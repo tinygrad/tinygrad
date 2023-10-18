@@ -6,7 +6,7 @@ except ImportError:
 from collections import defaultdict
 from typing import Dict, List
 from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, OpType, LazyOp
-from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters, getenv
+from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters, getenv, dedup
 
 # **** debugging and graphing ****
 
@@ -47,6 +47,7 @@ def str_dtype(dtyp):
 
 logops = open(getenv("LOGOPS", ""),"a") if getenv("LOGOPS", "") else None
 def log_schedule_item(si: ScheduleItem):
+  global node_count
   if logops and si.ast.op not in LoadOps: logops.write(str(si.ast)+"\n")
   show_graph = bool(GRAPH)
   if not DEBUG and not show_graph: return
@@ -60,12 +61,27 @@ def log_schedule_item(si: ScheduleItem):
   if show_graph:
     assert si.out.base == si.out, "all outputs based"
     top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#FF8080'}
-    for x in si.inputs:
-      assert x.base == x, "all inputs based"
-      #assert nm(x) in G.nodes, "all inputs seen"
-      G.add_edge(nm(x), nm(si.out), label=get_sop(op), color='#00000060')
+
+    # get inputs for shapetrackers
+    input_to_st = defaultdict(list)
+    for lo in si.ast.get_lazyops():
+      if lo.op != BufferOps.MEM: continue
+      input_to_st[si.inputs[lo.arg.idx-1]].append(lo.arg.st)
+
+    # add them to the graph, potentially with a movement op seperating them
+    for x in input_to_st:
+      for st in dedup(input_to_st[x]):
+        if st.contiguous:
+          G.add_edge(nm(x), nm(si.out), label=get_sop(op), color='#00000060')
+        else:
+          inter_node = node_count
+          node_count += 1
+          G.add_node(inter_node, style='filled', fillcolor="#80ff8080", color="black", label=f"{st.shape}\n{st.real_strides()}" + (f"\n{st.real_offset()}" if st.real_offset() != 0 else ""))
+          G.add_edge(nm(x), inter_node, color='#00000060')
+          G.add_edge(inter_node, nm(si.out), label=get_sop(op), color='#00000060')
       if 'label' not in G.nodes[nm(x)]:
         G.nodes[nm(x)]['label'] = str(x.shape)+str_dtype(si.out.dtype)
+
     if nm(si.out) not in G.nodes: G.add_node(nm(si.out))
 
     G.nodes[nm(si.out)]['label'] = (str(set(x.shape for x in si.inputs))+"\n"+str(si.out.shape) if optype == ReduceOps else str(si.out.shape))+str_dtype(si.out.dtype)+(f"\n{si.ast.op}" if si.ast.op in LoadOps else "")
