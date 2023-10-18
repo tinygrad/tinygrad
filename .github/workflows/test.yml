@@ -104,7 +104,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-        key: testing-packages-${{ hashFiles('*/setup.py') }}
+        key: testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
@@ -137,7 +137,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-          key: testing-packages-${{ hashFiles('*/setup.py') }}
+          key: testing-packages-${{ hashFiles('**/setup.py') }}
       - name: Install Dependencies
         run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - if: ${{ matrix.task == 'optimage' }}
@@ -246,7 +246,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-          key: ${{ matrix.backend }}-packages-${{ hashFiles('*/setup.py') }}
+          key: ${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas'}}" >> $GITHUB_ENV
       - name: Install OpenCL
@@ -282,7 +282,8 @@ jobs:
         if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         run: |
           cd ${{ github.workspace }}/gpuocelot/ocelot/build
-          find . -exec touch {} \;  # fix the timestamps of the cache to not rebuild
+          find . -exec touch {} \;
+          touch build.ninja
           sudo ninja install -d explain
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
@@ -322,7 +323,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-          key: testing-arm-packages-${{ hashFiles('*/setup.py') }}
+          key: testing-arm-packages-${{ hashFiles('**/setup.py') }}
       - name: Install cross-assembler
         run: |
           sudo apt update -y
