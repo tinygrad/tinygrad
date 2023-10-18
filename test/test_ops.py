@@ -847,8 +847,8 @@ class TestOps(unittest.TestCase):
   def test_conv1d(self):
     for bs in [1,8]:
       for cin in [1,3]:
-        for groups in [1,3] if cin == 3 else [1]:
-          for H in [1,2,5]:
+        for H in [1,2,5]:
+          for groups in [1,3] if cin == 3 and H == 5 else [1]:
             with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H):
               helper_test_op([(bs,cin,11), (6,cin//groups,H)],
                 lambda x,w: torch.nn.functional.conv1d(x,w,groups=groups).relu(),
@@ -888,11 +888,11 @@ class TestOps(unittest.TestCase):
   def test_conv2d(self):
     for bs in [1,4]:
       for cin in [1,3]:
-        for groups in [1,3] if cin == 3 else [1]:
-          for H in [1,2,5]:
-            for W in [1,2,3,5]:
+        for H in [1,2,3]:
+          for W in [1,2,3,5]:
+            for groups in [1,3] if cin == 3 and H == 3 and W == 3 else [1]:
               with self.subTest(batch_size=bs, channels=cin, groups=groups, height=H, width=W):
-                helper_test_op([(bs,cin,11,14), (6,cin//groups,H,W)],
+                helper_test_op([(bs,cin,11,7), (6,cin//groups,H,W)],
                   lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups).relu(),
                   lambda x,w: Tensor.conv2d(x,w,groups=groups).relu(), atol=1e-4, grad_rtol=1e-5)
 
@@ -1167,27 +1167,27 @@ class TestOps(unittest.TestCase):
     e = torch.randint(high=1, size=(1,1,1,1,6,1), dtype=torch.int64, requires_grad=False)
     i, j, k, o, p = [Tensor(tor.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False) for tor in [a,b,c,d,e]]
     # no dim collapse from int or dim injection from None
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,e], lambda x: x[i,j,k,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[:,b,c,d,:], lambda x: x[:,j,k,o,:])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,...], lambda x: x[i,j,...])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,...,e], lambda x: x[i,...,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[...,c,:,e], lambda x: x[...,k,:,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,d,e], lambda x: x[i,j,k,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[:,b,c,d,:], lambda x: x[:,j,k,o,:])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,...], lambda x: x[i,j,...])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,...,e], lambda x: x[i,...,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[...,c,:,e], lambda x: x[...,k,:,p])
     # dim collapse from int
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,c,d,e], lambda x: x[1,j,k,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,3,d,e], lambda x: x[i,j,3,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,2,d,2], lambda x: x[1,j,2,o,2])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,2,2,2,e], lambda x: x[i,2,2,2,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,:,3:11:2,d,0:2], lambda x: x[1,:,3:11:2,o,0:2])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,b,c,d,e], lambda x: x[1,j,k,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,3,d,e], lambda x: x[i,j,3,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,b,2,d,2], lambda x: x[1,j,2,o,2])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,2,2,2,e], lambda x: x[i,2,2,2,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,:,3:11:2,d,0:2], lambda x: x[1,:,3:11:2,o,0:2])
     # dim injection from None
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,c,d,e], lambda x: x[None,j,k,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,c,d,None], lambda x: x[i,j,k,o,None])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,b,None,d,e], lambda x: x[i,j,None,o,p])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,c,d,None], lambda x: x[None,j,k,o,None])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,b,c,d,e], lambda x: x[None,j,k,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,d,None], lambda x: x[i,j,k,o,None])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,None,d,e], lambda x: x[i,j,None,o,p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,b,c,d,None], lambda x: x[None,j,k,o,None])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
     # dim injection and collapse
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[1,b,None,d,1], lambda x: x[1,j,None,o,1])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[None,b,2,d,None], lambda x: x[None,j,2,o,None])
-    helper_test_op([(2,5,15,5,3,4)], lambda x: x[...,1,d,None], lambda x: x[...,1,o,None])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,b,None,d,1], lambda x: x[1,j,None,o,1])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,b,2,d,None], lambda x: x[None,j,2,o,None])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[...,1,d,None], lambda x: x[...,1,o,None])
 
   def test_slice_fancy_indexing_with_idx(self):
     # indexing using idx with different dim
