@@ -1,19 +1,15 @@
 import multiprocessing, subprocess
 import cloudpickle  # type: ignore
 from typing import Any
-from tabulate import tabulate  # type: ignore
 from tinygrad.nn.state import get_state_dict
 
 def get_net_size(model):
-  table = []
   total_params, total_bytes = 0, 0
   for param_name, param in zip(get_state_dict(model), get_state_dict(model).values()):
     if not ("num_batches_tracked" in param_name) and not ("running" in param_name):
       total_params += param.numpy().size
       total_bytes += param.numpy().nbytes
-      table.append([param_name, param.numpy().size, param.numpy().nbytes])
-  table.append(["Total", total_params, total_bytes])
-  print(tabulate(table, headers=["Layers", "Params", "Bytes"]))
+  print(f"Total Params: {total_params} Bytes: {total_bytes}")
 
 def _early_exec_process(qin, qout):
   while True:
