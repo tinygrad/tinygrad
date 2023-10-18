@@ -2,9 +2,10 @@ import unittest
 
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import time_linearizer
-from tinygrad.ops import Device, LoadOps
+from tinygrad.ops import Compiled, Device, LoadOps
 from tinygrad.tensor import Tensor
 
+@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only test for compiled backends")
 class TestTimeLinearizer(unittest.TestCase):
   def test_reasonable_time(self):
     si = [si for si in Tensor([1,2,3,4]).add(1).lazydata.schedule() if si.ast.op not in LoadOps][0]
