@@ -44,6 +44,7 @@ def _send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
   if RawHIPBuffer and x.__class__ is RawHIPBuffer:
     # send ipc handle
     hip.hipSetDevice(x._device)
+    hip.hipDeviceSynchronize()
     handle = hip.hipIpcGetMemHandle(x._buf)
     dist.OOB.send((handle, x._device), target_rank)
 
