@@ -45,6 +45,14 @@ jobs:
       run: sudo apt install sloccount
     - name: Check <5000 lines
       run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
+    - name: Test Docs
+      run: python docs/abstractions.py
+    - name: Test Quickstart
+      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
+    - name: Fuzz Test symbolic
+      run: python test/external/fuzz_symbolic.py
+    - name: Fuzz Test shapetracker
+      run: PYTHONPATH="." python test/external/fuzz_shapetracker.py
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
@@ -73,16 +81,8 @@ jobs:
         key: testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Test Docs
-      run: python docs/abstractions.py
-    - name: Test Quickstart
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Run Pytest
       run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)" --durations=20
-    - name: Fuzz Test symbolic
-      run: python test/external/fuzz_symbolic.py
-    - name: Fuzz Test shapetracker
-      run: PYTHONPATH="." python test/external/fuzz_shapetracker.py
     - name: Compile EfficientNet to C
       run: PYTHONPATH="." CLANG=1 python examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
