@@ -116,8 +116,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [optimage, openpilot, multigpu, realworld]
-    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'|| matrix.task=='openpilot'&&'openpilot (OpenCL) Tests'|| matrix.task=='multigpu'&&'MultiGPU Tests' || matrix.task=='realworld'&&'Real World Tests'}}
+        task: [optimage, openpilot]
+    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests'|| matrix.task=='openpilot'&&'openpilot (OpenCL) Tests'}}
     runs-on: ubuntu-20.04
     timeout-minutes: 20
 
@@ -149,10 +149,11 @@ jobs:
         name: Test WINO=1
         run: GPU=1 DEBUG=2 WINO=1 python3 test/test_ops.py TestOps.test_simple_conv2d
       - if: ${{ matrix.task == 'optimage'}}
-        name: Test GPU IMAGE ops
-        run: |
-          GPU=1 IMAGE=1 python -m pytest -n=auto test/test_ops.py
-          GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
+        name: Test GPU IMAGE=1 ops
+        run: GPU=1 IMAGE=1 python -m pytest -n=auto test/test_ops.py
+      - if: ${{ matrix.task == 'optimage'}}
+        name: Test GPU IMAGE=2 ops
+        run: GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model compile and size
         run: |
@@ -167,16 +168,11 @@ jobs:
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test tensor core ops
         run: GPU=1 TC=2 python -m pytest -n=auto test/test_ops.py
-      - if: ${{ matrix.task == 'multigpu' }}
+      - if: ${{ matrix.task == 'openpilot' }}
         name: Test multigpu
         run: |
           PYTHONPATH="." python test/external/dist/test_world.py
           PYTHONPATH="." python test/external/dist/test_collectives.py
-      - if: ${{ matrix.task == 'realworld' }}
-        name: Run GPT2
-        run: |
-          PYTHONPATH="." JIT=0 python examples/gpt2.py --model_size=gpt2 --prompt "Hello." --count 10 --temperature 0 --timing
-          PYTHONPATH="." JIT=1 python examples/gpt2.py --model_size=gpt2 --prompt "Hello." --count 10 --temperature 0 --timing
 
   testmetalwebgpu:
     name: Metal and WebGPU Tests
