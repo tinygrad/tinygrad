@@ -310,12 +310,9 @@ jobs:
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models --durations=20
-      - name: manual test (cuda) - specs
-        if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
-        run: nvidia-smi
-      - name: manual test (cuda) - driver
-        if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
-        run: nvcc --version
       - name: manual test (cuda) - script
         if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
         run: python ./nv.py
+      - name: manual test (cuda) - driver
+        if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
+        run: nvcc --version
