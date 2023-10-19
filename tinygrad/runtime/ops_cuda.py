@@ -33,7 +33,7 @@ if getenv("CUDACPU", 0) == 1:
     class Event:
       def __init__(self): pass
       def record(self): self.start = time.perf_counter()
-      def time_till(self, other): return self.start - other.start
+      def time_till(self, other): return other.start - self.start
       def synchronize(self): pass
     class Context:
       synchronize = lambda:0 # noqa: E731
@@ -87,7 +87,7 @@ class CUDAProgram:
       tm0 = start.time_till(end)*1e-3
       end_time = time.time()
       print("time calculated with cuda.Event()", tm0, start, end)
-      print("real time", (start_time - end_time) * 1e3)
+      print("real time flipped", start_time - end_time)
       return tm0
 
 

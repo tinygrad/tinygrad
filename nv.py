@@ -22,4 +22,3 @@ code = renderer(lin.function_name, lin.uops)
 prg = CUDAProgram(lin.function_name, code[0], code[1]["binary"])
 tm = prg(lin.global_size, lin.local_size, rout, *rin, wait=True)
 print(tm)
-
