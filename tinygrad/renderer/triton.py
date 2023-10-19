@@ -1,12 +1,14 @@
 from typing import Dict, List, Final, Callable, DefaultDict
 from collections import defaultdict
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
-from tinygrad.helpers import dtypes, ImageDType, DEBUG, getenv
+from tinygrad.helpers import DType, dtypes, ImageDType, DEBUG, getenv
 from tinygrad.codegen.linearizer import  UOp, UOps
 from triton.compiler import compile as triton_compile  # type: ignore
-import linecache
-import math
-import re
+import math, re, linecache
+
+triton_dtypes = {dtypes.double: "tl.float64", dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.bool: "tl.int1", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64", dtypes.uint32: "tl.uint32", dtypes.uint64: "tl.uint64"}
+signature_dtypes = {dtypes.double: "*fp64",dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.bool: "*i8", dtypes.int8: "*i1", dtypes.uint8: "*u8", dtypes._arg_int32: "i32", dtypes.int32: "*i32", dtypes.int64: "*i64", dtypes.uint32: "*u32", dtypes.uint64: "*u64"}
+
 def next_power_of_2(x):
   return 1 << (x - 1).bit_length()
 
@@ -28,9 +30,12 @@ def remove_single_scalar_curly_braces(ptx_code):
 def render_const(args):
   return (('-' if args<0 else '') + 'float("inf")') if math.isinf(args) else ('float("nan")' if math.isnan(args) else str(args))
 
-def define_scalar(local_size, triton_type, args):
-  if len(local_size) > 0: return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{render_const(args)}, dtype={triton_type})"
-  return f"(tl.where(1, {render_const(args)}, {render_const(args)}).to({triton_type}))"
+def render_cast(dtype: DType):
+  return f"to({triton_dtypes[dtype]})"
+
+def define_scalar(local_size, dtype, args):
+  if len(local_size) > 0: return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{render_const(args)}, dtype={triton_dtypes[dtype]})"
+  return f"(tl.where(1, {render_const(args)}, {render_const(args)}).{render_cast(dtype)})"
 
 def uops_to_triton(function_name:str, uops:List[UOp]):
   local_size: List[int] = []
@@ -66,8 +71,6 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     TernaryOps.WHERE: lambda x,y,z,: f"tl.where({x},{y},{z})",
   }
   def int_div(x,y): return f"({x}//{y})"
-  triton_dtypes = {dtypes.double: "tl.float64", dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.bool: "tl.int1", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64"}
-  signature_dtypes = {dtypes.double: "*fp64",dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.bool: "*i8", dtypes.int8: "*i1", dtypes.uint8: "*u8", dtypes._arg_int32: "i32", dtypes.int32: "*i32", dtypes.int64: "*i64"}
   for u in uops:
     uop,dtype,vin,args,_ = u
     if uop == UOps.LOOP:
@@ -78,13 +81,13 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       assert dtype is not None
       val = code_for_op[args](*[r[x] for x in vin])
       if child_count[u] <=1 or dtypes.is_int(dtype): r[u] = int_div(*[r[x] for x in vin]) if args == BinaryOps.DIV and dtypes.is_int(dtype) else val
-      else: kk(f"{ssa(u, 'alu')} = ({val}).to({triton_dtypes[dtype]})")
+      else: kk(f"{ssa(u, 'alu')} = ({val}).{render_cast(dtype)}")
     elif uop == UOps.LOAD:
       assert dtype is not None
-      if len(vin) == 2: kk(f"{ssa(u, 'val')} = tl.load({r[vin[0]]} + { fill_dims_for_idx(r[vin[1]], dims)}, mask = {render_valid(valid)}).to({triton_dtypes[vin[0].dtype]})")# type: ignore
-      else: kk(f"{ssa(u, 'val')} = tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+{fill_dims_for_idx(r[vin[1]],dims)} , mask={render_valid(valid+[r[vin[2]]])}), 0.0).to({triton_dtypes[vin[0].dtype]})")# type: ignore
-    elif uop == UOps.DEFINE_ACC: kk(f"{ssa(u, 'acc')} = {define_scalar(local_size, triton_dtypes[dtype], args).replace('//', '/')}") # type: ignore
-    elif uop == UOps.CONST: r[u] = define_scalar([], triton_dtypes[dtype], args) # type: ignore
+      if len(vin) == 2: kk(f"{ssa(u, 'val')} = tl.load({r[vin[0]]} + { fill_dims_for_idx(r[vin[1]], dims)}, mask = {render_valid(valid)}).{render_cast(dtype)}")
+      else: kk(f"{ssa(u, 'val')} = tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+{fill_dims_for_idx(r[vin[1]],dims)} , mask={render_valid(valid+[r[vin[2]]])}), 0.0).{render_cast(dtype)}")
+    elif uop == UOps.DEFINE_ACC: kk(f"{ssa(u, 'acc')} = {define_scalar(local_size, dtype, args).replace('//', '/')}")
+    elif uop == UOps.CONST: r[u] = define_scalar([], dtype, args)
     elif uop == UOps.STORE:
       assert not isinstance(dtype, ImageDType), "unimplemented: image store"
       if len(vin) == 2: kk(f"{r[vin[0]]} =  {r[vin[1]].replace('//', '/')}")
