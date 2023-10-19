@@ -82,6 +82,15 @@ def bbox_transform(proposals, reference_boxes):
   targets = np.concatenate((targets_dx, targets_dy, targets_dw, targets_dh), axis=1)
   return targets
 
+def tg_targets_to_mlperf_targets(tg_targets : dict[str,Tensor]) -> List[dict[str,torch.tensor]]:
+    assert(set(['regression_targets', 'classification_targets']).issubset(set(tg_targets.keys())))
+    assert tg_targets['regression_targets'].shape[:2]==tg_targets['classification_targets'].shape[:2]
+    targets = []
+    for img_regs,img_cls in zip(tg_targets['regression_targets'],tg_targets['classification_targets']):
+        d_img = {'boxes':torch_tensor(img_regs), 'labels':torch_tensor(img_cls)}
+        targets.append(d_img)
+
+    return targets
 class RetinaNetTrainer:
     def __init__(self,  model : RetinaNet = RetinaNet(ResNeXt50_32X4D(num_classes=None)), debug = False):
         
@@ -136,27 +145,78 @@ class RetinaNetTrainer:
             if("bn" in key):
                 val.requires_grad = False
             
+    def reference_forward(self, images,tg_targets=None):
+        #for parallel debugging
+        #from model.resnet import ResNet
+        targets = tg_targets_to_mlperf_targets(tg_targets)
+        Warning("Still adapting from train_retinanet_tests-.py")
+        reference_sample_image_list, targets = self.reference.transform(images,targets)
+        reference_input = reference_sample_image_list.tensors.double()
+        reference_feature_maps = self.reference.backbone.double()(reference_input) #TODO .double() bothers me. but default usage raises errors ("expected Double instead of Float" bc resnet bias is initialized w/ 32 bits)
+        reference_features = list(reference_feature_maps.values())
+
+        head_outs = self.reference.double()(reference_input, targets)
+        return head_outs
+    
+    def check_weight_init_forward(self):
+        td, rd = get_state_dict(self.model), self.reference.state_dict()
+        assert all(item in td.keys() for item in rd.keys())
+        assert all(np.allclose(td[item].numpy(),rd[item].numpy()) for item in rd.keys())
+
+        #with open("random_image.pkl",'rb') as file: sample_image_list = loadp(file)
+        sample_image_list = [torch_tensor(np.random.rand(3,200,200)) for _ in range(4)]
+
+        reference_head_outs = self.reference_forward(sample_image_list)
+        tg_head_outs = self.model_forward(sample_image_list).numpy()
 
 
+
+        Warning("Tinygrad implementation runs sigmoid on cls_logits, mlperf not. Adding sigmoid to mlperf for tests")
+        reference_head_cls_logits = torch.sigmoid(reference_head_outs["cls_logits"].detach()).numpy()
+        reference_head_bbox_regression = reference_head_outs["bbox_regression"].detach().numpy()
+        assert(np.allclose(tg_head_outs[:,:,:4],reference_head_bbox_regression, atol=1e-5))
+        assert(np.allclose(tg_head_outs[:,:,4:],reference_head_cls_logits, atol=1e-5))
+        print("Equal forward for initial mlperf weights.")
+    def model_forward(self, images):
+        def input_fixup(x, normalize = True):
+            if normalize: x = x / 255.0
+            x -= input_mean
+            x /= input_std
+            return x
+        #from models.resnet import ResNet
+        Tensor.training = False
+        model_input = input_fixup(Tensor(images), normalize=False)
+        outs = self.model(model_input)
+        Tensor.training = TRAINING
+        return outs
     
     def train(self):
-
+        #self.check_weight_init_forward() FIXME this works but may modify gradients
         retina, anchors_orig, anchors_flattened_levels, optimizer = self.tg_init_setup()
+        self.reference.train()
         checker = None
 
         for x, annotations in iterate(self.dataset, BS):
             targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
             resized = [Image.fromarray(image) for image in x]
             resized = [np.asarray(image.resize(self.image_size)) for image in resized]
-            images = Tensor(resized, requires_grad=False)
+            
+            images = self.input_fixup(Tensor(resized, requires_grad=False))
+            reference_images = torch.permute(torch_tensor(resized),(0,3,1,2))/255 
 
-            head_outputs = retina(self.input_fixup(images))
+
+            model_head_outputs = retina(images)
+            breakpoint()
+            reference_head_outputs = self.reference_forward(reference_images,targets)
+            
+            Warning("reference outputs may be losses instead of head outputs if model is being trained")
             #if self.debug: checker.check_head_outputs(head_outputs)
-
-            #eltwise_loss = self._eltwise_compute_loss(BS, targets, head_outputs) 
-            #imgwise_loss_np = self._imgwise_compute_loss_np(BS, targets, head_outputs)
-            #batchwise_loss = self._batchwise_compute_loss(BS, targets, head_outputs)
-            imgwise_loss = self._imgwise_compute_loss(BS, targets, head_outputs)
+            assert(np.allclose(model_head_outputs[:,:,4:].numpy(), reference_head_outputs["cls_logits"], atol=1e-5))
+            assert(np.allclose(model_head_outputs[:,:,:4].numpy(), reference_head_outputs["bbox_regression"], atol=1e-5))
+            #eltwise_loss = self._eltwise_compute_loss(BS, targets, model_head_outputs) 
+            #imgwise_loss_np = self._imgwise_compute_loss_np(BS, targets, model_head_outputs)
+            #batchwise_loss = self._batchwise_compute_loss(BS, targets, model_head_outputs)
+            imgwise_loss = self._imgwise_compute_loss(BS, targets, model_head_outputs)
             #if self.debug: checker.check_losses(imgwise_loss)
             optimizer.zero_grad()
             imgwise_loss.backward()
@@ -164,7 +224,7 @@ class RetinaNetTrainer:
             
             #TODO input_size=self.image_size? WATCH OUT PARAMETERS AND USAGE
             if self.debug:
-                predictions = retina.postprocess_detections(head_outputs.numpy(),input_size=self.image_size,anchors=anchors_orig,orig_image_sizes=[t["image_size"] for t in annotations])
+                predictions = retina.postprocess_detections(model_head_outputs.numpy(),input_size=self.image_size,anchors=anchors_orig,orig_image_sizes=[t["image_size"] for t in annotations])
 
                 for image, image_preds in zip(x, predictions):
                     img = Image.fromarray(image)
