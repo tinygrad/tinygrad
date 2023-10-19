@@ -435,8 +435,6 @@ class RPNLossComputation:
     if DEBUG > 0:
       box_regression[sampled_pos_inds].realize(), regression_targets[sampled_pos_inds].realize()
       print_gpu_memory("after_cats")
-      del sampled_pos_inds, sampled_neg_inds, sampled_inds, objectness, box_regression, labels, regression_targets
-      print_gpu_memory("after_cats_del")
       if DEBUG > 1:
         print("box_reg", box_regression[sampled_pos_inds].numpy(), "reg_targets", regression_targets[sampled_pos_inds].numpy())
     box_loss = smooth_l1_loss(
