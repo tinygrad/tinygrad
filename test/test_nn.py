@@ -134,6 +134,7 @@ class TestNN(unittest.TestCase):
     BS, C1, H, W = 2, 8, 16, 16
     C2, K, S, P = 8, 3, 1, 1
 
+    old_wino = Tensor.wino
     Tensor.wino = True
 
     # create in tinygrad
@@ -164,7 +165,7 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(gb.numpy(), torch_layer.bias.grad.numpy(), atol=5e-4, rtol=1e-5)
     np.testing.assert_allclose(gx.numpy(), torch_x.grad.numpy(), atol=5e-4, rtol=1e-5)
 
-    Tensor.wino = False
+    Tensor.wino = old_wino
 
   @unittest.skipIf(CI and (WINDOWS or Device.DEFAULT == "WEBGPU"), "runs out of memory in CI")
   def test_conv_transpose1d(self):
