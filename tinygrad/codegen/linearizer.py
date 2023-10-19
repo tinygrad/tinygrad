@@ -425,9 +425,14 @@ class Linearizer(OptimizedKernel):
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:
       ret = []
+      nacc = acc[:]
       for idx, val, off in zip([[i] for i in range(len(values[0]))], zip(*values), offs):
-        acc[off] = self.uop(UOps.PHI, dtypes.float32, (acc[off], self.uop(UOps.ALU, dtypes.float32, val+(acc[off],), ops[x.op])))
+        acc[off] = self.uop(UOps.ALU, dtypes.float32, val+(acc[off],), ops[x.op])
         ret.append((idx, acc[off]))
+      # any that changed need a phi node
+      for off,n in enumerate(nacc):
+        if acc[off] != n:
+          acc[off] = self.uop(UOps.PHI, dtypes.float32, (n, acc[off]))
     else:
       ret = [(idx, self.uop(UOps.ALU, dtypes.float32, val, x.op)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
     ordered_ret: List[Optional[UOp]] = [None]*len(values[0])

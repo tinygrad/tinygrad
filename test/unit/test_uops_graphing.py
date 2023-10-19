@@ -26,14 +26,14 @@ class TestUopsFlopCounter(unittest.TestCase):
     b = Tensor.rand(N,N)
     si = (a@b).lazydata.schedule()[-1]
     lin = Linearizer(si.ast)
-    lin.apply_opt(Opt(OptOps.UPCAST, 0, 2))
-    lin.apply_opt(Opt(OptOps.UPCAST, 1, 2))
-    lin.apply_opt(Opt(OptOps.UNROLL, 0, 2))
-    #lin.hand_coded_optimizations()
+    #lin.apply_opt(Opt(OptOps.UPCAST, 0, 2))
+    #lin.apply_opt(Opt(OptOps.UPCAST, 1, 2))
+    #lin.apply_opt(Opt(OptOps.UNROLL, 0, 2))
+    lin.hand_coded_optimizations()
     print(lin.colored_shape())
     uops = lin.linearize().uops
     graph_uops(uops)
-    #print(OpenCLRenderer("matmul", uops)[0])
+    print(OpenCLRenderer("matmul", uops)[0])
 
   def test_flops_reduce(self):
     a = Tensor.rand(1024*1024)
