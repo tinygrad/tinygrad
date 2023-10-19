@@ -417,7 +417,13 @@ class RPNLossComputation:
       print_gpu_memory("after_sampling")
     if len(sampled_pos_inds[0]) == 0: return None, None # todo negative mining
     sampled_pos_inds, sampled_neg_inds = Tensor(sampled_pos_inds).squeeze(0), Tensor(sampled_neg_inds).squeeze(0)
+    if DEBUG > 0:
+      sampled_pos_inds.realize(), sampled_neg_inds.realize()
+      print_gpu_memory("after_idx_realized")
     sampled_inds = Tensor.cat(sampled_pos_inds, sampled_neg_inds, dim=0)
+    if DEBUG > 0:
+      sampled_inds.realize()
+      print_gpu_memory("after_first_cats")
     objectness, box_regression = \
             concat_box_prediction_layers(objectness, box_regression)
     objectness = objectness.squeeze() 
