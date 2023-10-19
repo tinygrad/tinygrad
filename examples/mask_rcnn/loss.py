@@ -208,6 +208,7 @@ def concat_box_prediction_layers(box_cls, box_regression):
   # being concatenated as well)
   box_cls = Tensor.cat(*box_cls_flattened, dim=1).reshape(-1, C)
   box_regression = Tensor.cat(*box_regression_flattened, dim=1).reshape(-1, 4)
+  del box_cls, box_regression_flattened
   return box_cls, box_regression
 
 class SmoothL1Loss(Function):
