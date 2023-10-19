@@ -208,7 +208,7 @@ def concat_box_prediction_layers(box_cls, box_regression):
   # being concatenated as well)
   box_cls = Tensor.cat(*box_cls_flattened, dim=1).reshape(-1, C)
   box_regression = Tensor.cat(*box_regression_flattened, dim=1).reshape(-1, 4)
-  del box_cls_flattened, box_regression_flattened
+  del box_cls, box_regression_flattened
   return box_cls, box_regression
 
 class SmoothL1Loss(Function):
@@ -435,6 +435,8 @@ class RPNLossComputation:
     if DEBUG > 0:
       box_regression[sampled_pos_inds].realize(), regression_targets[sampled_pos_inds].realize()
       print_gpu_memory("after_cats")
+      del sampled_pos_inds, sampled_neg_inds, sampled_inds, objectness, box_regression, labels, regression_targets
+      print_gpu_memory("after_cats_del")
       if DEBUG > 1:
         print("box_reg", box_regression[sampled_pos_inds].numpy(), "reg_targets", regression_targets[sampled_pos_inds].numpy())
     box_loss = smooth_l1_loss(
