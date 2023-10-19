@@ -77,13 +77,19 @@ class CUDAProgram:
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait:
+      start_time = time.time()
       start, end = cuda.Event(), cuda.Event()
       start.record()
     self.prg(*[x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) if (isinstance(x, int) and not getenv("CUDACPU")) else x for x in args], block=tuple(local_size if self.local_size_override is None else self.local_size_override), grid=tuple(global_size), shared=self.shared)
     if wait:
       end.record()
       end.synchronize()
-      return start.time_till(end)*1e-3
+      tm0 = start.time_till(end)*1e-3
+      end_time = time.time()
+      print("time calculated with cuda.Event()", tm0, start, end)
+      print("real time", (start_time - end_time) * 1e3)
+      return tm0
+
 
 renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
   kernel_prefix = "__global__ ", smem_prefix = "__shared__ ", smem_prefix_for_cast=False, arg_int_prefix = "const int", barrier = "__syncthreads();", float4 = "make_float4",
