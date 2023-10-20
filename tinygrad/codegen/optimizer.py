@@ -316,9 +316,11 @@ class OptimizedKernel(Kernel):
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op == OptOps.UPCASTMID:  # white
-      # TODO: when is this valid?
-      assert axis < self.first_reduce, "upcast in mid reduce is for non-reduce"
-      assert amt <= 8, "don't upcast more than 8"
+      assert self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1, "invalid upcast mid reduce"
+      axes = self.sts[0].unit_stride_axes()
+      assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
+      assert axes[0] == axis, "wrong axis"
+      assert amt == 4, "don't upcast mid anything but 4"
       self.shift_to(axis, amt, insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(amt)
     return self.simplify_ones()

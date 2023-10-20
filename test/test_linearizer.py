@@ -4,7 +4,7 @@ import unittest, os
 from tinygrad.codegen.kernel import tensor_cores
 from tinygrad.codegen.optimizer import Opt, OptOps
 from tinygrad.codegen.linearizer import Linearizer, UOps
-from tinygrad.ops import Compiled, Device, MovementOps, LazyOp
+from tinygrad.ops import Compiled, Device
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
@@ -390,19 +390,6 @@ class TestLinearizerOpts(unittest.TestCase):
       [Opt(OptOps.UPCAST, 0, 8)], # Checking how it works with upcasts
     ])
 
-  def test_upcast_mid_reduce(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.has_shared:
-      self.skipTest("Only Compiled uses linearizer with shared")
-
-    N = 64
-    Tensor.manual_seed(1772)
-    a = Tensor.rand(1, N)
-    b = Tensor.rand(N, N)
-    r = a@b
-    helper_linearizer_opt(r, [
-      [Opt(OptOps.UPCASTMID, 0, 4)],
-    ])
-
   def test_full_upcast(self):
     if not isinstance(Device[Device.DEFAULT], Compiled):
       self.skipTest("Only Compiled uses linearizer")
@@ -415,7 +402,7 @@ class TestLinearizerOpts(unittest.TestCase):
       [Opt(OptOps.UPCAST, 0, 4)], # Checking how it works with upcasts
     ])
 
-  def test_matmul_local(self):
+  def test_matmul(self):
     if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.has_local or not Device[Device.DEFAULT].linearizer_opts.has_shared:
       self.skipTest("Only Compiled uses linearizer with locals and shared")
 
