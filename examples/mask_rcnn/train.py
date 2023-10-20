@@ -165,6 +165,8 @@ def simple():
     print("training", img_filename)
     img = [Tensor(build_transforms()(Image.open(img_filename).convert("RGB")).numpy(), requires_grad=True)]
     images = to_image_list(img)
+    print_gpu_memory("before images")
+    images.tensors[0].realize()
     print_gpu_memory("before backbone")
     features = backbone(images.tensors)
     features[0].realize()
