@@ -55,8 +55,8 @@ class CStyleLanguage(NamedTuple):
     else: 
       if var_dtype == dtypes.float32 and isinstance(x, float):
         val = f"{x}f"
-      # elif var_dtype == dtypes.float16 and isinstance(x, float):
-      #   val = f"{x}h"
+      elif var_dtype == dtypes.float16 and isinstance(x, float):
+        val = f"{x}h"
       else:
         val = f"{int(x)}"
     return val

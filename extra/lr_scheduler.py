@@ -2,12 +2,11 @@ import math
 from typing import List
 from tinygrad.nn.optim import Optimizer
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes
 
 class LR_Scheduler:
   def __init__(self, optimizer: Optimizer):
     self.optimizer = optimizer
-    self.epoch_counter = Tensor([0], dtype=dtypes.int32, requires_grad=False)
+    self.epoch_counter = Tensor([0], requires_grad=False)
 
   def get_lr(self): pass
 
@@ -81,7 +80,7 @@ class OneCycleLR(LR_Scheduler):
   def _annealing_linear(start: Tensor, end: Tensor, pct: Tensor) -> Tensor: return ((end - start) * pct + start)
 
   def get_lr(self) -> Tensor:
-    return (self.epoch_counter.float() < self.total_steps*self.pct_start).where(
-      self._annealing_linear(self.initial_lr, self.max_lr, (self.epoch_counter.float())/(self.total_steps*self.pct_start)),
-      self._annealing_linear(self.max_lr, self.min_lr, ((self.epoch_counter.float())-(self.total_steps*self.pct_start))/(self.total_steps*(1-self.pct_start)))
+    return (self.epoch_counter < self.total_steps*self.pct_start).where(
+      self._annealing_linear(self.initial_lr, self.max_lr, self.epoch_counter/(self.total_steps*self.pct_start)),
+      self._annealing_linear(self.max_lr, self.min_lr, (self.epoch_counter-(self.total_steps*self.pct_start))/(self.total_steps*(1-self.pct_start)))
     )
