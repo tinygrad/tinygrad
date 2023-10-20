@@ -166,7 +166,7 @@ def simple():
     images = to_image_list(img)
     print_gpu_memory("before backbone")
     features = backbone(images.tensors)
-    features.realize()
+    features[0].realize()
     print_gpu_memory("after backbone realize")
     objectness, rpn_box_regression = rpn(features)
     print_gpu_memory("before objectness realize")
