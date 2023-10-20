@@ -388,7 +388,7 @@ class Linearizer(OptimizedKernel):
 
   def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None, cachable=True) -> UOp:
     key = (uop, dtype, vin, arg)
-    if uop == UOps.STORE and len(vin) == 2 and vin[0] == vin[1]: return vin[0]   # self store is noop
+    if uop == UOps.PHI and len(vin) == 2 and vin[0] == vin[1]: return vin[0]   # self phi is noop
     if uop == UOps.CAST and all(x.uop == UOps.GEP for x in vin) and all_same([x.vin[0] for x in vin]) and all(x.arg == i for i,x in enumerate(vin)): return vin[0].vin[0]
     if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype)
     if uop == UOps.ALU:
@@ -425,14 +425,11 @@ class Linearizer(OptimizedKernel):
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:
       ret = []
-      nacc = acc[:]
       for idx, val, off in zip([[i] for i in range(len(values[0]))], zip(*values), offs):
-        acc[off] = self.uop(UOps.ALU, dtypes.float32, val+(acc[off],), ops[x.op])
+        new_val = self.uop(UOps.ALU, dtypes.float32, val+(acc[off],), ops[x.op])
+        # NOTE: we could apply the phi node to only the last change, but this breaks CLANG with nested max(x,y)
+        acc[off] = self.uop(UOps.PHI, dtypes.float32, (acc[off], new_val))
         ret.append((idx, acc[off]))
-      # any that changed need a phi node
-      for off,n in enumerate(nacc):
-        if acc[off] != n:
-          acc[off] = self.uop(UOps.PHI, dtypes.float32, (n, acc[off]))
     else:
       ret = [(idx, self.uop(UOps.ALU, dtypes.float32, val, x.op)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
     ordered_ret: List[Optional[UOp]] = [None]*len(values[0])
