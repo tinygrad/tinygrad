@@ -164,7 +164,7 @@ def simple():
     img_filename = os.path.join(BASEDIR, 'train2017', img_metadata['file_name'])
     print("training", img_filename)
     print_gpu_memory("before_load_no_transforms")
-    t = Tensor(Image.open(img_filename).convert("RGB"), requires_grad=True).realize()
+    t = Tensor(Image.open(img_filename).convert("RGB").numpy(), requires_grad=True).realize()
     print_gpu_memory("after_load_no_transforms")
     del t
     gc.collect()
