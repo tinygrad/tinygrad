@@ -235,6 +235,8 @@ jobs:
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_dtype.py
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
+    - name: Fuzz Test linearizer
+      run: DEVICES=METAL,GPU,WEBGPU PYTHONPATH="." python test/external/fuzz_linearizer.py
 
   tests:
     strategy:
@@ -310,28 +312,8 @@ jobs:
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models --durations=20
-
-          #tesstfuzzlinearizer:
-          #name: Torch Tests
-          #runs-on: ubuntu-latest
-          #timeout-minutes: 20
-      #
-      #steps:
-      #- name: Checkout Code
-      #uses: actions/checkout@v3
-      #- name: Set up Python 3.11
-      #uses: actions/setup-python@v4
-      #with:
-      #python-version: 3.11
-      #- name: Cache python packages
-      #uses: actions/cache@v3
-      #with:
-      #path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-      #key: testing-packages-${{ hashFiles('**/setup.py') }}
-      #- name: Install Dependencies
-      #run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-      #- name: Fuzz Test linearizer
-      #run: PYTHONPATH="." python test/external/fuzz_linearizer.py
+      - name: Fuzz Test linearizer
+        run: DEVICES=LLVM,GPU,CUDA PYTHONPATH="." python test/external/fuzz_linearizer.py
 
   #testunicorn:
   #  name: ARM64 unicorn Test
