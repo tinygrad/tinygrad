@@ -211,6 +211,9 @@ def concat_box_prediction_layers(box_cls, box_regression):
   # being concatenated as well)
   if DEBUG > 0:
     print_gpu_memory("prior to cat")
+    print("len ", len(box_cls_flattened))
+    box_cls_flattened[0].realize()
+    print_gpu_memory("realize cls")
   box_cls = Tensor.cat(*box_cls_flattened, dim=1)#.reshape(-1, C)
   if DEBUG > 0:
     print_gpu_memory("after boxcls cat")
@@ -218,7 +221,6 @@ def concat_box_prediction_layers(box_cls, box_regression):
     print_gpu_memory("after boxcls realize") # memory taken here
     del box_cls
     gc.collect()
-    cuda.empty_cache()
     print_gpu_memory("after boxcls delete") # memory not reclaimed here!!
     del box_regression_flattened
     print_gpu_memory("after boxcls flat delete") # memory not reclaimed here!!
