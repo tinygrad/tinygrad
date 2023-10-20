@@ -208,7 +208,7 @@ def concat_box_prediction_layers(box_cls, box_regression):
   # being concatenated as well)
   if DEBUG > 0:
     print_gpu_memory("prior to cat")
-  box_cls = Tensor.cat(*box_cls_flattened, dim=1).reshape(-1, C)
+  box_cls = Tensor.cat(*box_cls_flattened, dim=1)#.reshape(-1, C)
   if DEBUG > 0:
     print_gpu_memory("after boxcls cat")
     box_cls.realize()
