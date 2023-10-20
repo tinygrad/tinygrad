@@ -85,10 +85,12 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       else: kk(f"{ssa(u, 'val')} = tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+{fill_dims_for_idx(r[vin[1]],dims)} , mask={render_valid(valid+[r[vin[2]]])}), 0.0).to({triton_dtypes[vin[0].dtype]})")# type: ignore
     elif uop == UOps.DEFINE_ACC: kk(f"{ssa(u, 'acc')} = {define_scalar(local_size, triton_dtypes[dtype], args).replace('//', '/')}") # type: ignore
     elif uop == UOps.CONST: r[u] = define_scalar([], triton_dtypes[dtype], args) # type: ignore
+    elif uop == UOps.PHI:
+      kk(f"{r[vin[0]]} = {r[vin[1]].replace('//', '/')}")
+      r[u] = r[vin[0]]
     elif uop == UOps.STORE:
       assert not isinstance(dtype, ImageDType), "unimplemented: image store"
-      if len(vin) == 2: kk(f"{r[vin[0]]} =  {r[vin[1]].replace('//', '/')}")
-      else: kk(f"tl.store({r[vin[0]]} + {r[vin[1]]}, {r[vin[2]].replace('//', '/')}, mask = {render_valid(valid)}) ")
+      kk(f"tl.store({r[vin[0]]} + {r[vin[1]]}, {r[vin[2]].replace('//', '/')}, mask = {render_valid(valid)}) ")
     elif uop == UOps.DEFINE_GLOBAL:
       bufs.append(args)
       signatures.append(signature_dtypes[args[1]])

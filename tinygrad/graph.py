@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Dict, List
 from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, OpType, LazyOp
 from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters, getenv, dedup
+from tinygrad.codegen.linearizer import UOps
 
 # **** debugging and graphing ****
 
@@ -98,3 +99,15 @@ def _tree(lazydata, prefix=""):
   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
 
 def print_tree(lazydata:LazyOp): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(lazydata))]))
+
+def graph_uops(uops):
+  colors = {UOps.ALU: "#ffffc0", UOps.LOAD: "#ffc0c0", UOps.STORE: "#c0ffc0", UOps.SPECIAL: "#c0c0ff", UOps.CONST: "#e0e0e0",
+            UOps.DEFINE_GLOBAL: "#ffe0b0", UOps.DEFINE_LOCAL: "#ffe0d0", UOps.DEFINE_ACC: "#f0ffe0",
+            UOps.LOOP: "#c8a0e0", UOps.PHI: "#e0ffc0"}
+  G = nx.DiGraph()
+  for u in uops:
+    G.add_node(u.num, label=f"{str(u.uop)[5:]}{(' '+str(u.arg)) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.uop, "#ffffff"))
+    for v in u.vin: G.add_edge(v.num, u.num)
+  GRAPHPATH = "/tmp/uops"
+  nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
+  os.system(f'dot -Grankdir=LR -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')

@@ -185,12 +185,12 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
       if len(vin) > 2: val = lang.render_conditional(r[vin[2]], val, r[vin[3]])
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'val')} = {val};")
+    elif uop == UOps.PHI:
+      kk(f"{r[vin[0]]} = {r[vin[1]]};")
+      r[u] = r[vin[0]]
     elif uop == UOps.STORE:
-      if len(vin) == 2:
-        kk(f"{r[vin[0]]} = {r[vin[1]]};")
-      elif len(vin) == 3:
-        assert vin[0].dtype is not None and vin[2].dtype is not None
-        kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
+      assert vin[0].dtype is not None and vin[2].dtype is not None
+      kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
     elif uop == UOps.CAST and dtype is not None and dtype.sz > 1:
       val = lang.render_cast([r[x] for x in vin], dtype)
       if child_count[u] <= 1: r[u] = val
