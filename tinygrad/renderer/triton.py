@@ -81,12 +81,12 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       assert dtype is not None
       val = code_for_op[args](*[r[x] for x in vin])
       if child_count[u] <=1 or dtypes.is_int(dtype): r[u] = int_div(*[r[x] for x in vin]) if args == BinaryOps.DIV and dtypes.is_int(dtype) else val
-      else: kk(f"{ssa(u, 'alu')} = ({render_cast(val, dtype)})")
+      else: kk(f"{ssa(u, 'alu')} = ({render_cast(f'{(val)}', dtype)})")
     elif uop == UOps.LOAD:
       assert dtype is not None
       if len(vin) == 2: kk(f"{ssa(u, 'val')} = {render_cast(f'tl.load({r[vin[0]]} + { fill_dims_for_idx(r[vin[1]], dims)}, mask = {render_valid(valid)})', dtype)}")
       else:
-        kk(f"{ssa(u, 'val')} = {render_cast(f'render_cast tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+{fill_dims_for_idx(r[vin[1]],dims)} , mask={render_valid(valid+[r[vin[2]]])}), 0.0)', dtype)}")
+        kk(f"{ssa(u, 'val')} = {render_cast(f'tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+{fill_dims_for_idx(r[vin[1]],dims)} , mask={render_valid(valid+[r[vin[2]]])}), 0.0)', dtype)}")
     elif uop == UOps.DEFINE_ACC: kk(f"{ssa(u, 'acc')} = {define_scalar(local_size, dtype, args).replace('//', '/')}")
     elif uop == UOps.CONST: r[u] = define_scalar([], dtype, args)
     elif uop == UOps.STORE:
