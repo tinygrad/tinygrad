@@ -128,6 +128,10 @@ def main():
       print("&&&& MLPERF METRIC STATUS=SUCCESS")
     else:
       print("&&&& MLPERF METRIC STATUS=ABORTED")
+import gc
+
+def tensors_allocated():
+  return sum([isinstance(x, Tensor) for x in gc.get_objects()])
 
 def simple():
   from loss import make_match_fn,make_balanced_sampler_fn,generate_rpn_labels,RPNLossComputation, print_gpu_memory
@@ -149,7 +153,6 @@ def simple():
   from pycocotools.coco import COCO
   import os
   from PIL import Image
-  import gc
 
   NUM_EPOCHS = 100  # or however many epochs you'd like
 
@@ -165,10 +168,12 @@ def simple():
     print("training", img_filename)
     print_gpu_memory("before_load_no_transforms")
     t = Tensor(np.array(Image.open(img_filename).convert("RGB")), requires_grad=True).realize()
+    print("tensors allocated", tensors_allocated())
     print_gpu_memory("after_load_no_transforms")
     del t
     gc.collect()
     print_gpu_memory("after_del")
+    print("tensors allocated", tensors_allocated())
     print_gpu_memory("before_load")
     t = Tensor(build_transforms()(Image.open(img_filename).convert("RGB")).numpy(), requires_grad=True).realize()
     print_gpu_memory("after_load")
