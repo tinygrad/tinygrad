@@ -4,7 +4,9 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
 from tinygrad.helpers import DType, dtypes, ImageDType, DEBUG, getenv
 from tinygrad.codegen.linearizer import  UOp, UOps
 from triton.compiler import compile as triton_compile  # type: ignore
-import math, re, linecache
+import linecache
+import math
+import re
 
 triton_dtypes = {dtypes.double: "tl.float64", dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.bool: "tl.int1", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64", dtypes.uint32: "tl.uint32", dtypes.uint64: "tl.uint64"}
 signature_dtypes = {dtypes.double: "*fp64",dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.bool: "*i8", dtypes.int8: "*i1", dtypes.uint8: "*u8", dtypes._arg_int32: "i32", dtypes.int32: "*i32", dtypes.int64: "*i64", dtypes.uint32: "*u32", dtypes.uint64: "*u64"}
@@ -85,14 +87,15 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     elif uop == UOps.LOAD:
       assert dtype is not None
       if len(vin) == 2: kk(f"{ssa(u, 'val')} = {render_cast(f'tl.load({r[vin[0]]} + { fill_dims_for_idx(r[vin[1]], dims)}, mask = {render_valid(valid)})', dtype)}")
-      else:
-        kk(f"{ssa(u, 'val')} = {render_cast(f'tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+{fill_dims_for_idx(r[vin[1]],dims)} , mask={render_valid(valid+[r[vin[2]]])}), 0.0)', dtype)}")
+      else: kk(f"{ssa(u, 'val')} = {render_cast(f'tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+{fill_dims_for_idx(r[vin[1]],dims)} , mask={render_valid(valid+[r[vin[2]]])}), 0.0)', dtype)}")
     elif uop == UOps.DEFINE_ACC: kk(f"{ssa(u, 'acc')} = {define_scalar(local_size, dtype, args).replace('//', '/')}")
     elif uop == UOps.CONST: r[u] = define_scalar([], dtype, args)
+    elif uop == UOps.PHI:
+      kk(f"{r[vin[0]]} = {r[vin[1]].replace('//', '/')}")
+      r[u] = r[vin[0]]
     elif uop == UOps.STORE:
       assert not isinstance(dtype, ImageDType), "unimplemented: image store"
-      if len(vin) == 2: kk(f"{r[vin[0]]} =  {r[vin[1]].replace('//', '/')}")
-      else: kk(f"tl.store({r[vin[0]]} + {r[vin[1]]}, {r[vin[2]].replace('//', '/')}, mask = {render_valid(valid)}) ")
+      kk(f"tl.store({r[vin[0]]} + {r[vin[1]]}, {r[vin[2]].replace('//', '/')}, mask = {render_valid(valid)}) ")
     elif uop == UOps.DEFINE_GLOBAL:
       bufs.append(args)
       signatures.append(signature_dtypes[args[1]])
