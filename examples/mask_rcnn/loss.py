@@ -180,6 +180,9 @@ def flat_idx(F: list[Tensor], l: int, h: int, w: int, p: int = 1) -> int:
   _, A, _, W = F[l].shape
   return int(acc+h*A/p*W+w*A/p)
 
+
+import gc
+ 
 def concat_box_prediction_layers(box_cls, box_regression):
   box_cls_flattened = []
   box_regression_flattened = []
@@ -214,6 +217,7 @@ def concat_box_prediction_layers(box_cls, box_regression):
     box_cls.realize()
     print_gpu_memory("after boxcls realize") # memory taken here
     del box_cls
+    gc.collect()
     print_gpu_memory("after boxcls delete") # memory not reclaimed here!!
     del box_regression_flattened
     print_gpu_memory("after boxcls flat delete") # memory not reclaimed here!!
