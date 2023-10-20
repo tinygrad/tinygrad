@@ -322,17 +322,14 @@ class TestHandCodedOpts(unittest.TestCase):
     # check that we don't do too many upcasts
     assert prod(k.full_shape[k.shape_len-k.upcasted:k.shape_len]) <= 49
 
-def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
+def helper_linearizer_opt(r:Tensor, opts=[]):
   wanna_output = None
   realized_ast, real_bufs = helper_realized_ast(r)
 
-  def check_opt(opts, create_k, to_prg, apply_tc=False):
+  def check_opt(opts, create_k, to_prg):
     k = create_k()
-    if apply_tc:
-      k.apply_tensor_cores(1,opts)
-    else:
-      for opt in opts:
-        k.apply_opt(opt)
+    for opt in opts:
+      k.apply_opt(opt)
     prg = to_prg(k)
     real_bufs[0] = real_bufs[0].fromCPU(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np)) # Zero to check that all values are filled
     prg.exec(real_bufs, force_wait=True)
@@ -352,7 +349,7 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
   prg.exec(real_bufs, force_wait=True)
   np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
   for x in opts: # Check custom transformations if any.
-    check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_program, apply_tc)
+    check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_program)
 
 class TestLinearizerOpts(unittest.TestCase):
   def test_local_and_grouped_reduce(self):
