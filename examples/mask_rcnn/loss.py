@@ -215,6 +215,8 @@ def concat_box_prediction_layers(box_cls, box_regression):
     print_gpu_memory("after boxcls realize") # memory taken here
     del box_cls
     print_gpu_memory("after boxcls delete") # memory not reclaimed here!!
+    del box_regression_flattened
+    print_gpu_memory("after boxcls flat delete") # memory not reclaimed here!!
   box_regression = Tensor.cat(*box_regression_flattened, dim=1).reshape(-1, 4)
   if DEBUG > 0:
     print_gpu_memory("after box_regression cat")
