@@ -168,10 +168,13 @@ def simple():
     print("training", img_filename)
     print("tensors allocated", tensors_allocated())
     print_gpu_memory("before_load_no_transforms")
-    t = Tensor(np.array(Image.open(img_filename).convert("RGB")), requires_grad=True).realize()
+    imgg = Image.open(img_filename).convert("RGB")
+    imgn = np.array(imgg)
+    t = Tensor(imgn, requires_grad=True).realize()
     print("tensors allocated", tensors_allocated())
     print_gpu_memory("after_load_no_transforms")
     del t
+    del imgg
     gc.collect()
     print_gpu_memory("after_del")
     print("tensors allocated", tensors_allocated())
