@@ -430,6 +430,8 @@ class RPNLossComputation:
     if DEBUG > 0:
       objectness.realize(), box_regression.realize()
       print_gpu_memory("after concat_box_prediction_layers")
+      del objectness, del box_regression
+      print_gpu_memory("after concat_box_prediction_layers_del")
     objectness = objectness.squeeze() 
     labels, regression_targets = Tensor.cat(*labels, dim=0), Tensor.cat(*regression_targets, dim=0)
     if DEBUG > 0:
