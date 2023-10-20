@@ -18,7 +18,6 @@ if __name__ == "__main__":
     rawbufs = bufs_from_lin(lin)
     base_tm = time_linearizer(lin, rawbufs)
     ground_truth = rawbufs[0].toCPU()
-    lin.hand_coded_optimizations
 
     for opt in optimizers:
       opt(lin)
