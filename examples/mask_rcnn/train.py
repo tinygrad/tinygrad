@@ -166,6 +166,10 @@ def simple():
     images = to_image_list(img)
     features = backbone(images.tensors)
     objectness, rpn_box_regression = rpn(features)
+    objectness[0].realize()
+    print_gpu_memory("after objectness realize")
+    del objectness
+    print_gpu_memory("after objectness del")
     anchors = [anchor for anchor in anchor_generator(images, features)]
     annotations = coco.loadAnns(coco.getAnnIds(imgIds=[random_img_id]))
     gt = []
