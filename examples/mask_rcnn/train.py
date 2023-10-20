@@ -176,6 +176,7 @@ def simple():
     del objectness
     del features
     del backbone
+    del rpn
     gc.collect()
     print_gpu_memory("after stuff del")
     anchors = [anchor for anchor in anchor_generator(images, features)]
