@@ -33,7 +33,7 @@ if getenv("CUDACPU", 0) == 1:
     class Event:
       def __init__(self): pass
       def record(self): self.start = time.perf_counter()
-      def time_till(self, other): return self.start - other.start
+      def time_till(self, other): return other.start - self.start
       def synchronize(self): pass
     class Context:
       synchronize = lambda:0 # noqa: E731
