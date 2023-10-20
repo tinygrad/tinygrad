@@ -190,6 +190,11 @@ def concat_box_prediction_layers(box_cls, box_regression):
   # same format as the labels. Note that the labels are computed for
   # all feature levels concatenated, so we keep the same representation
   # for the objectness and the box_regression
+  if DEBUG > 0:
+    print_gpu_memory("prior to ops")
+    print("len ", len(box_cls))
+    box_cls[0].realize()
+    print_gpu_memory("realize box_cls input")
   for box_cls_per_level, box_regression_per_level in zip(
       box_cls, box_regression
   ):
