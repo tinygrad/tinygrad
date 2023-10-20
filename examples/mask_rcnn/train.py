@@ -163,6 +163,12 @@ def simple():
     img_metadata = coco.loadImgs(random_img_id)[0]
     img_filename = os.path.join(BASEDIR, 'train2017', img_metadata['file_name'])
     print("training", img_filename)
+    print_gpu_memory("before_load")
+    t = Tensor(build_transforms()(Image.open(img_filename).convert("RGB")).numpy(), requires_grad=True).realize()
+    print_gpu_memory("after_load")
+    del t
+    gc.collect()
+    print_gpu_memory("after_del")
     img = [Tensor(build_transforms()(Image.open(img_filename).convert("RGB")).numpy(), requires_grad=True)]
     images = to_image_list(img)
     print_gpu_memory("before images")
