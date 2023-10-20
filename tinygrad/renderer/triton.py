@@ -28,14 +28,14 @@ def remove_single_scalar_curly_braces(ptx_code):
   return '\n'.join([re.sub(r'\{\s*(%\w+)\s*\}', r'\1', line) for line in ptx_code.split('\n')])
 
 def render_const(args):
-  return (('-' if args<0 else '') + 'float("inf")') if math.isinf(args) else ('float("nan")' if math.isnan(args) else str(args))
+  return (('-' if args<0 else '') + 'tl.where(1,float("inf"),0)') if math.isinf(args) else ('tl.where(1,float("nan"),0)' if math.isnan(args) else str(args))
 
 def render_cast(x:str, dtype:DType):
   return f"{x}.to({triton_dtypes[dtype]})"
 
-def define_scalar(local_size, dtype, args):
-  if len(local_size) > 0: return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])}), {render_const(args)}, dtype={triton_dtypes[dtype]})"
-  return f"{render_cast(f'tl.where(1, {render_const(args)}, {render_const(args)})', dtype)}"
+def define_scalar(local_size, triton_type, args):
+  if len(local_size) > 0: return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{render_const(args)}, dtype={triton_type})"
+  return render_const(args)
 
 def uops_to_triton(function_name:str, uops:List[UOp]):
   local_size: List[int] = []
@@ -63,14 +63,14 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     UnaryOps.SQRT: lambda x,: f"tl.sqrt({x})",
     UnaryOps.NEG: lambda x,: f"-{x}",
     BinaryOps.ADD: lambda x,y,: f"({x}+{y})", BinaryOps.SUB: lambda x,y,: f"({x}-{y})",
-    BinaryOps.MUL: lambda x,y,: f"({x}*{y})", BinaryOps.DIV: lambda x,y,: f"({x}/{y})",
+    BinaryOps.MUL: lambda x,y,: f"({x}*{y})", BinaryOps.DIV: lambda x,y,: f"({x}/{y})" if y != '0.0' else f"{x}*tl.where({x}==0.0, float('nan'), float('inf'))",
     BinaryOps.MAX: lambda x,y,: f"tl.maximum({x},{y})",
     BinaryOps.CMPLT: lambda x,y,: f"({x}<{y})",
-    BinaryOps.MOD: lambda x,y,: f"({x}%{y})",
+    BinaryOps.MOD: lambda x,y,: f"tl.abs({x})%tl.abs({y})*tl.where({x}<0,-1,1)",
     TernaryOps.MULACC: lambda x,y,z,: f"(({x}*{y})+{z})",
     TernaryOps.WHERE: lambda x,y,z,: f"tl.where({x},{y},{z})",
   }
-  def int_div(x,y): return f"({x}//{y})"
+  def int_div(x,y): return f"({x}//{y})" if y != '0' else f"{x}*tl.where({x}==0, float('nan'), float('inf'))"
   for u in uops:
     uop,dtype,vin,args,_ = u
     if uop == UOps.LOOP:
@@ -81,7 +81,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       assert dtype is not None
       val = code_for_op[args](*[r[x] for x in vin])
       if child_count[u] <=1 or dtypes.is_int(dtype): r[u] = int_div(*[r[x] for x in vin]) if args == BinaryOps.DIV and dtypes.is_int(dtype) else val
-      else: kk(f"{ssa(u, 'alu')} = ({render_cast(f'{(val)}', dtype)})")
+      else: kk(f"{ssa(u, 'alu')} = ({val})")
     elif uop == UOps.LOAD:
       assert dtype is not None
       if len(vin) == 2: kk(f"{ssa(u, 'val')} = {render_cast(f'tl.load({r[vin[0]]} + { fill_dims_for_idx(r[vin[1]], dims)}, mask = {render_valid(valid)})', dtype)}")

@@ -4,6 +4,8 @@
 import numpy
 from tinygrad.tensor import Tensor
 from PIL import Image
+from pathlib import Path
+from extra.utils import download_file
 
 # File Formats
 
@@ -17,6 +19,9 @@ def image_load(path) -> numpy.ndarray:
   """
   # file
   na = numpy.array(Image.open(path))
+  if na.shape[2] == 4:
+    # RGBA -> RGB (covers opaque images with alpha channels)
+    na = na[:,:,0:3]
   # fix shape
   na = numpy.moveaxis(na, [2,0,1], [0,1,2])
   # shape is now (3,h,w), add 1
@@ -113,6 +118,19 @@ class Vgg7:
   def get_parameters(self) -> list:
     return self.conv1.get_parameters() + self.conv2.get_parameters() + self.conv3.get_parameters() + self.conv4.get_parameters() + self.conv5.get_parameters() + self.conv6.get_parameters() + self.conv7.get_parameters()
 
+  def load_from_pretrained(self, intent = "art", subtype = "scale2.0x"):
+    """
+    Downloads a nagadomi/waifu2x JSON weight file and loads it.
+    """
+    fn = Path(__file__).parents[2] / ("weights/vgg_7_" + intent + "_" + subtype + "_model.json")
+    download_file("https://github.com/nagadomi/waifu2x/raw/master/models/vgg_7/" + intent + "/" + subtype + "_model.json", fn)
+
+    import json
+    with open(fn, "rb") as f:
+      data = json.load(f)
+
+    self.load_waifu2x_json(data)
+
   def load_waifu2x_json(self, data: list):
     """
     Loads weights from one of the waifu2x JSON files, i.e. waifu2x/models/vgg_7/art/noise0_model.json
@@ -125,7 +143,6 @@ class Vgg7:
     self.conv5.load_waifu2x_json(data[4])
     self.conv6.load_waifu2x_json(data[5])
     self.conv7.load_waifu2x_json(data[6])
-
 
   def forward_tiled(self, image: numpy.ndarray, tile_size: int) -> numpy.ndarray:
     """
