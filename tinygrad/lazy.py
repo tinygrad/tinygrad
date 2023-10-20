@@ -256,10 +256,7 @@ class LazyBuffer:
         return self.op.replace_with_movement_ops([(op, arg)])
     if REMOVE_MOVEMENT_NOPS and not self.realized and st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root
-      if PUSH_CONTIGUOUS:
-        root = get_movementroot(self, allow_contiguous=True)
-      else:
-        root = get_movementroot(self)
+      root = get_movementroot(self, allow_contiguous=PUSH_CONTIGUOUS)
       if root.st.contiguous and root != self and prod(st.shape) == prod(root.shape):
         return root.reshape(st.shape)
     return create_lazybuffer(self.device, st, MovementOps, LazyOp(op, (self,), arg), self.dtype, base=self.base)
