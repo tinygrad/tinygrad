@@ -166,6 +166,7 @@ def simple():
     img_metadata = coco.loadImgs(random_img_id)[0]
     img_filename = os.path.join(BASEDIR, 'train2017', img_metadata['file_name'])
     print("training", img_filename)
+    print("tensors allocated", tensors_allocated())
     print_gpu_memory("before_load_no_transforms")
     t = Tensor(np.array(Image.open(img_filename).convert("RGB")), requires_grad=True).realize()
     print("tensors allocated", tensors_allocated())
