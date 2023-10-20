@@ -30,12 +30,12 @@ def remove_single_scalar_curly_braces(ptx_code):
 def render_const(args):
   return (('-' if args<0 else '') + 'float("inf")') if math.isinf(args) else ('float("nan")' if math.isnan(args) else str(args))
 
-def render_cast(dtype: DType):
-  return f"to({triton_dtypes[dtype]})"
+def render_cast(x:str, dtype:DType):
+  return f"{x}.to({triton_dtypes[dtype]})"
 
 def define_scalar(local_size, dtype, args):
   if len(local_size) > 0: return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{render_const(args)}, dtype={triton_dtypes[dtype]})"
-  return f"(tl.where(1, {render_const(args)}, {render_const(args)}).{render_cast(dtype)})"
+  return f"({render_cast(f"tl.where(1, {render_const(args)}, {render_const(args)})", dtype)})"
 
 def uops_to_triton(function_name:str, uops:List[UOp]):
   local_size: List[int] = []
@@ -81,11 +81,12 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       assert dtype is not None
       val = code_for_op[args](*[r[x] for x in vin])
       if child_count[u] <=1 or dtypes.is_int(dtype): r[u] = int_div(*[r[x] for x in vin]) if args == BinaryOps.DIV and dtypes.is_int(dtype) else val
-      else: kk(f"{ssa(u, 'alu')} = ({val}).{render_cast(dtype)}")
+      else: kk(f"{ssa(u, 'alu')} = ({render_cast(val, dtype)})")
     elif uop == UOps.LOAD:
       assert dtype is not None
-      if len(vin) == 2: kk(f"{ssa(u, 'val')} = tl.load({r[vin[0]]} + { fill_dims_for_idx(r[vin[1]], dims)}, mask = {render_valid(valid)}).{render_cast(dtype)}")
-      else: kk(f"{ssa(u, 'val')} = tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+{fill_dims_for_idx(r[vin[1]],dims)} , mask={render_valid(valid+[r[vin[2]]])}), 0.0).{render_cast(dtype)}")
+      if len(vin) == 2: kk(f"{ssa(u, 'val')} = {render_cast(f"tl.load({r[vin[0]]} + { fill_dims_for_idx(r[vin[1]], dims)}, mask = {render_valid(valid)})", dtype)}")
+      else:
+        kk(f"{ssa(u, 'val')} = {render_cast(f"render_cast tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+{fill_dims_for_idx(r[vin[1]],dims)} , mask={render_valid(valid+[r[vin[2]]])}), 0.0)", dtype)}")
     elif uop == UOps.DEFINE_ACC: kk(f"{ssa(u, 'acc')} = {define_scalar(local_size, dtype, args).replace('//', '/')}")
     elif uop == UOps.CONST: r[u] = define_scalar([], dtype, args)
     elif uop == UOps.STORE:
