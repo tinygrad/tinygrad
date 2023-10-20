@@ -5,7 +5,6 @@ from tinygrad.features.search import bufs_from_lin, time_linearizer
 from tinygrad.ops import Device
 
 devices = [fn.replace("ops_", "").replace(".py", "").upper() for fn in os.listdir("./tinygrad/runtime") if fn.endswith(".py") and fn.startswith("ops_")]
-devices = ["METAL", "GPU"] # TODO remove
 ast_strs = load_worlds()
 optimizers = [lambda lin: lin.hand_coded_optimizations()]
 
