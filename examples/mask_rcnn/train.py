@@ -164,8 +164,12 @@ def simple():
     print("training", img_filename)
     img = [Tensor(build_transforms()(Image.open(img_filename).convert("RGB")).numpy(), requires_grad=True)]
     images = to_image_list(img)
+    print_gpu_memory("before backbone")
     features = backbone(images.tensors)
+    features.realize()
+    print_gpu_memory("after backbone realize")
     objectness, rpn_box_regression = rpn(features)
+    print_gpu_memory("before objectness realize")
     objectness[0].realize()
     print_gpu_memory("after objectness realize")
     del objectness
