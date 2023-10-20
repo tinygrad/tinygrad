@@ -14,27 +14,21 @@ import numpy as np
 
 # fake the function signature of ASTRunner so we can put it in the cache
 def __send_rb(args, variables=None, jit=False, force_wait=False):
-  x, target_rank, y, extra = args[:4]
-  if y is None:
-    if RawHIPBuffer and x.__class__ is RawHIPBuffer:
-      hip.hipSetDevice(x._device)
-      hip.hipDeviceSynchronize()
-      extra = (hip.hipIpcGetMemHandle(x._buf), x._device)
+  x, target_rank, y = args[:3]
+  if RawHIPBuffer and x.__class__ is RawHIPBuffer:
+    hip.hipSetDevice(x._device)
+    hip.hipDeviceSynchronize()
   else:
     if isinstance(x, RawBufferCopyInOut): x._copyout(np.frombuffer(y._buffer(), dtype=x.dtype.np))
     else: y.fromCPU(x.toCPU())
-  dist.OOB.send(extra, target_rank)
+  dist.OOB.send(None, target_rank)
   if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}  rank {getenv('RANK')} sent {x} to rank {target_rank}")
 
 def __recv_rb(args, variables=None, jit=False, force_wait=False):
   x, target_rank, y = args[:3]
-  extra = dist.OOB.recv(target_rank)
+  dist.OOB.recv(target_rank)
   if RawHIPBuffer and x.__class__ is RawHIPBuffer:
-    hip.hipSetDevice(extra[1])
-    y._buf = hip.hipIpcOpenMemHandle(extra[0], 0)
     x._transfer(y)
-    hip.hipSetDevice(extra[1])
-    hip.hipIpcCloseMemHandle(y._buf)
   elif isinstance(x, RawBufferCopyIn): x._copyin(y.toCPU())
   else: x.fromCPU(y.toCPU())
   if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}  rank {getenv('RANK')} recv {x} from rank {target_rank}")
@@ -50,7 +44,7 @@ def _send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
 
     # jit support
     x._allocator = None # need to disconnect allocator for sent buffers
-    CacheCollector.add(__send_rb, [x, target_rank, None, None], {})
+    CacheCollector.add(__send_rb, [x, target_rank, None], {})
   else:
     # cache the shared memory so we don't have to create it every time
     if cache_id is not None and cache_id in _send_rb.shared_memory_cache:
@@ -69,7 +63,7 @@ def _send_rb(x:RawBuffer, target_rank:int, cache_id:Optional[str]=None):
     dist.OOB.send((shm_name, cache_id), target_rank)
 
     # jit support
-    CacheCollector.add(__send_rb, [x, target_rank, y, None], {})
+    CacheCollector.add(__send_rb, [x, target_rank, y], {})
 setattr(_send_rb, "shared_memory_cache", {})
 
 # receive a rawbuffer from the target rank
@@ -84,12 +78,7 @@ def _recv_rb(x:RawBuffer, target_rank:int):
     y = RawHIPBuffer(x.size, x.dtype, device=str(y_device), buf=ptr, allocator=None)
     x._transfer(y)
 
-    # close ipc handle
-    hip.hipSetDevice(y._device)
-    hip.hipIpcCloseMemHandle(y._buf)
-
     if DEBUG >= 2: print(f"****  rank {getenv('RANK')} got {x} from rank {target_rank}")
-
     CacheCollector.add(__recv_rb, [x, target_rank, y], {})
   else:
     extra = dist.OOB.recv(target_rank)
