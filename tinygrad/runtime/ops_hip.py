@@ -28,10 +28,6 @@ class _HIP:
     hip.hipSetDevice(self.default_device)
     self.device_count = hip.hipGetDeviceCount()
     self.allocator = HIPAllocator(hip.hipGetDeviceProperties(self.default_device).totalGlobalMem)
-  def synchronize(self):
-    for i in range(self.device_count):
-      hip.hipSetDevice(i)
-      hip.hipDeviceSynchronize()
 HIP = _HIP()
 
 class HIPGraph(BasicBatchExecutor):

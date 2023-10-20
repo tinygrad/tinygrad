@@ -12,8 +12,8 @@ import numpy as np
 def allreduce_jit(t:Tensor, cache_id=None) -> Tensor:
   return collectives.allreduce(t, cache_id=cache_id).realize()
 
-SIZE = 4096 if not CI else 2
-SIZE_2 = 555 if not CI else 3
+SIZE = 2048 if not CI else 2
+SIZE_2 = 255 if not CI else 3
 
 def run():
   # set a deterministic seed so that both ranks generate the same random tensor
@@ -42,8 +42,12 @@ def run():
   print(f"rank {rank} passed")
 
 if __name__ == "__main__":
-  # devices = ["gpu:0", "gpu:1" if not CI else "gpu:0"]
-  devices = ["hip:0", "hip:1", "hip:2", "hip:3", "hip:4", "hip:5"]
+  if getenv("HIP"):
+    from tinygrad.runtime.ops_hip import HIP
+    devices = [f"hip:{i}" for i in range(HIP.device_count)]
+  else:
+    from tinygrad.runtime.ops_gpu import CL
+    devices = [f"gpu:{i}" for i in range(len(CL.devices))] if not CI else ["gpu:0", "gpu:0"]
   world_size = len(devices)
 
   dist.init_oob(world_size)
