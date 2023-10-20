@@ -64,4 +64,4 @@ class LLVMProgram:
     cfunc(*[x._buf if not isinstance(x, int) else x for x in bufs])
     if wait: return time.monotonic()-st
 
-LLVMBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False), uops_to_llvm_ir, LLVMProgram)
+LLVMBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, LLVMProgram)
