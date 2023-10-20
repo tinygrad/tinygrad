@@ -149,6 +149,7 @@ def simple():
   from pycocotools.coco import COCO
   import os
   from PIL import Image
+  import gc
 
   NUM_EPOCHS = 100  # or however many epochs you'd like
 
@@ -173,7 +174,9 @@ def simple():
     objectness[0].realize()
     print_gpu_memory("after objectness realize")
     del objectness
-    print_gpu_memory("after objectness del")
+    del features
+    gc.collect()
+    print_gpu_memory("after stuff del")
     anchors = [anchor for anchor in anchor_generator(images, features)]
     annotations = coco.loadAnns(coco.getAnnIds(imgIds=[random_img_id]))
     gt = []
