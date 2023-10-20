@@ -33,8 +33,8 @@ def render_const(args):
 def render_cast(x:str, dtype:DType):
   return f"{x}.to({triton_dtypes[dtype]})"
 
-def define_scalar(local_size, triton_type, args):
-  if len(local_size) > 0: return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{render_const(args)}, dtype={triton_type})"
+def define_scalar(local_size, dtype, args):
+  if len(local_size) > 0: return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{render_const(args)}, dtype={triton_dtypes[dtype]})"
   return render_const(args)
 
 def uops_to_triton(function_name:str, uops:List[UOp]):
