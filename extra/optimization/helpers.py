@@ -23,6 +23,7 @@ def load_worlds(filter_reduce=True, filter_noimage=True, filter_novariable=True)
   if filter_novariable: ast_strs = [x for x in ast_strs if "Variable" not in x]
   random.seed(1337)
   random.shuffle(ast_strs)
+  random.seed(None) # reset seed
   return ast_strs
 
 def assert_same_lin(l1, l2):
