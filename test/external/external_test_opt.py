@@ -14,7 +14,7 @@ from tinygrad import nn
 from tinygrad.helpers import getenv
 from tinygrad.nn import optim
 from tinygrad.ops import GlobalCounters, MovementOps, ReduceOps
-from tinygrad.lazy import PUSH_PERMUTES
+from tinygrad.lazy import PUSH_CONTIGUOUS, PUSH_PERMUTES
 from tinygrad.jit import CacheCollector
 
 class CLCache:
@@ -323,6 +323,16 @@ class TestOpt(unittest.TestCase):
       cache_len = len(CacheCollector.cache)
     np.testing.assert_allclose(a.numpy().sum(2).transpose(1,0).reshape(4,4,4,4), d.numpy(), rtol=1e-3, atol=1e-5)
     if PUSH_PERMUTES: assert cache_len == 1, "permute wasn't pushed!"
+
+  @unittest.skipIf(not PUSH_CONTIGUOUS, "this test requires PUSH_CONTIGUOUS")
+  def test_elementwise_contiguous_reshape_chain(self):
+    a = Tensor.randn(3)
+    with CLCache():
+      b = a.exp().contiguous().reshape(1,3).exp()
+      b.realize()
+      cache_len = len(CacheCollector.cache)
+    np.testing.assert_allclose(np.exp(np.exp(a.numpy().reshape(1,3))), b.numpy(), rtol=1e-3, atol=1e-5)
+    if PUSH_CONTIGUOUS: assert cache_len == 1, "reshape wasn't pushed. broken elementwise contiguous reshape chain!"
 
   @unittest.skipIf(PUSH_PERMUTES, "this test is broken with PUSH_PERMUTES")
   def test_no_reduceop_rerun(self):
