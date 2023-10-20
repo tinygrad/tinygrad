@@ -167,6 +167,9 @@ def simple():
     images = to_image_list(img)
     print_gpu_memory("before images")
     images.tensors[0].realize()
+    print_gpu_memory("after images")
+    del images
+    gc.collect()
     print_gpu_memory("before backbone")
     features = backbone(images.tensors)
     features[0].realize()
