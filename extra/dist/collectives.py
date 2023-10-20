@@ -1,8 +1,7 @@
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 
 from extra.dist import world
-import extra.hip_wrapper as hip
 
 def allreduce(t:Tensor, cache_id=None) -> Tensor:
   RANK, WORLD_SIZE = getenv("RANK"), getenv("WORLD_SIZE")
