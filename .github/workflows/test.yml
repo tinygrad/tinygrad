@@ -118,7 +118,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [optimage, openpilot, onnx]
+        task: [optimage, openpilot, onnx, optimization]
     name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests' || matrix.task=='openpilot'&&'openpilot (OpenCL) Tests' || matrix.task=='onnx'&&'ONNX Tests' || matrix.task=='optimization'&&'Optimization Tests' }}
     runs-on: ubuntu-20.04
     timeout-minutes: 20
