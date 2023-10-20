@@ -206,8 +206,18 @@ def concat_box_prediction_layers(box_cls, box_regression):
   # concatenate on the first dimension (representing the feature levels), to
   # take into account the way the labels were generated (with all feature maps
   # being concatenated as well)
+  if DEBUG > 0:
+    print_gpu_memory("prior to cat")
   box_cls = Tensor.cat(*box_cls_flattened, dim=1).reshape(-1, C)
+  if DEBUG > 0:
+    print_gpu_memory("after boxcls cat")
+    box_cls.realize()
+    print_gpu_memory("after boxcls realize")
   box_regression = Tensor.cat(*box_regression_flattened, dim=1).reshape(-1, 4)
+  if DEBUG > 0:
+    print_gpu_memory("after box_regression cat")
+    box_regression.realize()
+    print_gpu_memory("after box_regression realize")
   del box_cls_flattened, box_regression_flattened
   return box_cls, box_regression
 
