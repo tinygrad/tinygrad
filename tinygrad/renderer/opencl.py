@@ -14,6 +14,7 @@ class OpenCLLanguage(CStyleLanguage):
   float4 = "(float4)"
   gid = [f'get_group_id({i})' for i in range(3)]
   lid = [f'get_local_id({i})' for i in range(3)]
+  xid = [f'get_global_id({i})' for i in range(3)]
   uses_vload=False
 
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())

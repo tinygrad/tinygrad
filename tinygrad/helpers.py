@@ -21,7 +21,7 @@ def all_int(t: Tuple[Any, ...]) -> TypeGuard[Tuple[int, ...]]: return all(isinst
 def colored(st, color, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
 def ansilen(s): return len(re.sub('\x1b\\[(K|.*?m)', '', s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
-def flatten(l:Iterator): return [item for sublist in l for item in sublist]
+def flatten(l:Union[List, Iterator]): return [item for sublist in l for item in sublist]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def merge_dicts(ds:Iterable[Dict]) -> Dict:
@@ -59,7 +59,7 @@ class ContextVar:
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
 
-DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
+DEBUG, IMAGE, BEAM = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0)
 GRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 
 class Timing(contextlib.ContextDecorator):
@@ -88,6 +88,10 @@ class ImageDType(DType):
     self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
     super().__init__()
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
+  # TODO: fix this to not need these
+  def __hash__(self): return hash((super().__hash__(), self.shape))
+  def __eq__(self, x): return super().__eq__(x) and self.shape == x.shape
+  def __ne__(self, x): return super().__ne__(x) or self.shape != x.shape
 
 class PtrDType(DType):
   def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.np, dt.sz)

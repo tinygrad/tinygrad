@@ -37,26 +37,26 @@ class ClangProgram:
     # A: it seems there isn't https://stackoverflow.com/questions/28053328/ctypes-cdll-load-library-from-memory-rather-than-file
     #    because ctypes.CDLL() calls dlopen (POSIX) or LoadLibrary (Windows) which require a file
     if not (CI and ARM64):
-      cached_file_path = pathlib.Path(tempfile.mktemp())
-      cached_file_path.write_bytes(self.prg)
-      self.fxn: Any = ctypes.CDLL(str(cached_file_path))[name]
+      with tempfile.NamedTemporaryFile(delete=True) as cached_file_path:
+        pathlib.Path(cached_file_path.name).write_bytes(self.prg)
+        self.fxn: Any = ctypes.CDLL(str(cached_file_path.name))[name]
 
   @cache_compiled
   def compile(self, prg, binary) -> bytes:
-    output_file, temp_file = pathlib.Path(tempfile.mktemp()), pathlib.Path(tempfile.mktemp())
-    if not binary:
-      subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+str(output_file)).split(), input=prg.encode('utf-8'))
-    elif CI and ARM64:
-      prg = prg.split('\n') # type: ignore
-      self.varsize = align(int(prg[0].split(" ")[1]))
-      self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if ins[:2] == 'bl'}
-      prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg[6:-3]] + ['\n'])
-      subprocess.check_output(args=('aarch64-linux-gnu-as -o '+str(temp_file)).split(), input=prg.encode('utf-8'))
-      subprocess.check_output(args=('aarch64-linux-gnu-objcopy -O binary --only-section=.text '+str(temp_file)+' '+str(output_file)).split())
-    else:
-      subprocess.check_output(args=('as -o' + str(temp_file)).split(), input=prg.encode('utf-8'))
-      subprocess.check_output(args=('clang -lm -shared '+str(temp_file)+' -o'+str(output_file)).split())
-    return output_file.read_bytes()
+    with tempfile.NamedTemporaryFile(delete=True) as output_file, tempfile.NamedTemporaryFile(delete=True) as temp_file:
+      if not binary:
+        subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+str(output_file.name)).split(), input=prg.encode('utf-8'))
+      elif CI and ARM64:
+        prg = prg.split('\n') # type: ignore
+        self.varsize = align(int(prg[0].split(" ")[1]))
+        self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if ins[:2] == 'bl'}
+        prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg[6:-3]] + ['\n'])
+        subprocess.check_output(args=('aarch64-linux-gnu-as -o '+str(temp_file.name)).split(), input=prg.encode('utf-8'))
+        subprocess.check_output(args=('aarch64-linux-gnu-objcopy -O binary --only-section=.text '+str(temp_file.name)+' '+str(output_file.name)).split())
+      else:
+        subprocess.check_output(args=('as -o' + str(temp_file.name)).split(), input=prg.encode('utf-8'))
+        subprocess.check_output(args=('clang -lm -shared '+str(temp_file.name)+' -o'+str(output_file.name)).split())
+      return pathlib.Path(output_file.name).read_bytes()
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()

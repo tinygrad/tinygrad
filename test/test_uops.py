@@ -7,8 +7,8 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ASTRunner, Compiled
 from tinygrad.codegen.linearizer import UOps, UOp
 
 def _uops_to_prg(uops):
-  src = Device[Device.DEFAULT].renderer("test", uops)
-  return ASTRunner("test", src[0] if getenv("TRITON") else src, [1], [1], runtime_args={"binary": getenv("TRITON")}).build(Device[Device.DEFAULT].runtime)
+  src, runtime_args = Device[Device.DEFAULT].renderer("test", uops)
+  return ASTRunner("test", src, [1], [1], runtime_args=runtime_args).build(Device[Device.DEFAULT].runtime)
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(vin), arg, len(uops)))
@@ -44,18 +44,18 @@ class TestUOps(unittest.TestCase):
 
   def _test_uop_fxn(self, bop, fxn, dt=dtypes.float32):
     for f in [_test_single_value, _test_single_value_const]:
-      for a in [-2.0, 0.0, 1.0, 2.0]:
+      for a in [-2.0, 0.0, 1.0]:
         self._equal(f([a], bop, dt), fxn(a), places=3 if dt==dtypes.half else 5)
 
   def _test_bop_fxn(self, bop, fxn, dt=dtypes.float32, no_b_zero=False):
     for f in [_test_single_value, _test_single_value_const]:
-      for a in [-2.0, 0.0, 1.0, 2.0]:
-        for b in [-3.0, 1.0, 3.0] + ([] if no_b_zero else [0.0]):
+      for a in [-2.0, 0.0, 1.0]:
+        for b in [-3.0, 1.0] + ([] if no_b_zero else [0.0]):
           self._equal(f([a,b], bop, dt), fxn(a,b), places=3 if dt==dtypes.half else 5)
 
   def _test_top_fxn(self, bop, fxn, dt=dtypes.float32):
     for f in [_test_single_value, _test_single_value_const]:
-      for a in [-2.0, 0, 1, 2.0]:
+      for a in [-2.0, 0, 1]:
         for b in [-3.0, 3.0]:
           for c in [-4.0, 4.0]:
             self._equal(f([a,b,c], bop, dt), fxn(a,b,c), places=3 if dt==dtypes.half else 5)

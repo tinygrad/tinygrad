@@ -121,7 +121,7 @@ const setupNet = async (device, safetensor) => {{
         device.queue.submit([gpuCommands]);
 
         await gpuReadBuffer.mapAsync(GPUMapMode.READ);
-        const resultBuffer = new Float32Array(gpuReadBuffer.size);
+        const resultBuffer = new Float32Array(gpuReadBuffer.size/4);
         resultBuffer.set(new Float32Array(gpuReadBuffer.getMappedRange()));
         gpuReadBuffer.unmap();
         return resultBuffer;
