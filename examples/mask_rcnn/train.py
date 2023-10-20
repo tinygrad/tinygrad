@@ -143,7 +143,7 @@ def simple():
   rpn = RPNHead(
     channels, anchor_generator.num_anchors_per_location()[0]
   )
-  optimizer = optim.SGD(backbone.parameters() + rpn.parameters(), lr=0.001, momentum=0.9, weight_decay=0.0005)
+  # optimizer = optim.SGD(backbone.parameters() + rpn.parameters(), lr=0.001, momentum=0.9, weight_decay=0.0005)
 
   import random
   from pycocotools.coco import COCO
@@ -184,14 +184,14 @@ def simple():
       print(e)
       continue
     total_loss = objectness_loss + regression_loss
-    optimizer.zero_grad()
+    # optimizer.zero_grad()
     try:
       total_loss.backward()
     except Exception as e:
       print("backward error")
       print(e) # some backwards overflow cuda blocks
       continue
-    optimizer.step()
+    # optimizer.step()
     print(f"Epoch {epoch + 1}/{NUM_EPOCHS}, Loss: {total_loss.numpy()}")
     mem_info = print_gpu_memory("epoch")
     del total_loss, images, img, features, objectness, rpn_box_regression, anchors, targets, objectness_loss, regression_loss, img_metadata, annotations
