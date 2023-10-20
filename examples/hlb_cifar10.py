@@ -172,7 +172,7 @@ def train_cifar():
     return X
 
   # return a binary mask in the format of BS x C x H x W where H x W contains a random square mask
-  def make_square_mask(shape, mask_size) -> Tensor:
+  def make_square_mask(shape, mask_size):
     is_even = int(mask_size % 2 == 0)
     center_max = shape[-2]-mask_size//2-is_even
     center_min = mask_size//2-is_even
@@ -185,10 +185,11 @@ def train_cifar():
     mask = d_y * d_x
     return mask
 
-  def random_crop(X:Tensor, crop_size=32):
+  def random_crop(X, crop_size=32):
     mask = make_square_mask(X.shape, crop_size)
     mask = mask.repeat((1,3,1,1))
     X_cropped = Tensor(X.flatten().numpy()[mask.flatten().numpy().astype(bool)])
+
     return X_cropped.reshape((-1, 3, crop_size, crop_size))
 
   def cutmix(X:Tensor, Y:Tensor, mask_size=3):
@@ -205,7 +206,7 @@ def train_cifar():
 
   # the operations that remain inside batch fetcher is the ones that involves random operations
   def fetch_batches(X_in:Tensor, Y_in:Tensor, BS:int, is_train:bool):
-    step, cnt = 0, 0
+    step = 0
     while True:
       st = time.monotonic()
       X, Y = X_in, Y_in
@@ -217,7 +218,7 @@ def train_cifar():
         if step >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
       X, Y = X.numpy(), Y.numpy()
       et = time.monotonic()
-      print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({cnt})")
+      print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms")
       for i in range(0, X.shape[0], BS):
         # pad the last batch
         batch_end = min(i+BS, Y.shape[0])
@@ -225,7 +226,7 @@ def train_cifar():
         y = Tensor(Y[order[batch_end-BS:batch_end]])
         step += 1
         yield x, y
-      cnt += 1
+
       if not is_train: break
 
   transform = [
@@ -303,8 +304,6 @@ def train_cifar():
   loss_batchsize_scaler = 512/BS
   @TinyJit
   def train_step_jitted(model, optimizer, lr_scheduler, X, Y):
-    if getenv("DIST"):
-      X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank]
     out = model(X)
     loss = cross_entropy(out, Y, reduction='none' ,label_smoothing=hyp['opt']['label_smoothing']).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
 
@@ -332,9 +331,6 @@ def train_cifar():
     return loss.realize()
 
   def eval_step(model, X, Y):
-    # further split batch if distributed
-    if getenv("DIST"):
-      X, Y = X.chunk(min(world_size, 5), 0)[min(rank, 4)], Y.chunk(min(world_size, 5), 0)[min(rank, 4)]
     out = model(X, training=False)
     loss = cross_entropy(out, Y, reduction='mean')
     correct = out.argmax(axis=1) == Y.argmax(axis=1)
@@ -353,19 +349,23 @@ def train_cifar():
 
   model_ema: Optional[modelEMA] = None
   projected_ema_decay_val = hyp['ema']['decay_base'] ** hyp['ema']['every_n_steps']
+  best_eval = -1
   i = 0
   batcher = fetch_batches(X_train, Y_train, BS=BS, is_train=True)
   with Tensor.train():
     st = time.monotonic()
     while i <= STEPS:
-      if i%getenv("EVAL_STEPS", STEPS) == 0 and i > 1:
-        st_eval = time.monotonic()
+      if i%getenv("EVAL_STEPS", 100) == 0 and i > 1:
         # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
         corrects = []
         corrects_ema = []
         losses = []
         losses_ema = []
         for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
+          # further split batch if distributed
+          if getenv("DIST"):
+            Xt, Yt = Xt.chunk(min(world_size, 5), 0)[min(rank, 4)], Yt.chunk(min(world_size, 5), 0)[min(rank, 4)]
+
           correct, loss = eval_step_jitted(model, Xt, Yt)
           losses.append(loss.numpy().tolist())
           corrects.extend(correct.numpy().tolist())
@@ -399,11 +399,15 @@ def train_cifar():
         if rank == 0:
           acc = correct_sum/correct_len*100.0
           if model_ema: acc_ema = correct_sum_ema/correct_len_ema*100.0
-          print(f"eval     {correct_sum}/{correct_len} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i} (in {(time.monotonic()-st)*1e3:.2f} ms)")
-          if model_ema: print(f"eval ema {correct_sum_ema}/{correct_len_ema} {acc_ema:.2f}%, {(sum(losses_ema)/len(losses_ema)):7.2f} val_loss STEP={i}")
+          if acc > best_eval:
+            best_eval = acc
+            print(f"eval     {correct_sum}/{correct_len} {acc:.2f}%, {(sum(losses)/len(losses)):7.2f} val_loss STEP={i}")
+            if model_ema: print(f"eval ema {correct_sum_ema}/{correct_len_ema} {acc_ema:.2f}%, {(sum(losses_ema)/len(losses_ema)):7.2f} val_loss STEP={i}")
 
       if STEPS == 0 or i==STEPS: break
       X, Y = next(batcher)
+      if getenv("DIST"):
+        X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank]
       GlobalCounters.reset()
       loss = train_step_jitted(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y)
       et = time.monotonic()
@@ -425,9 +429,8 @@ if __name__ == "__main__":
   if not getenv("DIST"):
     train_cifar()
   else: # distributed
-    # from tinygrad.runtime.ops_gpu import CL
-    # devices = [f"gpu:{i}" for i in range(len(CL.devices))]
-    devices = [f"hip:{i}" for i in range(6)]
+    from tinygrad.runtime.ops_gpu import CL
+    devices = [f"gpu:{i}" for i in range(len(CL.devices))]
     world_size = len(devices)
 
     # ensure that the batch size is divisible by the number of devices
