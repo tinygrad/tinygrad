@@ -451,6 +451,9 @@ class RPNLossComputation:
     if DEBUG > 0:
       sampled_inds.realize()
       print_gpu_memory("after_first_cats")
+    if DEBUG > 0:
+      objectness[0].realize()
+      print_gpu_memory("realize_objectness")
     objectness, box_regression = \
             concat_box_prediction_layers(objectness, box_regression)
     if DEBUG > 0:
