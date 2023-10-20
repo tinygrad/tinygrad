@@ -218,6 +218,7 @@ def concat_box_prediction_layers(box_cls, box_regression):
     print_gpu_memory("after boxcls realize") # memory taken here
     del box_cls
     gc.collect()
+    cuda.empty_cache()
     print_gpu_memory("after boxcls delete") # memory not reclaimed here!!
     del box_regression_flattened
     print_gpu_memory("after boxcls flat delete") # memory not reclaimed here!!
