@@ -20,7 +20,7 @@ def eval_whisper(model, start, end, verbose, dataset):
     if (verbose > 1 and predicted != transcript) or (verbose > 2):
       print("-" * 128, f"{fn.stem}\n", sep="\n")
       sys.stdout.writelines(list(diff.compare([predicted + "\n"], [transcript + "\n"])))
-      print(f"\nword error rate: {current_wer:.4f}")
+      print(f"\nSample word error rate: {(current_wer*100):.2f}")
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Evaluate whisper on librispeech', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -54,6 +54,7 @@ if __name__ == "__main__":
         print("-"*128)
       del model
   print("Results of a run:")
-  for (k,v) in WER.items():
-    print(f"{k}: WER is {(np.average(v)*100):.2f}")
+  gt = [i["transcript"] for i in dataset[:num_samples]]
+  for (k,v) in predictions.items():
+    print(f"{k}: WER is {(word_error_rate(gt,v)[0]*100):.2f}")
     print(f"{k}: {np.count_nonzero(v)} out of {len(v)} samples have mistakes, {(np.count_nonzero(v)/len(v)*100):.2f}%")
