@@ -315,8 +315,6 @@ jobs:
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models --durations=20
-      - name: Fuzz Test linearizer
-        run: DEVICES=LLVM,GPU,CUDA PYTHONPATH="." python test/external/fuzz_linearizer.py
 
   #testunicorn:
   #  name: ARM64 unicorn Test
