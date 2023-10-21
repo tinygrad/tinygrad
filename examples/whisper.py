@@ -104,7 +104,7 @@ class TextDecoder:
   def __call__(self, x, xa, start_pos):
     x = self.token_embedding(x) + self.positional_embedding[start_pos:start_pos+x.shape[-1]]
     seqlen = x.shape[1]
-    
+
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf")).triu(k=start_pos+1)
     for (i, block) in enumerate(self.blocks):
       (self_cache_k, self_cache_v) = self.self_kv_caches[i]
