@@ -239,7 +239,7 @@ jobs:
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
     - name: Fuzz Test linearizer
-      run: DEVICES=METAL,GPU,WEBGPU PYTHONPATH="." python test/external/fuzz_linearizer.py
+      run: PYTHONPATH="." DEVICES=METAL,GPU,WEBGPU FUZZ=10 SAMPLE_SIZE=5 python test/external/fuzz_linearizer.py
 
   tests:
     strategy:
