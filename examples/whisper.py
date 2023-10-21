@@ -33,19 +33,22 @@ class MultiHeadAttention:
     self.value = nn.Linear(n_state, n_state)
     self.out = nn.Linear(n_state, n_state)
 
-  def __call__(self, x: Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos: int, xa: Optional[Tensor] = None, mask: Optional[Tensor] = None, jit_ctx:Optional[Dict[Variable,int]]=None):
-    bsz, seqlen, _ = x.shape
+  def __call__(self, x: Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos: int, xa: Optional[Tensor] = None, mask: Optional[Tensor] = None):
+    bsz, seqlen, _ = (xa or x).shape
     q = self.query(x).reshape(*x.shape[:2], self.n_head, -1).permute(0, 2, 1, 3)
     k = self.key(xa or x).reshape(*(xa or x).shape[:2], self.n_head, -1).permute(0, 2, 1, 3)
     v = self.value(xa or x).reshape(*(xa or x).shape[:2], self.n_head, -1).permute(0, 2, 1, 3)
     if start_pos == 0:
       keys, values = k, v
-    else:
+    elif xa is None:
       assert cache_k is not None and cache_v is not None, "no cache"
-      assert start_pos == sym_infer(cache_k.shape[1], cache_k.lazydata.var_vals) == sym_infer(cache_v.shape[1], cache_v.lazydata.var_vals), f"cache has wrong shape, not ({start_pos} == {sym_infer(cache_k.shape[1], cache_k.lazydata.var_vals)} == {sym_infer(cache_v.shape[1], cache_v.lazydata.var_vals)})"
-      assert seqlen == k.shape[1] and seqlen == v.shape[1], "seqlen is wrong shape?!?"
-      keys, values = cache_k.cat(k, dim=1), cache_v.cat(v, dim=1)
-
+      assert start_pos == sym_infer(cache_k.shape[2], cache_k.lazydata.var_vals) == sym_infer(cache_v.shape[2], cache_v.lazydata.var_vals), f"cache has wrong shape, not ({start_pos} == {sym_infer(cache_k.shape[2], cache_k.lazydata.var_vals)} == {sym_infer(cache_v.shape[2], cache_v.lazydata.var_vals)})"
+      assert seqlen == k.shape[2] and seqlen == v.shape[2], "seqlen is wrong shape?!?"
+      keys, values = cache_k.cat(k, dim=2), cache_v.cat(v, dim=2)
+    elif xa:
+      assert cache_k is not None and cache_v is not None, "no cache"
+      assert seqlen == k.shape[2] and seqlen == v.shape[2], "seqlen is wrong shape?!?"
+      keys, values = cache_k, cache_v
     cache_k, cache_v = keys, values
     attn = Tensor.scaled_dot_product_attention(q, keys, values, mask)
     return self.out(attn.permute(0, 2, 1, 3).flatten(start_dim=2)).realize(), cache_k.realize(), cache_v.realize()
@@ -61,27 +64,15 @@ class ResidualAttentionBlock:
     self.mlp = [nn.Linear(n_state, n_state*4), Tensor.gelu, nn.Linear(n_state*4, n_state)]
     self.mlp_ln = nn.LayerNorm(n_state)
 
-  def __call__(self, x, start_pos, xa=None, mask=None, self_cache_k=None, self_cache_v=None, cross_cache_k=None, cross_cache_v=None, jit_ctx:Optional[Dict[Variable,int]]=None):
+  def __call__(self, x, start_pos, xa=None, mask=None, self_cache_k=None, self_cache_v=None, cross_cache_k=None, cross_cache_v=None):
     bsz, seqlen, _ = x.shape
-    # if all([self_cache_k, self_cache_v, cross_cache_k, cross_cache_v]):
-    #   pos = Variable("pos", 1, 448)
-    #   self_cache_k = self_cache_k.reshape(self_cache_k.shape[0], pos, self_cache_k.shape[2], self_cache_k.shape[3])
-    #   self_cache_v = self_cache_v.reshape(self_cache_v.shape[0], pos, self_cache_v.shape[2], self_cache_v.shape[3])
-    #   self_cache_k.lazydata.var_vals[pos] = start_pos
-    #   self_cache_v.lazydata.var_vals[pos] = start_pos
-    #   if self.cross_attn:
-    #     cross_cache_k = cross_cache_k.reshape(cross_cache_k.shape[0], pos, cross_cache_k.shape[2], cross_cache_k.shape[3])
-    #     cross_cache_v = cross_cache_v.reshape(cross_cache_v.shape[0], pos, cross_cache_v.shape[2], cross_cache_v.shape[3])
-    #     cross_cache_k.lazydata.var_vals[pos] = pos
-    #     cross_cache_v.lazydata.var_vals[pos] = pos
-    
     ao = self.attn(self.attn_ln(x), self_cache_k, self_cache_v, start_pos, mask=mask)
     (attn_output, new_self_cache_k, new_self_cache_v) = ao
     x = x + attn_output
     new_cross_cache_k, new_cross_cache_v = cross_cache_k, cross_cache_v
-    if self.cross_attn: 
-        (cross_attn_output, new_cross_cache_k, new_cross_cache_v) = self.cross_attn(self.cross_attn_ln(x), cross_cache_k, cross_cache_v, start_pos, xa, jit_ctx=jit_ctx)
-        x = x + cross_attn_output
+    if self.cross_attn:
+      (cross_attn_output, new_cross_cache_k, new_cross_cache_v) = self.cross_attn(self.cross_attn_ln(x), cross_cache_k, cross_cache_v, start_pos, xa)
+      x = x + cross_attn_output
     x = x + self.mlp_ln(x).sequential(self.mlp)
     return x, new_self_cache_k, new_self_cache_v, new_cross_cache_k, new_cross_cache_v
 
@@ -92,7 +83,6 @@ class AudioEncoder:
     self.blocks = [ResidualAttentionBlock(n_audio_state, n_audio_head) for _ in range(n_audio_layer)]
     self.ln_post = nn.LayerNorm(n_audio_state)
     self.positional_embedding = Tensor.empty(n_audio_ctx, n_audio_state)
-
   def __call__(self, x):
     x = self.conv1(x).gelu()
     x = self.conv2(x).gelu()
@@ -108,23 +98,18 @@ class TextDecoder:
     self.positional_embedding = Tensor.empty(n_text_ctx, n_text_state)
     self.blocks = [ResidualAttentionBlock(n_text_state, n_text_head, cross_attention=True) for _ in range(n_text_layer)]
     self.self_kv_caches = [(None, None) for _ in range(n_text_layer)]
-    self.cross_kv_caches = [(None, None) for _ in range(n_text_layer)]    
+    self.cross_kv_caches = [(None, None) for _ in range(n_text_layer)]
     self.ln = nn.LayerNorm(n_text_state)
 
-    self.jitted = False
-    #self.blocks_jitted = [TinyJit(b) for b in self.blocks]
-
-  def __call__(self, x, xa):
-    offset = 0
-    x = self.token_embedding(x) + self.positional_embedding[offset:offset+x.shape[-1]]
+  def __call__(self, x, xa, start_pos):
+    x = self.token_embedding(x) + self.positional_embedding[start_pos:start_pos+x.shape[-1]]
+    seqlen = x.shape[1]
     
-    seqlen, start_pos = x.shape[1], 0
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf")).triu(k=start_pos+1)
-    pos = Variable("pos", 1, 448)
     for (i, block) in enumerate(self.blocks):
       (self_cache_k, self_cache_v) = self.self_kv_caches[i]
       (cross_cache_k, cross_cache_v) = self.cross_kv_caches[i]
-      x, self_cache_k, self_cache_v, cross_cache_k, cross_cache_v = block(x, start_pos, xa, mask, self_cache_k, self_cache_v, cross_cache_k, cross_cache_v, jit_ctx={pos: seqlen})
+      x, self_cache_k, self_cache_v, cross_cache_k, cross_cache_v = block(x, start_pos, xa, mask, self_cache_k, self_cache_v, cross_cache_k, cross_cache_v)
       self.self_kv_caches[i] = (self_cache_k, self_cache_v)
       self.cross_kv_caches[i] = (cross_cache_k, cross_cache_v)
     x = self.ln(x)
@@ -272,14 +257,13 @@ class GreedyDecoder:
   def __init__(self, eot): self.eot = eot
 
   def update(self, tokens, logits, sum_logprobs):
-    next_tokens = logits.argmax(-1)
-    logprobs = logits.log_softmax(-1)
-    current_logprobs = logprobs[Tensor.arange(0, logprobs.shape[0]), next_tokens]
-    sum_logprobs += current_logprobs * (tokens[:, -1] != self.eot)
-    next_tokens = Tensor.where(tokens[:, -1] == self.eot, self.eot, next_tokens)
-    tokens = Tensor.cat(tokens, next_tokens[:, None], dim=-1)
+    next_tokens = logits.argmax(-1, keepdim=True)
+    # logprobs = logits.log_softmax(-1)
+    # current_logprobs = logprobs[Tensor.arange(0, logprobs.shape[0]), next_tokens]
+    # sum_logprobs += current_logprobs * (tokens[:, -1] != self.eot)
+    tokens = Tensor.cat(tokens, next_tokens, dim=1)
     completed = (tokens[:, -1] == self.eot).numpy().all()
-    return tokens.realize(), completed
+    return next_tokens.realize(), completed
 
   def finalize(self, tokens, sum_logprobs):
     tokens = np.pad(tokens.numpy(), [(0, 0), (0, 0), (0, 1)], constant_values=self.eot)
@@ -319,17 +303,23 @@ def make_initial_prompt(model, lang="en", translate=False, timestamps=True):
   return [model.tokenizer._special_tokens[i] for i in tasks]
 
 def decode_segment(segment, initial_tokens, model, sample_len=224, n_audio=1, n_group=1):
-  if segment.ndim == 2: segment = np.expand_dims(segment, axis=0)
+  if segment.ndim == 2: segment = segment.reshape(1, *segment.shape)
   texts, sample_begin = [], len(initial_tokens)
   decoder = GreedyDecoder(eot=model.tokenizer.eot_token)
   sequence_ranker = MaximumLikelihoodRanker(None)
   audio_features = model.encoder(Tensor(segment)).realize()
   tokens = Tensor([initial_tokens], dtype=dtypes.int64).repeat((segment.shape[0], 1))
   sum_logprobs = Tensor.zeros(audio_features.shape[0])
+  start_pos = 0
+  working_tokens = tokens
   for _ in range(sample_len):
-    logits = model.decoder(tokens, audio_features)
+    logits = model.decoder(working_tokens, audio_features, start_pos)
     logits = logits[:, -1]
-    tokens, completed = decoder.update(tokens, logits, sum_logprobs)
+    working_tokens, completed = decoder.update(tokens, logits, sum_logprobs)
+    working_tokens = working_tokens.cast(dtypes.int64)
+    start_pos = tokens.shape[1]
+    tokens = Tensor.cat(tokens, working_tokens, dim=-1)
+    tokens.realize()
     if completed: break
   tokens = tokens.reshape(n_audio, n_group, -1)
   sum_logprobs = sum_logprobs.reshape(n_audio, n_group)

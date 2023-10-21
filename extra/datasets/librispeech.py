@@ -1,24 +1,13 @@
 import functools
 import json
 import math
+import os
 import pathlib
 import numpy as np
 import soundfile
 
-"""
-The dataset has to be downloaded manually from https://www.openslr.org/12/ and put in `extra/datasets/librispeech`.
-For mlperf validation the dev-clean dataset is used.
-
-Then all the flacs have to be converted to wav using something like:
-```sh
-for file in $(find * | grep flac); do ffmpeg -i $file -ar 16k "$(dirname $file)/$(basename $file .flac).wav"; done
-```
-
-Then this [file](https://github.com/mlcommons/inference/blob/master/speech_recognition/rnnt/dev-clean-wav.json) has to also be put in `extra/datasets/librispeech`.
-"""
+datasets = ["dev-clean", "dev-other", "test-clean", "test-other", "train-clean-100", "train-clean-360", "train-other-500"]
 BASEDIR = pathlib.Path(__file__).parent / "librispeech"
-with open(BASEDIR / "dev-clean-wav.json") as f:
-  ci = json.load(f)
 
 #stft function was ripped out of librosa, which pulled too many dependencies, and simplified for our use case, if you need more features - scipy.signal.stft
 def stft(y, n_fft = 2048, hop_length = None, win_length = None, pad_mode = "constant"):
@@ -107,10 +96,38 @@ def load_wav(file):
   sample = soundfile.read(file)[0].astype(np.float32)
   return sample, sample.shape[0]
 
-def iterate(bs=1, start=0):
-  print(f"there are {len(ci)} samples in the dataset")
-  for i in range(start, len(ci), bs):
-    samples, sample_lens = zip(*[load_wav(BASEDIR / v["files"][0]["fname"]) for v in ci[i : i + bs]])
+def load_dataset(dsname):
+  assert dsname in datasets, f"dataset {dsname} is not available, choose from {datasets}"
+  dspath = BASEDIR / f"{dsname}"
+  if not dspath.exists():
+    from extra.utils import download_file
+    download_file(f"https://www.openslr.org/resources/12/{dsname}.tar.gz", BASEDIR / f"{dsname}.tar.gz")
+    import tarfile
+    with tarfile.open(BASEDIR / f"{dsname}.tar.gz", "r:gz") as tar:
+      for member in tar.getmembers():
+        if member.name.startswith(f"LibriSpeech/{dsname}/"):
+          tar.extract(member, BASEDIR)
+    (BASEDIR / f"LibriSpeech/{dsname}").rename(dspath)
+    (BASEDIR / f"LibriSpeech").rmdir()
+    for file in (dspath).glob("**/*.flac"):
+      soundfile.write(file.with_suffix(".wav"), *soundfile.read(file))
+      file.unlink()
+  dataset = []
+  for dirpath, dirnames, filenames in os.walk(dspath):
+    for filename in filenames:
+      if filename.endswith(".txt"):
+        with open(os.path.join(dirpath, filename)) as f:
+          for line in f:
+            key, value = line.split(' ', 1)
+            parts = key.split('-')
+            dataset.append({"fname": f"{dsname}/{parts[0]}/{parts[1]}/{key}.wav", "transcript": value.lower().strip()})
+  return dataset
+
+def iterate(bs=1, start=0, ds="dev-clean"):
+  dataset = load_dataset(ds)
+  print(f"there are {len(dataset)} samples in the dataset")
+  for i in range(start, len(dataset), bs):
+    samples, sample_lens = zip(*[load_wav(BASEDIR / v["fname"]) for v in dataset[i : i + bs]])
     samples = list(samples)
     # pad to same length
     max_len = max(sample_lens)
@@ -118,7 +135,7 @@ def iterate(bs=1, start=0):
       samples[j] = np.pad(samples[j], (0, max_len - sample_lens[j]), "constant")
     samples, sample_lens = np.array(samples), np.array(sample_lens)
 
-    yield feature_extract(samples, sample_lens), np.array([v["transcript"] for v in ci[i : i + bs]])
+    yield feature_extract(samples, sample_lens), np.array([v["transcript"] for v in dataset[i : i + bs]])
 
 if __name__ == "__main__":
   X, Y = next(iterate())
