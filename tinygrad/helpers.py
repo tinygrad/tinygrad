@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, pathlib, hashlib, tempfile
+import os, functools, platform, time, re, contextlib, operator, pathlib, hashlib, tempfile, pickle, sqlite3
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -163,3 +163,32 @@ def cache_compiled(func):
       output_file.rename(cache_path)
     return cache_path.read_bytes()
   return wrapper
+
+# *** universal database cache ***
+
+_db_connection = None
+_db_tables = set()
+def db_connection():
+  global _db_connection
+  if _db_connection is None: _db_connection = sqlite3.connect(getenv("CACHEDB", "/tmp/tinygrad_cache"))
+  return _db_connection
+
+def diskcache_get(table:str, key:str) -> Any:
+  try:
+    res = db_connection().cursor().execute(f"SELECT val FROM {table} WHERE key=?", (str(key),))
+  except sqlite3.OperationalError:
+    return None  # table doesn't exist
+  if (val:=res.fetchone()) is not None:
+    return pickle.loads(val[0])
+  return None
+
+def diskcache_put(table:str, key:str, value:Any):
+  global _db_tables
+  conn = db_connection()
+  cur = conn.cursor()
+  if table not in _db_tables:
+    cur.execute(f"CREATE TABLE IF NOT EXISTS {table} (key text PRIMARY KEY, val text)")
+    _db_tables.add(table)
+  cur.execute(f"REPLACE INTO {table} (key, val) VALUES (?, ?)", (key, pickle.dumps(value)))
+  conn.commit()
+  cur.close()
