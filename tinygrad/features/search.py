@@ -21,7 +21,7 @@ actions += [
 
 # returns time in seconds
 def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, should_copy=True, disable_cache=False) -> float:
-  key = str((lin.ast, lin.applied_opts))
+  key = str((lin.ast, lin.applied_opts, allow_test_size, max_global_size))
   if should_copy and not disable_cache and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
   if should_copy: lin = lin.copy() # TODO: remove the need for this
   var_vals = {k:k.min for k in vars_from_ast(lin.ast)}
@@ -55,7 +55,6 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
     #print(lin.ast)
     #print(lin.applied_opts)
     tms = [float('inf')]
-  print("miss")
   return min(diskcache_put("time_linearizer", key, tms))
 
 # get (scrap) buffers for timing the linearizer
@@ -87,7 +86,12 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       pass
   return acted_lins
 
-def beam_search(lin, rawbufs, amt):
+def beam_search(lin:Linearizer, rawbufs, amt:int) -> Linearizer:
+  key = str((lin.ast, amt))
+  if (val:=diskcache_get("beam_search", key)) is not None:
+    ret = lin.copy()
+    for o in val: ret.apply_opt(o)
+    return ret
   best_tm = float('inf')
   beam: List[Linearizer] = [lin]
   while 1:
@@ -98,4 +102,5 @@ def beam_search(lin, rawbufs, amt):
     best_tm = opts[0][1]
     beam = [x[0] for x in opts[:amt]]
     if DEBUG >= 1: print(f"{opts[0][1]*1e6:12.2f} us from {len(opts):3d} actions", beam[0].colored_shape())
+  diskcache_put("beam_search", key, beam[0].applied_opts)
   return beam[0]
