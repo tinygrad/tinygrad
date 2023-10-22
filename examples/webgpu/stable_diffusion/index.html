@@ -70,7 +70,8 @@
 </head>
 
 <body>
-<h1>WebGPU <a href="https://github.com/geohot/tinygrad">tinygrad</a> StableDiffusion!</h1>
+<h1 id="wgpuError" style="display: none; color: red;">WebGPU is not supported in this browser</h1>
+<h1 id="sdTitle">WebGPU <a href="https://github.com/tinygrad/tinygrad">tinygrad</a> StableDiffusion!</h1>
 <div id="mybox">
     <input id="promptText" type="text" placeholder="Enter your prompt here" value="a horse sized cat eating a bagel">
     
@@ -99,6 +100,14 @@
 
 <script>
     window.addEventListener('load', function() {
+        if (!navigator.gpu) {
+            document.getElementById("wgpuError").style.display = "";
+            document.getElementById("sdTitle").style.display = "none";
+            document.getElementById("btnRunNet").disabled = true;
+            
+            return;
+        }
+
         const ctx = document.getElementById("canvas").getContext("2d", { willReadFrequently: true });
         const resultText = document.getElementById('result');
         let labels, nets, safetensorParts;
