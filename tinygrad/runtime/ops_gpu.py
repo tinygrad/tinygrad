@@ -48,6 +48,7 @@ if not getenv("DELAYED_RUNTIME_INIT", False): CL.post_init()
 class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device='0'): super().__init__(size, dtype, allocator=CL.cl_allocator, **{'device': device})
   def _copyin(self, x:np.ndarray):
+    x = np.require(x, requirements=['A'])
     assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
     self.event = cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements='C'), is_blocking=False)
   def _copyout(self, x:np.ndarray):
