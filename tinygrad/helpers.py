@@ -167,7 +167,6 @@ def cache_compiled(func):
 # *** universal database cache ***
 
 _db_connection = None
-_db_tables = set()
 def db_connection():
   global _db_connection
   if _db_connection is None: _db_connection = sqlite3.connect(getenv("CACHEDB", "/tmp/tinygrad_cache"))
@@ -182,8 +181,8 @@ def diskcache_get(table:str, key:str) -> Any:
     return pickle.loads(val[0])
   return None
 
+_db_tables = set()
 def diskcache_put(table:str, key:str, value:Any):
-  global _db_tables
   conn = db_connection()
   cur = conn.cursor()
   if table not in _db_tables:
