@@ -6,6 +6,7 @@ from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from extra.utils import temp
+from tinygrad.nn.state import torch_load
 
 x_init = np.random.randn(1,3).astype(np.float32)
 U_init = np.random.randn(3,3).astype(np.float32)
@@ -247,6 +248,14 @@ class TestTinygrad(unittest.TestCase):
     a = t[10:20]
     dev = a.to(Device.DEFAULT)
     np.testing.assert_allclose(a.numpy(), dev.numpy())
+
+  # Regression test for https://github.com/tinygrad/tinygrad/issues/1751
+  def test_copy_from_disk_unaligned(self):
+    # works without the slice, but 32 was the smallest reproducible
+    t : Tensor = torch_load('$GITHUB_WORKSPACE/pytorch-gpt2-medium.bin')['wpe.weight'][:32]
+    act = t.numpy()
+    assert not act.flags.aligned
+    assert np.testing.assert_allclose(act, t.to(Device.DEFAULT).numpy())
 
 if __name__ == '__main__':
   unittest.main()
