@@ -35,6 +35,9 @@ class DiskCache(unittest.TestCase):
   def test_no_table(self):
     self.assertIsNone(diskcache_get("faketable", "k"))
 
+  def test_ret(self):
+    self.assertEqual(diskcache_put("test", "key", ("vvs",)), ("vvs",))
+
   def test_non_str_key(self):
     diskcache_put("test", 4, 5)
     self.assertEqual(diskcache_get("test", 4), 5)

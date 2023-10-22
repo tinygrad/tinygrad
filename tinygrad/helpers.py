@@ -191,3 +191,4 @@ def diskcache_put(table:str, key:str, value:Any):
   cur.execute(f"REPLACE INTO {table} (key, val) VALUES (?, ?)", (key, pickle.dumps(value)))
   conn.commit()
   cur.close()
+  return value

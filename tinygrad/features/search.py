@@ -1,7 +1,7 @@
 from typing import Dict, List, cast, DefaultDict, Optional
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
-from tinygrad.helpers import prod, getenv, ImageDType, flatten, DEBUG
+from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, diskcache_get, diskcache_put
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
@@ -20,11 +20,9 @@ actions += [
 ]
 
 # returns time in seconds
-import shelve
-logtm = shelve.open(getenv("LOGTM", "")) if getenv("LOGTM", "") else None
 def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, should_copy=True, disable_cache=False) -> float:
   key = str((lin.ast, lin.applied_opts))
-  if should_copy and not disable_cache and logtm is not None and key in logtm: return min(logtm[key])  # pylint: disable=E1135 # NOTE: we check should_copy since this may have side effects
+  if should_copy and not disable_cache and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
   if should_copy: lin = lin.copy() # TODO: remove the need for this
   var_vals = {k:k.min for k in vars_from_ast(lin.ast)}
   try:
@@ -57,8 +55,8 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
     #print(lin.ast)
     #print(lin.applied_opts)
     tms = [float('inf')]
-  if logtm is not None: logtm[key] = tms
-  return min(tms)
+  print("miss")
+  return min(diskcache_put("time_linearizer", key, tms))
 
 # get (scrap) buffers for timing the linearizer
 def bufs_from_lin(lin:Linearizer) -> List[RawBuffer]:
