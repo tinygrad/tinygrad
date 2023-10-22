@@ -175,7 +175,7 @@ def db_connection():
 
 def diskcache_get(table:str, key:str) -> Any:
   try:
-    res = db_connection().cursor().execute(f"SELECT val FROM {table} WHERE key=?", (str(key),))
+    res = db_connection().cursor().execute(f"SELECT val FROM {table} WHERE key=?", (key,))
   except sqlite3.OperationalError:
     return None  # table doesn't exist
   if (val:=res.fetchone()) is not None:
@@ -187,7 +187,7 @@ def diskcache_put(table:str, key:str, value:Any):
   conn = db_connection()
   cur = conn.cursor()
   if table not in _db_tables:
-    cur.execute(f"CREATE TABLE IF NOT EXISTS {table} (key text PRIMARY KEY, val text)")
+    cur.execute(f"CREATE TABLE IF NOT EXISTS {table} (key text PRIMARY KEY, val blob)")
     _db_tables.add(table)
   cur.execute(f"REPLACE INTO {table} (key, val) VALUES (?, ?)", (key, pickle.dumps(value)))
   conn.commit()
