@@ -166,15 +166,23 @@ def cache_compiled(func):
 
 # *** universal database cache ***
 
+CACHEDB = getenv("CACHEDB", "/tmp/tinygrad_cache")
+VERSION = 2
 _db_connection = None
 def db_connection():
   global _db_connection
-  if _db_connection is None: _db_connection = sqlite3.connect(getenv("CACHEDB", "/tmp/tinygrad_cache"))
+  if _db_connection is None:
+    _db_connection = sqlite3.connect(CACHEDB)
+    if diskcache_get("meta", "version") != VERSION:
+      print("cache is out of date, clearing it")
+      os.unlink(CACHEDB)
+      _db_connection = sqlite3.connect(CACHEDB)
+      diskcache_put("meta", "version", VERSION)
   return _db_connection
 
-def diskcache_get(table:str, key:str) -> Any:
+def diskcache_get(table:str, key:str, subkey:str="") -> Any:
   try:
-    res = db_connection().cursor().execute(f"SELECT val FROM {table} WHERE key=?", (key,))
+    res = db_connection().cursor().execute(f"SELECT val FROM {table} WHERE key=? AND subkey=?", (key,subkey))
   except sqlite3.OperationalError:
     return None  # table doesn't exist
   if (val:=res.fetchone()) is not None:
@@ -182,13 +190,13 @@ def diskcache_get(table:str, key:str) -> Any:
   return None
 
 _db_tables = set()
-def diskcache_put(table:str, key:str, value:Any):
+def diskcache_put(table:str, key:str, val:Any, subkey:str=""):
   conn = db_connection()
   cur = conn.cursor()
   if table not in _db_tables:
-    cur.execute(f"CREATE TABLE IF NOT EXISTS {table} (key text PRIMARY KEY, val blob)")
+    cur.execute(f"CREATE TABLE IF NOT EXISTS {table} (key text, subkey text, val blob, PRIMARY KEY (key, subkey))")
     _db_tables.add(table)
-  cur.execute(f"REPLACE INTO {table} (key, val) VALUES (?, ?)", (key, pickle.dumps(value)))
+  cur.execute(f"REPLACE INTO {table} (key, subkey, val) VALUES (?, ?, ?)", (key, subkey, pickle.dumps(val)))
   conn.commit()
   cur.close()
-  return value
+  return val
