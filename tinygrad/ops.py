@@ -277,7 +277,7 @@ class Compiled:
             lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
             lins[-1][1].hand_coded_optimizations()
           timed = sorted([(nm, tk, time_linearizer(tk, rawbuffers, allow_test_size=False, disable_cache=True)) for nm, tk in lins], key=lambda x: x[2])
-          if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {tm*1e6:8.2f} us" for nm, _, tm in timed))
+          if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(25, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
           k = timed[0][1]
       return self.to_program(k)
 
