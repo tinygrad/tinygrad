@@ -1,7 +1,7 @@
 from typing import Dict, List, cast, DefaultDict, Optional
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
-from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, diskcache_get, diskcache_put
+from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, diskcache_get, diskcache_put, getenv
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
@@ -88,7 +88,7 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
 
 def beam_search(lin:Linearizer, rawbufs, amt:int) -> Linearizer:
   key,subkey = str(lin.ast), str(amt)
-  if (val:=diskcache_get("beam_search", key, subkey)) is not None:
+  if (val:=diskcache_get("beam_search", key, subkey)) is not None and not getenv("IGNORE_BEAM_CACHE"):
     ret = lin.copy()
     for o in val: ret.apply_opt(o)
     return ret
