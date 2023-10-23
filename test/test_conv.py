@@ -1,5 +1,6 @@
 import unittest
 import numpy as np
+import torch
 from tinygrad.tensor import Tensor, Device
 import pytest
 
@@ -62,6 +63,23 @@ class TestConv(unittest.TestCase):
     r1, r2 = out.relu(), out.elu()
     np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0))
     np.testing.assert_allclose(r2.numpy(), np.where(out.numpy() > 0, out.numpy(), (np.exp(out.numpy()) - 1)), atol=1e-5)
+    Tensor.no_grad = False
+
+  @unittest.skipIf(Device.DEFAULT != "TORCH", "Takes too long to compile for Compiled backends")
+  def test_igemm_conv(self):
+    Tensor.no_grad = True
+    old_igemm = Tensor.igemm
+    Tensor.igemm = True
+    nb = np.random.default_rng().standard_normal(size=(1,4,16,16), dtype=np.float32)
+    nc = np.random.default_rng().standard_normal(size=(6,4,3,3), dtype=np.float32)
+    b = torch.from_numpy(nb)
+    c = torch.from_numpy(nc)
+    comp = torch.nn.functional.conv2d(b, c, padding=1).numpy()
+    x = Tensor(nb)
+    w = Tensor(nc)
+    out = x.conv2d(w, padding=(1,1)).numpy()
+    np.testing.assert_allclose(out, comp, atol=1e-4, rtol=1e-2)
+    Tensor.igemm = old_igemm
     Tensor.no_grad = False
 
   @unittest.skipIf(Device.DEFAULT != "TORCH", "Takes too long to compile for Compiled backends")
