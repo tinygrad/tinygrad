@@ -11,7 +11,7 @@ import numpy as np
 import unittest
 from tinygrad.tensor import Tensor, Device
 from tinygrad import nn
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, dtypes
 from tinygrad.nn import optim
 from tinygrad.ops import GlobalCounters, MovementOps, ReduceOps
 from tinygrad.lazy import PUSH_CONTIGUOUS, PUSH_PERMUTES
@@ -332,7 +332,18 @@ class TestOpt(unittest.TestCase):
       b.realize()
       cache_len = len(CacheCollector.cache)
     np.testing.assert_allclose(np.exp(np.exp(a.numpy().reshape(1,3))), b.numpy(), rtol=1e-3, atol=1e-5)
-    if PUSH_CONTIGUOUS: assert cache_len == 1, "reshape wasn't pushed. broken elementwise contiguous reshape chain!"
+    if PUSH_CONTIGUOUS: assert cache_len == 1, "contiguous wasn't pushed down. broken elementwise contiguous reshape chain"
+
+  @unittest.skipIf(not PUSH_CONTIGUOUS, "this test requires PUSH_CONTIGUOUS.")
+  def test_openpilot_subgraph(self):
+    a = Tensor.randn(3)
+    b = Tensor.randn(1,3, dtype=dtypes.float64)
+    with CLCache():
+      c = a.cast(dtype=dtypes.float64).contiguous().reshape(1,3) + b
+      c.realize()
+      cache_len = len(CacheCollector.cache)
+    np.testing.assert_allclose(a.numpy().astype(np.double).reshape(1,3) + b.numpy(), c.numpy(), rtol=1e-3, atol=1e-5)
+    if PUSH_CONTIGUOUS: assert cache_len == 1, "contiguous wasn't pushed down. this can increase openpilot kernels"
 
   @unittest.skipIf(PUSH_PERMUTES, "this test is broken with PUSH_PERMUTES")
   def test_no_reduceop_rerun(self):
