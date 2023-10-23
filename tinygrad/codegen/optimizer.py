@@ -282,7 +282,7 @@ class OptimizedKernel(Kernel):
 
   def apply_opt(self, opt:Opt):
     self.applied_opts.append(opt)
-    axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op == OptOps.GROUP or opt.op == OptOps.GROUPTOP else 0))
+    axis = opt.axis + {OptOps.UNROLL: self.first_reduce, OptOps.GROUP: self.first_reduce + len(self.group_for_reduce)}.get(opt.op, 0)
     amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
     assert self.full_shape[axis] % amt == 0, "no longer valid shift"
     assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
@@ -297,10 +297,6 @@ class OptimizedKernel(Kernel):
       self.local_dims += 1
       # TOOD: include exclude_local_upcast here
     elif opt.op == OptOps.GROUP:      # green
-      assert axis >= self.first_reduce + len(self.group_for_reduce) and axis < self.shape_len-self.upcasted, "must be reduce axis to group"
-      self.shift_to(axis, amt, insert_before=self.first_reduce + len(self.group_for_reduce))
-      self.group_for_reduce.append(amt)
-    elif opt.op == OptOps.GROUPTOP:   # green
       assert axis >= self.first_reduce + len(self.group_for_reduce) and axis < self.shape_len-self.upcasted, "must be reduce axis to group"
       self.shift_to(axis, amt, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(amt)
@@ -369,7 +365,7 @@ class OptimizedKernel(Kernel):
         # TODO: use 1024 if it's allowed in a smarter way
         for sz in (([256, 16]) if prod(self.sts[0].shape[:self.first_reduce]) <= 32 else [16]):
           if all(st.shape[self.first_reduce] % sz == 0 or st.shape[self.first_reduce] == 1 for st in self.sts):
-            self.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
+            self.apply_opt(Opt(OptOps.GROUP, 0, sz))
             break
 
       # are we upcasting in mid reduce? (only for images)
