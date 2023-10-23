@@ -81,6 +81,15 @@ jobs:
         key: testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Cache gpt2-medium
+      id: cache-gpt2-medium
+      uses: actions/cache@v3
+      with:
+        path: ${{ github.workspace }}/pytorch-gpt2-medium.bin
+        key: cache-gpt2-medium-nodownload
+    - name: Download gpt2-medium
+      if: steps.cache-gpt2-medium.cache-hit != 'true'
+      run: wget -O ${{ github.workspace }}/pytorch-gpt2-medium.bin https://huggingface.co/gpt2-medium/resolve/main/pytorch_model.bin
     - name: Run Pytest
       run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)" --durations=20
     - name: Compile EfficientNet to C
@@ -109,6 +118,15 @@ jobs:
         key: testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Cache gpt2-medium
+      id: cache-gpt2-medium
+      uses: actions/cache@v3
+      with:
+        path: ${{ github.workspace }}/pytorch-gpt2-medium.bin
+        key: cache-gpt2-medium-nodownload
+    - name: Download gpt2-medium
+      if: steps.cache-gpt2-medium.cache-hit != 'true'
+      run: wget -O ${{ github.workspace }}/pytorch-gpt2-medium.bin https://huggingface.co/gpt2-medium/resolve/main/pytorch_model.bin
     - name: Run Pytest
       run: TORCH=1 python -m pytest -n=auto test/ --durations=20
     - name: Run ONNX
@@ -300,6 +318,15 @@ jobs:
           sudo ninja install -d explain
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+      - name: Cache gpt2-medium
+        id: cache-gpt2-medium
+        uses: actions/cache@v3
+        with:
+          path: ${{ github.workspace }}/pytorch-gpt2-medium.bin
+          key: cache-gpt2-medium-nodownload
+      - name: Download gpt2-medium
+        if: steps.cache-gpt2-medium.cache-hit != 'true'
+        run: wget -O ${{ github.workspace }}/pytorch-gpt2-medium.bin https://huggingface.co/gpt2-medium/resolve/main/pytorch_model.bin
       - name: Check Device.DEFAULT and print some source
         run: |
           python -c "from tinygrad.ops import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"

@@ -4,9 +4,11 @@ import struct
 import unittest, copy
 import mmap
 from tinygrad.tensor import Tensor, Device
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import dtypes, CI
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
-from extra.utils import temp
+from extra.utils import temp, fetch_as_file
+from tinygrad.nn.state import torch_load
+import os
 
 x_init = np.random.randn(1,3).astype(np.float32)
 U_init = np.random.randn(3,3).astype(np.float32)
