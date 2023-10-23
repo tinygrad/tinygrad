@@ -14,6 +14,7 @@ if __name__ == "__main__":
 
     cur3 = conn.cursor()
     cur3.execute(f"SELECT * FROM {table} LIMIT 10")
-    for k,sk,v in cur3.fetchall():
-      v = pickle.loads(v)
-      print(f"{len(k):10d}, {sk} -> {v}")
+    for f in cur3.fetchall():
+      v = pickle.loads(f[-1])
+      print("   ", len(f[0]), f[1:-1], v)
+      #print(f"{len(k):10d}, {sk} -> {v}")

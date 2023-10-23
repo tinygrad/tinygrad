@@ -15,17 +15,22 @@ if __name__ == "__main__":
   fn = sys.argv[1] if len(sys.argv) > 1 else "/tmp/tinygrad_cache"
   conn = sqlite3.connect(fn)
   cur = conn.cursor()
-  cur.execute("SELECT key,subkey,val FROM time_linearizer")
+  cur.execute("SELECT * FROM time_linearizer")
   grouped = defaultdict(dict)
-  for ast,sk,v in tqdm(cur.fetchall()):
-    #, opts, allow_test_size, max_global_size = eval(k)
-    grouped[ast][sk] = pickle.loads(v)
-    #v = pickle.loads(v)
-    #grouped[ast][tuple(opts)] = v
+  for f in tqdm(cur.fetchall()): grouped[f[0]][f[1:-1]] = pickle.loads(f[-1])
 
-  for ast,optc in grouped.items():
-    print(len(optc))
-    print(optc.items())
+  for ast,sk in grouped.items():
+    print(len(sk))
+    for sks,tm in sk.items():
+      eval(sks[0])
+      #ss = sks.split(",")
+      #print(ss)
+
+      #print(sks)
+      #opts, allow_test_size, max_global_size = eval(sks)
+      #print(tm)
+
+    #print(optc.items())
 
 
 

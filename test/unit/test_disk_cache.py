@@ -43,5 +43,14 @@ class DiskCache(unittest.TestCase):
     self.assertEqual(diskcache_get("test", 4), 5)
     self.assertEqual(diskcache_get("test", "4"), 5)
 
+  def test_dict_key(self):
+    fancy_key = {"hello": "world", "goodbye": 7, "good": True}
+    fancy_key2 = {"hello": "world", "goodbye": 8, "good": True}
+    diskcache_put("test2", fancy_key, 5)
+    self.assertEqual(diskcache_get("test2", fancy_key), 5)
+    diskcache_put("test2", fancy_key2, 8)
+    self.assertEqual(diskcache_get("test2", fancy_key2), 8)
+    self.assertEqual(diskcache_get("test2", fancy_key), 5)
+
 if __name__ == "__main__":
   unittest.main()
