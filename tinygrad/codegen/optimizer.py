@@ -10,7 +10,7 @@ from tinygrad.shape.view import View, strides_for_shape
 from enum import Enum, auto
 
 class OptOps(Enum):
-  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); LASTLOCAL = auto(); GROUP = auto(); GROUPTOP = auto(); SWAP = auto() # noqa: E702
+  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); LASTLOCAL = auto(); GROUP = auto(); GROUPTOP = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 @dataclass(frozen=True, order=True)
@@ -285,14 +285,10 @@ class OptimizedKernel(Kernel):
 
   def apply_opt(self, opt:Opt):
     self.applied_opts.append(opt)
-    if opt.op != OptOps.SWAP:
-      axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op == OptOps.GROUP or opt.op == OptOps.GROUPTOP else 0))
-      amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
-      assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-      assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
-    else:
-      axis = opt.axis
-      amt = opt.amt
+    axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op == OptOps.GROUP or opt.op == OptOps.GROUPTOP else 0))
+    amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
+    assert self.full_shape[axis] % amt == 0, "no longer valid shift"
+    assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
     if opt.op == OptOps.LOCAL:        # cyan
       assert axis < self.first_reduce, "can't local a reduce"
       assert not(self.use_tensor_cores), "can't local with tensor cores"
@@ -330,16 +326,6 @@ class OptimizedKernel(Kernel):
       assert amt == 4, "don't upcast mid anything but 4"
       self.shift_to(axis, amt, insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(amt)
-    elif opt.op == OptOps.SWAP:
-      colors = self.colors()
-      range_dim = list(range(self.first_reduce))
-      # TODO: don't compare with strings
-      range_yellow = [i for i,c in enumerate(colors) if c == "yellow"]
-      assert (axis in range_dim and amt in range_dim) or (axis in range_yellow and amt in range_yellow), "out of range"
-      new_order = list(range(self.shape_len))
-      new_order[axis], new_order[amt] = new_order[amt], new_order[axis]
-      self.reshape_and_permute(None, new_order)
-      self.simplify_merge_adjacent()
     return self.simplify_ones()
 
   def required_optimizations(self, early_only=False):

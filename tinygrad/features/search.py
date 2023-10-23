@@ -18,9 +18,6 @@ actions += [
   Opt(op=OptOps.GROUPTOP, axis=2, amt=16), Opt(op=OptOps.GROUPTOP, axis=2, amt=256),
   Opt(op=OptOps.UPCASTMID, axis=1, amt=4),
 ]
-actions += [
-  Opt(op=OptOps.SWAP, axis=x, amt=y) for x in range(16) for y in range(x+1,16)
-]
 
 # returns time in seconds
 def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, should_copy=True, disable_cache=False) -> float:
