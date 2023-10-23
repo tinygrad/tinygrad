@@ -5,9 +5,8 @@ import unittest, copy
 from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import dtypes, CI
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
-from extra.utils import temp
+from extra.utils import temp, fetch_as_file
 from tinygrad.nn.state import torch_load
-from extra.utils import fetch_as_file
 import os
 
 x_init = np.random.randn(1,3).astype(np.float32)
