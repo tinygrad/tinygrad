@@ -92,7 +92,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int) -> Linearizer:
     ret = lin.copy()
     for o in val: ret.apply_opt(o)
     return ret
-  best_tm = float('inf')
+  best_tm = time_linearizer(lin, rawbufs)   # handle the case where no actions make it faster
   beam: List[Linearizer] = [lin]
   while 1:
     acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin in beam])
