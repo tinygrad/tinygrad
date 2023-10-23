@@ -252,19 +252,15 @@ class TestTinygrad(unittest.TestCase):
   # Regression test for https://github.com/tinygrad/tinygrad/issues/1751
   def test_copy_from_numpy_unaligned(self):
     # 2**15 is the minimum for repro
-    t = Tensor.randn(2**15, dtype=dtypes.float)
+    arr = np.random.randn(2**15).astype(dtypes.float.np)
     fn = temp('test_copy_from_numpy_unaligned')
-    with open(fn, 'wb') as f:
-      f.write(b't')
-      tmp = t.numpy()
-      f.write(tmp.tobytes())
-      f.close()
-      f = open(fn, "a+b")
-      memview = memoryview(mmap.mmap(f.fileno(), tmp.nbytes + 1))
-    dev = np.frombuffer(memview[1:], dtype=t.dtype.np, count=t.shape[0])  
-    np.testing.assert_allclose(dev, t.numpy())
+    with open(fn, 'wb') as f: f.write(b't' + arr.tobytes())
+    with open(fn, "a+b") as f: memview = memoryview(mmap.mmap(f.fileno(), arr.nbytes + 1))
+    ua_arr = np.frombuffer(memview[1:], dtype=arr.dtype, count=arr.shape[0])
+    np.testing.assert_allclose(arr, ua_arr)
+    assert not ua_arr.flags.aligned
     # force device copy - to() is opt'd away - Tensor(dev)/1 is ignored
-    np.testing.assert_allclose(dev, (Tensor(dev)/Tensor(1)).numpy())
+    np.testing.assert_allclose(ua_arr, (Tensor(ua_arr)/Tensor(1)).numpy())
 
 if __name__ == '__main__':
   unittest.main()
