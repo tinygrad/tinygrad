@@ -10,7 +10,7 @@ from tinygrad.shape.view import View, strides_for_shape
 from enum import Enum, auto
 
 class OptOps(Enum):
-  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); LASTLOCAL = auto(); GROUP = auto(); GROUPTOP = auto() # noqa: E702
+  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); LASTLOCAL = auto(); GROUP = auto(); GROUPTOP = auto(); SWAP = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 @dataclass(frozen=True, order=True)
@@ -260,17 +260,20 @@ class OptimizedKernel(Kernel):
 
         # final optional global upcast
         if s1_exists:
-          s1_div = [upc for upc in [4,3,2,1] if self.full_shape[s1]%upc == 0][0]
+          s1_div = [upc for upc in [5,4,3,2,1] if self.full_shape[s1]%upc == 0][0]
           if s1_div != 1: fix(self.apply_opt(Opt(OptOps.UPCAST, s1, s1_div)), s1)
         if s0_exists:
-          s0_div = [upc for upc in [4,3,2,1] if self.full_shape[s0]%upc == 0][0]
+          s0_div = [upc for upc in [5,4,3,2,1] if self.full_shape[s0]%upc == 0][0]
           if s0_div != 1: fix(self.apply_opt(Opt(OptOps.UPCAST, s0, s0_div)), s0)
 
         # very late (optional) upcast to run group at the same time. only if actually using real tensor cores, otherwise local isn't a simdgroup
         self.use_tensor_cores = use_tensor_cores == 1  # TC=2 will do the shape ops without the WMMA
-        if self.use_tensor_cores and s0_exists and self.full_shape[s0] % 2 == 0:
-          self.apply_opt(Opt(OptOps.LASTLOCAL, s0, 2))
-          self.exclude_local_upcast += 1
+        if self.use_tensor_cores and s0_exists:
+          for upc in [4,2]:
+            if self.full_shape[s0] % upc == 0:
+              self.apply_opt(Opt(OptOps.LASTLOCAL, s0, upc))
+              self.exclude_local_upcast += 1
+              break
 
         # alias buffer
         alias_pattern = [0]*(self.global_dims+self.exclude_local_upcast) + [2]*(self.local_dims-self.exclude_local_upcast) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)
@@ -282,10 +285,14 @@ class OptimizedKernel(Kernel):
 
   def apply_opt(self, opt:Opt):
     self.applied_opts.append(opt)
-    axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op == OptOps.GROUP or opt.op == OptOps.GROUPTOP else 0))
-    amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
-    assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-    assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
+    if opt.op != OptOps.SWAP:
+      axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op == OptOps.GROUP or opt.op == OptOps.GROUPTOP else 0))
+      amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
+      assert self.full_shape[axis] % amt == 0, "no longer valid shift"
+      assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
+    else:
+      axis = opt.axis
+      amt = opt.amt
     if opt.op == OptOps.LOCAL:        # cyan
       assert axis < self.first_reduce, "can't local a reduce"
       assert not(self.use_tensor_cores), "can't local with tensor cores"
@@ -323,6 +330,16 @@ class OptimizedKernel(Kernel):
       assert amt == 4, "don't upcast mid anything but 4"
       self.shift_to(axis, amt, insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(amt)
+    elif opt.op == OptOps.SWAP:
+      colors = self.colors()
+      range_dim = list(range(self.first_reduce))
+      # TODO: don't compare with strings
+      range_yellow = [i for i,c in enumerate(colors) if c == "yellow"]
+      assert (axis in range_dim and amt in range_dim) or (axis in range_yellow and amt in range_yellow), "out of range"
+      new_order = list(range(self.shape_len))
+      new_order[axis], new_order[amt] = new_order[amt], new_order[axis]
+      self.reshape_and_permute(None, new_order)
+      self.simplify_merge_adjacent()
     return self.simplify_ones()
 
   def required_optimizations(self, early_only=False):
