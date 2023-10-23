@@ -22,7 +22,9 @@ if __name__ == "__main__":
   for ast,sk in grouped.items():
     print(len(sk))
     for sks,tm in sk.items():
-      eval(sks[0])
+      #print(sks[1], sks[2])
+      opts = eval(sks[0])
+      #print(opts)
       #ss = sks.split(",")
       #print(ss)
 
