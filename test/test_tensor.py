@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import struct
 import unittest, copy
-import os
 import mmap
 from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import dtypes
@@ -259,9 +258,8 @@ class TestTinygrad(unittest.TestCase):
       f.write(b't')
       f.write(t.numpy().tobytes())
       f.close()
-      sz = os.stat(fn).st_size
       f = open(fn, "a+b")
-      memview = memoryview(mmap.mmap(f.fileno(), sz))
+      memview = memoryview(mmap.mmap(f.fileno(), t.numpy().nbytes + 1))
     dev = np.frombuffer(memview[1:], dtype=t.dtype.np, count=t.shape[0])  
     np.testing.assert_allclose(dev, t.numpy())
     # force device copy - to() is opt'd away - Tensor(dev)/1 is ignored
