@@ -64,14 +64,14 @@ class TestInferenceMinKernels(unittest.TestCase):
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
     # TODO: this seems very high
-    with CLCache(116):
+    with CLCache(115):
       model.forward(img).realize()
 
   def test_resnet(self):
     model = ResNet18()
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     img = Tensor.randn(1, 3, 224, 224)
-    with CLCache(29):
+    with CLCache(26):
       model.forward(img).realize()
 
   def test_vit(self):
