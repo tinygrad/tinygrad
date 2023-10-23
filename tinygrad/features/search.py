@@ -10,11 +10,11 @@ from tinygrad.codegen.optimizer import Opt, OptOps
 actions = flatten([[Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,7]] for axis in range(6)])
 actions += flatten([[Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4]] for axis in range(4)])
 actions += flatten([[Opt(op=OptOps.LOCAL, axis=axis, amt=amt) for amt in [2,3,4,8,16]] for axis in range(5)])
+actions += flatten([[Opt(op=OptOps.GROUP, axis=axis, amt=amt) for amt in [4,8,16,256]] for axis in range(3)])
 actions += [
   Opt(op=OptOps.LOCAL, axis=0, amt=32),
   Opt(op=OptOps.UPCASTMID, axis=1, amt=4),
 ]
-actions += flatten([[Opt(op=OptOps.GROUP, axis=axis, amt=amt) for amt in [4,8,16,256]] for axis in range(3)])
 
 # returns time in seconds
 def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, should_copy=True, disable_cache=False) -> float:
