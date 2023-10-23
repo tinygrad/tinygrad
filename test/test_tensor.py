@@ -256,10 +256,11 @@ class TestTinygrad(unittest.TestCase):
     fn = temp('test_copy_from_numpy_unaligned')
     with open(fn, 'wb') as f:
       f.write(b't')
-      f.write(t.numpy().tobytes())
+      tmp = t.numpy()
+      f.write(tmp.tobytes())
       f.close()
       f = open(fn, "a+b")
-      memview = memoryview(mmap.mmap(f.fileno(), t.numpy().nbytes + 1))
+      memview = memoryview(mmap.mmap(f.fileno(), tmp.nbytes + 1))
     dev = np.frombuffer(memview[1:], dtype=t.dtype.np, count=t.shape[0])  
     np.testing.assert_allclose(dev, t.numpy())
     # force device copy - to() is opt'd away - Tensor(dev)/1 is ignored
