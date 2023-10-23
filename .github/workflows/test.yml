@@ -66,6 +66,7 @@ jobs:
     name: CPU and ImageNet to C Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: setup
 
     steps:
     - name: Checkout Code
@@ -94,6 +95,7 @@ jobs:
     name: Torch Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: setup
 
     steps:
     - name: Checkout Code
@@ -239,6 +241,18 @@ jobs:
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
 
+  setup:
+    steps:
+      - name: Cache gpt2-medium
+        id: cache-gpt2-medium
+        uses: actions/cache@v3
+        with:
+          path: ${{ github.workspace }}/pytorch-gpt2-medium.bin
+          key: cache-gpt2-medium-nodownload
+      - name: Download gpt2-medium
+        if: steps.cache-gpt2-medium.cache-hit != 'true'
+        run: wget -O ${{ github.workspace }}/pytorch-gpt2-medium.bin https://huggingface.co/gpt2-medium/resolve/main/pytorch_model.bin
+
   tests:
     strategy:
       fail-fast: false
@@ -248,6 +262,7 @@ jobs:
     name: Tests on (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || 'ubuntu-latest' }}
     timeout-minutes: 20
+    needs: setup
 
     steps:
       - name: Checkout Code
@@ -304,15 +319,6 @@ jobs:
         run: |
           python -c "from tinygrad.ops import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
           DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-      - name: Cache gpt2-medium
-        id: cache-gpt2-medium
-        uses: actions/cache@v3
-        with:
-          path: ${{ github.workspace }}/pytorch-gpt2-medium.bin
-          key: cache-gpt2-medium-nodownload
-      - name: Download gpt2-medium
-        if: steps.cache-gpt2-medium.cache-hit != 'true'
-        run: wget -O ${{ github.workspace }}/pytorch-gpt2-medium.bin https://huggingface.co/gpt2-medium/resolve/main/pytorch_model.bin
       - name: Run pytest (not cuda)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
         run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}' --durations=20
