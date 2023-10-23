@@ -242,6 +242,7 @@ jobs:
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
 
   setup:
+    runs-on: ubuntu-latest 
     steps:
       - name: Cache gpt2-medium
         id: cache-gpt2-medium
