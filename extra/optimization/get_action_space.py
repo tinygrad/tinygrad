@@ -7,7 +7,7 @@ tactions = set()
 def test_rebuild(lin):
   linr = Linearizer(lin.ast)
   for o in lin.applied_opts:
-    assert o in actions
+    assert o in actions, f"{o} is not in actions"
     tactions.add(o)
     linr.apply_opt(o)
 
