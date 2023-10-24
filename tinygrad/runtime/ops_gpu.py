@@ -3,9 +3,9 @@ import pathlib
 import numpy as np
 import pyopencl as cl  # type: ignore
 from typing import Optional, List
-from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
+from tinygrad.helpers import DEBUG, dtypes, getenv, prod, ImageDType, OSX, fromimport
 from tinygrad.ops import Compiled
-from tinygrad.renderer.opencl import OpenCLRenderer
+from tinygrad.renderer.opencl import OpenCLLanguage, OpenCLRenderer
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
 
@@ -40,6 +40,14 @@ class _CL:
     if DEBUG >= 1: print(f"using devices: {[ctx.devices[0].hashable_model_and_version_identifier for ctx in self.cl_ctxs]}")
     self.cl_queue: List[cl.CommandQueue] = [cl.CommandQueue(ctx, device=ctx.devices[0], properties=cl.command_queue_properties.PROFILING_ENABLE) for ctx in self.cl_ctxs]
     self.cl_allocator = CLAllocator(CL.cl_ctxs[0].devices[0].get_info(cl.device_info.GLOBAL_MEM_SIZE))
+    self.supports_fp16 = self.has_fp16_support()
+
+  def has_fp16_support(self):
+    try:
+      cl.Program(CL.cl_ctxs[0], OpenCLLanguage.half_prekernel + """\nkernel void dummy() { half a = (half)1.0; }""").build()
+      return True
+    except cl.RuntimeError: return False
+
   def synchronize(self):
     for q in self.cl_queue: q.finish()
 CL = _CL()
@@ -103,4 +111,4 @@ class CLProgram:
         return None
     return None
 
-GPUBuffer = Compiled(CLBuffer, LinearizerOptions(), OpenCLRenderer, CLProgram, CL.synchronize)
+GPUBuffer = Compiled(CLBuffer, LinearizerOptions(unsupported_dtypes=[dtypes.float16] if not CL.supports_fp16 else []), OpenCLRenderer, CLProgram, CL.synchronize)
