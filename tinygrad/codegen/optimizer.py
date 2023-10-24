@@ -217,6 +217,7 @@ class OptimizedKernel(Kernel):
             for upc in [4,2]:
               if self.full_shape[s0] % upc == 0:
                 self.apply_opt(Opt(OptOps.LASTLOCAL, s0, upc))
+                break
 
         # alias buffer
         alias_pattern = [0]*(self.global_dims+(self.local_dims-len(tc.threads))) + [2]*(len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)
