@@ -41,8 +41,7 @@ class LocalBuffer(NamedTuple):
 
 class LinearizerOptions(NamedTuple):
   device: str = ""
-  # TODO: make this generic with a list of supported types
-  supports_float4: bool = True
+  unsupported_dtypes: List[DType] = []
   supports_float4_alu: bool = True
   has_local: bool = True
   has_shared: bool = True
@@ -113,7 +112,7 @@ class Kernel:
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
   def get_upcast_dim(self, i) -> List[int]:
-    should_upcast = self.opts.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
+    should_upcast = dtypes._float4 not in self.opts.unsupported_dtypes and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
   @property

@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional
 import numpy as np
 from pycuda.compiler import compile as cuda_compile # type: ignore
-from tinygrad.helpers import DEBUG, getenv, colored, fromimport
+from tinygrad.helpers import DEBUG, dtypes, getenv, colored, fromimport
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -101,6 +101,6 @@ renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
 if getenv("TRITON") == 1:
   from tinygrad.renderer.triton import uops_to_triton
   renderer = uops_to_triton
-  CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024], has_shared=False), renderer, CUDAProgram, cuda.Context.synchronize)
+  CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(unsupported_dtypes=[dtypes._float4], supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024], has_shared=False), renderer, CUDAProgram, cuda.Context.synchronize)
 else:
-  CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False if getenv("PTX") else True, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]), renderer, CUDAProgram, cuda.Context.synchronize)
+  CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(unsupported_dtypes=[dtypes._float4] if getenv("PTX") else [], supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]), renderer, CUDAProgram, cuda.Context.synchronize)

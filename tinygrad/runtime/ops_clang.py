@@ -2,7 +2,7 @@ import time, ctypes, subprocess, platform, functools, pathlib, tempfile
 from typing import Any
 from functools import partial, reduce
 from tinygrad.ops import Compiled
-from tinygrad.helpers import fromimport, getenv, DEBUG, CI, cache_compiled
+from tinygrad.helpers import dtypes, fromimport, getenv, DEBUG, CI, cache_compiled
 from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
@@ -82,4 +82,4 @@ class ClangProgram:
     if wait: return time.monotonic()-st
 
 renderer = fromimport("tinygrad.renderer.assembly_arm64", "uops_to_arm64_asm") if ARM64 else functools.partial(uops_to_cstyle, CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict", arg_int_prefix="const int"))
-ClangBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False), renderer, ClangProgram)
+ClangBuffer = Compiled(RawMallocBuffer, LinearizerOptions(unsupported_dtypes=[dtypes._float4], has_local=False), renderer, ClangProgram)

@@ -29,6 +29,7 @@ except ImportError:
 # tinygrad version
 
 import os
+from tinygrad.helpers import dtypes
 from tinygrad.tensor import Tensor
 
 # define the compute
@@ -39,7 +40,7 @@ C = (A.reshape(M, 1, K) * B.permute(1,0).reshape(1, N, K)).sum(axis=2)
 sched = C.lazydata.schedule()
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.codegen.kernel import LinearizerOptions
-lin = Linearizer(sched[-1].ast, LinearizerOptions(has_local=False, supports_float4=False))
+lin = Linearizer(sched[-1].ast, LinearizerOptions(has_local=False, unsupported_dtypes=[dtypes._float4]))
 #lin.hand_coded_optimizations()
 lin.linearize()
 from tinygrad.runtime.ops_clang import renderer

@@ -112,7 +112,7 @@ def helper_realized_ast(r:Tensor):
 
 class TestFloat4(unittest.TestCase):
   def setUp(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.supports_float4:
+    if not isinstance(Device[Device.DEFAULT], Compiled) or dtypes._float4 in Device[Device.DEFAULT].linearizer_opts.unsupported_dtypes:
       self.skipTest("Device does not support float4")
 
   @staticmethod
