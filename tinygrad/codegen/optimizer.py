@@ -260,17 +260,20 @@ class OptimizedKernel(Kernel):
 
         # final optional global upcast
         if s1_exists:
-          s1_div = [upc for upc in [4,3,2,1] if self.full_shape[s1]%upc == 0][0]
+          s1_div = [upc for upc in [5,4,3,2,1] if self.full_shape[s1]%upc == 0][0]
           if s1_div != 1: fix(self.apply_opt(Opt(OptOps.UPCAST, s1, s1_div)), s1)
         if s0_exists:
-          s0_div = [upc for upc in [4,3,2,1] if self.full_shape[s0]%upc == 0][0]
+          s0_div = [upc for upc in [5,4,3,2,1] if self.full_shape[s0]%upc == 0][0]
           if s0_div != 1: fix(self.apply_opt(Opt(OptOps.UPCAST, s0, s0_div)), s0)
 
         # very late (optional) upcast to run group at the same time. only if actually using real tensor cores, otherwise local isn't a simdgroup
         self.use_tensor_cores = use_tensor_cores == 1  # TC=2 will do the shape ops without the WMMA
-        if self.use_tensor_cores and s0_exists and self.full_shape[s0] % 2 == 0:
-          self.apply_opt(Opt(OptOps.LASTLOCAL, s0, 2))
-          self.exclude_local_upcast += 1
+        if self.use_tensor_cores and s0_exists:
+          for upc in [4,2]:
+            if self.full_shape[s0] % upc == 0:
+              self.apply_opt(Opt(OptOps.LASTLOCAL, s0, upc))
+              self.exclude_local_upcast += 1
+              break
 
         # alias buffer
         alias_pattern = [0]*(self.global_dims+self.exclude_local_upcast) + [2]*(self.local_dims-self.exclude_local_upcast) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)

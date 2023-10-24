@@ -52,7 +52,7 @@ class MetalBatchExecutor(BasicBatchExecutor):
     METAL.mtl_buffers_in_flight.append(command_buffer)
   def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
     if self.use_basic_executor: return super().exec(jit_cache, updatable_entries) # No graph is created switch to basic executor.
-    for i in range((len(jit_cache)+7)//8): self.__do_exec(jit_cache[8*i:8*(i+1)]) # Run in batches with size 8.
+    for i in range((len(jit_cache)+127)//128): self.__do_exec(jit_cache[128*i:128*(i+1)]) # Run in batches with size 128.
     super().recalc_stat(jit_cache)
 
 def unwrap(x):
