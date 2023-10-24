@@ -98,7 +98,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int) -> Linearizer:
     acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin in beam])
     timed_lins = [(v,time_linearizer(v, rawbufs)) for v in acted_lins]
     opts = sorted(timed_lins, key=lambda x: x[1])
-    if len(opts) == 0 or best_tm <= opts[0][1]: break  # we didn't get faster
+    if len(opts) == 0 or (best_tm - opts[0][1])*1e6<getenv("BEAM_STOP",5): break  # we didn't get faster
     best_tm = opts[0][1]
     beam = [x[0] for x in opts[:amt]]
     if DEBUG >= 2: print(f"{opts[0][1]*1e6:12.2f} us from {len(opts):3d} actions", beam[0].colored_shape())
