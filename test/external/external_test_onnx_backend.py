@@ -156,15 +156,10 @@ backend_test.exclude('test_isinf_positive_cpu')
 backend_test.exclude('test_isnan_cpu')
 
 # issue 1791 fast math messes with these https://github.com/tinygrad/tinygrad/issues/1791
-if getenv('METAL') or getenv('LLVM'):
+if getenv('LLVM'):
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
-
-# issue 2067 potentially also a fastmath issue https://github.com/tinygrad/tinygrad/issues/2067
-if getenv('METAL'):
-  backend_test.exclude('test_maxpool_2d_pads_cpu')
-  backend_test.exclude('test_maxpool_2d_same_lower_cpu')
 
 # Don't know how to treat special TensorProto like TensorProto.FLOAT8E4M3FN
 if getenv("CPU") or getenv("TORCH"):

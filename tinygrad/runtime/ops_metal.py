@@ -70,6 +70,10 @@ class MetalProgram:
       self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
     else:
       options = Metal.MTLCompileOptions.alloc().init()
+      # With fast math enabled, the compiler does reciprocal division optimizations (x/4 => x * 0.25). 
+      # This causes innaccuracies (e.g. `Tensor(3) + 0.5)/3.5 != 0`).
+      # For an example in practice see `test_resize_upsample_sizes_nearest_cpu` in the onnx test suite
+      options.setFastMathEnabled_(False)
       self.library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
     self.fxn = self.library.newFunctionWithName_(name)
     # hacks to disassemble shader
