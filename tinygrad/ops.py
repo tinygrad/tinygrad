@@ -287,19 +287,22 @@ class Compiled:
       k = Linearizer(ast, self.linearizer_opts)
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
       if not getenv("NOOPT"):
-        if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
         if BEAM:
           kb = Linearizer(ast, self.linearizer_opts)
           kb.required_optimizations()
           kb.dont_use_locals = bool(getenv("NOLOCALS"))
           from tinygrad.features.search import beam_search, time_linearizer
-          lins = [(f"beam{BEAM.value}", beam_search(kb, rawbuffers, BEAM.value)), (("tc" if used_tensor_cores else "hc"), k)]
-          if used_tensor_cores:
-            lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
-            lins[-1][1].hand_coded_optimizations()
+          lins = [(f"beam{BEAM.value}", beam_search(kb, rawbuffers, BEAM.value))]
+          tc_lin = Linearizer(ast, self.linearizer_opts)
+          if tc_lin.apply_tensor_cores(getenv("TC", 1)):
+            lins.append(("tc", tc_lin))
+          lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
+          lins[-1][1].hand_coded_optimizations()
           timed = sorted([(nm, tk, time_linearizer(tk, rawbuffers, allow_test_size=False, disable_cache=True)) for nm, tk in lins], key=lambda x: x[2])
           if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
           k = timed[0][1]
+        else:
+          if not k.apply_tensor_cores(getenv("TC", 1)): k.hand_coded_optimizations()
       return self.to_program(k)
 
     if getenv("ENABLE_METHOD_CACHE", 1):
