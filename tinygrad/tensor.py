@@ -642,7 +642,7 @@ class Tensor:
     if x.__class__ is not Tensor and x == 0.0: return mlops.Zero.apply(self)
     if x.__class__ is not Tensor and x == -1.0: return -self
     return mlops.Mul.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x != 1.0 else self
-  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return mlops.Div.apply(*self._broadcasted(x, reverse))
+  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return mlops.Div.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or reverse or not x or not dtypes.is_float(self.dtype) else self.mul(1/x)
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     if x.__class__ is not Tensor and not reverse:
       # simple pow identities
