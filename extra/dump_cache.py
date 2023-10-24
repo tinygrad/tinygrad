@@ -1,5 +1,4 @@
-import sys
-import sqlite3
+import sys, sqlite3, pickle
 
 if __name__ == "__main__":
   fn = sys.argv[1] if len(sys.argv) > 1 else "/tmp/tinygrad_cache"
@@ -12,3 +11,10 @@ if __name__ == "__main__":
     cur2.execute(f"SELECT COUNT(*) FROM {table}")
     cnt = cur2.fetchone()[0]
     print(f"{table:20s} : {cnt}")
+
+    cur3 = conn.cursor()
+    cur3.execute(f"SELECT * FROM {table} LIMIT 10")
+    for f in cur3.fetchall():
+      v = pickle.loads(f[-1])
+      print("   ", len(f[0]), f[1:-1], v)
+      #print(f"{len(k):10d}, {sk} -> {v}")
