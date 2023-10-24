@@ -35,14 +35,15 @@ class _CL:
     platform_devices: List[List[cl.Device]] = [y for y in ([x.get_devices(device_type=cl.device_type.GPU) for x in cl_platforms] + [x.get_devices(device_type=cl.device_type.CPU) for x in cl_platforms]) if y]
     self.devices = [device for device in platform_devices[getenv('CL_PLATFORM', 0)] if device.name not in getenv('CL_EXCLUDE', "").split(",")]
     self.cl_platform = self.devices[0].platform
+
   def post_init(self, device=None):
     self.cl_ctxs: List[cl.Context] = [cl.Context(devices=[x]) for x in self.devices] if device is None else [cl.Context(devices=[self.devices[device]])]
     if DEBUG >= 1: print(f"using devices: {[ctx.devices[0].hashable_model_and_version_identifier for ctx in self.cl_ctxs]}")
     self.cl_queue: List[cl.CommandQueue] = [cl.CommandQueue(ctx, device=ctx.devices[0], properties=cl.command_queue_properties.PROFILING_ENABLE) for ctx in self.cl_ctxs]
     self.cl_allocator = CLAllocator(CL.cl_ctxs[0].devices[0].get_info(cl.device_info.GLOBAL_MEM_SIZE))
-    self.supports_fp16 = self.has_fp16_support()
+    self.has_fp16_support = self.check_fp16_support()
 
-  def has_fp16_support(self):
+  def check_fp16_support(self) -> bool:
     try:
       cl.Program(CL.cl_ctxs[0], OpenCLLanguage.half_prekernel + """\nkernel void dummy() { half a = (half)1.0; }""").build()
       return True
@@ -111,4 +112,4 @@ class CLProgram:
         return None
     return None
 
-GPUBuffer = Compiled(CLBuffer, LinearizerOptions(unsupported_dtypes=[dtypes.float16] if not CL.supports_fp16 else []), OpenCLRenderer, CLProgram, CL.synchronize)
+GPUBuffer = Compiled(CLBuffer, LinearizerOptions(unsupported_dtypes=[dtypes.float16] if hasattr(CL, "has_fp16_support") and not CL.has_fp16_support else []), OpenCLRenderer, CLProgram, CL.synchronize)
