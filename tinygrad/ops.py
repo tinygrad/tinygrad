@@ -174,6 +174,7 @@ class BasicBatchExecutor:
       GlobalCounters.global_mem += prg.mem_estimate
 
 class GraphBatchExecutor(BasicBatchExecutor):
+  def __init__(self, jit_cache:List[Tuple[Any, Any, Any]]): self.graphs: List[Any] = []
   def split_into_graphs(self, jit_cache:List[Tuple[Any, Any, Any]]):
     # Splitting the JIT cache into batches to enable parallel execution (cpu+gpu). Batch sizes follow a logarithmic pattern: 4, 4, 8, 16, 32, and so on.
     # This helps push tasks to the GPU while the CPU updates the next graph.
@@ -181,13 +182,17 @@ class GraphBatchExecutor(BasicBatchExecutor):
       self.create_graph(jit_cache[(1<<(i-1) if i > 2 else 0):(1<<i)])
 
   def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
-    if not self.instances: return super().exec(jit_cache, updatable_entries) # No graph is created, switch to basic executor.
+    if not self.graphs: return super().exec(jit_cache, updatable_entries) # No graph is created, switch to basic executor.
     update_keys_per_batch = collections.defaultdict(list)
     for j in updatable_entries.keys(): update_keys_per_batch[max(0, math.ceil(math.log2(j+1))-2)].append(j)
-    for instid in range(len(self.instances)):
+    for instid in range(len(self.graphs)):
       for jcid in update_keys_per_batch[instid]: self.update_node(instid, jcid, jit_cache[jcid][0], jit_cache[jcid][1], jit_cache[jcid][2], updated_args=updatable_entries[jcid])
       self.exec_instance(instid)
     super().recalc_stat(jit_cache)
+
+  def create_graph(self, jit_cache_slice: List[Tuple[Any, Any, Any]]): raise NotImplementedError("must be implemented")
+  def update_node(self, instid: int, jcid: int, program, args, variables, updated_args=None): raise NotImplementedError("must be implemented")
+  def exec_instance(self, instid: int): raise NotImplementedError("must be implemented")
 
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):

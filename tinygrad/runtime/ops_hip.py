@@ -31,18 +31,19 @@ HIP = _HIP()
 
 class HIPGraph(GraphBatchExecutor):
   def __init__(self, jit_cache: List[Tuple[Any, Any, Any]]):
-    self.jc_info, self.graphs, self.instances = [], [], []
+    super().__init__(jit_cache)
+    self.jc_info: List[Tuple[Any, Any]] = []
 
     # Check if HIPGraph could run the given jit_cache. If not, no hip graph is created and HIPGraph is a BasicBatchExecutor.
     if DEBUG>0 or not all(isinstance(prg, ASTRunner) and isinstance(prg.clprg, HIPProgram) for prg,_,_ in jit_cache): return # Only HIPProgram can be captured.
     if len(set([pargs[0]._device for _,pargs,_ in jit_cache])) != 1: return # Only one device is supported now.
 
     self.split_into_graphs(jit_cache)
-    assert len(self.jc_info) == len(jit_cache), f"Each jit cache entry should be captured into nodes. {len(self.jc_info)} != {len(jit_cache)}"
 
   def __del__(self):
-    for inst in self.instances: hip.hipGraphExecDestroy(inst)
-    for gr in self.graphs: hip.hipGraphDestroy(gr)
+    for inst,gr in self.graphs:
+      hip.hipGraphExecDestroy(inst)
+      hip.hipGraphDestroy(gr)
 
   def create_graph(self, jit_cache: List[Tuple[Any, Any, Any]]):
     graph, graph_node = hip.hipGraphCreate(), None
@@ -54,16 +55,15 @@ class HIPGraph(GraphBatchExecutor):
       graph_node = hip.hipGraphAddKernelNode(graph, [graph_node] if graph_node else [], params)
       self.jc_info.append((graph_node, params))
 
-    self.graphs.append(graph)
-    self.instances.append(hip.hipGraphInstantiate(graph))
+    self.graphs.append((hip.hipGraphInstantiate(graph), graph))
 
   def update_node(self, instid, jcid, prg, pargs, variables, updated_args=None):
     graph_node, params = self.jc_info[jcid]
     global_size, local_size = prg.launch_dims(variables)
     hip.updateKernelNodeParams(params, *pargs, *variables.values(), grid=global_size, block=local_size, updated_args=updated_args)
-    hip.hipGraphExecKernelNodeSetParams(self.instances[instid], graph_node, params)
+    hip.hipGraphExecKernelNodeSetParams(self.graphs[instid][0], graph_node, params)
 
-  def exec_instance(self, instid): hip.hipGraphLaunch(self.instances[instid])
+  def exec_instance(self, instid): hip.hipGraphLaunch(self.graphs[instid][0])
 
 class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device=str(HIP.default_device)): super().__init__(size, dtype, allocator=HIP.allocator, **{'device': int(device)})
