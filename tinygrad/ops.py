@@ -190,9 +190,9 @@ class GraphBatchExecutor(BasicBatchExecutor):
       self.exec_instance(instid)
     super().recalc_stat(jit_cache)
 
-  def create_graph(self, jit_cache_slice: List[Tuple[Any, Any, Any]]): raise NotImplementedError("must be implemented")
-  def update_node(self, instid: int, jcid: int, program, args, variables, updated_args=None): raise NotImplementedError("must be implemented")
-  def exec_instance(self, instid: int): raise NotImplementedError("must be implemented")
+  def create_graph(self, jit_cache: List[Tuple[Any, Any, Any]]): raise NotImplementedError("must be implemented")
+  def update_node(self, instid, jcid, prg, pargs, variables, updated_args=None): raise NotImplementedError("must be implemented")
+  def exec_instance(self, instid): raise NotImplementedError("must be implemented")
 
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
