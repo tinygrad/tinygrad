@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import struct
 import unittest, copy
+import mmap
 from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
@@ -247,6 +248,19 @@ class TestTinygrad(unittest.TestCase):
     a = t[10:20]
     dev = a.to(Device.DEFAULT)
     np.testing.assert_allclose(a.numpy(), dev.numpy())
+
+  # Regression test for https://github.com/tinygrad/tinygrad/issues/1751
+  def test_copy_from_numpy_unaligned(self):
+    # 2**15 is the minimum for repro
+    arr = np.random.randn(2**15).astype(dtypes.float.np)
+    fn = temp('test_copy_from_numpy_unaligned')
+    with open(fn, 'wb') as f: f.write(b't' + arr.tobytes())
+    with open(fn, "a+b") as f: memview = memoryview(mmap.mmap(f.fileno(), arr.nbytes + 1))
+    ua_arr = np.frombuffer(memview[1:], dtype=arr.dtype, count=arr.shape[0])
+    np.testing.assert_allclose(arr, ua_arr)
+    assert not ua_arr.flags.aligned
+    # force device copy - to() is opt'd away - Tensor(dev)/1 is ignored
+    np.testing.assert_allclose(ua_arr, (Tensor(ua_arr)/Tensor(1)).numpy())
 
 if __name__ == '__main__':
   unittest.main()
