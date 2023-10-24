@@ -130,6 +130,14 @@ try:
 
   ## Graph Management
 
+  _libhip.hipGraphCreate.restype = int
+  _libhip.hipGraphCreate.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+  def hipGraphCreate():
+    ptr = ctypes.c_void_p()
+    status = _libhip.hipGraphCreate(ctypes.byref(ptr), 0)
+    hipCheckStatus(status)
+    return ptr
+
   _libhip.hipGraphInstantiate.restype = int
   _libhip.hipGraphInstantiate.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
   def hipGraphInstantiate(graph):
