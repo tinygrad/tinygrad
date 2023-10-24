@@ -1,7 +1,7 @@
 from typing import Dict, List, cast, DefaultDict, Optional
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
-from tinygrad.helpers import prod, getenv, ImageDType, flatten, DEBUG
+from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, diskcache_get, diskcache_put, getenv
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
@@ -12,18 +12,17 @@ actions += flatten([[Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4]]
 actions += flatten([[Opt(op=OptOps.LOCAL, axis=axis, amt=amt) for amt in [2,3,4,8,16]] for axis in range(5)])
 actions += [
   Opt(op=OptOps.LOCAL, axis=0, amt=32),
-  Opt(op=OptOps.GROUP, axis=1, amt=4), Opt(op=OptOps.GROUP, axis=1, amt=8), Opt(op=OptOps.GROUP, axis=2, amt=8),
+  Opt(op=OptOps.GROUP, axis=0, amt=4), Opt(op=OptOps.GROUP, axis=0, amt=8), Opt(op=OptOps.GROUP, axis=1, amt=8),
   Opt(op=OptOps.GROUPTOP, axis=0, amt=16), Opt(op=OptOps.GROUPTOP, axis=0, amt=256),
   Opt(op=OptOps.GROUPTOP, axis=1, amt=16), Opt(op=OptOps.GROUPTOP, axis=1, amt=256),
-  Opt(op=OptOps.GROUPTOP, axis=2, amt=16), Opt(op=OptOps.GROUPTOP, axis=2, amt=256)
+  Opt(op=OptOps.GROUPTOP, axis=2, amt=16), Opt(op=OptOps.GROUPTOP, axis=2, amt=256),
+  Opt(op=OptOps.UPCASTMID, axis=1, amt=4),
 ]
 
 # returns time in seconds
-import shelve
-logtm = shelve.open(getenv("LOGTM", "")) if getenv("LOGTM", "") else None
 def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, should_copy=True, disable_cache=False) -> float:
-  key = str((lin.ast, lin.applied_opts))
-  if should_copy and not disable_cache and logtm is not None and key in logtm: return min(logtm[key])  # pylint: disable=E1135 # NOTE: we check should_copy since this may have side effects
+  key = {"ast": str(lin.ast), "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size}
+  if should_copy and not disable_cache and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
   if should_copy: lin = lin.copy() # TODO: remove the need for this
   var_vals = {k:k.min for k in vars_from_ast(lin.ast)}
   try:
@@ -56,8 +55,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
     #print(lin.ast)
     #print(lin.applied_opts)
     tms = [float('inf')]
-  if logtm is not None: logtm[key] = tms
-  return min(tms)
+  return min(diskcache_put("time_linearizer", key, tms))
 
 # get (scrap) buffers for timing the linearizer
 def bufs_from_lin(lin:Linearizer) -> List[RawBuffer]:
@@ -88,8 +86,13 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       pass
   return acted_lins
 
-def beam_search(lin, rawbufs, amt):
-  best_tm = float('inf')
+def beam_search(lin:Linearizer, rawbufs, amt:int) -> Linearizer:
+  key = {"ast": str(lin.ast), "amt": amt}
+  if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE"):
+    ret = lin.copy()
+    for o in val: ret.apply_opt(o)
+    return ret
+  best_tm = time_linearizer(lin, rawbufs)   # handle the case where no actions make it faster
   beam: List[Linearizer] = [lin]
   while 1:
     acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin in beam])
@@ -98,5 +101,6 @@ def beam_search(lin, rawbufs, amt):
     if len(opts) == 0 or best_tm <= opts[0][1]: break  # we didn't get faster
     best_tm = opts[0][1]
     beam = [x[0] for x in opts[:amt]]
-    if DEBUG >= 1: print(f"{opts[0][1]*1e6:12.2f} us from {len(opts):3d} actions", beam[0].colored_shape())
+    if DEBUG >= 2: print(f"{opts[0][1]*1e6:12.2f} us from {len(opts):3d} actions", beam[0].colored_shape())
+  diskcache_put("beam_search", key, beam[0].applied_opts)
   return beam[0]
