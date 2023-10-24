@@ -1,4 +1,5 @@
 import unittest
+import pickle
 from tinygrad.helpers import diskcache_get, diskcache_put
 
 def remote_get(q,k): q.put(diskcache_get("test", k))
@@ -42,6 +43,17 @@ class DiskCache(unittest.TestCase):
     diskcache_put("test", 4, 5)
     self.assertEqual(diskcache_get("test", 4), 5)
     self.assertEqual(diskcache_get("test", "4"), 5)
+
+  def test_dict_key(self):
+    fancy_key = {"hello": "world", "goodbye": 7, "good": True, "pkl": pickle.dumps("cat")}
+    fancy_key2 = {"hello": "world", "goodbye": 8, "good": True, "pkl": pickle.dumps("cat")}
+    fancy_key3 = {"hello": "world", "goodbye": 8, "good": True, "pkl": pickle.dumps("dog")}
+    diskcache_put("test2", fancy_key, 5)
+    self.assertEqual(diskcache_get("test2", fancy_key), 5)
+    diskcache_put("test2", fancy_key2, 8)
+    self.assertEqual(diskcache_get("test2", fancy_key2), 8)
+    self.assertEqual(diskcache_get("test2", fancy_key), 5)
+    self.assertEqual(diskcache_get("test2", fancy_key3), None)
 
 if __name__ == "__main__":
   unittest.main()
