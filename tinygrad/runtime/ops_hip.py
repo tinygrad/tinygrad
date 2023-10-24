@@ -23,9 +23,10 @@ class HIPAllocator(LRUAllocator):
   def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
 
 class _HIP:
-  def __init__(self):
+  def __init__(self, device=None):
+    self.default_device = device or getenv("HIP_DEFAULT_DEVICE")
+    hip.hipSetDevice(self.default_device)
     self.device_count = hip.hipGetDeviceCount()
-    self.default_device = getenv("HIP_DEFAULT_DEVICE")
     self.allocator = HIPAllocator(hip.hipGetDeviceProperties(self.default_device).totalGlobalMem)
 HIP = _HIP()
 
@@ -66,12 +67,16 @@ class HIPGraph(GraphBatchExecutor):
   def exec_instance(self, instid): hip.hipGraphLaunch(self.graphs[instid][0])
 
 class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
-  def __init__(self, size, dtype, device=str(HIP.default_device)): super().__init__(size, dtype, allocator=HIP.allocator, **{'device': int(device)})
+  def __init__(self, size, dtype, device=HIP.default_device, buf=None, allocator=HIP.allocator): super().__init__(size, dtype, buf=buf, allocator=allocator, **{'device': int(device)})
   def _copyin(self, x:np.ndarray):
-    x = np.require(x, requirements='C')
-    hip.hipMemcpyAsync(self._buf, x.ctypes.data, self.size * self.dtype.itemsize, hip.hipMemcpyHostToDevice, 0)
-  def _copyout(self, x:np.ndarray): hip.hipMemcpy(x.ctypes.data, self._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToHost)
-  def _transfer(self, x): hip.hipMemcpyAsync(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice, 0)
+    hip.hipSetDevice(self._device)
+    hip.hipMemcpyAsync(self._buf, np.require(x, requirements='C').ctypes.data, self.size * self.dtype.itemsize, hip.hipMemcpyHostToDevice, 0)
+  def _copyout(self, x:np.ndarray):
+    hip.hipSetDevice(self._device)
+    hip.hipMemcpy(x.ctypes.data, self._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToHost)
+  def _transfer(self, x):
+    hip.hipSetDevice(x._device)
+    hip.hipMemcpy(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice)
 
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
