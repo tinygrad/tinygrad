@@ -184,7 +184,7 @@ class LtNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], _=False): return (self.a//b) < (self.b//b)
   def get_bounds(self) -> Tuple[int, int]:
     b_min, b_max = (self.b, self.b) if isinstance(self.b, int) else (self.b.min, self.b.max)
-    return int(self.a.max < b_min), int(self.a.min < b_max)
+    return (1, 1) if self.a.max < b_min else (0, 1) if self.a.min < b_max else (0, 0)
 
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) < (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
