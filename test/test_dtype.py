@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad.helpers import getenv, DType, DEBUG, CI
+from tinygrad.helpers import getenv, DType, DEBUG, ImageDType, PtrDType
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import List, Optional
@@ -156,6 +156,22 @@ class TestInt32Dtype(unittest.TestCase):
 class TestBoolDtype(unittest.TestCase):
   def test_casts_from_bool(self): _test_casts_from([0,1,1,0], source_dtype=dtypes.bool, target_dtypes=[dtypes.float32, dtypes.int32])
   def test_casts_to_bool(self): _test_casts_to([0,1,1,0], source_dtypes=[dtypes.float32, dtypes.int32], target_dtype=dtypes.bool)
+
+class TestEqStrDType(unittest.TestCase):
+  def test_image_ne(self):
+    assert dtypes.float == dtypes.float32, "float doesn't match?"
+    assert dtypes.imagef((1,2,4)) != dtypes.imageh((1,2,4)), "different image dtype doesn't match"
+    assert dtypes.imageh((1,2,4)) != dtypes.imageh((1,4,2)), "different shape doesn't match"
+    assert dtypes.imageh((1,2,4)) == dtypes.imageh((1,2,4)), "same shape matches"
+    assert isinstance(dtypes.imageh((1,2,4)), ImageDType)
+  def test_ptr_ne(self):
+    # TODO: is this the wrong behavior?
+    assert PtrDType(dtypes.float32) == dtypes.float32
+    #assert PtrDType(dtypes.float32) == PtrDType(dtypes.float32)
+    #assert PtrDType(dtypes.float32) != dtypes.float32
+  def test_strs(self):
+    self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")
+    self.assertEqual(str(PtrDType(dtypes.float32)), "ptr.dtypes.float")
 
 if __name__ == '__main__':
   unittest.main()

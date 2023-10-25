@@ -41,10 +41,8 @@ TORCH               | [1]        | enable PyTorch backend
 CLANG               | [1]        | enable Clang backend
 LLVM                | [1]        | enable LLVM backend
 LLVMOPT             | [1]        | enable slightly more expensive LLVM optimizations
-LAZY                | [1]        | enable lazy operations (this is the default)
 OPT                 | [1-3]      | optimization level
-KOPT                | [1-2]      | kernel optimization, 1 turns it on, 2 caches the found optimizations
-BUDGET              | [#]        | kernel optimization search budget
+BEAM                | [#]        | number of beams in kernel beam search
 GRAPH               | [1]        | create a graph of all operations (requires graphviz)
 GRAPHPATH           | [/path/to] | where to put the generated graph
 PRINT_PRG           | [1]        | print program code
@@ -177,7 +175,6 @@ TORCHCUDA | [1] | enable the torch cuda backend
 
 Variable | Possible Value(s) | Description
 ---|---|---
-KOPT   | [1] | enable kernel optimization
 KCACHE | [1] | enable kernel cache
 
 ### test/external/external_test_opt.py

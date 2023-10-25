@@ -9,7 +9,7 @@ from collections import namedtuple
 from tqdm import tqdm
 from tinygrad.tensor import Tensor
 from tinygrad.ops import Device
-from tinygrad.helpers import dtypes, GlobalCounters, Timing
+from tinygrad.helpers import dtypes, GlobalCounters, Timing, Context, getenv
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from extra.utils import download_file
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
@@ -568,6 +568,7 @@ if __name__ == "__main__":
   parser.add_argument('--fp16', action='store_true', help="Cast the weights to float16")
   parser.add_argument('--timing', action='store_true', help="Print timing per step")
   parser.add_argument('--seed', type=int, help="Set the random latent seed")
+  parser.add_argument('--guidance', type=float, default=7.5, help="Prompt strength")
   args = parser.parse_args()
 
   Tensor.no_grad = True
@@ -594,12 +595,11 @@ if __name__ == "__main__":
   # done with clip model
   del model.cond_stage_model
 
-  def get_model_output(latent, timestep):
+  def get_model_output(latent, timestep, unconditional_guidance_scale):
     # put into diffuser
     latents = model.model.diffusion_model(latent.expand(2, *latent.shape[1:]), timestep, unconditional_context.cat(context, dim=0))
     unconditional_latent, latent = latents[0:1], latents[1:2]
 
-    unconditional_guidance_scale = 7.5
     e_t = unconditional_latent + unconditional_guidance_scale * (latent - unconditional_latent)
     return e_t
 
@@ -624,8 +624,8 @@ if __name__ == "__main__":
     return x_prev, pred_x0
 
   @TinyJit
-  def do_step(latent, timestep, index):
-    e_t = get_model_output(latent, timestep)
+  def do_step(latent, timestep, index, guidance):
+    e_t = get_model_output(latent, timestep, guidance)
     x_prev, _ = get_x_prev_and_pred_x0(latent, e_t, index)
     #e_t_next = get_model_output(x_prev)
     #e_t_prime = (e_t + e_t_next) / 2
@@ -636,14 +636,15 @@ if __name__ == "__main__":
   if args.seed is not None: Tensor._seed = args.seed
   latent = Tensor.randn(1,4,64,64)
 
-  # this is diffusion
-  for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
-    GlobalCounters.reset()
-    t.set_description("%3d %3d" % (index, timestep))
-    with Timing("step in ", enabled=args.timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
-      latent = do_step(latent, Tensor([timestep]), Tensor([index]))
-      if args.timing: Device[Device.DEFAULT].synchronize()
-  del do_step
+  with Context(BEAM=getenv("LATEBEAM")):
+    # this is diffusion
+    for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
+      GlobalCounters.reset()
+      t.set_description("%3d %3d" % (index, timestep))
+      with Timing("step in ", enabled=args.timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
+        latent = do_step(latent, Tensor([timestep]), Tensor([index]), Tensor([args.guidance]))
+        if args.timing: Device[Device.DEFAULT].synchronize()
+    del do_step
 
   # upsample latent space to image with autoencoder
   x = model.first_stage_model.post_quant_conv(1/0.18215 * latent)

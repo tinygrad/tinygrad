@@ -13,8 +13,10 @@ class CStyleLanguage(NamedTuple):
   buffer_suffix: str = ""
   smem_align: str = ""
   smem_prefix: str = ""
+  smem_prefix_for_cast: bool = True
   arg_int_prefix: str = ""
   barrier: str = ""
+  xid: List[str] = []
   gid: List[str] = []
   lid: List[str] = []
   global_max: List[int] = []
@@ -64,7 +66,7 @@ class CStyleLanguage(NamedTuple):
     if self.uses_vload and buf_dtype == dtypes.float16:
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx})"
     if output_dtype.sz > 1:
-      out_val = f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx}))"
+      out_val = f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx}))"
     else:
       out_val = f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
 
@@ -75,6 +77,9 @@ class CStyleLanguage(NamedTuple):
 
   def render_for(self, expr: str, _min:Union[int,str], _max:Union[int,str]) -> str:
     return f"for (int {expr} = {_min}; {expr} < {_max}; ++{expr}) {{"
+
+  def render_if(self, cond: str):
+    return f"if ({cond}) {{"
 
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"({cond})?({x}):{y}"
@@ -98,10 +103,10 @@ class CStyleLanguage(NamedTuple):
     if self.uses_vload and buf_dtype == dtypes.float16:
       return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.sz > 1:
-      return f"*(({self.smem_prefix if local else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
+      return f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
 
-def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> str:
+def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
   local_size: List[int] = []
   kernel,prekernel,bufs = [],[],[]
   #pend_close = None
@@ -125,6 +130,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
     uop,dtype,vin,args,_ = u
     if uop == UOps.LOOP:
       kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]))
+      depth += 1
+    elif uop == UOps.IF:
+      kk(lang.render_if(r[vin[0]]))
       depth += 1
     elif uop == UOps.BARRIER:
       kk(lang.barrier)
@@ -166,7 +174,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       assert dtype is not None
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
     elif uop == UOps.SPECIAL:
-      xid = lang.gid if args[1].startswith("g") else lang.lid
+      xid = lang.gid if args[1].startswith("g") else (lang.xid if args[1].startswith("i") else lang.lid)
       kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]}; /* {args[2]} */")
       if args[1].startswith("l"): local_size.append(args[2])
       r[u] = args[1]
@@ -177,12 +185,12 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
       if len(vin) > 2: val = lang.render_conditional(r[vin[2]], val, r[vin[3]])
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'val')} = {val};")
+    elif uop == UOps.PHI:
+      kk(f"{r[vin[0]]} = {r[vin[1]]};")
+      r[u] = r[vin[0]]
     elif uop == UOps.STORE:
-      if len(vin) == 2:
-        kk(f"{r[vin[0]]} = {r[vin[1]]};")
-      elif len(vin) == 3:
-        assert vin[0].dtype is not None and vin[2].dtype is not None
-        kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
+      assert vin[0].dtype is not None and vin[2].dtype is not None
+      kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
     elif uop == UOps.CAST and dtype is not None and dtype.sz > 1:
       val = lang.render_cast([r[x] for x in vin], dtype)
       if child_count[u] <= 1: r[u] = val
@@ -201,4 +209,4 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
     else:
       raise RuntimeError(f"failed to render {uop}")
 
-  return lang.render_kernel(function_name, kernel, bufs, local_size, prekernel)
+  return lang.render_kernel(function_name, kernel, bufs, local_size, prekernel), {"binary":False}

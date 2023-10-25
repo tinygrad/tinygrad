@@ -3,14 +3,12 @@ from models.resnet import ResNet50
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps, Device, Compiled
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.codegen.search import bufs_from_lin, time_linearizer, get_linearizer_actions
-from tinygrad.helpers import ansilen, DEBUG, getenv, flatten
+from tinygrad.features.search import time_linearizer, beam_search
+from tinygrad.helpers import ansilen, DEBUG, getenv
 from tinygrad.graph import print_tree
 from tinygrad.lazy import vars_from_ast
 from tinygrad.shape.symbolic import sym_infer
 
-import shelve
-global_db = shelve.open("/tmp/greedy_cache")
 
 if __name__ == "__main__":
   mdl = ResNet50()
@@ -28,6 +26,9 @@ if __name__ == "__main__":
   out = mdl(x)
   sched = out.lazydata.schedule(seen)
   sched = [x for x in sched if x.ast.op not in LoadOps]
+
+  # focus on one kernel
+  if getenv("KERNEL", -1) >= 0: sched = sched[getenv("KERNEL", -1):getenv("KERNEL", -1)+1]
 
   # work with the schedule
   total_tm = 0
@@ -55,22 +56,7 @@ if __name__ == "__main__":
     # try a beam search
     if getenv("BEAM"):
       lin = Linearizer(si.ast, device.linearizer_opts)
-      if str(lin.ast) in global_db:
-        for ao in global_db[str(lin.ast)]:
-          lin.apply_opt(ao)
-      else:
-        best_tm = float('inf')
-        beam = [lin]
-        while 1:
-          acted_lins = flatten([get_linearizer_actions(lin).items() for lin in beam])
-          timed_lins = [(v,time_linearizer(v, rawbufs)) for k,v in acted_lins if k != 0]
-          opts = sorted(timed_lins, key=lambda x: x[1])
-          if len(opts) == 0 or best_tm <= opts[0][1]: break  # we didn't get faster
-          best_tm = opts[0][1]
-          beam = [x[0] for x in opts[:getenv("BEAM")]]
-          if DEBUG >= 1: print(f"{opts[0][1]*1e3:10.2f} ms from {len(opts):3d} actions", beam[0].colored_shape())
-        lin = beam[0]
-        global_db[str(lin.ast)] = lin.applied_opts
+      lin = beam_search(lin, rawbufs, getenv("BEAM"))
       lins.append(lin)
 
     # benchmark the programs

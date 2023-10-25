@@ -1,12 +1,16 @@
 from typing import Dict, List, Final, Callable, DefaultDict
 from collections import defaultdict
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
-from tinygrad.helpers import dtypes, ImageDType, DEBUG, getenv
+from tinygrad.helpers import DType, dtypes, ImageDType, DEBUG, getenv
 from tinygrad.codegen.linearizer import  UOp, UOps
 from triton.compiler import compile as triton_compile  # type: ignore
-import hashlib
+import linecache
 import math
 import re
+
+triton_dtypes = {dtypes.double: "tl.float64", dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.bool: "tl.int1", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64", dtypes.uint32: "tl.uint32", dtypes.uint64: "tl.uint64"}
+signature_dtypes = {dtypes.double: "*fp64",dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.bool: "*i8", dtypes.int8: "*i1", dtypes.uint8: "*u8", dtypes._arg_int32: "i32", dtypes.int32: "*i32", dtypes.int64: "*i64", dtypes.uint32: "*u32", dtypes.uint64: "*u64"}
+
 def next_power_of_2(x):
   return 1 << (x - 1).bit_length()
 
@@ -26,11 +30,14 @@ def remove_single_scalar_curly_braces(ptx_code):
   return '\n'.join([re.sub(r'\{\s*(%\w+)\s*\}', r'\1', line) for line in ptx_code.split('\n')])
 
 def render_const(args):
-  return (('-' if args<0 else '') + 'float("inf")') if math.isinf(args) else ('float("nan")' if math.isnan(args) else str(args))
+  return (('-' if args<0 else '') + 'tl.where(1,float("inf"),0)') if math.isinf(args) else ('tl.where(1,float("nan"),0)' if math.isnan(args) else str(args))
 
-def define_scalar(local_size, triton_type, args):
-  if len(local_size) > 0: return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{render_const(args)}, dtype={triton_type})"
-  return f"(tl.where(1, {render_const(args)}, {render_const(args)}).to({triton_type}))"
+def render_cast(x:str, dtype:DType):
+  return f"{x}.to({triton_dtypes[dtype]})"
+
+def define_scalar(local_size, dtype, args):
+  if len(local_size) > 0: return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{render_const(args)}, dtype={triton_dtypes[dtype]})"
+  return render_const(args)
 
 def uops_to_triton(function_name:str, uops:List[UOp]):
   local_size: List[int] = []
@@ -58,37 +65,37 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     UnaryOps.SQRT: lambda x,: f"tl.sqrt({x})",
     UnaryOps.NEG: lambda x,: f"-{x}",
     BinaryOps.ADD: lambda x,y,: f"({x}+{y})", BinaryOps.SUB: lambda x,y,: f"({x}-{y})",
-    BinaryOps.MUL: lambda x,y,: f"({x}*{y})", BinaryOps.DIV: lambda x,y,: f"({x}/{y})",
+    BinaryOps.MUL: lambda x,y,: f"({x}*{y})", BinaryOps.DIV: lambda x,y,: f"({x}/{y})" if y != '0.0' else f"{x}*tl.where({x}==0.0, float('nan'), float('inf'))",
     BinaryOps.MAX: lambda x,y,: f"tl.maximum({x},{y})",
     BinaryOps.CMPLT: lambda x,y,: f"({x}<{y})",
-    BinaryOps.MOD: lambda x,y,: f"({x}%{y})",
+    BinaryOps.MOD: lambda x,y,: f"tl.abs({x})%tl.abs({y})*tl.where({x}<0,-1,1)",
     TernaryOps.MULACC: lambda x,y,z,: f"(({x}*{y})+{z})",
     TernaryOps.WHERE: lambda x,y,z,: f"tl.where({x},{y},{z})",
   }
-  def int_div(x,y): return f"({x}//{y})"
-  triton_dtypes = {dtypes.double: "tl.float64", dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.bool: "tl.int1", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64"}
-  signature_dtypes = {dtypes.double: "*fp64",dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.bool: "*i8", dtypes.int8: "*i1", dtypes.uint8: "*u8", dtypes._arg_int32: "i32", dtypes.int32: "*i32", dtypes.int64: "*i64"}
+  def int_div(x,y): return f"({x}//{y})" if y != '0' else f"{x}*tl.where({x}==0, float('nan'), float('inf'))"
   for u in uops:
     uop,dtype,vin,args,_ = u
     if uop == UOps.LOOP:
-      kk(f"for {ssa(u, 'ridx')} in range({vin[0].arg}, {r[vin[1]]}+{define_scalar([], 'tl.int32', 1)}):")
+      kk(f"for {ssa(u, 'ridx')} in range({vin[0].arg}, {r[vin[1]]}):")
       depth += 1
     elif uop == UOps.END: depth -= 1
     elif uop == UOps.ALU:
       assert dtype is not None
       val = code_for_op[args](*[r[x] for x in vin])
       if child_count[u] <=1 or dtypes.is_int(dtype): r[u] = int_div(*[r[x] for x in vin]) if args == BinaryOps.DIV and dtypes.is_int(dtype) else val
-      else: kk(f"{ssa(u, 'alu')} = ({val}).to({triton_dtypes[dtype]})")
+      else: kk(f"{ssa(u, 'alu')} = ({val})")
     elif uop == UOps.LOAD:
       assert dtype is not None
-      if len(vin) == 2: kk(f"{ssa(u, 'val')} = tl.load({r[vin[0]]} + { fill_dims_for_idx(r[vin[1]], dims)}, mask = {render_valid(valid)}).to({triton_dtypes[vin[0].dtype]})")# type: ignore
-      else: kk(f"{ssa(u, 'val')} = tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+{fill_dims_for_idx(r[vin[1]],dims)} , mask={render_valid(valid+[r[vin[2]]])}), 0.0).to({triton_dtypes[vin[0].dtype]})")# type: ignore
-    elif uop == UOps.DEFINE_ACC: kk(f"{ssa(u, 'acc')} = {define_scalar(local_size, triton_dtypes[dtype], args).replace('//', '/')}") # type: ignore
-    elif uop == UOps.CONST: r[u] = define_scalar([], triton_dtypes[dtype], args) # type: ignore
+      if len(vin) == 2: kk(f"{ssa(u, 'val')} = {render_cast(f'tl.load({r[vin[0]]} + { fill_dims_for_idx(r[vin[1]], dims)}, mask = {render_valid(valid)})', dtype)}")
+      else: kk(f"{ssa(u, 'val')} = {render_cast(f'tl.where({r[vin[2]]}, tl.load({r[vin[0]]}+{fill_dims_for_idx(r[vin[1]],dims)} , mask={render_valid(valid+[r[vin[2]]])}), 0.0)', dtype)}")
+    elif uop == UOps.DEFINE_ACC: kk(f"{ssa(u, 'acc')} = {define_scalar(local_size, dtype, args).replace('//', '/')}")
+    elif uop == UOps.CONST: r[u] = define_scalar([], dtype, args)
+    elif uop == UOps.PHI:
+      kk(f"{r[vin[0]]} = {r[vin[1]].replace('//', '/')}")
+      r[u] = r[vin[0]]
     elif uop == UOps.STORE:
       assert not isinstance(dtype, ImageDType), "unimplemented: image store"
-      if len(vin) == 2: kk(f"{r[vin[0]]} =  {r[vin[1]].replace('//', '/')}")
-      else: kk(f"tl.store({r[vin[0]]} + {r[vin[1]]}, {r[vin[2]].replace('//', '/')}, mask = {render_valid(valid)}) ")
+      kk(f"tl.store({r[vin[0]]} + {r[vin[1]]}, {r[vin[2]].replace('//', '/')}, mask = {render_valid(valid)}) ")
     elif uop == UOps.DEFINE_GLOBAL:
       bufs.append(args)
       signatures.append(signature_dtypes[args[1]])
@@ -112,14 +119,11 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   local_size = [acc_local_size] + [1] * (len(local_size) - 1)
 
   if DEBUG >=4: print(prg)
-  hsh = hashlib.md5(prg.encode('utf-8')).hexdigest()
-  fn = f"/tmp/{hsh}.py"
-  with open(fn, "w") as f: f.write(prg)
-  codeObject = compile(prg, fn, "exec")
-  exec(codeObject, globals()) # pylint: disable=W0122\
+  getlines = linecache.getlines
+  linecache.getlines = lambda filename, module_globals=None: prg.splitlines(keepends=True) if "<triton>" == filename else getlines(filename, module_globals)
+  exec(compile(prg, "<triton>", "exec"), globals()) # pylint: disable=W0122\
   compiled = triton_compile(globals()[function_name], signature=",".join(signatures), device_type="cuda", debug=False, cc=(35 if getenv("CUDACPU", 0) else None))
-  prg = compiled.asm["ptx"]
-  if getenv("CUDACPU"): prg = remove_single_scalar_curly_braces(prg.split(".file")[0].split(".visible .func")[0])
+  prg = remove_single_scalar_curly_braces(compiled.asm["ptx"].split(".file")[0].split(".visible .func")[0])
   max_local_size =  [int(x) for x in prg.split(".maxntid ")[1].split("\n")[0].split(", ")]
   for i in range(len(local_size)): local_size[i] = min(local_size[i], max_local_size[i])
-  return prg, local_size, {"binary":True, "shared":compiled.metadata["shared"]}
+  return prg, {"binary":True, "shared":compiled.metadata["shared"], "local_size_override":local_size +  [1]*(3-len(local_size))}

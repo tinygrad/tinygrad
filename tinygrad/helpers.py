@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, pathlib, hashlib, tempfile
+import os, functools, platform, time, re, contextlib, operator, pathlib, hashlib, tempfile, pickle, sqlite3
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -21,7 +21,7 @@ def all_int(t: Tuple[Any, ...]) -> TypeGuard[Tuple[int, ...]]: return all(isinst
 def colored(st, color, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
 def ansilen(s): return len(re.sub('\x1b\\[(K|.*?m)', '', s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
-def flatten(l:Iterator): return [item for sublist in l for item in sublist]
+def flatten(l:Union[List, Iterator]): return [item for sublist in l for item in sublist]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def merge_dicts(ds:Iterable[Dict]) -> Dict:
@@ -59,7 +59,7 @@ class ContextVar:
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
 
-DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
+DEBUG, IMAGE, BEAM = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0)
 GRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 
 class Timing(contextlib.ContextDecorator):
@@ -87,6 +87,10 @@ class ImageDType(DType):
     self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
     super().__init__()
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
+  # TODO: fix this to not need these
+  def __hash__(self): return hash((super().__hash__(), self.shape))
+  def __eq__(self, x): return super().__eq__(x) and self.shape == x.shape
+  def __ne__(self, x): return super().__ne__(x) or self.shape != x.shape
 
 class PtrDType(DType):
   def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.np, dt.sz)
@@ -159,3 +163,46 @@ def cache_compiled(func):
       output_file.rename(cache_path)
     return cache_path.read_bytes()
   return wrapper
+
+# *** universal database cache ***
+
+CACHEDB = getenv("CACHEDB", "/tmp/tinygrad_cache")
+VERSION = 2
+_db_connection = None
+def db_connection():
+  global _db_connection
+  if _db_connection is None:
+    _db_connection = sqlite3.connect(CACHEDB)
+    if DEBUG >= 3: _db_connection.set_trace_callback(print)
+    if diskcache_get("meta", "version") != VERSION:
+      print("cache is out of date, clearing it")
+      os.unlink(CACHEDB)
+      _db_connection = sqlite3.connect(CACHEDB)
+      if DEBUG >= 3: _db_connection.set_trace_callback(print)
+      diskcache_put("meta", "version", VERSION)
+  return _db_connection
+
+def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
+  if isinstance(key, (str,int)): key = {"key": key}
+  try:
+    res = db_connection().cursor().execute(f"SELECT val FROM {table} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
+  except sqlite3.OperationalError:
+    return None  # table doesn't exist
+  if (val:=res.fetchone()) is not None:
+    return pickle.loads(val[0])
+  return None
+
+_db_tables = set()
+def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
+  if isinstance(key, (str,int)): key = {"key": key}
+  conn = db_connection()
+  cur = conn.cursor()
+  if table not in _db_tables:
+    TYPES = {str: "text", bool: "integer", int: "integer", float: "numeric", bytes: "blob"}
+    ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
+    cur.execute(f"CREATE TABLE IF NOT EXISTS {table} ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
+    _db_tables.add(table)
+  cur.execute(f"REPLACE INTO {table} ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val), ))
+  conn.commit()
+  cur.close()
+  return val
