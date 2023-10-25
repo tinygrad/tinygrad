@@ -70,9 +70,7 @@ class Node:
     raise RuntimeError(f"not supported: {b} // {self}")
   def __floordiv__(self, b:Union[Node,int], factoring_allowed=True):
     if isinstance(b, Node):
-      if b.__class__ is NumNode: return self // b.b
-      if self == b: return NumNode(1)
-      if (b - self).min > 0 and self.min >= 0: return NumNode(0) # b - self simplifies the node
+      if self.min//b.min == self.max//b.max: return self.max//b.max
       raise RuntimeError(f"not supported: {self} // {b}")
     assert b != 0
     if b < 0: return (self//-b)*-1
@@ -274,11 +272,9 @@ class SumNode(RedNode):
       de_num = sum(node.b for node in b.flat_components if node.__class__ is NumNode)
       if nu_num > 0 and de_num and (d:=nu_num//de_num) > 0: return (self-b*d) % b
     if isinstance(b, Node) and (b - self).min > 0: return self # b - self simplifies the node
-    new_nodes: List[Node] = []
-    for x in self.nodes:
-      if x.__class__ is NumNode: new_nodes.append(Variable.num(x.b%b))
-      elif isinstance(x, MulNode): new_nodes.append(x.a * (x.b%b))
-      else: new_nodes.append(x)
+
+    new_nodes = [x%b if x.__class__ in [MulNode, NumNode] else x for x in self.nodes]
+
     return Node.__mod__(Node.sum(new_nodes), b)
 
   def __lt__(self, b:Union[Node,int]):
