@@ -368,14 +368,14 @@ class TestLinearizerOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 2)],
       [Opt(OptOps.LOCAL, 0, 8)],
       [Opt(OptOps.LOCAL, 0, 16)], # Checking how it works with locals
-      [Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 0, 64)], # Checking how it works with grouped reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.GROUPTOP, 0, 16)],
-      [Opt(OptOps.LOCAL, 0, 32), Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 64)], # Checking how it works with locals + grouped reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)], # Checking how it works with locals + grouped reduce + upcasts
+      [Opt(OptOps.GROUP, 0, 2)],
+      [Opt(OptOps.GROUP, 0, 32)],
+      [Opt(OptOps.GROUP, 0, 64)], # Checking how it works with grouped reduce
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUP, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.GROUP, 0, 16)],
+      [Opt(OptOps.LOCAL, 0, 32), Opt(OptOps.GROUP, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUP, 0, 64)], # Checking how it works with locals + grouped reduce
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)], # Checking how it works with locals + grouped reduce + upcasts
     ])
 
   def test_upcasts(self):
@@ -422,14 +422,14 @@ class TestLinearizerOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4)],
       [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 32)],
       [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.LOCAL, 1, 8)], # Checking how it works with locals
-      [Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.UNROLL, 0, 4)], # Checking how it works with grouped_reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 0, 4)], # Checking how it works with local+grouped_reduce
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)], # Checking all together
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 8)], # Full global upcast + local
+      [Opt(OptOps.GROUP, 0, 2)],
+      [Opt(OptOps.GROUP, 0, 32)],
+      [Opt(OptOps.GROUP, 0, 32), Opt(OptOps.UNROLL, 0, 4)], # Checking how it works with grouped_reduce
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUP, 0, 32)],
+      [Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUP, 0, 32)],
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUP, 0, 4)], # Checking how it works with local+grouped_reduce
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)], # Checking all together
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 8)], # Full global upcast + local
     ])
 
   def test_double_reduce(self):
@@ -442,18 +442,18 @@ class TestLinearizerOpts(unittest.TestCase):
     r = a.sum(axis=(1,3))
     helper_linearizer_opt(r, [
       # openCL / GPU=1 is 256 max threads
-      [Opt(OptOps.GROUPTOP, 0, 2)], [Opt(OptOps.GROUPTOP, 0, 32)],
-      [Opt(OptOps.GROUPTOP, 1, 2)], [Opt(OptOps.GROUPTOP, 1, 32)], # Checking how it works with 1 grouped_reduce.
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 2)],
-      [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 64)], # Checking how it works with 2 grouped_reduces.
-      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 0, 4)],
-      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 32), Opt(OptOps.UNROLL, 2, 4)], # Checking how it works with 2 grouped_reduces + upcasts.
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4)],
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 32), Opt(OptOps.UNROLL, 1, 4)], # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)], # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 0, 2)], # No globals
+      [Opt(OptOps.GROUP, 0, 2)], [Opt(OptOps.GROUP, 0, 32)],
+      [Opt(OptOps.GROUP, 1, 2)], [Opt(OptOps.GROUP, 1, 32)], # Checking how it works with 1 grouped_reduce.
+      [Opt(OptOps.GROUP, 0, 2), Opt(OptOps.GROUP, 1, 2)],
+      [Opt(OptOps.GROUP, 0, 16), Opt(OptOps.GROUP, 1, 2)],
+      [Opt(OptOps.GROUP, 0, 4), Opt(OptOps.GROUP, 1, 64)], # Checking how it works with 2 grouped_reduces.
+      [Opt(OptOps.GROUP, 0, 16), Opt(OptOps.GROUP, 1, 2), Opt(OptOps.UNROLL, 0, 4)],
+      [Opt(OptOps.GROUP, 0, 2), Opt(OptOps.GROUP, 1, 32), Opt(OptOps.UNROLL, 2, 4)], # Checking how it works with 2 grouped_reduces + upcasts.
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUP, 0, 4), Opt(OptOps.GROUP, 1, 4)],
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUP, 0, 2), Opt(OptOps.GROUP, 1, 32), Opt(OptOps.UNROLL, 1, 4)], # Checking how it works with 2 grouped_reduces + upcasts + locals.
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUP, 0, 8), Opt(OptOps.GROUP, 1, 4), Opt(OptOps.UPCAST, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUP, 0, 8), Opt(OptOps.GROUP, 1, 4), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)], # Checking how it works with 2 grouped_reduces + upcasts + locals.
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUP, 0, 4), Opt(OptOps.GROUP, 1, 4), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 0, 2)], # No globals
     ])
 
   def test_tensor_core_opts(self):
@@ -472,11 +472,11 @@ class TestLinearizerOpts(unittest.TestCase):
       [Opt(OptOps.UPCAST, 1, 4)],
       [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
       [Opt(OptOps.UNROLL, 0, 2)], # check last unroll
-      [Opt(OptOps.LASTLOCAL, 0, 4)], # check last local
+      [Opt(OptOps.LOCAL, 0, 4)], # check last local
       [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of last unroll and last local
       [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2)],
       [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LASTLOCAL, 0, 2)],
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
       # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
     ], apply_tc=True)
 
