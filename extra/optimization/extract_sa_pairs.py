@@ -52,7 +52,7 @@ def dataset_from_cache(fn):
     act = k[-1]
     log_ratio = math.log(old_tm/new_tm)
     #print(f"ratio: {old_tm/new_tm:6.2f}x (log {log_ratio:5.2f}) from {str(act):50s} on {lin.colored_shape()}")
-    S.append(lin_to_feats(lin, use_sts=False))
+    S.append(lin_to_feats(lin, use_sts=True))
     A.append(actions.index(act))
     V.append([log_ratio])  # NOTE: i have written the bug many times with this having the wrong dim
 
