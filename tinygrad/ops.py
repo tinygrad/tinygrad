@@ -195,7 +195,6 @@ class GraphBatchExecutor(BasicBatchExecutor):
 
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
-    if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args or not runtime_args['binary']): print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
 
   def optimize_local_size(self, global_size, rawbufs) -> List[int]:
@@ -241,13 +240,13 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, runtime, synchronize=lambda: None, batch_exec=BasicBatchExecutor):
-    self.buffer, self.linearizer_opts, self.renderer, self.runtime, self.synchronize, self.batch_exec = buffer, linearizer_opts, renderer, runtime, synchronize, batch_exec
+  def __init__(self, buffer: Type[RawBuffer], compiler, runtime, synchronize=lambda: None, batch_exec=BasicBatchExecutor):
+    self.buffer, self.compiler, self.runtime, self.synchronize, self.batch_exec = buffer, compiler, runtime, synchronize, batch_exec
     self.method_cache: Dict[LazyOp, ASTRunner] = {}
 
   def to_program(self, k):
     k.linearize()
-    src, runtime_args = self.renderer(k.function_name, k.uops)
+    src, runtime_args = self.compiler.compile(k.function_name, k.uops)
     return ASTRunner(k.function_name, src, k.global_size, k.local_size,
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
                      display_name=k.display_name, runtime_args=runtime_args).build(self.runtime, self.batch_exec)
@@ -283,20 +282,20 @@ class Compiled:
     # compilation time
     def get_program():
       from tinygrad.codegen.linearizer import Linearizer
-      k = Linearizer(ast, self.linearizer_opts)
+      k = Linearizer(ast, self.compiler.linearizer_opts)
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
       if not getenv("NOOPT"):
         if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
         if BEAM >= 1 and not vars_from_ast(ast):
           # allocate a scratch buffer if output buffer is also input
           test_rawbuffers = [self.buffer(rawbuffers[0].size, rawbuffers[0].dtype), *rawbuffers[1:]] if rawbuffers[0] in rawbuffers[1:] else rawbuffers
-          kb = Linearizer(ast, self.linearizer_opts)
+          kb = Linearizer(ast, self.compiler.linearizer_opts)
           kb.required_optimizations()
           kb.dont_use_locals = bool(getenv("NOLOCALS"))
           from tinygrad.features.search import beam_search, time_linearizer
           lins = [(f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))), (("tc" if used_tensor_cores else "hc"), k)]
           if used_tensor_cores:
-            lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
+            lins.append(("hc", Linearizer(ast, self.compiler.linearizer_opts)))
             lins[-1][1].hand_coded_optimizations()
           timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, disable_cache=True)) for nm, tk in lins], key=lambda x: x[2])
           if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
