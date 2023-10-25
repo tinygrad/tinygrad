@@ -270,7 +270,11 @@ class SumNode(RedNode):
       if nu_num > 0 and de_num and (d:=nu_num//de_num) > 0: return (self-b*d) % b
     if isinstance(b, Node) and (b - self).min > 0: return self # b - self simplifies the node
 
-    new_nodes = [x%b if x.__class__ in [MulNode, NumNode] else x for x in self.nodes]
+    new_nodes: List[Node] = []
+    for x in self.nodes:
+      if x.__class__ is NumNode: new_nodes.append(Variable.num(x.b%b))
+      elif isinstance(x, MulNode): new_nodes.append(x.a * (x.b%b))
+      else: new_nodes.append(x)
 
     return Node.__mod__(Node.sum(new_nodes), b)
 
