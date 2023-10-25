@@ -9,8 +9,6 @@ from tinygrad.graph import print_tree
 from tinygrad.lazy import vars_from_ast
 from tinygrad.shape.symbolic import sym_infer
 
-import shelve
-global_db = shelve.open("/tmp/greedy_cache")
 
 if __name__ == "__main__":
   mdl = ResNet50()
@@ -58,12 +56,7 @@ if __name__ == "__main__":
     # try a beam search
     if getenv("BEAM"):
       lin = Linearizer(si.ast, device.linearizer_opts)
-      if str(lin.ast) in global_db:
-        for ao in global_db[str(lin.ast)]:
-          lin.apply_opt(ao)
-      else:
-        lin = beam_search(lin, rawbufs, getenv("BEAM"))
-        global_db[str(lin.ast)] = lin.applied_opts
+      lin = beam_search(lin, rawbufs, getenv("BEAM"))
       lins.append(lin)
 
     # benchmark the programs

@@ -1,5 +1,5 @@
 from __future__ import annotations
-import time, importlib, inspect, functools, pathlib, itertools, random
+import time, importlib, inspect, functools, pathlib, itertools, random, math, collections
 import numpy as np
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
@@ -173,6 +173,27 @@ class BasicBatchExecutor:
       GlobalCounters.global_ops += sym_infer(prg.op_estimate, variables)
       GlobalCounters.global_mem += prg.mem_estimate
 
+class GraphBatchExecutor(BasicBatchExecutor):
+  def __init__(self, jit_cache:List[Tuple[Any, Any, Any]]): self.graphs: List[Any] = []
+  def split_into_graphs(self, jit_cache:List[Tuple[Any, Any, Any]]):
+    # Splitting the JIT cache into batches to enable parallel execution (cpu+gpu). Batch sizes follow a logarithmic pattern: 4, 4, 8, 16, 32, and so on.
+    # This helps push tasks to the GPU while the CPU updates the next graph.
+    for i in range(2, max(math.ceil(math.log2(len(jit_cache))), 2) + 1):
+      self.create_graph(jit_cache[(1<<(i-1) if i > 2 else 0):(1<<i)])
+
+  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
+    if not self.graphs: return super().exec(jit_cache, updatable_entries) # No graph is created, switch to basic executor.
+    update_keys_per_batch = collections.defaultdict(list)
+    for j in updatable_entries.keys(): update_keys_per_batch[max(0, math.ceil(math.log2(j+1))-2)].append(j)
+    for instid in range(len(self.graphs)):
+      for jcid in update_keys_per_batch[instid]: self.update_node(instid, jcid, jit_cache[jcid][0], jit_cache[jcid][1], jit_cache[jcid][2], updated_args=updatable_entries[jcid])
+      self.exec_instance(instid)
+    super().recalc_stat(jit_cache)
+
+  def create_graph(self, jit_cache: List[Tuple[Any, Any, Any]]): raise NotImplementedError("must be implemented")
+  def update_node(self, instid, jcid, prg, pargs, variables, updated_args=None): raise NotImplementedError("must be implemented")
+  def exec_instance(self, instid): raise NotImplementedError("must be implemented")
+
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
     if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args or not runtime_args['binary']): print(prg)
@@ -266,17 +287,19 @@ class Compiled:
       k = Linearizer(ast, self.linearizer_opts)
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
       if not getenv("NOOPT"):
-        if not k.apply_tensor_cores(getenv("TC", 1)): k.hand_coded_optimizations()
+        if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
         if BEAM:
           kb = Linearizer(ast, self.linearizer_opts)
           kb.required_optimizations()
           kb.dont_use_locals = bool(getenv("NOLOCALS"))
           from tinygrad.features.search import beam_search, time_linearizer
-          kb = beam_search(kb, rawbuffers, BEAM.value)
-          baseline, beamtime = time_linearizer(k, rawbuffers, allow_test_size=False, disable_cache=True), time_linearizer(kb, rawbuffers, allow_test_size=False, disable_cache=True)
-          if beamtime < baseline:
-            if DEBUG >= 1: print(f"beam search {beamtime*1e6:<12.2f} beat baseline {baseline*1e6:<12.2f} by {baseline/beamtime:.2f}x")
-            k = kb
+          lins = [(f"beam{BEAM.value}", beam_search(kb, rawbuffers, BEAM.value)), (("tc" if used_tensor_cores else "hc"), k)]
+          if used_tensor_cores:
+            lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
+            lins[-1][1].hand_coded_optimizations()
+          timed = sorted([(nm, tk, time_linearizer(tk, rawbuffers, allow_test_size=False, disable_cache=True)) for nm, tk in lins], key=lambda x: x[2])
+          if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
+          k = timed[0][1]
       return self.to_program(k)
 
     if getenv("ENABLE_METHOD_CACHE", 1):

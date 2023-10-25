@@ -1,9 +1,9 @@
 import numpy as np
-import ctypes, functools, math, collections
+import ctypes, functools
 import extra.hip_wrapper as hip
 from typing import Tuple, Any, List
 from tinygrad.helpers import DEBUG, getenv, cache_compiled
-from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
+from tinygrad.ops import Compiled, ASTRunner, GraphBatchExecutor
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
@@ -23,68 +23,60 @@ class HIPAllocator(LRUAllocator):
   def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
 
 class _HIP:
-  def __init__(self):
+  def __init__(self, device=None):
+    self.default_device = device or getenv("HIP_DEFAULT_DEVICE")
+    hip.hipSetDevice(self.default_device)
     self.device_count = hip.hipGetDeviceCount()
-    self.default_device = getenv("HIP_DEFAULT_DEVICE")
     self.allocator = HIPAllocator(hip.hipGetDeviceProperties(self.default_device).totalGlobalMem)
 HIP = _HIP()
 
-class HIPGraph(BasicBatchExecutor):
+class HIPGraph(GraphBatchExecutor):
   def __init__(self, jit_cache: List[Tuple[Any, Any, Any]]):
-    self.info, self.graphs, self.instances = [], [], []
+    super().__init__(jit_cache)
+    self.jc_info: List[Tuple[Any, Any]] = []
 
     # Check if HIPGraph could run the given jit_cache. If not, no hip graph is created and HIPGraph is a BasicBatchExecutor.
     if DEBUG>0 or not all(isinstance(prg, ASTRunner) and isinstance(prg.clprg, HIPProgram) for prg,_,_ in jit_cache): return # Only HIPProgram can be captured.
     if len(set([pargs[0]._device for _,pargs,_ in jit_cache])) != 1: return # Only one device is supported now.
 
-    # Splitting the JIT cache into batches to enable parallel execution (cpu+gpu). Batch sizes follow a logarithmic pattern: 4, 8, 16, 32, and so on.
-    # This helps push tasks to the GPU while the CPU updates the next graph.
-    capture_stream = hip.hipStreamCreate()
-    hip.hipStreamBeginCapture(capture_stream)
-    for j,(prg, pargs, variables) in enumerate(jit_cache):
-      # Capture node
-      global_size, local_size = prg.launch_dims(variables)
-      _, _, graph, deps = hip.hipStreamGetCaptureInfo_v2(capture_stream)
-      params = hip.buildKernelNodeParams(*pargs, *variables.values(), func=prg.clprg.prgs[pargs[0]._device], grid=global_size, block=local_size)
-      graph_node = hip.hipGraphAddKernelNode(graph, deps, params)
-      hip.hipStreamUpdateCaptureDependencies(capture_stream, [graph_node], hip.hipStreamSetCaptureDependencies)
-      self.info.append((self.__get_batch(j), graph_node, params))
-
-      # If the next batch is different or this is the last entry, finish the graph.
-      if self.__get_batch(j) != self.__get_batch(j+1) or j==len(jit_cache)-1:
-        self.graphs.append(hip.hipStreamEndCapture(capture_stream))
-        self.instances.append(hip.hipGraphInstantiate(self.graphs[-1]))
-        if j!=len(jit_cache)-1: hip.hipStreamBeginCapture(capture_stream)
-    hip.hipStreamDestroy(capture_stream)
+    self.split_into_graphs(jit_cache)
 
   def __del__(self):
-    for inst in self.instances: hip.hipGraphExecDestroy(inst)
-    for gr in self.graphs: hip.hipGraphDestroy(gr)
+    for inst,gr in self.graphs:
+      hip.hipGraphExecDestroy(inst)
+      hip.hipGraphDestroy(gr)
 
-  def __update(self, nodeid, inst, prg, pargs, variables, updated_args=None):
-    batchid, graph_node, params = self.info[nodeid]
+  def create_graph(self, jit_cache: List[Tuple[Any, Any, Any]]):
+    graph, graph_node = hip.hipGraphCreate(), None
+
+    # Capture nodes.
+    for prg, pargs, variables in jit_cache:
+      global_size, local_size = prg.launch_dims(variables)
+      params = hip.buildKernelNodeParams(*pargs, *variables.values(), func=prg.clprg.prgs[pargs[0]._device], grid=global_size, block=local_size)
+      graph_node = hip.hipGraphAddKernelNode(graph, [graph_node] if graph_node else [], params)
+      self.jc_info.append((graph_node, params))
+
+    self.graphs.append((hip.hipGraphInstantiate(graph), graph))
+
+  def update_node(self, instid, jcid, prg, pargs, variables, updated_args=None):
+    graph_node, params = self.jc_info[jcid]
     global_size, local_size = prg.launch_dims(variables)
     hip.updateKernelNodeParams(params, *pargs, *variables.values(), grid=global_size, block=local_size, updated_args=updated_args)
-    hip.hipGraphExecKernelNodeSetParams(inst, graph_node, params)
-    self.info[nodeid] = (batchid, graph_node, params)
+    hip.hipGraphExecKernelNodeSetParams(self.graphs[instid][0], graph_node, params)
 
-  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
-    if not self.instances: return super().exec(jit_cache, updatable_entries) # No graph is created switch to basic executor.
-    update_keys_per_batch = collections.defaultdict(list)
-    for j in updatable_entries.keys(): update_keys_per_batch[self.info[j][0]].append(j)
-    for i,inst in enumerate(self.instances):
-      for j in update_keys_per_batch[i]: self.__update(j, inst, jit_cache[j][0], jit_cache[j][1], jit_cache[j][2], updated_args=updatable_entries[j])
-      hip.hipGraphLaunch(inst)
-    super().recalc_stat(jit_cache)
-  def __get_batch(self, j): return int(math.log(j+4,2)-2) # Batch sizes are logarithmic 4,8,16,32,...
+  def exec_instance(self, instid): hip.hipGraphLaunch(self.graphs[instid][0])
 
 class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
-  def __init__(self, size, dtype, device=str(HIP.default_device)): super().__init__(size, dtype, allocator=HIP.allocator, **{'device': int(device)})
+  def __init__(self, size, dtype, device=HIP.default_device, buf=None, allocator=HIP.allocator): super().__init__(size, dtype, buf=buf, allocator=allocator, **{'device': int(device)})
   def _copyin(self, x:np.ndarray):
-    x = np.require(x, requirements='C')
-    hip.hipMemcpyAsync(self._buf, x.ctypes.data, self.size * self.dtype.itemsize, hip.hipMemcpyHostToDevice, 0)
-  def _copyout(self, x:np.ndarray): hip.hipMemcpy(x.ctypes.data, self._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToHost)
-  def _transfer(self, x): hip.hipMemcpyAsync(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice, 0)
+    hip.hipSetDevice(self._device)
+    hip.hipMemcpyAsync(self._buf, np.require(x, requirements='C').ctypes.data, self.size * self.dtype.itemsize, hip.hipMemcpyHostToDevice, 0)
+  def _copyout(self, x:np.ndarray):
+    hip.hipSetDevice(self._device)
+    hip.hipMemcpy(x.ctypes.data, self._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToHost)
+  def _transfer(self, x):
+    hip.hipSetDevice(x._device)
+    hip.hipMemcpy(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice)
 
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):

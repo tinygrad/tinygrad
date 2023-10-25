@@ -24,7 +24,7 @@ class TinyJit:
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
 
   def __call__(self, *args, **kwargs) -> Any:
-    if Device.DEFAULT not in JIT_SUPPORTED_DEVICE: return self.fxn(*args, **kwargs)  # only jit on supported device
+    if Device.DEFAULT.split(":")[0] not in JIT_SUPPORTED_DEVICE: return self.fxn(*args, **kwargs)  # only jit on supported device
     # NOTE: this cast is needed since although we know realize will create a ".realized" RawBuffer, the type checker doesn't
     input_rawbuffers: Dict[Union[int, str], Tuple[RawBuffer, ShapeTracker]] = {cast(Union[int, str], k):(cast(RawBuffer, v.realize().lazydata.realized), v.lazydata.st) for k,v in itertools.chain(enumerate(args), kwargs.items()) if v.__class__ is Tensor}
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
