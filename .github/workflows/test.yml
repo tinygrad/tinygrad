@@ -187,6 +187,9 @@ jobs:
       - if: ${{ matrix.task == 'optimization' }}
         name: Test Action Space
         run: PYTHONPATH="." GPU=1 python3 extra/optimization/get_action_space.py
+      - if: ${{ matrix.task == 'optimization' }}
+        name: Test Beam Search
+        run: PYTHONPATH="." GPU=1 python3 -m pytest extra/optimization/test_beam_search.py
 
   testmetalwebgpu:
     name: Metal and WebGPU Tests
@@ -285,12 +288,13 @@ jobs:
           cache-name: cache-gpuocelot-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ubuntu22.04-gpuocelot-szymonozog-tinygrad-norebuild
+          key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480
       - name: Clone/compile gpuocelot
         if: (matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
-          git clone --recurse-submodules --single-branch --branch tinygrad https://github.com/SzymonOzog/gpuocelot.git ${{ github.workspace }}/gpuocelot
+          git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
           cd ${{ github.workspace }}/gpuocelot/ocelot
+          git checkout 18401f4245b27ca4b3af433196583cc81ef84480
           mkdir build
           cd build
           cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0
