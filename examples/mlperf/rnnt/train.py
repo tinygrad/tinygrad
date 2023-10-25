@@ -1,4 +1,5 @@
 #%%
+
 from tinygrad.tensor import Tensor
 from tinygrad.nn.optim import Adam, LAMB
 from tinygrad.nn import Embedding, Linear
@@ -13,14 +14,15 @@ import itertools
 import pathlib
 import json
 import numpy as np
+from math import prod
 import matplotlib.pyplot as plt
 import librosa
 import soundfile
 
-try:
-  import lovely_grad
-  lovely_grad.monkey_patch()
-except:pass
+# try:
+#   import lovely_grad
+#   lovely_grad.monkey_patch()
+# except:pass
 
 
 """
@@ -70,29 +72,17 @@ def feature_extract(x, x_lens):
 def load_wav(file):
   sample = soundfile.read(file)[0].astype(np.float32)
   return sample, sample.shape[0]
-def iterate(bs=1, start=0):
-  print(f"there are {len(ci)} samples in the dataset")
-  for i in range(start, len(ci), bs):
-    samples, sample_lens = zip(*[load_wav(BASEDIR / v["files"][0]["fname"]) for v in ci[i : i + bs]])
-    samples = list(samples)
-    X,X_lens = list(zip(*[feature_extract(np.array(samples[i:i+1]),np.array(sample_lens[i:i+1])) for i in range(bs)]))
-    max_len = max(X_lens)
-    X = [np.pad(X[j],((0,int(max_len[0]-X_lens[j][0])),(0,0),(0,0)),'constant') for j in range (len(X))]
-    yield (
-      np.concatenate(X,axis=1),
-      (np.array(X_lens)),
-      *text_encode([v['transcript'] for v in ci[i:i+bs]]))
-
+#%%
 characters = [*" 'abcdefghijklmnopqrstuvwxyz","<skip>"]
 c2i= dict([(c,i) for i,c in enumerate(characters)])
 charn = len(characters)
 
-def text_encode(text:list[str]):
+def text_encode(text:list[str])->(Tensor,np.ndarray):
     if isinstance(text,str):text = [text]
     seqs = [np.array([np.array(c2i[char]) for char in seq]) for seq in text]
     seq_lens = [len(s) for s in seqs]
     seqs = list(map (lambda s: np.pad(s,(0,max(seq_lens)-len(s)),"constant"),seqs))
-    return Tensor(seqs,dtype=dtypes.int16), seq_lens
+    return Tensor(seqs,dtype=dtypes.int16, requires_grad=False), Tensor(np.array(seq_lens,dtype=np.int16),requires_grad=False)
 
 def text_decode(toks:Tensor):
     ret = []
@@ -100,6 +90,21 @@ def text_decode(toks:Tensor):
         ret.append("".join([characters[int(tok)] for tok in seq ]))
     return ret
 
+from typing import Generator
+
+def iterate(bs=1, start=0)->Generator[tuple[Tensor, Tensor, Tensor, Tensor],None,None]:
+  for i in range(start, len(ci), bs):
+    samples, sample_lens = zip(*[load_wav(BASEDIR / v["files"][0]["fname"]) for v in ci[i : i + bs]])
+    samples = list(samples)
+    X,X_lens = list(zip(*[feature_extract(np.array(samples[i:i+1]),np.array(sample_lens[i:i+1])) for i in range(bs)]))
+    max_len = max(X_lens)
+    X = [np.pad(X[j],((0,int(max_len[0]-X_lens[j][0])),(0,0),(0,0)),'constant') for j in range (len(X))]
+    yield (
+      Tensor(np.concatenate(X,axis=1),requires_grad=False),
+      Tensor(np.array(X_lens),requires_grad=False),
+      *text_encode([v['transcript'] for v in ci[i:i+bs]]))
+
+#%%
 class RNNT:
   def __init__(self, input_features=240, vocab_size=29, enc_hidden_size=1024, pred_hidden_size=320, joint_hidden_size=512, pre_enc_layers=2, post_enc_layers=3, pred_layers=2, stack_time_factor=2, dropout=0.32):
     self.encoder = Encoder(input_features, enc_hidden_size, pre_enc_layers, post_enc_layers, stack_time_factor, dropout)
@@ -242,16 +247,20 @@ class Encoder:
     self.params = [*self.pre_rnn.params, *self.post_rnn.params]
 
   def __call__(self, x:Tensor, x_lens):
-    x, _ = self.pre_rnn(x, None)
-    x, x_lens = self.stack_time(x, x_lens)
-    x, _ = self.post_rnn(x, None)
+
+    Timer.start("enc.pre")
+    x, _ = self.pre_rnn.__call__(x, None)
+    Timer.start("enc.stack")
+    x, x_lens = self.stack_time.__call__(x, x_lens)
+    Timer.start("enc.post")
+    x, _ = self.post_rnn.__call__(x, None)
     return x.transpose(0, 1), x_lens
   
 class StackTime:
   def __init__(self, factor):
     self.factor = factor
 
-  def __call__(self, x:Tensor, x_lens):
+  def __call__(self, x:Tensor, x_lens:Tensor):
     x = x.pad(((0, x.shape[0] % self.factor), (0, 0), (0, 0))).permute((1,0,2))
     x = x.reshape( x.shape[0], x.shape[1] // self.factor, x.shape[2] * self.factor).permute((1,0,2))
     return x, x_lens / self.factor if x_lens is not None else None
@@ -267,7 +276,7 @@ class Prediction:
 
   def __call__(self, x, hc, m):
     emb = self.emb(x) * m
-    x_, hc = self.rnn(emb.transpose(0, 1), hc)
+    x_, hc = self.rnn.__call__(emb.transpose(0, 1), hc)
     return x_.transpose(0, 1), hc
 
 def autocompare(x,x2):
@@ -293,14 +302,20 @@ def autocompare(x,x2):
     err = np.abs(x-x2).max()
     print(err)
     return False
-
-def encode(rnnt,X,X_lens,Y,Y_lens):
-
-  enc, enc_lens  = rnnt.encoder(Tensor(X),Tensor(X_lens))
+#%%
+# @TinyJit
+def encode(rnnt:RNNT,X:Tensor,X_lens:np.ndarray,Y:Tensor,Y_lens:np.ndarray):
   bs = X.shape[1]
-  preds,hc = rnnt.prediction(Tensor.zeros((bs,1)).cat(Y,dim=1),None,1)
+  Timer.start("enc")
+  enc, enc_lens  = rnnt.encoder.__call__(X,X_lens)
+  Timer.start("pred")
+  preds,hc = rnnt.prediction.__call__(Tensor.zeros((bs,1)).cat(Y,dim=1),None,1)
+  Timer.start("joint")
   distribution = rnnt.joint.__call__(preds, enc).softmax(3).realize()
+  Timer.end("joint")
   return enc,enc_lens,distribution
+
+#%%
 
 def timestring(s):
   s = round(s)
@@ -309,23 +324,13 @@ def timestring(s):
   return f"{str(h).rjust(3)}:{str(m).rjust(2,'0')}:{str(s).rjust(2,'0')}"
 import time
 
-progress_start = time.time()
-def progressbar(batch_size=None, i = None):
-  global progress_start, skipto
-  if i == None : 
-    progress_start = time.time()
-    return
-  dur = time.time() - progress_start
-  sampled = (i+1) * batch_size
-  print (f"{sampled}/{len(ci)} done. {timestring(dur)} projected total: {timestring(dur*(len(ci)-skipto)/(sampled-skipto))}".ljust(50),end = "",flush=True)
-
 def logsumexp(a:np.ndarray,b:np.ndarray):
   mx = np.where(a>b,a,b)
   return np.log(np.exp(a-mx)+np.exp(b-mx)) + mx
 
 class LogLoss(Function):
 
-  def forward(self,distribution:LazyBuffer,X_lens:LazyBuffer,Y:LazyBuffer, Y_lens:LazyBuffer):
+  def forward(self,distribution:LazyBuffer,X_lens:Tensor,Y:LazyBuffer, Y_lens:Tensor):
     bs=Y.shape[0]
     self.device = distribution.device
     distribution:np.ndarray = distribution.realized.toCPU().reshape(distribution.shape)
@@ -413,33 +418,6 @@ rnnt= RNNT()
 opt = LAMB(rnnt.params)
 opt.zero_grad()
 
-#%%
-#%%
-
-def train(epochs = 1, skipto=0, eval_skip = 10, batch_size=4):
-  for e in epochs:
-
-    it = enumerate(iterate(batch_size))
-
-    progressbar()
-    while 1:
-      try: i,(X,X_lens,Y,Y_lens) = next(it)
-      except: break
-
-      if i*batch_size < skipto: continue
-      opt.zero_grad()
-      global enc2, enc2lens, dis2 
-      enc2,enc2lens,dis2 = encode(rnnt, X,X_lens,Y,Y_lens)
-      loss = LogLoss.apply(dis2,enc2lens.realize(), Y,Tensor(Y_lens,requires_grad=False).realize())
-
-      if  (i*batch_size > eval_skip):
-        loss.backward()
-        opt.step()
-      else: print(end="eval ")
-      loss_normal = loss.numpy() / (sum(X_lens) + sum(Y_lens))[0]
-
-      progressbar(batch_size, i)
-      print (f" normalized: {loss_normal:.5}",flush=True)
 
 
 #%%
@@ -452,7 +430,6 @@ def save(name:str = "rnnt"):
       np.save(f, par.numpy())
 
 # save()
-#%%
 
 def load(name:str ="rnnt"):
   with open(name+'.npy', 'rb') as f:
@@ -463,3 +440,64 @@ def load(name:str ="rnnt"):
       except:
         print('Could not load parameter')
 
+class Timer:
+
+  data:dict[str,any] = {}
+  running_items:set[str]= set()
+
+  def start(item:str):
+
+    for other in list(Timer.running_items):
+      if (not item.startswith(other)):
+        Timer.end(other)
+
+    Timer.running_items.add(item)
+    if not item in Timer.data: Timer.data[item] = {"time":0.}
+    Timer.data[item]["start"] = time.time()
+
+  def end(item):
+    Timer.running_items.remove(item)
+    Timer.data[item]['time'] += time.time() - Timer.data[item]['start']
+    del Timer.data[item]['start']
+
+    
+  def reset(): 
+    for v in Timer.data.values: v['time'] = 0
+
+  def table(): 
+    for k in Timer.data: print (str(k).ljust(20)+ f": {Timer.data[k]['time']:.5}")
+
+#%%
+if __name__ == "__main__":
+
+  try:
+    rnnt = RNNT()
+    batch_size = 8
+    start_time = time.time()
+    it = enumerate(iterate(batch_size))
+    Timer.start("")
+    for i,(X,X_lens,Y,Y_lens) in it:
+
+
+      last_time = time.time()
+      enc,enclens,d = encode(rnnt,X,X_lens,Y,Y_lens)
+      c = i * batch_size
+
+      delta = time.time() - last_time
+      Timer.start("forward")
+      loss = LogLoss.apply(d,enclens.realize(), Y,Y_lens.realize())
+
+      Timer.end("forward")
+
+      print (f"{timestring(time.time()-start_time)} Btime: {(time.time()-last_time):.5} ")
+      if i >= 10:
+        Timer.end("")
+        Timer.table()
+        break
+
+  except KeyboardInterrupt:pass
+
+
+
+
+# %%
