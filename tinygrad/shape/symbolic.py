@@ -89,13 +89,10 @@ class Node:
     raise RuntimeError(f"not supported: {b} % {self}")
   def __mod__(self, b:Union[Node,int]):
     if isinstance(b, Node):
-      if b.__class__ is NumNode: return self % b.b
-      if self == b: return NumNode(0)
-      if (b - self).min > 0 and self.min >= 0: return self # b - self simplifies the node
+      if self.min//b.min == self.max//b.max: return self - b*(self.max//b.max)
       raise RuntimeError(f"not supported: {self} % {b}")
     assert b > 0
     if b == 1: return NumNode(0)
-    if self.min >= 0 and self.max < b: return self
     if (self.min//b) == (self.max//b): return self - (b*(self.min//b))
     if self.min < 0: return (self - ((self.min//b)*b)) % b
     return create_node(ModNode(self, b))
