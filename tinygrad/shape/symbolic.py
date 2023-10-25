@@ -175,8 +175,7 @@ class NumNode(Node):
 
 def create_node(ret:Node):
   assert ret.min <= ret.max, f"min greater than max! {ret.min} {ret.max} when creating {type(ret)} {ret}"
-  if ret.min == ret.max: return NumNode(ret.min)
-  return ret
+  return ret if ret.min != ret.max else NumNode(ret.min)
 
 class OpNode(Node):
   def __init__(self, a:Node, b:Union[Node, int]):
@@ -189,9 +188,9 @@ class OpNode(Node):
 class LtNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], _=False): return (self.a//b) < (self.b//b)
   def get_bounds(self) -> Tuple[int, int]:
-    if isinstance(self.b, int):
-      return (1, 1) if self.a.max < self.b else (0, 0) if self.a.min >= self.b else (0, 1)
-    return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min >= self.b.max else (0, 1)
+    b_min, b_max = (self.b, self.b) if isinstance(self.b, int) else (self.b.min, self.b.max)
+    return int(self.a.max < b_min), int(self.a.min < b_max)
+
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) < (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
 class MulNode(OpNode):
@@ -219,15 +218,13 @@ class DivNode(OpNode):
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) // self.b
 
 class ModNode(OpNode):
-  def __mod__(self, b: Union[Node, int]):
-    if isinstance(b, Node) or isinstance(self.b, Node): return Node.__mod__(self, b)
-    return self.a % b if gcd(self.b, b) == b else Node.__mod__(self, b)
+  def __mod__(self, b: Union[Node, int]): return self.a % b if self.b % b == 0 else Node.__mod__(self, b)
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     if (self.b % b == 0): return (self.a//b) % (self.b//b) # put the div inside mod
     return Node.__floordiv__(self, b, factoring_allowed)
   def get_bounds(self) -> Tuple[int, int]:
     assert self.a.min >= 0 and isinstance(self.b, int)
-    return (0, self.b-1) if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b) else (self.a.min%self.b, self.a.max%self.b)
+    return (0, self.b-1)
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) % self.b
 
 class RedNode(Node):
@@ -287,21 +284,22 @@ class SumNode(RedNode):
   def __lt__(self, b:Union[Node,int]):
     lhs: Node = self
     if isinstance(b, int):
-      new_sum = []
+      nodes = []
       for x in self.nodes:
         # TODO: should we just force the last one to always be the number
         if isinstance(x, NumNode): b -= x.b
-        else: new_sum.append(x)
-      lhs = Node.sum(new_sum)
-      nodes = lhs.nodes if isinstance(lhs, SumNode) else [lhs]
+        else: nodes.append(x)
+
       muls, others = partition(nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
+
       if muls:
         # NOTE: gcd in python 3.8 takes exactly 2 args
         mul_gcd = b
         for x in muls: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell x.b is int here
-        all_others = Variable.sum(others)
+        all_others = create_rednode(SumNode, others)
         if all_others.min >= 0 and all_others.max < mul_gcd:
-          lhs, b = Variable.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
+          nodes, b = [mul//mul_gcd for mul in muls], b//mul_gcd
+      lhs = create_rednode(SumNode, nodes) if len(nodes) > 1 else nodes[0]
     return Node.__lt__(lhs, b)
 
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return Variable.sum([node.substitute(var_vals) for node in self.nodes])
