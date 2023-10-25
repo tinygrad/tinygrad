@@ -244,7 +244,6 @@ try:
     status = _libhip.hipGraphExecKernelNodeSetParams(gexec, node, ctypes.byref(params.c_struct))
     hipCheckStatus(status)
 
-
   _libhip.hipMalloc.restype = int
   _libhip.hipMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
   def hipMalloc(count):
