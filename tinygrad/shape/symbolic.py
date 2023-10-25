@@ -70,7 +70,7 @@ class Node:
     raise RuntimeError(f"not supported: {b} // {self}")
   def __floordiv__(self, b:Union[Node,int], factoring_allowed=True):
     if isinstance(b, Node):
-      if self.min//b.min == self.max//b.max: return self.max//b.max
+      if self.min//b.min == self.max//b.max: return NumNode(c) if isinstance((c:=self.max//b.max), int) else c
       raise RuntimeError(f"not supported: {self} // {b}")
     assert b != 0
     if b < 0: return (self//-b)*-1
