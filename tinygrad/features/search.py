@@ -1,4 +1,4 @@
-from typing import Dict, List, cast, DefaultDict, Optional
+from typing import Dict, List, cast, DefaultDict, Optional, Tuple
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
 from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, diskcache_get, diskcache_put, getenv
@@ -86,21 +86,30 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       pass
   return acted_lins
 
-def beam_search(lin:Linearizer, rawbufs, amt:int) -> Linearizer:
+def beam_search(lin:Linearizer, baseline_lins:List[Tuple[str, Linearizer]], rawbufs, amt:int) -> Linearizer:
   key = {"ast": str(lin.ast), "amt": amt}
   if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE"):
     ret = lin.copy()
     for o in val: ret.apply_opt(o)
     return ret
-  best_tm = time_linearizer(lin, rawbufs)   # handle the case where no actions make it faster
-  beam: List[Linearizer] = [lin]
-  while 1:
-    acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin in beam])
-    timed_lins = [(v,time_linearizer(v, rawbufs)) for v in acted_lins]
-    opts = sorted(timed_lins, key=lambda x: x[1])
-    if len(opts) == 0 or (best_tm - opts[0][1])*1e6<getenv("BEAM_STOP",5): break  # we didn't get faster
-    best_tm = opts[0][1]
-    beam = [x[0] for x in opts[:amt]]
-    if DEBUG >= 2: print(f"{opts[0][1]*1e6:12.2f} us from {len(opts):3d} actions", beam[0].colored_shape())
-  diskcache_put("beam_search", key, beam[0].applied_opts)
-  return beam[0]
+
+  timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, disable_cache=True)) for nm, tk in baseline_lins], key=lambda x: x[2])
+  if timed[0][2]*1e6 > getenv("BEAM_MIN_TIME", 10000000):
+    # meets the threshold time (in micros) to do a beam search
+    best_tm = time_linearizer(lin, rawbufs)   # handle the case where no actions make it faster
+    beam: List[Linearizer] = [lin]
+    while 1:
+      acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin in beam])
+      timed_lins = [(v,time_linearizer(v, rawbufs)) for v in acted_lins]
+      opts = sorted(timed_lins, key=lambda x: x[1])
+      if len(opts) == 0 or (best_tm-opts[0][1])*1e6<getenv("BEAM_MIN_PROGRESS",5):
+        timed.append((f"beam{amt}", opts[0][0], opts[0][1]))
+        break  # we didn't get faster by BEAM_STOP micros
+      best_tm = opts[0][1]
+      beam = [x[0] for x in opts[:amt]]
+      if DEBUG >= 2: print(f"{opts[0][1]*1e6:12.2f} us from {len(opts):3d} actions", beam[0].colored_shape())
+
+  timed = sorted(timed, key=lambda x: x[2])
+  diskcache_put("beam_search", key, timed[0][1].applied_opts)
+  if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
+  return timed[0][1]

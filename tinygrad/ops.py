@@ -291,19 +291,13 @@ class Compiled:
           kb = Linearizer(ast, self.linearizer_opts)
           kb.required_optimizations()
           kb.dont_use_locals = bool(getenv("NOLOCALS"))
-          from tinygrad.features.search import beam_search, time_linearizer
-          lins = [("hc", Linearizer(ast, self.linearizer_opts))]
-          lins[-1][1].hand_coded_optimizations()
+          from tinygrad.features.search import beam_search
+          baseline_lins = [("hc", Linearizer(ast, self.linearizer_opts))]
+          baseline_lins[-1][1].hand_coded_optimizations()
           tc_lin = Linearizer(ast, self.linearizer_opts)
           if tc_lin.apply_tensor_cores(getenv("TC", 1)):
-            lins.append(("tc", tc_lin))
-          timed = sorted([(nm, tk, time_linearizer(tk, rawbuffers, allow_test_size=False, disable_cache=True)) for nm, tk in lins], key=lambda x: x[2])
-          if timed[0][2]*1e6 > getenv("BEAM_THRESHOLD",10000000):
-            tk = beam_search(kb, rawbuffers, BEAM.value)
-            timed.append((f"beam{BEAM.value}", tk, time_linearizer(tk, rawbuffers, allow_test_size=False, disable_cache=True)))
-            timed = sorted(timed, key=lambda x: x[2])
-          if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
-          k = timed[0][1]
+            baseline_lins.append(("tc", tc_lin))
+          k = beam_search(kb, baseline_lins, rawbuffers, BEAM.value)
         else:
           if not k.apply_tensor_cores(getenv("TC", 1)): k.hand_coded_optimizations()
       return self.to_program(k)
