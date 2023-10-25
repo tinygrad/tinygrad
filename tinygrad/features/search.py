@@ -94,7 +94,7 @@ def beam_search(lin:Linearizer, baseline_lins:List[Tuple[str, Linearizer]], rawb
     return ret
 
   timed = sorted([(nm, tk, time_linearizer(tk, rawbufs, allow_test_size=False, disable_cache=True)) for nm, tk in baseline_lins], key=lambda x: x[2])
-  if timed[0][2]*1e6 > getenv("BEAM_MIN_TIME", 10000000):
+  if timed[0][2]*1e6 > getenv("BEAM_MIN_TIME", 0):
     # meets the threshold time (in micros) to do a beam search
     best_tm = time_linearizer(lin, rawbufs)   # handle the case where no actions make it faster
     beam: List[Linearizer] = [lin]
