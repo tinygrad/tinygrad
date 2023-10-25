@@ -45,12 +45,15 @@ def run():
 
     # check that the received tensor is the same as the sent tensor
     if rank == 0:
-      assert np.allclose(t.numpy(), t2.numpy())
+      assert np.allclose(t.numpy(), t2.numpy()), f"{t2.numpy()} wasn't equal to {t.numpy()}"
 
   print(f"rank {rank} passed")
 
 if __name__ == "__main__":
-  devices = ["gpu:0", "gpu:1" if not CI else "gpu:0"]
+  if getenv("HIP"):
+    devices = ["hip:0", "hip:1"]
+  else:
+    devices = ["gpu:0", "gpu:1" if not CI else "gpu:0"]
   world_size = len(devices)
 
   dist.init_oob(world_size)
