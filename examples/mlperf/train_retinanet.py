@@ -82,15 +82,23 @@ def bbox_transform(proposals, reference_boxes):
   targets = np.concatenate((targets_dx, targets_dy, targets_dw, targets_dh), axis=1)
   return targets
 
+
 def tg_targets_to_mlperf_targets(tg_targets : dict[str,Tensor]) -> List[dict[str,torch.tensor]]:
     assert(set(['regression_targets', 'classification_targets']).issubset(set(tg_targets.keys())))
     assert tg_targets['regression_targets'].shape[:2]==tg_targets['classification_targets'].shape[:2]
+    allowed_indxs = np.nonzero(tg_targets["regression_masks"])
     targets = []
-    for img_regs,img_cls in zip(tg_targets['regression_targets'],tg_targets['classification_targets']):
+    #breakpoint()
+    for img_regs,img_cls in zip(tg_targets['regression_targets'][allowed_indxs],tg_targets['classification_targets'][allowed_indxs]):
         d_img = {'boxes':torch_tensor(img_regs), 'labels':torch_tensor(img_cls)}
         targets.append(d_img)
 
     return targets
+def filter_by_reg_mask(targets):
+    res = {}
+    allowed_indxs = np.nonzero(targets["regression_masks"])
+    res["regression_targets"], res["classification_targets"] = targets["regression_targets"][allowed_indxs], res["classification_targets"][allowed_indxs]
+    return res
 class RetinaNetTrainer:
     def __init__(self,  model : RetinaNet = RetinaNet(ResNeXt50_32X4D(num_classes=None)), debug = False):
         
@@ -207,6 +215,7 @@ class RetinaNetTrainer:
 
             model_head_outputs = retina(images)
             breakpoint()
+
             reference_head_outputs = self.reference_forward(reference_images,targets)
             
             Warning("reference outputs may be losses instead of head outputs if model is being trained")
