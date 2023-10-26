@@ -47,7 +47,10 @@ def dataset_from_cache(fn):
     old_tm = min(opts_to_outcome[(ast,k[:-1])])
     new_tm = min(opts_to_outcome[(ast,k)])
     if math.isinf(old_tm) or math.isinf(new_tm) or old_tm < 1e-9 or new_tm < 1e-9: continue
-    lin = Linearizer(eval(ast))
+    try:
+      lin = Linearizer(eval(ast))
+    except Exception:
+      continue
     for opt in k[:-1]: lin.apply_opt(opt)
     act = k[-1]
     log_ratio = math.log(old_tm/new_tm)
