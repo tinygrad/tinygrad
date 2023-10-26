@@ -13,6 +13,9 @@ def is_dtype_supported(dtype: DType):
   if dtype in [dtypes.double, dtypes.float64]: return Device.DEFAULT not in ["WEBGPU", "METAL"] and not OSX
   if dtype in [dtypes.int8, dtypes.uint8]: return Device.DEFAULT != "WEBGPU"
   if dtype == dtypes.uint64: return Device.DEFAULT not in ["TORCH"]
+  if dtype == dtypes.int16: return Device.DEFAULT not in ["TORCH"]
+  if dtype == dtypes.uint16: return Device.DEFAULT not in ["TORCH"]
+  if dtype == dtypes.uint32: return Device.DEFAULT not in ["TORCH"]
   if dtype == dtypes.bfloat16: return False # TODO return Device.DEFAULT == "LLVM"
   return True
 
