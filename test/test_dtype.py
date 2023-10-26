@@ -8,15 +8,14 @@ from extra.utils import OSX, temp
 
 def is_dtype_supported(dtype: DType):
 # for GPU, cl_khr_fp16 isn't supported (except now we don't need it!)
-  if dtype == dtypes.half:
-    return not (CI and Device.DEFAULT == "GPU") and Device.DEFAULT != "WEBGPU"
+  if dtype == dtypes.half: return not (CI and Device.DEFAULT == "GPU") and Device.DEFAULT != "WEBGPU"
   if dtype in [dtypes.double, dtypes.float64]: return Device.DEFAULT not in ["WEBGPU", "METAL"] and not OSX
-  if dtype in [dtypes.int8, dtypes.uint8, dtypes.int64, dtypes.bool, dtypes.int16, dtypes.uint16]: return Device.DEFAULT != "WEBGPU"
-  if dtype == dtypes.uint64: return Device.DEFAULT not in ["TORCH", "WEBGPU"]
-  if dtype == dtypes.int16: return Device.DEFAULT not in ["TORCH", "WEBGPU"]
-  if dtype == dtypes.uint16: return Device.DEFAULT not in ["TORCH", "WEBGPU"]
-  if dtype == dtypes.uint32: return Device.DEFAULT not in ["TORCH"]
   if dtype == dtypes.bfloat16: return False # TODO return Device.DEFAULT == "LLVM"
+  if dtype in [dtypes.int8, dtypes.uint8]: return Device.DEFAULT not in ["WEBGPU"]
+  if dtype in [dtypes.int16, dtypes.uint16]: return Device.DEFAULT not in ["WEBGPU", "TORCH"]
+  if dtype == dtypes.uint32: return Device.DEFAULT not in ["TORCH"]
+  if dtype in [dtypes.int64, dtypes.uint64]: return Device.DEFAULT not in ["WEBGPU", "TORCH"]
+  if dtype == dtypes.bool: return Device.DEFAULT not in ["WEBGPU"]
   return True
 
 def get_cast_dtypes(dtype: DType) -> List[DType]: return [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_")] # dont cast internal dtypes
