@@ -20,37 +20,6 @@ def pretty_ptx(s):
   return s
 def arch(): return "sm_" + "".join([str(x) for x in pycuda.driver.Context.get_device().compute_capability()])
 
-class CUDAGraph(GraphBatchExecutor):
-  def __init__(self, jit_cache: List[Tuple[Any, Any, Any]]):
-    super().__init__(jit_cache)
-    self.jc_info: List[Any] = []
-
-    # Check if CUDAGraph could run the given jit_cache.
-    if DEBUG>0 or getenv("CUDACPU") or not all(isinstance(prg, ASTRunner) and isinstance(prg.clprg, CUDAProgram) for prg,_,_ in jit_cache): return # Only CUDAProgram can be captured.
-    self.split_into_graphs(jit_cache)
-
-  def create_graph(self, jit_cache: List[Tuple[Any, Any, Any]]):
-    try:
-      graph, graph_node = cuda.Graph(), None
-
-      for prg, pargs, variables in jit_cache:
-        global_size, local_size = prg.launch_dims(variables)
-        cuda_args = [x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) for x in [*pargs, *variables.values()]]
-        graph_node = graph.add_kernel_node(*cuda_args, block=tuple(local_size), grid=tuple(global_size), func=prg.clprg.prg, dependencies=[graph_node] if graph_node else [])
-        self.jc_info.append(graph_node)
-
-      self.graphs.append((graph.instantiate(), graph))
-    except (RuntimeError, AttributeError):
-      # CudaGraph might not be suported with the installed version of pycuda.
-      return
-
-  def update_node(self, instid, jcid, prg, pargs, variables, updated_args=None):
-    global_size, local_size = prg.launch_dims(variables)
-    cuda_args = [x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) for x in [*pargs, *variables.values()]]
-    self.graphs[instid][0].kernel_node_set_params(*cuda_args, block=tuple(local_size), grid=tuple(global_size), func=prg.clprg.prg, kernel_node=self.jc_info[jcid])
-
-  def exec_instance(self, instid): self.graphs[instid][0].launch()
-
 if getenv("CUDACPU", 0) == 1:
   import ctypes, ctypes.util
   lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
@@ -87,6 +56,37 @@ else:
     def __init__(self, size, dtype): super().__init__(size, dtype, allocator=CUDAAlloc)
     def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x.ravel(), stream) # type: ignore
     def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf) # type: ignore
+
+class CUDAGraph(GraphBatchExecutor):
+  def __init__(self, jit_cache: List[Tuple[Any, Any, Any]]):
+    super().__init__(jit_cache)
+    self.jc_info: List[Any] = []
+
+    # Check if CUDAGraph could run the given jit_cache.
+    if DEBUG>0 or getenv("CUDACPU") or not all(isinstance(prg, ASTRunner) and isinstance(prg.clprg, CUDAProgram) for prg,_,_ in jit_cache): return # Only CUDAProgram can be captured.
+    self.split_into_graphs(jit_cache)
+
+  def create_graph(self, jit_cache: List[Tuple[Any, Any, Any]]):
+    try:
+      graph, graph_node = cuda.Graph(), None # type: ignore
+
+      for prg, pargs, variables in jit_cache:
+        global_size, local_size = prg.launch_dims(variables)
+        cuda_args = [x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) for x in [*pargs, *variables.values()]]
+        graph_node = graph.add_kernel_node(*cuda_args, block=tuple(local_size), grid=tuple(global_size), func=prg.clprg.prg, dependencies=[graph_node] if graph_node else [])
+        self.jc_info.append(graph_node)
+
+      self.graphs.append((graph.instantiate(), graph))
+    except (RuntimeError, AttributeError):
+      # CudaGraph might not be suported with the installed version of pycuda.
+      return
+
+  def update_node(self, instid, jcid, prg, pargs, variables, updated_args=None):
+    global_size, local_size = prg.launch_dims(variables)
+    cuda_args = [x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) for x in [*pargs, *variables.values()]]
+    self.graphs[instid][0].kernel_node_set_params(*cuda_args, block=tuple(local_size), grid=tuple(global_size), func=prg.clprg.prg, kernel_node=self.jc_info[jcid])
+
+  def exec_instance(self, instid): self.graphs[instid][0].launch()
 
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False, shared = 0, local_size_override=None):
