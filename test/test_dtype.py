@@ -11,10 +11,10 @@ def is_dtype_supported(dtype: DType):
   if dtype == dtypes.half:
     return not (CI and Device.DEFAULT == "GPU") and Device.DEFAULT != "WEBGPU"
   if dtype in [dtypes.double, dtypes.float64]: return Device.DEFAULT not in ["WEBGPU", "METAL"] and not OSX
-  if dtype in [dtypes.int8, dtypes.uint8]: return Device.DEFAULT != "WEBGPU"
-  if dtype == dtypes.uint64: return Device.DEFAULT not in ["TORCH"]
-  if dtype == dtypes.int16: return Device.DEFAULT not in ["TORCH"]
-  if dtype == dtypes.uint16: return Device.DEFAULT not in ["TORCH"]
+  if dtype in [dtypes.int8, dtypes.uint8, dtypes.int64, dtypes.bool, dtypes.int16, dtypes.uint16]: return Device.DEFAULT != "WEBGPU"
+  if dtype == dtypes.uint64: return Device.DEFAULT not in ["TORCH", "WEBGPU"]
+  if dtype == dtypes.int16: return Device.DEFAULT not in ["TORCH", "WEBGPU"]
+  if dtype == dtypes.uint16: return Device.DEFAULT not in ["TORCH", "WEBGPU"]
   if dtype == dtypes.uint32: return Device.DEFAULT not in ["TORCH"]
   if dtype == dtypes.bfloat16: return False # TODO return Device.DEFAULT == "LLVM"
   return True
@@ -170,6 +170,7 @@ class TestInt64Dtype(unittest.TestCase):
   def test_int64_upcast_ops(self): _test_ops(a_dtype=dtypes.int64, b_dtype=dtypes.int64, target_dtype=dtypes.int64)
   def test_upcast_to_int64_ops(self): _test_ops(a_dtype=dtypes.int64, b_dtype=dtypes.int64, target_dtype=dtypes.int64)
 
+@unittest.skipIf(Device.DEFAULT == "WEBGPU", "host-shareablity is a requirement for storage buffers, but 'bool' type is not host-shareable")
 class TestBoolDtype(unittest.TestCase):
   def setUp(self):
     if not is_dtype_supported(dtypes.bool): raise unittest.SkipTest("bool not supported")
