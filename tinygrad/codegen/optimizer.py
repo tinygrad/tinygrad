@@ -11,15 +11,13 @@ from enum import Enum, auto
 
 class OptOps(Enum):
   UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); LASTLOCAL = auto(); GROUP = auto(); GROUPTOP = auto() # noqa: E702
-  MERGELOCAL = auto(); SWAPGLOBAL = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
-amt_is_axis_2 = set([OptOps.SWAPGLOBAL])
 
 @dataclass(frozen=True, order=True)
 class Opt:
   op: OptOps
   axis: int
-  amt: Optional[int]   # this can also be an alt axis
+  amt: int   # this can also be an alt axis, or nothing
   def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, amt={self.amt})"
 
 class OptimizedKernel(Kernel):
@@ -231,23 +229,10 @@ class OptimizedKernel(Kernel):
   def apply_opt(self, opt:Opt):
     self.applied_opts.append(opt)
     axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op == OptOps.GROUP or opt.op == OptOps.GROUPTOP else 0))
-    if opt.amt is not None and opt.op not in amt_is_axis_2:
-      amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
-      assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-      assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
-    else:
-      axis2 = opt.amt
-    if opt.op == OptOps.SWAPGLOBAL:        # blue
-      assert axis < self.global_dims and axis2 < self.global_dims, "global dims swap"
-      permute = list(range(self.shape_len))
-      permute[axis2], permute[axis] = permute[axis], permute[axis2]
-      self.reshape_and_permute(None, tuple(permute))
-    elif opt.op == OptOps.MERGELOCAL:      # 1 less cyan
-      assert axis+1 < self.local_dims, "both local"
-      lsplit = self.first_reduce-self.local_dims
-      self.reshape_and_permute(lambda x: x[:lsplit] + x[lsplit:lsplit+axis] + (x[lsplit+axis]*x[lsplit+axis+1],) + x[lsplit+axis+2:], None)
-      self.local_dims -= 1
-    elif opt.op == OptOps.LOCAL:        # cyan
+    amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
+    assert self.full_shape[axis] % amt == 0, "no longer valid shift"
+    assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
+    if opt.op == OptOps.LOCAL:        # cyan
       assert axis < self.first_reduce, "can't local a reduce"
       assert not(self.tensor_core), "can't local with tensor cores"
       self.shift_to(axis, amt, insert_before=self.first_reduce)
