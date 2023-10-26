@@ -139,6 +139,10 @@ jobs:
         #ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
         WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
       shell: bash
+    - name: Run 10 CIFAR training steps w WINO/HALF/HIP
+      run: |
+        #ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
+        HALF=1 HIP=1 WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
     - uses: actions/upload-artifact@v3
       with:
         name: Speed (AMD)
@@ -147,6 +151,7 @@ jobs:
           torch_speed.txt
           train_cifar.txt
           train_cifar_wino.txt
+          train_cifar_wino_half_hip.txt
           llama_unjitted.txt
           llama_jitted.txt
           gpt2_unjitted.txt

@@ -47,21 +47,19 @@ class ScheduleItem:
   inputs: Tuple[LazyBuffer, ...]
   var_vals: Dict[Variable, int]
 
+@dataclass(frozen=True)
 class LazyOp:
-  __slots__ = "op", "src", "arg", "buffers", "__weakref__"
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
-  arg: Any
-  buffers: Tuple[LazyBuffer, ...]
-  def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Any = None):
-    self.op, self.src, self.arg, self.buffers = op, src, arg, ()
+  arg: Any = None
+  @property
+  def buffers(self):
+    buffers: Tuple[Union[LazyOp, LazyBuffer], ...] = ()
     try:  # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
-      for x in src: self.buffers += x.buffers
-    except AttributeError: self.buffers = ()
+      for x in self.src: buffers += x.buffers
+    except AttributeError: buffers = ()
+    return buffers
 
-  def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
-  def __eq__(self, __value: object) -> bool: return isinstance(__value, LazyOp) and self.op is __value.op and self.src == __value.src and self.arg == __value.arg
-  def __hash__(self) -> int: return hash((self.op, self.src, self.arg))
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
 
@@ -288,7 +286,7 @@ class Compiled:
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
       if not getenv("NOOPT"):
         if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
-        if BEAM:
+        if BEAM and not vars_from_ast(ast):
           kb = Linearizer(ast, self.linearizer_opts)
           kb.required_optimizations()
           kb.dont_use_locals = bool(getenv("NOLOCALS"))
