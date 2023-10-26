@@ -10,9 +10,11 @@ from tinygrad.codegen.optimizer import Opt, OptOps
 actions = flatten([[Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,7]] for axis in range(6)])
 actions += flatten([[Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4]] for axis in range(4)])
 actions += flatten([[Opt(op=OptOps.LOCAL, axis=axis, amt=amt) for amt in [2,3,4,8,16]] for axis in range(5)])
+#actions += [Opt(op=OptOps.MERGELOCAL, axis=axis, amt=None) for axis in range(5)]
+#actions += flatten([[Opt(op=OptOps.SWAPGLOBAL, axis=axis, amt=axis2) for axis2 in range(5)] for axis in range(5)])
 actions += [
   Opt(op=OptOps.LOCAL, axis=0, amt=32),
-  Opt(op=OptOps.GROUP, axis=0, amt=4), Opt(op=OptOps.GROUP, axis=0, amt=8), Opt(op=OptOps.GROUP, axis=1, amt=8),
+  #Opt(op=OptOps.GROUP, axis=0, amt=4), Opt(op=OptOps.GROUP, axis=0, amt=8), Opt(op=OptOps.GROUP, axis=1, amt=8),
   Opt(op=OptOps.GROUPTOP, axis=0, amt=16), Opt(op=OptOps.GROUPTOP, axis=0, amt=256),
   Opt(op=OptOps.GROUPTOP, axis=1, amt=16), Opt(op=OptOps.GROUPTOP, axis=1, amt=256),
   Opt(op=OptOps.GROUPTOP, axis=2, amt=16), Opt(op=OptOps.GROUPTOP, axis=2, amt=256),
@@ -86,56 +88,27 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       pass
   return acted_lins
 
-_net = None
-def net(x):
-  from tinygrad.tensor import Tensor
-  from tinygrad.helpers import Context
-  global _net
-  if _net is None:
-    from tinygrad.nn.state import load_state_dict, safe_load
-    from extra.optimization.pretrain_valuenet import ValueNet
-    _net = ValueNet(1021+len(actions), 2)
-    load_state_dict(_net, safe_load("/tmp/qnet.safetensors"))
-  with Context(BEAM=0):
-    with Tensor.train(False):
-      return _net(Tensor(x)).numpy()
-
-def beam_filter(beam:List[Tuple[Linearizer, float]]) -> List[Tuple[Linearizer, float]]:
-  from extra.optimization.helpers import lin_to_feats
-  import numpy as np
-  feats = []
-  lins = []
-  base_tms = []
-  for lin,tm in beam:
-    lin_feats = lin_to_feats(lin)
-    for a,v in get_linearizer_actions(lin, include_0=False).items():
-      acts = np.zeros(len(actions))
-      acts[a-1] = 1.0
-      feats.append(np.concatenate([lin_feats, acts]))
-      lins.append(v)
-      base_tms.append(tm)
-  pred_time = np.array(base_tms) / np.exp(net(feats)[:, 0])
-  return sorted(zip(lins, pred_time), key=lambda x: x[1])
-
 def beam_search(lin:Linearizer, rawbufs, amt:int) -> Linearizer:
   key = {"ast": str(lin.ast), "amt": amt}
   if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE"):
     ret = lin.copy()
     for o in val: ret.apply_opt(o)
     return ret
-  beam: List[Tuple[Linearizer, float]] = [(lin, time_linearizer(lin, rawbufs))]
+  beam: List[Tuple[Linearizer, float]] = [(lin, time_linearizer(lin, rawbufs, allow_test_size=not getenv("BEAM_NOESTIMATE")))]
   seen_uops = set()
   seen_uops.add(tuple(lin.copy().linearize().uops))
   while 1:
+    """
     if getenv("BEAMFILTER"):
+      from extra.optimization.run_qnet import beam_q_estimate
       try:
-        best = beam_filter(beam)
+        best = beam_q_estimate(beam)
         lins = [x[0] for x in best]
         acted_lins = lins[0:getenv("BEAMFILTER")]
       except Exception:
         acted_lins = lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam])
-    else:
-      acted_lins = lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam])
+    """
+    acted_lins = lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam])
 
     # dedup with uops (TODO: double linearize not needed)
     acted_lins_dedup = []
@@ -146,10 +119,12 @@ def beam_search(lin:Linearizer, rawbufs, amt:int) -> Linearizer:
       acted_lins_dedup.append(lin)
     acted_lins = acted_lins_dedup
 
-    timed_lins: List[Tuple[Linearizer, float]] = [(v,time_linearizer(v,rawbufs)) for v in acted_lins]
+    # time linearizers, and keep the BEAM best
+    timed_lins: List[Tuple[Linearizer, float]] = [(v,time_linearizer(v,rawbufs,allow_test_size=not getenv("BEAM_NOESTIMATE"))) for v in acted_lins]
     opts = sorted(timed_lins, key=lambda x: x[1])
     if len(opts) == 0 or beam[0][1] <= opts[0][1]: break  # we didn't get faster
     beam = opts[:amt]
     if DEBUG >= 1: print(f"{opts[0][1]*1e6:12.2f} us from {len(lins):3d} -> {len(opts):3d} actions", beam[0][0].colored_shape())
   diskcache_put("beam_search", key, beam[0][0].applied_opts)
+  print(beam[0][0].applied_opts)
   return beam[0][0]
