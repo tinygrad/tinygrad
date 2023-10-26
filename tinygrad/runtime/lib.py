@@ -24,6 +24,8 @@ class RawBuffer:  # pylint: disable=abstract-method
   # NOTE: this interface allows for 0 copy
   @classmethod
   def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
+  @classmethod
+  def from_buffer(cls, src, **kwargs) -> _T: return cls.fromCPU(src.toCPU(), **kwargs)
   def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
 
 class RawBufferCopyIn(RawBuffer):

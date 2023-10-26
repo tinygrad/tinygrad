@@ -58,7 +58,7 @@ def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
     buffer.realized = cast(RawBufferTransfer, Device[buffer.device].buffer).transfer(src.realized, buffer.shape, buffer.dtype, **buffer._device_extra_args())
   else:
     # TODO: schedule this as FROM to go to CPU, and a FROM to go to device
-    buffer.realized = Device[buffer.device].buffer.fromCPU(src.realized.toCPU(), **buffer._device_extra_args())
+    buffer.realized = Device[buffer.device].buffer.from_buffer(src.realized, **buffer._device_extra_args())
 
 # *** n op LoadOps ***
 
