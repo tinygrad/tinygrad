@@ -44,7 +44,11 @@ def cast(bb, val, input_type, output_type):
 
   if input_type == dtypes.float32:
     if dtypes.is_int(output_type) or output_type == dtypes.bool:
-      val = bb[-1].fptoui(val, dtype_to_llvm_dtype[output_type]) if dtypes.is_unsigned(output_type) or output_type == dtypes.bool else bb[-1].fptosi(val, dtype_to_llvm_dtype[output_type])
+      if dtypes.is_unsigned(output_type):
+        val = bb[-1].fptoui(val, dtype_to_llvm_dtype[output_type])
+      if output_type == dtypes.bool:
+        val = bb[-1].fcmp_ordered("!=", val, ir.Constant(ir.FloatType(), 0))
+      else: bb[-1].fptosi(val, dtype_to_llvm_dtype[output_type])
     elif output_type == dtypes.bfloat16:
       val = bb[-1].bitcast(val, ir.IntType(32))
       val = bb[-1].lshr(val, ir.Constant(ir.IntType(32), 16))
