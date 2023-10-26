@@ -124,6 +124,8 @@ def beam_search(lin:Linearizer, rawbufs, amt:int) -> Linearizer:
     for o in val: ret.apply_opt(o)
     return ret
   beam: List[Tuple[Linearizer, float]] = [(lin, time_linearizer(lin, rawbufs))]
+  seen_uops = set()
+  seen_uops.add(tuple(lin.copy().linearize().uops))
   while 1:
     if getenv("BEAMFILTER"):
       try:
@@ -134,6 +136,16 @@ def beam_search(lin:Linearizer, rawbufs, amt:int) -> Linearizer:
         acted_lins = lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam])
     else:
       acted_lins = lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam])
+
+    # dedup with uops (TODO: double linearize not needed)
+    acted_lins_dedup = []
+    for lin in acted_lins:
+      tuops = tuple(lin.copy().linearize().uops)
+      if tuops in seen_uops: continue
+      seen_uops.add(tuops)
+      acted_lins_dedup.append(lin)
+    acted_lins = acted_lins_dedup
+
     timed_lins: List[Tuple[Linearizer, float]] = [(v,time_linearizer(v,rawbufs)) for v in acted_lins]
     opts = sorted(timed_lins, key=lambda x: x[1])
     if len(opts) == 0 or beam[0][1] <= opts[0][1]: break  # we didn't get faster
