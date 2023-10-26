@@ -1,7 +1,7 @@
 import ctypes
 import numpy as np
 from collections import defaultdict, deque
-from typing import TypeVar, Type, Any, Dict, Deque, Tuple, cast
+from typing import Optional, TypeVar, Type, Any, Dict, Deque, Tuple, cast
 from tinygrad.helpers import DType, dtypes, prod, all_int, GlobalCounters, ImageDType
 
 _T = TypeVar("_T")
@@ -25,7 +25,7 @@ class RawBuffer:  # pylint: disable=abstract-method
   @classmethod
   def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
   @classmethod
-  def from_buffer(cls, src, **kwargs) -> _T: return cls.fromCPU(src.realized.toCPU(), **kwargs)
+  def from_buffer(cls, src, shape: Optional[tuple], dtype, **kwargs): return cls.fromCPU(src.realized.toCPU(), **kwargs)
   def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
 
 class RawBufferCopyIn(RawBuffer):
@@ -44,15 +44,14 @@ class RawBufferMapped(RawBufferCopyIn):
   def _copyin(self, x:np.ndarray) -> None: np.copyto(self.toCPU(), x.reshape(-1))
 
   @classmethod
-  def from_buffer(cls, src, **kwargs) -> _T:
+  def from_buffer(cls, src, shape, dtype, **kwargs):
     from tinygrad.runtime.ops_disk import RawDiskBuffer
     if isinstance(src.realized, RawDiskBuffer):
-      assert all_int(cls.shape), "does not support symbolic shape"
-      print("test")
-      cls.realized = cls(prod(cls.shape), cls.dtype, **kwargs)
-      src.realized.readinto(cast(RawBufferMapped, cls.realized)._buffer())
+      assert all_int(shape), "does not support symbolic shape"
+      realized = cls(prod(shape), dtype, **kwargs)
+      src.realized.readinto(cast(RawBufferMapped, realized)._buffer())
       return cast(RawBufferMapped, cls.fromCPU(src.realized.toCPU(), **kwargs))
-    return super().from_buffer(src, **kwargs)
+    return super().from_buffer(src, shape, dtype, **kwargs)
   
 
     
@@ -80,10 +79,10 @@ class RawBufferTransfer(RawBuffer):
     return ret
   
   @classmethod
-  def from_buffer(cls, src, **kwargs) -> _T:
+  def from_buffer(cls, src, shape, dtype, **kwargs):
     if isinstance(src.realized, RawBufferTransfer):
-      return cast(RawBufferTransfer, cls.transfer(src.realized, cls.shape, cls.dtype, **kwargs))
-    return super().from_buffer(src, **kwargs)
+      return cast(RawBufferTransfer, cls.transfer(src.realized, cls.size, cls.dtype, **kwargs))
+    return super().from_buffer(src, shape, dtype, **kwargs)
 
 
 class LRUAllocator:
