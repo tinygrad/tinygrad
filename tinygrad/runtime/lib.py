@@ -1,7 +1,7 @@
 import ctypes
 import numpy as np
 from collections import defaultdict, deque
-from typing import Optional, TypeVar, Type, Any, Dict, Deque, Tuple, cast
+from typing import TypeVar, Type, Any, Dict, Deque, Tuple, cast
 from tinygrad.helpers import DType, dtypes, prod, all_int, GlobalCounters, ImageDType
 
 _T = TypeVar("_T")
@@ -25,7 +25,7 @@ class RawBuffer:  # pylint: disable=abstract-method
   @classmethod
   def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
   @classmethod
-  def from_buffer(cls, src, shape: Optional[tuple], dtype, **kwargs): return cls.fromCPU(src.realized.toCPU(), **kwargs)
+  def from_buffer(cls, src, shape: Tuple, dtype:DType, **kwargs): return cls.fromCPU(src.realized.toCPU(), **kwargs)
   def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
 
 class RawBufferCopyIn(RawBuffer):
@@ -51,9 +51,6 @@ class RawBufferMapped(RawBufferCopyIn):
       src.realized.readinto(cast(RawBufferMapped, cls(prod(shape), dtype, **kwargs))._buffer())
       return cast(RawBufferMapped, cls.fromCPU(src.realized.toCPU(), **kwargs))
     return super().from_buffer(src, shape, dtype, **kwargs)
-  
-
-    
 
 # this one is simple enough that i moved it out of the runtimes
 class RawMallocBuffer(RawBufferMapped):
@@ -80,9 +77,8 @@ class RawBufferTransfer(RawBuffer):
   @classmethod
   def from_buffer(cls, src, shape, dtype, **kwargs):
     if isinstance(src.realized, RawBufferTransfer):
-      return cast(RawBufferTransfer, cls.transfer(src.realized, cls.size, cls.dtype, **kwargs))
+      return cls.transfer(src.realized, cls.size, cls.dtype, **kwargs)
     return super().from_buffer(src, shape, dtype, **kwargs)
-
 
 class LRUAllocator:
   def __init__(self, dev_memsz=(4<<30)):
