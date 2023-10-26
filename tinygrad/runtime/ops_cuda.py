@@ -77,9 +77,9 @@ class CUDAGraph(GraphBatchExecutor):
         self.jc_info.append(graph_node)
 
       self.graphs.append((graph.instantiate(), graph))
-    except (RuntimeError, AttributeError):
+    except Exception as e:
       # CudaGraph might not be suported with the installed version of pycuda.
-      return
+      if DEBUG>=3: print(f"Error creating CUDAGraph: {e}")
 
   def update_node(self, instid, jcid, prg, pargs, variables, updated_args=None):
     global_size, local_size = prg.launch_dims(variables)
