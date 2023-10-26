@@ -40,7 +40,10 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
 
 def _test_op(fxn, target_dtype:DType, target): _assert_eq(fxn(), target_dtype, target)
 def _test_cast(a:Tensor, target_dtype:DType, target):
-  try: _test_op(lambda: a.cast(target_dtype), target_dtype, target)
+  print("testing cast on", a.device, a.dtype, target_dtype)
+  try:
+    _test_op(lambda: a.cast(target_dtype), target_dtype, target)
+    print("cast passed")
   except Exception as e:
     print(f"failed to cast {a.dtype} to {target_dtype}")
     raise e
