@@ -59,7 +59,6 @@ else:
 
 class CUDAProgram:
   def __init__(self, name:str, prg:str, binary=False, shared = 0, local_size_override=None):
-    print(prg)
     if not binary:
       try: prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8')
       except cuda.CompileError as e:
