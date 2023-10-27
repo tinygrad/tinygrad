@@ -2,7 +2,7 @@ import ctypes
 import numpy as np
 from collections import defaultdict, deque
 from typing import TypeVar, Type, Any, Dict, Deque, Tuple, cast
-from tinygrad.helpers import DType, dtypes, prod, all_int, GlobalCounters, ImageDType
+from tinygrad.helpers import DType, dtypes, prod, all_int, getenv, GlobalCounters, ImageDType
 
 _T = TypeVar("_T")
 class RawBuffer:  # pylint: disable=abstract-method
@@ -76,7 +76,7 @@ class RawBufferTransfer(RawBuffer):
   
   @classmethod
   def from_buffer(cls, src, shape, dtype, **kwargs):
-    if isinstance(src.realized, RawBufferTransfer):
+    if isinstance(src.realized, RawBufferTransfer) and getenv("P2P", 0) >= 1:
       return cls.transfer(src.realized, cls.size, cls.dtype, **kwargs)
     return super().from_buffer(src, shape, dtype, **kwargs)
 
