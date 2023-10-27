@@ -73,6 +73,8 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype:DType):
   _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
 
 class TestBFloat16DType(unittest.TestCase):
+  def setUp(self):
+    if not is_dtype_supported(dtypes.bfloat16): raise unittest.SkipTest("bfloat16 not supported")
   def test_bf16_to_float(self):
     with self.assertRaises(AssertionError):
       _test_cast(Tensor([100000], dtype=dtypes.bfloat16), dtypes.float32, [100000])
@@ -83,14 +85,12 @@ class TestBFloat16DType(unittest.TestCase):
 
   # torch.tensor([10000, -1, -1000, -10000, 20]).type(torch.bfloat16)
 
-  @unittest.skipIf(Device.DEFAULT not in ["LLVM"], "bf16 only on LLVM")
   def test_bf16(self):
     t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.bfloat16)
     t.realize()
     back = t.cast(dtypes.float32)
     assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
 
-  @unittest.skipIf(Device.DEFAULT not in ["LLVM"], "bf16 only on LLVM")
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.float32)
     t.to(f"disk:{temp('f32')}").realize()
