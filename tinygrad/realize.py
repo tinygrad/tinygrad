@@ -5,7 +5,7 @@ from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import DEBUG, prod, all_int, IMAGE
 
-from tinygrad.features.image import fix_schedule_for_images 
+from tinygrad.features.image import fix_schedule_for_images
 
 def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
   # HACK: images can be not usable due to shape
