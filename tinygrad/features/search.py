@@ -1,4 +1,4 @@
-from typing import Dict, List, cast, DefaultDict, Optional
+from typing import Dict, List, cast, DefaultDict, Optional, Tuple
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
 from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, diskcache_get, diskcache_put, getenv
@@ -84,21 +84,43 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       pass
   return acted_lins
 
-def beam_search(lin:Linearizer, rawbufs, amt:int) -> Linearizer:
+def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linearizer:
   key = {"ast": str(lin.ast), "amt": amt}
   if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE"):
     ret = lin.copy()
     for o in val: ret.apply_opt(o)
     return ret
-  best_tm = time_linearizer(lin, rawbufs)   # handle the case where no actions make it faster
-  beam: List[Linearizer] = [lin]
+
+  # init the BEAM with the base linearizer
+  beam: List[Tuple[Linearizer, float]] = [(lin, time_linearizer(lin, rawbufs, allow_test_size=allow_test_size))]
+
+  # NOTE: real uops use a weird compare method that's only valid inside a linearizer
+  def tuplize_uops(uops): return tuple([(x.uop, x.dtype, tuple(x.num for x in x.vin), x.arg) for x in uops])
+  seen_uops = {tuplize_uops(lin.copy().linearize().uops): tuple(lin.applied_opts)}
+
   while 1:
-    acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin in beam])
-    timed_lins = [(v,time_linearizer(v, rawbufs)) for v in acted_lins]
+    acted_lins = lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam])
+
+    # dedup with uops (TODO: double linearize not needed)
+    acted_lins_dedup = []
+    for lin in acted_lins:
+      tuops = tuplize_uops(lin.copy().linearize().uops)
+      if tuops in seen_uops:
+        #print(seen_uops[tuops], lin.applied_opts)
+        continue
+      seen_uops[tuops] = tuple(lin.applied_opts)
+      acted_lins_dedup.append(lin)
+    acted_lins = acted_lins_dedup
+
+    # time linearizers
+    timed_lins: List[Tuple[Linearizer, float]] = [(v,time_linearizer(v,rawbufs,allow_test_size=allow_test_size)) for v in acted_lins]
     opts = sorted(timed_lins, key=lambda x: x[1])
-    if len(opts) == 0 or best_tm <= opts[0][1]: break  # we didn't get faster
-    best_tm = opts[0][1]
-    beam = [x[0] for x in opts[:amt]]
-    if DEBUG >= 2: print(f"{opts[0][1]*1e6:12.2f} us from {len(opts):3d} actions", beam[0].colored_shape())
-  diskcache_put("beam_search", key, beam[0].applied_opts)
-  return beam[0]
+    if len(opts) == 0 or beam[0][1] <= opts[0][1]: break  # we didn't get faster
+
+    # keep the BEAM best
+    beam = opts[:amt]
+    if DEBUG >= 2: print(f"{opts[0][1]*1e6:12.2f} us from {len(lins):3d} -> {len(opts):3d} actions", beam[0][0].colored_shape())
+
+  diskcache_put("beam_search", key, beam[0][0].applied_opts)
+  if DEBUG >= 2: print(beam[0][0].applied_opts)
+  return beam[0][0]

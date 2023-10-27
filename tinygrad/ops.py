@@ -52,6 +52,7 @@ class LazyOp:
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
   arg: Any = None
+  def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
   @property
   def buffers(self):
     buffers: Tuple[Union[LazyOp, LazyBuffer], ...] = ()
@@ -286,12 +287,12 @@ class Compiled:
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
       if not getenv("NOOPT"):
         if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
-        if BEAM and not vars_from_ast(ast):
+        if BEAM >= 1 and not vars_from_ast(ast):
           kb = Linearizer(ast, self.linearizer_opts)
           kb.required_optimizations()
           kb.dont_use_locals = bool(getenv("NOLOCALS"))
           from tinygrad.features.search import beam_search, time_linearizer
-          lins = [(f"beam{BEAM.value}", beam_search(kb, rawbuffers, BEAM.value)), (("tc" if used_tensor_cores else "hc"), k)]
+          lins = [(f"beam{BEAM.value}", beam_search(kb, rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))), (("tc" if used_tensor_cores else "hc"), k)]
           if used_tensor_cores:
             lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
             lins[-1][1].hand_coded_optimizations()

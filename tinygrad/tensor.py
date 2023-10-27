@@ -40,9 +40,10 @@ class Tensor:
   __deletable__ = ('_ctx',)
   training: ClassVar[bool] = False
   class train:
+    def __init__(self, val=True): self.val = val
     def __enter__(self):
       self.prev = Tensor.training
-      Tensor.training = True
+      Tensor.training = self.val
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any): Tensor.training = self.prev
 
   no_grad: ClassVar[bool] = False
