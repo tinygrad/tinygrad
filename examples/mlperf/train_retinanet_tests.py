@@ -30,8 +30,10 @@ class RetinaNetTrainingInitializer:
         self.reference = mlp_retinanet.retinanet_from_backbone(backbone="resnext50_32x4d",num_classes=self.model.num_classes, image_size = list(IMAGE_SIZES["debug"]), pretrained=False, trainable_backbone_layers=3, data_layout="channels_first")
         self.reference.training = True
 
-    def setup(self):
+    def setup(self, store_weights=False, load_debug_weights=False):
         #self.freeze_spec_backbone_layers()
+        torch.save(self.reference,"examples/mlperf/for_debug.pt") if store_weights else None
+        if load_debug_weights: self.reference = torch.load("examples/mlperf/for_debug.pt")
         self.set_initial_weights(from_mlperf_model=(self.reference is not None))
 
         Tensor.training = TRAINING
@@ -157,9 +159,8 @@ def tg_forward_debug_cls(self, x):
 class RetinaNetMLPerfTrainer:
     def __init__(self):
         init = RetinaNetTrainingInitializer()
-        init.setup()
-        breakpoint()
-        pass
+        init.setup(store_weights=False, load_debug_weights=True)
+        
 
     def train():
         raise NotImplementedError
