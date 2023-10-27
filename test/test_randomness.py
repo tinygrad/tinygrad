@@ -81,7 +81,7 @@ class TestRandomness(unittest.TestCase):
 
   def test_uniform(self):
     self.assertFalse(normal_test(Tensor.uniform))
-    self.assertTrue(equal_distribution(Tensor.uniform, lambda x: torch.nn.init.uniform_(torch.empty(x), a=-1, b=1), lambda x: np.random.uniform(low=-1, high=1, size=x)))
+    self.assertTrue(equal_distribution(Tensor.uniform, lambda x: torch.nn.init.uniform_(torch.empty(x)), lambda x: np.random.uniform(size=x)))
     self.assertTrue(equal_distrib_ints(Tensor.uniform, lambda x: np.random.randint(low=-100, high=100, size=x)))
 
   def test_scaled_uniform(self):
