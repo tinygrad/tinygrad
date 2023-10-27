@@ -1,4 +1,4 @@
-import subprocess, time, re, hashlib, tempfile, functools
+import subprocess, time, re, hashlib, tempfile
 from pathlib import Path
 from typing import Optional
 import numpy as np
