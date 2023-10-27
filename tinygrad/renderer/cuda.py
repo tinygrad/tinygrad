@@ -1,6 +1,7 @@
 import functools
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import DType, PtrDType, dtypes
+
 class CUDALanguage(CStyleLanguage):
   kernel_prefix = "__global__ "
   smem_prefix = "__shared__ "
@@ -20,8 +21,9 @@ class CUDALanguage(CStyleLanguage):
     };
     """
 
-  def render_cast(self, x, output_dtype, buf_dtype) -> str:
-    if output_dtype == dtypes._float2 and buf_dtype == dtypes._half2: return f"__half2float({','.join(x)})"
+  def render_cast(self, x, output_dtype, buf_dtype=None) -> str:
+    if isinstance(buf_dtype, PtrDType): buf_dtype = DType(buf_dtype.priority, buf_dtype.itemsize, buf_dtype.name, buf_dtype.np, buf_dtype.sz)
+    if len(x) == 1 and output_dtype == dtypes._float2 and buf_dtype == dtypes.half: return f"make_float2(__half2float({x[0][1:]}->x), __half2float({x[0][1:]}->y));"
     return super().render_cast(x, output_dtype, buf_dtype)
 
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
