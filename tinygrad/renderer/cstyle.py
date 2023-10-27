@@ -42,14 +42,14 @@ class CStyleLanguage(NamedTuple):
   }
 
   # returns a str expression of the casted xs with the given type
-  def render_cast(self, x:List[str], var_dtype:DType) -> str:
-    if len(x) == 1: return f"({var_dtype.name})({x[0]})"
-    assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
+  def render_cast(self, x:List[str], output_dtype:DType, buf_dtype:DType|None=None) -> str:
+    if len(x) == 1: return f"({output_dtype.name})({x[0]})"
+    assert len(x) == output_dtype.sz, f"cast is wrong size {len(x)} != {output_dtype.sz}"
     assert self.float4 is not None, "cast is not supported on this platform"
-    if var_dtype == dtypes._float4: return f"{self.float4}({','.join(x)})"
-    if var_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
-    if var_dtype == dtypes._int2: return f"{self.float4.replace('float4', 'int2')}({','.join(x)})"
-    raise NotImplementedError(f"no cast for {var_dtype}")
+    if output_dtype == dtypes._float4: return f"{self.float4}({','.join(x)})"
+    if output_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
+    if output_dtype == dtypes._int2: return f"{self.float4.replace('float4', 'int2')}({','.join(x)})"
+    raise NotImplementedError(f"no cast for {output_dtype}")
 
   # returns a str expression of the const with the given type
   def render_const(self, x:Union[float,int], var_dtype) -> str:
@@ -70,7 +70,7 @@ class CStyleLanguage(NamedTuple):
     else:
       out_val = f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
 
-    return self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val
+    return self.render_cast([out_val], output_dtype, buf_dtype) if output_dtype != buf_dtype else out_val
 
   def render_local(self, name:str, size:int):
     return self.smem_align + self.smem_prefix + f"float {name}[{size}];"
