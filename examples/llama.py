@@ -256,7 +256,7 @@ def concat_weights(models):
 def load(fn:str):
   if fn.endswith('.index.json'):
     with open(fn) as fp: weight_map = json.load(fp)['weight_map']
-    parts = {n: load(Path(fn).parent / Path(n).name) for n in set(weight_map.values())}
+    parts = {n: load(str(Path(fn).parent / Path(n).name)) for n in set(weight_map.values())}
     return {k: parts[n][k] for k, n in weight_map.items()}
   elif fn.endswith(".safetensors"):
     return safe_load(fn)
