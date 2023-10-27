@@ -80,13 +80,13 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
 
 class HIPProgram:
   def __init__(self, name:str, prg:str, binary=False):
+    self.modules, self.prgs = [], []
     prg = prg if binary else self.compile(prg, name)
 
     if DEBUG >= 6:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
-    self.modules, self.prgs = [], []
     for i in range(HIP.device_count):
       hip.hipSetDevice(i)
       self.modules.append(hip.hipModuleLoadData(prg))
