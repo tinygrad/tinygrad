@@ -292,7 +292,7 @@ class Compiled:
           kb.required_optimizations()
           kb.dont_use_locals = bool(getenv("NOLOCALS"))
           from tinygrad.features.search import beam_search, time_linearizer
-          lins = [(f"beam{BEAM.value}", beam_search(kb, rawbuffers, BEAM.value)), (("tc" if used_tensor_cores else "hc"), k)]
+          lins = [(f"beam{BEAM.value}", beam_search(kb, rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))), (("tc" if used_tensor_cores else "hc"), k)]
           if used_tensor_cores:
             lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
             lins[-1][1].hand_coded_optimizations()
