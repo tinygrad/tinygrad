@@ -25,7 +25,7 @@ class RawBuffer:  # pylint: disable=abstract-method
   @classmethod
   def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
   @classmethod
-  def from_buffer(cls, src, shape: Tuple, dtype:DType, **kwargs): return cls.fromCPU(src.realized.toCPU(), **kwargs)
+  def fromBuffer(cls, src, shape: Tuple, dtype:DType, **kwargs): return cls.fromCPU(src.realized.toCPU(), **kwargs)
   def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
 
 class RawBufferCopyIn(RawBuffer):
@@ -44,13 +44,12 @@ class RawBufferMapped(RawBufferCopyIn):
   def _copyin(self, x:np.ndarray) -> None: np.copyto(self.toCPU(), x.reshape(-1))
 
   @classmethod
-  def from_buffer(cls, src, shape, dtype, **kwargs):
+  def fromBuffer(cls, src, shape, dtype, **kwargs):
     from tinygrad.runtime.ops_disk import RawDiskBuffer
     if isinstance(src.realized, RawDiskBuffer):
       assert all_int(shape), "does not support symbolic shape"
       src.realized.readinto(cast(RawBufferMapped, cls(prod(shape), dtype, **kwargs))._buffer())
-      return cast(RawBufferMapped, cls.fromCPU(src.realized.toCPU(), **kwargs))
-    return super().from_buffer(src, shape, dtype, **kwargs)
+    return cast(RawBufferMapped, cls.fromCPU(src.realized.toCPU(), **kwargs))
 
 # this one is simple enough that i moved it out of the runtimes
 class RawMallocBuffer(RawBufferMapped):
@@ -75,10 +74,10 @@ class RawBufferTransfer(RawBuffer):
     return ret
 
   @classmethod
-  def from_buffer(cls, src, shape, dtype, **kwargs):
+  def fromBuffer(cls, src, shape, dtype, **kwargs):
     if isinstance(src.realized, RawBufferTransfer) and getenv("P2P", 0) >= 1:
       return cls.transfer(src.realized, cls.size, cls.dtype, **kwargs)
-    return super().from_buffer(src, shape, dtype, **kwargs)
+    return cls.fromCPU(src.realized.toCPU(), **kwargs)
 
 class LRUAllocator:
   def __init__(self, dev_memsz=(4<<30)):
