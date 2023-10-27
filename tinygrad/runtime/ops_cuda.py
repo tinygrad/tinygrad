@@ -1,4 +1,4 @@
-import subprocess, time, re, hashlib, tempfile, functools
+import subprocess, time, re, hashlib, tempfile
 from pathlib import Path
 from typing import Optional, List, Any, Tuple
 import numpy as np
@@ -118,7 +118,7 @@ class CUDAProgram:
 
 if getenv("TRITON") == 1:
   from tinygrad.renderer.triton import uops_to_triton
-  renderer = uops_to_triton
-  CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024], has_shared=False), CUDARenderer, CUDAProgram, cuda.Context.synchronize)
+  TritonRenderer = uops_to_triton
+  CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024], has_shared=False), TritonRenderer, CUDAProgram, cuda.Context.synchronize)
 else:
   CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False if getenv("PTX") else True, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]), CUDARenderer, CUDAProgram, cuda.Context.synchronize, CUDAGraph)
