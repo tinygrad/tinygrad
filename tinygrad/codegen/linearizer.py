@@ -149,6 +149,12 @@ class Linearizer(OptimizedKernel):
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
+    # late alias the tensor core buffers
+    if self.tensor_core:
+      for tc_buf in self.tensor_core_bufs:
+        alias_pattern = [0]*(self.global_dims+(self.local_dims-len(self.tensor_core.threads))) + [2]*(len(self.tensor_core.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)
+        self.alias_buffer(tc_buf, alias_pattern)
+
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
 

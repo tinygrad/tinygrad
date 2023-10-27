@@ -81,6 +81,7 @@ class Kernel:
     self.local_dims: int = 0
     self.local_alias: Dict[int, LocalBuffer] = {}
     self.tensor_core: Optional[TensorCore] = None
+    self.tensor_core_bufs: List[MemBuffer] = []
     self.dont_use_locals: bool = False
 
     self.global_size: Optional[List[int]] = None

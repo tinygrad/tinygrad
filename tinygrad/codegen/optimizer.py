@@ -10,7 +10,7 @@ from tinygrad.shape.view import View, strides_for_shape
 from enum import Enum, auto
 
 class OptOps(Enum):
-  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); GROUPTOP = auto() # noqa: E702
+  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); GROUPTOP = auto(); TC = auto(); HC = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 @dataclass(frozen=True, order=True)
@@ -159,7 +159,7 @@ class OptimizedKernel(Kernel):
 
   # ******************** high level optimizers ********************
 
-  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None):
+  def apply_tensor_cores(self, use_tensor_cores=1, axis=0, extra_opts:Optional[List[Opt]]=None):
     if use_tensor_cores and self.opts.has_local and self.reduceop and self.reduceop.op == ReduceOps.SUM and self.opts.device in tensor_cores:
       for tc in tensor_cores[self.opts.device]:
         if not((tc.arch is None or tc.arch == os.uname().machine) and isinstance(self.reduceop.src[0], LazyOp)): continue
@@ -177,10 +177,12 @@ class OptimizedKernel(Kernel):
         axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides[:self.first_reduce]) if s == 0 and self.full_shape[i]%tc.dims[1] == 0]
 
         if not(axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%tc.dims[2] == 0 and self.full_shape[self.first_reduce] >= tc.dims[2] and (self.shape_len-self.first_reduce) == 1): continue
+        axis_choices = list(itertools.product(axis_buf0, axis_buf1))
 
-        if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
+        if not(axis < len(axis_choices)): continue
 
-        s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0] # TODO: select axis in smart way
+        if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc, axis)
+        s0, s1 = axis_choices[-(axis+1)][0][0], axis_choices[-(axis+1)][1][0]
         s0_exists, s1_exists = True, True
         assert s0 != s1 and self.full_shape[s0]%tc.dims[0] == 0 and self.full_shape[s1]%tc.dims[1] == 0
         def fix(needed, ax):
@@ -194,10 +196,11 @@ class OptimizedKernel(Kernel):
             s1_exists = False
 
         # tensor core -- unroll the reduce dim, upcast input, then create the correct thread pattern
-        self.apply_opt(Opt(OptOps.UNROLL, 0, tc.dims[2]))
-        self.apply_opt(Opt(OptOps.UPCAST, s0 if tc.upcast_dim == 0 else s1, (tc.dims[0]*tc.dims[2])//prod([a[1] for a in tc.threads])))
+        self.applied_opts.append(Opt(OptOps.TC, axis, 0)) # ignore the required opts
+        self.apply_opt(Opt(OptOps.UNROLL, 0, tc.dims[2]), append_opt=False)
+        self.apply_opt(Opt(OptOps.UPCAST, s0 if tc.upcast_dim == 0 else s1, (tc.dims[0]*tc.dims[2])//prod([a[1] for a in tc.threads])), append_opt=False)
         for (tc_dim, tc_amt) in tc.threads:
-          fix(self.apply_opt(Opt(OptOps.LOCAL, s0 if tc_dim == 0 else s1, tc_amt)), s0 if tc_dim == 0 else s1)
+          fix(self.apply_opt(Opt(OptOps.LOCAL, s0 if tc_dim == 0 else s1, tc_amt), append_opt=False), s0 if tc_dim == 0 else s1)
 
         # assert tensor core and prevent extra_opts from altering the key shape structure
         if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
@@ -219,15 +222,22 @@ class OptimizedKernel(Kernel):
                 self.apply_opt(Opt(OptOps.LOCAL, s0, upc))
                 break
 
-        # alias buffer
-        alias_pattern = [0]*(self.global_dims+(self.local_dims-len(tc.threads))) + [2]*(len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)
-        self.alias_buffer(buf0, alias_pattern)
-        self.alias_buffer(buf1, alias_pattern)
+        # delay alias_buffer until all optimizations are completed
+        self.tensor_core_bufs = [buf0, buf1]
         return True
     return False
 
-  def apply_opt(self, opt:Opt):
-    self.applied_opts.append(opt)
+  def apply_opt(self, opt:Opt, append_opt=True):
+    if opt.op == OptOps.TC:
+      assert len(self.applied_opts) == 0, "tensor core opts must be first"
+      applied = self.apply_tensor_cores(getenv("TC", 1), extra_opts=[]) # don't hand-code
+      assert applied, "no tensor core available"
+      return
+    if opt.op == OptOps.HC:
+      assert len(self.applied_opts) == 0, "hand-coded opts must be first"
+      return self.hand_coded_optimizations()
+
+    if append_opt: self.applied_opts.append(opt)
     axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op == OptOps.GROUPTOP else 0))
     amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
     assert self.full_shape[axis] % amt == 0, "no longer valid shift"
