@@ -21,8 +21,8 @@ class CUDALanguage(CStyleLanguage):
     };
     """
 
-  def render_cast(self, x, output_dtype, buf_dtype=None) -> str:
-    if len(x) == 1 and buf_dtype is not None and output_dtype == dtypes._float2 and buf_dtype == dtypes.half: return f"make_float2(__half2float({x[0][1:]}->x), __half2float({x[0][1:]}->y));"
-    return super().render_cast(x, output_dtype, buf_dtype)
+  def render_cast(self, x, var_dtype, buf_dtype=None) -> str:
+    if len(x) == 1 and buf_dtype is not None and var_dtype == dtypes._float2 and buf_dtype == dtypes.half: return f"make_float2(__half2float({x[0][1:]}->x), __half2float({x[0][1:]}->y));"
+    return super().render_cast(x, var_dtype, buf_dtype)
 
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
