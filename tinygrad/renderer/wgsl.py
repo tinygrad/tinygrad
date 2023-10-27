@@ -49,7 +49,7 @@ class WGSLLanguage(CStyleLanguage):
   def render_conditional(self, cond:str, x:str, y:str) -> str:
     return f"select(f32({y}), {x}, bool({cond}))"
 
-  def render_cast(self, x: List[str], output_dtype: DType, buf_dtype: DType | None = None) -> str:
+  def render_cast(self, x: List[str], output_dtype: DType, buf_dtype: Union[DType,None]=None) -> str:
     if type_map[output_dtype]: return f"{type_map[output_dtype]}({x[0]})"
     raise NotImplementedError(f"no cast for {output_dtype}")
 

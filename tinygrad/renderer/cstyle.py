@@ -42,7 +42,7 @@ class CStyleLanguage(NamedTuple):
   }
 
   # returns a str expression of the casted xs with the given type
-  def render_cast(self, x:List[str], output_dtype:DType, buf_dtype:DType|None=None) -> str:
+  def render_cast(self, x:List[str], output_dtype:DType, buf_dtype:Union[DType, None]=None) -> str:
     if len(x) == 1: return f"({output_dtype.name})({x[0]})"
     assert len(x) == output_dtype.sz, f"cast is wrong size {len(x)} != {output_dtype.sz}"
     assert self.float4 is not None, "cast is not supported on this platform"
