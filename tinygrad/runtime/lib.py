@@ -73,7 +73,7 @@ class RawBufferTransfer(RawBuffer):
     ret = cls(prod(shape), dtype, **kwargs)
     ret._transfer(x)
     return ret
-  
+
   @classmethod
   def from_buffer(cls, src, shape, dtype, **kwargs):
     if isinstance(src.realized, RawBufferTransfer) and getenv("P2P", 0) >= 1:
