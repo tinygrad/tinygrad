@@ -294,7 +294,8 @@ class Compiled:
           kb = Linearizer(ast, self.linearizer_opts)
           kb.required_optimizations()
           from tinygrad.features.search import beam_search, time_linearizer
-          lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
+          if not bool(getenv("NOLOCALS")) or getenv("NOLOCALS") >= 2:
+            lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
           if bool(getenv("NOLOCALS")):
             lins.append((f"beam{BEAM.value}n", beam_search(kb.copy(), test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)), dont_use_locals=True)))
           if used_tensor_cores:
