@@ -11,7 +11,9 @@ def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.__mul_
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
+WINDOWS = platform.system() == "Windows"
 CI = os.getenv("CI", "") != ""
+TEMP_DIR = os.getenv("TEMPDIR", tempfile.gettempdir())
 
 def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def argfix(*x): return tuple(x[0]) if x and x[0].__class__ in (tuple, list) else x
@@ -60,7 +62,7 @@ class ContextVar:
   def __lt__(self, x): return self.value < x
 
 DEBUG, IMAGE, BEAM = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0)
-GRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
+GRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("GRAPHPATH", os.path.join(TEMP_DIR, "tinygrad_graphs"))
 
 class Timing(contextlib.ContextDecorator):
   def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
