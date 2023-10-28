@@ -189,7 +189,7 @@ jobs:
         run: PYTHONPATH="." GPU=1 python3 extra/optimization/get_action_space.py
       - if: ${{ matrix.task == 'optimization' }}
         name: Test Beam Search
-        run: PYTHONPATH="." GPU=1 python3 -m pytest extra/optimization/test_beam_search.py
+        run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
 
   testmetalwebgpu:
     name: Metal and WebGPU Tests
