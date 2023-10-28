@@ -29,7 +29,7 @@ class ValueNet:
   def __call__(self, x):
     x = self.l1(x).relu()
     x = self.l2(x).relu()
-    x = self.l3(x).relu()
+    x = self.l3(x).relu().dropout(0.8)
     return self.l4(x)
 
 if __name__ == "__main__":
