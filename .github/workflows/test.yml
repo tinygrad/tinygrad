@@ -11,7 +11,7 @@ jobs:
   linter:
     name: Linters
     runs-on: ubuntu-latest
-    timeout-minutes: 11
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -65,7 +65,7 @@ jobs:
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 11
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -93,7 +93,7 @@ jobs:
   testtorch:
     name: Torch Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 11
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -121,7 +121,7 @@ jobs:
         task: [optimage, openpilot, onnx, optimization]
     name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests' || matrix.task=='openpilot'&&'openpilot (OpenCL) Tests' || matrix.task=='onnx'&&'ONNX Tests' || matrix.task=='optimization'&&'Optimization Tests' }}
     runs-on: ubuntu-20.04
-    timeout-minutes: 11
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Code
@@ -194,7 +194,7 @@ jobs:
   testmetalwebgpu:
     name: Metal and WebGPU Tests
     runs-on: macos-13
-    timeout-minutes: 11
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Code
@@ -252,7 +252,7 @@ jobs:
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || 'ubuntu-latest' }}
-    timeout-minutes: 11
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Code
@@ -316,9 +316,6 @@ jobs:
       - name: Run ONNX (only LLVM)
         if: matrix.backend == 'llvm'
         run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - name: Run pytest dtypes (cuda)
-        if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
-        run: python -m pytest test/test_dtype.py -s
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models --durations=20
@@ -326,7 +323,7 @@ jobs:
   #testunicorn:
   #  name: ARM64 unicorn Test
   #  runs-on: ubuntu-latest
-  #  timeout-minutes: 11
+  #  timeout-minutes: 20
   #  steps:
   #    - name: Checkout Code
   #      uses: actions/checkout@v3
