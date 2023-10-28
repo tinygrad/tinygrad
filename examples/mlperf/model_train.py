@@ -79,7 +79,7 @@ def train_resnet():
     # train loop
     Tensor.training = True
     cl = time.monotonic() 
-    for X, Y, _ in (t := tqdm(PreFetcher(iterate(bs=BS, val=False, num_workers=16), total=steps_in_train_epoch))):
+    for X, Y, _ in (t := tqdm(PreFetcher(iterate(bs=BS, val=False, num_workers=16)), total=steps_in_train_epoch)):
       GlobalCounters.reset()
       st = time.monotonic()
       data_time = cl-st
@@ -107,7 +107,7 @@ def train_resnet():
       eval_top_1_acc = []
       eval_top_5_acc = []
       Tensor.training = False
-      for X, Y in (t := tqdm(PreFetcher(iterate(bs=BS, val=True, num_workers=16), total=steps_in_val_epoch))):
+      for X, Y in (t := tqdm(PreFetcher(iterate(bs=BS, val=True, num_workers=16)), total=steps_in_val_epoch)):
         X, Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
         st = time.time()
         loss, out = eval_step(X, Y)
