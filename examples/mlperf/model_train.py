@@ -66,6 +66,7 @@ def train_resnet():
   parameters = get_parameters(model)
 
   BS = getenv("BS",16)
+  WORKERS = getenv("WORKERS",16)
   lr = 0.256 * (BS / 256)  # Linearly scale from BS=256, lr=0.256
   epochs = 100
   optimizer = optim.SGD(parameters, lr, momentum=.875, weight_decay=1/2**15)
@@ -79,7 +80,7 @@ def train_resnet():
     # train loop
     Tensor.training = True
     cl = time.monotonic() 
-    for X, Y, actual_data in (t := tqdm(PreFetcher(iterate(bs=BS, val=False, num_workers=16)), total=steps_in_train_epoch)):
+    for X, Y, actual_data in (t := tqdm(PreFetcher(iterate(bs=BS, val=False, num_workers=WORKERS)), total=steps_in_train_epoch)):
       GlobalCounters.reset()
       st = time.monotonic()
       data_time = cl-st
