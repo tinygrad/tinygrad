@@ -83,7 +83,7 @@ def train_resnet():
     for X, Y, actual_data in (t := tqdm(PreFetcher(iterate(bs=BS, val=False, num_workers=WORKERS)), total=steps_in_train_epoch)):
       GlobalCounters.reset()
       st = time.monotonic()
-      data_time = cl-st
+      data_time = st-cl
       X, Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
       loss, out = train_step(X, Y)
       et = time.monotonic()
