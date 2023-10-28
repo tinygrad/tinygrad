@@ -189,11 +189,6 @@ MODEL_PARAMS = {
     },
   },
   "2": {
-    #TinyLLaMA https://github.com/jzhang38/TinyLlama
-    "1B": {
-      "args": {"dim": 2048, "multiple_of": 256, "n_heads": 32, "n_kv_heads": 4, "n_layers": 22, "norm_eps": 1e-05, "vocab_size": 32000},
-      "files": 1,
-    },
     "7B": {
       "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-05, "vocab_size": 32000},
       "files": 1,
@@ -243,6 +238,13 @@ MODEL_PARAMS = {
     "34B-Instruct": {
       "args": {"dim": 8192, "n_layers": 48, "n_heads": 64, "n_kv_heads": 8, "multiple_of": 256, "ffn_dim_multiplier": 1.0, "norm_eps": 1e-5, "rope_theta": 1000000, "vocab_size": 32000},
       "files": 4,
+    },
+  },
+  #TinyLLaMA https://github.com/jzhang38/TinyLlama
+  "tiny": {
+    "1B": {
+      "args": {"dim": 2048, "multiple_of": 256, "n_heads": 32, "n_kv_heads": 4, "n_layers": 22, "norm_eps": 1e-05, "vocab_size": 32000},
+      "files": 1,
     },
   }
 }
