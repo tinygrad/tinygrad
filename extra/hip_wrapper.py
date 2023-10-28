@@ -14,17 +14,14 @@ try:
 
   _libAmdHip64ImagePath = os.path.join(_hipPathEnv, "lib" if OSX or LINUX else "bin", "libamdhip64.so" if OSX or LINUX else "amdhip64.dll")
   _libHipRtcImagePath = os.path.join(_hipPathEnv, "lib" if OSX or LINUX else "bin", "libhiprtc.so")
-  if WINDOWS:
-    if not os.path.exists(_libAmdHip64ImagePath):
-      for path in os.environ["PATH"].split(os.pathsep):
-        if os.path.exists(os.path.join(path, "amdhip64.dll")):
-          _libAmdHip64ImagePath = os.path.join(path, "amdhip64.dll")
-          break
+  if WINDOWS and not os.path.exists(_libAmdHip64ImagePath):
+    for path in os.environ["PATH"].split(os.pathsep):
+      if os.path.exists(os.path.join(path, "amdhip64.dll")): _libAmdHip64ImagePath = os.path.join(path, "amdhip64.dll")
 
     _libHipRtcImagePath = sorted(glob.glob(os.path.join(_hipPathEnv, "bin", f"hiprtc*.dll")))[-1] if glob.glob(os.path.join(_hipPathEnv, "bin", f"hiprtc*.dll")) else None
 
   if not os.path.exists(_libAmdHip64ImagePath): raise RuntimeError("Image not found at %s" % _libAmdHip64ImagePath)
-  if not os.path.exists(_libHipRtcImagePath): raise RuntimeError("Image not found at %s" % _libAmdHip64ImagePath)
+  if _libHipRtcImagePath and not os.path.exists(_libHipRtcImagePath): raise RuntimeError("Image not found at %s" % _libAmdHip64ImagePath)
 
   _libhip = ctypes.cdll.LoadLibrary(_libAmdHip64ImagePath)
   _libhiprtc = ctypes.cdll.LoadLibrary(_libHipRtcImagePath)
