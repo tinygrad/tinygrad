@@ -3,6 +3,7 @@ from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import GlobalCounters, getenv, dtypes
+from examples.mlperf.helpers import PreFetcher
 from tqdm import tqdm
 import numpy as np
 import random
@@ -73,12 +74,15 @@ def train_resnet():
 
   steps_in_train_epoch = (len(get_train_files()) // BS) - 1
   steps_in_val_epoch = (len(get_val_files()) // BS) - 1
+  epoch_avg_time = []
   for e in range(epochs):
     # train loop
     Tensor.training = True
-    for X, Y, data_time in (t := tqdm(iterate(bs=BS, val=False, num_workers=16), total=steps_in_train_epoch)):
+    cl = time.monotonic() 
+    for X, Y, _ in (t := tqdm(PreFetcher(iterate(bs=BS, val=False, num_workers=16), total=steps_in_train_epoch))):
       GlobalCounters.reset()
       st = time.monotonic()
+      data_time = cl-st
       X, Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
       loss, out = train_step(X, Y)
       et = time.monotonic()
@@ -94,6 +98,7 @@ def train_resnet():
                  "train/loss": loss_cpu,
                  "train/GFLOPS": GlobalCounters.global_ops*1e-9/(cl-st),
       })
+      epoch_avg_time.append(data_time+(cl-st))
     
     # "eval" loop. Evaluate every 4 epochs, starting with epoch 1
     if e % 4 == 1:
@@ -102,7 +107,7 @@ def train_resnet():
       eval_top_1_acc = []
       eval_top_5_acc = []
       Tensor.training = False
-      for X, Y in (t := tqdm(iterate(bs=BS, val=True, num_workers=16), total=steps_in_val_epoch)):
+      for X, Y in (t := tqdm(PreFetcher(iterate(bs=BS, val=True, num_workers=16), total=steps_in_val_epoch))):
         X, Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
         st = time.time()
         loss, out = eval_step(X, Y)
@@ -114,12 +119,13 @@ def train_resnet():
         eval_times.append(et - st)
         eval_top_1_acc.append(top_1_acc)
         eval_top_5_acc.append(top_5_acc)
-
       wandb.log({"eval/loss": sum(eval_loss) / len(eval_loss),
                 "eval/forward_time": sum(eval_times) / len(eval_times),
                 "eval/top_1_acc": sum(eval_top_1_acc) / len(eval_top_1_acc),
                 "eval/top_5_acc": sum(eval_top_5_acc) / len(eval_top_5_acc),
+                "eval/avg_time": sum(epoch_avg_time) / len(epoch_avg_time)
       })
+      epoch_avg_time = []
 
 def train_retinanet():
   # TODO: Retinanet

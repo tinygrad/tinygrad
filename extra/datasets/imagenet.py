@@ -16,13 +16,15 @@ cir = {v[0]: int(k) for k,v in ci.items()}
 
 @functools.lru_cache(None)
 def get_train_files():
-#  train_files = open(BASEDIR / "train_files").read().strip().split("\n")
-  train_files = []
-  a = os.listdir(os.path.join(BASEDIR, 'train'))
-  for i in tqdm(range(len(a))):
-      f = os.path.join(os.path.join(BASEDIR, 'train', a[i]))
-      for fi in os.listdir(f):
-          train_files.append(fi)
+  if os.path.exists(os.path.join(BASEDIR, "train_files")):
+    train_files = open(BASEDIR / "train_files").read().strip().split("\n")
+  else:
+    train_files = []
+    a = os.listdir(os.path.join(BASEDIR, 'train'))
+    for i in tqdm(range(len(a))):
+        f = os.path.join(os.path.join(BASEDIR, 'train', a[i]))
+        for fi in os.listdir(f):
+            train_files.append(fi)
   return [(BASEDIR / "train" / x) for x in train_files]
 
 @functools.lru_cache(None)
