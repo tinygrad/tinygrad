@@ -232,6 +232,7 @@ class OptimizedKernel(Kernel):
     amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
     assert self.full_shape[axis] % amt == 0, "no longer valid shift"
     assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
+    assert not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals"
     if opt.op == OptOps.LOCAL:        # cyan
       assert axis < self.first_reduce-(len(self.tensor_core.threads) if self.tensor_core else 0), "local is for non-reduce that aren't TC dims"
       self.shift_to(axis, amt, insert_before=self.first_reduce-self.local_dims)

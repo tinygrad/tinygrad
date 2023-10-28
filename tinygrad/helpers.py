@@ -169,7 +169,7 @@ def cache_compiled(func):
 CACHEDB = getenv("CACHEDB", "/tmp/tinygrad_cache")
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 2
+VERSION = 3
 _db_connection = None
 def db_connection():
   global _db_connection
