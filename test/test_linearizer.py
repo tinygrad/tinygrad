@@ -478,23 +478,26 @@ class TestLinearizerOpts(unittest.TestCase):
     if Device.DEFAULT not in tensor_cores:
       self.skipTest("No tensor cores for device")
 
-    N = 128
-    Tensor.manual_seed(1552)
-    a = Tensor.rand(N, N)
-    b = Tensor.rand(N, N)
-    r = a@b
-    helper_linearizer_opt(r, [
-      [Opt(OptOps.UPCAST, 0, 4)],
-      [Opt(OptOps.UPCAST, 1, 4)],
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
-      [Opt(OptOps.UNROLL, 0, 2)], # check last unroll
-      [Opt(OptOps.LOCAL, 0, 4)], # check last local
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of last unroll and last local
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2)],
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
-      # [Opt(OptOps.GROUPTOP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
-    ], apply_tc=True)
+    for tc in tensor_cores[Device.DEFAULT]:
+      if tc.arch is not None and tc.arch != os.uname().machine: continue
+
+      N = 128
+      Tensor.manual_seed(1552)
+      a = Tensor.rand(N, N, dtype=tc.dtype_in)
+      b = Tensor.rand(N, N, dtype=tc.dtype_in)
+      r = a@b
+      helper_linearizer_opt(r, [
+        [Opt(OptOps.UPCAST, 0, 4)],
+        [Opt(OptOps.UPCAST, 1, 4)],
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
+        [Opt(OptOps.UNROLL, 0, 2)], # check last unroll
+        [Opt(OptOps.LOCAL, 0, 4)], # check last local
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of last unroll and last local
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2)],
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
+        # [Opt(OptOps.GROUPTOP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
+      ], apply_tc=True)
 
   def test_tensor_core_opts_metal(self):
     if not Device.DEFAULT == "METAL":
