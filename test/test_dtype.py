@@ -103,8 +103,12 @@ class TestDType(unittest.TestCase):
   def test_to_np(self): _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), self.DTYPE.np, self.DATA)
   def test_casts_to(self): _test_casts_to(self.DATA, target_dtype=self.DTYPE)
   def test_casts_from(self): _test_casts_from(self.DATA, source_dtype=self.DTYPE)
-  def test_upcast_ops(self): _test_ops(a_dtype=self.DTYPE, b_dtype=self.DTYPE, target_dtype=self.DTYPE)
-  def test_upcast_to_ops(self): _test_ops(a_dtype=dtypes.int8, b_dtype=self.DTYPE, target_dtype=self.DTYPE)
+  def test_upcast_ops(self):
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      if dtype.sz > self.DTYPE.sz: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype, target_dtype=dtype)
+  def test_upcast_to_ops(self):
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      if dtype.sz < self.DTYPE.sz: _test_ops(a_dtype=dtype, b_dtype=self.DTYPE, target_dtype=self.DTYPE)
 
 class TestHalfDtype(TestDType): DTYPE = dtypes.half
 
