@@ -104,7 +104,6 @@ def beam_search(lin:Linearizer, baseline_lins:List[Tuple[str, Linearizer]], rawb
     def tuplize_uops(uops): return tuple([(x.uop, x.dtype, tuple(x.num for x in x.vin), x.arg) for x in uops])
     seen_uops = {tuplize_uops(lin.copy().linearize().uops): tuple(lin.applied_opts)}
 
-
     while 1:
       acted_lins = lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam])
 
