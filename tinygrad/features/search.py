@@ -22,8 +22,6 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
   key = {"ast": str(lin.ast), "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size}
   if should_copy and not disable_cache and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
   if should_copy: lin = lin.copy() # TODO: remove the need for this
-  # allocate a scratch buffer if output buffer is also input
-  if rawbufs[0] in rawbufs[1:]: rawbufs = [cast(Compiled, Device[Device.DEFAULT]).buffer(rawbufs[0].size, rawbufs[0].dtype), *rawbufs[1:]]
   var_vals = {k:k.min for k in vars_from_ast(lin.ast)}
   try:
     lin.linearize()
