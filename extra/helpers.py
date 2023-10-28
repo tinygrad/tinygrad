@@ -1,26 +1,12 @@
-import multiprocessing, subprocess
+import os, multiprocessing, subprocess
 import cloudpickle  # type: ignore
 from typing import Any
 
-def _early_exec_process(qin, qout):
-  while True:
-    path, inp = qin.get()
-    try:
-      qout.put(subprocess.check_output(path, input=inp))
-    except Exception as e:
-      qout.put(e)
-
+earlypool = None
 def enable_early_exec():
-  qin: multiprocessing.Queue = multiprocessing.Queue()
-  qout: multiprocessing.Queue = multiprocessing.Queue()
-  p = multiprocessing.Process(target=_early_exec_process, args=(qin, qout))
-  p.daemon = True
-  p.start()
-  def early_exec(x):
-    qin.put(x)
-    ret = qout.get()
-    if isinstance(ret, Exception): raise ret
-    else: return ret
+  global earlypool
+  if earlypool is None: earlypool = multiprocessing.Pool(int(os.getenv("WORKERS", 1)))
+  def early_exec(x): return earlypool.apply_async(subprocess.check_output, (x[0],), {"input":x[1]}).get()
   return early_exec
 
 def proc(itermaker, q) -> None:
