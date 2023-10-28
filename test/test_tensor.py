@@ -1,9 +1,12 @@
 import numpy as np
 import torch
-import unittest
+import struct
+import unittest, copy
+import mmap
 from tinygrad.tensor import Tensor, Device
 from tinygrad.helpers import dtypes
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
+from extra.utils import temp
 
 x_init = np.random.randn(1,3).astype(np.float32)
 U_init = np.random.randn(3,3).astype(np.float32)
@@ -97,12 +100,12 @@ class TestTinygrad(unittest.TestCase):
     assert W.grad is not None
 
   def test_dropout(self):
-    Tensor.training = True
-    n, rate = 1_000_000, 0.1
-    w = Tensor.ones(n).dropout(rate)
-    non_zeros = np.count_nonzero(w.numpy())
-    expected = n * (1 - rate)
-    np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
+    with Tensor.train():
+      n, rate = 1_000_000, 0.1
+      w = Tensor.ones(n).dropout(rate)
+      non_zeros = np.count_nonzero(w.numpy())
+      expected = n * (1 - rate)
+      np.testing.assert_allclose(non_zeros, expected, rtol=2e-3)
 
   def test_jacobian(self):
     W = np.random.RandomState(42069).random((10, 5)).astype(np.float32)
@@ -219,6 +222,45 @@ class TestTinygrad(unittest.TestCase):
     x.dot(layer).mean().backward()
     x = Tensor.randn(1, 1, 1)
     x.dot(layer).mean().backward()
+
+  def test_zerosized_tensors(self):
+    Tensor([]).realize()
+    Tensor([]).numpy()
+
+  def test_tensor_ndarray_dtype(self):
+    arr = np.array([1]) # where dtype is implicitly int64
+    assert Tensor(arr).dtype == dtypes.int64
+    assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32 # check if ndarray correctly casts to Tensor dtype
+    assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64 # check that it works for something else
+
+  def test_tensor_list_dtype(self):
+    arr = [1]
+    assert Tensor(arr).dtype == Tensor.default_type
+    assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
+    assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+
+  def test_tensor_copy(self):
+    x = copy.deepcopy(Tensor.ones((3,3,3)))
+    np.testing.assert_allclose(x.numpy(), np.ones((3,3,3)))
+
+  def test_copy_from_disk(self):
+    t = Tensor.randn(30, device="CPU").to(f"disk:{temp('test_copy_from_disk')}")
+    a = t[10:20]
+    dev = a.to(Device.DEFAULT)
+    np.testing.assert_allclose(a.numpy(), dev.numpy())
+
+  # Regression test for https://github.com/tinygrad/tinygrad/issues/1751
+  def test_copy_from_numpy_unaligned(self):
+    # 2**15 is the minimum for repro
+    arr = np.random.randn(2**15).astype(dtypes.float.np)
+    fn = temp('test_copy_from_numpy_unaligned')
+    with open(fn, 'wb') as f: f.write(b't' + arr.tobytes())
+    with open(fn, "a+b") as f: memview = memoryview(mmap.mmap(f.fileno(), arr.nbytes + 1))
+    ua_arr = np.frombuffer(memview[1:], dtype=arr.dtype, count=arr.shape[0])
+    np.testing.assert_allclose(arr, ua_arr)
+    assert not ua_arr.flags.aligned
+    # force device copy - to() is opt'd away - Tensor(dev)/1 is ignored
+    np.testing.assert_allclose(ua_arr, (Tensor(ua_arr)/Tensor(1)).numpy())
 
 if __name__ == '__main__':
   unittest.main()

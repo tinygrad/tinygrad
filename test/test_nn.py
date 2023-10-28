@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from extra.utils import WINDOWS
-from tinygrad.helpers import getenv
+from tinygrad.helpers import CI
 from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import BatchNorm2d, Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding, InstanceNorm
@@ -90,7 +90,7 @@ class TestNN(unittest.TestCase):
     _test_linear(Tensor.randn(BS, T, in_dim)) # test with more dims
 
   def test_conv1d(self):
-    BS, C1, W = 4, 16, 224
+    BS, C1, W = 4, 16, 224//4
     C2, K, S, P = 64, 7, 2, 1
 
     # create in tinygrad
@@ -110,7 +110,7 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
   def test_conv2d(self):
-    BS, C1, H, W = 4, 16, 224, 224
+    BS, C1, H, W = 4, 16, 224//4, 224//4
     C2, K, S, P = 64, 7, 2, 1
 
     # create in tinygrad
@@ -129,9 +129,47 @@ class TestNN(unittest.TestCase):
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
-  @unittest.skipIf(getenv("CI", "") != "" and (WINDOWS or Device.DEFAULT == "WEBGPU"), "runs out of memory in CI")
+  @unittest.skipIf(Device.DEFAULT != "TORCH", "Takes too long to compile for Compiled backends")
+  def test_conv2d_winograd(self):
+    BS, C1, H, W = 2, 8, 16, 16
+    C2, K, S, P = 8, 3, 1, 1
+
+    old_wino = Tensor.wino
+    Tensor.wino = True
+
+    # create in tinygrad
+    layer = Conv2d(C1, C2, kernel_size=K, stride=S, padding=P)
+    layer.weight.requires_grad = True
+    layer.bias.requires_grad = True
+
+    # create in torch
+    torch_layer = torch.nn.Conv2d(C1, C2, kernel_size=K, stride=S, padding=P).eval()
+    torch_layer.weight = torch.nn.Parameter(torch.tensor(layer.weight.numpy(), dtype=torch.float32))
+    torch_layer.bias = torch.nn.Parameter(torch.tensor(layer.bias.numpy(), dtype=torch.float32))
+
+    # test
+    x = Tensor.uniform(BS, C1, H, W, requires_grad=True)
+    z = layer(x)
+    torch_x = torch.tensor(x.numpy(), requires_grad=True)
+    torch_z = torch_layer(torch_x)
+    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
+
+    m = z.mean()
+    m.backward()
+    gw = layer.weight.grad.realize()
+    gb = layer.bias.grad.realize()
+    gx = x.grad.realize()
+
+    torch_z.mean().backward()
+    np.testing.assert_allclose(gw.numpy(), torch_layer.weight.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(gb.numpy(), torch_layer.bias.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(gx.numpy(), torch_x.grad.numpy(), atol=5e-4, rtol=1e-5)
+
+    Tensor.wino = old_wino
+
+  @unittest.skipIf(CI and (WINDOWS or Device.DEFAULT == "WEBGPU"), "runs out of memory in CI")
   def test_conv_transpose1d(self):
-    BS, C1, W = 4, 16, 224
+    BS, C1, W = 4, 16, 224//4
     C2, K, S, P = 64, 7, 2, 1
 
     # create in tinygrad
@@ -150,9 +188,9 @@ class TestNN(unittest.TestCase):
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
-  @unittest.skipIf(getenv("CI", "") != "" and (WINDOWS or Device.DEFAULT == "WEBGPU"), "runs out of memory in CI")
+  @unittest.skipIf(CI and (WINDOWS or Device.DEFAULT == "WEBGPU"), "runs out of memory in CI")
   def test_conv_transpose2d(self):
-    BS, C1, H, W = 4, 16, 224, 224
+    BS, C1, H, W = 4, 16, 224//4, 224//4
     C2, K, S, P = 64, 7, 2, 1
 
     # create in tinygrad

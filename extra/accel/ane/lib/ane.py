@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os
+from pathlib import Path
 from ctypes import *
 import json
 import collections
@@ -8,13 +8,13 @@ import faulthandler
 import struct
 faulthandler.enable()
 
-basedir = os.path.dirname(os.path.abspath(os.path.realpath(__file__)))
+basedir = Path(__file__).resolve().parent
 
 libane = None
 aneregs = None
 def init_libane():
   global libane, aneregs
-  libane = cdll.LoadLibrary(os.path.join(basedir, "libane.dylib"))
+  libane = cdll.LoadLibrary((basedir / "libane.dylib").as_posix())
 
   libane.ANE_Compile.argtypes = [c_char_p, c_int]
   libane.ANE_Compile.restype = c_void_p
@@ -29,7 +29,7 @@ def init_libane():
 
   #libane.ANE_RegDebug.restype = c_char_p
 
-  with open(os.path.join(basedir, "aneregs.json")) as f:
+  with open(basedir / "aneregs.json") as f:
     aneregs = json.load(f)
 
 ANE_Struct = [
@@ -214,7 +214,7 @@ if __name__ == "__main__":
   mdf = ane.pack(dd, md)
   assert(md == mdf)
 
-  comp = ane.compile(dat) 
+  comp = ane.compile(dat)
   ret = ane.run(comp, tin, tout)
   print("** after **")
   print(tind)

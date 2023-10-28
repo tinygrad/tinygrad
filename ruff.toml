@@ -1,0 +1,42 @@
+tab-size = 2
+
+select = [
+  "F",
+  "W6",
+  "E71",
+  "E72",
+  "E112",
+  "E113",
+  # "E124",
+  "E203",
+  "E272",
+  # "E303",
+  # "E304",
+  # "E502",
+  "E702",
+  "E703",
+  "E731",
+  "W191",
+  "UP039",  # unnecessary-class-parentheses
+]
+
+exclude = [
+  "disassemblers/",
+  "docs/",
+  "examples/",
+  "extra/",
+  "models/",
+  "openpilot/",
+]
+
+[per-file-ignores]
+"test/*" = [
+  "F401",
+  "F403",
+  "F405",
+  "F541",
+  "E722",
+  "E731",
+  "F821",
+  "F841",
+]

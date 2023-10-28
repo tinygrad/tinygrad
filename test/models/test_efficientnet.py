@@ -68,7 +68,7 @@ class TestEfficientNet(unittest.TestCase):
     self.assertEqual(label, "hen")
 
   def test_chicken_bigbatch(self):
-    label = _infer(self.model, chicken_img, 4)
+    label = _infer(self.model, chicken_img, 2)
     self.assertEqual(label, "hen")
 
   def test_car(self):

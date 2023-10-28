@@ -5,7 +5,7 @@ import json
 import traceback
 import numpy as np
 from tinygrad.runtime.ops_gpu import CLProgram
-from tinygrad.helpers import prod, getenv
+from tinygrad.helpers import DEBUG, getenv
 from collections import defaultdict
 import pyopencl as cl
 from tinygrad.runtime.ops_gpu import CL, OSX_TIMING_RATIO
@@ -139,6 +139,8 @@ class Thneed:
           aa = bufs[a]
         aaa.append(aa)
       self.cl_cache.append((kernel, [k['global_work_size'], k['local_work_size'], *aaa]))
+
+    if DEBUG >= 1: print(f"thneed: total bufs loaded: {len(bufs.keys())}")
 
     # load inputs
     for k in jdat['inputs']:
@@ -279,12 +281,12 @@ class Thneed:
 
     if DEBUGCL >= 2:
       for i, ((prg, args), e) in enumerate(zip(self.cl_cache, events)):
-        print(f"{i:3d} {prg.name:20s} " + "queued @ %5.2f ms, submit @ %5.2fms, start @ %5.2f ms, end @ %5.2f ms" % tuple((x*OSX_TIMING_RATIO - st*1e9)/1e6 for x in [e.profile.queued, e.profile.submit, e.profile.start, e.profile.end]))
+        print(f"{i:3d} {prg.name:25s} " + "queued @ %5.2f ms, submit @ %5.2fms, start @ %5.2f ms, end @ %5.2f ms" % tuple((x*OSX_TIMING_RATIO - st*1e9)/1e6 for x in [e.profile.queued, e.profile.submit, e.profile.start, e.profile.end]))
     if DEBUGCL >= 1:
       total_runtime = 0
       for i, ((prg, args), e) in enumerate(zip(self.cl_cache, events)):
         runtime = (e.profile.end - e.profile.start) * OSX_TIMING_RATIO
-        print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:20s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us {(getattr(prg, 'op_estimate', float('nan')))/runtime:9.2f} GFLOPS -> {args[2].shape if hasattr(args[2], 'shape') else args[2].size}")
+        print(f"{i:3d} time {total_runtime/1e6:5.2f} ms running {prg.name:25s} with {str(args[0]):15s} {str(args[1]):15s} count {len(args)-2:2d} runtime {runtime/1e3:7.2f} us {(getattr(prg, 'op_estimate', float('nan')))/runtime:9.2f} GFLOPS -> {args[2].shape if hasattr(args[2], 'shape') else args[2].size}")
         if hasattr(prg, 'prg') and ((DEBUGCL >= 2 and getenv("PRINT_KERNEL", -1) == i) or DEBUGCL >= 3):
           print(prg.prg)
         total_runtime += runtime

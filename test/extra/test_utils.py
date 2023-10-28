@@ -32,7 +32,7 @@ class TestFetchRelative(unittest.TestCase):
     self.tempdir = tempfile.TemporaryDirectory()
     os.chdir(self.tempdir.name)
     with open('test_file.txt', 'x') as f:
-        f.write("12345")
+      f.write("12345")
 
   def tearDown(self):
     os.chdir(self.working_dir)
@@ -44,9 +44,9 @@ class TestFetchRelative(unittest.TestCase):
 
   #test ../
   def test_fetch_relative_dotdotslash(self):
-      os.mkdir('test_file_path')
-      os.chdir('test_file_path')
-      self.assertEqual(b'12345', fetch("../test_file.txt"))
+    os.mkdir('test_file_path')
+    os.chdir('test_file_path')
+    self.assertEqual(b'12345', fetch("../test_file.txt"))
 
 class TestDownloadFile(unittest.TestCase):
   def setUp(self):
@@ -64,10 +64,10 @@ class TestDownloadFile(unittest.TestCase):
     mock_response.status_code = 200
     mock_response.headers = {'content-length': '8'}
     mock_requests.return_value = mock_response
-    self.assertFalse(os.path.exists(self.test_file.parent))
+    self.assertFalse(self.test_file.parent.exists())
     download_file("https://www.mock.com/fake.txt", self.test_file, skip_if_exists=False)
-    self.assertTrue(os.path.exists(self.test_file.parent))
-    self.assertTrue(os.path.isfile(self.test_file))
+    self.assertTrue(self.test_file.parent.exists())
+    self.assertTrue(self.test_file.is_file())
     self.assertEqual('12345678', self.test_file.read_text())
 
 class TestUtils(unittest.TestCase):

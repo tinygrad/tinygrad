@@ -11,7 +11,7 @@ x_init = np.random.randn(1,4).astype(np.float32)
 W_init = np.random.randn(4,4).astype(np.float32)
 m_init = np.random.randn(1,4).astype(np.float32)
 
-class TinyNet():
+class TinyNet:
   def __init__(self):
     self.x = Tensor(x_init.copy(), requires_grad=True)
     self.W = Tensor(W_init.copy(), requires_grad=True)
@@ -23,7 +23,7 @@ class TinyNet():
     out = out.mul(self.m).add(self.m).sum()
     return out
 
-class TinyNetTF():
+class TinyNetTF:
   def __init__(self):
     self.x = tf.Variable(x_init.copy(), trainable=True)
     self.W = tf.Variable(W_init.copy(), trainable=True)

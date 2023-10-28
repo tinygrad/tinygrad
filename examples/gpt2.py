@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # pip3 install tiktoken
 
-import functools, argparse
+import argparse
 import numpy as np
 from tqdm import trange
 np.set_printoptions(linewidth=200)
-from typing import Optional, Tuple
+from typing import Optional, Dict
 
 from tinygrad.helpers import Timing, getenv, dtypes, DEBUG
 from tinygrad.ops import GlobalCounters
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
 from tinygrad.jit import TinyJit
@@ -69,77 +69,76 @@ class TransformerBlock:
     self.mlp = FeedForward(dim, 4*dim, linear)
     self.ln_1 = LayerNorm(dim, norm_eps)
     self.ln_2 = LayerNorm(dim, norm_eps)
-    self.cache_k, self.cache_v = None, None
-    self.jitted = TinyJit(self.inner)
 
-  def inner(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor]):
+  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, mask:Optional[Tensor]):
     output, cache_k, cache_v = self.attn(self.ln_1(x), cache_k, cache_v, start_pos, mask)
     h = x + output
-    return (h + self.mlp(self.ln_2(h))).realize(), cache_k, cache_v
-
-  def __call__(self, x:Tensor, start_pos:int, mask:Optional[Tensor]):
-    if start_pos > 0 and mask is None and getenv("JIT"):
-      seqlen = x.shape[1]
-
-      pos = Variable("pos", 1, MAX_CONTEXT)
-      self.cache_k = self.cache_k.reshape(self.cache_k.shape[0], pos, self.cache_k.shape[2], self.cache_k.shape[3])
-      self.cache_v = self.cache_v.reshape(self.cache_v.shape[0], pos, self.cache_v.shape[2], self.cache_v.shape[3])
-
-      ret, cache_k, cache_v = self.jitted(x, self.cache_k, self.cache_v, start_pos, mask)
-
-      # save the cache. with symbolic shape, cast it back to int shape so we have int shape in cache
-      self.cache_k = cache_k.reshape(cache_k.shape[0], start_pos+seqlen, cache_k.shape[2], cache_k.shape[3]).realize()
-      self.cache_v = cache_v.reshape(cache_v.shape[0], start_pos+seqlen, cache_v.shape[2], cache_v.shape[3]).realize()
-
-      return ret
-    else:
-      ret, self.cache_k, self.cache_v = self.inner(x, self.cache_k, self.cache_v, start_pos, mask)
-      return ret
+    h = (h + self.mlp(self.ln_2(h)))
+    return h, cache_k, cache_v
 
 class Transformer:
-  def __init__(self, dim, n_heads, n_layers, norm_eps=1e-5, vocab_size=50257, linear=Linear, max_seq_len=1024):
+  def __init__(self, dim, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_seq_len=1024):
     self.wte = Embedding(vocab_size, dim)
     self.wpe = Embedding(max_seq_len, dim)
     self.h = [TransformerBlock(dim, n_heads, norm_eps, linear) for _ in range(n_layers)]
+    self.kv_caches = None
+    self.n_layers = n_layers
     self.ln_f = LayerNorm(dim, norm_eps)
     self.lm_head = linear(dim, vocab_size, bias=False)
 
-    self.embed_jitted = TinyJit(self.embed)
-    self.postprocess_jitted = TinyJit(self.postprocess)
-
-  def embed(self, tokens, pos):
+  def embed(self, tokens:Tensor, pos:Tensor):
     tok_emb = self.wte(tokens)
     pos_emb = self.wpe(pos)
     h = tok_emb + pos_emb
-    return h.realize()
+    if getenv("FP16"): h = h.half()
+    return h
 
   def postprocess(self, x, temperature:Optional[float]):
     logits = self.lm_head(self.ln_f(x))
-    if temperature is not None: return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
-    return logits.realize()
+    if temperature is not None: return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten()
+    return logits
 
-  def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]):
+  @TinyJit
+  def run_all_layers(self, tokens:Tensor, pos:Tensor, start_pos:int, temperature:float, **kv_cache):
+    h = self.embed(tokens, pos)
+
+    for i, hi in enumerate(self.h):
+      h, kv_cache[f'cache_k{i}'], kv_cache[f'cache_v{i}'] = hi(h, kv_cache[f'cache_k{i}'], kv_cache[f'cache_v{i}'], start_pos=start_pos, mask=None)
+
+    # don't realize until here
+    for v in kv_cache.values(): v.realize()
+    return self.postprocess(h, temperature).realize(), kv_cache
+
+  def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
     _bsz, seqlen = tokens.shape
-    if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
     if seqlen == 1 and start_pos > 0 and getenv("JIT"):
-      start_pos_var = Variable("start_pos", 1, MAX_CONTEXT)
-      pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos_var, start_pos_var+seqlen)))
-      pos.lazydata.st.var_vals[start_pos_var] = start_pos
-      h = self.embed_jitted(tokens, pos).sequential([functools.partial(layer, start_pos=start_pos, mask=None) for layer in self.h])
-      return self.postprocess_jitted(h, temperature)
+      start_pos_var = Variable("start_pos", 1, MAX_CONTEXT).bind(start_pos)
+      pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos_var, start_pos_var + seqlen)))
+      for k,v in self.kv_caches.items():
+        self.kv_caches[k] = v.reshape(v.shape[0], start_pos_var, v.shape[2], v.shape[3])
+      logit_or_softmax, self.kv_caches = self.run_all_layers(tokens, pos, start_pos=start_pos, temperature=temperature, **self.kv_caches)
+      return logit_or_softmax
     else:
+      if start_pos == 0:
+        if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
+        self.kv_caches = {**{f'cache_k{i}':None  for i in range(self.n_layers)}, **{f'cache_v{i}':None for i in range(self.n_layers)}}
+
       pos = self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos, start_pos+seqlen)))
-      mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize()
-      h = self.embed(tokens, pos).sequential([functools.partial(layer, start_pos=start_pos, mask=mask) for layer in self.h])
-      return self.postprocess(h, temperature)
+      mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float16 if getenv('FP16') else dtypes.float32).triu(start_pos+1).realize()
+      h = self.embed(tokens, pos)
+      for i, hi in enumerate(self.h):
+        h, self.kv_caches[f'cache_k{i}'], self.kv_caches[f'cache_v{i}'] = hi(h, self.kv_caches[f'cache_k{i}'], self.kv_caches[f'cache_v{i}'], start_pos=start_pos, mask=mask)
+      for v in self.kv_caches.values(): v.realize()
+      return self.postprocess(h, temperature).realize()
 
 # **** files and arguments ****
 
+VOCAB_SIZE = 50257
 MODEL_PARAMS = {
-  'gpt2':         dict(n_layers=12, n_heads=12, dim=768),   # 124M params
-  'gpt2-medium':  dict(n_layers=24, n_heads=16, dim=1024),  # 350M params
-  'gpt2-large':   dict(n_layers=36, n_heads=20, dim=1280),  # 774M params
-  'gpt2-xl':      dict(n_layers=48, n_heads=25, dim=1600),  # 1558M params
+  'gpt2':         dict(n_layers=12, n_heads=12, dim=768, norm_eps=1e-5, vocab_size=VOCAB_SIZE),   # 124M params
+  'gpt2-medium':  dict(n_layers=24, n_heads=16, dim=1024, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 350M params
+  'gpt2-large':   dict(n_layers=36, n_heads=20, dim=1280, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 774M params
+  'gpt2-xl':      dict(n_layers=48, n_heads=25, dim=1600, norm_eps=1e-5, vocab_size=VOCAB_SIZE),  # 1558M params
 }
 
 def get_url(model_size): return f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'
@@ -163,9 +162,10 @@ class GPT2:
     # lm head and wte are tied
     weights['lm_head.weight'] = Tensor(weights['wte.weight'].numpy())
 
-    load_state_dict(model, weights)
     if getenv("FP16"):
-      for v in get_state_dict(model).values(): v.assign(v.cast(dtypes.float16).realize())
+      for k, v in weights.items():
+        weights[k] = v.cpu().half().realize()
+    load_state_dict(model, weights)
     return GPT2(model, tokenizer)
 
   def __init__(self, model, tokenizer):
@@ -177,13 +177,13 @@ class GPT2:
     start_pos = 0
     for _ in trange(max_length, disable=(timing==True)):
       GlobalCounters.reset()
-      if args.timing: print("")
+      if timing: print("")
       st = GlobalCounters.time_sum_s
-      with Timing(f"ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU"+
-                  f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                  f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s") if DEBUG else None, enabled=timing):
-        probs = self.model(Tensor([toks[start_pos:]]), start_pos, temperature)
-      with Timing("sync in ", enabled=timing):
+      with Timing("total ", enabled=timing):
+        with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+                    f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                    (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
+          probs = self.model(Tensor([toks[start_pos:]]), start_pos, temperature)
         probs_np = probs.numpy()
         tok = int(np.random.choice(len(probs_np), p=probs_np))
       start_pos = len(toks)
@@ -203,7 +203,12 @@ if __name__ == "__main__":
   parser.add_argument('--temperature', type=float, default=0.8, help="Temperature in the softmax")
   parser.add_argument('--model_size', type=str, default="gpt2-medium", help="Size of model to use [gpt2, gpt2-medium, gpt2-large, gpt2-xl]")
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
+  parser.add_argument('--seed', type=int, help="Set the random seed")
   args = parser.parse_args()
+
+  if args.seed is not None:
+    Tensor._seed = args.seed
+    np.random.seed(args.seed)
 
   print(f"using {args.model_size}")
   gpt2 = GPT2.build(args.model_size)

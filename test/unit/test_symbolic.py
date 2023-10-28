@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, sym_render
+from tinygrad.shape.symbolic import Node, MulNode, SumNode, Variable, NumNode, LtNode, sym_render, sym_infer, create_rednode
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -26,16 +26,15 @@ class TestSymbolic(unittest.TestCase):
 
   def test_ge_divides(self):
     expr = (Variable("idx", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512
-    self.helper_test_variable(expr, 0, 1, "((idx*4)<512)")
-    self.helper_test_variable(expr//4, 0, 1, "(idx<128)")
+    self.helper_test_variable(expr, 0, 1, "(idx<128)")
 
   def test_ge_divides_and(self):
     expr = Variable.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512,
                           (Variable("idx2", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512])
-    self.helper_test_variable(expr//4, 0, 1, "((idx1<128) and (idx2<128))")
+    self.helper_test_variable(expr, 0, 1, "((idx1<128) and (idx2<128))")
     expr = Variable.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512,
                           (Variable("idx2", 0, 511)*4 + Variable("FLOAT8_INDEX", 0, 7)) < 512])
-    self.helper_test_variable(expr//4, 0, 1, "((((FLOAT8_INDEX//4)+idx2)<128) and (idx1<128))")
+    self.helper_test_variable(expr//4, 0, 1, "((((FLOAT8_INDEX//4)+idx2)<128) and ((idx1//4)<32))")
 
   def test_lt_factors(self):
     expr = Variable.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256)) < 512])
@@ -130,17 +129,36 @@ class TestSymbolic(unittest.TestCase):
     # NOTE: even though the mod max is 50, it can't know this without knowing about the mul
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 99, "((b*50)%100)")
 
+  def test_mod_to_sub(self):
+    # This is mod reduction
+    self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, (Variable("a",1,2)-1).render())
+
   def test_sum_div_const(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*4, Variable.num(3)]) // 4, 0, 7, "a")
 
   def test_sum_div_const_big(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*4, Variable.num(3)]) // 16, 0, 1, "(a//4)")
 
+  def test_sum_lt_fold(self):
+    self.helper_test_variable(Variable.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 3)]) < 16, 0, 1, "(a<4)")
+    self.helper_test_variable(Variable.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 4)]) < 16, 0, 1, "(((a*4)+b)<16)")
+
   def test_mod_mul(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)%9, 0, 5, "a")
 
+  def test_mod_mod(self):
+    self.helper_test_variable((Variable("a", 0, 31)%12)%4, 0, 3, "(a%4)")
+    self.helper_test_variable(((4*Variable("a", 0, 31)) % 12) % 4, 0, 0, "0")
+    self.helper_test_variable((Variable("a", 0, 31) % 4) % 12, 0, 3, "(a%4)")
+
   def test_mul_mul(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)*9, 0, 5*10*9, "(a*90)")
+
+  def test_mul_lt(self):
+    self.helper_test_variable((Variable("a", 0, 5)*4)<13, 0, 1, "(a<4)")
+    self.helper_test_variable((Variable("a", 0, 5)*4)<16, 0, 1, "(a<4)")
+    self.helper_test_variable((Variable("a", 0, 5)*4)>11, 0, 1, "((a*-1)<-2)")
+    self.helper_test_variable((Variable("a", 0, 5)*4)>12, 0, 1, "((a*-1)<-3)")
 
   def test_div_div(self):
     self.helper_test_variable((Variable("a", 0, 1800)//10)//9, 0, 20, "(a//90)")
@@ -279,6 +297,21 @@ class TestSymRender(unittest.TestCase):
     assert sym_render(a+1) == "(1+a)"
     assert sym_render(a*b) == "(a*b)"
 
+class TestSymInfer(unittest.TestCase):
+  def test_sym_infer(self):
+    a = Variable("a", 0, 10)
+    b = Variable("b", 0, 10)
+    c = Variable("c", 0, 10)
+    var_vals = {a: 2, b: 3, c: 4}
+    assert sym_infer(5, var_vals) == 5
+    assert sym_infer(a, var_vals) == 2
+    assert sym_infer(b, var_vals) == 3
+    assert sym_infer(a+b, var_vals) == 5
+    assert sym_infer(a-b, var_vals) == -1
+    assert sym_infer(a+b+c, var_vals) == 9
+    assert sym_infer(a*b, var_vals) == 6
+    assert sym_infer(a*b+c, var_vals) == 10
+
 class TestSymbolicSymbolicOps(unittest.TestCase):
   def test_node_divmod_node(self):
     i = Variable("i", 1, 10)
@@ -343,17 +376,18 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     a = Variable("a", 1, 5)
     b = Variable("b", 6, 9)
     c = Variable("c", 1, 10)
+    d = Variable("d", 5, 10)
     # if the value is always the same, it folds to num
     assert (a < b) == 1
-    # if it remains as a LtNode, bool is always true and we need to test against min to test if it always evals to True
-    assert (a < c).__class__ is LtNode and (a < c).min == 0 and (a < c).max == 1
+    assert (b < a) == 0
+    assert (d < a) == 0
+    # if it remains as a LtNode, bool is always true and (min, max) == (0, 1)
+    assert isinstance((a < c), LtNode) and (a < c).min == 0 and (a < c).max == 1
     assert a < c
-    assert not (a < c).min
-    assert (a > c).__class__ is LtNode and (a > c).min == 0 and (a > c).max == 1
-    assert not (a > c).min
+    assert isinstance((a > c), LtNode) and (a > c).min == 0 and (a > c).max == 1
     # same when comparing with a constant
-    assert a < 3
-    assert a > 3
+    assert a < 3 and (a < 3).min == 0 and (a < 3).max == 1
+    assert a > 3 and (a > 3).min == 0 and (a > 3).max == 1
 
   def test_num_node_mul_node(self):
     a = Variable("a", 1, 5)
@@ -366,6 +400,49 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     b = NumNode(0) * a
     assert b == 0
     assert isinstance(b, NumNode)
+
+  def test_num_node_expand(self):
+    a = NumNode(42)
+    assert a.expand() == [a]
+
+  def test_variable_expand(self):
+    a = Variable("a", 5, 7)
+    assert a.expand() == [a]
+
+  def test_variable_expand_expr_none(self):
+    a = Variable(None, 5, 7)
+    assert a.expand() == [NumNode(5), NumNode(6), NumNode(7)]
+
+  def test_mul_node_expand(self):
+    a = Variable(None, 5, 7)
+    m = MulNode(a, 3)
+    assert m.expand() == [NumNode(15), NumNode(18), NumNode(21)]
+
+    b = Variable("b", 1, 3)
+    n = MulNode(b, 3)
+    assert n.expand() == [Variable("b", 1, 3)*3]
+
+  def test_sum_node_expand(self):
+    a = Variable(None, 1, 3)
+    b = Variable("b", 5, 7)
+
+    s1 = create_rednode(SumNode, [a, b])
+    assert s1.expand() == [Variable.sum([NumNode(i),b]) for i in range(1,4)]
+
+  def test_multi_expand(self):
+    a = Variable("a", 1, 3)
+    b = Variable("b", 14, 17)
+    s1 = create_rednode(SumNode, [a, b])
+    # expand increments earlier variables faster than later variables (as specified in the argument)
+    # this behavior was just copied from before, no idea why this should be true
+    assert s1.expand((a, b)) == [NumNode(x + y) for x in range(b.min, b.max + 1) for y in range(a.min, a.max + 1)]
+
+  def test_substitute(self):
+    a = Variable(None, 1, 3)
+    b = a + 1
+    c = b.substitute({a: NumNode(1)})
+    assert c == NumNode(2)
+
 
 if __name__ == '__main__':
   unittest.main()

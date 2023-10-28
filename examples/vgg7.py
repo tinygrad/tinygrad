@@ -1,12 +1,12 @@
 import sys
-import os
 import random
 import json
 import numpy
+from pathlib import Path
 from PIL import Image
 from tinygrad.tensor import Tensor
 from tinygrad.nn.optim import SGD
-from examples.vgg7_helpers.kinne import KinneDir
+from tinygrad.nn.state import safe_save, safe_load, get_state_dict, load_state_dict
 from examples.vgg7_helpers.waifu2x import image_load, image_save, Vgg7
 
 # amount of context erased by model
@@ -26,21 +26,23 @@ def set_sample_count(samples_dir, sc):
     file.write(str(sc) + "\n")
 
 if len(sys.argv) < 2:
-  print("python3 -m examples.vgg7 import MODELJSON MODELDIR")
+  print("python3 -m examples.vgg7 import MODELJSON MODEL")
   print(" imports a waifu2x JSON vgg_7 model, i.e. waifu2x/models/vgg_7/art/scale2.0x_model.json")
-  print(" into a directory of float binaries along with a meta.txt file containing tensor sizes")
+  print(" into a safetensors file")
   print(" weight tensors are ordered in tinygrad/ncnn form, as so: (outC,inC,H,W)")
-  print(" *this format is used by all other commands in this program*")
-  print("python3 -m examples.vgg7 execute MODELDIR IMG_IN IMG_OUT")
+  print(" *this format is used by most other commands in this program*")
+  print("python3 -m examples.vgg7 import_kinne MODEL_KINNE MODEL_SAFETENSORS")
+  print(" imports a model in 'KINNE' format (raw floats: used by older versions of this example) into safetensors")
+  print("python3 -m examples.vgg7 execute MODEL IMG_IN IMG_OUT")
   print(" given an already-nearest-neighbour-scaled image, runs vgg7 on it")
   print(" output image has 7 pixels removed on all edges")
   print(" do not run on large images, will have *hilarious* RAM use")
-  print("python3 -m examples.vgg7 execute_full MODELDIR IMG_IN IMG_OUT")
+  print("python3 -m examples.vgg7 execute_full MODEL IMG_IN IMG_OUT")
   print(" does the 'whole thing' (padding, tiling)")
   print(" safe for large images, etc.")
-  print("python3 -m examples.vgg7 new MODELDIR")
+  print("python3 -m examples.vgg7 new MODEL")
   print(" creates a new model (experimental)")
-  print("python3 -m examples.vgg7 train MODELDIR SAMPLES_DIR ROUNDS ROUNDS_SAVE")
+  print("python3 -m examples.vgg7 train MODEL SAMPLES_DIR ROUNDS ROUNDS_SAVE")
   print(" trains a model (experimental)")
   print(" (how experimental? well, every time I tried it, it flooded w/ NaNs)")
   print(" note: ROUNDS < 0 means 'forever'. ROUNDS_SAVE <= 0 is not a good idea.")
@@ -67,10 +69,11 @@ def load_and_save(path, save):
   if save:
     for v in vgg7.get_parameters():
       nansbane(v)
-  kn = KinneDir(model, save)
-  kn.parameters(vgg7.get_parameters())
-  kn.close()
-  if not save:
+    st = get_state_dict(vgg7)
+    safe_save(st, path)
+  else:
+    st = safe_load(path)
+    load_state_dict(vgg7, st)
     for v in vgg7.get_parameters():
       nansbane(v)
 
@@ -80,8 +83,19 @@ if cmd == "import":
 
   vgg7.load_waifu2x_json(json.load(open(src, "rb")))
 
-  if not os.path.isdir(model):
-    os.mkdir(model)
+  load_and_save(model, True)
+elif cmd == "import_kinne":
+  # tinygrad wasn't doing safetensors when this example was written
+  # it's possible someone might have a model around using the resulting interim format
+  src = sys.argv[2]
+  model = sys.argv[3]
+
+  index = 0
+  for t in vgg7.get_parameters():
+    fn = src + "/snoop_bin_" + str(index) + ".bin"
+    t.assign(Tensor(numpy.fromfile(fn, "<f4")).reshape(shape=t.shape))
+    index += 1
+
   load_and_save(model, True)
 elif cmd == "execute":
   model = sys.argv[2]
@@ -102,8 +116,6 @@ elif cmd == "execute_full":
 elif cmd == "new":
   model = sys.argv[2]
 
-  if not os.path.isdir(model):
-    os.mkdir(model)
   load_and_save(model, True)
 elif cmd == "train":
   model = sys.argv[2]
@@ -118,7 +130,7 @@ elif cmd == "train":
   # This is used to try and get the network to focus on "interesting" samples,
   #  which works nicely with the microsample system.
   sample_probs = None
-  sample_probs_path = model + "/sample_probs.bin"
+  sample_probs_path = model + "_sample_probs.bin"
   try:
     # try to read...
     sample_probs = numpy.fromfile(sample_probs_path, "<f8")
@@ -179,7 +191,7 @@ elif cmd == "train":
     optim.step()
 
     # warning: used by sample probability adjuster
-    loss_indicator = loss.max().numpy()[0]
+    loss_indicator = loss.max().numpy()
     print("Round " + str(rnum) + " : " + str(loss_indicator))
 
     if (rnum % rounds_per_save) == 0:

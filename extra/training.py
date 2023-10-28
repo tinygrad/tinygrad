@@ -5,31 +5,31 @@ from tinygrad.helpers import getenv
 
 def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=lambda out,y: out.sparse_categorical_crossentropy(y),
         transform=lambda x: x, target_transform=lambda x: x, noloss=False):
-  Tensor.training = True
-  losses, accuracies = [], []
-  for i in (t := trange(steps, disable=getenv('CI', False))):
-    samp = np.random.randint(0, X_train.shape[0], size=(BS))
-    x = Tensor(transform(X_train[samp]), requires_grad=False)
-    y = Tensor(target_transform(Y_train[samp]))
+  with Tensor.train():
+    losses, accuracies = [], []
+    for i in (t := trange(steps, disable=getenv('CI', False))):
+      samp = np.random.randint(0, X_train.shape[0], size=(BS))
+      x = Tensor(transform(X_train[samp]), requires_grad=False)
+      y = Tensor(target_transform(Y_train[samp]))
 
-    # network
-    out = model.forward(x) if hasattr(model, 'forward') else model(x)
+      # network
+      out = model.forward(x) if hasattr(model, 'forward') else model(x)
 
-    loss = lossfn(out, y)
-    optim.zero_grad()
-    loss.backward()
-    if noloss: del loss
-    optim.step()
+      loss = lossfn(out, y)
+      optim.zero_grad()
+      loss.backward()
+      if noloss: del loss
+      optim.step()
 
-    # printing
-    if not noloss:
-      cat = out.argmax(axis=-1)
-      accuracy = (cat == y).mean().numpy()
+      # printing
+      if not noloss:
+        cat = out.argmax(axis=-1)
+        accuracy = (cat == y).mean().numpy()
 
-      loss = loss.detach().numpy()
-      losses.append(loss)
-      accuracies.append(accuracy)
-      t.set_description("loss %.2f accuracy %.2f" % (loss, accuracy))
+        loss = loss.detach().numpy()
+        losses.append(loss)
+        accuracies.append(accuracy)
+        t.set_description("loss %.2f accuracy %.2f" % (loss, accuracy))
   return [losses, accuracies]
 
 

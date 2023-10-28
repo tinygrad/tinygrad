@@ -1,8 +1,13 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib
+import os, functools, platform, time, re, contextlib, operator, pathlib, hashlib, tempfile, pickle, sqlite3
 import numpy as np
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Callable, Any, Iterable
-from math import prod # noqa: F401 # pylint:disable=unused-import
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING
+if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
+  from typing_extensions import TypeGuard
+
+T = TypeVar("T")
+# NOTE: it returns int 1 if x is empty regardless of the type of x
+def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.__mul__, x, 1)
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
@@ -12,16 +17,16 @@ def dedup(x): return list(dict.fromkeys(x))   # retains list order
 def argfix(*x): return tuple(x[0]) if x and x[0].__class__ in (tuple, list) else x
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def all_same(items): return all(x == items[0] for x in items)
+def all_int(t: Tuple[Any, ...]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
 def ansilen(s): return len(re.sub('\x1b\\[(K|.*?m)', '', s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
-def flatten(l:Iterator): return [item for sublist in l for item in sublist]
-def mnum(i) -> str: return str(i) if i >= 0 else f"m{-i}"
+def flatten(l:Union[List, Iterator]): return [item for sublist in l for item in sublist]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
+def strip_parens(fst): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def merge_dicts(ds:Iterable[Dict]) -> Dict:
-  kvs = set([(k,v) for d in ds for k,v in d.items()])
-  assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
-  return {k:v for k,v in kvs}
+  assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
+  return {k:v for d in ds for k,v in d.items()}
 def partition(lst, fxn):
   a: list[Any] = []
   b: list[Any] = []
@@ -54,8 +59,8 @@ class ContextVar:
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
 
-DEBUG, IMAGE = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0)
-GRAPH, PRUNEGRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("PRUNEGRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
+DEBUG, IMAGE, BEAM = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0)
+GRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 
 class Timing(contextlib.ContextDecorator):
   def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
@@ -72,7 +77,7 @@ class DType(NamedTuple):
   name: str
   np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
   sz: int = 1
-  def __repr__(self): return f"dtypes.{self.name}"
+  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}"
 
 # dependent typing?
 class ImageDType(DType):
@@ -82,6 +87,14 @@ class ImageDType(DType):
     self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
     super().__init__()
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
+  # TODO: fix this to not need these
+  def __hash__(self): return hash((super().__hash__(), self.shape))
+  def __eq__(self, x): return super().__eq__(x) and self.shape == x.shape
+  def __ne__(self, x): return super().__ne__(x) or self.shape != x.shape
+
+class PtrDType(DType):
+  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.np, dt.sz)
+  def __repr__(self): return f"ptr.{super().__repr__()}"
 
 class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
@@ -114,13 +127,21 @@ class dtypes:
   bfloat16: Final[DType] = DType(0, 2, "__bf16", None)
 
   # NOTE: these are internal dtypes, should probably check for that
+  _int2: Final[DType] = DType(2, 4*2, "int2", None, 2)
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
   _float2: Final[DType] = DType(4, 4*2, "float2", None, 2)
   _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
   _arg_int32: Final[DType] = DType(2, 4, "_arg_int32", None)
 
+  # NOTE: these are image dtypes
+  @staticmethod
+  def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shp)
+  @staticmethod
+  def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp)
+
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod}
+INVERSE_DTYPES_DICT = {v:k for k,v in DTYPES_DICT.items()}
 
 class GlobalCounters:
   global_ops: ClassVar[int] = 0
@@ -129,6 +150,59 @@ class GlobalCounters:
   kernel_count: ClassVar[int] = 0
   mem_used: ClassVar[int] = 0   # NOTE: this is not reset
   mem_cached: ClassVar[int] = 0 # NOTE: this is not reset
-  cache: ClassVar[Optional[List[Tuple[Callable, Any, Dict[Any, int]]]]] = None  # List[Tuple[Callable, List[RawBuffer], Dict[Variable, int]]]
   @staticmethod
-  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count, GlobalCounters.cache = 0,0,0.0,0,None
+  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0
+
+# *** compiled cache decorator ***
+
+def cache_compiled(func):
+  def wrapper(self, prg:str, *args, **kwargs) -> bytes:
+    cache_path, output_file = pathlib.Path(f"{tempfile.gettempdir()}/tinygrad_cc_{hashlib.sha256(prg.encode()).hexdigest()}"), pathlib.Path(tempfile.mktemp())
+    if not cache_path.exists():
+      output_file.write_bytes(func(self, prg, *args, **kwargs))
+      output_file.rename(cache_path)
+    return cache_path.read_bytes()
+  return wrapper
+
+# *** universal database cache ***
+
+CACHEDB = getenv("CACHEDB", "/tmp/tinygrad_cache")
+VERSION = 2
+_db_connection = None
+def db_connection():
+  global _db_connection
+  if _db_connection is None:
+    _db_connection = sqlite3.connect(CACHEDB)
+    if DEBUG >= 3: _db_connection.set_trace_callback(print)
+    if diskcache_get("meta", "version") != VERSION:
+      print("cache is out of date, clearing it")
+      os.unlink(CACHEDB)
+      _db_connection = sqlite3.connect(CACHEDB)
+      if DEBUG >= 3: _db_connection.set_trace_callback(print)
+      diskcache_put("meta", "version", VERSION)
+  return _db_connection
+
+def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
+  if isinstance(key, (str,int)): key = {"key": key}
+  try:
+    res = db_connection().cursor().execute(f"SELECT val FROM {table} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
+  except sqlite3.OperationalError:
+    return None  # table doesn't exist
+  if (val:=res.fetchone()) is not None:
+    return pickle.loads(val[0])
+  return None
+
+_db_tables = set()
+def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
+  if isinstance(key, (str,int)): key = {"key": key}
+  conn = db_connection()
+  cur = conn.cursor()
+  if table not in _db_tables:
+    TYPES = {str: "text", bool: "integer", int: "integer", float: "numeric", bytes: "blob"}
+    ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
+    cur.execute(f"CREATE TABLE IF NOT EXISTS {table} ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
+    _db_tables.add(table)
+  cur.execute(f"REPLACE INTO {table} ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val), ))
+  conn.commit()
+  cur.close()
+  return val

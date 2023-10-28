@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
 import torch
 
 def get_question_samp(bsz, seq_len, vocab_size, seed):
@@ -22,7 +22,6 @@ def set_equal_weights(mdl, torch_mdl):
   torch_mdl.eval()
 
 class TestBert(unittest.TestCase):
-  @unittest.skipIf(Device.DEFAULT == "TORCH", "torch doesn't support '-' operator with a bool tensor")  # TODO
   def test_questions(self):
     from models.bert import BertForQuestionAnswering
     from transformers import BertForQuestionAnswering as TorchBertForQuestionAnswering

@@ -4,6 +4,8 @@
 import numpy
 from tinygrad.tensor import Tensor
 from PIL import Image
+from pathlib import Path
+from extra.utils import download_file
 
 # File Formats
 
@@ -17,6 +19,9 @@ def image_load(path) -> numpy.ndarray:
   """
   # file
   na = numpy.array(Image.open(path))
+  if na.shape[2] == 4:
+    # RGBA -> RGB (covers opaque images with alpha channels)
+    na = na[:,:,0:3]
   # fix shape
   na = numpy.moveaxis(na, [2,0,1], [0,1,2])
   # shape is now (3,h,w), add 1
@@ -47,33 +52,37 @@ class Conv3x3Biased:
   A 3x3 convolution layer with some utility functions.
   """
   def __init__(self, inC, outC, last = False):
+    # The properties must be named as "W" and "b".
+    # This is in an attempt to try and be roughly compatible with https://github.com/FHPythonUtils/Waifu2x
+    #  though this cannot necessarily account for transposition and other such things.
+
     # Massively overstate the weights to get them to be focused on,
     #  since otherwise the biases overrule everything
-    self.weight = Tensor.uniform(outC, inC, 3, 3) * 16.0
+    self.W = Tensor.uniform(outC, inC, 3, 3) * 16.0
     # Layout-wise, blatant cheat, but serious_mnist does it. I'd guess channels either have to have a size of 1 or whatever the target is?
     # Values-wise, entirely different blatant cheat.
     # In most cases, use uniform bias, but tiny.
     # For the last layer, use just 0.5, constant.
     if last:
-      self.bias = Tensor.zeros(1, outC, 1, 1) + 0.5
+      self.b = Tensor.zeros(1, outC, 1, 1) + 0.5
     else:
-      self.bias = Tensor.uniform(1, outC, 1, 1)
+      self.b = Tensor.uniform(1, outC, 1, 1)
 
   def forward(self, x):
     # You might be thinking, "but what about padding?"
     # Answer: Tiling is used to stitch everything back together, though you could pad the image before providing it.
-    return x.conv2d(self.weight).add(self.bias)
+    return x.conv2d(self.W).add(self.b)
 
   def get_parameters(self) -> list:
-    return [self.weight, self.bias]
+    return [self.W, self.b]
 
   def load_waifu2x_json(self, layer: dict):
     # Weights in this file are outChannel,inChannel,X,Y.
     # Not outChannel,inChannel,Y,X.
     # Therefore, transpose it before assignment.
     # I have long since forgotten how I worked this out.
-    self.weight.assign(Tensor(layer["weight"]).reshape(shape=self.weight.shape).transpose(2, 3))
-    self.bias.assign(Tensor(layer["bias"]).reshape(shape=self.bias.shape))
+    self.W.assign(Tensor(layer["weight"]).reshape(shape=self.W.shape).transpose(2, 3))
+    self.b.assign(Tensor(layer["bias"]).reshape(shape=self.b.shape))
 
 class Vgg7:
   """
@@ -109,6 +118,19 @@ class Vgg7:
   def get_parameters(self) -> list:
     return self.conv1.get_parameters() + self.conv2.get_parameters() + self.conv3.get_parameters() + self.conv4.get_parameters() + self.conv5.get_parameters() + self.conv6.get_parameters() + self.conv7.get_parameters()
 
+  def load_from_pretrained(self, intent = "art", subtype = "scale2.0x"):
+    """
+    Downloads a nagadomi/waifu2x JSON weight file and loads it.
+    """
+    fn = Path(__file__).parents[2] / ("weights/vgg_7_" + intent + "_" + subtype + "_model.json")
+    download_file("https://github.com/nagadomi/waifu2x/raw/master/models/vgg_7/" + intent + "/" + subtype + "_model.json", fn)
+
+    import json
+    with open(fn, "rb") as f:
+      data = json.load(f)
+
+    self.load_waifu2x_json(data)
+
   def load_waifu2x_json(self, data: list):
     """
     Loads weights from one of the waifu2x JSON files, i.e. waifu2x/models/vgg_7/art/noise0_model.json
@@ -121,7 +143,6 @@ class Vgg7:
     self.conv5.load_waifu2x_json(data[4])
     self.conv6.load_waifu2x_json(data[5])
     self.conv7.load_waifu2x_json(data[6])
-
 
   def forward_tiled(self, image: numpy.ndarray, tile_size: int) -> numpy.ndarray:
     """
