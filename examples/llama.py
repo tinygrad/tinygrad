@@ -517,7 +517,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
   # *** prompt engineers stop here ****
 
-  LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code"}[args.gen]
+  LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code", "tiny": '-tiny'}[args.gen]
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
