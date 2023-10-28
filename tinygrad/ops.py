@@ -296,7 +296,7 @@ class Compiled:
           from tinygrad.features.search import beam_search, time_linearizer
           lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
           if bool(getenv("NOLOCALS")):
-            lins.append((f"beam{BEAM.value}nl", beam_search(kb.copy(), test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)), dont_use_locals=True)))
+            lins.append((f"beam{BEAM.value}n", beam_search(kb.copy(), test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)), dont_use_locals=True)))
           if used_tensor_cores:
             lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
             lins[-1][1].hand_coded_optimizations()
