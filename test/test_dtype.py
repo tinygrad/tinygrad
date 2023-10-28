@@ -7,8 +7,8 @@ from typing import List, Optional
 from extra.utils import OSX, temp
 
 def is_dtype_supported(dtype: DType):
-# for GPU, cl_khr_fp16 isn't supported (except now we don't need it!)
-  if dtype == dtypes.half: return not (CI and Device.DEFAULT in ["GPU", "LLVM", "CUDA"]) and Device.DEFAULT != "WEBGPU"
+  # for GPU, cl_khr_fp16 isn't supported (except now we don't need it!)
+  if dtype == dtypes.half: return not (CI and Device.DEFAULT in ["GPU", "LLVM"]) and Device.DEFAULT != "WEBGPU" and getenv("CUDACPU") != 1
   if dtype in [dtypes.double, dtypes.float64]: return Device.DEFAULT not in ["WEBGPU", "METAL"] and not OSX
   if dtype == dtypes.bfloat16: return False # TODO return Device.DEFAULT == "LLVM"
   if dtype in [dtypes.int8, dtypes.uint8]: return Device.DEFAULT not in ["WEBGPU"]
