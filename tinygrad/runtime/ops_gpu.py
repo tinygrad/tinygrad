@@ -2,12 +2,13 @@ from __future__ import annotations
 import pathlib
 import numpy as np
 import pyopencl as cl  # type: ignore
-from typing import Optional, List
+from typing import Optional, List, Any
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
 from tinygrad.ops import Compiled
 from tinygrad.renderer.opencl import OpenCLRenderer
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
+from tinygrad.lowering import CompilerStack
 
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
@@ -60,9 +61,19 @@ class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
       cl.enqueue_copy_buffer_p2p_amd(CL.cl_platform, CL.cl_queue[x._buf.device], x._buf, self._buf, x.size * x.dtype.itemsize).wait()
     else: raise NotImplementedError("p2p transfer between devices not implemented on non-amd")
 
+def pyopencl_compile(name: str, prg: str, options=None):
+  clprograms = [cl.Program(ctx, prg) for ctx in CL.cl_ctxs]
+  try:
+    for clprogram in clprograms: clprogram.build(options=options)
+  except cl.RuntimeError as e:
+    if DEBUG >= 3: print("FAILED TO BUILD", prg)
+    raise e
+  binaries = [clp.get_info(cl.program_info.BINARIES) for clp in clprograms]
+  return binaries
+
 class CLProgram:
-  def __init__(self, name:str, prg:str, binary=False, argdtypes=None, options=None):
-    self.name, self.clprograms = name, [cl.Program(ctx, ctx.devices, [prg]*len(ctx.devices)) if binary else cl.Program(ctx, prg) for ctx in CL.cl_ctxs]  # type: ignore
+  def __init__(self, name:str, prg:List[List[bytes]], argdtypes=None, options=None):
+    self.name, self.clprograms = name, [cl.Program(ctx, ctx.devices, binaries) for ctx, binaries in zip(CL.cl_ctxs, prg)]  # type: ignore
     try:
       self._clprgs = [clprogram.build(options=options) for clprogram in self.clprograms]
     except cl.RuntimeError as e:
@@ -103,4 +114,5 @@ class CLProgram:
         return None
     return None
 
-GPUBuffer = Compiled(CLBuffer, LinearizerOptions(), OpenCLRenderer, CLProgram, CL.synchronize)
+pyopencl_compiler = CompilerStack("PYOPENCL", LinearizerOptions(), OpenCLRenderer, [pyopencl_compile])
+GPUBuffer = Compiled(CLBuffer, pyopencl_compiler, CLProgram, CL.synchronize)

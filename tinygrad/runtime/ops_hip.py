@@ -142,5 +142,5 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset
   """,
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]))
-hip_compiler = CompilerStack("HIP", LinearizerOptions(device="HIP"), renderer, [hipcc_compile])
+hip_compiler = CompilerStack("HIPCC", LinearizerOptions(device="HIP"), renderer, [hipcc_compile])
 HIPBuffer = Compiled(RawHIPBuffer, hip_compiler, HIPProgram, hip.hipDeviceSynchronize, HIPGraph)

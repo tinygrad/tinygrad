@@ -30,6 +30,15 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     assert si.out.realized and isinstance(si.out.realized, Device[si.out.device].buffer), f"device mismatch on realized got {type(si.out.realized)} expected {si.out.device}"
     assert si.out.realized.dtype == si.out.dtype, "realized dtype is incorrect"
 
+def compile_schedule(schedule: List[ScheduleItem]):
+  # HACK: images can be not usable due to shape
+  if IMAGE >= 2: schedule = fix_schedule_for_images(schedule)
+
+  # NOTE: if you for loop the schedule it's slow because nothing frees
+  compiled = [Device[si.out.device].compiler.compile_ast(si.ast) if si.ast.op not in LoadOps else None for si in schedule]
+
+  return compiled
+
 # *** zero op LoadOps ***
 
 def _realize_empty(buffer: LazyBuffer) -> None:
