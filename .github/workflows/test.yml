@@ -319,6 +319,9 @@ jobs:
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models --durations=20
+      - name: TEMP Run sampler script (CUDA)
+        if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
+        run: python $GITHUB_WORKSPACE/t.py
 
   #testunicorn:
   #  name: ARM64 unicorn Test
