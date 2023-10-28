@@ -68,7 +68,7 @@ def train_resnet():
   BS = getenv("BS",16)
   WORKERS = getenv("WORKERS",16)
   lr = 0.256 * (BS / 256)  # Linearly scale from BS=256, lr=0.256
-  epochs = 100
+  epochs = 50
   optimizer = optim.SGD(parameters, lr, momentum=.875, weight_decay=1/2**15)
   scheduler = CosineAnnealingLR(optimizer, epochs)
   print(f"training with batch size {BS} for {epochs} epochs")
