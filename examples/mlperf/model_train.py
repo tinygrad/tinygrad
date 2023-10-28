@@ -89,7 +89,7 @@ def train_resnet():
       loss_cpu = loss.numpy()
       cl = time.monotonic()
 
-      print(f"{(data_time+cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {data_time*1000.0:7.2f} ms fetch data, {loss_cpu:7.2f} loss, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {data_time*1000.0:7.2f} ms fetch data, {loss_cpu:7.2f} loss, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
       wandb.log({"lr": scheduler.get_lr().numpy().item(),
                  "train/data_time": data_time,
                  "train/python_time": et - st,
@@ -98,7 +98,7 @@ def train_resnet():
                  "train/loss": loss_cpu,
                  "train/GFLOPS": GlobalCounters.global_ops*1e-9/(cl-st),
       })
-      epoch_avg_time.append(data_time+(cl-st))
+      epoch_avg_time.append((data_time+(et-st))*1000)
     
     # "eval" loop. Evaluate every 4 epochs, starting with epoch 1
     if e % 4 == 1:
