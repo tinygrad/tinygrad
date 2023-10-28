@@ -79,7 +79,7 @@ def train_resnet():
     # train loop
     Tensor.training = True
     cl = time.monotonic() 
-    for X, Y, _ in (t := tqdm(PreFetcher(iterate(bs=BS, val=False, num_workers=16)), total=steps_in_train_epoch)):
+    for X, Y, actual_data in (t := tqdm(PreFetcher(iterate(bs=BS, val=False, num_workers=16)), total=steps_in_train_epoch)):
       GlobalCounters.reset()
       st = time.monotonic()
       data_time = cl-st
@@ -89,7 +89,7 @@ def train_resnet():
       loss_cpu = loss.numpy()
       cl = time.monotonic()
 
-      print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {data_time*1000.0:7.2f} ms fetch data, {loss_cpu:7.2f} loss, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {actual_data*1000.0:7.2f} ms fetch data, {data_time*1000:7.2f} ms prefetch data {loss_cpu:7.2f} loss, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
       wandb.log({"lr": scheduler.get_lr().numpy().item(),
                  "train/data_time": data_time,
                  "train/python_time": et - st,
