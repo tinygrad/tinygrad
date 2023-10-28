@@ -244,6 +244,8 @@ class OptimizedKernel(Kernel):
     elif opt.op == OptOps.UNROLL:     # purple
       assert axis < self.shape_len-self.upcasted, "can't upcasted already upcasted"
       assert amt <= 32, "don't unroll more than 32"
+      if self.full_shape[axis] == amt and axis == self.first_reduce:
+        self.local_dims += 1 # offset loss in simplify_ones because first_reduce will move after shift_to
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op == OptOps.UPCAST:     # yellow

@@ -333,6 +333,8 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
     else:
       for opt in opts:
         k.apply_opt(opt)
+    expected_locals = (len(k.tensor_core.threads) if k.tensor_core else 0) + sum(opt.op == OptOps.LOCAL for opt in opts)
+    assert expected_locals == k.local_dims, f"expected {expected_locals} local_dims but got {k.local_dims}"
     prg = to_prg(k)
     real_bufs[0] = real_bufs[0].fromCPU(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np)) # Zero to check that all values are filled
     prg.exec(real_bufs, force_wait=True)
@@ -393,6 +395,19 @@ class TestLinearizerOpts(unittest.TestCase):
       [Opt(OptOps.UPCAST, 0, 8)], # Checking how it works with upcasts
     ])
 
+  def test_full_unroll(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+
+    N = 16
+    Tensor.manual_seed(1772)
+    a = Tensor.rand(N, N)
+    b = Tensor.rand(N, N)
+    r = a@b
+    helper_linearizer_opt(r, [
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UNROLL, 0, 16)],
+    ])
+
   def test_full_upcast(self):
     if not isinstance(Device[Device.DEFAULT], Compiled):
       self.skipTest("Only Compiled uses linearizer")
@@ -424,6 +439,7 @@ class TestLinearizerOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.LOCAL, 1, 8)], # Checking how it works with locals
       [Opt(OptOps.GROUPTOP, 0, 2)],
       [Opt(OptOps.GROUPTOP, 0, 32)],
+      [Opt(OptOps.UNROLL, 0, 4)], # check partial unroll
       [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.UNROLL, 0, 4)], # Checking how it works with grouped_reduce
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 32)],
       [Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 0, 32)],
@@ -478,6 +494,19 @@ class TestLinearizerOpts(unittest.TestCase):
       [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
       [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
       # [Opt(OptOps.GROUPTOP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
+    ], apply_tc=True)
+
+  def test_tensor_core_opts_metal(self):
+    if not Device.DEFAULT == "METAL":
+      self.skipTest("Only on METAL")
+
+    N = 128
+    Tensor.manual_seed(1552)
+    a = Tensor.rand(N, N)
+    b = Tensor.rand(N, N)
+    r = a@b
+    helper_linearizer_opt(r, [
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 16)], # check full unroll
     ], apply_tc=True)
 
 
