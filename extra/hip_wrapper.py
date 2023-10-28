@@ -1,13 +1,33 @@
 import ctypes
-from tinygrad.helpers import DEBUG
+import glob
+import os
+
+from tinygrad.helpers import DEBUG, WINDOWS, OSX, LINUX
 import sys
 import numpy as np
 from typing import Any, Dict, List, Tuple
 from dataclasses import dataclass
 
 try:
-  _libhip = ctypes.cdll.LoadLibrary("libamdhip64.so")
-  _libhiprtc = ctypes.cdll.LoadLibrary("libhiprtc.so")
+  _hipPathEnv = os.getenv("HIP_PATH", "")
+  if not _hipPathEnv: raise RuntimeError("HIP_PATH environment variable not set")
+
+  _libAmdHip64ImagePath = os.path.join(_hipPathEnv, "lib" if OSX or LINUX else "bin", "libamdhip64.so" if OSX or LINUX else "amdhip64.dll")
+  _libHipRtcImagePath = os.path.join(_hipPathEnv, "lib" if OSX or LINUX else "bin", "libhiprtc.so")
+  if WINDOWS:
+    if not os.path.exists(_libAmdHip64ImagePath):
+      for path in os.environ["PATH"].split(os.pathsep):
+        if os.path.exists(os.path.join(path, "amdhip64.dll")):
+          _libAmdHip64ImagePath = os.path.join(path, "amdhip64.dll")
+          break
+
+    _libHipRtcImagePath = sorted(glob.glob(os.path.join(_hipPathEnv, "bin", f"hiprtc*.dll")))[-1] if glob.glob(os.path.join(_hipPathEnv, "bin", f"hiprtc*.dll")) else None
+
+  if not os.path.exists(_libAmdHip64ImagePath): raise RuntimeError("Image not found at %s" % _libAmdHip64ImagePath)
+  if not os.path.exists(_libHipRtcImagePath): raise RuntimeError("Image not found at %s" % _libAmdHip64ImagePath)
+
+  _libhip = ctypes.cdll.LoadLibrary(_libAmdHip64ImagePath)
+  _libhiprtc = ctypes.cdll.LoadLibrary(_libHipRtcImagePath)
 
   _libhip.hipGetErrorString.restype = ctypes.c_char_p
   _libhip.hipGetErrorString.argtypes = [ctypes.c_int]
@@ -688,5 +708,7 @@ try:
     status = _libhiprtc.hiprtcGetCode(prog, e_code)
     hipCheckStatus(status)
     return e_code
-except:
-  if DEBUG >= 1: print("WARNING: libamdhip64.so or libhiprtc.so not found. HIP support will not work.")
+except Exception as e:
+  if DEBUG >= 1:
+    print("WARNING: Unable to initialize HIP runtime. %s" % e)
+    exit(0)
