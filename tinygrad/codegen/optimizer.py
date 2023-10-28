@@ -244,7 +244,8 @@ class OptimizedKernel(Kernel):
     elif opt.op == OptOps.UNROLL:     # purple
       assert axis < self.shape_len-self.upcasted, "can't upcasted already upcasted"
       assert amt <= 32, "don't unroll more than 32"
-      self.shift_to(axis, amt, insert_before=None)
+      assert not(self.tensor_core), "can't unroll with tensor cores"
+      self.shift_to(axis, amt, insert_before=len(self.full_unupcasted_shape))
       self.upcast()
     elif opt.op == OptOps.UPCAST:     # yellow
       assert axis < self.first_reduce-(len(self.tensor_core.threads) if self.tensor_core else 0), "upcast is for non-reduce that aren't TC dims"
