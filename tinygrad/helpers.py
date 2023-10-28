@@ -12,6 +12,7 @@ def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.__mul_
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
 WINDOWS = platform.system() == "Windows"
+LINUX = platform.system() == "Linux"
 CI = os.getenv("CI", "") != ""
 TEMP_DIR = os.getenv("TEMPDIR", tempfile.gettempdir())
 
@@ -62,7 +63,8 @@ class ContextVar:
   def __lt__(self, x): return self.value < x
 
 DEBUG, IMAGE, BEAM = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0)
-GRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("GRAPHPATH", os.path.join(TEMP_DIR, "tinygrad_graphs"))
+GRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("GRAPHPATH", os.path.join(TEMP_DIR, "tinygrad_graph"))
+if DEBUG >= 1: print(f"Graph path: {GRAPHPATH}")
 
 class Timing(contextlib.ContextDecorator):
   def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
@@ -168,7 +170,8 @@ def cache_compiled(func):
 
 # *** universal database cache ***
 
-CACHEDB = getenv("CACHEDB", "/tmp/tinygrad_cache")
+CACHEDB = getenv("CACHEDB", os.path.join(TEMP_DIR, "tinygrad_cache"))
+if DEBUG >= 1: print(f"Cache path: {CACHEDB}")
 VERSION = 2
 _db_connection = None
 def db_connection():
