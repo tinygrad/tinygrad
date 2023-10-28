@@ -65,7 +65,7 @@ def train_resnet():
   model = ResNet50(num_classes)
   parameters = get_parameters(model)
 
-  BS = 16
+  BS = getenv("BS",16)
   lr = 0.256 * (BS / 256)  # Linearly scale from BS=256, lr=0.256
   epochs = 100
   optimizer = optim.SGD(parameters, lr, momentum=.875, weight_decay=1/2**15)
