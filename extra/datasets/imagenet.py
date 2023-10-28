@@ -16,6 +16,7 @@ cir = {v[0]: int(k) for k,v in ci.items()}
 
 @functools.lru_cache(None)
 def get_train_files():
+  '''
   if os.path.exists(os.path.join(BASEDIR, "train_files")):
     train_files = open(BASEDIR / "train_files").read().strip().split("\n")
   else:
@@ -26,6 +27,9 @@ def get_train_files():
         for fi in os.listdir(f):
             train_files.append(fi)
   return [(BASEDIR / "train" / x) for x in train_files]
+'''
+  train_files = glob.glob(str(BASEDIR/"train/*/*"))
+  return train_files
 
 @functools.lru_cache(None)
 def get_val_files():
