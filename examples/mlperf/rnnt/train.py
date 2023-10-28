@@ -459,7 +459,6 @@ class Timer:
     Timer.running_items.remove(item)
     Timer.data[item]['time'] += time.time() - Timer.data[item]['start']
     del Timer.data[item]['start']
-
     
   def reset(): 
     for v in Timer.data.values: v['time'] = 0
@@ -472,28 +471,36 @@ if __name__ == "__main__":
 
   try:
     rnnt = RNNT()
+    opt = LAMB(rnnt.params)
     batch_size = 8
     start_time = time.time()
     it = enumerate(iterate(batch_size))
-    Timer.start("")
     for i,(X,X_lens,Y,Y_lens) in it:
-
+      Timer.start("")
 
       last_time = time.time()
       enc,enclens,d = encode(rnnt,X,X_lens,Y,Y_lens)
       c = i * batch_size
 
       delta = time.time() - last_time
-      Timer.start("forward")
+      Timer.start("rnntloss")
       loss = LogLoss.apply(d,enclens.realize(), Y,Y_lens.realize())
+      Timer.start("backward")
+      opt.zero_grad()
+      loss.backward()
+      Timer.start("step")
+      opt.step()
 
-      Timer.end("forward")
 
-      print (f"{timestring(time.time()-start_time)} Btime: {(time.time()-last_time):.5} ")
-      if i >= 10:
-        Timer.end("")
+      Timer.end("")
+      nloss = loss.detach().numpy()/(sum(X_lens.numpy())+sum(Y_lens.numpy()))[0]
+
+      done = (i+1)*batch_size
+      dur = time.time()-start_time
+      print (f"{done}/{len(ci)} time:{timestring(dur)}/{timestring(dur*len(ci)/done)}   L:{nloss:.5} ")
+      if (i+1) % 10 == 0:
         Timer.table()
-        break
+        Timer.reset()
 
   except KeyboardInterrupt:pass
 
