@@ -18,10 +18,10 @@ cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]
 
 def fetch_cifar():
-  X_train = Tensor.empty(50000, 3*32*32, device=f'disk:./cifar_train_x', dtype=dtypes.uint8)
-  Y_train = Tensor.empty(50000, device=f'disk:./cifar_train_y', dtype=dtypes.int64)
-  X_test = Tensor.empty(10000, 3*32*32, device=f'disk:./cifar_test_x', dtype=dtypes.uint8)
-  Y_test = Tensor.empty(10000, device=f'disk:./cifar_test_y', dtype=dtypes.int64)
+  X_train = Tensor.empty(50000, 3*32*32, device=f'disk:/tmp/cifar_train_x', dtype=dtypes.uint8)
+  Y_train = Tensor.empty(50000, device=f'disk:/tmp/cifar_train_y', dtype=dtypes.int64)
+  X_test = Tensor.empty(10000, 3*32*32, device=f'disk:/tmp/cifar_test_x', dtype=dtypes.uint8)
+  Y_test = Tensor.empty(10000, device=f'disk:/tmp/cifar_test_y', dtype=dtypes.int64)
 
   if not os.path.isfile("/tmp/cifar_extracted"):
     def _load_disk_tensor(X, Y, db_list):
