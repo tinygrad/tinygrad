@@ -2,7 +2,7 @@ import ctypes
 import numpy as np
 from collections import defaultdict, deque
 from typing import TypeVar, Type, Any, Dict, Deque, Tuple, Union
-from tinygrad.helpers import DType, dtypes, prod, GlobalCounters, ImageDType
+from tinygrad.helpers import DType, dtypes, prod, GlobalCounters, ImageDType, DEBUG
 
 _T = TypeVar("_T")
 class RawBuffer:  # pylint: disable=abstract-method
@@ -69,7 +69,6 @@ class LRUAllocator:
     self.free_space: Dict[Any, int] = defaultdict(lambda: dev_memsz)
     self.buffer_info: Dict[Any, Tuple[int, DType, str]] = dict()
     self.cached_buffers: Dict[Tuple[int, ...], Deque[Tuple[Any, int]]] = defaultdict(deque) # Cached buffer storage, splitted by type and size, newest first.
-    print(self.cached_buffers)
     self.aging_order: Dict[Any, Deque[Tuple[Tuple[int, ...], int]]] = defaultdict(deque) # Keys of cached_buffers, ordered from oldest to newest updates.
   def _cache_reuse_buffer(self, rawbufs: Deque[Tuple[Any, int]]): # The newest cached buffer is reused.
     GlobalCounters.mem_cached -= self._underlying_buf_memsz(rawbufs[0][0])
@@ -88,8 +87,8 @@ class LRUAllocator:
     self.buffer_info.pop(buf_to_free)
     self._do_free(buf_to_free)
   def alloc(self, size, dtype, device='0', **kwargs):
-    print("cached buffers length", len(self.cached_buffers))
     rawbufs = self.cached_buffers.get(self._cached_bufkey(size, dtype, device), None)
+    if DEBUG>2 and not rawbufs and (len(self.cached_buffers) + 1) % 30 == 0: print("LRUAllocator, number of buffers allocated: ", len(self.cached_buffers))
     return self._cache_reuse_buffer(rawbufs) if rawbufs else self._alloc_buffer(size, dtype, device, **kwargs)
   def free(self, buf): # free() just caches buffer. It might be freed later when OOM during allocation.
     self.epoch += 1
