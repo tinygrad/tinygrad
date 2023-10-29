@@ -44,7 +44,7 @@ def _test_cast(a:Tensor, target_dtype:DType): _test_op(lambda: a.cast(target_dty
 def _test_bitcast(a:Tensor, target_dtype:DType, target): _test_op(lambda: a.bitcast(target_dtype), target_dtype, target)
 
 class TestDType(unittest.TestCase):
-  DTYPE: Any = None
+  DTYPE: Any = dtypes.float
   DATA: Any = None
   @classmethod
   def setUpClass(cls):
