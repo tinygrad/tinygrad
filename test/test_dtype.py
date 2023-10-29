@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor, dtypes
-from typing import List
+from typing import Any, List
 from extra.utils import OSX, temp
 
 def is_dtype_supported(dtype: DType):
@@ -44,11 +44,12 @@ def _test_cast(a:Tensor, target_dtype:DType): _test_op(lambda: a.cast(target_dty
 def _test_bitcast(a:Tensor, target_dtype:DType, target): _test_op(lambda: a.bitcast(target_dtype), target_dtype, target)
 
 class TestDType(unittest.TestCase):
-  DTYPE: DType = dtypes.float
-  DATA: List = np.random.randint(0, 100, size=10, dtype=DTYPE.np).tolist() if dtypes.is_int(DTYPE) else np.random.uniform(0, 1, size=10).tolist()
+  DTYPE: Any = None
+  DATA: Any = None
   @classmethod
   def setUpClass(cls):
     if not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
+    cls.DATA = np.random.randint(0, 100, size=10, dtype=cls.DTYPE.np).tolist() if dtypes.is_int(cls.DTYPE) else np.random.choice([True, False], size=10).tolist() if cls.DTYPE == dtypes.bool else np.random.uniform(0, 1, size=10).tolist()
 
   def test_to_np(self): _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), self.DTYPE.np, np.array(self.DATA, dtype=self.DTYPE.np))
 
@@ -153,9 +154,7 @@ class TestUint32Dtype(TestDType): DTYPE = dtypes.uint32
 class TestInt64Dtype(TestDType): DTYPE = dtypes.int64
 class TestUint64Dtype(TestDType): DTYPE = dtypes.uint64
 
-class TestBoolDtype(TestDType):
-  DTYPE = dtypes.bool
-  DATA = [True, True, False, False]
+class TestBoolDtype(TestDType): DTYPE = dtypes.bool
 
 class TestEqStrDType(unittest.TestCase):
   def test_image_ne(self):
