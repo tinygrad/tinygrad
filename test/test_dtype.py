@@ -16,7 +16,7 @@ def is_dtype_supported(dtype: DType):
   if dtype in [dtypes.int16, dtypes.uint16]: return Device.DEFAULT not in ["WEBGPU", "TORCH"]
   if dtype == dtypes.uint32: return Device.DEFAULT not in ["TORCH"]
   if dtype in [dtypes.int64, dtypes.uint64]: return Device.DEFAULT not in ["WEBGPU", "TORCH"]
-  if dtype == dtypes.bool: return Device.DEFAULT not in ["WEBGPU"]
+  if dtype == dtypes.bool: return Device.DEFAULT not in ["WEBGPU"] # host-shareablity is a requirement for storage buffers, but 'bool' type is not host-shareable
   return True
 
 def get_available_cast_dtypes(dtype: DType) -> List[DType]: return [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_")] # dont cast internal dtypes
@@ -153,7 +153,7 @@ class TestUint32Dtype(TestDType): DTYPE = dtypes.uint32
 class TestInt64Dtype(TestDType): DTYPE = dtypes.int64
 class TestUint64Dtype(TestDType): DTYPE = dtypes.uint64
 
-class TestBoolDtype(unittest.TestCase):
+class TestBoolDtype(TestDType):
   DTYPE = dtypes.bool
   DATA = [True, True, False, False]
 
