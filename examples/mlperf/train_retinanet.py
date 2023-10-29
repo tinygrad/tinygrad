@@ -86,12 +86,12 @@ def bbox_transform(proposals, reference_boxes):
 def tg_targets_to_mlperf_targets(tg_targets : dict[str,Tensor]) -> List[dict[str,torch.tensor]]:
     assert(set(['regression_targets', 'classification_targets']).issubset(set(tg_targets.keys())))
     assert tg_targets['regression_targets'].shape[:2]==tg_targets['classification_targets'].shape[:2]
-    breakpoint()
     allowed_indxs = np.nonzero(tg_targets["regression_masks"])
     targets = []
-    #breakpoint()
-    for img_regs,img_cls in zip(tg_targets['regression_targets'][allowed_indxs],tg_targets['classification_targets'][allowed_indxs]):
-        d_img = {'boxes':torch_tensor([img_regs]) if len(img_regs.shape)<=1 else torch_tensor(img_regs), 'labels':torch_tensor([img_cls]) if len(img_cls.shape)<=1 else torch_tensor(img_cls)}
+    for img_regs,img_cls_mask in zip(tg_targets['decoded_regression_targets'][allowed_indxs],tg_targets['classification_targets'][allowed_indxs]):
+        img_cls_idxs = np.where(img_cls_mask)
+        d_img = {'boxes':torch_tensor([img_regs]) if len(img_regs.shape)<=1 else torch_tensor(img_regs), 
+                 'labels':torch_tensor([img_cls_idxs]) if len(img_cls_mask.shape)<=1 else torch_tensor(img_cls_idxs)}
         targets.append(d_img)
     return targets
 
@@ -118,7 +118,7 @@ class RetinaNetTrainer:
         #TODO rescale bboxes to transformed size
         batch_size = len(annotations)
         regression_targets = np.zeros((batch_size, len(anchors), 4), dtype=np.float32)
-        classification_targets = np.zeros((batch_size, len(anchors), n_classes), dtype=np.float32)
+        classification_targets = np.zeros((batch_size, len(anchors), n_classes), dtype=np.int32)
 
         regression_masks = np.zeros((batch_size, len(anchors)), dtype=np.float32)
         classification_masks = np.zeros((batch_size, len(anchors)), dtype=np.float32)
@@ -140,8 +140,14 @@ class RetinaNetTrainer:
             regression_masks[i, matched_anchor_idxs] = 1
             classification_masks[i, np.concatenate((matched_anchor_idxs,unmatched_anchor_idxs))] = 1
                    
-        breakpoint()
-        return {"untransformed_regression_targets": decode_bbox(regression_targets,anchors),"regression_targets": regression_targets, "classification_targets": classification_targets, "regression_masks": regression_masks, "classification_masks": classification_masks}
+        #TODO decode_bbox(regression_targets[0],anchors) runs
+
+        return {
+            
+            #FIXME you can directly pass anchors, just wanted to check decode function
+            "decoded_regression_targets": np.array([decode_bbox(img_reg_target, anchors) for img_reg_target in regression_targets])
+                ,"regression_targets": regression_targets, "classification_targets": classification_targets,
+                "regression_masks": regression_masks, "classification_masks": classification_masks}
     
     def freeze_spec_backbone_layers(self, layers_to_train = ["layer2", "layer3", "layer4"]):
         """(MLPerf) The weights of the first two stages are frozen (code). 
@@ -215,7 +221,6 @@ class RetinaNetTrainer:
 
 
             model_head_outputs = retina(images)
-            breakpoint()
 
             reference_head_outputs = self.reference_forward(reference_images,targets)
             
