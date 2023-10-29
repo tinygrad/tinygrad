@@ -30,7 +30,7 @@ def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str]
 def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
   assert hasattr(model, "forward") or callable(model), "model needs a forward function"
   @TinyJit
-  def run(*x): 
+  def run(*x):
     out = model.forward(*x) if hasattr(model, "forward") else model(*x)
     out = out if isinstance(out, tuple) else [out]
     return [o.realize() for o in out]
