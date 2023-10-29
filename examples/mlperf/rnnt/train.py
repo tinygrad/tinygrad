@@ -40,6 +40,7 @@ Then this [file](https://github.com/mlcommons/inference/blob/master/speech_recog
 BASEDIR = pathlib.Path("../../../extra/datasets/librispeech")
 with open(BASEDIR / "dev-clean-wav.json") as f:
   ci = json.load(f)
+  ci = [c for c in ci if c['files'][0]['duration'] < 15]
 FILTER_BANK = np.expand_dims(librosa.filters.mel(sr=16000, n_fft=512, n_mels=80, fmin=0, fmax=8000), 0)
 WINDOW = librosa.filters.get_window("hann", 320)
 
@@ -361,7 +362,10 @@ class LogLoss(Function):
         logalpha[_t,_u] = logsumexp(logalpha[_t,_u], logalpha[_t-1,_u] + logdist[_u,_t-1,-1])
         _t,_u = t[np.where(u>0)], u[np.where(u>0)]
         logalpha[_t,_u] = logsumexp(logalpha[_t,_u], logalpha[_t,_u-1] + logdist[_u-1,_t,self.labels[bi,_u-1]])
+
       Loss .append( -logalpha[-1,-1] - logdist[-1,-1,-1])
+
+
 
     return LazyBuffer.fromCPU(np.sum(Loss))
 
@@ -461,12 +465,14 @@ class Timer:
     del Timer.data[item]['start']
     
   def reset(): 
-    for v in Timer.data.values: v['time'] = 0
+    for v in Timer.data.values(): v['time'] = 0
 
   def table(): 
     for k in Timer.data: print (str(k).ljust(20)+ f": {Timer.data[k]['time']:.5}")
 
 #%%
+if False:
+  pass
 if __name__ == "__main__":
 
   try:
@@ -475,7 +481,12 @@ if __name__ == "__main__":
     batch_size = 8
     start_time = time.time()
     it = enumerate(iterate(batch_size))
+    evalset = next(iterate())
+
+    skipto = 0
     for i,(X,X_lens,Y,Y_lens) in it:
+      done = (i+1)*batch_size - skipto
+      if (done<skipto):continue
       Timer.start("")
 
       last_time = time.time()
@@ -488,6 +499,7 @@ if __name__ == "__main__":
       Timer.start("backward")
       opt.zero_grad()
       loss.backward()
+
       Timer.start("step")
       opt.step()
 
@@ -495,10 +507,17 @@ if __name__ == "__main__":
       Timer.end("")
       nloss = loss.detach().numpy()/(sum(X_lens.numpy())+sum(Y_lens.numpy()))[0]
 
-      done = (i+1)*batch_size
       dur = time.time()-start_time
-      print (f"{done}/{len(ci)} time:{timestring(dur)}/{timestring(dur*len(ci)/done)}   L:{nloss:.5} ")
-      if (i+1) % 10 == 0:
+      print (f"\r{done}/{len(ci)} time:{timestring(dur)}/{timestring(dur*len(ci)/done)}   L:{nloss:.5} ",end ="")
+      if (i+1) % 20 == 0:
+        
+        enc, enclens, d = encode(rnnt,*evalset)
+        valloss = LogLoss.apply(d,enclens.realize(), evalset[2],evalset[3].realize())
+        valloss.numpy()
+        nvloss = valloss.detach().numpy()/(sum(evalset[1].numpy())+sum(evalset[3].numpy()))[0]
+        print(f"eval loss :{nvloss:.5}")
+
+        print()
         Timer.table()
         Timer.reset()
 
