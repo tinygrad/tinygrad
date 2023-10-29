@@ -157,7 +157,7 @@ class TestUint64Dtype(TestDType): DTYPE = dtypes.uint64
 
 class TestBoolDtype(unittest.TestCase):
   DTYPE = dtypes.bool
-  DATA = [True, False, False, False]
+  DATA = [True, True, False, False]
 
 class TestEqStrDType(unittest.TestCase):
   def test_image_ne(self):
