@@ -165,47 +165,12 @@ def simple():
     random_img_id = random.choice(img_ids)
     img_metadata = coco.loadImgs(random_img_id)[0]
     img_filename = os.path.join(BASEDIR, 'train2017', img_metadata['file_name'])
-    print("training", img_filename)
-    print("tensors allocated", tensors_allocated())
-    print_gpu_memory("before_load_no_transforms")
-    imgg = Image.open(img_filename).convert("RGB")
-    imgn = np.array(imgg)
-    t = Tensor(imgn).realize()
-    print("tensors allocated", tensors_allocated())
-    print_gpu_memory("after_load_no_transforms")
-    del t
-    del imgg
-    del imgn
-    gc.collect()
-    print_gpu_memory("after_del")
-    print("tensors allocated", tensors_allocated())
-    print_gpu_memory("before_load")
     t = Tensor(build_transforms()(Image.open(img_filename).convert("RGB")).numpy(), requires_grad=True).realize()
-    print_gpu_memory("after_load")
-    del t
-    gc.collect()
-    print_gpu_memory("after_del")
     img = [Tensor(build_transforms()(Image.open(img_filename).convert("RGB")).numpy(), requires_grad=True)]
     images = to_image_list(img)
-    print_gpu_memory("before images")
     images.tensors[0].realize()
-    print_gpu_memory("after images")
-    del images
-    gc.collect()
-    print_gpu_memory("before backbone")
     features = backbone(images.tensors)
-    features[0].realize()
-    print_gpu_memory("after backbone realize")
     objectness, rpn_box_regression = rpn(features)
-    print_gpu_memory("before objectness realize")
-    objectness[0].realize()
-    print_gpu_memory("after objectness realize")
-    del objectness
-    del features
-    del backbone
-    del rpn
-    gc.collect()
-    print_gpu_memory("after stuff del")
     anchors = [anchor for anchor in anchor_generator(images, features)]
     annotations = coco.loadAnns(coco.getAnnIds(imgIds=[random_img_id]))
     gt = []
