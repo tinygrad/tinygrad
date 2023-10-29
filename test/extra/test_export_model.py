@@ -9,7 +9,7 @@ class MockMultiInputModel:
 
 class MockMultiOutputModel:
   def __call__(self, x1):
-    return x1, x1.pad(((0, 0), (0, 1)))
+    return x1 + x1, x1.pad(((0, 0), (0, 1))) + 1.0
 
 # TODO: move compile_efficientnet tests here
 @unittest.skipUnless(Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, f"Model export is not supported on {Device.DEFAULT}")
