@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor, dtypes
-from typing import List, Optional
+from typing import List
 from extra.utils import OSX, temp
 
 def is_dtype_supported(dtype: DType):
@@ -39,20 +39,34 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
     raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e
 
 def _test_op(fxn, target_dtype:DType, target): _assert_eq(fxn(), target_dtype, target)
-def _test_cast(a:Tensor, target_dtype:DType, target): _test_op(lambda: a.cast(target_dtype), target_dtype, target)
+def _test_cast(a:Tensor, target_dtype:DType): _test_op(lambda: a.cast(target_dtype), target_dtype, a.numpy().astype(target_dtype.np).tolist())
 def _test_bitcast(a:Tensor, target_dtype:DType, target): _test_op(lambda: a.bitcast(target_dtype), target_dtype, target)
 
-# tests no-op casts from source_dtype to target_dtypes
-def _test_casts_from(tensor_contents:List, source_dtype:DType, target_contents:Optional[List]=None):
-  list(map(
-    lambda t_dtype: _test_cast(Tensor(tensor_contents, dtype=source_dtype), t_dtype, target_contents or np.array(tensor_contents, dtype=source_dtype.np).astype(t_dtype.np).tolist()),
-    get_available_cast_dtypes(source_dtype)
+class TestDType(unittest.TestCase):
+  DTYPE = dtypes.float
+  DATA = [1, 2, 3, 4]
+  @classmethod
+  def setUpClass(cls):
+    if not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
+
+  def test_to_np(self): _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), self.DTYPE.np, self.DATA)
+
+  def test_casts_to(self): list(map(
+    lambda dtype: _test_cast(Tensor(self.DATA, dtype=dtype), self.DTYPE),
+    get_available_cast_dtypes(self.DTYPE)
   ))
-# tests no-op casts from source_dtypes to target_dtype
-def _test_casts_to(tensor_contents:List, target_dtype:DType, target_contents:Optional[List]=None):
-  list(map(
-    lambda s_dtype: _test_cast(Tensor(tensor_contents, dtype=s_dtype), target_dtype, target_contents or np.array(tensor_contents, dtype=s_dtype.np).astype(target_dtype.np).tolist()),
-    get_available_cast_dtypes(target_dtype)
+  def test_casts_from(self): list(map(
+    lambda dtype: _test_cast(Tensor(self.DATA, dtype=self.DTYPE), dtype),
+    get_available_cast_dtypes(self.DTYPE)
+  ))
+
+  def test_upcast_ops(self): list(map(
+    lambda dtype: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype, target_dtype=dtype) if dtype.sz > self.DTYPE.sz else None,
+    get_available_cast_dtypes(self.DTYPE)
+  ))
+  def test_upcast_to_ops(self): list(map(
+    lambda dtype: _test_ops(a_dtype=dtype, b_dtype=self.DTYPE, target_dtype=self.DTYPE) if dtype.sz < self.DTYPE.sz else None,
+    get_available_cast_dtypes(self.DTYPE)
   ))
 
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype:DType):
@@ -62,8 +76,9 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype:DType):
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
   _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
 
-@unittest.skipIf(Device.DEFAULT not in ["LLVM"], "bf16 only on LLVM")
 class TestBFloat16DType(unittest.TestCase):
+  def setUp(self):
+    if not is_dtype_supported(dtypes.bfloat16): raise unittest.SkipTest("bfloat16 not supported")
   def test_bf16_to_float(self):
     with self.assertRaises(AssertionError):
       _test_cast(Tensor([100000], dtype=dtypes.bfloat16), dtypes.float32, [100000])
@@ -92,22 +107,6 @@ class TestBFloat16DType(unittest.TestCase):
     t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('bf16')}").llvm().realize()
     back = t.cast(dtypes.float32)
     assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
-
-class TestDType(unittest.TestCase):
-  DTYPE = dtypes.float
-  DATA = [1, 2, 3, 4]
-  @classmethod
-  def setUpClass(cls):
-    if not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
-  def test_to_np(self): _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), self.DTYPE.np, self.DATA)
-  def test_casts_to(self): _test_casts_to(self.DATA, target_dtype=self.DTYPE)
-  def test_casts_from(self): _test_casts_from(self.DATA, source_dtype=self.DTYPE)
-  def test_upcast_ops(self):
-    for dtype in get_available_cast_dtypes(self.DTYPE):
-      if dtype.sz > self.DTYPE.sz: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype, target_dtype=dtype)
-  def test_upcast_to_ops(self):
-    for dtype in get_available_cast_dtypes(self.DTYPE):
-      if dtype.sz < self.DTYPE.sz: _test_ops(a_dtype=dtype, b_dtype=self.DTYPE, target_dtype=self.DTYPE)
 
 class TestHalfDtype(TestDType): DTYPE = dtypes.half
 
