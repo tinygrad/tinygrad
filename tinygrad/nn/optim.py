@@ -1,9 +1,10 @@
 # sorted in order of increasing complexity
+from abc import ABCMeta, abstractmethod
 from typing import List
 from tinygrad.helpers import dedup
 from tinygrad.tensor import Tensor
 
-class Optimizer:
+class Optimizer(metaclass=ABCMeta):
   def __init__(self, params: List[Tensor], lr: float):
     # if it's None, but being put into an optimizer, set it to True
     for x in params:
@@ -19,6 +20,9 @@ class Optimizer:
   def realize(self, extra=None):
     # NOTE: in extra is too late for most of the params due to issues with assign
     Tensor.corealize(extra + self.params + self.buffers if extra is not None else self.params + self.buffers)
+
+  @abstractmethod
+  def step(self): pass
 
 class SGD(Optimizer):
   def __init__(self, params: List[Tensor], lr=0.001, momentum=0, weight_decay=0.0, nesterov=False):
