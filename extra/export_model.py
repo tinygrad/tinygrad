@@ -2,7 +2,7 @@ from typing import Tuple, Dict, List
 from tinygrad.helpers import DType
 from tinygrad.tensor import Device, Tensor
 from tinygrad.jit import TinyJit
-from tinygrad.nn.state import get_state_dict, get_parameters
+from tinygrad.nn.state import get_state_dict
 import json
 
 EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CLANG", "CUDA", "GPU", "METAL"]
