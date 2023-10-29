@@ -118,13 +118,12 @@ class TestDoubleDtype(TestDType): DTYPE = dtypes.double
 
 class TestInt8Dtype(TestDType):
   DTYPE = dtypes.int8
-  @unittest.skipIf(getenv("CUDA",0)==1, "cuda saturation works differently")
-  @unittest.skipIf(getenv("PTX",0)==1, "cuda saturation doesn't wrap")
+  @unittest.skipIf(getenv("CUDA",0)==1 or getenv("PTX", 0)==1, "cuda saturation works differently")
   def test_int8_to_uint8_negative(self): _test_op(lambda: Tensor([-1, -2, -3, -4], dtype=dtypes.int8).cast(dtypes.uint8), dtypes.uint8, [255, 254, 253, 252])
 
 class TestUint8Dtype(TestDType):
   DTYPE = dtypes.uint8
-  @unittest.skipIf(getenv("PTX",0)==1, "cuda saturation doesn't wrap")
+  @unittest.skipIf(getenv("CUDA",0)==1 or getenv("PTX", 0)==1, "cuda saturation works differently")
   def test_uint8_to_int8_overflow(self): _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
 
 @unittest.skipIf(Device.DEFAULT not in {"CPU", "TORCH"}, "only bitcast in CPU and TORCH")
