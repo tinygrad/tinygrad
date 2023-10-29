@@ -97,7 +97,7 @@ def iterate(bs=1, start=0)->Generator[tuple[Tensor, Tensor, Tensor, Tensor],None
   for i in range(start, len(ci), bs):
     samples, sample_lens = zip(*[load_wav(BASEDIR / v["files"][0]["fname"]) for v in ci[i : i + bs]])
     samples = list(samples)
-    X,X_lens = list(zip(*[feature_extract(np.array(samples[i:i+1]),np.array(sample_lens[i:i+1])) for i in range(bs)]))
+    X,X_lens = list(zip(*[feature_extract(np.array(samples[i:i+1]),np.array(sample_lens[i:i+1])) for i in range(len(samples))]))
     max_len = max(X_lens)
     X = [np.pad(X[j],((0,int(max_len[0]-X_lens[j][0])),(0,0),(0,0)),'constant') for j in range (len(X))]
     yield (
@@ -471,13 +471,14 @@ class Timer:
     for k in Timer.data: print (str(k).ljust(20)+ f": {Timer.data[k]['time']:.5}")
 
 #%%
-if False:
-  pass
-if __name__ == "__main__":
 
+def setup():
+  global rnnt, opt
+  rnnt =  RNNT()
+  opt = LAMB(rnnt.params)
+
+def epoch():
   try:
-    rnnt = RNNT()
-    opt = LAMB(rnnt.params)
     batch_size = 8
     start_time = time.time()
     it = enumerate(iterate(batch_size))
