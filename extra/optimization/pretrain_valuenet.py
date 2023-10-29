@@ -21,15 +21,15 @@ from extra.optimization.helpers import lin_to_feats, MAX_DIMS
 # NOTE: this is not real value of the state, it's just a prediction of the runtime
 INNER = 512
 class ValueNet:
-  def __init__(self):
-    self.l1 = Linear(240,INNER)
+  def __init__(self, feats=240, out=1):
+    self.l1 = Linear(feats,INNER)
     self.l2 = Linear(INNER,INNER)
     self.l3 = Linear(INNER,INNER)
-    self.l4 = Linear(INNER,1)
+    self.l4 = Linear(INNER,out)
   def __call__(self, x):
     x = self.l1(x).relu()
     x = self.l2(x).relu()
-    x = self.l3(x).relu()
+    x = self.l3(x).relu().dropout(0.8)
     return self.l4(x)
 
 if __name__ == "__main__":

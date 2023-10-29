@@ -2,27 +2,12 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.state import get_parameters
-from tinygrad.ops import LazyOp, LoadOps
 from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
 from tinygrad.helpers import dtypes, CI
-from tinygrad.lazy import Device
+from tinygrad.ops import Device
+from test.helpers import derandomize_model
 
 from examples.llama import Transformer
-
-# for speed
-def derandomize(x):
-  if isinstance(x, LazyOp):
-    if x.op == LoadOps.RAND: x.op = LoadOps.EMPTY
-    x.src = tuple([derandomize(s) for s in x.src])
-  else:
-    x.op = derandomize(x.op)
-  return x
-
-def derandomize_model(model):
-  for p in get_parameters(model):
-    p.lazydata = derandomize(p.lazydata)
-    p.realize()
 
 def helper_test_jitted_correctness(gen, train, train_jit):
   nojit = train(*gen()).numpy()

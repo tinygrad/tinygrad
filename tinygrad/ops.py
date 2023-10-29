@@ -1,5 +1,5 @@
 from __future__ import annotations
-import time, importlib, inspect, functools, pathlib, itertools, random
+import time, importlib, inspect, functools, pathlib, itertools, random, math, collections
 import numpy as np
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
@@ -47,21 +47,20 @@ class ScheduleItem:
   inputs: Tuple[LazyBuffer, ...]
   var_vals: Dict[Variable, int]
 
+@dataclass(frozen=True)
 class LazyOp:
-  __slots__ = "op", "src", "arg", "buffers", "__weakref__"
   op: Op
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
-  arg: Any
-  buffers: Tuple[LazyBuffer, ...]
-  def __init__(self, op: Op, src: Tuple[Union[LazyOp, LazyBuffer], ...], arg: Any = None):
-    self.op, self.src, self.arg, self.buffers = op, src, arg, ()
-    try:  # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
-      for x in src: self.buffers += x.buffers
-    except AttributeError: self.buffers = ()
-
+  arg: Any = None
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
-  def __eq__(self, __value: object) -> bool: return isinstance(__value, LazyOp) and self.op is __value.op and self.src == __value.src and self.arg == __value.arg
-  def __hash__(self) -> int: return hash((self.op, self.src, self.arg))
+  @property
+  def buffers(self):
+    buffers: Tuple[Union[LazyOp, LazyBuffer], ...] = ()
+    try:  # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
+      for x in self.src: buffers += x.buffers
+    except AttributeError: buffers = ()
+    return buffers
+
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
 
@@ -173,16 +172,31 @@ class BasicBatchExecutor:
       GlobalCounters.global_ops += sym_infer(prg.op_estimate, variables)
       GlobalCounters.global_mem += prg.mem_estimate
 
+class GraphBatchExecutor(BasicBatchExecutor):
+  def __init__(self, jit_cache:List[Tuple[Any, Any, Any]]): self.graphs: List[Any] = []
+  def split_into_graphs(self, jit_cache:List[Tuple[Any, Any, Any]]):
+    # Splitting the JIT cache into batches to enable parallel execution (cpu+gpu). Batch sizes follow a logarithmic pattern: 4, 4, 8, 16, 32, and so on.
+    # This helps push tasks to the GPU while the CPU updates the next graph.
+    for i in range(2, max(math.ceil(math.log2(len(jit_cache))), 2) + 1):
+      self.create_graph(jit_cache[(1<<(i-1) if i > 2 else 0):(1<<i)])
+
+  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
+    if not self.graphs: return super().exec(jit_cache, updatable_entries) # No graph is created, switch to basic executor.
+    update_keys_per_batch = collections.defaultdict(list)
+    for j in updatable_entries.keys(): update_keys_per_batch[max(0, math.ceil(math.log2(j+1))-2)].append(j)
+    for instid in range(len(self.graphs)):
+      for jcid in update_keys_per_batch[instid]: self.update_node(instid, jcid, jit_cache[jcid][0], jit_cache[jcid][1], jit_cache[jcid][2], updated_args=updatable_entries[jcid])
+      self.exec_instance(instid)
+    super().recalc_stat(jit_cache)
+
+  def create_graph(self, jit_cache: List[Tuple[Any, Any, Any]]): raise NotImplementedError("must be implemented")
+  def update_node(self, instid, jcid, prg, pargs, variables, updated_args=None): raise NotImplementedError("must be implemented")
+  def exec_instance(self, instid): raise NotImplementedError("must be implemented")
+
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
     if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args or not runtime_args['binary']): print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
-
-  @staticmethod
-  def from_linearizer(k, src:str):
-    return ASTRunner(k.function_name, src, k.global_size, k.local_size,
-                     op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
-                     display_name=k.display_name, runtime_args={"binary": False})
 
   def optimize_local_size(self, global_size, rawbufs) -> List[int]:
     assert self.global_size is not None, "needs a global size to optimize local size"
@@ -216,7 +230,7 @@ class ASTRunner:
     if global_size is not None and local_size is None:
       local_size = self.local_size = self.optimize_local_size(global_size, rawbufs)
       global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
-    if et := self.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=1): GlobalCounters.time_sum_s += et
+    if et := self.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=2): GlobalCounters.time_sum_s += et
     op_estimate = sym_infer(self.op_estimate, var_vals)
     if DEBUG >= 2:
       print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(37-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(global_size):18s} {str(local_size):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
@@ -233,7 +247,10 @@ class Compiled:
 
   def to_program(self, k):
     k.linearize()
-    return ASTRunner.from_linearizer(k, self.renderer(k.function_name, k.uops)).build(self.runtime, self.batch_exec)
+    src, runtime_args = self.renderer(k.function_name, k.uops)
+    return ASTRunner(k.function_name, src, k.global_size, k.local_size,
+                     op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
+                     display_name=k.display_name, runtime_args=runtime_args).build(self.runtime, self.batch_exec)
 
   def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
     # check if we can reuse the output buffer
@@ -269,17 +286,21 @@ class Compiled:
       k = Linearizer(ast, self.linearizer_opts)
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
       if not getenv("NOOPT"):
-        if not k.apply_tensor_cores(getenv("TC", 1)): k.hand_coded_optimizations()
-        if BEAM:
+        if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
+        if BEAM >= 1 and not vars_from_ast(ast):
+          # allocate a scratch buffer if output buffer is also input
+          test_rawbuffers = [self.buffer(rawbuffers[0].size, rawbuffers[0].dtype), *rawbuffers[1:]] if rawbuffers[0] in rawbuffers[1:] else rawbuffers
           kb = Linearizer(ast, self.linearizer_opts)
           kb.required_optimizations()
           kb.dont_use_locals = bool(getenv("NOLOCALS"))
           from tinygrad.features.search import beam_search, time_linearizer
-          kb = beam_search(kb, rawbuffers, BEAM.value)
-          baseline, beamtime = time_linearizer(k, rawbuffers, allow_test_size=False, disable_cache=True), time_linearizer(kb, rawbuffers, allow_test_size=False, disable_cache=True)
-          if beamtime < baseline:
-            if DEBUG >= 1: print(f"beam search {beamtime*1e6:<12.2f} beat baseline {baseline*1e6:<12.2f} by {baseline/beamtime:.2f}x")
-            k = kb
+          lins = [(f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))), (("tc" if used_tensor_cores else "hc"), k)]
+          if used_tensor_cores:
+            lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
+            lins[-1][1].hand_coded_optimizations()
+          timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, disable_cache=True)) for nm, tk in lins], key=lambda x: x[2])
+          if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
+          k = timed[0][1]
       return self.to_program(k)
 
     if getenv("ENABLE_METHOD_CACHE", 1):

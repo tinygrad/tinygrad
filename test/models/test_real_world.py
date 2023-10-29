@@ -4,8 +4,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
-from tinygrad.ops import Device, GlobalCounters, LazyOp, LoadOps
+from tinygrad.ops import Device, GlobalCounters
 from tinygrad.helpers import CI, dtypes, getenv, prod
+from test.helpers import derandomize_model
 
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
 from examples.hlb_cifar10 import SpeedyResNet
@@ -29,20 +30,6 @@ def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed, all_jit
   assert not kernels_used or kernels_used <= max_kernels_allowed, f"{nm} used more than {max_kernels_allowed} kernels"
   if all_jitted:
     assert kernels_used > 0 and kernels_used == GlobalCounters.kernel_count, f"only {kernels_used} out of {GlobalCounters.kernel_count} were jitted"
-
-# for speed
-def derandomize(x):
-  if isinstance(x, LazyOp):
-    if x.op == LoadOps.RAND: x.op = LoadOps.EMPTY
-    x.src = tuple([derandomize(s) for s in x.src])
-  elif hasattr(x, "op"):
-    x.op = derandomize(x.op)
-  return x
-
-def derandomize_model(model):
-  for p in get_parameters(model):
-    p.lazydata = derandomize(p.lazydata)
-    p.realize()
 
 class TestRealWorld(unittest.TestCase):
   def setUp(self):
@@ -72,7 +59,7 @@ class TestRealWorld(unittest.TestCase):
     # NOTE: only test one pass, not testing the dynamic shape autoregressive part
     helper_test("test_llama", lambda: (Tensor([[1,]]),), test, 0.22 if CI else 13.5, 126 if CI else 486, all_jitted=True)
 
-  @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
+  @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and (Device.DEFAULT not in ["LLVM"] or not CI), "needs JIT, too long on CI LLVM")
   def test_gpt2(self):
     Tensor.default_type = dtypes.float16
 
@@ -83,7 +70,7 @@ class TestRealWorld(unittest.TestCase):
     def test(t): return model(t, 0).realize()
     helper_test("test_gpt2", lambda: (Tensor([[1,]]),), test, 0.21 if CI else 0.9, 129 if CI else 369, all_jitted=True)
 
-  @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
+  @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and (Device.DEFAULT not in ["LLVM", "CLANG"] or not CI), "needs JIT, too long on CI LLVM and CLANG")
   def test_train_cifar(self):
     # TODO: with default device
     #old_default = Device.DEFAULT

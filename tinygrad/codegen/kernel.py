@@ -15,20 +15,22 @@ class TensorCore:
   dims: List[int]
   dtype_in: DType
   dtype_out: DType
-  threads: List[int]
-  thread_local_aliases: List[List[List[int]]]
-  thread_local_sizes: List[int]
+  threads: List[Tuple[int,int]] # list of (TC dim,amt) that construct the warp thread structure
+  upcast_dim: int # which TC dim to upcast
+  thread_local_aliases: List[List[List[int]]] # a list of [threads_1, ..., threads_n, upcast_1(unrolled), upcast_2(upcast)] defining the alias (-1 is upcast, 1-n is warp threads) for each TC dim
+  thread_local_sizes: List[int] # in each thread, the number of elements stored in registers for each TC dim
   arch: Optional[str] = None
   def __str__(self): return f"tensor_core<{self.device}, {self.dims}, {self.dtype_in}, {self.dtype_out}>"
 
 # TODO(TC): doesn't belong here!!!
 tensor_cores: Dict[str, List[TensorCore]] = {
   "METAL": [
-    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.float, dtype_out=dtypes.float, threads=[2,4,2,2], thread_local_sizes=[2,2,2], thread_local_aliases=[ [[-1, 1, 3], [0], [2, 4]], [[2, 4], [-1, 1, 3], [0]], [[0], [-1, 1, 3], [2, 4]] ], arch="arm64"),
-    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.half,  threads=[2,4,2,2], thread_local_sizes=[2,2,2], thread_local_aliases=[ [[-1, 1, 3], [0], [2, 4]], [[2, 4], [-1, 1, 3], [0]], [[0], [-1, 1, 3], [2, 4]] ], arch="arm64")
+    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.float, dtype_out=dtypes.float, upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"),
+    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.half,  upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"),
   ],
   "HIP": [
-    TensorCore(device="HIP", dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, threads=[16,2], thread_local_sizes=[16,16,8], thread_local_aliases=[ [[-1], [0], [1]], [[-1], [1], [0]], [[0], [1], [2, -1]] ]),
+    TensorCore(device="HIP", dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, upcast_dim=1, threads=[(0,16),(1,2)], thread_local_sizes=[16,16,8], thread_local_aliases=[ [[0],[0],[-1],[1]], [[0],[1],[-1],[0]], [[0],[1],[0],[2,-1]] ]),
+    TensorCore(device="HIP", dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.half,  upcast_dim=1, threads=[(0,16),(1,2)], thread_local_sizes=[16,16,8], thread_local_aliases=[ [[0],[0],[-1],[1]], [[0],[1],[-1],[0]], [[0],[1],[0],[2,-1]] ]),
   ]
 }
 
@@ -78,9 +80,7 @@ class Kernel:
     self.upcasted: int = 0
     self.local_dims: int = 0
     self.local_alias: Dict[int, LocalBuffer] = {}
-    self.use_tensor_cores: bool = False
-    self.exclude_local_upcast: int = 0
-    self.reverse_upcast_dir: bool = False
+    self.tensor_core: Optional[TensorCore] = None
     self.dont_use_locals: bool = False
 
     self.global_size: Optional[List[int]] = None
@@ -139,8 +139,7 @@ class Kernel:
 
   # there's eight chunks of the shape
   # blue   -- global dims
-  # CYAN   -- excluded local dims (non-warp)
-  # cyan   -- local dims
+  # cyan   -- local dims (warp ones first)
   #  *** self.first_reduce
   # green  -- reduce-local dims
   # white  -- reduce-late upcasted dim (self.upcast_in_mid_reduce_axes)
@@ -151,11 +150,9 @@ class Kernel:
   def colors(self) -> List[str]:
     # first non local non reduce dims are global (blue)
     colors = ["blue"] * self.global_dims
-    # some special local_dims are excluded from the local upcast
-    colors += ["CYAN"] * self.exclude_local_upcast
-    # except the local_dims, these are non-reduce locals (cyan)
-    colors += ["cyan"] * (self.local_dims - self.exclude_local_upcast)
-    # between first_reduce and first_reduce + group_for_reduce, they are either local (cyan), or late upcasted (green)
+    # after global are local_dims; warp ones used in tensor cores must be closest to first_reduce (cyan)
+    colors += ["cyan"] * self.local_dims
+    # between first_reduce and first_reduce + group_for_reduce, they are either upcast mid reduce (white), or late upcasted (green)
     colors += ["white" if i in self.upcast_in_mid_reduce_axes else "green" for i in range(self.first_reduce, self.first_reduce + len(self.group_for_reduce))]
     # between first_reduce + group_for_reduce and upcasted, they are reduce (red)
     colors += ["red"] * ((self.shape_len-self.upcasted) - (self.first_reduce + len(self.group_for_reduce)))
@@ -164,8 +161,8 @@ class Kernel:
     assert len(colors) == self.shape_len, "colors size mismatch"
     return colors
 
-  def colored_shape(self, pad=None) -> str:
-    ret = ' '.join(colored(s, color) for s,color in zip([f"{s:4d}" if isinstance(s, int) else s for s in self.full_shape], self.colors()))
+  def colored_shape(self, pad=None, dense=False) -> str:
+    ret = ' '.join(colored(s, color) for s,color in zip([f"{s:4d}" if isinstance(s, int) and not dense else s for s in self.full_shape], self.colors()))
     if pad: ret += ' '*(pad-ansilen(ret))
     return ret
   def printbufs(self, prefix=""):

@@ -1,5 +1,5 @@
 import unittest
-from tinygrad.helpers import Timing
+from tinygrad.helpers import Timing, CI
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
 from tinygrad.codegen.linearizer import Linearizer
@@ -31,9 +31,9 @@ class TestWinograd(unittest.TestCase):
 
   def test_profile(self):
     x,w = Tensor.rand(1,4,9,9).realize(), Tensor.rand(4,4,3,3).realize()
-    pr = start_profile()
+    if not CI: pr = start_profile()
     out = Tensor.conv2d(x,w).realize()
-    stop_profile(pr, sort='time')
+    if not CI: stop_profile(pr, sort='time')
     out.numpy()
 
 if __name__ == '__main__':

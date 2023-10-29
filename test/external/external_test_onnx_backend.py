@@ -66,8 +66,8 @@ backend_test.exclude('test_reduce_log_sum_exp*') # dependent on actual float64 i
 backend_test.exclude('test_operator_add*') # dependent on float64 math. Without it values default to 0 or inf
 
 # we don't support indexes
-# backend_test.exclude('test_argmax_*') # Needs more work #select_last_index
-# backend_test.exclude('test_argmin_*') # Needs more work #select_last_index
+# backend_test.exclude('test_argmax_*') # Needs more work: select_last_index
+# backend_test.exclude('test_argmin_*') # Needs more work: select_last_index
 backend_test.exclude('test_nonzero_*')
 
 # no support for mod
@@ -149,32 +149,42 @@ backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # anti
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
 backend_test.exclude('test_operator_addconstant_cpu') # bad data type
 
-# 1556
+# issue 1556 https://github.com/tinygrad/tinygrad/issues/1556
 backend_test.exclude('test_isinf_cpu')
 backend_test.exclude('test_isinf_negative_cpu')
 backend_test.exclude('test_isinf_positive_cpu')
 backend_test.exclude('test_isnan_cpu')
 
-if getenv("CPU") or getenv("ARM64"):
-  # not too sure
-  backend_test.exclude('test_dequantizelinear_axis_cpu')
-  backend_test.exclude('test_dequantizelinear_cpu')
-
-if getenv('LLVM') or getenv('GPU') or getenv('CLANG') or getenv('METAL') or getenv('MPS'):
-  # compiled backends cannot reshape to 0 or from 0
-  backend_test.exclude('test_slice_start_out_of_bounds_cpu')
-  backend_test.exclude('test_constantofshape_int_shape_zero_cpu')
-
-if getenv('GPU') or getenv('METAL') or getenv('MPS'):
-  backend_test.exclude('test_mish_cpu') # weird inaccuracy
-  backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
-  backend_test.exclude('test_eyelike_with_dtype_cpu') # I'm not sure about this...
-
-if getenv('METAL') or getenv('MPS'):
-  # (((Tensor([0,1,2,3,4,5])+0.5)/3.5 - 0.5)) Try this with METAL and LLVM, weird weird inaccuracy
+# issue 1791 fast math messes with these https://github.com/tinygrad/tinygrad/issues/1791
+if getenv('METAL') or getenv('LLVM'):
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
+
+# issue 2067 potentially also a fastmath issue https://github.com/tinygrad/tinygrad/issues/2067
+if getenv('METAL'):
+  backend_test.exclude('test_maxpool_2d_pads_cpu')
+  backend_test.exclude('test_maxpool_2d_same_lower_cpu')
+
+# Don't know how to treat special TensorProto like TensorProto.FLOAT8E4M3FN
+if getenv("CPU") or getenv("TORCH"):
+  backend_test.exclude('test_dequantizelinear_axis_cpu')
+  backend_test.exclude('test_dequantizelinear_cpu')
+
+# compiled backends cannot reshape to and from 0
+if getenv('LLVM') or getenv('GPU') or getenv('CLANG') or getenv('METAL') or getenv('CUDA'):
+  backend_test.exclude('test_slice_start_out_of_bounds_cpu')
+  backend_test.exclude('test_constantofshape_int_shape_zero_cpu')
+
+if getenv('GPU') or getenv('METAL'):
+  backend_test.exclude('test_mish_cpu') # weird inaccuracy
+  backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
+  backend_test.exclude('test_eyelike_with_dtype_cpu') # backend does not support dtype: Double
+
+# Segfaults in CI
+if (getenv('LLVM') or getenv('CUDA')) and getenv("CI", "") != "":
+  backend_test.exclude('test_max_float16_cpu')
+  backend_test.exclude('test_min_float16_cpu')
 
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):
