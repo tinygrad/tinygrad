@@ -47,12 +47,15 @@ def dataset_from_cache(fn):
     old_tm = min(opts_to_outcome[(ast,k[:-1])])
     new_tm = min(opts_to_outcome[(ast,k)])
     if math.isinf(old_tm) or math.isinf(new_tm) or old_tm < 1e-9 or new_tm < 1e-9: continue
-    lin = Linearizer(eval(ast))
+    try:
+      lin = Linearizer(eval(ast))
+    except Exception:
+      continue
     for opt in k[:-1]: lin.apply_opt(opt)
     act = k[-1]
     log_ratio = math.log(old_tm/new_tm)
     #print(f"ratio: {old_tm/new_tm:6.2f}x (log {log_ratio:5.2f}) from {str(act):50s} on {lin.colored_shape()}")
-    S.append(lin_to_feats(lin))
+    S.append(lin_to_feats(lin, use_sts=True))
     A.append(actions.index(act))
     V.append([log_ratio])  # NOTE: i have written the bug many times with this having the wrong dim
 
@@ -75,10 +78,15 @@ if __name__ == "__main__":
     ld = safe_load("/tmp/dataset")
     X,V = ld['X'].numpy(), ld['V'].numpy()
 
-  #ratio = int(0.9*X.shape[0])
+  print(X.shape, V.shape)
+  order = list(range(X.shape[0]))
+  random.shuffle(order)
+  X, V = X[order], V[order]
+
   ratio = -512
   X_test, V_test = Tensor(X[ratio:]), Tensor(V[ratio:])
   X,V = X[:ratio], V[:ratio]
+  print(X.shape, V.shape)
 
   #print(X[0], V[0])
   #print(X[-1], V[-1])
@@ -100,7 +108,7 @@ if __name__ == "__main__":
   losses = []
   test_losses = []
   test_loss = float('inf')
-  for i in (t:=trange(1000)):
+  for i in (t:=trange(2000)):
     x,y = get_minibatch(X,V,bs=256)
     out = net(x)
     #loss = (out-y).square().mean()
