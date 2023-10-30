@@ -13,14 +13,14 @@ actions += flatten([[Opt(op=OptOps.LOCAL, axis=axis, amt=amt) for amt in [2,3,4,
 actions += flatten([[Opt(op=OptOps.GROUPTOP, axis=axis, amt=amt) for amt in [13,16,29,32,256]] for axis in range(3)])
 actions += [
   Opt(op=OptOps.LOCAL, axis=0, amt=32),
-  Opt(op=OptOps.GROUPTOP, axis=0, amt=4), Opt(op=OptOps.GROUPTOP, axis=0, amt=8), Opt(op=OptOps.GROUPTOP, axis=1, amt=8),
+  Opt(op=OptOps.GROUP, axis=0, amt=4), Opt(op=OptOps.GROUP, axis=0, amt=8), Opt(op=OptOps.GROUP, axis=1, amt=8),
   Opt(op=OptOps.UPCASTMID, axis=1, amt=4),
 ]
 
 # returns time in seconds
 def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, should_copy=True, disable_cache=False) -> float:
   key = {"ast": str(lin.ast), "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size}
-  if should_copy and not disable_cache and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
+  if should_copy and not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
   if should_copy: lin = lin.copy() # TODO: remove the need for this
   var_vals = {k:k.min for k in vars_from_ast(lin.ast)}
   try:
@@ -85,11 +85,12 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       pass
   return acted_lins
 
-def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linearizer:
-  key = {"ast": str(lin.ast), "amt": amt}
-  if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE"):
+def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True, dont_use_locals=False) -> Linearizer:
+  key = {"ast": str(lin.ast), "amt": amt, "allow_test_size": allow_test_size, "dont_use_locals": dont_use_locals}
+  if dont_use_locals: lin.dont_use_locals = True
+  if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE") and CACHELEVEL >= 1:
     ret = lin.copy()
-    for o in val: ret.apply_opt(o)
+    for o in val[len(lin.applied_opts):]: ret.apply_opt(o)
     return ret
 
   # init the BEAM with the base linearizer
@@ -122,6 +123,6 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
     beam = opts[:amt]
     if DEBUG >= 2: print(f"{opts[0][1]*1e6:12.2f} us from {len(lins):3d} -> {len(opts):3d} actions", beam[0][0].colored_shape())
 
-  diskcache_put("beam_search", key, beam[0][0].applied_opts)
+  if CACHELEVEL >= 1: diskcache_put("beam_search", key, beam[0][0].applied_opts)
   if DEBUG >= 2: print(beam[0][0].applied_opts)
   return beam[0][0]
