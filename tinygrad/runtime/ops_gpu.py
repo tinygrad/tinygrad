@@ -81,7 +81,8 @@ class CLProgram:
     self.local_size_override = local_size_override
     if function_name_override is not None: name=function_name_override
     try:
-      self._clprgs = [clprogram.build(options=options) for clprogram in self.clprograms]
+      pass
+      #self._clprgs = [clprogram.build(options=options) for clprogram in self.clprograms]
     except cl.RuntimeError as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
@@ -126,8 +127,8 @@ if getenv("TRITON") == 1:
   from tinygrad.renderer.triton import uops_to_triton
   amdgcn_triton = CompilerStack("TRITON_AMDGCN", LinearizerOptions(supports_float4=False, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024], has_shared=False), functools.partial(uops_to_triton, "hsaco"), [scatter_binary])
 if getenv("HIP_GPU") == 1:
-  from tinygrad.runtime.ops_hip import hipcc_compile, renderer as hip_renderer
-  hipcc_gpu = CompilerStack("HIPCC_GPU", LinearizerOptions(device="HIP"), hip_renderer, [hipcc_compile, scatter_binary])
+  from tinygrad.runtime.ops_hip import hip_compiler
+  hipcc_gpu = hip_compiler.plus_pass(scatter_binary)
 
 pyopencl_compiler = CompilerStack("PYOPENCL", LinearizerOptions(), OpenCLRenderer, [pyopencl_compile])
 GPUBuffer = Compiled(CLBuffer, amdgcn_triton if getenv("TRITON") else hipcc_gpu if getenv("HIP_GPU") else pyopencl_compiler, CLProgram, CL.synchronize)
