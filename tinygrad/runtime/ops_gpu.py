@@ -81,12 +81,11 @@ class CLProgram:
     self.local_size_override = local_size_override
     if function_name_override is not None: name=function_name_override
     try:
-      pass
-      #self._clprgs = [clprogram.build(options=options) for clprogram in self.clprograms]
+      for clprogram in self.clprograms: clprogram.build(options=options)
     except cl.RuntimeError as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
-    self.clprgs = [clprg.__getattr__(name) for clprg in self._clprgs]
+    self.clprgs = [clprg.__getattr__(name) for clprg in self.clprograms]
     if DEBUG >= 5 and not OSX:
       if 'Adreno' in CL.cl_ctxs[0].devices[0].name:
         fromimport('disassemblers.adreno', 'disasm')(self.binary())
