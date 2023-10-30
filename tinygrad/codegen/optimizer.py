@@ -232,7 +232,7 @@ class OptimizedKernel(Kernel):
     amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
     assert self.full_shape[axis] % amt == 0, "no longer valid shift"
     assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
-    assert not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals"
+    assert not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.LASTLOCAL, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals"
     if opt.op == OptOps.LOCAL:        # cyan
       assert axis < self.first_reduce, "can't local a reduce"
       assert not(self.tensor_core), "can't local with tensor cores"
