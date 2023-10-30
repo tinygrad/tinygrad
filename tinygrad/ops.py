@@ -252,7 +252,7 @@ class Compiled:
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
                      display_name=k.display_name, runtime_args=runtime_args).build(self.runtime, self.batch_exec)
 
-  def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
+  def exec_ast(self, ast: LazyOp, output, inputs, var_vals, rawbuffers: List[RawBuffer], **kwargs):
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
