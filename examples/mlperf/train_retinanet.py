@@ -4,7 +4,7 @@ from PIL import Image, ImageDraw
 from extra.datasets.openimages import openimages, iterate
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
-from tinygrad.nn import optim
+from tinygrad.nn import optim, BatchNorm2d
 from tinygrad.state import get_parameters
 from tqdm import trange
 from typing import List, Tuple
@@ -14,6 +14,8 @@ import torch
 from contextlib import redirect_stdout
 from train_retinanet_tests import *
 from models.retinanet import decode_bbox
+
+
 
 def resize_box_based_on_new_image_size(box: List[float], img_old_size: Tuple[int], img_new_size: Tuple[int]) -> List[float]:
   ratio_height, ratio_width = [new / orig for new, orig in zip(img_new_size[:2], img_old_size[:2])]

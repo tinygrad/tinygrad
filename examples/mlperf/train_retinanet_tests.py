@@ -63,6 +63,16 @@ class RetinaNetTrainingInitializer:
             self.set_regression_weights()
             self.set_fpn_weights()
 
+        self.freeze_batch_norm_forward()
+    
+    def freeze_batch_norm_forward(self):
+        self.model.backbone.body.bn1.__class__.__call__ = frozen_bn_forward
+    
+def frozen_bn_forward(self,x:Tensor):
+    batch_mean = self.running_mean
+    # NOTE: this can be precomputed for static inference. we expand it here so it fuses
+    batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
+    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
 
 class RetinaNetWeightsChecker:
     def __init__(self):
