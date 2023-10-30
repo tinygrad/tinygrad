@@ -32,7 +32,8 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
   @TinyJit
   def run(*x):
     out = model.forward(*x) if hasattr(model, "forward") else model(*x)
-    out = out if isinstance(out, tuple) else [out]
+    assert isinstance(out, Tuple[Tensor]) or isinstance(out, List[Tensor]) or isinstance(out, Tensor), "model output must be a Tensor, tuple, or a list of Tensors for export"
+    out = [out] if isinstance(out, Tensor) else out
     return [o.realize() for o in out]
 
   # twice to run the JIT
