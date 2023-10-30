@@ -90,8 +90,8 @@ def tg_targets_to_mlperf_targets(tg_targets : dict[str,Tensor]) -> List[dict[str
     targets = []
     for img_regs,img_cls_mask in zip(tg_targets['decoded_regression_targets'][allowed_indxs],tg_targets['classification_targets'][allowed_indxs]):
         img_cls_idxs = np.where(img_cls_mask)
-        d_img = {'boxes':torch_tensor([img_regs]) if len(img_regs.shape)<=1 else torch_tensor(img_regs), 
-                 'labels':torch_tensor([img_cls_idxs]) if len(img_cls_mask.shape)<=1 else torch_tensor(img_cls_idxs)}
+        d_img = {'boxes':torch_tensor(np.array([img_regs])) if len(img_regs.shape)<=1 else torch_tensor(img_regs), 
+                 'labels':torch_tensor(np.array([img_cls_idxs])) if len(img_cls_mask.shape)<=1 else torch_tensor(img_cls_idxs)}
         targets.append(d_img)
     return targets
 
@@ -103,7 +103,7 @@ def filter_by_reg_mask(targets):
 class RetinaNetTrainer:
     def __init__(self,  model : RetinaNet = RetinaNet(ResNeXt50_32X4D(num_classes=None)), debug = False):
         
-        self.model, self.reference = RetinaNetTrainingInitializer().setup()
+        self.model, self.reference = RetinaNetTrainingInitializer().setup(load_debug_weights=True)
         Warning("TODO: at training, ResNet weights should be loaded and most of its layers should be frozen.")
         #self.model.backbone.load_from_pretrained()
         self.input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
@@ -165,13 +165,38 @@ class RetinaNetTrainer:
         #from model.resnet import ResNet
         targets = tg_targets_to_mlperf_targets(tg_targets)
         Warning("Still adapting from train_retinanet_tests-.py")
-        reference_sample_image_list, targets = self.reference.transform(images,targets)
+        #reference_sample_image_list, targets = self.reference.transform(images,targets)
+        
+        #reference_input = reference_sample_image_list.tensors.double()
+        #HERE ref BP 1 ID inside MLPERF repo: transformed images
+        #reference_feature_maps = self.reference.backbone.double()(reference_input) #TODO .double() bothers me. but default usage raises errors ("expected Double instead of Float" bc resnet bias is initialized w/ 32 bits)
+        #reference_features = list(reference_feature_maps.values())
+
+        head_outs = self.reference.double()(images, targets)
+        return head_outs
+    def _reference_forward_raw(self, images,):
+        #for parallel debugging
+        #from model.resnet import ResNet
+        reference_sample_image_list, _ = self.reference.transform(images,None)
         reference_input = reference_sample_image_list.tensors.double()
         reference_feature_maps = self.reference.backbone.double()(reference_input) #TODO .double() bothers me. but default usage raises errors ("expected Double instead of Float" bc resnet bias is initialized w/ 32 bits)
         reference_features = list(reference_feature_maps.values())
 
-        head_outs = self.reference.double()(reference_input, targets)
+        self.reference.head.classification_head.__class__.forward = reference_forward_debug_cls
+        head_outs = self.reference.head.double().forward(reference_features)
         return head_outs
+    def _model_forward_raw(self, images):
+        def _input_fixup(x, normalize = True):
+            if normalize: x = x / 255.0
+            x -= input_mean
+            x /= input_std
+            return x
+        #from models.resnet import ResNet
+        Tensor.training = False
+        model_input = _input_fixup(Tensor(images), normalize=False)
+        self.model.head.classification_head.__class__.__call__ = tg_forward_debug_cls
+        outs = self.model(model_input)
+        return outs
     
     def check_weight_init_forward(self):
         td, rd = get_state_dict(self.model), self.reference.state_dict()
@@ -181,8 +206,8 @@ class RetinaNetTrainer:
         #with open("random_image.pkl",'rb') as file: sample_image_list = loadp(file)
         sample_image_list = [torch_tensor(np.random.rand(3,200,200)) for _ in range(4)]
 
-        reference_head_outs = self.reference_forward(sample_image_list)
-        tg_head_outs = self.model_forward(sample_image_list).numpy()
+        reference_head_outs = self._reference_forward_raw(sample_image_list)
+        tg_head_outs = self._model_forward_raw(sample_image_list).numpy()
 
 
 
@@ -207,8 +232,11 @@ class RetinaNetTrainer:
     
     def train(self):
         #self.check_weight_init_forward() FIXME this works but may modify gradients
+
         retina, anchors_orig, anchors_flattened_levels, optimizer = self.tg_init_setup()
+        
         self.reference.train()
+        
         checker = None
 
         for x, annotations in iterate(self.dataset, BS):
@@ -217,21 +245,25 @@ class RetinaNetTrainer:
             resized = [np.asarray(image.resize(self.image_size)) for image in resized]
             
             images = self.input_fixup(Tensor(resized, requires_grad=False))
-            reference_images = torch.permute(torch_tensor(resized),(0,3,1,2))/255 
+            reference_images = torch.permute(torch.from_numpy(np.array(resized)),(0,3,1,2))/255 
 
 
-            model_head_outputs = retina(images)
+            if sys.argv[1]=='m':
+                #tg BP 1 ID: transformed images
+                breakpoint()
+                model_head_outputs = retina(images)
 
-            reference_head_outputs = self.reference_forward(reference_images,targets)
-            
+            if sys.argv[1]=='r':
+                reference_loss = self.reference_forward(reference_images.double(),targets)
+                reference_head_outputs = self.reference.last_head_outputs
             Warning("reference outputs may be losses instead of head outputs if model is being trained")
             #if self.debug: checker.check_head_outputs(head_outputs)
-            assert(np.allclose(model_head_outputs[:,:,4:].numpy(), reference_head_outputs["cls_logits"], atol=1e-5))
-            assert(np.allclose(model_head_outputs[:,:,:4].numpy(), reference_head_outputs["bbox_regression"], atol=1e-5))
+            
             #eltwise_loss = self._eltwise_compute_loss(BS, targets, model_head_outputs) 
             #imgwise_loss_np = self._imgwise_compute_loss_np(BS, targets, model_head_outputs)
             #batchwise_loss = self._batchwise_compute_loss(BS, targets, model_head_outputs)
             imgwise_loss = self._imgwise_compute_loss(BS, targets, model_head_outputs)
+            breakpoint()
             #if self.debug: checker.check_losses(imgwise_loss)
             optimizer.zero_grad()
             imgwise_loss.backward()
