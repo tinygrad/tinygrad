@@ -90,9 +90,10 @@ def hipcc_compile(kernel_name, prg) -> bytes:
     raise e
 
 class HIPProgram:
-  self.modules, self.prgs = [], []
-
-  def __init__(self, name:str, prg: bytes):
+  def __init__(self, name:str, prg: bytes, local_size_override=None, function_name_override=None):
+    self.modules, self.prgs = [], []
+    self.local_size_override = local_size_override
+    if function_name_override is not None: name=function_name_override
     if DEBUG >= 6:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
@@ -103,6 +104,7 @@ class HIPProgram:
       self.prgs.append(hip.hipModuleGetFunction(self.modules[-1], name))
 
   def __call__(self, global_size, local_size, *args, wait=False):
+    if self.local_size_override is not None: local_size = self.local_size_override
     hip.hipSetDevice(args[0]._device)
     if wait:
       start, end = hip.hipEventCreate(), hip.hipEventCreate()
@@ -142,5 +144,9 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset
   """,
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]))
+if getenv("TRITON") == 1:
+  import torch  # needed otherwise triton can't read amdhsa device info fsr
+  from tinygrad.renderer.triton import uops_to_triton
+  amdgcn_triton = CompilerStack("TRITON_HSACO", LinearizerOptions(supports_float4=False, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024], has_shared=False), functools.partial(uops_to_triton, "hsaco"), [])
 hip_compiler = CompilerStack("HIPCC", LinearizerOptions(device="HIP"), renderer, [hipcc_compile])
-HIPBuffer = Compiled(RawHIPBuffer, hip_compiler, HIPProgram, hip.hipDeviceSynchronize, HIPGraph)
+HIPBuffer = Compiled(RawHIPBuffer, hip_compiler if not getenv("TRITON") else amdgcn_triton, HIPProgram, hip.hipDeviceSynchronize, HIPGraph)

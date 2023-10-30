@@ -39,7 +39,7 @@ def define_scalar(local_size, dtype, args):
   if len(local_size) > 0: return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{render_const(args)}, dtype={triton_dtypes[dtype]})"
   return render_const(args)
 
-def uops_to_triton(function_name:str, uops:List[UOp]):
+def uops_to_triton(target, function_name:str, uops:List[UOp]):
   local_size: List[int] = []
   depth = 1
   signatures, dims, bufs, kernel, valid = [], [], [], [], [] #type: ignore
@@ -122,8 +122,21 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   getlines = linecache.getlines
   linecache.getlines = lambda filename, module_globals=None: prg.splitlines(keepends=True) if "<triton>" == filename else getlines(filename, module_globals)
   exec(compile(prg, "<triton>", "exec"), globals()) # pylint: disable=W0122\
-  compiled = triton_compile(globals()[function_name], signature=",".join(signatures), device_type="cuda", debug=False, cc=(35 if getenv("CUDACPU", 0) else None))
-  prg = remove_single_scalar_curly_braces(compiled.asm["ptx"].split(".file")[0].split(".visible .func")[0])
-  max_local_size =  [int(x) for x in prg.split(".maxntid ")[1].split("\n")[0].split(", ")]
-  for i in range(len(local_size)): local_size[i] = min(local_size[i], max_local_size[i])
-  return prg, {"binary":True, "shared":compiled.metadata["shared"], "local_size_override":local_size +  [1]*(3-len(local_size))}
+  if target == 'ptx':
+    compiled = triton_compile(globals()[function_name], signature=",".join(signatures), device_type="cuda", debug=False, cc=(35 if getenv("CUDACPU", 0) else None))
+    prg = remove_single_scalar_curly_braces(compiled.asm["ptx"].split(".file")[0].split(".visible .func")[0])
+    max_local_size =  [int(x) for x in prg.split(".maxntid ")[1].split("\n")[0].split(", ")]
+    for i in range(len(local_size)): local_size[i] = min(local_size[i], max_local_size[i])
+    return prg, {"binary":True, "shared":compiled.metadata["shared"], "local_size_override":local_size +  [1]*(3-len(local_size))}
+  elif target == 'hsaco':
+    compiled = triton_compile(globals()[function_name], signature=",".join(signatures), device_type="hip", debug=False)
+    with open(compiled.asm['hsaco_path'], 'rb') as hsaco_file:
+      hsaco_bin = hsaco_file.read()
+    hsaco_function_name=re.search(r'^([A-Za-z0-9_]+):', compiled.asm['amdgcn'], re.M).group(1)
+    return hsaco_bin, {"local_size_override":local_size +  [1]*(3-len(local_size)), "function_name_override": hsaco_function_name}
+  elif target == 'amdgcn':
+    compiled = triton_compile(globals()[function_name], signature=",".join(signatures), device_type="hip", debug=False)
+    amdgcn = compiled.asm['amdgcn']
+    triton_function_name = re.search(r'^([A-Za-z0-9_]+):', amdgcn, re.M).group(1)
+    amdgcn = amdgcn.replace(function_name, triton_function_name)
+    return amdgcn.encode("utf-8"), {"local_size_override":local_size +  [1]*(3-len(local_size))}

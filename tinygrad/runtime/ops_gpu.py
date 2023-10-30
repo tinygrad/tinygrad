@@ -1,4 +1,5 @@
 from __future__ import annotations
+import functools
 import pathlib
 import numpy as np
 import pyopencl as cl  # type: ignore
@@ -71,9 +72,14 @@ def pyopencl_compile(name: str, prg: str, options=None):
   binaries = [clp.get_info(cl.program_info.BINARIES) for clp in clprograms]
   return binaries
 
+def scatter_binary(name: str, prg: bytes):
+  return [[prg] for _ in CL.cl_ctxs]
+
 class CLProgram:
-  def __init__(self, name:str, prg:List[List[bytes]], argdtypes=None, options=None):
+  def __init__(self, name:str, prg:List[List[bytes]], argdtypes=None, options=None, local_size_override=None, function_name_override=None):
     self.name, self.clprograms = name, [cl.Program(ctx, ctx.devices, binaries) for ctx, binaries in zip(CL.cl_ctxs, prg)]  # type: ignore
+    self.local_size_override = local_size_override
+    if function_name_override is not None: name=function_name_override
     try:
       self._clprgs = [clprogram.build(options=options) for clprogram in self.clprograms]
     except cl.RuntimeError as e:
@@ -98,6 +104,7 @@ class CLProgram:
   def max_work_group_size(): return CL.cl_ctxs[0].devices[0].max_work_group_size
 
   def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
+    if self.local_size_override is not None: local_size = self.local_size_override
     if not hasattr(self, 'argdtypes'): self.set_argdtypes(tuple(None if x.__class__ is CLBuffer else np.int32 for x in bufs))
     cl_bufs, wait_for = [], []
     for x in bufs:
@@ -114,5 +121,13 @@ class CLProgram:
         return None
     return None
 
+if getenv("TRITON") == 1:
+  import torch  # needed otherwise triton can't read amdhsa device info fsr
+  from tinygrad.renderer.triton import uops_to_triton
+  amdgcn_triton = CompilerStack("TRITON_AMDGCN", LinearizerOptions(supports_float4=False, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024], has_shared=False), functools.partial(uops_to_triton, "hsaco"), [scatter_binary])
+if getenv("HIP_GPU") == 1:
+  from tinygrad.runtime.ops_hip import hipcc_compile, renderer as hip_renderer
+  hipcc_gpu = CompilerStack("HIPCC_GPU", LinearizerOptions(device="HIP"), hip_renderer, [hipcc_compile, scatter_binary])
+
 pyopencl_compiler = CompilerStack("PYOPENCL", LinearizerOptions(), OpenCLRenderer, [pyopencl_compile])
-GPUBuffer = Compiled(CLBuffer, pyopencl_compiler, CLProgram, CL.synchronize)
+GPUBuffer = Compiled(CLBuffer, amdgcn_triton if getenv("TRITON") else hipcc_gpu if getenv("HIP_GPU") else pyopencl_compiler, CLProgram, CL.synchronize)
