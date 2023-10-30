@@ -154,7 +154,7 @@ def simple():
   import os
   from PIL import Image
 
-  NUM_EPOCHS = 5000  # or however many epochs you'd like
+  NUM_EPOCHS = 5000
 
   # Load COCO annotations
   coco = COCO(os.path.join(BASEDIR, 'annotations', 'instances_train2017.json'))
@@ -197,7 +197,13 @@ def simple():
       print(e) # some backwards overflow cuda blocks
       continue
     # optimizer.step()
-    print(f"Epoch {epoch + 1}/{NUM_EPOCHS}, Loss: {total_loss.numpy()}")
+    try:
+      print(f"Epoch {epoch + 1}/{NUM_EPOCHS}, Loss: {total_loss.numpy()}")
+    except Exception as e:
+      print("error computing total loss for the epoch")
+      print("hopefully it was good")
+      print(e)
+      continue
     mem_info = print_gpu_memory("epoch")
     del total_loss, images, img, features, objectness, rpn_box_regression, anchors, targets, objectness_loss, regression_loss, img_metadata, annotations
 
