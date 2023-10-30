@@ -79,15 +79,7 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
     hip.hipSetDevice(x._device)
     hip.hipMemcpy(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice)
 
-@cache_compiled
-def hipcc_compile(kernel_name, prg) -> bytes:
-  try:
-    prog = hip.hiprtcCreateProgram(prg, kernel_name, [], [])
-    hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])
-    return hip.hiprtcGetCode(prog)
-  except Exception as e:
-    if DEBUG >= 3: print("FAILED TO BUILD", prg)
-    raise e
+
 
 class HIPProgram:
   def __init__(self, name:str, prg: bytes, local_size_override=None, function_name_override=None):
@@ -102,6 +94,17 @@ class HIPProgram:
       hip.hipSetDevice(i)
       self.modules.append(hip.hipModuleLoadData(prg))
       self.prgs.append(hip.hipModuleGetFunction(self.modules[-1], name))
+
+  @staticmethod
+  @cache_compiled
+  def compile(kernel_name, prg) -> bytes:
+    try:
+      prog = hip.hiprtcCreateProgram(prg, kernel_name, [], [])
+      hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])
+      return hip.hiprtcGetCode(prog)
+    except Exception as e:
+      if DEBUG >= 3: print("FAILED TO BUILD", prg)
+      raise e
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if self.local_size_override is not None: local_size = self.local_size_override
@@ -148,5 +151,5 @@ if getenv("TRITON") == 1:
   import torch  # needed otherwise triton can't read amdhsa device info fsr
   from tinygrad.renderer.triton import uops_to_triton
   amdgcn_triton = CompilerStack("TRITON_HSACO", LinearizerOptions(supports_float4=False, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024], has_shared=False), functools.partial(uops_to_triton, "hsaco"), [])
-hip_compiler = CompilerStack("HIPCC", LinearizerOptions(device="HIP"), renderer, [hipcc_compile])
+hip_compiler = CompilerStack("HIPCC", LinearizerOptions(device="HIP"), renderer, [HIPProgram.compile])
 HIPBuffer = Compiled(RawHIPBuffer, hip_compiler if not getenv("TRITON") else amdgcn_triton, HIPProgram, hip.hipDeviceSynchronize, HIPGraph)
