@@ -60,6 +60,11 @@ def schedule_to_thneed(schedule, output_fn):
   for si in schedule:
     prg = Device["GPU"].method_cache[si.ast]
     args = (si.out,) + si.inputs
+
+    # pass these to thneed
+    setattr(prg.clprg, 'op_estimate', prg.op_estimate)
+    setattr(prg.clprg, 'prg', prg.prg)
+
     global_size = prg.global_size + [1]*(3-len(prg.global_size))
     local_size = prg.local_size + [1]*(3-len(prg.local_size))
     cl_cache.append((prg.clprg, [[int(g*l) for g,l in zip(global_size, local_size)], local_size, *[x.realized._buf for x in args]]))
