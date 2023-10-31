@@ -52,6 +52,7 @@ class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
     self.event = cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements=['C', 'A']), is_blocking=False)
   def _copyout(self, x:np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
+    CL.cl_allocator.ensure_has_free_space(self.size, self.dtype, self._device)
     buf = cl.Buffer(CL.cl_ctxs[self._buf.device], cl.mem_flags.WRITE_ONLY | cl.mem_flags.USE_HOST_PTR, 0, hostbuf=x.data)
     mapped, event = cl.enqueue_map_buffer(CL.cl_queue[self._buf.device], buf, cl.map_flags.WRITE, 0, self.size, dtype=self.dtype.np, is_blocking=False)
     with mapped.base: cl.enqueue_copy(CL.cl_queue[self._buf.device], mapped, self._buf, is_blocking=True, wait_for=[event] + ([self.event] if hasattr(self, "event") else []))
