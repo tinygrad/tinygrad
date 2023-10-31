@@ -18,6 +18,7 @@ canvas {  display: none; }
 </style>
 <title>tinygrad has WebGPU</title>
 <script src="./net.js"></script>
+<link rel="icon" type="image/x-icon" href="https://raw.githubusercontent.com/tinygrad/tinygrad/master/docs/logo.png">
 </head>
 <body>
 <h1>WebGPU <a href="https://github.com/geohot/tinygrad">tinygrad</a> EfficientNet!</h1>
@@ -111,7 +112,7 @@ canvas {  display: none; }
 		const input = reorderChannelsAndRemoveAlpha(Array.from(data).map((pix) => (pix / 255.0) * 0.45 - 0.225));
 		const out = await timer(() => net(new Float32Array(input)));
 
-		const arr = Array.from(new Float32Array(out));
+		const arr = Array.from(new Float32Array(out[0]));
 		const index = arr.indexOf(Math.max(...arr));
 
 		resultText.textContent = labels[index];
