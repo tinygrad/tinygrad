@@ -2,8 +2,9 @@ import numpy as np
 import unittest, os
 
 from tinygrad.codegen.kernel import tensor_cores
+from tinygrad.codegen.optimizer import Opt, OptOps
 from tinygrad.codegen.linearizer import Linearizer, UOps
-from tinygrad.ops import Compiled, Device, MovementOps, LazyOp
+from tinygrad.ops import Compiled, Device
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
@@ -253,6 +254,231 @@ class TestFloat4(unittest.TestCase):
     k.linearize()
 
     assert TestFloat4.count_float4(k) == (1, 1)
+
+class TestHandCodedOpts(unittest.TestCase):
+  def setUp(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Device does not use linearizer")
+
+  def test_masked_upcast(self):
+    layer_1 = Tensor.cat(*[Tensor.rand(5) for _ in range(4)])
+    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 20))
+
+    s = layer_2.lazydata.schedule()[-1]
+    k = Linearizer(s.ast)
+    k.hand_coded_optimizations()
+    assert len(k.bufs) == 6  # make sure all ops are done in one kernel
+    # masked upcast should upcast masked axis of size 7
+    # masked upcast should not upcast large (20) last axis
+    # float4/other hcopt shouldn't upcast last axis, since we already have 7 upcast, and the last axis is not very contiguous
+    assert k.upcasted == 1 and k.full_shape[-1] == 7
+
+  def test_masked_upcast_wino(self):
+    monster = Tensor.stack([Tensor.stack([Tensor.rand(16) for _ in range(6)]) for _ in range(6)])
+
+    s = monster.lazydata.schedule()[-1]
+    k = Linearizer(s.ast)
+    k.hand_coded_optimizations()
+    assert len(k.bufs) == 37  # make sure all ops are done in one kernel
+    # should upcast the two Tensor.stacks
+    assert k.upcasted >= 2 and k.full_shape[k.shape_len-k.upcasted:k.shape_len].count(6) == 2
+
+  def test_masked_upcast_wino_full(self):
+    old_wino = Tensor.wino
+    Tensor.wino = True
+    x,w = Tensor.rand(1,4,9,9, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
+    out = Tensor.conv2d(x,w, padding=1)
+    upcasts = []
+    # collect upcasts of tile transform kernels
+    for i, si in enumerate(out.lazydata.schedule()):
+      k = Linearizer(si.ast)
+      k.hand_coded_optimizations()
+      if k.reduceop is not None: continue  # not a tile transform kernel (there is a gemm reduce kernel)
+      if len(k.bufs) < 100: continue  # not a tile transform kernel (there's a permute kernel at the end)
+      upcasts.append(tuple(k.full_shape[k.shape_len - k.upcasted:k.shape_len]))
+    assert len(upcasts) == 3  # 3 transformation matrices
+    assert upcasts.count((6, 6)) == 2 and upcasts.count((4, 4)) == 1
+
+    out.mean().backward()
+    for si in x.grad.lazydata.schedule() + w.grad.lazydata.schedule():
+      k = Linearizer(si.ast)
+      k.hand_coded_optimizations()
+      k.linearize()
+      if len(k.bufs) < 20: continue  # not a tile transform kernel
+      # heuristic number to make sure that at least some upcasts but not too many upcasts are being done
+      assert 6 <= prod(k.full_shape[k.shape_len - k.upcasted:k.shape_len]) <= 49
+
+    Tensor.wino = old_wino
+
+  def test_masked_upcast_many(self):
+    layer_1 = Tensor.cat(Tensor.rand(3, 4), Tensor.rand(4, 4))
+    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 7, 4))
+    layer_3 = Tensor.cat(layer_2.unsqueeze(0), Tensor.rand(6, 7, 7, 4))
+
+    s = layer_3.lazydata.schedule()[-1]
+    k = Linearizer(s.ast)
+    k.hand_coded_optimizations()
+    assert len(k.bufs) == 5  # make sure all ops are done in one kernel
+    # check that we don't do too many upcasts
+    assert prod(k.full_shape[k.shape_len-k.upcasted:k.shape_len]) <= 49
+
+def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
+  wanna_output = None
+  realized_ast, real_bufs = helper_realized_ast(r)
+
+  def check_opt(opts, create_k, to_prg):
+    k = create_k()
+    if apply_tc:
+      k.apply_tensor_cores(1, opts)
+    else:
+      for opt in opts:
+        k.apply_opt(opt)
+    prg = to_prg(k)
+    real_bufs[0] = real_bufs[0].fromCPU(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np)) # Zero to check that all values are filled
+    prg.exec(real_bufs, force_wait=True)
+    np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
+
+  # Get baseline, which is not optimized at all.
+  k = Linearizer(realized_ast)
+  prg = Device[Device.DEFAULT].to_program(k)
+  prg.exec(real_bufs, force_wait=True)
+  wanna_output = real_bufs[0].toCPU().copy()
+
+  # Check correctness of handcoded optimiztions.
+  k = Linearizer(realized_ast)
+  k.hand_coded_optimizations()
+  prg = Device[Device.DEFAULT].to_program(k)
+  real_bufs[0] = real_bufs[0].fromCPU(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np)) # Zero to check that all values are filled
+  prg.exec(real_bufs, force_wait=True)
+  np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
+  for x in opts: # Check custom transformations if any.
+    check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_program)
+
+class TestLinearizerOpts(unittest.TestCase):
+  def test_local_and_grouped_reduce(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.has_local or not Device[Device.DEFAULT].linearizer_opts.has_shared:
+      self.skipTest("Only Compiled uses linearizer with locals and shared")
+
+    N = 128
+    Tensor.manual_seed(1882)
+    a = Tensor.rand(4, 4, N, N)
+    b = Tensor.rand(4, 4, N)
+    r = (b.sqrt() + ((a+1).sum(axis=3).exp()))
+    helper_linearizer_opt(r, [
+      [Opt(OptOps.LOCAL, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 8)],
+      [Opt(OptOps.LOCAL, 0, 16)], # Checking how it works with locals
+      [Opt(OptOps.GROUPTOP, 0, 2)],
+      [Opt(OptOps.GROUPTOP, 0, 32)],
+      [Opt(OptOps.GROUPTOP, 0, 64)], # Checking how it works with grouped reduce
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.GROUPTOP, 0, 16)],
+      [Opt(OptOps.LOCAL, 0, 32), Opt(OptOps.GROUPTOP, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 64)], # Checking how it works with locals + grouped reduce
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)], # Checking how it works with locals + grouped reduce + upcasts
+    ])
+
+  def test_upcasts(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+
+    N = 16
+    Tensor.manual_seed(1772)
+    a = Tensor.rand(N, N)
+    b = Tensor.rand(N, N)
+    r = (a+b).sqrt() * ((a+1).exp())
+    helper_linearizer_opt(r, [
+      [Opt(OptOps.UPCAST, 0, 2)],
+      [Opt(OptOps.UPCAST, 0, 4)],
+      [Opt(OptOps.UPCAST, 0, 8)], # Checking how it works with upcasts
+    ])
+
+  def test_full_upcast(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+
+    Tensor.manual_seed(1772)
+    a = Tensor.rand(4)
+    b = Tensor.rand(4)
+    r = (a+b).sqrt() * ((a+1).exp())
+    helper_linearizer_opt(r, [
+      [Opt(OptOps.UPCAST, 0, 4)], # Checking how it works with upcasts
+    ])
+
+  def test_matmul(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.has_local or not Device[Device.DEFAULT].linearizer_opts.has_shared:
+      self.skipTest("Only Compiled uses linearizer with locals and shared")
+
+    N = 128
+    Tensor.manual_seed(1552)
+    a = Tensor.rand(N, N)
+    b = Tensor.rand(N, N)
+    r = a@b
+    helper_linearizer_opt(r, [
+      [Opt(OptOps.UPCAST, 0, 2)],
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # Checking how it works with upcasts
+      [Opt(OptOps.LOCAL, 0, 2)],
+      [Opt(OptOps.LOCAL, 1, 32)],
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4)],
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 32)],
+      [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.LOCAL, 1, 8)], # Checking how it works with locals
+      [Opt(OptOps.GROUPTOP, 0, 2)],
+      [Opt(OptOps.GROUPTOP, 0, 32)],
+      [Opt(OptOps.GROUPTOP, 0, 32), Opt(OptOps.UNROLL, 0, 4)], # Checking how it works with grouped_reduce
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 32)],
+      [Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 0, 32)],
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 0, 4)], # Checking how it works with local+grouped_reduce
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)], # Checking all together
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 8)], # Full global upcast + local
+    ])
+
+  def test_double_reduce(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.has_local or not Device[Device.DEFAULT].linearizer_opts.has_shared:
+      self.skipTest("Only Compiled uses linearizer with locals and shared")
+
+    N = 128
+    Tensor.manual_seed(1552)
+    a = Tensor.rand(8, N, 8, N)
+    r = a.sum(axis=(1,3))
+    helper_linearizer_opt(r, [
+      # openCL / GPU=1 is 256 max threads
+      [Opt(OptOps.GROUPTOP, 0, 2)], [Opt(OptOps.GROUPTOP, 0, 32)],
+      [Opt(OptOps.GROUPTOP, 1, 2)], [Opt(OptOps.GROUPTOP, 1, 32)], # Checking how it works with 1 grouped_reduce.
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],
+      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 2)],
+      [Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 64)], # Checking how it works with 2 grouped_reduces.
+      [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 0, 4)],
+      [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 32), Opt(OptOps.UNROLL, 2, 4)], # Checking how it works with 2 grouped_reduces + upcasts.
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4)],
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 32), Opt(OptOps.UNROLL, 1, 4)], # Checking how it works with 2 grouped_reduces + upcasts + locals.
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)], # Checking how it works with 2 grouped_reduces + upcasts + locals.
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 0, 2)], # No globals
+    ])
+
+  def test_tensor_core_opts(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.has_local:
+      self.skipTest("Only Compiled uses linearizer with locals")
+    if Device.DEFAULT not in tensor_cores:
+      self.skipTest("No tensor cores for device")
+
+    N = 128
+    Tensor.manual_seed(1552)
+    a = Tensor.rand(N, N)
+    b = Tensor.rand(N, N)
+    r = a@b
+    helper_linearizer_opt(r, [
+      [Opt(OptOps.UPCAST, 0, 4)],
+      [Opt(OptOps.UPCAST, 1, 4)],
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
+      [Opt(OptOps.UNROLL, 0, 2)], # check last unroll
+      [Opt(OptOps.LASTLOCAL, 0, 4)], # check last local
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of last unroll and last local
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2)],
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
+      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LASTLOCAL, 0, 2)],
+      # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
+    ], apply_tc=True)
 
 
 if __name__ == '__main__':

@@ -1,4 +1,4 @@
-from typing import Final, Dict, Callable, Any, List, Optional
+from typing import Final, Dict, Callable, Any, List, Optional, Tuple
 from llvmlite import ir  # type: ignore
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.helpers import dtypes
@@ -24,7 +24,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
   TernaryOps.WHERE: lambda builder,x,y,z: builder.select(builder.fcmp_unordered("!=", x, ir.Constant(ir.FloatType(), 0), flags=LLVM_FAST_MATH_FLAGS) if isinstance(x.type, ir.FloatType) else builder.trunc(x, ir.IntType(1)), y, z, flags=LLVM_FAST_MATH_FLAGS),
 }
 
-dtype_to_llvm_dtype = {dtypes.float64:ir.DoubleType(), dtypes.float16:ir.HalfType(), dtypes.bfloat16:ir.IntType(16), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32), dtypes._arg_int32: ir.IntType(32)}
+dtype_to_llvm_dtype = {dtypes.float64:ir.DoubleType(), dtypes.float16:ir.HalfType(), dtypes.bfloat16:ir.IntType(16), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32), dtypes._arg_int32: ir.IntType(32), dtypes.int16:ir.IntType(16), dtypes.uint16:ir.IntType(16), dtypes.uint32:ir.IntType(32), dtypes.uint64:ir.IntType(64)}
 
 def cast(bb, val, input_type, output_type):
   if input_type == output_type: return val
@@ -44,7 +44,9 @@ def cast(bb, val, input_type, output_type):
 
   if input_type == dtypes.float32:
     if dtypes.is_int(output_type) or output_type == dtypes.bool:
-      val = bb[-1].fptoui(val, dtype_to_llvm_dtype[output_type]) if dtypes.is_unsigned(output_type) or output_type == dtypes.bool else bb[-1].fptosi(val, dtype_to_llvm_dtype[output_type])
+      if dtypes.is_unsigned(output_type): val = bb[-1].fptoui(val, dtype_to_llvm_dtype[output_type])
+      elif output_type == dtypes.bool: val = bb[-1].fcmp_ordered("!=", val, ir.Constant(ir.FloatType(), 0), flags=LLVM_FAST_MATH_FLAGS)
+      else: val = bb[-1].fptosi(val, dtype_to_llvm_dtype[output_type])
     elif output_type == dtypes.bfloat16:
       val = bb[-1].bitcast(val, ir.IntType(32))
       val = bb[-1].lshr(val, ir.Constant(ir.IntType(32), 16))
@@ -57,7 +59,7 @@ def cast(bb, val, input_type, output_type):
 
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
-def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
+def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
   # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
 
@@ -129,14 +131,17 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
         val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
         val = cast(bb, val, vin[0].dtype, dtype)
       lvars[u] = val
+    if uop == UOps.PHI:
+      lvars[u] = lvars[vin[1]]
+      # PHI UOps can link to other PHI Uops, backtrace this to DEFINE_ACC
+      backward = vin[0]
+      while backward.uop == UOps.PHI: backward = backward.vin[0]
+      lvars[backward] = lvars[u]
     if uop == UOps.STORE:
-      if len(vin) == 2:
-        lvars[vin[0]] = lvars[vin[1]]
-      elif len(vin) == 3:
-        element = cast(bb, lvars[vin[2]], vin[2].dtype, vin[0].dtype)
-        bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
+      element = cast(bb, lvars[vin[2]], vin[2].dtype, vin[0].dtype)
+      bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
     if uop == UOps.ALU:
       lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin])
 
   bb[-1].ret_void()
-  return str(module)
+  return str(module), {"binary":False}
