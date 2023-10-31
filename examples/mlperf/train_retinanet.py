@@ -4,7 +4,7 @@ from PIL import Image, ImageDraw
 from extra.datasets.openimages import openimages, iterate
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
-from tinygrad.nn import optim, BatchNorm2d
+from tinygrad.nn import optim
 from tinygrad.state import get_parameters
 from tqdm import trange
 from typing import List, Tuple
@@ -85,8 +85,11 @@ def bbox_transform(proposals, reference_boxes):
   return targets
 
 
-def tg_targets_to_mlperf_targets(tg_targets : dict[str,Tensor]) -> List[dict[str,torch.tensor]]:
-    assert(set(['regression_targets', 'classification_targets']).issubset(set(tg_targets.keys())))
+def annotations_to_mlperf_targets(annotations : dict[str,Tensor]) -> List[dict[str,torch.tensor]]:
+    for img_annotations in annotations:
+        img_annotations["boxes"] = torch_tensor(img_annotations["boxes"])
+        img_annotations["labels"] = torch_tensor(img_annotations["labels"])
+    """assert(set(['regression_targets', 'classification_targets']).issubset(set(tg_targets.keys())))
     assert tg_targets['regression_targets'].shape[:2]==tg_targets['classification_targets'].shape[:2]
     allowed_indxs = np.nonzero(tg_targets["regression_masks"])
     targets = []
@@ -94,8 +97,8 @@ def tg_targets_to_mlperf_targets(tg_targets : dict[str,Tensor]) -> List[dict[str
         img_cls_idxs = np.where(img_cls_mask)
         d_img = {'boxes':torch_tensor(np.array([img_regs])) if len(img_regs.shape)<=1 else torch_tensor(img_regs), 
                  'labels':torch_tensor(np.array([img_cls_idxs])) if len(img_cls_mask.shape)<=1 else torch_tensor(img_cls_idxs)}
-        targets.append(d_img)
-    return targets
+        targets.append(d_img)"""
+    #return targets
 
 def filter_by_reg_mask(targets):
     res = {}
@@ -118,6 +121,7 @@ class RetinaNetTrainer:
     def get_ground_truths(self, anchors, annotations, n_classes):
         #TODO tensorize this function for further lazyness exploitation
         #TODO rescale bboxes to transformed size
+        Warning("Check get_ground_truths this is okay, compare ground truth obtainment with MLPERF functions.")
         batch_size = len(annotations)
         regression_targets = np.zeros((batch_size, len(anchors), 4), dtype=np.float32)
         classification_targets = np.zeros((batch_size, len(anchors), n_classes), dtype=np.int32)
@@ -162,20 +166,13 @@ class RetinaNetTrainer:
             if("bn" in key):
                 val.requires_grad = False
             
-    def reference_forward(self, images,tg_targets=None):
-        #for parallel debugging
-        #from model.resnet import ResNet
-        targets = tg_targets_to_mlperf_targets(tg_targets)
-        Warning("Still adapting from train_retinanet_tests-.py")
-        #reference_sample_image_list, targets = self.reference.transform(images,targets)
-        
-        #reference_input = reference_sample_image_list.tensors.double()
-        #HERE ref BP 1 ID inside MLPERF repo: transformed images
-        #reference_feature_maps = self.reference.backbone.double()(reference_input) #TODO .double() bothers me. but default usage raises errors ("expected Double instead of Float" bc resnet bias is initialized w/ 32 bits)
-        #reference_features = list(reference_feature_maps.values())
-
-        head_outs = self.reference.double()(images, targets)
+    def reference_forward(self, images,annotations=None):
+        annotations_to_mlperf_targets(annotations)
+        Warning("Still adapting from train_retinanet_tests-.py")    
+        breakpoint()
+        head_outs = self.reference.double()(images, annotations)
         return head_outs
+    
     def _reference_forward_raw(self, images,):
         #for parallel debugging
         #from model.resnet import ResNet
@@ -184,7 +181,6 @@ class RetinaNetTrainer:
         reference_feature_maps = self.reference.backbone.double()(reference_input) #TODO .double() bothers me. but default usage raises errors ("expected Double instead of Float" bc resnet bias is initialized w/ 32 bits)
         reference_features = list(reference_feature_maps.values())
 
-        self.reference.head.classification_head.__class__.forward = reference_forward_debug_cls
         head_outs = self.reference.head.double().forward(reference_features)
         return head_outs
     def _model_forward_raw(self, images):
@@ -219,8 +215,11 @@ class RetinaNetTrainer:
         assert(np.allclose(tg_head_outs[:,:,:4],reference_head_bbox_regression, atol=1e-5))
         assert(np.allclose(tg_head_outs[:,:,4:],reference_head_cls_logits, atol=1e-5))
         print("Equal forward for initial mlperf weights.")
+
+
     def model_forward(self, images):
         def input_fixup(x, normalize = True):
+            #FIXME dynamic function definition may slow things up
             if normalize: x = x / 255.0
             x -= input_mean
             x /= input_std
@@ -242,7 +241,8 @@ class RetinaNetTrainer:
         checker = None
 
         for x, annotations in iterate(self.dataset, BS):
-            targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
+            Warning("Annotations not being resized!")
+            precomp_tg_targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
             resized = [Image.fromarray(image) for image in x]
             resized = [np.asarray(image.resize(self.image_size)) for image in resized]
             
@@ -251,21 +251,17 @@ class RetinaNetTrainer:
 
 
             if sys.argv[1]=='m':
-                #tg BP 1 ID: transformed images
-                breakpoint()
                 model_head_outputs = retina(images)
 
             if sys.argv[1]=='r':
-                reference_loss = self.reference_forward(reference_images.double(),targets)
+                reference_loss = self.reference_forward(reference_images.double(),annotations=annotations)
                 reference_head_outputs = self.reference.last_head_outputs
             Warning("reference outputs may be losses instead of head outputs if model is being trained")
-            #if self.debug: checker.check_head_outputs(head_outputs)
-            
-            #eltwise_loss = self._eltwise_compute_loss(BS, targets, model_head_outputs) 
-            #imgwise_loss_np = self._imgwise_compute_loss_np(BS, targets, model_head_outputs)
-            #batchwise_loss = self._batchwise_compute_loss(BS, targets, model_head_outputs)
-            imgwise_loss = self._imgwise_compute_loss(BS, targets, model_head_outputs)
+
+            #tg BP 1 ID: loss debug
             breakpoint()
+            imgwise_loss = self._imgwise_compute_loss(BS, precomp_tg_targets, model_head_outputs)
+
             #if self.debug: checker.check_losses(imgwise_loss)
             optimizer.zero_grad()
             imgwise_loss.backward()
@@ -379,9 +375,6 @@ class RetinaNetTrainer:
         print(total_loss.numpy() , " batch loss")
         return total_loss
     
-
-    
-
     def _imgwise_compute_loss(self, BS, targets, head_outputs):
         from torchvision.ops.focal_loss import sigmoid_focal_loss
         from torch.nn import SmoothL1Loss
@@ -413,6 +406,20 @@ class RetinaNetTrainer:
 
         return classification_losses + regression_losses
     
+    def compute_loss(self, targets, head_outputs, anchors):
+        # type: (List[Dict[str, Tensor]], Dict[str, Tensor], List[Tensor]) -> Dict[str, Tensor]
+        matched_idxs = []
+        for anchors_per_image, targets_per_image in zip(anchors, targets):
+            if targets_per_image['boxes'].numel() == 0:
+                matched_idxs.append(torch.full((anchors_per_image.size(0),), -1, dtype=torch.int64,
+                                               device=anchors_per_image.device))
+                continue
+
+            match_quality_matrix = box_iou(targets_per_image['boxes'], anchors_per_image)
+            matched_idxs.append(self.proposal_matcher(match_quality_matrix))
+        breakpoint()
+        return self.head.compute_loss(targets, head_outputs, anchors, matched_idxs)
+
     def _imgwise_compute_loss_np(self, BS, targets, head_outputs):
         from torchvision.ops.focal_loss import sigmoid_focal_loss
         from torch.nn import SmoothL1Loss
