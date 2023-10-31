@@ -6,6 +6,7 @@ from onnx.onnx_pb import TensorProto
 import numpy as np
 import functools
 from typing import Union, Tuple, Optional, List, Any
+from tinygrad.ops import LoadOps
 import math
 
 # **************** Free Ops ****************
@@ -17,7 +18,13 @@ def Sub(input: Union[Tensor, Any], other: Tensor): return input - other # some t
 def Mul(input: Tensor, other: Tensor): return (input * other) if input.dtype == dtypes.float else (input * other).cast(input.dtype)
 # in openpilot, due to SHUFFLE_PAD_OPS issues, we are spending an extra kernel
 def Div(input: Tensor, other: Tensor): return input / other if input.dtype == dtypes.float else input.div(other).floor()
-def Pow(input: Tensor, other: Tensor): return (input.float() ** other.float()).cast(input.dtype)
+def Pow(input: Tensor, other: Tensor):
+  # TODO: can we do this more generically?
+  if not other.lazydata.realized and other.lazydata.op.op == LoadOps.CONST and other.lazydata.st.contiguous:
+    other = other.lazydata.op.arg
+  else:
+    other = other.float()
+  return (input.float() ** other).cast(input.dtype)
 def Reciprocal(input: Tensor): return input.reciprocal()
 def Sqrt(input: Tensor): return input.sqrt()
 def Sign(input: Tensor): return input.sign()
@@ -59,7 +66,7 @@ def Constant(value: Tensor=None, value_float=None, value_floats=None, value_int=
 def Softsign(input: Tensor): return input / (1+input.abs())
 def Cosh(x): return (math.e ** x + math.e ** -x) / 2
 def Sinh(x): return (math.e ** x - math.e ** -x) / 2
-def Tanh(x): return Sinh(x) / Cosh(x)
+def Tanh(x): return x.tanh()
 
 def HardSigmoid(input: Tensor, alpha=0.2, beta=0.5): return (alpha*input + beta).clip(0, 1)
 def HardSwish(input: Tensor): return input * HardSigmoid(input, 1/6, 0.5)
