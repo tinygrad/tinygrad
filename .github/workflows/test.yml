@@ -165,6 +165,9 @@ jobs:
         name: Test openpilot model correctness (float32)
         run: DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile.py
       - if: ${{ matrix.task == 'openpilot' }}
+        name: Test openpilot model correctness (float32, new compiler)
+        run: DEBUGCL=1 FLOAT16=0 python3 openpilot/compile2.py
+      - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot alt model correctness (float32)
         run: DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
       - if: ${{ matrix.task == 'openpilot' }}
