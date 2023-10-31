@@ -75,14 +75,13 @@ class LRUAllocator:
     GlobalCounters.mem_cached -= self._underlying_buf_memsz(rawbufs[0][0])
     return rawbufs.popleft()[0]
 
-  def ensure_gpu_has_free_space(self, size, dtype, device):
-    print(len(self.aging_order[device]), size*dtype.itemsize)
+  def ensure_has_free_space(self, size, dtype, device):
     while len(self.aging_order[device]) and (self.free_space[device]-size*dtype.itemsize) < 0: # When OOM removing lru buffers.
       bucket, epoch = self.aging_order[device].popleft()
       if self.cached_buffers[bucket] and self.cached_buffers[bucket][-1][1] == epoch: self._free_buffer(self.cached_buffers[bucket].pop()[0]) # Free cached buffer if it is still in cache.
 
   def _alloc_buffer(self, size, dtype, device, **kwargs):
-    self.ensure_gpu_has_free_space(size, dtype, device)
+    self.ensure_has_free_space(size, dtype, device)
     self.free_space[device] -= size*dtype.itemsize
     newbuf = self._do_alloc(max(1, size), dtype, device, **kwargs)
     self.buffer_info[newbuf] = (size, dtype, device)
