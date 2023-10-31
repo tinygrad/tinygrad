@@ -10,8 +10,12 @@ class CompilerStack:
   def compile(self, kernel_name, uops: List[UOps]):
     prg, runtime_args = self.renderer(kernel_name, uops)
     if DEBUG >= 4: print(prg)
-    ret = functools.reduce(lambda ir, f: f(kernel_name, ir), self.pass_list, prg)
-    return ret, runtime_args
+
+    for f in self.pass_list:
+      prg, args = f(kernel_name, prg)
+      runtime_args.update(args)
+
+    return prg, runtime_args
   def make_lin(self, ast): return Linearizer(ast, self.linearizer_opts)
   def compile_ast(self, ast):
     lin = self.make_lin(ast)

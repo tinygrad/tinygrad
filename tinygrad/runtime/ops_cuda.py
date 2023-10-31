@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional, List, Any, Tuple
 import numpy as np
 from pycuda.compiler import compile as cuda_compile # type: ignore
-from tinygrad.helpers import DEBUG, getenv, colored
+from tinygrad.helpers import DEBUG, getenv, colored, cache_compiled
 from tinygrad.ops import Compiled, GraphBatchExecutor, ASTRunner
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -89,12 +89,7 @@ class CUDAGraph(GraphBatchExecutor):
   def exec_instance(self, instid): self.graphs[instid][0].launch()
 
 class CUDAProgram:
-  def __init__(self, name:str, prg:str, binary=False, shared = 0, local_size_override=None):
-    if not binary:
-      try: prg = cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8')
-      except cuda.CompileError as e:
-        if DEBUG >= 3: print("FAILED TO BUILD", prg)
-        raise e
+  def __init__(self, name:str, prg:str, shared = 0, local_size_override=None):
     if DEBUG >= 5: print(pretty_ptx(prg))
     if DEBUG >= 6:
       try:
@@ -105,6 +100,15 @@ class CUDAProgram:
       except Exception as e: print("failed to generate SASS", str(e))
     # TODO: name is wrong, so we get it from the ptx using hacks
     self.prg, self.shared, self.local_size_override = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0]), shared, local_size_override
+
+  @staticmethod
+  @cache_compiled
+  def compile(name, prg):
+    try:
+      return cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets']).decode('utf-8'), {}
+    except cuda.CompileError as e:
+      if DEBUG >= 3: print("FAILED TO BUILD", prg)
+      raise e
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait:

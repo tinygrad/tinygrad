@@ -1,7 +1,9 @@
 import time, hashlib, ctypes
 from typing import ClassVar
+
+from tinygrad.lowering import CompilerStack
 from tinygrad.ops import Compiled
-from tinygrad.helpers import getenv, DEBUG
+from tinygrad.helpers import getenv, DEBUG, cache_compiled
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
@@ -64,4 +66,5 @@ class LLVMProgram:
     cfunc(*[x._buf if not isinstance(x, int) else x for x in bufs])
     if wait: return time.monotonic()-st
 
-LLVMBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, LLVMProgram)
+LLVMCompiler = CompilerStack('LLVM', LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, [])
+LLVMBuffer = Compiled(RawMallocBuffer, LLVMCompiler, LLVMProgram)

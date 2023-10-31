@@ -156,12 +156,11 @@ class GlobalCounters:
 # *** compiled cache decorator ***
 
 def cache_compiled(func):
-  def wrapper(self, prg:str, *args, **kwargs) -> bytes:
-    cache_path, output_file = pathlib.Path(f"{tempfile.gettempdir()}/tinygrad_cc_{hashlib.sha256(prg.encode()).hexdigest()}"), pathlib.Path(tempfile.mktemp())
-    if not cache_path.exists():
-      output_file.write_bytes(func(self, prg, *args, **kwargs))
-      output_file.rename(cache_path)
-    return cache_path.read_bytes()
+  def wrapper(prg:str, *args, **kwargs) -> bytes:
+    key = hashlib.sha256(prg.encode()).hexdigest()
+    if diskcache_get('compile_cache', key) is None:
+      diskcache_put('compile_cache', key, func(prg, *args, **kwargs))
+    return diskcache_get('compile_cache', key)
   return wrapper
 
 # *** universal database cache ***

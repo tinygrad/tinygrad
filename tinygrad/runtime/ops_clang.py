@@ -6,6 +6,7 @@ from tinygrad.helpers import fromimport, getenv, DEBUG, CI, cache_compiled
 from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
+from tinygrad.lowering import CompilerStack
 import struct
 import numpy as np
 
@@ -29,7 +30,9 @@ def emulate_ext_calls(fn, uc, address, size, user_data):
   uc.reg_write(getattr(arm64_const, f'UC_ARM64_REG_S{fn[1][1:]}'), struct.unpack('I', struct.pack('f', mock_lm[fn[0]](s_in)))[0])  # type: ignore
 
 class ClangProgram:
-  def __init__(self, name:str, prg:str, binary:bool=False):
+  def __init__(self, name:str, prg:str, binary:bool=False, varsize=None, ext_calls=None):
+    self.varsize, self.ext_calls = varsize, ext_calls  # for ARM64 CI unicorn
+
     if binary and DEBUG >= 5: print(prg)
     self.prg: Any = self.compile(prg if binary else CLANG_PROGRAM_HEADER+prg, binary)
 
@@ -41,22 +44,24 @@ class ClangProgram:
         pathlib.Path(cached_file_path.name).write_bytes(self.prg)
         self.fxn: Any = ctypes.CDLL(str(cached_file_path.name))[name]
 
+  @staticmethod
   @cache_compiled
-  def compile(self, prg, binary) -> bytes:
+  def compile(name, prg, binary) -> bytes:
     with tempfile.NamedTemporaryFile(delete=True) as output_file, tempfile.NamedTemporaryFile(delete=True) as temp_file:
+      runtime_args = {}
       if not binary:
         subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+str(output_file.name)).split(), input=prg.encode('utf-8'))
       elif CI and ARM64:
         prg = prg.split('\n') # type: ignore
-        self.varsize = align(int(prg[0].split(" ")[1]))
-        self.ext_calls = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if ins[:2] == 'bl'}
+        runtime_args["varsize"] = align(int(prg[0].split(" ")[1]))
+        runtime_args["ext_calls"] = {(i*4+ADDRESS):ins.split(" ")[1:] for i, ins in enumerate(filter(lambda ins: ins[:4] != 'loop', prg[6:-3])) if ins[:2] == 'bl'}
         prg = "\n".join(['nop' if ins[:2] == 'bl' else ins for ins in prg[6:-3]] + ['\n'])
         subprocess.check_output(args=('aarch64-linux-gnu-as -o '+str(temp_file.name)).split(), input=prg.encode('utf-8'))
         subprocess.check_output(args=('aarch64-linux-gnu-objcopy -O binary --only-section=.text '+str(temp_file.name)+' '+str(output_file.name)).split())
       else:
         subprocess.check_output(args=('as -o' + str(temp_file.name)).split(), input=prg.encode('utf-8'))
         subprocess.check_output(args=('clang -lm -shared '+str(temp_file.name)+' -o'+str(output_file.name)).split())
-      return pathlib.Path(output_file.name).read_bytes()
+      return pathlib.Path(output_file.name).read_bytes(), runtime_args
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait: st = time.monotonic()
@@ -81,5 +86,6 @@ class ClangProgram:
       self.fxn(*[x._buf if isinstance(x, RawMallocBuffer) else x for x in args])
     if wait: return time.monotonic()-st
 
-renderer = fromimport("tinygrad.renderer.assembly_arm64", "uops_to_arm64_asm") if ARM64 else functools.partial(uops_to_cstyle, CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict", arg_int_prefix="const int"))
-ClangBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False), renderer, ClangProgram)
+renderer = fromimport("tinygrad.renderer.assembly_arm64", "uops_to_arm64_asm") if ARM64 else CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict", arg_int_prefix="const int")
+clang_compiler = CompilerStack("CLANG", LinearizerOptions(supports_float4=False, has_local=False), renderer, [ClangProgram.compile])
+ClangBuffer = Compiled(RawMallocBuffer, clang_compiler, renderer, ClangProgram)

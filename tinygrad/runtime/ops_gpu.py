@@ -70,7 +70,7 @@ def pyopencl_compile(name: str, prg: str, options=None):
     if DEBUG >= 3: print("FAILED TO BUILD", prg)
     raise e
   binaries = [clp.get_info(cl.program_info.BINARIES) for clp in clprograms]
-  return binaries
+  return binaries, {}
 
 def scatter_binary(name: str, prg: bytes):
   return [[prg] for _ in CL.cl_ctxs]

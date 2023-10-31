@@ -101,7 +101,7 @@ class HIPProgram:
     try:
       prog = hip.hiprtcCreateProgram(prg, kernel_name, [], [])
       hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])
-      return hip.hiprtcGetCode(prog)
+      return hip.hiprtcGetCode(prog), {}
     except Exception as e:
       if DEBUG >= 3: print("FAILED TO BUILD", prg)
       raise e
@@ -124,7 +124,7 @@ class HIPProgram:
   def __del__(self):
     for module in self.modules: hip.hipModuleUnload(module)
 
-renderer = functools.partial(uops_to_cstyle, CStyleLanguage(
+renderer = CStyleLanguage(
   kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
 __device__ float4 max(float4 x, float4 y) { return float4(max(x.x, y.x), max(x.y, y.y), max(x.z, y.z), max(x.w, y.w)); }
 __device__ float4 pow(float x, float4 y) { return float4(pow(x, y.x), pow(x, y.y), pow(x, y.z), pow(x, y.w)); }
@@ -146,10 +146,10 @@ __device__ void vstore_half2(float2 data, size_t offset, half *p) { *(p + offset
 __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset*4) = (half)data.x; *(p + offset*4 + 1) = (half)data.y; *(p + offset*4 + 2) = (half)data.z; *(p + offset*4 + 3) = (half)data.w; }
   """,
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
-  lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]))
+  lid = [f'threadIdx.{chr(120+i)}' for i in range(3)])
 if getenv("TRITON") == 1:
   import torch  # needed otherwise triton can't read amdhsa device info fsr
   from tinygrad.renderer.triton import uops_to_triton
-  amdgcn_triton = CompilerStack("TRITON_HSACO", LinearizerOptions(supports_float4=False, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024], has_shared=False), functools.partial(uops_to_triton, "hsaco"), [])
+  amdgcn_triton = CompilerStack("TRITON_HSACO", LinearizerOptions(supports_float4=False, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [256, 256, 256], has_shared=False), functools.partial(uops_to_triton, "hsaco"), [])
 hip_compiler = CompilerStack("HIPCC", LinearizerOptions(device="HIP"), renderer, [HIPProgram.compile])
 HIPBuffer = Compiled(RawHIPBuffer, hip_compiler if not getenv("TRITON") else amdgcn_triton, HIPProgram, hip.hipDeviceSynchronize, HIPGraph)

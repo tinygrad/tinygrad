@@ -7,6 +7,7 @@ from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
 from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.renderer.metal import MetalRenderer
 from tinygrad.runtime.lib import RawBufferMapped, LRUAllocator
+from tinygrad.lowering import CompilerStack
 
 METAL_XCODE = getenv("METAL_XCODE")
 
@@ -100,4 +101,5 @@ class MetalProgram:
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
     METAL.mtl_buffers_in_flight.append(command_buffer)
 
-MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, MetalProgram, METAL.synchronize, MetalBatchExecutor)
+metal_compiler = CompilerStack("METAL", LinearizerOptions(device="METAL"), MetalRenderer, )
+MetalBuffer = Compiled(RawMetalBuffer, metal_compiler, MetalProgram, METAL.synchronize, MetalBatchExecutor)
