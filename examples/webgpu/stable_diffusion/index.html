@@ -5,16 +5,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>tinygrad has WebGPU</title>
+
     <style>
         body {
             font-family: 'Arial', sans-serif;
             text-align: center;
-            padding: 50px;
+            padding: 30px;
         }
 
         a {
             text-decoration: none;
-            color: inherit;
+            color: #4A90E2;
         }
 
         h1 {
@@ -28,13 +29,13 @@
             flex-direction: column;
             align-items: center;
             gap: 20px;
-            width: 50%; /* reduce the width */
+            width: 50%;
             margin: 0 auto;
         }
 
         #promptText, #stepRange, #btnRunNet, #guidanceRange {
             font-size: 18px;
-            width: 100%; /* make them take full width within the #mybox container */
+            width: 100%;
         }
 
         #result {
@@ -48,17 +49,18 @@
 
         canvas {
             margin-top: 20px;
+            border: 1px solid #000; 
         }
 
         label {
             display: flex;
             align-items: center;
-            gap: 10px; /* Add a gap between the label elements */
-            width: 100%; /* To ensure it takes the full width */
+            gap: 10px;
+            width: 100%;
         }
         
         #sliderValue {
-            margin-right: 10px; /* Additional margin for visual spacing */
+            margin-right: 10px;/
         }
     </style>
 
@@ -71,7 +73,7 @@
 
 <body>
 <h1 id="wgpuError" style="display: none; color: red;">WebGPU is not supported in this browser</h1>
-<h1 id="sdTitle">WebGPU <a href="https://github.com/tinygrad/tinygrad">tinygrad</a> StableDiffusion!</h1>
+<h1 id="sdTitle">StableDiffusion by <a href="https://github.com/tinygrad/tinygrad" target="_blank">TinyGrad</a> WebGPU</h1>
 <div id="mybox">
     <input id="promptText" type="text" placeholder="Enter your prompt here" value="a horse sized cat eating a bagel">
     
@@ -85,40 +87,34 @@
         <input id="guidanceRange" type="range" min="3" max="15" value="7.5" step="0.1">
     </label>
     
-    <input id="btnRunNet" type="button" value="Run">
-     
-    <div style="display: flex; align-items: center; width: 100%; gap: 10px;">
+    <input id="btnRunNet" type="button" value="Run" disabled>
+
+    <div id="divModelDl" style="display: flex; align-items: center; width: 100%; gap: 10px;">
+        <span id="modelDlTitle">Downloading model</span>
+        <progress id="modelDlProgressBar" value="0" max="100" style="flex-grow: 1;"></progress>
+        <span id="modelDlProgressValue"></span>
+    </div>
+
+    <div id="divStepProgress" style="display: none; align-items: center; width: 100%; gap: 10px;">
         <progress id="progressBar" value="0" max="100" style="flex-grow: 1;"></progress>
         <span id="progressFraction"></span>
     </div>
 </div>
 <canvas id="canvas" width="512" height="512"></canvas>
-<div>
-    <div id="result">result will go here</div>
-    <div id="time"></div>
-</div>
 
 <script>
     window.addEventListener('load', function() {
         if (!navigator.gpu) {
             document.getElementById("wgpuError").style.display = "";
             document.getElementById("sdTitle").style.display = "none";
-            document.getElementById("btnRunNet").disabled = true;
             
             return;
         }
 
         const ctx = document.getElementById("canvas").getContext("2d", { willReadFrequently: true });
-        const resultText = document.getElementById('result');
         let labels, nets, safetensorParts;
 
-        const error = (err) => {
-            resultText.innerHTML = `Error: ${err}`;
-            throw new Error(err);
-        }
-
         const getDevice = async () => {
-            if (!navigator.gpu) error("WebGPU not supported.");
             const adapter = await navigator.gpu.requestAdapter();
             const requiredLimits = {};
             const maxBufferSizeInSDModel = 1073741824;
@@ -131,34 +127,42 @@
         };
 
         const timer = async (func, label = "") => {
-            document.getElementById('time').innerHTML = "";
             const start = performance.now();
             const out = await func();
             const delta = (performance.now() - start).toFixed(1)
             console.log(`${delta} ms ${label}`);
-            document.getElementById('time').innerHTML = `${delta} ms ${label}`;
             return out;
-        }	
-
-        function checkStatus(response) {
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status} - ${response.statusText}`);
-            }
-            return response;
         }
 
         const loadNet = async () => {
-            resultText.innerHTML = "loading..."
-            safetensorParts = await getSafetensorParts();
-            const device = await getDevice();
+            const modelDlTitle = document.getElementById("modelDlTitle");
+
+            const progress = (loaded, total) => {
+                document.getElementById("modelDlProgressBar").value = (loaded/total) * 100
+                document.getElementById("modelDlProgressValue").innerHTML = Math.trunc((loaded/total) * 100) + "%"
+            }
+
+            safetensorParts = await getSafetensorParts(progress);
+
+            modelDlTitle.innerHTML = "Compiling model"
+
             let models = ["textModel", "diffusor", "decoder"];
+            const device = await getDevice();
+
             nets = await timer(() => Promise.all([
                 textModel().setup(device, safetensorParts),
                 diffusor().setup(device, safetensorParts),
                 decoder().setup(device, safetensorParts)
             ]).then((loadedModels) => loadedModels.reduce((acc, model, index) => { acc[models[index]] = model; return acc; }, {})), "(compilation)")
             console.log(nets)
-            resultText.innerHTML = "ready"
+
+            modelDlTitle.innerHTML = "Model ready"
+            setTimeout(() => {
+                document.getElementById("modelDlProgressBar").style.display = "none";
+                document.getElementById("modelDlProgressValue").style.display = "none";
+                document.getElementById("divStepProgress").style.display = "flex";
+            }, 1000);
+            document.getElementById("btnRunNet").disabled = false;
         }
 
         function runStableDiffusion(prompt, steps, guidance) {
@@ -207,47 +211,45 @@
         }
 
         document.getElementById("btnRunNet").addEventListener("click", function(e) {
-            if (!nets) error("Net not loaded yet.");
-                e.target.disabled = true;
+            e.target.disabled = true;
 
-                runStableDiffusion(document.getElementById("promptText").value, document.getElementById("stepRange").value, document.getElementById("guidanceRange").value).then((image) => {
-                    let pixels = []
-                    let pixelCounter = 0
+            runStableDiffusion(document.getElementById("promptText").value, document.getElementById("stepRange").value, document.getElementById("guidanceRange").value).then((image) => {
+                let pixels = []
+                let pixelCounter = 0
 
-                    for (let j = 0; j < 512; j++) {
-                        for (let k = 0; k < 512; k++) {
-                            pixels.push(image[pixelCounter])
-                            pixels.push(image[pixelCounter+1])
-                            pixels.push(image[pixelCounter+2])
-                            pixels.push(255)
-                            pixelCounter += 3
-                        }
+                for (let j = 0; j < 512; j++) {
+                    for (let k = 0; k < 512; k++) {
+                        pixels.push(image[pixelCounter])
+                        pixels.push(image[pixelCounter+1])
+                        pixels.push(image[pixelCounter+2])
+                        pixels.push(255)
+                        pixelCounter += 3
                     }
-                    
-                    ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), 512, 512), 0, 0);
-                    console.log(image);
-                    console.log("Success");
-                    e.target.disabled = false;
-                });
-            }, false);
-
-            const stepSlider = document.getElementById('stepRange');
-            const stepValue = document.getElementById('stepValue');
-
-            stepSlider.addEventListener('input', function() {
-                stepValue.textContent = stepSlider.value;
+                }
+                
+                ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), 512, 512), 0, 0);
+                console.log(image);
+                console.log("Success");
+                e.target.disabled = false;
             });
+        }, false);
 
-            const guidanceSlider = document.getElementById('guidanceRange');
-            const guidanceValue = document.getElementById('guidanceValue');
+        const stepSlider = document.getElementById('stepRange');
+        const stepValue = document.getElementById('stepValue');
 
-            guidanceSlider.addEventListener('input', function() {
-                guidanceValue.textContent = guidanceSlider.value;
-            });
+        stepSlider.addEventListener('input', function() {
+            stepValue.textContent = stepSlider.value;
+        });
 
-            loadNet();
-        }
-    )
+        const guidanceSlider = document.getElementById('guidanceRange');
+        const guidanceValue = document.getElementById('guidanceValue');
+
+        guidanceSlider.addEventListener('input', function() {
+            guidanceValue.textContent = guidanceSlider.value;
+        });
+
+        loadNet();
+    });
 </script>
 </body>
 </html>

@@ -62,13 +62,12 @@ if __name__ == "__main__":
     functions, statements, bufs, _ = compile_net(run, special_names)
     state = get_state_dict(model)
     weights = {id(x.lazydata.realized): name for name, x in state.items()}
-
     kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
     kernel_names = ', '.join([name for (name, _, _, _) in statements])
     kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
     bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}'], '{weights[_key]}'))") + ";"  for name,(size,dtype,_key) in bufs.items()])
-    gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate(special_names.items()) if value != "outputs"])
-    input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new Float32Array(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,(_,value) in enumerate(special_names.items()) if value != "outputs"])
+    gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate(special_names.items()) if "output" not in value])
+    input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new Float32Array(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,(_,value) in enumerate(special_names.items()) if value != "output0"])
     return f"""\n    var {step.name} = function() {{
     
     {kernel_code}
@@ -80,18 +79,18 @@ if __name__ == "__main__":
         {bufs}
         
         {gpu_write_bufs}
-        const gpuReadBuffer = device.createBuffer({{ size: outputs.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }});
+        const gpuReadBuffer = device.createBuffer({{ size: output0.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }});
 
         const kernels = [{kernel_names}];
         const piplines = await Promise.all(kernels.map(name => device.createComputePipelineAsync({{layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}})));
 
-        return async ({",".join([f'data{i}' for i,(k,v) in enumerate(special_names.items()) if v != "outputs"])}) => {{
+        return async ({",".join([f'data{i}' for i,(k,v) in enumerate(special_names.items()) if v != "output0"])}) => {{
             const commandEncoder = device.createCommandEncoder();
 
             {input_writer}
 
             {kernel_calls}
-            commandEncoder.copyBufferToBuffer(outputs, 0, gpuReadBuffer, 0, outputs.size);
+            commandEncoder.copyBufferToBuffer(output0, 0, gpuReadBuffer, 0, output0.size);
             const gpuCommands = commandEncoder.finish();
             device.queue.submit([gpuCommands]);
 
@@ -115,21 +114,56 @@ if __name__ == "__main__":
       safe_save(state, os.path.join(os.path.dirname(__file__), "net.safetensors"))
       part_start_offsets = create_multipart_safetensor("./net.safetensors", 1073741824)
       os.remove("net.safetensors") #don't need the original after splitting
-      safetensor_parts = '\n    '.join([f"parts.push(new Uint8Array(await (await fetch('./net_part{i}.safetensors')).arrayBuffer()));" for i, _ in enumerate(part_start_offsets)])
+      safetensor_parts = ',\n    '.join([f"getProgressDlForPart('./net_part{i}.safetensors', progressCallback)" for i, _ in enumerate(part_start_offsets)])
 
   prekernel = f"""const getTensorMetadata = (safetensorBuffer) => {{
       const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
       const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
       return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
     }};
+    
+    const getProgressDlForPart = async (part, progressCallback) => {{
+    const response = await fetch(part);
+    const contentLength = response.headers.get('content-length');
+    const total = parseInt(contentLength, 10);
+  
+    const res = new Response(new ReadableStream({{
+      async start(controller) {{
+        const reader = response.body.getReader();
+        for (;;) {{
+          const {{ done, value }} = await reader.read();
+          if (done) break;
+          progressCallback(part, value.byteLength, total);
+          controller.enqueue(value);
+        }}
+        controller.close();
+      }},
+    }}));
+  
+    return res.arrayBuffer();
+  }};
+  
+  const getSafetensorParts = async (progress) => {{
+    let totalLoaded = 0;
+    let totalSize = 0;
+    let partSize = {{}};
 
-  const getSafetensorParts = async () => {{
-    let parts = [];
+    const progressCallback = (part, loaded, total) => {{
+      totalLoaded += loaded;
 
+      if (!partSize[part]) {{
+        totalSize += total;
+        partSize[part] = true;
+      }}
+      progress(totalLoaded, totalSize);
+    }};
+  
+    const buffers = await Promise.all([
     {safetensor_parts}
-
-    return parts;
-  }}
+    ]);
+  
+    return buffers.map(buffer => new Uint8Array(buffer));
+  }};
 
   const getTensorBuffer = (safetensorParts, tensorMetadata, key) => {{
     let selectedPart = 0;
