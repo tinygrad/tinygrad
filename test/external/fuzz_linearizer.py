@@ -23,13 +23,13 @@ def fuzz_linearizer(lin: Linearizer):
     idx, valid = buf.st.expr_idxs()
     # TODO: image type and variable shape
     size = idx.max+1
-    rawbuf = device.buffer.fromCPU(np.random.default_rng(seed=42).standard_normal(size=size, dtype=buf.dtype.np))
+    rawbuf = device.buffer.fromCPU(np.random.rand(size).astype(buf.dtype.np))
     rawbufs.append(rawbuf)
 
   prg = device.to_program(lin.copy())
   prg.exec(rawbufs, force_wait=True)
   ground_truth = rawbufs[0].toCPU()
-  print(f"{ground_truth=}")
+  # print(f"{ground_truth=}")
 
   # NOTE: copied from beam_search
   def tuplize_uops(uops): return tuple([(x.uop, x.dtype, tuple(x.num for x in x.vin), x.arg) for x in uops])
@@ -51,18 +51,26 @@ def fuzz_linearizer(lin: Linearizer):
     # get a new output buffer
     outputbuffer = device.buffer(size=prod(lin.membufs[0].st.shape), dtype=lin.membufs[0].dtype)
     rawbufs[0] = outputbuffer
-    prg = device.to_program(lin.copy())
-    prg.exec(rawbufs, force_wait=True)
-    result = rawbufs[0].toCPU()
-    print(result)
-    np.testing.assert_allclose(result, ground_truth, rtol=1e-4, atol=1e-4)
 
+    try:
+      prg = device.to_program(lin.copy())
+      prg.exec(rawbufs, force_wait=True)
+    except:
+      print("FAIL!!")
+      return False
+    result = rawbufs[0].toCPU()
+    # print(result)
+    np.testing.assert_allclose(result, ground_truth, rtol=1e-4, atol=1e-4)
+  return True
 
 if __name__ == "__main__":
   device = Device[Device.DEFAULT]
   ast_strs = load_worlds()
   print(f"{len(ast_strs)=}")
+  tested = passed = 0
   # TODO: ast_strs[0] output contains nan?
-  for i in range(5):
-    lin = ast_str_to_lin(ast_strs[i])
-    fuzz_linearizer(lin)
+  for ast in ast_strs[:20]:
+    tested += 1
+    lin = ast_str_to_lin(ast)
+    passed += int(fuzz_linearizer(lin))
+  print(f"{passed} / {tested} = {passed/tested:.4f}")
