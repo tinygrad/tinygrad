@@ -7,6 +7,7 @@ from tinygrad.ops import Device
 from extra.utils import download_file
 from typing import NamedTuple, Any, List
 from pathlib import Path
+import argparse
 
 FILENAME = Path(__file__).parent.parent.parent.parent / "weights/sd-v1-4.ckpt"
 
@@ -35,6 +36,9 @@ def create_multipart_safetensor(fn, part_size):
   return part_start_offsets
 
 if __name__ == "__main__":
+  parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser.add_argument('--remoteweights', action='store_true', help="Use safetensors from Huggingface, or from local")
+  args = parser.parse_args()
   Device.DEFAULT = "WEBGPU"
 
   Tensor.no_grad = True
@@ -110,11 +114,17 @@ if __name__ == "__main__":
     prg += compile_step(model, step)
 
     if step.name == "diffusor":
-      state = get_state_dict(model)
-      safe_save(state, os.path.join(os.path.dirname(__file__), "net.safetensors"))
-      part_start_offsets = create_multipart_safetensor("./net.safetensors", 1073741824)
-      os.remove("net.safetensors") #don't need the original after splitting
-      safetensor_parts = ',\n    '.join([f"getProgressDlForPart('./net_part{i}.safetensors', progressCallback)" for i, _ in enumerate(part_start_offsets)])
+      if args.remoteweights:
+        part_start_offsets = [1131408336, 2227518416, 3308987856, 4265298864]
+        base_url = "https://huggingface.co/wpmed/tinygrad-sd/resolve/main"
+      else:
+        state = get_state_dict(model)
+        safe_save(state, os.path.join(os.path.dirname(__file__), "net.safetensors"))
+        part_start_offsets = create_multipart_safetensor("./net.safetensors", 1073741824)
+        os.remove("net.safetensors")
+        base_url = "."
+
+      safetensor_parts = ',\n    '.join([f"getProgressDlForPart('{base_url}/net_part{i}.safetensors', progressCallback)" for i, _ in enumerate(part_start_offsets)])
 
   prekernel = f"""const getTensorMetadata = (safetensorBuffer) => {{
       const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
