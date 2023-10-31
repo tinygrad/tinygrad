@@ -288,13 +288,16 @@ class Compiled:
       if not getenv("NOOPT"):
         if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
         if BEAM >= 1 and not vars_from_ast(ast):
+          lins = [(("tc" if used_tensor_cores else "hc"), k)]
           # allocate a scratch buffer if output buffer is also input
           test_rawbuffers = [self.buffer(rawbuffers[0].size, rawbuffers[0].dtype), *rawbuffers[1:]] if rawbuffers[0] in rawbuffers[1:] else rawbuffers
           kb = Linearizer(ast, self.linearizer_opts)
           kb.required_optimizations()
-          kb.dont_use_locals = bool(getenv("NOLOCALS"))
           from tinygrad.features.search import beam_search, time_linearizer
-          lins = [(f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))), (("tc" if used_tensor_cores else "hc"), k)]
+          if not bool(getenv("NOLOCALS")) or getenv("NOLOCALS") >= 2:
+            lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
+          if bool(getenv("NOLOCALS")):
+            lins.append((f"beam{BEAM.value}n", beam_search(kb.copy(), test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)), dont_use_locals=True)))
           if used_tensor_cores:
             lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
             lins[-1][1].hand_coded_optimizations()

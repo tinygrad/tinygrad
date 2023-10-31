@@ -35,7 +35,7 @@ puppeteer.launch({ headless: false, args: ["--enable-unsafe-webgpu"]}).then(asyn
     page.on("console", message => console.log(`message from console ${message.text()}`))
         .on("pageerror", ({ message }) => console.log(`error from page ${message}`))
 
-    const res = await page.goto("http://localhost:8000/examples/webgpu/index.html");
+    const res = await page.goto("http://localhost:8000/examples/index.html");
     if(res.status() != 200) throw new Error("Failed to load page");
     const textSelector = await page.waitForSelector("#result");
     const buttonSelector = await page.waitForSelector("input[type=button]");
