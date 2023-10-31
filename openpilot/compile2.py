@@ -109,10 +109,6 @@ def thneed_test_onnx(onnx_data, output_fn):
     # non thneed
     run_onnx = get_run_onnx(onnx_model)
     new_tinygrad_out = next(iter(run_onnx(inputs).values())).cast(dtypes.float32).numpy()
-    for i,(x,y) in enumerate(zip(new_torch_out.flatten().tolist(), new_tinygrad_out.flatten().tolist())):
-      if abs(x-y) > 100:
-        print(i, x, y)
-
     np.testing.assert_allclose(new_torch_out, new_tinygrad_out, atol=1e-4, rtol=1e-2)
     print("classic self-test passed!")
   else:
@@ -142,19 +138,20 @@ if __name__ == "__main__":
   schedule, schedule_independent, inputs = get_schedule(onnx_data)
   schedule, schedule_input = partition(schedule, lambda x: x.ast.op not in LoadOps)
   print(f"{len(schedule_input)} inputs")
-  schedule = fix_schedule_for_images(schedule)
-  image_count = sum(isinstance(si.out.dtype, ImageDType) for si in schedule)
-  print(f"**** running real kernels {image_count}/{len(schedule)} images ****")
-
-  if GRAPH:
-    for si in schedule_input: log_schedule_item(si)
-    for si in schedule: log_schedule_item(si)
 
   run_schedule(schedule_independent, disable_logging=True)
   run_schedule(schedule_input)
   with Context(DEBUG=2, BEAM=getenv("LATEBEAM")):
+    schedule = fix_schedule_for_images(schedule)
+    image_count = sum(isinstance(si.out.dtype, ImageDType) for si in schedule)
+    print(f"**** running real kernels {image_count}/{len(schedule)} images ****")
+
+    if GRAPH:
+      for si in schedule_input: log_schedule_item(si)
+      for si in schedule: log_schedule_item(si)
+
     GlobalCounters.reset()
-    run_schedule(schedule)
+    run_schedule(schedule[:])
 
   output_fn = sys.argv[2] if len(sys.argv) >= 3 else "/tmp/output.thneed"
   schedule_to_thneed(schedule, output_fn)
