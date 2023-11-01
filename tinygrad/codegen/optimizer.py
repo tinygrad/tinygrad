@@ -278,6 +278,7 @@ class OptimizedKernel(Kernel):
       self.group_for_reduce.append(amt)
     elif opt.op == OptOps.NOLOCALS:
       assert self.local_dims == 0 and len(self.group_for_reduce) == 0, "can't have no locals with locals"
+      assert not self.dont_use_locals, "already not using locals"
       self.dont_use_locals = True
     return self.simplify_ones()
 
