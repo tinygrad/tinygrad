@@ -228,7 +228,9 @@ class ASTRunner:
     if var_vals is None: var_vals = {}
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None:
-      local_size = self.local_size = self.optimize_local_size(global_size, rawbufs)
+      # TODO: this is copied from get_program
+      test_rawbuffers = [type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
+      local_size = self.local_size = self.optimize_local_size(global_size, test_rawbuffers)
       global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
     if et := self.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=2): GlobalCounters.time_sum_s += et
     op_estimate = sym_infer(self.op_estimate, var_vals)
@@ -290,7 +292,7 @@ class Compiled:
         if BEAM >= 1 and not vars_from_ast(ast):
           lins = [(("tc" if used_tensor_cores else "hc"), k)]
           # allocate a scratch buffer if output buffer is also input
-          test_rawbuffers = [self.buffer(rawbuffers[0].size, rawbuffers[0].dtype), *rawbuffers[1:]] if rawbuffers[0] in rawbuffers[1:] else rawbuffers
+          test_rawbuffers = [type(rawbuffers[0])(rawbuffers[0].size, rawbuffers[0].dtype), *rawbuffers[1:]] if rawbuffers[0] in rawbuffers[1:] else rawbuffers
           kb = Linearizer(ast, self.linearizer_opts)
           kb.required_optimizations()
           from tinygrad.features.search import beam_search, time_linearizer
