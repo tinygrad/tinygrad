@@ -455,13 +455,14 @@ class Linearizer(OptimizedKernel):
     if x.op in ops:
       ret = []
       for idx, val in get_grouped_maybe_float4(*values, [acc[o] for o in offs], grouping_allowed=self.opts.supports_float4_alu):
-        new_val = self.uop(UOps.ALU, dtypes._float4 if any(x.dtype == dtypes._float4 for x in val) else dtypes.float32, val, ops[x.op])
+        acc_in = acc[offs[idx[0]]].vin[0] if len(idx) > 1 else acc[offs[idx[0]]]
+        new_val = self.uop(UOps.ALU, dtypes._float4 if any(x.dtype == dtypes._float4 for x in val) else dtypes.float32, val[:-1]+(acc_in,), ops[x.op])
         if len(idx) > 1:
-          new_acc = self.uop(UOps.PHI, dtypes._float4, (acc[offs[idx[0]]].vin[0], new_val))
+          new_acc = self.uop(UOps.PHI, dtypes._float4, (acc_in, new_val))
           for j,ix in enumerate(idx):
             acc[offs[ix]] = self.uop(UOps.GEP, dtypes.float32, (new_acc,), j)
         else:
-          acc[offs[idx[0]]] = new_acc = self.uop(UOps.PHI, dtypes.float32, (acc[offs[idx[0]]], new_val))
+          acc[offs[idx[0]]] = new_acc = self.uop(UOps.PHI, dtypes.float32, (acc_in, new_val))
         ret.append((idx, new_acc))
       """
       for idx, val, off in zip([[i] for i in range(len(values[0]))], zip(*values), offs):

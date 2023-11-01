@@ -52,8 +52,9 @@ if __name__ == "__main__":
   GlobalCounters.reset()
   with Context(DEBUG=getenv("LATEDEBUG", 2), BEAM=getenv("LATEBEAM")):
     run_schedule(schedule[getenv("CONV"):getenv("CONV")+1])  # skip the last conv
-    from tinygrad.codegen.linearizer import Linearizer
-    lin = Linearizer(schedule[getenv("CONV")].ast)
-    lin.hand_coded_optimizations()
-    uops = lin.linearize().uops
-    graph_uops(uops)
+    if getenv("GRAPHUOPS"):
+      from tinygrad.codegen.linearizer import Linearizer
+      lin = Linearizer(schedule[getenv("CONV")].ast)
+      lin.hand_coded_optimizations()
+      uops = lin.linearize().uops
+      graph_uops(uops)
