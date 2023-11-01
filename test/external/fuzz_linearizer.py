@@ -5,8 +5,9 @@ from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import get_linearizer_actions
 from tinygrad.graph import print_tree
-from tinygrad.helpers import prod
+from tinygrad.helpers import ImageDType, prod, getenv
 from tinygrad.ops import Device, Compiled, Interpreted
+from tinygrad.lazy import vars_from_ast
 
 random.seed(42)
 np.random.seed(42)
@@ -27,14 +28,17 @@ def fuzz_linearizer(lin: Linearizer):
   rawbufs = [None]  # first one is output
   rawbuf_size = defaultdict(int)
   for buf in lin.membufs[1:]:
-    idx, valid = buf.st.expr_idxs()
-    # TODO: image type output float4
-    # TODO: variable shape cannot deepcopy
-    size = idx.max+1
+    if isinstance(buf.dtype, ImageDType):
+      size = prod(buf.dtype.shape)
+    else:
+      idx, valid = buf.st.expr_idxs()
+      # TODO: variable shape cannot deepcopy
+      size = idx.max+1
     rawbuf_size[buf.idx] = max(rawbuf_size[buf.idx], size)
 
   for i, size in sorted(rawbuf_size.items()):
     assert len(rawbufs) == i
+    if not isinstance(size, int): size = size.max
     # TODO: different range for int type v.s. float type
     rawbuf = device.buffer.fromCPU(np.random.uniform(low=-5.0, high=5.0, size=size).astype(buf.dtype.np))
     rawbufs.append(rawbuf)
@@ -47,29 +51,33 @@ def fuzz_linearizer(lin: Linearizer):
   while 1:
     if len(seen_uops) >= 20: break  # enough for this kernel
     # TODO: if this is too slow, we can reject sample until first valid action, instead of getting all actions first
-    actions = get_linearizer_actions(lin.copy(), include_0=False)
+    actions = get_linearizer_actions(lin, include_0=False)
     if not actions: break
     lin = random.choice(list(actions.values()))
     if lin.applied_opts: print(f"last action: {lin.applied_opts[-1]}")
 
     # stop if kernel uops repeat
-    tuops = tuplize_uops(lin.copy().linearize().uops)
+    tuops = tuplize_uops(lin.linearize().uops)
     if tuops in seen_uops: break
     seen_uops[tuops] = tuple(lin.applied_opts)
 
     print(lin.colored_shape())
     # get a new output buffer
-    rawbufs[0] = device.buffer(size=prod(lin.membufs[0].st.shape), dtype=lin.membufs[0].dtype)
+    assert lin.membufs[0].idx == 0
+    rawbufs[0] = device.buffer(size=prod(s if isinstance(s, int) else s.max for s in lin.membufs[0].st.shape), dtype=lin.membufs[0].dtype)
 
+    var_vals = {v: random.randint(v.min, v.max) for v in vars_from_ast(lin.ast)}
+
+    # TODO: render error: assert output_dtype == dtypes._float4, f"images must be float4, getting {output_dtype}"
     if isinstance(device, Compiled):
       try:
-        prg = device.to_program(lin.copy())
+        prg = device.to_program(lin)
       except:
         traceback.print_exc()
         print("COMPILE FAILED!!")
         return "COMPILE_ERROR"
       try:
-        prg.exec(rawbufs, force_wait=True)
+        prg.exec(rawbufs, var_vals, force_wait=True)
       except:
         traceback.print_exc()
         print("EXEC FAILED!!")
@@ -115,7 +123,7 @@ if __name__ == "__main__":
   c = Counter()
   failed = []
   # TODO: ast_strs[0] output contains nan?
-  for i, ast in enumerate(ast_strs):
+  for i, ast in enumerate(ast_strs[:getenv("FUZZ_N", len(ast_strs))]):
     if isinstance(device, Interpreted) and ("dtypes.image" in ast or "Variable" in ast): continue  # not supported
     print(f"testing ast {i}")
     tested += 1
