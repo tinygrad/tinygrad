@@ -20,10 +20,9 @@ actions += [
 ]
 
 # returns time in seconds
-def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, should_copy=True, disable_cache=False, clear_l2=False) -> float:
+def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, disable_cache=False, clear_l2=False) -> float:
   key = {"ast": str(lin.ast), "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size}
-  if should_copy and not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
-  if should_copy: lin = lin.copy() # TODO: remove the need for this
+  if not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
   var_vals = {k:k.min for k in vars_from_ast(lin.ast)}
   try:
     lin.linearize()
@@ -75,7 +74,7 @@ def bufs_from_lin(lin:Linearizer) -> List[RawBuffer]:
 
 # get dictionary of all possible actions
 def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Linearizer]:
-  acted_lins = {0:lin.copy()} if include_0 else {}
+  acted_lins = {0:lin} if include_0 else {}
   for i,a in enumerate(actions):
     if a.axis is not None and a.axis >= lin.shape_len: continue
     if a.axis is not None and lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) in actions: continue
@@ -104,7 +103,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
 
   # NOTE: real uops use a weird compare method that's only valid inside a linearizer
   def tuplize_uops(uops): return tuple([(x.uop, x.dtype, tuple(x.num for x in x.vin), x.arg) for x in uops])
-  seen_uops = {tuplize_uops(lin.copy().linearize().uops): tuple(lin.applied_opts)}
+  seen_uops = {tuplize_uops(lin.linearize().uops): tuple(lin.applied_opts)}
 
   while 1:
     acted_lins = lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam])
@@ -112,7 +111,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
     # dedup with uops (TODO: double linearize not needed)
     acted_lins_dedup = []
     for lin in acted_lins:
-      tuops = tuplize_uops(lin.copy().linearize().uops)
+      tuops = tuplize_uops(lin.linearize().uops)
       if tuops in seen_uops:
         #print(seen_uops[tuops], lin.applied_opts)
         continue
