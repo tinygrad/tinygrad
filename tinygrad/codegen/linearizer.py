@@ -71,10 +71,13 @@ def to_float4(x:List[UOp]) -> Optional[UOp]:
     return x[0].vin[0]
   return None
 
-def get_grouped_maybe_float4(*values:List[UOp], grouping_allowed=True):
+def get_grouped_maybe_float4(*values:List[UOp], grouping_allowed=True, has_acc=True):
   assert all_same([len(x) for x in values]), f"all values are not the same length {values}"
   # these use accumulators, we can only fold if the acc is a float4
-  idxs = get_grouped_float4_idxs(values[-1]) if grouping_allowed else None
+  if has_acc:
+    idxs = get_grouped_float4_idxs(values[-1]) if grouping_allowed else None
+  else:
+    idxs = get_grouped_float4_idxs(values[0]) if grouping_allowed else None
   if idxs is not None:
     new_idxs = []
     new_values = []
@@ -474,7 +477,7 @@ class Linearizer(OptimizedKernel):
       """
     else:
       ret = []
-      for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.opts.supports_float4_alu and x.op not in {BinaryOps.CMPLT, TernaryOps.WHERE}):
+      for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.opts.supports_float4_alu and x.op not in {BinaryOps.CMPLT, TernaryOps.WHERE}, has_acc=False):
         new_val = self.uop(UOps.ALU, dtypes._float4 if any(x.dtype == dtypes._float4 for x in val) else dtypes.float32, val, x.op)
         ret.append((idx, new_val))
       #ret = [(idx, self.uop(UOps.ALU, dtypes.float32, val, x.op)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
