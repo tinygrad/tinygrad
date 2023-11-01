@@ -95,9 +95,6 @@ class Kernel:
     self.tensor_core: Optional[TensorCore] = None
     self.dont_use_locals: bool = False
 
-    self.global_size: Optional[List[int]] = None
-    self.local_size: Optional[List[int]] = None
-
     # move all reduce axes to the end
     reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))
     permute = tuple([i for i,(s,n) in reduce if s == n] + [i for i,(s,n) in reduce if s != n])

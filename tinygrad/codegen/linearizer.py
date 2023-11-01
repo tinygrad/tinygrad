@@ -209,6 +209,9 @@ class Linearizer(Kernel):
           loop_uop = self.loop_uops[x.expr]
           if loop_uop.uop == UOps.LOOP: self.uop(UOps.END, None, (loop_uop,))
 
+    # set global/local size
+    self.global_size: Optional[List[int]] = None
+    self.local_size: Optional[List[int]] = None
     if self.dont_use_locals:
       self.global_size = [x.max+1 for x in loop_global_idxs][::-1]
       self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr.replace("gidx", "idx"), x.max+1)) for i,x in enumerate(loop_global_idxs)})
