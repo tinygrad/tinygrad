@@ -1,6 +1,6 @@
 import random
 import numpy as np
-from collections import Counter
+from collections import Counter, defaultdict
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import get_linearizer_actions
@@ -26,15 +26,17 @@ def fuzz_linearizer(lin: Linearizer):
 
   outputbuffer = device.buffer(size=prod(lin.membufs[0].st.shape), dtype=lin.membufs[0].dtype)
   rawbufs = [outputbuffer]
-  # deduped? can there be a missed number?
-  for buf in sorted(lin.membufs[1:], key=lambda x: x.idx):
-    assert len(rawbufs) == buf.idx
+  rawbuf_size = defaultdict(int)
+  for buf in lin.membufs[1:]:
     idx, valid = buf.st.expr_idxs()
     # TODO: image type and variable shape
     size = idx.max+1
+    rawbuf_size[buf.idx] = max(rawbuf_size[buf.idx], size)
+
+  for i, size in sorted(rawbuf_size.items()):
+    assert len(rawbufs) == i
     # TODO: different range for int type v.s. float type
-    # TODO: assert based on L2 distance not elementwise
-    rawbuf = device.buffer.fromCPU(np.random.uniform(low=-1.0, high=1.0, size=size).astype(buf.dtype.np))
+    rawbuf = device.buffer.fromCPU(np.random.uniform(low=-5.0, high=5.0, size=size).astype(buf.dtype.np))
     rawbufs.append(rawbuf)
 
   # NOTE: copied from beam_search
@@ -76,7 +78,13 @@ def fuzz_linearizer(lin: Linearizer):
         print("EXEC FAILED!!")
         return "EXEC_ERROR"
     else:
-      device.exec_ast(lin.ast, output=LB(rawbufs[0], rawbufs[0].dtype), inputs=[LB(buf, buf.dtype) for buf in rawbufs[1:]])
+      # TODO: Interpreted does not work with symbolic shape
+      try:
+        device.exec_ast(lin.ast, output=LB(rawbufs[0], rawbufs[0].dtype), inputs=[LB(buf, buf.dtype) for buf in rawbufs[1:]])
+      except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return str(type(e))
 
     result = rawbufs[0].toCPU()
 
@@ -84,6 +92,7 @@ def fuzz_linearizer(lin: Linearizer):
       output = result
     else:
       try:
+        # TODO: assert based on L2 distance not elementwise
         np.testing.assert_allclose(result, output, rtol=1e-4, atol=1e-4)
       except AssertionError:
         return "NOT_ALLCLOSE"
@@ -98,10 +107,16 @@ if __name__ == "__main__":
   print(f"{len(ast_strs)=}")
   tested = 0
   c = Counter()
+  failed = []
   # TODO: ast_strs[0] output contains nan?
-  for ast in ast_strs[:20]:
+  for i, ast in enumerate(ast_strs):
+    print(f"testing ast {i}")
     tested += 1
     lin = ast_str_to_lin(ast)
-    c[fuzz_linearizer(lin)] += 1
+    fuzz = fuzz_linearizer(lin)
+    c[fuzz] += 1
+    if fuzz != "PASS":
+      failed.append(i)
   print(f"{tested=}")
   print(c.most_common())
+  print(f"{failed=}")
