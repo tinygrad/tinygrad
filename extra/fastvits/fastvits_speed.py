@@ -41,7 +41,7 @@ if __name__ == "__main__":
 
   # TODO: the elementwise ops shouldn't rerun with normal realize
   x = Tensor.randn(1, 256, 32, 64)
-  out = x.sequential([c1,c2,c3,c4,c5])
+  out = x.sequential([c1,lambda x: x.relu(), c2,c3,c4,c5])
   schedule = out.lazydata.schedule()
 
   schedule, schedule_input = partition(schedule, lambda x: x.ast.op not in LoadOps and any(y.op in ReduceOps for y in x.ast.get_lazyops()))

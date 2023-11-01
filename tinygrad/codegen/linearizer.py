@@ -45,6 +45,7 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
     local_idxs = local_idxs[0:maxdim-1] + nli[::-1]
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
+# TODO: the next three functions are poorly written
 def get_grouped_float4_idxs(acc:List[UOp]) -> Optional[List[int]]:
   idxs: Optional[List[int]] = []
   for i,a in enumerate(acc):
@@ -472,7 +473,11 @@ class Linearizer(OptimizedKernel):
         ret.append((idx, acc[off]))
       """
     else:
-      ret = [(idx, self.uop(UOps.ALU, dtypes.float32, val, x.op)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
+      ret = []
+      for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.opts.supports_float4_alu and x.op not in {BinaryOps.CMPLT, TernaryOps.WHERE}):
+        new_val = self.uop(UOps.ALU, dtypes._float4 if any(x.dtype == dtypes._float4 for x in val) else dtypes.float32, val, x.op)
+        ret.append((idx, new_val))
+      #ret = [(idx, self.uop(UOps.ALU, dtypes.float32, val, x.op)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
     ordered_ret: List[Optional[UOp]] = [None]*len(values[0])
     # scatter
     for i,j in ret:
