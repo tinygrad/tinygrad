@@ -29,7 +29,7 @@ def single_kernel():
 
 # CONV=0 PYTHONPATH="." LATEDEBUG=5 OPT=99 IMAGE=2 FLOAT16=1 NOLOCALS=1 python3 extra/fastvits/fastvits_speed.py
 if __name__ == "__main__":
-  single_kernel()
+  #single_kernel()
 
   # this is stage 1 in fastvits
   c1 = Conv2d(256, 64, (1,1), bias=False)

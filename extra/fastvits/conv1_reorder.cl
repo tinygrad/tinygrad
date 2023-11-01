@@ -92,6 +92,12 @@ __kernel void r_32_16_16_64_4_4_4(write_only image2d_t data0, read_only image2d_
     acc2 = val2.w * val7 + acc2;
     acc3 = val3.w * val7 + acc3;
 
+    // slower
+    /*acc0 = val0.x * val4 + val0.y * val5 + val0.z * val6 + val0.w * val7 + acc0;
+    acc1 = val1.x * val4 + val1.y * val5 + val1.z * val6 + val1.w * val7 + acc1;
+    acc2 = val2.x * val4 + val2.y * val5 + val2.z * val6 + val2.w * val7 + acc2;
+    acc3 = val3.x * val4 + val3.y * val5 + val3.z * val6 + val3.w * val7 + acc3;*/
+
     /*(acc0).x = (((val0).y*(val5).x)+(acc0).x);
     (acc0).y = (((val0).y*(val5).y)+(acc0).y);
     (acc0).z = (((val0).y*(val5).z)+(acc0).z);

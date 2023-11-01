@@ -45,6 +45,47 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
     local_idxs = local_idxs[0:maxdim-1] + nli[::-1]
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
+def get_grouped_float4_idxs(acc:List[UOp]) -> Optional[List[int]]:
+  idxs: Optional[List[int]] = []
+  for i,a in enumerate(acc):
+    if idxs is None: break
+    if i in idxs: continue
+    if a.uop == UOps.GEP and a.arg == 0:
+      idxs.append(i)
+      friends: List[int] = []
+      for j,b in enumerate(acc):
+        if len(friends) == 3: break
+        if j in idxs: continue
+        if b.uop == UOps.GEP and a.vin[0] == b.vin[0] and b.arg == len(friends)+1:
+          friends.append(j)
+      if len(friends) == 3: idxs += friends
+      else: idxs = None
+    else:
+      idxs = None
+  return idxs
+
+def to_float4(x:List[UOp]) -> Optional[UOp]:
+  if all_same(x): return x[0]
+  if all(y.uop == UOps.GEP for y in x) and all_same([y.vin[0] for y in x]) and all(y.arg == i for i,y in enumerate(x)):
+    return x[0].vin[0]
+  return None
+
+def get_grouped_maybe_float4(*values:List[UOp], grouping_allowed=True):
+  assert all_same([len(x) for x in values]), f"all values are not the same length {values}"
+  # these use accumulators, we can only fold if the acc is a float4
+  idxs = get_grouped_float4_idxs(values[-1]) if grouping_allowed else None
+  if idxs is not None:
+    new_idxs = []
+    new_values = []
+    for i in range(0, len(idxs), 4):
+      nv = tuple(to_float4([v[j] for j in idxs[i:i+4]]) for v in values)
+      if any(x is None for x in nv): break
+      new_idxs.append(idxs[i:i+4])
+      new_values.append(nv)
+    if len(new_values) == len(idxs)//4:
+      return zip(new_idxs, new_values)
+  return zip([[i] for i in range(len(values[0]))], zip(*values))
+
 class Linearizer(OptimizedKernel):
   def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op, dtype=dtypes.int32):
     render_b:UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
@@ -296,6 +337,9 @@ class Linearizer(OptimizedKernel):
         # load earlybufs
         loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs[1:], start=1) if b in self.earlybufs})
 
+        # needed on 845 to not interleave the loads and adds
+        self.uop(UOps.BARRIER, None, (), cachable=False)
+
         # run early AST (with reduce)
         self.ast_parse(self.reduceop, acc, self.acc_offsets(self.full_buf_index), loaded_buffers, do_reduce=True)
 
@@ -412,18 +456,27 @@ class Linearizer(OptimizedKernel):
     values = [self.ast_parse(v, acc, offs, loaded_buffers) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:
+      values.append([acc[o] for o in offs])
       ret = []
-      for idx, val, off in zip([[i] for i in range(len(values[0]))], zip(*values), offs):
-        new_val = self.uop(UOps.ALU, dtypes.float32, val+(acc[off],), ops[x.op])
+      for idx, val in get_grouped_maybe_float4(*values, grouping_allowed=self.opts.supports_float4_alu):
+        new_val = self.uop(UOps.ALU, dtypes._float4 if any(x.dtype == dtypes._float4 for x in val) else dtypes.float32, val, ops[x.op])
         # NOTE: we could apply the phi node to only the last change, but this breaks CLANG with nested max(x,y)
-        acc[off] = self.uop(UOps.PHI, dtypes.float32, (acc[off], new_val))
-        ret.append((idx, acc[off]))
+        if len(idx) > 1:
+          new_acc = self.uop(UOps.PHI, dtypes._float4, (acc[offs[idx[0]]].vin[0], new_val))
+          for j,ix in enumerate(idx):
+            acc[offs[ix]] = self.uop(UOps.GEP, dtypes.float32, (new_acc,), j)
+          ret.append((idx, new_acc))
+        else:
+          acc[offs[idx[0]]] = self.uop(UOps.PHI, dtypes.float32, (acc[offs[idx[0]]], new_val))
+          ret.append((idx, acc[offs[idx[0]]]))
     else:
       ret = [(idx, self.uop(UOps.ALU, dtypes.float32, val, x.op)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
     ordered_ret: List[Optional[UOp]] = [None]*len(values[0])
     # scatter
     for i,j in ret:
-      for k in i:
-        ordered_ret[k] = j
+      #for k in i:
+      #  ordered_ret[k] = j
+      for o,k in enumerate(i):
+        ordered_ret[k] = self.uop(UOps.GEP, dtypes.float32, (j,), o) if j.dtype == dtypes._float4 else j
     assert all(isinstance(x, UOp) for x in ordered_ret), "some tokens didn't get scattered?"
     return cast(List[UOp], ordered_ret)
