@@ -1,7 +1,7 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
-from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv
+from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
@@ -49,7 +49,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
     tms = []
     for _ in range(cnt):
       if clear_l2:
-        Tensor.rand(1024,1024).realize()
+        with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
       tms.append(prg.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=True)*factor)
     prg.global_size = real_global_size
   except Exception:

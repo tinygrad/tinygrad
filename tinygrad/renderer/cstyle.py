@@ -135,8 +135,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       kk(lang.render_if(r[vin[0]]))
       depth += 1
     elif uop == UOps.BARRIER:
-      if args is not None: kk(args)
-      else: kk(lang.barrier)
+      kk(lang.barrier)
     elif uop == UOps.END:
       depth -= 1
       kk("}")

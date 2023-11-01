@@ -72,7 +72,8 @@ __kernel void r_32_16_16_64_4_4_4(write_only image2d_t data0, read_only image2d_
     (acc3).z = (((val3).x*(val4).z)+(acc3).z);
     (acc3).w = (((val3).x*(val4).w)+(acc3).w);*/
 
-    read_mem_fence(CLK_LOCAL_MEM_FENCE);
+    //read_mem_fence(CLK_LOCAL_MEM_FENCE);
+    mem_fence(CLK_LOCAL_MEM_FENCE);
 
     acc0 = val0.x * val4 + acc0;
     acc1 = val1.x * val4 + acc1;
