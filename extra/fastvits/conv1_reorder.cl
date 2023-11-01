@@ -72,14 +72,39 @@ __kernel void r_32_16_16_64_4_4_4(write_only image2d_t data0, read_only image2d_
     (acc3).z = (((val3).x*(val4).z)+(acc3).z);
     (acc3).w = (((val3).x*(val4).w)+(acc3).w);*/
 
-    read_mem_fence(CLK_LOCAL_MEM_FENCE);
+    //read_mem_fence(CLK_LOCAL_MEM_FENCE);
 
-    acc0 = val0.x * val4 + acc0;
+    /*(acc0).x = (((val0).x*(val4).x)+(acc0).x);
+    (acc0).y = (((val0).x*(val4).y)+(acc0).y);
+    (acc0).z = (((val0).x*(val4).z)+(acc0).z);
+    (acc0).w = (((val0).x*(val4).w)+(acc0).w);*/
+
+    acc0 = mad(val0.x, val4, acc0);
+    acc0 = mad(val0.y, val5, acc0);
+    acc0 = mad(val0.z, val6, acc0);
+    acc0 = mad(val0.w, val7, acc0);
+
+    acc1 = mad(val1.x, val4, acc1);
+    acc1 = mad(val1.y, val5, acc1);
+    acc1 = mad(val1.z, val6, acc1);
+    acc1 = mad(val1.w, val7, acc1);
+
+    acc2 = mad(val2.x, val4, acc2);
+    acc2 = mad(val2.y, val5, acc2);
+    acc2 = mad(val2.z, val6, acc2);
+    acc2 = mad(val2.w, val7, acc2);
+
+    acc3 = mad(val3.x, val4, acc3);
+    acc3 = mad(val3.y, val5, acc3);
+    acc3 = mad(val3.z, val6, acc3);
+    acc3 = mad(val3.w, val7, acc3);
+
+    /*acc0 = val0.x * val4 + acc0;
     acc1 = val1.x * val4 + acc1;
     acc2 = val2.x * val4 + acc2;
-    acc3 = val3.x * val4 + acc3;
+    acc3 = val3.x * val4 + acc3;*/
 
-    acc0 = val0.y * val5 + acc0;
+    /*acc0 = val0.y * val5 + acc0;
     acc1 = val1.y * val5 + acc1;
     acc2 = val2.y * val5 + acc2;
     acc3 = val3.y * val5 + acc3;
@@ -90,7 +115,7 @@ __kernel void r_32_16_16_64_4_4_4(write_only image2d_t data0, read_only image2d_
     acc0 = val0.w * val7 + acc0;
     acc1 = val1.w * val7 + acc1;
     acc2 = val2.w * val7 + acc2;
-    acc3 = val3.w * val7 + acc3;
+    acc3 = val3.w * val7 + acc3;*/
 
     /*(acc0).x = (((val0).y*(val5).x)+(acc0).x);
     (acc0).y = (((val0).y*(val5).y)+(acc0).y);
