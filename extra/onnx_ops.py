@@ -591,8 +591,32 @@ def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point=0, axis=1):
   return (x - x_zer) * x_sc
 
 # Needs work
-def IsNaN(x):
+def IsNaN(x: Tensor):
   return (x < float("-inf")).cast(dtypes.bool)
+
+def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
+  try:
+    import PIL.Image
+    import io
+  except ImportError as e:
+    raise ImportError(
+      "Pillow must be installed to use the reference implementation of the ImageDecoder operator"
+      ) from e
+  img = PIL.Image.open(io.BytesIO(safe_numpy(encoded_stream).tobytes()))
+  if pixel_format == "BGR":
+    return Tensor(np.array(img))[:, :, ::-1]
+  elif pixel_format == "RGB":
+    return Tensor(np.array(img))
+  elif pixel_format == "Grayscale":
+    img = img.convert("L")
+    decoded = Tensor(np.array(img))
+    return decoded.unsqueeze(-1) # (H, W) to (H, W, 1)
+  else:
+    raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
+
+def Gelu(x:Tensor, appoximate=None):
+  if appoximate == "tanh": return 0.5 * x * (1+Erf(x/math.sqrt(2)))
+  else: return 0.5 * x * (1 + math.tanh(math.sqrt(2/math.pi)) * (x + 0.044715 * x.pow(3)))
 
 # **************** com.microsoft Ops ****************
 
