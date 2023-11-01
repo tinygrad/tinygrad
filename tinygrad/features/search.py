@@ -1,10 +1,11 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
-from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv
+from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
+from tinygrad.tensor import Tensor
 
 from tinygrad.codegen.optimizer import Opt, OptOps
 actions = flatten([[Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,7]] for axis in range(6)])
@@ -15,10 +16,11 @@ actions += [
   Opt(op=OptOps.LOCAL, axis=0, amt=32),
   Opt(op=OptOps.GROUP, axis=0, amt=4), Opt(op=OptOps.GROUP, axis=0, amt=8), Opt(op=OptOps.GROUP, axis=1, amt=8),
   Opt(op=OptOps.UPCASTMID, axis=1, amt=4),
+  Opt(op=OptOps.NOLOCALS),
 ]
 
 # returns time in seconds
-def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, should_copy=True, disable_cache=False) -> float:
+def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, should_copy=True, disable_cache=False, clear_l2=False) -> float:
   key = {"ast": str(lin.ast), "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size}
   if should_copy and not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
   if should_copy: lin = lin.copy() # TODO: remove the need for this
@@ -45,7 +47,12 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
     if global_size is not None and local_size is None:
       local_size = prg.optimize_local_size(global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
-    tms = [prg.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=True)*factor for _ in range(cnt)]
+    tms = []
+    for _ in range(cnt):
+      if clear_l2:
+        # TODO: this is too small for many L2 caches
+        with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
+      tms.append(prg.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=True)*factor)
     prg.global_size = real_global_size
   except Exception:
     #import traceback; traceback.print_exc()
@@ -70,8 +77,8 @@ def bufs_from_lin(lin:Linearizer) -> List[RawBuffer]:
 def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Linearizer]:
   acted_lins = {0:lin.copy()} if include_0 else {}
   for i,a in enumerate(actions):
-    if a.axis >= lin.shape_len: continue
-    if lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) in actions: continue
+    if a.axis is not None and a.axis >= lin.shape_len: continue
+    if a.axis is not None and lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) in actions: continue
     lin2 = lin.copy()
     try:
       lin2.apply_opt(a)
@@ -85,9 +92,8 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       pass
   return acted_lins
 
-def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True, dont_use_locals=False) -> Linearizer:
-  key = {"ast": str(lin.ast), "amt": amt, "allow_test_size": allow_test_size, "dont_use_locals": dont_use_locals}
-  if dont_use_locals: lin.dont_use_locals = True
+def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linearizer:
+  key = {"ast": str(lin.ast), "amt": amt, "allow_test_size": allow_test_size}
   if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE") and CACHELEVEL >= 1:
     ret = lin.copy()
     for o in val[len(lin.applied_opts):]: ret.apply_opt(o)
@@ -124,5 +130,5 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True, dont_use
     if DEBUG >= 2: print(f"{opts[0][1]*1e6:12.2f} us from {len(lins):3d} -> {len(opts):3d} actions", beam[0][0].colored_shape())
 
   if CACHELEVEL >= 1: diskcache_put("beam_search", key, beam[0][0].applied_opts)
-  if DEBUG >= 2: print(beam[0][0].applied_opts)
+  if DEBUG >= 3: print(beam[0][0].applied_opts)
   return beam[0][0]
