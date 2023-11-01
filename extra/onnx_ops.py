@@ -1,5 +1,5 @@
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod, dtypes
+from tinygrad.helpers import prod, dtypes, ImageDType
 from extra.onnx import safe_numpy
 from onnx.helper import tensor_dtype_to_np_dtype
 from onnx.onnx_pb import TensorProto
@@ -7,7 +7,6 @@ import os
 import numpy as np
 import functools
 from typing import Union, Tuple, Optional, List, Any
-from tinygrad.ops import LoadOps
 import math
 
 # **************** Free Ops ****************
@@ -18,14 +17,8 @@ def Add(input: Tensor, other: Tensor, broadcast=None): return input + other if i
 def Sub(input: Union[Tensor, Any], other: Tensor): return input - other # some test has input as int
 def Mul(input: Tensor, other: Tensor): return (input * other) if input.dtype == dtypes.float else (input * other).cast(input.dtype)
 # in openpilot, due to SHUFFLE_PAD_OPS issues, we are spending an extra kernel
-def Div(input: Tensor, other: Tensor): return input / other if input.dtype == dtypes.float else input.div(other).floor()
-def Pow(input: Tensor, other: Tensor):
-  # TODO: can we do this more generically?
-  if not other.lazydata.realized and other.lazydata.op.op == LoadOps.CONST and other.lazydata.st.contiguous:
-    other = other.lazydata.op.arg
-  else:
-    other = other.float()
-  return (input.float() ** other).cast(input.dtype)
+def Div(input: Tensor, other: Tensor): return input / other if input.dtype == dtypes.float or isinstance(input.dtype, ImageDType) else input.div(other).floor()
+def Pow(input: Tensor, other: Tensor): return (input.float() ** other.float()).cast(input.dtype)
 def Reciprocal(input: Tensor): return input.reciprocal()
 def Sqrt(input: Tensor): return input.sqrt()
 def Sign(input: Tensor): return input.sign()
