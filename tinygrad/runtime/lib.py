@@ -75,13 +75,13 @@ class LRUAllocator:
     GlobalCounters.mem_cached -= self._underlying_buf_memsz(rawbufs[0][0])
     return rawbufs.popleft()[0]
 
-  def ensure_has_free_space(self, size, dtype, device):
-    while len(self.aging_order[device]) and (self.free_space[device]-size*dtype.itemsize) < 0: # When OOM removing lru buffers.
+  def ensure_has_free_space(self, space_to_free, device):
+    while len(self.aging_order[device]) and self._get_free_space(device) < space_to_free: # When OOM removing lru buffers.
       bucket, epoch = self.aging_order[device].popleft()
       if self.cached_buffers[bucket] and self.cached_buffers[bucket][-1][1] == epoch: self._free_buffer(self.cached_buffers[bucket].pop()[0]) # Free cached buffer if it is still in cache.
 
   def _alloc_buffer(self, size, dtype, device, **kwargs):
-    self.ensure_has_free_space(size, dtype, device)
+    self.ensure_has_free_space(size*dtype.itemsize, device)
     self.free_space[device] -= size*dtype.itemsize
     newbuf = self._do_alloc(max(1, size), dtype, device, **kwargs)
     self.buffer_info[newbuf] = (size, dtype, device)
@@ -108,3 +108,4 @@ class LRUAllocator:
   def _cached_bufkey(self, size, dtype, device) -> Tuple[int, ...]: return (device, size, dtype, dtype.shape) if isinstance(dtype, ImageDType) else (device, size, dtype) # Provides a key for reusing device buffers with identical keys.
   def _do_alloc(self, size, dtype, device, **kwargs): raise NotImplementedError("must be implemented")
   def _do_free(self, buf): pass
+  def _get_free_space(self, device): return self.free_space[device]
