@@ -150,6 +150,9 @@ class Linearizer(Kernel):
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
+    # no new opts and we already ran? skip relinearizing
+    if self.applied_opts == self.applied_opts_cache: return self
+
     # save backups
     sts_backup, gfr_backup, upc_backup = self.sts[:], self.group_for_reduce[:], self.upcasted
 
@@ -382,6 +385,8 @@ class Linearizer(Kernel):
     # restore backups
     self.sts, self.group_for_reduce, self.upcasted = sts_backup, gfr_backup, upc_backup
 
+    # set cache and return
+    self.applied_opts_cache = self.applied_opts[:]
     return self
 
   def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None, cachable=True) -> UOp:

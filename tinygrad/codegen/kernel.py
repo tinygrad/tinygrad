@@ -106,6 +106,9 @@ class Kernel:
     self.simplify_ones()
     self.simplify_merge_adjacent()
 
+    # cache
+    self.applied_opts_cache: Optional[List[Opt]] = None
+
   def copy(self):
     ret = type(self).__new__(type(self))
 
@@ -120,6 +123,9 @@ class Kernel:
     # parameters for optimizations
     ret.applied_opts, ret.group_for_reduce, ret.upcasted, ret.local_dims, ret.local_alias, ret.tensor_core, ret.dont_use_locals = \
       self.applied_opts[:], self.group_for_reduce[:], self.upcasted, self.local_dims, self.local_alias.copy(), self.tensor_core, self.dont_use_locals
+
+    # uncached
+    ret.applied_opts_cache = []
 
     return ret
 
