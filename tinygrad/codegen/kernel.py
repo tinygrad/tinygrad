@@ -124,8 +124,8 @@ class Kernel:
     ret.applied_opts, ret.group_for_reduce, ret.upcasted, ret.local_dims, ret.local_alias, ret.tensor_core, ret.dont_use_locals = \
       self.applied_opts[:], self.group_for_reduce[:], self.upcasted, self.local_dims, self.local_alias.copy(), self.tensor_core, self.dont_use_locals
 
-    # uncached
-    ret.applied_opts_cache = []
+    # uncached since linearize didn't run
+    ret.applied_opts_cache = None
 
     return ret
 
