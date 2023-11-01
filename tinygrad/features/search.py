@@ -7,7 +7,7 @@ from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
 from tinygrad.tensor import Tensor
 
-from tinygrad.codegen.optimizer import Opt, OptOps
+from tinygrad.codegen.kernel import Opt, OptOps
 actions = flatten([[Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,7]] for axis in range(6)])
 actions += flatten([[Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4]] for axis in range(4)])
 actions += flatten([[Opt(op=OptOps.LOCAL, axis=axis, amt=amt) for amt in [2,3,4,8,13,16,29]] for axis in range(5)])

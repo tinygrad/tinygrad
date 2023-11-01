@@ -148,6 +148,9 @@ class Linearizer(Kernel):
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
+    # save backups
+    sts_backup, gfr_backup, upc_backup = self.sts[:], self.group_for_reduce[:], self.upcasted
+
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
 
@@ -370,6 +373,9 @@ class Linearizer(Kernel):
       if len(nu) == len(self.uops): break
       if DEBUG >= 4: print(f"reduced UOp count from {len(self.uops)} to {len(nu)}")
       self.uops = nu
+
+    # restore backups
+    self.sts, self.group_for_reduce, self.upcasted = sts_backup, gfr_backup, upc_backup
 
     return self
 
