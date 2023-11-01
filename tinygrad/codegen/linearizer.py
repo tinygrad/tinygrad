@@ -9,8 +9,7 @@ from tinygrad.ops import LazyOp, UnaryOps, ConstBuffer, MemBuffer, BufferOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, VariableOrNum, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
-from tinygrad.codegen.optimizer import OptimizedKernel
-from tinygrad.codegen.kernel import LocalBuffer
+from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.lazy import vars_from_ast
 from tinygrad.features.image import to_image_idx
 
@@ -45,7 +44,7 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
     local_idxs = local_idxs[0:maxdim-1] + nli[::-1]
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
-class Linearizer(OptimizedKernel):
+class Linearizer(Kernel):
   def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op, dtype=dtypes.int32):
     render_b:UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
     return self.uop(UOps.ALU, dtype, (a, render_b), op)
