@@ -50,15 +50,15 @@ else:
   import pycuda.driver as cuda # type: ignore
   class CUDAAllocator(LRUAllocator):
     def _do_alloc(self, size, dtype, device, **kwargs):
-      try: return cuda.mem_alloc(size * dtype.itemsize)
-      except cuda.MemoryError as e:
+      try: return cuda.mem_alloc(size * dtype.itemsize) # type: ignore
+      except cuda.MemoryError as e: # type: ignore
         if len(self.aging_order[device]):
           self.ensure_has_free_space(1.1*self._get_cur_free_spce(device), device) # increase free space by 10% and try again.
           return self._do_alloc(size, dtype, device, **kwargs)
         raise e
     def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
-    def _get_cur_free_spce(self, deivice): return cuda.mem_get_info()[0]
-  CUDAAlloc = CUDAAllocator(cuda.memgetinfo()[0])
+    def _get_cur_free_spce(self, deivice): return cuda.mem_get_info()[0] # type: ignore
+  CUDAAlloc = CUDAAllocator(cuda.memgetinfo()[0]) # type: ignore
   class RawCUDABuffer(RawBufferCopyInOut): # type: ignore
     def __init__(self, size, dtype): super().__init__(size, dtype, allocator=CUDAAlloc)
     def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x.ravel(), stream) # type: ignore
