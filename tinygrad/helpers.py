@@ -175,12 +175,12 @@ def db_connection():
   global _db_connection
   if _db_connection is None:
     _db_connection = sqlite3.connect(CACHEDB)
-    if DEBUG >= 3: _db_connection.set_trace_callback(print)
+    if DEBUG >= 5: _db_connection.set_trace_callback(print)
     if diskcache_get("meta", "version") != VERSION:
       print("cache is out of date, clearing it")
       os.unlink(CACHEDB)
       _db_connection = sqlite3.connect(CACHEDB)
-      if DEBUG >= 3: _db_connection.set_trace_callback(print)
+      if DEBUG >= 5: _db_connection.set_trace_callback(print)
       diskcache_put("meta", "version", VERSION)
   return _db_connection
 
