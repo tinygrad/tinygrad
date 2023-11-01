@@ -24,7 +24,10 @@ class ClangProgram:
 
   @cache_compiled
   def compile(self, prg) -> bytes:
-    return subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o /dev/stdout').split(), input=prg.encode('utf-8'))
+    # TODO: sadly clang doesn't like the use of /dev/stdout here
+    with tempfile.NamedTemporaryFile(delete=True) as output_file:
+      subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+str(output_file.name)).split(), input=prg.encode('utf-8'))
+      return pathlib.Path(output_file.name).read_bytes()
 
   def __call__(self, unused_global_size, unused_local_size, *args, wait=False):
     if wait: st = time.monotonic()
