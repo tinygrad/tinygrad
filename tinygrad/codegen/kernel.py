@@ -1,9 +1,7 @@
 from __future__ import annotations
-import os, math
-from typing import NamedTuple, Optional, List, Tuple, cast, Dict
-from copy import deepcopy
-import itertools
-from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, BufferOps, Device, Compiled
+import os, math, itertools
+from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
+from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, Device, Compiled
 from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int, ansilen, getenv, prod, DEBUG
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import sint
@@ -78,16 +76,25 @@ class Kernel:
     self.reduceop = reduceops[0] if reduceops else None
 
     # create new shapetrackers inside this kernel, we will permute them
-    self.bufs = [MemBuffer(0, self.info.dtype, ShapeTracker.from_shape(self.info.shape))] + dedup([x.arg for x in self.ast.get_lazyops() if x.op in BufferOps])
-    self.sts: List[ShapeTracker] = [x.st for x in self.bufs]
+    self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = [MemBuffer(0, self.info.dtype, ShapeTracker.from_shape(self.info.shape))] + dedup([x.arg for x in self.ast.get_lazyops() if x.op in BufferOps])
 
-    self.mem_estimate: int = sum(x.dtype.itemsize*x.st.size() for x in self.bufs)
+    # extract things from the buffers
+    self.mem_estimate: int = sum(x.dtype.itemsize*x.st.size() for x in cast(List[Union[MemBuffer, ConstBuffer]], self.bufs))
 
     # get earlybufs, before the one reduce op
     self.earlybufs = [x.arg for x in self.reduceop.get_lazyops() if x.op in BufferOps] if self.reduceop else []
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
 
-    # parameters
+    # create the (permuted) shapetrackers
+    self.sts: List[ShapeTracker] = [x.st for x in cast(List[Union[MemBuffer, ConstBuffer]], self.bufs)]
+
+    # move all reduce axes to the end
+    reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))
+    permute = tuple([i for i,(s,n) in reduce if s == n] + [i for i,(s,n) in reduce if s != n])
+    self.reshape_and_permute(None, permute)
+
+    # parameters for optimization
+    self.applied_opts: List[Opt] = []
     self.group_for_reduce: List[int] = []
     self.upcasted: int = 0
     self.local_dims: int = 0
@@ -95,26 +102,33 @@ class Kernel:
     self.tensor_core: Optional[TensorCore] = None
     self.dont_use_locals: bool = False
 
-    # move all reduce axes to the end
-    reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))
-    permute = tuple([i for i,(s,n) in reduce if s == n] + [i for i,(s,n) in reduce if s != n])
-    self.reshape_and_permute(None, permute)
-
     # group simplifies
     self.simplify_ones()
     self.simplify_merge_adjacent()
 
-    self.applied_opts: List[Opt] = []
-
   def copy(self):
-    return deepcopy(self)
+    ret = type(self).__new__(type(self))
+
+    # base linearizer params
+    ret.opts, ret.ast = self.opts, self.ast
+
+    # things downstream of the AST
+    # NOTE: we copy bufs for local buffers and sts for optimizations
+    ret.info, ret.reduceop, ret.bufs, ret.mem_estimate, ret.earlybufs, ret.full_buf_index, ret.sts = \
+      self.info, self.reduceop, self.bufs[:], self.mem_estimate, self.earlybufs, self.full_buf_index, self.sts[:]
+
+    # parameters for optimizations
+    ret.applied_opts, ret.group_for_reduce, ret.upcasted, ret.local_dims, ret.local_alias, ret.tensor_core, ret.dont_use_locals = \
+      self.applied_opts[:], self.group_for_reduce[:], self.upcasted, self.local_dims, self.local_alias.copy(), self.tensor_core, self.dont_use_locals
+
+    return ret
 
   @property
   def membufs(self) -> List[MemBuffer]: return [x for x in self.bufs if isinstance(x, MemBuffer)]
 
   def has_variable_shape(self) -> bool:
     for b in self.bufs:
-      if not all_int(b.st.views[-1].shape): return True
+      if not isinstance(b, LocalBuffer) and not all_int(b.st.views[-1].shape): return True
     return False
 
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
@@ -235,7 +249,7 @@ class Kernel:
     shapes, strides = [x.shape for x in self.sts], [x.real_strides() for x in self.sts]
 
     # if it's an image, insert fake strides such that this fusion doesn't happen across image axes
-    if self.bufs[0].dtype.name.startswith('image'):
+    if isinstance(self.bufs[0].dtype, ImageDType):
       base_shape = self.bufs[0].dtype.shape
       if shape_idx_groups := get_contraction(self.output_shape, base_shape):
         special_strides: Tuple[int, ...] = tuple()
@@ -310,7 +324,7 @@ class Kernel:
     self.sts.append(ShapeTracker((View.create(tuple(shp), tuple(stride)),)))
     self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
-    self.local_alias[i] = self.bufs[-1]
+    self.local_alias[i] = cast(LocalBuffer, self.bufs[-1])
 
   # ******************** high level optimizers ********************
 
@@ -326,7 +340,7 @@ class Kernel:
         if not(isinstance(mul_op, LazyOp) and mul_op.op == BinaryOps.MUL): continue
         if not(isinstance(mul_op.src[0], LazyOp) and mul_op.src[0].op == BufferOps.MEM and mul_op.src[0].arg.dtype == tc.dtype_in): continue
         if not(isinstance(mul_op.src[1], LazyOp) and mul_op.src[1].op == BufferOps.MEM and mul_op.src[1].arg.dtype == tc.dtype_in): continue
-        buf0, buf1 = self.bufs.index(cast(LazyOp, mul_op.src[0].arg)), self.bufs.index(cast(LazyOp, mul_op.src[1].arg))
+        buf0, buf1 = self.bufs.index(cast(MemBuffer, mul_op.src[0].arg)), self.bufs.index(cast(MemBuffer, mul_op.src[1].arg))
         buf0_strides, buf1_strides = self.sts[buf0].real_strides(), self.sts[buf1].real_strides()
         axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides[:self.first_reduce]) if s == 0 and self.full_shape[i]%tc.dims[0] == 0]
         axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides[:self.first_reduce]) if s == 0 and self.full_shape[i]%tc.dims[1] == 0]

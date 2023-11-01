@@ -61,7 +61,8 @@ class Linearizer(Kernel):
     AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
   def global_load(self, i:int, idxs:Sequence[Node], acc=None) -> List[UOp]:
-    const = self.bufs[i].val if isinstance(self.bufs[i], ConstBuffer) else acc
+    buf = self.bufs[i]
+    const = buf.val if isinstance(buf, ConstBuffer) else acc
 
     def rename_var(v: VariableOrNum, expr: str): return v if isinstance(v, NumNode) else Variable(expr, v.min, v.max)
 
@@ -83,10 +84,10 @@ class Linearizer(Kernel):
     e_idxs, e_valids = g_idx.expand(expand_vars), g_valid.expand(expand_vars)
 
     ret = []
-    invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
+    invalid_value = 0 if dtypes.is_int(buf.dtype) else 0.0
     for idx, valid, rep_idx in zip(e_idxs, e_valids, Node.iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
-      key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else (self.bufs[i].idx if isinstance(self.bufs[i], MemBuffer) else self.bufs[i].name)}{idx.render()}{valid.render()}"
+      key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
         if acc is not None:
           assert valid.min == 1
@@ -99,8 +100,8 @@ class Linearizer(Kernel):
         else:
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
-          if isinstance(self.bufs[i].dtype, ImageDType):
-            idx, valid = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+          if isinstance(buf.dtype, ImageDType):
+            idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
             rendered_idx = self.uop(UOps.CAST, dtypes._int2, (idx[0].render(self.render_ops, self), idx[1].render(self.render_ops, self)))
           else:
             rendered_idx = idx.render(self.render_ops, self)
@@ -114,6 +115,7 @@ class Linearizer(Kernel):
     return ret
 
   def global_store(self, i:int, idxs:List[Node], store:List[UOp]) -> None:
+    buf = self.bufs[i]
     buf_uop = self.buf_uops[i]
     assert buf_uop is not None, f"buffer {i} wasn't UOped"
 
@@ -139,8 +141,8 @@ class Linearizer(Kernel):
 
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
-      if isinstance(self.bufs[i].dtype, ImageDType):
-        idx, valid = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+      if isinstance(buf.dtype, ImageDType):
+        idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
         rendered_idx = self.uop(UOps.CAST, dtypes._int2, tuple(x.render(self.render_ops, self) for x in idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
@@ -343,10 +345,10 @@ class Linearizer(Kernel):
         render_loop(end_local_idxs)
 
         # load localbufs
-        loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)
+        loaded_buffers[self.bufs[-1]] = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
-        self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), acc, self.acc_offsets(-1), loaded_buffers, do_reduce=True) # type: ignore
+        self.ast_parse(LazyOp(self.reduceop.op, (self.bufs[-1],)), acc, self.acc_offsets(-1), loaded_buffers, do_reduce=True) # type: ignore
 
         # end the late reduce loop
         end_loop(end_local_idxs)
