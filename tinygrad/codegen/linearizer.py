@@ -338,7 +338,7 @@ class Linearizer(OptimizedKernel):
         loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs[1:], start=1) if b in self.earlybufs})
 
         # needed on 845 to not interleave the loads and adds
-        self.uop(UOps.BARRIER, None, (), cachable=False)
+        self.uop(UOps.BARRIER, None, (), "read_mem_fence(CLK_LOCAL_MEM_FENCE);", cachable=False)
 
         # run early AST (with reduce)
         self.ast_parse(self.reduceop, acc, self.acc_offsets(self.full_buf_index), loaded_buffers, do_reduce=True)
