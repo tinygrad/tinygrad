@@ -16,6 +16,7 @@ actions += [
   Opt(op=OptOps.LOCAL, axis=0, amt=32),
   Opt(op=OptOps.GROUP, axis=0, amt=4), Opt(op=OptOps.GROUP, axis=0, amt=8), Opt(op=OptOps.GROUP, axis=1, amt=8),
   Opt(op=OptOps.UPCASTMID, axis=1, amt=4),
+  Opt(op=OptOps.NOLOCALS),
 ]
 
 # returns time in seconds
@@ -76,8 +77,8 @@ def bufs_from_lin(lin:Linearizer) -> List[RawBuffer]:
 def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Linearizer]:
   acted_lins = {0:lin.copy()} if include_0 else {}
   for i,a in enumerate(actions):
-    if a.axis >= lin.shape_len: continue
-    if lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) in actions: continue
+    if a.axis is not None and a.axis >= lin.shape_len: continue
+    if a.axis is not None and lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) in actions: continue
     lin2 = lin.copy()
     try:
       lin2.apply_opt(a)
@@ -91,9 +92,8 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       pass
   return acted_lins
 
-def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True, dont_use_locals=False) -> Linearizer:
-  key = {"ast": str(lin.ast), "amt": amt, "allow_test_size": allow_test_size, "dont_use_locals": dont_use_locals}
-  if dont_use_locals: lin.dont_use_locals = True
+def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linearizer:
+  key = {"ast": str(lin.ast), "amt": amt, "allow_test_size": allow_test_size}
   if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE") and CACHELEVEL >= 1:
     ret = lin.copy()
     for o in val[len(lin.applied_opts):]: ret.apply_opt(o)
@@ -130,5 +130,5 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True, dont_use
     if DEBUG >= 2: print(f"{opts[0][1]*1e6:12.2f} us from {len(lins):3d} -> {len(opts):3d} actions", beam[0][0].colored_shape())
 
   if CACHELEVEL >= 1: diskcache_put("beam_search", key, beam[0][0].applied_opts)
-  if DEBUG >= 2: print(beam[0][0].applied_opts)
+  if DEBUG >= 3: print(beam[0][0].applied_opts)
   return beam[0][0]

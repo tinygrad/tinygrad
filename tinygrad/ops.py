@@ -294,14 +294,11 @@ class Compiled:
           kb = Linearizer(ast, self.linearizer_opts)
           kb.required_optimizations()
           from tinygrad.features.search import beam_search, time_linearizer
-          if not bool(getenv("NOLOCALS")) or getenv("NOLOCALS") >= 2:
-            lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
-          if bool(getenv("NOLOCALS")):
-            lins.append((f"beam{BEAM.value}n", beam_search(kb.copy(), test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)), dont_use_locals=True)))
+          lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
           if used_tensor_cores:
             lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
             lins[-1][1].hand_coded_optimizations()
-            timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, disable_cache=True, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
+          timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, disable_cache=True, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
           if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
           k = timed[0][1]
       return self.to_program(k)
