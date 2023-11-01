@@ -156,6 +156,7 @@ class GlobalCounters:
 # *** compiled cache decorator ***
 
 def cache_compiled(func):
+  if getenv("DISABLE_COMPILER_CACHE"): return func
   def wrapper(self, prg:str, *args, **kwargs) -> bytes:
     cache_path, output_file = pathlib.Path(f"{tempfile.gettempdir()}/tinygrad_cc_{hashlib.sha256(prg.encode()).hexdigest()}"), pathlib.Path(tempfile.mktemp())
     if not cache_path.exists():

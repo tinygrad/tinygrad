@@ -1,7 +1,7 @@
-import time, hashlib, ctypes
+import time, ctypes
 from typing import ClassVar
 from tinygrad.ops import Compiled
-from tinygrad.helpers import getenv, DEBUG
+from tinygrad.helpers import getenv, DEBUG, cache_compiled
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
@@ -46,17 +46,17 @@ class LLVM:
 
 class LLVMProgram:
   def __init__(self, name:str, prg:str, binary=False):
-    self.mod = llvm.parse_assembly(prg)
-    self.mod.verify()
-    LLVM().optimizer.run(self.mod)
-    self.mod.name = hashlib.sha1(prg.encode('utf-8')).hexdigest()
-    if DEBUG >= 5: print(LLVM.target_machine.emit_assembly(self.mod))
-    LLVM.engine.add_module(self.mod)
-    LLVM.engine.finalize_object()
+    self.prg = self.compile(prg)
+    LLVM().engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(self.prg))
     self.fxn = LLVM.engine.get_function_address(name)
 
-  def __del__(self):
-    if hasattr(self, 'mod'): LLVM.engine.remove_module(self.mod)
+  @cache_compiled
+  def compile(self, prg) -> bytes:
+    mod = llvm.parse_assembly(prg)
+    mod.verify()
+    LLVM().optimizer.run(mod)
+    if DEBUG >= 5: print(LLVM.target_machine.emit_assembly(mod))
+    return LLVM.target_machine.emit_object(mod)
 
   def __call__(self, unused_global_size, unused_local_size, *bufs, wait=False):
     cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.c_void_p for _ in bufs])(self.fxn)

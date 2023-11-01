@@ -89,7 +89,7 @@ class CUDAGraph(GraphBatchExecutor):
   def exec_instance(self, instid): self.graphs[instid][0].launch()
 
 class CUDAProgram:
-  def __init__(self, name:str, prg:str, binary=False, shared = 0, local_size_override=None):
+  def __init__(self, name:str, prg:str, binary=False, shared=0, local_size_override=None):
     if not binary: prg = self.compile(prg).decode('utf-8')
     if DEBUG >= 5: print(pretty_ptx(prg))
     if DEBUG >= 6:

@@ -7,9 +7,8 @@ from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
 args = {
-  'Windows': {'cflags':'', 'ext':'dll', 'exp':'__declspec(dllexport) '},
-  'Linux': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'so', 'exp':''},
-  'Darwin': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'dylib', 'exp':''}
+  'Linux': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'so'},
+  'Darwin': {'cflags':'-lm -fPIC --rtlib=compiler-rt ', 'ext':'dylib'}
 }[platform.system()]
 
 CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#include <stdbool.h>\n'
@@ -25,14 +24,12 @@ class ClangProgram:
 
   @cache_compiled
   def compile(self, prg) -> bytes:
-    with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+str(output_file.name)).split(), input=prg.encode('utf-8'))
-      return pathlib.Path(output_file.name).read_bytes()
+    return subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o /dev/stdout').split(), input=prg.encode('utf-8'))
 
   def __call__(self, unused_global_size, unused_local_size, *args, wait=False):
     if wait: st = time.monotonic()
     self.fxn(*[x._buf if isinstance(x, RawMallocBuffer) else x for x in args])
     if wait: return time.monotonic()-st
 
-renderer = functools.partial(uops_to_cstyle, CStyleLanguage(kernel_prefix=args['exp'], buffer_suffix=" restrict", arg_int_prefix="const int"))
+renderer = functools.partial(uops_to_cstyle, CStyleLanguage(buffer_suffix=" restrict", arg_int_prefix="const int"))
 ClangBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False), renderer, ClangProgram)
