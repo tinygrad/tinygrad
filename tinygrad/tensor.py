@@ -639,11 +639,8 @@ class Tensor:
     return (x, y)
 
   def _to_float(self, x:Union[Tensor, float]):
-    if isinstance(x, Tensor) and not x.lazydata.realized and x.lazydata.op.op == LoadOps.CONST and not x.requires_grad \
-      and x.lazydata.st.contiguous and self._broadcasted(x)[0].shape == self.shape:
-      return x.lazydata.op.arg
-    else:
-      return x
+    return x.lazydata.op.arg if isinstance(x, Tensor) and not x.lazydata.realized and x.lazydata.op.op == LoadOps.CONST and not x.requires_grad \
+      and x.lazydata.st.contiguous and self._broadcasted(x)[0].shape == self.shape else x
 
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     x = self._to_float(x)
