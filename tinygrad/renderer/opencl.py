@@ -10,7 +10,7 @@ class OpenCLLanguage(CStyleLanguage):
   smem_prefix = "__local "
   arg_int_prefix = "const int"
   half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable"
-  barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
+  barrier = "mem_fence(CLK_LOCAL_MEM_FENCE);"  # is real barrier ever needed?
   float4 = "(float4)"
   gid = [f'get_group_id({i})' for i in range(3)]
   lid = [f'get_local_id({i})' for i in range(3)]
