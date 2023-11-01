@@ -6,6 +6,7 @@ from tinygrad.ops import GlobalCounters
 from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, prod
 from tinygrad.ops import Device
+from tinygrad.tensor import Tensor
 
 def check_gc():
   if Device.DEFAULT == "GPU":
@@ -104,6 +105,30 @@ class TestAllocators(unittest.TestCase):
           assert cmp_trace_and_buf(buf, refs[i%8]), "Buffer should be reused"
         __test()
       for r in refs: assert r() is not None, "All refs should be cached"
+    test()
+    check_gc()
+
+  @unittest.skip("failing in CI")
+  def test_gpu_copyout(self):
+    def test():
+      from tinygrad.runtime.ops_gpu import CL
+
+      # Allocation to init the allocator.
+      tx = Tensor.rand(1)
+      tx.realize()
+      free_space = CL.cl_allocator.free_space[tx.lazydata.realized._device]
+
+      # Spawning 128mb objects to fill half of free_space
+      will_allocate = free_space // 3
+      trash_allocation_size = free_space // 2
+
+      def sp():
+        trash_buffer = Tensor.rand(trash_allocation_size // 4)
+        trash_buffer.realize()
+      sp()
+
+      xx = Tensor.rand(will_allocate // 4)
+      _ = xx.numpy()
     test()
     check_gc()
 

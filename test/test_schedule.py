@@ -326,5 +326,10 @@ class TestSchedule(unittest.TestCase):
     out = x.to('cpu')
     check_schedule(out, 0, filter_loadops=False)
 
+  def test_pow_const_tensor(self):
+    x = Tensor([1,2,3,4])
+    out = x ** Tensor(2)
+    check_schedule(out, 1)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

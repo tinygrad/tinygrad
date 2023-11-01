@@ -10,14 +10,14 @@ from tinygrad.shape.view import View, strides_for_shape
 from enum import Enum, auto
 
 class OptOps(Enum):
-  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); GROUPTOP = auto() # noqa: E702
+  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); LASTLOCAL = auto(); GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 @dataclass(frozen=True, order=True)
 class Opt:
   op: OptOps
-  axis: int
-  amt: int
+  axis: Optional[int] = None
+  amt: Optional[int] = None
   def __repr__(self): return f"Opt(op={self.op}, axis={self.axis}, amt={self.amt})"
 
 class OptimizedKernel(Kernel):
@@ -197,7 +197,7 @@ class OptimizedKernel(Kernel):
         self.apply_opt(Opt(OptOps.UNROLL, 0, tc.dims[2]))
         self.apply_opt(Opt(OptOps.UPCAST, s0 if tc.upcast_dim == 0 else s1, (tc.dims[0]*tc.dims[2])//prod([a[1] for a in tc.threads])))
         for (tc_dim, tc_amt) in tc.threads:
-          fix(self.apply_opt(Opt(OptOps.LOCAL, s0 if tc_dim == 0 else s1, tc_amt)), s0 if tc_dim == 0 else s1)
+          fix(self.apply_opt(Opt(OptOps.LASTLOCAL, s0 if tc_dim == 0 else s1, tc_amt)), s0 if tc_dim == 0 else s1)
 
         # assert tensor core and prevent extra_opts from altering the key shape structure
         if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
@@ -216,7 +216,7 @@ class OptimizedKernel(Kernel):
           if self.tensor_core and s0_exists:
             for upc in [4,2]:
               if self.full_shape[s0] % upc == 0:
-                self.apply_opt(Opt(OptOps.LOCAL, s0, upc))
+                self.apply_opt(Opt(OptOps.LASTLOCAL, s0, upc))
                 break
 
         # alias buffer
@@ -227,17 +227,34 @@ class OptimizedKernel(Kernel):
     return False
 
   def apply_opt(self, opt:Opt):
+    assert not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.LASTLOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals"
     self.applied_opts.append(opt)
-    axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op == OptOps.GROUPTOP else 0))
-    amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
-    assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-    assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
+    if opt.axis is not None:
+      axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op == OptOps.GROUP or opt.op == OptOps.GROUPTOP else 0))
+    else:
+      axis = -1
+    if opt.amt is not None:
+      amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
+      assert self.full_shape[axis] % amt == 0, "no longer valid shift"
+      assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
+    else:
+      amt = -1
     if opt.op == OptOps.LOCAL:        # cyan
-      assert axis < self.first_reduce-(len(self.tensor_core.threads) if self.tensor_core else 0), "local is for non-reduce that aren't TC dims"
+      assert axis < self.first_reduce, "can't local a reduce"
+      assert not(self.tensor_core), "can't local with tensor cores"
+      self.shift_to(axis, amt, insert_before=self.first_reduce)
+      self.local_dims += 1
+    elif opt.op == OptOps.LASTLOCAL:  # cyan
+      assert axis < self.first_reduce, "can't local a reduce"
       self.shift_to(axis, amt, insert_before=self.first_reduce-self.local_dims)
       self.local_dims += 1
-    elif opt.op == OptOps.GROUPTOP:      # green
-      assert axis >= self.first_reduce + len(self.group_for_reduce) and axis < self.shape_len-self.upcasted, "group is for reduce dims"
+    elif opt.op == OptOps.GROUP:      # green
+      assert axis >= self.first_reduce + len(self.group_for_reduce) and axis < self.shape_len-self.upcasted, "must be reduce axis to group"
+      assert not(self.tensor_core), "can't group with tensor cores"
+      self.shift_to(axis, amt, insert_before=self.first_reduce + len(self.group_for_reduce))
+      self.group_for_reduce.append(amt)
+    elif opt.op == OptOps.GROUPTOP:   # green
+      assert axis >= self.first_reduce + len(self.group_for_reduce) and axis < self.shape_len-self.upcasted, "must be reduce axis to group"
       assert not(self.tensor_core), "can't group with tensor cores"
       self.shift_to(axis, amt, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(amt)
@@ -247,7 +264,7 @@ class OptimizedKernel(Kernel):
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op == OptOps.UPCAST:     # yellow
-      assert axis < self.first_reduce-(len(self.tensor_core.threads) if self.tensor_core else 0), "upcast is for non-reduce that aren't TC dims"
+      assert axis < self.first_reduce, "upcast is for non-reduce"
       assert amt <= 8, "don't upcast more than 8"
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
@@ -259,6 +276,10 @@ class OptimizedKernel(Kernel):
       assert amt == 4, "don't upcast mid anything but 4"
       self.shift_to(axis, amt, insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(amt)
+    elif opt.op == OptOps.NOLOCALS:
+      assert self.local_dims == 0 and len(self.group_for_reduce) == 0, "can't have no locals with locals"
+      assert not self.dont_use_locals, "already not using locals"
+      self.dont_use_locals = True
     return self.simplify_ones()
 
   def required_optimizations(self, early_only=False):
@@ -292,7 +313,7 @@ class OptimizedKernel(Kernel):
           if self.full_shape[self.first_reduce]%MV_THREADS_PER_ROW == 0 and self.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
             if DEBUG >= 3: print(f"MATVEC: full_shape={self.full_shape} first_reduce={self.first_reduce} buf0_strides={buf0_strides} blocksize={MV_BLOCKSIZE} threads_per_row={MV_THREADS_PER_ROW} rows_per_thread={MV_ROWS_PER_THREAD}")
             if MV_THREADS_PER_ROW > 1:
-              self.apply_opt(Opt(OptOps.GROUPTOP, 0, MV_THREADS_PER_ROW))
+              self.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
             if MV_BLOCKSIZE > 1:
               self.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1:
@@ -357,7 +378,7 @@ class OptimizedKernel(Kernel):
         break
 
     # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast. NOTE: careful, this has broken VALIDHACKS
-    if self.first_reduce < (self.shape_len-self.upcasted) and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))):
+    if self.first_reduce < (self.shape_len-self.upcasted) and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))) and (self.upcasted == 0 or prod(self.full_shape[-self.upcasted:]) < 64):
       if (s:=self.full_unupcasted_shape[-1]) <= 32 and isinstance(s, int):  # NOTE: cannot loop unroll symbolic axis
         self.apply_opt(Opt(OptOps.UNROLL, len(self.full_unupcasted_shape)-1-self.first_reduce, 0))
         # if it's small, upcast a second reduce dimension too
@@ -379,7 +400,7 @@ class OptimizedKernel(Kernel):
 
     if self.opts.has_local:
       if getenv("NOLOCALS") and self.local_dims == 0 and not self.group_for_reduce:
-        self.dont_use_locals = True
+        self.apply_opt(Opt(OptOps.NOLOCALS))
       else:
         # prioritize making expand axes local
         local_axis_ranking = [(any(self.sts[buf_index].views[-1].strides[axis] == 0 for buf_index in range(len(self.sts))), axis) for axis in range(len(self.full_shape[:self.first_reduce]))]
