@@ -16,6 +16,7 @@ class LB:
   # placeholder LazyBuffer
   def __init__(self, rawbuf, dtype):
     self.realized = rawbuf
+    self.output_buffer = rawbuf
     self.dtype = dtype
 
 
@@ -74,9 +75,10 @@ def fuzz_linearizer(lin: Linearizer):
       except:
         print("EXEC FAILED!!")
         return "EXEC_ERROR"
-      result = rawbufs[0].toCPU()
     else:
-      result = device.exec_ast(lin.ast, inputs=[LB(buf, buf.dtype) for buf in rawbufs[1:]])
+      device.exec_ast(lin.ast, output=LB(rawbufs[0], rawbufs[0].dtype), inputs=[LB(buf, buf.dtype) for buf in rawbufs[1:]])
+
+    result = rawbufs[0].toCPU()
 
     if output is None:
       output = result
@@ -88,12 +90,10 @@ def fuzz_linearizer(lin: Linearizer):
       except Exception as e:
         import traceback
         traceback.print_exc()
-        # TypeError: ufunc 'isfinite' not supported for the input types, and the inputs could not be safely coerced to any supported types according to the casting rule ''safe''
         return str(type(e))
   return "PASS"
 
 if __name__ == "__main__":
-  device = Device[Device.DEFAULT]
   ast_strs = load_worlds()
   print(f"{len(ast_strs)=}")
   tested = 0
