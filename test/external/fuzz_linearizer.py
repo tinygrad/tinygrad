@@ -6,10 +6,17 @@ from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import get_linearizer_actions
 from tinygrad.graph import print_tree
 from tinygrad.helpers import prod
-from tinygrad.ops import Device
+from tinygrad.ops import Device, Compiled
 
 random.seed(42)
 np.random.seed(42)
+device = Device[Device.DEFAULT]
+
+class LB:
+  # placeholder LazyBuffer
+  def __init__(self, rawbuf, dtype):
+    self.realized = rawbuf
+    self.dtype = dtype
 
 
 def fuzz_linearizer(lin: Linearizer):
@@ -54,25 +61,35 @@ def fuzz_linearizer(lin: Linearizer):
     # get a new output buffer
     rawbufs[0] = device.buffer(size=prod(lin.membufs[0].st.shape), dtype=lin.membufs[0].dtype)
 
-    # TODO: Interpreted backend
-    try:
-      prg = device.to_program(lin.copy())
-    except:
-      import traceback; traceback.print_exc()
-      print("COMPILE FAILED!!")
-      return "COMPILE_ERROR"
+    if isinstance(device, Compiled):
+      try:
+        prg = device.to_program(lin.copy())
+      except:
+        import traceback
+        traceback.print_exc()
+        print("COMPILE FAILED!!")
+        return "COMPILE_ERROR"
+      try:
+        prg.exec(rawbufs, force_wait=True)
+      except:
+        print("EXEC FAILED!!")
+        return "EXEC_ERROR"
+      result = rawbufs[0].toCPU()
+    else:
+      result = device.exec_ast(lin.ast, inputs=[LB(buf, buf.dtype) for buf in rawbufs[1:]])
 
-    try:
-      prg.exec(rawbufs, force_wait=True)
-    except:
-      print("EXEC FAILED!!")
-      return "EXEC_ERROR"
-
-    result = rawbufs[0].toCPU()
     if output is None:
       output = result
-    elif not np.allclose(result, output, rtol=1e-4, atol=1e-4):
-      return "NOT_ALLCLOSE"
+    else:
+      try:
+        np.testing.assert_allclose(result, output, rtol=1e-4, atol=1e-4)
+      except AssertionError:
+        return "NOT_ALLCLOSE"
+      except Exception as e:
+        import traceback
+        traceback.print_exc()
+        # TypeError: ufunc 'isfinite' not supported for the input types, and the inputs could not be safely coerced to any supported types according to the casting rule ''safe''
+        return str(type(e))
   return "PASS"
 
 if __name__ == "__main__":
