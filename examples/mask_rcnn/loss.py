@@ -190,11 +190,6 @@ def concat_box_prediction_layers(box_cls, box_regression):
   # same format as the labels. Note that the labels are computed for
   # all feature levels concatenated, so we keep the same representation
   # for the objectness and the box_regression
-  if DEBUG > 0:
-    print_gpu_memory("prior to ops")
-    print("len ", len(box_cls))
-    box_cls[0].realize()
-    print_gpu_memory("realize box_cls input")
   for box_cls_per_level, box_regression_per_level in zip(
       box_cls, box_regression
   ):
@@ -214,26 +209,8 @@ def concat_box_prediction_layers(box_cls, box_regression):
   # concatenate on the first dimension (representing the feature levels), to
   # take into account the way the labels were generated (with all feature maps
   # being concatenated as well)
-  if DEBUG > 0:
-    print_gpu_memory("prior to cat")
-    print("len ", len(box_cls_flattened))
-    box_cls_flattened[0].realize()
-    print_gpu_memory("realize cls")
   box_cls = Tensor.cat(*box_cls_flattened, dim=1)#.reshape(-1, C)
-  if DEBUG > 0:
-    print_gpu_memory("after boxcls cat")
-    box_cls.realize()
-    print_gpu_memory("after boxcls realize") # memory taken here
-    del box_cls
-    gc.collect()
-    print_gpu_memory("after boxcls delete") # memory not reclaimed here!!
-    del box_regression_flattened
-    print_gpu_memory("after boxcls flat delete") # memory not reclaimed here!!
   box_regression = Tensor.cat(*box_regression_flattened, dim=1).reshape(-1, 4)
-  if DEBUG > 0:
-    print_gpu_memory("after box_regression cat")
-    box_regression.realize()
-    print_gpu_memory("after box_regression realize")
   del box_cls_flattened, box_regression_flattened
   return box_cls, box_regression
 
@@ -439,53 +416,27 @@ class RPNLossComputation:
     anchors = [cat_boxlist(anchors_per_image) for anchors_per_image in anchors]
     labels, regression_targets = self.prepare_targets(anchors, targets)
     sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
-    if DEBUG > 0:
-      labels[0].realize(), regression_targets[0].realize()
-      print_gpu_memory("after_sampling")
     if len(sampled_pos_inds[0]) == 0: return None, None # todo negative mining
     sampled_pos_inds, sampled_neg_inds = Tensor(sampled_pos_inds).squeeze(0), Tensor(sampled_neg_inds).squeeze(0)
-    if DEBUG > 0:
-      sampled_pos_inds.realize(), sampled_neg_inds.realize()
-      print_gpu_memory("after_idx_realized")
     sampled_inds = Tensor.cat(sampled_pos_inds, sampled_neg_inds, dim=0)
-    if DEBUG > 0:
-      sampled_inds.realize()
-      print_gpu_memory("after_first_cats")
-    if DEBUG > 0:
-      objectness[0].realize()
-      print_gpu_memory("realize_objectness")
     objectness, box_regression = \
             concat_box_prediction_layers(objectness, box_regression)
-    if DEBUG > 0:
-      objectness.realize(), box_regression.realize()
-      print_gpu_memory("after concat_box_prediction_layers")
-      del objectness, box_regression
-      print_gpu_memory("after concat_box_prediction_layers_del")
     objectness = objectness.squeeze() 
     labels, regression_targets = Tensor.cat(*labels, dim=0), Tensor.cat(*regression_targets, dim=0)
-    if DEBUG > 0:
-      box_regression[sampled_pos_inds].realize(), regression_targets[sampled_pos_inds].realize()
-      print_gpu_memory("after_cats")
-      del sampled_pos_inds, sampled_neg_inds, sampled_inds, objectness, box_regression, labels, regression_targets
-      print_gpu_memory("after_cats_del")
-      if DEBUG > 1:
-        print("box_reg", box_regression[sampled_pos_inds].numpy(), "reg_targets", regression_targets[sampled_pos_inds].numpy())
+    if DEBUG > 1:
+      print("box_reg", box_regression[sampled_pos_inds].numpy(), "reg_targets", regression_targets[sampled_pos_inds].numpy())
     box_loss = smooth_l1_loss(
         box_regression[sampled_pos_inds],
         regression_targets[sampled_pos_inds],
         beta=1.0 / 9,
         size_average=False,
     ) / sampled_inds.numel()
-    if DEBUG > 0:
-      box_loss.realize(), objectness[sampled_inds].realize(), labels[sampled_inds].realize()
-      print_gpu_memory("after_box_loss")
-      if DEBUG > 1:
-        print("box_loss", box_loss.numpy(), "objectness", objectness[sampled_inds].numpy(), "objectness gt", labels[sampled_inds].numpy())
+    if DEBUG > 1:
+      print("box_loss", box_loss.numpy(), "objectness", objectness[sampled_inds].numpy(), "objectness gt", labels[sampled_inds].numpy())
     objectness_loss = binary_cross_entropy_with_logits(
         objectness[sampled_inds], labels[sampled_inds]
     )
     del objectness, labels, regression_targets, sampled_pos_inds, sampled_neg_inds, anchors, box_regression
-    if DEBUG > 0: print_gpu_memory("after_cleanup")
     return objectness_loss, box_loss
 
 if __name__ == "__main__":

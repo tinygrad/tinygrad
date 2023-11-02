@@ -165,7 +165,6 @@ def simple():
     random_img_id = random.choice(img_ids)
     img_metadata = coco.loadImgs(random_img_id)[0]
     img_filename = os.path.join(BASEDIR, 'train2017', img_metadata['file_name'])
-    t = Tensor(build_transforms()(Image.open(img_filename).convert("RGB")).numpy(), requires_grad=True).realize()
     img = [Tensor(build_transforms()(Image.open(img_filename).convert("RGB")).numpy(), requires_grad=True)]
     images = to_image_list(img)
     images.tensors[0].realize()
