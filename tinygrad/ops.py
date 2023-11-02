@@ -195,7 +195,6 @@ class GraphBatchExecutor(BasicBatchExecutor):
 
 class ASTRunner:
   def __init__(self, name, prg, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
-    if DEBUG >= 4 and (runtime_args is None or 'binary' not in runtime_args or not runtime_args['binary']): print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
 
   def optimize_local_size(self, global_size:List[int], rawbufs:List[RawBuffer]) -> List[int]:
@@ -243,14 +242,15 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, runtime, synchronize=lambda: None, batch_exec=BasicBatchExecutor):
-    self.buffer, self.linearizer_opts, self.renderer, self.runtime, self.synchronize, self.batch_exec = buffer, linearizer_opts, renderer, runtime, synchronize, batch_exec
+  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, compiler, runtime, synchronize=lambda: None, batch_exec=BasicBatchExecutor):
+    self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize, self.batch_exec = buffer, linearizer_opts, renderer, compiler, runtime, synchronize, batch_exec
     self.method_cache: Dict[LazyOp, ASTRunner] = {}
 
   def to_program(self, k):
     k.linearize()
     src, runtime_args = self.renderer(k.function_name, k.uops)
-    return ASTRunner(k.function_name, src, k.global_size, k.local_size,
+    prg = self.compiler(src)
+    return ASTRunner(k.function_name, prg, k.global_size, k.local_size,
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
                      display_name=k.display_name, runtime_args=runtime_args).build(self.runtime, self.batch_exec)
 

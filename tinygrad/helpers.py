@@ -155,20 +155,22 @@ class GlobalCounters:
 
 # *** compiled cache decorator ***
 
-def cache_compiled(func):
-  if getenv("DISABLE_COMPILER_CACHE"): return func
-  def wrapper(self, prg:str, *args, **kwargs) -> bytes:
-    table, key = f"compiler_cache_{type(self).__name__}", hashlib.sha256(prg.encode()).hexdigest()
-    if (ret:=diskcache_get(table, key)): return ret
-    return diskcache_put(table, key, func(self, prg, *args, **kwargs))
-  return wrapper
+def cache_compiled(metakey):
+  def _cache_compiled(func):
+    if getenv("DISABLE_COMPILER_CACHE"): return func
+    def wrapper(prg:str, *args, **kwargs) -> bytes:
+      table, key = f"compiler_cache_{metakey}", hashlib.sha256(prg.encode()).hexdigest()
+      if (ret:=diskcache_get(table, key)): return ret
+      return diskcache_put(table, key, func(prg, *args, **kwargs))
+    return wrapper
+  return _cache_compiled
 
 # *** universal database cache ***
 
 CACHEDB = getenv("CACHEDB", "/tmp/tinygrad_cache")
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 5
+VERSION = 6
 _db_connection = None
 def db_connection():
   global _db_connection
