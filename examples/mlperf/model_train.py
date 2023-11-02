@@ -44,7 +44,7 @@ def train_resnet_dali():
                                         size=val_size,
                                         dali_cpu=False,
                                         shard_id=0, # local_rank
-                                        num_shards=0, # world size
+                                        num_shards=1, # world size
                                         is_training=True)
   train_pipe.build()
   train_loader = DALIClassificationIterator(train_pipe, reader_name="Reader",
@@ -60,7 +60,7 @@ def train_resnet_dali():
                                         size=val_size,
                                         dali_cpu=False,
                                         shard_id=0, # local_rank
-                                        num_shards=0, # world size
+                                        num_shards=1, # world size
                                         is_training=True)
   val_pipe.build()
   val_loader = DALIClassificationIterator(val_pipe, reader_name="Reader",
