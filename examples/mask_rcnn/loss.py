@@ -209,7 +209,7 @@ def concat_box_prediction_layers(box_cls, box_regression):
   # concatenate on the first dimension (representing the feature levels), to
   # take into account the way the labels were generated (with all feature maps
   # being concatenated as well)
-  box_cls = Tensor.cat(*box_cls_flattened, dim=1)#.reshape(-1, C)
+  box_cls = Tensor.cat(*box_cls_flattened, dim=1).reshape(-1, C)
   box_regression = Tensor.cat(*box_regression_flattened, dim=1).reshape(-1, 4)
   del box_cls_flattened, box_regression_flattened
   return box_cls, box_regression
