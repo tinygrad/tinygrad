@@ -12,6 +12,7 @@ import time
 
 # TODO: auto-down DALI
 def train_resnet_dali():
+  import math
   from models.resnet import ResNet50
   from extra.datasets.imagenet import BASEDIR
   from extra.datasets.imagenet_dali import create_dali_pipeline
@@ -34,7 +35,7 @@ def train_resnet_dali():
   WORKERS = getenv("WORKERS", 4)
   traindir, valdir = os.path.join(BASEDIR, 'train'),os.path.join(BASEDIR,'val')
   val_size,crop_size = 256,224
-  
+
   train_pipe = create_dali_pipeline(batch_size=BS,
                                         num_threads=WORKERS,
                                         device_id=0,
@@ -121,14 +122,15 @@ def train_resnet_dali():
   epochs = 50
   optimizer = optim.SGD(parameters, lr, momentum=.875, weight_decay=1/2**15)
   scheduler = CosineAnnealingLR(optimizer, epochs)
-  print(f"training with batch size {BS} for {epochs} epochs")
+  total_train = 1281136
+  print(f"training with batch size {BS} for {epochs} epochs, {math.ceil(total_train/BS)} steps per epoch")
 
   epoch_avg_time = []
   for e in range(epochs):
     # train loop
     Tensor.training = True
     cl = time.monotonic() 
-    for i,data in enumerate(train_loader):
+    for i,data in enumerate(train_loader): 
       # how long does .cpu() take?
       ft = time.monotonic()
       X,Y = data[0]["data"].cpu().numpy(),data[0]["label"].squeeze(-1).long().cpu().numpy()
@@ -140,8 +142,8 @@ def train_resnet_dali():
       et = time.monotonic()
       loss_cpu = loss.numpy()
       cl = time.monotonic()
-
-      print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(st-ft)*1000.0:7.2f} ms move data, {data_time*1000:7.2f} ms prefetch data {loss_cpu:7.2f} loss, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      estim = math.ceil(total_train/BS)*(data_time+et-st)/(60*60)
+      print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(st-ft)*1000.0:7.2f} ms move data, {data_time*1000:7.2f} ms prefetch data {loss_cpu:7.2f} loss, {estim} hrs expected {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
       wandb.log({"lr": scheduler.get_lr().numpy().item(),
                  "train/data_time": data_time,
                  "train/python_time": et - st,
