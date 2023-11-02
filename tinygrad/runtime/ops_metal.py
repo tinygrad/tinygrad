@@ -58,8 +58,8 @@ def unwrap(x):
   assert err is None, str(err)
   return ret
 
-@cache_compiled("metal")
-def compile(prg) -> bytes:
+@cache_compiled
+def compile_metal(prg) -> bytes:
   if getenv("METAL_XCODE"):
     # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
     air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
@@ -100,4 +100,4 @@ class MetalProgram:
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
     METAL.mtl_buffers_in_flight.append(command_buffer)
 
-MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile, MetalProgram, METAL.synchronize, MetalBatchExecutor)
+MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, METAL.synchronize, MetalBatchExecutor)

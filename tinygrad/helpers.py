@@ -155,15 +155,13 @@ class GlobalCounters:
 
 # *** compiled cache decorator ***
 
-def cache_compiled(metakey):
-  def _cache_compiled(func):
-    if getenv("DISABLE_COMPILER_CACHE"): return func
-    def wrapper(prg:str, *args, **kwargs) -> bytes:
-      table, key = f"compiler_cache_{metakey}", hashlib.sha256(prg.encode()).hexdigest()
-      if (ret:=diskcache_get(table, key)): return ret
-      return diskcache_put(table, key, func(prg, *args, **kwargs))
-    return wrapper
-  return _cache_compiled
+def cache_compiled(func):
+  if getenv("DISABLE_COMPILER_CACHE"): return func
+  def wrapper(prg:str, *args, **kwargs) -> bytes:
+    table, key = f"cache_{func.__name__}", hashlib.sha256(prg.encode()).hexdigest()
+    if (ret:=diskcache_get(table, key)): return ret
+    return diskcache_put(table, key, func(prg, *args, **kwargs))
+  return wrapper
 
 # *** universal database cache ***
 

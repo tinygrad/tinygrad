@@ -249,6 +249,7 @@ class Compiled:
   def to_program(self, k):
     k.linearize()
     src, runtime_args = self.renderer(k.function_name, k.uops)
+    if DEBUG >= 4: print(src)
     prg = self.compiler(src)
     return ASTRunner(k.function_name, prg, k.global_size, k.local_size,
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,

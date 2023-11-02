@@ -44,19 +44,18 @@ class LLVM:
     backing_mod.triple = llvm.get_process_triple()
     LLVM.engine = llvm.create_mcjit_compiler(backing_mod, LLVM.target_machine)
 
-class LLVMProgram:
-  def __init__(self, name:str, prg:str, binary=False):
-    self.prg = prg if binary else self.compile(prg)
-    LLVM().engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(self.prg))
-    self.fxn = LLVM.engine.get_function_address(name)
+@cache_compiled
+def compile_llvm(prg) -> bytes:
+  mod = llvm.parse_assembly(prg)
+  mod.verify()
+  LLVM().optimizer.run(mod)
+  if DEBUG >= 5: print(LLVM.target_machine.emit_assembly(mod))
+  return LLVM.target_machine.emit_object(mod)
 
-  @cache_compiled
-  def compile(self, prg) -> bytes:
-    mod = llvm.parse_assembly(prg)
-    mod.verify()
-    LLVM().optimizer.run(mod)
-    if DEBUG >= 5: print(LLVM.target_machine.emit_assembly(mod))
-    return LLVM.target_machine.emit_object(mod)
+class LLVMProgram:
+  def __init__(self, name:str, lib:bytes):
+    LLVM().engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(lib))
+    self.fxn = LLVM.engine.get_function_address(name)
 
   def __call__(self, unused_global_size, unused_local_size, *bufs, wait=False):
     cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.c_void_p for _ in bufs])(self.fxn)
@@ -64,4 +63,4 @@ class LLVMProgram:
     cfunc(*[x._buf if not isinstance(x, int) else x for x in bufs])
     if wait: return time.perf_counter()-st
 
-LLVMBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, LLVMProgram)
+LLVMBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, compile_llvm, LLVMProgram)

@@ -78,10 +78,15 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
     hip.hipSetDevice(x._device)
     hip.hipMemcpy(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice)
 
+@cache_compiled
+def compile_hip(prg) -> bytes:
+  prog = hip.hiprtcCreateProgram(prg, "<null>", [], [])
+  hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])
+  return hip.hiprtcGetCode(prog)
+
 class HIPProgram:
-  def __init__(self, name:str, prg:str, binary=False):
+  def __init__(self, name:str, prg:bytes):
     self.modules, self.prgs = [], []
-    prg = prg if binary else self.compile(prg, name)
 
     if DEBUG >= 6:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
@@ -91,12 +96,6 @@ class HIPProgram:
       hip.hipSetDevice(i)
       self.modules.append(hip.hipModuleLoadData(prg))
       self.prgs.append(hip.hipModuleGetFunction(self.modules[-1], name))
-
-  @cache_compiled
-  def compile(self, prg, name) -> bytes:
-    prog = hip.hiprtcCreateProgram(prg, name, [], [])
-    hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])
-    return hip.hiprtcGetCode(prog)
 
   def __call__(self, global_size, local_size, *args, wait=False):
     hip.hipSetDevice(args[0]._device)
@@ -138,4 +137,4 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset
   """,
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]))
-HIPBuffer = Compiled(RawHIPBuffer, LinearizerOptions(device="HIP"), renderer, HIPProgram, hip.hipDeviceSynchronize, HIPGraph)
+HIPBuffer = Compiled(RawHIPBuffer, LinearizerOptions(device="HIP"), renderer, compile_hip, HIPProgram, hip.hipDeviceSynchronize, HIPGraph)

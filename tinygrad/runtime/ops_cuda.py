@@ -88,9 +88,12 @@ class CUDAGraph(GraphBatchExecutor):
 
   def exec_instance(self, instid): self.graphs[instid][0].launch()
 
+@cache_compiled
+def compile_cuda(prg) -> bytes: return cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets'])
+
 class CUDAProgram:
-  def __init__(self, name:str, prg:str, binary=False, shared=0, local_size_override=None):
-    if not binary: prg = self.compile(prg).decode('utf-8')
+  def __init__(self, name:str, _prg:bytes, shared=0, local_size_override=None):
+    prg = _prg.decode('utf-8')
     if DEBUG >= 5: print(pretty_ptx(prg))
     if DEBUG >= 6:
       try:
@@ -101,10 +104,6 @@ class CUDAProgram:
       except Exception as e: print("failed to generate SASS", str(e))
     # TODO: name is wrong, so we get it from the ptx using hacks
     self.prg, self.shared, self.local_size_override = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0]), shared, local_size_override
-
-  @cache_compiled
-  def compile(self, prg) -> bytes:
-    return cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets'])
 
   def __call__(self, global_size, local_size, *args, wait=False):
     if wait:
@@ -118,7 +117,8 @@ class CUDAProgram:
 
 if getenv("TRITON") == 1:
   from tinygrad.renderer.triton import uops_to_triton
-  TritonRenderer = uops_to_triton
-  CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024], has_shared=False), TritonRenderer, CUDAProgram, cuda.Context.synchronize)
+  CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024], has_shared=False),
+                        uops_to_triton, lambda x: x, CUDAProgram, cuda.Context.synchronize)
 else:
-  CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False if getenv("PTX") else True, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]), CUDARenderer, CUDAProgram, cuda.Context.synchronize, CUDAGraph)
+  CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False if getenv("PTX") else True, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]),
+                        CUDARenderer, compile_cuda, CUDAProgram, cuda.Context.synchronize, CUDAGraph)

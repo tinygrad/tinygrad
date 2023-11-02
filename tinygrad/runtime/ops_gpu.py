@@ -100,4 +100,4 @@ class CLProgram:
         return None
     return None
 
-GPUBuffer = Compiled(CLBuffer, LinearizerOptions(), OpenCLRenderer, CLProgram, CL.synchronize)
+GPUBuffer = Compiled(CLBuffer, LinearizerOptions(), OpenCLRenderer, lambda x: x, CLProgram, CL.synchronize)
