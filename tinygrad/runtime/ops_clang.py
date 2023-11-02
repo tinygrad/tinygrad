@@ -14,10 +14,10 @@ args = {
 CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#include <stdbool.h>\n'
 
 @cache_compiled
-def compile_clang(prg) -> bytes:
+def compile_clang(prg:str) -> bytes:
   # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
   with tempfile.NamedTemporaryFile(delete=True) as output_file:
-    subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+str(output_file.name)).split(), input=prg.encode('utf-8'))
+    subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c '+args['cflags']+' - -o '+str(output_file.name)).split(), input=(CLANG_PROGRAM_HEADER+prg).encode('utf-8'))
     return pathlib.Path(output_file.name).read_bytes()
 
 class ClangProgram:
