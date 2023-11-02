@@ -20,12 +20,11 @@ def atan2_gpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
   assert a.device == "GPU" and b.device == "GPU", "gpu function requires GPUBuffers"
   assert a.dtype == b.dtype and a.dtype == dtypes.float32, "gpu function only supports float32"
   ret.realized = Device[ret.device].buffer(prod(ret.shape), ret.dtype)
-  src = """
+  ASTRunner("atan2_gpu", """
     __kernel void atan2_gpu(global float *c, global float *a, global float *b) {
       int idx = get_global_id(0);
       c[idx] = atan2(a[idx], b[idx]);
-    }"""
-  ASTRunner("atan2_gpu", src, Device[ret.device].compiler(src), global_size=[prod(ret.shape)]).build(Device[ret.device].runtime).exec([ret.realized, a.realized, b.realized])
+    }""", global_size=[prod(ret.shape)]).build(Device[ret.device].compiler, Device[ret.device].runtime).exec([ret.realized, a.realized, b.realized])
   return ret.realized
 
 def atan2_cpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
