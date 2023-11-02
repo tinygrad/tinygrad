@@ -11,6 +11,7 @@ from tinygrad.helpers import prod, dtypes
 from tinygrad.lazy import LazyBuffer, create_lazybuffer
 from tinygrad.ops import ASTRunner, Device
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.runtime.ops_gpu import compile_gpu
 import pytest
 
 pytestmark = pytest.mark.webgpu
@@ -20,11 +21,12 @@ def atan2_gpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
   assert a.device == "GPU" and b.device == "GPU", "gpu function requires GPUBuffers"
   assert a.dtype == b.dtype and a.dtype == dtypes.float32, "gpu function only supports float32"
   ret.realized = Device[ret.device].buffer(prod(ret.shape), ret.dtype)
-  ASTRunner("atan2_gpu", """
+  src = """
     __kernel void atan2_gpu(global float *c, global float *a, global float *b) {
       int idx = get_global_id(0);
       c[idx] = atan2(a[idx], b[idx]);
-    }""", global_size=[prod(ret.shape)]).build(Device[ret.device].runtime).exec([ret.realized, a.realized, b.realized])
+    }"""
+  ASTRunner("atan2_gpu", src, compile_gpu(src), global_size=[prod(ret.shape)]).build(Device[ret.device].runtime).exec([ret.realized, a.realized, b.realized])
   return ret.realized
 
 def atan2_cpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
