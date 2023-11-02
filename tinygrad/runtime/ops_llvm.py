@@ -1,13 +1,15 @@
 import time, ctypes
 from typing import ClassVar
 from tinygrad.ops import Compiled
-from tinygrad.helpers import getenv, DEBUG, cache_compiled
+from tinygrad.helpers import getenv, DEBUG, diskcache
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
 from tinygrad.runtime.lib import RawMallocBuffer
 
 import llvmlite.binding as llvm  # type: ignore
+
+LLVMOPT = bool(getenv("LLVMOPT"))
 
 class LLVM:
   target_machine: ClassVar[llvm.targets.TargetMachine] = None
@@ -26,7 +28,7 @@ class LLVM:
     LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
 
     # TODO: this makes compile times so much faster
-    if getenv("LLVMOPT"):
+    if LLVMOPT:
       llvm.set_option(str(), '-force-vector-interleave=4')  # this makes sum the same speed as torch, it also doubles the (slow) conv speed
       if DEBUG >= 4: llvm.set_option(str(), '--debug-only=loop-vectorize')
       #llvm.set_option(str(), '--debug')
@@ -44,8 +46,8 @@ class LLVM:
     backing_mod.triple = llvm.get_process_triple()
     LLVM.engine = llvm.create_mcjit_compiler(backing_mod, LLVM.target_machine)
 
-@cache_compiled
-def compile_llvm(prg) -> bytes:
+@diskcache
+def compile_llvm(prg, llvmopt=LLVMOPT) -> bytes:
   mod = llvm.parse_assembly(prg)
   mod.verify()
   LLVM().optimizer.run(mod)

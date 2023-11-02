@@ -2,7 +2,7 @@ import numpy as np
 import ctypes, functools
 import extra.hip_wrapper as hip
 from typing import Tuple, Any, List
-from tinygrad.helpers import DEBUG, getenv, cache_compiled
+from tinygrad.helpers import DEBUG, getenv, diskcache
 from tinygrad.ops import Compiled, ASTRunner, GraphBatchExecutor
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -78,7 +78,7 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
     hip.hipSetDevice(x._device)
     hip.hipMemcpy(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice)
 
-@cache_compiled
+@diskcache
 def compile_hip(prg) -> bytes:
   prog = hip.hiprtcCreateProgram(prg, "<null>", [], [])
   hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])

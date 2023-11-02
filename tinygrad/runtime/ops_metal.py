@@ -3,7 +3,7 @@ import os, subprocess, pathlib, ctypes, tempfile
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any, Tuple
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, cache_compiled
+from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache
 from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.renderer.metal import MetalRenderer
 from tinygrad.runtime.lib import RawBufferMapped, LRUAllocator
@@ -58,9 +58,9 @@ def unwrap(x):
   assert err is None, str(err)
   return ret
 
-@cache_compiled
-def compile_metal(prg) -> bytes:
-  if getenv("METAL_XCODE"):
+@diskcache
+def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
+  if use_xcode:
     # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
     air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
     return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)

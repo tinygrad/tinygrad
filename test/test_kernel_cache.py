@@ -2,12 +2,9 @@
 import unittest
 import secrets
 import string
-import tempfile
-import pathlib
 from tinygrad.tensor import Tensor
 from tinygrad.ops import Device
-from tinygrad.helpers import cache_compiled
-import tinygrad.runtime.ops_clang
+from tinygrad.helpers import diskcache
 
 def generate_random_string(length=16):
   alphabet = string.ascii_letters + string.digits
@@ -15,7 +12,7 @@ def generate_random_string(length=16):
 
 compile_call_count = 0
 
-@cache_compiled
+@diskcache
 def helper_test_compile(prg:str) -> bytes:
   global compile_call_count
   compile_call_count += 1

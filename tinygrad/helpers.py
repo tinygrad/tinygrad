@@ -153,16 +153,6 @@ class GlobalCounters:
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0
 
-# *** compiled cache decorator ***
-
-def cache_compiled(func):
-  if getenv("DISABLE_COMPILER_CACHE"): return func
-  def wrapper(prg:str, *args, **kwargs) -> bytes:
-    table, key = f"cache_{func.__name__}", hashlib.sha256(prg.encode()).hexdigest()
-    if (ret:=diskcache_get(table, key)): return ret
-    return diskcache_put(table, key, func(prg, *args, **kwargs))
-  return wrapper
-
 # *** universal database cache ***
 
 CACHEDB = getenv("CACHEDB", "/tmp/tinygrad_cache")
@@ -207,3 +197,10 @@ def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
   conn.commit()
   cur.close()
   return val
+
+def diskcache(func):
+  def wrapper(*args, **kwargs) -> bytes:
+    table, key = f"cache_{func.__name__}", hashlib.sha256(pickle.dumps((args, kwargs))).hexdigest()
+    if (ret:=diskcache_get(table, key)): return ret
+    return diskcache_put(table, key, func(*args, **kwargs))
+  return wrapper

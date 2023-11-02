@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional, List, Any, Tuple
 import numpy as np
 from pycuda.compiler import compile as cuda_compile # type: ignore
-from tinygrad.helpers import DEBUG, getenv, colored, cache_compiled
+from tinygrad.helpers import DEBUG, getenv, colored, diskcache
 from tinygrad.ops import Compiled, GraphBatchExecutor, ASTRunner
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -88,7 +88,7 @@ class CUDAGraph(GraphBatchExecutor):
 
   def exec_instance(self, instid): self.graphs[instid][0].launch()
 
-@cache_compiled
+@diskcache
 def compile_cuda(prg) -> bytes: return cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets'])
 
 class CUDAProgram:
@@ -118,7 +118,7 @@ class CUDAProgram:
 if getenv("TRITON") == 1:
   from tinygrad.renderer.triton import uops_to_triton
   CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024], has_shared=False),
-                        uops_to_triton, lambda x: x.encode('utf-8'), CUDAProgram, cuda.Context.synchronize)
+                        uops_to_triton, lambda x: x, CUDAProgram, cuda.Context.synchronize)
 else:
   CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False if getenv("PTX") else True, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]),
                         CUDARenderer, compile_cuda, CUDAProgram, cuda.Context.synchronize, CUDAGraph)
