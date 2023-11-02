@@ -129,6 +129,8 @@ def train_resnet_dali():
     Tensor.training = True
     cl = time.monotonic() 
     for i,data in enumerate(train_loader):
+      # how long does .cpu() take?
+      ft = time.monotonic()
       X,Y = data[0]["data"].cpu().numpy(),data[0]["label"].squeeze(-1).long().cpu().numpy()
       GlobalCounters.reset()
       st = time.monotonic()
@@ -139,7 +141,7 @@ def train_resnet_dali():
       loss_cpu = loss.numpy()
       cl = time.monotonic()
 
-      print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {actual_data*1000.0:7.2f} ms fetch data, {data_time*1000:7.2f} ms prefetch data {loss_cpu:7.2f} loss, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(st-ft)*1000.0:7.2f} ms move data, {data_time*1000:7.2f} ms prefetch data {loss_cpu:7.2f} loss, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
       wandb.log({"lr": scheduler.get_lr().numpy().item(),
                  "train/data_time": data_time,
                  "train/python_time": et - st,
