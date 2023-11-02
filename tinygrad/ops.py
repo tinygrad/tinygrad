@@ -194,8 +194,9 @@ class GraphBatchExecutor(BasicBatchExecutor):
   def exec_instance(self, instid): raise NotImplementedError("must be implemented")
 
 class ASTRunner:
-  def __init__(self, name, prg, lib, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
-    self.name, self.prg, self.lib, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, lib, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
+  def __init__(self, name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
+    if DEBUG >= 4: print(prg)
+    self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
 
   def optimize_local_size(self, global_size:List[int], rawbufs:List[RawBuffer]) -> List[int]:
     assert self.global_size is not None, "needs a global size to optimize local size"
@@ -210,7 +211,8 @@ class ASTRunner:
         return float('inf')
     return min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
 
-  def build(self, runtime, batch_exec=BasicBatchExecutor):
+  def build(self, compiler, runtime, batch_exec=BasicBatchExecutor):
+    self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
     self.clprg, self.batch_exec = runtime(self.name, self.lib, **self.runtime_args), batch_exec
     return self
 
@@ -249,11 +251,9 @@ class Compiled:
   def to_program(self, k):
     k.linearize()
     src, runtime_args = self.renderer(k.function_name, k.uops)
-    if DEBUG >= 4: print(src)
-    lib = self.compiler.__wrapped__(src) if getenv("DISABLE_COMPILER_CACHE") else self.compiler(src)
-    return ASTRunner(k.function_name, src, lib, k.global_size, k.local_size,
+    return ASTRunner(k.function_name, src, k.global_size, k.local_size,
                      op_estimate=k.info.flops, mem_estimate=k.mem_estimate,
-                     display_name=k.display_name, runtime_args=runtime_args).build(self.runtime, self.batch_exec)
+                     display_name=k.display_name, runtime_args=runtime_args).build(self.compiler, self.runtime, self.batch_exec)
 
   def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
     # check if we can reuse the output buffer

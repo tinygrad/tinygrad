@@ -8,8 +8,7 @@ from tinygrad.codegen.linearizer import UOps, UOp
 
 def _uops_to_prg(uops):
   src, runtime_args = Device[Device.DEFAULT].renderer("test", uops)
-  prg = Device[Device.DEFAULT].compiler(src)
-  return ASTRunner("test", src, prg, [1], [1], runtime_args=runtime_args).build(Device[Device.DEFAULT].runtime)
+  return ASTRunner("test", src, [1], [1], runtime_args=runtime_args).build(Device[Device.DEFAULT].compiler, Device[Device.DEFAULT].runtime)
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(vin), arg, len(uops)))
