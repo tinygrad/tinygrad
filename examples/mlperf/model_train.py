@@ -319,7 +319,7 @@ def train_maskrcnn():
 if __name__ == "__main__":
   # NOTE: to run with resnet_dali, do export=resnet_dali
   with Tensor.train():
-    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn","resnet_dali").split(","):
+    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn,resnet_dali").split(","):
       nm = f"train_{m}"
       if nm in globals():
         print(f"training {m}")
