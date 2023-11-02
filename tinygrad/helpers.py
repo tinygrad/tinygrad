@@ -203,4 +203,5 @@ def diskcache(func):
     table, key = f"cache_{func.__name__}", hashlib.sha256(pickle.dumps((args, kwargs))).hexdigest()
     if (ret:=diskcache_get(table, key)): return ret
     return diskcache_put(table, key, func(*args, **kwargs))
+  setattr(wrapper, "__wrapped__", func)
   return wrapper
