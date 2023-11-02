@@ -34,7 +34,7 @@ def anybuf(size, dtype):
   return FakeBuffer(size, dtype)
 
 def add_to_cache(bufs):
-  CacheCollector.add(ASTRunner("", None), bufs, None)
+  CacheCollector.add(ASTRunner("", None, None), bufs, None)
   return bufs[0]
 
 def add_to_cache_refed(bufs):
