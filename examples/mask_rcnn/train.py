@@ -156,7 +156,7 @@ def simple():
   import os
   from PIL import Image
 
-  NUM_EPOCHS = 800
+  NUM_EPOCHS = 3000
 
   # Load COCO annotations
   coco = COCO(os.path.join(BASEDIR, 'annotations', 'instances_train2017.json'))
