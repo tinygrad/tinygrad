@@ -46,7 +46,7 @@ class LLVM:
 
 class LLVMProgram:
   def __init__(self, name:str, prg:str, binary=False):
-    self.prg = self.compile(prg)
+    self.prg = prg if binary else self.compile(prg)
     LLVM().engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(self.prg))
     self.fxn = LLVM.engine.get_function_address(name)
 
@@ -60,8 +60,8 @@ class LLVMProgram:
 
   def __call__(self, unused_global_size, unused_local_size, *bufs, wait=False):
     cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.c_void_p for _ in bufs])(self.fxn)
-    if wait: st = time.monotonic()
+    if wait: st = time.perf_counter()
     cfunc(*[x._buf if not isinstance(x, int) else x for x in bufs])
-    if wait: return time.monotonic()-st
+    if wait: return time.perf_counter()-st
 
 LLVMBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, LLVMProgram)

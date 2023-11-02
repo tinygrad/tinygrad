@@ -30,9 +30,9 @@ class ClangProgram:
       return pathlib.Path(output_file.name).read_bytes()
 
   def __call__(self, unused_global_size, unused_local_size, *args, wait=False):
-    if wait: st = time.monotonic()
+    if wait: st = time.perf_counter()
     self.fxn(*[x._buf if isinstance(x, RawMallocBuffer) else x for x in args])
-    if wait: return time.monotonic()-st
+    if wait: return time.perf_counter()-st
 
 renderer = functools.partial(uops_to_cstyle, CStyleLanguage(buffer_suffix=" restrict", arg_int_prefix="const int"))
 ClangBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False), renderer, ClangProgram)
