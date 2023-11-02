@@ -25,8 +25,7 @@ def atan2_gpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
       int idx = get_global_id(0);
       c[idx] = atan2(a[idx], b[idx]);
     }"""
-  from tinygrad.runtime.ops_gpu import compile_gpu
-  ASTRunner("atan2_gpu", src, compile_gpu(src), global_size=[prod(ret.shape)]).build(Device[ret.device].runtime).exec([ret.realized, a.realized, b.realized])
+  ASTRunner("atan2_gpu", src, Device[ret.device].compiler(src), global_size=[prod(ret.shape)]).build(Device[ret.device].runtime).exec([ret.realized, a.realized, b.realized])
   return ret.realized
 
 def atan2_cpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
