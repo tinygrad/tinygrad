@@ -1,13 +1,15 @@
 import time, ctypes
 from typing import ClassVar
 from tinygrad.ops import Compiled
-from tinygrad.helpers import getenv, DEBUG, cache_compiled
+from tinygrad.helpers import getenv, DEBUG, diskcache
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
 from tinygrad.runtime.lib import RawMallocBuffer
 
 import llvmlite.binding as llvm  # type: ignore
+
+LLVMOPT = bool(getenv("LLVMOPT"))
 
 class LLVM:
   target_machine: ClassVar[llvm.targets.TargetMachine] = None
@@ -26,7 +28,7 @@ class LLVM:
     LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
 
     # TODO: this makes compile times so much faster
-    if getenv("LLVMOPT"):
+    if LLVMOPT:
       llvm.set_option(str(), '-force-vector-interleave=4')  # this makes sum the same speed as torch, it also doubles the (slow) conv speed
       if DEBUG >= 4: llvm.set_option(str(), '--debug-only=loop-vectorize')
       #llvm.set_option(str(), '--debug')
@@ -44,19 +46,18 @@ class LLVM:
     backing_mod.triple = llvm.get_process_triple()
     LLVM.engine = llvm.create_mcjit_compiler(backing_mod, LLVM.target_machine)
 
-class LLVMProgram:
-  def __init__(self, name:str, prg:str, binary=False):
-    self.prg = prg if binary else self.compile(prg)
-    LLVM().engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(self.prg))
-    self.fxn = LLVM.engine.get_function_address(name)
+@diskcache
+def compile_llvm(prg, llvmopt=LLVMOPT) -> bytes:
+  mod = llvm.parse_assembly(prg)
+  mod.verify()
+  LLVM().optimizer.run(mod)
+  if DEBUG >= 5: print(LLVM.target_machine.emit_assembly(mod))
+  return LLVM.target_machine.emit_object(mod)
 
-  @cache_compiled
-  def compile(self, prg) -> bytes:
-    mod = llvm.parse_assembly(prg)
-    mod.verify()
-    LLVM().optimizer.run(mod)
-    if DEBUG >= 5: print(LLVM.target_machine.emit_assembly(mod))
-    return LLVM.target_machine.emit_object(mod)
+class LLVMProgram:
+  def __init__(self, name:str, lib:bytes):
+    LLVM().engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(lib))
+    self.fxn = LLVM.engine.get_function_address(name)
 
   def __call__(self, unused_global_size, unused_local_size, *bufs, wait=False):
     cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.c_void_p for _ in bufs])(self.fxn)
@@ -64,4 +65,4 @@ class LLVMProgram:
     cfunc(*[x._buf if not isinstance(x, int) else x for x in bufs])
     if wait: return time.perf_counter()-st
 
-LLVMBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, LLVMProgram)
+LLVMBuffer = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, compile_llvm, LLVMProgram)
