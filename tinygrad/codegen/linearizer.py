@@ -9,8 +9,7 @@ from tinygrad.ops import LazyOp, UnaryOps, ConstBuffer, MemBuffer, BufferOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, VariableOrNum, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
-from tinygrad.codegen.optimizer import OptimizedKernel
-from tinygrad.codegen.kernel import LocalBuffer
+from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.lazy import vars_from_ast
 from tinygrad.features.image import to_image_idx
 
@@ -45,7 +44,7 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
     local_idxs = local_idxs[0:maxdim-1] + nli[::-1]
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
-class Linearizer(OptimizedKernel):
+class Linearizer(Kernel):
   def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op, dtype=dtypes.int32):
     render_b:UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
     return self.uop(UOps.ALU, dtype, (a, render_b), op)
@@ -62,7 +61,8 @@ class Linearizer(OptimizedKernel):
     AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
   def global_load(self, i:int, idxs:Sequence[Node], acc=None) -> List[UOp]:
-    const = self.bufs[i].val if isinstance(self.bufs[i], ConstBuffer) else acc
+    buf = self.bufs[i]
+    const = buf.val if isinstance(buf, ConstBuffer) else acc
 
     def rename_var(v: VariableOrNum, expr: str): return v if isinstance(v, NumNode) else Variable(expr, v.min, v.max)
 
@@ -84,10 +84,10 @@ class Linearizer(OptimizedKernel):
     e_idxs, e_valids = g_idx.expand(expand_vars), g_valid.expand(expand_vars)
 
     ret = []
-    invalid_value = 0 if dtypes.is_int(self.bufs[i].dtype) else 0.0
+    invalid_value = 0 if dtypes.is_int(buf.dtype) else 0.0
     for idx, valid, rep_idx in zip(e_idxs, e_valids, Node.iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, Variable.num(0), Variable.num(1)) if valid.max == 0 else (const, idx, valid)
-      key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else (self.bufs[i].idx if isinstance(self.bufs[i], MemBuffer) else self.bufs[i].name)}{idx.render()}{valid.render()}"
+      key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
         if acc is not None:
           assert valid.min == 1
@@ -100,8 +100,8 @@ class Linearizer(OptimizedKernel):
         else:
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
-          if isinstance(self.bufs[i].dtype, ImageDType):
-            idx, valid = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+          if isinstance(buf.dtype, ImageDType):
+            idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
             rendered_idx = self.uop(UOps.CAST, dtypes._int2, (idx[0].render(self.render_ops, self), idx[1].render(self.render_ops, self)))
           else:
             rendered_idx = idx.render(self.render_ops, self)
@@ -115,6 +115,7 @@ class Linearizer(OptimizedKernel):
     return ret
 
   def global_store(self, i:int, idxs:List[Node], store:List[UOp]) -> None:
+    buf = self.bufs[i]
     buf_uop = self.buf_uops[i]
     assert buf_uop is not None, f"buffer {i} wasn't UOped"
 
@@ -140,8 +141,8 @@ class Linearizer(OptimizedKernel):
 
     for idx, var in store_offset.items():
       idx, valid = self.sts[i].expr_idxs(idx)
-      if isinstance(self.bufs[i].dtype, ImageDType):
-        idx, valid = to_image_idx(self.bufs[i].dtype.shape, idx, valid)
+      if isinstance(buf.dtype, ImageDType):
+        idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
         rendered_idx = self.uop(UOps.CAST, dtypes._int2, tuple(x.render(self.render_ops, self) for x in idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
@@ -149,12 +150,17 @@ class Linearizer(OptimizedKernel):
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
+    # no new opts and we already ran? skip relinearizing
+    if self.applied_opts == self.applied_opts_cache: return self
+
+    # save backups
+    sts_backup, gfr_backup, upc_backup = self.sts[:], self.group_for_reduce[:], self.upcasted
+
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
 
     # limit dims if we need to
-    # TODO: broken, and doesn't really belong here
-    #if self.opts.global_max and self.opts.local_max: self.limit_dims_to_max(self.opts.global_max, self.opts.local_max)
+    if self.opts.global_max and self.opts.local_max: self.limit_dims_to_max(self.opts.global_max, self.opts.local_max)
 
     # uops
     self.uops: List[UOp] = []
@@ -208,6 +214,9 @@ class Linearizer(OptimizedKernel):
           loop_uop = self.loop_uops[x.expr]
           if loop_uop.uop == UOps.LOOP: self.uop(UOps.END, None, (loop_uop,))
 
+    # set global/local size
+    self.global_size: Optional[List[int]] = None
+    self.local_size: Optional[List[int]] = None
     if self.dont_use_locals:
       self.global_size = [x.max+1 for x in loop_global_idxs][::-1]
       self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr.replace("gidx", "idx"), x.max+1)) for i,x in enumerate(loop_global_idxs)})
@@ -339,10 +348,10 @@ class Linearizer(OptimizedKernel):
         render_loop(end_local_idxs)
 
         # load localbufs
-        loaded_buffers["LOCAL_BUFFER"] = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)
+        loaded_buffers[self.bufs[-1]] = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)
 
         # there's no AST here (and there's no shape for the reduce LazyOp)
-        self.ast_parse(LazyOp(self.reduceop.op, ("LOCAL_BUFFER",)), acc, self.acc_offsets(-1), loaded_buffers, do_reduce=True) # type: ignore
+        self.ast_parse(LazyOp(self.reduceop.op, (self.bufs[-1],)), acc, self.acc_offsets(-1), loaded_buffers, do_reduce=True) # type: ignore
 
         # end the late reduce loop
         end_loop(end_local_idxs)
@@ -373,6 +382,11 @@ class Linearizer(OptimizedKernel):
       if DEBUG >= 4: print(f"reduced UOp count from {len(self.uops)} to {len(nu)}")
       self.uops = nu
 
+    # restore backups
+    self.sts, self.group_for_reduce, self.upcasted = sts_backup, gfr_backup, upc_backup
+
+    # set cache and return
+    self.applied_opts_cache = self.applied_opts[:]
     return self
 
   def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None, cachable=True) -> UOp:

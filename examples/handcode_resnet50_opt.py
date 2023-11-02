@@ -59,9 +59,9 @@ if __name__ == "__main__":
     # benchmark the programs
     choices = []
     for lin in lins:
-      tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10, should_copy=False)
+      tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10)
       gflops = sym_infer(lin.info.flops, {k:k.min for k in vars_from_ast(lin.ast)})*1e-9/tm
-      choices.append((tm, gflops, lin))
+      choices.append((tm, gflops, lin.linearize()))
 
       # print all kernels
       if DEBUG >= 1: print(f"                 kernel {i:2d} {lin.display_name+' '*(37-ansilen(lin.display_name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS")

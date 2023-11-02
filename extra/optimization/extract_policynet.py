@@ -17,7 +17,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.shape.symbolic import Variable
 inf, nan = float('inf'), float('nan')
-from tinygrad.codegen.optimizer import Opt, OptOps
+from tinygrad.codegen.kernel import Opt, OptOps
 
 INNER = 256
 class PolicyNet:

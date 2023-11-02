@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = 'tinygrad'
+version = '0.7.0'
+description = 'You like pytorch? You like micrograd? You love tinygrad! <3'
+authors = [{name = 'George Hotz'}]
+license = {text = 'MIT'}
+readme = 'README.md' 
+requires-python = '>=3.8'
+classifiers = [
+  'Programming Language :: Python :: 3',
+  'License :: OSI Approved :: MIT License'
+]
+
+dependencies= [
+  "numpy",
+  "requests",
+  "pillow",
+  "tqdm",
+  "networkx",
+  "pyopencl",
+  "PyYAML",
+  "pyobjc-framework-Metal; platform_system=='Darwin'",
+  "pyobjc-framework-Cocoa; platform_system=='Darwin'",
+  "pyobjc-framework-libdispatch; platform_system=='Darwin'",
+]
+
+[project.optional-dependencies]
+llvm = ["llvmlite"]
+cuda = ["pycuda"]
+arm = ["unicorn"]
+triton = ["triton-nightly>=2.1.0.dev20231014192330", "pycuda"]
+webgpu = ["wgpu"]
+linting = [
+  "flake8",
+  "pylint",
+  "mypy",
+  "typing-extensions",
+  "pre-commit",
+  "ruff",
+  "types-PyYAML",
+  "types-tqdm"
+]
+testing = [
+  "torch",
+  "pytest",
+  "pytest-xdist",
+  "onnx==1.14.1",
+  "onnx2torch",
+  "opencv-python",
+  "tabulate",
+  "safetensors",
+  "cloudpickle",
+  "transformers",
+  "sentencepiece",
+  "tiktoken",
+  "librosa"
+]
+
+[tool.setuptools]
+include-package-data = true
+packages = [
+  'tinygrad',
+  'tinygrad.codegen', 
+  'tinygrad.nn', 
+  'tinygrad.renderer', 
+  'tinygrad.runtime', 
+  'tinygrad.shape', 
+  'tinygrad.features'
+]

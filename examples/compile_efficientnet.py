@@ -11,7 +11,7 @@ if __name__ == "__main__":
   model = EfficientNet(0)
   model.load_from_pretrained()
   mode = "clang" if getenv("CLANG", "") != "" else "webgpu" if getenv("WEBGPU", "") != "" else ""
-  prg, inp_sizes, out_size, state = export_model(model, mode, Tensor.randn(1,3,224,224))
+  prg, inp_sizes, out_sizes, state = export_model(model, mode, Tensor.randn(1,3,224,224))
   dirname = Path(__file__).parent
   if getenv("CLANG", "") == "":
     safe_save(state, (dirname / "net.safetensors").as_posix())
@@ -28,9 +28,10 @@ if __name__ == "__main__":
     lbls = ast.literal_eval(lbls.decode('utf-8'))
     lbls = ['"'+lbls[i]+'"' for i in range(1000)]
     inputs = "\n".join([f"float {inp}[{inp_size}];" for inp,inp_size in inp_sizes.items()])
+    outputs = "\n".join([f"float {out}[{out_size}];" for out,out_size in out_sizes.items()])
     cprog.append(f"char *lbls[] = {{{','.join(lbls)}}};")
     cprog.append(inputs)
-    cprog.append(f"float outputs[{out_size}];")
+    cprog.append(outputs)
 
     # buffers (empty + weights)
     cprog.append("""
@@ -52,12 +53,12 @@ if __name__ == "__main__":
         }
       }
     }
-    net(input0, outputs);
+    net(input0, output0);
     float best = -INFINITY;
     int best_idx = -1;
     for (int i = 0; i < 1000; i++) {
-      if (outputs[i] > best) {
-        best = outputs[i];
+      if (output0[i] > best) {
+        best = output0[i];
         best_idx = i;
       }
     }
