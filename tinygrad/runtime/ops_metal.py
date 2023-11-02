@@ -77,13 +77,12 @@ class MetalProgram:
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
       return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
-    else:
-      options = Metal.MTLCompileOptions.alloc().init()
-      library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
-      # TODO: avoid file write here?
-      with tempfile.NamedTemporaryFile(delete=True) as output_file:
-        library.serializeToURL_error_(Cocoa.NSURL.URLWithString_(f"file://{output_file.name}"), None)
-        return pathlib.Path(output_file.name).read_bytes()
+    options = Metal.MTLCompileOptions.alloc().init()
+    library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
+    # TODO: avoid file write here?
+    with tempfile.NamedTemporaryFile(delete=True) as output_file:
+      library.serializeToURL_error_(Cocoa.NSURL.URLWithString_(f"file://{output_file.name}"), None)
+      return pathlib.Path(output_file.name).read_bytes()
 
   def __call__(self, global_size, local_size, *bufs, wait=False):
     assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"
