@@ -105,22 +105,27 @@ def preprocess(img, val):
   return img
 
 def image_load(fn, val=True):
+  e1 = time.monotonic()
   img = Image.open(fn).convert('RGB')
+  e2 = time.monotonic()
   img = image_resize(img, 256, Image.BILINEAR)
+  e3 = time.monotonic()
   ret = preprocess(img, val)
+  e4 = time.monotonic()
+  print('at batch size 16, multi 16')
+  print(f'total {(e4-e1)*1000:7.2f} open {(e2-e1)*1000:7.2f} resize {(e3-e2)*1000:7.2f} preprocess {(e4-e2)*1000:7.2f}')
   return ret
 
-def iterate(bs=32, val=True, shuffle=True, num_workers=0):
+from multiprocessing import Pool
+
+def iterate(bs=16, val=True, shuffle=True, num_workers=0):
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
-  if num_workers > 0:
-    from multiprocessing import Pool
-    p = Pool(16)
   for i in range(0, len(files), bs)[:-1]:  # Don't get last batch so all batch shapes are consistent
     st = time.monotonic()
     if num_workers > 0:
-      X = p.starmap(image_load, zip([files[i] for i in order[i:i+bs]], repeat(val)))
+      X = Pool(num_workers).starmap(image_load, zip([files[i] for i in order[i:i+bs]], repeat(val)))
     else:
       X = [image_load(files[i], val) for i in order[i:i+bs]]
     Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
@@ -136,6 +141,22 @@ def fetch_batch(bs, val=False):
   return np.array(X), np.array(Y)
 
 if __name__ == "__main__":
-  X,Y = fetch_batch(64)
-  print(X.shape, Y)
+  #X,Y = fetch_batch(64)
+  #print(X.shape, Y)
+  train_files = get_train_files()
+  one_file = train_files[0]
+  res = image_load(one_file)
+  # fp32
+  bytes = res.size * 4
+  print(bytes)
+  print(f'mb: {bytes/1000}')
+  # total... not feasible to preprocess & save.
+  print(f'total: {1.2*10**6*bytes/(1000*1000)}gb')
 
+  for x,y,t in iterate(num_workers=0, val=False):
+    print(f'one batch time {t*1000:7.2f} ms')
+    print(f'pred one batch time {16*16} ms')
+
+
+
+  # opt2 process on GPU
