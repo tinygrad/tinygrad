@@ -68,6 +68,7 @@ class LRUAllocator:
     self.epoch = 0
     self.free_space: Dict[Any, int] = defaultdict(lambda: dev_memsz)
     self.buffer_info: Dict[Any, Tuple[int, DType, str]] = dict()
+    self.overhead = 0# give more room so you can ensure you don't overallocate
     self.cached_buffers: Dict[Tuple[int, ...], Deque[Tuple[Any, int]]] = defaultdict(deque) # Cached buffer storage, splitted by type and size, newest first.
     self.aging_order: Dict[Any, Deque[Tuple[Tuple[int, ...], int]]] = defaultdict(deque) # Keys of cached_buffers, ordered from oldest to newest updates.
 
@@ -76,7 +77,7 @@ class LRUAllocator:
     return rawbufs.popleft()[0]
 
   def ensure_has_free_space(self, size, dtype, device):
-    while len(self.aging_order[device]) and (self.free_space[device]-size*dtype.itemsize) < 0: # When OOM removing lru buffers.
+    while len(self.aging_order[device]) and (self.free_space[device]-size*dtype.itemsize) < self.overhead: # When OOM removing lru buffers.
       bucket, epoch = self.aging_order[device].popleft()
       if self.cached_buffers[bucket] and self.cached_buffers[bucket][-1][1] == epoch: self._free_buffer(self.cached_buffers[bucket].pop()[0]) # Free cached buffer if it is still in cache.
 
@@ -95,7 +96,7 @@ class LRUAllocator:
 
   def alloc(self, size, dtype, device='0', **kwargs):
     rawbufs = self.cached_buffers.get(self._cached_bufkey(size, dtype, device), None)
-    if not rawbufs and (len(self.cached_buffers) + 1) % 20 == 0: print("LRUAllocator, number of buffers allocated: ", len(self.cached_buffers))
+    if not rawbufs and (len(self.cached_buffers) + 1) % 20 == 0: print("LRUAllocator, number of buffers allocated: ", len(self.cached_buffers), " free space ", self.free_space[device])
     return self._cache_reuse_buffer(rawbufs) if rawbufs else self._alloc_buffer(size, dtype, device, **kwargs)
 
   def free(self, buf): # free() just caches buffer. It might be freed later when OOM during allocation.
