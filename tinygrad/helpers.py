@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, pathlib, hashlib, tempfile, pickle, sqlite3
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -156,12 +156,11 @@ class GlobalCounters:
 # *** compiled cache decorator ***
 
 def cache_compiled(func):
+  if getenv("DISABLE_COMPILER_CACHE"): return func
   def wrapper(self, prg:str, *args, **kwargs) -> bytes:
-    cache_path, output_file = pathlib.Path(f"{tempfile.gettempdir()}/tinygrad_cc_{hashlib.sha256(prg.encode()).hexdigest()}"), pathlib.Path(tempfile.mktemp())
-    if not cache_path.exists():
-      output_file.write_bytes(func(self, prg, *args, **kwargs))
-      output_file.rename(cache_path)
-    return cache_path.read_bytes()
+    table, key = f"compiler_cache_{type(self).__name__}", hashlib.sha256(prg.encode()).hexdigest()
+    if (ret:=diskcache_get(table, key)): return ret
+    return diskcache_put(table, key, func(self, prg, *args, **kwargs))
   return wrapper
 
 # *** universal database cache ***

@@ -94,13 +94,9 @@ class HIPProgram:
 
   @cache_compiled
   def compile(self, prg, name) -> bytes:
-    try:
-      prog = hip.hiprtcCreateProgram(prg, name, [], [])
-      hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])
-      return hip.hiprtcGetCode(prog)
-    except Exception as e:
-      if DEBUG >= 3: print("FAILED TO BUILD", prg)
-      raise e
+    prog = hip.hiprtcCreateProgram(prg, name, [], [])
+    hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])
+    return hip.hiprtcGetCode(prog)
 
   def __call__(self, global_size, local_size, *args, wait=False):
     hip.hipSetDevice(args[0]._device)
