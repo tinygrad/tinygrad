@@ -311,6 +311,7 @@ def test_loss():
   optimizer.zero_grad()
   total_loss.backward()
   optimizer.step()
+  del annotations
 
 def binary_cross_entropy(pred: Tensor, y: Tensor): return -(pred.log()*y + (1-y)*(1-pred).log()).mean()
 # todo eps is a bit big
@@ -439,7 +440,8 @@ class RPNLossComputation:
     del objectness, labels, regression_targets, sampled_pos_inds, sampled_neg_inds, anchors, box_regression
     return objectness_loss, box_loss
 
-if __name__ == "__main__":
+def run_all_tests():
+  print("running all tests to ensure no regressions")
   test_loss()
   test_fork_grad()
   download_train()
@@ -452,3 +454,7 @@ if __name__ == "__main__":
   test_rind()
   test_balanced_sampler()
   test_match_targets_to_anchors()
+  print("Tests succeeded. Now training.")
+
+if __name__ == "__main__":
+  run_all_tests()

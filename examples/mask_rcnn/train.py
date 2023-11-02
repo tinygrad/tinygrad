@@ -11,6 +11,7 @@ from models.resnet import ResNet
 from util import FileLoader
 from PIL import Image
 from models.mask_rcnn import *
+import traceback
 
 def build_transforms(is_train=True):
   pixel_mean = [102.9801, 115.9465, 122.7717]
@@ -134,9 +135,10 @@ def tensors_allocated():
   return sum([isinstance(x, Tensor) for x in gc.get_objects()])
 
 def simple():
-  from loss import make_match_fn,make_balanced_sampler_fn,generate_rpn_labels,RPNLossComputation, print_gpu_memory
+  from loss import make_match_fn,make_balanced_sampler_fn,generate_rpn_labels,RPNLossComputation, print_gpu_memory, run_all_tests
   from extra.datasets.coco import BASEDIR
 
+  run_all_tests()
   hq_fn, _ = make_match_fn(0.7, 0.4)
   sampler = make_balanced_sampler_fn(256, 0.5)
   coder = BoxCoder(weights=(1.0, 1.0, 1.0, 1.0))
@@ -147,18 +149,19 @@ def simple():
   rpn = RPNHead(
     channels, anchor_generator.num_anchors_per_location()[0]
   )
-  # optimizer = optim.SGD(backbone.parameters() + rpn.parameters(), lr=0.001, momentum=0.9, weight_decay=0.0005)
+  optimizer = optim.SGD(backbone.parameters() + rpn.parameters(), lr=0.001, momentum=0.9, weight_decay=0.0005)
 
   import random
   from pycocotools.coco import COCO
   import os
   from PIL import Image
 
-  NUM_EPOCHS = 5000
+  NUM_EPOCHS = 800
 
   # Load COCO annotations
   coco = COCO(os.path.join(BASEDIR, 'annotations', 'instances_train2017.json'))
   img_ids = coco.getImgIds()
+  losses = []
 
   for epoch in range(NUM_EPOCHS):
     # Select a random image ID
@@ -185,28 +188,31 @@ def simple():
       if objectness_loss is None or regression_loss is None: continue # todo negative mine
     except Exception as e:
       print("forward error")
-      print(e)
+      print(traceback.format_exc())
       continue
     total_loss = objectness_loss + regression_loss
-    # optimizer.zero_grad()
+    optimizer.zero_grad()
     try:
       total_loss.backward()
     except Exception as e:
       print("backward error")
-      print(e) # some backwards overflow cuda blocks
+      print(traceback.format_exc())
       continue
-    # optimizer.step()
+    optimizer.step()
     try:
-      print(f"Epoch {epoch + 1}/{NUM_EPOCHS}, Loss: {total_loss.numpy()}")
+      epoch_loss = total_loss.numpy().item()
+      losses.append(epoch_loss)
+      print(f"Epoch {epoch + 1}/{NUM_EPOCHS}, Loss: {epoch_loss}")
     except Exception as e:
       print("error computing total loss for the epoch")
-      print("hopefully it was good")
-      print(e)
+      print(traceback.format_exc())
       continue
     mem_info = print_gpu_memory("epoch")
     del total_loss, images, img, features, objectness, rpn_box_regression, anchors, targets, objectness_loss, regression_loss, img_metadata, annotations
+  return losses
 
 if __name__ == "__main__":
   start = time.time()
-  simple()
+  losses = simple()
   print("&&&& MLPERF METRIC TIME=", time.time() - start)
+  print(f"losses: {losses}")

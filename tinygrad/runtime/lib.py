@@ -64,7 +64,7 @@ class RawBufferTransfer(RawBuffer):
     return ret
 
 class LRUAllocator:
-  def __init__(self, dev_memsz=(4<<30)):
+  def __init__(self, dev_memsz=(4<<30)): 
     self.epoch = 0
     self.free_space: Dict[Any, int] = defaultdict(lambda: dev_memsz)
     self.buffer_info: Dict[Any, Tuple[int, DType, str]] = dict()
@@ -95,7 +95,7 @@ class LRUAllocator:
 
   def alloc(self, size, dtype, device='0', **kwargs):
     rawbufs = self.cached_buffers.get(self._cached_bufkey(size, dtype, device), None)
-    if DEBUG>2 and not rawbufs and (len(self.cached_buffers) + 1) % 20 == 0: print("LRUAllocator, number of buffers allocated: ", len(self.cached_buffers))
+    if not rawbufs and (len(self.cached_buffers) + 1) % 20 == 0: print("LRUAllocator, number of buffers allocated: ", len(self.cached_buffers))
     return self._cache_reuse_buffer(rawbufs) if rawbufs else self._alloc_buffer(size, dtype, device, **kwargs)
 
   def free(self, buf): # free() just caches buffer. It might be freed later when OOM during allocation.
