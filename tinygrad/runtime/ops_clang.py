@@ -15,7 +15,7 @@ CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define
 
 class ClangProgram:
   def __init__(self, name:str, prg:str, binary=False):
-    self.prg: bytes = self.compile(CLANG_PROGRAM_HEADER+prg)
+    self.prg: bytes = prg if binary else self.compile(CLANG_PROGRAM_HEADER+prg)
 
     # write to disk so we can load it
     with tempfile.NamedTemporaryFile(delete=True) as cached_file_path:

@@ -60,7 +60,7 @@ def unwrap(x):
 
 class MetalProgram:
   def __init__(self, name:str, prg:str, binary:bool=False):
-    lib = self.compile(prg)
+    lib = prg if binary else self.compile(prg)
     data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
     self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
     self.fxn = self.library.newFunctionWithName_(name)
