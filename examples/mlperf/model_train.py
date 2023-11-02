@@ -129,7 +129,7 @@ def train_resnet_dali():
     Tensor.training = True
     cl = time.monotonic() 
     for i,data in enumerate(train_loader):
-      X,Y = data[0]["data"],data[0]["label"].squeeze(-1).long()
+      X,Y = data[0]["data"].numpy(),data[0]["label"].squeeze(-1).long().numpy()
       GlobalCounters.reset()
       st = time.monotonic()
       data_time = st-cl
