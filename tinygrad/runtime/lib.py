@@ -77,7 +77,7 @@ class LRUAllocator:
     return rawbufs.popleft()[0]
 
   def ensure_has_free_space(self, size, dtype, device):
-    if not rawbufs and (len(self.cached_buffers) + 1) % 20 == 0: print("LRUAllocator, number of buffers allocated: ", len(self.cached_buffers), " free space ", self.free_space[device])
+    if (len(self.cached_buffers) + 1) % 20 == 0: print("LRUAllocator, number of buffers allocated: ", len(self.cached_buffers), " free space ", self.free_space[device])
     while len(self.aging_order[device]) and (self.free_space[device]-size*dtype.itemsize) < self.overhead: # When OOM removing lru buffers.
       bucket, epoch = self.aging_order[device].popleft()
       if self.cached_buffers[bucket] and self.cached_buffers[bucket][-1][1] == epoch: self._free_buffer(self.cached_buffers[bucket].pop()[0]) # Free cached buffer if it is still in cache.
