@@ -142,8 +142,8 @@ def train_resnet_dali():
       et = time.monotonic()
       loss_cpu = loss.numpy()
       cl = time.monotonic()
-      estim = math.ceil(total_train/BS)*(data_time+et-st)/(60*60)
-      print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(st-ft)*1000.0:7.2f} ms move data, {data_time*1000:7.2f} ms prefetch data {loss_cpu:7.2f} loss, {estim} hrs expected {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      estim = epochs*math.ceil(total_train/BS)*(data_time+et-st)/(60*60)
+      print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(st-ft)*1000.0:7.2f} ms move data, {data_time*1000:7.2f} ms prefetch data {loss_cpu:7.2f} loss, {estim:7.2f} hrs expected {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
       wandb.log({"lr": scheduler.get_lr().numpy().item(),
                  "train/data_time": data_time,
                  "train/python_time": et - st,
