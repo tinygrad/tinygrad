@@ -3,7 +3,7 @@ from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import GlobalCounters, getenv, dtypes
-from examples.mlperf.helpers import PreFetcher
+from extra.datasets.imagenet import PreFetcher
 from tqdm import tqdm
 import numpy as np
 import random
