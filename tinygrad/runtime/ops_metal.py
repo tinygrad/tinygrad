@@ -72,7 +72,7 @@ def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
     return pathlib.Path(output_file.name).read_bytes()
 
 class MetalProgram:
-  def __init__(self, name:str, lib:bytes):
+  def __init__(self, name:str, lib:bytes, global_size:List[int], local_size:List[int]):
     data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
     self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
     self.fxn = self.library.newFunctionWithName_(name)
@@ -82,9 +82,10 @@ class MetalProgram:
         shader.flush()
         os.system(f"cd {pathlib.Path(__file__).parents[2]}/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
     self.pipeline_state = unwrap(METAL.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
-
-  def __call__(self, global_size, local_size, *bufs, wait=False):
     assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"
+    self.global_size, self.local_size = Metal.MTLSize(*global_size), Metal.MTLSize(*local_size)
+
+  def __call__(self, *bufs, wait=False):
     command_buffer = METAL.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
@@ -92,7 +93,7 @@ class MetalProgram:
       if isinstance(a, RawMetalBuffer): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
       elif isinstance(a, int): encoder.setBytes_length_atIndex_((arg:=ctypes.c_int32(a)), ctypes.sizeof(arg), i)
       else: raise RuntimeError(f"arg at index {i} has unsupported type {type(a)}")
-    encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
+    encoder.dispatchThreadgroups_threadsPerThreadgroup_(self.global_size, self.local_size)
     encoder.endEncoding()
     command_buffer.commit()
     if wait:
