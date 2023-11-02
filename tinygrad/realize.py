@@ -24,7 +24,35 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
       for i,s in enumerate(si.ast.src): assert isinstance(s, LazyOp) and s.op == BufferOps.MEM and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
       LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out, *si.inputs)
     else:
-      si.out.realized = Device[si.out.device].exec_ast(si.ast, output=si.out, inputs=si.inputs, var_vals=si.var_vals, **si.out._device_extra_args())
+      # NOTE: all the steps have now moved here
+      device = Device[si.out.device]
+
+      # get linearizer
+      from tinygrad.codegen.linearizer import Linearizer
+      lin = Linearizer(si.ast, device.linearizer_opts)
+
+      # TODO: search optimizations
+      lin.hand_coded_optimizations()
+
+      # generate uops from the AST
+      lin.linearize()
+
+      # render the source code
+      src, runtime_args = device.renderer(lin.function_name, lin.uops)
+      if DEBUG >= 4: print(src)
+
+      # compile the source code
+      lib: bytes = device.compiler(src)
+
+      # create the program with the runtime
+      prg = device.runtime(lin.function_name, lib, **runtime_args)
+
+      # allocate the output buffer
+      si.out.realized = device.buffer(si.out.st.size(), si.out.dtype)
+
+      # run the program
+      print("here")
+      prg(lin.global_size, lin.local_size, si.out.realized, *[x.realized for x in si.inputs])
     del si.out.op
     for v in si.out.views: del v.op
     assert si.out.realized and isinstance(si.out.realized, Device[si.out.device].buffer), f"device mismatch on realized got {type(si.out.realized)} expected {si.out.device}"
