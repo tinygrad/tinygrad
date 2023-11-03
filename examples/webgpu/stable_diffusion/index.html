@@ -68,6 +68,7 @@
         import ClipTokenizer from 'https://softwired.nyc3.cdn.digitaloceanspaces.com/sd/clip_tokenizer.js';
         window.clipTokenizer = new ClipTokenizer();
     </script>
+    <script src="./f16_to_f32.js"></script>
     <script src="./net.js"></script>
 </head>
 
@@ -122,7 +123,7 @@
             requiredLimits.maxBufferSize = maxBufferSizeInSDModel;
             
             return await adapter.requestDevice({
-            requiredLimits,
+            requiredLimits
             }	);
         };
 
@@ -134,6 +135,147 @@
             return out;
         }
 
+        const getProgressDlForPart = async (part, progressCallback) => {
+            const response = await fetch(part);
+            const contentLength = response.headers.get('content-length');
+            const total = parseInt(contentLength, 10);
+        
+            const res = new Response(new ReadableStream({
+            async start(controller) {
+                const reader = response.body.getReader();
+                for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                progressCallback(part, value.byteLength, total);
+                controller.enqueue(value);
+                }
+                controller.close();
+            },
+            }));
+        
+            return res.arrayBuffer();
+        };
+  
+        const getAndDecompressF16Safetensors = async (device, progress) => {
+            let totalLoaded = 0;
+            let totalSize = 0;
+            let partSize = {};
+
+            const progressCallback = (part, loaded, total) => {
+                totalLoaded += loaded;
+
+                if (!partSize[part]) {
+                    totalSize += total;
+                    partSize[part] = true;
+                }
+                progress(totalLoaded, totalSize);
+            };
+        
+            let buffers = await Promise.all([
+                getProgressDlForPart(window.MODEL_BASE_URL + '/net_part0.safetensors', progressCallback),
+                getProgressDlForPart(window.MODEL_BASE_URL + '/net_part1.safetensors', progressCallback),
+                getProgressDlForPart(window.MODEL_BASE_URL + '/net_part2.safetensors', progressCallback),
+                getProgressDlForPart(window.MODEL_BASE_URL + '/net_part3.safetensors', progressCallback),
+                getProgressDlForPart(window.MODEL_BASE_URL + '/net_textmodel.safetensors', progressCallback)
+            ]);
+
+            // Combine everything except for text model, since that's alreafy f32
+            const totalLength = buffers.reduce((acc, buffer, index, array) => {
+                if (index < array.length - 1) {
+                    return acc + buffer.byteLength;
+                } else {
+                    return acc;
+                }
+                }, 0
+            );
+
+            let combinedBuffer = new Uint8Array(totalLength);
+
+            let offset = 0;
+            buffers.forEach((buffer, index) => {
+                if (index < 4) {
+                    combinedBuffer.set(new Uint8Array(buffer), offset);
+                    offset += buffer.byteLength;
+                    buffer = null;
+                }
+            });
+
+            let textModelU8 = new Uint8Array(buffers[4]);
+            buffers = null;
+
+            const textModelOffset = 3772703308;
+            const metadataLength = Number(new DataView(combinedBuffer.buffer).getBigUint64(0, true));
+            const metadata = JSON.parse(new TextDecoder("utf8").decode(combinedBuffer.subarray(8, 8 + metadataLength)));
+
+            const allToDecomp = combinedBuffer.byteLength - (8 + metadataLength);
+            const decodeChunkSize = 67107840;
+            const numChunks = Math.ceil(allToDecomp/decodeChunkSize);
+
+            console.log(allToDecomp + " bytes to decompress");
+            console.log("Will be decompressed in " + numChunks+ " chunks");
+
+            let partOffsets = [{start: 0, end: 1131408336}, {start: 1131408336, end: 2227518416}, {start: 2227518416, end: 3308987856}, {start: 3308987856, end: 4265298864}];
+            let parts = [];
+
+            for (let offsets of partOffsets) {
+                parts.push(new Uint8Array(offsets.end-offsets.start));
+            }
+            parts[0].set(new Uint8Array(new BigUint64Array([BigInt(metadataLength)]).buffer), 0);
+            parts[0].set(combinedBuffer.subarray(8, 8 + metadataLength), 8);
+            parts[3].set(textModelU8, textModelOffset+8+metadataLength - partOffsets[3].start);
+
+            let start = Date.now();
+            let cursor = 0;
+
+            for (let i = 0; i < numChunks; i++) {
+                let chunkStartF16 = 8 + metadataLength + (decodeChunkSize * i);
+                let chunkEndF16 = chunkStartF16 + decodeChunkSize;
+                
+                
+                let chunk = combinedBuffer.subarray(chunkStartF16, chunkEndF16);
+
+                if (chunk.byteLength %4 != 0) {
+                    const paddingBytes = 4 - (chunk.byteLength % 4);
+                    const alignedBuffer = new ArrayBuffer(chunk.byteLength + paddingBytes);
+                    const alignedView = new Uint8Array(alignedBuffer);
+                    alignedView.set(new Uint8Array(chunk));
+                    chunk = alignedView;
+                }
+
+                let result = await f16tof32GPU(device, chunk);
+                let resultUint8 = new Uint8Array(result.buffer);
+                let chunkStartF32 = 8 + metadataLength + (decodeChunkSize * i * 2);
+                let chunkEndF32 = chunkStartF32 + resultUint8.byteLength;
+                let offsetInPart = chunkStartF32 - partOffsets[cursor].start;
+
+                if (chunkEndF32 < partOffsets[cursor].end || cursor === parts.length - 1) {
+                    parts[cursor].set(resultUint8, offsetInPart);
+                } else {
+                    let spaceLeftInCurrentPart = partOffsets[cursor].end - chunkStartF32;
+                    parts[cursor].set(resultUint8.subarray(0, spaceLeftInCurrentPart), offsetInPart);
+
+                    cursor++;
+
+                    if (cursor < parts.length) {
+                        let nextPartOffset = spaceLeftInCurrentPart;
+                        let nextPartLength = resultUint8.length - nextPartOffset;
+                        parts[cursor].set(resultUint8.subarray(nextPartOffset, nextPartOffset + nextPartLength), 0);
+                    }
+                }
+
+                resultUint8 = null;
+                result = null;
+            }
+
+            combinedBuffer = null;
+
+            let end = Date.now();
+            console.log("Decoding took: " + ((end - start) / 1000) + " s");
+            console.log("Avarage " + ((end - start) / numChunks) + " ms per chunk");
+
+            return parts;
+        };
+
         const loadNet = async () => {
             const modelDlTitle = document.getElementById("modelDlTitle");
 
@@ -142,12 +284,12 @@
                 document.getElementById("modelDlProgressValue").innerHTML = Math.trunc((loaded/total) * 100) + "%"
             }
 
-            safetensorParts = await getSafetensorParts(progress);
+            const device = await getDevice();
+            safetensorParts = await getAndDecompressF16Safetensors(device, progress);
 
             modelDlTitle.innerHTML = "Compiling model"
 
             let models = ["textModel", "diffusor", "decoder"];
-            const device = await getDevice();
 
             nets = await timer(() => Promise.all([
                 textModel().setup(device, safetensorParts),
@@ -178,7 +320,7 @@
 
                 console.log("Timesteps: " + timesteps);
 
-                let alphasCumprod = getWeight(safetensorParts, "alphas_cumprod");
+                let alphasCumprod = getWeight(safetensorParts,"alphas_cumprod");
                 let alphas = [];
 
                 for (t of timesteps) {

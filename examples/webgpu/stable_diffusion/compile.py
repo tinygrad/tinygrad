@@ -8,32 +8,68 @@ from extra.utils import download_file
 from typing import NamedTuple, Any, List
 from pathlib import Path
 import argparse
+import numpy as np
+
+def convert_f32_to_f16(input_file, output_file):
+  with open(input_file, 'rb') as f:
+    metadata_length_bytes = f.read(8)
+    metadata_length = int.from_bytes(metadata_length_bytes, byteorder='little', signed=False)
+    metadata_json_bytes = f.read(metadata_length)
+    float32_values = np.fromfile(f, dtype=np.float32)
+
+  first_text_model_offset = 3772703308
+  num_elements = int((first_text_model_offset)/4)
+  front_float16_values = float32_values[:num_elements].astype(np.float16)
+  rest_float32_values = float32_values[num_elements:]
+
+  with open(output_file, 'wb') as f:
+    f.write(metadata_length_bytes)
+    f.write(metadata_json_bytes)
+    front_float16_values.tofile(f)
+    rest_float32_values.tofile(f)
 
 FILENAME = Path(__file__).parent.parent.parent.parent / "weights/sd-v1-4.ckpt"
 
-def create_multipart_safetensor(fn, part_size):
+def split_safetensor(fn):
   _, json_len, metadata = safe_load_metadata(fn)
+  text_model_offset = 3772703308
+  chunk_size = 536870912
+
+  for k in metadata:
+    # safetensor is in fp16, except for text moel
+    if (metadata[k]["data_offsets"][0] < text_model_offset):
+      metadata[k]["data_offsets"][0] = int(metadata[k]["data_offsets"][0]/2)
+      metadata[k]["data_offsets"][1] = int(metadata[k]["data_offsets"][1]/2)
+  
   last_offset = 0
-  part_start_offsets = []
+  part_end_offsets = []
 
   for k in metadata:
     offset = metadata[k]['data_offsets'][0]
+
+    if offset == text_model_offset:
+      break
+
     part_offset = offset - last_offset
     
-    if (part_offset >= part_size):
-      part_start_offsets.append(8+json_len+offset)
+    if (part_offset >= chunk_size):
+      part_end_offsets.append(8+json_len+offset)
       last_offset = offset
 
+  text_model_start = int(text_model_offset/2)
   net_bytes = bytes(open(fn, 'rb').read())
-  part_start_offsets.append(len(net_bytes))
+  part_end_offsets.append(text_model_start+8+json_len)
   cur_pos = 0
   
-  for i, end_pos in enumerate(part_start_offsets):
+  for i, end_pos in enumerate(part_end_offsets):
     with open(f'./net_part{i}.safetensors', "wb+") as f:
       f.write(net_bytes[cur_pos:end_pos])
       cur_pos = end_pos
 
-  return part_start_offsets
+  with open(f'./net_textmodel.safetensors', "wb+") as f:
+    f.write(net_bytes[text_model_start+8+json_len:])
+  
+  return part_end_offsets
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -115,70 +151,28 @@ if __name__ == "__main__":
 
     if step.name == "diffusor":
       if args.remoteweights:
-        part_start_offsets = [1131408336, 2227518416, 3308987856, 4265298864]
-        base_url = "https://huggingface.co/wpmed/tinygrad-sd/resolve/main"
+        base_url = "https://huggingface.co/wpmed/tinygrad-sd-f16/resolve/main"
       else:
         state = get_state_dict(model)
         safe_save(state, os.path.join(os.path.dirname(__file__), "net.safetensors"))
-        part_start_offsets = create_multipart_safetensor("./net.safetensors", 1073741824)
+        convert_f32_to_f16("./net.safetensors", "./net_conv.safetensors")
+        split_safetensor("./net_conv.safetensors")
         os.remove("net.safetensors")
+        os.remove("net_conv.safetensors")
         base_url = "."
 
-      safetensor_parts = ',\n    '.join([f"getProgressDlForPart('{base_url}/net_part{i}.safetensors', progressCallback)" for i, _ in enumerate(part_start_offsets)])
-
-  prekernel = f"""const getTensorMetadata = (safetensorBuffer) => {{
+  prekernel = f"""
+    window.MODEL_BASE_URL= "{base_url}";
+    const getTensorMetadata = (safetensorBuffer) => {{
       const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
       const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
       return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
     }};
-    
-    const getProgressDlForPart = async (part, progressCallback) => {{
-    const response = await fetch(part);
-    const contentLength = response.headers.get('content-length');
-    const total = parseInt(contentLength, 10);
-  
-    const res = new Response(new ReadableStream({{
-      async start(controller) {{
-        const reader = response.body.getReader();
-        for (;;) {{
-          const {{ done, value }} = await reader.read();
-          if (done) break;
-          progressCallback(part, value.byteLength, total);
-          controller.enqueue(value);
-        }}
-        controller.close();
-      }},
-    }}));
-  
-    return res.arrayBuffer();
-  }};
-  
-  const getSafetensorParts = async (progress) => {{
-    let totalLoaded = 0;
-    let totalSize = 0;
-    let partSize = {{}};
-
-    const progressCallback = (part, loaded, total) => {{
-      totalLoaded += loaded;
-
-      if (!partSize[part]) {{
-        totalSize += total;
-        partSize[part] = true;
-      }}
-      progress(totalLoaded, totalSize);
-    }};
-  
-    const buffers = await Promise.all([
-    {safetensor_parts}
-    ]);
-  
-    return buffers.map(buffer => new Uint8Array(buffer));
-  }};
 
   const getTensorBuffer = (safetensorParts, tensorMetadata, key) => {{
     let selectedPart = 0;
     let counter = 0;
-    let partStartOffsets = {part_start_offsets};
+    let partStartOffsets = [1131408336, 2227518416, 3308987856, 4265298864];
     let correctedOffsets = tensorMetadata.data_offsets;
     let prev_offset = 0;
 
