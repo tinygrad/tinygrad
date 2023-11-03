@@ -172,8 +172,7 @@ class Tensor:
   def arange(start, stop=None, step=1, **kwargs):
     if stop is None: stop, start = start, 0
     def countbits(x): return next(s for s in range(256) if x >> s == 0)
-    out_len = math.ceil((stop - start) / step)
-    nbits = countbits(out_len)
+    nbits = countbits(out_len := math.ceil(abs((stop - start) / step)))
     ret = Tensor(0, **kwargs).reshape([1] * nbits).expand([2] * nbits)
     for i in range(nbits): ret = ret + Tensor(1 << i, **kwargs).reshape([1] * nbits).pad(tuple([(0, 0)] * (nbits - i - 1) + [(1, 0)] + [(0, 0)] * i))
     return (ret * step + start).reshape(2 ** nbits).shrink(((0, out_len),))
