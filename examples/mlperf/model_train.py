@@ -135,10 +135,11 @@ def train_resnet_dali():
     for i,data in enumerate(t:=tqdm(train_loader)): 
       X,Y = data[0]["data"].cpu().numpy(),data[0]["label"].squeeze(-1).long().cpu().numpy()
       GlobalCounters.reset()
-      data_time = st-cl
       st = time.monotonic()
+      data_time = st-cl
       X, Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
-      loss, out = train_step(X, Y)
+      #loss, out = train_step(X, Y)
+      time.sleep(20/1000)
       et = time.monotonic()
       if i % 1000 == 0: loss_cpu = loss.numpy()
       cl = time.monotonic()
