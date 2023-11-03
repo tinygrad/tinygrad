@@ -461,7 +461,7 @@ if __name__ == "__main__":
       if nm in globals():
         print(f"training {m}")
         alls = []
-        steps = 300
+        steps = 10
         for bs in range(8,16,8):
           for w in range(0,2,2):
             if w == 0: w=1
