@@ -2,9 +2,10 @@ from __future__ import annotations
 import importlib, inspect, functools, pathlib, itertools, random, math, collections
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, dtypes, dedup
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer
+from tinygrad.shape.shapetracker import ShapeTracker
 from dataclasses import dataclass
 
 # these are the llops your accelerator must implement, along with toCpu
@@ -25,7 +26,6 @@ OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOp
 
 if TYPE_CHECKING:
   from tinygrad.lazy import LazyBuffer
-  from tinygrad.shape.shapetracker import ShapeTracker
 
 @dataclass(frozen=True)
 class MemBuffer:
@@ -108,49 +108,17 @@ Device = _Device()
 
 # **************** for Interpreted Buffers ****************
 
-@functools.lru_cache(None)
-def ast_to_python(ast:LazyOp):
-  lines: List[Tuple[str, List[str], str]] = []
-  last_use: Dict[str, int] = {}
-  @functools.lru_cache(None)
-  def _compile_ast(ast:LazyOp) -> str:
-    nonlocal lines
-    if ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
-      ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
-    inp = [_compile_ast(src) for src in ast.src]
-    for ip in inp: last_use[ip] = len(lines)
-    real_inp = inp[:]
-    if ast.op == BufferOps.MEM: inp += ["inputs", str(ast.arg.idx-1), str(ast.arg.st.size()), str(ast.arg.dtype)]
-    elif ast.op == BufferOps.CONST: inp += [str(ast.arg.val), str(ast.arg.dtype)]
-    elif ast.arg: inp += [str(ast.arg)]
-    ret = f"a{len(lines)}"
-    lines.append((ret, dedup(real_inp), f"f[{ast.op}]({', '.join(inp)})"))
-    if ast.op in BufferOps:
-      for mop,arg in ast.arg.st.to_movement_ops():
-        lines.append((ret, [ret], f"f[{mop}]({ret}, {str(arg)})"))
-    return ret
-  ret = _compile_ast(ast)
-  src = ['def run(f, inputs):']
-  for i,(x,inp,y) in enumerate(lines):
-    src.append(f"  {x} = {y}")
-    to_del = [ip for ip in inp if last_use[ip] == i]
-    if to_del and i != len(lines)-1: src.append(f"  del {','.join(to_del)}")
-  src.append(f"  return {ret}")
-  ssrc = '\n'.join(src)
-  if DEBUG >= 4: print(ssrc)
-  tglob = {"BufferOps": BufferOps, "UnaryOps": UnaryOps, "BinaryOps": BinaryOps, "TernaryOps": TernaryOps, "MovementOps": MovementOps, "ReduceOps": ReduceOps, "dtypes": dtypes, "inf": math.inf, "nan": math.nan}
-  # pylint: disable-next=exec-used
-  exec(compile(ssrc, "<ast>", "exec"), tglob)
-  return tglob['run']
-
+from tinygrad.interpreted import ast_to_python
 class Interpreted:
   def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], to_underlying=lambda x: x._buf, from_underlying=None):
     self.buffer, self.fxn_for_op, self.to_underlying, self.from_underlying = buffer, fxn_for_op, to_underlying, from_underlying
     self.synchronize = lambda: None
     self.codegen = None
+    self.method_cache: Dict[LazyOp, Callable] = {}
 
   def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, context=None, **kwargs):
-    ret = ast_to_python(ast)(self.fxn_for_op, [x.realized for x in inputs] if inputs else None)
+    if ast not in self.method_cache: self.method_cache[ast] = ast_to_python(ast, self.fxn_for_op)
+    ret = self.method_cache[ast]([x.realized for x in inputs] if inputs else None)
     if self.from_underlying: ret = self.from_underlying(ret)
     if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op:
       ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.to_underlying(ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
@@ -173,15 +141,11 @@ class FlopCounter:
     self.flops, ret = 0, self.flops
     return ret
 InterpretedFlopCounter = Interpreted(FlopCounter, {
-  BufferOps.MEM: lambda _,idx,sz,dtype: FlopCounter((sz,), dtype, 0, {idx: dtype.itemsize*sz}), BufferOps.CONST: lambda _,dtype: FlopCounter(tuple(), dtype, 0, {}),
-  MovementOps.AS_STRIDED: lambda self,arg: FlopCounter(tuple(arg[0]), self.dtype, self.consume_flops(), self.mem),
-  MovementOps.EXPAND: lambda self, arg: FlopCounter(arg, self.dtype, self.consume_flops(), self.mem),
-  MovementOps.PAD: lambda self, arg: FlopCounter(tuple(x+y[0]+y[1] for x,y in zip(self.shape, arg)), self.dtype, self.consume_flops(), self.mem),
+  BufferOps.MEM: lambda arg: FlopCounter(arg.st.shape, arg.dtype, 0, {arg.idx: arg.dtype.itemsize*arg.st.size()}), BufferOps.CONST: lambda arg: FlopCounter(arg.st.shape, arg.dtype, 0, {}),
   UnaryOps.CAST: lambda self,arg: FlopCounter(self.shape, arg[0], self.consume_flops(), self.mem),   # cast uses no flops
   **{op:lambda self: FlopCounter(self.shape, self.dtype, self.consume_flops() + prod(self.shape), self.mem) for op in UnaryOps if op != UnaryOps.CAST},
   **{op:lambda self,y: FlopCounter(self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape), {**self.mem, **y.mem}) for op in BinaryOps},
   **{op:lambda self,new_shape: FlopCounter(new_shape, self.dtype, self.consume_flops() + prod(self.shape), self.mem) for op in ReduceOps},
-  TernaryOps.MULACC: lambda self,y,new_shape: FlopCounter(new_shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + 2*prod(self.shape), {**self.mem, **y.mem}),
   TernaryOps.WHERE: lambda self,y,z: FlopCounter(self.shape, y.dtype, self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape), {**self.mem, **y.mem, **z.mem})})
 
 @functools.lru_cache(None)
