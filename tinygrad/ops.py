@@ -329,8 +329,7 @@ class Compiled:
           if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
           k = timed[0][1]
       else:
-        pass
-        # k.required_optimizations()
+        k.required_optimizations()
       return self.to_program(k)
 
     if getenv("ENABLE_METHOD_CACHE", 1):
