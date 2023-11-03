@@ -41,12 +41,12 @@ def ast_to_python(ast:LazyOp, f:Dict[Op, Callable]) -> Callable:
   def _compile_ast(ast:LazyOp) -> str:
     if TernaryOps.MULACC in f and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
-    inp = [_compile_ast(src) for src in ast.src]
 
     if MovementOps.AS_STRIDED in f and ast.op in BufferOps:
       tmp = f"{gstr(f[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"{gstr(f[ast.op], ast.op)}(inputs[{ast.arg.idx-1}])"
       for mop,arg in to_movement_ops(ast.arg.st): tmp = f"{gstr(f[mop], mop)}({tmp}, {gstr(arg)})"
     else:
+      inp = [_compile_ast(src) for src in ast.src]
       tmp = f"{gstr(f[ast.op], ast.op)}({', '.join(inp + ([gstr(ast.arg)] if ast.arg else []))})"
 
     ret = f"a{len(lines)}"
@@ -56,6 +56,6 @@ def ast_to_python(ast:LazyOp, f:Dict[Op, Callable]) -> Callable:
   ret = _compile_ast(ast)
   src = ['def run(inputs):'] + lines + [f"  return {ret}"]
   ssrc = '\n'.join(src)
-  if DEBUG >= 4: print(ssrc)
+  if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), ssrc))
   exec(compile(ssrc, "<ast>", "exec"), tglob) # pylint: disable=exec-used
   return tglob['run']
