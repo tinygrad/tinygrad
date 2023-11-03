@@ -230,7 +230,7 @@ output = RawMallocBuffer(1, dtypes.float32)
 
 # compile the program, run it, and 2+3 does indeed equal 5
 program = ClangProgram("add", compile_clang(f"void add(float *a, float *b, float *c) {{ *a = *b + *c; }}"))
-program(None, None, output, input_a, input_b)  # NOTE: the None are for global_size and local_size
+program(output, input_a, input_b)
 print(output.toCPU())
 assert output.toCPU()[0] == 5, "it's still 5"
 np.testing.assert_allclose(output.toCPU(), numpy_a+numpy_b)
