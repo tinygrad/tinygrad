@@ -193,7 +193,7 @@ def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
     print('table dne')
     return None  # table doesn't exist
   if (val:=res.fetchone()) is not None:
-    print('found opt')
+    print(f'found opt {key}')
     return pickle.loads(val[0])
   return None
 
