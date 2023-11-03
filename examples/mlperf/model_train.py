@@ -11,7 +11,7 @@ import wandb
 import time
 
 # TODO: auto-down DALI
-def train_resnet_dali(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None):
+def train_resnet_dali(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None,steps=None):
   import math
   from models.resnet import ResNet50
   from extra.datasets.imagenet import BASEDIR
@@ -134,6 +134,7 @@ def train_resnet_dali(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None):
     Tensor.training = True
     cl = time.monotonic() 
     for i,data in enumerate(t:=tqdm(train_loader)): 
+      if not steps and i == steps: break
       X,Y = data[0]["data"].cpu().numpy(),data[0]["label"].squeeze(-1).long().cpu().numpy()
       GlobalCounters.reset()
       st = time.monotonic()
@@ -197,7 +198,7 @@ def train_resnet_dali(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None):
       epoch_avg_time = []
 
 
-def train_resnet_dali(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None):
+def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=None):
   # TODO: Resnet50-v1.5
   from models.resnet import ResNet50
   from extra.datasets.imagenet import get_train_files, get_val_files
@@ -271,7 +272,7 @@ def train_resnet_dali(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None):
     # train loop
     Tensor.training = True
     cl = time.perf_counter() 
-    for i,(X,Y,a,m) in enumerate(t:= tqdm(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS)),total=steps_in_train_epoch)):
+    for i,(X,Y,a,m) in enumerate(t:= tqdm(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS)),total=steps_in_train_epoch if not steps else steps)):
       GlobalCounters.reset()
       st = time.perf_counter()
       data_time = st-cl
@@ -459,13 +460,14 @@ if __name__ == "__main__":
       if nm in globals():
         print(f"training {m}")
         alls = []
+        steps = 300
         for bs in range(8,16,8):
           for w in range(0,2,2):
             if w == 0: w=1
             for compute in range(10,15,5):
               #c = globals()[nm]
-              a = train_resnet_dali(bs=bs,w=w,compute=compute)
-              b = train_resnet(bs=bs,w=w,compute=compute)
+              a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
+              b = train_resnet(bs=bs,w=w,compute=compute,steps=steps)
               alls.append((a,bs,w,compute, 'dali'))
               alls.append((b,bs,w,compute, 'tiny'))
         def avg(l): return sum(l)/len(l)
