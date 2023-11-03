@@ -11,9 +11,10 @@ import cloudpickle
 from tqdm import tqdm
 from queue import Queue
 from threading import Thread
+from tinygrad.helpers import getenv
 
 class PreFetcher(Thread):
-  def __init__(self,generator,max_prefetch=16):
+  def __init__(self,generator,max_prefetch=getenv("QS",1)):
     super().__init__()
     self.queue = Queue(max_prefetch)
     self.generator = generator

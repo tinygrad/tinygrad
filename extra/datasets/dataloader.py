@@ -66,8 +66,8 @@ def image_load(fn, val):
   #print('bef')
   #print(img.shape)
   n = time.perf_counter()
-  img = torch.from_numpy(np.float32(img).transpose([2, 0, 1])) / 255.0
-  img = F.normalize(img, mean, std)
+  #img = torch.from_numpy(np.float32(img).transpose([2, 0, 1])) / 255.0
+  #img = F.normalize(img, mean, std)
   e = time.perf_counter()
   return img, e-s, e-n
 
