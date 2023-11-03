@@ -105,7 +105,7 @@ class CUDAProgram:
     # TODO: name is wrong, so we get it from the ptx using hacks
     self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
 
-  def __call__(self, *args, global_size, local_size, shared=0, wait=False):
+  def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], shared:int=0, wait=False):
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()

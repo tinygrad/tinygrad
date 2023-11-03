@@ -216,8 +216,10 @@ class GraphBatchExecutor(BasicBatchExecutor):
 
 class ASTRunner:
   def __init__(self, name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
-    if DEBUG >= 4: print(prg)
-    self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
+    if DEBUG >= 4:
+      print(runtime_args)
+      print(prg)
+    self.name, self.prg, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
 
   def optimize_local_size(self, global_size:List[int], rawbufs:List[RawBuffer]) -> List[int]:
     assert self.global_size is not None, "needs a global size to optimize local size"
@@ -249,15 +251,18 @@ class ASTRunner:
 
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
     if var_vals is None: var_vals = {}
+    """
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None:
       # TODO: this is copied from get_program
       local_size = self.local_size = self.optimize_local_size(global_size, rawbufs)
       global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
+    """
     if et := self.clprg(*rawbufs, *var_vals.values(), **self.runtime_args, wait=force_wait or DEBUG>=2): GlobalCounters.time_sum_s += et
     op_estimate = sym_infer(self.op_estimate, var_vals)
     if DEBUG >= 2:
-      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(37-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(global_size):18s} {str(local_size):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(37-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz",
+            f"{str(self.runtime_args.get('global_size', None)):18s} {str(self.runtime_args.get('local_size', None)):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
             (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {self.mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
     GlobalCounters.kernel_count += 1
     GlobalCounters.global_ops += op_estimate
@@ -272,8 +277,7 @@ class Compiled:
   def to_program(self, k):
     k.linearize()
     src, runtime_args = self.renderer(k.function_name, k.uops)
-    return ASTRunner(k.function_name, src, k.global_size, k.local_size,
-                     op_estimate=k.info.flops, mem_estimate=k.info.mem_estimate,
+    return ASTRunner(k.function_name, src, op_estimate=k.info.flops, mem_estimate=k.info.mem_estimate,
                      display_name=k.display_name, runtime_args=runtime_args).build(self.compiler, self.runtime, self.batch_exec)
 
   def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
