@@ -175,7 +175,11 @@ class Tensor:
     nbits = countbits(out_len := math.ceil(abs((stop - start) / step)))
     ret = Tensor(0, **kwargs).reshape([1] * nbits).expand([2] * nbits)
     for i in range(nbits): ret = ret + Tensor(1 << i, **kwargs).reshape([1] * nbits).pad(tuple([(0, 0)] * (nbits - i - 1) + [(1, 0)] + [(0, 0)] * i))
-    return (ret * step + start).reshape(2 ** nbits).shrink(((0, out_len),))
+    ret1 = (ret * step + start).reshape(2 ** nbits).shrink(((0, out_len),))
+    ret2 = Tensor.full((math.ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
+    if ret1.realize().numpy() != ret2.realize().numpy():
+      assert False, f'{start}, {stop}, {step}, {kwargs}'
+    return ret1
 
   @staticmethod
   def eye(dim:int, **kwargs): return Tensor.full((dim,1),1,**kwargs).pad(((0,0),(0,dim))).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
