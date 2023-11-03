@@ -92,7 +92,7 @@ class CUDAGraph(GraphBatchExecutor):
 def compile_cuda(prg) -> bytes: return cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets'])
 
 class CUDAProgram:
-  def __init__(self, name:str, _prg:bytes, shared=0, local_size_override=None):
+  def __init__(self, name:str, _prg:bytes):
     prg = _prg.decode('utf-8')
     if DEBUG >= 5: print(pretty_ptx(prg))
     if DEBUG >= 6:
@@ -103,13 +103,13 @@ class CUDAProgram:
         print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
       except Exception as e: print("failed to generate SASS", str(e))
     # TODO: name is wrong, so we get it from the ptx using hacks
-    self.prg, self.shared, self.local_size_override = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0]), shared, local_size_override
+    self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
 
-  def __call__(self, global_size, local_size, *args, wait=False):
+  def __call__(self, *args, global_size, local_size, shared=0, wait=False):
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
-    self.prg(*[x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) if (isinstance(x, int) and not getenv("CUDACPU")) else x for x in args], block=tuple(local_size if self.local_size_override is None else self.local_size_override), grid=tuple(global_size), shared=self.shared)
+    self.prg(*[x._buf if isinstance(x, RawCUDABuffer) else np.int32(x) if (isinstance(x, int) and not getenv("CUDACPU")) else x for x in args], block=tuple(local_size), grid=tuple(global_size), shared=shared)
     if wait:
       end.record()
       end.synchronize()

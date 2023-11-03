@@ -234,7 +234,7 @@ class ASTRunner:
 
   def build(self, compiler, runtime, batch_exec=BasicBatchExecutor):
     self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
-    self.clprg, self.batch_exec = runtime(self.name, self.lib, **self.runtime_args), batch_exec
+    self.clprg, self.batch_exec = runtime(self.name, self.lib), batch_exec
     return self
 
   def exec(self, rawbufs, var_vals:Optional[Dict[Variable, int]]=None, force_wait=False, optimizing=False) -> Optional[float]:
@@ -254,7 +254,7 @@ class ASTRunner:
       # TODO: this is copied from get_program
       local_size = self.local_size = self.optimize_local_size(global_size, rawbufs)
       global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
-    if et := self.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=force_wait or DEBUG>=2): GlobalCounters.time_sum_s += et
+    if et := self.clprg(*rawbufs, *var_vals.values(), **self.runtime_args, wait=force_wait or DEBUG>=2): GlobalCounters.time_sum_s += et
     op_estimate = sym_infer(self.op_estimate, var_vals)
     if DEBUG >= 2:
       print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(37-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(global_size):18s} {str(local_size):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +

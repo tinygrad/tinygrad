@@ -90,7 +90,7 @@ class CLProgram:
   @staticmethod
   def max_work_group_size(): return CL.cl_ctxs[0].devices[0].max_work_group_size
 
-  def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
+  def __call__(self, *bufs, global_size, local_size, wait=False) -> Optional[float]:
     if not hasattr(self, 'argdtypes'): self.set_argdtypes(tuple(None if x.__class__ is CLBuffer else np.int32 for x in bufs))
     cl_bufs, wait_for = [], []
     for x in bufs:

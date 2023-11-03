@@ -4,6 +4,7 @@ from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, prod, DType, strip_parens
+from tinygrad.shape.symbolic import sint
 
 class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"
@@ -107,7 +108,8 @@ class CStyleLanguage(NamedTuple):
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
 
 def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
-  local_size: List[int] = []
+  global_size: List[sint] = []
+  local_size: List[sint] = []
   kernel,prekernel,bufs = [],[],[]
   #pend_close = None
   depth = 1
@@ -177,6 +179,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       xid = lang.gid if args[1].startswith("g") else (lang.xid if args[1].startswith("i") else lang.lid)
       kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]}; /* {args[2]} */")
       if args[1].startswith("l"): local_size.append(args[2])
+      else: global_size.append(args[2])
       r[u] = args[1]
     elif uop == UOps.CONST:
       r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
@@ -209,4 +212,5 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
     else:
       raise RuntimeError(f"failed to render {uop}")
 
-  return lang.render_kernel(function_name, kernel, bufs, local_size, prekernel), {}
+  return lang.render_kernel(function_name, kernel, bufs, local_size, prekernel), \
+    {"global_size": global_size + [1]*(3-len(global_size)), "local_size": local_size + [1]*(3-len(local_size))}
