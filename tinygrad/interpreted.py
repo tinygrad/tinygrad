@@ -54,8 +54,7 @@ def ast_to_python(ast:LazyOp, f:Dict[Op, Callable]) -> Callable:
     return ret
 
   ret = _compile_ast(ast)
-  src = ['def run(inputs):'] + lines + [f"  return {ret}"]
-  ssrc = '\n'.join(src)
-  if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), ssrc))
-  exec(compile(ssrc, "<ast>", "exec"), tglob) # pylint: disable=exec-used
+  src = '\n'.join(['def run(inputs):'] + lines + [f"  return {ret}"])
+  if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
+  exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
   return tglob['run']
