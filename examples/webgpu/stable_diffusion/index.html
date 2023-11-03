@@ -104,13 +104,88 @@
 <canvas id="canvas" width="512" height="512"></canvas>
 
 <script>
-    window.addEventListener('load', function() {
+    function initDb() {
+        return new Promise((resolve, reject) => {
+            let db;
+            const request = indexedDB.open('tinydb', 1);
+            request.onerror = (event) => {
+                console.error('Database error:', event.target.error);
+                resolve(null);
+            };
+
+            request.onsuccess = (event) => {
+                db = event.target.result;
+                console.log("Db initialized.");
+                resolve(db);
+            };
+
+            request.onupgradeneeded = (event) => {
+                db = event.target.result;
+                if (!db.objectStoreNames.contains('tensors')) {
+                    db.createObjectStore('tensors', { keyPath: 'id' });
+                }
+            };
+        });
+    }
+
+    function saveTensorToDb(db, id, tensor) {
+        return new Promise((resolve, reject) => {
+            if (db == null) {
+                resolve(null);
+            }
+
+            const transaction = db.transaction(['tensors'], 'readwrite');
+            const store = transaction.objectStore('tensors');
+            const request = store.put({ id: id, content: tensor });
+
+            request.onsuccess = () => {
+                console.log('Tensor saved successfully.');
+                resolve();
+            };
+
+            request.onerror = (event) => {
+                console.error('Tensor save failed:', event.target.error);
+                resolve(null);
+            };
+        });
+    }
+
+    function readTensorFromDb(db, id) {
+        return new Promise((resolve, reject) => {
+            if (db == null) {
+                resolve(null);
+            }
+            
+            const transaction = db.transaction(['tensors'], 'readonly');
+            const store = transaction.objectStore('tensors');
+            const request = store.get(id);
+
+            request.onsuccess = (event) => {
+                const result = event.target.result;
+                if (result) {
+                    console.log("Cache hit: " + id);
+                    resolve(result);
+                } else {
+                    console.log("Cache miss: " + id);
+                    resolve(null);
+                }
+            };
+
+            request.onerror = (event) => {
+                console.error('Tensor retrieve failed: ', event.target.error);
+                resolve(null);
+            };
+        });
+    }
+
+    window.addEventListener('load', async function() {
         if (!navigator.gpu) {
             document.getElementById("wgpuError").style.display = "";
             document.getElementById("sdTitle").style.display = "none";
-            
             return;
         }
+
+        let db = await initDb();
 
         const ctx = document.getElementById("canvas").getContext("2d", { willReadFrequently: true });
         let labels, nets, safetensorParts;
@@ -123,8 +198,8 @@
             requiredLimits.maxBufferSize = maxBufferSizeInSDModel;
             
             return await adapter.requestDevice({
-            requiredLimits
-            }	);
+                requiredLimits
+            });
         };
 
         const timer = async (func, label = "") => {
@@ -139,18 +214,19 @@
             const response = await fetch(part);
             const contentLength = response.headers.get('content-length');
             const total = parseInt(contentLength, 10);
-        
+
             const res = new Response(new ReadableStream({
-            async start(controller) {
-                const reader = response.body.getReader();
-                for (;;) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                progressCallback(part, value.byteLength, total);
-                controller.enqueue(value);
-                }
-                controller.close();
-            },
+                async start(controller) {
+                    const reader = response.body.getReader();
+                    for (;;) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        progressCallback(part, value.byteLength, total);
+                        controller.enqueue(value);
+                    }
+                    
+                    controller.close();
+                },
             }));
         
             return res.arrayBuffer();
@@ -168,40 +244,54 @@
                     totalSize += total;
                     partSize[part] = true;
                 }
+                
                 progress(totalLoaded, totalSize);
             };
-        
-            let buffers = await Promise.all([
-                getProgressDlForPart(window.MODEL_BASE_URL + '/net_part0.safetensors', progressCallback),
-                getProgressDlForPart(window.MODEL_BASE_URL + '/net_part1.safetensors', progressCallback),
-                getProgressDlForPart(window.MODEL_BASE_URL + '/net_part2.safetensors', progressCallback),
-                getProgressDlForPart(window.MODEL_BASE_URL + '/net_part3.safetensors', progressCallback),
-                getProgressDlForPart(window.MODEL_BASE_URL + '/net_textmodel.safetensors', progressCallback)
-            ]);
 
-            // Combine everything except for text model, since that's alreafy f32
-            const totalLength = buffers.reduce((acc, buffer, index, array) => {
-                if (index < array.length - 1) {
-                    return acc + buffer.byteLength;
-                } else {
-                    return acc;
-                }
-                }, 0
-            );
+            let combinedBuffer = await readTensorFromDb(db, "net.f16");
+            let textModelU8 = await readTensorFromDb(db, "net.text");
 
-            let combinedBuffer = new Uint8Array(totalLength);
+            if (combinedBuffer == null) {
+                let buffers = await Promise.all([
+                    getProgressDlForPart(window.MODEL_BASE_URL + '/net_part0.safetensors', progressCallback),
+                    getProgressDlForPart(window.MODEL_BASE_URL + '/net_part1.safetensors', progressCallback),
+                    getProgressDlForPart(window.MODEL_BASE_URL + '/net_part2.safetensors', progressCallback),
+                    getProgressDlForPart(window.MODEL_BASE_URL + '/net_part3.safetensors', progressCallback),
+                    getProgressDlForPart(window.MODEL_BASE_URL + '/net_textmodel.safetensors', progressCallback)
+                ]);
 
-            let offset = 0;
-            buffers.forEach((buffer, index) => {
-                if (index < 4) {
-                    combinedBuffer.set(new Uint8Array(buffer), offset);
-                    offset += buffer.byteLength;
-                    buffer = null;
-                }
-            });
+                document.getElementById("modelDlTitle").innerHTML = "Processing";
 
-            let textModelU8 = new Uint8Array(buffers[4]);
-            buffers = null;
+                // Combine everything except for text model, since that's alreafy f32
+                const totalLength = buffers.reduce((acc, buffer, index, array) => {
+                    if (index < array.length - 1) {
+                        return acc + buffer.byteLength;
+                    } else {
+                        return acc;
+                    }
+                    }, 0
+                );
+
+                combinedBuffer = new Uint8Array(totalLength);
+                let offset = 0;
+                buffers.forEach((buffer, index) => {
+                    if (index < 4) {
+                        combinedBuffer.set(new Uint8Array(buffer), offset);
+                        offset += buffer.byteLength;
+                        buffer = null;
+                    }
+                });
+
+                textModelU8 = new Uint8Array(buffers[4])
+                await saveTensorToDb(db, "net.f16", combinedBuffer);
+                await saveTensorToDb(db, "net.text", textModelU8);
+                buffers = null;
+            } else {
+                combinedBuffer = combinedBuffer.content;
+                textModelU8 = textModelU8.content;
+            }
+
+            document.getElementById("modelDlTitle").innerHTML = "Decompressing model";
 
             const textModelOffset = 3772703308;
             const metadataLength = Number(new DataView(combinedBuffer.buffer).getBigUint64(0, true));
@@ -228,10 +318,9 @@
             let cursor = 0;
 
             for (let i = 0; i < numChunks; i++) {
+                progress(i, numChunks);
                 let chunkStartF16 = 8 + metadataLength + (decodeChunkSize * i);
                 let chunkEndF16 = chunkStartF16 + decodeChunkSize;
-                
-                
                 let chunk = combinedBuffer.subarray(chunkStartF16, chunkEndF16);
 
                 if (chunk.byteLength %4 != 0) {
@@ -296,7 +385,8 @@
                 diffusor().setup(device, safetensorParts),
                 decoder().setup(device, safetensorParts)
             ]).then((loadedModels) => loadedModels.reduce((acc, model, index) => { acc[models[index]] = model; return acc; }, {})), "(compilation)")
-            console.log(nets)
+
+            progress(1, 1);
 
             modelDlTitle.innerHTML = "Model ready"
             setTimeout(() => {
