@@ -1,4 +1,4 @@
-from typing import List, cast, Dict, Callable, Tuple
+from typing import List, cast, Dict, Callable
 import functools
 import numpy as np
 from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps, Interpreted, Compiled, get_lazyop_info
@@ -57,7 +57,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
       LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out, *si.inputs)
     elif isinstance(device, Interpreted):
       # compile AST to interpreted function for speed
-      si.out.realized = interpret_ast(device, si.ast)(*[x.realized for x in si.inputs])
+      si.out.realized = interpret_ast(device, si.ast)(*si.inputs)
     else:
       # allocate empty output buffer
       # TODO: memory scheduling

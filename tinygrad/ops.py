@@ -120,7 +120,7 @@ class Interpreted:
     if ast.op in BufferOps and ast.op not in self.fxn_for_op:
       if ast.op == BufferOps.MEM:
         assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
-        buf = self.to_underlying(inputs[ast.arg.idx-1]) #.realized)
+        buf = self.to_underlying(inputs[ast.arg.idx-1].realized)
       elif ast.op == BufferOps.CONST:
         buf = self.to_underlying(self.buffer.fromCPU(np.array(ast.arg.val, dtype=ast.arg.dtype.np)))
       for mop,arg in ast.arg.st.to_movement_ops(): buf = self.fxn_for_op[mop](buf, arg)
