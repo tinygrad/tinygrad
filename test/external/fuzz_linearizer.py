@@ -124,7 +124,8 @@ if __name__ == "__main__":
   failed = []
   # TODO: ast_strs[0] output contains nan?
   for i, ast in enumerate(ast_strs[:getenv("FUZZ_N", len(ast_strs))]):
-    if isinstance(device, Interpreted) and ("dtypes.image" in ast or "Variable" in ast): continue  # not supported
+    if "Variable" in ast and isinstance(device, Interpreted): continue  # no symbolic shape for Interpreted
+    if "dtypes.image" in ast and Device.DEFAULT != "GPU": continue  # IMAGE is only for GPU
     print(f"testing ast {i}")
     tested += 1
     lin = ast_str_to_lin(ast)
