@@ -60,7 +60,7 @@ if __name__ == '__main__':
   norm,data,mult = [],[],[]
   for i, (X,Y,m,t) in enumerate(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=W))):
     n1 = time.perf_counter()
-    X = normalize(Tensor(X, requires_grad=False))
+    #X = normalize(Tensor(X, requires_grad=False))
     n2 = time.perf_counter()
     s1 = time.perf_counter()  
     t = s1-s
