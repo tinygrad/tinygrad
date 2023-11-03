@@ -9,6 +9,8 @@ from PIL import Image
 import functools, pathlib
 import cloudpickle
 from simplejpeg import decode_jpeg
+from multiprocessing import Pool
+from functools import partial
 
 BASEDIR = pathlib.Path(__file__).parent / "imagenet"
 ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
@@ -34,9 +36,9 @@ def decode(fn):
     return decode_jpeg(f.read())
 
 rrc = RandomResizedCrop(224)
-def image_load(fn, val=False):
+def image_load(fn, val):
   s = time.perf_counter()
-  img = Image.open(fn).convert('RGB')
+  #img = Image.open(fn).convert('RGB')
   img = Image.fromarray(decode(fn))
   r = time.perf_counter()
   img = F.resize(img, 256, Image.BILINEAR,antialias=True)
@@ -52,19 +54,26 @@ def image_load(fn, val=False):
       #rhf=RandomHorizontalFlip(p=0.5)
       #img=rhf.forward(img)
       img = F.hflip(img)
-    print(f'load timn {load_t*1000:7.2f}ms norm {(e-r)*1000:7.2f}ms resize {(e1-s1)*1000:7.2f}ms randresize')
-  return np.float32(img)
+    #print(f'load timn {load_t*1000:7.2f}ms norm {(e-r)*1000:7.2f}ms resize {(e1-s1)*1000:7.2f}ms randresize')
+  e = time.perf_counter()
+  return np.float32(img), e-s
 
 def iterate(bs=16, val=True, shuffle=True, num_workers=16):
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
-  from multiprocessing import Pool
   p = Pool(num_workers)
   for i in range(0, len(files), bs)[:-1]:
-    X = p.starmap(image_load, zip([files[i] for i in order[i:i+bs]], repeat(val)))
+    s = time.perf_counter()
+    #X = p.starmap(image_load, zip([files[i] for i in order[i:i+bs]], repeat(val)), 
+    #            chunksize=bs//num_workers)
+    X = p.map(partial(image_load,val=val),[files[i] for i in order[i:i+bs]],
+              chunksize=bs//num_workers)
+    e = time.perf_counter() 
+    X,T = [x[0] for x in X],[x[1] for x in X]
+    print(f'{(e-s)*1000:7.2f}ms all imgs tm {((e-s)-max(T))*1000:7.2f} mult process tm')
     Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
-    yield (np.array(X), np.array(Y))
+    yield np.array(X), np.array(Y)#, ((e-s)-max(T)))
   
 def proc(itermaker, q) -> None:
   try:
@@ -81,7 +90,7 @@ class _CloudpickleFunctionWrapper:
   def __setstate__(self, pfn): self.fn = cloudpickle.loads(pfn)
   def __call__(self, *args, **kwargs) -> Any:  return self.fn(*args, **kwargs)
 
-def cross_process(itermaker, maxsize=1):
+def cross_process(itermaker, maxsize=8):
   q: multiprocessing.Queue = multiprocessing.Queue(maxsize)
   p = multiprocessing.Process(target=proc, args=(_CloudpickleFunctionWrapper(itermaker), q))
   p.start()

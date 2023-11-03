@@ -1,5 +1,6 @@
 #from extra.datasets.imagenet import iterate
 from extra.datasets.dataloader import cross_process, iterate
+from extra.datasets.imagenet import PreFetcher
 from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor
 import numpy as np
@@ -26,7 +27,6 @@ def normalize(X: Tensor):
   X -= input_mean
   X /= input_std
   return X.realize()
-
 # BS=16,W=8,decoder=jpeg_decode
 # total = 32
 
@@ -43,21 +43,24 @@ def normalize(X: Tensor):
 # data = 85
 from models.resnet import ResNet50
 
+# BS16,W8
+# prefetcher tm
+# data avg tm   22.67 norm avg tm    2.16 mult avg tm  7.61
+
+#BS32,W16
+#
+
 if __name__ == '__main__':
   model = ResNet50()
-  BS,W=16,8
+  BS,W=32,16
   import time
   n = Normalize(mean, std)
   s = time.perf_counter()
  # for i, (X,Y) in enumerate(cross_process(lambda: iterate(bs=32,val=False,shuffle=True))):
-  norm,data = [],[]
-  for i, (X,Y) in enumerate(cross_process(lambda: iterate(bs=BS,val=False,shuffle=True,num_workers=W))):
+  norm,data,mult = [],[],[]
+  for i, (X,Y) in enumerate(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=W))):
     n1 = time.perf_counter()
-    # TODO: move to gpu, may be faster. 
-    #X = torch.from_numpy(X.transpose([0,3,1,2])) / 255.0
-    #X = F.normalize(X, mean, std)
     X = normalize(Tensor(X, requires_grad=False))
-    # do i need to move to cpu? 
     n2 = time.perf_counter()
     s1 = time.perf_counter()  
     t = s1-s
@@ -66,7 +69,8 @@ if __name__ == '__main__':
     print(f'total data {(t)*1000:7.2f}ms norm {(n2-n1)*1000:7.2f}ms')
     data.append(t)
     norm.append(n2-n1)
+    mult.append(0)
     if i!= 0 and i % (300) == 0: break
-  data,norm = data[1:],norm[1:]
-  print(f'data avg tm {(sum(data)/len(data))*1000:7.2f} avg tm {(sum(norm)/len(norm))*1000:7.2f}')
+  data,norm,mult = data[1:],norm[1:],mult[1:]
+  print(f'data avg tm {(sum(data)/len(data))*1000:7.2f} norm avg tm {(sum(norm)/len(norm))*1000:7.2f} mult avg tm {(sum(mult)/len(mult))*1000:7.2f}')
   
