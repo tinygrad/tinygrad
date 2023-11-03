@@ -40,7 +40,7 @@ def train_resnet():
     X = X.permute(0,3,1,2) / 255.0
     X -= input_mean
     X /= input_std
-    return X.realize() 
+    return X
 
   @TinyJit
   def train_step(X, Y):
