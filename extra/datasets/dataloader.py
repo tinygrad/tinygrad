@@ -63,8 +63,12 @@ def image_load(fn, val):
       img = F.hflip(img)
     #print(f'load timn {load_t*1000:7.2f}ms norm {(e-r)*1000:7.2f}ms resize {(e1-s1)*1000:7.2f}ms randresize')
   # TODO: normalize
+  print('bef')
+  print(img.shape)
   img = torch.from_numpy(np.float32(img).transpose([2, 0, 1])) / 255.0
   img = F.normalize(img, mean, std)
+  print('af')
+  print(img.shape)
   e = time.perf_counter()
   return img, e-s
 
