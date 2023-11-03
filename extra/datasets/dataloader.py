@@ -39,7 +39,11 @@ rrc = RandomResizedCrop(224)
 def image_load(fn, val):
   s = time.perf_counter()
   #img = Image.open(fn).convert('RGB')
-  img = Image.fromarray(decode(fn))
+  try:
+    img = Image.fromarray(decode(fn))
+  except:
+    print(fn)
+    return np.random.rand(224,224,3),0
   r = time.perf_counter()
   img = F.resize(img, 256, Image.BILINEAR,antialias=True)
   e = time.perf_counter()
