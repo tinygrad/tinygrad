@@ -13,7 +13,7 @@ from queue import Queue
 from threading import Thread
 
 class PreFetcher(Thread):
-  def __init__(self,generator,max_prefetch=1):
+  def __init__(self,generator,max_prefetch=16):
     super().__init__()
     self.queue = Queue(max_prefetch)
     self.generator = generator
