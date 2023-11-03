@@ -81,7 +81,7 @@ class _CloudpickleFunctionWrapper:
   def __setstate__(self, pfn): self.fn = cloudpickle.loads(pfn)
   def __call__(self, *args, **kwargs) -> Any:  return self.fn(*args, **kwargs)
 
-def cross_process(itermaker, maxsize=16):
+def cross_process(itermaker, maxsize=1):
   q: multiprocessing.Queue = multiprocessing.Queue(maxsize)
   p = multiprocessing.Process(target=proc, args=(_CloudpickleFunctionWrapper(itermaker), q))
   p.start()
