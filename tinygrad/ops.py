@@ -3,7 +3,7 @@ import time, importlib, inspect, functools, pathlib, itertools, random, math, co
 import numpy as np
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, dtypes
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, dtypes, dedup
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer
 from dataclasses import dataclass
@@ -110,25 +110,34 @@ Device = _Device()
 # **************** for Interpreted Buffers ****************
 
 @functools.lru_cache(None)
-def compile_ast(ast:LazyOp) -> Callable:
+def ast_to_python(ast:LazyOp) -> Callable:
   lines = []
+  last_use = {}
   @functools.lru_cache(None)
   def _compile_ast(ast:LazyOp) -> str:
     nonlocal lines
     if ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
     inp = [_compile_ast(src) for src in ast.src]
+    for ip in inp: last_use[ip] = len(lines)
+    real_inp = inp[:]
     if ast.op == BufferOps.MEM: inp += [f"inputs[{ast.arg.idx-1}]"]
     elif ast.op == BufferOps.CONST: inp += [str(ast.arg.val), str(ast.arg.dtype)]
     elif ast.arg: inp += [str(ast.arg)]
     ret = f"a{len(lines)}"
-    lines.append(f"{ret} = f[{ast.op}]({', '.join(inp)})")
+    lines.append((ret, dedup(real_inp), f"f[{ast.op}]({', '.join(inp)})"))
     if ast.op in BufferOps:
       for mop,arg in ast.arg.st.to_movement_ops():
-        lines.append(f"{ret} = f[{mop}]({ret}, {str(arg)})")
+        lines.append((ret, [ret], f"f[{mop}]({ret}, {str(arg)})"))
     return ret
   ret = _compile_ast(ast)
-  src = 'def run(f, inputs):\n  '+'\n  '.join(lines)+f"\n  return {ret}"
+  src = ['def run(f, inputs):']
+  for i,(x,inp,y) in enumerate(lines):
+    src.append(f"  {x} = {y}")
+    to_del = [ip for ip in inp if last_use[ip] == i]
+    if to_del and i != len(lines)-1: src.append(f"  del {','.join(to_del)}")
+  src.append(f"  return {ret}")
+  src = '\n'.join(src)
   if DEBUG >= 4: print(src)
   tglob = {"BufferOps": BufferOps, "UnaryOps": UnaryOps, "BinaryOps": BinaryOps, "TernaryOps": TernaryOps, "MovementOps": MovementOps, "ReduceOps": ReduceOps, "dtypes": dtypes}
   exec(compile(src, "<ast>", "exec"), tglob)
@@ -142,36 +151,12 @@ class Interpreted:
     self.codegen = None
 
   def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, context=None, **kwargs):
-    prg = compile_ast(ast)
-    ret = prg(self.fxn_for_op, [x.realized for x in inputs])
+    ret = ast_to_python(ast)(self.fxn_for_op, [x.realized for x in inputs])
     ret = self.from_underlying(ret)
     if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op:
       ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.to_underlying(ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
-    return ret
-
-    if ast.op in BufferOps and ast.op not in self.fxn_for_op:
-      if ast.op == BufferOps.MEM:
-        assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
-        buf = self.to_underlying(inputs[ast.arg.idx-1].realized)
-      elif ast.op == BufferOps.CONST:
-        buf = self.to_underlying(self.buffer.fromCPU(np.array(ast.arg.val, dtype=ast.arg.dtype.np)))
-      for mop,arg in ast.arg.st.to_movement_ops(): buf = self.fxn_for_op[mop](buf, arg)
-      return self.from_underlying(buf)
-    if TernaryOps.MULACC in self.fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
-      ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
-    created_context = context is None
-    if context is None: context = dict()
-    if not created_context and ast in context: return context[ast]
-    srcs = [self.exec_ast(cast(LazyOp, x), inputs=inputs, context=context, **kwargs) for x in ast.src]
-    if DEBUG >= 3: st = time.perf_counter()
-    ret = self.from_underlying(self.fxn_for_op[ast.op](*([self.to_underlying(x) for x in srcs] + ([ast.arg] if ast.arg is not None else []))))
-    if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op: ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.to_underlying(ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
-    if DEBUG >= 5 or (self.buffer != FlopCounter and DEBUG >= 3): print(f"*** {'exec' if created_context else '    '} {GlobalCounters.mem_used/1e9:5.2f} GB {(time.perf_counter()-st)*1e3:7.2f} ms op: {ast.op:20s} out({ret.dtype.name}): {str(ret._buf.shape) if hasattr(ret._buf, 'shape') else str(len(ret._buf)):30s} in({len(srcs)}):", list(set(x._buf.shape if hasattr(x._buf, 'shape') else len(x._buf) for x in srcs)), ast.arg if ast.arg is not None else "")
-    if not created_context: context[ast] = ret
+    # TODO: is this used?
     if output is not None and output.output_buffer is not None:
-      # TODO: does this check have any meaning anymore?
-      # It fails on things like batchnorm initted with zeros
-      #assert output.output_buffer.size == ret.size, f"size mismatch, {output.output_buffer.size} != {ret.size}"
       assert output.output_buffer.dtype == ret.dtype
       output.output_buffer._buf = ret._buf
       return output.output_buffer

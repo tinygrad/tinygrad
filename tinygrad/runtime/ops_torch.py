@@ -17,6 +17,7 @@ def as_strided(x, arg):
   return torch.as_strided(x.contiguous(), arg[0], arg[1], arg[2])
 
 torch_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
+  # TODO: torch.tensor should work here
   #BufferOps.CONST: lambda val, dtype: torch.tensor(val, dtype=inverse_type_map[dtype]),
   BufferOps.CONST: lambda val, dtype: torch.from_numpy(np.array(val, dtype=dtype.np)),
   UnaryOps.NOOP: lambda x: x.contiguous(), UnaryOps.SQRT: lambda x: x.sqrt(), UnaryOps.EXP2: lambda x: x.exp2(), UnaryOps.LOG2: lambda x: x.log2(), UnaryOps.SIN: torch.sin,
