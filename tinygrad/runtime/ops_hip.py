@@ -97,7 +97,7 @@ class HIPProgram:
       self.modules.append(hip.hipModuleLoadData(prg))
       self.prgs.append(hip.hipModuleGetFunction(self.modules[-1], name))
 
-  def __call__(self, global_size, local_size, *args, wait=False):
+  def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
     hip.hipSetDevice(args[0]._device)
     if wait:
       start, end = hip.hipEventCreate(), hip.hipEventCreate()
