@@ -223,7 +223,7 @@ def recover_corrupted_db(corrupted_db, new_db):
 
 
 if __name__ == "__main__":
-  recover_corrupted_db("/tmp/tinygrad_cache", "/tmp/tinygrad_cache")
+  #recover_corrupted_db("/users/minjunes/downloads/tinygrad_cache BEAM=6", "/tmp/tinygrad_cache")
   # NOTE: to run with resnet_dali, do export=resnet_dali
   with Tensor.train():
     for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
