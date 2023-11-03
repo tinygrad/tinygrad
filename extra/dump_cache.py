@@ -16,5 +16,5 @@ if __name__ == "__main__":
     cur3.execute(f"SELECT * FROM {table} LIMIT 10")
     for f in cur3.fetchall():
       v = pickle.loads(f[-1])
-      print("   ", len(f[0]), f[1:-1], v)
+      print("   ", len(f[0]) if isinstance(f[0], str) else f[0], f[1:-1], str(v)[0:50])
       #print(f"{len(k):10d}, {sk} -> {v}")
