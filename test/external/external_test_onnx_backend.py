@@ -4,7 +4,7 @@ import onnx.backend.test
 import numpy as np
 from tinygrad.tensor import Tensor
 from typing import Any, Tuple
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, CI
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
@@ -181,7 +181,7 @@ if getenv('GPU') or getenv('METAL'):
   backend_test.exclude('test_eyelike_with_dtype_cpu') # backend does not support dtype: Double
 
 # Segfaults in CI
-if (getenv('LLVM') or getenv('CUDA')) and getenv("CI", "") != "":
+if (getenv('LLVM') or getenv('CUDA')) and CI:
   backend_test.exclude('test_max_float16_cpu')
   backend_test.exclude('test_min_float16_cpu')
 
