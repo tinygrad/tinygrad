@@ -77,7 +77,7 @@ def iterate(bs=16, val=True, shuffle=True, num_workers=16):
     X,T = [x[0] for x in X],[x[1] for x in X]
     print(f'{(e-s)*1000:7.2f}ms all imgs tm {((e-s)-max(T))*1000:7.2f} mult process tm')
     Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
-    yield np.array(X), np.array(Y)#, ((e-s)-max(T)))
+    yield np.array(X), np.array(Y), (e-s), ((e-s)-max(T))
   
 def proc(itermaker, q) -> None:
   try:

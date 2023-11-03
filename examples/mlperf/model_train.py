@@ -102,7 +102,7 @@ def train_resnet():
     # train loop
     Tensor.training = True
     cl = time.monotonic() 
-    for i, (X,Y) in enumerate(t:= tqdm(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS)), total=steps_in_train_epoch)):
+    for i, (X,Y,a,m) in enumerate(t:= tqdm(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS)), total=steps_in_train_epoch)):
       GlobalCounters.reset()
 
       st1 = time.monotonic()
@@ -121,6 +121,7 @@ def train_resnet():
       cl = time.monotonic()
       train_time = (data_time+et-st)*steps_in_train_epoch*epochs/(60*60)
       val_time = (data_time+et-st)*steps_in_val_epoch*(epochs//4)/(60*60)
+      print(f'{a*1000:7.2f} all img tm {m*1000:7.2f} multi tm')
       print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {data_time*1000:7.2f} ms data {loss_cpu:7.2f} loss (every 1000)" + \
             f"{GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS {train_time+val_time:7.1f} hrs total {train_time:7.1f}hrs train {val_time:7.1f}hrs val")
       '''
@@ -167,7 +168,7 @@ def train_resnet():
       eval_top_5_acc = []
       Tensor.training = False
       cl = time.monotonic()
-      for i, (X, Y) in enumerate(t:=tqdm(PreFetcher(iterate(bs=BS,val=True, num_workers=WORKERS)), total=steps_in_val_epoch)):
+      for i, (X, Y,a,m) in enumerate(t:=tqdm(PreFetcher(iterate(bs=BS,val=True, num_workers=WORKERS)), total=steps_in_val_epoch)):
         X, Y = normalize(Tensor(X, requires_grad=False)), Tensor(Y, requires_grad=False)
         loss, out = eval_step(X, Y)
 
