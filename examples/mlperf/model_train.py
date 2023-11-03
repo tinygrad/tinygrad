@@ -108,7 +108,7 @@ def train_resnet_dali():
   np.random.seed(seed)
   random.seed(seed)
 
-  wandb.init()
+  #wandb.init()
 
   num_classes = 1000
   fp16 = getenv("HALF", 0)
@@ -145,6 +145,7 @@ def train_resnet_dali():
       train_time = (data_time+et-st)*steps_in_train_epoch*epochs/(60*60)
       val_time = (data_time+et-st)*steps_in_val_epoch*(epochs//4)/(60*60)
       print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {data_time*1000:7.2f} ms prefetch data {loss_cpu:7.2f} loss, {train_time+val_time:7.2f} hrs expected {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      '''
       wandb.log({"lr": scheduler.get_lr().numpy().item(),
                  "train/data_time": data_time,
                  "train/python_time": et - st,
@@ -153,6 +154,7 @@ def train_resnet_dali():
                  "train/loss": loss_cpu,
                  "train/GFLOPS": GlobalCounters.global_ops*1e-9/(cl-st),
       })
+      '''
       epoch_avg_time.append((data_time+(et-st))*1000)
 
     # "eval" loop. Evaluate every 4 epochs, starting with epoch 1
@@ -175,12 +177,14 @@ def train_resnet_dali():
         eval_times.append(et - st)
         eval_top_1_acc.append(top_1_acc)
         eval_top_5_acc.append(top_5_acc)
+      '''
       wandb.log({"eval/loss": sum(eval_loss) / len(eval_loss),
                 "eval/forward_time": sum(eval_times) / len(eval_times),
                 "eval/top_1_acc": sum(eval_top_1_acc) / len(eval_top_1_acc),
                 "eval/top_5_acc": sum(eval_top_5_acc) / len(eval_top_5_acc),
                 "eval/avg_time": sum(epoch_avg_time) / len(epoch_avg_time)
       })
+      '''
       epoch_avg_time = []
 
 
@@ -438,7 +442,7 @@ if __name__ == "__main__":
     #recover_corrupted_db("/users/minjunes/downloads/tinygrad_cache BEAM=6", "/tmp/tinygrad_cache")
     # NOTE: to run with resnet_dali, do export=resnet_dali
   with Tensor.train():
-    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
+    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn,resnet_dali").split(","):
       nm = f"train_{m}"
       if nm in globals():
         print(f"training {m}")
