@@ -104,8 +104,8 @@ def train_resnet():
       GlobalCounters.reset()
 
       st1 = time.monotonic()
-      #X,Y = torch_normalize(X),Tensor(Y,requires_grad=False)
-      X,Y = normalize(Tensor(X,requires_grad=False)),Tensor(Y,requires_grad=False)
+      X,Y = torch_normalize(X),Tensor(Y,requires_grad=False)
+      #X,Y = normalize(Tensor(X,requires_grad=False)),Tensor(Y,requires_grad=False)
 
       st = time.monotonic()
       #print(f'normalize {(st-st1)*1000:7.2f}')
