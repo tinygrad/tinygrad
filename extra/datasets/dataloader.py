@@ -35,24 +35,24 @@ def decode(fn):
 
 rrc = RandomResizedCrop(224)
 def image_load(fn, val=False):
-  #s = time.perf_counter()
-  #img = Image.open(fn).convert('RGB')
+  s = time.perf_counter()
+  img = Image.open(fn).convert('RGB')
   img = Image.fromarray(decode(fn))
-  #r = time.perf_counter()
+  r = time.perf_counter()
   img = F.resize(img, 256, Image.BILINEAR,antialias=True)
-  #e = time.perf_counter()
-  #load_t = e-s
+  e = time.perf_counter()
+  load_t = e-s
   if val:
     img = F.center_crop(img,224)
   else:
-  #  s1 = time.perf_counter()
+    s1 = time.perf_counter()
     img = rrc.forward(img)
-  #  e1 = time.perf_counter()
+    e1 = time.perf_counter()
     if random.random() < 0.5:
       #rhf=RandomHorizontalFlip(p=0.5)
       #img=rhf.forward(img)
       img = F.hflip(img)
-    #print(f'load timn {load_t*1000:7.2f}ms norm {(e-r)*1000:7.2f}ms resize {(e1-s1)*1000:7.2f}ms randresize')
+    print(f'load timn {load_t*1000:7.2f}ms norm {(e-r)*1000:7.2f}ms resize {(e1-s1)*1000:7.2f}ms randresize')
   return np.float32(img)
 
 def iterate(bs=16, val=True, shuffle=True, num_workers=16):
