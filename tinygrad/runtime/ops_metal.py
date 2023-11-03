@@ -3,7 +3,7 @@ import os, subprocess, pathlib, ctypes, tempfile
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any, Tuple
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache
+from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, ansistrip
 from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.renderer.metal import MetalRenderer
 from tinygrad.runtime.lib import RawBufferMapped, LRUAllocator
@@ -75,7 +75,7 @@ class MetalProgram:
   def __init__(self, name:str, lib:bytes, global_size:List[int], local_size:List[int]):
     data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
     self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
-    self.fxn = self.library.newFunctionWithName_(name)
+    self.fxn = self.library.newFunctionWithName_(ansistrip(name))
     if DEBUG >= 5:
       with tempfile.NamedTemporaryFile(delete=True) as shader:
         shader.write(lib)
@@ -83,7 +83,7 @@ class MetalProgram:
         os.system(f"cd {pathlib.Path(__file__).parents[2]}/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
     self.pipeline_state = unwrap(METAL.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
     assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"
-    self.global_size, self.local_size = Metal.MTLSize(*global_size), Metal.MTLSize(*local_size)
+    self.name, self.global_size, self.local_size = name, global_size, local_size
 
   def __call__(self, *bufs, wait=False):
     command_buffer = METAL.mtl_queue.commandBuffer()
@@ -93,7 +93,7 @@ class MetalProgram:
       if isinstance(a, RawMetalBuffer): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
       elif isinstance(a, int): encoder.setBytes_length_atIndex_((arg:=ctypes.c_int32(a)), ctypes.sizeof(arg), i)
       else: raise RuntimeError(f"arg at index {i} has unsupported type {type(a)}")
-    encoder.dispatchThreadgroups_threadsPerThreadgroup_(self.global_size, self.local_size)
+    encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*self.global_size), Metal.MTLSize(*self.local_size))
     encoder.endEncoding()
     command_buffer.commit()
     if wait:

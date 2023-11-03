@@ -120,7 +120,7 @@ class Interpreted:
     if ast.op in BufferOps and ast.op not in self.fxn_for_op:
       if ast.op == BufferOps.MEM:
         assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
-        buf = self.to_underlying(inputs[ast.arg.idx-1].realized)
+        buf = self.to_underlying(inputs[ast.arg.idx-1]) #.realized)
       elif ast.op == BufferOps.CONST:
         buf = self.to_underlying(self.buffer.fromCPU(np.array(ast.arg.val, dtype=ast.arg.dtype.np)))
       for mop,arg in ast.arg.st.to_movement_ops(): buf = self.fxn_for_op[mop](buf, arg)
@@ -146,18 +146,21 @@ class Interpreted:
     return ret
 
 class FlopCounter:
-  def __init__(self, tup:Tuple[Tuple[int, ...], DType, int]): self.shape, self.dtype, self.flops, self._buf = *tup, self
+  def __init__(self, tup:Tuple[Tuple[int, ...], DType, int, Dict[int, int]]): self.shape, self.dtype, self.flops, self.mem, self._buf = *tup, self
+  @property
+  def mem_estimate(self): return sum(self.mem.values())
   def consume_flops(self):
     self.flops, ret = 0, self.flops
     return ret
-shape_fxn_for_op: Dict[Op, Callable] = {
-  BufferOps.MEM: lambda arg: (arg.st.shape, arg.dtype, 0), BufferOps.CONST: lambda arg: (arg.st.shape, arg.dtype, 0),
-  UnaryOps.CAST: lambda self,arg: (self.shape, arg[0], self.consume_flops()),   # cast uses no flops
-  **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in UnaryOps if op != UnaryOps.CAST},
-  **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape)) for op in BinaryOps},
-  **{op:lambda self,new_shape: (new_shape, self.dtype, self.consume_flops() + prod(self.shape)) for op in ReduceOps},
-  TernaryOps.WHERE: lambda self,y,z: (self.shape, y.dtype, self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape))}
-InterpretedFlopCounter = Interpreted(FlopCounter, shape_fxn_for_op, lambda x: x)
+InterpretedFlopCounter = Interpreted(FlopCounter, {
+  BufferOps.MEM: lambda arg: (arg.st.shape, arg.dtype, 0, {arg.idx: arg.dtype.itemsize*arg.st.size()}), BufferOps.CONST: lambda arg: (arg.st.shape, arg.dtype, 0, {}),
+  UnaryOps.CAST: lambda self,arg: (self.shape, arg[0], self.consume_flops(), self.mem),   # cast uses no flops
+  **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape), self.mem) for op in UnaryOps if op != UnaryOps.CAST},
+  **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape), {**self.mem, **y.mem}) for op in BinaryOps},
+  **{op:lambda self,new_shape: (new_shape, self.dtype, self.consume_flops() + prod(self.shape), self.mem) for op in ReduceOps},
+  TernaryOps.WHERE: lambda self,y,z: (self.shape, y.dtype, self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape), {**self.mem, **y.mem, **z.mem})})
+
+@functools.lru_cache(None)
 def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.exec_ast(ast)
 
 # **************** for Compiled Buffers ****************

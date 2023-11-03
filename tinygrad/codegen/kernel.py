@@ -205,10 +205,6 @@ class Kernel:
     ret = ' '.join(colored(s, color) for s,color in zip([f"{s:4d}" if isinstance(s, int) and not dense else s for s in self.full_shape], self.colors()))
     if pad: ret += ' '*(pad-ansilen(ret))
     return ret
-  def printbufs(self, prefix=""):
-    for i,st in enumerate(self.sts):
-      print(prefix, f"{i:3d} {str(self.bufs[i]):47s}", st.views)
-    print(self.colored_shape())
 
   # ******************** base simplifiers ********************
 

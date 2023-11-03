@@ -1,10 +1,10 @@
 from typing import List, cast, Dict, Callable, Tuple
 import functools
 import numpy as np
-from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps, Interpreted, Compiled
+from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps, Interpreted, Compiled, get_lazyop_info
 from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import DEBUG, prod, all_int, getenv, IMAGE
+from tinygrad.helpers import DEBUG, prod, all_int, getenv, IMAGE, colored, GlobalCounters, ansilen
 
 from tinygrad.features.image import fix_schedule_for_images
 
@@ -12,7 +12,8 @@ from tinygrad.features.image import fix_schedule_for_images
 
 @functools.lru_cache(None)   # this is the method cache for interpreted
 def interpret_ast(device:Interpreted, ast:LazyOp) -> Callable:
-  raise NotImplementedError("write this to return a function that applies the AST")
+  def fxn(*inputs): return device.exec_ast(ast, None, inputs)
+  return fxn
 
 @functools.lru_cache(None)   # this is the new method cache
 def compile_ast(device:Compiled, ast:LazyOp) -> Callable:
@@ -35,7 +36,7 @@ def compile_ast(device:Compiled, ast:LazyOp) -> Callable:
   lib: bytes = device.compiler(src)
 
   # get the function
-  return device.runtime(lin.function_name, lib, lin.global_size, lin.local_size, **runtime_args)
+  return device.runtime(lin.display_name, lib, lin.global_size, lin.local_size, **runtime_args)
 
 # *** main schedule runner ***
 
@@ -62,11 +63,25 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
       # TODO: memory scheduling
       # TODO: before or after compile?
       si.out.realized = device.buffer(si.out.st.size(), si.out.dtype)
+      rawbufs = [si.out.realized] + [x.realized for x in si.inputs]
+
+      # get ast info
+      info = get_lazyop_info(si.ast)
+
+      # compile the program
+      prg = compile_ast(device, si.ast)
 
       # run the program
-      compile_ast(device, si.ast)(si.out.realized, *[x.realized for x in si.inputs])
+      if et := prg(*rawbufs, wait=DEBUG>=2): GlobalCounters.time_sum_s += et
 
-      # TODO: do the rest of the ASTRunner stuff here, print, GlobalCounters etc...
+      if DEBUG >= 2:
+        jit = False
+        print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {prg.name+' '*(37-ansilen(prg.name))} arg {len(rawbufs):3d} sz {str(prg.global_size):18s} {str(prg.local_size):12s} OPs {int(info.flops/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+              (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({info.flops/((et or 1e-20)*1e9):8.2f} GFLOPS, {info.mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
+      GlobalCounters.kernel_count += 1
+      GlobalCounters.global_ops += info.flops
+      GlobalCounters.global_mem += info.mem_estimate
+
     del si.out.op
     for v in si.out.views: del v.op
     assert si.out.realized and isinstance(si.out.realized, Device[si.out.device].buffer), f"device mismatch on realized got {type(si.out.realized)} expected {si.out.device}"
