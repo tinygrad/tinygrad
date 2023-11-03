@@ -206,7 +206,7 @@ class Thneed:
                   l.x = get_global_id(0);
                   out[l.y*row_pitch + l.x] = read_imagef(in, smp, l);
                 }
-              """), argdtypes=(None, None, np.int32))(a.shape, None, a, buf, row_pitch//(4*(2 if FLOAT16 else 4)))
+              """), argdtypes=(None, None, np.int32))(a, buf, row_pitch//(4*(2 if FLOAT16 else 4)), global_size=a.shape)
 
               # multiple of 32 isn't enough
               jdat['objects'].append({

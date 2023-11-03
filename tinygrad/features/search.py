@@ -51,13 +51,18 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
       if clear_l2:
         # TODO: this is too small for many L2 caches
         with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
-      tms.append(prg.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=True)*factor)
+      lra = prg.runtime_args.copy()
+      if global_size: lra['global_size'] = global_size
+      if local_size: lra['local_size'] = local_size
+      tms.append(prg.clprg(*rawbufs, *var_vals.values(), **lra, wait=True)*factor)
     prg.global_size = real_global_size
   except Exception:
-    #import traceback; traceback.print_exc()
-    #print("FAILED")
-    #print(lin.ast)
-    #print(lin.applied_opts)
+    if DEBUG >= 4:
+      import traceback
+      traceback.print_exc()
+      print("FAILED")
+      print(lin.ast)
+      print(lin.applied_opts)
     tms = [float('inf')]
   if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)
   return min(tms)

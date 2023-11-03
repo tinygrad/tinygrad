@@ -41,7 +41,7 @@ class FakeBuffer(RawBuffer):
   def toCPU(self): return np.empty(self.size, dtype=self.dtype.np)
 class FakeProgram:
   def __init__(self, name:str, prg:str): pass
-  def __call__(self, global_size, local_size, *bufs, wait=False): pass
+  def __call__(self, *bufs, global_size, local_size, wait=False): pass
 
 def helper_test_correctness(gen, train):
   from tinygrad.runtime.ops_gpu import CL, CLAllocator
