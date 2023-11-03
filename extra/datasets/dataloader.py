@@ -86,7 +86,7 @@ def iterate(bs=16, val=True, shuffle=True, num_workers=16):
     if isinstance(X[0], torch.Tensor):
       yield torch.stack(X).numpy(), np.array(Y), (e-s), (sum(T)/len(T))
     else:
-      yield np.array(X),np.array(Y),(e-s),(sum(T)/len(T))
+      yield np.array(np.float32(X)),np.array(Y),(e-s),(sum(T)/len(T))
   
 def proc(itermaker, q) -> None:
   try:
