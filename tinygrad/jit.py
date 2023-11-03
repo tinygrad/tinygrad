@@ -12,6 +12,7 @@ JIT_SUPPORTED_DEVICE = ["GPU", "CLANG", "METAL", "CUDA", "HIP", "WEBGPU", "LLVM"
 
 class TinyJit:
   def __init__(self, fxn:Callable):
+    print(f'jitting {fxn}')
     self.fxn: Callable = fxn
     self.cnt: int = 0
     self.jit_cache: List[Tuple[Any, List[Optional[RawBuffer]], Dict[Variable, int]]] = []

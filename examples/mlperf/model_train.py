@@ -100,7 +100,7 @@ def train_resnet():
     # train loop
     Tensor.training = True
     cl = time.monotonic() 
-    for i, (X,Y) in enumerate(t:= tqdm(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS)), total=steps_in_train_epoch)):
+    for i, (X,Y) in enumerate(t:= tqdm(cross_process(lambda: iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS)), total=steps_in_train_epoch)):
       GlobalCounters.reset()
 
       st1 = time.monotonic()
@@ -159,7 +159,7 @@ def train_resnet():
       eval_top_5_acc = []
       Tensor.training = False
       cl = time.monotonic()
-      for i, (X, Y) in enumerate(t:=tqdm(PreFetcher(iterate(bs=BS,val=True, num_workers=WORKERS)), total=steps_in_val_epoch)):
+      for i, (X, Y) in enumerate(t:=tqdm(cross_process(lambda: iterate(bs=BS,val=True, num_workers=WORKERS)), total=steps_in_val_epoch)):
         X, Y = normalize(Tensor(X, requires_grad=False)), Tensor(Y, requires_grad=False)
         loss, out = eval_step(X, Y)
 
