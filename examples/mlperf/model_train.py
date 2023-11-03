@@ -10,8 +10,6 @@ import random
 #import wandb
 import time
 
-
-
 def train_resnet():
   # TODO: Resnet50-v1.5
   from models.resnet import ResNet50
@@ -29,20 +27,6 @@ def train_resnet():
     y = (y_counter == Y.flatten().reshape(-1, 1)).where(-1.0 * num_classes, 0)
     y = y.reshape(*Y.shape, num_classes)
     return (1 - label_smoothing) * out.mul(y).mean() + (-1 * label_smoothing * out.mean())
-
-  mean = [0.485, 0.456, 0.406]
-  std = [0.229, 0.224, 0.225]
-
-  '''
-  @TinyJit
-  def normalize(X: Tensor):
-    input_mean = Tensor(mean).reshape(-1,1,1)
-    input_std = Tensor(std).reshape(-1,1,1)
-    X = X.permute(0,3,1,2) / 255.0
-    X -= input_mean
-    X /= input_std
-    return X
-  '''
 
   @TinyJit
   def train_step(X, Y):
