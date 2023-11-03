@@ -54,13 +54,13 @@ def train_resnet():
     eq_elements = np.equal(out_top_n, YY)
     top_n_acc = np.count_nonzero(eq_elements) / eq_elements.size * top_n
     return top_n_acc
-
+  ''' 
   mean = [0.485, 0.456, 0.406]
   std = [0.229, 0.224, 0.225]
   def normalize(X):
      X = torch.from_numpy(X.transpose([0,3,1,2]))/255.0
      return np.array(F.normalize(X, mean, std))
-
+  '''
   seed = getenv('SEED', 42)
   Tensor.manual_seed(seed)
   np.random.seed(seed)
