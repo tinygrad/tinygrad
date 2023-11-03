@@ -90,12 +90,13 @@ def train_resnet():
     # train loop
     Tensor.training = True
     cl = time.perf_counter() 
-    for i, (X,Y,a,m) in enumerate(t:= tqdm(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS)), total=steps_in_train_epoch)):
+    for i,(X,Y,a,m) in enumerate(t:= tqdm(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS)),total=steps_in_train_epoch)):
       GlobalCounters.reset()
       st = time.perf_counter()
       data_time = st-cl
       X,Y = Tensor(X,requires_grad=False),Tensor(Y,requires_grad=False)
-      loss, out = train_step(X, Y)
+      time.sleep(20/1000)
+      #loss, out = train_step(X, Y)
       et = time.perf_counter()
       if i % 1000 == 0: 
         loss_cpu = 0 #loss.numpy()
@@ -156,10 +157,9 @@ def train_resnet():
       eval_top_5_acc = []
       Tensor.training = False
       cl = time.monotonic()
-      for i, (X, Y,a,m) in enumerate(t:=tqdm(PreFetcher(iterate(bs=BS,val=True, num_workers=WORKERS)), total=steps_in_val_epoch)):
-        X, Y = normalize(Tensor(X, requires_grad=False)), Tensor(Y, requires_grad=False)
+      for i,(X,Y,a,m) in enumerate(t:=tqdm(PreFetcher(iterate(bs=BS,val=True, num_workers=WORKERS)),total=steps_in_val_epoch)):
+        X,Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
         loss, out = eval_step(X, Y)
-
         top_1_acc = calculate_accuracy(out, Y, 1)
         top_5_acc = calculate_accuracy(out, Y, 5)
         et = time.monotonic()
