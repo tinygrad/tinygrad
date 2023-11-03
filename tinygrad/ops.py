@@ -222,7 +222,6 @@ class ASTRunner:
     self.name, self.prg, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
 
   def optimize_local_size(self, global_size:List[int], rawbufs:List[RawBuffer]) -> List[int]:
-    assert self.global_size is not None, "needs a global size to optimize local size"
     test_rawbuffers = [type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
     MAX_WORKGROUP = self.clprg.max_work_group_size() if hasattr(self.clprg, 'max_work_group_size') else 1024
     local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in global_size]
@@ -245,23 +244,18 @@ class ASTRunner:
     return self(rawbufs, var_vals, force_wait=force_wait)
 
   def launch_dims(self, var_vals):
-    global_size = ([sym_infer(sz, var_vals) for sz in self.global_size] + [1]*(3-len(self.global_size))) if self.global_size is not None else self.global_size
-    local_size = ([sym_infer(sz, var_vals) for sz in self.local_size] + [1]*(3-len(self.local_size))) if self.local_size is not None else self.local_size
+    global_size = [sym_infer(sz, var_vals) for sz in self.runtime_args['global_size']] if 'global_size' in self.runtime_args else None
+    local_size = [sym_infer(sz, var_vals) for sz in self.runtime_args['local_size']] if 'local_size' in self.runtime_args else None
     return global_size, local_size
 
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
     if var_vals is None: var_vals = {}
-    lra = self.runtime_args.copy()
-    for arg in ['global_size', 'local_size']:
-      if arg in lra:
-        lra[arg] = tuple(sym_infer(sz, var_vals) for sz in lra[arg])
-    """
-    global_size, local_size = self.launch_dims(var_vals)
+    lra = {}
+    lra['global_size'], lra['local_size'] = self.launch_dims(var_vals)
     if global_size is not None and local_size is None:
       # TODO: this is copied from get_program
       local_size = self.local_size = self.optimize_local_size(global_size, rawbufs)
       global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
-    """
     if et := self.clprg(*rawbufs, *var_vals.values(), **lra, wait=force_wait or DEBUG>=2): GlobalCounters.time_sum_s += et
     op_estimate = sym_infer(self.op_estimate, var_vals)
     mem_estimate = sym_infer(self.mem_estimate, var_vals)

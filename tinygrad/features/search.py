@@ -27,37 +27,38 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
   try:
     lin.linearize()
     prg = cast(Compiled, Device[Device.DEFAULT]).to_program(lin)
-    real_global_size = prg.global_size
-    if allow_test_size and prg.global_size:
-      test_global_size = prg.global_size[:]
+    global_size, local_size = prg.launch_dims(var_vals)
+    if allow_test_size and global_size:
+      test_global_size = global_size[:]
       while prod(test_global_size) > max_global_size:
         for j in range(2,-1,-1):
           if test_global_size[j] > 16:
             test_global_size[j] //= 2
             break
-      factor = prod(prg.global_size) / prod(test_global_size)
-      prg.global_size = test_global_size
+      factor = prod(global_size) / prod(test_global_size)
       #print(real_global_size, test_global_size, factor)
     else:
       factor = 1
     # TODO: this is super broken for var_vals
     # TODO: this is copied from prg.__call__
-    global_size, local_size = prg.launch_dims(var_vals)
     if global_size is not None and local_size is None:
       local_size = prg.optimize_local_size(global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
     tms = []
+    lra = {"wait": True}
+    if global_size: lra['global_size'] = global_size
+    if local_size: lra['local_size'] = local_size
     for _ in range(cnt):
       if clear_l2:
         # TODO: this is too small for many L2 caches
         with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
-      tms.append(prg.clprg(global_size, local_size, *rawbufs, *var_vals.values(), wait=True)*factor)
-    prg.global_size = real_global_size
+      tms.append(prg.clprg(*rawbufs, *var_vals.values(), **lra)*factor)
   except Exception:
-    #import traceback; traceback.print_exc()
-    #print("FAILED")
-    #print(lin.ast)
-    #print(lin.applied_opts)
+    if DEBUG >= 4:
+      import traceback; traceback.print_exc()
+      print("FAILED")
+      print(lin.ast)
+      print(lin.applied_opts)
     tms = [float('inf')]
   if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)
   return min(tms)

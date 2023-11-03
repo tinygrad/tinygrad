@@ -14,3 +14,6 @@ class TestTimeLinearizer(unittest.TestCase):
     rawbufs = [Device[Device.DEFAULT].buffer(si.out.st.size(), si.out.dtype)] + [Device[Device.DEFAULT].buffer(x.st.size(), x.dtype) for x in si.inputs]
     tm = time_linearizer(Linearizer(si.ast), rawbufs, allow_test_size=False, cnt=10)
     assert tm > 0 and tm != float('inf')
+
+if __name__ == '__main__':
+  unittest.main()
