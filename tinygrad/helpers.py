@@ -19,7 +19,8 @@ def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https
 def all_same(items): return all(x == items[0] for x in items)
 def all_int(t: Tuple[Any, ...]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
-def ansilen(s): return len(re.sub('\x1b\\[(K|.*?m)', '', s))
+def ansistrip(s): return re.sub('\x1b\\[(K|.*?m)', '', s)
+def ansilen(s): return len(ansistrip(s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Union[List, Iterator]): return [item for sublist in l for item in sublist]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
