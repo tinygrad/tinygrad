@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict,
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer
-from tinygrad.shape.shapetracker import ShapeTracker
 from dataclasses import dataclass
 
 # these are the llops your accelerator must implement, along with toCpu
@@ -25,6 +24,7 @@ Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps, Buf
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[TernaryOps], Type[BufferOps]]
 
 if TYPE_CHECKING:
+  from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.lazy import LazyBuffer
 
 @dataclass(frozen=True)
@@ -108,7 +108,38 @@ Device = _Device()
 
 # **************** for Interpreted Buffers ****************
 
-from tinygrad.interpreted import ast_to_python
+def ast_to_python(ast:LazyOp, f:Dict[Op, Callable]) -> Callable:
+  tglob: Dict[str, Any] = {}
+  lines: List[str] = []
+
+  @functools.lru_cache(None)
+  def gstr(x:Any, nm=None) -> str:
+    ret = str(nm).replace(".", "_") if nm else f"m{len(tglob):04d}"
+    tglob[ret] = x
+    return ret
+
+  @functools.lru_cache(None)
+  def _compile_ast(ast:LazyOp) -> str:
+    if TernaryOps.MULACC in f and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
+      ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
+
+    if MovementOps.AS_STRIDED in f and ast.op in BufferOps:
+      tmp = f"{gstr(f[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"{gstr(f[ast.op], ast.op)}(inputs[{ast.arg.idx-1}])"
+      for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(f[mop], mop)}({tmp}, {gstr(arg)})"
+    else:
+      inp = [_compile_ast(src) for src in ast.src]
+      tmp = f"{gstr(f[ast.op], ast.op)}({', '.join(inp + ([gstr(ast.arg)] if ast.arg else []))})"
+
+    ret = f"a{len(lines)}"
+    lines.append(f"  {ret} = {tmp}")
+    return ret
+
+  ret = _compile_ast(ast)
+  src = '\n'.join(['def run(inputs):'] + lines + [f"  return {ret}"])
+  if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
+  exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
+  return tglob['run']
+
 class Interpreted:
   def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], to_underlying=lambda x: x._buf, from_underlying=None):
     self.buffer, self.fxn_for_op, self.to_underlying, self.from_underlying = buffer, fxn_for_op, to_underlying, from_underlying
