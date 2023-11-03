@@ -123,7 +123,8 @@ def train_resnet_dali():
   epochs = 50
   optimizer = optim.SGD(parameters, lr, momentum=.875, weight_decay=1/2**15)
   scheduler = CosineAnnealingLR(optimizer, epochs)
-  steps_in_train_epoch = (len(get_train_files()) // BS) - 1
+  total_train = 1281136
+  steps_in_train_epoch = (total_train // BS) - 1
   steps_in_val_epoch = (len(get_val_files()) // BS) - 1
   print(f"training with batch size {BS} for {epochs} epochs {WORKERS} workers")
 
