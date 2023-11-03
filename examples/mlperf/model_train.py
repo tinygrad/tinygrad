@@ -89,23 +89,18 @@ def train_resnet():
   for e in range(epochs):
     # train loop
     Tensor.training = True
-    cl = time.monotonic() 
+    cl = time.perf_counter() 
     for i, (X,Y,a,m) in enumerate(t:= tqdm(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS)), total=steps_in_train_epoch)):
       GlobalCounters.reset()
-
-      st1 = time.monotonic()
-      #X,Y = torch_normalize(X),Tensor(Y,requires_grad=False)
-      X,Y = Tensor(X,requires_grad=False),Tensor(Y,requires_grad=False)
-
-      st = time.monotonic()
+      st = time.perf_counter()
       data_time = st-cl
+      X,Y = Tensor(X,requires_grad=False),Tensor(Y,requires_grad=False)
       loss, out = train_step(X, Y)
-
-      et = time.monotonic()
+      et = time.perf_counter()
       if i % 1000 == 0: 
         loss_cpu = 0 #loss.numpy()
 
-      cl = time.monotonic()
+      cl = time.perf_counter()
       train_time = (data_time+et-st)*steps_in_train_epoch*epochs/(60*60)
       val_time = (data_time+et-st)*steps_in_val_epoch*(epochs//4)/(60*60)
       print(f'{a*1000:7.2f} all img tm {m*1000:7.2f} norm tm')
