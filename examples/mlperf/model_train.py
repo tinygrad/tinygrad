@@ -33,6 +33,7 @@ def train_resnet():
   mean = [0.485, 0.456, 0.406]
   std = [0.229, 0.224, 0.225]
 
+  '''
   @TinyJit
   def normalize(X: Tensor):
     input_mean = Tensor(mean).reshape(-1,1,1)
@@ -41,9 +42,16 @@ def train_resnet():
     X -= input_mean
     X /= input_std
     return X
+  '''
 
   @TinyJit
   def train_step(X, Y):
+    input_mean = Tensor(mean).reshape(-1,1,1)
+    input_std = Tensor(std).reshape(-1,1,1)
+    X = X.permute(0,3,1,2) / 255.0
+    X -= input_mean
+    X /= input_std
+
     X = X.half()
     Y = Y.half()
     optimizer.zero_grad()
