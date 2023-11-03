@@ -474,9 +474,8 @@ if __name__ == "__main__":
         def avg(l): return sum(l)/len(l)
         def med(l): return statistics.median(l)
         def get_str(st): 
-          x,meta = st
+          x,bs,w,compute,n = st
           ets,dts,tts,vts = x
-          bs,w,compute,n = meta
           s = (f'**{n} {bs} bs {w} workers {compute}ms comp**')
           e = (f'{avg(ets)*1000:7.2f}ms total {avg(dts)*1000:7.2f}ms data {avg(tts):7.2f}hrs train {avg(vts):7.2f}hrs val')
           e1 = (f'{med(ets)*1000:7.2f}ms total {med(dts)*1000:7.2f}ms data {med(tts):7.2f}hrs train {med(vts):7.2f}hrs val')
