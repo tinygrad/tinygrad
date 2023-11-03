@@ -141,7 +141,7 @@ def train_resnet_dali():
       #loss, out = train_step(X, Y)
       time.sleep(20/1000)
       et = time.monotonic()
-      if i % 1000 == 0: loss_cpu = loss.numpy()
+      if i % 1000 == 0: loss_cpu = 0#loss.numpy()
       cl = time.monotonic()
       train_time = (data_time+et-st)*steps_in_train_epoch*epochs/(60*60)
       val_time = (data_time+et-st)*steps_in_val_epoch*(epochs//4)/(60*60)
