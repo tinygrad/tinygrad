@@ -1,8 +1,7 @@
 from __future__ import annotations
-import time, importlib, inspect, functools, pathlib, itertools, random, math, collections
-import numpy as np
+import importlib, inspect, functools, pathlib, itertools, random, math, collections
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, dtypes, dedup
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer
@@ -110,9 +109,9 @@ Device = _Device()
 # **************** for Interpreted Buffers ****************
 
 @functools.lru_cache(None)
-def ast_to_python(ast:LazyOp) -> Callable:
-  lines = []
-  last_use = {}
+def ast_to_python(ast:LazyOp):
+  lines: List[Tuple[str, List[str], str]] = []
+  last_use: Dict[str, int] = {}
   @functools.lru_cache(None)
   def _compile_ast(ast:LazyOp) -> str:
     nonlocal lines
@@ -121,7 +120,7 @@ def ast_to_python(ast:LazyOp) -> Callable:
     inp = [_compile_ast(src) for src in ast.src]
     for ip in inp: last_use[ip] = len(lines)
     real_inp = inp[:]
-    if ast.op == BufferOps.MEM: inp += [f"inputs[{ast.arg.idx-1}]"]
+    if ast.op == BufferOps.MEM: inp += ["inputs", str(ast.arg.idx-1), str(ast.arg.st.size()), str(ast.arg.dtype)]
     elif ast.op == BufferOps.CONST: inp += [str(ast.arg.val), str(ast.arg.dtype)]
     elif ast.arg: inp += [str(ast.arg)]
     ret = f"a{len(lines)}"
@@ -137,22 +136,22 @@ def ast_to_python(ast:LazyOp) -> Callable:
     to_del = [ip for ip in inp if last_use[ip] == i]
     if to_del and i != len(lines)-1: src.append(f"  del {','.join(to_del)}")
   src.append(f"  return {ret}")
-  src = '\n'.join(src)
-  if DEBUG >= 4: print(src)
-  tglob = {"BufferOps": BufferOps, "UnaryOps": UnaryOps, "BinaryOps": BinaryOps, "TernaryOps": TernaryOps, "MovementOps": MovementOps, "ReduceOps": ReduceOps, "dtypes": dtypes}
-  exec(compile(src, "<ast>", "exec"), tglob)
+  ssrc = '\n'.join(src)
+  if DEBUG >= 4: print(ssrc)
+  tglob = {"BufferOps": BufferOps, "UnaryOps": UnaryOps, "BinaryOps": BinaryOps, "TernaryOps": TernaryOps, "MovementOps": MovementOps, "ReduceOps": ReduceOps, "dtypes": dtypes, "inf": math.inf, "nan": math.nan}
+  # pylint: disable-next=exec-used
+  exec(compile(ssrc, "<ast>", "exec"), tglob)
   return tglob['run']
 
 class Interpreted:
   def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], to_underlying=lambda x: x._buf, from_underlying=None):
-    self.buffer, self.fxn_for_op, self.to_underlying = buffer, fxn_for_op, to_underlying
-    self.from_underlying = buffer if from_underlying is None else from_underlying
+    self.buffer, self.fxn_for_op, self.to_underlying, self.from_underlying = buffer, fxn_for_op, to_underlying, from_underlying
     self.synchronize = lambda: None
     self.codegen = None
 
   def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, context=None, **kwargs):
-    ret = ast_to_python(ast)(self.fxn_for_op, [x.realized for x in inputs])
-    ret = self.from_underlying(ret)
+    ret = ast_to_python(ast)(self.fxn_for_op, [x.realized for x in inputs] if inputs else None)
+    if self.from_underlying: ret = self.from_underlying(ret)
     if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op:
       ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.to_underlying(ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
     # TODO: is this used?
@@ -162,20 +161,28 @@ class Interpreted:
       return output.output_buffer
     return ret
 
+@dataclass
 class FlopCounter:
-  def __init__(self, tup:Tuple[Tuple[int, ...], DType, int, Dict[int, int]]): self.shape, self.dtype, self.flops, self.mem, self._buf = *tup, self
+  shape: Tuple[int, ...]
+  dtype: DType
+  flops: int
+  mem: Dict[int, int]
   @property
-  def mem_estimate(self): return sum(self.mem.values())
+  def mem_estimate(self): return sum(self.mem.values()) + self.dtype.itemsize*prod(self.shape)
   def consume_flops(self):
     self.flops, ret = 0, self.flops
     return ret
 InterpretedFlopCounter = Interpreted(FlopCounter, {
-  BufferOps.MEM: lambda arg: (arg.st.shape, arg.dtype, 0, {arg.idx: arg.dtype.itemsize*arg.st.size()}), BufferOps.CONST: lambda arg: (arg.st.shape, arg.dtype, 0, {}),
-  UnaryOps.CAST: lambda self,arg: (self.shape, arg[0], self.consume_flops(), self.mem),   # cast uses no flops
-  **{op:lambda self: (self.shape, self.dtype, self.consume_flops() + prod(self.shape), self.mem) for op in UnaryOps if op != UnaryOps.CAST},
-  **{op:lambda self,y: (self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape), {**self.mem, **y.mem}) for op in BinaryOps},
-  **{op:lambda self,new_shape: (new_shape, self.dtype, self.consume_flops() + prod(self.shape), self.mem) for op in ReduceOps},
-  TernaryOps.WHERE: lambda self,y,z: (self.shape, y.dtype, self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape), {**self.mem, **y.mem, **z.mem})})
+  BufferOps.MEM: lambda _,idx,sz,dtype: FlopCounter((sz,), dtype, 0, {idx: dtype.itemsize*sz}), BufferOps.CONST: lambda _,dtype: FlopCounter(tuple(), dtype, 0, {}),
+  MovementOps.AS_STRIDED: lambda self,arg: FlopCounter(tuple(arg[0]), self.dtype, self.consume_flops(), self.mem),
+  MovementOps.EXPAND: lambda self, arg: FlopCounter(arg, self.dtype, self.consume_flops(), self.mem),
+  MovementOps.PAD: lambda self, arg: FlopCounter(tuple(x+y[0]+y[1] for x,y in zip(self.shape, arg)), self.dtype, self.consume_flops(), self.mem),
+  UnaryOps.CAST: lambda self,arg: FlopCounter(self.shape, arg[0], self.consume_flops(), self.mem),   # cast uses no flops
+  **{op:lambda self: FlopCounter(self.shape, self.dtype, self.consume_flops() + prod(self.shape), self.mem) for op in UnaryOps if op != UnaryOps.CAST},
+  **{op:lambda self,y: FlopCounter(self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape), {**self.mem, **y.mem}) for op in BinaryOps},
+  **{op:lambda self,new_shape: FlopCounter(new_shape, self.dtype, self.consume_flops() + prod(self.shape), self.mem) for op in ReduceOps},
+  TernaryOps.MULACC: lambda self,y,new_shape: FlopCounter(new_shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + 2*prod(self.shape), {**self.mem, **y.mem}),
+  TernaryOps.WHERE: lambda self,y,z: FlopCounter(self.shape, y.dtype, self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape), {**self.mem, **y.mem, **z.mem})})
 
 @functools.lru_cache(None)
 def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.exec_ast(ast)
