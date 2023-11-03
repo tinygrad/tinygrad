@@ -27,7 +27,7 @@ class ClangProgram:
       pathlib.Path(cached_file_path.name).write_bytes(prg)
       self.fxn: Any = ctypes.CDLL(str(cached_file_path.name))[name]
 
-  def __call__(self, unused_global_size, unused_local_size, *args, wait=False):
+  def __call__(self, *args, wait=False):
     if wait: st = time.perf_counter()
     self.fxn(*[x._buf if isinstance(x, RawMallocBuffer) else x for x in args])
     if wait: return time.perf_counter()-st
