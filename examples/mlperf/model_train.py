@@ -128,7 +128,7 @@ def train_resnet_dali():
   steps_in_val_epoch = (len(get_val_files()) // BS) - 1
   print(f"training with batch size {BS} for {epochs} epochs {WORKERS} workers")
 
-  epoch_avg_time = []
+  epoch_avg_time, dts, tts, vts = [],[],[],[]
   for e in range(epochs):
     # train loop
     Tensor.training = True
@@ -157,7 +157,11 @@ def train_resnet_dali():
                  "train/GFLOPS": GlobalCounters.global_ops*1e-9/(cl-st),
       })
       '''
-      epoch_avg_time.append((data_time+(et-st))*1000)
+      epoch_avg_time.append((data_time+(et-st)))
+      dts.append(data_time)
+      tts.append(train_time)
+      vts.append(val_time)
+    return epoch_avg_time, dts, tts, vts
 
     # "eval" loop. Evaluate every 4 epochs, starting with epoch 1
     if e % 4 == 1:
@@ -265,7 +269,7 @@ def train_resnet():
 
   steps_in_train_epoch = (len(get_train_files()) // BS) - 1
   steps_in_val_epoch = (len(get_val_files()) // BS) - 1
-  epoch_avg_time = []
+  epoch_avg_time, dts, tts, vts = [],[],[],[]
   for e in range(epochs):
     # train loop
     Tensor.training = True
@@ -297,13 +301,17 @@ def train_resnet():
                  "train/GFLOPS": GlobalCounters.global_ops*1e-9/(cl-st),
       })
     '''
-      epoch_avg_time.append((data_time+(et-st))*1000)
+      epoch_avg_time.append((data_time+(et-st)))
+      dts.append(data_time)
+      tts.append(train_time)
+      vts.append(val_time)
 
     epoch_avg = sum(epoch_avg_time)/len(epoch_avg_time)
     epoch_med = statistics.median(epoch_avg_time)
     val_time = epoch_avg*steps_in_val_epoch*(epochs//4)/(1000*60*60)
     train_time = epoch_avg*steps_in_train_epoch*epochs/(1000*60*60)
-    print(f'EPOCH {e}: avg step time {epoch_avg:7.2f} ms {epoch_med:7.2f}ms median step time  {train_time+val_time:7.2f}hrs total')
+    print(f'EPOCH {e}: avg step time {epoch_avg*1000:7.2f} ms {epoch_med:7.2f}ms median step time  {train_time+val_time:7.2f}hrs total')
+    return epoch_avg_time, dts, tts, vts 
 
     # 60ms mean 25ms median step for cross_process
     # 40ms mean 20ms median step  data, PreFetcher
@@ -443,10 +451,51 @@ if __name__ == "__main__":
               print(f"An error occurred while installing '{module}'.", e)
     #recover_corrupted_db("/users/minjunes/downloads/tinygrad_cache BEAM=6", "/tmp/tinygrad_cache")
     # NOTE: to run with resnet_dali, do export=resnet_dali
+  import statistics
   with Tensor.train():
     for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn,resnet_dali").split(","):
       nm = f"train_{m}"
       if nm in globals():
         print(f"training {m}")
-        globals()[nm]()
+        alls = []
+        for bs in range(8,16,8):
+          for w in range(0,2,2):
+            if w == 0: w=1
+            for compute in range(10,15,5):
+              #c = globals()[nm]
+              a = train_resnet_dali(bs=bs,w=w,compute=compute)
+              b = train_resnet(bs=bs,w=w,compute=compute)
+              alls.append((a,bs,w,compute, 'dali'))
+              alls.append((b,bs,w,compute, 'tiny'))
+        def avg(l): return sum(l)/len(l)
+        def med(l): return statistics.median(l)
+        def get_str(st): 
+          x,meta = st
+          ets,dts,tts,vts = x
+          bs,w,compute,n = meta
+          s = (f'**{n} {bs} bs {w} workers {compute}ms comp**')
+          e = (f'{avg(ets)*1000:7.2f}ms total {avg(dts)*1000:7.2f}ms data {avg(tts):7.2f}hrs train {avg(vts):7.2f}hrs val')
+          e1 = (f'{med(ets)*1000:7.2f}ms total {med(dts)*1000:7.2f}ms data {med(tts):7.2f}hrs train {med(vts):7.2f}hrs val')
+          return s,e,e1
+        for st in alls:
+          s,e,e1 = get_str(st)
+          print(s)
+          print(e)
+          print(e1)
+          with open('logs.txt', 'a') as f:
+            f.write(s+'\n'+e+'\n'+e1+'\n')
+        # avg sort
+        avgs = sorted(alls, key=lambda x: avg(x[0][0]))
+        meds = sorted(alls, key=lambda x: med(x[0][0])) 
+        with open('logs.txt', 'a') as f:
+          f.write("**sorted by avg**")
+          for a in avgs:
+            s,e,e1 = get_str(a)
+            f.write(s+'\n'+e+'\n'+e1+'\n')
+          f.write('**sorted by med**')
+          for m in meds:
+            s,e,e1 = get_str(m)
+            f.write(s+'\n'+e+'\n'+e1+'\n')
+        # med sort
+        #globals()[nm]()
 
