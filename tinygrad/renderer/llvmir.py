@@ -32,10 +32,10 @@ def cast(bb, val, input_type, output_type):
   if dtypes.is_float(input_type):
     if dtypes.is_float(output_type):
       if output_type.itemsize > input_type.itemsize: return bb[-1].fpext(val, dtype_to_llvm_dtype[output_type])
-      else: return bb[-1].fptrunc(val, dtype_to_llvm_dtype[output_type])
+      return bb[-1].fptrunc(val, dtype_to_llvm_dtype[output_type])
     if dtypes.is_int(output_type):
       if dtypes.is_unsigned(output_type): return bb[-1].fptoui(val, dtype_to_llvm_dtype[output_type])
-      else: return bb[-1].fptosi(val, dtype_to_llvm_dtype[output_type])
+      return bb[-1].fptosi(val, dtype_to_llvm_dtype[output_type])
     if output_type == dtypes.bool: return bb[-1].fcmp_unordered('!=', cast(bb, val, input_type, dtypes.float32), ir.Constant(ir.FloatType(), 0))
 
   if dtypes.is_unsigned(input_type) or input_type == dtypes.bool:
@@ -45,7 +45,7 @@ def cast(bb, val, input_type, output_type):
     if dtypes.is_float(output_type): return bb[-1].uitofp(val, dtype_to_llvm_dtype[output_type])
     if dtypes.is_int(output_type):
       if input_type.itemsize > output_type.itemsize: return bb[-1].trunc(val, dtype_to_llvm_dtype[output_type])
-      else: return bb[-1].zext(val, dtype_to_llvm_dtype[output_type])
+      return bb[-1].zext(val, dtype_to_llvm_dtype[output_type])
     if output_type == dtypes.bool: return bb[-1].icmp_unsigned('!=', val, ir.Constant(val.type, 0))
 
   if dtypes.is_int(input_type):
@@ -55,7 +55,7 @@ def cast(bb, val, input_type, output_type):
     if dtypes.is_float(output_type): return bb[-1].sitofp(val, dtype_to_llvm_dtype[output_type])
     if dtypes.is_int(output_type):
       if input_type.itemsize > output_type.itemsize: return bb[-1].trunc(val, dtype_to_llvm_dtype[output_type])
-      else: return bb[-1].sext(val, dtype_to_llvm_dtype[output_type])
+      return bb[-1].sext(val, dtype_to_llvm_dtype[output_type])
     if output_type == dtypes.bool: return bb[-1].icmp_signed('!=', val, ir.Constant(val.type, 0))
 
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
