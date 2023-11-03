@@ -69,7 +69,7 @@ def image_load(fn, val):
   #img = torch.from_numpy(np.float32(img).transpose([2, 0, 1])) / 255.0
   #img = F.normalize(img, mean, std)
   e = time.perf_counter()
-  return img, e-s, e-n
+  return np.float32(img), e-s, e-n
 
 def iterate(bs=16, val=True, shuffle=True, num_workers=16):
   files = get_val_files() if val else get_train_files()
@@ -86,7 +86,7 @@ def iterate(bs=16, val=True, shuffle=True, num_workers=16):
     if isinstance(X[0], torch.Tensor):
       yield torch.stack(X).numpy(), np.array(Y), (e-s), (sum(T)/len(T))
     else:
-      yield np.array(np.float32(X)),np.array(Y),(e-s),(sum(T)/len(T))
+      yield np.array(X),np.array(Y),(e-s),(sum(T)/len(T))
   
 def proc(itermaker, q) -> None:
   try:
