@@ -83,7 +83,10 @@ def iterate(bs=16, val=True, shuffle=True, num_workers=16):
     X,T = [x[0] for x in X],[x[2] for x in X]
     #print(f'{(e-s)*1000:7.2f}ms all imgs tm {((e-s)-max(T))*1000:7.2f} mult process tm')
     Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
-    yield torch.stack(X).numpy(), np.array(Y), (e-s), (sum(T)/len(T))
+    if isinstance(X[0], torch.Tensor):
+      yield torch.stack(X).numpy(), np.array(Y), (e-s), (sum(T)/len(T))
+    else:
+      yield np.array(X),np.array(Y),(e-s),(sum(T)/len(T))
   
 def proc(itermaker, q) -> None:
   try:
