@@ -78,9 +78,6 @@ class Kernel:
     # create new shapetrackers inside this kernel, we will permute them
     self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = [MemBuffer(0, self.info.dtype, ShapeTracker.from_shape(self.info.shape))] + dedup([x.arg for x in self.ast.get_lazyops() if x.op in BufferOps])
 
-    # extract things from the buffers
-    self.mem_estimate: int = sum(x.dtype.itemsize*x.st.size() for x in cast(List[Union[MemBuffer, ConstBuffer]], self.bufs))
-
     # get earlybufs, before the one reduce op
     self.earlybufs = [x.arg for x in self.reduceop.get_lazyops() if x.op in BufferOps] if self.reduceop else []
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
@@ -117,8 +114,8 @@ class Kernel:
 
     # things downstream of the AST
     # NOTE: we copy bufs for local buffers and sts for optimizations
-    ret.info, ret.reduceop, ret.bufs, ret.mem_estimate, ret.earlybufs, ret.full_buf_index, ret.sts = \
-      self.info, self.reduceop, self.bufs[:], self.mem_estimate, self.earlybufs, self.full_buf_index, self.sts[:]
+    ret.info, ret.reduceop, ret.bufs, ret.earlybufs, ret.full_buf_index, ret.sts = \
+      self.info, self.reduceop, self.bufs[:], self.earlybufs, self.full_buf_index, self.sts[:]
 
     # parameters for optimizations
     ret.applied_opts, ret.group_for_reduce, ret.upcasted, ret.local_dims, ret.local_alias, ret.tensor_core, ret.dont_use_locals = \
