@@ -11,7 +11,7 @@ import wandb
 import time
 
 # TODO: auto-down DALI
-def train_resnet_dali():
+def train_resnet_dali(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None):
   import math
   from models.resnet import ResNet50
   from extra.datasets.imagenet import BASEDIR
@@ -32,8 +32,8 @@ def train_resnet_dali():
 
   from extra.lr_scheduler import CosineAnnealingLR
   import os
-  BS = getenv("BS",32)
-  WORKERS = getenv("WORKERS", 8)
+  BS = bs
+  WORKERS = w
   traindir, valdir = os.path.join(BASEDIR, 'train'),os.path.join(BASEDIR,'val')
   val_size,crop_size = 256,224
 
@@ -139,8 +139,11 @@ def train_resnet_dali():
       st = time.monotonic()
       data_time = st-cl
       X, Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
-      #loss, out = train_step(X, Y)
-      #time.sleep(15/1000)
+      if not compute:
+        loss, out = train_step(X, Y)
+      else:
+        time.sleep(compute/1000)
+
       et = time.monotonic()
       if i % 1000 == 0: loss_cpu = 0#loss.numpy()
       cl = time.monotonic()
@@ -194,7 +197,7 @@ def train_resnet_dali():
       epoch_avg_time = []
 
 
-def train_resnet():
+def train_resnet_dali(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None):
   # TODO: Resnet50-v1.5
   from models.resnet import ResNet50
   from extra.datasets.imagenet import get_train_files, get_val_files
@@ -238,13 +241,7 @@ def train_resnet():
     eq_elements = np.equal(out_top_n, YY)
     top_n_acc = np.count_nonzero(eq_elements) / eq_elements.size * top_n
     return top_n_acc
-  ''' 
-  mean = [0.485, 0.456, 0.406]
-  std = [0.229, 0.224, 0.225]
-  def normalize(X):
-     X = torch.from_numpy(X.transpose([0,3,1,2]))/255.0
-     return np.array(F.normalize(X, mean, std))
-  '''
+
   seed = getenv('SEED', 42)
   Tensor.manual_seed(seed)
   np.random.seed(seed)
@@ -259,8 +256,8 @@ def train_resnet():
   model = ResNet50(num_classes)
   parameters = get_parameters(model)
 
-  BS = getenv("BS",16)
-  WORKERS = getenv("WORKERS",16)
+  BS = bs
+  WORKERS = w
   lr = 0.256 * (BS / 256)  # Linearly scale from BS=256, lr=0.256
   epochs = 50
   optimizer = optim.SGD(parameters, lr, momentum=.875, weight_decay=1/2**15)
@@ -279,8 +276,12 @@ def train_resnet():
       st = time.perf_counter()
       data_time = st-cl
       X,Y = Tensor(X,requires_grad=False),Tensor(Y,requires_grad=False)
-      time.sleep(20/1000)
-      #loss, out = train_step(X, Y)
+
+      if not compute:
+        loss, out = train_step(X, Y)
+      else:
+        time.sleep(compute/1000)
+
       et = time.perf_counter()
       if i % 1000 == 0: 
         loss_cpu = 0 #loss.numpy()
@@ -482,12 +483,12 @@ if __name__ == "__main__":
           print(s)
           print(e)
           print(e1)
-          with open('logs.txt', 'a') as f:
+          with open('train_logs', 'a') as f:
             f.write(s+'\n'+e+'\n'+e1+'\n')
         # avg sort
         avgs = sorted(alls, key=lambda x: avg(x[0][0]))
         meds = sorted(alls, key=lambda x: med(x[0][0])) 
-        with open('logs.txt', 'a') as f:
+        with open('train_logs', 'a') as f:
           f.write("**sorted by avg**")
           for a in avgs:
             s,e,e1 = get_str(a)
