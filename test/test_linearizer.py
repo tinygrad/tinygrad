@@ -2,7 +2,7 @@ import numpy as np
 import unittest, os
 
 from tinygrad.codegen.kernel import tensor_cores
-from tinygrad.codegen.optimizer import Opt, OptOps
+from tinygrad.codegen.kernel import Opt, OptOps
 from tinygrad.codegen.linearizer import Linearizer, UOps
 from tinygrad.ops import Compiled, Device
 from tinygrad.tensor import Tensor

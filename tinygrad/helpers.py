@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, pathlib, hashlib, tempfile, pickle, sqlite3
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3
 import numpy as np
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -19,7 +19,8 @@ def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https
 def all_same(items): return all(x == items[0] for x in items)
 def all_int(t: Tuple[Any, ...]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
-def ansilen(s): return len(re.sub('\x1b\\[(K|.*?m)', '', s))
+def ansistrip(s): return re.sub('\x1b\\[(K|.*?m)', '', s)
+def ansilen(s): return len(ansistrip(s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Union[List, Iterator]): return [item for sublist in l for item in sublist]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
@@ -153,34 +154,23 @@ class GlobalCounters:
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0
 
-# *** compiled cache decorator ***
-
-def cache_compiled(func):
-  def wrapper(self, prg:str, *args, **kwargs) -> bytes:
-    cache_path, output_file = pathlib.Path(f"{tempfile.gettempdir()}/tinygrad_cc_{hashlib.sha256(prg.encode()).hexdigest()}"), pathlib.Path(tempfile.mktemp())
-    if not cache_path.exists():
-      output_file.write_bytes(func(self, prg, *args, **kwargs))
-      output_file.rename(cache_path)
-    return cache_path.read_bytes()
-  return wrapper
-
 # *** universal database cache ***
 
 CACHEDB = getenv("CACHEDB", "/tmp/tinygrad_cache")
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 3
+VERSION = 6
 _db_connection = None
 def db_connection():
   global _db_connection
   if _db_connection is None:
     _db_connection = sqlite3.connect(CACHEDB)
-    if DEBUG >= 3: _db_connection.set_trace_callback(print)
+    if DEBUG >= 5: _db_connection.set_trace_callback(print)
     if diskcache_get("meta", "version") != VERSION:
       print("cache is out of date, clearing it")
       os.unlink(CACHEDB)
       _db_connection = sqlite3.connect(CACHEDB)
-      if DEBUG >= 3: _db_connection.set_trace_callback(print)
+      if DEBUG >= 5: _db_connection.set_trace_callback(print)
       diskcache_put("meta", "version", VERSION)
   return _db_connection
 
@@ -208,3 +198,11 @@ def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
   conn.commit()
   cur.close()
   return val
+
+def diskcache(func):
+  def wrapper(*args, **kwargs) -> bytes:
+    table, key = f"cache_{func.__name__}", hashlib.sha256(pickle.dumps((args, kwargs))).hexdigest()
+    if (ret:=diskcache_get(table, key)): return ret
+    return diskcache_put(table, key, func(*args, **kwargs))
+  setattr(wrapper, "__wrapped__", func)
+  return wrapper

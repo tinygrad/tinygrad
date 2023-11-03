@@ -118,7 +118,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   for x in local_size: acc_local_size *= next_power_of_2(x)
   local_size = [acc_local_size] + [1] * (len(local_size) - 1)
 
-  if DEBUG >=4: print(prg)
+  if DEBUG >= 4: print(prg)
   getlines = linecache.getlines
   linecache.getlines = lambda filename, module_globals=None: prg.splitlines(keepends=True) if "<triton>" == filename else getlines(filename, module_globals)
   exec(compile(prg, "<triton>", "exec"), globals()) # pylint: disable=W0122\
@@ -126,4 +126,5 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   prg = remove_single_scalar_curly_braces(compiled.asm["ptx"].split(".file")[0].split(".visible .func")[0])
   max_local_size =  [int(x) for x in prg.split(".maxntid ")[1].split("\n")[0].split(", ")]
   for i in range(len(local_size)): local_size[i] = min(local_size[i], max_local_size[i])
-  return prg, {"binary":True, "shared":compiled.metadata["shared"], "local_size_override":local_size +  [1]*(3-len(local_size))}
+
+  return prg, {"shared":compiled.metadata["shared"], "local_size_override":local_size + [1]*(3-len(local_size))}

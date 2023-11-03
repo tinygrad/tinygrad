@@ -2,7 +2,7 @@ import numpy as np
 import ctypes, functools
 import extra.hip_wrapper as hip
 from typing import Tuple, Any, List
-from tinygrad.helpers import DEBUG, getenv, cache_compiled
+from tinygrad.helpers import DEBUG, getenv, diskcache
 from tinygrad.ops import Compiled, ASTRunner, GraphBatchExecutor
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -70,7 +70,7 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device=HIP.default_device, buf=None, allocator=HIP.allocator): super().__init__(size, dtype, buf=buf, allocator=allocator, **{'device': int(device)})
   def _copyin(self, x:np.ndarray):
     hip.hipSetDevice(self._device)
-    hip.hipMemcpyAsync(self._buf, np.require(x, requirements='C').ctypes.data, self.size * self.dtype.itemsize, hip.hipMemcpyHostToDevice, 0)
+    hip.hipMemcpyAsync(self._buf, np.require(x, requirements='C').ctypes.data_as(ctypes.c_void_p), self.size * self.dtype.itemsize, hip.hipMemcpyHostToDevice, 0)
   def _copyout(self, x:np.ndarray):
     hip.hipSetDevice(self._device)
     hip.hipMemcpy(x.ctypes.data, self._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToHost)
@@ -78,10 +78,15 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
     hip.hipSetDevice(x._device)
     hip.hipMemcpy(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice)
 
+@diskcache
+def compile_hip(prg) -> bytes:
+  prog = hip.hiprtcCreateProgram(prg, "<null>", [], [])
+  hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])
+  return hip.hiprtcGetCode(prog)
+
 class HIPProgram:
-  def __init__(self, name:str, prg:str, binary=False):
+  def __init__(self, name:str, prg:bytes):
     self.modules, self.prgs = [], []
-    prg = prg if binary else self.compile(prg, name)
 
     if DEBUG >= 6:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
@@ -91,16 +96,6 @@ class HIPProgram:
       hip.hipSetDevice(i)
       self.modules.append(hip.hipModuleLoadData(prg))
       self.prgs.append(hip.hipModuleGetFunction(self.modules[-1], name))
-
-  @cache_compiled
-  def compile(self, prg, name) -> bytes:
-    try:
-      prog = hip.hiprtcCreateProgram(prg, name, [], [])
-      hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])
-      return hip.hiprtcGetCode(prog)
-    except Exception as e:
-      if DEBUG >= 3: print("FAILED TO BUILD", prg)
-      raise e
 
   def __call__(self, global_size, local_size, *args, wait=False):
     hip.hipSetDevice(args[0]._device)
@@ -142,4 +137,4 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset
   """,
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]))
-HIPBuffer = Compiled(RawHIPBuffer, LinearizerOptions(device="HIP"), renderer, HIPProgram, hip.hipDeviceSynchronize, HIPGraph)
+HIPBuffer = Compiled(RawHIPBuffer, LinearizerOptions(device="HIP"), renderer, compile_hip, HIPProgram, hip.hipDeviceSynchronize, HIPGraph)
