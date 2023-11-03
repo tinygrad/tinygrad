@@ -134,7 +134,7 @@ def train_resnet_dali(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None,step
     Tensor.training = True
     cl = time.monotonic() 
     for i,data in enumerate(t:=tqdm(train_loader)): 
-      if not steps and i == steps: break
+      if steps and i == steps: break
       X,Y = data[0]["data"].cpu().numpy(),data[0]["label"].squeeze(-1).long().cpu().numpy()
       GlobalCounters.reset()
       st = time.monotonic()
