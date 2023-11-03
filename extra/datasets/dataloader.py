@@ -61,7 +61,7 @@ def image_load(fn, val):
       #rhf=RandomHorizontalFlip(p=0.5)
       #img=rhf.forward(img)
       img = F.hflip(img)
-    print(f'load timn {load_t*1000:7.2f}ms norm {(e-r)*1000:7.2f}ms resize {(e1-s1)*1000:7.2f}ms randresize')
+    #print(f'load timn {load_t*1000:7.2f}ms norm {(e-r)*1000:7.2f}ms resize {(e1-s1)*1000:7.2f}ms randresize')
   # TODO: normalize
   #print('bef')
   #print(img.shape)
