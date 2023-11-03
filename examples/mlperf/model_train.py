@@ -7,8 +7,10 @@ from extra.datasets.imagenet import PreFetcher
 from tqdm import tqdm
 import numpy as np
 import random
-import wandb
+#import wandb
 import time
+
+
 
 def train_resnet():
   # TODO: Resnet50-v1.5
@@ -76,7 +78,7 @@ def train_resnet():
   np.random.seed(seed)
   random.seed(seed)
 
-  wandb.init()
+  #wandb.init()
 
   num_classes = 1000
   fp16 = getenv("HALF", 0)
@@ -121,6 +123,7 @@ def train_resnet():
       val_time = (data_time+et-st)*steps_in_val_epoch*(epochs//4)/(60*60)
       print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {data_time*1000:7.2f} ms data {loss_cpu:7.2f} loss (every 1000)" + \
             f"{GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS {train_time+val_time:7.1f} hrs total {train_time:7.1f}hrs train {val_time:7.1f}hrs val")
+      '''
       wandb.log({"lr": scheduler.get_lr().numpy().item(),
                  "train/data_time": data_time,
                  "train/python_time": et - st,
@@ -129,6 +132,7 @@ def train_resnet():
                  "train/loss": loss_cpu,
                  "train/GFLOPS": GlobalCounters.global_ops*1e-9/(cl-st),
       })
+    '''
       epoch_avg_time.append((data_time+(et-st))*1000)
 
     epoch_avg = sum(epoch_avg_time)/len(epoch_avg_time)
@@ -174,12 +178,14 @@ def train_resnet():
         eval_times.append(et - st)
         eval_top_1_acc.append(top_1_acc)
         eval_top_5_acc.append(top_5_acc)
+        '''
         wandb.log({"eval/loss": sum(eval_loss) / len(eval_loss),
                   "eval/forward_time": sum(eval_times) / len(eval_times),
                   "eval/top_1_acc": sum(eval_top_1_acc) / len(eval_top_1_acc),
                   "eval/top_5_acc": sum(eval_top_5_acc) / len(eval_top_5_acc),
                   "eval/avg_time": sum(epoch_avg_time) / len(epoch_avg_time)
         })
+        '''
         val_time = (data_time+et-st)*steps_in_val_epoch*(epochs//4)/(60*60)
         print(f'{(et-cl)*1000:7.2f} ms run {val_time:7.2f}hrs total val')
         cl = time.monotonic()
@@ -227,8 +233,24 @@ def recover_corrupted_db(corrupted_db, new_db):
 
 
 if __name__ == "__main__":
-  #recover_corrupted_db("/users/minjunes/downloads/tinygrad_cache BEAM=6", "/tmp/tinygrad_cache")
-  # NOTE: to run with resnet_dali, do export=resnet_dali
+  import subprocess
+  import sys
+  modules_to_check = ['simpljpeg', 'wandb', 'pycuda', 'cloudpickle']
+  def install(package):
+      subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+  for module in modules_to_check:
+      try:
+          __import__(module)
+          print(f"Module '{module}' is already installed.")
+      except ImportError:
+          print(f"Module '{module}' not found. Installing...")
+          try:
+              install(module)
+              print(f"Module '{module}' has been installed.")
+          except Exception as e:
+              print(f"An error occurred while installing '{module}'.", e)
+    #recover_corrupted_db("/users/minjunes/downloads/tinygrad_cache BEAM=6", "/tmp/tinygrad_cache")
+    # NOTE: to run with resnet_dali, do export=resnet_dali
   with Tensor.train():
     for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
       nm = f"train_{m}"
