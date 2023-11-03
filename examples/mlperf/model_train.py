@@ -41,10 +41,6 @@ def train_resnet():
     X -= input_mean
     X /= input_std
     return X.realize() 
-  
-  def torch_normalize(X): 
-    X = torch.from_numpy(X.transpose([0,3,1,2])) / 255.0
-    return Tensor(np.array(F.normalize(X, mean, std)), requires_grad=False)
 
   @TinyJit
   def train_step(X, Y):

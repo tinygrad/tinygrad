@@ -58,7 +58,7 @@ if __name__ == '__main__':
   s = time.perf_counter()
  # for i, (X,Y) in enumerate(cross_process(lambda: iterate(bs=32,val=False,shuffle=True))):
   norm,data,mult = [],[],[]
-  for i, (X,Y) in enumerate(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=W))):
+  for i, (X,Y,m,t) in enumerate(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=W))):
     n1 = time.perf_counter()
     X = normalize(Tensor(X, requires_grad=False))
     n2 = time.perf_counter()
