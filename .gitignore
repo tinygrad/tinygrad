@@ -5,6 +5,7 @@ notebooks
 .*.swp
 .*.swo
 *.pyc
+*.DS_Store
 *.so
 *.txt
 build
