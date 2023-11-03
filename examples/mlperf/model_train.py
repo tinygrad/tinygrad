@@ -125,7 +125,7 @@ def train_resnet_dali():
   scheduler = CosineAnnealingLR(optimizer, epochs)
   steps_in_train_epoch = (len(get_train_files()) // BS) - 1
   steps_in_val_epoch = (len(get_val_files()) // BS) - 1
-  print(f"training with batch size {BS} for {epochs} epochs")
+  print(f"training with batch size {BS} for {epochs} epochs {WORKERS} workers")
 
   epoch_avg_time = []
   for e in range(epochs):
