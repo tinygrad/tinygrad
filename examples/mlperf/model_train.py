@@ -140,7 +140,7 @@ def train_resnet_dali():
       data_time = st-cl
       X, Y = Tensor(X, requires_grad=False), Tensor(Y, requires_grad=False)
       #loss, out = train_step(X, Y)
-      time.sleep(20/1000)
+      time.sleep(15/1000)
       et = time.monotonic()
       if i % 1000 == 0: loss_cpu = 0#loss.numpy()
       cl = time.monotonic()
