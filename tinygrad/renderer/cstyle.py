@@ -213,6 +213,6 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       raise RuntimeError(f"failed to render {uop}")
 
   runtime_args = {}
-  if global_size: runtime_args['global_size'] = tuple(global_size[::-1] + [1]*(3-len(global_size)))
+  if lang.gid: runtime_args['global_size'] = tuple(global_size[::-1] + [1]*(3-len(global_size)))
   if local_size: runtime_args['local_size'] = tuple(local_size[::-1] + [1]*(3-len(local_size)))
   return lang.render_kernel(function_name, kernel, bufs, local_size, prekernel), runtime_args
