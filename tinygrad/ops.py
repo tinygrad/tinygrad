@@ -3,7 +3,7 @@ import time, importlib, inspect, functools, pathlib, itertools, random, math, co
 import numpy as np
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, cast, Mapping
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, dtypes
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer
 from dataclasses import dataclass
@@ -109,6 +109,31 @@ Device = _Device()
 
 # **************** for Interpreted Buffers ****************
 
+@functools.lru_cache(None)
+def compile_ast(ast:LazyOp) -> Callable:
+  lines = []
+  @functools.lru_cache(None)
+  def _compile_ast(ast:LazyOp) -> str:
+    nonlocal lines
+    if ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
+      ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
+    inp = [_compile_ast(src) for src in ast.src]
+    if ast.op == BufferOps.MEM: inp += [f"inputs[{ast.arg.idx-1}]"]
+    elif ast.op == BufferOps.CONST: inp += [str(ast.arg.val), str(ast.arg.dtype)]
+    elif ast.arg: inp += [str(ast.arg)]
+    ret = f"a{len(lines)}"
+    lines.append(f"{ret} = f[{ast.op}]({', '.join(inp)})")
+    if ast.op in BufferOps:
+      for mop,arg in ast.arg.st.to_movement_ops():
+        lines.append(f"{ret} = f[{mop}]({ret}, {str(arg)})")
+    return ret
+  ret = _compile_ast(ast)
+  src = 'def run(f, inputs):\n  '+'\n  '.join(lines)+f"\n  return {ret}"
+  if DEBUG >= 4: print(src)
+  tglob = {"BufferOps": BufferOps, "UnaryOps": UnaryOps, "BinaryOps": BinaryOps, "TernaryOps": TernaryOps, "MovementOps": MovementOps, "ReduceOps": ReduceOps, "dtypes": dtypes}
+  exec(compile(src, "<ast>", "exec"), tglob)
+  return tglob['run']
+
 class Interpreted:
   def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], to_underlying=lambda x: x._buf, from_underlying=None):
     self.buffer, self.fxn_for_op, self.to_underlying = buffer, fxn_for_op, to_underlying
@@ -117,6 +142,13 @@ class Interpreted:
     self.codegen = None
 
   def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, context=None, **kwargs):
+    prg = compile_ast(ast)
+    ret = prg(self.fxn_for_op, [x.realized for x in inputs])
+    ret = self.from_underlying(ret)
+    if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op:
+      ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.to_underlying(ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
+    return ret
+
     if ast.op in BufferOps and ast.op not in self.fxn_for_op:
       if ast.op == BufferOps.MEM:
         assert inputs[ast.arg.idx-1].dtype == ast.arg.dtype, "dtype mismatch"
