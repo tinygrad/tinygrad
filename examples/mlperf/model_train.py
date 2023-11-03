@@ -111,7 +111,7 @@ def train_resnet():
 
       st1 = time.monotonic()
       #X,Y = torch_normalize(X),Tensor(Y,requires_grad=False)
-      X,Y = normalize(Tensor(X,requires_grad=False)),Tensor(Y,requires_grad=False)
+      X,Y = Tensor(X,requires_grad=False),Tensor(Y,requires_grad=False)
 
       st = time.monotonic()
       print(f'normalize {(st-st1)*1000:7.2f}')
@@ -240,7 +240,7 @@ def recover_corrupted_db(corrupted_db, new_db):
 if __name__ == "__main__":
   import subprocess
   import sys
-  modules_to_check = ['simpljpeg', 'wandb', 'pycuda', 'cloudpickle']
+  modules_to_check = ['simplejpeg', 'wandb', 'pycuda', 'cloudpickle']
   def install(package):
       subprocess.check_call([sys.executable, "-m", "pip", "install", package])
   for module in modules_to_check:
