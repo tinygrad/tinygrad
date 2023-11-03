@@ -461,11 +461,11 @@ if __name__ == "__main__":
       if nm in globals():
         print(f"training {m}")
         alls = []
-        steps = 10
-        for bs in range(8,16,8):
-          for w in range(0,2,2):
+        steps = 100
+        for bs in range(8,40,8):
+          for w in range(0,18,2):
             if w == 0: w=1
-            for compute in range(10,15,5):
+            for compute in range(10,40,5):
               #c = globals()[nm]
               a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
               b = train_resnet(bs=bs,w=w,compute=compute,steps=steps)
@@ -476,7 +476,7 @@ if __name__ == "__main__":
         def get_str(st): 
           x,bs,w,compute,n = st
           ets,dts,tts,vts = x
-          s = (f'**{n} {bs} bs {w} workers {compute}ms comp**')
+          s = (f'{n} {bs} bs {w} workers {compute}ms comp**')
           e = (f'{avg(ets)*1000:7.2f}ms total {avg(dts)*1000:7.2f}ms data {avg(tts):7.2f}hrs train {avg(vts):7.2f}hrs val')
           e1 = (f'{med(ets)*1000:7.2f}ms total {med(dts)*1000:7.2f}ms data {med(tts):7.2f}hrs train {med(vts):7.2f}hrs val')
           return s,e,e1
@@ -488,17 +488,17 @@ if __name__ == "__main__":
           with open('train_logs', 'a') as f:
             f.write(s+'\n'+e+'\n'+e1+'\n')
         # avg sort
-        avgs = sorted(alls, key=lambda x: avg(x[0][0]))
-        meds = sorted(alls, key=lambda x: med(x[0][0])) 
+        avgs = sorted(alls, key=lambda x: avg(x[0][0]))[::-1]
+        meds = sorted(alls, key=lambda x: med(x[0][0]))[::-1]
         with open('train_logs', 'a') as f:
-          f.write("**sorted by avg**")
-          for a in avgs:
+          f.write("**sorted by avg**+\n")
+          for i,a in enumerate(avgs):
             s,e,e1 = get_str(a)
-            f.write(s+'\n'+e+'\n'+e1+'\n')
-          f.write('**sorted by med**')
-          for m in meds:
+            f.write(f'RANK {i}'+s+'\n'+e+'\n'+e1+'\n')
+          f.write('**sorted by med**+\n')
+          for i,m in enumerate(meds):
             s,e,e1 = get_str(m)
-            f.write(s+'\n'+e+'\n'+e1+'\n')
+            f.write(f'RANK {i}'+s+'\n'+e+'\n'+e1+'\n')
         # med sort
         #globals()[nm]()
 
