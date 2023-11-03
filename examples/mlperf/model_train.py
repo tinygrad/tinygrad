@@ -163,7 +163,9 @@ def train_resnet():
     # "eval" loop. Evaluate every 4 epochs, starting with epoch 1
 
     # on runpod
-    # idk why, data is 400ms... 
+    # not data, compute is 400ms. just gotta make compute faster
+    # but is compute slower cuz of normalize - should it be done on cpu? 
+    # normalize on CUDA might take signfiicantly longer than on CPU, in hindsight
 
     if e % 4 == 1:
       eval_loss = []

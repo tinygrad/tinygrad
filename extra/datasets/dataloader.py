@@ -27,9 +27,12 @@ def get_val_files():
   return val_files
 
 import time
+import torch
 import torchvision.transforms.functional as F
 from torchvision.transforms import RandomResizedCrop
 
+mean = [0.485, 0.456, 0.406]
+std = [0.229, 0.224, 0.225]
 
 def decode(fn):
   with open(fn, 'rb') as f:
@@ -59,8 +62,11 @@ def image_load(fn, val):
       #img=rhf.forward(img)
       img = F.hflip(img)
     #print(f'load timn {load_t*1000:7.2f}ms norm {(e-r)*1000:7.2f}ms resize {(e1-s1)*1000:7.2f}ms randresize')
+  # TODO: normalize
+  img = torch.from_numpy(np.float32(img).transpose(2,0,1) / 255)
+  img = F.normalize(img, mean, std)
   e = time.perf_counter()
-  return np.float32(img), e-s
+  return img, e-s
 
 def iterate(bs=16, val=True, shuffle=True, num_workers=16):
   files = get_val_files() if val else get_train_files()
