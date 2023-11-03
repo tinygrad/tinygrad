@@ -13,8 +13,13 @@ import torch
 import torchvision.transforms.functional as F
 from torchvision.transforms import RandomResizedCrop, Normalize
 
+def torch_normalize(X):
+  return F.normalize(X, mean, std)
+
 @TinyJit
 def normalize(X: Tensor):
+  mean = [0.485, 0.456, 0.406]
+  std = [0.229, 0.224, 0.225]
   input_mean = Tensor(mean).reshape(-1,1,1)
   input_std = Tensor(std).reshape(-1,1,1)
   X = X.permute(0,3,1,2) / 255.0

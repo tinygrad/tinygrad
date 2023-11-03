@@ -1,0 +1,45 @@
+{
+    "os": "macOS-13.3-x86_64-i386-64bit",
+    "python": "3.9.18",
+    "heartbeatAt": "2023-11-03T02:41:59.642908",
+    "startedAt": "2023-11-03T02:41:59.553971",
+    "docker": null,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "program": "/Users/minjunes/tinygrad/examples/mlperf/model_train.py",
+    "codePathLocal": "examples/mlperf/model_train.py",
+    "codePath": "examples/mlperf/model_train.py",
+    "git": {
+        "remote": "https://github.com/tinygrad/tinygrad.git",
+        "commit": "c19adaa7f7aaacf1ab3d1557b7c037b728839f3f"
+    },
+    "email": "mjsong2021@gmail.com",
+    "root": "/Users/minjunes/tinygrad",
+    "host": "minjunes-MBP.fios-router.home",
+    "username": "minjunes",
+    "executable": "/Users/minjunes/opt/anaconda3/envs/tinygrad/bin/python",
+    "cpu_count": 8,
+    "cpu_count_logical": 8,
+    "cpu_freq": {
+        "current": 2400,
+        "min": 2400,
+        "max": 2400
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 2400,
+            "min": 2400,
+            "max": 2400
+        }
+    ],
+    "disk": {
+        "/": {
+            "total": 460.4317207336426,
+            "used": 11.166431427001953
+        }
+    },
+    "memory": {
+        "total": 8.0
+    }
+}

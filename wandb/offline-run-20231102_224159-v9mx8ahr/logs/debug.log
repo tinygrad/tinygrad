@@ -1,0 +1,25 @@
+2023-11-02 22:41:59,558 INFO    MainThread:11147 [wandb_setup.py:_flush():76] Current SDK version is 0.15.12
+2023-11-02 22:41:59,558 INFO    MainThread:11147 [wandb_setup.py:_flush():76] Configure stats pid to 11147
+2023-11-02 22:41:59,559 INFO    MainThread:11147 [wandb_setup.py:_flush():76] Loading settings from /Users/minjunes/.config/wandb/settings
+2023-11-02 22:41:59,559 INFO    MainThread:11147 [wandb_setup.py:_flush():76] Loading settings from /Users/minjunes/tinygrad/wandb/settings
+2023-11-02 22:41:59,559 INFO    MainThread:11147 [wandb_setup.py:_flush():76] Loading settings from environment variables: {}
+2023-11-02 22:41:59,559 INFO    MainThread:11147 [wandb_setup.py:_flush():76] Applying setup settings: {'_disable_service': False}
+2023-11-02 22:41:59,559 INFO    MainThread:11147 [wandb_setup.py:_flush():76] Inferring run settings from compute environment: {'program_relpath': 'examples/mlperf/model_train.py', 'program_abspath': '/Users/minjunes/tinygrad/examples/mlperf/model_train.py', 'program': '/Users/minjunes/tinygrad/examples/mlperf/model_train.py'}
+2023-11-02 22:41:59,559 INFO    MainThread:11147 [wandb_setup.py:_flush():76] Applying login settings: {'mode': 'offline'}
+2023-11-02 22:41:59,559 INFO    MainThread:11147 [wandb_init.py:_log_setup():528] Logging user logs to /Users/minjunes/tinygrad/wandb/offline-run-20231102_224159-v9mx8ahr/logs/debug.log
+2023-11-02 22:41:59,559 INFO    MainThread:11147 [wandb_init.py:_log_setup():529] Logging internal logs to /Users/minjunes/tinygrad/wandb/offline-run-20231102_224159-v9mx8ahr/logs/debug-internal.log
+2023-11-02 22:41:59,559 INFO    MainThread:11147 [wandb_init.py:init():568] calling init triggers
+2023-11-02 22:41:59,559 INFO    MainThread:11147 [wandb_init.py:init():575] wandb.init called with sweep_config: {}
+config: {}
+2023-11-02 22:41:59,559 INFO    MainThread:11147 [wandb_init.py:init():618] starting backend
+2023-11-02 22:41:59,560 INFO    MainThread:11147 [wandb_init.py:init():622] setting up manager
+2023-11-02 22:41:59,562 INFO    MainThread:11147 [backend.py:_multiprocessing_setup():105] multiprocessing start_methods=spawn,fork,forkserver, using: spawn
+2023-11-02 22:41:59,565 INFO    MainThread:11147 [wandb_init.py:init():628] backend started and connected
+2023-11-02 22:41:59,571 INFO    MainThread:11147 [wandb_init.py:init():720] updated telemetry
+2023-11-02 22:41:59,621 INFO    MainThread:11147 [wandb_init.py:init():753] communicating run to backend with 90.0 second timeout
+2023-11-02 22:41:59,627 INFO    MainThread:11147 [wandb_init.py:init():804] starting run threads in backend
+2023-11-02 22:42:02,449 INFO    MainThread:11147 [wandb_run.py:_console_start():2199] atexit reg
+2023-11-02 22:42:02,449 INFO    MainThread:11147 [wandb_run.py:_redirect():2054] redirect: wrap_raw
+2023-11-02 22:42:02,449 INFO    MainThread:11147 [wandb_run.py:_redirect():2119] Wrapping output streams.
+2023-11-02 22:42:02,449 INFO    MainThread:11147 [wandb_run.py:_redirect():2144] Redirects installed.
+2023-11-02 22:42:02,450 INFO    MainThread:11147 [wandb_init.py:init():845] run started, returning control to user process

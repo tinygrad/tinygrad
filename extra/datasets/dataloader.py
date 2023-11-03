@@ -24,13 +24,10 @@ def get_val_files():
   val_files = glob.glob(str(BASEDIR / "val/*/*"))
   return val_files
 
-#rrc = transforms.RandomResizedCrop(224)
-import torch
 import time
 import torchvision.transforms.functional as F
-from torchvision.transforms import RandomResizedCrop, Normalize, RandomHorizontalFlip
-import pyvips
-from io import BytesIO
+from torchvision.transforms import RandomResizedCrop
+
 
 def decode(fn):
   with open(fn, 'rb') as f:
@@ -41,10 +38,10 @@ def image_load(fn, val=False):
   #s = time.perf_counter()
   #img = Image.open(fn).convert('RGB')
   img = Image.fromarray(decode(fn))
+  #r = time.perf_counter()
   img = F.resize(img, 256, Image.BILINEAR,antialias=True)
-  
   #e = time.perf_counter()
- # load_t = e-s
+  #load_t = e-s
   if val:
     img = F.center_crop(img,224)
   else:
@@ -55,19 +52,16 @@ def image_load(fn, val=False):
       #rhf=RandomHorizontalFlip(p=0.5)
       #img=rhf.forward(img)
       img = F.hflip(img)
-      #e=time.perf_counter()
-      #s=time.perf_counter()
-      #e=time.perf_counter()
-    #print(f'load timne {load_t*1000:7.2f}ms norm {(e-s)*1000:7.2f}ms resize {(e1-s1)*1000:7.2f}ms flip {(e2-e1)*1000:7.2f}ms')
+    #print(f'load timn {load_t*1000:7.2f}ms norm {(e-r)*1000:7.2f}ms resize {(e1-s1)*1000:7.2f}ms randresize')
   return np.float32(img)
 
-def iterate(bs=32, val=True, shuffle=True, num_workers=16):
+def iterate(bs=16, val=True, shuffle=True, num_workers=16):
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
   from multiprocessing import Pool
   p = Pool(num_workers)
-  for i in range(0, len(files), bs):
+  for i in range(0, len(files), bs)[:-1]:
     X = p.starmap(image_load, zip([files[i] for i in order[i:i+bs]], repeat(val)))
     Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
     yield (np.array(X), np.array(Y))
@@ -89,7 +83,6 @@ class _CloudpickleFunctionWrapper:
 
 def cross_process(itermaker, maxsize=16):
   q: multiprocessing.Queue = multiprocessing.Queue(maxsize)
-  # multiprocessing uses pickle which cannot dump lambdas, so use cloudpickle.
   p = multiprocessing.Process(target=proc, args=(_CloudpickleFunctionWrapper(itermaker), q))
   p.start()
   while True:

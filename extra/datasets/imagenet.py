@@ -38,7 +38,6 @@ class PreFetcher(Thread):
 
   def __iter__(self): return self
 
-
 BASEDIR = pathlib.Path(__file__).parent / "imagenet"
 ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
 cir = {v[0]: int(k) for k,v in ci.items()}
