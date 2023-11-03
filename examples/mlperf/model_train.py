@@ -463,7 +463,7 @@ if __name__ == "__main__":
         alls = []
         steps = 30
         for bs in range(8,40,8):
-          for w in range(0,16,4):
+          for w in range(4,16,4):
             if w == 0: w=1
             for compute in range(10,40,5):
               #c = globals()[nm]
