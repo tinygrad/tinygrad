@@ -27,7 +27,7 @@ def to_movement_ops(shape:ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
     if v.mask is not None and any(x != (0,0) for x in post_expand_pads): to_apply.append((MovementOps.PAD, post_expand_pads))
   return to_apply
 
-def ast_to_python(ast:LazyOp, f:Dict[Op, Callable]):
+def ast_to_python(ast:LazyOp, f:Dict[Op, Callable]) -> Callable:
   tglob: Dict[str, Any] = {}
   lines: List[str] = []
 
