@@ -201,7 +201,29 @@ def train_maskrcnn():
   # TODO: Mask RCNN
   pass
 
+import sqlite3
+
+def recover_corrupted_db(corrupted_db, new_db):
+    # Connect to the corrupted database
+    conn_corrupted = sqlite3.connect(corrupted_db)
+    
+    # Get the dump of the corrupted database
+    dumped_data = '\n'.join(conn_corrupted.iterdump())
+
+    # Close the corrupted database connection
+    conn_corrupted.close()
+
+    # Create and/or write the dump to the new database
+    conn_new = sqlite3.connect(new_db)
+    conn_new.executescript(dumped_data)
+    conn_new.close()
+
+    print(f"Attempted to recover data from {corrupted_db} to {new_db}")
+
+
+
 if __name__ == "__main__":
+  recover_corrupted_db("/tmp/tinygrad_cache", "/tmp/tinygrad_cache")
   # NOTE: to run with resnet_dali, do export=resnet_dali
   with Tensor.train():
     for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
