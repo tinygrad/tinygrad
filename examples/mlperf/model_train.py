@@ -98,7 +98,6 @@ def train_resnet():
       X,Y = Tensor(X,requires_grad=False),Tensor(Y,requires_grad=False)
 
       st = time.monotonic()
-      print(f'normalize {(st-st1)*1000:7.2f}')
       data_time = st-cl
       loss, out = train_step(X, Y)
 
@@ -109,7 +108,7 @@ def train_resnet():
       cl = time.monotonic()
       train_time = (data_time+et-st)*steps_in_train_epoch*epochs/(60*60)
       val_time = (data_time+et-st)*steps_in_val_epoch*(epochs//4)/(60*60)
-      print(f'{a*1000:7.2f} all img tm {m*1000:7.2f} multi tm')
+      print(f'{a*1000:7.2f} all img tm {m*1000:7.2f} norm tm')
       print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {data_time*1000:7.2f} ms data {loss_cpu:7.2f} loss (every 1000)" + \
             f"{GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS {train_time+val_time:7.1f} hrs total {train_time:7.1f}hrs train {val_time:7.1f}hrs val")
       '''
@@ -150,6 +149,10 @@ def train_resnet():
     # not data, compute is 400ms. just gotta make compute faster
     # but is compute slower cuz of normalize - should it be done on cpu? 
     # normalize on CUDA might take signfiicantly longer than on CPU, in hindsight
+
+    # on T4 getting
+    #170.97ms all imgs tm   15.81 mult process tm
+    #579.19 ms run,  497.66 ms python,   81.53 ms data    0.00 loss (every 1000)   797.77 GFLOPS     5.2 hrs total     4.7hrs train     0.5hrs val
 
     if e % 4 == 1:
       eval_loss = []
