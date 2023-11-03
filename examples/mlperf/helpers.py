@@ -2,35 +2,6 @@ from collections import OrderedDict
 import unicodedata
 import numpy as np
 from scipy import signal
-from queue import Queue
-from threading import Thread
-
-class PreFetcher(Thread):
-  def __init__(self,generator,max_prefetch=1):
-    super().__init__()
-    self.queue = Queue(max_prefetch)
-    self.generator = generator
-    self.Continue = True
-    self.daemon = True
-    self.start()
-
-  def run(self):
-    try:
-        for item in self.generator: self.queue.put((True,item))
-    except Exception as e:          self.queue.put((False,e))
-    finally:                        self.queue.put((False,StopIteration))
-  
-  def __next__(self):
-    if self.Continue:
-        success, next_item = self.queue.get()
-        if success: return next_item
-        else:
-            self.Continue = False
-            raise next_item
-    else: raise StopIteration
-
-  def __iter__(self): return self
-
 def gaussian_kernel(n, std):
   gaussian_1d = signal.gaussian(n, std)
   gaussian_2d = np.outer(gaussian_1d, gaussian_1d)

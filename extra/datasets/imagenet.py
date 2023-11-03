@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 import functools, pathlib
 from itertools import repeat
-import os
+import cloudpickle
 from tqdm import tqdm
 from queue import Queue
 from threading import Thread
@@ -130,19 +130,19 @@ def preprocess(img, val):
   else:
     img = center_crop(img, 224)
     img = np.array(img)
-  img = normalization(img)
+  #img = normalization(img)
   return img
 
 def image_load(fn, val=True):
-  e1 = time.monotonic()
+  #e1 = time.monotonic()
   img = Image.open(fn).convert('RGB')
-  e2 = time.monotonic()
+  #e2 = time.monotonic()
   img = image_resize(img, 256, Image.BILINEAR)
-  e3 = time.monotonic()
+  #e3 = time.monotonic()
   ret = preprocess(img, val)
-  e4 = time.monotonic()
-  print('at batch size 16, multi 16')
-  print(f'total {(e4-e1)*1000:7.2f} open {(e2-e1)*1000:7.2f} resize {(e3-e2)*1000:7.2f} preprocess {(e4-e2)*1000:7.2f}')
+  #e4 = time.monotonic()
+  #print('at batch size 16, multi 16')
+  #print(f'total {(e4-e1)*1000:7.2f} open {(e2-e1)*1000:7.2f} resize {(e3-e2)*1000:7.2f} preprocess {(e4-e2)*1000:7.2f}')
   return ret
 
 from multiprocessing import Pool
