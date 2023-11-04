@@ -265,9 +265,6 @@ class Compiled:
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
     if not output.realized:
       output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
-    else:
-      from tinygrad.jit import CacheCollector
-      CacheCollector._mark_output_buffer(output.output_buffer)
 
     # all the rawbuffers
     rawbuffers = [output.realized] + [x.realized for x in inputs]
