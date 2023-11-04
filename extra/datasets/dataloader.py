@@ -76,18 +76,18 @@ def iterate(bs=16, val=True, shuffle=True, num_workers=16):
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
-  p = Pool(num_workers)
-  for i in range(0, len(files), bs)[:-1]:
-    s = time.perf_counter()
-    X = p.map(partial(image_load,val=val),[files[i] for i in order[i:i+bs]],chunksize=math.ceil(bs/num_workers))
-    e = time.perf_counter() 
-    X,T = [x[0] for x in X],[x[1] for x in X]
-    #print(f'{(e-s)*1000:7.2f}ms all imgs tm {((e-s)-max(T))*1000:7.2f} mult process tm')
-    Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
-    if isinstance(X[0], torch.Tensor):
-      yield torch.stack(X).numpy(), np.array(Y), (e-s), (sum(T)/len(T))
-    else:
-      yield np.array(X),np.array(Y),(e-s),(sum(T)/len(T))
+  with Pool(num_workers) as p:
+    for i in range(0, len(files), bs)[:-1]:
+      s = time.perf_counter()
+      X = p.map(partial(image_load,val=val),[files[i] for i in order[i:i+bs]],chunksize=math.ceil(bs/num_workers))
+      e = time.perf_counter() 
+      X,T = [x[0] for x in X],[x[1] for x in X]
+      #print(f'{(e-s)*1000:7.2f}ms all imgs tm {((e-s)-max(T))*1000:7.2f} mult process tm')
+      Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
+      if isinstance(X[0], torch.Tensor):
+        yield torch.stack(X).numpy(), np.array(Y), (e-s), (sum(T)/len(T))
+      else:
+        yield np.array(X),np.array(Y),(e-s),(sum(T)/len(T))
   
 def proc(itermaker, q) -> None:
   try:

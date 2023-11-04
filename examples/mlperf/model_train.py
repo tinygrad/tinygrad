@@ -274,7 +274,7 @@ def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=No
     # train loop
     Tensor.training = True
     cl = time.perf_counter() 
-    for i,(X,Y,a,m) in enumerate(t:= tqdm(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS)),total=steps_in_train_epoch if not steps else steps)):
+    for i,(X,Y,a,m) in enumerate(t:= tqdm(cross_process(iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS)),total=steps_in_train_epoch if not steps else steps)):
       if steps and i == steps: break
       GlobalCounters.reset()
       st = time.perf_counter()
@@ -289,7 +289,6 @@ def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=No
       et = time.perf_counter()
       if i % 1000 == 0: 
         loss_cpu = 0 #loss.numpy()
-
       cl = time.perf_counter()
       train_time = (data_time+et-st)*steps_in_train_epoch*epochs/(60*60)
       val_time = (data_time+et-st)*steps_in_val_epoch*(epochs//4)/(60*60)
@@ -310,7 +309,7 @@ def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=No
       dts.append(data_time)
       tts.append(train_time)
       vts.append(val_time)
-
+    
     epoch_avg = sum(epoch_avg_time)/len(epoch_avg_time)
     epoch_med = statistics.median(epoch_avg_time)
     val_time = epoch_avg*steps_in_val_epoch*(epochs//4)/(1000*60*60)
@@ -439,10 +438,14 @@ def recover_corrupted_db(corrupted_db, new_db):
 
 if __name__ == "__main__":
   from sys import platform
+  from guppy import hpy
   import statistics
   import subprocess
   import sys
   import pathlib
+  h = hpy()
+  h.setrelheap()
+
 
   modules_to_check = ['pycuda', 'wandb', 'simplejpeg', 'cloudpickle']
   if platform == 'darwin':
@@ -478,6 +481,9 @@ if __name__ == "__main__":
               b = train_resnet(bs=bs,w=w,compute=compute,steps=steps)
               #alls.append((a,bs,w,compute, 'dali'))
               alls.append((b,bs,w,compute, 'tiny'))
+              heap = h.heap()
+              #print(heap)
+           #   input()
         def avg(l): return sum(l)/len(l)
         def med(l): return statistics.median(l)
         def get_str(st): 

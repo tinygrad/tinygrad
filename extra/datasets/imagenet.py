@@ -13,10 +13,11 @@ from queue import Queue
 from threading import Thread
 from tinygrad.helpers import getenv
 
+# TODO mem leak here - obj np.ndarray
 class PreFetcher(Thread):
   def __init__(self,generator,max_prefetch=getenv("QS",1)):
     super().__init__()
-    self.queue = Queue(max_prefetch)
+    self.queue = Queue(1)
     self.generator = generator
     self.Continue = True
     self.daemon = True
@@ -24,14 +25,16 @@ class PreFetcher(Thread):
 
   def run(self):
     try:
-        for item in self.generator: self.queue.put((True,item))
+        for item in self.generator: 
+          self.queue.put((True,item))
     except Exception as e:          self.queue.put((False,e))
     finally:                        self.queue.put((False,StopIteration))
-  
+
   def __next__(self):
     if self.Continue:
         success, next_item = self.queue.get()
-        if success: return next_item
+        if success: 
+          return next_item
         else:
             self.Continue = False
             raise next_item
