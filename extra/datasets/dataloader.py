@@ -72,7 +72,7 @@ def image_load(fn, val):
   return np.float32(img), e-s
 
 import math
-def iterate(bs=16, val=True, shuffle=True, num_workers=16):
+def iterate(bs=16, val=False, shuffle=True, num_workers=16):
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
