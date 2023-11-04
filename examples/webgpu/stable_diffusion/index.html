@@ -138,6 +138,11 @@
             const store = transaction.objectStore('tensors');
             const request = store.put({ id: id, content: tensor });
 
+            transaction.onabort = (event) => {
+                console.log("Transaction error while saving tensor: " + event.target.error);
+                resolve(null);
+            };
+
             request.onsuccess = () => {
                 console.log('Tensor saved successfully.');
                 resolve();
@@ -159,6 +164,11 @@
             const transaction = db.transaction(['tensors'], 'readonly');
             const store = transaction.objectStore('tensors');
             const request = store.get(id);
+
+            transaction.onabort = (event) => {
+                console.log("Transaction error while reading tensor: " + event.target.error);
+                resolve(null);
+            };
 
             request.onsuccess = (event) => {
                 const result = event.target.result;
@@ -250,21 +260,25 @@
 
             let combinedBuffer = await readTensorFromDb(db, "net.f16");
             let textModelU8 = await readTensorFromDb(db, "net.text");
+            let textModelFetched = false;
 
             if (combinedBuffer == null) {
-                let buffers = await Promise.all([
+                let dlParts = [
                     getProgressDlForPart(window.MODEL_BASE_URL + '/net_part0.safetensors', progressCallback),
                     getProgressDlForPart(window.MODEL_BASE_URL + '/net_part1.safetensors', progressCallback),
                     getProgressDlForPart(window.MODEL_BASE_URL + '/net_part2.safetensors', progressCallback),
-                    getProgressDlForPart(window.MODEL_BASE_URL + '/net_part3.safetensors', progressCallback),
-                    getProgressDlForPart(window.MODEL_BASE_URL + '/net_textmodel.safetensors', progressCallback)
-                ]);
+                    getProgressDlForPart(window.MODEL_BASE_URL + '/net_part3.safetensors', progressCallback)
+                ];
 
-                document.getElementById("modelDlTitle").innerHTML = "Processing";
+                if (textModelU8 == null) {
+                    dlParts.push(getProgressDlForPart(window.MODEL_BASE_URL + '/net_textmodel.safetensors', progressCallback));
+                }
+
+                let buffers = await Promise.all(dlParts);
 
                 // Combine everything except for text model, since that's alreafy f32
                 const totalLength = buffers.reduce((acc, buffer, index, array) => {
-                    if (index < array.length - 1) {
+                    if (index < 4) {
                         return acc + buffer.byteLength;
                     } else {
                         return acc;
@@ -273,6 +287,7 @@
                 );
 
                 combinedBuffer = new Uint8Array(totalLength);
+
                 let offset = 0;
                 buffers.forEach((buffer, index) => {
                     if (index < 4) {
@@ -282,12 +297,21 @@
                     }
                 });
 
-                textModelU8 = new Uint8Array(buffers[4])
                 await saveTensorToDb(db, "net.f16", combinedBuffer);
-                await saveTensorToDb(db, "net.text", textModelU8);
-                buffers = null;
+
+                if (textModelU8 == null) {
+                    textModelFetched = true;
+                    textModelU8 = new Uint8Array(buffers[4]);
+                    await saveTensorToDb(db, "net.text", textModelU8);
+                }
             } else {
                 combinedBuffer = combinedBuffer.content;
+            }
+
+            if (textModelU8 == null) {
+                textModelU8 = new Uint8Array(await getProgressDlForPart(window.MODEL_BASE_URL + '/net_textmodel.safetensors', progressCallback));
+                await saveTensorToDb(db, "net.text", textModelU8);
+            } else if (!textModelFetched) {
                 textModelU8 = textModelU8.content;
             }
 
