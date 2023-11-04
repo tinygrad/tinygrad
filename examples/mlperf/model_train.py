@@ -274,7 +274,7 @@ def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=No
     # train loop
     Tensor.training = True
     cl = time.perf_counter() 
-    for i,(X,Y,a,m) in enumerate(t:= tqdm(cross_process(iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS)),total=steps_in_train_epoch if not steps else steps)):
+    for i,(X,Y,a,m) in enumerate(t:= tqdm(cross_process(lambda: iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS)),total=steps_in_train_epoch if not steps else steps)):
       if steps and i == steps: break
       GlobalCounters.reset()
       st = time.perf_counter()
