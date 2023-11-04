@@ -12,6 +12,7 @@ import time
 
 # TODO: auto-down DALI
 def train_resnet_dali(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None,steps=None):
+  print(locals())
   import math
   from models.resnet import ResNet50
   from extra.datasets.imagenet import BASEDIR
@@ -199,6 +200,7 @@ def train_resnet_dali(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None,step
 
 
 def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=None):
+  print(locals())
   # TODO: Resnet50-v1.5
   from models.resnet import ResNet50
   from extra.datasets.imagenet import get_train_files, get_val_files
