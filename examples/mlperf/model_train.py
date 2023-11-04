@@ -482,7 +482,7 @@ if __name__ == "__main__":
               #alls.append((a,bs,w,compute, 'dali'))
               alls.append((b,bs,w,compute, 'tiny'))
               heap = h.heap()
-              #print(heap)
+              print(heap)
            #   input()
         def avg(l): return sum(l)/len(l)
         def med(l): return statistics.median(l)
