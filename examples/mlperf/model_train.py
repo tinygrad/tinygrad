@@ -470,10 +470,10 @@ if __name__ == "__main__":
         print(f"training {m}")
         alls = []
         steps = 30
-        for bs in range(8,40,8):
+        for bs in range(8,32,8):
           for w in range(4,16,4):
             if w == 0: w=1
-            for compute in range(10,40,5):
+            for compute in range(10,30,5):
               #a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
               b = train_resnet(bs=bs,w=w,compute=compute,steps=steps)
               #alls.append((a,bs,w,compute, 'dali'))
