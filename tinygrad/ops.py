@@ -1,5 +1,5 @@
 from __future__ import annotations
-import importlib, inspect, functools, pathlib, itertools, random, math, collections
+import importlib, inspect, functools, pathlib, itertools, random
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM
@@ -183,37 +183,6 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.ex
 
 # **************** for Compiled Buffers ****************
 
-class BasicBatchExecutor:
-  def __init__(self, jit_cache:List[Tuple[Any, Any, Any]]): pass
-  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
-    for prg, pargs, variables in jit_cache: prg(pargs, variables, jit=True)
-  def recalc_stat(self, jit_cache: List[Tuple[Any, Any, Any]]):
-    for prg, _, variables in jit_cache:
-      GlobalCounters.kernel_count += 1
-      GlobalCounters.global_ops += sym_infer(prg.op_estimate, variables)
-      GlobalCounters.global_mem += prg.mem_estimate
-
-class GraphBatchExecutor(BasicBatchExecutor):
-  def __init__(self, jit_cache:List[Tuple[Any, Any, Any]]): self.graphs: List[Any] = []
-  def split_into_graphs(self, jit_cache:List[Tuple[Any, Any, Any]]):
-    # Splitting the JIT cache into batches to enable parallel execution (cpu+gpu). Batch sizes follow a logarithmic pattern: 4, 4, 8, 16, 32, and so on.
-    # This helps push tasks to the GPU while the CPU updates the next graph.
-    for i in range(2, max(math.ceil(math.log2(len(jit_cache))), 2) + 1):
-      self.create_graph(jit_cache[(1<<(i-1) if i > 2 else 0):(1<<i)])
-
-  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
-    if not self.graphs: return super().exec(jit_cache, updatable_entries) # No graph is created, switch to basic executor.
-    update_keys_per_batch = collections.defaultdict(list)
-    for j in updatable_entries.keys(): update_keys_per_batch[max(0, math.ceil(math.log2(j+1))-2)].append(j)
-    for instid in range(len(self.graphs)):
-      for jcid in update_keys_per_batch[instid]: self.update_node(instid, jcid, jit_cache[jcid][0], jit_cache[jcid][1], jit_cache[jcid][2], updated_args=updatable_entries[jcid])
-      self.exec_instance(instid)
-    super().recalc_stat(jit_cache)
-
-  def create_graph(self, jit_cache: List[Tuple[Any, Any, Any]]): raise NotImplementedError("must be implemented")
-  def update_node(self, instid, jcid, prg, pargs, variables, updated_args=None): raise NotImplementedError("must be implemented")
-  def exec_instance(self, instid): raise NotImplementedError("must be implemented")
-
 class ASTRunner:
   def __init__(self, name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
     if DEBUG >= 4: print(prg)
@@ -232,9 +201,9 @@ class ASTRunner:
         return float('inf')
     return min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
 
-  def build(self, compiler, runtime, batch_exec=BasicBatchExecutor):
+  def build(self, compiler, runtime):
     self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
-    self.clprg, self.batch_exec = runtime(self.name, self.lib), batch_exec
+    self.clprg = runtime(self.name, self.lib)
     return self
 
   def exec(self, rawbufs, var_vals:Optional[Dict[Variable, int]]=None, force_wait=False, optimizing=False) -> Optional[float]:
@@ -259,17 +228,18 @@ class ASTRunner:
     if local_size and 'local_size' not in lra: lra['local_size'] = local_size
     if et := self.clprg(*rawbufs, *var_vals.values(), **lra, wait=force_wait or DEBUG>=2): GlobalCounters.time_sum_s += et
     op_estimate = sym_infer(self.op_estimate, var_vals)
+    mem_estimate = sym_infer(self.mem_estimate, var_vals)
     if DEBUG >= 2:
       print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(self.display_name+' '*(37-ansilen(self.display_name))) if self.display_name is not None else self.name:33s} arg {len(rawbufs):3d} sz {str(global_size):18s} {str(local_size):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
-            (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {self.mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
+            (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
     GlobalCounters.kernel_count += 1
     GlobalCounters.global_ops += op_estimate
-    GlobalCounters.global_mem += self.mem_estimate
+    GlobalCounters.global_mem += mem_estimate
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, compiler, runtime, synchronize=lambda: None, batch_exec=BasicBatchExecutor):
-    self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize, self.batch_exec = buffer, linearizer_opts, renderer, compiler, runtime, synchronize, batch_exec
+  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, compiler, runtime, synchronize=lambda: None):
+    self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize = buffer, linearizer_opts, renderer, compiler, runtime, synchronize
     self.method_cache: Dict[LazyOp, ASTRunner] = {}
 
   def to_program(self, k):
@@ -277,7 +247,7 @@ class Compiled:
     src, runtime_args = self.renderer(k.function_name, k.uops)
     return ASTRunner(k.function_name, src, k.global_size, k.local_size,
                      op_estimate=k.info.flops, mem_estimate=k.info.mem_estimate,
-                     display_name=k.display_name, runtime_args=runtime_args).build(self.compiler, self.runtime, self.batch_exec)
+                     display_name=k.display_name, runtime_args=runtime_args).build(self.compiler, self.runtime)
 
   def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
     # check if we can reuse the output buffer
