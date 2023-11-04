@@ -1,0 +1,22 @@
+tiny 8 bs 12 workers 10ms comp**
+ 206.99ms total  194.28ms data    3.40hrs train    0.34hrs val
+  16.12ms total    4.33ms data    0.26hrs train    0.03hrs val
+**sorted by avg**+
+RANK 0tiny 8 bs 12 workers 10ms comp**
+ 206.99ms total  194.28ms data    3.40hrs train    0.34hrs val
+  16.12ms total    4.33ms data    0.26hrs train    0.03hrs val
+**sorted by med**+
+RANK 0tiny 8 bs 12 workers 10ms comp**
+ 206.99ms total  194.28ms data    3.40hrs train    0.34hrs val
+  16.12ms total    4.33ms data    0.26hrs train    0.03hrs val
+tiny 8 bs 12 workers 10ms comp**
+ 218.36ms total  206.08ms data    3.58hrs train    0.36hrs val
+  16.54ms total    5.38ms data    0.27hrs train    0.03hrs val
+**sorted by avg**+
+RANK 0tiny 8 bs 12 workers 10ms comp**
+ 218.36ms total  206.08ms data    3.58hrs train    0.36hrs val
+  16.54ms total    5.38ms data    0.27hrs train    0.03hrs val
+**sorted by med**+
+RANK 0tiny 8 bs 12 workers 10ms comp**
+ 218.36ms total  206.08ms data    3.58hrs train    0.36hrs val
+  16.54ms total    5.38ms data    0.27hrs train    0.03hrs val

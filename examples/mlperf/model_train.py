@@ -438,9 +438,15 @@ def recover_corrupted_db(corrupted_db, new_db):
 
 
 if __name__ == "__main__":
+  from sys import platform
+  import statistics
   import subprocess
   import sys
-  modules_to_check = ['simplejpeg', 'wandb', 'pycuda', 'cloudpickle']
+  import pathlib
+
+  modules_to_check = ['pycuda', 'wandb', 'simplejpeg', 'cloudpickle']
+  if platform == 'darwin':
+    modules_to_check = modules_to_check[1:]
   def install(package):
       subprocess.check_call([sys.executable, "-m", "pip", "install", package])
   for module in modules_to_check:
@@ -456,7 +462,7 @@ if __name__ == "__main__":
               print(f"An error occurred while installing '{module}'.", e)
     #recover_corrupted_db("/users/minjunes/downloads/tinygrad_cache BEAM=6", "/tmp/tinygrad_cache")
     # NOTE: to run with resnet_dali, do export=resnet_dali
-  import statistics
+  LOG = pathlib.Path(__file__).parent / "log"
   with Tensor.train():
     for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn,resnet_dali").split(","):
       nm = f"train_{m}"
@@ -468,10 +474,9 @@ if __name__ == "__main__":
           for w in range(4,16,4):
             if w == 0: w=1
             for compute in range(10,40,5):
-              #c = globals()[nm]
-              a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
+              #a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
               b = train_resnet(bs=bs,w=w,compute=compute,steps=steps)
-              alls.append((a,bs,w,compute, 'dali'))
+              #alls.append((a,bs,w,compute, 'dali'))
               alls.append((b,bs,w,compute, 'tiny'))
         def avg(l): return sum(l)/len(l)
         def med(l): return statistics.median(l)
@@ -487,12 +492,12 @@ if __name__ == "__main__":
           print(s)
           print(e)
           print(e1)
-          with open('train_logs', 'a') as f:
+          with open(LOG, 'a') as f:
             f.write(s+'\n'+e+'\n'+e1+'\n')
         # avg sort
         avgs = sorted(alls, key=lambda x: avg(x[0][0]))[::-1]
         meds = sorted(alls, key=lambda x: med(x[0][0]))[::-1]
-        with open('train_logs', 'a') as f:
+        with open(LOG, 'a') as f:
           f.write("**sorted by avg**+\n")
           for i,a in enumerate(avgs):
             s,e,e1 = get_str(a)

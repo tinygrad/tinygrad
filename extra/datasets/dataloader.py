@@ -65,12 +65,13 @@ def image_load(fn, val):
   # TODO: normalize
   #print('bef')
   #print(img.shape)
-  n = time.perf_counter()
+  #n = time.perf_counter()
   #img = torch.from_numpy(np.float32(img).transpose([2, 0, 1])) / 255.0
   #img = F.normalize(img, mean, std)
   e = time.perf_counter()
-  return np.float32(img), e-s, e-n
+  return np.float32(img), e-s
 
+import math
 def iterate(bs=16, val=True, shuffle=True, num_workers=16):
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
@@ -78,9 +79,9 @@ def iterate(bs=16, val=True, shuffle=True, num_workers=16):
   p = Pool(num_workers)
   for i in range(0, len(files), bs)[:-1]:
     s = time.perf_counter()
-    X = p.map(partial(image_load,val=val),[files[i] for i in order[i:i+bs]],chunksize=bs//num_workers)
+    X = p.map(partial(image_load,val=val),[files[i] for i in order[i:i+bs]],chunksize=math.ceil(bs/num_workers))
     e = time.perf_counter() 
-    X,T = [x[0] for x in X],[x[2] for x in X]
+    X,T = [x[0] for x in X],[x[1] for x in X]
     #print(f'{(e-s)*1000:7.2f}ms all imgs tm {((e-s)-max(T))*1000:7.2f} mult process tm')
     Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
     if isinstance(X[0], torch.Tensor):
