@@ -8,10 +8,12 @@ from PIL import Image
 import functools, pathlib
 from itertools import repeat
 import cloudpickle
+import threading
 from tqdm import tqdm
 from queue import Queue
 from threading import Thread
 from tinygrad.helpers import getenv
+import gc
 
 # TODO mem leak here - obj np.ndarray
 class PreFetcher(Thread):
@@ -19,26 +21,35 @@ class PreFetcher(Thread):
     super().__init__()
     self.queue = Queue(1)
     self.generator = generator
-    self.Continue = True
+    self.exit_event = threading.Event()
     self.daemon = True
     self.start()
 
   def run(self):
     try:
         for item in self.generator: 
+          if self.exit_event.is_set(): 
+            self.generator.close()
+            del self.generator, self.queue
+            return  # Stop prefetching if signaled to stop
           self.queue.put((True,item))
     except Exception as e:          self.queue.put((False,e))
-    finally:                        self.queue.put((False,StopIteration))
+    finally:                        
+      if hasattr(self, 'queue'): self.queue.put((False,StopIteration))
+  
+  def stop(self):
+    self.exit_event.set()
 
   def __next__(self):
-    if self.Continue:
+    if not self.exit_event.is_set():
         success, next_item = self.queue.get()
         if success: 
           return next_item
         else:
             self.Continue = False
             raise next_item
-    else: raise StopIteration
+    else: 
+      raise StopIteration
 
   def __iter__(self): return self
 

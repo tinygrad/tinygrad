@@ -5,8 +5,10 @@ from tinygrad.nn import optim
 from tinygrad.helpers import GlobalCounters, getenv, dtypes
 from extra.datasets.imagenet import PreFetcher
 from tqdm import tqdm
+from multiprocessing import Pool
 import numpy as np
 import random
+import gc
 import wandb
 import time
 
@@ -199,16 +201,21 @@ def train_resnet_dali(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None,step
       epoch_avg_time = []
 
 
+
+
 def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=None):
   print(locals())
-  # TODO: Resnet50-v1.5
   from models.resnet import ResNet50
+  from guppy import hpy
   from extra.datasets.imagenet import get_train_files, get_val_files
   from extra.datasets.dataloader import cross_process, iterate
   from extra.lr_scheduler import CosineAnnealingLR
   import torchvision.transforms.functional as F
   import torch
   import statistics
+  # TODO: Resnet50-v1.5
+  h = hpy()
+  h.setrelheap()
 
   def sparse_categorical_crossentropy(out, Y, label_smoothing=0):
     out = out.float()
@@ -274,7 +281,8 @@ def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=No
     # train loop
     Tensor.training = True
     cl = time.perf_counter() 
-    for i,(X,Y,a,m) in enumerate(t:= tqdm(cross_process(lambda: iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS)),total=steps_in_train_epoch if not steps else steps)):
+    it = PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS))
+    for i,(X,Y,a,m) in enumerate(t:= tqdm(it,total=steps_in_train_epoch if not steps else steps)):
       if steps and i == steps: break
       GlobalCounters.reset()
       st = time.perf_counter()
@@ -309,13 +317,19 @@ def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=No
       dts.append(data_time)
       tts.append(train_time)
       vts.append(val_time)
+      #if i % 10 == 0:
+      #  heap = h.heap()
+        #print(heap)
     
     epoch_avg = sum(epoch_avg_time)/len(epoch_avg_time)
     epoch_med = statistics.median(epoch_avg_time)
     val_time = epoch_avg*steps_in_val_epoch*(epochs//4)/(1000*60*60)
     train_time = epoch_avg*steps_in_train_epoch*epochs/(1000*60*60)
     print(f'EPOCH {e}: avg step time {epoch_avg*1000:7.2f} ms {epoch_med:7.2f}ms median step time  {train_time+val_time:7.2f}hrs total')
-    return epoch_avg_time, dts, tts, vts 
+
+    if steps:
+      it.stop()
+      return epoch_avg_time, dts, tts, vts 
 
     # 60ms mean 25ms median step for cross_process
     # 40ms mean 20ms median step  data, PreFetcher
@@ -434,9 +448,51 @@ def recover_corrupted_db(corrupted_db, new_db):
 
     print(f"Attempted to recover data from {corrupted_db} to {new_db}")
 
-
+def test(h):
+  alls = []
+  steps = 30
+  for bs in range(8,40,8):
+    for w in range(4,20,4):
+      if w == 0: w=1
+      for compute in range(10,35,5):
+        #a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
+        b = train_resnet(bs=bs,w=w,compute=compute,steps=steps)
+        #alls.append((a,bs,w,compute, 'dali'))
+        alls.append((b,bs,w,compute,'tiny'))
+        heap = h.heap()
+        print(heap)
+      #   input()
+  def avg(l): return sum(l)/len(l)
+  def med(l): return statistics.median(l)
+  def get_str(st): 
+    x,bs,w,compute,n = st
+    ets,dts,tts,vts = x
+    s = (f'{n} {bs} bs {w} workers {compute}ms comp**')
+    e = (f'{avg(ets)*1000:7.2f}ms total {avg(dts)*1000:7.2f}ms data {avg(tts):7.2f}hrs train {avg(vts):7.2f}hrs val')
+    e1 = (f'{med(ets)*1000:7.2f}ms total {med(dts)*1000:7.2f}ms data {med(tts):7.2f}hrs train {med(vts):7.2f}hrs val')
+    return s,e,e1
+  for st in alls:
+    s,e,e1 = get_str(st)
+    print(s)
+    print(e)
+    print(e1)
+    with open(LOG, 'a') as f:
+      f.write(s+'\n'+e+'\n'+e1+'\n')
+  # avg sort
+  avgs = sorted(alls, key=lambda x: avg(x[0][0]))[::-1]
+  meds = sorted(alls, key=lambda x: med(x[0][0]))[::-1]
+  with open(LOG, 'a') as f:
+    f.write("**sorted by avg**+\n")
+    for i,a in enumerate(avgs):
+      s,e,e1 = get_str(a)
+      f.write(f'RANK {i}'+s+'\n'+e+'\n'+e1+'\n')
+    f.write('**sorted by med**+\n')
+    for i,m in enumerate(meds):
+      s,e,e1 = get_str(m)
+      f.write(f'RANK {i}'+s+'\n'+e+'\n'+e1+'\n')
 
 if __name__ == "__main__":
+  TEST = 1
   from sys import platform
   from guppy import hpy
   import statistics
@@ -445,8 +501,6 @@ if __name__ == "__main__":
   import pathlib
   h = hpy()
   h.setrelheap()
-
-
   modules_to_check = ['pycuda', 'wandb', 'simplejpeg', 'cloudpickle']
   if platform == 'darwin':
     modules_to_check = modules_to_check[1:]
@@ -470,48 +524,8 @@ if __name__ == "__main__":
     for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn,resnet_dali").split(","):
       nm = f"train_{m}"
       if nm in globals():
-        print(f"training {m}")
-        alls = []
-        steps = 30
-        for bs in range(8,40,8):
-          for w in range(4,20,4):
-            if w == 0: w=1
-            for compute in range(10,35,5):
-              #a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
-              b = train_resnet(bs=bs,w=w,compute=compute,steps=steps)
-              #alls.append((a,bs,w,compute, 'dali'))
-              alls.append((b,bs,w,compute, 'tiny'))
-              heap = h.heap()
-              print(heap)
-           #   input()
-        def avg(l): return sum(l)/len(l)
-        def med(l): return statistics.median(l)
-        def get_str(st): 
-          x,bs,w,compute,n = st
-          ets,dts,tts,vts = x
-          s = (f'{n} {bs} bs {w} workers {compute}ms comp**')
-          e = (f'{avg(ets)*1000:7.2f}ms total {avg(dts)*1000:7.2f}ms data {avg(tts):7.2f}hrs train {avg(vts):7.2f}hrs val')
-          e1 = (f'{med(ets)*1000:7.2f}ms total {med(dts)*1000:7.2f}ms data {med(tts):7.2f}hrs train {med(vts):7.2f}hrs val')
-          return s,e,e1
-        for st in alls:
-          s,e,e1 = get_str(st)
-          print(s)
-          print(e)
-          print(e1)
-          with open(LOG, 'a') as f:
-            f.write(s+'\n'+e+'\n'+e1+'\n')
-        # avg sort
-        avgs = sorted(alls, key=lambda x: avg(x[0][0]))[::-1]
-        meds = sorted(alls, key=lambda x: med(x[0][0]))[::-1]
-        with open(LOG, 'a') as f:
-          f.write("**sorted by avg**+\n")
-          for i,a in enumerate(avgs):
-            s,e,e1 = get_str(a)
-            f.write(f'RANK {i}'+s+'\n'+e+'\n'+e1+'\n')
-          f.write('**sorted by med**+\n')
-          for i,m in enumerate(meds):
-            s,e,e1 = get_str(m)
-            f.write(f'RANK {i}'+s+'\n'+e+'\n'+e1+'\n')
-        # med sort
-        #globals()[nm]()
+        if not TEST:
+          globals()[nm](compute=20)
+        else:
+          test(h)
 
