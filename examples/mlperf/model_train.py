@@ -485,11 +485,11 @@ def test(h):
     f.write("**sorted by avg**+\n")
     for i,a in enumerate(avgs):
       s,e,e1 = get_str(a)
-      f.write(f'RANK {i}'+s+'\n'+e+'\n'+e1+'\n')
+      f.write(f'RANK {i}'+s+'\n'+e+'\n')
     f.write('**sorted by med**+\n')
     for i,m in enumerate(meds):
       s,e,e1 = get_str(m)
-      f.write(f'RANK {i}'+s+'\n'+e+'\n'+e1+'\n')
+      f.write(f'RANK {i}'+s+'\n'+e1+'\n')
 
 if __name__ == "__main__":
   TEST = 1
