@@ -24,7 +24,7 @@ class RawDiskBuffer(RawBufferMapped):
   def cast(self, arg:Tuple[DType, bool]): return RawDiskBuffer(self.size, arg[0], buf=self._buf, shape=self.shape, offset=self.offset)
   def reshape(self, arg): return RawDiskBuffer(self.size, self.dtype, buf=self._buf, shape=arg, offset=self.offset)
   def shrink(self, arg):
-    if len(arg)>1: assert arg[1:] == tuple([(0,x) for x in self.shape[1:]]), f"can only slice the first dim of disk tensor {arg}"
+    assert len(arg)<2 or arg[1:] == tuple([(0,x) for x in self.shape[1:]]), f"can only slice the first dim of disk tensor {arg}"
     offset = arg[0][0]*(prod(self.shape[1:]) if len(arg)>1 else 1)*self.dtype.itemsize
     size = (arg[0][1]-arg[0][0]) * (prod(self.shape[1:]) if len(arg)>1 else 1)
     return RawDiskBuffer(size, self.dtype, buf=self._buf, offset=self.offset+offset, shape=(arg[0][1]-arg[0][0],)+(self.shape[1:] if len(arg)>1 else ()))
