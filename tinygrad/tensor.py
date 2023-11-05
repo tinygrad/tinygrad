@@ -488,7 +488,6 @@ class Tensor:
       xup = xup.reshape(*prefix, *flatten((k,o,s) for k,o,s in zip(k_, o_, s_)))
       xup = xup.slice(slc_prefix + flatten(((0,k), (0,o), (0,1)) for k,o in zip(k_, o_)))
       xup = xup.reshape(*prefix, *flatten((k,o) for k,o in zip(k_, o_)))
-      # DAMAGE HAS BEEN DONE BY THIS POINT
       return xup.permute(*range(len(prefix)), *[len(prefix)+i*2+1 for i in range(len(k_))], *[len(prefix)+i*2 for i in range(len(k_))])
     # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
     o_ = [(i+(s-k))//s for i,s,k in zip(i_, s_, k_)]
@@ -526,8 +525,6 @@ class Tensor:
     if not all(x == 3 for x in HW) or stride != 1 or dilation != 1 or not Tensor.wino:
       # normal conv
       x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW).permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
-      # X IS THE WEIRD TENSOR - PAD, POOL RESHAPE, EXPAND, PERMUTE
-      # THE WEIRD PART HAPPENS BEFORE THIS LINE - JUST PAD AND POOL
 
       # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
       ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True).reshape(bs, cout, *oyx)
