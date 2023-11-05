@@ -15,6 +15,53 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   for d in shape[::-1][:-1]: strides = [d*strides[0]] + strides
   return filter_strides(shape, tuple(strides))
 
+@functools.lru_cache(maxsize=None)
+def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
+  assert len(shape) == len(strides)
+  ret = [(shape[0], strides[0])] if shape else []
+  for i in range(1, len(shape)):
+    if ret[-1][1] == shape[i]*strides[i] or ret[-1][0] == 1:
+      ret[-1] = (ret[-1][0] * shape[i], strides[i])
+    elif shape[i] == 1:
+      continue
+    else:
+      ret.append((shape[i], strides[i]))
+  return tuple(ret)
+
+@functools.lru_cache(maxsize=None)
+def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tuple[Tuple[sint, sint], ...]],bool]:
+  # assumes view can be reshaped to new_shape (if it had no mask), this implies we won't have to worry about strides
+  if view.mask is None: return view.mask, False
+  new_mask: List[Tuple[int, int]] = []
+  r_masks, r_shape, r_new_shape = reversed(view.mask), reversed(view.shape), reversed(new_shape)
+  stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
+  while len(new_mask) < len(new_shape):
+    if mask[1]-mask[0] < 1: # if the mask is never valid, just return all zeros
+      return ((0,0),)*len(new_shape), False
+    if old_dim == new_dim*stride: # easy, can just copy the mask
+      new_mask.append((mask[0]//stride, (mask[1]-1)//stride+1))
+      stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
+    elif old_dim > new_dim: # splitting the old mask
+      # we cannot split if the reshape cuts across the mask
+      if (mask[0]%(new_dim*stride)!=0 or mask[1]%(new_dim*stride)!=0) and mask[0]//(new_dim*stride)!=(mask[1]-1)//(new_dim*stride):
+        return view.mask, True
+      new_mask.append((mask[0]%(new_dim*stride)//stride, (mask[1]-1)%(new_dim*stride)//stride+1))
+      # the remaining mask still needs to be split, we need to determine the mask for the next dimension  
+      # we maintain the stride 
+      stride *= new_dim
+      new_dim = next(r_new_shape, 1)
+    elif old_dim < new_dim*stride: # combining masks
+      next_mask = next(r_masks, (0,1)) 
+      # if the current dimension is masked, we cannot merge unless the next masks have an index range of 1
+      if (mask[0]!=0 or mask[1]!=old_dim) and next_mask[1]-next_mask[0]!=1:
+        return view.mask, True
+      # we combine the current mask with the next and go through the loop again with the next dimension
+      mask = (next_mask[0]*old_dim+mask[0], (next_mask[1]-1)*old_dim+mask[1])
+      old_dim *= next(r_shape, 1) 
+  for mask in (mask, *r_masks): # if the old shape has leading 1s, need to make sure their mask is (0,1), otherwise the mask is zero'd
+    if mask != (0,1): return ((0,0),)*len(new_shape), False
+  return tuple(reversed(new_mask)), False
+
 @dataclass(frozen=True)
 class View:
   shape:Tuple[sint, ...]
@@ -127,6 +174,20 @@ class View:
           new_mask_tuple = tuple([(0,1) if x == 1 else new_mask.pop(0) for x in new_shape])
       return View.create(new_shape, new_strides_tuple, self.offset, new_mask_tuple)
 
-    # TODO: bring the merge_views logic here for more caching
+    # TODO: this is incomplete with symbolic expand (3,i) -> (3,i,1) so still need the adding/removing 1s part
+    strides, reverse_shape = [], reversed(new_shape)
+    for d, s in reversed(to_shape_strides(self.shape, self.strides)):
+      acc, new_stride = 1, s
+      while acc < d:
+        try: new_dim = next(reverse_shape)
+        except StopIteration: break
+        acc *= new_dim
+        strides.append(new_stride)
+        new_stride *= new_dim
+      if acc != d: break
+    else:
+      strides += [0,] * (len(new_shape) - len(strides))
+      mask, extra = _reshape_mask(self, new_shape)
+      if not extra: return View.create(new_shape, tuple(reversed(strides)), self.offset, mask)
 
     return None

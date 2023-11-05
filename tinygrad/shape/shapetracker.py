@@ -6,20 +6,7 @@ from typing import Tuple, List, Optional, Dict, cast
 from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, DEBUG, dedup
 from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, sint
-from tinygrad.shape.view import View
-
-@functools.lru_cache(maxsize=None)
-def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
-  assert len(shape) == len(strides)
-  ret = [(shape[0], strides[0])] if shape else []
-  for i in range(1, len(shape)):
-    if ret[-1][1] == shape[i]*strides[i] or ret[-1][0] == 1:
-      ret[-1] = (ret[-1][0] * shape[i], strides[i])
-    elif shape[i] == 1:
-      continue
-    else:
-      ret.append((shape[i], strides[i]))
-  return tuple(ret)
+from tinygrad.shape.view import View, to_shape_strides
 
 def expr_node_mask(view:View, idx, valid=None) -> Node:
   expr = [valid] if valid is not None else []
