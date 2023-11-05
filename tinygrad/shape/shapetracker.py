@@ -100,9 +100,7 @@ class ShapeTracker:
     for v in self.views:
       real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
       offset = v.offset
-      for i in range(len(v.strides)):
-        if v.strides[i] < 0:
-          offset += v.strides[i] * (real_shape[i] - 1)
+      offset = offset + sum([v.strides[i] * (real_shape[i]-1) for i in range(len(v.strides)) if v.strides[i]<0])
       real_offset = offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
       # first, we apply the offset
       # then, we make it the correct shape
