@@ -594,6 +594,7 @@ def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point=0, axis=1):
 def IsNaN(x: Tensor):
   return (x < float("-inf")).cast(dtypes.bool)
 
+# TODO ugly af https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_image_decoder.py
 def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
   try:
     import PIL.Image
@@ -617,6 +618,9 @@ def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
 def Gelu(x:Tensor, appoximate=None):
   if appoximate == "tanh": return 0.5 * x * (1+Erf(x/math.sqrt(2)))
   else: return 0.5 * x * (1 + math.tanh(math.sqrt(2/math.pi)) * (x + 0.044715 * x.pow(3)))
+
+def AffineGrid(theta: Tensor, size: Tensor, align_corners):
+  ...
 
 # **************** com.microsoft Ops ****************
 
