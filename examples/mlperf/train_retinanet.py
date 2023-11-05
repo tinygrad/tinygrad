@@ -170,8 +170,8 @@ class RetinaNetTrainer:
         annotations_to_mlperf_targets(annotations)
         Warning("Still adapting from train_retinanet_tests-.py")    
         breakpoint()
-        head_outs = self.reference.double()(images, annotations)
-        return head_outs
+        training_forward_outs = self.reference.double()(images, annotations)
+        return training_forward_outs
     
     def _reference_forward_raw(self, images,):
         #for parallel debugging
@@ -241,11 +241,11 @@ class RetinaNetTrainer:
         checker = None
 
         for x, annotations in iterate(self.dataset, BS):
-            Warning("Annotations not being resized!")
-            precomp_tg_targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
+            Warning("Annotations not being resized for MLPERF reference model")
+            if len(sys.argv)>2 and sys.argv[2]=="old_loss": precomp_tg_targets = self.get_ground_truths(anchors_flattened_levels, annotations, len(self.dataset.cats.keys()))
             resized = [Image.fromarray(image) for image in x]
             resized = [np.asarray(image.resize(self.image_size)) for image in resized]
-            
+
             images = self.input_fixup(Tensor(resized, requires_grad=False))
             reference_images = torch.permute(torch.from_numpy(np.array(resized)),(0,3,1,2))/255 
 
@@ -260,8 +260,12 @@ class RetinaNetTrainer:
 
             #tg BP 1 ID: loss debug
             breakpoint()
-            imgwise_loss = self._imgwise_compute_loss(BS, precomp_tg_targets, model_head_outputs)
-
+            
+            if len(sys.argv)>2 and sys.argv[2]=="old_loss": imgwise_loss = self._imgwise_compute_loss(BS, precomp_tg_targets, model_head_outputs)
+            else:
+                self.dataset_annotations_to_tg(annotations)
+                tg_anchors_flattened_levels = Tensor(anchors_flattened_levels.astype("float32"))
+                self.compute_loss_tg(annotations, model_head_outputs, tg_anchors_flattened_levels)
             #if self.debug: checker.check_losses(imgwise_loss)
             optimizer.zero_grad()
             imgwise_loss.backward()
@@ -343,7 +347,11 @@ class RetinaNetTrainer:
         #mlp_fpn = [(name,param) for name,param in mlperf_model.backbone.fpn.named_parameters()]
         #tg_w = [(name,param.numpy()) for name,param in get_state_dict(self.model.backbone.fpn).items()]
         
-
+    def dataset_annotations_to_tg(self, np_annotations):
+        for img_annotations in np_annotations:
+            img_annotations["boxes"] = Tensor(img_annotations["boxes"])
+            img_annotations["labels"] = Tensor(img_annotations["labels"])
+        return
     def mAP_compute(self, annotations, predictions):
         coco_results  = [{"image_id": annotations[i]["image_id"], "category_id": label, "bbox": box.tolist(), "score": score}
       for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
@@ -406,8 +414,10 @@ class RetinaNetTrainer:
 
         return classification_losses + regression_losses
     
-    def compute_loss(self, targets, head_outputs, anchors):
+    def compute_loss_tg(self, targets, head_outputs, anchors):
+        #FIXME making tinygrad version
         # type: (List[Dict[str, Tensor]], Dict[str, Tensor], List[Tensor]) -> Dict[str, Tensor]
+        Warning("Assuming fixed anchors (all images' channels are resized to 800x800 in the benchmark). No anchor redundant compute.")
         matched_idxs = []
         for anchors_per_image, targets_per_image in zip(anchors, targets):
             if targets_per_image['boxes'].numel() == 0:
