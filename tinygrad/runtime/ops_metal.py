@@ -1,14 +1,12 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
-import os, subprocess, pathlib, ctypes
+import os, subprocess, pathlib, ctypes, tempfile
 import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any, Tuple
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes
+from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache
 from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
 from tinygrad.renderer.metal import MetalRenderer
 from tinygrad.runtime.lib import RawBufferMapped, LRUAllocator
-
-METAL_XCODE = getenv("METAL_XCODE")
 
 class MetalAllocator(LRUAllocator):
   def _do_alloc(self, size, dtype, device, **kwargs): return METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
@@ -60,30 +58,32 @@ def unwrap(x):
   assert err is None, str(err)
   return ret
 
+@diskcache
+def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
+  if use_xcode:
+    # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
+    air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
+    return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+  options = Metal.MTLCompileOptions.alloc().init()
+  library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
+  # TODO: avoid file write here?
+  with tempfile.NamedTemporaryFile(delete=True) as output_file:
+    library.serializeToURL_error_(Cocoa.NSURL.URLWithString_(f"file://{output_file.name}"), None)
+    return pathlib.Path(output_file.name).read_bytes()
+
 class MetalProgram:
-  def __init__(self, name:str, prg:str, binary:bool=False):
-    if METAL_XCODE:
-      air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
-      # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
-      lib = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
-      data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
-      self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
-    else:
-      options = Metal.MTLCompileOptions.alloc().init()
-      self.library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
+  def __init__(self, name:str, lib:bytes):
+    data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
+    self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
     self.fxn = self.library.newFunctionWithName_(name)
-    # hacks to disassemble shader
     if DEBUG >= 5:
-      arc = unwrap(METAL.device.newBinaryArchiveWithDescriptor_error_(Metal.MTLBinaryArchiveDescriptor.alloc().init(), None))
-      desc = Metal.MTLComputePipelineDescriptor.alloc().init()
-      desc.setComputeFunction_(self.fxn)
-      unwrap(arc.addComputePipelineFunctionsWithDescriptor_error_(desc, None))
-      unwrap(arc.serializeToURL_error_(Cocoa.NSURL.URLWithString_("file:///tmp/shader.bin"), None))
-      # clone https://github.com/dougallj/applegpu.git in tinygrad/disassemblers
-      os.system(f"cd {pathlib.Path(__file__).parents[2]}/disassemblers/applegpu && python3 compiler_explorer.py /tmp/shader.bin")
+      with tempfile.NamedTemporaryFile(delete=True) as shader:
+        shader.write(lib)
+        shader.flush()
+        os.system(f"cd {pathlib.Path(__file__).parents[2]}/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
     self.pipeline_state = unwrap(METAL.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
 
-  def __call__(self, global_size, local_size, *bufs, wait=False):
+  def __call__(self, *bufs, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
     assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"
     command_buffer = METAL.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
@@ -100,4 +100,4 @@ class MetalProgram:
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
     METAL.mtl_buffers_in_flight.append(command_buffer)
 
-MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, MetalProgram, METAL.synchronize, MetalBatchExecutor)
+MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, METAL.synchronize, MetalBatchExecutor)

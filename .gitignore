@@ -1,6 +1,7 @@
 __pycache__
 .venv/
 .vscode
+.DS_Store
 notebooks
 .*.swp
 .*.swo
@@ -31,7 +32,8 @@ extra/datasets/kits/
 extra/datasets/COCO/
 extra/datasets/audio*
 venv
-examples/net.*[js,json,safetensors]
+examples/**/net.*[js,json]
+examples/**/*.safetensors
 node_modules
 package.json
 package-lock.json
