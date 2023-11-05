@@ -104,7 +104,28 @@ class ShapeTracker:
       # then, we make it the correct shape
       # then, we apply permutations
       # TODO: don't use as_strided
-      to_apply.append((MovementOps.AS_STRIDED, ([s if st != 0 else 1 for s,st in zip(real_shape, v.strides)], v.strides, real_offset)))
+      # to_apply.append((MovementOps.AS_STRIDED, ([s if st != 0 else 1 for s,st in zip(real_shape, v.strides)], v.strides, real_offset)))
+      buffer_size = sum([(s-1)*st for s, st in zip(real_shape,v.strides)]) + 1
+      real_real_shape = [s for s,st in zip(real_shape, v.strides) if st!=0]
+      strides = [abs(st) for st in v.strides if st!=0]
+      # to_apply.append((MovementOps.SHRINK, ((real_offset,real_offset+functools.reduce(operator.mul, real_real_shape)),)))
+      new_shape_strides = sorted(zip(real_real_shape, strides), key=lambda k: k[1], reverse=True)
+      order = sorted(range(len(strides)), key=lambda k: strides[k], reverse=True)
+      to_apply.append((MovementOps.RESHAPE, -1))
+      to_apply.append((MovementOps.SHRINK, ((real_offset,real_offset+buffer_size),)))
+      if len(strides) > 0:
+        to_apply.append((MovementOps.PAD, ((0, (new_shape_strides[0][0] * new_shape_strides[0][1]) - buffer_size),)))
+        for i in range(len(new_shape_strides)):
+          total_size = new_shape_strides[i][0] * new_shape_strides[i][1]
+          to_apply.append((MovementOps.SHRINK, (*((0, s[0]) for s in new_shape_strides[:i]), (0,total_size))))
+          to_apply.append((MovementOps.RESHAPE, (*[s[0] for s in new_shape_strides[:i+1]], new_shape_strides[i][1])))
+        to_apply.append((MovementOps.SHRINK, (*[(0, s[0]) for s in new_shape_strides], (0,1))))
+        to_apply.append((MovementOps.RESHAPE, (*[s[0] for s in new_shape_strides],)))
+        to_apply.append((MovementOps.PERMUTE, [order.index(i) for i in range(len(strides))]))
+      to_apply.append((MovementOps.RESHAPE, [s if st!=0 else 1 for s,st in zip(real_shape, v.strides)]))
+      # flip
+      #if any(i < 0 for i in v.strides):
+      #  to_apply.append((MovementOps.STRIDE, (-1 if st<0 else 1 for st in v.strides)))
       # then, we apply pre expand pads
       if v.mask is not None:
         pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
@@ -150,11 +171,11 @@ class ShapeTracker:
     return idx, valid
 
   def simplify(self) -> ShapeTracker:
-    if len(self.views) >= 2:
-      new_view = merge_views(self.views[-2], self.views[-1])
-      if new_view:
-        if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
-        return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
+    # if len(self.views) >= 2:
+    #   new_view = merge_views(self.views[-2], self.views[-1])
+    #   if new_view:
+    #     if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
+    #     return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
     return self
 
   def expr_idxs(self, idxs=None):
