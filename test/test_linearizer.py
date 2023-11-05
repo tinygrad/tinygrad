@@ -1,10 +1,9 @@
 import numpy as np
 import unittest, os
 
-from tinygrad.codegen.kernel import tensor_cores
-from tinygrad.codegen.optimizer import Opt, OptOps
+from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOps
-from tinygrad.ops import Compiled, Device
+from tinygrad.ops import Compiled, Device, LoadOps
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
@@ -102,6 +101,14 @@ class TestLinearizer(unittest.TestCase):
       assert len([uop for uop in k.uops if uop.uop == UOps.WMMA]) == 1, "tensor core not triggered"
       np_c = np_a @ np_b
       np.testing.assert_allclose(np_c, r.numpy(), atol=5e-3, rtol=1e-4)
+
+  def test_limit_dims_to_max_5d_global(self):
+    t = Tensor.rand(3, 4, 5, 6, 7).pad(((1, 1), (1, 1), (1, 1), (1, 1), (1, 1))) + 1
+    sched = [si for si in t.lazydata.schedule() if si.ast.op not in LoadOps]
+    assert len(sched) == 1
+    lin = Linearizer(sched[0].ast)
+    assert lin.full_shape[:lin.global_dims] == (5, 6, 7, 8, 9)
+    lin.limit_dims_to_max(global_max=[16, 16, 16], local_max=[16, 16, 16])
 
 def helper_realized_ast(r:Tensor):
   s = r.lazydata.schedule()

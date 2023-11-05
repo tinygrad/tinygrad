@@ -1,8 +1,9 @@
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod, dtypes
+from tinygrad.helpers import prod, dtypes, ImageDType
 from extra.onnx import safe_numpy
 from onnx.helper import tensor_dtype_to_np_dtype
 from onnx.onnx_pb import TensorProto
+import os
 import numpy as np
 import functools
 from typing import Union, Tuple, Optional, List, Any
@@ -12,11 +13,11 @@ import math
 
 def Identity(input: Tensor): return input
 def Neg(input: Tensor): return -input
-def Add(input: Tensor, other: Tensor, broadcast=None): return input + other if input.dtype == dtypes.float else (input + other).cast(input.dtype)
+def Add(input: Tensor, other: Tensor, broadcast=None): return input + other if input.dtype == dtypes.float or isinstance(input.dtype, ImageDType) else (input + other).cast(input.dtype)
 def Sub(input: Union[Tensor, Any], other: Tensor): return input - other # some test has input as int
-def Mul(input: Tensor, other: Tensor): return (input * other) if input.dtype == dtypes.float else (input * other).cast(input.dtype)
+def Mul(input: Tensor, other: Tensor): return (input * other) if input.dtype == dtypes.float or isinstance(input.dtype, ImageDType) else (input * other).cast(input.dtype)
 # in openpilot, due to SHUFFLE_PAD_OPS issues, we are spending an extra kernel
-def Div(input: Tensor, other: Tensor): return input / other if input.dtype == dtypes.float else input.div(other).floor()
+def Div(input: Tensor, other: Tensor): return input / other if input.dtype == dtypes.float or isinstance(input.dtype, ImageDType) else input.div(other).floor()
 def Pow(input: Tensor, other: Tensor): return (input.float() ** other.float()).cast(input.dtype)
 def Reciprocal(input: Tensor): return input.reciprocal()
 def Sqrt(input: Tensor): return input.sqrt()
@@ -59,7 +60,7 @@ def Constant(value: Tensor=None, value_float=None, value_floats=None, value_int=
 def Softsign(input: Tensor): return input / (1+input.abs())
 def Cosh(x): return (math.e ** x + math.e ** -x) / 2
 def Sinh(x): return (math.e ** x - math.e ** -x) / 2
-def Tanh(x): return Sinh(x) / Cosh(x)
+def Tanh(x): return x.tanh()
 
 def HardSigmoid(input: Tensor, alpha=0.2, beta=0.5): return (alpha*input + beta).clip(0, 1)
 def HardSwish(input: Tensor): return input * HardSigmoid(input, 1/6, 0.5)
@@ -96,7 +97,7 @@ def OptionalGetElement(x: Tensor=None): return x if x is not None else Tensor([]
 
 def Tile(input: Tensor, repeats): return input.repeat([int(x) for x in safe_numpy(repeats)])
 def Range(start: Tensor, limit, delta): return Tensor.arange(start=int(safe_numpy(start)), stop=int(safe_numpy(limit)), step=int(safe_numpy(delta))).cast(dtype=start.dtype)
-def Shape(data: Tensor, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int64)
+def Shape(data: Tensor, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int32 if os.path.isfile("/TICI") else dtypes.int64)  # TODO: really?
 def Size(data: Tensor): return prod(data if isinstance(data, list) else data.shape)
 def Flatten(input: Tensor, axis=1): return input.reshape(prod((1,) + input.shape[0:axis]), -1)
 def Reshape(data: Tensor, shape: Tensor, allowzero=None): return data.reshape([int(x) if x != 0 else data.shape[i] for i,x in enumerate(safe_numpy(shape))])

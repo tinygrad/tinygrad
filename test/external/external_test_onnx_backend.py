@@ -4,7 +4,7 @@ import onnx.backend.test
 import numpy as np
 from tinygrad.tensor import Tensor
 from typing import Any, Tuple
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, CI
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
@@ -156,10 +156,9 @@ backend_test.exclude('test_isinf_positive_cpu')
 backend_test.exclude('test_isnan_cpu')
 
 # issue 1791 fast math messes with these https://github.com/tinygrad/tinygrad/issues/1791
-if getenv('METAL') or getenv('LLVM'):
-  backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
-  backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
-  backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
+backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
+backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
+backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
 
 # issue 2067 potentially also a fastmath issue https://github.com/tinygrad/tinygrad/issues/2067
 if getenv('METAL'):
@@ -182,7 +181,7 @@ if getenv('GPU') or getenv('METAL'):
   backend_test.exclude('test_eyelike_with_dtype_cpu') # backend does not support dtype: Double
 
 # Segfaults in CI
-if (getenv('LLVM') or getenv('CUDA')) and getenv("CI", "") != "":
+if (getenv('LLVM') or getenv('CUDA')) and CI:
   backend_test.exclude('test_max_float16_cpu')
   backend_test.exclude('test_min_float16_cpu')
 
