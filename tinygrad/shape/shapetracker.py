@@ -110,8 +110,9 @@ class ShapeTracker:
       # TODO: don't use as_strided
       # to_apply.append((MovementOps.AS_STRIDED, ([s if st != 0 else 1 for s,st in zip(real_shape, v.strides)], v.strides, real_offset)))
       real_real_shape = [s for s,st in zip(real_shape, v.strides) if st!=0]
-      strides = [abs(st) for st in v.strides if st!=0]
+      strides = [abs(st) for st in v.strides]
       buffer_size = sum([(s-1)*st for s, st in zip(real_shape,strides)]) + 1
+      strides = [st for st in strides if st!=0]
       # to_apply.append((MovementOps.SHRINK, ((real_offset,real_offset+functools.reduce(operator.mul, real_real_shape)),)))
       new_shape_strides = sorted(zip(real_real_shape, strides), key=lambda k: k[1], reverse=True)
       order = sorted(range(len(strides)), key=lambda k: strides[k], reverse=True)
