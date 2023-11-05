@@ -479,8 +479,8 @@ def test(h):
     with open(LOG, 'a') as f:
       f.write(s+'\n'+e+'\n'+e1+'\n')
   # avg sort
-  avgs = sorted(alls, key=lambda x: avg(x[0][0]))[::-1]
-  meds = sorted(alls, key=lambda x: med(x[0][0]))[::-1]
+  avgs = sorted(alls, key=lambda x: avg(x[0][0]))
+  meds = sorted(alls, key=lambda x: med(x[0][0]))
   with open(LOG, 'a') as f:
     f.write("**sorted by avg**+\n")
     for i,a in enumerate(avgs):
