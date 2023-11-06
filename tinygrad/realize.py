@@ -67,6 +67,11 @@ class Runner:
   prg: str
   ast: LazyOp
   runtime_args: Dict
+  # TODO: remove these
+  @property
+  def global_size(self): return self.runtime_args.get('global_size')
+  @property
+  def local_size(self): return self.runtime_args.get('local_size')
   def __call__(self, rawbufs, var_vals, jit=False):
     lra = self.runtime_args.copy()
     if DEBUG >= 2: lra['wait'] = True
@@ -101,7 +106,7 @@ def compile_ast(device:Compiled, ast:LazyOp) -> Runner:
     print(src)
 
   # compile the source code. TODO: pass in device identifier
-  lib: bytes = device.compiler(src)
+  lib: bytes = device.compiler.__wrapped__(src) if getenv("DISABLE_COMPILER_CACHE") else device.compiler(src)
 
   # get the function
   return Runner(device.runtime(lin.function_name, lib), lin.display_name, src, ast, runtime_args)
@@ -140,17 +145,23 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
       rawbufs = [x.realized for x in si.inputs]
       if isinstance(device, Interpreted):
         fxn = interpret_ast(device, si.ast)
+
+        # run function
         st = time.perf_counter()
         ret = fxn(*rawbufs)
         et = time.perf_counter() - st
+
         # TODO: this shouldn't be needed
         if ret.dtype != si.out.dtype:
           ret = device.from_underlying(device.fxn_for_op[UnaryOps.CAST](device.to_underlying(ret), (si.out.dtype, False)))
+
         # handle assignment
         if si.out.output_buffer is not None:
           assert si.out.output_buffer.dtype == ret.dtype
           si.out.output_buffer._buf = ret._buf
           ret = si.out.output_buffer
+
+        # final
         si.out.realized = ret
         print_info("<interpreted>", si.ast, si.var_vals, {}, et)
       else:
