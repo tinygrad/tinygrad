@@ -1,13 +1,12 @@
 from typing import List, cast, Dict, Callable, Any, Tuple
-import functools, time
+import functools, time, itertools, random
 import numpy as np
-from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps, Interpreted, Compiled, TernaryOps, ReduceOps, BinaryOps, MovementOps, InterpretedFlopCounter, FlopCounter
+from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps, Interpreted, Compiled, TernaryOps, ReduceOps, BinaryOps, MovementOps, UnaryOps, InterpretedFlopCounter, FlopCounter
 from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import DEBUG, prod, all_int, getenv, IMAGE, GlobalCounters, colored, ansilen
 
-from tinygrad.runtime.lib import RawBufferMapped, RawBufferTransfer
-from tinygrad.runtime.ops_disk import RawDiskBuffer
+from tinygrad.runtime.lib import RawBuffer
 from tinygrad.features.image import fix_schedule_for_images
 from tinygrad.shape.symbolic import sym_infer
 
@@ -41,7 +40,7 @@ def interpret_ast(device:Interpreted, ast:LazyOp) -> Callable:
     return ret
 
   ret = _interpret_ast(ast)
-  src = '\n'.join(['def run(inputs):'] + lines + [f"  return {gstr(device.from_underlying, 'from_underlying')}({ret})" if device.from_underlying else f"  return {ret}"])
+  src = '\n'.join(['def run(*inputs):'] + lines + [f"  return {gstr(device.from_underlying, 'from_underlying')}({ret})" if device.from_underlying else f"  return {ret}"])
   if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
   exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
   return tglob['run']
@@ -76,6 +75,19 @@ def compile_ast(device:Compiled, ast:LazyOp) -> Tuple[Callable, str, dict]:
   # get the function
   return device.runtime(lin.function_name, lib), lin.display_name, runtime_args
 
+local_size_cache = {}
+def optimize_local_size(prg:Callable, global_size:List[int], rawbufs:List[RawBuffer]) -> List[int]:
+  test_rawbuffers = [type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
+  MAX_WORKGROUP = prg.max_work_group_size() if hasattr(prg, 'max_work_group_size') else 1024
+  local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in global_size]
+  local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
+  def try_exec(local_size):
+    try:
+      return prg(*test_rawbuffers, global_size=[g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)], local_size=local_size, wait=True)
+    except Exception:
+      return float('inf')
+  return min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
+
 # *** main schedule runner ***
 
 def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
@@ -99,24 +111,38 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
       if isinstance(device, Interpreted):
         fxn = interpret_ast(device, si.ast)
         st = time.perf_counter()
-        si.out.realized = fxn(rawbufs)
+        si.out.realized = fxn(*rawbufs)
         et = time.perf_counter() - st
+        # TODO: this shouldn't be needed
+        if si.out.realized.dtype != si.out.dtype:
+          si.out.realized = device.from_underlying(device.fxn_for_op[UnaryOps.CAST](device.to_underlying(si.out.realized), (si.out.dtype, False)))
         name = "<interpreted>"
       else:
         # compile the program
         prg, name, runtime_args = compile_ast(device, si.ast)
         lra = runtime_args.copy()
+        if DEBUG >= 2: lra['wait'] = True
 
         # symbolic
         if 'global_size' in lra: lra['global_size'] = [sym_infer(sz, si.var_vals) for sz in lra['global_size']]
         if 'local_size' in lra: lra['local_size'] = [sym_infer(sz, si.var_vals) for sz in lra['local_size']]
 
-        # run the program
+        # allocate the memory
         si.out.realized = device.buffer(si.out.st.size(), si.out.dtype)
+        rawbufs = [si.out.realized] + rawbufs
 
-        #from tinygrad.jit import CacheCollector
-        #CacheCollector.add(prg, [si.out.realized]+rawbufs, si.var_vals)
-        if et := prg(si.out.realized, *rawbufs, **lra, wait=DEBUG>=2): GlobalCounters.time_sum_s += et
+        # local opt (TODO: confirm it's not symbolic)
+        if 'global_size' in lra and 'local_size' not in lra:
+          ckey = (device, si.ast)
+          if ckey not in local_size_cache: local_size_cache[ckey] = optimize_local_size(prg, lra['global_size'], rawbufs)
+          lra['local_size'] = local_size_cache[ckey]
+
+        # add this function to JIT
+        from tinygrad.jit import CacheCollector
+        CacheCollector.add(prg, rawbufs, si.var_vals)
+
+        # run the program
+        if et := prg(*rawbufs, **lra): GlobalCounters.time_sum_s += et
 
       # get ast info
       info = get_lazyop_info(si.ast)
@@ -149,6 +175,8 @@ def _realize_rand(buffer: LazyBuffer) -> None:
 
 # *** one op LoadOps ***
 
+from tinygrad.runtime.lib import RawBufferMapped, RawBufferTransfer
+from tinygrad.runtime.ops_disk import RawDiskBuffer
 def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
   assert src.realized.size == buffer.st.size(), f"size mismatch on FROM {src.realized.size} != {buffer.st.size()}"
   assert src.st.contiguous and buffer.st.contiguous, "all must be contiguous for from"
