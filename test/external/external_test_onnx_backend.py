@@ -141,6 +141,7 @@ backend_test.exclude('test_resize_upsample_sizes_cubic_*') # unsure how to imple
 # rest of the failing tests
 backend_test.exclude('test_averagepool_2d_dilations_*') # dilations != 1 not supported for avgpool in tensor.py
 backend_test.exclude('test_averagepool_3d_dilations_*') # dilations != 1 not supported for avgpool in tensor.py
+backend_test.exclude('test_regex_*') # does not support string Tensors
 backend_test.exclude('test_convtranspose_autopad_same_cpu') # TODO geohotstan has no idea how this is done, autopad requires output_shape but output_shape requires pads from autopad
 backend_test.exclude('test_optional_has_element_empty_optional_input_cpu') # Attempts to create Tensor from None
 backend_test.exclude('test_range_int32_type_negative_delta_expanded_cpu') # AttributeProto.GRAPH not implemented

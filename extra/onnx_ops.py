@@ -617,7 +617,7 @@ def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
 
 def Gelu(x:Tensor, approximate=None):
   if approximate == "tanh": return 0.5 * x * (1 + ((x + 0.044715 * x.pow(3)) * math.sqrt(2/math.pi)).tanh())
-  else: return 0.5 * x * (1+Erf(x/math.sqrt(2))) 
+  else: return 0.5 * x * (1 + Erf(x/math.sqrt(2))) 
 
 def AffineGrid(theta: Tensor, size: Tensor, align_corners):
   print(theta.numpy())
