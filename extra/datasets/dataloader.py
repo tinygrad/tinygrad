@@ -59,9 +59,9 @@ def get_transform(val):
 def image_proc_n(fn,t):
   s = time.perf_counter()
   img = Image.fromarray(decode(fn))
-  e = time.perf_counter()
   X = t(img)
-  return img, e-s
+  e = time.perf_counter()
+  return X, e-s
 
 toTensor = transforms.Compose([
     transforms.ToTensor()
@@ -125,10 +125,29 @@ def cross_process(itermaker, maxsize=8):
 
 if __name__ == '__main__':
   import statistics
-  t = []
-  for f in get_train_files()[:100]:
-    s = time.perf_counter()
-    decode(f)
-    e = time.perf_counter()
-    t.append(e-s)
-  print(f'{(sum(t)/len(t))*1000:7.2f} avg read {statistics.median(t)*1000:7.2f} median read {max(t)*1000:7.2f} max read')
+  all_ts = 1281136
+  epochs = 54
+  tr = get_transform(False)
+  t,u = [],[]
+  files = get_train_files()
+  order = list(range(0, len(files)))
+  random.shuffle(order)
+  stats = []
+  for BS in [16,32,64,128]:
+    for W in [4,8,12,16]:
+      with Pool(W) as p:
+        for _ in range(30):
+          s = time.perf_counter()
+          X,T = zip(*p.map(partial(image_proc_n,t=tr), [files[j] for j in order[0:0+BS]], chunksize=BS//W))
+          e = time.perf_counter()
+          t.append(e-s)
+          u.extend(T)
+        print(f'**BS={BS} W={W}**')
+        train_time = (statistics.median(t))*(all_ts//BS+1)*epochs/(60*60)
+        print(f'total time: {train_time:7.2f} hrs')
+        print(f'mult: {(sum(t)/len(t))*1000:7.2f} avg read {statistics.median(t)*1000:7.2f} median read {max(t)*1000:7.2f} max read')
+        print(f'unit: {(sum(u)/len(u))*1000:7.2f} avg read {statistics.median(u)*1000:7.2f} median read {max(u)*1000:7.2f} max read')
+        stats.append((train_time,BS,W))
+  for i,(tt,BS,W) in enumerate(sorted(stats, key=lambda x:x[0])):
+    print(f'RANK {i}: BS={BS} W={W}')
+ 
