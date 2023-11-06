@@ -58,8 +58,8 @@ def get_transform(val):
 
 def image_proc_n(fn,t):
   img = Image.fromarray(decode(fn))
-  X = t(img)
-  return X
+  #X = t(img)
+  return img
 
 toTensor = transforms.Compose([
     transforms.ToTensor()
@@ -68,20 +68,13 @@ toTensor = transforms.Compose([
 rrc = RandomResizedCrop(224)
 def image_proc(fn, val=False, t=None):
   img = Image.fromarray(decode(fn))
- # img = Image.open(fn).convert("RGB")
   img = F.resize(img, 256, Image.BILINEAR,antialias=True)
-  #e = time.perf_counter()
   if val:
     img = F.center_crop(img,224)
   else:
-  #  s1 = time.perf_counter()
     img = rrc.forward(img)
-  #  e1 = time.perf_counter()
     if random.random() < 0.5:
-      #rhf=RandomHorizontalFlip(p=0.5)
-      #img=rhf.forward(img)
       img = F.hflip(img)
-  #  print(f'norm {(e-r)*1000:7.2f}ms resize {(e1-s1)*1000:7.2f}ms randresize')
   img = toTensor(img)
   img = F.normalize(img/255.0,mean,std)
   return img 
