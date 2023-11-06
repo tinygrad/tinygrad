@@ -4,7 +4,7 @@ import Metal, Cocoa, libdispatch # type: ignore
 from typing import List, Any, Tuple
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache
-from tinygrad.ops import Compiled, ASTRunner, BasicBatchExecutor
+from tinygrad.ops import Compiled
 from tinygrad.renderer.metal import MetalRenderer
 from tinygrad.runtime.lib import RawBufferMapped, LRUAllocator
 
@@ -32,26 +32,6 @@ class RawMetalBuffer(RawBufferMapped):
   def _buffer(self):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
-
-class MetalBatchExecutor(BasicBatchExecutor):
-  def __init__(self, jit_cache: List[Tuple[Any, Any, Any]]): self.use_basic_executor = (DEBUG>0 or not all(isinstance(prg, ASTRunner) and isinstance(prg.clprg, MetalProgram) for prg,_,_ in jit_cache))
-  def __do_exec(self, jit_cache: List[Tuple[Any, Any, Any]]):
-    if len(jit_cache) == 0: return
-    command_buffer = METAL.mtl_queue.commandBufferWithUnretainedReferences()
-    encoder = command_buffer.computeCommandEncoder()
-    for prg, pargs, variables in jit_cache:
-      global_size, local_size = prg.launch_dims(variables)
-      encoder.setComputePipelineState_(prg.clprg.pipeline_state)
-      for i,a in enumerate(pargs): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
-      for i,a in enumerate(variables.values()): encoder.setBytes_length_atIndex_((arg:=ctypes.c_int32(a)), ctypes.sizeof(arg), len(pargs)+i)
-      encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
-    encoder.endEncoding()
-    command_buffer.commit()
-    METAL.mtl_buffers_in_flight.append(command_buffer)
-  def exec(self, jit_cache: List[Tuple[Any, Any, Any]], updatable_entries):
-    if self.use_basic_executor: return super().exec(jit_cache, updatable_entries) # No graph is created switch to basic executor.
-    for i in range((len(jit_cache)+127)//128): self.__do_exec(jit_cache[128*i:128*(i+1)]) # Run in batches with size 128.
-    super().recalc_stat(jit_cache)
 
 def unwrap(x):
   ret, err = x
@@ -100,4 +80,4 @@ class MetalProgram:
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
     METAL.mtl_buffers_in_flight.append(command_buffer)
 
-MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, METAL.synchronize, MetalBatchExecutor)
+MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, METAL.synchronize)

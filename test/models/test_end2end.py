@@ -16,8 +16,8 @@ def compare_tiny_torch(model, model_torch, X, Y):
       if not CI: print(f"initting {k} from torch")
       model_state_dict[k].assign(Tensor(v.detach().numpy())).realize()
 
-    optimizer = optim.SGD(get_parameters(model), lr=0.01)
-    optimizer_torch = torch.optim.SGD(model_torch.parameters(), lr=0.01)
+    optimizer = optim.SGD(get_parameters(model), lr=0.001)
+    optimizer_torch = torch.optim.SGD(model_torch.parameters(), lr=0.001)
 
     Xt = torch.Tensor(X.numpy())
     np.testing.assert_allclose(X.numpy(), Xt.detach().numpy())
