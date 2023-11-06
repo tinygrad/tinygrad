@@ -1,5 +1,4 @@
 import multiprocessing
-import cloudpickle
 from typing import Any
 import glob, random
 import json
@@ -17,8 +16,8 @@ ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
 cir = {v[0]: int(k) for k,v in ci.items()}
 
 @functools.lru_cache(None)
-def get_train_files():
-  train_files = glob.glob(str(BASEDIR/"train/*/*"))
+def get_train_files(dir=None):
+  train_files = glob.glob(str(BASEDIR/"train/*/*") if not dir else dir)
   return train_files
 
 @functools.lru_cache(None)
@@ -124,17 +123,21 @@ def cross_process(itermaker, maxsize=8):
     else: yield ret
 
 if __name__ == '__main__':
+  #tar -xvf extra/datasets/imagenet/imagenette2.tgz -C extra/datasets/imagenet
+  #mv extra/datasets/imagenet/imagenette2/train extra/datasets/imagenet/train
+  #mv extra/datasets/imagenet/imagenette2/val extra/datasets/imagenet/val
+
   import statistics
   all_ts = 1281136
   epochs = 54
   tr = get_transform(False)
   t,u = [],[]
-  files = get_train_files()
+  files = get_train_files(pathlib.Path(__file__).parent / "imagenet" / "imagenette2")
   order = list(range(0, len(files)))
   random.shuffle(order)
   stats = []
   for BS in [64,128,256]:
-    for W in [2,4,6,8]:
+    for W in [4,6,8,16]:
       with Pool(W) as p:
         for _ in range(30):
           s = time.perf_counter()
