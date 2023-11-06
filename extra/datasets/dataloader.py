@@ -131,4 +131,4 @@ if __name__ == '__main__':
     decode(f)
     e = time.perf_counter()
     t.append(e-s)
-  print(f'{(sum(t)/len(t))*1000:7.2f} avg read {statistics.median(t):7.2f} median read {max(t)} max read')
+  print(f'{(sum(t)/len(t))*1000:7.2f} avg read {statistics.median(t)*1000:7.2f} median read {max(t)*1000:7.2f} max read')
