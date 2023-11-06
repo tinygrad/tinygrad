@@ -60,7 +60,7 @@ def image_proc_n(fn,t):
   s = time.perf_counter()
   img = Image.fromarray(decode(fn))
   e = time.perf_counter()
-  #X = t(img)
+  X = t(img)
   return img, e-s
 
 toTensor = transforms.Compose([
