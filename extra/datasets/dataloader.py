@@ -133,8 +133,8 @@ if __name__ == '__main__':
   order = list(range(0, len(files)))
   random.shuffle(order)
   stats = []
-  for BS in [16,32,64,128]:
-    for W in [4,8,12,16]:
+  for BS in [64,128,256]:
+    for W in [2,4,8]:
       with Pool(W) as p:
         for _ in range(30):
           s = time.perf_counter()
