@@ -109,8 +109,8 @@ Device = _Device()
 # **************** for Interpreted Buffers ****************
 
 class Interpreted:
-  def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], to_underlying=lambda x: x._buf, from_underlying=None):
-    self.buffer, self.fxn_for_op, self.to_underlying, self.from_underlying = buffer, fxn_for_op, to_underlying, from_underlying
+  def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_underlying=None):
+    self.buffer, self.fxn_for_op, self.from_underlying = buffer, fxn_for_op, from_underlying
     self.synchronize = lambda: None
     self.codegen = None
     self.method_cache: Dict[LazyOp, Callable] = {}
@@ -148,11 +148,11 @@ class Interpreted:
     exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
     return tglob['run']
 
-  def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, context=None, **kwargs):
+  def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, **kwargs):
     if ast not in self.method_cache: self.method_cache[ast] = self.interpret_ast(ast)
     ret = self.method_cache[ast]([x.realized for x in inputs] if inputs else None)
     if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op:
-      ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.to_underlying(ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
+      ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.fxn_for_op[BufferOps.MEM](ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
     # TODO: is this used?
     if output is not None and output.output_buffer is not None:
       assert output.output_buffer.dtype == ret.dtype
@@ -194,9 +194,9 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.lib)
     return self
 
-  def exec(self, rawbufs, var_vals:Optional[Dict[Variable, int]]=None, force_wait=False, optimizing=False) -> Optional[float]:
+  def exec(self, rawbufs, var_vals:Optional[Dict[Variable, int]]=None, force_wait=False) -> Optional[float]:
     from tinygrad.jit import CacheCollector
-    if not optimizing: CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
+    CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
     return self(rawbufs, var_vals, force_wait=force_wait)
 
   def launch_dims(self, var_vals):
