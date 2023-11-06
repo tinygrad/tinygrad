@@ -399,7 +399,7 @@ def test(os):
   LOG = pathlib.Path(__file__).parent / "log"
   alls = []
   steps = 100
-  for bs in [32]:
+  for bs in [128]:
     for w in [4,8,16]:
       if w == 0: w=1
       for compute in [35]:
