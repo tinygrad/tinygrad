@@ -215,9 +215,8 @@ jobs:
       run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
-    #- name: Run dtype test
-    #  run: DEBUG=4 METAL=1 python -m pytest -n=auto test/test_dtype.py
-    # dtype test has issues on test_half_to_int8
+    - name: Run dtype test
+      run: DEBUG=4 METAL=1 python -m pytest -n=auto test/test_dtype.py
     - name: Check Device.DEFAULT (METAL) and print some source
       run: |
         METAL=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
@@ -240,8 +239,8 @@ jobs:
       run: METAL=1 python -m pytest -n=auto test/test_linearizer.py
     - name: Test tensor core reshape-only ops
       run: METAL=1 TC=2 python -m pytest -n=auto test/test_ops.py
-    #- name: Run webgpu pytest
-    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
+    - name: Run webgpu pytest
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
     - name: Run webgpu dtype tests
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_dtype.py
     - name: Build WEBGPU Efficientnet
