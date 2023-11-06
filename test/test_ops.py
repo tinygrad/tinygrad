@@ -260,12 +260,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: 2/x, lambda x: 2/x)
     helper_test_op([()], lambda x: x/2, lambda x: x/2)
     helper_test_op([()], lambda x: 2/x, lambda x: 2/x)
-  @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "WEBGPU does not have support for inf/nan, METAL has issues with -inf")
+  @unittest.skipIf(Device.DEFAULT in ["WEBGPU"], "WEBGPU does not have support for inf/nan")
   def test_mul_const_naninf(self):
     helper_test_op([(45,65)], lambda x: x*float("inf"), lambda x: x*float("inf"))
     helper_test_op([(45,65)], lambda x: x*-float("inf"), lambda x: x*-float("inf"))
     helper_test_op([(45,65)], lambda x: x*float("nan"), lambda x: x*float("nan"))
-  @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "WEBGPU does not have support for inf/nan, METAL has issues with -inf")
+  @unittest.skipIf(Device.DEFAULT in ["WEBGPU"], "WEBGPU does not have support for inf/nan")
   def test_div_const_naninf(self):
     helper_test_op([(45,65)], lambda x: x/float("inf"), lambda x: x/float("inf"))
     helper_test_op([(45,65)], lambda x: x/-float("inf"), lambda x: x/-float("inf"))
@@ -838,7 +838,6 @@ class TestOps(unittest.TestCase):
         lambda x,w: torch.nn.functional.conv_transpose2d(x,w, stride=stride).relu(),
         lambda x,w: Tensor.conv_transpose2d(x,w,stride=stride).relu(), atol=1e-4, grad_rtol=1e-5)
 
-  @unittest.skipIf(Device.DEFAULT == "METAL" and CI, "broken in METAL CI")
   def test_output_padded_conv_transpose2d(self):
     for output_padding, stride in [((1,1), (2,3)), ((2,1), (3,2))]:
       helper_test_op([(2,4,6,5), (4,4,3,3),(4,)],
@@ -1009,14 +1008,12 @@ class TestOps(unittest.TestCase):
               lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w).relu(),
               lambda x,w: Tensor.conv2d(x,w,padding=p).relu(), atol=1e-4)
 
-  @unittest.skipIf(Device.DEFAULT == "METAL" and CI, "broken in METAL CI")
   def test_padded_conv2d_p21(self):
     bs,cin,H,W,padding = 4, 3, 3, 3, (2,1)
     helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
       lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
       lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
 
-  @unittest.skipIf(Device.DEFAULT == "METAL" and CI, "broken in METAL CI")
   def test_padded_conv2d_p22(self):
     bs,cin,H,W,padding = 4, 3, 3, 3, (2,2)
     helper_test_op([(bs,cin,11,28), (4,cin,H,W)],

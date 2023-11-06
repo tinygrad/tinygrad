@@ -44,7 +44,8 @@ def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
     # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
     air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
     return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
-  options = Metal.MTLCompileOptions.alloc().init()
+  options = Metal.MTLCompileOptions.new()
+  options.setFastMathEnabled_(False)
   library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
   # TODO: avoid file write here?
   with tempfile.NamedTemporaryFile(delete=True) as output_file:

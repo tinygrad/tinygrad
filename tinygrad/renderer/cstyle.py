@@ -35,7 +35,8 @@ class CStyleLanguage(NamedTuple):
     UnaryOps.SIN: lambda x: f"sin({x})",
     UnaryOps.SQRT: lambda x: f"sqrt({x})",
     BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
-    BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
+    BinaryOps.MUL: lambda a,b: f"({a}*{b})" if b!="INFINITY" else f"(({a}>=0.0?1.0:-1.0)*{b})",
+    BinaryOps.DIV: lambda a,b: f"({a}/{b})",
     BinaryOps.MAX: lambda a,b: f"max({a},{b})", BinaryOps.MOD: lambda a,b: f"({a}%{b})",
     BinaryOps.CMPLT: lambda a,b: f"({a}<{b})", TernaryOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})",
     TernaryOps.WHERE: lambda a,b,c: f"({a}!=0?{b}:{c})"
