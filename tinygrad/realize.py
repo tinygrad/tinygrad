@@ -1,8 +1,8 @@
-from typing import List, cast, Dict, Callable, Any
-import functools, time, itertools, random
+from typing import List, cast, Dict, Callable
+import time, itertools, random
 import numpy as np
 from dataclasses import dataclass
-from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps, Interpreted, Compiled, TernaryOps, ReduceOps, BinaryOps, MovementOps, UnaryOps, InterpretedFlopCounter, FlopCounter
+from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps, Interpreted, Compiled, UnaryOps, interpret_ast, get_lazyop_info
 from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad.lazy import LazyBuffer, vars_from_ast
 from tinygrad.helpers import DEBUG, prod, all_int, getenv, IMAGE, GlobalCounters, colored, ansilen, NOOPT, BEAM
@@ -10,44 +10,6 @@ from tinygrad.helpers import DEBUG, prod, all_int, getenv, IMAGE, GlobalCounters
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.features.image import fix_schedule_for_images
 from tinygrad.shape.symbolic import sym_infer
-
-@functools.lru_cache(None)
-def interpret_ast(device:Interpreted, ast:LazyOp) -> Callable:
-  tglob: Dict[str, Any] = {}
-  lines: List[str] = []
-  f = device.fxn_for_op
-
-  @functools.lru_cache(None)
-  def gstr(x:Any, nm=None) -> str:
-    ret = str(nm).replace(".", "_") if nm else f"m{len(tglob):04d}"
-    tglob[ret] = x
-    return ret
-
-  @functools.lru_cache(None)
-  def _interpret_ast(ast:LazyOp) -> str:
-    if TernaryOps.MULACC in f and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
-      ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
-
-    if MovementOps.AS_STRIDED in f and ast.op in BufferOps:
-      # expand the shapetracker
-      tmp = f"{gstr(f[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"{gstr(f[ast.op], ast.op)}(inputs[{ast.arg.idx-1}])"
-      for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(f[mop], mop)}({tmp}, {gstr(arg)})"
-    else:
-      inp = [_interpret_ast(src) for src in ast.src]
-      tmp = f"{gstr(f[ast.op], ast.op)}({', '.join(inp + ([gstr(ast.arg)] if ast.arg else []))})"
-
-    ret = f"a{len(lines)}"
-    lines.append(f"  {ret} = {tmp}")
-    return ret
-
-  ret = _interpret_ast(ast)
-  src = '\n'.join(['def run(*inputs):'] + lines + [f"  return {gstr(device.from_underlying, 'from_underlying')}({ret})" if device.from_underlying else f"  return {ret}"])
-  if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
-  exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
-  return tglob['run']
-
-@functools.lru_cache(None)
-def get_lazyop_info(ast:LazyOp) -> FlopCounter: return interpret_ast(InterpretedFlopCounter, ast)(None)
 
 def print_info(name, ast, var_vals, lra, et, jit=False):
   info = get_lazyop_info(ast)
@@ -92,6 +54,7 @@ def optimize_local_size(prg:Callable, global_size:List[int], rawbufs:List[RawBuf
       return float('inf')
   return min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
 
+# rawbufs are just used for timing
 def compile_ast(device:Compiled, ast:LazyOp, rawbufs:List[RawBuffer]) -> Runner:
   # get linearizer
   from tinygrad.codegen.linearizer import Linearizer
@@ -201,10 +164,10 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
         rawbufs = [si.out.realized] + rawbufs
 
         # compile the program
-        if (device, si.ast) not in method_cache:
-          runner = method_cache[(device, si.ast)] = compile_ast(device, si.ast, rawbufs)
+        if (si.out.device, si.ast) not in method_cache:
+          runner = method_cache[(si.out.device, si.ast)] = compile_ast(device, si.ast, rawbufs)
         else:
-          runner = method_cache[(device, si.ast)]
+          runner = method_cache[(si.out.device, si.ast)]
 
         # add this function to JIT
         from tinygrad.jit import CacheCollector
