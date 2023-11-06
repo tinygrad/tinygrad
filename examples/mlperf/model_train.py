@@ -399,10 +399,10 @@ def test(os):
   LOG = pathlib.Path(__file__).parent / "log"
   alls = []
   steps = 100
-  for bs in [128]:
-    for w in [4,8,16]:
+  for bs in [32]:
+    for w in [16]:
       if w == 0: w=1
-      for compute in [160]:
+      for compute in [40]:
         if os != 'darwin':
           a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
           alls.append((a,bs,w,compute, 'dali'))
