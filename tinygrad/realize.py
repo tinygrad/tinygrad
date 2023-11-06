@@ -90,6 +90,22 @@ def optimize_local_size(prg:Callable, global_size:List[int], rawbufs:List[RawBuf
 
 # *** main schedule runner ***
 
+def print_info(name, ast, var_vals, lra, et, jit=False):
+  info = get_lazyop_info(ast)
+  op_estimate = sym_infer(info.flops, var_vals)
+  mem_estimate = sym_infer(info.mem_estimate, var_vals)
+  if DEBUG >= 2:
+    print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(name+' '*(37-ansilen(name)))} arg {len(info.mem):3d} sz {str(lra.get('global_size')):18s} {str(lra.get('local_size')):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+        (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
+  GlobalCounters.kernel_count += 1
+  GlobalCounters.global_ops += op_estimate
+  GlobalCounters.global_mem += mem_estimate
+
+# TODO: refactor this
+def jitprg(prg, name, ast, lra, pargs, variables):
+  if et := prg(*pargs, *variables.values(), **lra): GlobalCounters.time_sum_s += et
+  print_info(name, ast, variables, lra, et, jit=True)
+
 def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
   # HACK: images can be not usable due to shape
   if IMAGE >= 2: schedule = fix_schedule_for_images(schedule)
@@ -111,11 +127,17 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
       if isinstance(device, Interpreted):
         fxn = interpret_ast(device, si.ast)
         st = time.perf_counter()
-        si.out.realized = fxn(*rawbufs)
+        ret = fxn(*rawbufs)
         et = time.perf_counter() - st
         # TODO: this shouldn't be needed
-        if si.out.realized.dtype != si.out.dtype:
-          si.out.realized = device.from_underlying(device.fxn_for_op[UnaryOps.CAST](device.to_underlying(si.out.realized), (si.out.dtype, False)))
+        if ret.dtype != si.out.dtype:
+          ret = device.from_underlying(device.fxn_for_op[UnaryOps.CAST](device.to_underlying(ret), (si.out.dtype, False)))
+        # handle assignment
+        if si.out.output_buffer is not None:
+          assert si.out.output_buffer.dtype == ret.dtype
+          si.out.output_buffer._buf = ret._buf
+          ret = si.out.output_buffer
+        si.out.realized = ret
         name = "<interpreted>"
       else:
         # compile the program
@@ -127,8 +149,23 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
         if 'global_size' in lra: lra['global_size'] = [sym_infer(sz, si.var_vals) for sz in lra['global_size']]
         if 'local_size' in lra: lra['local_size'] = [sym_infer(sz, si.var_vals) for sz in lra['local_size']]
 
-        # allocate the memory
-        si.out.realized = device.buffer(si.out.st.size(), si.out.dtype)
+        # check if we can reuse the output buffer
+        # if it's aliased, don't use it
+        # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
+        si.out.realized = si.out.output_buffer
+        if si.out.realized:
+          for i,a in enumerate(si.inputs):
+            # TODO: if this is contiguous it's fine
+            if a.realized == si.out.realized:
+              if any(not x.arg.st.contiguous for x in si.ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
+                si.out.realized = None
+                break
+
+        # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
+        if not si.out.realized:
+          si.out.realized = device.buffer(prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype)
+
+        # all the rawbufs
         rawbufs = [si.out.realized] + rawbufs
 
         # local opt (TODO: confirm it's not symbolic)
@@ -139,22 +176,12 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
 
         # add this function to JIT
         from tinygrad.jit import CacheCollector
-        CacheCollector.add(prg, rawbufs, si.var_vals)
+        CacheCollector.add(functools.partial(jitprg, prg, name, si.ast, lra), rawbufs, si.var_vals)
 
         # run the program
-        if et := prg(*rawbufs, **lra): GlobalCounters.time_sum_s += et
+        if et := prg(*rawbufs, *si.var_vals.values(), **lra): GlobalCounters.time_sum_s += et
+      print_info(name, si.ast, si.var_vals, lra, et)
 
-      # get ast info
-      info = get_lazyop_info(si.ast)
-      op_estimate = sym_infer(info.flops, si.var_vals)
-      mem_estimate = sym_infer(info.mem_estimate, si.var_vals)
-      if DEBUG >= 2:
-        jit = False
-        print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(name+' '*(37-ansilen(name)))} arg {len(rawbufs):3d} sz {str(lra.get('global_size')):18s} {str(lra.get('local_size')):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
-            (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
-      GlobalCounters.kernel_count += 1
-      GlobalCounters.global_ops += op_estimate
-      GlobalCounters.global_mem += mem_estimate
     del si.out.op
     for v in si.out.views: del v.op
     assert si.out.realized and isinstance(si.out.realized, Device[si.out.device].buffer), f"device mismatch on realized got {type(si.out.realized)} expected {si.out.device}"
