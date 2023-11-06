@@ -10,7 +10,7 @@ from dataclasses import dataclass
 JIT_SUPPORTED_DEVICE = ["GPU", "CLANG", "METAL", "CUDA", "HIP", "WEBGPU", "LLVM"]
 
 @dataclass(frozen=True)
-class ScheduleItem:
+class JitItem:
   prg: ASTRunner
   rawbufs: List[Optional[RawBuffer]]
 
@@ -18,7 +18,7 @@ class TinyJit:
   def __init__(self, fxn:Callable):
     self.fxn: Callable = fxn
     self.cnt: int = 0
-    self.jit_cache: List[ScheduleItem] = []
+    self.jit_cache: List[JitItem] = []
     self.ret: Any = None
     self.input_replace: Dict[Tuple[int, int], Tuple[Union[int, str], ShapeTracker, DType]] = {}   # (kernel_number, buffer_number) -> (input_name, expected_shapetracker, expected_type)
 
@@ -68,15 +68,15 @@ class TinyJit:
 
 class _CacheCollector:
   def __init__(self):
-    self.cache: Optional[List[ScheduleItem]] = None
+    self.cache: Optional[List[JitItem]] = None
   def start(self, var_vals:Optional[Dict[Variable, int]]=None):
     self.cache = []
     self.var_vals = var_vals if var_vals is not None else {}
   def add(self, prg, rawbufs, var_vals):
     if self.cache is None: return
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
-    self.cache.append(ScheduleItem(prg, rawbufs))
-  def finish(self) -> List[ScheduleItem]:
+    self.cache.append(JitItem(prg, rawbufs))
+  def finish(self) -> List[JitItem]:
     if self.cache is None: return []
     ret = self.cache
     self.cache = None

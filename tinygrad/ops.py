@@ -248,7 +248,9 @@ class Compiled:
         # TODO: if this is contiguous it's fine
         if a.realized == output.realized:
           if any(not x.arg.st.contiguous for x in ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
-            output.realized = None
+            #from tinygrad.codegen.linearizer import Linearizer
+            #print(Device[Device.DEFAULT].renderer("hello", Linearizer(ast, self.linearizer_opts).linearize().uops)[0])
+            #output.realized = None
             break
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
@@ -261,10 +263,13 @@ class Compiled:
     # extract real vars used in ast
     from tinygrad.lazy import vars_from_ast
     ast_vars = vars_from_ast(ast)
-    assert all(v.val is None for v in ast_vars), f"ast contains bound Variable {ast_vars}"
+    assert all(v._val is None for v in ast_vars), f"ast contains bound Variable {ast_vars}"
 
     # compilation time
     def get_program():
+      if DEBUG >= 3:
+        from tinygrad.graph import print_tree
+        print_tree(ast)
       from tinygrad.codegen.linearizer import Linearizer
       k = Linearizer(ast, self.linearizer_opts)
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
