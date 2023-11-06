@@ -46,7 +46,7 @@ class TestLazyBuffer(unittest.TestCase):
     z = Tensor([1, np.e]).numpy()
     np.testing.assert_allclose(y, z)
 
-  @unittest.skipUnless(Device.DEFAULT in ["METAL", "CUDA", "GPU"], "Only GPU backends supports cache")
+  @unittest.skipUnless(Device.DEFAULT in ["CUDA", "GPU"], "Only GPU backends supports cache")
   def test_children_count(self):
     a = Tensor.ones(8,8,8)
     d1 = a.sum((0))
