@@ -3,7 +3,6 @@ from typing import Any
 import glob, random
 import json
 import numpy as np
-from itertools import repeat
 from PIL import Image
 import functools, pathlib
 import cloudpickle
@@ -123,16 +122,15 @@ def cross_process(itermaker, maxsize=8):
     else: yield ret
 
 if __name__ == '__main__':
-  #tar -xvf extra/datasets/imagenet/imagenette2.tgz -C extra/datasets/imagenet
-  #mv extra/datasets/imagenet/imagenette2/train extra/datasets/imagenet/train
-  #mv extra/datasets/imagenet/imagenette2/val extra/datasets/imagenet/val
-
   import statistics
+  import os
   all_ts = 1281136
   epochs = 54
   tr = get_transform(False)
   t,u = [],[]
-  files = get_train_files(dir=pathlib.Path(__file__).parent / "imagenet" / "imagenette2")
+  DIR = pathlib.Path(__file__).parent/"imagenet"/"imagenette2"
+  files = get_train_files(dir=DIR if os.path.exists(DIR) else None)
+  print(len(files))
   order = list(range(0, len(files)))
   random.shuffle(order)
   stats = []
