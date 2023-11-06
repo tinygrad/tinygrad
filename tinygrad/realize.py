@@ -1,6 +1,7 @@
-from typing import List, cast, Dict, Callable, Any, Tuple
+from typing import List, cast, Dict, Callable, Any
 import functools, time, itertools, random
 import numpy as np
+from dataclasses import dataclass
 from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps, Interpreted, Compiled, TernaryOps, ReduceOps, BinaryOps, MovementOps, UnaryOps, InterpretedFlopCounter, FlopCounter
 from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad.lazy import LazyBuffer
@@ -48,8 +49,34 @@ def interpret_ast(device:Interpreted, ast:LazyOp) -> Callable:
 @functools.lru_cache(None)
 def get_lazyop_info(ast:LazyOp) -> FlopCounter: return interpret_ast(InterpretedFlopCounter, ast)(None)
 
+def print_info(name, ast, var_vals, lra, et, jit=False):
+  info = get_lazyop_info(ast)
+  op_estimate = sym_infer(info.flops, var_vals)
+  mem_estimate = sym_infer(info.mem_estimate, var_vals)
+  if DEBUG >= 2:
+    print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(name+' '*(37-ansilen(name)))} arg {len(info.mem):3d} sz {str(lra.get('global_size')):18s} {str(lra.get('local_size')):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+        (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
+  GlobalCounters.kernel_count += 1
+  GlobalCounters.global_ops += op_estimate
+  GlobalCounters.global_mem += mem_estimate
+
+@dataclass(frozen=True)
+class Runner:
+  fxn: Callable
+  name: str
+  prg: str
+  ast: LazyOp
+  runtime_args: Dict
+  def __call__(self, rawbufs, var_vals, jit=False):
+    lra = self.runtime_args.copy()
+    if DEBUG >= 2: lra['wait'] = True
+    if 'global_size' in lra: lra['global_size'] = [sym_infer(sz, var_vals) for sz in lra['global_size']]
+    if 'local_size' in lra: lra['local_size'] = [sym_infer(sz, var_vals) for sz in lra['local_size']]
+    if et := self.fxn(*rawbufs, *var_vals.values(), **lra): GlobalCounters.time_sum_s += et
+    print_info(self.name, self.ast, var_vals, lra, et, jit=jit)
+
 @functools.lru_cache(None)
-def compile_ast(device:Compiled, ast:LazyOp) -> Tuple[Callable, str, dict]:
+def compile_ast(device:Compiled, ast:LazyOp) -> Runner:
   # get linearizer
   from tinygrad.codegen.linearizer import Linearizer
   lin = Linearizer(ast, device.linearizer_opts)
@@ -77,7 +104,7 @@ def compile_ast(device:Compiled, ast:LazyOp) -> Tuple[Callable, str, dict]:
   lib: bytes = device.compiler(src)
 
   # get the function
-  return device.runtime(lin.function_name, lib), lin.display_name, runtime_args
+  return Runner(device.runtime(lin.function_name, lib), lin.display_name, src, ast, runtime_args)
 
 local_size_cache = {}
 def optimize_local_size(prg:Callable, global_size:List[int], rawbufs:List[RawBuffer]) -> List[int]:
@@ -93,25 +120,6 @@ def optimize_local_size(prg:Callable, global_size:List[int], rawbufs:List[RawBuf
   return min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
 
 # *** main schedule runner ***
-
-def print_info(name, ast, var_vals, lra, et, jit=False):
-  info = get_lazyop_info(ast)
-  op_estimate = sym_infer(info.flops, var_vals)
-  mem_estimate = sym_infer(info.mem_estimate, var_vals)
-  if DEBUG >= 2:
-    print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(name+' '*(37-ansilen(name)))} arg {len(info.mem):3d} sz {str(lra.get('global_size')):18s} {str(lra.get('local_size')):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
-        (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
-  GlobalCounters.kernel_count += 1
-  GlobalCounters.global_ops += op_estimate
-  GlobalCounters.global_mem += mem_estimate
-
-# TODO: refactor this
-def jitprg(prg, name, ast, runtime_args, pargs, var_vals, jit=False):
-  lra = runtime_args.copy()
-  if 'global_size' in lra: lra['global_size'] = [sym_infer(sz, var_vals) for sz in lra['global_size']]
-  if 'local_size' in lra: lra['local_size'] = [sym_infer(sz, var_vals) for sz in lra['local_size']]
-  if et := prg(*pargs, *var_vals.values(), **lra): GlobalCounters.time_sum_s += et
-  print_info(name, ast, var_vals, lra, et, jit=jit)
 
 def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
   # HACK: images can be not usable due to shape
@@ -147,13 +155,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
         print_info("<interpreted>", si.ast, si.var_vals, {}, et)
       else:
         # compile the program
-        prg, name, runtime_args = compile_ast(device, si.ast)
-        lra = runtime_args.copy()
-        if DEBUG >= 2: lra['wait'] = True
-
-        # symbolic
-        if 'global_size' in lra: lra['global_size'] = [sym_infer(sz, si.var_vals) for sz in lra['global_size']]
-        if 'local_size' in lra: lra['local_size'] = [sym_infer(sz, si.var_vals) for sz in lra['local_size']]
+        runner = compile_ast(device, si.ast)
 
         # check if we can reuse the output buffer
         # if it's aliased, don't use it
@@ -175,19 +177,17 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
         rawbufs = [si.out.realized] + rawbufs
 
         # local opt (TODO: confirm it's not symbolic)
-        if 'global_size' in lra and 'local_size' not in lra:
+        if 'global_size' in runner.runtime_args and 'local_size' not in runner.runtime_args:
           ckey = (device, si.ast)
-          if ckey not in local_size_cache: local_size_cache[ckey] = optimize_local_size(prg, lra['global_size'], rawbufs)
-          lra['local_size'] = local_size_cache[ckey]
-
-        specprg = functools.partial(jitprg, prg, name, si.ast, runtime_args)
+          if ckey not in local_size_cache: local_size_cache[ckey] = optimize_local_size(fxn, runner.runtime_args['global_size'], rawbufs)
+          runner.runtime_args['local_size'] = local_size_cache[ckey]
 
         # add this function to JIT
         from tinygrad.jit import CacheCollector
-        CacheCollector.add(specprg, rawbufs, si.var_vals)
+        CacheCollector.add(runner, rawbufs, si.var_vals)
 
         # run the function
-        specprg(rawbufs, si.var_vals)
+        runner(rawbufs, si.var_vals)
 
     del si.out.op
     for v in si.out.views: del v.op

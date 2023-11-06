@@ -48,7 +48,7 @@ def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
   library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
   # TODO: avoid file write here?
   with tempfile.NamedTemporaryFile(delete=True) as output_file:
-    library.serializeToURL_error_(Cocoa.NSURL.URLWithString_(f"file://{output_file.name}"), None)
+    unwrap(library.serializeToURL_error_(Cocoa.NSURL.URLWithString_(f"file://{output_file.name}"), None))
     return pathlib.Path(output_file.name).read_bytes()
 
 class MetalProgram:

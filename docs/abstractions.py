@@ -303,7 +303,7 @@ assert len(cache_saved) == 1
 prg, bufs, _ = cache_saved[0]
 
 # print the C Program :)
-#print(prg.prg)
+print(prg.prg)
 
 # after some formatting (the compiler doesn't care)
 # NOTE: the 2 and 3 are constant folded
