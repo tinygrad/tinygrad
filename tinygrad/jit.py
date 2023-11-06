@@ -41,7 +41,7 @@ class TinyJit:
         for k in self.jit_cache[j][2].keys():
           try: self.jit_cache[j][2][k] = var_vals[k]
           except KeyError: pass
-      for prg, pargs, variables in self.jit_cache: prg(pargs, variables)
+      for prg, pargs, variables in self.jit_cache: prg(pargs, variables, jit=True)
       for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
     elif self.cnt == 1:
       CacheCollector.start()

@@ -63,11 +63,15 @@ def compile_ast(device:Compiled, ast:LazyOp) -> Tuple[Callable, str, dict]:
   # render the source code
   # TODO: move global_size and local_size to runtime_args
   src, runtime_args = device.renderer(lin.function_name, lin.uops)
-  if DEBUG >= 4: print(src)
 
   # move this to renderer?
   if lin.global_size: runtime_args['global_size'] = lin.global_size
   if lin.local_size: runtime_args['local_size'] = lin.local_size
+
+  # print
+  if DEBUG >= 4:
+    print(runtime_args)
+    print(src)
 
   # compile the source code. TODO: pass in device identifier
   lib: bytes = device.compiler(src)
@@ -102,9 +106,12 @@ def print_info(name, ast, var_vals, lra, et, jit=False):
   GlobalCounters.global_mem += mem_estimate
 
 # TODO: refactor this
-def jitprg(prg, name, ast, lra, pargs, variables):
-  if et := prg(*pargs, *variables.values(), **lra): GlobalCounters.time_sum_s += et
-  print_info(name, ast, variables, lra, et, jit=True)
+def jitprg(prg, name, ast, runtime_args, pargs, var_vals, jit=False):
+  lra = runtime_args.copy()
+  if 'global_size' in lra: lra['global_size'] = [sym_infer(sz, var_vals) for sz in lra['global_size']]
+  if 'local_size' in lra: lra['local_size'] = [sym_infer(sz, var_vals) for sz in lra['local_size']]
+  if et := prg(*pargs, *var_vals.values(), **lra): GlobalCounters.time_sum_s += et
+  print_info(name, ast, var_vals, lra, et, jit=jit)
 
 def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
   # HACK: images can be not usable due to shape
@@ -122,7 +129,6 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
       for i,s in enumerate(si.ast.src): assert isinstance(s, LazyOp) and s.op == BufferOps.MEM and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
       LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out, *si.inputs)
     else:
-      lra = {}
       rawbufs = [x.realized for x in si.inputs]
       if isinstance(device, Interpreted):
         fxn = interpret_ast(device, si.ast)
@@ -138,7 +144,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
           si.out.output_buffer._buf = ret._buf
           ret = si.out.output_buffer
         si.out.realized = ret
-        name = "<interpreted>"
+        print_info("<interpreted>", si.ast, si.var_vals, {}, et)
       else:
         # compile the program
         prg, name, runtime_args = compile_ast(device, si.ast)
@@ -174,13 +180,14 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
           if ckey not in local_size_cache: local_size_cache[ckey] = optimize_local_size(prg, lra['global_size'], rawbufs)
           lra['local_size'] = local_size_cache[ckey]
 
+        specprg = functools.partial(jitprg, prg, name, si.ast, runtime_args)
+
         # add this function to JIT
         from tinygrad.jit import CacheCollector
-        CacheCollector.add(functools.partial(jitprg, prg, name, si.ast, lra), rawbufs, si.var_vals)
+        CacheCollector.add(specprg, rawbufs, si.var_vals)
 
-        # run the program
-        if et := prg(*rawbufs, *si.var_vals.values(), **lra): GlobalCounters.time_sum_s += et
-      print_info(name, si.ast, si.var_vals, lra, et)
+        # run the function
+        specprg(rawbufs, si.var_vals)
 
     del si.out.op
     for v in si.out.views: del v.op
