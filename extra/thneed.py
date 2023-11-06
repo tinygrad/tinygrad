@@ -4,7 +4,7 @@ import struct
 import json
 import traceback
 import numpy as np
-from tinygrad.runtime.ops_gpu import CLProgram
+from tinygrad.runtime.ops_gpu import CLProgram, compile_gpu
 from tinygrad.helpers import DEBUG, getenv
 from collections import defaultdict
 import pyopencl as cl
@@ -104,21 +104,11 @@ class Thneed:
       if 'data' in o:
         self.buffers_to_save.add(buf)
 
-    # load in the programs (this isn't used)
-    prgs = {}
-    for k,v in jdat['programs'].items():
-      print("building", k)
-      try:
-        prgs[k] = CLProgram(k, v, rename=False)
-      except Exception:
-        print("FAILED", k)
-        traceback.print_exc()
-        exit(0)
-
     # load binaries
+    prgs = {}
     for o in jdat['binaries']:
       nptr = ptr + o['length']
-      prgs[o['name']] = CLProgram(o['name'], weights[ptr:nptr], binary=True)
+      prgs[o['name']] = CLProgram(o['name'], weights[ptr:nptr])
       ptr = nptr
 
     # populate the cl_cache
@@ -208,7 +198,7 @@ class Thneed:
               # zero out the buffer
               cl.enqueue_copy(CL.cl_queue[0], buf, b'\x00'*buf.size, is_blocking=True)
 
-              CLProgram("from_image_strided", """
+              CLProgram("from_image_strided", compile_gpu("""
                 __kernel void from_image_strided(read_only image2d_t in, __global float4 *out, int row_pitch) {
                   const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
                   int2 l;
@@ -216,7 +206,7 @@ class Thneed:
                   l.x = get_global_id(0);
                   out[l.y*row_pitch + l.x] = read_imagef(in, smp, l);
                 }
-              """, argdtypes=(None, None, np.int32))(a.shape, None, a, buf, row_pitch//(4*(2 if FLOAT16 else 4)))
+              """), argdtypes=(None, None, np.int32))(a, buf, row_pitch//(4*(2 if FLOAT16 else 4)), global_size=a.shape)
 
               # multiple of 32 isn't enough
               jdat['objects'].append({

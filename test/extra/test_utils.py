@@ -6,12 +6,12 @@ from unittest.mock import patch, MagicMock
 
 import torch
 import numpy as np
-from tinygrad.helpers import getenv
+from tinygrad.helpers import CI
 from extra.utils import fetch, temp, download_file
 from tinygrad.nn.state import torch_load
 from PIL import Image
 
-@unittest.skipIf(getenv("CI", "") != "", "no internet tests in CI")
+@unittest.skipIf(CI, "no internet tests in CI")
 class TestFetch(unittest.TestCase):
   def test_fetch_bad_http(self):
     self.assertRaises(AssertionError, fetch, 'http://httpstat.us/500')

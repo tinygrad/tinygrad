@@ -1,9 +1,11 @@
 from __future__ import annotations
+import os
+os.environ['PYOPENCL_NO_CACHE'] = '1'
 import pathlib
 import numpy as np
 import pyopencl as cl  # type: ignore
-from typing import Optional, List
-from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport
+from typing import Optional, List, Tuple
+from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport, diskcache
 from tinygrad.ops import Compiled
 from tinygrad.renderer.opencl import OpenCLRenderer
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
@@ -61,33 +63,34 @@ class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
       cl.enqueue_copy_buffer_p2p_amd(CL.cl_platform, CL.cl_queue[x._buf.device], x._buf, self._buf, x.size * x.dtype.itemsize).wait()
     else: raise NotImplementedError("p2p transfer between devices not implemented on non-amd")
 
+@diskcache
+def compile_gpu(prg:str) -> bytes:
+  clprg = cl.Program(CL.cl_ctxs[0], prg)
+  clprg.build()
+  return clprg.get_info(cl.program_info.BINARIES)[0]
+
 class CLProgram:
-  def __init__(self, name:str, prg:str, binary=False, argdtypes=None, options=None):
-    self.name, self.clprograms = name, [cl.Program(ctx, ctx.devices, [prg]*len(ctx.devices)) if binary else cl.Program(ctx, prg) for ctx in CL.cl_ctxs]  # type: ignore
-    try:
-      self._clprgs = [clprogram.build(options=options) for clprogram in self.clprograms]
-    except cl.RuntimeError as e:
-      if DEBUG >= 3: print("FAILED TO BUILD", prg)
-      raise e
+  def __init__(self, name:str, prg:bytes, argdtypes=None, options=None):
+    self.name, self.clprograms = name, [cl.Program(ctx, ctx.devices, [prg]*len(ctx.devices)) for ctx in CL.cl_ctxs]  # type: ignore
+    self._clprgs = [clprogram.build(options=options) for clprogram in self.clprograms]
     self.clprgs = [clprg.__getattr__(name) for clprg in self._clprgs]
     if DEBUG >= 5 and not OSX:
       if 'Adreno' in CL.cl_ctxs[0].devices[0].name:
-        fromimport('disassemblers.adreno', 'disasm')(self.binary())
+        fromimport('disassemblers.adreno', 'disasm')(prg)
       elif CL.cl_ctxs[0].devices[0].name.startswith('gfx'):
-        asm = early_exec(([ROCM_LLVM_PATH / "llvm-objdump", '-d', '-'], self.binary()))
+        asm = early_exec(([ROCM_LLVM_PATH / "llvm-objdump", '-d', '-'], prg))
         print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
       else:
         # print the PTX for NVIDIA. TODO: probably broken for everything else
-        print(self.binary().decode('utf-8'))
+        print(prg.decode('utf-8'))
     if argdtypes is not None: self.set_argdtypes(argdtypes)
 
-  def binary(self): return self.clprograms[0].get_info(cl.program_info.BINARIES)[0]
   def set_argdtypes(self, argdtypes): self.argdtypes, _ = argdtypes, [clprg.set_scalar_arg_dtypes(argdtypes) for clprg in self.clprgs]
 
   @staticmethod
   def max_work_group_size(): return CL.cl_ctxs[0].devices[0].max_work_group_size
 
-  def __call__(self, global_size, local_size, *bufs, wait=False) -> Optional[float]:
+  def __call__(self, *bufs, global_size:Tuple[int,int,int], local_size:Optional[Tuple[int,int,int]]=None, wait=False) -> Optional[float]:
     if not hasattr(self, 'argdtypes'): self.set_argdtypes(tuple(None if x.__class__ is CLBuffer else np.int32 for x in bufs))
     cl_bufs, wait_for = [], []
     for x in bufs:
@@ -104,4 +107,4 @@ class CLProgram:
         return None
     return None
 
-GPUBuffer = Compiled(CLBuffer, LinearizerOptions(), OpenCLRenderer, CLProgram, CL.synchronize)
+GPUBuffer = Compiled(CLBuffer, LinearizerOptions(), OpenCLRenderer, compile_gpu, CLProgram, CL.synchronize)

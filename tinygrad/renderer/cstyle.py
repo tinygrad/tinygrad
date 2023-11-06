@@ -61,7 +61,7 @@ class CStyleLanguage(NamedTuple):
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
     if isinstance(buf_dtype, ImageDType):
-      assert output_dtype == dtypes._float4, "images must be float4"
+      assert output_dtype == dtypes._float4, f"images must be float4, getting {output_dtype}"
       return f"read_imagef({buf_name}, smp, {idx})"
     if self.uses_vload and buf_dtype == dtypes.float16:
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx})"
@@ -209,4 +209,4 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
     else:
       raise RuntimeError(f"failed to render {uop}")
 
-  return lang.render_kernel(function_name, kernel, bufs, local_size, prekernel), {"binary":False}
+  return lang.render_kernel(function_name, kernel, bufs, local_size, prekernel), {}
