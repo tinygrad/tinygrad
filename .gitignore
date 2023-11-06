@@ -21,6 +21,7 @@ recognize*
 disassemblers/applegpu
 disassemblers/cuda_ioctl_sniffer
 *.prof
+examples/mlperf/logs
 extra/datasets/cifar-10-python.tar.gz
 extra/datasets/librispeech/
 extra/datasets/imagenet/*

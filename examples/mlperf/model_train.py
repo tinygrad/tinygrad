@@ -200,9 +200,6 @@ def train_resnet_dali(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None,step
       '''
       epoch_avg_time = []
 
-
-
-
 def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=None):
   print(locals())
   from models.resnet import ResNet50
@@ -211,9 +208,7 @@ def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=No
   from extra.datasets.dataloader import cross_process, iterate
   from extra.lr_scheduler import CosineAnnealingLR
   import torchvision.transforms.functional as F
-  import torch
   import statistics
-  # TODO: Resnet50-v1.5
   h = hpy()
   h.setrelheap()
 
@@ -282,7 +277,7 @@ def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=No
     Tensor.training = True
     cl = time.perf_counter() 
     it = PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=WORKERS))
-    for i,(X,Y,a,m) in enumerate(t:= tqdm(it,total=steps_in_train_epoch if not steps else steps)):
+    for i,(X,Y,dt) in enumerate(t:= tqdm(it,total=steps_in_train_epoch if not steps else steps)):
       if steps and i == steps: break
       GlobalCounters.reset()
       st = time.perf_counter()
@@ -300,7 +295,6 @@ def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=No
       cl = time.perf_counter()
       train_time = (data_time+et-st)*steps_in_train_epoch*epochs/(60*60)
       val_time = (data_time+et-st)*steps_in_val_epoch*(epochs//4)/(60*60)
-      print(f'{a*1000:7.2f} all img tm {m*1000:7.2f} norm tm')
       print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {data_time*1000:7.2f} ms data {loss_cpu:7.2f} loss (every 1000)" + \
             f"{GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS {train_time+val_time:7.1f} hrs total {train_time:7.1f}hrs train {val_time:7.1f}hrs val")
       '''
@@ -314,7 +308,7 @@ def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=No
       })
     '''
       epoch_avg_time.append((data_time+(et-st)))
-      dts.append(data_time)
+      dts.append(dt)
       tts.append(train_time)
       vts.append(val_time)
       #if i % 10 == 0:
@@ -325,59 +319,11 @@ def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=No
     epoch_med = statistics.median(epoch_avg_time)
     val_time = epoch_avg*steps_in_val_epoch*(epochs//4)/(1000*60*60)
     train_time = epoch_avg*steps_in_train_epoch*epochs/(1000*60*60)
-    print(f'EPOCH {e}: avg step time {epoch_avg*1000:7.2f} ms {epoch_med:7.2f}ms median step time  {train_time+val_time:7.2f}hrs total')
-
+    #print(f'EPOCH {e}: avg step time {epoch_avg*1000:7.2f} ms {epoch_med:7.2f}ms median step time  {train_time+val_time:7.2f}hrs total')
+    print(f'{(sum(dts)/len(dts))*1000:7.2f} avg data tm {statistics.median(dts)*1000:7.2f} median data tm')
     if steps:
       it.stop()
       return epoch_avg_time, dts, tts, vts 
-
-    # 60ms mean 25ms median step for cross_process
-    # 40ms mean 20ms median step  data, PreFetcher
-
-    # before beam search, on METAL 1 step = ~1700ms compute
-    # trying hand coded opt first, getting 2202.96 ms
-    # trying beam search BEAM=10, getting 
-
-    # CUDA
-    # hand | ******* total 498.16 ms,   1062 GFLOPS
-    # BEAM 6 | Tesla T4 ******* total 120.94 ms,   4376 GFLOPS
-
-    # TODO: - does optimized for CUDA work on all CUDA machines
-    # - BEAM 4 or 2.
-    
-    # "eval" loop. Evaluate every 4 epochs, starting with epoch 1
-
-    # on runpod
-    # not data, compute is 400ms. just gotta make compute faster
-    # but is compute slower cuz of normalize - should it be done on cpu? 
-    # normalize on CUDA might take signfiicantly longer than on CPU, in hindsight
-
-    # on T4 getting
-    #170.97ms all imgs tm   15.81 mult process tm
-    #579.19 ms run,  497.66 ms python,   81.53 ms data    0.00 loss (every 1000)   797.77 GFLOPS     5.2 hrs total     4.7hrs train     0.5hrs val
-
-    '''
-    data load is bottleneck, anything above 20ms won't work
-
-    load timn    6.10ms norm    3.33ms resize   16.84ms randresize
-    load timn   24.66ms norm   22.01ms resize    1.30ms randresize
-    load timn    1.91ms norm    1.52ms resize    1.44ms randresize
-    load timn   24.56ms norm   21.06ms resize    1.24ms randresize
-    load timn   23.03ms norm   21.99ms resize   12.26ms randresize
-    load timn   25.87ms norm   11.45ms resize    8.74ms randresize
-    load timn   19.21ms norm   10.68ms resize   17.24ms randresize
-    load timn   36.25ms norm   11.41ms resize   13.68ms randresize
-    load timn   18.13ms norm    3.24ms resize   19.72ms randresize
-    load timn   23.33ms norm   12.51ms resize    7.08ms randresize
-    load timn   38.23ms norm   10.93ms resize    1.34ms randresize
-    load timn   23.26ms norm    3.29ms resize    4.95ms randresize
-    load timn   34.62ms norm   14.39ms resize    1.27ms randresize
-    load timn   37.09ms norm   22.48ms resize    4.05ms randresize
-    load timn   26.44ms norm   12.35ms resize   10.28ms randresize
-      95.31 all img tm    0.00 norm tm
-    101.38 ms run,   20.42 ms python,   80.96 ms data    0.00 loss (every 1000)     0.00 GFLOPS     0.9 hrs total     0.8hrs train     0.1hrs val
-      1% 4/590 [00:00<01:14,  7.91it/s]load timn   22.92ms norm   18.82ms resize    1.87ms randresize 
-    '''
 
     if e % 4 == 1:
       eval_loss = []
@@ -449,8 +395,9 @@ def recover_corrupted_db(corrupted_db, new_db):
     print(f"Attempted to recover data from {corrupted_db} to {new_db}")
 
 def test(h):
+  LOG = pathlib.Path(__file__).parent / "log"
   alls = []
-  steps = 30
+  steps = 100
   for bs in range(8,40,8):
     for w in range(4,20,4):
       if w == 0: w=1
@@ -504,8 +451,7 @@ if __name__ == "__main__":
   modules_to_check = ['pycuda', 'wandb', 'simplejpeg', 'cloudpickle']
   if platform == 'darwin':
     modules_to_check = modules_to_check[1:]
-  def install(package):
-      subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+  def install(package): subprocess.check_call([sys.executable, "-m", "pip", "install", package])
   for module in modules_to_check:
       try:
           __import__(module)
@@ -517,9 +463,7 @@ if __name__ == "__main__":
               print(f"Module '{module}' has been installed.")
           except Exception as e:
               print(f"An error occurred while installing '{module}'.", e)
-    #recover_corrupted_db("/users/minjunes/downloads/tinygrad_cache BEAM=6", "/tmp/tinygrad_cache")
-    # NOTE: to run with resnet_dali, do export=resnet_dali
-  LOG = pathlib.Path(__file__).parent / "log"
+
   with Tensor.train():
     for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn,resnet_dali").split(","):
       nm = f"train_{m}"

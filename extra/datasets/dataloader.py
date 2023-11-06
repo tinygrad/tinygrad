@@ -28,6 +28,7 @@ def get_val_files():
 
 import time
 import torch
+from torchvision import transforms
 import torchvision.transforms.functional as F
 from torchvision.transforms import RandomResizedCrop
 
@@ -38,59 +39,68 @@ def decode(fn):
   with open(fn, 'rb') as f:
     return decode_jpeg(f.read())
 
+def get_transform(val):
+  if not val:
+    t = [
+      transforms.Resize(256, interpolation=transforms.InterpolationMode.BILINEAR, antialias=True),
+      transforms.RandomResizedCrop(224),
+      transforms.RandomHorizontalFlip(),
+      transforms.ToTensor(),
+      transforms.Normalize(mean=mean, std=std)
+    ]
+  else:
+    t = [
+     transforms.Resize(256, interpolation=transforms.InterpolationMode.BILINEAR, antialias=True),
+     transforms.CenterCrop(224),
+     transforms.ToTensor()
+    ]
+  return transforms.Compose(t)
+
+def image_proc_n(fn,t):
+  img = Image.fromarray(decode(fn))
+  X = t(img)
+  return X
+
+toTensor = transforms.Compose([
+    transforms.ToTensor()
+])
+
 rrc = RandomResizedCrop(224)
-def image_load(fn, val=False):
-  s = time.perf_counter()
-  #img = Image.open(fn).convert('RGB')
-  try:
-    img = Image.fromarray(decode(fn))
-  except:
-    print(fn)
-    return np.random.rand(224,224,3),0
-  r = time.perf_counter()
+def image_proc(fn, val=False, t=None):
+  img = Image.fromarray(decode(fn))
+ # img = Image.open(fn).convert("RGB")
   img = F.resize(img, 256, Image.BILINEAR,antialias=True)
-  e = time.perf_counter()
-  load_t = e-s
+  #e = time.perf_counter()
   if val:
     img = F.center_crop(img,224)
   else:
-    s1 = time.perf_counter()
+  #  s1 = time.perf_counter()
     img = rrc.forward(img)
-    e1 = time.perf_counter()
+  #  e1 = time.perf_counter()
     if random.random() < 0.5:
       #rhf=RandomHorizontalFlip(p=0.5)
       #img=rhf.forward(img)
       img = F.hflip(img)
-    #print(f'load timn {load_t*1000:7.2f}ms norm {(e-r)*1000:7.2f}ms resize {(e1-s1)*1000:7.2f}ms randresize')
-  # TODO: normalize
-  #print('bef')
-  #print(img.shape)
-  #n = time.perf_counter()
-  #img = torch.from_numpy(np.float32(img).transpose([2, 0, 1])) / 255.0
-  #img = F.normalize(img, mean, std)
-  e = time.perf_counter()
-  return np.float32(img), e-s
+  #  print(f'norm {(e-r)*1000:7.2f}ms resize {(e1-s1)*1000:7.2f}ms randresize')
+  img = toTensor(img)
+  img = F.normalize(img/255.0,mean,std)
+  return img 
 
 import math
-# TODO memory leak here
 def iterate(bs=16, val=False, shuffle=True, num_workers=16):
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
+  t = get_transform(val)
   with Pool(num_workers) as p:
     for i in range(0, len(files), bs)[:-1]:
       s = time.perf_counter()
-      image_loader = partial(image_load, val=val)
-      X = p.map(image_loader, [files[j] for j in order[i:i + bs]], chunksize=math.ceil(bs / num_workers))
-      # Cleanup the partial function after its use
+      X = p.map(partial(image_proc,t=t), [files[j] for j in order[i:i + bs]], chunksize=math.ceil(bs/num_workers))
       e = time.perf_counter()
-      X, T = zip(*X)
-      #print(f'{(e-s)*1000:7.2f}ms all imgs tm {((e-s)-max(T))*1000:7.2f} mult process tm')
+      proc_tm = e-s
+      print(f'{proc_tm*1000:7.2f} proc tm')
       Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
-      if isinstance(X[0], torch.Tensor):
-        yield torch.stack(X).numpy(), np.array(Y), (e-s), (sum(T)/len(T))
-      else:
-        yield np.array(X),np.array(Y),(e-s),(sum(T)/len(T))
+      yield np.array(X),np.array(Y),proc_tm
   
 def proc(itermaker, q) -> None:
   try:
