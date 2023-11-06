@@ -14,7 +14,7 @@ import torch
 from contextlib import redirect_stdout
 from train_retinanet_tests import *
 from models.retinanet import decode_bbox
-
+from tinygrad.helpers import dtypes
 
 
 def resize_box_based_on_new_image_size(box: List[float], img_old_size: Tuple[int], img_new_size: Tuple[int]) -> List[float]:
@@ -169,7 +169,6 @@ class RetinaNetTrainer:
     def reference_forward(self, images,annotations=None):
         annotations_to_mlperf_targets(annotations)
         Warning("Still adapting from train_retinanet_tests-.py")    
-        breakpoint()
         training_forward_outs = self.reference.double()(images, annotations)
         return training_forward_outs
     
@@ -258,13 +257,11 @@ class RetinaNetTrainer:
                 reference_head_outputs = self.reference.last_head_outputs
             Warning("reference outputs may be losses instead of head outputs if model is being trained")
 
-            #tg BP 1 ID: loss debug
-            breakpoint()
             
             if len(sys.argv)>2 and sys.argv[2]=="old_loss": imgwise_loss = self._imgwise_compute_loss(BS, precomp_tg_targets, model_head_outputs)
             else:
                 self.dataset_annotations_to_tg(annotations)
-                tg_anchors_flattened_levels = Tensor(anchors_flattened_levels.astype("float32"))
+                tg_anchors_flattened_levels = [Tensor(anchors_flattened_levels.astype("float32")) for _ in range(BS)]
                 self.compute_loss_tg(annotations, model_head_outputs, tg_anchors_flattened_levels)
             #if self.debug: checker.check_losses(imgwise_loss)
             optimizer.zero_grad()
@@ -418,16 +415,20 @@ class RetinaNetTrainer:
         #FIXME making tinygrad version
         # type: (List[Dict[str, Tensor]], Dict[str, Tensor], List[Tensor]) -> Dict[str, Tensor]
         Warning("Assuming fixed anchors (all images' channels are resized to 800x800 in the benchmark). No anchor redundant compute.")
+        Warning("You might want to implement this in numpy before the return compute_loss and then compare performances")
+
         matched_idxs = []
+        
         for anchors_per_image, targets_per_image in zip(anchors, targets):
             if targets_per_image['boxes'].numel() == 0:
-                matched_idxs.append(torch.full((anchors_per_image.size(0),), -1, dtype=torch.int64,
+                matched_idxs.append(Tensor.full((anchors_per_image.size(0),), -1, dtype=dtypes.int64,
                                                device=anchors_per_image.device))
                 continue
 
-            match_quality_matrix = box_iou(targets_per_image['boxes'], anchors_per_image)
+            match_quality_matrix = self.box_iou(targets_per_image['boxes'], anchors_per_image)
+            breakpoint()
             matched_idxs.append(self.proposal_matcher(match_quality_matrix))
-        breakpoint()
+        
         return self.head.compute_loss(targets, head_outputs, anchors, matched_idxs)
 
     def _imgwise_compute_loss_np(self, BS, targets, head_outputs):
@@ -496,7 +497,28 @@ class RetinaNetTrainer:
         return images, annotations
 
 
+    def box_iou(self,boxes1 : Tensor,boxes2:Tensor) -> Tuple[Tensor,Tensor]:
+            area1 = self.box_area(boxes1)
+            area2 = self.box_area(boxes2)
 
+
+            lt = boxes1[:, None, :2].maximum(boxes2[:, :2])  # [N,M,2]
+            rb = boxes1[:, None, 2:].minimum(boxes2[:, 2:])  # [N,M,2]
+            wh = self._upcast(rb - lt).clip(min_=0,max_=float('inf') )  # [N,M,2]
+            inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
+            union = area1[:, None] + area2 - inter
+            return inter, union
+
+    def box_area(self, boxes : Tensor) -> Tensor:
+        boxes = self._upcast(boxes)
+        return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    
+    def _upcast(self,t:Tensor) -> Tensor:
+        if t.is_floating_point():
+            return t if t.dtype in (dtypes.float32, ) else t.float()
+        else:
+            Warning(".int not implemented, maybe not that useful but this is used in reference")
+            return t #if t.dtype in (dtypes.int32,) else t.int()
     def input_fixup(self,x):
         x = x.permute([0,3,1,2]) / 255.0
         x -= self.input_mean
@@ -528,13 +550,7 @@ class RetinaNetMlPerfTrainingChecker:
         self.mlperf_model.training = True
         assert torch.equal(torch_tensor(anchors_flattened_levels),anchors_one_image[0])
 
-    def check_head_outputs(self):
-        raise NotImplementedError
-    def check_preds(self):
-        raise NotImplementedError
-    def check_losses(self):
-        raise NotImplementedError
-
+    
 
 
 
