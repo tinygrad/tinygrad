@@ -394,20 +394,18 @@ def recover_corrupted_db(corrupted_db, new_db):
 
     print(f"Attempted to recover data from {corrupted_db} to {new_db}")
 
-def test(h):
+def test():
   LOG = pathlib.Path(__file__).parent / "log"
   alls = []
   steps = 100
-  for bs in range(8,40,8):
-    for w in range(4,20,4):
+  for bs in [16,32]:
+    for w in [4,8,16]:
       if w == 0: w=1
-      for compute in range(10,35,5):
-        #a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
+      for compute in [15]:
+        a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
         b = train_resnet(bs=bs,w=w,compute=compute,steps=steps)
-        #alls.append((a,bs,w,compute, 'dali'))
+        alls.append((a,bs,w,compute, 'dali'))
         alls.append((b,bs,w,compute,'tiny'))
-        heap = h.heap()
-        print(heap)
       #   input()
   def avg(l): return sum(l)/len(l)
   def med(l): return statistics.median(l)
@@ -418,13 +416,6 @@ def test(h):
     e = (f'{avg(ets)*1000:7.2f}ms total {avg(dts)*1000:7.2f}ms data {avg(tts):7.2f}hrs train {avg(vts):7.2f}hrs val')
     e1 = (f'{med(ets)*1000:7.2f}ms total {med(dts)*1000:7.2f}ms data {med(tts):7.2f}hrs train {med(vts):7.2f}hrs val')
     return s,e,e1
-  for st in alls:
-    s,e,e1 = get_str(st)
-    print(s)
-    print(e)
-    print(e1)
-    with open(LOG, 'a') as f:
-      f.write(s+'\n'+e+'\n'+e1+'\n')
   # avg sort
   avgs = sorted(alls, key=lambda x: avg(x[0][0]))
   meds = sorted(alls, key=lambda x: med(x[0][0]))
@@ -471,5 +462,5 @@ if __name__ == "__main__":
         if not TEST:
           globals()[nm](compute=20)
         else:
-          test(h)
+          test()
 
