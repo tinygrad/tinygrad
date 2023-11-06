@@ -4,8 +4,8 @@ import numpy as np
 from dataclasses import dataclass
 from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps, Interpreted, Compiled, TernaryOps, ReduceOps, BinaryOps, MovementOps, UnaryOps, InterpretedFlopCounter, FlopCounter
 from tinygrad.graph import log_schedule_item, print_tree
-from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import DEBUG, prod, all_int, getenv, IMAGE, GlobalCounters, colored, ansilen
+from tinygrad.lazy import LazyBuffer, vars_from_ast
+from tinygrad.helpers import DEBUG, prod, all_int, getenv, IMAGE, GlobalCounters, colored, ansilen, NOOPT, BEAM
 
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.features.image import fix_schedule_for_images
@@ -80,38 +80,6 @@ class Runner:
     if et := self.fxn(*rawbufs, *var_vals.values(), **lra): GlobalCounters.time_sum_s += et
     print_info(self.name, self.ast, var_vals, lra, et, jit=jit)
 
-@functools.lru_cache(None)
-def compile_ast(device:Compiled, ast:LazyOp) -> Runner:
-  # get linearizer
-  from tinygrad.codegen.linearizer import Linearizer
-  lin = Linearizer(ast, device.linearizer_opts)
-
-  # TODO: search optimizations
-  lin.hand_coded_optimizations()
-
-  # generate uops from the AST
-  lin.linearize()
-
-  # render the source code
-  # TODO: move global_size and local_size to runtime_args
-  src, runtime_args = device.renderer(lin.function_name, lin.uops)
-
-  # move this to renderer?
-  if lin.global_size: runtime_args['global_size'] = lin.global_size
-  if lin.local_size: runtime_args['local_size'] = lin.local_size
-
-  # print
-  if DEBUG >= 4:
-    print(runtime_args)
-    print(src)
-
-  # compile the source code. TODO: pass in device identifier
-  lib: bytes = device.compiler.__wrapped__(src) if getenv("DISABLE_COMPILER_CACHE") else device.compiler(src)
-
-  # get the function
-  return Runner(device.runtime(lin.function_name, lib), lin.display_name, src, ast, runtime_args)
-
-local_size_cache = {}
 def optimize_local_size(prg:Callable, global_size:List[int], rawbufs:List[RawBuffer]) -> List[int]:
   test_rawbuffers = [type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
   MAX_WORKGROUP = prg.max_work_group_size() if hasattr(prg, 'max_work_group_size') else 1024
@@ -124,8 +92,56 @@ def optimize_local_size(prg:Callable, global_size:List[int], rawbufs:List[RawBuf
       return float('inf')
   return min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
 
+def compile_ast(device:Compiled, ast:LazyOp, rawbufs:List[RawBuffer]) -> Runner:
+  # get linearizer
+  from tinygrad.codegen.linearizer import Linearizer
+  lin = Linearizer(ast, device.linearizer_opts)
+
+  if not NOOPT:
+    if not (used_tensor_cores:=lin.apply_tensor_cores(getenv("TC", 1))): lin.hand_coded_optimizations()
+    if BEAM >= 1 and not vars_from_ast(ast):
+      lins = [(("tc" if used_tensor_cores else "hc"), lin)]
+      # allocate a scratch buffer if output buffer is also input
+      test_rawbuffers = [type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
+      kb = Linearizer(ast, device.linearizer_opts)
+      kb.required_optimizations()
+      from tinygrad.features.search import beam_search, time_linearizer
+      lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
+      if used_tensor_cores:
+        lins.append(("hc", Linearizer(ast, device.linearizer_opts)))
+        lins[-1][1].hand_coded_optimizations()
+      timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, disable_cache=True, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
+      if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
+      lin = timed[0][1]
+  else:
+    lin.required_optimizations()
+
+  # generate uops from the AST
+  lin.linearize()
+
+  # render the source code
+  # TODO: move global_size and local_size to runtime_args
+  src, runtime_args = device.renderer(lin.function_name, lin.uops)
+  if DEBUG >= 4: print(src)
+
+  # move this to renderer?
+  if lin.global_size: runtime_args['global_size'] = lin.global_size
+  if lin.local_size: runtime_args['local_size'] = lin.local_size
+
+  # compile the source code. TODO: pass in device identifier
+  lib: bytes = device.compiler.__wrapped__(src) if getenv("DISABLE_COMPILER_CACHE") else device.compiler(src)
+
+  # get the function
+  fxn = device.runtime(lin.function_name, lib)
+
+  # local opt (TODO: confirm it's not symbolic)
+  if 'global_size' in runtime_args and 'local_size' not in runtime_args: runtime_args['local_size'] = optimize_local_size(fxn, runtime_args['global_size'], rawbufs)
+
+  return Runner(fxn, lin.display_name, src, ast, runtime_args)
+
 # *** main schedule runner ***
 
+method_cache = {}
 def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
   # HACK: images can be not usable due to shape
   if IMAGE >= 2: schedule = fix_schedule_for_images(schedule)
@@ -165,9 +181,6 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
         si.out.realized = ret
         print_info("<interpreted>", si.ast, si.var_vals, {}, et)
       else:
-        # compile the program
-        runner = compile_ast(device, si.ast)
-
         # check if we can reuse the output buffer
         # if it's aliased, don't use it
         # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
@@ -187,11 +200,11 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
         # all the rawbufs
         rawbufs = [si.out.realized] + rawbufs
 
-        # local opt (TODO: confirm it's not symbolic)
-        if 'global_size' in runner.runtime_args and 'local_size' not in runner.runtime_args:
-          ckey = (device, si.ast)
-          if ckey not in local_size_cache: local_size_cache[ckey] = optimize_local_size(fxn, runner.runtime_args['global_size'], rawbufs)
-          runner.runtime_args['local_size'] = local_size_cache[ckey]
+        # compile the program
+        if (device, si.ast) not in method_cache:
+          runner = method_cache[(device, si.ast)] = compile_ast(device, si.ast, rawbufs)
+        else:
+          runner = method_cache[(device, si.ast)]
 
         # add this function to JIT
         from tinygrad.jit import CacheCollector
