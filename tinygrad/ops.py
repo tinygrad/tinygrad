@@ -194,9 +194,9 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.lib)
     return self
 
-  def exec(self, rawbufs, var_vals:Optional[Dict[Variable, int]]=None, force_wait=False, optimizing=False) -> Optional[float]:
+  def exec(self, rawbufs, var_vals:Optional[Dict[Variable, int]]=None, force_wait=False) -> Optional[float]:
     from tinygrad.jit import CacheCollector
-    if not optimizing: CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
+    CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
     return self(rawbufs, var_vals, force_wait=force_wait)
 
   def launch_dims(self, var_vals):
