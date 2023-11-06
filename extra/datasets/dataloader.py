@@ -124,12 +124,11 @@ def cross_process(itermaker, maxsize=8):
     else: yield ret
 
 if __name__ == '__main__':
-  import time
-  r = []
-  for i,f in enumerate(get_train_files()[:100]):
-    s = time.monotonic()
-    image_load(f)
-    s1 = time.monotonic()  
-    r.append(s1-s)
-    if i != 0 and i%100==0:break
-  print(f'{(sum(r)/len(r))*1000:7.2f}ms')
+  import statistics
+  t = []
+  for f in get_train_files()[:100]:
+    s = time.perf_counter()
+    decode(f)
+    e = time.perf_counter()
+    t.append(e-s)
+  print(f'{(sum(t)/len(t))*1000:7.2f} avg read {statistics.median(t):7.2f} median read {max(t)} max read')
