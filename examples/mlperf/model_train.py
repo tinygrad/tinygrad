@@ -400,7 +400,7 @@ def test(os):
   alls = []
   steps = 100
   for bs in [32]:
-    for w in [16]:
+    for w in [8]:
       if w == 0: w=1
       for compute in [40]:
         if os != 'darwin':
