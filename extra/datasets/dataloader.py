@@ -57,9 +57,11 @@ def get_transform(val):
   return transforms.Compose(t)
 
 def image_proc_n(fn,t):
+  s = time.perf_counter()
   img = Image.fromarray(decode(fn))
+  e = time.perf_counter()
   #X = t(img)
-  return img
+  return img, e-s
 
 toTensor = transforms.Compose([
     transforms.ToTensor()
@@ -89,9 +91,10 @@ def iterate(bs=16, val=False, shuffle=True, num_workers=16):
     for i in range(0, len(files), bs)[:-1]:
       s = time.perf_counter()
       X = p.map(partial(image_proc_n,t=t), [files[j] for j in order[i:i + bs]], chunksize=math.ceil(bs/num_workers))
+      X,T = zip(*X)
       e = time.perf_counter()
       proc_tm = e-s
-      print(f'{proc_tm*1000:7.2f} proc tm')
+      print(f'{proc_tm*1000:7.2f} proc tm {(sum(T)/len(T))*1000:7.2f} avg read tm')
       Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
       yield np.array(X),np.array(Y),proc_tm
   
