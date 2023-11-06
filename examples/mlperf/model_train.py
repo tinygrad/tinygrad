@@ -402,7 +402,7 @@ def test(os):
   for bs in [128]:
     for w in [4,8,16]:
       if w == 0: w=1
-      for compute in [35]:
+      for compute in [160]:
         if os != 'darwin':
           a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
           alls.append((a,bs,w,compute, 'dali'))
