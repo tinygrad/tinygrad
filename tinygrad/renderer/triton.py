@@ -127,4 +127,4 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   max_local_size =  [int(x) for x in prg.split(".maxntid ")[1].split("\n")[0].split(", ")]
   for i in range(len(local_size)): local_size[i] = min(local_size[i], max_local_size[i])
 
-  return prg, {"shared":compiled.metadata["shared"], "local_size_override":local_size + [1]*(3-len(local_size))}
+  return prg, {"shared":compiled.metadata["shared"], "local_size":local_size + [1]*(3-len(local_size))}

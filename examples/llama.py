@@ -14,7 +14,7 @@ from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict
-from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import GlobalCounters
 from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
 from tinygrad.shape.symbolic import Variable, sym_infer
 
