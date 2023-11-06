@@ -239,8 +239,8 @@ jobs:
       run: METAL=1 python -m pytest -n=auto test/test_linearizer.py
     - name: Test tensor core reshape-only ops
       run: METAL=1 TC=2 python -m pytest -n=auto test/test_ops.py
-    # - name: Run webgpu pytest
-    #   run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
+    #- name: Run webgpu pytest
+    #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
     - name: Run webgpu dtype tests
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_dtype.py
     - name: Build WEBGPU Efficientnet
