@@ -68,6 +68,9 @@ class TestEnd2End(unittest.TestCase):
   def setUpClass(cls):
     cls.X, cls.Y = get_mnist_data()
 
+  def setUp(self):
+    torch.manual_seed(123)
+
   def test_linear_mnist(self):
     class LinTiny:
       def __init__(self, has_batchnorm=False):
