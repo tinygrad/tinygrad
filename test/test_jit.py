@@ -184,9 +184,9 @@ class TestJit(unittest.TestCase):
     Y = [foo(e).numpy() for e in arg]
 
     foo(Tensor([7,7,7,7,7]))
-    want = [[1., 3., 3., 4., 5.],
+    want = [[1., 2., 3., 4., 5.],
             [1., 3., 3., 4., 6.],
-            [1., 3., 3., 4., 7.],
+            [1., 2., 5., 4., 7.],
             [0., 2., 3., 1., 0.]]
     np.testing.assert_allclose(want, Y)
 
