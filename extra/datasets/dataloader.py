@@ -94,7 +94,7 @@ def iterate(bs=16, val=False, shuffle=True, num_workers=16):
       X,T = zip(*X)
       e = time.perf_counter()
       proc_tm = e-s
-      print(f'{proc_tm*1000:7.2f} proc tm {(sum(T)/len(T))*1000:7.2f} avg read tm')
+      print(f'{proc_tm*1000:7.2f} proc tm {max(T)*1000:7.2f} worse read tm')
       Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
       yield np.array(X),np.array(Y),proc_tm
   
