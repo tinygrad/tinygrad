@@ -404,8 +404,9 @@ def test(os):
       if w == 0: w=1
       for compute in [40]:
         if os != 'darwin':
-          a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
-          alls.append((a,bs,w,compute, 'dali'))
+       #   a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
+       #   alls.append((a,bs,w,compute, 'dali'))
+          pass
         b = train_resnet(bs=bs,w=w,compute=compute,steps=steps)
         alls.append((b,bs,w,compute,'tiny'))
       #   input()
