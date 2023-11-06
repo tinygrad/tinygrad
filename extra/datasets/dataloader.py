@@ -132,7 +132,7 @@ if __name__ == '__main__':
   epochs = 54
   tr = get_transform(False)
   t,u = [],[]
-  files = get_train_files(dir=pathlib.Path(__file__).parent / "imagenet" / "imagenette2")
+  files = get_train_files(dir=str(pathlib.Path(__file__).parent / "imagenet" / "imagenette2"))
   order = list(range(0, len(files)))
   random.shuffle(order)
   stats = []
