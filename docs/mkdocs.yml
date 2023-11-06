@@ -1,0 +1,51 @@
+site_name: tinygrad
+repo_name: tinygrad/tinygrad
+repo_url: https://github.com/tinygrad/tinygrad
+theme:
+  name: material
+  favicon: icon.png
+  logo: icon.png
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default 
+      primary: black
+      accent: blue
+      toggle:
+        icon: material/lightbulb
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: blue
+      toggle:
+        icon: material/lightbulb-outline
+        name: Switch to system preference
+  features:
+    - content.code.copy
+    - navigation.tabs
+    - navigation.top
+    - search.suggest
+    - search.share
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+nav:
+  - Getting Started:
+    - Welcome: index.md
+    - Quick Start Guide: quickstart.md
+    - Abstraction Stack: abstractions.py
+    - Showcase: showcase.md
+  - Resources:
+    - Environment Variables: env_vars.md
+    - Adding New Accelerators: adding_new_accelerators.md
+plugins:
+  - search
+  - mkdocs-jupyter:
+      ignore_h1_titles: true
+      execute: true
+      allow_errors: false
