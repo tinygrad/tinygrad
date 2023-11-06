@@ -1,106 +1,14 @@
 from typing import List, cast, Dict, Callable
-import time, itertools, random
+import time
 import numpy as np
 from dataclasses import dataclass
-from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps, Interpreted, Compiled, UnaryOps, interpret_ast, get_lazyop_info
+from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps, Interpreted, UnaryOps, print_info
 from tinygrad.graph import log_schedule_item, print_tree
-from tinygrad.lazy import LazyBuffer, vars_from_ast
-from tinygrad.helpers import DEBUG, prod, all_int, getenv, IMAGE, GlobalCounters, colored, ansilen, NOOPT, BEAM
+from tinygrad.lazy import LazyBuffer
+from tinygrad.helpers import DEBUG, prod, all_int, getenv, IMAGE
 
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.features.image import fix_schedule_for_images
-from tinygrad.shape.symbolic import sym_infer
-
-def print_info(name, ast, var_vals, lra, et, jit=False):
-  info = get_lazyop_info(ast)
-  op_estimate = sym_infer(info.flops, var_vals)
-  mem_estimate = sym_infer(info.mem_estimate, var_vals)
-  if DEBUG >= 2:
-    print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(name+' '*(37-ansilen(name)))} arg {len(info.mem):3d} sz {str(lra.get('global_size')):18s} {str(lra.get('local_size')):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
-        (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
-  GlobalCounters.kernel_count += 1
-  GlobalCounters.global_ops += op_estimate
-  GlobalCounters.global_mem += mem_estimate
-
-@dataclass(frozen=True)
-class Runner:
-  fxn: Callable
-  name: str
-  prg: str
-  ast: LazyOp
-  runtime_args: Dict
-  # TODO: remove these
-  @property
-  def global_size(self): return self.runtime_args.get('global_size')
-  @property
-  def local_size(self): return self.runtime_args.get('local_size')
-  def __call__(self, rawbufs, var_vals, jit=False):
-    lra = self.runtime_args.copy()
-    if DEBUG >= 2: lra['wait'] = True
-    if 'global_size' in lra: lra['global_size'] = [sym_infer(sz, var_vals) for sz in lra['global_size']]
-    if 'local_size' in lra: lra['local_size'] = [sym_infer(sz, var_vals) for sz in lra['local_size']]
-    if et := self.fxn(*rawbufs, *var_vals.values(), **lra): GlobalCounters.time_sum_s += et
-    print_info(self.name, self.ast, var_vals, lra, et, jit=jit)
-
-def optimize_local_size(prg:Callable, global_size:List[int], rawbufs:List[RawBuffer]) -> List[int]:
-  test_rawbuffers = [type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
-  MAX_WORKGROUP = prg.max_work_group_size() if hasattr(prg, 'max_work_group_size') else 1024
-  local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in global_size]
-  local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
-  def try_exec(local_size):
-    try:
-      return prg(*test_rawbuffers, global_size=[g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)], local_size=local_size, wait=True)
-    except Exception:
-      return float('inf')
-  return min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
-
-# rawbufs are just used for timing
-def compile_ast(device:Compiled, ast:LazyOp, rawbufs:List[RawBuffer]) -> Runner:
-  # get linearizer
-  from tinygrad.codegen.linearizer import Linearizer
-  lin = Linearizer(ast, device.linearizer_opts)
-
-  if not NOOPT:
-    if not (used_tensor_cores:=lin.apply_tensor_cores(getenv("TC", 1))): lin.hand_coded_optimizations()
-    if BEAM >= 1 and not vars_from_ast(ast):
-      lins = [(("tc" if used_tensor_cores else "hc"), lin)]
-      # allocate a scratch buffer if output buffer is also input
-      test_rawbuffers = [type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
-      kb = Linearizer(ast, device.linearizer_opts)
-      kb.required_optimizations()
-      from tinygrad.features.search import beam_search, time_linearizer
-      lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
-      if used_tensor_cores:
-        lins.append(("hc", Linearizer(ast, device.linearizer_opts)))
-        lins[-1][1].hand_coded_optimizations()
-      timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, disable_cache=True, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
-      if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
-      lin = timed[0][1]
-  else:
-    lin.required_optimizations()
-
-  # generate uops from the AST
-  lin.linearize()
-
-  # render the source code
-  # TODO: move global_size and local_size to runtime_args
-  src, runtime_args = device.renderer(lin.function_name, lin.uops)
-  if DEBUG >= 4: print(src)
-
-  # move this to renderer?
-  if lin.global_size: runtime_args['global_size'] = lin.global_size
-  if lin.local_size: runtime_args['local_size'] = lin.local_size
-
-  # compile the source code. TODO: pass in device identifier
-  lib: bytes = device.compiler.__wrapped__(src) if getenv("DISABLE_COMPILER_CACHE") else device.compiler(src)
-
-  # get the function
-  fxn = device.runtime(lin.function_name, lib)
-
-  # local opt (TODO: confirm it's not symbolic)
-  if 'global_size' in runtime_args and 'local_size' not in runtime_args: runtime_args['local_size'] = optimize_local_size(fxn, runtime_args['global_size'], rawbufs)
-
-  return Runner(fxn, lin.display_name, src, ast, runtime_args)
 
 # *** main schedule runner ***
 
@@ -123,7 +31,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     else:
       rawbufs = [x.realized for x in si.inputs]
       if isinstance(device, Interpreted):
-        fxn = interpret_ast(device, si.ast)
+        fxn = device.interpret_ast(si.ast)
 
         # run function
         st = time.perf_counter()
@@ -164,10 +72,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
         rawbufs = [si.out.realized] + rawbufs
 
         # compile the program
-        if (si.out.device, si.ast) not in method_cache:
-          runner = method_cache[(si.out.device, si.ast)] = compile_ast(device, si.ast, rawbufs)
-        else:
-          runner = method_cache[(si.out.device, si.ast)]
+        runner = device.compile_ast(si.ast, rawbufs)
 
         # add this function to JIT
         from tinygrad.jit import CacheCollector

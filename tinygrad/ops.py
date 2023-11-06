@@ -2,10 +2,10 @@ from __future__ import annotations
 import importlib, inspect, functools, pathlib
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping
-from tinygrad.helpers import prod, DEBUG, getenv, DType
+from tinygrad.helpers import prod, DEBUG, getenv, DType, colored, ansilen, NOOPT, BEAM
 from tinygrad.runtime.lib import RawBuffer
-from tinygrad.shape.symbolic import Variable
-from dataclasses import dataclass
+from tinygrad.shape.symbolic import Variable, sym_infer
+from dataclasses import dataclass, field
 
 from tinygrad.helpers import GlobalCounters  # noqa: F401
 
@@ -116,40 +116,39 @@ class Interpreted:
     self.synchronize = lambda: None
     self.codegen = None
 
-@functools.lru_cache(None)
-def interpret_ast(device:Interpreted, ast:LazyOp) -> Callable:
-  tglob: Dict[str, Any] = {}
-  lines: List[str] = []
-  f = device.fxn_for_op
+  def interpret_ast(self:Interpreted, ast:LazyOp) -> Callable:
+    tglob: Dict[str, Any] = {}
+    lines: List[str] = []
+    f = self.fxn_for_op
 
-  @functools.lru_cache(None)
-  def gstr(x:Any, nm=None) -> str:
-    ret = str(nm).replace(".", "_") if nm else f"m{len(tglob):04d}"
-    tglob[ret] = x
-    return ret
+    @functools.lru_cache(None)
+    def gstr(x:Any, nm=None) -> str:
+      ret = str(nm).replace(".", "_") if nm else f"m{len(tglob):04d}"
+      tglob[ret] = x
+      return ret
 
-  @functools.lru_cache(None)
-  def _interpret_ast(ast:LazyOp) -> str:
-    if TernaryOps.MULACC in f and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
-      ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
+    @functools.lru_cache(None)
+    def _interpret_ast(ast:LazyOp) -> str:
+      if TernaryOps.MULACC in f and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
+        ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
 
-    if MovementOps.AS_STRIDED in f and ast.op in BufferOps:
-      # expand the shapetracker
-      tmp = f"{gstr(f[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"{gstr(f[ast.op], ast.op)}(inputs[{ast.arg.idx-1}])"
-      for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(f[mop], mop)}({tmp}, {gstr(arg)})"
-    else:
-      inp = [_interpret_ast(src) for src in ast.src]
-      tmp = f"{gstr(f[ast.op], ast.op)}({', '.join(inp + ([gstr(ast.arg)] if ast.arg else []))})"
+      if MovementOps.AS_STRIDED in f and ast.op in BufferOps:
+        # expand the shapetracker
+        tmp = f"{gstr(f[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"{gstr(f[ast.op], ast.op)}(inputs[{ast.arg.idx-1}])"
+        for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(f[mop], mop)}({tmp}, {gstr(arg)})"
+      else:
+        inp = [_interpret_ast(src) for src in ast.src]
+        tmp = f"{gstr(f[ast.op], ast.op)}({', '.join(inp + ([gstr(ast.arg)] if ast.arg else []))})"
 
-    ret = f"a{len(lines)}"
-    lines.append(f"  {ret} = {tmp}")
-    return ret
+      ret = f"a{len(lines)}"
+      lines.append(f"  {ret} = {tmp}")
+      return ret
 
-  ret = _interpret_ast(ast)
-  src = '\n'.join(['def run(*inputs):'] + lines + [f"  return {gstr(device.from_underlying, 'from_underlying')}({ret})" if device.from_underlying else f"  return {ret}"])
-  if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
-  exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
-  return tglob['run']
+    ret = _interpret_ast(ast)
+    src = '\n'.join(['def run(*inputs):'] + lines + [f"  return {gstr(self.from_underlying, 'from_underlying')}({ret})" if self.from_underlying else f"  return {ret}"])
+    if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
+    exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
+    return tglob['run']
 
 @dataclass
 class FlopCounter:
@@ -171,9 +170,40 @@ InterpretedFlopCounter = Interpreted(FlopCounter, {
   TernaryOps.WHERE: lambda self,y,z: FlopCounter(self.shape, y.dtype, self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape), {**self.mem, **y.mem, **z.mem})})
 
 @functools.lru_cache(None)
-def get_lazyop_info(ast:LazyOp) -> FlopCounter: return interpret_ast(InterpretedFlopCounter, ast)(None)
+def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.interpret_ast(ast)(None)
 
 # **************** for Compiled Buffers ****************
+
+def print_info(name, ast, var_vals, lra, et, jit=False):
+  info = get_lazyop_info(ast)
+  op_estimate = sym_infer(info.flops, var_vals)
+  mem_estimate = sym_infer(info.mem_estimate, var_vals)
+  if DEBUG >= 2:
+    print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {(name+' '*(37-ansilen(name)))} arg {len(info.mem):3d} sz {str(lra.get('global_size')):18s} {str(lra.get('local_size')):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+        (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
+  GlobalCounters.kernel_count += 1
+  GlobalCounters.global_ops += op_estimate
+  GlobalCounters.global_mem += mem_estimate
+
+@dataclass(frozen=True)
+class Runner:
+  fxn: Callable
+  name: str
+  prg: str
+  ast: LazyOp
+  runtime_args: Dict
+  # TODO: remove these
+  @property
+  def global_size(self): return self.runtime_args.get('global_size')
+  @property
+  def local_size(self): return self.runtime_args.get('local_size')
+  def __call__(self, rawbufs, var_vals, jit=False):
+    lra = self.runtime_args.copy()
+    if DEBUG >= 2: lra['wait'] = True
+    if 'global_size' in lra: lra['global_size'] = [sym_infer(sz, var_vals) for sz in lra['global_size']]
+    if 'local_size' in lra: lra['local_size'] = [sym_infer(sz, var_vals) for sz in lra['local_size']]
+    if et := self.fxn(*rawbufs, *var_vals.values(), **lra): GlobalCounters.time_sum_s += et
+    print_info(self.name, self.ast, var_vals, lra, et, jit=jit)
 
 @dataclass
 class Compiled:
@@ -183,3 +213,57 @@ class Compiled:
   compiler: Any
   runtime: Any
   synchronize: Any = lambda: None  # noqa: E731
+  _method_cache: Dict = field(default_factory=dict)
+
+  # rawbufs are just used for timing
+  def compile_ast(self:Compiled, ast:LazyOp, rawbufs:List[RawBuffer]) -> Runner:
+    if ast in self._method_cache: return self._method_cache[ast]
+
+    # get linearizer
+    from tinygrad.codegen.linearizer import Linearizer
+    lin = Linearizer(ast, self.linearizer_opts)
+
+    if not NOOPT:
+      if not (used_tensor_cores:=lin.apply_tensor_cores(getenv("TC", 1))): lin.hand_coded_optimizations()
+      if BEAM >= 1:
+        lins = [(("tc" if used_tensor_cores else "hc"), lin)]
+        # allocate a scratch buffer if output buffer is also input
+        test_rawbuffers = [type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
+        kb = Linearizer(ast, self.linearizer_opts)
+        kb.required_optimizations()
+        from tinygrad.features.search import beam_search, time_linearizer
+        lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
+        if used_tensor_cores:
+          lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
+          lins[-1][1].hand_coded_optimizations()
+        timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, disable_cache=True, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
+        if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
+        lin = timed[0][1]
+    else:
+      lin.required_optimizations()
+
+    # generate uops from the AST
+    lin.linearize()
+
+    # render the source code
+    # TODO: move global_size and local_size to runtime_args
+    src, runtime_args = self.renderer(lin.function_name, lin.uops)
+    if DEBUG >= 4: print(src)
+
+    # move this to renderer?
+    if lin.global_size: runtime_args['global_size'] = lin.global_size
+    if lin.local_size: runtime_args['local_size'] = lin.local_size
+
+    # compile the source code. TODO: pass in device identifier
+    lib: bytes = self.compiler.__wrapped__(src) if getenv("DISABLE_COMPILER_CACHE") else self.compiler(src)
+
+    # get the function
+    fxn = self.runtime(lin.function_name, lib)
+
+    # local opt (TODO: confirm it's not symbolic)
+    if 'global_size' in runtime_args and 'local_size' not in runtime_args:
+      from tinygrad.features.search import optimize_local_size
+      runtime_args['local_size'] = optimize_local_size(fxn, runtime_args['global_size'], rawbufs)
+
+    runner = self._method_cache[ast] = Runner(fxn, lin.display_name, src, ast, runtime_args)
+    return runner
