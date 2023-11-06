@@ -1,5 +1,5 @@
 from __future__ import annotations
-import importlib, inspect, functools, pathlib, itertools, random
+import importlib, inspect, functools, pathlib
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT
@@ -188,19 +188,6 @@ class ASTRunner:
     if DEBUG >= 4: print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
 
-  def optimize_local_size(self, global_size:List[int], rawbufs:List[RawBuffer]) -> List[int]:
-    assert self.global_size is not None, "needs a global size to optimize local size"
-    test_rawbuffers = [type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
-    MAX_WORKGROUP = self.clprg.max_work_group_size() if hasattr(self.clprg, 'max_work_group_size') else 1024
-    local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in global_size]
-    local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
-    def try_exec(local_size):
-      try:
-        return self.clprg([g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)], local_size, *test_rawbuffers, wait=True)
-      except Exception:
-        return float('inf')
-    return min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
-
   def build(self, compiler, runtime):
     self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
     self.clprg = runtime(self.name, self.lib)
@@ -221,7 +208,8 @@ class ASTRunner:
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None:
       # TODO: this is copied from get_program
-      local_size = self.local_size = self.optimize_local_size(global_size, rawbufs)
+      from tinygrad.features.search import optimize_local_size
+      local_size = self.local_size = optimize_local_size(self.clprg, global_size, rawbufs)
       global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
     lra = self.runtime_args.copy()
     if global_size: lra['global_size'] = global_size

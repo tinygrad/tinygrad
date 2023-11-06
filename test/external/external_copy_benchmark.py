@@ -2,7 +2,7 @@ import unittest
 from tinygrad.helpers import prod
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
-from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import GlobalCounters
 from tinygrad.jit import CacheCollector
 
 class TestCopy(unittest.TestCase):

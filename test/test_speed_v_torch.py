@@ -10,7 +10,7 @@ import time
 import numpy as np
 np.set_printoptions(linewidth=160)
 from tinygrad.ops import Device
-from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 from tinygrad.helpers import colored, getenv, CI

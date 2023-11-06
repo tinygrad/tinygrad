@@ -6,7 +6,7 @@ from models.efficientnet import EfficientNet
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.tensor import Tensor
-from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import GlobalCounters
 from tinygrad.helpers import getenv
 from tinygrad.jit import CacheCollector
 

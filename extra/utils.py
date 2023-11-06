@@ -7,7 +7,7 @@ from collections import defaultdict
 from typing import Union
 
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
-from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import Device
