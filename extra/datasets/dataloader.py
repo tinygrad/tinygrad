@@ -17,7 +17,7 @@ cir = {v[0]: int(k) for k,v in ci.items()}
 
 @functools.lru_cache(None)
 def get_train_files(dir=None):
-  train_files = glob.glob(str(BASEDIR/"train/*/*") if not dir else dir)
+  train_files = glob.glob(str(BASEDIR/"train/*/*") if not dir else str(dir/'train/*/*'))
   return train_files
 
 @functools.lru_cache(None)
@@ -132,7 +132,7 @@ if __name__ == '__main__':
   epochs = 54
   tr = get_transform(False)
   t,u = [],[]
-  files = get_train_files(dir=str(pathlib.Path(__file__).parent / "imagenet" / "imagenette2"))
+  files = get_train_files(dir=pathlib.Path(__file__).parent / "imagenet" / "imagenette2")
   order = list(range(0, len(files)))
   random.shuffle(order)
   stats = []
