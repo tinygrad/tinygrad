@@ -394,7 +394,7 @@ def recover_corrupted_db(corrupted_db, new_db):
 
     print(f"Attempted to recover data from {corrupted_db} to {new_db}")
 
-def test():
+def test(os):
   LOG = pathlib.Path(__file__).parent / "log"
   alls = []
   steps = 100
@@ -402,9 +402,10 @@ def test():
     for w in [4,8,16]:
       if w == 0: w=1
       for compute in [15]:
-        #a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
+        if os != 'darwin':
+          a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
+          alls.append((a,bs,w,compute, 'dali'))
         b = train_resnet(bs=bs,w=w,compute=compute,steps=steps)
-        #alls.append((a,bs,w,compute, 'dali'))
         alls.append((b,bs,w,compute,'tiny'))
       #   input()
   def avg(l): return sum(l)/len(l)
@@ -462,5 +463,5 @@ if __name__ == "__main__":
         if not TEST:
           globals()[nm](compute=20)
         else:
-          test()
+          test(platform)
 
