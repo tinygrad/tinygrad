@@ -282,9 +282,9 @@ def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=No
       GlobalCounters.reset()
       st = time.perf_counter()
       data_time = st-cl
-      X,Y = Tensor(X,requires_grad=False),Tensor(Y,requires_grad=False)
 
       if not compute:
+        X,Y = Tensor(X,requires_grad=False),Tensor(Y,requires_grad=False)
         loss, out = train_step(X, Y)
       else:
         time.sleep(compute/1000)
@@ -398,13 +398,13 @@ def test():
   LOG = pathlib.Path(__file__).parent / "log"
   alls = []
   steps = 100
-  for bs in [16,32]:
+  for bs in [32]:
     for w in [4,8,16]:
       if w == 0: w=1
       for compute in [15]:
-        a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
+        #a = train_resnet_dali(bs=bs,w=w,compute=compute,steps=steps)
         b = train_resnet(bs=bs,w=w,compute=compute,steps=steps)
-        alls.append((a,bs,w,compute, 'dali'))
+        #alls.append((a,bs,w,compute, 'dali'))
         alls.append((b,bs,w,compute,'tiny'))
       #   input()
   def avg(l): return sum(l)/len(l)

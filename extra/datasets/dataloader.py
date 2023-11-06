@@ -95,7 +95,7 @@ def iterate(bs=16, val=False, shuffle=True, num_workers=16):
   with Pool(num_workers) as p:
     for i in range(0, len(files), bs)[:-1]:
       s = time.perf_counter()
-      X = p.map(partial(image_proc,t=t), [files[j] for j in order[i:i + bs]], chunksize=math.ceil(bs/num_workers))
+      X = p.map(partial(image_proc_n,t=t), [files[j] for j in order[i:i + bs]], chunksize=math.ceil(bs/num_workers))
       e = time.perf_counter()
       proc_tm = e-s
       print(f'{proc_tm*1000:7.2f} proc tm')
