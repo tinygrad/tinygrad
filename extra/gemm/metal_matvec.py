@@ -3,7 +3,7 @@ import os
 import numpy as np
 import time, torch, torch.mps
 
-from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.ops import Device

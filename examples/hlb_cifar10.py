@@ -18,7 +18,7 @@ from tinygrad.nn.state import get_state_dict
 from tinygrad.nn import optim
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
-from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import GlobalCounters
 from tinygrad.shape.symbolic import Node
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
