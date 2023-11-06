@@ -148,7 +148,7 @@ class Interpreted:
     exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
     return tglob['run']
 
-  def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, context=None, **kwargs):
+  def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, **kwargs):
     if ast not in self.method_cache: self.method_cache[ast] = self.interpret_ast(ast)
     ret = self.method_cache[ast]([x.realized for x in inputs] if inputs else None)
     if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op:
