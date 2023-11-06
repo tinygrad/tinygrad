@@ -168,6 +168,7 @@ def train_resnet_dali(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None,step
       dts.append(data_time)
       tts.append(train_time)
       vts.append(val_time)
+    print(f'{(sum(dts)/len(dts))*1000:7.2f} avg data tm {statistics.median(dts)*1000:7.2f} median data tm')
     return epoch_avg_time, dts, tts, vts
 
     # "eval" loop. Evaluate every 4 epochs, starting with epoch 1
