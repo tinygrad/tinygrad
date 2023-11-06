@@ -134,7 +134,7 @@ if __name__ == '__main__':
   random.shuffle(order)
   stats = []
   for BS in [64,128,256]:
-    for W in [2,4,8]:
+    for W in [2,4,6,8]:
       with Pool(W) as p:
         for _ in range(30):
           s = time.perf_counter()
@@ -149,5 +149,5 @@ if __name__ == '__main__':
         print(f'unit: {(sum(u)/len(u))*1000:7.2f} avg read {statistics.median(u)*1000:7.2f} median read {max(u)*1000:7.2f} max read')
         stats.append((train_time,BS,W))
   for i,(tt,BS,W) in enumerate(sorted(stats, key=lambda x:x[0])):
-    print(f'RANK {i}: BS={BS} W={W}')
+    print(f'RANK {i}: BS={BS} W={W} {tt} hrs')
  
