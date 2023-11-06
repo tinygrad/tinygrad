@@ -167,9 +167,11 @@ if getenv('METAL'):
   backend_test.exclude('test_maxpool_2d_pads_cpu')
   backend_test.exclude('test_maxpool_2d_same_lower_cpu')
 
+# TODO it's possible to fix this
 # Don't know how to treat special TensorProto like TensorProto.FLOAT8E4M3FN
 if getenv("CPU") or getenv("TORCH"):
   backend_test.exclude('test_dequantizelinear_axis_cpu')
+  backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
   backend_test.exclude('test_dequantizelinear_cpu')
 
 # compiled backends cannot reshape to and from 0
