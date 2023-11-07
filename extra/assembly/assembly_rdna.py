@@ -1,4 +1,4 @@
-import yaml
+import json
 from typing import Tuple, Set, Dict
 from tinygrad.helpers import dtypes
 from tinygrad.codegen.assembly import AssemblyCodegen, Register
@@ -197,7 +197,7 @@ class RDNACodegen(AssemblyCodegen):
                   '.wavefront_size': 32}],
                 'amdhsa.target': 'amdgcn-amd-amdhsa--gfx1100', 'amdhsa.version': [1, 2]}
 
-    code = boilerplate_start + "\n" + '\n'.join("%s %d" % x for x in kernel_desc.items()) + "\n" +  code_start + '\n'.join(ins) + "\n.amdgpu_metadata\n" + yaml.dump(metadata) + ".end_amdgpu_metadata"
+    code = boilerplate_start + "\n" + '\n'.join("%s %d" % x for x in kernel_desc.items()) + "\n" +  code_start + '\n'.join(ins) + "\n.amdgpu_metadata\n" + json.dump(metadata) + ".end_amdgpu_metadata"
     obj = early_exec(([ROCM_LLVM_PATH / "llvm-mc", '--arch=amdgcn', '--mcpu=gfx1100', '--triple=amdgcn-amd-amdhsa', '--filetype=obj', '-'], code.encode("utf-8")))
     asm = early_exec(([ROCM_LLVM_PATH / "ld.lld", "/dev/stdin", "-o", "/dev/stdout", "--pie"], obj))
     return asm
