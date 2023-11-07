@@ -188,7 +188,7 @@ with Tensor.train():
     out = net(batch)
 
     # compute loss
-    loss = sparse_categorical_crossentropy(out, labels)
+    loss = out.sparse_categorical_crossentropy(labels)
 
     # zero gradients
     opt.zero_grad()
