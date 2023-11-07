@@ -10,7 +10,7 @@ from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Seque
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import Device, LoadOps
-from tinygrad.shape.symbolic import sint, Node
+from tinygrad.shape.symbolic import sint
 from tinygrad.realize import run_schedule
 
 # An instantiation of the Function is the Context
@@ -90,6 +90,9 @@ class Tensor:
   def shape(self) -> Tuple[sint, ...]: return self.lazydata.shape
 
   @property
+  def unbounded_shape(self) -> Tuple[sint, ...]: return self.lazydata.st.unbind().shape
+
+  @property
   def dtype(self) -> DType: return self.lazydata.dtype
 
   # ***** data handlers ****
@@ -112,7 +115,7 @@ class Tensor:
       self.contiguous().realize().lazydata.realized._copyin(x.numpy())  # type: ignore
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
-    #assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
+    assert self.unbounded_shape == x.unbounded_shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.dtype == x.dtype and self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized
@@ -253,7 +256,7 @@ class Tensor:
   def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple([x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))]))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
-  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
+  def shrink(self, arg:Tuple[Optional[Tuple[sint, sint]], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=tuple(x if x else (0,s) for x,s in zip(arg, self.shape))) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
   def pad(self, arg: Tuple[Tuple[int, int], ...], value:float=0) -> Tensor:
     ret = mlops.Pad.apply(self, arg=arg) if any(x != (0, 0) for x in arg) else self
     return ret if 0 == value else ret + mlops.Pad.apply(Tensor.ones_like(self), arg=arg).where(0, value)
@@ -559,7 +562,7 @@ class Tensor:
   def dot(self, w:Tensor) -> Tensor:
     n1, n2 = len(self.shape), len(w.shape)
     assert n1 != 0 and n2 != 0, f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
-    #assert self.shape[-1] == w.shape[-min(n2, 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(n2, 2)]})"
+    assert self.shape[-1] == w.shape[-min(n2, 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(n2, 2)]})"
     x = self.reshape(*self.shape[0:-1], *[1]*min(n1-1, n2-1, 1), self.shape[-1])
     w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
     return (x*w).sum(-1)
