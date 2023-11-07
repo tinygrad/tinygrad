@@ -156,7 +156,8 @@ class GlobalCounters:
 
 # *** universal database cache ***
 
-CACHEDB: str = getenv("CACHEDB", os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad", "cache.db"))
+
+CACHEDB: str = os.path.join(os.getenv("XDG_CACHE_HOME") or (os.path.expanduser("~/Library/Caches") if OSX else os.path.expanduser("~/.cache")), "tinygrad", "cache.db")
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
 VERSION = 6
