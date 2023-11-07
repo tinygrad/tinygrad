@@ -463,7 +463,7 @@ if __name__ == "__main__":
       nm = f"train_{m}"
       if nm in globals():
         if not TEST:
-          globals()[nm](compute=20)
+          globals()[nm](steps=30)
         else:
           test(platform)
 
