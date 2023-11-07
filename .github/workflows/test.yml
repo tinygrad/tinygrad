@@ -218,7 +218,7 @@ jobs:
         METAL=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
         METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run test
-      run: METAL=1 python -m pytest test/
+      run: METAL=1 python -m pytest -n=auto test/
     - name: Check Device.DEFAULT (WEBGPU) and print some source
       run: |
         WEBGPU=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
