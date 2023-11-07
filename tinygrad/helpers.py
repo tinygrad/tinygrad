@@ -185,7 +185,6 @@ def db_connection():
   return _db_connection
 
 def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
-  print('in diskcache')
   if isinstance(key, (str,int)): key = {"key": key}
   try:
     res = db_connection().cursor().execute(f"SELECT val FROM {table} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
@@ -193,7 +192,6 @@ def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
     print('table dne')
     return None  # table doesn't exist
   if (val:=res.fetchone()) is not None:
-    print(f'found opt {key}')
     return pickle.loads(val[0])
   return None
 
