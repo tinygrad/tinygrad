@@ -53,8 +53,8 @@ class TinyJit:
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
       # get the inputs for replacement
-      for j,cache in enumerate(self.jit_cache):
-        for i,a in enumerate(cache.rawbufs):
+      for j,ji in enumerate(self.jit_cache):
+        for i,a in enumerate(ji.rawbufs):
           if a in [v[0] for v in input_rawbuffers.values()]:
             self.input_replace[(j,i)] = [(k, v[1].unbind(), v[0].dtype) for k,v in input_rawbuffers.items() if v[0] == a][0]
       assert set([x[0] for x in self.input_replace.values()]) == set(input_rawbuffers.keys()), "some input tensors not found"
