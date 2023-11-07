@@ -187,6 +187,7 @@ def db_connection():
 def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
   if isinstance(key, (str,int)): key = {"key": key}
   try:
+    print(tuple(key.values()))
     res = db_connection().cursor().execute(f"SELECT val FROM {table} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
   except sqlite3.OperationalError:
     return None  # table doesn't exist
