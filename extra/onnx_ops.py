@@ -583,7 +583,7 @@ def IsInf(x,detect_negative=1,detect_positive=1):
   ret = (x == float("inf"))*detect_positive + (x == float("-inf"))*detect_negative + Tensor.zeros(*x.shape)
   return ret.cast(dtypes.bool)
 
-# Needs work
+# Needs work Check dtype somehow
 def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point=0, axis=1):
   axis = axis + x.ndim if axis < 0 else axis
   x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
@@ -619,9 +619,9 @@ def Gelu(x:Tensor, approximate=None):
   if approximate == "tanh": return 0.5 * x * (1 + ((x + 0.044715 * x.pow(3)) * math.sqrt(2/math.pi)).tanh())
   else: return 0.5 * x * (1 + Erf(x/math.sqrt(2))) 
 
+#TODO https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_affine_grid.py
 def AffineGrid(theta: Tensor, size: Tensor, align_corners):
-  print(theta.numpy())
-  print(size.numpy())
+  _, _, *data_size = safe_numpy(size)
   ...
 
 # **************** com.microsoft Ops ****************
