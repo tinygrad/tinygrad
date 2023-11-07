@@ -8,6 +8,8 @@ from typing import Dict, List
 from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, OpType, LazyOp
 from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters, getenv, dedup
 from tinygrad.codegen.linearizer import UOps
+from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.symbolic import Variable
 
 # **** debugging and graphing ****
 
@@ -47,11 +49,12 @@ def str_dtype(dtyp):
   return "" if ret == 'float' else f"\n{ret}"
 
 @functools.lru_cache(None)
-def add_st_node(nmx, nmo, label, st):
+def add_st_node(nmx, nmo, label, st:ShapeTracker):
   global node_count
   inter_node = node_count
   node_count += 1
-  G.add_node(inter_node, style='filled', fillcolor="#80ff8080", color="black", label=f"{st.shape}\n{st.real_strides()}" + (f"\n{st.real_offset()}" if st.real_offset() != 0 else ""))
+  offset = st.expr_node(Variable('zero', 0, 0))[0]
+  G.add_node(inter_node, style='filled', fillcolor="#80ff8080", color="black", label=f"{st.shape}\n{st.real_strides()}" + (f"\n{offset}" if offset != 0 else ""))
   G.add_edge(nmx, inter_node, color='#00000060')
   G.add_edge(inter_node, nmo, label=label, color='#00000060')
 
