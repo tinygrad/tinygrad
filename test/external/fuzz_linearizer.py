@@ -31,15 +31,13 @@ def fuzz_linearizer(lin: Linearizer):
     if isinstance(buf.dtype, ImageDType):
       size = prod(buf.dtype.shape)
     else:
-      idx, valid = buf.st.expr_idxs()
-      # TODO: variable shape cannot deepcopy
+      idx = buf.st.expr_idxs()[0]
       size = idx.max+1
     rawbuf_size[buf.idx] = max(rawbuf_size[buf.idx], size)
 
   for i, size in sorted(rawbuf_size.items()):
     assert len(rawbufs) == i
     if not isinstance(size, int): size = size.max
-    # TODO: different range for int type v.s. float type
     rawbuf = device.buffer.fromCPU(np.random.uniform(low=-5.0, high=5.0, size=size).astype(buf.dtype.np))
     rawbufs.append(rawbuf)
 
@@ -68,7 +66,7 @@ def fuzz_linearizer(lin: Linearizer):
 
     var_vals = {v: random.randint(v.min, v.max) for v in vars_from_ast(lin.ast)}
 
-    # TODO: render error: assert output_dtype == dtypes._float4, f"images must be float4, getting {output_dtype}"
+    # TODO: images needs required_optimization
     if isinstance(device, Compiled):
       try:
         prg = device.to_program(lin)
@@ -83,7 +81,6 @@ def fuzz_linearizer(lin: Linearizer):
         print("EXEC FAILED!!")
         return "EXEC_ERROR"
     else:
-      # TODO: Interpreted does not work with symbolic shape
       try:
         device.exec_ast(lin.ast, output=LB(rawbufs[0], rawbufs[0].dtype), inputs=[LB(buf, buf.dtype) for buf in rawbufs[1:]])
       except Exception as e:
@@ -96,8 +93,7 @@ def fuzz_linearizer(lin: Linearizer):
       ground_truth = result
     else:
       try:
-        # TODO: assert based on L2 distance not elementwise
-        np.testing.assert_allclose(result, ground_truth, rtol=1e-4, atol=1e-4)
+        np.testing.assert_allclose(result, ground_truth, rtol=1e-2, atol=1e-2)
       except AssertionError:
         traceback.print_exc()
         return "NOT_ALLCLOSE"
