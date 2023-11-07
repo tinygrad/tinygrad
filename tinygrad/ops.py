@@ -127,7 +127,8 @@ def interpret_ast(device:Interpreted, ast:LazyOp) -> Callable:
 
     if MovementOps.RESHAPE in f and ast.op in BufferOps:
       tmp = f"{gstr(f[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"{gstr(f[ast.op], ast.op)}(inputs[{ast.arg.idx-1}])"
-      for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(f[mop], mop)}({tmp}, {gstr(arg)})"
+      for mop,arg in ast.arg.st.to_movement_ops():
+        tmp = f"{gstr(f[mop], mop)}({tmp}, {gstr(arg)})"
     else:
       inp = [_interpret_ast(src) for src in ast.src]
       tmp = f"{gstr(f[ast.op], ast.op)}({', '.join(inp + ([gstr(ast.arg)] if ast.arg else []))})"
