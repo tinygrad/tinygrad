@@ -53,8 +53,7 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
   mst = ShapeTracker((vm2, vm1))
   strides = mst.real_strides()
   if None in strides: return None
-  view = View.create(vm1.shape, cast(Tuple[sint, ...], strides), mst.real_offset(), vm1.mask)
-  return view
+  return View.create(vm1.shape, cast(Tuple[sint, ...], strides), mst.real_offset(), vm1.mask)
 
 @functools.lru_cache(maxsize=None)
 def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
@@ -102,11 +101,6 @@ class ShapeTracker:
       real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
       offset = v.offset + sum(v.strides[i] * (real_shape[i]-1) for i in range(len(v.strides)) if v.strides[i]<0)
       real_offset = offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
-      # first, we apply the offset
-      # then, we make it the correct shape
-      # then, we apply permutations
-      # TODO: don't use as_strided
-      # to_apply.append((MovementOps.AS_STRIDED, ([s if st != 0 else 1 for s,st in zip(real_shape, v.strides)], v.strides, real_offset)))
       real_real_shape = [s for s,st in zip(real_shape, v.strides) if st]
       strides = [abs(st) for st in v.strides]
       buffer_size = sum((s-1)*st for s, st in zip(real_shape,strides)) + 1
