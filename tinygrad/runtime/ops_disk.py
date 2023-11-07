@@ -3,7 +3,7 @@ from typing import Optional
 from typing import Callable, Dict, Tuple
 from tinygrad.helpers import prod, DType
 from tinygrad.runtime.lib import RawBufferMapped
-from tinygrad.ops import Interpreted, Op, MovementOps, UnaryOps
+from tinygrad.ops import Interpreted, Op, MovementOps, UnaryOps, BufferOps
 
 class RawDiskBuffer(RawBufferMapped):
   def __init__(self, size, dtype:DType, device:Optional[str]=None, buf=None, shape=None, offset=0):  # pylint: disable=super-init-not-called
@@ -37,5 +37,5 @@ class RawDiskBuffer(RawBufferMapped):
     self._buf[0].seek(self.offset)
     self._buf[0].readinto(buf)
 
-disk_fxn_for_op: Dict[Op, Callable] = { UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
-DiskBuffer = Interpreted(RawDiskBuffer, disk_fxn_for_op, to_underlying=lambda x:x, from_underlying=lambda x:x)
+disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.MEM: lambda x: x, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
+DiskBuffer = Interpreted(RawDiskBuffer, disk_fxn_for_op, from_underlying=lambda x:x)

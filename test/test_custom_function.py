@@ -24,7 +24,7 @@ def atan2_gpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
     __kernel void atan2_gpu(global float *c, global float *a, global float *b) {
       int idx = get_global_id(0);
       c[idx] = atan2(a[idx], b[idx]);
-    }""", global_size=[prod(ret.shape)]).build(Device[ret.device].runtime).exec([ret.realized, a.realized, b.realized])
+    }""", global_size=[prod(ret.shape)]).build(Device[ret.device].compiler, Device[ret.device].runtime).exec([ret.realized, a.realized, b.realized])
   return ret.realized
 
 def atan2_cpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):

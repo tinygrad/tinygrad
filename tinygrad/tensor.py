@@ -40,9 +40,10 @@ class Tensor:
   __deletable__ = ('_ctx',)
   training: ClassVar[bool] = False
   class train:
+    def __init__(self, val=True): self.val = val
     def __enter__(self):
       self.prev = Tensor.training
-      Tensor.training = True
+      Tensor.training = self.val
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any): Tensor.training = self.prev
 
   no_grad: ClassVar[bool] = False
@@ -192,16 +193,16 @@ class Tensor:
   def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor: return (std * Tensor.randn(*shape, **kwargs)) + mean
 
   @staticmethod
-  def uniform(*shape, low=-1.0, high=1.0, **kwargs) -> Tensor:
+  def uniform(*shape, low=0.0, high=1.0, **kwargs) -> Tensor:
     dtype = kwargs.pop("dtype", Tensor.default_type)
     return ((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype) + low
 
   @staticmethod
-  def scaled_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul(prod(shape)**-0.5)
+  def scaled_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, low=-1.0, high=1.0, **kwargs).mul(prod(shape)**-0.5)
 
   # https://www.tensorflow.org/api_docs/python/tf/keras/initializers/GlorotUniform
   @staticmethod
-  def glorot_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, **kwargs).mul((6/(shape[0]+prod(shape[1:])))**0.5)
+  def glorot_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, low=-1.0, high=1.0, **kwargs).mul((6/(shape[0]+prod(shape[1:])))**0.5)
 
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
   @staticmethod
@@ -573,6 +574,7 @@ class Tensor:
   def log(self): return mlops.Log.apply(self)
   def log2(self): return mlops.Log.apply(self)/math.log(2)
   def exp(self): return mlops.Exp.apply(self)
+  def exp2(self): return mlops.Exp.apply(self*math.log(2))
   def relu(self): return mlops.Relu.apply(self)
   def sigmoid(self): return mlops.Sigmoid.apply(self)
   def sin(self): return mlops.Sin.apply(self)
@@ -636,14 +638,26 @@ class Tensor:
     if yshape != shape_ret: y = y.expand(shape_ret)
     return (x, y)
 
-  def add(self, x:Union[Tensor, float], reverse=False) -> Tensor: return mlops.Add.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else self
-  def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor: return mlops.Sub.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else (-self if reverse else self)
+  def _to_float(self, x:Union[Tensor, float]):
+    return x.lazydata.op.arg if isinstance(x, Tensor) and not x.lazydata.realized and x.lazydata.op.op == LoadOps.CONST and not x.requires_grad \
+      and x.lazydata.st.contiguous and self._broadcasted(x)[0].shape == self.shape else x
+
+  def add(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+    x = self._to_float(x)
+    return mlops.Add.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else self
+  def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+    x = self._to_float(x)
+    return mlops.Sub.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else (-self if reverse else self)
   def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+    x = self._to_float(x)
     if x.__class__ is not Tensor and x == 0.0: return mlops.Zero.apply(self)
     if x.__class__ is not Tensor and x == -1.0: return -self
     return mlops.Mul.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x != 1.0 else self
-  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor: return mlops.Div.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or reverse or not x or not dtypes.is_float(self.dtype) else self.mul(1/x)
+  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+    x = self._to_float(x)
+    return mlops.Div.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or reverse or not x or not dtypes.is_float(self.dtype) else self.mul(1/x)
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+    x = self._to_float(x)
     if x.__class__ is not Tensor and not reverse:
       # simple pow identities
       if x < 0: return self.reciprocal().pow(-x)

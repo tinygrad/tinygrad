@@ -4,7 +4,7 @@ except Exception: pass
 from typing import Callable, Dict
 from tinygrad.helpers import DType, OSX
 from tinygrad.runtime.lib import RawBufferMapped
-from tinygrad.ops import Interpreted, Op, UnaryOps, MovementOps
+from tinygrad.ops import Interpreted, Op, UnaryOps, MovementOps, BufferOps
 
 SHM_CACHE: Dict[str, mmap.mmap] = {}
 class RawShmBuffer(RawBufferMapped):
@@ -31,5 +31,5 @@ class RawShmBuffer(RawBufferMapped):
   def _buffer(self): return memoryview(self._buf)
 
 # TODO: is this wrong?
-shm_fxn_for_op: Dict[Op, Callable] = { UnaryOps.NOOP: lambda x:x, MovementOps.RESHAPE: lambda x,_:x, MovementOps.AS_STRIDED: lambda x,_:x }
-ShmBuffer = Interpreted(RawShmBuffer, shm_fxn_for_op, to_underlying=lambda x:x, from_underlying=lambda x:x)
+shm_fxn_for_op: Dict[Op, Callable] = { BufferOps.MEM: lambda x: x, UnaryOps.NOOP: lambda x:x, MovementOps.RESHAPE: lambda x,_:x, MovementOps.AS_STRIDED: lambda x,_:x }
+ShmBuffer = Interpreted(RawShmBuffer, shm_fxn_for_op, from_underlying=lambda x:x)

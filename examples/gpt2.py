@@ -8,7 +8,7 @@ np.set_printoptions(linewidth=200)
 from typing import Optional, Dict
 
 from tinygrad.helpers import Timing, getenv, dtypes, DEBUG
-from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import GlobalCounters
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
@@ -50,7 +50,7 @@ class Attention:
       keys, values = cache_k.cat(xk, dim=1), cache_v.cat(xv, dim=1)
 
     # save the cache
-    cache_k, cache_v = keys, values
+    cache_k, cache_v = keys.realize(), values.realize()
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     output = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1)
     return self.c_proj(output), cache_k, cache_v
@@ -180,9 +180,9 @@ class GPT2:
       if timing: print("")
       st = GlobalCounters.time_sum_s
       with Timing("total ", enabled=timing):
-        with Timing(f"ran model in ", on_exit=(lambda et: f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU"+
+        with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                     f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                    f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s") if DEBUG else None, enabled=timing):
+                    (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
           probs = self.model(Tensor([toks[start_pos:]]), start_pos, temperature)
         probs_np = probs.numpy()
         tok = int(np.random.choice(len(probs_np), p=probs_np))
