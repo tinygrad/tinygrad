@@ -213,30 +213,16 @@ jobs:
         key: metal-webgpu-testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Test LLaMA compile speed
-      run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
-    - name: Run dtype test
-      run: DEBUG=4 METAL=1 python -m pytest -n=auto test/test_dtype.py
     - name: Check Device.DEFAULT (METAL) and print some source
       run: |
         METAL=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
         METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-    - name: Run metal ops test
-      run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_ops.py
-    - name: Run JIT test
-      run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_jit.py
-    - name: Run symbolic shapetracker test
-      run: METAL=1 python -m pytest -n=auto test/test_symbolic_shapetracker.py test/test_symbolic_ops.py test/test_symbolic_jit.py
-    - name: Run ONNX
-      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
-    - name: Run whisper test
-      run: METAL=1 python -m pytest test/models/test_whisper.py
+    - name: Run test
+      run: METAL=1 python -m pytest test/
     - name: Check Device.DEFAULT (WEBGPU) and print some source
       run: |
         WEBGPU=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
         WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-    - name: Run linearizer and tensor core test
-      run: METAL=1 python -m pytest -n=auto test/test_linearizer.py
     - name: Test tensor core reshape-only ops
       run: METAL=1 TC=2 python -m pytest -n=auto test/test_ops.py
     #- name: Run webgpu pytest
