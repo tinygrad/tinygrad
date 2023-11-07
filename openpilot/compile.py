@@ -17,7 +17,7 @@ import onnx
 import numpy as np
 
 import tinygrad.graph as graph
-from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import GlobalCounters
 from tinygrad.jit import TinyJit, CacheCollector
 
 import pyopencl as cl

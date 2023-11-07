@@ -9,12 +9,11 @@ torch.set_num_threads(1)
 import time
 import numpy as np
 np.set_printoptions(linewidth=160)
-from functools import partial
 from tinygrad.ops import Device
-from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
-from tinygrad.helpers import colored, getenv, CI, dtypes
+from tinygrad.helpers import colored, getenv, CI
 from tinygrad.jit import TinyJit
 import pytest
 
@@ -149,7 +148,7 @@ class TestSpeed(unittest.TestCase):
     def f(a, b): return a-b
     helper_test_generic_square('sub', 4096, f, f)
 
-  @unittest.skipIf(getenv("CI","")!="" and Device.DEFAULT == "WEBGPU", "breaking on webgpu CI")
+  @unittest.skipIf(CI and Device.DEFAULT == "WEBGPU", "breaking on webgpu CI")
   def test_pow(self):
     def f(a, b): return a.pow(b)
     helper_test_generic_square('pow', 2048, f, f)
