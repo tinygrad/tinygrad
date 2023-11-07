@@ -4,7 +4,7 @@ import math
 import numpy as np
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, dtypes
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, dtypes, Context, NOOPT
 from tinygrad.ops import Device
 
 if CI:
@@ -753,6 +753,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,4,9,9), (4,4,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
+
+  def test_simple_conv2d_noopt(self):
+    # useful with IMAGE enabled
+    with Context(NOOPT=1):
+      self.test_simple_conv2d()
 
   @unittest.skipIf(IMAGE>0, "no conv3d on images")
   def test_simple_conv3d(self):

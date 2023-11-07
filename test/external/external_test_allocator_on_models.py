@@ -3,7 +3,7 @@ import unittest, gc
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_state_dict
-from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import GlobalCounters
 from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, prod
 from tinygrad.ops import Device

@@ -16,8 +16,8 @@ def compare_tiny_torch(model, model_torch, X, Y):
       if not CI: print(f"initting {k} from torch")
       model_state_dict[k].assign(Tensor(v.detach().numpy())).realize()
 
-    optimizer = optim.SGD(get_parameters(model), lr=0.01)
-    optimizer_torch = torch.optim.SGD(model_torch.parameters(), lr=0.01)
+    optimizer = optim.SGD(get_parameters(model), lr=0.001)
+    optimizer_torch = torch.optim.SGD(model_torch.parameters(), lr=0.001)
 
     Xt = torch.Tensor(X.numpy())
     np.testing.assert_allclose(X.numpy(), Xt.detach().numpy())
@@ -67,6 +67,9 @@ class TestEnd2End(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     cls.X, cls.Y = get_mnist_data()
+
+  def setUp(self):
+    torch.manual_seed(123)
 
   def test_linear_mnist(self):
     class LinTiny:

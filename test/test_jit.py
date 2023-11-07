@@ -168,5 +168,27 @@ class TestJit(unittest.TestCase):
     assert len(res3) == 5, "All values should be different, rand works in jit."
     assert res3 != res2, "Jit rand is diff with diff seeds"
 
+  def test_jit_realization_and_sampling(self):
+    w = Tensor.eye(5)
+
+    @TinyJit
+    def foo (x): return w.dot(x).realize()
+
+    arg  = [
+        Tensor([1,2,3,4,5]),
+        Tensor([1,3,3,4,6]),
+        Tensor([1,2,5,4,7]),
+        Tensor([0,2,3,1,0]),
+    ]
+
+    Y = [foo(e).numpy() for e in arg]
+
+    foo(Tensor([7,7,7,7,7]))
+    want = [[1., 2., 3., 4., 5.],
+            [1., 3., 3., 4., 6.],
+            [1., 2., 5., 4., 7.],
+            [0., 2., 3., 1., 0.]]
+    np.testing.assert_allclose(want, Y)
+
 if __name__ == '__main__':
   unittest.main()
