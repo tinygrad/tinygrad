@@ -308,10 +308,8 @@ print(prg.prg)
 # after some formatting (the compiler doesn't care)
 # NOTE: the 2 and 3 are constant folded
 """
-void E_1(float* data0) {
-  for (int idx0 = 0; idx0 < 1; idx0++) {
-    data0[0] = (2.0f) + (3.0f);
-  }
+void E_n2(float* restrict data0) {
+  data0[0] = (2.0f+3.0f);
 }
 """
 

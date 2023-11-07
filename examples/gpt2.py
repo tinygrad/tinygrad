@@ -8,7 +8,7 @@ np.set_printoptions(linewidth=200)
 from typing import Optional, Dict
 
 from tinygrad.helpers import Timing, getenv, dtypes, DEBUG
-from tinygrad.ops import GlobalCounters
+from tinygrad.helpers import GlobalCounters
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear

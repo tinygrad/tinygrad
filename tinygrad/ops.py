@@ -1,5 +1,5 @@
 from __future__ import annotations
-import importlib, inspect, functools, pathlib, itertools, random
+import importlib, inspect, functools, pathlib
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT
@@ -108,50 +108,51 @@ Device = _Device()
 
 # **************** for Interpreted Buffers ****************
 
-@functools.lru_cache(None)
-def interpret_ast(device:Interpreted, ast:LazyOp) -> Callable:
-  tglob: Dict[str, Any] = {}
-  lines: List[str] = []
-  f = device.fxn_for_op
-
-  @functools.lru_cache(None)
-  def gstr(x:Any, nm=None) -> str:
-    ret = str(nm).replace(".", "_") if nm else f"m{len(tglob):04d}"
-    tglob[ret] = x
-    return ret
-
-  @functools.lru_cache(None)
-  def _interpret_ast(ast:LazyOp) -> str:
-    if TernaryOps.MULACC in f and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
-      ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
-
-    if MovementOps.AS_STRIDED in f and ast.op in BufferOps:
-      tmp = f"{gstr(f[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"{gstr(f[ast.op], ast.op)}(inputs[{ast.arg.idx-1}])"
-      for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(f[mop], mop)}({tmp}, {gstr(arg)})"
-    else:
-      inp = [_interpret_ast(src) for src in ast.src]
-      tmp = f"{gstr(f[ast.op], ast.op)}({', '.join(inp + ([gstr(ast.arg)] if ast.arg else []))})"
-
-    ret = f"a{len(lines)}"
-    lines.append(f"  {ret} = {tmp}")
-    return ret
-
-  ret = _interpret_ast(ast)
-  src = '\n'.join(['def run(inputs):'] + lines + [f"  return {gstr(device.from_underlying, 'from_underlying')}({ret})" if device.from_underlying else f"  return {ret}"])
-  if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
-  exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
-  return tglob['run']
-
 class Interpreted:
-  def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], to_underlying=lambda x: x._buf, from_underlying=None):
-    self.buffer, self.fxn_for_op, self.to_underlying, self.from_underlying = buffer, fxn_for_op, to_underlying, from_underlying
+  def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_underlying=None):
+    self.buffer, self.fxn_for_op, self.from_underlying = buffer, fxn_for_op, from_underlying
     self.synchronize = lambda: None
     self.codegen = None
+    self.method_cache: Dict[LazyOp, Callable] = {}
 
-  def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, context=None, **kwargs):
-    ret = interpret_ast(self, ast)([x.realized for x in inputs] if inputs else None)
+  def interpret_ast(self:Interpreted, ast:LazyOp) -> Callable:
+    tglob: Dict[str, Any] = {}
+    lines: List[str] = []
+    f = self.fxn_for_op
+
+    @functools.lru_cache(None)
+    def gstr(x:Any, nm=None) -> str:
+      ret = str(nm).replace(".", "_") if nm else f"m{len(tglob):04d}"
+      tglob[ret] = x
+      return ret
+
+    @functools.lru_cache(None)
+    def _interpret_ast(ast:LazyOp) -> str:
+      if TernaryOps.MULACC in f and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
+        ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
+
+      if MovementOps.AS_STRIDED in f and ast.op in BufferOps:
+        tmp = f"{gstr(f[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"{gstr(f[ast.op], ast.op)}(inputs[{ast.arg.idx-1}])"
+        for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(f[mop], mop)}({tmp}, {gstr(arg)})"
+      else:
+        inp = [_interpret_ast(src) for src in ast.src]
+        tmp = f"{gstr(f[ast.op], ast.op)}({', '.join(inp + ([gstr(ast.arg)] if ast.arg else []))})"
+
+      ret = f"a{len(lines)}"
+      lines.append(f"  {ret} = {tmp}")
+      return ret
+
+    ret = _interpret_ast(ast)
+    src = '\n'.join(['def run(inputs):'] + lines + [f"  return {gstr(self.from_underlying, 'from_underlying')}({ret})" if self.from_underlying else f"  return {ret}"])
+    if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
+    exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
+    return tglob['run']
+
+  def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, **kwargs):
+    if ast not in self.method_cache: self.method_cache[ast] = self.interpret_ast(ast)
+    ret = self.method_cache[ast]([x.realized for x in inputs] if inputs else None)
     if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op:
-      ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.to_underlying(ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
+      ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.fxn_for_op[BufferOps.MEM](ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
     # TODO: is this used?
     if output is not None and output.output_buffer is not None:
       assert output.output_buffer.dtype == ret.dtype
@@ -188,27 +189,14 @@ class ASTRunner:
     if DEBUG >= 4: print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
 
-  def optimize_local_size(self, global_size:List[int], rawbufs:List[RawBuffer]) -> List[int]:
-    assert self.global_size is not None, "needs a global size to optimize local size"
-    test_rawbuffers = [type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
-    MAX_WORKGROUP = self.clprg.max_work_group_size() if hasattr(self.clprg, 'max_work_group_size') else 1024
-    local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in global_size]
-    local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
-    def try_exec(local_size):
-      try:
-        return self.clprg([g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)], local_size, *test_rawbuffers, wait=True)
-      except Exception:
-        return float('inf')
-    return min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
-
   def build(self, compiler, runtime):
     self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
     self.clprg = runtime(self.name, self.lib)
     return self
 
-  def exec(self, rawbufs, var_vals:Optional[Dict[Variable, int]]=None, force_wait=False, optimizing=False) -> Optional[float]:
+  def exec(self, rawbufs, var_vals:Optional[Dict[Variable, int]]=None, force_wait=False) -> Optional[float]:
     from tinygrad.jit import CacheCollector
-    if not optimizing: CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
+    CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
     return self(rawbufs, var_vals, force_wait=force_wait)
 
   def launch_dims(self, var_vals):
@@ -221,7 +209,8 @@ class ASTRunner:
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None:
       # TODO: this is copied from get_program
-      local_size = self.local_size = self.optimize_local_size(global_size, rawbufs)
+      from tinygrad.features.search import optimize_local_size
+      local_size = self.local_size = optimize_local_size(self.clprg, global_size, rawbufs)
       global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
     lra = self.runtime_args.copy()
     if global_size: lra['global_size'] = global_size
