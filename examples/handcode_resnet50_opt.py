@@ -9,7 +9,7 @@ from tinygrad.lazy import vars_from_ast
 from tinygrad.shape.symbolic import sym_infer
 
 if __name__ == "__main__":
-  for BS in [8,16,32,64,128,256]:
+  for BS in [64,128,256]:
     train = 1281136
     val = 320284
     opt_tm = (24*60*60*1000)/((train//BS)*50+(val//BS)*12)

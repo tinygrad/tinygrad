@@ -189,7 +189,6 @@ def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
   try:
     res = db_connection().cursor().execute(f"SELECT val FROM {table} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
   except sqlite3.OperationalError:
-    print('table dne')
     return None  # table doesn't exist
   if (val:=res.fetchone()) is not None:
     return pickle.loads(val[0])
