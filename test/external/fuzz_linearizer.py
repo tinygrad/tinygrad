@@ -9,8 +9,6 @@ from tinygrad.helpers import ImageDType, prod, getenv
 from tinygrad.ops import Device, Compiled, Interpreted
 from tinygrad.lazy import vars_from_ast
 
-random.seed(42)
-np.random.seed(42)
 device = Device[Device.DEFAULT]
 
 class LB:
@@ -22,6 +20,8 @@ class LB:
 
 
 def fuzz_linearizer(lin: Linearizer):
+  random.seed(42)
+  np.random.seed(42)
   print_tree(lin.ast)
   print(lin.colored_shape())
   rawbufs = bufs_from_lin(lin)
@@ -67,7 +67,7 @@ def fuzz_linearizer(lin: Linearizer):
         device.exec_ast(lin.ast, output=LB(rawbufs[0], rawbufs[0].dtype), inputs=[LB(buf, buf.dtype) for buf in rawbufs[1:]])
       except Exception as e:
         traceback.print_exc()
-        return str(type(e))
+        return e
 
     result = rawbufs[0].toCPU()
 
@@ -81,7 +81,7 @@ def fuzz_linearizer(lin: Linearizer):
         return "NOT_ALLCLOSE"
       except Exception as e:
         traceback.print_exc()
-        return str(type(e))
+        return e
   return "PASS"
 
 
@@ -97,7 +97,7 @@ if __name__ == "__main__":
     print(f"testing ast {i}")
     tested += 1
     lin = ast_str_to_lin(ast)
-    fuzz = fuzz_linearizer(lin)
+    fuzz = str(fuzz_linearizer(lin))
     c[fuzz] += 1
     if fuzz != "PASS":
       failed.append(i)
