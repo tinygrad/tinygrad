@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, operator
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, cast
+from typing import Tuple, List, Optional, Dict
 from tinygrad.helpers import prod, all_int, dedup
 from tinygrad.shape.symbolic import Node, NumNode, Variable, VariableOrNum, is_sym_int, sint
 

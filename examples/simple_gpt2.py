@@ -27,21 +27,24 @@ class Attention:
     xqkv = self.c_attn(x)
     xq, xk, xv = [xqkv.slice([None, None, (i*self.dim, (i+1)*self.dim)]).reshape(xqkv.shape[0], xqkv.shape[1], self.n_heads, self.head_dim) for i in range(3)]
     bsz, seqlen, _, _ = xq.shape
-    if start_pos.val == 0:
-      keys, values = xk, xv
-      self.cache_k, self.cache_v = keys.realize(), values.realize()
-    else:
-      assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
-      keys = self.cache_k.reshape(bsz, start_pos, self.n_heads, self.head_dim).cat(xk, dim=1)
-      values = self.cache_v.reshape(bsz, start_pos, self.n_heads, self.head_dim).cat(xv, dim=1)
-      if keys.lazydata.st.unbind().shape == self.cache_k.lazydata.st.unbind().shape:
-        keys = self.cache_k.assign(keys).realize()
-        values = self.cache_v.assign(values).realize()
-      else:
-        self.cache_k = keys.realize()
-        self.cache_v = values.realize()
 
-    print(self.cache_k.lazydata.realized)
+    # reset kv cache
+    if start_pos.val == 0:
+      self.cache_k, self.cache_v = Tensor.zeros(bsz, start_pos, self.n_heads, self.head_dim), Tensor.zeros(bsz, start_pos, self.n_heads, self.head_dim)
+
+    # append to kv cache
+    assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
+    keys = self.cache_k.reshape(bsz, start_pos, self.n_heads, self.head_dim).cat(xk, dim=1)
+    values = self.cache_v.reshape(bsz, start_pos, self.n_heads, self.head_dim).cat(xv, dim=1)
+    if keys.unbounded_shape == self.cache_k.unbounded_shape:
+      # NOTE: this won't trigger the second time, because the first one is large
+      keys = self.cache_k.assign(keys).realize()
+      values = self.cache_v.assign(values).realize()
+    else:
+      self.cache_k = keys.realize()
+      self.cache_v = values.realize()
+
+    #print(self.cache_k.shape, self.cache_k.lazydata.realized)
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1))
 
@@ -72,25 +75,14 @@ class Transformer:
     self.h = [TransformerBlock(dim, n_heads, norm_eps) for _ in range(n_layers)]
     self.ln_f = LayerNorm(dim, norm_eps)
     self.lm_head = Linear(dim, vocab_size, bias=False)
+    self.forward_jit = TinyJit(self.forward)
 
-  @TinyJit
-  def fastpath(self, tokens:Tensor, start_pos:Variable, temperature:Optional[float]=None):
-    _bsz, seqlen = tokens.shape
-    tok_emb = self.wte(tokens)
-    pos_emb = self.wpe(self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos, start_pos+seqlen))))
-    h = tok_emb + pos_emb
-    for hi in self.h: h = hi(h, start_pos=start_pos, mask=None)
-    logits = self.lm_head(self.ln_f(h))
-    return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
-
-  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:Optional[float]=None):
+  def forward(self, tokens:Tensor, start_pos:Variable, temperature:Optional[float]=None):
     if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
-
     _bsz, seqlen = tokens.shape
-    if _bsz == 1 and seqlen == 1 and getenv("JIT"): return self.fastpath(tokens, start_pos, temperature)
 
     tok_emb = self.wte(tokens)
-    pos_emb = self.wpe(self.allpos.shrink(((0, self.allpos.shape[0]), (start_pos, start_pos+seqlen))))
+    pos_emb = self.wpe(self.allpos.shrink((None, (start_pos, start_pos+seqlen))))
     h = tok_emb + pos_emb
 
     mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf")).triu(start_pos.val+1).realize() if seqlen > 1 else None
@@ -98,6 +90,9 @@ class Transformer:
 
     logits = self.lm_head(self.ln_f(h))
     return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
+
+  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:Optional[float]=None):
+    return (self.forward_jit if tokens.shape[0:2] == (1,1) and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257
 MODEL_PARAMS = {
