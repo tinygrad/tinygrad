@@ -120,7 +120,7 @@ class TestAllocators(unittest.TestCase):
       assert len(lru_allocator.aging_order['0']) == 3, "All buffers should be cached"
       assert lru_allocator.free_space['0'] == 128 - 24, "24 bytes to be used by current cached buffers"
 
-      def always_raise_exception(*args, **kwargs): 
+      def always_raise_exception(*args, **kwargs):
         raise Exception("OOM")
       lru_allocator._do_alloc = always_raise_exception
 
@@ -141,9 +141,9 @@ class TestAllocators(unittest.TestCase):
 
       original_do_alloc = lru_allocator._do_alloc  # save the original method
       def single_fail_then_pass(*args, **kwargs):
-          lru_allocator._do_alloc = original_do_alloc  # restore the original method
-          raise Exception("OOM")
-      lru_allocator._do_alloc = single_fail_then_pass 
+        lru_allocator._do_alloc = original_do_alloc  # restore the original method
+        raise Exception("OOM")
+      lru_allocator._do_alloc = single_fail_then_pass
 
       buff = alloc(lru_allocator, 5, dtypes.float32, device='0')
       assert len(lru_allocator.aging_order['0']) < cache_length, "Some buffers should be cleaned as first alloc failed"
