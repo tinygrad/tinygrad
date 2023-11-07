@@ -122,6 +122,9 @@ def cross_process(itermaker, maxsize=8):
     else: yield ret
 
 if __name__ == '__main__':
+  # at batch 128, need 160ms total runtime
+  # need data time < 160ms, need gpu time < 160ms, then you hit <24hrs
+  # on mps data = 110ms, but on shittier machines ~400ms... 
   import statistics
   import os
   all_ts = 1281136
@@ -134,8 +137,8 @@ if __name__ == '__main__':
   order = list(range(0, len(files)))
   random.shuffle(order)
   stats = []
-  for BS in [64,128,256]:
-    for W in [4,6,8,16]:
+  for BS in [16,32,64,128]:
+    for W in [4,6,8]:
       with Pool(W) as p:
         for _ in range(30):
           s = time.perf_counter()
