@@ -221,6 +221,20 @@ def train_resnet(bs=getenv('BS',16),w=getenv("WORKERS",8),compute=None, steps=No
     y = y.reshape(*Y.shape, num_classes)
     return (1 - label_smoothing) * out.mul(y).mean() + (-1 * label_smoothing * out.mean())
 
+  # this jit takes very long on BEAM
+  # even with cached BEAM. so idk why it takes so long - since
+  # on handcoded, when you cache the kernels found on BEAM & load from it,
+  # there is no wait time. so where is wait time? 
+  # no $, so waiting 3+hrs for BEAM to work on train == lot of dollas lost
+
+  # TODO
+  # opt tm = single step time in ms to get <24hrs
+  # 1) need to benchmark time for different batch sizes
+  # 2) like: python handcode_resnet50_opt.py -BS X
+
+  # once that is set up,
+  # 1) opt using BEAM / WINO to hit below opt tm for GPU
+  # 2) in PR, specify using VM with data time <= opt tm
   @TinyJit
   def train_step(X, Y):
     X = X.half()
