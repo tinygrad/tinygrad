@@ -45,6 +45,12 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
 class Linearizer(Kernel):
+  def get_vectorized_type(self, buf_dtype: DType, amt:int): # TODO better abstraction
+    #if True: return dtypes.float32 if amt == 1 else dtypes._float4 if amt == 4 else dtypes._float2 #revert to original
+    if amt == 1: return buf_dtype
+    if amt == 2: return dtypes._float2 if buf_dtype == dtypes.float32 else dtypes._half2 if buf_dtype == dtypes.half else dtypes._int2
+    if amt == 4: return dtypes._float4 if buf_dtype == dtypes.float32 else dtypes._half4 if buf_dtype == dtypes.half else dtypes._int4
+
   def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op, dtype=dtypes.int32):
     render_b:UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
     return self.uop(UOps.ALU, dtype, (a, render_b), op)

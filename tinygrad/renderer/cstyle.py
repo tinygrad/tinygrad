@@ -22,7 +22,9 @@ class CStyleLanguage(NamedTuple):
   global_max: List[int] = []
   local_max: List[int] = []
   extra_args: List[str] = []
+  # TODO more generic vectorized dtype support
   float4: Optional[str] = None
+  half4: Optional[str] = None
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
   external_local_bufs: bool = False
@@ -47,6 +49,7 @@ class CStyleLanguage(NamedTuple):
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.float4 is not None, "cast is not supported on this platform"
     if var_dtype == dtypes._float4: return f"{self.float4}({','.join(x)})"
+    if var_dtype == dtypes._half4: return f"{self.half4}({','.join(x)})"
     if var_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
     if var_dtype == dtypes._int2: return f"{self.float4.replace('float4', 'int2')}({','.join(x)})"
     raise NotImplementedError(f"no cast for {var_dtype}")
