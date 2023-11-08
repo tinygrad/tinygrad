@@ -38,7 +38,7 @@ def get_transform(val):
       transforms.RandomResizedCrop(224),
       transforms.RandomHorizontalFlip(),
       transforms.ToTensor(),
-      transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+      transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ]
   else:
     t = [
@@ -72,7 +72,8 @@ def iterate(bs=16, val=False, shuffle=True, num_workers=16):
     for i in range(0, len(files), bs)[:-1]:
       X = p.map(partial(image_proc,t=t), [files[j] for j in order[i:i + bs]], chunksize=math.ceil(bs/num_workers))
       Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
-      yield np.array(X),np.array(Y)
+      X,Y = np.array(X),np.array(Y)
+      yield X, Y 
 
 def benchmark_dataload_time():
   import statistics
