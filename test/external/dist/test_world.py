@@ -9,12 +9,12 @@ from tinygrad.tensor import Tensor
 import numpy as np
 
 @TinyJit
-def send_jit(t, target_rank, cache_id=None) -> Tensor:
-  return world.send(t, target_rank, cache_id=cache_id).realize()
+def send_jit(t, target_rank) -> Tensor:
+  return world.send(t, target_rank).realize()
 
 @TinyJit
-def recv_jit(t, target_rank, cache_id=None) -> Tensor:
-  return world.recv(t, target_rank, cache_id=cache_id).realize()
+def recv_jit(t, target_rank) -> Tensor:
+  return world.recv(t, target_rank).realize()
 
 SIZE = 2048 if not CI else 2
 
@@ -31,17 +31,17 @@ def run():
 
     # send to rank 1
     if rank == 0:
-      send_jit(t, 1, cache_id="test")
+      send_jit(t, 1)
     elif rank == 1:
       t2 = Tensor.empty(SIZE, SIZE)
-      recv_jit(t2, 0, cache_id="test")
+      recv_jit(t2, 0)
 
     # recv from rank 1
     if rank == 0:
       t2 = Tensor.empty(SIZE, SIZE)
-      recv_jit(t2, 1, cache_id="test2")
+      recv_jit(t2, 1)
     elif rank == 1:
-      send_jit(t2, 0, cache_id="test2")
+      send_jit(t2, 0)
 
     # check that the received tensor is the same as the sent tensor
     if rank == 0:
