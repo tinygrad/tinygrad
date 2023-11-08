@@ -102,28 +102,27 @@ class ShapeTracker:
       offset = v.offset + sum(v.strides[i] * (real_shape[i]-1) for i in range(len(v.strides)) if v.strides[i]<0)
       real_offset = offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
       real_real_shape = [s for s,st in zip(real_shape, v.strides) if st]
-      strides = [abs(st) for st in v.strides]
-      buffer_size = sum((s-1)*st for s, st in zip(real_shape,strides)) + 1
-      strides = [st for st in strides if st]
-      ordered_shape_strides = sorted(zip(real_real_shape, strides), key=lambda k: k[1], reverse=True)
-      order = sorted(range(len(strides)), key=lambda k: strides[k], reverse=True)
+      strides = [abs(st) for st in v.strides if st]
+      buffer_size = sum((s-1)*st for s, st in zip(real_real_shape,strides)) + 1
+      def sort_by_strides(shape, strides): return sorted(zip(shape, strides), key=lambda k: k[1], reverse=True), sorted(range(len(strides)), key=lambda k: strides[k], reverse=True)
+      ordered_shape_strides, order = sort_by_strides(real_real_shape, strides)
       to_apply.append((MovementOps.RESHAPE, -1))
       to_apply.append((MovementOps.SHRINK, ((real_offset,real_offset+buffer_size),)))
       if strides:
         if (ordered_shape_strides[0][0] * ordered_shape_strides[0][1]) - buffer_size > 0:
           to_apply.append((MovementOps.PAD, ((0, (ordered_shape_strides[0][0] * ordered_shape_strides[0][1]) - buffer_size),)))
-        for i in range(len(ordered_shape_strides)):
-          total_size = ordered_shape_strides[i][0] * ordered_shape_strides[i][1]
-          if i<len(ordered_shape_strides)-1 and ordered_shape_strides[i][1] < ordered_shape_strides[i+1][0]*ordered_shape_strides[i+1][1]:
+        for i, shape_stride in enumerate(ordered_shape_strides):
+          total_size = shape_stride[0] * shape_stride[1]
+          if i<len(ordered_shape_strides)-1 and shape_stride[1] < ordered_shape_strides[i+1][0]*ordered_shape_strides[i+1][1]:
             remaining_buffer = ordered_shape_strides[i-1][1] if i>0 else buffer_size
-            to_apply.append((MovementOps.EXPAND, (ordered_shape_strides[i][0], *(s[0] for s in ordered_shape_strides[:i]), remaining_buffer)))
+            to_apply.append((MovementOps.EXPAND, (shape_stride[0], *(s[0] for s in ordered_shape_strides[:i]), remaining_buffer)))
             to_apply.append((MovementOps.PERMUTE, (*range(1,i+1), 0, i+1)))
-            to_apply.append((MovementOps.RESHAPE, (*(s[0] for s in ordered_shape_strides[:i]), ordered_shape_strides[i][0]*remaining_buffer)))
-            to_apply.append((MovementOps.PAD, (*((0,0) for _ in range(i)), (0, ordered_shape_strides[i][0]*ordered_shape_strides[i][1]))))
-            to_apply.append((MovementOps.RESHAPE, (*(s[0] for s in ordered_shape_strides[:i+1]), remaining_buffer+ordered_shape_strides[i][1])))
+            to_apply.append((MovementOps.RESHAPE, (*(s[0] for s in ordered_shape_strides[:i]), shape_stride[0]*remaining_buffer)))
+            to_apply.append((MovementOps.PAD, (*((0,0) for _ in range(i)), (0, shape_stride[0]*shape_stride[1]))))
+            to_apply.append((MovementOps.RESHAPE, (*(s[0] for s in ordered_shape_strides[:i+1]), remaining_buffer+shape_stride[1])))
           else:
             to_apply.append((MovementOps.SHRINK, (*((0, s[0]) for s in ordered_shape_strides[:i]), (0,total_size))))
-            to_apply.append((MovementOps.RESHAPE, (*[s[0] for s in ordered_shape_strides[:i+1]], ordered_shape_strides[i][1])))
+            to_apply.append((MovementOps.RESHAPE, (*[s[0] for s in ordered_shape_strides[:i+1]], shape_stride[1])))
         to_apply.append((MovementOps.SHRINK, (*[(0, s[0]) for s in ordered_shape_strides], (0,1))))
         to_apply.append((MovementOps.RESHAPE, tuple(s[0] for s in ordered_shape_strides)))
         if order != list(range(len(order))):
