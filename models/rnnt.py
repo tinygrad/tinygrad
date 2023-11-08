@@ -98,10 +98,11 @@ class LSTMCell:
   def __init__(self, input_size, hidden_size, dropout):
     self.dropout = dropout
 
-    self.weights_ih = Tensor.uniform(hidden_size * 4, input_size)
-    self.bias_ih = Tensor.uniform(hidden_size * 4)
-    self.weights_hh = Tensor.uniform(hidden_size * 4, hidden_size)
-    self.bias_hh = Tensor.uniform(hidden_size * 4)
+    k = input_size ** -0.5
+    self.weights_ih = Tensor.uniform(hidden_size * 4, input_size, low = -k, high=k)
+    self.bias_ih = Tensor.uniform(hidden_size * 4, low = -k, high=k)
+    self.weights_hh = Tensor.uniform(hidden_size * 4, hidden_size, low = -k, high=k)
+    self.bias_hh = Tensor.uniform(hidden_size * 4, low = -k, high=k)
 
   def __call__(self, x, hc):
     gates = x.linear(self.weights_ih.T, self.bias_ih) + hc[:x.shape[0]].linear(self.weights_hh.T, self.bias_hh)
