@@ -75,8 +75,8 @@ class CStyleLanguage(NamedTuple):
   def render_local(self, name:str, size:int):
     return self.smem_align + self.smem_prefix + f"float {name}[{size}];"
 
-  def render_for(self, expr: str, _min:Union[int,str], _max:Union[int,str]) -> str:
-    return f"for (int {expr} = {_min}; {expr} < {_max}; ++{expr}) {{"
+  def render_for(self, expr: str, _min:Union[int,str], _max:Union[int,str], _step:Union[int,str]) -> str:
+    return f"for (int {expr} = {_min}; {expr} < {_max}; {expr} += {_step}) {{"
 
   def render_if(self, cond: str):
     return f"if ({cond}) {{"
@@ -127,9 +127,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       child_count[v] += 1
 
   for u in uops:
-    uop,dtype,vin,args,_ = u
+    uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
     if uop == UOps.LOOP:
-      kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]))
+      kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]], r[vin[2]]))
       depth += 1
     elif uop == UOps.IF:
       kk(lang.render_if(r[vin[0]]))
@@ -195,6 +195,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       val = lang.render_cast([r[x] for x in vin], dtype)
       if child_count[u] <= 1: r[u] = val
       else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
+    elif uop == UOps.CAST and dtype.sz == 1:
+      r[u] = f"(float)({r[vin[0]]})"
     elif uop == UOps.DEFINE_LOCAL:
       if lang.external_local_bufs:
         prekernel.append(lang.render_local(args[0], args[1]))

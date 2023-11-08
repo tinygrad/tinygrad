@@ -3,8 +3,9 @@ from typing import List, Tuple, Any, Optional, cast, DefaultDict, NamedTuple, Di
 import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
+from dataclasses import dataclass
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, all_same, getenv
 from tinygrad.ops import LazyOp, UnaryOps, ConstBuffer, MemBuffer, BufferOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -20,16 +21,19 @@ class UOps(Enum):
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto(); PHI = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
-class UOp(NamedTuple):
+@dataclass
+class UOp:
   uop: UOps
   dtype: Optional[DType]
   vin: Tuple[UOp, ...]
-  arg: Any
+  arg: Any = None
   def __repr__(self): return f"{self.num:4d} {str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.num for x in self.vin]):32s} {self.arg}"
   #def __repr__(self): return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str(self.vin):32s} {self.arg}"
 
+  def compare(self, x:UOp): return self.uop == x.uop and self.dtype == x.dtype and self.vin == x.vin and self.arg == x.arg
+
   # UOps are unique
-  num: int
+  num: int = -1
   def __hash__(self): return self.num
   def __eq__(self, x): return self.num == x.num
 
@@ -204,7 +208,8 @@ class Linearizer(Kernel):
     def render_loop(xx:List[Variable]):
       self.loop_uops.update({x.expr:self.uop(UOps.LOOP, dtypes.int32, (
         self.const(x.min) if isinstance(x.min, int) else cast(Node, x.min).render(self.render_ops, self),
-        self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), cachable=False) for x in xx if not isinstance(x, NumNode) and x.expr is not None})
+        self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self),
+        self.const(1)), cachable=False) for x in xx if not isinstance(x, NumNode) and x.expr is not None})
     def end_loop(xx:List[Variable]):
       for x in xx[::-1]:
         if not isinstance(x, NumNode) and x.expr is not None:
@@ -367,6 +372,59 @@ class Linearizer(Kernel):
     if if_gate: self.uop(UOps.END, None, (if_gate,))
     end_loop(loop_global_idxs+loop_local_idxs if not self.group_for_reduce else loop_global_idxs)
 
+    # **** graph replacement engine ****
+
+    did_replacement = True
+    while did_replacement:
+      did_replacement = False
+      for i,ru in enumerate(self.uops):
+        if ru.uop == UOps.ALU and ru.arg == TernaryOps.WHERE and \
+            ru.vin[1].compare(UOp(UOps.CONST, dtypes.float32, tuple(), 1.0)) and \
+            ru.vin[2].compare(UOp(UOps.CONST, dtypes.float32, tuple(), 0.0)) and False:
+          ru.uop = UOps.CAST
+          ru.vin = [ru.vin[0]]
+          ru.arg = None
+        # TODO: check this is the only child
+        if ru.uop == UOps.ALU and (ru.vin[0].uop == UOps.LOOP or ru.vin[1].uop == UOps.LOOP) and ru.arg in [BinaryOps.ADD, BinaryOps.MUL]:
+          if ru.vin[0].uop == UOps.LOOP: loop_idx = 0
+          elif ru.vin[1].uop == UOps.LOOP: loop_idx = 1
+          rest = self.uops[i:]
+          self.uops = self.uops[:i]
+          ru.uop = UOps.LOOP
+          if ru.arg == BinaryOps.MUL:
+            if ru.vin[1-loop_idx].uop == UOps.CONST and ru.vin[1-loop_idx].arg == -1:
+              # TODO: -2 is wrong
+              ru.vin = [self.uop(UOps.ALU, ru.dtype, (self.uop(UOps.ALU, ru.dtype, (v, ru.vin[1-loop_idx]), ru.arg), self.const(1)), BinaryOps.ADD) for v in [ru.vin[loop_idx].vin[1], ru.vin[loop_idx].vin[0]]] + [ru.vin[loop_idx].vin[2]]
+            else:
+              ru.vin = [self.uop(UOps.ALU, ru.dtype, (v, ru.vin[1-loop_idx]), ru.arg) for v in ru.vin[loop_idx].vin]
+          elif ru.arg == BinaryOps.ADD:
+            ru.vin = [self.uop(UOps.ALU, ru.dtype, (v, ru.vin[1-loop_idx]), ru.arg) for v in ru.vin[loop_idx].vin[0:2]] + [ru.vin[loop_idx].vin[2]]
+          ru.arg = None
+          for x in rest:
+            if x.uop == UOps.END:
+              x.vin = (ru, )
+            if x.uop == UOps.PHI:
+              x.vin = x.vin[0:2] + (ru, )
+            x.num += 10
+          self.uops += rest
+          did_replacement = True
+          break
+
+    """
+    # do graph replacements
+    for ru in self.uops:
+      if ru.uop == UOps.LOOP:
+        children: List[UOps] = []
+        for ru2 in self.uops:
+          if ru in ru2.vin:
+            children.append(ru2)
+        if len(children) == 2:
+          # children[0] is an ALU
+          if children[0].uop == UOps.ALU and children[0].arg == BinaryOps.MUL:
+            self.uop()
+    """
+
+
     # (recursively) remove childless uops
     UOPS_W_SIDE_EFFECTS = {UOps.STORE, UOps.WMMA, UOps.END, UOps.BARRIER, UOps.DEFINE_GLOBAL}
     while 1:
@@ -378,6 +436,14 @@ class Linearizer(Kernel):
       if len(nu) == len(self.uops): break
       if DEBUG >= 4: print(f"reduced UOp count from {len(self.uops)} to {len(nu)}")
       self.uops = nu
+
+    if DEBUG >= 5:
+      for u in self.uops: print(u)
+
+    # maybe graph the uops
+    if getenv("GRAPHUOPS"):
+      from tinygrad.graph import graph_uops
+      graph_uops(self.uops)
 
     # restore backups
     self.sts, self.group_for_reduce, self.upcasted = sts_backup, gfr_backup, upc_backup
@@ -403,9 +469,13 @@ class Linearizer(Kernel):
         if arg == BinaryOps.MUL and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[x]
       if arg == BinaryOps.SUB and vin[1].uop == UOps.CONST and vin[1].arg == 0.0: return vin[0]
       if arg == BinaryOps.DIV and vin[1].uop == UOps.CONST and vin[1].arg == 1.0: return vin[0]
+      # int32 add/mul
+      # TODO: all the constant folding
+      if arg == BinaryOps.ADD and vin[0].uop == UOps.CONST and vin[1].uop == UOps.CONST: return self.const(vin[0].arg + vin[1].arg, dtype)
+      if arg == BinaryOps.MUL and vin[0].uop == UOps.CONST and vin[1].uop == UOps.CONST: return self.const(vin[0].arg * vin[1].arg, dtype)
     if cachable and key in self.saved_exprs: return self.saved_exprs[key]
     self.uops.append(UOp(uop, dtype, vin, arg, len(self.uops)))
-    if DEBUG >= 5: print(self.uops[-1])
+    #if DEBUG >= 5: print(self.uops[-1])
     if cachable: self.saved_exprs[key] = self.uops[-1]
     return self.uops[-1]
 
@@ -425,11 +495,17 @@ class Linearizer(Kernel):
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:
       ret = []
+      #input_acc = acc[:]
       for idx, val, off in zip([[i] for i in range(len(values[0]))], zip(*values), offs):
         new_val = self.uop(UOps.ALU, dtypes.float32, val+(acc[off],), ops[x.op])
+        print(self.loop_uops)
+        acc[off] = self.uop(UOps.PHI, dtypes.float32, (acc[off], new_val, list(self.loop_uops.values())[-1]))
         # NOTE: we could apply the phi node to only the last change, but this breaks CLANG with nested max(x,y)
-        acc[off] = self.uop(UOps.PHI, dtypes.float32, (acc[off], new_val))
+        #acc[off] = new_val
         ret.append((idx, acc[off]))
+      #for off in range(len(acc)):
+      #  if input_acc[off] != acc[off]:
+      #    acc[off] = self.uop(UOps.PHI, dtypes.float32, (input_acc[off], acc[off]))
     else:
       ret = [(idx, self.uop(UOps.ALU, dtypes.float32, val, x.op)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
     ordered_ret: List[Optional[UOp]] = [None]*len(values[0])
