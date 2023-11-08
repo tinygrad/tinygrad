@@ -166,13 +166,13 @@ def db_connection():
   if _db_connection is None:
     os.makedirs(CACHEDB.rsplit("/", 1)[0], exist_ok=True)
     _db_connection = sqlite3.connect(CACHEDB)
-    if DEBUG >= 5: _db_connection.set_trace_callback(print)
+    if DEBUG >= 7: _db_connection.set_trace_callback(print)
     if diskcache_get("meta", "version") != VERSION:
       print("cache is out of date, clearing it")
       del _db_connection
       os.unlink(CACHEDB)
       _db_connection = sqlite3.connect(CACHEDB)
-      if DEBUG >= 5: _db_connection.set_trace_callback(print)
+      if DEBUG >= 7: _db_connection.set_trace_callback(print)
       diskcache_put("meta", "version", VERSION)
   return _db_connection
 
