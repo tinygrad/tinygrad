@@ -100,7 +100,7 @@ def benchmark_dataload_time():
         train_tm = (statistics.median(t))*(all_trains//BS)*epochs/(60*60)
         val_tm = (statistics.median(t))*(all_vals//BS)*(epochs//4)/(60*60)
         print(f'{train_tm+val_tm:7.2f} hrs total tm {train_tm:7.2f}hrs train tm {val_tm:7.2f}hrs val tm')
-        print(f'mult: {(sum(t)/len(t))*1000:7.2f} avg read {statistics.median(t)*1000:7.2f} median read {max(t)*1000:7.2f} max read')
+        print(f'batch: {(sum(t)/len(t))*1000:7.2f} avg read {statistics.median(t)*1000:7.2f} median read {max(t)*1000:7.2f} max read')
         print(f'unit: {(sum(u)/len(u))*1000:7.2f} avg read {statistics.median(u)*1000:7.2f} median read {max(u)*1000:7.2f} max read')
         stats.append((train_tm,BS,W))
   for i,(tt,BS,W) in enumerate(sorted(stats, key=lambda x:x[0])):

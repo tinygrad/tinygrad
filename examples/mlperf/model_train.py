@@ -75,11 +75,11 @@ def train_resnet():
 
   steps_in_train_epoch = (len(get_train_files())//BS) - 1
   steps_in_val_epoch = (len(get_val_files())//BS) - 1
-  epoch_avg_time, dts, tts, vts = [],[],[],[]
+  epoch_avg_time,tts,vts = [],[],[]
   for e in range(epochs):
     Tensor.training = True
     cl = time.perf_counter() 
-    for i,(X,Y,dt) in enumerate(t:= tqdm(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=W)),total=steps_in_train_epoch)):
+    for i,(X,Y) in enumerate(t:= tqdm(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=W)),total=steps_in_train_epoch)):
       GlobalCounters.reset()
       st = time.perf_counter()
       data_time = st-cl
@@ -103,7 +103,6 @@ def train_resnet():
                  "train/GFLOPS": GlobalCounters.global_ops*1e-9/(cl-st),
       })
       epoch_avg_time.append((data_time+(et-st)))
-      dts.append(dt)
       tts.append(train_time)
       vts.append(val_time)
       cl = time.perf_counter()
