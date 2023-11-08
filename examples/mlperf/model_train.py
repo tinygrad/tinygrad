@@ -17,7 +17,7 @@ def train_resnet():
   from extra.lr_scheduler import CosineAnnealingLR
 
   # if no combination of BS and WORKERS get you under 24hs, limited by CPU + disk I/O.
-  BS,W = benchmark_dataload_time()
+  BS,W = 64,4#benchmark_dataload_time()
 
   def sparse_categorical_crossentropy(out, Y, label_smoothing=0):
     out = out.float()
@@ -75,7 +75,7 @@ def train_resnet():
 
   steps_in_train_epoch = (len(get_train_files())//BS) - 1
   steps_in_val_epoch = (len(get_val_files())//BS) - 1
-  epoch_avg_time,tts,vts = [],[],[]
+  epoch_avg_time,tts, vts = [],[],[]
   for e in range(epochs):
     Tensor.training = True
     cl = time.perf_counter() 
