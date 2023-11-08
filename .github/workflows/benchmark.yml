@@ -16,25 +16,26 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
+    - name: Symlink models and datasets
+      run: |
+        ln -s ~/tinygrad/disassemblers/applegpu disassemblers/applegpu
+        ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
+        ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
+        ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
+        ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
     - name: Run model inference benchmark
       run: python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
       shell: bash
     - name: Run Tensor Core GEMM
-      run: |
-        ln -s ~/tinygrad/disassemblers/applegpu disassemblers/applegpu
-        DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
+      run: DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
       shell: bash
     - name: Run Stable Diffusion
-      run: |
-        ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
-        ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
-        python3 examples/stable_diffusion.py --noshow --timing | tee sd.txt
+      run: python3 examples/stable_diffusion.py --noshow --timing | tee sd.txt
       shell: bash
     - name: Run LLaMA
       run: |
-        ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         JIT=0 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
         JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
       shell: bash
@@ -44,14 +45,10 @@ jobs:
         JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
       shell: bash
     - name: Run 10 CIFAR training steps
-      run: |
-        ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
-        STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+      run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
       shell: bash
     - name: Run 10 CIFAR training steps w winograd
-      run: |
-        #ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
-        WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
+      run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
       shell: bash
     - uses: actions/upload-artifact@v3
       with:
@@ -105,6 +102,12 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
+    - name: Symlink models and datasets
+      run: |
+        ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
+        ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
+        ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
+        ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
     - name: Run model inference benchmark
       run: python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -114,14 +117,10 @@ jobs:
       run: HIP=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
       shell: bash
     - name: Run Stable Diffusion
-      run: |
-        ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
-        ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
-        python3 examples/stable_diffusion.py --noshow --timing | tee sd.txt
+      run: python3 examples/stable_diffusion.py --noshow --timing | tee sd.txt
       shell: bash
     - name: Run LLaMA
       run: |
-        ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         JIT=0 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
         JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
       shell: bash
@@ -131,18 +130,12 @@ jobs:
         JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
       shell: bash
     - name: Run 10 CIFAR training steps
-      run: |
-        ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
-        STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+      run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w winograd
-      run: |
-        #ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
-        WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
+      run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
       shell: bash
     - name: Run 10 CIFAR training steps w WINO/HALF/HIP
-      run: |
-        #ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
-        HALF=1 HIP=1 WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
+      run: HALF=1 HIP=1 WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
     - uses: actions/upload-artifact@v3
       with:
         name: Speed (AMD)
