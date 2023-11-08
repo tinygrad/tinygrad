@@ -58,7 +58,7 @@ def train_resnet():
   Tensor.manual_seed(seed)
   np.random.seed(seed)
   random.seed(seed)
-  wandb.init()
+  #wandb.init()
 
   num_classes = 1000
   fp16 = getenv("HALF", 0)
