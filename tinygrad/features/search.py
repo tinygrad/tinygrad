@@ -113,12 +113,15 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
     # dedup with uops (TODO: double linearize not needed)
     acted_lins_dedup = []
     for lin in acted_lins:
-      tuops = tuplize_uops(lin.copy().linearize().uops)
-      if tuops in seen_uops:
-        #print(seen_uops[tuops], lin.applied_opts)
+      # some lin shape greater than global dim limit, raising error
+      try:
+        tuops = tuplize_uops(lin.copy().linearize().uops)
+        if tuops in seen_uops: continue
+        seen_uops[tuops] = tuple(lin.applied_opts)
+        acted_lins_dedup.append(lin)
+      except:
         continue
-      seen_uops[tuops] = tuple(lin.applied_opts)
-      acted_lins_dedup.append(lin)
+        #print(seen_uops[tuops], lin.applied_opts)
     acted_lins = acted_lins_dedup
 
     # time linearizers

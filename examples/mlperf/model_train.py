@@ -17,7 +17,7 @@ def train_resnet():
   from extra.lr_scheduler import CosineAnnealingLR
 
   # if no combination of BS and WORKERS get you under 24hs, limited by CPU + disk I/O.
-  BS,W = 128,4#benchmark_dataload_tm()
+  BS,W = 64,4#benchmark_dataload_tm()
 
   def sparse_categorical_crossentropy(out, Y, label_smoothing=0):
     out = out.float()
