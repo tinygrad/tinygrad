@@ -36,11 +36,10 @@ class RawDiskBuffer(RawBufferMapped):
   def readinto(self, buf):
     self._buf[0].seek(self.offset)
     self._buf[0].readinto(buf)
-  @classmethod
   def transfer(self, cls, shape, dtype, **kwargs):
     assert all_int(shape), "does not support symbolic shape"
     instance = cls(prod(shape), dtype, **kwargs)
-    self.realized.readinto(instance._buffer())
+    self.readinto(instance._buffer())
     return instance
 
 disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.MEM: lambda x: x, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
