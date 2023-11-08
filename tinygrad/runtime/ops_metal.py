@@ -38,12 +38,16 @@ def unwrap(x):
   assert err is None, str(err)
   return ret
 
+compiler_hack = True
+
 @diskcache
 def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
   if use_xcode:
     # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
     air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
     return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+  if compiler_hack:
+    return prg.encode()
   options = Metal.MTLCompileOptions.alloc().init()
   library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
   # TODO: avoid file write here?
@@ -53,8 +57,12 @@ def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
 
 class MetalProgram:
   def __init__(self, name:str, lib:bytes):
-    data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
-    self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
+    if compiler_hack:
+      options = Metal.MTLCompileOptions.alloc().init()
+      self.library = unwrap(METAL.device.newLibraryWithSource_options_error_(lib.decode(), options, None))
+    else:
+      data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
+      self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
     self.fxn = self.library.newFunctionWithName_(name)
     if DEBUG >= 5:
       with tempfile.NamedTemporaryFile(delete=True) as shader:
