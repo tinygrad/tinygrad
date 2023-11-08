@@ -2,7 +2,7 @@ import ctypes
 import numpy as np
 from collections import defaultdict, deque
 from typing import TypeVar, Type, Any, Dict, Deque, Tuple, cast
-from tinygrad.helpers import DType, dtypes, prod, all_int, getenv, GlobalCounters, ImageDType
+from tinygrad.helpers import DType, dtypes, prod, getenv, GlobalCounters, ImageDType
 
 _T = TypeVar("_T")
 class RawBuffer:  # pylint: disable=abstract-method
@@ -48,8 +48,7 @@ class RawBufferMapped(RawBufferCopyIn):
   def fromBuffer(cls, src, shape, dtype, **kwargs):
     from tinygrad.runtime.ops_disk import RawDiskBuffer
     if isinstance(src.realized, RawDiskBuffer):
-      assert all_int(shape), "does not support symbolic shape"
-      src.realized.readinto(cast(RawBufferMapped, cls(prod(shape), dtype, **kwargs))._buffer())
+      return src.realized.transfer(cls, shape, dtype, **kwargs)
     return cast(RawBufferMapped, cls.fromCPU(src.realized.toCPU(), **kwargs))
 
 # this one is simple enough that i moved it out of the runtimes

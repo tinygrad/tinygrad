@@ -1,7 +1,7 @@
 import os, mmap
 from typing import Optional
 from typing import Callable, Dict, Tuple
-from tinygrad.helpers import prod, DType
+from tinygrad.helpers import prod, all_int, DType
 from tinygrad.runtime.lib import RawBufferMapped
 from tinygrad.ops import Interpreted, Op, MovementOps, UnaryOps, BufferOps
 
@@ -36,6 +36,12 @@ class RawDiskBuffer(RawBufferMapped):
   def readinto(self, buf):
     self._buf[0].seek(self.offset)
     self._buf[0].readinto(buf)
+  @classmethod
+  def transfer(self, cls, shape, dtype, **kwargs):
+    assert all_int(shape), "does not support symbolic shape"
+    instance = cls(prod(shape), dtype, **kwargs)
+    self.realized.readinto(instance._buffer())
+    return instance
 
 disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.MEM: lambda x: x, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
 DiskBuffer = Interpreted(RawDiskBuffer, disk_fxn_for_op, from_underlying=lambda x:x)
