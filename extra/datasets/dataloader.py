@@ -1,11 +1,9 @@
-import multiprocessing
 from typing import Any
 import glob, random
 import json
 import numpy as np
 from PIL import Image
 import functools, pathlib
-import cloudpickle
 from simplejpeg import decode_jpeg
 from multiprocessing import Pool
 from functools import partial
@@ -25,13 +23,9 @@ def get_val_files():
   return val_files
 
 import time
-import torch
 from torchvision import transforms
 import torchvision.transforms.functional as F
 from torchvision.transforms import RandomResizedCrop
-
-mean = [0.485, 0.456, 0.406]
-std = [0.229, 0.224, 0.225]
 
 def decode(fn):
   with open(fn, 'rb') as f:
@@ -44,7 +38,7 @@ def get_transform(val):
       transforms.RandomResizedCrop(224),
       transforms.RandomHorizontalFlip(),
       transforms.ToTensor(),
-      transforms.Normalize(mean=mean, std=std)
+      transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ]
   else:
     t = [
@@ -54,30 +48,19 @@ def get_transform(val):
     ]
   return transforms.Compose(t)
 
-def image_proc_n(fn,t):
-  s = time.perf_counter()
-  img = Image.fromarray(decode(fn))
-  X = t(img)
-  e = time.perf_counter()
-  return X, e-s
-
 toTensor = transforms.Compose([
     transforms.ToTensor()
 ])
 
-rrc = RandomResizedCrop(224)
-def image_proc(fn, val=False, t=None):
-  img = Image.fromarray(decode(fn))
-  img = F.resize(img, 256, Image.BILINEAR,antialias=True)
-  if val:
-    img = F.center_crop(img,224)
-  else:
-    img = rrc.forward(img)
-    if random.random() < 0.5:
-      img = F.hflip(img)
-  img = toTensor(img)
-  img = F.normalize(img/255.0,mean,std)
-  return img 
+def image_proc(fn,t):
+  return t(Image.fromarray(decode(fn)))
+
+
+def image_proc_timed(fn,t):
+  s = time.perf_counter()
+  X = t(Image.fromarray(decode(fn)))
+  e = time.perf_counter() 
+  return X, e-s
 
 import math
 def iterate(bs=16, val=False, shuffle=True, num_workers=16):
@@ -87,71 +70,44 @@ def iterate(bs=16, val=False, shuffle=True, num_workers=16):
   t = get_transform(val)
   with Pool(num_workers) as p:
     for i in range(0, len(files), bs)[:-1]:
-      s = time.perf_counter()
-      X = p.map(partial(image_proc_n,t=t), [files[j] for j in order[i:i + bs]], chunksize=math.ceil(bs/num_workers))
-      X,T = zip(*X)
-      e = time.perf_counter()
-      proc_tm = e-s
-      print(f'{proc_tm*1000:7.2f} proc tm {max(T)*1000:7.2f} worse read tm')
+      X = p.map(partial(image_proc,t=t), [files[j] for j in order[i:i + bs]], chunksize=math.ceil(bs/num_workers))
       Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
-      yield np.array(X),np.array(Y),proc_tm
-  
-def proc(itermaker, q) -> None:
-  try:
-    for x in itermaker(): q.put(x)
-  except Exception as e:
-    q.put(e)
-  finally:
-    q.put(None)
-    q.close()
+      yield np.array(X),np.array(Y)
 
-class _CloudpickleFunctionWrapper:
-  def __init__(self, fn): self.fn = fn
-  def __getstate__(self): return cloudpickle.dumps(self.fn)
-  def __setstate__(self, pfn): self.fn = cloudpickle.loads(pfn)
-  def __call__(self, *args, **kwargs) -> Any:  return self.fn(*args, **kwargs)
-
-def cross_process(itermaker, maxsize=8):
-  q: multiprocessing.Queue = multiprocessing.Queue(maxsize)
-  p = multiprocessing.Process(target=proc, args=(_CloudpickleFunctionWrapper(itermaker), q))
-  p.start()
-  while True:
-    ret = q.get()
-    if isinstance(ret, Exception): raise ret
-    elif ret is None: break
-    else: yield ret
-
-if __name__ == '__main__':
-  # at batch 128, need 160ms total runtime
-  # need data time < 160ms, need gpu time < 160ms, then you hit <24hrs
-  # on mps data = 110ms, but on shittier machines ~400ms... 
+def benchmark_dataload_time():
   import statistics
   import os
-  all_ts = 1281136
-  epochs = 54
+  print('benchmarking dataload tm')
+  all_trains,all_vals = 1281136,320284 
+  epochs = 50
   tr = get_transform(False)
   t,u = [],[]
   DIR = pathlib.Path(__file__).parent/"imagenet"/"imagenette2"
   files = get_train_files(dir=DIR if os.path.exists(DIR) else None)
-  print(len(files))
   order = list(range(0, len(files)))
   random.shuffle(order)
   stats = []
-  for BS in [16,32,64,128]:
-    for W in [4,6,8]:
+  for BS in [32,64,128]:
+    for W in [4,8,16]:
       with Pool(W) as p:
         for _ in range(30):
           s = time.perf_counter()
-          X,T = zip(*p.map(partial(image_proc_n,t=tr), [files[j] for j in order[0:0+BS]], chunksize=BS//W))
+          X,T = zip(*p.map(partial(image_proc_timed,t=tr), [files[j] for j in order[0:0+BS]], chunksize=BS//W))
           e = time.perf_counter()
           t.append(e-s)
           u.extend(T)
         print(f'**BS={BS} W={W}**')
-        train_time = (statistics.median(t))*(all_ts//BS+1)*epochs/(60*60)
-        print(f'total time: {train_time:7.2f} hrs')
+        train_tm = (statistics.median(t))*(all_trains//BS)*epochs/(60*60)
+        val_tm = (statistics.median(t))*(all_vals//BS)*(epochs//4)/(60*60)
+        print(f'{train_tm+val_tm:7.2f} hrs total tm {train_tm:7.2f}hrs train tm {val_tm:7.2f}hrs val tm')
         print(f'mult: {(sum(t)/len(t))*1000:7.2f} avg read {statistics.median(t)*1000:7.2f} median read {max(t)*1000:7.2f} max read')
         print(f'unit: {(sum(u)/len(u))*1000:7.2f} avg read {statistics.median(u)*1000:7.2f} median read {max(u)*1000:7.2f} max read')
-        stats.append((train_time,BS,W))
+        stats.append((train_tm,BS,W))
   for i,(tt,BS,W) in enumerate(sorted(stats, key=lambda x:x[0])):
-    print(f'RANK {i}: BS={BS} W={W} {tt} hrs')
+    opt_tm = (24*60*60*1000)/((all_trains//BS)*epochs+(all_vals//BS)*(epochs//4))
+    print(f'RANK {i}: Under 24hrs={tt<=24} BS={BS} W={W} {tt:7.2f} hrs')
+    if tt<=24:
+      print(f'if GPU tm under {opt_tm:7.2f} ms, training will be under 24hrs')
+  _, BS, W = sorted(stats, key=lambda x:x[0])[0]
+  return BS,W
  
