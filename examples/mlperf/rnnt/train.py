@@ -19,8 +19,6 @@ import matplotlib.pyplot as plt
 import librosa
 import soundfile
 
-from lovely_numpy import lo
-
 # try:
 #   import lovely_grad
 #   lovely_grad.monkey_patch()
@@ -309,9 +307,13 @@ def autocompare(x,x2):
 # @TinyJit
 def encode(rnnt:RNNT,X:Tensor,X_lens:np.ndarray,Y:Tensor,Y_lens:np.ndarray):
   bs = X.shape[1]
+  Timer.start("enc")
   enc, enc_lens  = rnnt.encoder.__call__(X,X_lens)
+  Timer.start("pred")
   preds,hc = rnnt.prediction.__call__(Tensor.zeros((bs,1)).cat(Y,dim=1),None,1)
+  Timer.start("joint")
   distribution = rnnt.joint.__call__(preds, enc).softmax(3).realize()
+  Timer.end("joint")
   return enc,enc_lens,distribution
 
 #%%
@@ -327,7 +329,7 @@ def logsumexp(a:np.ndarray,b:np.ndarray):
   mx = np.where(a>b,a,b)
   return np.log(np.exp(a-mx)+np.exp(b-mx)) + mx
 
-class RNNTLoss(Function):
+class LogLoss(Function):
 
   def forward(self,distribution:LazyBuffer,X_lens:Tensor,Y:LazyBuffer, Y_lens:Tensor):
     bs=Y.shape[0]
@@ -362,6 +364,8 @@ class RNNTLoss(Function):
         logalpha[_t,_u] = logsumexp(logalpha[_t,_u], logalpha[_t,_u-1] + logdist[_u-1,_t,self.labels[bi,_u-1]])
 
       Loss .append( -logalpha[-1,-1] - logdist[-1,-1,-1])
+
+
 
     return LazyBuffer.fromCPU(np.sum(Loss))
 
@@ -405,24 +409,23 @@ class RNNTLoss(Function):
       
       logdgrad[-1,-1,-1] = 0
 
-      # if bi == 0:
-      #   plt.figure(figsize=(6,2))  # Adjust the figure size as needed
-      #   plt.subplot(1,3,1)
-      #   ab = (logalpha+logbeta)
-      #   plt.imshow(np.exp(ab-ab.max()))
-      #   plt.subplot(1, 3,2)  # Select the second subplot
-      #   plt.imshow(np.exp(logdgrad[:,:,-1]))
-      #   plt.subplot(1,3,3)
-      #   plt.imshow(np.exp(logdgrad[:,:,:-1]).sum(2))
-      #   plt.tight_layout()  # Ensures that the plots are nicely spaced
-      #   plt.show()
-
       logdgrad = np.pad(logdgrad, [[0,max(self.Us)-logdgrad.shape[0]],[0,max(self.Ts)-logdgrad.shape[1]],[0,0]],"constant",constant_values=-np.inf)
       logdgrads.append(logdgrad)
 
     assert not np.isnan(logdgrads).any()
     return LazyBuffer.fromCPU(- np.exp(logdgrads)), None, None, None, None
 
+
+
+#%%
+rnnt= RNNT()
+opt = LAMB(rnnt.params)
+opt.zero_grad()
+
+
+
+#%%
+# opt.step()
 
 #%%
 def save(name:str = "rnnt"):
@@ -469,21 +472,13 @@ class Timer:
 
 #%%
 
-epochcounter = 0
-evlosses = []
-
 def setup():
-  global rnnt, opt, epochcounter, evlosses
+  global rnnt, opt
   rnnt =  RNNT()
   opt = LAMB(rnnt.params)
-  epochcounter = 0
-  evlosses = []
-
 
 def epoch():
   try:
-    global epochcounter
-    epochcounter += 1
     batch_size = 8
     start_time = time.time()
     it = enumerate(iterate(batch_size))
@@ -493,29 +488,39 @@ def epoch():
     for i,(X,X_lens,Y,Y_lens) in it:
       done = (i+1)*batch_size - skipto
       if (done<skipto):continue
+      Timer.start("")
 
       last_time = time.time()
       enc,enclens,d = encode(rnnt,X,X_lens,Y,Y_lens)
+      c = i * batch_size
 
-      loss = RNNTLoss.apply(d,enclens.realize(), Y,Y_lens.realize())
+      delta = time.time() - last_time
+      Timer.start("rnntloss")
+      loss = LogLoss.apply(d,enclens.realize(), Y,Y_lens.realize())
+      Timer.start("backward")
       opt.zero_grad()
       loss.backward()
+
+      Timer.start("step")
       opt.step()
+
+
+      Timer.end("")
       nloss = loss.detach().numpy()/(sum(X_lens.numpy())+sum(Y_lens.numpy()))[0]
 
       dur = time.time()-start_time
       print (f"\r{done}/{len(ci)} time:{timestring(dur)}/{timestring(dur*len(ci)/done)}   L:{nloss:.5} ",end ="")
-      if (i+1) % 10 == 0:
+      if (i+1) % 20 == 0:
         
         enc, enclens, d = encode(rnnt,*evalset)
-        valloss = RNNTLoss.apply(d,enclens.realize(), evalset[2],evalset[3].realize())
+        valloss = LogLoss.apply(d,enclens.realize(), evalset[2],evalset[3].realize())
         valloss.numpy()
         nvloss = valloss.detach().numpy()/(sum(evalset[1].numpy())+sum(evalset[3].numpy()))[0]
         print(f"eval loss :{nvloss:.5}")
-        evlosses.append(nvloss)
-    
-    save(f"rnnt_E{epochcounter}_L{nvloss:.5}")
 
+        print()
+        Timer.table()
+        Timer.reset()
 
   except KeyboardInterrupt:pass
 
