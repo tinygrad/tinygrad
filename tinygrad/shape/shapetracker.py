@@ -104,12 +104,12 @@ class ShapeTracker:
       real_real_shape = [s for s,st in zip(real_shape, v.strides) if st]
       strides = [abs(st) for st in v.strides if st and not isinstance(st, Node)]
       buffer_size = sum((s-1)*st for s, st in zip(real_real_shape,strides)) + 1
-      def sort_by_strides(shape, strides): return sorted(zip(shape, strides), key=lambda k: k[1], reverse=True), sorted(range(len(strides)), key=lambda k: strides[k], reverse=True)
+      def sort_by_strides(shape, strides): return sorted(zip(shape, strides), key=lambda k: (k[1],-k[0]), reverse=True), sorted(range(len(strides)), key=lambda k: (strides[k],-real_real_shape[k]), reverse=True)
       ordered_shape_strides, order = sort_by_strides(real_real_shape, strides)
       to_apply.append((MovementOps.RESHAPE, (-1,)))
       to_apply.append((MovementOps.SHRINK, ((real_offset,real_offset+buffer_size),)))
       if strides:
-        if (ordered_shape_strides[0][0] * ordered_shape_strides[0][1]) - buffer_size > 0:
+        if (ordered_shape_strides[0][0]*ordered_shape_strides[0][1])-buffer_size > 0:
           to_apply.append((MovementOps.PAD, ((0, (ordered_shape_strides[0][0] * ordered_shape_strides[0][1]) - buffer_size),)))
         for i, shape_stride in enumerate(ordered_shape_strides):
           total_size = shape_stride[0] * shape_stride[1]
@@ -125,8 +125,7 @@ class ShapeTracker:
             to_apply.append((MovementOps.RESHAPE, (*[s[0] for s in ordered_shape_strides[:i+1]], shape_stride[1])))
         to_apply.append((MovementOps.SHRINK, (*[(0, s[0]) for s in ordered_shape_strides], (0,1))))
         to_apply.append((MovementOps.RESHAPE, tuple(s[0] for s in ordered_shape_strides)))
-        if order != list(range(len(order))):
-          to_apply.append((MovementOps.PERMUTE, tuple(order.index(i) for i in range(len(strides)))))
+        if order != list(range(len(order))): to_apply.append((MovementOps.PERMUTE, tuple(order.index(i) for i in range(len(strides)))))
       to_apply.append((MovementOps.RESHAPE, tuple(s if st else 1 for s,st in zip(real_shape, v.strides))))
       # flip
       if any(i < 0 for i in v.strides): to_apply.append((MovementOps.STRIDE, tuple(-1 if st<0 else 1 for st in v.strides)))
