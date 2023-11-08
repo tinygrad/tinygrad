@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, cast
 from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, DEBUG, dedup
-from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, sint
+from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, sint
 from tinygrad.shape.view import View
 
 @functools.lru_cache(maxsize=None)
@@ -50,10 +50,11 @@ def expr_idxs(view:View, idxs) -> Node:
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
   if vm2.mask: return None  # this isn't supported yet
+  if vm1.offset != 0: return None  # this isn't supported yet
   mst = ShapeTracker((vm2, vm1))
   strides = mst.real_strides()
   if None in strides: return None
-  return View.create(vm1.shape, cast(Tuple[sint, ...], strides), mst.real_offset(), vm1.mask)
+  return View.create(vm1.shape, cast(Tuple[sint, ...], strides), vm2.offset, vm1.mask)
 
 @functools.lru_cache(maxsize=None)
 def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
@@ -141,12 +142,6 @@ class ShapeTracker:
       # lastly, we apply post expand pads
       if v.mask is not None and any(x != (0,0) for x in post_expand_pads): to_apply.append((MovementOps.PAD, post_expand_pads))
     return to_apply
-
-  # these are multiview strides, value is None if it's not a simple strided dimension
-  # TODO: this can be shared code between simplify and merge_views
-  def real_offset(self) -> sint:
-    real_offset, _ = self.expr_node(Variable('zero', 0, 0))
-    return real_offset.b if isinstance(real_offset, NumNode) else real_offset
 
   # NOTE: if a stride is not always valid, it will be None
   def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
