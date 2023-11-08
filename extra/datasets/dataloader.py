@@ -90,7 +90,7 @@ def benchmark_dataload_time():
   for BS in [32,64,128]:
     for W in [4,8,16]:
       with Pool(W) as p:
-        for _ in range(30):
+        for _ in range(10):
           s = time.perf_counter()
           X,T = zip(*p.map(partial(image_proc_timed,t=tr), [files[j] for j in order[0:0+BS]], chunksize=BS//W))
           e = time.perf_counter()
