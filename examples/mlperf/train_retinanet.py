@@ -117,6 +117,7 @@ class RetinaNetTrainer:
         self.coco_eval = COCOeval(self.dataset, iouType="bbox")
         self.debug = debug
         self.image_size = IMAGE_SIZES["debug"] if debug else IMAGE_SIZES["mlperf"]
+        self.set_matcher_attributes()
     
     def get_ground_truths(self, anchors, annotations, n_classes):
         #TODO tensorize this function for further lazyness exploitation
@@ -507,8 +508,80 @@ class RetinaNetTrainer:
             wh = self._upcast(rb - lt).clip(min_=0,max_=float('inf') )  # [N,M,2]
             inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
             union = area1[:, None] + area2 - inter
-            return inter, union
+            iou = inter / union
+            return iou
 
+    def set_matcher_attributes(self):
+        self.allow_low_quality_matches = True
+        self.low_threshold = 0.4
+        self.high_threshold = 0.5
+        self.BELOW_LOW_THRESHOLD = -1
+        self.BETWEEN_THRESHOLDS = -2
+
+    def proposal_matcher(self, match_quality_matrix : Tensor):
+        if match_quality_matrix.numel() == 0:
+            # empty targets or proposals not supported during training
+            if match_quality_matrix.shape[0] == 0:
+                raise ValueError(
+                    "No ground-truth boxes available for one of the images "
+                    "during training")
+            else:
+                raise ValueError(
+                    "No proposal boxes available for one of the images "
+                    "during training")
+
+        # match_quality_matrix is M (gt) x N (predicted)
+        # Max over gt elements (dim 0) to find best gt candidate for each prediction
+        
+        #FIXME this works different from reference
+
+        Warning("Find an efficient way to find match_quality_matrix max,idxs without numpy conversion")
+        #FIXME
+        matched_vals, matches = Tensor(match_quality_matrix.numpy().max(axis=0)),Tensor(match_quality_matrix.numpy().argmax(axis=0))
+        #maybe  match_quality_matrix.max()
+        if self.allow_low_quality_matches:
+            all_matches = Tensor.zeros_like(matches).assign(matches)
+        else:
+            all_matches = None
+
+        # Assign candidate matches with low quality to negative (unassigned) values
+        below_low_threshold = matched_vals < self.low_threshold
+        between_thresholds = (matched_vals >= self.low_threshold) * (
+            matched_vals < self.high_threshold
+        )
+        
+        
+        matches = Tensor.full_like(matches,self.BELOW_LOW_THRESHOLD) * (below_low_threshold) + matches * (1-below_low_threshold)
+        matches = Tensor.full_like(matches,self.BETWEEN_THRESHOLDS) * (between_thresholds) + matches * (1-between_thresholds)
+        
+        
+        if self.allow_low_quality_matches:
+            assert all_matches is not None
+            self.set_low_quality_matches_(matches, all_matches, match_quality_matrix)
+
+        return matches
+    def set_low_quality_matches_(self, matches, all_matches, match_quality_matrix):
+        highest_quality_foreach_gt = match_quality_matrix.max(axis=1)
+        Warning("Find an efficient way to make argwhere or similar without numpy conversion")
+        #FIXME
+        gt_pred_pairs_of_highest_quality = np.nonzero(
+            match_quality_matrix.numpy() == highest_quality_foreach_gt[:, None].numpy()
+        )
+        gt_pred_pairs_of_highest_quality = list(gt_pred_pairs_of_highest_quality)
+        for i in range(len(gt_pred_pairs_of_highest_quality)):gt_pred_pairs_of_highest_quality[i] = Tensor(gt_pred_pairs_of_highest_quality[i])
+        gt_pred_pairs_of_highest_quality = tuple(gt_pred_pairs_of_highest_quality)
+        pred_inds_to_update = gt_pred_pairs_of_highest_quality[1]
+
+        Warning("Find an efficient way to make argwhere or similar without numpy conversion")
+        #FIXME
+        matches = matches.numpy()
+        all_matches = all_matches.numpy()
+        pred_inds_to_update = pred_inds_to_update.numpy()
+        matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
+
+        matches = Tensor(matches)
+        all_matches = Tensor(all_matches)
+        
     def box_area(self, boxes : Tensor) -> Tensor:
         boxes = self._upcast(boxes)
         return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
