@@ -158,23 +158,6 @@ class View:
     # after the asserts, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)
 
-    # check if this is adding or removing 1s (only)
-    # NOTE: this is optional, but removes most calls to (expensive!) merge_views (with mask, not optional)
-    if [x for x in self.shape if x != 1] == [x for x in new_shape if x != 1]:
-      new_strides: List[sint] = [y for x,y in zip(self.shape, self.strides) if x != 1]
-      new_strides_tuple: Tuple[sint, ...] = tuple([0 if x == 1 else new_strides.pop(0) for x in new_shape])
-      new_mask_tuple: Optional[Tuple[Tuple[sint, sint], ...]] = None
-      if self.mask:
-        for x,y in zip(self.shape, self.mask):
-          if x == 1 and y != (0, 1):
-            new_mask_tuple = ((0,0),) * len(new_shape)
-            break
-        else:
-          new_mask: List[Tuple[sint, sint]] = [y for x,y in zip(self.shape, self.mask) if x != 1]
-          new_mask_tuple = tuple([(0,1) if x == 1 else new_mask.pop(0) for x in new_shape])
-      return View.create(new_shape, new_strides_tuple, self.offset, new_mask_tuple)
-
-    # TODO: this is incomplete with symbolic expand (3,i) -> (3,i,1) so still need the adding/removing 1s part
     strides, reverse_shape = [], reversed(new_shape)
     for d, s in reversed(to_shape_strides(self.shape, self.strides)):
       acc, new_stride = 1, s
