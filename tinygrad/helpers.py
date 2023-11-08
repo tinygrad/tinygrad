@@ -156,7 +156,8 @@ class GlobalCounters:
 
 # *** universal database cache ***
 
-CACHEDB = getenv("CACHEDB", "/tmp/tinygrad_cache")
+_cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache"))
+CACHEDB: str = getenv("CACHEDB", os.path.join(_cache_dir, "tinygrad", "cache.db"))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
 VERSION = 6
@@ -164,20 +165,25 @@ _db_connection = None
 def db_connection():
   global _db_connection
   if _db_connection is None:
+    os.makedirs(CACHEDB.rsplit("/", 1)[0], exist_ok=True)
     _db_connection = sqlite3.connect(CACHEDB)
-    if DEBUG >= 5: _db_connection.set_trace_callback(print)
+    if DEBUG >= 7: _db_connection.set_trace_callback(print)
     if diskcache_get("meta", "version") != VERSION:
       print("cache is out of date, clearing it")
+      del _db_connection
       os.unlink(CACHEDB)
       _db_connection = sqlite3.connect(CACHEDB)
-      if DEBUG >= 5: _db_connection.set_trace_callback(print)
+      if DEBUG >= 7: _db_connection.set_trace_callback(print)
       diskcache_put("meta", "version", VERSION)
   return _db_connection
 
 def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
+  if CACHELEVEL == 0: return None
   if isinstance(key, (str,int)): key = {"key": key}
+  conn = db_connection()
+  cur = conn.cursor()
   try:
-    res = db_connection().cursor().execute(f"SELECT val FROM {table} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
+    res = cur.execute(f"SELECT val FROM {table} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
   except sqlite3.OperationalError:
     return None  # table doesn't exist
   if (val:=res.fetchone()) is not None:
@@ -186,6 +192,7 @@ def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
 
 _db_tables = set()
 def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
+  if CACHELEVEL == 0: return val
   if isinstance(key, (str,int)): key = {"key": key}
   conn = db_connection()
   cur = conn.cursor()
