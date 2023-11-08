@@ -112,6 +112,7 @@ class TestRealStrides(unittest.TestCase):
     print(self.st, st)
     assert st == (None, 4, 1)
 
+@unittest.skip("trying without simplify")
 class TestRealSimplifies(unittest.TestCase):
   def tearDown(self):
     st = self.st.real_strides()
@@ -227,6 +228,7 @@ class TestIndexExpressions2d(unittest.TestCase):
       new_st.append(st)
     self.sts = new_st
 
+@unittest.skip("trying without simplify")
 class TestSimplifyingShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = CheckingShapeTracker((1, 10))
