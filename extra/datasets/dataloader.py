@@ -73,6 +73,7 @@ def iterate(bs=16, val=False, shuffle=True, num_workers=16):
       X = p.map(partial(image_proc,t=t), [files[j] for j in order[i:i + bs]], chunksize=math.ceil(bs/num_workers))
       Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
       X,Y = np.array(X),np.array(Y)
+      print(X.shape)
       print(np.dtype(X.dtype).name)
       yield X, Y 
 
