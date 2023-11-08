@@ -17,7 +17,7 @@ def train_resnet():
   from extra.lr_scheduler import CosineAnnealingLR
 
   # if no combination of BS and WORKERS get you under 24hs, limited by CPU + disk I/O.
-  BS,W = 64,4#benchmark_dataload_tm()
+  BS,W = 128,4#benchmark_dataload_tm()
 
   def sparse_categorical_crossentropy(out, Y, label_smoothing=0):
     out = out.float()
@@ -88,11 +88,11 @@ def train_resnet():
       loss, out = train_step(X, Y)
 
       et = time.perf_counter()
-      loss_cpu = loss.numpy() if i % 1000 == 0 else loss_cpu
+      loss_cpu = loss.numpy() if i % 100 == 0 else loss_cpu
       train_time = (data_time+et-st)*steps_in_train_epoch*epochs/(60*60)
       val_time = (data_time+et-st)*steps_in_val_epoch*(epochs//4)/(60*60)
 
-      print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {data_time*1000:7.2f} ms data {loss_cpu:7.2f} loss (every 1000)" + \
+      print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {data_time*1000:7.2f} ms data {loss_cpu:7.2f} loss (every 100)" + \
             f"{GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS {train_time+val_time:7.1f} hrs total {train_time:7.1f}hrs train {val_time:7.1f}hrs val")
       '''      wandb.log({"lr": scheduler.get_lr().numpy().item(),
                  "train/data_time": data_time,
