@@ -53,7 +53,7 @@ toTensor = transforms.Compose([
 ])
 
 def image_proc(fn,t):
-  return t(Image.fromarray(decode(fn)))
+  return np.array(t(Image.fromarray(decode(fn))))
 
 
 def image_proc_timed(fn,t):
@@ -70,7 +70,7 @@ def iterate(bs=16, val=False, shuffle=True, num_workers=16):
   t = get_transform(val)
   with Pool(num_workers) as p:
     for i in range(0, len(files), bs)[:-1]:
-      X = p.map(partial(image_proc,t=t), [files[j] for j in order[i:i + bs]], chunksize=math.ceil(bs/num_workers))
+      X = p.map(partial(image_proc,t=t),[files[j] for j in order[i:i + bs]],chunksize=math.ceil(bs/num_workers))
       Y = [cir[files[i].split("/")[-2]] for i in order[i:i+bs]]
       X,Y = np.array(X),np.array(Y)
       print(X.shape)
