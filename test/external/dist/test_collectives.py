@@ -9,8 +9,8 @@ from tinygrad.tensor import Tensor
 import numpy as np
 
 @TinyJit
-def allreduce_jit(t:Tensor, cache_id=None) -> Tensor:
-  return collectives.allreduce(t, cache_id=cache_id).realize()
+def allreduce_jit(t:Tensor) -> Tensor:
+  return collectives.allreduce(t).realize()
 
 SIZE = 2048 if not CI else 2
 SIZE_2 = 255 if not CI else 3
@@ -25,7 +25,7 @@ def run():
   for _ in range(3):
     # create a tensor to send
     t = Tensor.zeros(SIZE, SIZE) if rank != 0 else Tensor.ones(SIZE, SIZE)
-    t2 = allreduce_jit(t.contiguous().realize(), cache_id="test")
+    t2 = allreduce_jit(t.contiguous().realize())
     assert np.allclose(np.ones((SIZE, SIZE)), t2.numpy()), f"{t2.numpy()} wasn't ones"
 
   # reset jit
@@ -36,7 +36,7 @@ def run():
   for _ in range(3):
     # create a tensor to send
     t = Tensor.ones(SIZE_2, SIZE_2, SIZE_2) if rank == 0 else Tensor.zeros(SIZE_2, SIZE_2, SIZE_2)
-    t2 = allreduce_jit(t.contiguous().realize(), cache_id="test2")
+    t2 = allreduce_jit(t.contiguous().realize())
     assert np.allclose(np.ones((SIZE_2, SIZE_2, SIZE_2)), t2.numpy()), f"{t2.numpy()} wasn't ones"
 
   print(f"rank {rank} passed")
