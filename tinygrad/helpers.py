@@ -128,13 +128,10 @@ class dtypes:
   bfloat16: Final[DType] = DType(0, 2, "__bf16", None)
 
   # NOTE: these are internal dtypes, should probably check for that
-  # vectorized dtypes
   _int2: Final[DType] = DType(2, 4*2, "int2", None, 2)
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
   _float2: Final[DType] = DType(4, 4*2, "float2", None, 2)
   _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
-  _arg_int32: Final[DType] = DType(2, 4, "_arg_int32", None)
-
   _arg_int32: Final[DType] = DType(2, 4, "_arg_int32", None)
 
   # NOTE: these are image dtypes

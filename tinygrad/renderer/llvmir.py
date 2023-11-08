@@ -96,7 +96,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
       phis = []
       for rp in reduce_phis:
         incoming = lvars[rp]
-        lvars[rp] = bb[-1].phi(dtype_to_llvm_dtype[rp.dtype])
+        lvars[rp] = bb[-1].phi(ir.FloatType())
         lvars[rp].add_incoming(incoming, bb[-2]._block)
         phis.append((rp, lvars[rp]))
 
