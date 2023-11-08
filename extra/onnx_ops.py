@@ -620,9 +620,39 @@ def Gelu(x:Tensor, approximate=None):
   else: return 0.5 * x * (1 + Erf(x/math.sqrt(2))) 
 
 #TODO https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_affine_grid.py
-def AffineGrid(theta: Tensor, size: Tensor, align_corners):
-  _, _, *data_size = safe_numpy(size)
-  ...
+def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
+  _, _, *data_sz = safe_numpy(size).tolist()
+  size_zeros = Tensor.zeros(data_sz)
+  original_grid = Tensor.ones(data_sz)
+  stackable = [original_grid]
+  print(f"{data_sz}")
+  print(f"{size_zeros=}")
+  print(f"{original_grid=}")
+  print(safe_numpy(size), "FUCK")
+  for dim, dim_sz in enumerate(data_sz):
+    if align_corners == 1: a = Tensor.arange(-1, 1.0001, 2/(dim_sz-1), requires_grad=False, dtype=dtypes.int32)
+    else: a = Tensor.arange(-1+1/dim_sz, 1, 2/dim_sz)
+    if dim == 0: stackable = [a.reshape(dim_sz, *[1]*(len(data_sz)-1)) + size_zeros, *stackable]
+    elif dim == 1: stackable = [a.reshape(1, dim_sz, *[1]*(len(data_sz)-2)) + size_zeros, *stackable]
+    else: stackable = [a.reshape(1, dim_sz) + size_zeros, *stackable]
+
+  original_grid = Tensor.stack(stackable, dim=len(data_sz))
+  if original_grid.ndim == 3:
+    N, dim_2d, dim_homo = theta.shape
+    assert dim_2d == 2 and dim_homo == 3
+    H, W, dim_homo = original_grid.shape
+    assert dim_homo == 3
+    original_grid = original_grid.reshape(H*W, dim_homo).transpose()
+    return theta.matmul(original_grid).permute(0,2,1).reshape(N, H, W, dim_2d)
+  else: 
+    assert original_grid.ndim == 4
+    N, dim_3d, dim_homo = theta.shape
+    assert dim_3d == 3 and dim_homo == 4
+    D, H, W, dim_homo = original_grid.shape
+    assert dim_homo == 4
+    original_grid = original_grid.reshape(D*H*W, dim_homo).transpose()
+    return theta.matmul(original_grid).permute(0,2,1).reshape(N, D, H, W, dim_3d)
+
 
 # **************** com.microsoft Ops ****************
 
