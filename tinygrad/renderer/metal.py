@@ -8,7 +8,6 @@ class MetalLanguage(CStyleLanguage):
   arg_int_prefix = "constant int&"
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
-  half4 = "half4"
   uses_ptr_arithmetic=True
   gid = [f"gid.{chr(120+i)}" for i in range(3)]
   lid = [f"lid.{chr(120+i)}" for i in range(3)]

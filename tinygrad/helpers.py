@@ -130,16 +130,10 @@ class dtypes:
   # NOTE: these are internal dtypes, should probably check for that
   # vectorized dtypes
   _int2: Final[DType] = DType(2, 4*2, "int2", None, 2)
-  _int4: Final[DType] = DType(2, 4*4, "int4", None, 4)
-
-  _half2: Final[DType] = DType(0, 2*2, "half2", None, 2)
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
-
   _float2: Final[DType] = DType(4, 4*2, "float2", None, 2)
   _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
-
-  _double2: Final[DType] = DType(4, 4*2, "double2", None, 2)
-  _double4: Final[DType] = DType(4, 4*4, "double4", None, 4)
+  _arg_int32: Final[DType] = DType(2, 4, "_arg_int32", None)
 
   _arg_int32: Final[DType] = DType(2, 4, "_arg_int32", None)
 
