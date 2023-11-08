@@ -13,11 +13,11 @@ import time
 def train_resnet():
   from models.resnet import ResNet50
   from extra.datasets.imagenet import get_train_files, get_val_files
-  from extra.datasets.dataloader import iterate, benchmark_dataload_time
+  from extra.datasets.dataloader import iterate, benchmark_dataload_tm
   from extra.lr_scheduler import CosineAnnealingLR
 
   # if no combination of BS and WORKERS get you under 24hs, limited by CPU + disk I/O.
-  BS,W = 64,4#benchmark_dataload_time()
+  BS,W = 64,4#benchmark_dataload_tm()
 
   def sparse_categorical_crossentropy(out, Y, label_smoothing=0):
     out = out.float()
@@ -94,7 +94,7 @@ def train_resnet():
 
       print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {data_time*1000:7.2f} ms data {loss_cpu:7.2f} loss (every 1000)" + \
             f"{GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS {train_time+val_time:7.1f} hrs total {train_time:7.1f}hrs train {val_time:7.1f}hrs val")
-      wandb.log({"lr": scheduler.get_lr().numpy().item(),
+      '''      wandb.log({"lr": scheduler.get_lr().numpy().item(),
                  "train/data_time": data_time,
                  "train/python_time": et - st,
                  "train/step_time": cl - st,
@@ -102,6 +102,8 @@ def train_resnet():
                  "train/loss": loss_cpu,
                  "train/GFLOPS": GlobalCounters.global_ops*1e-9/(cl-st),
       })
+'''
+
       epoch_avg_time.append((data_time+(et-st)))
       tts.append(train_time)
       vts.append(val_time)
@@ -124,12 +126,14 @@ def train_resnet():
         eval_times.append(et - st)
         eval_top_1_acc.append(top_1_acc)
         eval_top_5_acc.append(top_5_acc)
+        '''
         wandb.log({"eval/loss": sum(eval_loss) / len(eval_loss),
                   "eval/forward_time": sum(eval_times) / len(eval_times),
                   "eval/top_1_acc": sum(eval_top_1_acc) / len(eval_top_1_acc),
                   "eval/top_5_acc": sum(eval_top_5_acc) / len(eval_top_5_acc),
                   "eval/avg_time": sum(epoch_avg_time) / len(epoch_avg_time)
         })
+        '''
         val_time = (data_time+et-st)*steps_in_val_epoch*(epochs//4)/(60*60)
         print(f'{(et-cl)*1000:7.2f} ms run {val_time:7.2f}hrs total val')
         cl = time.monotonic()

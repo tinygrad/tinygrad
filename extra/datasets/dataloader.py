@@ -1,4 +1,3 @@
-from typing import Any
 import glob, random
 import json
 import numpy as np
@@ -7,6 +6,7 @@ import functools, pathlib
 from simplejpeg import decode_jpeg
 from multiprocessing import Pool
 from functools import partial
+import math
 
 BASEDIR = pathlib.Path(__file__).parent / "imagenet"
 ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
@@ -55,14 +55,12 @@ toTensor = transforms.Compose([
 def image_proc(fn,t):
   return np.array(t(Image.fromarray(decode(fn))))
 
-
 def image_proc_timed(fn,t):
   s = time.perf_counter()
   X = t(Image.fromarray(decode(fn)))
   e = time.perf_counter() 
   return X, e-s
 
-import math
 def iterate(bs=16, val=False, shuffle=True, num_workers=16):
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
@@ -75,9 +73,13 @@ def iterate(bs=16, val=False, shuffle=True, num_workers=16):
       X,Y = np.array(X),np.array(Y)
       yield X, Y 
 
-def benchmark_dataload_time():
+def benchmark_dataload_tm():
   import statistics
+  from pathlib import Path
   import os
+  if not os.path.exists(Path(__file__).parent/'imagenet'/'imagenette2'): 
+    from extra.datasets.imagenet_download import get_imagenette2
+    get_imagenette2()
   print('benchmarking dataload tm')
   all_trains,all_vals = 1281136,320284 
   epochs = 50
@@ -88,7 +90,7 @@ def benchmark_dataload_time():
   order = list(range(0, len(files)))
   random.shuffle(order)
   stats = []
-  for BS in [64,128]:
+  for BS in [16,32,64,128]:
     for W in [4,8,16]:
       with Pool(W) as p:
         for _ in range(10):
@@ -101,14 +103,19 @@ def benchmark_dataload_time():
         train_tm = (statistics.median(t))*(all_trains//BS)*epochs/(60*60)
         val_tm = (statistics.median(t))*(all_vals//BS)*(epochs//4)/(60*60)
         print(f'{train_tm+val_tm:7.2f} hrs total tm {train_tm:7.2f}hrs train tm {val_tm:7.2f}hrs val tm')
-        print(f'batch: {(sum(t)/len(t))*1000:7.2f} avg read {statistics.median(t)*1000:7.2f} median read {max(t)*1000:7.2f} max read')
-        print(f'unit: {(sum(u)/len(u))*1000:7.2f} avg read {statistics.median(u)*1000:7.2f} median read {max(u)*1000:7.2f} max read')
+        print(f'batch: {(sum(t)/len(t))*1000:7.2f} ms avg read {statistics.median(t)*1000:7.2f} ms median read {max(t)*1000:7.2f} ms max read')
+        print(f'unit: {(sum(u)/len(u))*1000:7.2f} ms avg read {statistics.median(u)*1000:7.2f} ms median read {max(u)*1000:7.2f} ms max read')
         stats.append((train_tm,BS,W))
   for i,(tt,BS,W) in enumerate(sorted(stats, key=lambda x:x[0])):
     opt_tm = (24*60*60*1000)/((all_trains//BS)*epochs+(all_vals//BS)*(epochs//4))
-    print(f'RANK {i}: Under 24hrs={tt<=24} BS={BS} W={W} {tt:7.2f} hrs')
     if tt<=24:
-      print(f'if GPU tm under {opt_tm:7.2f} ms, training will be under 24hrs')
+      note = (f'NOTE: if GPU tm under {opt_tm:7.2f} ms, then under 24hrs')
+    else:
+      note = (f'NOTE: no use in training, limited by cpu')
+    print(f'RANK {i}: Under 24hrs={tt<=24} BS={BS} W={W} {tt:7.2f} hrs ' + note)
+    
   _, BS, W = sorted(stats, key=lambda x:x[0])[0]
   return BS,W
  
+if __name__ == '__main__':
+  benchmark_dataload_tm()

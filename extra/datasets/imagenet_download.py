@@ -4,6 +4,11 @@ from pathlib import Path
 from tqdm import tqdm
 import tarfile, os
 
+def get_imagenette2():
+  download_file('https://s3.amazonaws.com/fast-ai-imageclas/imagenette2.tgz', Path(__file__).parent/'imagenet'/'imagenette2.tgz')
+  imagenet_extract(Path(__file__).parent/'imagenet'/'imagenette2.tgz', Path(__file__).parent/'imagenet')
+  os.remove(Path(__file__).parent/'imagenet'/'imagenette2.tgz')
+
 def imagenet_extract(file, path, small=False):
   with tarfile.open(name=file) as tar:
     if small: # Show progressbar only for big files
