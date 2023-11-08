@@ -87,7 +87,7 @@ def benchmark_dataload_time():
   order = list(range(0, len(files)))
   random.shuffle(order)
   stats = []
-  for BS in [32,64,128]:
+  for BS in [64,128]:
     for W in [4,8,16]:
       with Pool(W) as p:
         for _ in range(10):
