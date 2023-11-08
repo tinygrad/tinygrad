@@ -1,5 +1,5 @@
 import random
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, getenv
 from test.unit.test_shapetracker import CheckingShapeTracker
 random.seed(42)
 
@@ -55,7 +55,7 @@ def do_expand(st):
 
 if __name__ == "__main__":
   ops = [do_permute, do_pad, do_shrink, do_reshape_split_one, do_reshape_combine_two, do_stride, do_expand]
-  for _ in range(200):
+  for _ in range(getenv("CNT", 200)):
     st = CheckingShapeTracker((random.randint(2, 10), random.randint(2, 10), random.randint(2, 10)))
     for i in range(8): random.choice(ops)(st)
     st.assert_same()
