@@ -1,8 +1,10 @@
 import subprocess, time, re, hashlib, tempfile
 from pathlib import Path
 from typing import Optional, Tuple
+import ctypes, ctypes.util
 import numpy as np
-from pycuda.compiler import compile as cuda_compile # type: ignore
+import pycuda.driver as cuda_driver
+from pycuda.compiler import compile as cuda_compile
 from tinygrad.helpers import DEBUG, getenv, colored, diskcache
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
@@ -18,10 +20,9 @@ def pretty_ptx(s):
   s = re.sub(r'(\.)(param|reg|global)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # space
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
-def arch(): return "sm_" + "".join([str(x) for x in pycuda.driver.Context.get_device().compute_capability()])
+def arch(): return "sm_" + "".join([str(x) for x in cuda_driver.Context.get_device().compute_capability()])
 
 if getenv("CUDACPU", 0) == 1:
-  import ctypes, ctypes.util
   lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
   lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
   class cuda:
@@ -42,16 +43,13 @@ if getenv("CUDACPU", 0) == 1:
     class device:
       compute_capability = lambda: (3,5) # pylint: disable=unnecessary-lambda # noqa: E731
     get_device = lambda: context.device # pylint: disable=unnecessary-lambda # noqa: E731
-  import pycuda.driver # type: ignore
-  pycuda.driver.Context = context
+  cuda_driver.Context = context
   RawCUDABuffer = RawMallocBuffer
 else:
-  import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
-  import pycuda.driver as cuda # type: ignore
   class CUDAAllocator(LRUAllocator):
     def _do_alloc(self, size, dtype, device, **kwargs): return cuda.mem_alloc(size * dtype.itemsize) # type: ignore
     def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
-  CUDAAlloc = CUDAAllocator(pycuda.driver.Context.get_device().total_memory())
+  CUDAAlloc = CUDAAllocator(cuda_driver.Context.get_device().total_memory())
   class RawCUDABuffer(RawBufferCopyInOut): # type: ignore
     def __init__(self, size, dtype): super().__init__(size, dtype, allocator=CUDAAlloc)
     def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x.ravel(), stream) # type: ignore
