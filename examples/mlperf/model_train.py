@@ -121,7 +121,7 @@ def train_resnet():
         top_5_acc = calculate_accuracy(out, Y, 5)
         et = time.monotonic()
         eval_loss.append(loss.numpy().item() if i % 1000 == 0 else eval_loss[-1])
-        eval_times.append(et - st)
+        eval_times.append(et - cl)
         eval_top_1_acc.append(top_1_acc)
         eval_top_5_acc.append(top_5_acc)
         wandb.log({"eval/loss": sum(eval_loss) / len(eval_loss),
@@ -130,7 +130,7 @@ def train_resnet():
                   "eval/top_5_acc": sum(eval_top_5_acc) / len(eval_top_5_acc),
                   "eval/avg_time": sum(epoch_avg_time) / len(epoch_avg_time)
         })
-        val_time = (data_time+et-st)*steps_in_val_epoch*(epochs//4)/(60*60)
+        val_time = (et-st)*steps_in_val_epoch*(epochs//4)/(60*60)
         print(f'{(et-cl)*1000:7.2f} ms run {val_time:7.2f}hrs total val')
         cl = time.monotonic()
       epoch_avg_time = []
