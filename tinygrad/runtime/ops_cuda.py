@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 import numpy as np
 from pycuda.compiler import compile as cuda_compile
-from pycuda.driver import Context, Device, Module as cuda_ctx, cuda_device. cuda_module
+from pycuda.driver import Context, Device, Module as cuda_ctx, cuda_device, cuda_module
 from tinygrad.helpers import DEBUG, getenv, colored, diskcache, DType
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
