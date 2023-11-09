@@ -19,8 +19,8 @@ def get_train_files(dir=getenv("IMGNETTE2",0)):
   return train_files
 
 @functools.lru_cache(None)
-def get_val_files():
-  val_files = glob.glob(str(BASEDIR / "val/*/*"))
+def get_val_files(dir=getenv("IMGNETTE2",0)):
+  val_files =  glob.glob(str(BASEDIR/"val/*/*") if not dir else str(pathlib.Path(__file__).parent/"imagenet"/"imagenette2"/'val/*/*'))
   return val_files
 
 import time
