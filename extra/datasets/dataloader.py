@@ -6,6 +6,7 @@ import functools, pathlib
 from simplejpeg import decode_jpeg
 from multiprocessing import Pool
 from functools import partial
+from tinygrad.helpers import getenv
 import math
 
 BASEDIR = pathlib.Path(__file__).parent / "imagenet"
@@ -13,7 +14,7 @@ ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
 cir = {v[0]: int(k) for k,v in ci.items()}
 
 @functools.lru_cache(None)
-def get_train_files(dir=None):
+def get_train_files(dir=getenv("DIR",None)):
   train_files = glob.glob(str(BASEDIR/"train/*/*") if not dir else str(dir/'train/*/*'))
   return train_files
 
@@ -117,4 +118,11 @@ def benchmark_dataload_tm():
   return BS,W
  
 if __name__ == '__main__':
+  import sys, subprocess
+  for module in ['wandb', 'simplejpeg', 'pycuda']:
+      try: __import__(module)
+      except ImportError:
+          print(f"'{module}' not found. Installing...")
+          try: subprocess.check_call([sys.executable, "-m", "pip", "install", module])
+          except Exception as e: print(f"An error occurred while installing '{module}'.", e)
   benchmark_dataload_tm()
