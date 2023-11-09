@@ -141,9 +141,10 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       kk("}")
     elif uop == UOps.WMMA:
       if args[0] == "METAL":
+        assert dtype == dtypes._float2, "output dtype of METAL TC is _float2"
         # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
         output = ssa(u, 'wmma')
-        kk(f"float2 {output};")
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {output};")
         kk("{ simdgroup_float8x8 a,b,c;")
         kk(f"a.thread_elements()[0] = {r[vin[0]]}; a.thread_elements()[1] = {r[vin[1]]};")
         kk(f"b.thread_elements()[0] = {r[vin[2]]}; b.thread_elements()[1] = {r[vin[3]]};")
@@ -151,15 +152,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
         kk("simdgroup_multiply_accumulate(c, a, b, c);")
         kk(f"{output}.x = c.thread_elements()[0]; {output}.y = c.thread_elements()[1]; }}")
       elif args[0] == "HIP":
-        output = ssa(u, 'wmma')
-        kk(f"float8 {output};")
-        kk("{")
-        # TODO: this should be cast
-        kk(f"half16 a_frag = {{ {','.join(['(half)'+r[x] for x in vin[0:16]])} }};")
-        kk(f"half16 b_frag = {{ {','.join(['(half)'+r[x] for x in vin[16:32]])} }};")
-        kk(f"float8 c_frag = {{ {','.join([r[x] for x in vin[32:]])} }};")
-        kk(f"{output} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(a_frag, b_frag, c_frag);")
-        kk("}")
+        assert dtype == dtypes._float8, "output dtype of HIP TC is _float8"
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
       else:
         raise NotImplementedError(f"WMMA not implemented for {args}")
     elif uop == UOps.ALU:
@@ -209,7 +203,10 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       bufs.append(args)
       r[u] = args[0]
     elif uop == UOps.GEP:
-      r[u] = f"({r[vin[0]]}).{'xyzw'[args]}"
+      if dtype.size > 4:
+        r[u] = f"({r[vin[0]]})[{args}]"  # this is correct for HIP
+      else:
+        r[u] = f"({r[vin[0]]}).{'xyzw'[args]}"
     else:
       raise RuntimeError(f"failed to render {uop}")
 

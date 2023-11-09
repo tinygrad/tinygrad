@@ -293,6 +293,10 @@ class Linearizer(Kernel):
           for x in range(bx):
             for j in range(acc_reds):
               op1, op2, op3 = locals_to_store[0][2][(x+(j*bx))*wmma_sz[0]:(x+(j*bx)+1)*wmma_sz[0]], locals_to_store[1][2][(y+(j*by))*wmma_sz[1]:(y+(j*by)+1)*wmma_sz[1]], acc[i:i+wmma_sz[2]]
+              if self.opts.device == "HIP":
+                op1 = [self.uop(UOps.CAST, dtypes._half16, tuple(op1))]
+                op2 = [self.uop(UOps.CAST, dtypes._half16, tuple(op2))]
+                op3 = [self.uop(UOps.CAST, dtypes._float8, tuple(op3))]
               ret = self.uop(UOps.WMMA, dtypes._float2 if wmma_sz[2] == 2 else dtypes._float8, tuple(op1+op2+op3), (self.opts.device, self.tensor_core.dtype_in, self.tensor_core.dtype_out,))
               for z in range(cast(DType, ret.dtype).sz):
                 acc[i+z] = self.uop(UOps.PHI, dtypes.float, (op3[z], self.uop(UOps.GEP, dtypes.float, (ret,), z)) + global_loop_ctx + loop_ctx)
