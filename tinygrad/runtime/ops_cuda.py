@@ -44,7 +44,8 @@ if getenv("CUDACPU", 0) == 1:
     class device:
       compute_capability = lambda: (3,5) # pylint: disable=unnecessary-lambda # noqa: E731
     get_device = lambda: context.device # pylint: disable=unnecessary-lambda # noqa: E731
-  cuda.Context = context
+  import pycuda.driver #type: module
+  pycuda.driver.Context = context
   RawCUDABuffer = RawMallocBuffer
 else:
   import pycuda.autoprimaryctx #type: module # pylint: disable=unused-import # noqa: F401
