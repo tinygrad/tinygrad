@@ -19,7 +19,7 @@ def pretty_ptx(s):
   s = re.sub(r'(\.)(param|reg|global)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # space
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
-def arch(): return "sm_" + "".join([str(x) for x in Context.get_device().compute_capability()])
+def arch(): return "sm_" + "".join([str(x) for x in cuda_ctx.get_device().compute_capability()])
 def compile_cuda_prg(prg: str, target: cuda_ctx, options: list[str], no_extern_c: bool) -> cuda_module: return cuda_compile(prg, target=target, options=options, no_extern_c=no_extern_c,)
 
 if getenv("CUDACPU", 0) == 1:
