@@ -160,14 +160,15 @@ class View:
 
     strides, reverse_shape = [], reversed(new_shape)
     for d, s in reversed(to_shape_strides(self.shape, self.strides)):
-      acc, new_stride = 1, s
-      while acc < d:
+      acc, new_stride, equal = 1, s, False
+      while acc <= d and not equal:
         try: new_dim = next(reverse_shape)
         except StopIteration: break
         acc *= new_dim
         strides.append(new_stride)
         new_stride *= new_dim
-      if acc != d: break
+        if acc == d: equal = True
+      if not equal: break
     else:
       strides += [0,] * (len(new_shape) - len(strides))
       mask, extra = _reshape_mask(self, new_shape)
