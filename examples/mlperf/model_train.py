@@ -7,10 +7,10 @@ from extra.datasets.imagenet import PreFetcher
 from tqdm import tqdm
 import numpy as np
 import random
-import wandb
 import time
 
 def train_resnet():
+  import wandb
   from models.resnet import ResNet50
   from extra.datasets.imagenet import get_train_files, get_val_files
   from extra.datasets.dataloader import iterate
