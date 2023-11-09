@@ -74,7 +74,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
   }
   def int_div(x,y): return f"({x}//{y})" if y != '0' else f"{x}*tl.where({x}==0, float('nan'), float('inf'))"
   for u in uops:
-    uop,dtype,vin,args,_ = u
+    uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
     if uop == UOps.LOOP:
       kk(f"for {ssa(u, 'ridx')} in range({vin[0].arg}, {r[vin[1]]}):")
       depth += 1
