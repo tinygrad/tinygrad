@@ -79,7 +79,6 @@ def train_resnet():
     Tensor.training = True
     cl = time.perf_counter() 
     for i,(X,Y) in enumerate(t:= tqdm(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=W)),total=steps_in_train_epoch)):
-      if i == 10: break
       GlobalCounters.reset()
       st = time.perf_counter()
       data_time = st-cl
@@ -102,7 +101,6 @@ def train_resnet():
                  "train/loss": loss_cpu,
                  "train/GFLOPS": GlobalCounters.global_ops*1e-9/(cl-st),
       })
-      epoch_avg_time.append((data_time+(et-st)))
       tts.append(train_time)
       vts.append(val_time)
       cl = time.perf_counter()
