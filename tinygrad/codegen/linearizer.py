@@ -209,15 +209,11 @@ class Linearizer(Kernel):
         self.const(x.max+1) if isinstance(x.max, int) else cast(Node, x.max+1).render(self.render_ops, self)), cachable=False) for x in xx if not isinstance(x, NumNode) and x.expr is not None}
       self.loop_uops.update(new_loops)
       return tuple(new_loops.values())
-    def end_loop(xx:List[Variable]):
-      for x in xx[::-1]:
-        if not isinstance(x, NumNode) and x.expr is not None:
-          loop_uop = self.loop_uops[x.expr]
-          if loop_uop.uop == UOps.LOOP: self.uop(UOps.END, None, (loop_uop,))
 
     # set global/local size
     self.global_size: Optional[List[int]] = None
     self.local_size: Optional[List[int]] = None
+    global_loop_ctx: Tuple[UOp, ...] = tuple()
     if self.dont_use_locals:
       self.global_size = [x.max+1 for x in loop_global_idxs][::-1]
       self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr.replace("gidx", "idx"), x.max+1)) for i,x in enumerate(loop_global_idxs)})
@@ -228,7 +224,7 @@ class Linearizer(Kernel):
       self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_global_idxs)})
       self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_local_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})
     else:
-      render_loop(loop_global_idxs+loop_local_idxs)
+      global_loop_ctx = render_loop(loop_global_idxs+loop_local_idxs)
 
     # parse AST
     loaded_buffers = {}
@@ -296,8 +292,16 @@ class Linearizer(Kernel):
         for y in range(by):
           for x in range(bx):
             for j in range(acc_reds):
-              # TODO: make this a proper op with PHI node
-              self.uop(UOps.WMMA, None, tuple(locals_to_store[0][2][(x+(j*bx))*wmma_sz[0]:(x+(j*bx)+1)*wmma_sz[0]]+locals_to_store[1][2][(y+(j*by))*wmma_sz[1]:(y+(j*by)+1)*wmma_sz[1]]+acc[i:i+wmma_sz[2]]), (self.opts.device, self.tensor_core.dtype_in, self.tensor_core.dtype_out,))
+              op1, op2, op3 = locals_to_store[0][2][(x+(j*bx))*wmma_sz[0]:(x+(j*bx)+1)*wmma_sz[0]], locals_to_store[1][2][(y+(j*by))*wmma_sz[1]:(y+(j*by)+1)*wmma_sz[1]], acc[i:i+wmma_sz[2]]
+              if self.opts.device != "HIP":
+                ops = tuple(op1+op2+op3)
+              else:
+                ops = (self.uop(UOps.CAST, dtypes._half16, tuple(op1)),
+                       self.uop(UOps.CAST, dtypes._half16, tuple(op2)),
+                       self.uop(UOps.CAST, dtypes._float8, tuple(op3)))
+              ret = self.uop(UOps.WMMA, dtypes._float2 if wmma_sz[2] == 2 else dtypes._float8, ops, (self.opts.device, self.tensor_core.dtype_in, self.tensor_core.dtype_out,))
+              for z in range(cast(DType, ret.dtype).sz):
+                acc[i+z] = self.uop(UOps.PHI, dtypes.float, (op3[z], self.uop(UOps.GEP, dtypes.float, (ret,), z)) + global_loop_ctx + loop_ctx)
             i += wmma_sz[2]
       else:
         if locals_to_store:
@@ -309,10 +313,9 @@ class Linearizer(Kernel):
         loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs[1:], start=1) if b in self.earlybufs})
 
         # run early AST (with reduce)
-        self.ast_parse(self.reduceop, acc, self.acc_offsets(self.full_buf_index), loaded_buffers, do_reduce=True, loop_ctx=loop_ctx)
+        self.ast_parse(self.reduceop, acc, self.acc_offsets(self.full_buf_index), loaded_buffers, do_reduce=True, loop_ctx=global_loop_ctx + loop_ctx)
 
       # end the reduce loop
-      end_loop(reduce_idxs)
       self.load_cache.clear()
 
       # end the local loop, do the local reduce
@@ -320,7 +323,6 @@ class Linearizer(Kernel):
         fake_global_idxs = [x*0 for x in global_idxs]
         self.global_store(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, acc)  # store accumulators
         self.uop(UOps.BARRIER, None, (), cachable=False)
-        end_loop(loop_local_idxs)  # TODO: this is ending too much, should only end what's in the if?
         if self.opts.has_local:
           fake_idxs = [Variable.num(0)]*len(self.sts[-1].shape)
           fake_idxs[self.global_dims+self.local_dims:self.global_dims+len(local_idxs)] = local_idxs[self.local_dims:]
@@ -356,24 +358,23 @@ class Linearizer(Kernel):
         self.ast_parse(LazyOp(self.reduceop.op, (self.bufs[-1],)), acc, self.acc_offsets(-1), loaded_buffers, do_reduce=True, loop_ctx=loop_ctx) # type: ignore
 
         # end the late reduce loop
-        end_loop(end_local_idxs)
         self.load_cache.clear()
 
     # load latebufs
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})
 
     # run late AST
-    val = self.ast_parse(self.ast, acc, None, loaded_buffers)
+    val = self.ast_parse(self.ast, acc, None, loaded_buffers, loop_ctx=global_loop_ctx)
 
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
-    # end the global (and maybe local) loop
+    # end the if statement if we used it
     if if_gate: self.uop(UOps.END, None, (if_gate,))
-    end_loop(loop_global_idxs+loop_local_idxs if not self.group_for_reduce else loop_global_idxs)
 
     # (recursively) remove childless uops
-    UOPS_W_SIDE_EFFECTS = {UOps.STORE, UOps.WMMA, UOps.END, UOps.BARRIER, UOps.DEFINE_GLOBAL}
+    # NOTE: DEFINE_GLOBAL should be removable, but we'd have to propagate that
+    UOPS_W_SIDE_EFFECTS = {UOps.STORE, UOps.END, UOps.BARRIER, UOps.DEFINE_GLOBAL}
     while 1:
       has_child: Set[UOp] = set()
       for ru in self.uops:
@@ -384,7 +385,28 @@ class Linearizer(Kernel):
       if DEBUG >= 4: print(f"reduced UOp count from {len(self.uops)} to {len(nu)}")
       self.uops = nu
 
+    def get_recursive_deps(x:UOp) -> List[UOp]:
+      deps = set([x])
+      ssize = 0
+      while ssize != len(deps):
+        ssize = len(deps)
+        for u in self.uops:
+          if len(deps.intersection([x for x in u.vin if x.uop != UOps.PHI])):
+            deps.add(u)
+      return sorted(list(deps), key=lambda x: x.num)
+
+    # add END of loops after the last thing that (recursively) depends on them
+    for u in self.uops:
+      if u.uop == UOps.LOOP:
+        last_phi = self.uops.index(get_recursive_deps(u)[-1])
+        at_end = self.uops[last_phi+1:]
+        self.uops = self.uops[:last_phi+1]
+        self.uop(UOps.END, None, (u,), cachable=False)
+        self.uops += at_end
+
     # maybe graph the uops
+    if DEBUG >= 5:
+      for u in self.uops: print(u)
     if getenv("GRAPHUOPS"):
       from tinygrad.graph import graph_uops
       graph_uops(self.uops)
@@ -415,7 +437,7 @@ class Linearizer(Kernel):
       if arg == BinaryOps.DIV and vin[1].uop == UOps.CONST and vin[1].arg == 1.0: return vin[0]
     if cachable and key in self.saved_exprs: return self.saved_exprs[key]
     self.uops.append(UOp(uop, dtype, vin, arg, len(self.uops)))
-    if DEBUG >= 5: print(self.uops[-1])
+    #if DEBUG >= 5: print(self.uops[-1])
     if cachable: self.saved_exprs[key] = self.uops[-1]
     return self.uops[-1]
 

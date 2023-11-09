@@ -24,7 +24,7 @@ class TestLinearizerFailures(unittest.TestCase):
     lin = Linearizer(ast)
     assert fuzz_linearizer(lin) != "PASS"
 
-  @unittest.skipUnless(Device.DEFAULT in ["METAL", "GPU", "CLANG"], "fails on these backends")
+  @unittest.skipUnless(Device.DEFAULT in ["METAL", "GPU"], "fails on these backends")
   def test_failure_3(self):
     ast = LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.MEM, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(32, 8, 16, 16), strides=(2048, 256, 16, 1), offset=0, mask=None, contiguous=True),)))),), arg=(32, 8, 16, 1))
     lin = Linearizer(ast)
