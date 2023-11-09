@@ -69,7 +69,7 @@ class LazyOp:
   def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
     assert self.op in BinaryOps or self.op in UnaryOps or self.op in TernaryOps
     srcs = [z.replace_with_movement_ops(ops) for z in self.src]
-    return srcs[0].e(self.op, *srcs[1:], arg=self.arg)   # type: ignore
+    return srcs[0].e(self.op, *srcs[1:], arg=self.arg)  
 
   @property
   def st(self): raise NotImplementedError

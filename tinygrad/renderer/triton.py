@@ -42,7 +42,7 @@ def define_scalar(local_size, dtype, args):
 def uops_to_triton(function_name:str, uops:List[UOp]):
   local_size: List[int] = []
   depth = 1
-  signatures, dims, bufs, kernel, valid = [], [], [], [], [] #type: ignore
+  signatures, dims, bufs, kernel, valid = [], [], [], [], [] 
 
   c: DefaultDict[str, int] = defaultdict(int)
   r: Dict[UOp, str] = {}
