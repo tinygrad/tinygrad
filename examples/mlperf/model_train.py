@@ -79,7 +79,7 @@ def train_resnet():
     Tensor.training = True
     cl = time.perf_counter() 
     for i,(X,Y) in enumerate(t:= tqdm(PreFetcher(iterate(bs=BS,val=False,shuffle=True,num_workers=W)),total=steps_in_train_epoch)):
-      break
+      if i == 10: break
       GlobalCounters.reset()
       st = time.perf_counter()
       data_time = st-cl
