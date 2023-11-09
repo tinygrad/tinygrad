@@ -183,7 +183,20 @@ def get_run_onnx(onnx_model: ModelProto):
         y = opt["y"]
         intermediate_tensors[y].backward()
         ret = tuple([t.grad for t in inp])
-      
+      elif n.op_type == "DequantizeLinear":
+        x, x_scale, axis, x_zero_point = inp[0], inp[1], opt["axis"], opt["x_zero_point"]
+        axis = axis + x.ndim if axis < 0 else axis
+        x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
+        x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
+        ret = (x - x_zer) * x_sc
+
+        '''
+def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point=0, axis=1):
+  axis = axis + x.ndim if axis < 0 else axis
+  x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
+  x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
+  return (x - x_zer) * x_sc
+    '''  
       # onnx_ops.py
       elif hasattr(onnx_ops, n.op_type):
         fxn = getattr(onnx_ops, n.op_type)

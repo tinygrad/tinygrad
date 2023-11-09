@@ -594,12 +594,13 @@ def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
   return ret.cast(dtypes.bool)
 
 # Needs work Check dtype somehow
+'''
 def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point=0, axis=1):
   axis = axis + x.ndim if axis < 0 else axis
   x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
   x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
   return (x - x_zer) * x_sc
-
+'''
 # Needs work
 def IsNaN(x: Tensor):
   return (x < float("-inf")).cast(dtypes.bool)
