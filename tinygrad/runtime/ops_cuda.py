@@ -2,12 +2,15 @@ import subprocess, time, re, hashlib, tempfile
 from pathlib import Path
 from typing import Optional, Tuple
 import numpy as np
-from pycuda.compiler import compile as cuda_compile # type: ignore
-from tinygrad.helpers import DEBUG, getenv, colored, diskcache
+from pycuda.compiler import compile as cuda_compile
+from pycuda.driver import Context, Device, Module
+from tinygrad.helpers import DEBUG, getenv, colored, diskcache, DType
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cuda import CUDARenderer
+
+def compile_cuda_prg(source: str, options: list[str] = [], keep: bool = False, no_extern_c: bool = False, arch: str = None, code: str = None, cache_dir: str = None, include_dirs: list[str] = None, target: Context = None, thread: Device = None,) -> Module: return cuda_compile( source, options=options, keep=keep, no_extern_c=no_extern_c, arch=arch, code=code, cache_dir=cache_dir, include_dirs=include_dirs, target=target, thread=thread,)
 
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
@@ -42,23 +45,22 @@ if getenv("CUDACPU", 0) == 1:
     class device:
       compute_capability = lambda: (3,5) # pylint: disable=unnecessary-lambda # noqa: E731
     get_device = lambda: context.device # pylint: disable=unnecessary-lambda # noqa: E731
-  import pycuda.driver # type: ignore
-  pycuda.driver.Context = context
+  cuda.Context = context
   RawCUDABuffer = RawMallocBuffer
 else:
-  import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
-  import pycuda.driver as cuda # type: ignore
+  import pycuda.autoprimaryctx # type: module # pylint: disable=unused-import # noqa: F401
+  import pycuda.driver as cuda
   class CUDAAllocator(LRUAllocator):
-    def _do_alloc(self, size, dtype, device, **kwargs): return cuda.mem_alloc(size * dtype.itemsize) # type: ignore
-    def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
-  CUDAAlloc = CUDAAllocator(pycuda.driver.Context.get_device().total_memory())
-  class RawCUDABuffer(RawBufferCopyInOut): # type: ignore
-    def __init__(self, size, dtype): super().__init__(size, dtype, allocator=CUDAAlloc)
+      def _do_alloc(self, size, dtype,  device: cuda.Device, **kwargs) -> cuda.DeviceAllocation: return cuda.mem_alloc(size * dtype.itemsize)
+    def _cached_bufkey(self, size, dtype, device: cuda.Device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
+  CUDAAlloc = CUDAAllocator(cuda.Context.get_device().total_memory())
+  class RawCUDABuffer(RawBufferCopyInOut):
+      def __init__(self, size, dtype): super().__init__(size: int, dtype: DType, allocator=CUDAAlloc)
     def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x.ravel(), stream) # type: ignore
     def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf) # type: ignore
 
 @diskcache
-def compile_cuda(prg) -> bytes: return cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets'])
+def compile_cuda(prg) -> bytes: return cuda_compile_prg(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets'])
 
 class CUDAProgram:
   def __init__(self, name:str, _prg:bytes):
