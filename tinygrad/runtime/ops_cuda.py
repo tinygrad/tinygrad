@@ -18,7 +18,7 @@ def pretty_ptx(s):
   s = re.sub(r'(\.)(param|reg|global)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # space
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
-def arch(): return "sm_" + "".join([str(x) for x in cuda.driver.Context.get_device().compute_capability()])
+def arch(): return "sm_" + "".join([str(x) for x in cuda.driver.Context.get_device().compute_capability()]) #type: ignore
 
 if getenv("CUDACPU", 0) == 1:
   import ctypes, ctypes.util
