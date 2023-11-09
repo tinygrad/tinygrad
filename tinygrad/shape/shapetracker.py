@@ -109,8 +109,7 @@ class ShapeTracker:
       ordered_shape_strides, order = sort_by_strides(real_real_shape, strides)
       to_apply.extend([(MovementOps.RESHAPE, (-1,)), (MovementOps.SHRINK, ((real_offset,real_offset+buffer_size),))])
       if strides:
-        if (ordered_shape_strides[0][0]*ordered_shape_strides[0][1])-buffer_size > 0:
-          to_apply.append((MovementOps.PAD, ((0, (ordered_shape_strides[0][0] * ordered_shape_strides[0][1]) - buffer_size),)))
+        if (ordered_shape_strides[0][0]*ordered_shape_strides[0][1])-buffer_size > 0: to_apply.append((MovementOps.PAD, ((0, (ordered_shape_strides[0][0] * ordered_shape_strides[0][1]) - buffer_size),)))
         for i, shape_stride in enumerate(ordered_shape_strides):
           if i<len(ordered_shape_strides)-1 and shape_stride[1] < ordered_shape_strides[i+1][0]*ordered_shape_strides[i+1][1]:
             remaining_buffer = ordered_shape_strides[i-1][1] if i>0 else buffer_size
