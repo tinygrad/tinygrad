@@ -28,23 +28,20 @@ class Attention:
     xq, xk, xv = [xqkv.slice([None, None, (i*self.dim, (i+1)*self.dim)]).reshape(xqkv.shape[0], xqkv.shape[1], self.n_heads, self.head_dim) for i in range(3)]
     bsz, seqlen, _, _ = xq.shape
 
-    # reset kv cache
-    if start_pos.val == 0:
-      self.cache_k, self.cache_v = Tensor.zeros(bsz, start_pos, self.n_heads, self.head_dim), Tensor.zeros(bsz, start_pos, self.n_heads, self.head_dim)
+    # create kv cache
+    if not hasattr(self, "cache_k"):
+      self.cache_k, self.cache_v = Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim), Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim)
 
     # append to kv cache
     assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
-    keys = self.cache_k.reshape(bsz, start_pos, self.n_heads, self.head_dim).cat(xk, dim=1)
-    values = self.cache_v.reshape(bsz, start_pos, self.n_heads, self.head_dim).cat(xv, dim=1)
-    if keys.unbounded_shape == self.cache_k.unbounded_shape:
-      # NOTE: this won't trigger the second time, because the first one is large
-      keys = self.cache_k.assign(keys).realize()
-      values = self.cache_v.assign(values).realize()
-    else:
-      self.cache_k = keys.realize()
-      self.cache_v = values.realize()
 
-    #print(self.cache_k.shape, self.cache_k.lazydata.realized)
+    # TODO: see if we can replace cache update with: self.cache_k[:, start_pos:(start_pos+seqlen), :, :, :].assign(xk)
+    keys, values = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1), self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
+
+    # pad and save the cache
+    self.cache_k.assign(keys.cat(self.cache_k.shrink((None, (start_pos+seqlen, MAX_CONTEXT), None, None)), dim=1)).realize()
+    self.cache_v.assign(values.cat(self.cache_v.shrink((None, (start_pos+seqlen, MAX_CONTEXT), None, None)), dim=1)).realize()
+
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1))
 
@@ -85,12 +82,14 @@ class Transformer:
     pos_emb = self.wpe(self.allpos.shrink((None, (start_pos, start_pos+seqlen))))
     h = tok_emb + pos_emb
 
+    # TODO: should be start_pos == 0 for branch?
     mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf")).triu(start_pos.val+1).realize() if seqlen > 1 else None
     for hi in self.h: h = hi(h, start_pos=start_pos, mask=mask)
 
     logits = self.lm_head(self.ln_f(h))
     return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
 
+  # TODO: fix token length 0 and 1
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:Optional[float]=None):
     return (self.forward_jit if tokens.shape[0:2] == (1,1) and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
 
