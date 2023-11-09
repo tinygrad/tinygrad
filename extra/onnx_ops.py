@@ -178,6 +178,7 @@ def Expand(input: Tensor, shape):
   shape_ret = tuple(max(sx, sy) for sx,sy in zip(x_shape, y_shape))
   return input.reshape(x_shape).expand(shape_ret)
 
+
 # **************** Complex Ops ****************
 
 def Gemm(A: Tensor, B: Tensor, C: Tensor=None, alpha=1.0, beta=1.0, transA=0, transB=0, broadcast=0):
@@ -588,7 +589,7 @@ def EyeLike(x: Tensor, dtype=None, k=0):
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 
 # Needs work
-def IsInf(x,detect_negative=1,detect_positive=1):
+def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
   ret = (x == float("inf"))*detect_positive + (x == float("-inf"))*detect_negative + Tensor.zeros(*x.shape)
   return ret.cast(dtypes.bool)
 
@@ -603,15 +604,14 @@ def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point=0, axis=1):
 def IsNaN(x: Tensor):
   return (x < float("-inf")).cast(dtypes.bool)
 
-# TODO ugly af https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_image_decoder.py
+# copied from https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_image_decoder.py
+# without importing PIL we'll have to manually decode a bunch of image formats like PNG, JPEG, WebP, etc
 def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
   try:
     import PIL.Image
     import io
   except ImportError as e:
-    raise ImportError(
-      "Pillow must be installed to use the reference implementation of the ImageDecoder operator"
-      ) from e
+    raise ImportError("Pillow must be installed to use the reference implementation of the ImageDecoder operator") from e
   img = PIL.Image.open(io.BytesIO(safe_numpy(encoded_stream).tobytes()))
   if pixel_format == "BGR":
     return Tensor(np.array(img))[:, :, ::-1]
@@ -628,23 +628,17 @@ def Gelu(x:Tensor, approximate=None):
   if approximate == "tanh": return 0.5 * x * (1 + ((x + 0.044715 * x.pow(3)) * math.sqrt(2/math.pi)).tanh())
   else: return 0.5 * x * (1 + Erf(x/math.sqrt(2)))
 
-#TODO https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_affine_grid.py
 def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
   _, _, *data_sz = safe_numpy(size).tolist()
   size_zeros = Tensor.zeros(data_sz)
   original_grid = Tensor.ones(data_sz)
   stackable = [original_grid]
-  print(f"{data_sz}")
-  print(f"{size_zeros=}")
-  print(f"{original_grid=}")
-  print(safe_numpy(size), "FUCK")
   for dim, dim_sz in enumerate(data_sz):
     if align_corners == 1: a = Tensor.arange(-1, 1.0001, 2/(dim_sz-1))
     else: a = Tensor.arange(-1+1/dim_sz, 1, 2/dim_sz)
     if dim == 0: stackable = [a.reshape(dim_sz, *[1]*(len(data_sz)-1)) + size_zeros, *stackable]
     elif dim == 1: stackable = [a.reshape(1, dim_sz, *[1]*(len(data_sz)-2)) + size_zeros, *stackable]
     else: stackable = [a.reshape(1, dim_sz) + size_zeros, *stackable]
-
   original_grid = Tensor.stack(stackable, dim=len(data_sz))
   if original_grid.ndim == 3:
     N, dim_2d, dim_homo = theta.shape
@@ -661,7 +655,6 @@ def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
     assert dim_homo == 4
     original_grid = original_grid.reshape(D*H*W, dim_homo).transpose()
     return theta.matmul(original_grid).permute(0,2,1).reshape(N, D, H, W, dim_3d)
-
 
 # **************** com.microsoft Ops ****************
 

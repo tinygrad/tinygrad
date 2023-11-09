@@ -144,7 +144,7 @@ def get_run_onnx(onnx_model: ModelProto):
         inp.append(t)
       opt: Dict = attribute_dict[num]
       if debug >= 1: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
-
+      
       # NOTE some ops live here because they require some local variables
       if n.op_type == "Split": # have to use n.output for cases when num_outputs is absent
         axis = opt.get("axis", 0)
@@ -183,7 +183,7 @@ def get_run_onnx(onnx_model: ModelProto):
         y = opt["y"]
         intermediate_tensors[y].backward()
         ret = tuple([t.grad for t in inp])
-
+      
       # onnx_ops.py
       elif hasattr(onnx_ops, n.op_type):
         fxn = getattr(onnx_ops, n.op_type)
@@ -197,7 +197,7 @@ def get_run_onnx(onnx_model: ModelProto):
       else:
         print("UNSUPPORTED", n.op_type, n.input, n.output)
         raise Exception(f"op_type {n.op_type} not supported")
-
+      
       if not isinstance(ret, tuple): ret = (ret, )
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
       if debug >= 2: print([x.shape if isinstance(x, Tensor) else None for x in ret])
