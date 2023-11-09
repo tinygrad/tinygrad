@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 import numpy as np
 from pycuda.compiler import compile as cuda_compile
-from pycuda.driver import Context, Device, Module as cuda_ctx, cuda_device, cuda_module
+from pycuda.driver import Context, Device, Module as cuda_ctx, cuda_dev, cuda_mod
 from tinygrad.helpers import DEBUG, getenv, colored, diskcache, DType
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
@@ -20,7 +20,7 @@ def pretty_ptx(s):
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
 def arch(): return "sm_" + "".join([str(x) for x in cuda_ctx.get_device().compute_capability()])
-def compile_cuda_prg(prg: str, target: cuda_ctx, options: list[str], no_extern_c: bool) -> cuda_module: return cuda_compile(prg, target=target, options=options, no_extern_c=no_extern_c,)
+def compile_cuda_prg(prg: str, target: cuda_ctx, options: list[str], no_extern_c: bool) -> cuda_mod: return cuda_compile(prg, target=target, options=options, no_extern_c=no_extern_c,)
 
 if getenv("CUDACPU", 0) == 1:
   import ctypes, ctypes.util
