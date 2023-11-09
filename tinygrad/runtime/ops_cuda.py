@@ -20,7 +20,7 @@ def pretty_ptx(s):
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
 def arch(): return "sm_" + "".join([str(x) for x in Context.get_device().compute_capability()])
-def compile_cuda_prg(prg: str, options: list[str] = [], keep: bool = False, no_extern_c: bool = False, arch: str = None, code: str = None, cache_dir: str = None, include_dirs: list[str] = None, target: cuda_ctx = None, thread: cuda_device = None,) -> cuda_module: return cuda_compile(prg, options=options, keep=keep, no_extern_c=no_extern_c, arch=arch, code=code, cache_dir=cache_dir, include_dirs=include_dirs, target=target, thread=thread,)
+def compile_cuda_prg(prg: str, target: cuda_ctx, options: list[str], no_extern_c: bool) -> cuda_module: return cuda_compile(prg, target=target, options=options, no_extern_c=no_extern_c,)
 
 if getenv("CUDACPU", 0) == 1:
   import ctypes, ctypes.util
