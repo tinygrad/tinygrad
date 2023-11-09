@@ -153,7 +153,7 @@ def train_maskrcnn():
 
 if __name__ == "__main__":
   import sys, subprocess
-  for module in [ 'wandb', 'simplejpeg']:
+  for module in ['wandb', 'simplejpeg', 'pycuda']:
       try: __import__(module)
       except ImportError:
           print(f"'{module}' not found. Installing...")
