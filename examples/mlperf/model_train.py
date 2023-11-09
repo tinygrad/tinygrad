@@ -74,7 +74,7 @@ def train_resnet():
 
   steps_in_train_epoch = (len(get_train_files())//BS) - 1
   steps_in_val_epoch = (len(get_val_files())//BS) - 1
-  epoch_avg_time,tts, vts = [],[],[]
+  tts, vts = [],[]
   for e in range(epochs):
     Tensor.training = True
     cl = time.perf_counter() 
@@ -128,12 +128,10 @@ def train_resnet():
                   "eval/forward_time": sum(eval_times) / len(eval_times),
                   "eval/top_1_acc": sum(eval_top_1_acc) / len(eval_top_1_acc),
                   "eval/top_5_acc": sum(eval_top_5_acc) / len(eval_top_5_acc),
-                  "eval/avg_time": sum(epoch_avg_time) / len(epoch_avg_time)
         })
-        val_time = (et-st)*steps_in_val_epoch*(epochs//4)/(60*60)
+        val_time = (et-cl)*steps_in_val_epoch*(epochs//4)/(60*60)
         print(f'{(et-cl)*1000:7.2f} ms run {val_time:7.2f}hrs total val')
         cl = time.monotonic()
-      epoch_avg_time = []
 
 def train_retinanet():
   # TODO: Retinanet
