@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict
+from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict, cast
 import math
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
@@ -46,6 +46,8 @@ class CStyleLanguage(NamedTuple):
     if len(x) == 1: return f"({var_dtype.name})({x[0]})"
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.float4 is not None, "cast is not supported on this platform"
+    if var_dtype == dtypes._half16: return f"(half16)({','.join(x)})"
+    if var_dtype == dtypes._float8: return f"(float8)({','.join(x)})"
     if var_dtype == dtypes._float4: return f"{self.float4}({','.join(x)})"
     if var_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
     if var_dtype == dtypes._int2: return f"{self.float4.replace('float4', 'int2')}({','.join(x)})"
@@ -203,7 +205,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       bufs.append(args)
       r[u] = args[0]
     elif uop == UOps.GEP:
-      if dtype.size > 4:
+      if cast(DType, vin[0]).dtype.sz > 4:
         r[u] = f"({r[vin[0]]})[{args}]"  # this is correct for HIP
       else:
         r[u] = f"({r[vin[0]]}).{'xyzw'[args]}"
