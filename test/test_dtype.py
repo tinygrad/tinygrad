@@ -81,25 +81,17 @@ class TestDType(unittest.TestCase):
     get_available_cast_dtypes(self.DTYPE)
   ))
   def test_upcast_to_ops(self): list(map(
-    lambda dtype: _test_ops(a_dtype=dtype, b_dtype=self.DTYPE, target_dtype=min([dtype, self.DTYPE], key=lambda x: x.priority)) if dtype.itemsize < self.DTYPE.itemsize else None,
+    lambda dtype: _test_ops(a_dtype=dtype, b_dtype=self.DTYPE, target_dtype=max([dtype, self.DTYPE], key=lambda x: x.priority)) if dtype.itemsize < self.DTYPE.itemsize else None,
     get_available_cast_dtypes(self.DTYPE)
   ))
 
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype:DType):
-  if not is_dtype_supported(a_dtype) or not is_dtype_supported(b_dtype): raise unittest.SkipTest("dtype not supported")
-  if a_dtype == dtypes.bool or b_dtype == dtypes.bool: raise unittest.SkipTest("bool not supported")
-
-  try: _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)+Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [2,4,6,8])
-  except AssertionError as e: raise AssertionError(f"[0] {a_dtype} + {b_dtype} does not match target {target_dtype}")
-
-  try: _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)*Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [1,4,9,16])
-  except AssertionError as e: raise AssertionError(f"[1] {a_dtype} * {b_dtype} does not match target {target_dtype}")
-
-  try: _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
-  except AssertionError as e: raise AssertionError(f"[2] {a_dtype} eye {b_dtype} does not match target {target_dtype}")
-
-  try: _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
-  except AssertionError as e: raise AssertionError(f"[3] {a_dtype} [] {b_dtype} does not match target {target_dtype}")
+  if not is_dtype_supported(a_dtype) or not is_dtype_supported(b_dtype): return
+  if a_dtype == dtypes.bool or b_dtype == dtypes.bool: return
+  _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)+Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [2,4,6,8])
+  _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)*Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [1,4,9,16])
+  _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
+  _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
 
 class TestBFloat16DType(unittest.TestCase):
   def setUp(self):
