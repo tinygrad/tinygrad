@@ -14,7 +14,7 @@ os.environ["METAL"] = "1"
 import time
 import numpy as np
 from tinygrad.helpers import dtypes, getenv
-from tinygrad.runtime.ops_metal import RawMetalBuffer, MetalProgram
+from tinygrad.runtime.ops_metal import RawMetalBuffer, MetalProgram, compile_metal
 
 N = 16384
 M = 4096
@@ -40,7 +40,7 @@ WORKSIZE_ROW = 16
 WORKSIZE_COL = 1
 LOCAL_SIZE = [32, WORKSIZE_COL, WORKSIZE_ROW]
 GLOBAL_SIZE = [M//(LOCAL_SIZE[0]*LOCAL_SIZE[1]*4), 1, 1]
-prog_string = f"""
+prog = compile_metal(f"""
 #include <metal_stdlib>
 using namespace metal;
 kernel void test(device float* data0, const device float* data1, const device float* data2, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {{
@@ -86,15 +86,15 @@ kernel void test(device float* data0, const device float* data1, const device fl
     *( (device float4 *) (data0 + (gidx0*{M//GLOBAL_SIZE[0]}) + ( ( (lidx1*{LOCAL_SIZE[1]})+lidx2 ) * 4 ) ) ) = out;
   }}
 }}
-"""
-prog = MetalProgram("test", prog_string)
+""")
+prog = MetalProgram("test", prog)
 # print(prog_string)
 na = np.zeros(M, dtype=np.float32)
 b = RawMetalBuffer.fromCPU(nb)
 c = RawMetalBuffer.fromCPU(nc)
 def metalrun():
   a = RawMetalBuffer.fromCPU(na)
-  prog(GLOBAL_SIZE, LOCAL_SIZE, a, b, c, wait=True)
+  prog(a, b, c, global_size=GLOBAL_SIZE, local_size=LOCAL_SIZE, wait=True)
   return a
 def timeit(fxn):
   st = time.perf_counter()
