@@ -1,5 +1,5 @@
 import os, mmap
-try: import _posixshmem    # type: ignore
+try: import _posixshmem
 except Exception: pass
 from typing import Callable, Dict
 from tinygrad.helpers import DType, OSX

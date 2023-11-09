@@ -3,7 +3,7 @@ import os
 os.environ['PYOPENCL_NO_CACHE'] = '1'
 import pathlib
 import numpy as np
-import pyopencl as cl  # type: ignore
+import pyopencl as cl
 from typing import Optional, List, Tuple
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport, diskcache
 from tinygrad.ops import Compiled
@@ -71,7 +71,7 @@ def compile_gpu(prg:str) -> bytes:
 
 class CLProgram:
   def __init__(self, name:str, prg:bytes, argdtypes=None, options=None):
-    self.name, self.clprograms = name, [cl.Program(ctx, ctx.devices, [prg]*len(ctx.devices)) for ctx in CL.cl_ctxs]  # type: ignore
+    self.name, self.clprograms = name, [cl.Program(ctx, ctx.devices, [prg]*len(ctx.devices)) for ctx in CL.cl_ctxs]
     self._clprgs = [clprogram.build(options=options) for clprogram in self.clprograms]
     self.clprgs = [clprg.__getattr__(name) for clprg in self._clprgs]
     if DEBUG >= 5 and not OSX:

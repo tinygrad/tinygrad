@@ -109,7 +109,7 @@ class Tensor:
     # TODO: this is a hack for writing to DISK
     if self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
-      self.contiguous().realize().lazydata.realized._copyin(x.numpy())  # type: ignore
+      self.contiguous().realize().lazydata.realized._copyin(x.numpy())
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"

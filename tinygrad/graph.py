@@ -1,6 +1,6 @@
 import os, atexit, functools
 try:
-  import networkx as nx  # type: ignore
+  import networkx as nx
 except ImportError:
   nx = None # graph won't work
 from collections import defaultdict
