@@ -45,7 +45,7 @@ class TinyJit:
         assert input_rawbuffers[input_name][0].dtype == expected_type, f"type mismatch in JIT, {input_rawbuffers[input_name][0].dtype} != {expected_type}"
         assert input_rawbuffers[input_name][1].unbind() == expected_st, f"ShapeTracker mismatch in JIT, {input_rawbuffers[input_name][1].unbind()} != {expected_st}"
         self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name][0]
-      for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), var_vals, jit=True)
+      for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), {v:var_vals[v] for v in ji.prg.vars}, jit=True)
     elif self.cnt == 1:
       CacheCollector.start(var_vals)
       self.ret = self.fxn(*args, **kwargs)

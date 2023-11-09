@@ -188,6 +188,7 @@ class ASTRunner:
   def __init__(self, name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
     if DEBUG >= 4: print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
+    self.vars:List[Variable] = []
 
   def build(self, compiler, runtime):
     self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
@@ -258,11 +259,6 @@ class Compiled:
     # all the rawbuffers
     rawbuffers = [output.realized] + [x.realized for x in inputs]
 
-    # extract real vars used in ast
-    from tinygrad.lazy import vars_from_ast
-    ast_vars = vars_from_ast(ast)
-    assert all(v._val is None for v in ast_vars), f"ast contains bound Variable {ast_vars}"
-
     # compilation time
     def get_program():
       if DEBUG >= 3:
@@ -289,7 +285,12 @@ class Compiled:
           k = timed[0][1]
       else:
         k.required_optimizations()
-      return self.to_program(k)
+      prg = self.to_program(k)
+      # extract real vars used in ast
+      from tinygrad.lazy import vars_from_ast
+      prg.vars = vars_from_ast(ast)
+      assert all(v._val is None for v in prg.vars), f"ast contains bound Variable {prg.vars}"
+      return prg
 
     if getenv("ENABLE_METHOD_CACHE", 1):
       if ast not in self.method_cache: self.method_cache[ast] = get_program()
@@ -299,5 +300,5 @@ class Compiled:
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
-    prg.exec(rawbuffers, var_vals={k:var_vals[k] for k in ast_vars})
+    prg.exec(rawbuffers, var_vals={k:var_vals[k] for k in prg.vars})
     return output.realized
