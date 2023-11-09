@@ -106,7 +106,7 @@ def train_resnet():
       vts.append(val_time)
       cl = time.perf_counter()
 
-    if e % 4 == 1:
+    if e % 4 == 0:
       eval_loss = []
       eval_times = []
       eval_top_1_acc = []
