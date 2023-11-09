@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, cast
 from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, DEBUG, dedup
-from tinygrad.shape.symbolic import Variable, MulNode, NumNode, Node, SumNode, sint
+from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, sint
 from tinygrad.shape.view import View, to_shape_strides
 
 def expr_node_mask(view:View, idx, valid=None) -> Node:
