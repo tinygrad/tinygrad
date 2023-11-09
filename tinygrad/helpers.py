@@ -156,16 +156,16 @@ class GlobalCounters:
 
 # *** universal database cache ***
 
-_cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad")
-CACHEDB: str = getenv("CACHEDB", os.path.join(_cache_dir, "cache.db"))
-_cache_dir = CACHEDB.rsplit(os.path.sep, 1)[0] if getenv("CACHEDB", "") else _cache_dir
+_cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache"))
+CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
+CACHELEVEL = getenv("CACHELEVEL", 2)
 
 VERSION = 6
 _db_connection = None
 def db_connection():
   global _db_connection
   if _db_connection is None:
-    os.makedirs(_cache_dir, exist_ok=True)
+    os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
     _db_connection = sqlite3.connect(CACHEDB)
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
     if diskcache_get("meta", "version") != VERSION:
