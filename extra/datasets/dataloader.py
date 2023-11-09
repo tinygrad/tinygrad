@@ -14,8 +14,8 @@ ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
 cir = {v[0]: int(k) for k,v in ci.items()}
 
 @functools.lru_cache(None)
-def get_train_files(dir=getenv("DIR",0)):
-  train_files = glob.glob(str(BASEDIR/"train/*/*") if not dir else str(dir/'train/*/*'))
+def get_train_files(dir=getenv("IMGNETTE2",0)):
+  train_files = glob.glob(str(BASEDIR/"train/*/*") if not dir else str(pathlib.Path(__file__).parent/"imagenet"/"imagenette2"/'train/*/*'))
   return train_files
 
 @functools.lru_cache(None)
