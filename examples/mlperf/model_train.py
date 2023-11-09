@@ -105,7 +105,7 @@ def train_resnet():
       tts.append(train_time)
       vts.append(val_time)
 
-    if e % 4 == 0:
+    if e % 4 == 1:
       eval_loss = []
       eval_times = []
       eval_top_1_acc = []
