@@ -160,7 +160,7 @@ if __name__ == "__main__":
           try: subprocess.check_call([sys.executable, "-m", "pip", "install", module])
           except Exception as e: print(f"An error occurred while installing '{module}'.", e)
   from extra.datasets.dataloader import benchmark_dataload_tm 
-  benchmark_dataload_tm()
+  #benchmark_dataload_tm()
   with Tensor.train():
     for m in getenv("MODEL","resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
       nm = f"train_{m}"
