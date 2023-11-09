@@ -238,15 +238,15 @@ def _format_padding(onnx_pads, ndims=None, axes=None):
     np_pads[axes[i]] = (onnx_pads[i], onnx_pads[i + num_axes])
   return np_pads
 
-# TODO there's unneeded code
 def _padding(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
   if auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations, ceil_mode)
   if pads is None: return X
   pads = _format_padding(pads, ndims=len(X.shape), axes=axes)
   return X.pad(tuple(pads), value=constant_value)
 
-# TODO works but hacky ugh, think of cleaner way to do this
-def _auto_pad(X: Tensor, auto_pad, strides, kernel_shape, dilations, ceil_mode):
+# TODO works but hacky and messy, think of cleaner way to do this
+# HACK ceil_mode and "VALID"
+def _auto_pad(X: Tensor, auto_pad, strides, kernel_shape, dilations, ceil_mode=0):
   strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
   dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
   if auto_pad == "SAME_UPPER" or auto_pad == "SAME_LOWER":
@@ -315,19 +315,13 @@ def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_i
     div = _padding(Tensor.ones(*X.shape), pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations).avg_pool2d(kernel_shape, stride=strides)
     return padding_included / div
 
-# 0: op MaxPool shape [(1, 1, 32, 32, 32)] opt {'ceil_mode': 1, 'dilations': (2, 2, 2), 'kernel_shape': (5, 5, 5), 'strides': (3, 3, 3)}
 def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
-  if ceil_mode: auto_pad="VALID"
-  print(f"{X.shape}")
+  if ceil_mode and auto_pad == "NOTSET": auto_pad="VALID"
   ret = _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-len(kernel_shape):], strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
-  print(f"after padding: {ret.shape}")
   ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations)
-  print(f"after max_pool: {ret.shape}")
   ret_len, X_len = ret.numel(), X.numel()
   indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().reshape(1, X_len).expand(ret_len, X_len)) * Tensor.arange(X_len).reshape(1, X_len).expand(ret_len, X_len)).sum(1).reshape(ret.shape).cast(dtypes.int64)
   if storage_order: indices = indices.transpose(indices.ndim-2, indices.ndim-1)
-  print(ret.numpy())
-  print(ret.shape)
   return ret, indices
 
 def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Tensor=None, kernel_shape=None, pads=None, strides=None):
