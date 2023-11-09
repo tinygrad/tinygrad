@@ -715,8 +715,8 @@ class Tensor:
   def __gt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, True))
   def __ge__(self, x) -> Tensor: return 1.0-(self<x)
   def __le__(self, x) -> Tensor: return 1.0-(self>x)
-  def __ne__(self, x) -> Tensor: return (self<x) + (self>x)   
-  def __eq__(self, x) -> Tensor: return 1.0-(self != x)       
+  def __ne__(self, x) -> Tensor: return (self<x) + (self>x)   # type: ignore
+  def __eq__(self, x) -> Tensor: return 1.0-(self != x)       # type: ignore
 
   # ***** functional nn ops *****
 
