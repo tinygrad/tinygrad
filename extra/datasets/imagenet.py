@@ -7,13 +7,10 @@ import numpy as np
 from PIL import Image
 import functools, pathlib
 from itertools import repeat
-import cloudpickle
 import threading
-from tqdm import tqdm
 from queue import Queue
 from threading import Thread
 from tinygrad.helpers import getenv
-import gc
 
 # TODO mem leak here - obj np.ndarray
 class PreFetcher(Thread):
