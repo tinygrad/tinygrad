@@ -1,8 +1,8 @@
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod, dtypes, ImageDType
+from tinygrad.helpers import prod, dtypes, ImageDType, flatten
 from extra.onnx import safe_numpy
 from onnx.helper import tensor_dtype_to_np_dtype
-from onnx.onnx_pb import TensorProto
+from onnx import TensorProto
 import os
 import numpy as np
 import functools
@@ -238,19 +238,27 @@ def _format_padding(onnx_pads, ndims=None, axes=None):
     np_pads[axes[i]] = (onnx_pads[i], onnx_pads[i + num_axes])
   return np_pads
 
-def _padding(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., strides=None, kernel_shape=None, dilations=None):
-  if auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
+# TODO there's unneeded code
+def _padding(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
+  if auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations, ceil_mode)
   if pads is None: return X
   pads = _format_padding(pads, ndims=len(X.shape), axes=axes)
   return X.pad(tuple(pads), value=constant_value)
 
-def _auto_pad(X, auto_pad, strides, kernel_shape, dilations):
+# TODO works but hacky ugh, think of cleaner way to do this
+def _auto_pad(X: Tensor, auto_pad, strides, kernel_shape, dilations, ceil_mode):
   strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
   dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
-  pad_shape = [(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(X.shape[-len(strides):], strides, kernel_shape, dilations)]
-  if auto_pad == "SAME_UPPER": return [pad_shape[0]//2, pad_shape[1]//2, pad_shape[0]-pad_shape[0]//2, pad_shape[1]-pad_shape[1]//2]
-  elif auto_pad == "SAME_LOWER": return [pad_shape[0]-pad_shape[0]//2, pad_shape[1]-pad_shape[1]//2, pad_shape[0]//2,  pad_shape[1]//2]
-  else: raise NotImplementedError(f"auto_pad={auto_pad} not implemented, yet")
+  if auto_pad == "SAME_UPPER" or auto_pad == "SAME_LOWER":
+    pad_shape = [(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
+    pad_shape = flatten([[sh//2, sh-sh//2] for sh in pad_shape])
+    return pad_shape[::2] + pad_shape[1::2] if auto_pad == "SAME_UPPER" else pad_shape[1::2] + pad_shape[::2]
+  elif auto_pad == "VALID":
+    out_spatial_shape = [math.ceil((sh - ((ker-1)*dil+1)) / st) + 1 if ceil_mode else math.floor((sh - ((ker-1)*dil+1)) / st) + 1 for sh, st, ker, dil in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
+    pad_shape = [(osh-1)*st+((ks-1)*dil+1)-ish for osh, st, ks, dil, ish in zip(out_spatial_shape, strides, kernel_shape, dilations, X.shape[-len(kernel_shape):])]
+    pad_shape = flatten([[sh//2, sh-sh//2] for sh in pad_shape])
+    return pad_shape[::2] + pad_shape[1::2]
+  else: raise NotImplementedError(f"auto_pad={auto_pad} not implemented")
 
 def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=None, axes: Tensor=None, mode="constant", value: float=0.):
   constant_value = value if constant_value is None else float(safe_numpy(constant_value)[0])
@@ -297,7 +305,8 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
 
 def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
   if dilations != 1: raise NotImplementedError(f"dilations != 1 not supported, dilations:{dilations}")
-  pixel_axes = tuple(range(len(X.shape)))[-2:]
+  # pixel_axes = tuple(range(len(X.shape)))[-2:] # TODO WTF IS THIS WRONG?!
+  pixel_axes = tuple(range(len(X.shape)))[-len(kernel_shape):]
   if ceil_mode: auto_pad = "SAME_UPPER"
   padding_included = _padding(X, pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations).avg_pool2d(kernel_shape, stride=strides)
   if count_include_pad:
@@ -306,13 +315,19 @@ def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_i
     div = _padding(Tensor.ones(*X.shape), pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations).avg_pool2d(kernel_shape, stride=strides)
     return padding_included / div
 
+# 0: op MaxPool shape [(1, 1, 32, 32, 32)] opt {'ceil_mode': 1, 'dilations': (2, 2, 2), 'kernel_shape': (5, 5, 5), 'strides': (3, 3, 3)}
 def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
-  if ceil_mode: auto_pad = "SAME_UPPER"
-  ret = _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-len(kernel_shape):], strides=strides, kernel_shape=kernel_shape, dilations=dilations)
+  if ceil_mode: auto_pad="VALID"
+  print(f"{X.shape}")
+  ret = _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-len(kernel_shape):], strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
+  print(f"after padding: {ret.shape}")
   ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations)
+  print(f"after max_pool: {ret.shape}")
   ret_len, X_len = ret.numel(), X.numel()
   indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().reshape(1, X_len).expand(ret_len, X_len)) * Tensor.arange(X_len).reshape(1, X_len).expand(ret_len, X_len)).sum(1).reshape(ret.shape).cast(dtypes.int64)
   if storage_order: indices = indices.transpose(indices.ndim-2, indices.ndim-1)
+  print(ret.numpy())
+  print(ret.shape)
   return ret, indices
 
 def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Tensor=None, kernel_shape=None, pads=None, strides=None):
@@ -617,7 +632,7 @@ def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
 
 def Gelu(x:Tensor, approximate=None):
   if approximate == "tanh": return 0.5 * x * (1 + ((x + 0.044715 * x.pow(3)) * math.sqrt(2/math.pi)).tanh())
-  else: return 0.5 * x * (1 + Erf(x/math.sqrt(2))) 
+  else: return 0.5 * x * (1 + Erf(x/math.sqrt(2)))
 
 #TODO https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_affine_grid.py
 def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
@@ -630,7 +645,7 @@ def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
   print(f"{original_grid=}")
   print(safe_numpy(size), "FUCK")
   for dim, dim_sz in enumerate(data_sz):
-    if align_corners == 1: a = Tensor.arange(-1, 1.0001, 2/(dim_sz-1), requires_grad=False, dtype=dtypes.int32)
+    if align_corners == 1: a = Tensor.arange(-1, 1.0001, 2/(dim_sz-1))
     else: a = Tensor.arange(-1+1/dim_sz, 1, 2/dim_sz)
     if dim == 0: stackable = [a.reshape(dim_sz, *[1]*(len(data_sz)-1)) + size_zeros, *stackable]
     elif dim == 1: stackable = [a.reshape(1, dim_sz, *[1]*(len(data_sz)-2)) + size_zeros, *stackable]
@@ -644,7 +659,7 @@ def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
     assert dim_homo == 3
     original_grid = original_grid.reshape(H*W, dim_homo).transpose()
     return theta.matmul(original_grid).permute(0,2,1).reshape(N, H, W, dim_2d)
-  else: 
+  else:
     assert original_grid.ndim == 4
     N, dim_3d, dim_homo = theta.shape
     assert dim_3d == 3 and dim_homo == 4

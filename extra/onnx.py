@@ -5,7 +5,7 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
 from typing import List,Dict
-from onnx.onnx_pb import AttributeProto, ModelProto, TensorProto, TypeProto
+from onnx import AttributeProto, ModelProto, TensorProto, TypeProto
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
 except ImportError:
@@ -74,7 +74,7 @@ def get_run_onnx(onnx_model: ModelProto):
     elif a.type == AttributeProto.FLOATS: return tuple(float(x) for x in a.floats)
     elif a.type == AttributeProto.INTS: return tuple(int(x) for x in a.ints)
     elif a.type == AttributeProto.STRINGS: return tuple(x.decode("utf-8") for x in a.strings)
-    elif a.type == AttributeProto.GRAPH: raise Exception(f"graph not implemented: {a.g}")
+    elif a.type == AttributeProto.GRAPH: raise Exception(f"graph not implemented: {a.g}\n likely an OP requiring control flow")
     else: raise Exception(f"can't parse {a.type} {a}")
   def attribute_to_dict(a: RepeatedCompositeFieldContainer[AttributeProto]): return {x.name:attribute_parse(x) for x in a}
 
@@ -144,7 +144,8 @@ def get_run_onnx(onnx_model: ModelProto):
         inp.append(t)
       opt: Dict = attribute_dict[num]
       if debug >= 1: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
-      # some ops live here because they require some local variables
+
+      # NOTE some ops live here because they require some local variables
       if n.op_type == "Split": # have to use n.output for cases when num_outputs is absent
         axis = opt.get("axis", 0)
         split = None if len(inp) == 1 else [int(x) for x in safe_numpy(inp[1])]
@@ -182,6 +183,8 @@ def get_run_onnx(onnx_model: ModelProto):
         y = opt["y"]
         intermediate_tensors[y].backward()
         ret = tuple([t.grad for t in inp])
+
+      # onnx_ops.py
       elif hasattr(onnx_ops, n.op_type):
         fxn = getattr(onnx_ops, n.op_type)
         if isinstance(fxn, dict):
@@ -194,6 +197,7 @@ def get_run_onnx(onnx_model: ModelProto):
       else:
         print("UNSUPPORTED", n.op_type, n.input, n.output)
         raise Exception(f"op_type {n.op_type} not supported")
+
       if not isinstance(ret, tuple): ret = (ret, )
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
       if debug >= 2: print([x.shape if isinstance(x, Tensor) else None for x in ret])

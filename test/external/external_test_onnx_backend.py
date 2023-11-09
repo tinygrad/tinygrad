@@ -93,9 +93,15 @@ backend_test.exclude('test_lstm_*')
 backend_test.exclude('test_simple_rnn_*')
 
 # no control flow
+# control flow uses AttributeProto.GRAPH
 backend_test.exclude('test_if_*')
 backend_test.exclude('test_loop*')
 backend_test.exclude('test_range_float_type_positive_delta_expanded_cpu') # requires loop
+backend_test.exclude('test_affine_grid_2d_align_corners_expanded_cpu')
+backend_test.exclude('test_affine_grid_2d_expanded_cpu')
+backend_test.exclude('test_affine_grid_3d_align_corners_expanded_cpu')
+backend_test.exclude('test_affine_grid_3d_expanded_cpu')
+backend_test.exclude('test_range_int32_type_negative_delta_expanded_cpu')
 
 # unsupported (strange) ops
 backend_test.exclude('test_bitwise_*')
@@ -144,7 +150,6 @@ backend_test.exclude('test_averagepool_3d_dilations_*') # dilations != 1 not sup
 backend_test.exclude('test_regex_*') # does not support string Tensors
 backend_test.exclude('test_convtranspose_autopad_same_cpu') # TODO geohotstan has no idea how this is done, autopad requires output_shape but output_shape requires pads from autopad
 backend_test.exclude('test_optional_has_element_empty_optional_input_cpu') # Attempts to create Tensor from None
-backend_test.exclude('test_range_int32_type_negative_delta_expanded_cpu') # AttributeProto.GRAPH not implemented
 backend_test.exclude('test_reshape_allowzero_reordered_cpu') # reshaping to 0 shape
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
