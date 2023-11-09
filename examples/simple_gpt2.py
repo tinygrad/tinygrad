@@ -26,21 +26,21 @@ class Attention:
   def __call__(self, x:Tensor, start_pos:Variable, mask:Optional[Tensor]) -> Tensor:
     xqkv = self.c_attn(x)
     xq, xk, xv = [xqkv.slice([None, None, (i*self.dim, (i+1)*self.dim)]).reshape(xqkv.shape[0], xqkv.shape[1], self.n_heads, self.head_dim) for i in range(3)]
-    bsz, seqlen, _, _ = xq.shape
+    bsz, seqlen, n_heads, head_dim = xq.shape
 
     # create kv cache
     if not hasattr(self, "cache_k"):
       self.cache_k, self.cache_v = Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim), Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim)
 
-    # append to kv cache
-    assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
+    # so the is slower.
+    kvmask = Tensor.zeros(start_pos).cat(Tensor.ones(seqlen)).cat(Tensor.zeros(MAX_CONTEXT-(start_pos+seqlen))).reshape(1, MAX_CONTEXT, 1, 1).expand(bsz, MAX_CONTEXT, n_heads, head_dim)
 
     # TODO: see if we can replace cache update with: self.cache_k[:, start_pos:(start_pos+seqlen), :, :, :].assign(xk)
     keys, values = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1), self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
 
-    # pad and save the cache
-    self.cache_k.assign(keys.cat(self.cache_k.shrink((None, (start_pos+seqlen, MAX_CONTEXT), None, None)), dim=1)).realize()
-    self.cache_v.assign(values.cat(self.cache_v.shrink((None, (start_pos+seqlen, MAX_CONTEXT), None, None)), dim=1)).realize()
+    # update the cache
+    self.cache_k.assign(kvmask.where(xk, self.cache_k)).realize()
+    self.cache_v.assign(kvmask.where(xv, self.cache_v)).realize()
 
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1))
@@ -74,7 +74,7 @@ class Transformer:
     self.lm_head = Linear(dim, vocab_size, bias=False)
     self.forward_jit = TinyJit(self.forward)
 
-  def forward(self, tokens:Tensor, start_pos:Variable, temperature:Optional[float]=None):
+  def forward(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
     if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
     _bsz, seqlen = tokens.shape
 
@@ -90,7 +90,7 @@ class Transformer:
     return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
 
   # TODO: fix token length 0 and 1
-  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:Optional[float]=None):
+  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
     return (self.forward_jit if tokens.shape[0:2] == (1,1) and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257

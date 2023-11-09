@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, operator
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict
+from typing import Tuple, List, Optional, Dict, cast
 from tinygrad.helpers import prod, all_int, dedup
 from tinygrad.shape.symbolic import Node, NumNode, Variable, VariableOrNum, is_sym_int, sint
 
@@ -71,7 +71,7 @@ class View:
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def expand(self, new_shape: Tuple[sint, ...]) -> View:
     assert len(new_shape) == len(self.shape)
-    #assert all(is_sym_int(x) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), f"can't expand {self.shape} into {new_shape}"
+    # assert all(is_sym_int(x) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.mask, self.shape, new_shape)]) if self.mask else None
     return View.create(new_shape, self.strides, self.offset, mask)
@@ -102,8 +102,8 @@ class View:
       if all_int(new_shape):
         assert prod(self.shape) == prod(new_shape), f"size mismatched, can't reshape {self.shape=} -> {new_shape=}"
       else:
-        assert all(isinstance(s, (int, Node)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Node) dim"
-        assert prod(self.shape) == prod([s if isinstance(s, int) else s.val for s in new_shape]), f"size mismatched, can't reshape {self.shape=} -> {new_shape=}"
+        assert all(isinstance(s, (int, Variable)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
+        assert prod(self.shape) == prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape]), f"size mismatched, can't reshape {self.shape=} -> {new_shape=}"
 
     # after the asserts, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)

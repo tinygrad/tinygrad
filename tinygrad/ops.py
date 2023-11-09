@@ -248,9 +248,7 @@ class Compiled:
         # TODO: if this is contiguous it's fine
         if a.realized == output.realized:
           if any(not x.arg.st.contiguous for x in ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
-            #from tinygrad.codegen.linearizer import Linearizer
-            #print(Device[Device.DEFAULT].renderer("hello", Linearizer(ast, self.linearizer_opts).linearize().uops)[0])
-            #output.realized = None
+            output.realized = None
             break
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape

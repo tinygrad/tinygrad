@@ -90,9 +90,6 @@ class Tensor:
   def shape(self) -> Tuple[sint, ...]: return self.lazydata.shape
 
   @property
-  def unbounded_shape(self) -> Tuple[sint, ...]: return self.lazydata.st.unbind().shape
-
-  @property
   def dtype(self) -> DType: return self.lazydata.dtype
 
   # ***** data handlers ****
@@ -115,7 +112,7 @@ class Tensor:
       self.contiguous().realize().lazydata.realized._copyin(x.numpy())  # type: ignore
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
-    assert self.unbounded_shape == x.unbounded_shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
+    assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.dtype == x.dtype and self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized
