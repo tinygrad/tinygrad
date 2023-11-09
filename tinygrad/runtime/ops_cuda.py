@@ -3,13 +3,12 @@ from pathlib import Path
 from typing import Optional, Tuple
 import numpy as np
 from pycuda.compiler import compile as cuda_compile
-from pycuda.driver import Context, Device, Module
+from pycuda.driver import Context, Device, Module as cuda_ctx, cuda_device. cuda_module
 from tinygrad.helpers import DEBUG, getenv, colored, diskcache, DType
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cuda import CUDARenderer
-
 
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
@@ -20,8 +19,8 @@ def pretty_ptx(s):
   s = re.sub(r'(\.)(param|reg|global)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # space
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
-def arch(): return "sm_" + "".join([str(x) for x in pycuda.driver.Context.get_device().compute_capability()])
-def compile_cuda_prg(source: str, options: list[str] = [], keep: bool = False, no_extern_c: bool = False, arch: str = None, code: str = None, cache_dir: str = None, include_dirs: list[str] = None, target: Context = None, thread: Device = None,) -> Module: return cuda_compile( source, options=options, keep=keep, no_extern_c=no_extern_c, arch=arch, code=code, cache_dir=cache_dir, include_dirs=include_dirs, target=target, thread=thread,)
+def arch(): return "sm_" + "".join([str(x) for x in Context.get_device().compute_capability()])
+def compile_cuda_prg(prg: str, options: list[str] = [], keep: bool = False, no_extern_c: bool = False, arch: str = None, code: str = None, cache_dir: str = None, include_dirs: list[str] = None, target: cuda_ctx = None, thread: cuda_device = None,) -> cuda_module: return cuda_compile(prg, options=options, keep=keep, no_extern_c=no_extern_c, arch=arch, code=code, cache_dir=cache_dir, include_dirs=include_dirs, target=target, thread=thread,)
 
 if getenv("CUDACPU", 0) == 1:
   import ctypes, ctypes.util
