@@ -60,7 +60,7 @@ else:
     def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf) # type: ignore
 
 @diskcache
-def compile_cuda(prg) -> bytes: return cuda_compile_prg(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets'])
+def compile_cuda(prg) -> bytes: return compile_cuda_prg(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets'])
 
 class CUDAProgram:
   def __init__(self, name:str, _prg:bytes):
