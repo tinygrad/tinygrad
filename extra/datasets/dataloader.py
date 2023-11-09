@@ -25,7 +25,6 @@ def get_val_files():
 import time
 from torchvision import transforms
 import torchvision.transforms.functional as F
-from torchvision.transforms import RandomResizedCrop
 
 def decode(fn):
   with open(fn, 'rb') as f:
@@ -59,7 +58,7 @@ def image_proc_timed(fn,t):
   s = time.perf_counter()
   X = t(Image.fromarray(decode(fn)))
   e = time.perf_counter() 
-  return X, e-s
+  return np.array(X), e-s
 
 def iterate(bs=16, val=False, shuffle=True, num_workers=16):
   files = get_val_files() if val else get_train_files()
