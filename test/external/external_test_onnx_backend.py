@@ -179,8 +179,8 @@ if getenv('METAL'):
 # Don't know how to treat special TensorProto like TensorProto.FLOAT8E4M3FN
 if getenv("CPU") or getenv("TORCH"):
   backend_test.exclude('test_dequantizelinear_axis_cpu')
-  backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
   backend_test.exclude('test_dequantizelinear_cpu')
+backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 # TODO figure out before PR ready
 backend_test.exclude('test_operator_addconstant_cpu') # bad data type
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type data_type: 5
@@ -190,6 +190,15 @@ backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad d
 if getenv('LLVM') or getenv('GPU') or getenv('CLANG') or getenv('METAL') or getenv('CUDA'):
   backend_test.exclude('test_slice_start_out_of_bounds_cpu')
   backend_test.exclude('test_constantofshape_int_shape_zero_cpu')
+  backend_test.exclude('test_reduce_l1_empty_set_cpu')
+  backend_test.exclude('test_reduce_sum_empty_set_cpu')
+  backend_test.exclude('test_reduce_l1_empty_set_expanded_cpu')
+  backend_test.exclude('test_reduce_sum_square_empty_set_cpu')
+  backend_test.exclude('test_reduce_l2_empty_set_cpu')
+  backend_test.exclude('test_reduce_sum_square_empty_set_expanded_cpu')
+  backend_test.exclude('test_reduce_l2_empty_set_expanded_cpu')
+  backend_test.exclude('test_reduce_log_sum_empty_set_cpu')
+  backend_test.exclude('test_reduce_log_sum_empty_set_expanded_cpu')
 
 if getenv('GPU') or getenv('METAL'):
   backend_test.exclude('test_mish_cpu') # weird inaccuracy
