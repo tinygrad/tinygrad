@@ -48,9 +48,9 @@ if getenv("CUDACPU", 0) == 1:
   cuda.Context = context
   RawCUDABuffer = RawMallocBuffer
 else:
-  import pycuda.autoprimaryctx # type: module # pylint: disable=unused-import # noqa: F401
-  import pycuda.driver as cuda
-  class CUDAAllocator(LRUAllocator):
+  import pycuda.autoprimaryctx #type: module # pylint: disable=unused-import # noqa: F401
+  import pycuda.driver as cuda #type: module
+  class CUDAAllocator(LRUAllocator): #type: ignore
       def _do_alloc(self, size, dtype, device: cuda.Device, **kwargs) -> cuda.DeviceAllocation: return cuda.mem_alloc(size * dtype.itemsize)
     def _cached_bufkey(self, size, dtype, device: cuda.Device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
   CUDAAlloc = CUDAAllocator(cuda.Context.get_device().total_memory())
