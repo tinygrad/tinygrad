@@ -91,6 +91,7 @@ def train_resnet():
       train_time = (data_time+et-st)*steps_in_train_epoch*epochs/(60*60)
       val_time = (data_time+et-st)*steps_in_val_epoch*(epochs//4)/(60*60)
 
+      cl = time.perf_counter()
       print(f"{(data_time+et-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {data_time*1000:7.2f} ms data {loss_cpu:7.2f} loss (every 100)" + \
             f"{GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS {train_time+val_time:7.1f} hrs total {train_time:7.1f}hrs train {val_time:7.1f}hrs val")
       wandb.log({"lr": scheduler.get_lr().numpy().item(),
@@ -103,7 +104,6 @@ def train_resnet():
       })
       tts.append(train_time)
       vts.append(val_time)
-      cl = time.perf_counter()
 
     if e % 4 == 0:
       eval_loss = []
