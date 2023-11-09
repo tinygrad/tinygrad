@@ -1,7 +1,6 @@
 import subprocess, time, re, hashlib, tempfile
 from pathlib import Path
 from typing import Optional, Tuple
-import ctypes, ctypes.util
 import numpy as np
 import pycuda.driver as cuda_driver
 from pycuda.compiler import compile as cuda_compile
@@ -23,6 +22,7 @@ def pretty_ptx(s):
 def arch(): return "sm_" + "".join([str(x) for x in cuda_driver.Context.get_device().compute_capability()])
 
 if getenv("CUDACPU", 0) == 1:
+  import ctypes, ctypes.util
   lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
   lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
   class cuda:
@@ -46,7 +46,7 @@ if getenv("CUDACPU", 0) == 1:
   cuda_driver.Context = context
   RawCUDABuffer = RawMallocBuffer
 else:
-  import pycuda.autoprimaryctx
+  import pycuda.autoprimaryctx # type: ignore
   class CUDAAllocator(LRUAllocator):
     def _do_alloc(self, size, dtype, device, **kwargs): return cuda.mem_alloc(size * dtype.itemsize) # type: ignore
     def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
