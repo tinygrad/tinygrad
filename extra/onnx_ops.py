@@ -81,15 +81,15 @@ def Clip(input: Tensor, min=None, max=None): return input.clip(float('-inf') if 
 
 # NOTE ReduceProd would require a new llop
 def _axes(axes, noop_with_empty_axes): return [int(x) for x in safe_numpy(axes)] if axes is not None and not (isinstance(axes, Tensor) and axes.shape == (0,)) else ([] if noop_with_empty_axes else None)
-def ReduceMax(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float32).max(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
-def ReduceMin(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float32).min(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
-def ReduceSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float32).sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
-def ReduceMean(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float32).mean(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
-def ReduceSumSquare(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float32).square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
-def ReduceL1(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float32).abs().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
-def ReduceL2(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float32).square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).sqrt().cast(data.dtype)
-def ReduceLogSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float32).sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log().cast(data.dtype)
-def ReduceLogSumExp(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float32).exp().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log().cast(data.dtype)
+def ReduceMax(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).max(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
+def ReduceMin(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).min(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
+def ReduceSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
+def ReduceMean(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).mean(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
+def ReduceSumSquare(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
+def ReduceL1(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).abs().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
+def ReduceL2(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).sqrt().cast(data.dtype)
+def ReduceLogSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log().cast(data.dtype)
+def ReduceLogSumExp(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).exp().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log().cast(data.dtype)
 
 def GlobalAveragePool(X: Tensor): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def GlobalMaxPool(X: Tensor): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=True)
@@ -595,7 +595,7 @@ def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
   return ret.cast(dtypes.bool)
 
 # Needs work Check dtype somehow
-def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Tensor | int = 0, axis=1):
+def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1):
   axis = axis + x.ndim if axis < 0 else axis
   x = x.cast(dtypes.float)
   if x_zero_point.__class__ is Tensor: x_zero_point.cast(dtypes.float)

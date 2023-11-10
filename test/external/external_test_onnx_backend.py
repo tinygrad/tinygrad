@@ -156,6 +156,8 @@ backend_test.exclude('test_reduce_sum_empty_set_non_reduced_axis_zero_cpu') # re
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
+backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type string
+backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 
 # issue 1556 https://github.com/tinygrad/tinygrad/issues/1556
 backend_test.exclude('test_isinf_cpu')
@@ -175,17 +177,7 @@ if getenv('METAL'):
   backend_test.exclude('test_maxpool_2d_pads_cpu')
   backend_test.exclude('test_maxpool_2d_same_lower_cpu')
 
-# TODO it's possible to fix this figure this shit out
-# Don't know how to treat special TensorProto like TensorProto.FLOAT8E4M3FN
-#backend_test.exclude('test_dequantizelinear_axis_cpu')
-#backend_test.exclude('test_dequantizelinear_cpu')
-#backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
-# TODO figure out before PR ready
-backend_test.exclude('test_operator_addconstant_cpu') # bad data type
-backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type data_type: 5
-backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type data_type: 5
-
-# compiled backends cannot reshape to and from 0
+# compiled backends cannot reshape to or from 0
 if getenv('LLVM') or getenv('GPU') or getenv('CLANG') or getenv('METAL') or getenv('CUDA'):
   backend_test.exclude('test_slice_start_out_of_bounds_cpu')
   backend_test.exclude('test_constantofshape_int_shape_zero_cpu')
