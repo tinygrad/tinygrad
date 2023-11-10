@@ -3,7 +3,7 @@ import itertools, random
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
 from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.linearizer import Linearizer, UOp
 from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
 from tinygrad.tensor import Tensor
@@ -97,6 +97,8 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       pass
   return acted_lins
 
+def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
+
 def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linearizer:
   key = {"ast": str(lin.ast), "amt": amt, "allow_test_size": allow_test_size}
   if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE") and CACHELEVEL >= 1:
@@ -108,7 +110,6 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   beam: List[Tuple[Linearizer, float]] = [(lin, time_linearizer(lin, rawbufs, allow_test_size=allow_test_size))]
 
   # NOTE: real uops use a weird compare method that's only valid inside a linearizer
-  def tuplize_uops(uops): return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
   seen_uops = {tuplize_uops(lin.linearize().uops): tuple(lin.applied_opts)}
 
   while 1:
