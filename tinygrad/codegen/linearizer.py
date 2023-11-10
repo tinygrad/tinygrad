@@ -370,6 +370,27 @@ class Linearizer(Kernel):
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
+    def get_recursive_parents(x:List[UOp]) -> List[UOp]:
+      ret: Set[UOp] = set()
+      this_round: Set[UOp] = set(x)
+      while len(this_round):
+        ret = ret.union(this_round)
+        next_round: Set[UOp] = set()
+        for r in this_round: next_round = next_round.union(set(r.vin))
+        this_round = next_round
+      return list(ret)
+
+    # loop removal
+    for i,u in enumerate(self.uops):
+      if u.uop == UOps.PHI and len(u.vin) == 3:
+        # if the parents of the PHI node don't have the LOOP as parents, it can be folded
+        if all(x.uop != UOps.LOOP for x in get_recursive_parents(list(u.vin[0:2]))):
+          tloop = u.vin[2]
+          at_end = self.uops[i:]
+          self.uops = self.uops[:i]
+          u.uop, u.vin, u.arg = UOps.ALU, (u.vin[1],self.uop(UOps.ALU, u.dtype, (tloop.vin[1], tloop.vin[0]), BinaryOps.SUB)), BinaryOps.MUL
+          self.uops += at_end
+
     # (recursively) remove childless uops
     # NOTE: DEFINE_GLOBAL should be removable, but we'd have to propagate that
     UOPS_W_SIDE_EFFECTS = {UOps.STORE, UOps.BARRIER, UOps.DEFINE_GLOBAL}
@@ -394,7 +415,6 @@ class Linearizer(Kernel):
       return sorted(list(deps), key=lambda x: x.num)
 
     # add END of loops after the last thing that (recursively) depends on them
-    # and END any if statements
     for u in self.uops:
       if u.uop == UOps.LOOP:
         last_phi = self.uops.index(get_recursive_deps(u)[-1])
@@ -403,6 +423,7 @@ class Linearizer(Kernel):
         self.uop(UOps.END, None, (u,), cachable=False)
         self.uops += at_end
       elif u.uop == UOps.IF:
+        # END any if statements at the end of the uops
         self.uop(UOps.END, None, (u,), cachable=False)
 
     # maybe graph the uops
