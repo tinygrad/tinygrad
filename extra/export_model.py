@@ -9,11 +9,11 @@ EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CLANG", "CUDA", "GPU", "METAL"]
 
 def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
-  for fxn,args,var_vals in run.jit_cache:
-    assert not var_vals, "symbolic shape is not supported"
+  for ji in run.jit_cache:
+    fxn = ji.prg
     functions[fxn.name] = fxn.prg   # NOTE: this assumes all with the same name are the same
     cargs = []
-    for i,arg in enumerate(args):
+    for i,arg in enumerate(ji.rawbufs):
       key = id(arg)
       if key not in bufs:
         if key in special_names:
@@ -43,7 +43,7 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
   # hack to put the inputs back
   for (j,i),idx in run.input_replace.items():
     realized_input = args[idx[0]].lazydata.realized
-    run.jit_cache[j][1][i] = realized_input
+    run.jit_cache[j].rawbufs[i] = realized_input
     special_names[id(realized_input)] = f'input{idx[0]}'
 
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)

@@ -17,7 +17,7 @@ class TestLinearizer(unittest.TestCase):
     np_a, np_b = a.numpy(), b.numpy()
     CacheCollector.start()
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),)))).realize()
-    rawbufs = CacheCollector.finish()[0][1]
+    rawbufs = CacheCollector.finish()[0].rawbufs
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.realized, b.lazydata.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     np.testing.assert_allclose(np_c, c.numpy(), atol=1e-4, rtol=1e-4)

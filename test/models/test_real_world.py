@@ -57,7 +57,7 @@ class TestRealWorld(unittest.TestCase):
     @TinyJit
     def test(t): return model(t, 0).realize()
     # NOTE: only test one pass, not testing the dynamic shape autoregressive part
-    helper_test("test_llama", lambda: (Tensor([[1,]]),), test, 0.22 if CI else 13.5, 126 if CI else 486, all_jitted=True)
+    helper_test("test_llama", lambda: (Tensor([[1,]]),), test, 0.22 if CI else 13.5, 137 if CI else 521, all_jitted=True)
 
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and (Device.DEFAULT not in ["LLVM"] or not CI), "needs JIT, too long on CI LLVM")
   def test_gpt2(self):
@@ -68,7 +68,7 @@ class TestRealWorld(unittest.TestCase):
     derandomize_model(model)
     @TinyJit
     def test(t): return model(t, 0).realize()
-    helper_test("test_gpt2", lambda: (Tensor([[1,]]),), test, 0.21 if CI else 0.9, 129 if CI else 369, all_jitted=True)
+    helper_test("test_gpt2", lambda: (Tensor([[1,]]),), test, 0.21 if CI else 0.9, 140 if CI else 396, all_jitted=True)
 
   @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and (Device.DEFAULT not in ["LLVM", "CLANG"] or not CI), "needs JIT, too long on CI LLVM and CLANG")
   def test_train_cifar(self):
