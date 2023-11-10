@@ -82,14 +82,6 @@ class Attention:
     if not hasattr(self, "cache_k"):
       self.cache_k, self.cache_v = Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim), Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim)
 
-    # kvmask = Tensor.zeros(start_pos).cat(Tensor.ones(seqlen)).cat(Tensor.zeros(MAX_CONTEXT-(start_pos+seqlen))).reshape(1, MAX_CONTEXT, 1, 1).expand(bsz, MAX_CONTEXT, n_heads, head_dim)
-
-    # keys, values = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1), self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
-
-    # # update the cache
-    # self.cache_k.assign(kvmask.where(xk, self.cache_k)).realize()
-    # self.cache_v.assign(kvmask.where(xv, self.cache_v)).realize()
-
     keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
     values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
 
