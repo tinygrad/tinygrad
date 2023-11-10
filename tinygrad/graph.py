@@ -114,8 +114,8 @@ def graph_uops(uops):
   G = nx.DiGraph()
   for u in uops:
     if u.uop == UOps.END: continue
-    G.add_node(u.num, label=f"{str(u.uop)[5:]}{(' '+str(u.arg)) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.uop, "#ffffff"))
-    for v in u.vin: G.add_edge(v.num, u.num)
+    G.add_node(uops.index(u), label=f"{str(u.uop)[5:]}{(' '+str(u.arg)) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.uop, "#ffffff"))
+    for v in u.vin: G.add_edge(uops.index(v), uops.index(u))
   GRAPHPATH = "/tmp/uops"
   nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
   os.system(f'dot -Grankdir=LR -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
