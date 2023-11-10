@@ -191,7 +191,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
     elif uop == UOps.STORE:
       assert vin[0].dtype is not None and vin[2].dtype is not None
       kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
-    elif uop == UOps.CAST and dtype is not None and dtype.sz > 1:
+    elif uop == UOps.CAST and dtype is not None:
       val = lang.render_cast([r[x] for x in vin], dtype)
       if child_count[u] <= 1: r[u] = val
       else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
