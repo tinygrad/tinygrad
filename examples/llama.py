@@ -82,15 +82,22 @@ class Attention:
     if not hasattr(self, "cache_k"):
       self.cache_k, self.cache_v = Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim), Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim)
 
-    kvmask = Tensor.zeros(start_pos).cat(Tensor.ones(seqlen)).cat(Tensor.zeros(MAX_CONTEXT-(start_pos+seqlen))).reshape(1, MAX_CONTEXT, 1, 1).expand(bsz, MAX_CONTEXT, n_heads, head_dim)
+    # kvmask = Tensor.zeros(start_pos).cat(Tensor.ones(seqlen)).cat(Tensor.zeros(MAX_CONTEXT-(start_pos+seqlen))).reshape(1, MAX_CONTEXT, 1, 1).expand(bsz, MAX_CONTEXT, n_heads, head_dim)
 
-    keys, values = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1), self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
+    # keys, values = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1), self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
+
+    # # update the cache
+    # self.cache_k.assign(kvmask.where(xk, self.cache_k)).realize()
+    # self.cache_v.assign(kvmask.where(xv, self.cache_v)).realize()
+
+    keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
+    values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
 
     # update the cache
-    self.cache_k.assign(kvmask.where(xk, self.cache_k)).realize()
-    self.cache_v.assign(kvmask.where(xv, self.cache_v)).realize()
+    self.cache_k.assign(keys.pad(((0,0),(0,MAX_CONTEXT-start_pos-seqlen),(0,0),(0,0))).contiguous()).realize()
+    self.cache_v.assign(values.pad(((0,0),(0,MAX_CONTEXT-start_pos-seqlen),(0,0),(0,0))).contiguous()).realize()
 
-    keys, values = repeat_kv(keys, self.n_rep).realize(), repeat_kv(values, self.n_rep).realize()
+    keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
 
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1)
@@ -120,7 +127,7 @@ class TransformerBlock:
 
   def __call__(self, x:Tensor, start_pos:Variable, freqs_cis:Tensor, mask:Optional[Tensor]):
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
-    return h + self.feed_forward(self.ffn_norm(h))
+    return (h + self.feed_forward(self.ffn_norm(h))).realize()
 
 class Transformer:
   def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None, n_kv_heads=None, rope_theta=10000):

@@ -25,22 +25,30 @@ class Attention:
 
   def __call__(self, x:Tensor, start_pos:Variable, mask:Optional[Tensor]) -> Tensor:
     xqkv = self.c_attn(x)
-    xq, xk, xv = [xqkv.slice([None, None, (i*self.dim, (i+1)*self.dim)]).reshape(xqkv.shape[0], xqkv.shape[1], self.n_heads, self.head_dim) for i in range(3)]
+    xq, xk, xv = [xqkv.shrink((None, None, (i*self.dim, (i+1)*self.dim))).reshape(xqkv.shape[0], xqkv.shape[1], self.n_heads, self.head_dim) for i in range(3)]
     bsz, seqlen, n_heads, head_dim = xq.shape
 
     # create kv cache
     if not hasattr(self, "cache_k"):
       self.cache_k, self.cache_v = Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim), Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim)
 
-    # so the is slower.
-    kvmask = Tensor.zeros(start_pos).cat(Tensor.ones(seqlen)).cat(Tensor.zeros(MAX_CONTEXT-(start_pos+seqlen))).reshape(1, MAX_CONTEXT, 1, 1).expand(bsz, MAX_CONTEXT, n_heads, head_dim)
+    # # method 1, 539 kernels
 
-    # TODO: see if we can replace cache update with: self.cache_k[:, start_pos:(start_pos+seqlen), :, :, :].assign(xk)
-    keys, values = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1), self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
+    # kvmask = Tensor.zeros(start_pos).cat(Tensor.ones(seqlen)).cat(Tensor.zeros(MAX_CONTEXT-(start_pos+seqlen))).reshape(1, MAX_CONTEXT, 1, 1).expand(bsz, MAX_CONTEXT, n_heads, head_dim)
+
+    # # update the cache
+    # self.cache_k.assign(kvmask.where(xk, self.cache_k)).realize()
+    # self.cache_v.assign(kvmask.where(xv, self.cache_v)).realize()
+
+    # keys, values = self.cache_k.shrink((None, (0, start_pos+seqlen), None, None)), self.cache_v.shrink((None, (0, start_pos+seqlen), None, None))
+
+    # method 2, 515 kernels
+    keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
+    values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
 
     # update the cache
-    self.cache_k.assign(kvmask.where(xk, self.cache_k)).realize()
-    self.cache_v.assign(kvmask.where(xv, self.cache_v)).realize()
+    self.cache_k.assign(keys.pad(((0,0),(0,MAX_CONTEXT-start_pos-seqlen),(0,0),(0,0))).contiguous()).realize()
+    self.cache_v.assign(values.pad(((0,0),(0,MAX_CONTEXT-start_pos-seqlen),(0,0),(0,0))).contiguous()).realize()
 
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1))
@@ -61,8 +69,7 @@ class TransformerBlock:
     self.ln_2 = LayerNorm(dim, norm_eps)
 
   def __call__(self, x:Tensor, start_pos:Variable, mask:Optional[Tensor]):
-    output = self.attn(self.ln_1(x), start_pos, mask)
-    h = x + output
+    h = x + self.attn(self.ln_1(x), start_pos, mask)
     return (h + self.mlp(self.ln_2(h)))
 
 class Transformer:
