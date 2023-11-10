@@ -317,7 +317,7 @@ def train_cifar():
         bucket, offset = [], 0
         for _, v in params_dict.items():
           if v.grad is not None: bucket.append(v.grad.flatten())
-        grads = collectives.allreduce(Tensor.cat(*bucket), cache_id="grads")
+        grads = collectives.allreduce(Tensor.cat(*bucket))
         for _, v in params_dict.items():
           if v.grad is not None:
             v.grad.assign(grads[offset:offset+v.grad.numel()].reshape(*v.grad.shape))

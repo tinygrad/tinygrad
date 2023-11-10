@@ -80,8 +80,7 @@ class ShapeTracker:
   @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
 
-  # this is the real size (ish)
-  def size(self): return self.views[-1].size()
+  def size(self): return 0 if prod(self.shape)==0 else self.expr_idxs()[0].max+1
 
   def vars(self) -> List[Variable]: return dedup(functools.reduce(operator.add, [v.vars() for v in self.views], []))
 
