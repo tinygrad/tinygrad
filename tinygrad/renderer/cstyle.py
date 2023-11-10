@@ -102,7 +102,7 @@ class CStyleLanguage(NamedTuple):
     if isinstance(buf_dtype, ImageDType):
       assert var_dtype == dtypes._float4, "images must be float4"
       return f"write_imagef({buf_name}, {idx}, {var_name});"
-    if self.uses_vload and buf_dtype == dtypes.float16:
+    if self.uses_vload and buf_dtype == dtypes.float16 and var_dtype != dtypes.float16:
       return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.sz > 1:
       return f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
@@ -163,6 +163,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       # remove parens if ALU types are the same. TODO: can do more here
       if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL}:
         val = lang.code_for_op[args](strip_parens(r[vin[0]]), *[r[x] for x in vin[1:]])
+      elif args == BinaryOps.MAX:
+        val = lang.code_for_op[args](*[lang.render_cast([r[x]], dtype) if x.dtype != dtype else r[x] for x in vin])
       else:
         val = lang.code_for_op[args](*[r[x] for x in vin])
       assert child_count[u] != 0, f"childless ALU op found {u}"
@@ -191,7 +193,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
     elif uop == UOps.STORE:
       assert vin[0].dtype is not None and vin[2].dtype is not None
       kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
-    elif uop == UOps.CAST and dtype is not None and dtype.sz > 1:
+    elif uop == UOps.CAST and dtype is not None:
       val = lang.render_cast([r[x] for x in vin], dtype)
       if child_count[u] <= 1: r[u] = val
       else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
