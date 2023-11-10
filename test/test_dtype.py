@@ -19,6 +19,8 @@ def is_dtype_supported(dtype: DType):
   if dtype == dtypes.bool:
    # host-shareablity is a requirement for storage buffers, but 'bool' type is not host-shareable
     if Device.DEFAULT == "WEBGPU": return False
+   # TODO remove triton from here once internal casting is fixed. CAST of fp32s between 0-1 is broken in triton
+    if getenv("TRITON") == 1: return False
   return True
 
 def get_available_cast_dtypes(dtype: DType) -> List[DType]: return [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_")] # dont cast internal dtypes
