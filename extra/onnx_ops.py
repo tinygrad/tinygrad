@@ -317,7 +317,7 @@ def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_i
 
 def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
   if ceil_mode and auto_pad == "NOTSET": auto_pad="VALID"
-  ret = _padding(X, pads, auto_pad, constant_value=-np.inf, axes=tuple(range(len(X.shape)))[-len(kernel_shape):], strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
+  ret = _padding(X, pads, auto_pad, constant_value=float("-inf"), axes=tuple(range(len(X.shape)))[-len(kernel_shape):], strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
   ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations)
   ret_len, X_len = ret.numel(), X.numel()
   indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().reshape(1, X_len).expand(ret_len, X_len)) * Tensor.arange(X_len).reshape(1, X_len).expand(ret_len, X_len)).sum(1).reshape(ret.shape).cast(dtypes.int64)
