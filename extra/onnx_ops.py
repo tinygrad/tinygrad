@@ -247,7 +247,6 @@ def _padding(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=
   return X.pad(tuple(pads), value=constant_value)
 
 # TODO works but hacky and messy, think of cleaner way to do this
-# HACK ceil_mode and "VALID"
 def _auto_pad(X: Tensor, auto_pad, strides, kernel_shape, dilations, ceil_mode=0):
   strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
   dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
@@ -307,7 +306,6 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
 
 def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
   if dilations != 1: raise NotImplementedError(f"dilations != 1 not supported, dilations:{dilations}")
-  # pixel_axes = tuple(range(len(X.shape)))[-2:] # TODO WTF IS THIS WRONG?!
   pixel_axes = tuple(range(len(X.shape)))[-len(kernel_shape):]
   if ceil_mode: auto_pad = "SAME_UPPER"
   padding_included = _padding(X, pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations).avg_pool2d(kernel_shape, stride=strides)
@@ -440,6 +438,7 @@ def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
 
 def Round(X:Tensor): return _round(X, 0.5, "round_to_even")
 
+# TODO clean this up, it's taking the longest in CI
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel', cubic_coeff_a=-0.75, exclude_outside=0, extrapolation_value=0.0, keep_aspect_ratio_policy='stretch', mode='nearest', nearest_mode='round_prefer_floor'):
   def _nearest_gather(X: Tensor, x_out, y_out): return X[:,:,y_out,:][:,:,:,x_out]
   def _nearest_mode(x_resized: Tensor, nearest_mode: str, x_len):
@@ -594,7 +593,6 @@ def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
   ret = (x == float("inf"))*detect_positive + (x == float("-inf"))*detect_negative + Tensor.zeros(*x.shape)
   return ret.cast(dtypes.bool)
 
-# Needs work Check dtype somehow
 def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1):
   axis = axis + x.ndim if axis < 0 else axis
   x = x.cast(dtypes.float)
