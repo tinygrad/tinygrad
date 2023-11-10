@@ -82,7 +82,7 @@ class Transformer:
     pos_emb = self.wpe(self.allpos.shrink((None, (start_pos, start_pos+seqlen))))
     h = tok_emb + pos_emb
 
-    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf")).triu(start_pos.val+1).realize() if start_pos.val == 0 else None
+    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf")).triu(start_pos.val+1).realize() if seqlen > 1 else None
     for hi in self.h: h = hi(h, start_pos=start_pos, mask=mask)
 
     logits = self.lm_head(self.ln_f(h))
