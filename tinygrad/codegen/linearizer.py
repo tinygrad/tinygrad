@@ -453,7 +453,7 @@ class Linearizer(Kernel):
     key = (uop, dtype, vin, arg)
     if simplify:
       if uop == UOps.PHI and len(vin) == 2: return vin[1]   # a phi without loops is a noop
-      if uop in {UOps.CAST, UOps.GEP} and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype, insert_before)
+      if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype, insert_before)
       if uop == UOps.ALU:
         # rewrites. NOTE: the rewritten NEG op is still around...
         if arg == BinaryOps.ADD and vin[1].uop == UOps.ALU and vin[1].arg == UnaryOps.NEG: return self.uop(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable=cachable, insert_before=insert_before)
