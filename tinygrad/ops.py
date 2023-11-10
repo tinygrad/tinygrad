@@ -265,6 +265,7 @@ class Compiled:
         from tinygrad.graph import print_tree
         print_tree(ast)
       from tinygrad.codegen.linearizer import Linearizer
+      from tinygrad.lazy import vars_from_ast
       k = Linearizer(ast, self.linearizer_opts)
       assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
       if not NOOPT:
@@ -287,7 +288,6 @@ class Compiled:
         k.required_optimizations()
       prg = self.to_program(k)
       # extract real vars used in ast
-      from tinygrad.lazy import vars_from_ast
       prg.vars = vars_from_ast(ast)
       assert all(v._val is None for v in prg.vars), f"ast contains bound Variable {prg.vars}"
       return prg
