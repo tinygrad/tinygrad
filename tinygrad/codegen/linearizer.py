@@ -395,12 +395,16 @@ class Linearizer(Kernel):
     changed_something = True
     while changed_something:
       changed_something = False
-      for i,u in enumerate(self.uops):
+      for u in self.uops:
         if u.uop == UOps.PHI and len(u.vin) == 3:
           # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
-          if all(x.uop != UOps.LOOP for x in get_recursive_parents(list(u.vin[0:2]))):
+          # TODO: ADD becomes a MUL, MAX can just become nothing
+          if all(x.uop != UOps.LOOP for x in get_recursive_parents(list(u.vin[0:2]))) and u.vin[1].arg == BinaryOps.ADD:
             if DEBUG >= 4: print(f"removing PHI node {u}")
-            loop_len = self.uop(UOps.ALU, u.dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB, insert_at=i)
+            del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
+            # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
+            loop_len = self.uop(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB, insert_before=self.uops.index(u))
+            #if loop_len.dtype != u.dtype: loop_len = self.uop(UOps.CAST, u.dtype, (loop_len,), insert_before=self.uops.index(u))
             u.uop, u.vin, u.arg = UOps.ALU, (u.vin[1],loop_len), BinaryOps.MUL
             changed_something = True
 
@@ -422,7 +426,7 @@ class Linearizer(Kernel):
     for u in self.uops:
       if u.uop == UOps.LOOP:
         # add END of loops after the last thing that (recursively) depends on them
-        self.uop(UOps.END, None, (u,), cachable=False, insert_at=self.uops.index(get_recursive_children(u)[-1])+1)
+        self.uop(UOps.END, None, (u,), cachable=False, insert_before=self.uops.index(get_recursive_children(u)[-1])+1)
       elif u.uop == UOps.IF:
         # END any if statements at the end of the uops
         self.uop(UOps.END, None, (u,), cachable=False)
@@ -441,7 +445,7 @@ class Linearizer(Kernel):
     self.applied_opts_cache = self.applied_opts[:]
     return self
 
-  def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None, cachable=True, insert_at=None, simplify=True) -> UOp:
+  def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None, cachable=True, insert_before=None, simplify=True) -> UOp:
     key = (uop, dtype, vin, arg)
     if simplify:
       if uop == UOps.PHI and len(vin) == 2 and vin[0] == vin[1]: return vin[0]   # self phi is noop
@@ -461,8 +465,8 @@ class Linearizer(Kernel):
         if arg == BinaryOps.DIV and vin[1].uop == UOps.CONST and vin[1].arg == 1.0: return vin[0]
     if cachable and key in self.saved_exprs: return self.saved_exprs[key]
     ret = UOp(uop, dtype, vin, arg, len(self.uops))
-    if insert_at is not None:
-      self.uops.insert(insert_at, ret)
+    if insert_before is not None:
+      self.uops.insert(insert_before, ret)
     else:
       self.uops.append(ret)
     if cachable: self.saved_exprs[key] = ret
