@@ -232,7 +232,6 @@ class Linearizer(Kernel):
     loaded_buffers = {}
     acc = []
     self.load_cache: Dict[str, UOp] = {}
-    if_gate: Optional[UOp] = None
 
     # reduce op
     fake_reduce_idxs: List[Variable] = []
@@ -329,7 +328,7 @@ class Linearizer(Kernel):
           fake_idxs = [Variable.num(0)]*len(self.sts[-1].shape)
           fake_idxs[self.global_dims+self.local_dims:self.global_dims+len(local_idxs)] = local_idxs[self.local_dims:]
           if_cond: UOp = (self.sts[-1].expr_idxs(fake_idxs)[0]<1).render(self.render_ops, self)
-          if_gate = self.uop(UOps.IF, None, (if_cond,), cachable=False)
+          barrier = self.uop(UOps.IF, None, (if_cond, barrier), cachable=False)
 
         # create new late reduce local loops and replace local_idxs that have been used
         end_local_idxs = [Variable(f"tidx{i}", 0, self.full_shape[i]-1 if i >= self.first_reduce and i not in self.upcast_in_mid_reduce_axes else 0) for i in range(0, self.first_reduce+len(self.group_for_reduce))]
@@ -371,12 +370,9 @@ class Linearizer(Kernel):
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
-    # end the if statement if we used it
-    if if_gate: self.uop(UOps.END, None, (if_gate,))
-
     # (recursively) remove childless uops
     # NOTE: DEFINE_GLOBAL should be removable, but we'd have to propagate that
-    UOPS_W_SIDE_EFFECTS = {UOps.STORE, UOps.END, UOps.BARRIER, UOps.DEFINE_GLOBAL}
+    UOPS_W_SIDE_EFFECTS = {UOps.STORE, UOps.BARRIER, UOps.DEFINE_GLOBAL}
     while 1:
       has_child: Set[UOp] = set()
       for ru in self.uops:
@@ -398,6 +394,7 @@ class Linearizer(Kernel):
       return sorted(list(deps), key=lambda x: x.num)
 
     # add END of loops after the last thing that (recursively) depends on them
+    # and END any if statements
     for u in self.uops:
       if u.uop == UOps.LOOP:
         last_phi = self.uops.index(get_recursive_deps(u)[-1])
@@ -405,6 +402,8 @@ class Linearizer(Kernel):
         self.uops = self.uops[:last_phi+1]
         self.uop(UOps.END, None, (u,), cachable=False)
         self.uops += at_end
+      elif u.uop == UOps.IF:
+        self.uop(UOps.END, None, (u,), cachable=False)
 
     # maybe graph the uops
     if DEBUG >= 5:
