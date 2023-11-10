@@ -97,7 +97,7 @@ class _Device:
     return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
   @functools.cached_property
   def DEFAULT(self) -> str:
-    device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None)
+    device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None)   # type: ignore
     if device_from_env: return device_from_env
     for device in ["METAL", "CUDA", "GPU"]:
       try:
