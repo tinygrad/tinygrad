@@ -65,6 +65,7 @@ def Tanh(x): return x.tanh()
 
 def HardSigmoid(input: Tensor, alpha=0.2, beta=0.5): return (alpha*input + beta).clip(0, 1)
 def HardSwish(input: Tensor): return input * HardSigmoid(input, 1/6, 0.5)
+def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + Erf(x/math.sqrt(2)))
 def Celu(X: Tensor, alpha=1.0): return X.relu() - (-alpha*(X/alpha).exp()+1).relu()
 def Selu(X: Tensor, alpha=1.67326319217681884765625, gamma=1.05070102214813232421875): return gamma * (X.relu() - (-alpha*X.exp()+alpha).relu())
 def Softplus(X: Tensor): return X.softplus()
@@ -623,10 +624,6 @@ def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
     return decoded.unsqueeze(-1) # (H, W) to (H, W, 1)
   else:
     raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
-
-def Gelu(x:Tensor, approximate=None):
-  if approximate == "tanh": return x.gelu()
-  else: return 0.5 * x * (1 + Erf(x/math.sqrt(2)))
 
 def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
   _, _, *data_sz = safe_numpy(size).tolist()
