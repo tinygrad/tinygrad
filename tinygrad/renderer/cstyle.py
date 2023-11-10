@@ -100,7 +100,7 @@ class CStyleLanguage(NamedTuple):
     if isinstance(buf_dtype, ImageDType):
       assert var_dtype == dtypes._float4, "images must be float4"
       return f"write_imagef({buf_name}, {idx}, {var_name});"
-    if self.uses_vload and buf_dtype == dtypes.float16:
+    if self.uses_vload and buf_dtype == dtypes.float16 and var_dtype != dtypes.float16:
       return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.sz > 1:
       return f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
