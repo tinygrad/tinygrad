@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 import unittest
+import pytest
 import numpy as np
 from weakref import ref
+
 from tinygrad.helpers import GlobalCounters
 from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, prod
@@ -23,7 +25,9 @@ class FakeDeviceBuffer:
     assert self.id == 0, "Should called _do_free() before"
 
 class FakeAllocator(LRUAllocator):
-  def _do_alloc(self, size, dtype, device, **kwargs): return FakeDeviceBuffer(size, dtype, device)
+  def _do_alloc(self, size, dtype, device, **kwargs):
+    if size*dtype.itemsize > self._get_cur_free_space(device): raise Exception("OOM")
+    return FakeDeviceBuffer(size, dtype, device)
   def _do_free(self, buf):
     buf.id -= 1
     assert buf.id == 0, f"Free should be called once, but {buf.id}"
@@ -105,6 +109,44 @@ class TestAllocators(unittest.TestCase):
           assert cmp_trace_and_buf(buf, refs[i%8]), "Buffer should be reused"
         __test()
       for r in refs: assert r() is not None, "All refs should be cached"
+    test()
+    check_gc()
+
+  def test_lru_allocator_failing_alloc_cleans_cache(self):
+    def test():
+      lru_allocator = FakeAllocator(128)
+      for size in range(1, 4):
+        alloc_free_trace(lru_allocator, size, dtypes.float32, device='0')
+      assert len(lru_allocator.aging_order['0']) == 3, "All buffers should be cached"
+      assert lru_allocator.free_space['0'] == 128 - 24, "24 bytes to be used by current cached buffers"
+
+      def always_raise_exception(*args, **kwargs):
+        raise Exception("OOM")
+      lru_allocator._do_alloc = always_raise_exception
+
+      with pytest.raises(Exception):
+        buff = alloc(lru_allocator, 5, dtypes.float32, device='0')
+      assert len(lru_allocator.aging_order['0']) == 0, "All buffers should be freed from cache due to failing alloc"
+    test()
+    check_gc()
+
+  def test_lru_allocator_fail_first_alloc_pass_after_clear_cahce(self):
+    def test():
+      lru_allocator = FakeAllocator(128)
+      for size in range(1, 4):
+        alloc_free_trace(lru_allocator, size, dtypes.float32, device='0')
+      cache_length = 3
+      assert len(lru_allocator.aging_order['0']) == cache_length, "All buffers should be cached"
+      assert lru_allocator.free_space['0'] == 128 - 24, "24 bytes to be used by current cached buffers"
+
+      original_do_alloc = lru_allocator._do_alloc  # save the original method
+      def single_fail_then_pass(*args, **kwargs):
+        lru_allocator._do_alloc = original_do_alloc  # restore the original method
+        raise Exception("OOM")
+      lru_allocator._do_alloc = single_fail_then_pass
+
+      buff = alloc(lru_allocator, 5, dtypes.float32, device='0')
+      assert len(lru_allocator.aging_order['0']) < cache_length, "Some buffers should be cleaned as first alloc failed"
     test()
     check_gc()
 
