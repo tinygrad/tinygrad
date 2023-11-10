@@ -53,12 +53,14 @@ def fuzz_linearizer(lin: Linearizer):
       try:
         prg = device.to_program(lin)
       except:
+        print(lin.ast)
         traceback.print_exc()
         print("COMPILE FAILED!!")
         return "COMPILE_ERROR"
       try:
         prg.exec(rawbufs, var_vals, force_wait=True)
       except:
+        print(lin.ast)
         traceback.print_exc()
         print("EXEC FAILED!!")
         return "EXEC_ERROR"
@@ -66,6 +68,7 @@ def fuzz_linearizer(lin: Linearizer):
       try:
         device.exec_ast(lin.ast, output=LB(rawbufs[0], rawbufs[0].dtype), inputs=[LB(buf, buf.dtype) for buf in rawbufs[1:]])
       except Exception as e:
+        print(lin.ast)
         traceback.print_exc()
         return e
 
@@ -77,9 +80,11 @@ def fuzz_linearizer(lin: Linearizer):
       try:
         np.testing.assert_allclose(result, ground_truth, rtol=1e-2, atol=1e-2)
       except AssertionError:
+        print(lin.ast)
         traceback.print_exc()
         return "NOT_ALLCLOSE"
       except Exception as e:
+        print(lin.ast)
         traceback.print_exc()
         return e
   return "PASS"
