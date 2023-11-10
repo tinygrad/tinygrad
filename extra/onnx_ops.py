@@ -81,15 +81,15 @@ def Clip(input: Tensor, min=None, max=None): return input.clip(float('-inf') if 
 
 # NOTE ReduceProd would require a new llop
 def _axes(axes, noop_with_empty_axes): return [int(x) for x in safe_numpy(axes)] if axes is not None and not (isinstance(axes, Tensor) and axes.shape == (0,)) else ([] if noop_with_empty_axes else None)
-def ReduceMax(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).max(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
-def ReduceMin(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).min(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
-def ReduceSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
-def ReduceMean(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).mean(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
-def ReduceSumSquare(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
-def ReduceL1(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).abs().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).cast(data.dtype)
-def ReduceL2(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).sqrt().cast(data.dtype)
-def ReduceLogSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log().cast(data.dtype)
-def ReduceLogSumExp(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.cast(dtypes.float).exp().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log().cast(data.dtype)
+def ReduceMax(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.max(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
+def ReduceMin(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.min(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
+def ReduceSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
+def ReduceMean(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.mean(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
+def ReduceSumSquare(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
+def ReduceL1(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.abs().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
+def ReduceL2(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).sqrt()
+def ReduceLogSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
+def ReduceLogSumExp(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.exp().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
 
 def GlobalAveragePool(X: Tensor): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def GlobalMaxPool(X: Tensor): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=True)
@@ -625,7 +625,7 @@ def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
     raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
 def Gelu(x:Tensor, approximate=None):
-  if approximate == "tanh": return 0.5 * x * (1 + ((x + 0.044715 * x.pow(3)) * math.sqrt(2/math.pi)).tanh())
+  if approximate == "tanh": return x.gelu()
   else: return 0.5 * x * (1 + Erf(x/math.sqrt(2)))
 
 def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
