@@ -68,7 +68,7 @@ class Kernel:
     self.ast = ast
 
     # fetch lazyop info
-    self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
+    self.info: FlopCounter = get_lazyop_info(self.ast)
 
     # there's only allowed to be one reduceop
     reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
@@ -471,8 +471,8 @@ class Kernel:
         self.reduceop and self.reduceop.op == ReduceOps.SUM and len(self.full_shape) >= 2 and self.opts.has_shared and \
         isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
         self.reduceop.src[0].src[0].op == BufferOps.MEM and self.reduceop.src[0].src[1].op == BufferOps.MEM:
-      buf0 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[0]).arg)
-      buf1 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[1]).arg)
+      buf0 = self.bufs.index(self.reduceop.src[0].src[0].arg)
+      buf1 = self.bufs.index(self.reduceop.src[0].src[1].arg)
       buf0_strides = self.sts[buf0].real_strides()
       buf1_strides = self.sts[buf1].real_strides()
       def has_expanded_axis(s, st): return any(x > 1 and y == 0 for x,y in zip(s,st))
