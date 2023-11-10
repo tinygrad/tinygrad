@@ -8,120 +8,71 @@ import pyaudio
 import tiktoken
 
 SAMPLE_RATE = 16000
-FRAME_CHUNK = 1600
-RECORD_SECONDS = 10
+N_FRAME_CHUNK = 1600
 
-def stream_audio(queue: multiprocessing.Queue):
-    p = pyaudio.PyAudio()
-    stream = p.open(format=pyaudio.paInt16, channels=1, rate=SAMPLE_RATE, input=True, frames_per_buffer=FRAME_CHUNK)
+class AudioListener:
+    def __init__(self, sample_rate: int = SAMPLE_RATE, n_frame_chunk: int = N_FRAME_CHUNK):
+        self.sample_rate = sample_rate
+        self.n_frame_chunk = n_frame_chunk
 
-    print("I'm listening...")
-    # for _ in range(0, int(SAMPLE_RATE / FRAME_CHUNK * RECORD_SECONDS)):
-    while True:
-        au_data = stream.read(FRAME_CHUNK)
-        waveform = ((np.frombuffer(au_data, np.int16)/32768).astype(np.float32)*3)
+    def start(self, audio_queue: multiprocessing.Queue):
+        self.process = multiprocessing.Process(target=self.listen, args=(audio_queue,))
+        self.process.daemon = True
+        self.process.start()
 
-        queue.put(waveform)
+    def listen(self, audio_queue: multiprocessing.Queue):
+        paudio = pyaudio.PyAudio()
+        stream = paudio.open(
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=self.sample_rate,
+            input=True,
+            frames_per_buffer=self.n_frame_chunk
+        )
 
-def stream_audio_v2(p: pyaudio.PyAudio, stream: pyaudio.Stream):
-    print("I'm listening...")
-    au_data = stream.read(FRAME_CHUNK)
-    waveform = ((np.frombuffer(au_data, np.int16)/32768).astype(np.float32)*3)
-    print("Done listening")
+        while True:
+            # TODO: make audio settings as ArgumentParser arg
+            audio = stream.read(self.n_frame_chunk)
+            audio = ((np.frombuffer(audio, np.int16)/32768).astype(np.float32)*3)
 
-    return waveform
+            audio_queue.put(audio)
 
-def transcribe_audio(audio: np.ndarray, model: Whisper, encoder: tiktoken.Encoding):
-    lst = [encoder._special_tokens["<|startoftranscript|>"], encoder._special_tokens["<|notimestamps|>"]]
-    log_spec = prep_audio(audio)
-
-    encoded_audio = model.encoder(Tensor(log_spec)).realize()
-    out = model.decoder(Tensor([lst]), encoded_audio).realize()
-    idx = int(out[0,-1].argmax().numpy().item())
-    lst.append(idx)
-    dec = encoder.decode(lst)
-
-    print(dec)
-    if dec.endswith("<|endoftext|>"):
-        print("Reached end of teext token!")
-        lst.pop()
-
-
-class TinyConv:
-    ...
+            # stream.close()
+            # paudio.terminate()
 
 
 if __name__ == "__main__":
+    # TODO: either refactor whisper example or put it on some helper class
     model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en")
 
-    queue = multiprocessing.Queue()
-    process = multiprocessing.Process(target=stream_audio, args=(queue,))
+    # TODO: make this take arguments later
+    audio_listener = AudioListener()
+    audio_queue = multiprocessing.Queue()
 
-    process.daemon = True
-    process.start()
+    audio_listener.start(audio_queue)
 
     lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
+    audio_buffer = None
+    did_read = False
+
     while True:
-        audio = queue.get()
-        print(f"audio:\n{audio}")
-        log_spec = prep_audio(audio)
-        encoded_audio = model.encoder(Tensor(log_spec)).realize()
-        out = model.decoder(Tensor([lst]), encoded_audio).realize()
-        idx = int(out[0,-1].argmax().numpy().item())
-        lst.append(idx)
-        dec = enc.decode(lst)
+        while not audio_queue.empty():
+            audio = audio_queue.get()
+            if audio_buffer is None:
+                audio_buffer = audio
+            else:
+                audio_buffer = np.concatenate([audio_buffer, audio])
+                print(f"--concat: {audio_buffer.shape}")
 
-        print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
-        if dec.endswith("<|endoftext|>"):
-            lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
-            print("popping")
+        if audio_buffer is not None:
+            log_spec = prep_audio(audio_buffer)
+            encoded_audio = model.encoder(Tensor(log_spec)).realize()
 
-    # lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
-    # total = None
-    # did_read = False
+            out = model.decoder(Tensor([lst]), encoded_audio).realize()
+            idx = int(out[0,-1].argmax().numpy().item())
+            lst.append(idx)
+            dec = enc.decode(lst)
 
-    # while True:
-    #     for _ in range(100):
-    #         audio = queue.get()
-
-    #         print(f"audio: {audio}")
-
-    # while True:
-    #     p = pyaudio.PyAudio()
-    #     stream = p.open(format=pyaudio.paInt16, channels=1, rate=SAMPLE_RATE, input=True, frames_per_buffer=FRAME_CHUNK)
-    #     audio = stream_audio_v2(p, stream)
-    #     stream.close()
-    #     p.terminate()
-
-    #     lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
-    #     print(f"---audio:\n{audio}")
-    #     log_spec = prep_audio(audio)
-    #     encoded_audio = model.encoder(Tensor(log_spec)).realize()
-    #     out = model.decoder(Tensor([lst]), encoded_audio).realize()
-    #     idx = int(out[0,-1].argmax().numpy().item())
-    #     lst.append(idx)
-    #     dec = enc.decode(lst)
-
-    #     print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
-    #     if dec.endswith("<|endoftext|>"):
-    #         lst.pop()
-    #         break
-
-
-    # for _ in range(0, int(SAMPLE_RATE / FRAME_CHUNK * RECORD_SECONDS)):
-    #     while not queue.empty() or total is None:
-    #         waveform = queue.get()
-    #         if total is None: total = waveform
-    #         else: total = np.concatenate([total, waveform])
-    #         did_read = True
-    #     if did_read:
-    #         log_spec = prep_audio(total)
-    #         encoded_audio = model.encoder(Tensor(log_spec)).realize()
-
-    #     out = model.decoder(Tensor([lst]), encoded_audio).realize()
-    #     idx = int(out[0,-1].argmax().numpy().item())
-    #     lst.append(idx)
-    #     dec = enc.decode(lst)
-    #     print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
-    #     if dec.endswith("<|endoftext|>"):
-    #         lst.pop()
+            print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
+            if dec.endswith("<|endoftext|>"):
+                lst.pop()
