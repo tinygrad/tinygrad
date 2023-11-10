@@ -71,6 +71,10 @@ class Attention:
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
   def __call__(self, x:Tensor, start_pos:Variable, freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
+    if mask is not None:
+      # no symbolic shape qkv when consuming prompts
+      start_pos = start_pos.val
+
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
@@ -133,7 +137,6 @@ class Transformer:
   def forward(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
     _bsz, seqlen = tokens.shape
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
-    # TODO: how does this work with chatbot?
     mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos.val+1).realize() if seqlen > 1 else None
 
     h = self.tok_embeddings(tokens)
@@ -141,9 +144,8 @@ class Transformer:
     logits = self.output(self.norm(h))
     return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
 
-  def __call__(self, tokens:Tensor, start_pos:int, temperature:float=0.0):
-    start_pos_var = Variable("pos", 1 if start_pos else 0, 1024).bind(start_pos)
-    return (self.forward_jit if tokens.shape[0:2] == (1,1) and getenv("JIT") else self.forward)(tokens, start_pos_var, temperature)
+  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
+    return (self.forward_jit if tokens.shape[0:2] == (1,1) and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
 
 # **** files and arguments ****
 MODEL_PARAMS = {
@@ -499,7 +501,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
     print(f"Preparing KV cache for chatbot with personality {args.personality}...")
     with Timing():
-      llama.model(Tensor([toks]), 0, args.temperature).realize()  # NOTE: output logits are not used
+      llama.model(Tensor([toks]), Variable("start_pos", 0, MAX_CONTEXT).bind(0), args.temperature).realize()  # NOTE: output logits are not used
     start_pos = len(toks)
   else:
     # non chat bot mode
@@ -538,7 +540,7 @@ After you are done speaking, output [EOS]. You are not Chad.
         with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                     f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                     (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
-          probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
+          probs = llama.model(Tensor([toks[start_pos:]]), Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), args.temperature).realize()
         probs_np = probs.numpy()
         tok = int(np.random.choice(len(probs_np), p=probs_np))
 

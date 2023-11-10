@@ -24,6 +24,10 @@ class Attention:
     self.head_dim = dim // n_heads
 
   def __call__(self, x:Tensor, start_pos:Variable, mask:Optional[Tensor]) -> Tensor:
+    if mask is not None:
+      # no symbolic shape qkv when consuming prompts
+      start_pos = start_pos.val
+
     xqkv = self.c_attn(x)
     xq, xk, xv = [xqkv.shrink((None, None, (i*self.dim, (i+1)*self.dim))).reshape(xqkv.shape[0], xqkv.shape[1], self.n_heads, self.head_dim) for i in range(3)]
     bsz, seqlen, n_heads, head_dim = xq.shape
@@ -32,17 +36,6 @@ class Attention:
     if not hasattr(self, "cache_k"):
       self.cache_k, self.cache_v = Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim), Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim)
 
-    # # method 1, 539 kernels
-
-    # kvmask = Tensor.zeros(start_pos).cat(Tensor.ones(seqlen)).cat(Tensor.zeros(MAX_CONTEXT-(start_pos+seqlen))).reshape(1, MAX_CONTEXT, 1, 1).expand(bsz, MAX_CONTEXT, n_heads, head_dim)
-
-    # # update the cache
-    # self.cache_k.assign(kvmask.where(xk, self.cache_k)).realize()
-    # self.cache_v.assign(kvmask.where(xv, self.cache_v)).realize()
-
-    # keys, values = self.cache_k.shrink((None, (0, start_pos+seqlen), None, None)), self.cache_v.shrink((None, (0, start_pos+seqlen), None, None))
-
-    # method 2, 515 kernels
     keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
     values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
 
@@ -89,14 +82,13 @@ class Transformer:
     pos_emb = self.wpe(self.allpos.shrink((None, (start_pos, start_pos+seqlen))))
     h = tok_emb + pos_emb
 
-    # TODO: should be start_pos == 0 for branch?
-    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf")).triu(start_pos.val+1).realize() if seqlen > 1 else None
+    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf")).triu(start_pos.val+1).realize() if start_pos.val == 0 else None
     for hi in self.h: h = hi(h, start_pos=start_pos, mask=mask)
 
     logits = self.lm_head(self.ln_f(h))
     return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
 
-  # TODO: fix token length 0 and 1
+  # TODO: fix empty token
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
     return (self.forward_jit if tokens.shape[0:2] == (1,1) and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
 
