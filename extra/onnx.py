@@ -6,7 +6,6 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
 from typing import List, Dict
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto # onnx 1.50 uses serialized file (see onnx/onnx-ml.proto) as descriptors
-from onnx.reference.custom_element_types import bfloat16, float8e4m3fn, float8e4m3fnuz, float8e5m2, float8e5m2fnuz
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
 except ImportError:
@@ -190,13 +189,6 @@ def get_run_onnx(onnx_model: ModelProto):
         intermediate_tensors[y].backward()
         ret = tuple([t.grad for t in inp])
 
-        '''
-def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point=0, axis=1):
-  axis = axis + x.ndim if axis < 0 else axis
-  x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
-  x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
-  return (x - x_zer) * x_sc
-    '''  
       # onnx_ops.py
       elif hasattr(onnx_ops, n.op_type):
         fxn = getattr(onnx_ops, n.op_type)
