@@ -140,6 +140,9 @@ class TestOps(unittest.TestCase):
   def test_sum_collapse(self):
     helper_test_op([], lambda: torch.ones(256,256).sum(axis=1), lambda: Tensor.ones(256,256).sum(axis=1), forward_only=True)
 
+  def test_sum_collapse_neg(self):
+    helper_test_op([], lambda: (-torch.ones(3,3)).sum(axis=1), lambda: (-Tensor.ones(3,3)).sum(axis=1), forward_only=True)
+
   def test_max_dont_collapse(self):
     helper_test_op([], lambda: torch.ones(256,256).max(1)[0], lambda: Tensor.ones(256,256).max(1), forward_only=True)
 

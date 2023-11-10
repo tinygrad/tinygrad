@@ -215,7 +215,6 @@ class Linearizer(Kernel):
     # set global/local size
     self.global_size: Optional[List[int]] = None
     self.local_size: Optional[List[int]] = None
-    global_loop_ctx: Tuple[UOp, ...] = tuple()
     if self.dont_use_locals:
       self.global_size = [x.max+1 for x in loop_global_idxs][::-1]
       self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr.replace("gidx", "idx"), x.max+1)) for i,x in enumerate(loop_global_idxs)})
@@ -226,7 +225,7 @@ class Linearizer(Kernel):
       self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_global_idxs)})
       self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_local_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})
     else:
-      global_loop_ctx = render_loop(loop_global_idxs+loop_local_idxs)
+      render_loop(loop_global_idxs+loop_local_idxs)
 
     # parse AST
     loaded_buffers = {}
@@ -302,7 +301,7 @@ class Linearizer(Kernel):
                        self.uop(UOps.CAST, dtypes._float8, tuple(op3)))
               ret = self.uop(UOps.WMMA, dtypes._float2 if wmma_sz[2] == 2 else dtypes._float8, ops, (self.opts.device, self.tensor_core.dtype_in, self.tensor_core.dtype_out,))
               for z in range(cast(DType, ret.dtype).sz):
-                acc[i+z] = self.uop(UOps.PHI, dtypes.float, (op3[z], self.uop(UOps.GEP, dtypes.float, (ret,), z)) + global_loop_ctx + loop_ctx)
+                acc[i+z] = self.uop(UOps.PHI, dtypes.float, (op3[z], self.uop(UOps.GEP, dtypes.float, (ret,), z)) + loop_ctx)
             i += wmma_sz[2]
       else:
         if locals_to_store:
@@ -314,7 +313,7 @@ class Linearizer(Kernel):
         loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs[1:], start=1) if b in self.earlybufs})
 
         # run early AST (with reduce)
-        self.ast_parse(self.reduceop, acc, self.acc_offsets(self.full_buf_index), loaded_buffers, do_reduce=True, loop_ctx=global_loop_ctx + loop_ctx)
+        self.ast_parse(self.reduceop, acc, self.acc_offsets(self.full_buf_index), loaded_buffers, do_reduce=True, loop_ctx=loop_ctx)
 
       # end the reduce loop
       self.load_cache.clear()
@@ -365,7 +364,7 @@ class Linearizer(Kernel):
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})
 
     # run late AST
-    val = self.ast_parse(self.ast, acc, None, loaded_buffers, loop_ctx=global_loop_ctx)
+    val = self.ast_parse(self.ast, acc, None, loaded_buffers)
 
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
