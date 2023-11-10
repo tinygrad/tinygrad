@@ -19,20 +19,6 @@ class TestSymbolicJit(unittest.TestCase):
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert len(jf.jit_cache) == 1
 
-  @unittest.skip("this is no longer supported")
-  def test_reshape_inside_plus1(self):
-    def f(a, i:Variable):
-      a = a.reshape(3, i)
-      return (a+1).realize()
-    jf = TinyJit(f)
-    for i in range(1, 5):
-      vi = Variable("i", 1, 10).bind(i)
-      a = Tensor.rand(3, i)
-      symbolic = jf(a, vi).reshape(3, i).numpy()
-      expected = f(a, i).numpy()
-      np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 1
-
   def test_add(self):
     def f(a, b): return (a+b).realize()
     jf = TinyJit(f)
