@@ -177,9 +177,9 @@ if getenv('METAL'):
 
 # TODO it's possible to fix this figure this shit out
 # Don't know how to treat special TensorProto like TensorProto.FLOAT8E4M3FN
-backend_test.exclude('test_dequantizelinear_axis_cpu')
-backend_test.exclude('test_dequantizelinear_cpu')
-backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
+#backend_test.exclude('test_dequantizelinear_axis_cpu')
+#backend_test.exclude('test_dequantizelinear_cpu')
+#backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 # TODO figure out before PR ready
 backend_test.exclude('test_operator_addconstant_cpu') # bad data type
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type data_type: 5

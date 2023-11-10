@@ -4,8 +4,9 @@ import importlib
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, getenv, DEBUG, dtypes
-from typing import List,Dict
-from onnx import AttributeProto, ModelProto, TensorProto, TypeProto
+from typing import List, Dict
+from onnx import AttributeProto, ModelProto, TensorProto, TypeProto # onnx 1.50 uses serialized file (see onnx/onnx-ml.proto) as descriptors
+from onnx.reference.custom_element_types import bfloat16, float8e4m3fn, float8e4m3fnuz, float8e5m2, float8e5m2fnuz
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
 except ImportError:
@@ -145,8 +146,9 @@ def get_run_onnx(onnx_model: ModelProto):
       opt: Dict = attribute_dict[num]
       if debug >= 1: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
       
-      # NOTE some ops live here because they require some local variables
-      if n.op_type == "Split": # have to use n.output for cases when num_outputs is absent
+      # NOTE some ops live here because they require access to some local variables
+      # have to use n.output for cases when num_outputs is absent
+      if n.op_type == "Split": 
         axis = opt.get("axis", 0)
         split = None if len(inp) == 1 else [int(x) for x in safe_numpy(inp[1])]
         if split is None:
@@ -160,7 +162,9 @@ def get_run_onnx(onnx_model: ModelProto):
           ret.append(inp[0].shrink(arg=tuple(arg)))
           i = i+s
         ret = tuple(ret)
-      elif n.op_type == "Slice": # need to check onnx_model_version
+
+      # need to check onnx_model_version
+      elif n.op_type == "Slice":
         if onnx_model_version < 10:
           axes, ends, starts, steps = list(opt.get("axes", range(inp[0].ndim))), list(opt["ends"]), list(opt["starts"]), [1]*inp[0].ndim
         else:
@@ -178,17 +182,13 @@ def get_run_onnx(onnx_model: ModelProto):
         new_shape = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in arg)
         if any(s==e for s,e in new_shape): ret = inp[0].shrink(new_shape)
         else: ret = inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
-      elif n.op_type == "Gradient": # need to call backward on intermediate_tensors
+      
+      # need to call backward on intermediate_tensors
+      elif n.op_type == "Gradient":
         assert len(opt["xs"]) == len(inp), f"len(opt['xs']):{len(opt['xs'])}, len(inp):{len(inp)} output and input has to match"
         y = opt["y"]
         intermediate_tensors[y].backward()
         ret = tuple([t.grad for t in inp])
-      elif n.op_type == "DequantizeLinear":
-        x, x_scale, axis, x_zero_point = inp[0], inp[1], opt["axis"], opt["x_zero_point"]
-        axis = axis + x.ndim if axis < 0 else axis
-        x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
-        x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
-        ret = (x - x_zer) * x_sc
 
         '''
 def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point=0, axis=1):

@@ -3,6 +3,7 @@ from tinygrad.helpers import prod, dtypes, ImageDType, flatten
 from extra.onnx import safe_numpy
 from onnx.helper import tensor_dtype_to_np_dtype
 from onnx import TensorProto
+import io
 import os
 import numpy as np
 import functools
@@ -594,13 +595,14 @@ def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
   return ret.cast(dtypes.bool)
 
 # Needs work Check dtype somehow
-'''
-def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point=0, axis=1):
+def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Tensor | int = 0, axis=1):
   axis = axis + x.ndim if axis < 0 else axis
+  x = x.cast(dtypes.float)
+  if x_zero_point.__class__ is Tensor: x_zero_point.cast(dtypes.float)
   x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
   x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
-  return (x - x_zer) * x_sc
-'''
+  return ((x - x_zer) * x_sc).cast(x_scale.dtype)
+
 # Needs work
 def IsNaN(x: Tensor):
   return (x < float("-inf")).cast(dtypes.bool)
@@ -610,7 +612,6 @@ def IsNaN(x: Tensor):
 def ImageDecoder(encoded_stream: Tensor, pixel_format="RGB"):
   try:
     import PIL.Image
-    import io
   except ImportError as e:
     raise ImportError("Pillow must be installed to use the reference implementation of the ImageDecoder operator") from e
   img = PIL.Image.open(io.BytesIO(safe_numpy(encoded_stream).tobytes()))
@@ -631,12 +632,10 @@ def Gelu(x:Tensor, approximate=None):
 
 def AffineGrid(theta: Tensor, size: Tensor, align_corners=0):
   _, _, *data_sz = safe_numpy(size).tolist()
-  size_zeros = Tensor.zeros(data_sz)
-  original_grid = Tensor.ones(data_sz)
+  size_zeros, original_grid = Tensor.zeros(data_sz), Tensor.ones(data_sz)
   stackable = [original_grid]
   for dim, dim_sz in enumerate(data_sz):
-    if align_corners == 1: a = Tensor.arange(-1, 1.0001, 2/(dim_sz-1))
-    else: a = Tensor.arange(-1+1/dim_sz, 1, 2/dim_sz)
+    a = Tensor.arange(-1, 1.0001, 2/(dim_sz-1)) if align_corners == 1 else Tensor.arange(-1+1/dim_sz, 1, 2/dim_sz)
     if dim == 0: stackable = [a.reshape(dim_sz, *[1]*(len(data_sz)-1)) + size_zeros, *stackable]
     elif dim == 1: stackable = [a.reshape(1, dim_sz, *[1]*(len(data_sz)-2)) + size_zeros, *stackable]
     else: stackable = [a.reshape(1, dim_sz) + size_zeros, *stackable]
