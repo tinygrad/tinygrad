@@ -16,29 +16,26 @@ class AudioListener:
     self.n_frame_chunk = n_frame_chunk
 
   def start(self, audio_queue: multiprocessing.Queue):
-      self.process = multiprocessing.Process(target=self.listen, args=(audio_queue,))
-      self.process.daemon = True
-      self.process.start()
+    self.process = multiprocessing.Process(target=self.listen, args=(audio_queue,))
+    self.process.daemon = True
+    self.process.start()
 
   def listen(self, audio_queue: multiprocessing.Queue):
-      paudio = pyaudio.PyAudio()
-      stream = paudio.open(
-          format=pyaudio.paInt16,
-          channels=1,
-          rate=self.sample_rate,
-          input=True,
-          frames_per_buffer=self.n_frame_chunk
-      )
+    paudio = pyaudio.PyAudio()
+    stream = paudio.open(
+      format=pyaudio.paInt16,
+      channels=1,
+      rate=self.sample_rate,
+      input=True,
+      frames_per_buffer=self.n_frame_chunk
+    )
 
-      while True:
-          # TODO: make audio settings as ArgumentParser arg
-          audio = stream.read(self.n_frame_chunk)
-          audio = ((np.frombuffer(audio, np.int16)/32768).astype(np.float32)*3)
+    while True:
+      # TODO: make audio settings as ArgumentParser arg
+      audio = stream.read(self.n_frame_chunk)
+      audio = ((np.frombuffer(audio, np.int16)/32768).astype(np.float32)*3)
 
-          audio_queue.put(audio)
-
-          # stream.close()
-          # paudio.terminate()
+      audio_queue.put(audio)
 
 
 if __name__ == "__main__":
@@ -57,21 +54,21 @@ if __name__ == "__main__":
 
   while True:
     while not audio_queue.empty():
-        audio = audio_queue.get()
-        if audio_buffer is None:
-            audio_buffer = audio
-        else:
-            audio_buffer = np.concatenate([audio_buffer, audio])
+      audio = audio_queue.get()
+      if audio_buffer is None:
+        audio_buffer = audio
+      else:
+        audio_buffer = np.concatenate([audio_buffer, audio])
 
     if audio_buffer is not None:
-        log_spec = prep_audio(audio_buffer)
-        encoded_audio = model.encoder(Tensor(log_spec)).realize()
+      log_spec = prep_audio(audio_buffer)
+      encoded_audio = model.encoder(Tensor(log_spec)).realize()
 
-        out = model.decoder(Tensor([lst]), encoded_audio).realize()
-        idx = int(out[0,-1].argmax().numpy().item())
-        lst.append(idx)
-        dec = enc.decode(lst)
+      out = model.decoder(Tensor([lst]), encoded_audio).realize()
+      idx = int(out[0,-1].argmax().numpy().item())
+      lst.append(idx)
+      dec = enc.decode(lst)
 
-        print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
-        if dec.endswith("<|endoftext|>"):
-            lst.pop()
+      print(dec) # DO NOT REMOVE PRINT. IT'S VERY IMPORTANT
+      if dec.endswith("<|endoftext|>"):
+        lst.pop()
