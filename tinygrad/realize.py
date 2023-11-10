@@ -1,7 +1,7 @@
 from typing import List, cast, Dict, Callable
 import numpy as np
 from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps
-from tinygrad.graph import log_schedule_item, print_tree
+from tinygrad.graph import log_schedule_item
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import DEBUG, prod, all_int, getenv, IMAGE
 
@@ -18,7 +18,6 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     si = schedule.pop(0)
     if not disable_logging: log_schedule_item(si)
     assert all(x.realized for x in si.inputs), "can't run schedule, some inputs aren't realized"
-    if DEBUG >= 3: print_tree(si.ast)
     if si.ast.op in LoadOps:
       # confirm the LoadOps are contiguous and in order
       for i,s in enumerate(si.ast.src): assert isinstance(s, LazyOp) and s.op == BufferOps.MEM and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
