@@ -534,9 +534,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   sys.stdout.write(outputted)
   sys.stdout.flush()
 
-  if args.profile:
-    import cProfile, pstats
-    profiler = cProfile.Profile()
+  if args.profile: from test.test_net_speed import start_profile, stop_profile
 
   # chatbot loop
   while 1:
@@ -553,7 +551,7 @@ After you are done speaking, output [EOS]. You are not Chad.
     last_break = len(outputted)
     for i in range(args.count):
       GlobalCounters.reset()
-      if args.profile and i == 2: profiler.enable()
+      if args.profile: pr = start_profile()
 
       if args.timing: print("")
       st = GlobalCounters.time_sum_s
@@ -564,6 +562,8 @@ After you are done speaking, output [EOS]. You are not Chad.
           probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
         probs_np = probs.numpy()
         tok = int(np.random.choice(len(probs_np), p=probs_np))
+
+      if args.profile: stop_profile(pr, sort='time')
 
       # use the kv cache
       start_pos = len(toks)
@@ -580,8 +580,3 @@ After you are done speaking, output [EOS]. You are not Chad.
       # stop after you have your answer
       if chatbot and outputted.endswith(end_delim): break
     if not chatbot: break
-
-  if args.profile:
-    profiler.disable()
-    stats = pstats.Stats(profiler)
-    stats.dump_stats("out.prof")
