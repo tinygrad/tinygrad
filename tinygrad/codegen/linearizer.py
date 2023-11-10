@@ -52,7 +52,7 @@ class Linearizer(Kernel):
     return self.uop(UOps.ALU, dtype, (a, render_b), op)
 
   # NOTE: the consts have to be be cached for deduping of downstream uops to work
-  def const(self, b:Union[int,float], dtype=dtypes.int32) -> UOp: return self.uop(UOps.CONST, dtype, tuple(), b)
+  def const(self, b:Union[int,float], dtype=dtypes.int32, insert_before=None) -> UOp: return self.uop(UOps.CONST, dtype, tuple(), b, insert_before=insert_before)
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: ctx.const(self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
@@ -390,6 +390,11 @@ class Linearizer(Kernel):
             deps.add(u)
       return sorted(list(deps), key=lambda x: x.num)
 
+    def replace_op(old:UOp, new:UOp):
+      for u in self.uops:
+        u.vin = tuple(new if x == old else x for x in u.vin)
+      self.uops.remove(old)
+
     # uops optimization
     changed_something = True
     while changed_something:
@@ -403,8 +408,8 @@ class Linearizer(Kernel):
             del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
             # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
             loop_len = self.uop(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB, insert_before=self.uops.index(u))
-            #if loop_len.dtype != u.dtype: loop_len = self.uop(UOps.CAST, u.dtype, (loop_len,), insert_before=self.uops.index(u))
-            u.uop, u.vin, u.arg = UOps.ALU, (u.vin[1],loop_len), BinaryOps.MUL
+            if loop_len.dtype != u.dtype: loop_len = self.uop(UOps.CAST, u.dtype, (loop_len,), insert_before=self.uops.index(u))
+            replace_op(u, self.uop(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u)))
             changed_something = True
 
     # (recursively) remove childless uops
@@ -448,12 +453,12 @@ class Linearizer(Kernel):
     key = (uop, dtype, vin, arg)
     if simplify:
       if uop == UOps.PHI and len(vin) == 2 and vin[0] == vin[1]: return vin[0]   # self phi is noop
-      if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype)
+      if uop in {UOps.CAST, UOps.GEP} and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype, insert_before)
       if uop == UOps.ALU:
         # rewrites. NOTE: the rewritten NEG op is still around...
-        if arg == BinaryOps.ADD and vin[1].uop == UOps.ALU and vin[1].arg == UnaryOps.NEG: return self.uop(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable=cachable)
+        if arg == BinaryOps.ADD and vin[1].uop == UOps.ALU and vin[1].arg == UnaryOps.NEG: return self.uop(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable=cachable, insert_before=insert_before)
         # constant folding
-        if arg == UnaryOps.NEG and vin[0].uop == UOps.CONST: return self.const(-vin[0].arg, dtype)
+        if arg == UnaryOps.NEG and vin[0].uop == UOps.CONST: return self.const(-vin[0].arg, dtype, insert_before)
         # zero folding
         for x in [0,1]:
           if arg == BinaryOps.ADD and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[1-x]
