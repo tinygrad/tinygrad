@@ -108,7 +108,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   beam: List[Tuple[Linearizer, float]] = [(lin, time_linearizer(lin, rawbufs, allow_test_size=allow_test_size))]
 
   # NOTE: real uops use a weird compare method that's only valid inside a linearizer
-  def tuplize_uops(uops): return tuple([(x.uop, x.dtype, tuple(x.num for x in x.vin), x.arg) for x in uops])
+  def tuplize_uops(uops): return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
   seen_uops = {tuplize_uops(lin.linearize().uops): tuple(lin.applied_opts)}
 
   while 1:

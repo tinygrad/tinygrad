@@ -21,19 +21,13 @@ class UOps(Enum):
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto(); PHI = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
-@dataclass
+@dataclass(eq=False)
 class UOp:
   uop: UOps
   dtype: Optional[DType]
   vin: Tuple[UOp, ...]
   arg: Any
-  def __repr__(self): return f"{self.num:4d} {str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.num for x in self.vin]):32s} {self.arg}"
-  #def __repr__(self): return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str(self.vin):32s} {self.arg}"
-
-  # UOps are unique
-  num: int = -1
-  def __hash__(self): return self.num
-  def __eq__(self, x): return self.num == x.num
+  def __repr__(self): return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
 
 def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
   local_idxs = loop_local_idxs = [Variable(f"{prefix}{start_dim+i}", 0, s-1) for i,s in enumerate(local_dims[0:maxdim-1] + (prod(local_dims[maxdim-1:]),) if len(local_dims) > maxdim else local_dims)]
@@ -168,7 +162,6 @@ class Linearizer(Kernel):
 
     # uops
     self.uops: List[UOp] = []
-    self.uop_num: int = 0
     self.buf_uops: List[Optional[UOp]] = [None]*len(self.bufs)
     self.loop_uops: Dict[str, UOp] = {}
 
@@ -389,11 +382,11 @@ class Linearizer(Kernel):
         for u in self.uops:
           if len(deps.intersection([x for x in u.vin if x.uop != UOps.PHI])):
             deps.add(u)
-      return sorted(list(deps), key=lambda x: x.num)
+      return sorted(list(deps), key=self.uops.index)    # get the last one
 
     def replace_op(old:UOp, new:UOp):
       for u in self.uops:
-        u.vin = tuple(new if x == old else x for x in u.vin)
+        u.vin = tuple(new if x is old else x for x in u.vin)
       self.uops.remove(old)
 
     # uops optimization
@@ -438,7 +431,8 @@ class Linearizer(Kernel):
 
     # maybe graph the uops
     if DEBUG >= 5:
-      for u in self.uops: print(u)
+      for u in self.uops:
+        print(f"{self.uops.index(u):4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} {str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")
     if getenv("GRAPHUOPS"):
       from tinygrad.graph import graph_uops
       graph_uops(self.uops)
@@ -469,8 +463,7 @@ class Linearizer(Kernel):
         if arg == BinaryOps.SUB and vin[1].uop == UOps.CONST and vin[1].arg == 0.0: return vin[0]
         if arg == BinaryOps.DIV and vin[1].uop == UOps.CONST and vin[1].arg == 1.0: return vin[0]
     if cachable and key in self.saved_exprs: return self.saved_exprs[key]
-    ret = UOp(uop, dtype, vin, arg, self.uop_num)
-    self.uop_num += 1
+    ret = UOp(uop, dtype, vin, arg)
     if insert_before is not None:
       self.uops.insert(insert_before, ret)
     else:
