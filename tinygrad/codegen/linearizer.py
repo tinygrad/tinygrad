@@ -31,7 +31,7 @@ class UOp:
   #def __repr__(self): return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str(self.vin):32s} {self.arg}"
 
   # UOps are unique
-  num: int
+  num: int = -1
   def __hash__(self): return self.num
   def __eq__(self, x): return self.num == x.num
 
@@ -370,6 +370,7 @@ class Linearizer(Kernel):
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
+    # graph helper functions
     def get_recursive_parents(x:List[UOp]) -> List[UOp]:
       ret: Set[UOp] = set()
       this_round: Set[UOp] = set(x)
@@ -380,16 +381,28 @@ class Linearizer(Kernel):
         this_round = next_round
       return list(ret)
 
-    # loop removal
-    for i,u in enumerate(self.uops):
-      if u.uop == UOps.PHI and len(u.vin) == 3:
-        # if the parents of the PHI node don't have the LOOP as parents, it can be folded
-        if all(x.uop != UOps.LOOP for x in get_recursive_parents(list(u.vin[0:2]))):
-          tloop = u.vin[2]
-          at_end = self.uops[i:]
-          self.uops = self.uops[:i]
-          u.uop, u.vin, u.arg = UOps.ALU, (u.vin[1],self.uop(UOps.ALU, u.dtype, (tloop.vin[1], tloop.vin[0]), BinaryOps.SUB)), BinaryOps.MUL
-          self.uops += at_end
+    def get_recursive_children(x:UOp) -> List[UOp]:
+      deps = set([x])
+      ssize = 0
+      while ssize != len(deps):
+        ssize = len(deps)
+        for u in self.uops:
+          if len(deps.intersection([x for x in u.vin if x.uop != UOps.PHI])):
+            deps.add(u)
+      return sorted(list(deps), key=lambda x: x.num)
+
+    # uops optimization
+    changed_something = True
+    while changed_something:
+      changed_something = False
+      for i,u in enumerate(self.uops):
+        if u.uop == UOps.PHI and len(u.vin) == 3:
+          # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
+          if all(x.uop != UOps.LOOP for x in get_recursive_parents(list(u.vin[0:2]))):
+            if DEBUG >= 4: print(f"removing PHI node {u}")
+            loop_len = self.uop(UOps.ALU, u.dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB, insert_at=i)
+            u.uop, u.vin, u.arg = UOps.ALU, (u.vin[1],loop_len), BinaryOps.MUL
+            changed_something = True
 
     # (recursively) remove childless uops
     # NOTE: DEFINE_GLOBAL should be removable, but we'd have to propagate that
@@ -403,25 +416,13 @@ class Linearizer(Kernel):
       if len(nu) == len(self.uops): break
       if DEBUG >= 4: print(f"reduced UOp count from {len(self.uops)} to {len(nu)}")
       self.uops = nu
+      del nu
 
-    def get_recursive_deps(x:UOp) -> List[UOp]:
-      deps = set([x])
-      ssize = 0
-      while ssize != len(deps):
-        ssize = len(deps)
-        for u in self.uops:
-          if len(deps.intersection([x for x in u.vin if x.uop != UOps.PHI])):
-            deps.add(u)
-      return sorted(list(deps), key=lambda x: x.num)
-
-    # add END of loops after the last thing that (recursively) depends on them
+    # add UOps.END
     for u in self.uops:
       if u.uop == UOps.LOOP:
-        last_phi = self.uops.index(get_recursive_deps(u)[-1])
-        at_end = self.uops[last_phi+1:]
-        self.uops = self.uops[:last_phi+1]
-        self.uop(UOps.END, None, (u,), cachable=False)
-        self.uops += at_end
+        # add END of loops after the last thing that (recursively) depends on them
+        self.uop(UOps.END, None, (u,), cachable=False, insert_at=self.uops.index(get_recursive_children(u)[-1])+1)
       elif u.uop == UOps.IF:
         # END any if statements at the end of the uops
         self.uop(UOps.END, None, (u,), cachable=False)
@@ -440,28 +441,32 @@ class Linearizer(Kernel):
     self.applied_opts_cache = self.applied_opts[:]
     return self
 
-  def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None, cachable=True) -> UOp:
+  def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None, cachable=True, insert_at=None, simplify=True) -> UOp:
     key = (uop, dtype, vin, arg)
-    if uop == UOps.PHI and len(vin) == 2 and vin[0] == vin[1]: return vin[0]   # self phi is noop
-    if uop == UOps.CAST and all(x.uop == UOps.GEP for x in vin) and all_same([x.vin[0] for x in vin]) and all(x.arg == i for i,x in enumerate(vin)): return vin[0].vin[0]
-    if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype)
-    if uop == UOps.ALU:
-      # rewrites. NOTE: the rewritten NEG op is still around...
-      if arg == BinaryOps.ADD and vin[1].uop == UOps.ALU and vin[1].arg == UnaryOps.NEG: return self.uop(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable=cachable)
-      # constant folding
-      if arg == UnaryOps.NEG and vin[0].uop == UOps.CONST: return self.const(-vin[0].arg, dtype)
-      # zero folding
-      for x in [0,1]:
-        if arg == BinaryOps.ADD and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[1-x]
-        if arg == BinaryOps.MUL and vin[x].uop == UOps.CONST and vin[x].arg == 1.0: return vin[1-x]
-        if arg == BinaryOps.MUL and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[x]
-      if arg == BinaryOps.SUB and vin[1].uop == UOps.CONST and vin[1].arg == 0.0: return vin[0]
-      if arg == BinaryOps.DIV and vin[1].uop == UOps.CONST and vin[1].arg == 1.0: return vin[0]
+    if simplify:
+      if uop == UOps.PHI and len(vin) == 2 and vin[0] == vin[1]: return vin[0]   # self phi is noop
+      if uop == UOps.CAST and all(x.uop == UOps.GEP for x in vin) and all_same([x.vin[0] for x in vin]) and all(x.arg == i for i,x in enumerate(vin)): return vin[0].vin[0]
+      if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype)
+      if uop == UOps.ALU:
+        # rewrites. NOTE: the rewritten NEG op is still around...
+        if arg == BinaryOps.ADD and vin[1].uop == UOps.ALU and vin[1].arg == UnaryOps.NEG: return self.uop(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable=cachable)
+        # constant folding
+        if arg == UnaryOps.NEG and vin[0].uop == UOps.CONST: return self.const(-vin[0].arg, dtype)
+        # zero folding
+        for x in [0,1]:
+          if arg == BinaryOps.ADD and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[1-x]
+          if arg == BinaryOps.MUL and vin[x].uop == UOps.CONST and vin[x].arg == 1.0: return vin[1-x]
+          if arg == BinaryOps.MUL and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[x]
+        if arg == BinaryOps.SUB and vin[1].uop == UOps.CONST and vin[1].arg == 0.0: return vin[0]
+        if arg == BinaryOps.DIV and vin[1].uop == UOps.CONST and vin[1].arg == 1.0: return vin[0]
     if cachable and key in self.saved_exprs: return self.saved_exprs[key]
-    self.uops.append(UOp(uop, dtype, vin, arg, len(self.uops)))
-    #if DEBUG >= 5: print(self.uops[-1])
-    if cachable: self.saved_exprs[key] = self.uops[-1]
-    return self.uops[-1]
+    ret = UOp(uop, dtype, vin, arg, len(self.uops))
+    if insert_at is not None:
+      self.uops.insert(insert_at, ret)
+    else:
+      self.uops.append(ret)
+    if cachable: self.saved_exprs[key] = ret
+    return ret
 
   def ast_parse(self, x, acc, offs, loaded_buffers, do_reduce=False, loop_ctx=tuple()) -> List[UOp]:
     if x.__class__ is not LazyOp: return loaded_buffers[x]    # for LOCAL_BUFFER
