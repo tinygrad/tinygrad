@@ -306,7 +306,6 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     return _padding(x, seq_pads, axes=seq_axes, constant_value=constant_value)
 
 def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
-  if dilations != 1: raise NotImplementedError(f"dilations != 1 not supported, dilations:{dilations}")
   pixel_axes = tuple(range(len(X.shape)))[-len(kernel_shape):]
   if ceil_mode: auto_pad = "SAME_UPPER"
   padding_included = _padding(X, pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations).avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
