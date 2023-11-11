@@ -233,7 +233,7 @@ class Tensor:
       return nodes
     return _deepwalk(self, set(), [])
 
-  def backward(self):
+  def backward(self) -> Tensor:
     assert self.shape == tuple(), f"backward can only be called for scalar tensors, but it has shape {self.shape})"
 
     # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
@@ -250,6 +250,7 @@ class Tensor:
           assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
           t.grad = g if t.grad is None else (t.grad + g)
       del t0._ctx
+    return self
 
   # ***** movement mlops *****
   def reshape(self, shape, *args) -> Tensor:
