@@ -1,7 +1,5 @@
 from tinygrad import Tensor, TinyJit, nn
-from tinygrad.helpers import GlobalCounters
-
-from extra.datasets import fetch_mnist
+from extra.datasets import fetch_mnist   # TODO: from tinygrad.extra.datasets should fix PYTHONPATH issues
 from tqdm import trange
 
 class Model:
@@ -29,10 +27,7 @@ if __name__ == "__main__":
     return loss.realize()  # TODO: should the jit do this automatically? i think yes
 
   for i in (t:=trange(200)):
-    # TODO: should the TinyJit auto reset this? this is only for debugging
-    GlobalCounters.reset()
-    # TODO: put this in the JIT when rand is fixed (also shouldn't need the realize)
-    samples = Tensor.randint(32, high=X_train.shape[0])
+    samples = Tensor.randint(32, high=X_train.shape[0])  # TODO: put this in the JIT when rand is fixed
     loss = train_step(samples)
     t.set_description(f"loss: {loss.item():.2f}")
 

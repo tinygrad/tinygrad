@@ -1,6 +1,6 @@
 from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional
 import functools, itertools
-from tinygrad.helpers import DEBUG, DType, merge_dicts
+from tinygrad.helpers import DEBUG, DType, merge_dicts, GlobalCounters
 from tinygrad.ops import RawBuffer, Device, ASTRunner
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -26,6 +26,7 @@ class TinyJit:
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
 
   def __call__(self, *args, **kwargs) -> Any:
+    GlobalCounters.reset()
     if Device.DEFAULT.split(":")[0] not in JIT_SUPPORTED_DEVICE: return self.fxn(*args, **kwargs)  # only jit on supported device
 
     # all inputs are realized
