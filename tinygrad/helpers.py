@@ -130,8 +130,10 @@ class dtypes:
   # NOTE: these are internal dtypes, should probably check for that
   _int2: Final[DType] = DType(2, 4*2, "int2", None, 2)
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
+  _half16: Final[DType] = DType(0, 2*16, "half16", None, 16)
   _float2: Final[DType] = DType(4, 4*2, "float2", None, 2)
   _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
+  _float8: Final[DType] = DType(4, 4*8, "float8", None, 8)
   _arg_int32: Final[DType] = DType(2, 4, "_arg_int32", None)
 
   # NOTE: these are image dtypes
@@ -157,7 +159,7 @@ class GlobalCounters:
 # *** universal database cache ***
 
 _cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache"))
-CACHEDB: str = getenv("CACHEDB", os.path.join(_cache_dir, "tinygrad", "cache.db"))
+CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
 VERSION = 6
@@ -165,11 +167,12 @@ _db_connection = None
 def db_connection():
   global _db_connection
   if _db_connection is None:
-    os.makedirs(CACHEDB.rsplit("/", 1)[0], exist_ok=True)
+    os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
     _db_connection = sqlite3.connect(CACHEDB)
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
     if diskcache_get("meta", "version") != VERSION:
       print("cache is out of date, clearing it")
+      _db_connection.close()
       del _db_connection
       os.unlink(CACHEDB)
       _db_connection = sqlite3.connect(CACHEDB)

@@ -137,6 +137,9 @@ class TestOps(unittest.TestCase):
   def test_arange_big(self):
     helper_test_op([], lambda: torch.arange(256), lambda: Tensor.arange(256), forward_only=True)
 
+  def test_sum_collapse(self):
+    helper_test_op([], lambda: torch.ones(256,256).sum(axis=1), lambda: Tensor.ones(256,256).sum(axis=1), forward_only=True)
+
   def test_where(self):
     helper_test_op(
       [(100,)],
