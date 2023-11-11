@@ -1,5 +1,4 @@
-from tinygrad import Tensor, nn
-from tinygrad.jit import TinyJit
+from tinygrad import Tensor, TinyJit, nn
 from tinygrad.helpers import GlobalCounters
 
 from extra.datasets import fetch_mnist
