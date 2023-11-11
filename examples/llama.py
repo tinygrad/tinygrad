@@ -84,7 +84,7 @@ class Attention:
 
     # create kv cache
     if not hasattr(self, "cache_k"):
-      self.cache_k, self.cache_v = Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim), Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim)
+      self.cache_k, self.cache_v = Tensor.zeros(bsz, MAX_CONTEXT, self.n_kv_heads, self.head_dim), Tensor.zeros(bsz, MAX_CONTEXT, self.n_kv_heads, self.head_dim)
 
     keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
     values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
