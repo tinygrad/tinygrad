@@ -1,5 +1,5 @@
 from tinygrad import Tensor, TinyJit, nn
-from extra.datasets import fetch_mnist   # TODO: from tinygrad.extra.datasets should fix PYTHONPATH issues
+from tinygrad.extra.datasets import fetch_mnist
 from tqdm import trange
 
 class Model:
@@ -10,7 +10,7 @@ class Model:
   def __call__(self, x:Tensor) -> Tensor:
     x = self.c1(x).relu().max_pool2d()
     x = self.c2(x).relu().max_pool2d()
-    return self.l1(x.flatten(1)).log_softmax()   # TODO: there's a second one of these in sparse_categorical_crossentropy
+    return self.l1(x.flatten(1)).log_softmax()   # TODO: there's a second log_softmax in sparse_categorical_crossentropy
 
 if __name__ == "__main__":
   X_train, Y_train, X_test, Y_test = fetch_mnist()
