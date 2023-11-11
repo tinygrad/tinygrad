@@ -24,7 +24,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
-        key: linting-packages-${{ hashFiles('**/setup.py') }}-3.8
+        key: linting-packages-${{ hashFiles('**/pyproject.toml') }}-3.8
     - name: Install dependencies
       run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Repo line count
@@ -78,7 +78,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
-        key: testing-packages-${{ hashFiles('**/setup.py') }}
+        key: testing-packages-${{ hashFiles('**/pyproject.toml') }}
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
@@ -106,7 +106,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-        key: testing-packages-${{ hashFiles('**/setup.py') }}
+        key: testing-packages-${{ hashFiles('**/pyproject.toml') }}
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
@@ -139,7 +139,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-          key: testing-packages-${{ hashFiles('**/setup.py') }}
+          key: testing-packages-${{ hashFiles('**/pyproject.toml') }}
       - name: Install Dependencies
         run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
       - if: ${{ matrix.task == 'optimage' }}
@@ -210,7 +210,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-        key: metal-webgpu-testing-packages-${{ hashFiles('**/setup.py') }}
+        key: metal-webgpu-testing-packages-${{ hashFiles('**/pyproject.toml') }}
     - name: Install Dependencies
       run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test LLaMA compile speed
@@ -272,7 +272,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-          key: ${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
+          key: ${{ matrix.backend }}-packages-${{ hashFiles('**/pyproject.toml') }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas'}}" >> $GITHUB_ENV
       - name: Install OpenCL
@@ -342,7 +342,7 @@ jobs:
   #      uses: actions/cache@v3
   #      with:
   #        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-  #        key: testing-arm-packages-${{ hashFiles('**/setup.py') }}
+  #        key: testing-arm-packages-${{ hashFiles('**/pyproject.toml') }}
   #    - name: Install cross-assembler
   #      run: |
   #        sudo apt update -y
