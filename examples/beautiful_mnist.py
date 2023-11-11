@@ -7,6 +7,7 @@ class Model:
     self.c1 = nn.Conv2d(1, 8, (3,3))
     self.c2 = nn.Conv2d(8, 16, (3,3))
     self.l1 = nn.Linear(400, 10)
+
   def __call__(self, x:Tensor) -> Tensor:
     x = self.c1(x).relu().max_pool2d()
     x = self.c2(x).relu().max_pool2d()
@@ -27,9 +28,11 @@ if __name__ == "__main__":
     return loss.realize()  # TODO: should the jit do this automatically? i think yes
 
   for i in (t:=trange(200)):
-    samples = Tensor.randint(32, high=X_train.shape[0])  # TODO: put this in the JIT when rand is fixed
+    samples = Tensor.randint(128, high=X_train.shape[0])  # TODO: put this in the JIT when rand is fixed
     loss = train_step(samples)
-    t.set_description(f"loss: {loss.item():.2f}")
+    t.set_description(f"loss: {loss.item():6.2f}")
 
+  # TODO: we have to get accuracy > 98% (and keep training time < 5s on M1 Max)
+  # TODO: support dropout in the JIT
   test_acc = (model(X_test).argmax(axis=1) == Y_test).mean()
-  print(f"Accuracy: {test_acc.item()*100:.2f}%")
+  print(f"accuracy: {test_acc.item()*100:.2f}%")
