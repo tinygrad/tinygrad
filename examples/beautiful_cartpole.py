@@ -13,6 +13,15 @@ class Model:
     x = self.l1(x).tanh()
     return self.l2(x).log_softmax()
 
+def evaluate(model:Model, test_env:gym.Env) -> float:
+  (obs, _), done = test_env.reset(), False
+  total_rew = 0.0
+  while not done:
+    act = model(Tensor(obs)).argmax().cast(dtypes.int32).item()
+    obs, rew, done, _, _ = test_env.step(act)
+    total_rew += rew
+  return total_rew
+
 # TODO: time should be < 5s on M1 Max
 if __name__ == "__main__":
   env = gym.make('CartPole-v1')
@@ -34,6 +43,7 @@ if __name__ == "__main__":
     while len(X) < BS:
       obs, _ = env.reset()
       acts, rews, done = [], [], False
+      # NOTE: we don't want to early stop since then the rewards are wrong for the last episode
       while not done:
         tobs = Tensor(obs)
 
@@ -63,12 +73,5 @@ if __name__ == "__main__":
     loss = train_step(Tensor(X[:BS]), Tensor(Y[:BS]))  # TODO: randomize this?
     t.set_description(f"loss: {loss.item():6.2f} ep_count: {len(ep_rews):2d} avg_ep_rew: {sum(ep_rews)/len(ep_rews):6.2f}")
 
-  # eval
-  test_env = gym.make('CartPole-v1', render_mode='human')
-  (obs, _), done = test_env.reset(), False
-  total_rew = 0
-  while not done:
-    act = model(Tensor(obs)).argmax().cast(dtypes.int32).item()
-    obs, rew, done, _, _ = test_env.step(act)
-    total_rew += rew
-  print(f"test reward: {total_rew}")
+  test_rew = evaluate(model, gym.make('CartPole-v1', render_mode='human'))
+  print(f"test reward: {test_rew}")
