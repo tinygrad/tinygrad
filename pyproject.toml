@@ -1,0 +1,65 @@
+[project]
+name = "tinygrad"
+version = "0.7.0"
+description = "You like pytorch? You like micrograd? You love tinygrad! ❤️"
+authors = ["George Hotz <https://github.com/geohot>"]
+license = "MIT"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "requests",
+    "tqdm",
+    "networkx",
+    "pyopencl",
+    { "pyobjc-framework-Metal" = { version = "*", markers = "platform_system == 'Darwin'" }},
+    { "pyobjc-framework-Cocoa" = { version = "*", markers = "platform_system == 'Darwin'" }},
+    { "pyobjc-framework-libdispatch" = { version = "*", markers = "platform_system == 'Darwin'" }}
+]
+
+[project.optional-dependencies]
+llvm = ["llvmlite"]
+cuda = ["pycuda"]
+arm = ["unicorn"]
+triton = ["triton-nightly>=2.1.0.dev20231014192330", "pycuda"]
+webgpu = ["wgpu"]
+linting = [
+    "flake8",
+    "pylint",
+    "mypy",
+    "typing-extensions",
+    "pre-commit",
+    "ruff",
+    "types-tqdm",
+]
+testing = [
+    "torch",
+    "pillow",
+    "pytest",
+    "pytest-xdist",
+    "onnx==1.15.0",
+    "onnx2torch",
+    "opencv-python",
+    "tabulate",
+    "safetensors",
+    "cloudpickle",
+    "transformers",
+    "sentencepiece",
+    "tiktoken",
+    "librosa",
+]
+
+[tool.poetry]
+packages = [
+    { include = "tinygrad" },
+    { include = "tinygrad.codegen" },
+    { include = "tinygrad.nn" },
+    { include = "tinygrad.renderer" },
+    { include = "tinygrad.runtime" },
+    { include = "tinygrad.shape" },
+    { include = "tinygrad.features" },
+]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
