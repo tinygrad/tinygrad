@@ -1,5 +1,4 @@
-from tinygrad.tensor import Tensor
-from tinygrad import nn
+from tinygrad import Tensor, nn
 from tinygrad.jit import TinyJit
 from tinygrad.helpers import GlobalCounters
 
