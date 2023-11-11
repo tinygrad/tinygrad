@@ -12,7 +12,7 @@ def fetch_mnist():
   Y_train = parse(dirname / "mnist/train-labels-idx1-ubyte.gz")[8:]
   X_test = parse(dirname / "mnist/t10k-images-idx3-ubyte.gz")[0x10:].reshape((-1, 28*28)).astype(np.float32)
   Y_test = parse(dirname / "mnist/t10k-labels-idx1-ubyte.gz")[8:]
-  return X_train, Y_train, X_test, Y_test
+  return Tensor(X_train).reshape(-1, 1, 28, 28), Tensor(Y_train), Tensor(X_test).reshape(-1, 1, 28, 28), Tensor(Y_test)
 
 cifar_mean = [0.4913997551666284, 0.48215855929893703, 0.4465309133731618]
 cifar_std = [0.24703225141799082, 0.24348516474564, 0.26158783926049628]

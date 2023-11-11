@@ -124,6 +124,8 @@ class Tensor:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
     return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().reshape(self.shape)
+  def item(self) -> Union[float, int]:
+    return self.numpy().item()
 
   # TODO: if things are realized this won't work
   def to_(self, device:str):
@@ -188,6 +190,10 @@ class Tensor:
     # https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
     src = Tensor.rand(2, *shape, **kwargs)
     return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(Tensor.default_type if dtype is None else dtype)
+
+  @staticmethod
+  def randint(*shape, low=0, high=10) -> Tensor:
+    return (Tensor.rand(*shape)*(high-low)+low).cast(dtypes.int32)
 
   @staticmethod
   def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor: return (std * Tensor.randn(*shape, **kwargs)) + mean
