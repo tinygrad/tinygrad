@@ -2,7 +2,7 @@ import math
 from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, all_int
-
+from tinygrad import nn
 class BatchNorm2d:
   def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
@@ -126,3 +126,16 @@ class Embedding:
   def __call__(self, idx:Tensor) -> Tensor:
     if not hasattr(self, 'vocab_counter'): self.vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False).reshape(1, 1, self.vocab_size)
     return (self.vocab_counter == idx.unsqueeze(2)).expand(*idx.shape, self.vocab_size) @ self.weight
+
+class DotProductAttention:
+    def __init__(self, dim:int):
+        self.dim = dim
+
+    def __call__(self, queries:Tensor, keys:Tensor, values:Tensor, mask:Optional[Tensor]=None) -> Tensor:
+        scores = Tensor.matmul(queries, keys.transpose(-1, -2)) / math.sqrt(self.dim)
+
+        if mask is not None:
+            scores += -1e9 * mask
+
+        weights = scores.softmax(-1)
+        return Tensor.matmul(weights, values)
