@@ -242,10 +242,10 @@ def _format_padding(onnx_pads, ndims=None, axes=None):
   return np_pads
 
 def _padding(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
-  if strides is not None: strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
-  if dilations is not None: dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
   if auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
   elif ceil_mode and auto_pad=="NOTSET": # stupid ceil_mode case
+    if strides is not None: strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
+    if dilations is not None: dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
     out_spatial_shape = [math.ceil((sh - dil * (ker-1)-1)/st + 1) if ceil_mode else math.floor((sh - dil * (ker-1)-1)/st + 1) for sh, st, ker, dil in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
     pad_shape = [(osh-1)*st+((ks-1)*dil+1)-ish for osh, st, ks, dil, ish in zip(out_spatial_shape, strides, kernel_shape, dilations, X.shape[-len(kernel_shape):])]
     pad_shape = flatten([[sh//2, sh-sh//2] for sh in pad_shape])
@@ -255,6 +255,8 @@ def _padding(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=
   return X.pad(tuple(pads), value=constant_value)
 
 def _auto_pad(X: Tensor, auto_pad, strides, kernel_shape, dilations):
+  strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
+  dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
   if auto_pad == "SAME_UPPER" or auto_pad == "SAME_LOWER":
     pad_shape = [(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
     pad_shape = flatten([[sh//2, sh-sh//2] for sh in pad_shape])
