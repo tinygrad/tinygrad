@@ -12,8 +12,7 @@ import time
 def train_resnet():
   import wandb
   from models.resnet import ResNet50
-  from extra.datasets.imagenet import get_train_files, get_val_files
-  from extra.datasets.dataloader import iterate
+  from extra.datasets.dataloader import iterate, get_train_files, get_val_files
   from extra.lr_scheduler import CosineAnnealingLR
 
   BS,W = getenv("BS",64),getenv("WORKERS",4)

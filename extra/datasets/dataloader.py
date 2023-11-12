@@ -7,7 +7,49 @@ from simplejpeg import decode_jpeg
 from multiprocessing import Pool
 from functools import partial
 from tinygrad.helpers import getenv
+from queue import Queue
+from threading import Thread
+from tinygrad.helpers import getenv
+import threading
 import math
+
+# TODO mem leak here - obj np.ndarray
+class PreFetcher(Thread):
+  def __init__(self,generator,max_prefetch=getenv("QS",1)):
+    super().__init__()
+    self.queue = Queue(1)
+    self.generator = generator
+    self.exit_event = threading.Event()
+    self.daemon = True
+    self.start()
+
+  def run(self):
+    try:
+        for item in self.generator: 
+          if self.exit_event.is_set(): 
+            self.generator.close()
+            del self.generator, self.queue
+            return  # Stop prefetching if signaled to stop
+          self.queue.put((True,item))
+    except Exception as e:          self.queue.put((False,e))
+    finally:                        
+      if hasattr(self, 'queue'): self.queue.put((False,StopIteration))
+  
+  def stop(self):
+    self.exit_event.set()
+
+  def __next__(self):
+    if not self.exit_event.is_set():
+        success, next_item = self.queue.get()
+        if success: 
+          return next_item
+        else:
+            self.Continue = False
+            raise next_item
+    else: 
+      raise StopIteration
+
+  def __iter__(self): return self
 
 BASEDIR = pathlib.Path(__file__).parent / "imagenet"
 ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
