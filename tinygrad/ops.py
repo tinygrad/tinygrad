@@ -71,7 +71,7 @@ class LazyOp:
     try: return buffers.union(*[x.unique_buffers(visited) for x in self.src])
     except AttributeError: return set()
 
-  
+
   @functools.cached_property
   def hash (self): return hash((self.op,self.src,self.arg))
   def __hash__(self): return self.hash
