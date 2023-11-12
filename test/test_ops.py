@@ -683,6 +683,25 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3)], lambda x: torch.nn.functional.pad(x, (0,0,3,4), value=1), lambda x: x.pad(((3,4), None), value=1))
     helper_test_op([(3,3)], lambda x: torch.nn.functional.pad(x, (0,0,0,0), value=1), lambda x: x.pad((None, None), value=1))
 
+  def test_pad_slice(self):
+    helper_test_op([(4)], lambda x: torch.nn.functional.pad(x,(1,0))[0], lambda x: x.pad(((1,0),))[0])
+    helper_test_op([(4)], lambda x: torch.nn.functional.pad(x,(3,0))[0:1], lambda x: x.pad(((3,0),))[0:1])
+    helper_test_op([(4)], lambda x: torch.nn.functional.pad(x,(0,3))[6], lambda x: x.pad(((0,3),))[6])
+    helper_test_op([(4)], lambda x: torch.nn.functional.pad(x,(0,3))[4:6], lambda x: x.pad(((0,3),))[4:6])
+    helper_test_op([(4,4)], lambda x: torch.nn.functional.pad(x,(0,0,1,0))[0], lambda x: x.pad(((1,0),(0,0)))[0])
+    helper_test_op([(4,4)], lambda x: torch.nn.functional.pad(x,(0,0,1,0))[0,2], lambda x: x.pad(((1,0),(0,0)))[0,2])
+    helper_test_op([(4,4)], lambda x: torch.nn.functional.pad(x,(0,0,0,2))[5], lambda x: x.pad(((0,2),(0,0)))[5])
+    helper_test_op([(4,4)], lambda x: torch.nn.functional.pad(x,(0,0,0,2))[3:5], lambda x: x.pad(((0,2),(0,0)))[3:5])
+    helper_test_op([(4,4)], lambda x: torch.nn.functional.pad(x,(3,0,0,0))[1,0], lambda x: x.pad(((0,0),(3,0)))[1,0])
+    helper_test_op([(4,4)], lambda x: torch.nn.functional.pad(x,(3,0,0,0))[1,0:4], lambda x: x.pad(((0,0),(3,0)))[1,0:4])
+    helper_test_op([(4,4)], lambda x: torch.nn.functional.pad(x,(3,4,1,2))[0], lambda x: x.pad(((1,2),(3,4)))[0])
+    helper_test_op([(4,4)], lambda x: torch.nn.functional.pad(x,(3,4,1,2))[:,1], lambda x: x.pad(((1,2),(3,4)))[:,1])
+    helper_test_op([(4,4)], lambda x: torch.nn.functional.pad(x,(3,4,1,2))[:,4], lambda x: x.pad(((1,2),(3,4)))[:,4])
+    helper_test_op([(3,3)], lambda x: torch.nn.functional.pad(x,(0,3,0,0))[:,4:6], lambda x: x.pad(((0,0),(0,3)))[:,4:6])
+    helper_test_op([(3,3)], lambda x: torch.nn.functional.pad(x,(0,1,3,2))[0:2,:], lambda x: x.pad(((3,2),(0,1)))[0:2,:])
+    helper_test_op([(3,3,3)], lambda x: torch.nn.functional.pad(x,(1,1,0,1,3,2))[0:2,:,:], lambda x: x.pad(((3,2),(0,1),(1,1)))[0:2,:,:])
+    helper_test_op([(3,3,3)], lambda x: torch.nn.functional.pad(x,(1,1,0,1,3,2))[2:4,:,:], lambda x: x.pad(((3,2),(0,1),(1,1)))[2:4,:,:])
+
   def test_transpose(self):
     helper_test_op([(3,3,3)], lambda x: x.transpose(1,2), lambda x: x.transpose(1,2))
     helper_test_op([(3,3,3)], lambda x: x.transpose(0,2), lambda x: x.transpose(0,2))
