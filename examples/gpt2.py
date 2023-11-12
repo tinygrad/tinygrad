@@ -40,8 +40,8 @@ class Attention:
     values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
 
     # update the cache
-    self.cache_k.assign(keys.pad(((0,0),(0,MAX_CONTEXT-start_pos-seqlen),(0,0),(0,0))).contiguous()).realize()
-    self.cache_v.assign(values.pad(((0,0),(0,MAX_CONTEXT-start_pos-seqlen),(0,0),(0,0))).contiguous()).realize()
+    self.cache_k.assign(keys.pad((None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()).realize()
+    self.cache_v.assign(values.pad((None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()).realize()
 
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1))

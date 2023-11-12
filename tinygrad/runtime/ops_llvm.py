@@ -7,7 +7,7 @@ from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
 from tinygrad.runtime.lib import RawMallocBuffer
 
-import llvmlite.binding as llvm  # type: ignore
+import llvmlite.binding as llvm
 
 LLVMOPT = bool(getenv("LLVMOPT"))
 
