@@ -269,7 +269,6 @@ class Compiled:
 
     # compilation time
     def get_program():
-
       if DEBUG >= 3:
         from tinygrad.graph import print_tree
         print_tree(ast)
@@ -295,7 +294,6 @@ class Compiled:
           k = timed[0][1]
       else:
         k.required_optimizations()
-
       prg = self.to_program(k)
       # extract real vars used in ast
       prg.vars = vars_from_ast(ast)
