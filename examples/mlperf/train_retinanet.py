@@ -15,7 +15,7 @@ from contextlib import redirect_stdout
 from train_retinanet_tests import *
 from models.retinanet import decode_bbox
 from tinygrad.helpers import dtypes
-
+import pickle as pkl
 
 def resize_box_based_on_new_image_size(box: List[float], img_old_size: Tuple[int], img_new_size: Tuple[int]) -> List[float]:
   ratio_height, ratio_width = [new / orig for new, orig in zip(img_new_size[:2], img_old_size[:2])]
@@ -105,6 +105,15 @@ def filter_by_reg_mask(targets):
     allowed_indxs = np.nonzero(targets["regression_masks"])
     res["regression_targets"], res["classification_targets"] = targets["regression_targets"][allowed_indxs], res["classification_targets"][allowed_indxs]
     return res
+def save_object(obj, filename):
+    with open(filename, 'wb') as f:
+        pkl.dump(obj, f)
+
+# Function to load an object from a file using pickle
+def load_object(filename):
+    with open(filename, 'rb') as f:
+        return pkl.load(f)
+
 class RetinaNetTrainer:
     def __init__(self,  model : RetinaNet = RetinaNet(ResNeXt50_32X4D(num_classes=None)), debug = False):
         
@@ -251,7 +260,7 @@ class RetinaNetTrainer:
 
 
             if sys.argv[1]=='m':
-                model_head_outputs = retina(images)
+                model_head_outputs = retina(images).numpy()
 
             if sys.argv[1]=='r':
                 reference_loss = self.reference_forward(reference_images.double(),annotations=annotations)
@@ -261,9 +270,9 @@ class RetinaNetTrainer:
             
             if len(sys.argv)>2 and sys.argv[2]=="old_loss": imgwise_loss = self._imgwise_compute_loss(BS, precomp_tg_targets, model_head_outputs)
             else:
-                self.dataset_annotations_to_tg(annotations)
-                tg_anchors_flattened_levels = [Tensor(anchors_flattened_levels.astype("float32")) for _ in range(BS)]
-                self.compute_loss_tg(annotations, model_head_outputs, tg_anchors_flattened_levels)
+                #self.dataset_annotations_to_tg(annotations)
+                anchors_flattened_levels = [anchors_flattened_levels.astype("float32") for _ in range(BS)]
+                self.compute_loss(annotations, model_head_outputs, anchors_flattened_levels)
             #if self.debug: checker.check_losses(imgwise_loss)
             optimizer.zero_grad()
             imgwise_loss.backward()
@@ -411,6 +420,47 @@ class RetinaNetTrainer:
         print((classification_losses + regression_losses).numpy() , " batch loss")
 
         return classification_losses + regression_losses
+    def compute_loss(self, targets, head_outputs, anchors):
+        # type: (List[Dict[str, Tensor]], Dict[str, Tensor], List[Tensor]) -> Dict[str, Tensor]
+        matched_idxs = []
+        for anchors_per_image, targets_per_image in zip(anchors, targets):
+            if targets_per_image['boxes'].size == 0:
+                matched_idxs.append(np.full((anchors_per_image.size(0),), -1, dtype=np.int64))
+                continue
+
+            match_quality_matrix = self.box_iou(targets_per_image['boxes'], anchors_per_image)
+            matched_idxs.append(self.proposal_matcher(match_quality_matrix))
+        breakpoint()
+        return self.head.compute_loss(targets, head_outputs, anchors, matched_idxs)
+
+    def box_iou(self,boxes1, boxes2):
+        inter, union = self._box_inter_union(boxes1, boxes2)
+        iou = inter / union
+        return iou
+
+    def _box_inter_union(self,boxes1, boxes2):
+        area1 = self.box_area(boxes1)
+        area2 = self.box_area(boxes2)
+
+        lt = np.maximum(boxes1[:, None, :2], boxes2[:, :2])  # [N,M,2]
+        rb = np.minimum(boxes1[:, None, 2:], boxes2[:, 2:])  # [N,M,2]
+
+        wh = self._upcast(rb - lt)
+        wh = np.clip(wh, 0, None)  # [N,M,2]
+        inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
+
+        union = area1[:, None] + area2 - inter
+
+        return inter, union
+    def box_area(self,boxes):
+        boxes = self._upcast(boxes)
+        return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    def _upcast(self,t):
+        # Protects from numerical overflows in multiplications by upcasting to the equivalent higher type
+        if np.issubdtype(t.dtype, np.floating):
+            return t if t.dtype in (np.float32, np.float64) else t.astype(np.float32)
+        else:
+            return t if t.dtype in (np.int32, np.int64) else t.astype(np.int32)
     
     def compute_loss_tg(self, targets, head_outputs, anchors):
         #FIXME making tinygrad version
@@ -498,7 +548,8 @@ class RetinaNetTrainer:
         return images, annotations
 
 
-    def box_iou(self,boxes1 : Tensor,boxes2:Tensor) -> Tuple[Tensor,Tensor]:
+
+    def box_iou_tg(self,boxes1 : Tensor,boxes2:Tensor) -> Tuple[Tensor,Tensor]:
             area1 = self.box_area(boxes1)
             area2 = self.box_area(boxes2)
 
@@ -517,8 +568,55 @@ class RetinaNetTrainer:
         self.high_threshold = 0.5
         self.BELOW_LOW_THRESHOLD = -1
         self.BETWEEN_THRESHOLDS = -2
+    def proposal_matcher(self,match_quality_matrix):
+        if match_quality_matrix.size == 0:
+            if match_quality_matrix.shape[0] == 0:
+                raise ValueError(
+                    "No ground-truth boxes available for one of the images "
+                    "during training")
+            else:
+                raise ValueError(
+                    "No proposal boxes available for one of the images "
+                    "during training")
+        matched_vals = np.amax(match_quality_matrix, axis=0)
+        matches = np.argmax(match_quality_matrix, axis=0)
 
-    def proposal_matcher(self, match_quality_matrix : Tensor):
+        if self.allow_low_quality_matches:
+            all_matches = np.copy(matches)
+        else:
+            all_matches = None
+
+        # Assign candidate matches with low quality to negative (unassigned) values
+        below_low_threshold = matched_vals < self.low_threshold
+
+        between_thresholds = (matched_vals >= self.low_threshold) & (
+            matched_vals < self.high_threshold
+        )
+
+        matches[below_low_threshold] = self.BELOW_LOW_THRESHOLD
+
+
+        matches[between_thresholds] = self.BETWEEN_THRESHOLDS
+
+        if self.allow_low_quality_matches:
+            assert all_matches is not None
+            self.set_low_quality_matches_(matches, all_matches, match_quality_matrix)
+
+        return matches
+
+    def set_low_quality_matches_(self, matches, all_matches, match_quality_matrix):
+
+        highest_quality_foreach_gt = match_quality_matrix.max(axis=1)
+        gt_pred_pairs_of_highest_quality = np.where(
+            match_quality_matrix == highest_quality_foreach_gt[:, None]
+        )
+
+        pred_inds_to_update = gt_pred_pairs_of_highest_quality[1]
+
+        matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
+
+    def proposal_matcher_tg(self, match_quality_matrix : Tensor):
+        sink_dir = "./examples/mlperf/reference_objects/matched_vals/"
         if match_quality_matrix.numel() == 0:
             # empty targets or proposals not supported during training
             if match_quality_matrix.shape[0] == 0:
@@ -537,13 +635,14 @@ class RetinaNetTrainer:
 
         Warning("Find an efficient way to find match_quality_matrix max,idxs without numpy conversion")
         #FIXME
+        
         matched_vals, matches = Tensor(match_quality_matrix.numpy().max(axis=0)),Tensor(match_quality_matrix.numpy().argmax(axis=0))
         #maybe  match_quality_matrix.max()
+
         if self.allow_low_quality_matches:
             all_matches = Tensor.zeros_like(matches).assign(matches)
         else:
             all_matches = None
-
         # Assign candidate matches with low quality to negative (unassigned) values
         below_low_threshold = matched_vals < self.low_threshold
         between_thresholds = (matched_vals >= self.low_threshold) * (
@@ -552,46 +651,51 @@ class RetinaNetTrainer:
         
         
         matches = Tensor.full_like(matches,self.BELOW_LOW_THRESHOLD) * (below_low_threshold) + matches * (1-below_low_threshold)
+
         matches = Tensor.full_like(matches,self.BETWEEN_THRESHOLDS) * (between_thresholds) + matches * (1-between_thresholds)
         
         
         if self.allow_low_quality_matches:
             assert all_matches is not None
-            self.set_low_quality_matches_(matches, all_matches, match_quality_matrix)
+            self.set_low_quality_matches_tg(matches, all_matches, match_quality_matrix)
 
         return matches
-    def set_low_quality_matches_(self, matches, all_matches, match_quality_matrix):
+    def set_low_quality_matches_tg(self, matches, all_matches, match_quality_matrix):
+        sink_dir = "./examples/mlperf/reference_objects/matched_vals/"
+
+        
         highest_quality_foreach_gt = match_quality_matrix.max(axis=1)
-        Warning("Find an efficient way to make argwhere or similar without numpy conversion")
+        Warning("To be tested and optimized. Find an efficient way to make argwhere or similar without numpy conversion.")
         #FIXME
+
         gt_pred_pairs_of_highest_quality = np.nonzero(
             match_quality_matrix.numpy() == highest_quality_foreach_gt[:, None].numpy()
         )
         gt_pred_pairs_of_highest_quality = list(gt_pred_pairs_of_highest_quality)
         for i in range(len(gt_pred_pairs_of_highest_quality)):gt_pred_pairs_of_highest_quality[i] = Tensor(gt_pred_pairs_of_highest_quality[i])
         gt_pred_pairs_of_highest_quality = tuple(gt_pred_pairs_of_highest_quality)
+
+
         pred_inds_to_update = gt_pred_pairs_of_highest_quality[1]
+
 
         Warning("Find an efficient way to make argwhere or similar without numpy conversion")
         #FIXME
         matches = matches.numpy()
         all_matches = all_matches.numpy()
         pred_inds_to_update = pred_inds_to_update.numpy()
+
         matches[pred_inds_to_update] = all_matches[pred_inds_to_update]
 
         matches = Tensor(matches)
+        
         all_matches = Tensor(all_matches)
         
-    def box_area(self, boxes : Tensor) -> Tensor:
+    def box_area_tg(self, boxes : Tensor) -> Tensor:
         boxes = self._upcast(boxes)
         return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
     
-    def _upcast(self,t:Tensor) -> Tensor:
-        if t.is_floating_point():
-            return t if t.dtype in (dtypes.float32, ) else t.float()
-        else:
-            Warning(".int not implemented, maybe not that useful but this is used in reference")
-            return t #if t.dtype in (dtypes.int32,) else t.int()
+    
     def input_fixup(self,x):
         x = x.permute([0,3,1,2]) / 255.0
         x -= self.input_mean
