@@ -143,7 +143,7 @@ class LazyBuffer:
 
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
 
-  def unique_buffers(self,_) -> Tuple[LazyBuffer, ...]: return (self,)
+  def unique_buffers(self,_ = None) -> Tuple[LazyBuffer, ...]: return (self,)
   def map_buffers(self, real_srcs: Mapping[Any, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
   def get_lazyops(self) -> List[LazyOp]: return []
 
