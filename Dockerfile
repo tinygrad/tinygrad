@@ -9,10 +9,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/
 
-# set environment variables
-ARG ENVIRONMENT=prod
-ENV ENVIRONMENT=${ENVIRONMENT}
-
 # set virtual environment
 ENV VIRTUAL_ENV=/venv
 RUN python3 -m venv ${VIRTUAL_ENV}
@@ -21,6 +17,7 @@ ENV PATH="${VIRTUAL_ENV}/bin:$PATH"
 # install system dependencies
 RUN apt-get -y update \
   && apt-get -y upgrade \
+#   && apt-get -y install python3-distutils \
   && apt-get clean
 
 # use base for build
