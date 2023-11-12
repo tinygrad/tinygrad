@@ -67,7 +67,7 @@ class LazyOp:
     buffers = set()
 
     visited.add(id(self))
-    
+
     try: return buffers.union(*[x.unique_buffers(visited) for x in self.src])
     except AttributeError: return set()
 
