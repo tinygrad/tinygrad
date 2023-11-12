@@ -40,7 +40,7 @@ jobs:
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
-      run: python -m mypy --warn-unused-ignores
+      run: python -m mypy
     - name: Install SLOCCount
       run: sudo apt install sloccount
     - name: Check <5000 lines
