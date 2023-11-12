@@ -6,6 +6,7 @@ from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer
 from dataclasses import dataclass
+from tinygrad.helpers import dedup
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -52,22 +53,12 @@ class LazyOp:
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
   arg: Any = None
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
-  @property
-  def buffers(self):
-    buffers: Tuple[Union[LazyOp, LazyBuffer], ...] = ()
-    try:  # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
-      for x in self.src: buffers += x.buffers
-    except AttributeError: buffers = ()
-    return buffers
 
   def unique_buffers(self,visited=None):
-    if visited and id(self) in visited: return set()
-    visited = visited if visited else {id(self)}
-    buffers = set()
-
-    visited.add(id(self))
-    try: return buffers.union(*[x.unique_buffers(visited) for x in self.src])
-    except AttributeError: return set()
+    if visited and id(self) in visited: return ()
+    visited = visited.union({id(self)}) if visited else {id(self)}
+    try: return sum([x.unique_buffers(visited) for x in self.src],())
+    except AttributeError: return ()
 
   @functools.cached_property
   def hash (self): return hash((self.op,self.src,self.arg))
@@ -254,8 +245,8 @@ class Compiled:
     k.linearize()
     src, runtime_args = self.renderer(k.function_name, k.uops)
     return ASTRunner(k.function_name, src, k.global_size, k.local_size,
-                     op_estimate=k.info.flops, mem_estimate=k.info.mem_estimate,
-                     display_name=k.display_name, runtime_args=runtime_args).build(self.compiler, self.runtime)
+                    op_estimate=k.info.flops, mem_estimate=k.info.mem_estimate,
+                    display_name=k.display_name, runtime_args=runtime_args).build(self.compiler, self.runtime)
 
   def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
     # check if we can reuse the output buffer
@@ -279,6 +270,7 @@ class Compiled:
 
     # compilation time
     def get_program():
+
       if DEBUG >= 3:
         from tinygrad.graph import print_tree
         print_tree(ast)
@@ -304,6 +296,7 @@ class Compiled:
           k = timed[0][1]
       else:
         k.required_optimizations()
+
       prg = self.to_program(k)
       # extract real vars used in ast
       prg.vars = vars_from_ast(ast)
