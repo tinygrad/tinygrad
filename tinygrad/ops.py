@@ -6,7 +6,6 @@ from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer
 from dataclasses import dataclass
-from tinygrad.helpers import dedup
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
