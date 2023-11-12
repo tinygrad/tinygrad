@@ -91,6 +91,14 @@ class ShapeTracker:
     for v in self.views:
       real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
       real_offset = v.offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
+      if v.offset_noreal:
+        if not real_shape:
+          to_apply.append((MovementOps.PAD, ((1,0),)))
+        to_apply.append((MovementOps.AS_STRIDED, ((0,)*len(real_shape), v.strides, 0)))
+        if v.mask:
+          pads = tuple((x+r,s-y) for (x,y),s,r in zip(v.mask, v.shape, real_shape))
+          to_apply.append((MovementOps.PAD, pads))
+        continue
       # first, we apply the offset
       # then, we make it the correct shape
       # then, we apply permutations

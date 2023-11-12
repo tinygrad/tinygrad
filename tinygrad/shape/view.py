@@ -22,13 +22,14 @@ class View:
   offset:sint
   mask:Optional[Tuple[Tuple[sint, sint], ...]]
   contiguous:bool
+  offset_noreal:Optional[bool]=None
 
   @staticmethod
   @functools.lru_cache(maxsize=None)
-  def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
+  def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None, offset_noreal:Optional[bool]=None):
     strides = filter_strides(shape, strides) if strides else strides_for_shape(shape)
     contiguous = offset == 0 and mask is None and all(s1 == s2 for s1,s2 in zip(strides, strides_for_shape(shape)))
-    return View(shape, strides, offset, mask, contiguous)
+    return View(shape, strides, offset, mask, contiguous, offset_noreal)
 
   def vars(self) -> Set[Variable]:
     flatten_mask = tuple(x for m in self.mask for x in m) if self.mask is not None else tuple()
@@ -40,19 +41,20 @@ class View:
     new_strides = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.strides])
     new_offset = self.offset if isinstance(self.offset, int) else self.offset.substitute(unbound_vars)
     new_mask = tuple((a if isinstance(a, int) else a.substitute(unbound_vars), b if isinstance(b, int) else b.substitute(unbound_vars)) for (a, b) in self.mask) if self.mask is not None else None
-    return View.create(new_shape, new_strides, new_offset, new_mask)
+    return View.create(new_shape, new_strides, new_offset, new_mask, self.offset_noreal)
 
   # MovementOps live here now
 
   def __unsafe_resize(self, arg: Tuple[Tuple[sint, sint], ...], mask=None) -> View:
     offset = sum([s * x[0] for s, x in zip(self.strides,arg)])
+    offset_noreal = any(ay <= mx or ax>=my for (mx,my),(ax,ay) in zip(self.mask, arg)) if self.mask else None
     if self.mask:
       # move the old mask
-      nmask = tuple([(max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(self.mask, arg)])
+      nmask = tuple([(min(max(mx-ax, 0), ay-ax), max(min(my-ax, ay-ax), 0)) for (mx,my),(ax,ay) in zip(self.mask, arg)])
       # merge the masks if we have two
       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
     shape = [y-x for x,y in arg]
-    return View.create(tuple(s.b if isinstance(s, NumNode) else s for s in shape), self.strides, self.offset+offset, mask)
+    return View.create(tuple(s.b if isinstance(s, NumNode) else s for s in shape), self.strides, self.offset+offset, mask, offset_noreal)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def pad(self, arg: Tuple[Tuple[int, int], ...]) -> View:
@@ -77,13 +79,13 @@ class View:
     assert all((s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.mask, self.shape, new_shape)]) if self.mask else None
-    return View.create(new_shape, self.strides, self.offset, mask)
+    return View.create(new_shape, self.strides, self.offset, mask, self.offset_noreal)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def permute(self, axis: Tuple[int, ...]) -> View:
     assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
     assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
-    return View.create(tuple([self.shape[a] for a in axis]), tuple([self.strides[a] for a in axis]), self.offset, tuple([self.mask[a] for a in axis]) if self.mask is not None else None)
+    return View.create(tuple([self.shape[a] for a in axis]), tuple([self.strides[a] for a in axis]), self.offset, tuple([self.mask[a] for a in axis]) if self.mask is not None else None, self.offset_noreal)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def stride(self, mul: Tuple[int, ...]) -> View:
@@ -93,7 +95,7 @@ class View:
     new_shape = tuple([(s+(abs(m)-1))//abs(m) for s,m in zip(self.shape, mul)])
     offset = sum([(s-1)*z for s,z,m in zip(self.shape, self.strides, mul) if m < 0])
     mask = tuple([(((mx if m > 0 else s-my)+(abs(m)-1))//abs(m), ((my if m > 0 else s-mx)+(abs(m)-1))//abs(m)) for (mx,my),s,m in zip(self.mask, self.shape, mul)]) if self.mask is not None else None
-    return View.create(new_shape, strides, self.offset + offset, mask)
+    return View.create(new_shape, strides, self.offset + offset, mask, self.offset_noreal)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def reshape(self, new_shape: Tuple[sint, ...]) -> Optional[View]:
@@ -109,7 +111,7 @@ class View:
       assert prod(self.shape) == prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape]), f"size mismatched, can't reshape {self.shape=} -> {new_shape=}"
 
     # after the asserts, it's okay to check contiguous
-    if self.contiguous: return View.create(new_shape)
+    if self.contiguous: return View.create(new_shape, offset_noreal=self.offset_noreal)
 
     # check if this is adding or removing 1s (only)
     # NOTE: this is optional, but removes most calls to (expensive!) merge_views (with mask, not optional)
@@ -125,7 +127,7 @@ class View:
         else:
           new_mask: List[Tuple[sint, sint]] = [y for x,y in zip(self.shape, self.mask) if x != 1]
           new_mask_tuple = tuple([(0,1) if x == 1 else new_mask.pop(0) for x in new_shape])
-      return View.create(new_shape, new_strides_tuple, self.offset, new_mask_tuple)
+      return View.create(new_shape, new_strides_tuple, self.offset, new_mask_tuple, self.offset_noreal)
 
     # TODO: bring the merge_views logic here for more caching
     return None
