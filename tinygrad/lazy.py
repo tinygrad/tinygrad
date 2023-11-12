@@ -111,7 +111,7 @@ class LazyBuffer:
     # NOTE: op should be read only after construction of LazyBuffer. it is now with schedule
     if op is not None:
       self.op: LazyOp = op
-      for x in op.buffers: x.children.add(self)
+      for x in op.unique_buffers(): x.children.add(self)
     assert optype != MovementOps or (base is not None and base.optype != MovementOps), "MovementOps must be based"
     self._base = base
     if base: base.views.add(self)
@@ -145,6 +145,7 @@ class LazyBuffer:
 
   @property
   def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
+  def unique_buffers(self,_): return {self}
   def map_buffers(self, real_srcs: Mapping[Any, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
   def get_lazyops(self) -> List[LazyOp]: return []
 

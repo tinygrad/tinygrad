@@ -60,6 +60,22 @@ class LazyOp:
     except AttributeError: buffers = ()
     return buffers
 
+  def unique_buffers(self,visited=None):
+
+    if visited and id(self) in visited: return set()
+    visited = visited if visited else {id(self)}
+    buffers = set()
+
+    visited.add(id(self))
+    
+    try: return buffers.union(*[x.unique_buffers(visited) for x in self.src])
+    except AttributeError: return set()
+
+  
+  @functools.cached_property
+  def hash (self): return hash((self.op,self.src,self.arg))
+  def __hash__(self): return self.hash
+
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
 
