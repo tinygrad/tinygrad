@@ -44,7 +44,7 @@ def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
     # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
     air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
     return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
-  options = Metal.MTLCompileOptions.alloc().init()
+  options = Metal.MTLCompileOptions.new()
   library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
   # TODO: avoid file write here?
   with tempfile.NamedTemporaryFile(delete=True) as output_file:
@@ -61,18 +61,39 @@ class MetalProgram:
         shader.write(lib)
         shader.flush()
         os.system(f"cd {pathlib.Path(__file__).parents[2]}/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
-    self.pipeline_state = unwrap(METAL.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
+    #self.pipeline_state = unwrap(METAL.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
+    descriptor = Metal.MTLComputePipelineDescriptor.new()
+    descriptor.setComputeFunction_(self.fxn)
+    descriptor.setSupportIndirectCommandBuffers_(True)
+    self.pipeline_state = unwrap(METAL.device.newComputePipelineStateWithDescriptor_options_reflection_error_(descriptor, Metal.MTLPipelineOption(0), None, None))
+
+    icb_descriptor = Metal.MTLIndirectCommandBufferDescriptor.new()
+    #print(dir(icb_descriptor))
+    icb_descriptor.setCommandTypes_(Metal.MTLIndirectCommandType(Metal.MTLIndirectCommandTypeConcurrentDispatch))
+    icb_descriptor.setInheritBuffers_(False)
+    icb_descriptor.setInheritPipelineState_(False)
+    icb_descriptor.setMaxKernelBufferBindCount_(3)
+    self.icb = METAL.device.newIndirectCommandBufferWithDescriptor_maxCommandCount_options_(icb_descriptor, 1, Metal.MTLResourceOptions(0))
+    self.icb_command = self.icb.indirectComputeCommandAtIndex_(0)
+    self.icb_command.setComputePipelineState_(self.pipeline_state)
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
     assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"
     command_buffer = METAL.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
+    for i,a in enumerate(bufs):
+      self.icb_command.setKernelBuffer_offset_atIndex_(a._buf, 0, i)
+    self.icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
+    self.icb_command.setBarrier()
+    encoder.executeCommandsInBuffer_withRange_(self.icb, Cocoa.NSRange(0,1))
+    """
     encoder.setComputePipelineState_(self.pipeline_state)
     for i,a in enumerate(bufs):
       if isinstance(a, RawMetalBuffer): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
       elif isinstance(a, int): encoder.setBytes_length_atIndex_((arg:=ctypes.c_int32(a)), ctypes.sizeof(arg), i)
       else: raise RuntimeError(f"arg at index {i} has unsupported type {type(a)}")
     encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
+    """
     encoder.endEncoding()
     command_buffer.commit()
     if wait:
