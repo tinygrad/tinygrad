@@ -75,7 +75,7 @@ class Tensor:
     else: raise RuntimeError(f"can't create Tensor from {data}")
 
     # data is a LazyBuffer, but it might be on the wrong device
-    self.lazydata = data if data.device == device else data.copy_to_device(device)
+    self.lazydata = data if data.device == device else data.copy_device(device)
 
   def __repr__(self):
     return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
