@@ -58,7 +58,6 @@ class LazyOp:
     try: return sum([x.buffers(visited) for x in self.src],())
     except AttributeError: return ()
 
-
   @functools.cached_property
   def hash (self): return hash((self.op,self.src,self.arg))
   def __hash__(self): return self.hash
