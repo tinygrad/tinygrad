@@ -122,7 +122,7 @@ class Interpreted:
 
     @functools.lru_cache(None)
     def gstr(x:Any, nm=None) -> str:
-      if 'Variable' in (str_arg := repr(x)): return re.sub(r'Variable\(.*?\)', lambda m: f'var_vals[{m.group(0)}]', str_arg)
+      if self != InterpretedFlopCounter and 'Variable' in (str_arg := repr(x)): return re.sub(r'Variable\(.*?\)', lambda m: f'var_vals[{m.group(0)}]', str_arg)
       ret = str(nm).replace(".", "_") if nm else f"m{len(tglob):04d}"
       tglob[ret] = x
       return ret
