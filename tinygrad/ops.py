@@ -143,14 +143,19 @@ class Interpreted:
       return ret
 
     ret = _interpret_ast(ast)
-    src = '\n'.join(['def run(inputs):'] + lines + [f"  return {gstr(self.from_underlying, 'from_underlying')}({ret})" if self.from_underlying else f"  return {ret}"])
-    if DEBUG >= 4 and self != InterpretedFlopCounter: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
+    src = '\n'.join(['from tinygrad.helpers import dtypes', 'from tinygrad.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer', 'from tinygrad.shape.shapetracker import ShapeTracker', 'from tinygrad.shape.symbolic import Variable', 'from tinygrad.shape.view import View', "inf, nan = float('inf'), float('nan')",
+      'def run(inputs, var_vals):'] + lines + [f"  return {gstr(self.from_underlying, 'from_underlying')}({ret})" if self.from_underlying else f"  return {ret}"])
+    src = functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src)
+    if self != InterpretedFlopCounter:
+      from tinygrad.lazy import vars_from_ast
+      for v in vars_from_ast(ast): src = src.replace(repr(v), f"var_vals[{repr(v)}]")
+    if DEBUG >= 4 and self != InterpretedFlopCounter: print(src)
     exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
     return tglob['run']
 
   def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, **kwargs):
     if ast not in self.method_cache: self.method_cache[ast] = self.interpret_ast(ast)
-    ret = self.method_cache[ast]([x.realized for x in inputs] if inputs else None)
+    ret = self.method_cache[ast]([x.realized for x in inputs] if inputs else None, var_vals)
     if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op:
       ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.fxn_for_op[BufferOps.MEM](ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
     # TODO: is this used?
