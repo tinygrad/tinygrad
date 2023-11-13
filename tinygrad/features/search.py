@@ -1,9 +1,9 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
-import itertools, random
+import itertools, random, math
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
 from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.linearizer import Linearizer, UOp
 from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
 from tinygrad.tensor import Tensor
@@ -45,7 +45,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
     # TODO: this is copied from prg.__call__
     global_size, local_size = prg.launch_dims(var_vals)
     if global_size is not None and local_size is None:
-      local_size = prg.optimize_local_size(global_size, rawbufs)
+      local_size = optimize_local_size(prg.clprg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
     tms = []
     for _ in range(cnt):
@@ -97,6 +97,8 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       pass
   return acted_lins
 
+def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
+
 def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linearizer:
   key = {"ast": str(lin.ast), "amt": amt, "allow_test_size": allow_test_size}
   if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE") and CACHELEVEL >= 1:
@@ -108,7 +110,6 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   beam: List[Tuple[Linearizer, float]] = [(lin, time_linearizer(lin, rawbufs, allow_test_size=allow_test_size))]
 
   # NOTE: real uops use a weird compare method that's only valid inside a linearizer
-  def tuplize_uops(uops): return tuple([(x.uop, x.dtype, tuple(x.num for x in x.vin), x.arg) for x in uops])
   seen_uops = {tuplize_uops(lin.linearize().uops): tuple(lin.applied_opts)}
 
   while 1:
@@ -148,4 +149,6 @@ def optimize_local_size(clprg:Callable, global_size:List[int], rawbufs:List[RawB
       return clprg(*test_rawbuffers, global_size=[g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)], local_size=local_size, wait=True)
     except Exception:
       return float('inf')
-  return min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])[1]
+  ret = min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])
+  assert not math.isinf(ret[0]), "all optimize_local_size exec failed"
+  return ret[1]

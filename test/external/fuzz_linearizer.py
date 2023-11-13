@@ -3,7 +3,7 @@ import numpy as np
 from collections import Counter, defaultdict
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
+from tinygrad.features.search import get_linearizer_actions, bufs_from_lin, tuplize_uops
 from tinygrad.graph import print_tree
 from tinygrad.helpers import ImageDType, prod, getenv
 from tinygrad.ops import Device, Compiled, Interpreted
@@ -26,10 +26,7 @@ def fuzz_linearizer(lin: Linearizer):
   print(lin.colored_shape())
   rawbufs = bufs_from_lin(lin)
 
-  # NOTE: copied from beam_search
-  def tuplize_uops(uops): return tuple([(x.uop, x.dtype, tuple(x.num for x in x.vin), x.arg) for x in uops])
   seen_uops = {}
-
   ground_truth = None
   while 1:
     if len(seen_uops) >= 20: break  # enough for this kernel
