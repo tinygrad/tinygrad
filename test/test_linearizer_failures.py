@@ -42,7 +42,6 @@ class TestLinearizerFailures(unittest.TestCase):
     assert fuzz_linearizer(lin) != "PASS"
 
 
-
 class TestLinearizerFailuresFixed(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT in ["LLVM"], "fixed on these backends")
   def test_failure_3(self):
