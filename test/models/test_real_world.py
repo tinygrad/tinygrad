@@ -56,6 +56,7 @@ class TestRealWorld(unittest.TestCase):
     derandomize_model(model)
     @TinyJit
     def test(t): return model(t, 0).realize()
+    # TODO: calling model like this is pretty wrong with kvcache, also memory test is broken with CacheCollector
     # NOTE: only test one pass, not testing the dynamic shape autoregressive part
     helper_test("test_llama", lambda: (Tensor([[1,]]),), test, 0.22 if CI else 13.5, 137 if CI else 521, all_jitted=True)
 

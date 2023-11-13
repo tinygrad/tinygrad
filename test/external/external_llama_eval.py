@@ -1,6 +1,7 @@
 from lm_eval.base import BaseLM
 from lm_eval import evaluator, tasks
 import torch, json, argparse
+from pathlib import Path
 
 from examples.llama import LLaMa
 from tinygrad.tensor import Tensor
@@ -10,7 +11,7 @@ class LLaMaAdaptor(BaseLM):
   def __init__(
     self,
     model_size="7B",
-    model_gen=1,
+    model_gen="1",
     device="",
     quantize=False,
     batch_size=1,
@@ -28,13 +29,16 @@ class LLaMaAdaptor(BaseLM):
     self.temperature = temperature
     self._device = device
 
-    assert isinstance(model_gen, int)
+    assert isinstance(model_gen, str)
     assert isinstance(model_size, str)
     assert isinstance(batch_size, int)
     assert isinstance(checkpoint_path, str)
     assert isinstance(tokenizer_path, str)
 
-    self.llama = LLaMa.build(checkpoint_path, tokenizer_path, model_gen, model_size, quantize)
+    LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code"}[model_gen]
+    MODEL_PATH = Path(__file__).parents[2] / f"weights/LLaMA{LLAMA_SUFFIX}/{model_size}"
+    TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
+    self.llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen, model_size, quantize)
 
   @classmethod
   def create_from_arg_string(cls, arg_string, additional_config=None):
@@ -70,7 +74,7 @@ class LLaMaAdaptor(BaseLM):
 
   def _model_call(self, inps):
     Tensor.no_grad = True
-    return torch.Tensor(self.llama.model(Tensor(inps.numpy()), 0).numpy())
+    return torch.Tensor(self.llama.model(Tensor(inps.numpy()), start_pos=0, temperature=0.0, output_logits=True).numpy())
 
   def greedy_until(self, requests):
     continuations = []
@@ -88,7 +92,7 @@ if __name__ == '__main__':
 
   parser = argparse.ArgumentParser(description='Run LLaMA evals in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--size', type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B] for Gen 2")
-  parser.add_argument('--gen', type=int, default="1", help="Generation of the model to use [1, 2]")
+  parser.add_argument('--gen', type=str, default="1", help="Generation of the model to use [1, 2]")
   parser.add_argument('--quantize', action='store_true', help="Quantize the weights to int8 in memory")
   parser.add_argument('--eval', type=str, default="arc_easy", help="Run in evaluation mode")
   parser.add_argument('--limit', type=int, default=None, help="Limit tests in eval")

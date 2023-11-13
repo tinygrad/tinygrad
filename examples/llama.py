@@ -130,7 +130,7 @@ class Transformer:
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_seq_len * 2, rope_theta)
     self.forward_jit = TinyJit(self.forward)
 
-  def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float=0.0):
+  def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float=0.0, output_logits=False):
     _bsz, seqlen = tokens.shape
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
@@ -138,14 +138,15 @@ class Transformer:
     h = self.tok_embeddings(tokens)
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h))
+    if output_logits: return logits.realize()
     return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
 
-  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
+  def __call__(self, tokens:Tensor, start_pos:int, temperature:float=0.0, output_logits=False):
     # TODO: better way to handle the first call v.s. the rest?
     if tokens.shape[0:2] == (1,1) and JIT:
       assert start_pos > 0
-      return self.forward_jit(tokens, Variable("start_pos", 1, MAX_CONTEXT).bind(start_pos), temperature)
-    return self.forward(tokens, start_pos, temperature)
+      return self.forward_jit(tokens, Variable("start_pos", 1, MAX_CONTEXT).bind(start_pos), temperature, output_logits)
+    return self.forward(tokens, start_pos, temperature, output_logits)
 
 # **** files and arguments ****
 MODEL_PARAMS = {
