@@ -7,7 +7,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
 from dataclasses import dataclass
-from weakref import ref
+from weakref import ref, WeakKeyDictionary
 
 JIT_SUPPORTED_DEVICE = ["GPU", "CLANG", "METAL", "CUDA", "HIP", "WEBGPU", "LLVM"]
 
@@ -81,20 +81,22 @@ class PlaceHolder:
 
 class _CacheCollector:
   def __init__(self):
-    self.cache: Optional[List[Tuple[ASTRunner, List[PlaceHolder]]]] = None
+    self.cache: Optional[List[Tuple[ASTRunner, List[Union[RawBuffer, PlaceHolder]]]]] = None
 
   def start(self, var_vals:Optional[Dict[Variable, int]]=None):
     self.cache = []
+    self.placeholders: WeakKeyDictionary[RawBuffer, PlaceHolder] = WeakKeyDictionary()
     self.var_vals = var_vals if var_vals is not None else {}
 
   def add(self, prg, rawbufs, var_vals):
     if self.cache is None: return
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
-    self.cache.append((prg, [PlaceHolder(x) for x in rawbufs]))
+    self.placeholders[rawbufs[0]] = PlaceHolder(rawbufs[0])
+    self.cache.append((prg, [self.placeholders.get(x, x) for x in rawbufs]))
 
   def finish(self) -> List[JitItem]:
     if self.cache is None: return []
     buffer_cache: Dict[PlaceHolder, RawBuffer] = {}
     saved_cache, self.cache = self.cache, None
-    return [JitItem(prg, [x.alloc_if_needed(buffer_cache) for x in pl]) for prg, pl in saved_cache]
+    return [JitItem(prg, [x.alloc_if_needed(buffer_cache) if isinstance(x, PlaceHolder) else x for x in pl]) for prg, pl in saved_cache]
 CacheCollector = _CacheCollector()
