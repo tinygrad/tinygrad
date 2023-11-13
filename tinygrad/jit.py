@@ -24,7 +24,7 @@ class BatchExecutor:
           self.input_replace[(j,i)] = [k for k,v in input_rawbuffers.items() if v == a][0]
     assert set(self.input_replace.values()) == set(input_rawbuffers.keys()), "some input tensors not found"
     self.clear_jit_inputs()
-  
+
   def __call__(self, input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int]):
     for (j,i),input_name in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name]
     for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), {v:var_vals[v] for v in getattr(ji.prg,"vars",[])}, jit=True)
@@ -41,7 +41,7 @@ class TinyJit:
     self.ret: Any = None
     self.expected_vals: Optional[Tuple[Variable, ...]] = None
     self.expected_sts_dtype: Optional[Tuple[Tuple[ShapeTracker, DType], ...]] = None
-  
+
   @property
   def jit_cache(self) -> List[JitItem]: return self.jit_fxn.jit_cache if self.jit_fxn else []
 
