@@ -1,5 +1,5 @@
 from __future__ import annotations
-import importlib, inspect, functools, pathlib
+import importlib, inspect, functools, pathlib, re
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT
@@ -116,12 +116,13 @@ class Interpreted:
     self.method_cache: Dict[LazyOp, Callable] = {}
 
   def interpret_ast(self:Interpreted, ast:LazyOp) -> Callable:
-    tglob: Dict[str, Any] = {}
+    tglob: Dict[str, Any] = {"Variable": Variable}
     lines: List[str] = []
     f = self.fxn_for_op
 
     @functools.lru_cache(None)
     def gstr(x:Any, nm=None) -> str:
+      if 'Variable' in (str_arg := repr(x)): return re.sub(r'Variable\(.*?\)', lambda m: f'var_vals[{m.group(0)}]', str_arg)
       ret = str(nm).replace(".", "_") if nm else f"m{len(tglob):04d}"
       tglob[ret] = x
       return ret
@@ -143,13 +144,8 @@ class Interpreted:
       return ret
 
     ret = _interpret_ast(ast)
-    src = '\n'.join(['from tinygrad.helpers import dtypes', 'from tinygrad.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer', 'from tinygrad.shape.shapetracker import ShapeTracker', 'from tinygrad.shape.symbolic import Variable', 'from tinygrad.shape.view import View', "inf, nan = float('inf'), float('nan')",
-      'def run(inputs, var_vals):'] + lines + [f"  return {gstr(self.from_underlying, 'from_underlying')}({ret})" if self.from_underlying else f"  return {ret}"])
-    src = functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src)
-    if self != InterpretedFlopCounter:
-      from tinygrad.lazy import vars_from_ast
-      for v in vars_from_ast(ast): src = src.replace(repr(v), f"var_vals[{repr(v)}]")
-    if DEBUG >= 4 and self != InterpretedFlopCounter: print(src)
+    src = '\n'.join(['def run(inputs, var_vals):'] + lines + [f"  return {gstr(self.from_underlying, 'from_underlying')}({ret})" if self.from_underlying else f"  return {ret}"])
+    if DEBUG >= 4 and self != InterpretedFlopCounter: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
     exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
     return tglob['run']
 
