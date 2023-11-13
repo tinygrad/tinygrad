@@ -408,20 +408,24 @@ class Kernel:
     else:
       amt = -1
     if opt.op == OptOps.LOCAL:        # cyan
+      assert self.opts.has_local, "target does not support local"
       assert axis < self.first_reduce, "can't local a reduce"
       assert not(self.tensor_core), "can't local with tensor cores"
       self.shift_to(axis, amt, insert_before=self.first_reduce)
       self.local_dims += 1
     elif opt.op == OptOps.LASTLOCAL:  # cyan
+      assert self.opts.has_local, "target does not support local"
       assert axis < self.first_reduce, "can't local a reduce"
       self.shift_to(axis, amt, insert_before=self.first_reduce-self.local_dims)
       self.local_dims += 1
     elif opt.op == OptOps.GROUP:      # green
+      assert self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem"
       assert axis >= self.first_reduce + len(self.group_for_reduce) and axis < self.shape_len-self.upcasted, "must be reduce axis to group"
       assert not(self.tensor_core), "can't group with tensor cores"
       self.shift_to(axis, amt, insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(amt)
     elif opt.op == OptOps.GROUPTOP:   # green
+      assert self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem"
       assert axis >= self.first_reduce + len(self.group_for_reduce) and axis < self.shape_len-self.upcasted, "must be reduce axis to group"
       assert not(self.tensor_core), "can't group with tensor cores"
       self.shift_to(axis, amt, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
@@ -445,6 +449,7 @@ class Kernel:
       self.shift_to(axis, amt, insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(amt)
     elif opt.op == OptOps.NOLOCALS:
+      assert self.opts.has_local, "target does not support local, so this optimization is meaningless"
       assert self.local_dims == 0 and len(self.group_for_reduce) == 0, "can't have no locals with locals"
       assert not self.dont_use_locals, "already not using locals"
       self.dont_use_locals = True
