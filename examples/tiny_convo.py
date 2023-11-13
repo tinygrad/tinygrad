@@ -10,7 +10,6 @@ import multiprocessing
 import numpy as np
 import pyaudio
 import sys
-import wave
 
 # Whisper
 SAMPLE_RATE = 16000
@@ -67,7 +66,7 @@ def whisper_decode(au_buffer: np.ndarray) -> str:
     out = model.decoder(Tensor([lst]), encoded_audio).realize()
     idx = int(out[0,-1].argmax().numpy().item())
     lst.append(idx)
-    
+
     lst_no_special_tokens = [token for token in lst if token not in idx_2_spec_toks]
 
     unmod_dec = enc.decode(lst)
