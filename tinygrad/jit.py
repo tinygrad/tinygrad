@@ -70,10 +70,14 @@ class TinyJit:
 
 class PlaceHolder:
   def __init__(self, buf:RawBuffer): self.size, self.dtype, self._device, self.ref, self.buftype, self.bufid = buf.size, buf.dtype, getattr(buf, '_device', None), ref(buf), type(buf), id(buf._buf)
-  def alloc_rawbuf(self): return self.buftype(self.size, self.dtype, **({'device':self._device} if self._device is not None else dict()))
   def to_tuple(self): return (self.size, self.dtype, self._device, self.buftype, self.bufid)
   def __hash__(self): return hash(self.to_tuple())
   def __eq__(self, x): return isinstance(x, PlaceHolder) and self.to_tuple() == x.to_tuple()
+  def alloc_if_needed(self, buffer_cache: Dict[PlaceHolder, RawBuffer]) -> RawBuffer:
+    ret = self.ref()
+    if ret: return ret
+    if self not in buffer_cache: buffer_cache[self] = self.buftype(self.size, self.dtype, **({'device':self._device} if self._device is not None else dict()))
+    return buffer_cache[self]
 
 class _CacheCollector:
   def __init__(self):
@@ -90,12 +94,7 @@ class _CacheCollector:
 
   def finish(self) -> List[JitItem]:
     if self.cache is None: return []
-    alloc = {}
-    def fix(pl:PlaceHolder) -> RawBuffer:
-      ret = pl.ref()
-      if ret: return ret
-      if pl not in alloc: alloc[pl] = pl.alloc_rawbuf()
-      return alloc[pl]
-    ret = [JitItem(prg, [fix(x) for x in pl]) for prg, pl in self.cache]
-    return ret
+    buffer_cache: Dict[PlaceHolder, RawBuffer] = {}
+    saved_cache, self.cache = self.cache, None
+    return [JitItem(prg, [x.alloc_if_needed(buffer_cache) for x in pl]) for prg, pl in saved_cache]
 CacheCollector = _CacheCollector()
