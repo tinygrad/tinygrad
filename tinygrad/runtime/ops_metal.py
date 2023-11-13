@@ -38,6 +38,8 @@ def unwrap(x):
   assert err is None, str(err)
   return ret
 
+compiler_hack = True
+
 @diskcache
 def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
   if use_xcode:
@@ -53,8 +55,12 @@ def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
 
 class MetalProgram:
   def __init__(self, name:str, lib:bytes):
-    data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
-    self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
+    if compiler_hack:
+      options = Metal.MTLCompileOptions.alloc().init()
+      self.library = unwrap(METAL.device.newLibraryWithSource_options_error_(lib.decode(), options, None))
+    else:
+      data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
+      self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
     self.fxn = self.library.newFunctionWithName_(name)
     if DEBUG >= 6:
       with tempfile.NamedTemporaryFile(delete=True) as shader:

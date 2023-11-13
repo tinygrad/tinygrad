@@ -52,14 +52,12 @@ class LazyOp:
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
   arg: Any = None
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
-  @functools.cached_property
-  def buffers(self):
-    def _buffers(self,visited):
-      if visited and id(self) in visited: return ()
-      visited = visited.union({id(self)}) if visited else {id(self)}
-      try: return sum([x._buffers(visited) for x in self.src],())
-      except AttributeError: return ()
-    return _buffers(self)
+  def buffers(self,visited=None):
+    if visited and id(self) in visited: return ()
+    visited = visited.union({id(self)}) if visited else {id(self)}
+    try: return sum([x.buffers(visited) for x in self.src],())
+    except AttributeError: return ()
+
 
   @functools.cached_property
   def hash (self): return hash((self.op,self.src,self.arg))
