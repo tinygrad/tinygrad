@@ -1,13 +1,11 @@
-from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional, Set
-import functools, itertools, time
-from tinygrad.helpers import DEBUG, DType, merge_dicts, dtypes
+from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional
+import functools, itertools
+from tinygrad.helpers import DEBUG, DType, merge_dicts
 from tinygrad.ops import RawBuffer, Device, ASTRunner
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, Node
+from tinygrad.shape.symbolic import Variable
 from dataclasses import dataclass
-
-from tinygrad.runtime.ops_metal import Metal, METAL, unwrap, Cocoa, RawMetalBuffer
 
 JIT_SUPPORTED_DEVICE = ["GPU", "CLANG", "METAL", "CUDA", "HIP", "WEBGPU", "LLVM"]
 
@@ -16,14 +14,36 @@ class JitItem:
   prg: ASTRunner
   rawbufs: List[Optional[RawBuffer]]
 
+class BatchExecutor:
+  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int]):
+    self.jit_cache: List[JitItem] = jit_cache
+    self.input_replace: Dict[Tuple[int, int], Union[int, str]] = {}
+    for j,ji in enumerate(jit_cache):
+      for i,a in enumerate(ji.rawbufs):
+        if a in [v for v in input_rawbuffers.values()]:
+          self.input_replace[(j,i)] = [k for k,v in input_rawbuffers.items() if v == a][0]
+    assert set(self.input_replace.values()) == set(input_rawbuffers.keys()), "some input tensors not found"
+    self.clear_jit_inputs()
+  
+  def __call__(self, input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int]):
+    for (j,i),input_name in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name]
+    for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), {v:var_vals[v] for v in getattr(ji.prg,"vars",[])}, jit=True)
+    self.clear_jit_inputs()
+
+  def clear_jit_inputs(self):
+    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
+
 class TinyJit:
   def __init__(self, fxn:Callable):
     self.fxn: Callable = fxn
+    self.jit_fxn: Optional[BatchExecutor] = None
     self.cnt: int = 0
-    self.jit_cache: List[JitItem] = []
     self.ret: Any = None
-    self.input_replace: Dict[Tuple[int, int], Tuple[Union[int, str], ShapeTracker, DType]] = {}   # (kernel_number, buffer_number) -> (input_name, expected_shapetracker, expected_type)
-    self.input_has_variable_dims: Set[int] = set()
+    self.expected_vals: Optional[Tuple[Variable, ...]] = None
+    self.expected_sts_dtype: Optional[Tuple[Tuple[ShapeTracker, DType], ...]] = None
+  
+  @property
+  def jit_cache(self) -> List[JitItem]: return self.jit_fxn.jit_cache if self.jit_fxn else []
 
   # add support for instance methods
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
@@ -33,89 +53,36 @@ class TinyJit:
 
     # all inputs are realized
     input_tensors: Dict[Union[int, str], Tensor] = {cast(Union[int, str], k):v.realize() for k,v in itertools.chain(enumerate(args), kwargs.items()) if v.__class__ is Tensor}
+    expected_sts_dtype = tuple([(v.lazydata.st.unbind(), v.dtype) for v in input_tensors.values()])
 
     # get rawbuffers
-    input_rawbuffers: Dict[Union[int, str], Tuple[RawBuffer, ShapeTracker]] = {k:(cast(RawBuffer, v.lazydata.realized), v.lazydata.st) for k,v in input_tensors.items()}
+    input_rawbuffers: Dict[Union[int, str], RawBuffer] = {k:cast(RawBuffer, v.lazydata.realized) for k,v in input_tensors.items()}
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
     assert len(set(input_rawbuffers.values())) == len(input_rawbuffers), "duplicate inputs to JIT"
 
     # get variables: they can either be in Tensors or passed in as arguments, and all must be bound. these are all global
     var_vals: Dict[Variable, int] = merge_dicts([arg.lazydata.st.var_vals for arg in input_tensors.values()] + [dict(x.unbind() for x in itertools.chain(args, kwargs.values()) if isinstance(x, Variable))])
+    expected_vals = tuple(var_vals.keys())
 
     if self.cnt >= 2:
-      assert self.stored_vals == tuple(var_vals.keys()), "this didn't change"
-
-      if hasattr(self, 'command_buffer'): self.command_buffer.waitUntilCompleted()
-
-      # check validity and assign the inputs
-      for (j,i),(input_name, expected_st, expected_type) in self.input_replace.items():
-        assert input_rawbuffers[input_name][0].dtype == expected_type, f"type mismatch in JIT, {input_rawbuffers[input_name][0].dtype} != {expected_type}"
-        assert input_rawbuffers[input_name][1].unbind() == expected_st, f"ShapeTracker mismatch in JIT, {input_rawbuffers[input_name][1].unbind()} != {expected_st}"
-        #self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name][0]
-        self.icb_commands[j].setKernelBuffer_offset_atIndex_(input_rawbuffers[input_name][0]._buf, 0, i)
-      for j in self.input_has_variable_dims:
-        global_size, local_size = self.jit_cache[j].prg.launch_dims(var_vals)
-        self.icb_commands[j].concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
-      self.int_buf_view[:] = list(var_vals.values())  # how to flush this cache?
-
-      #print(dir(self.int_buf._buf))
-      #print(self.int_buf_view)
-      self.command_buffer = METAL.mtl_queue.commandBuffer()
-      encoder = self.command_buffer.computeCommandEncoder()
-      encoder.executeCommandsInBuffer_withRange_(self.icb, Cocoa.NSRange(0,len(self.jit_cache)))
-      encoder.endEncoding()
-      self.command_buffer.commit()
-      METAL.mtl_buffers_in_flight.append(self.command_buffer)
-
+      assert self.expected_vals == expected_vals, "mismatch of var_vals"
+      assert self.expected_sts_dtype == expected_sts_dtype, "mismatch of sts"
+      assert self.jit_fxn, "didn't get jitted?"
+      self.jit_fxn(input_rawbuffers, var_vals)
     elif self.cnt == 1:
+      self.expected_vals, self.expected_sts_dtype = expected_vals, expected_sts_dtype
+
       CacheCollector.start(var_vals)
       self.ret = self.fxn(*args, **kwargs)
-      self.jit_cache = CacheCollector.finish()
-      assert len(self.jit_cache) != 0, "didn't JIT anything!"
-      if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
+      jit_cache = CacheCollector.finish()
+      assert len(jit_cache) != 0, "didn't JIT anything!"
+      if DEBUG >= 1: print(f"JIT captured {len(jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
-      # get the inputs for replacement
-      for j,ji in enumerate(self.jit_cache):
-        for i,a in enumerate(ji.rawbufs):
-          if a in [v[0] for v in input_rawbuffers.values()]:
-            self.input_replace[(j,i)] = [(k, v[1].unbind(), v[0].dtype) for k,v in input_rawbuffers.items() if v[0] == a][0]
-      assert set([x[0] for x in self.input_replace.values()]) == set(input_rawbuffers.keys()), "some input tensors not found"
-
-      # create metal batch exec
-      self.stored_vals = tuple(var_vals.keys())
-      self.int_buf = RawMetalBuffer(len(var_vals), dtypes.int32)
-      self.int_buf_view = self.int_buf.buffer_view()
-      icb_descriptor = Metal.MTLIndirectCommandBufferDescriptor.new()
-      icb_descriptor.setCommandTypes_(Metal.MTLIndirectCommandType(Metal.MTLIndirectCommandTypeConcurrentDispatch))
-      icb_descriptor.setInheritBuffers_(False)
-      icb_descriptor.setInheritPipelineState_(False)
-      icb_descriptor.setMaxKernelBufferBindCount_(31)
-      self.icb = METAL.device.newIndirectCommandBufferWithDescriptor_maxCommandCount_options_(icb_descriptor, len(self.jit_cache), Metal.MTLResourceOptions(0))
-      self.icb_commands = []
-      for j,ji in enumerate(self.jit_cache):
-        descriptor = Metal.MTLComputePipelineDescriptor.new()
-        descriptor.setComputeFunction_(ji.prg.clprg.fxn)
-        descriptor.setSupportIndirectCommandBuffers_(True)
-        pipeline_state = unwrap(METAL.device.newComputePipelineStateWithDescriptor_options_reflection_error_(descriptor, Metal.MTLPipelineOption(0), None, None))
-        icb_command = self.icb.indirectComputeCommandAtIndex_(j)
-        icb_command.setComputePipelineState_(pipeline_state)
-        for i,b in enumerate(ji.rawbufs):
-          icb_command.setKernelBuffer_offset_atIndex_(b._buf, 0, i)
-        for i,v in enumerate(getattr(ji.prg,"vars",[])):
-          vals_idx = list(var_vals.keys()).index(v)
-          icb_command.setKernelBuffer_offset_atIndex_(self.int_buf._buf, vals_idx*4, len(ji.rawbufs)+i)
-        global_size, local_size = ji.prg.launch_dims(var_vals)
-        icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
-        if any(isinstance(x, Node) for x in ji.prg.global_size) or any(isinstance(x, Node) for x in ji.prg.local_size):
-          self.input_has_variable_dims.add(j)
-        icb_command.setBarrier()
-        self.icb_commands.append(icb_command)
-
+      alt_batch_exec = Device[Device.DEFAULT].batch_executor
+      self.jit_fxn = (BatchExecutor if alt_batch_exec is None else alt_batch_exec)(jit_cache, input_rawbuffers, var_vals)
     elif self.cnt == 0:
       self.ret = self.fxn(*args, **kwargs)
 
-    # clear the inputs
-    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
     self.cnt += 1
     return self.ret
 
