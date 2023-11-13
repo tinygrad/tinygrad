@@ -1,6 +1,6 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib, ctypes, tempfile
-import Metal, Cocoa, libdispatch # type: ignore
+import Metal, Cocoa, libdispatch
 from typing import List, Any, Tuple
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache
@@ -56,7 +56,7 @@ class MetalProgram:
     data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
     self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
     self.fxn = self.library.newFunctionWithName_(name)
-    if DEBUG >= 5:
+    if DEBUG >= 6:
       with tempfile.NamedTemporaryFile(delete=True) as shader:
         shader.write(lib)
         shader.flush()

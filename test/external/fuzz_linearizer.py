@@ -3,7 +3,7 @@ import numpy as np
 from collections import Counter, defaultdict
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
+from tinygrad.features.search import get_linearizer_actions, bufs_from_lin, tuplize_uops
 from tinygrad.graph import print_tree
 from tinygrad.helpers import ImageDType, prod, getenv
 from tinygrad.ops import Device, Compiled, Interpreted
@@ -26,10 +26,7 @@ def fuzz_linearizer(lin: Linearizer):
   print(lin.colored_shape())
   rawbufs = bufs_from_lin(lin)
 
-  # NOTE: copied from beam_search
-  def tuplize_uops(uops): return tuple([(x.uop, x.dtype, tuple(x.num for x in x.vin), x.arg) for x in uops])
   seen_uops = {}
-
   ground_truth = None
   while 1:
     if len(seen_uops) >= 20: break  # enough for this kernel
@@ -53,12 +50,14 @@ def fuzz_linearizer(lin: Linearizer):
       try:
         prg = device.to_program(lin)
       except:
+        print(lin.ast)
         traceback.print_exc()
         print("COMPILE FAILED!!")
         return "COMPILE_ERROR"
       try:
         prg.exec(rawbufs, var_vals, force_wait=True)
       except:
+        print(lin.ast)
         traceback.print_exc()
         print("EXEC FAILED!!")
         return "EXEC_ERROR"
@@ -66,6 +65,7 @@ def fuzz_linearizer(lin: Linearizer):
       try:
         device.exec_ast(lin.ast, output=LB(rawbufs[0], rawbufs[0].dtype), inputs=[LB(buf, buf.dtype) for buf in rawbufs[1:]])
       except Exception as e:
+        print(lin.ast)
         traceback.print_exc()
         return e
 
@@ -77,9 +77,11 @@ def fuzz_linearizer(lin: Linearizer):
       try:
         np.testing.assert_allclose(result, ground_truth, rtol=1e-2, atol=1e-2)
       except AssertionError:
+        print(lin.ast)
         traceback.print_exc()
         return "NOT_ALLCLOSE"
       except Exception as e:
+        print(lin.ast)
         traceback.print_exc()
         return e
   return "PASS"

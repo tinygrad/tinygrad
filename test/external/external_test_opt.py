@@ -18,14 +18,14 @@ from tinygrad.lazy import PUSH_PERMUTES
 from tinygrad.jit import CacheCollector
 
 class CLCache:
-  def __init__(self, allowed=None, strict=False, preclear=True): self.allowed, self.strict, self.preclear = allowed, strict, preclear
+  def __init__(self, allowed=None, strict=False, preclear=True, var_vals=None): self.allowed, self.strict, self.preclear, self.var_vals = allowed, strict, preclear, var_vals if var_vals is not None else {}
   def __enter__(self):
     if self.preclear:
       gc.collect()
       for x in [x for x in gc.get_objects() if isinstance(x, Tensor)]:
         x.realize()
       GlobalCounters.reset()
-    CacheCollector.start()
+    CacheCollector.start(self.var_vals)
     print("cache: entering")
   def __exit__(self, type, value, traceback):
     cache = CacheCollector.finish()
@@ -85,10 +85,11 @@ class TestInferenceMinKernels(unittest.TestCase):
 
   def test_llama(self):
     from examples.llama import Transformer
+    from tinygrad.shape.symbolic import Variable
     args_tiny = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 4, "norm_eps": 1e-05, "vocab_size": 1000}
     model = Transformer(**args_tiny)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
-    with CLCache(85):
+    with CLCache(98):
       model(Tensor([[1,2,3,4]]), 0).realize()
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")

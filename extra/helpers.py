@@ -1,5 +1,5 @@
 import multiprocessing, subprocess
-import cloudpickle  # type: ignore
+import cloudpickle
 from typing import Any
 
 def _early_exec_process(qin, qout):

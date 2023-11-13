@@ -13,7 +13,7 @@ def _uops_to_prg(uops):
                    runtime_args=runtime_args).build(Device[Device.DEFAULT].compiler, Device[Device.DEFAULT].runtime)
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
-  uops.append(UOp(uop, dtype, tuple(vin), arg, len(uops)))
+  uops.append(UOp(uop, dtype, tuple(vin), arg))
   return uops[-1]
 
 def _test_single_value(vals, op, dtype):
