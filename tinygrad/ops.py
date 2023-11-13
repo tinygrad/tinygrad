@@ -53,10 +53,10 @@ class LazyOp:
   arg: Any = None
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
 
-  def unique_buffers(self,visited=None):
+  def buffers(self,visited=None):
     if visited and id(self) in visited: return ()
     visited = visited.union({id(self)}) if visited else {id(self)}
-    try: return sum([x.unique_buffers(visited) for x in self.src],())
+    try: return sum([x.buffers(visited) for x in self.src],())
     except AttributeError: return ()
 
   @functools.cached_property
