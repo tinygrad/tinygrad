@@ -6,6 +6,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
 from dataclasses import dataclass
+from weakref import ref
 
 JIT_SUPPORTED_DEVICE = ["GPU", "CLANG", "METAL", "CUDA", "HIP", "WEBGPU", "LLVM"]
 
@@ -88,19 +89,33 @@ class TinyJit:
     self.cnt += 1
     return self.ret
 
+class _PlaceHolder:
+  def __init__(self, buf): self.size, self.dtype, self._device, self.ref, self.buftype, self.bufid = buf.size, buf.dtype, getattr(buf, '_device', None), ref(buf), type(buf), id(buf._buf)
+  def alloc_rawbuf(self): return self.buftype(self.size, self.dtype, **({'device':self._device} if self._device is not None else dict()))
+
 class _CacheCollector:
   def __init__(self):
-    self.cache: Optional[List[JitItem]] = None
+    self.cache: Optional[List[Tuple[ASTRunner, List[_PlaceHolder]]]] = None
+
   def start(self, var_vals:Optional[Dict[Variable, int]]=None):
     self.cache = []
     self.var_vals = var_vals if var_vals is not None else {}
+
   def add(self, prg, rawbufs, var_vals):
     if self.cache is None: return
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
-    self.cache.append(JitItem(prg, rawbufs))
+    self.cache.append((prg, [_PlaceHolder(x) for x in rawbufs]))
+
   def finish(self) -> List[JitItem]:
     if self.cache is None: return []
-    ret = self.cache
+    alloc = {}
+    def fix(pl:_PlaceHolder) -> RawBuffer:
+      ret = pl.ref()
+      if ret: return ret
+      if pl.bufid not in alloc: alloc[pl.bufid] = pl.alloc_rawbuf()
+      return alloc[pl.bufid]
+    ret = [JitItem(prg, [fix(x) for x in pl]) for prg, pl in self.cache]
     self.cache = None
     return ret
+
 CacheCollector = _CacheCollector()
