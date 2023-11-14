@@ -21,14 +21,12 @@ class TestLazyOp(unittest.TestCase):
     self.assertEqual(ast, ast_remade)
 
   def test_selfreferential_speed(self):
-    x = LazyBuffer.fromCPU(np.array([1]))
     st = time.perf_counter_ns()
-    for i in range(30):
-      p = x
-      for n in range(i):
-        p = p.e(BinaryOps.ADD, p)
-      if time.perf_counter_ns()-st > 1e6 or i > 13:
-        assert i > 13
+    for i in range(14):
+      p = LazyBuffer.fromCPU(np.array([1]))
+      for _ in range(i): p = p.e(BinaryOps.ADD, p)
+      # sanity check if caching works this should be way faster
+      assert time.perf_counter_ns() -st < 1e6
 
 if __name__ == '__main__':
   unittest.main()
