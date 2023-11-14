@@ -2,7 +2,7 @@ from tinygrad.nn import Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
 import numpy as np
 from itertools import chain
-from extra.utils import get_child, fetch, download_file
+from tinygrad.extra.utils import get_child, fetch, download_file
 from pathlib import Path
 import cv2
 from collections import defaultdict

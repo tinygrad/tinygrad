@@ -10,7 +10,7 @@ from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
 if DEBUG >= 6:
-  from extra.helpers import enable_early_exec
+  from tinygrad.extra.helpers import enable_early_exec
   early_exec = enable_early_exec()
 
 # The default HIP stream is used for everything.

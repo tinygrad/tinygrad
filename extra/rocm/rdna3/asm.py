@@ -2,7 +2,7 @@ import numpy as np
 import pathlib
 from hexdump import hexdump
 from tinygrad.helpers import colored
-from extra.helpers import enable_early_exec
+from tinygrad.extra.helpers import enable_early_exec
 early_exec = enable_early_exec()
 
 from tinygrad.runtime.ops_gpu import CLProgram, CLBuffer, ROCM_LLVM_PATH

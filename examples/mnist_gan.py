@@ -7,7 +7,7 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.nn import optim
-from extra.datasets import fetch_mnist
+from tinygrad.extra.datasets import fetch_mnist
 
 class LinearGen:
   def __init__(self):

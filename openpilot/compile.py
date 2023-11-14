@@ -22,8 +22,8 @@ from tinygrad.jit import TinyJit, CacheCollector
 
 import pyopencl as cl
 from tinygrad.runtime.ops_gpu import CL
-from extra.utils import fetch
-from extra.onnx import get_run_onnx
+from tinygrad.extra.utils import fetch
+from tinygrad.extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
@@ -83,7 +83,7 @@ def compile(dat, output_fn):
     cl_cache.append((prg.clprg, [[int(g*l) for g,l in zip(global_size, local_size)], local_size, *[x._buf for x in ji.rawbufs]]))
     used_ops += prg.op_estimate
 
-  from extra.thneed import Thneed
+  from tinygrad.extra.thneed import Thneed
   t = Thneed(cl_cache, {k:v._buf for k,v in input_rawbuffers.items()})
 
   # save thneed (before run)
@@ -102,7 +102,7 @@ def compile(dat, output_fn):
   FLOAT16 = getenv("FLOAT16", 0)
   if FLOAT16 == 0:
     try:
-      from test.models.test_onnx import run_onnx_torch
+      from tinygrad.test.models.test_onnx import run_onnx_torch
       torch_out = run_onnx_torch(onnx_model, np_inputs).numpy()
       print(thneed_out, torch_out, "mse", np.sum((thneed_out-torch_out)**2), "max err", np.max(np.abs((thneed_out-torch_out))))
       np.testing.assert_allclose(torch_out, thneed_out, atol=1e-4, rtol=1e-2)

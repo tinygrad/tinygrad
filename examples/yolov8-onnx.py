@@ -3,7 +3,7 @@ import os
 from ultralytics import YOLO
 import onnx
 from pathlib import Path
-from extra.onnx import get_run_onnx
+from tinygrad.extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 
 os.chdir("/tmp")

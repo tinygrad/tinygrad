@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes
-from extra.utils import download_file
+from tinygrad.extra.utils import download_file
 
 def fetch_mnist():
   parse = lambda file: np.frombuffer(gzip.open(file).read(), dtype=np.uint8).copy()

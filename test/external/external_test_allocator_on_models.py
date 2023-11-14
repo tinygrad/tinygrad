@@ -7,9 +7,9 @@ from tinygrad.helpers import GlobalCounters
 from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, prod
 from tinygrad.ops import Device
-from test.helpers import derandomize_model
+from tinygrad.test.helpers import derandomize_model
 
-from examples.llama import Transformer
+from tinygrad.examples.llama import Transformer
 
 ALLOCATED_DEV_BUFS = 0
 class FakeDeviceBuffer:
@@ -84,7 +84,7 @@ def helper_test_alloc_count(mm, gen, train):
 def check_gc():
   if Device.DEFAULT == "GPU":
     gc.collect() # Need to collect Tensors.
-    from extra.introspection import print_objects
+    from tinygrad.extra.introspection import print_objects
     assert print_objects() == 0
 
 class TestAllocators(unittest.TestCase):
@@ -115,7 +115,7 @@ class TestAllocators(unittest.TestCase):
 
   @unittest.skip("huge for CI")
   def test_stable_diffusion(self):
-    from examples.stable_diffusion import UNetModel
+    from tinygrad.examples.stable_diffusion import UNetModel
     model = UNetModel()
     derandomize_model(model)
     def test(t, t2): return model(t, 801, t2).realize()

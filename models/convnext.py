@@ -43,7 +43,7 @@ versions = {
 def get_model(version, load_weights=False):
   model = ConvNeXt(**versions[version])
   if load_weights:
-    from extra.utils import fetch, fake_torch_load, get_child
+    from tinygrad.extra.utils import fetch, fake_torch_load, get_child
     weights = fake_torch_load(fetch(f'https://dl.fbaipublicfiles.com/convnext/convnext_{version}_1k_224_ema.pth'))['model']
     for k,v in weights.items():
       mv = get_child(model, k)
@@ -54,7 +54,7 @@ if __name__ == "__main__":
   model = get_model("tiny", True)
 
   # load image
-  from test.models.test_efficientnet import chicken_img, preprocess, _LABELS
+  from tinygrad.test.models.test_efficientnet import chicken_img, preprocess, _LABELS
   img = Tensor(preprocess(chicken_img))
 
   Tensor.training = False

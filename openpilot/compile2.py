@@ -12,8 +12,8 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/mod
 
 import onnx
 from typing import Tuple, List
-from extra.utils import fetch
-from extra.onnx import get_run_onnx
+from tinygrad.extra.utils import fetch
+from tinygrad.extra.onnx import get_run_onnx
 from tinygrad.graph import print_tree, log_schedule_item
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, DEBUG, getenv, ImageDType, GRAPH
@@ -53,7 +53,7 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   return schedule, schedule_independent, inputs
 
 def schedule_to_thneed(schedule, output_fn):
-  from extra.thneed import Thneed
+  from tinygrad.extra.thneed import Thneed
 
   # transform to CL.CACHE
   used_ops = 0
@@ -71,7 +71,7 @@ def schedule_to_thneed(schedule, output_fn):
     cl_cache.append((prg.clprg, [[int(g*l) for g,l in zip(global_size, local_size)], local_size, *[x.realized._buf for x in args]]))
     used_ops += prg.op_estimate
 
-  from extra.thneed import Thneed
+  from tinygrad.extra.thneed import Thneed
   input_rawbuffers = {k:inputs[k].lazydata.realized for k in inputs.keys()}
   t = Thneed(cl_cache, {k:v._buf for k,v in input_rawbuffers.items()})
 
@@ -87,7 +87,7 @@ def thneed_test_onnx(onnx_data, output_fn):
   import pyopencl as cl
   from tinygrad.runtime.ops_gpu import CL
   import numpy as np
-  from extra.thneed import Thneed
+  from tinygrad.extra.thneed import Thneed
   onnx_model = onnx.load(io.BytesIO(onnx_data))
 
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
@@ -102,7 +102,7 @@ def thneed_test_onnx(onnx_data, output_fn):
     new_torch_out = onnx_output[0]
   else:
     # test with torch
-    from test.models.test_onnx import run_onnx_torch
+    from tinygrad.test.models.test_onnx import run_onnx_torch
     new_torch_out = run_onnx_torch(onnx_model, new_np_inputs).numpy()
 
   if output_fn is None:

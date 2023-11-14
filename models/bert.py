@@ -1,6 +1,6 @@
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear, LayerNorm, Embedding
-from extra.utils import download_file, get_child
+from tinygrad.extra.utils import download_file, get_child
 from pathlib import Path
 
 

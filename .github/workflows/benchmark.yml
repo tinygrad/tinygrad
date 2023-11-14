@@ -11,8 +11,6 @@ jobs:
     name: Mac Benchmark
     runs-on: [self-hosted, macOS]
     if: github.repository_owner == 'tinygrad'
-    env:
-      PYTHONPATH: .
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
@@ -69,8 +67,6 @@ jobs:
     name: NVIDIA Benchmark
     runs-on: [self-hosted, Linux, CUDA]
     if: github.repository_owner == 'tinygrad'
-    env:
-      PYTHONPATH: .
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
@@ -97,8 +93,6 @@ jobs:
     name: AMD Benchmark
     runs-on: [self-hosted, Linux, ROCM]
     if: github.repository_owner == 'tinygrad'
-    env:
-      PYTHONPATH: .
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3

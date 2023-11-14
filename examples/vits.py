@@ -2,7 +2,7 @@ import json, logging, math, re, sys, time, wave, argparse, numpy as np
 from functools import reduce
 from pathlib import Path
 from typing import List
-from extra.utils import download_file
+from tinygrad.extra.utils import download_file
 from tinygrad import nn
 from tinygrad.helpers import dtypes
 from tinygrad.nn.state import torch_load

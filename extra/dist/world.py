@@ -1,5 +1,5 @@
 from typing import Optional
-from extra import dist
+from tinygrad.extra import dist
 from multiprocessing import shared_memory
 from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.lazy import LazyBuffer

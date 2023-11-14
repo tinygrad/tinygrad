@@ -6,9 +6,9 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d, optim
 from tinygrad.helpers import getenv
-from extra.datasets import fetch_mnist
-from extra.augment import augment_img
-from extra.training import train, evaluate
+from tinygrad.extra.datasets import fetch_mnist
+from tinygrad.extra.augment import augment_img
+from tinygrad.extra.training import train, evaluate
 GPU = getenv("GPU")
 QUICK = getenv("QUICK")
 DEBUG = getenv("DEBUG")

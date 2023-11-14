@@ -1,5 +1,5 @@
 # Python version of https://gist.github.com/antoinebrl/7d00d5cb6c95ef194c737392ef7e476a
-from extra.utils import download_file
+from tinygrad.extra.utils import download_file
 from pathlib import Path
 from tqdm import tqdm
 import tarfile, os
@@ -31,7 +31,7 @@ def imagenet_prepare_train():
   for co,tarf in enumerate(images):
     # for each tar file found. Create a folder with its name. Extract into that folder. Remove tar file
     if Path(Path(__file__).parent / "imagenet" / "train" / images[co]).is_file():
-      images[co] = tarf[:-4] # remove .tar from extracted tar files
+      images[co] = tarf[:-4] # remove .tar from tinygrad.extracted tar files
       os.makedirs(Path(__file__).parent / "imagenet" / "train" / images[co], exist_ok=True)
       imagenet_extract(Path(__file__).parent / "imagenet" / "train" / tarf, Path(__file__).parent/ "imagenet" / "train" / images[co], small=True)
       os.remove(Path(__file__).parent / "imagenet" / "train" / tarf)

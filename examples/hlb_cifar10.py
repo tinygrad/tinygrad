@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # setup for distributed
-from extra import dist
+from tinygrad.extra import dist
 from tinygrad.helpers import getenv, dtypes
 if __name__ == "__main__":
   if getenv("DIST"):
@@ -12,7 +12,7 @@ if __name__ == "__main__":
 import random, time
 import numpy as np
 from typing import Any, Dict, Optional, SupportsIndex, Type, Union
-from extra.datasets import fetch_cifar, cifar_mean, cifar_std
+from tinygrad.extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from tinygrad import nn
 from tinygrad.nn.state import get_state_dict
 from tinygrad.nn import optim
@@ -20,9 +20,9 @@ from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import GlobalCounters
 from tinygrad.shape.symbolic import Node
-from extra.lr_scheduler import OneCycleLR
+from tinygrad.extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
-from extra.dist import collectives
+from tinygrad.extra.dist import collectives
 
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 
@@ -254,7 +254,7 @@ def train_cifar():
   set_seed(hyp['seed'])
 
   # this import needs to be done here because this is running in a subprocess
-  from extra.dist import OOB
+  from tinygrad.extra.dist import OOB
   assert OOB is not None or not getenv("DIST"), "OOB should be initialized"
   rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
 

@@ -1,6 +1,6 @@
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, dtypes, ImageDType, flatten
-from extra.onnx import safe_numpy
+from tinygrad.extra.onnx import safe_numpy
 from onnx.helper import tensor_dtype_to_np_dtype
 from onnx import TensorProto
 import io

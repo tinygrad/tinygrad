@@ -1,8 +1,8 @@
 import math
 from tinygrad.helpers import flatten
 import tinygrad.nn as nn
-from models.resnet import ResNet
-from extra.utils import get_child
+from tinygrad.models.resnet import ResNet
+from tinygrad.extra.utils import get_child
 import numpy as np
 
 def nms(boxes, scores, thresh=0.5):
@@ -231,7 +231,7 @@ class FPN:
     return results
 
 if __name__ == "__main__":
-  from models.resnet import ResNeXt50_32X4D
+  from tinygrad.models.resnet import ResNeXt50_32X4D
   backbone = ResNeXt50_32X4D()
   retina = RetinaNet(backbone)
   retina.load_from_pretrained()

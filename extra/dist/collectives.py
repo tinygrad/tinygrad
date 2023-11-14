@@ -1,7 +1,7 @@
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 
-from extra.dist import world
+from tinygrad.extra.dist import world
 
 def allreduce(t:Tensor) -> Tensor:
   RANK, WORLD_SIZE = getenv("RANK"), getenv("WORLD_SIZE")

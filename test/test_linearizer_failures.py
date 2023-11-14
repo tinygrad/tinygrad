@@ -1,7 +1,7 @@
 import unittest
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.ops import Device, Interpreted
-from test.external.fuzz_linearizer import fuzz_linearizer
+from tinygrad.test.external.fuzz_linearizer import fuzz_linearizer
 
 # stuff needed to unpack a kernel
 from tinygrad.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer

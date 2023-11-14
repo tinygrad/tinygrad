@@ -8,8 +8,8 @@ import numpy as np
 import subprocess
 import tensorflow as tf
 import tf2onnx
-from examples.compile_efficientnet import compile_net
-from extra.onnx import get_run_onnx
+from tinygrad.examples.compile_efficientnet import compile_net
+from tinygrad.extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 
 def get_uncompiled_model2(dataset_size=32, output_size=4):

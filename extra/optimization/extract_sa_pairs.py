@@ -15,8 +15,8 @@ from tinygrad.codegen.kernel import Opt, OptOps
 # more stuff
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import actions
-from extra.optimization.helpers import lin_to_feats
-from extra.optimization.pretrain_valuenet import ValueNet
+from tinygrad.extra.optimization.helpers import lin_to_feats
+from tinygrad.extra.optimization.pretrain_valuenet import ValueNet
 from tinygrad.nn.optim import Adam
 from tinygrad.nn.state import get_parameters, get_state_dict, safe_save, safe_load, load_state_dict
 import random

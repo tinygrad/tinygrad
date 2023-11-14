@@ -7,8 +7,8 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
-from extra.datasets import fetch_cifar
-from models.efficientnet import EfficientNet
+from tinygrad.extra.datasets import fetch_cifar
+from tinygrad.models.efficientnet import EfficientNet
 
 class TinyConvNet:
   def __init__(self, classes=10):
@@ -46,7 +46,7 @@ if __name__ == "__main__":
   print(f"training with batch size {BS} for {steps} steps")
 
   if IMAGENET:
-    from extra.datasets.imagenet import fetch_batch
+    from tinygrad.extra.datasets.imagenet import fetch_batch
     def loader(q):
       while 1:
         try:

@@ -11,9 +11,9 @@ import numpy as np
 from PIL import Image
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
-from extra.utils import fetch
+from tinygrad.extra.utils import fetch
 from tinygrad.jit import TinyJit
-from models.efficientnet import EfficientNet
+from tinygrad.models.efficientnet import EfficientNet
 np.set_printoptions(suppress=True)
 
 # TODO: you should be able to put these in the jitted function

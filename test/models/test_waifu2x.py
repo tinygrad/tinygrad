@@ -7,7 +7,7 @@ from tinygrad.ops import Device
 
 class TestVGG7(unittest.TestCase):
   def test_vgg7(self):
-    from examples.vgg7_helpers.waifu2x import Vgg7, image_load
+    from tinygrad.examples.vgg7_helpers.waifu2x import Vgg7, image_load
 
     # Create in tinygrad
     Tensor.manual_seed(1337)

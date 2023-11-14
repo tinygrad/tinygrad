@@ -2,7 +2,7 @@ from pathlib import Path
 import torch
 from tinygrad import nn
 from tinygrad.tensor import Tensor
-from extra.utils import download_file, get_child
+from tinygrad.extra.utils import download_file, get_child
 
 class DownsampleBlock:
   def __init__(self, c0, c1, stride=2):

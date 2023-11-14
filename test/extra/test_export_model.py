@@ -1,5 +1,5 @@
 import unittest
-from extra.export_model import export_model, EXPORT_SUPPORTED_DEVICE
+from tinygrad.extra.export_model import export_model, EXPORT_SUPPORTED_DEVICE
 from tinygrad.tensor import Tensor, Device
 import json
 

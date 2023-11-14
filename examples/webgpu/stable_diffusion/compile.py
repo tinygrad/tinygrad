@@ -1,10 +1,10 @@
 import os
-from extra.export_model import compile_net, jit_model
-from examples.stable_diffusion import StableDiffusion
+from tinygrad.extra.export_model import compile_net, jit_model
+from tinygrad.examples.stable_diffusion import StableDiffusion
 from tinygrad.nn.state import get_state_dict, safe_save, safe_load_metadata, torch_load, load_state_dict
 from tinygrad.tensor import Tensor
 from tinygrad.ops import Device
-from extra.utils import download_file
+from tinygrad.extra.utils import download_file
 from typing import NamedTuple, Any, List
 from pathlib import Path
 import argparse
@@ -40,7 +40,7 @@ def split_safetensor(fn):
     if (metadata[k]["data_offsets"][0] < text_model_offset):
       metadata[k]["data_offsets"][0] = int(metadata[k]["data_offsets"][0]/2)
       metadata[k]["data_offsets"][1] = int(metadata[k]["data_offsets"][1]/2)
-  
+
   last_offset = 0
   part_end_offsets = []
 
@@ -51,7 +51,7 @@ def split_safetensor(fn):
       break
 
     part_offset = offset - last_offset
-    
+
     if (part_offset >= chunk_size):
       part_end_offsets.append(8+json_len+offset)
       last_offset = offset
@@ -60,7 +60,7 @@ def split_safetensor(fn):
   net_bytes = bytes(open(fn, 'rb').read())
   part_end_offsets.append(text_model_start+8+json_len)
   cur_pos = 0
-  
+
   for i, end_pos in enumerate(part_end_offsets):
     with open(f'./net_part{i}.safetensors', "wb+") as f:
       f.write(net_bytes[cur_pos:end_pos])
@@ -68,7 +68,7 @@ def split_safetensor(fn):
 
   with open(f'./net_textmodel.safetensors', "wb+") as f:
     f.write(net_bytes[text_model_start+8+json_len:])
-  
+
   return part_end_offsets
 
 if __name__ == "__main__":
@@ -90,11 +90,11 @@ if __name__ == "__main__":
     forward: Any = None
 
   sub_steps = [
-    Step(name = "textModel", input = [Tensor.randn(1, 77)], forward = model.cond_stage_model.transformer.text_model), 
+    Step(name = "textModel", input = [Tensor.randn(1, 77)], forward = model.cond_stage_model.transformer.text_model),
     Step(name = "diffusor", input = [Tensor.randn(1, 77, 768), Tensor.randn(1, 77, 768), Tensor.randn(1,4,64,64), Tensor.rand(1), Tensor.randn(1), Tensor.randn(1), Tensor.randn(1)], forward = model),
     Step(name = "decoder", input = [Tensor.randn(1,4,64,64)], forward = model.decode)
   ]
-  
+
   prg = ""
 
   def compile_step(model, step: Step):
@@ -109,7 +109,7 @@ if __name__ == "__main__":
     gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate(special_names.items()) if "output" not in value])
     input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new Float32Array(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,(_,value) in enumerate(special_names.items()) if value != "output0"])
     return f"""\n    var {step.name} = function() {{
-    
+
     {kernel_code}
 
     return {{
@@ -117,7 +117,7 @@ if __name__ == "__main__":
         const metadata = getTensorMetadata(safetensor[0]);
 
         {bufs}
-        
+
         {gpu_write_bufs}
         const gpuReadBuffer = device.createBuffer({{ size: output0.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }});
 
@@ -140,7 +140,7 @@ if __name__ == "__main__":
             gpuReadBuffer.unmap();
             return resultBuffer;
         }}
-      }} 
+      }}
     }}
   }}
   """

@@ -164,7 +164,7 @@ There are a couple of dataset loaders in tinygrad located in [/extra/datasets](/
 We will be using the MNIST dataset loader.
 
 ```python
-from extra.datasets import fetch_mnist
+from tinygrad.extra.datasets import fetch_mnist
 ```
 
 Now we have everything we need to start training our neural network.

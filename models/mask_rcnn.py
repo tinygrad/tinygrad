@@ -6,10 +6,10 @@ from pathlib import Path
 from tinygrad import nn
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes
-from extra.utils import get_child, download_file
+from tinygrad.extra.utils import get_child, download_file
 from tinygrad.nn.state import torch_load
-from models.resnet import ResNet
-from models.retinanet import nms as _box_nms
+from tinygrad.models.resnet import ResNet
+from tinygrad.models.retinanet import nms as _box_nms
 
 
 USE_NP_GATHER = os.getenv('FULL_TINYGRAD', '0') == '0'

@@ -12,7 +12,7 @@ from tinygrad.tensor import Tensor
 
 def check_gc():
   if Device.DEFAULT == "GPU":
-    from extra.introspection import print_objects
+    from tinygrad.extra.introspection import print_objects
     assert print_objects() == 0
 
 class FakeDeviceBuffer:

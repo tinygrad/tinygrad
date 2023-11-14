@@ -1,6 +1,6 @@
 import numpy as np
 from tinygrad.tensor import Tensor
-from models.transformer import TransformerBlock
+from tinygrad.models.transformer import TransformerBlock
 
 class ViT:
   def __init__(self, layers=12, embed_dim=192, num_heads=3):
@@ -30,7 +30,7 @@ class ViT:
 
   def load_from_pretrained(m):
     import io
-    from extra.utils import fetch
+    from tinygrad.extra.utils import fetch
 
     # https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py
     if m.embed_dim == 192:

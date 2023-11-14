@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 import torch
 import numpy as np
 from tinygrad.helpers import CI
-from extra.utils import fetch, temp, download_file
+from tinygrad.extra.utils import fetch, temp, download_file
 from tinygrad.nn.state import torch_load
 from PIL import Image
 

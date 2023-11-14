@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import os, cloudpickle, tempfile, unittest, subprocess
-from extra.helpers import enable_early_exec, cross_process, _CloudpickleFunctionWrapper
+from tinygrad.extra.helpers import enable_early_exec, cross_process, _CloudpickleFunctionWrapper
 
 def normalize_line_endings(s): return s.replace(b'\r\n', b'\n')
 

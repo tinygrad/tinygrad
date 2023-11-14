@@ -27,7 +27,7 @@ def single_kernel():
   print(old_tms, 67.107/min(old_tms)*1e3)
   exit(0)
 
-# CONV=0 PYTHONPATH="." LATEDEBUG=5 OPT=99 IMAGE=2 FLOAT16=1 NOLOCALS=1 python3 extra/fastvits/fastvits_speed.py
+# CONV=0 LATEDEBUG=5 OPT=99 IMAGE=2 FLOAT16=1 NOLOCALS=1 python3 extra/fastvits/fastvits_speed.py
 if __name__ == "__main__":
   #single_kernel()
 

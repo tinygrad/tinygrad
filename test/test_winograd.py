@@ -3,7 +3,7 @@ from tinygrad.helpers import Timing, CI
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
 from tinygrad.codegen.linearizer import Linearizer
-from test.test_net_speed import start_profile, stop_profile
+from tinygrad.test.test_net_speed import start_profile, stop_profile
 
 class TestWinograd(unittest.TestCase):
   def setUp(self):

@@ -6,7 +6,7 @@ from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
 from tinygrad.helpers import dtypes
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.helpers import Timing
-from extra.utils import fetch_as_file, temp
+from tinygrad.extra.utils import fetch_as_file, temp
 
 def compare_weights_both(url):
   import torch
@@ -70,7 +70,7 @@ class TestSafetensors(unittest.TestCase):
     for k,v in tensors.items(): np.testing.assert_array_equal(ret2[k].numpy(), v.numpy())
 
   def test_efficientnet_safetensors(self):
-    from models.efficientnet import EfficientNet
+    from tinygrad.models.efficientnet import EfficientNet
     model = EfficientNet(0)
     state_dict = get_state_dict(model)
     safe_save(state_dict, temp("eff0"))

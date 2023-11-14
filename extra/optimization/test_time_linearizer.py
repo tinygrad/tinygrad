@@ -1,4 +1,4 @@
-from extra.optimization.helpers import load_worlds, ast_str_to_lin
+from tinygrad.extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.features.search import bufs_from_lin, time_linearizer, get_linearizer_actions
 
 if __name__ == "__main__":

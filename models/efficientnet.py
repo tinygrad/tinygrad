@@ -1,7 +1,7 @@
 import math
 from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d
-from extra.utils import get_child
+from tinygrad.extra.utils import get_child
 
 class MBConvBlock:
   def __init__(self, kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio, has_se, track_running_stats=True):
@@ -142,7 +142,7 @@ class EfficientNet:
       7: "https://github.com/lukemelas/EfficientNet-PyTorch/releases/download/1.0/efficientnet-b7-dcc49843.pth"
     }
 
-    from extra.utils import fetch_as_file
+    from tinygrad.extra.utils import fetch_as_file
     from tinygrad.nn.state import torch_load
     b0 = torch_load(fetch_as_file(model_urls[self.number]))
     for k,v in b0.items():

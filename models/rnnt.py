@@ -2,7 +2,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.nn import Linear, Embedding
 import numpy as np
-from extra.utils import download_file
+from tinygrad.extra.utils import download_file
 from pathlib import Path
 
 

@@ -16,7 +16,7 @@ from tinygrad.shape.symbolic import Variable
 inf, nan = float('inf'), float('nan')
 from tinygrad.codegen.kernel import Opt, OptOps
 
-from extra.optimization.helpers import lin_to_feats, MAX_DIMS
+from tinygrad.extra.optimization.helpers import lin_to_feats, MAX_DIMS
 
 # NOTE: this is not real value of the state, it's just a prediction of the runtime
 INNER = 512

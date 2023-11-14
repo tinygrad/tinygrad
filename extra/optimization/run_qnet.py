@@ -7,12 +7,12 @@ def beam_q_estimate(beam:List[Tuple[Linearizer, float]]) -> List[Tuple[Linearize
   global _net
   if _net is None:
     from tinygrad.nn.state import load_state_dict, safe_load
-    from extra.optimization.pretrain_valuenet import ValueNet
+    from tinygrad.extra.optimization.pretrain_valuenet import ValueNet
     _net = ValueNet(1021+len(actions), 2)
     load_state_dict(_net, safe_load("/tmp/qnet.safetensors"), verbose=False)
   from tinygrad.tensor import Tensor
   from tinygrad.helpers import Context
-  from extra.optimization.helpers import lin_to_feats
+  from tinygrad.extra.optimization.helpers import lin_to_feats
   import numpy as np
   feats = []
   lins = []

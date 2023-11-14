@@ -2,9 +2,9 @@ import json
 import pathlib
 import zipfile
 import numpy as np
-from extra.utils import download_file
+from tinygrad.extra.utils import download_file
 import pycocotools._mask as _mask
-from examples.mask_rcnn import Masker
+from tinygrad.examples.mask_rcnn import Masker
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 

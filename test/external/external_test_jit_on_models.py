@@ -5,9 +5,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
 from tinygrad.helpers import dtypes, CI
 from tinygrad.ops import Device
-from test.helpers import derandomize_model
+from tinygrad.test.helpers import derandomize_model
 
-from examples.llama import Transformer
+from tinygrad.examples.llama import Transformer
 
 def helper_test_jitted_correctness(gen, train, train_jit):
   nojit = train(*gen()).numpy()
@@ -32,7 +32,7 @@ class TestJittedModels(unittest.TestCase):
 
   @unittest.skipUnless(not CI, "huge for CI")
   def test_jitted_stable_diffusion(self):
-    from examples.stable_diffusion import UNetModel
+    from tinygrad.examples.stable_diffusion import UNetModel
     model = UNetModel()
     derandomize_model(model)
     def test(t, t2): return model(t, 801, t2).realize()

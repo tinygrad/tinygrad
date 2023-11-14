@@ -25,7 +25,7 @@ def safe_numpy(t) -> np.ndarray:
   assert len(numpy_cache[t].shape) > 0
   return numpy_cache[t]
 
-onnx_ops = importlib.import_module('extra.onnx_ops')
+onnx_ops = importlib.import_module('tinygrad.extra.onnx_ops')
 
 ONNXLIMIT = getenv("ONNXLIMIT", -1)
 

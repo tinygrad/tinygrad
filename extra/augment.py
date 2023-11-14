@@ -5,7 +5,7 @@ import sys
 cwd = Path.cwd()
 sys.path.append(cwd.as_posix())
 sys.path.append((cwd / 'test').as_posix())
-from extra.datasets import fetch_mnist
+from tinygrad.extra.datasets import fetch_mnist
 from tqdm import trange
 
 def augment_img(X, rotate=10, px=3):

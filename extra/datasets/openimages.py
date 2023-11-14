@@ -1,12 +1,12 @@
 import os
 import math
 import json
-from extra.utils import OSX
+from tinygrad.extra.utils import OSX
 import numpy as np
 from PIL import Image
 import pathlib
 import boto3, botocore
-from extra.utils import download_file
+from tinygrad.extra.utils import download_file
 from tqdm import tqdm
 import pandas as pd
 import concurrent.futures

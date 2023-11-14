@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from transformers import BertTokenizer
 import numpy as np
-from extra.utils import download_file
+from tinygrad.extra.utils import download_file
 
 BASEDIR = Path(__file__).parent / "squad"
 def init_dataset():

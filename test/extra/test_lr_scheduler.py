@@ -4,9 +4,9 @@ import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn.optim import Adam
-from extra.lr_scheduler import MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR, OneCycleLR
-from extra.training import train, evaluate
-from extra.datasets import fetch_mnist
+from tinygrad.extra.lr_scheduler import MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR, OneCycleLR
+from tinygrad.extra.training import train, evaluate
+from tinygrad.extra.datasets import fetch_mnist
 import pytest
 
 pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu]

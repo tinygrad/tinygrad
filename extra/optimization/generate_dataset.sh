@@ -3,8 +3,8 @@ export LOGOPS=/tmp/ops
 rm $LOGOPS
 
 # generate many kernels
-PYTHONPATH="." OPT=2 GPU=1 python3 test/external/external_test_opt.py
-PYTHONPATH="." OPT=3 GPU=1 python3 test/external/external_test_opt.py
+OPT=2 GPU=1 python3 test/external/external_test_opt.py
+OPT=3 GPU=1 python3 test/external/external_test_opt.py
 GPU=1 IMAGE=1 python3 test/test_ops.py
 FORWARD_ONLY=1 GPU=1 IMAGE=2 python test/test_ops.py
 STEPS=3 python3 examples/hlb_cifar10.py

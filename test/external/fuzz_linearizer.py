@@ -1,7 +1,7 @@
 import random, traceback
 import numpy as np
 from collections import Counter, defaultdict
-from extra.optimization.helpers import load_worlds, ast_str_to_lin
+from tinygrad.extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import get_linearizer_actions, bufs_from_lin, tuplize_uops
 from tinygrad.graph import print_tree

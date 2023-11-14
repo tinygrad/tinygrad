@@ -1,9 +1,9 @@
 from pathlib import Path
-from models.efficientnet import EfficientNet
+from tinygrad.models.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_save
-from extra.utils import fetch
-from extra.export_model import export_model
+from tinygrad.extra.utils import fetch
+from tinygrad.extra.export_model import export_model
 from tinygrad.helpers import getenv
 import ast
 

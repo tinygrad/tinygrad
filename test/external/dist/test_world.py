@@ -1,9 +1,9 @@
-from extra import dist
+from tinygrad.extra import dist
 from tinygrad.jit import TinyJit
 if __name__ == "__main__":
   dist.preinit()
 
-from extra.dist import world
+from tinygrad.extra.dist import world
 from tinygrad.helpers import CI, getenv
 from tinygrad.tensor import Tensor
 import numpy as np

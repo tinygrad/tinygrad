@@ -5,7 +5,7 @@ import numpy
 from tinygrad.tensor import Tensor
 from PIL import Image
 from pathlib import Path
-from extra.utils import download_file
+from tinygrad.extra.utils import download_file
 
 # File Formats
 

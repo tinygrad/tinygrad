@@ -7,7 +7,7 @@ from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.runtime.ops_gpu import ROCM_LLVM_PATH
 
 # ugh, is this really needed?
-from extra.helpers import enable_early_exec
+from tinygrad.extra.helpers import enable_early_exec
 early_exec = enable_early_exec()
 
 boilerplate_start = """

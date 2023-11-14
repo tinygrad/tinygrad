@@ -7,8 +7,8 @@ import requests  # type: ignore
 import numpy as np
 
 from tinygrad.tensor import Tensor
-from examples.yolov3 import Darknet, infer, show_labels
-from extra.utils import fetch
+from tinygrad.examples.yolov3 import Darknet, infer, show_labels
+from tinygrad.extra.utils import fetch
 
 chicken_img = cv2.imread(str(Path(__file__).parent / 'efficientnet/Chicken.jpg'))
 car_img = cv2.imread(str(Path(__file__).parent / 'efficientnet/car.jpg'))

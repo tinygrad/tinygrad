@@ -5,8 +5,8 @@ import io
 import unittest
 import numpy as np
 import onnx
-from extra.utils import fetch, temp
-from extra.onnx import get_run_onnx
+from tinygrad.extra.utils import fetch, temp
+from tinygrad.extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI
 import pytest
@@ -124,7 +124,7 @@ class TestOnnxModel(unittest.TestCase):
   def _test_model(self, dat, input_name, input_new, debug=False):
     onnx_model = onnx.load(io.BytesIO(dat))
     print("onnx loaded")
-    from test.models.test_efficientnet import chicken_img, car_img, preprocess, _LABELS
+    from tinygrad.test.models.test_efficientnet import chicken_img, car_img, preprocess, _LABELS
     run_onnx = get_run_onnx(onnx_model)
 
     def run(img):

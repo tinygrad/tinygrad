@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from extra.utils import WINDOWS
+from tinygrad.extra.utils import WINDOWS
 from tinygrad.helpers import CI
 from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor, Device

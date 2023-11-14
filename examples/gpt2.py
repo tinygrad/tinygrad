@@ -10,7 +10,7 @@ from tinygrad.shape.symbolic import Variable
 from tinygrad.jit import TinyJit
 import tiktoken
 from tinygrad.nn.state import torch_load, load_state_dict
-from extra.utils import fetch_as_file
+from tinygrad.extra.utils import fetch_as_file
 from tinygrad.helpers import GlobalCounters, Timing, DEBUG, getenv
 
 MAX_CONTEXT = 128
