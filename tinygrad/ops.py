@@ -1,5 +1,5 @@
 from __future__ import annotations
-import importlib, inspect, functools, pathlib
+import importlib, inspect, functools, pathlib, re
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT
@@ -112,16 +112,21 @@ class Interpreted:
   def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_underlying=None):
     self.buffer, self.fxn_for_op, self.from_underlying = buffer, fxn_for_op, from_underlying
     self.synchronize = lambda: None
+    self.batch_executor = None
     self.codegen = None
     self.method_cache: Dict[LazyOp, Callable] = {}
 
   def interpret_ast(self:Interpreted, ast:LazyOp) -> Callable:
-    tglob: Dict[str, Any] = {}
+    tglob: Dict[str, Any] = {"Variable": Variable}
     lines: List[str] = []
     f = self.fxn_for_op
 
     @functools.lru_cache(None)
     def gstr(x:Any, nm=None) -> str:
+      if self != InterpretedFlopCounter and ('Variable' in (str_arg := repr(x)) or 'NumNode' in str_arg):
+        str_arg = re.sub(r'Variable\(.*?\)', lambda m: f'var_vals[{str(m.group(0))}]', str_arg)
+        # TODO: (Variable - Variable) might create NumNode. can we remove it?
+        return re.sub(r'NumNode\((.*?)\)', r'\1', str_arg)
       ret = str(nm).replace(".", "_") if nm else f"m{len(tglob):04d}"
       tglob[ret] = x
       return ret
@@ -143,14 +148,14 @@ class Interpreted:
       return ret
 
     ret = _interpret_ast(ast)
-    src = '\n'.join(['def run(inputs):'] + lines + [f"  return {gstr(self.from_underlying, 'from_underlying')}({ret})" if self.from_underlying else f"  return {ret}"])
+    src = '\n'.join(['def run(inputs, var_vals):'] + lines + [f"  return {gstr(self.from_underlying, 'from_underlying')}({ret})" if self.from_underlying else f"  return {ret}"])
     if DEBUG >= 4 and self != InterpretedFlopCounter: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
     exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
     return tglob['run']
 
   def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, **kwargs):
     if ast not in self.method_cache: self.method_cache[ast] = self.interpret_ast(ast)
-    ret = self.method_cache[ast]([x.realized for x in inputs] if inputs else None)
+    ret = self.method_cache[ast]([x.realized for x in inputs] if inputs else None, var_vals)
     if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op:
       ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.fxn_for_op[BufferOps.MEM](ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
     # TODO: is this used?
@@ -228,8 +233,8 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, compiler, runtime, synchronize=lambda: None):
-    self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize = buffer, linearizer_opts, renderer, compiler, runtime, synchronize
+  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, compiler, runtime, synchronize=lambda: None, batch_executor=None):
+    self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize, self.batch_executor = buffer, linearizer_opts, renderer, compiler, runtime, synchronize, batch_executor
     self.method_cache: Dict[LazyOp, ASTRunner] = {}
 
   def to_program(self, k):

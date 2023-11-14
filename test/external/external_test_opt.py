@@ -33,10 +33,10 @@ class CLCache:
     if self.allowed is not None:
       assert len(cache) <= self.allowed and (not self.strict or len(cache) == self.allowed), f"used too many kernels! {len(cache)} > {self.allowed}"
 
-from models.convnext import ConvNeXt
-from models.efficientnet import EfficientNet
-from models.resnet import ResNet18
-from models.vit import ViT
+from extra.models.convnext import ConvNeXt
+from extra.models.efficientnet import EfficientNet
+from extra.models.resnet import ResNet18
+from extra.models.vit import ViT
 from tinygrad.nn.state import get_parameters
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
