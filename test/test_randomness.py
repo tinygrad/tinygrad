@@ -96,6 +96,12 @@ class TestRandomness(unittest.TestCase):
     for shape in [(128, 64, 3, 3), (20, 24)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_normal, lambda x: torch.nn.init.kaiming_normal_(torch.empty(x)), shape=shape))
 
+  def test_multinomial(self):
+    p = [0.231, 0, 1, 0.5]
+    n_samples = 1000
+    assert equal_distribution(lambda *_: Tensor.multinomial(Tensor(p), n_samples, replacement=True), lambda _: torch.multinomial(torch.tensor(p), n_samples, replacement=True))
+    self.assertRaises(AssertionError, lambda: Tensor.multinomial(Tensor(p), n_samples, replacement=False))  # without replacement is not supported
+
   def test_conv2d_init(self):
     params = (128, 256, (3,3))
     assert equal_distribution(lambda *_: nn.Conv2d(*params).weight, lambda _: torch.nn.Conv2d(*params).weight.detach())
