@@ -13,7 +13,7 @@ class TestBeamSearch(unittest.TestCase):
   def tearDown(self):
     BEAM.value = self.old_beam
 
-  def test_variable_ast_no_beam(self):
+  def test_variable_ast_beam(self):
     a = Tensor.rand(3, 3).reshape((Variable("a", 1, 10).bind(3), 3))
     a = (a+1).realize()
 
