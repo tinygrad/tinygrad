@@ -77,6 +77,7 @@ class CUDAProgram:
     self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], shared:int=0, wait=False):
+    if DEBUG >= 4: print(f"launching CUDA kernel with global_size={global_size}, local_size={local_size}, shared={shared}")
     if wait:
       start, end = cuda.Event(), cuda.Event()
       start.record()
@@ -85,6 +86,7 @@ class CUDAProgram:
       end.record()
       end.synchronize()
       return start.time_till(end)*1e-3
+    if DEBUG >= 4: print("CUDA kernel execution completed")
 
 if getenv("TRITON") == 1:
   from tinygrad.renderer.triton import uops_to_triton
