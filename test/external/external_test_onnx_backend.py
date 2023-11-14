@@ -150,6 +150,8 @@ backend_test.exclude('test_regex_*') # does not support string Tensors
 backend_test.exclude('test_optional_has_element_empty_optional_input_cpu') # Attempts to create Tensor from None
 # spec for this? allowzero?
 backend_test.exclude('test_reshape_allowzero_reordered_cpu') # reshaping to shape with 0
+backend_test.exclude('test_reduce_min_empty_set_cpu') # max a tensor with 0 in shape
+backend_test.exclude('test_reduce_sum_empty_set_non_reduced_axis_zero_cpu') # reducing a tensor with 0 in shape
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip

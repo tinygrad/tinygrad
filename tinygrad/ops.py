@@ -329,7 +329,7 @@ class Compiled:
     # if it's aliased, don't use it
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
     output.realized = output.output_buffer
-    if output.realized:
+    if output.realized is not None:
       for i,a in enumerate(inputs):
         # TODO: if this is contiguous it's fine
         if a.realized == output.realized:
@@ -338,7 +338,7 @@ class Compiled:
             break
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-    if not output.realized:
+    if output.realized is None:
       output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
       if output.realized.size == 0: return output.realized
 
