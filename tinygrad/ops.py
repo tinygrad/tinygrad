@@ -1,10 +1,10 @@
 from __future__ import annotations
 import importlib, inspect, functools, pathlib, re
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT
 from tinygrad.runtime.lib import RawBuffer
-from tinygrad.shape.symbolic import Variable, sym_infer
+from tinygrad.shape.symbolic import Variable, sym_infer, NumNode
 from dataclasses import dataclass
 
 # these are the llops your accelerator must implement, along with toCpu
@@ -106,13 +106,55 @@ class _Device:
     return "CPU"
 Device = _Device()
 
+# **************** batch executor ****************
+
+@dataclass(frozen=True)
+class JitItem:
+  prg: ASTRunner
+  rawbufs: List[Optional[RawBuffer]]
+
+class BatchExecutor:
+  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int]):
+    self.jit_cache: List[JitItem] = jit_cache
+    self.input_replace: Dict[Tuple[int, int], Union[int, str]] = {}
+    self.op_estimate, self.mem_estimate = NumNode(0), NumNode(0)
+    for j,ji in enumerate(jit_cache):
+      if isinstance(ji.prg, ASTRunner):  # TODO: this is just for world and needs to be refactored
+        self.op_estimate += ji.prg.op_estimate
+        self.mem_estimate += ji.prg.mem_estimate
+      for i,a in enumerate(ji.rawbufs):
+        if a in [v for v in input_rawbuffers.values()]:
+          self.input_replace[(j,i)] = [k for k,v in input_rawbuffers.items() if v == a][0]
+    assert set(self.input_replace.values()) == set(input_rawbuffers.keys()), "some input tensors not found"
+    self.clear_jit_inputs()
+
+  def __call__(self, input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int], wait=False):
+    for (j,i),input_name in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name]
+    for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), {v:var_vals[v] for v in getattr(ji.prg,"vars",[])}, jit=True)
+    self.clear_jit_inputs()
+
+  def update_stats(self, var_vals: Dict[Variable, int], et: Optional[float]):
+    # TODO: this is mostly copied from ASTRunner
+    op_estimate = sym_infer(self.op_estimate, var_vals)
+    mem_estimate = sym_infer(self.mem_estimate, var_vals)
+    if DEBUG >= 2:
+      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'CYAN')}    kernels:{len(self.jit_cache):4d}  inputs:{len(self.input_replace):3d}   {' '.join([f'{k.expr}={v}' for k,v in var_vals.items()])[:50]:50s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+            (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
+    GlobalCounters.kernel_count += len(self.jit_cache)
+    GlobalCounters.global_ops += sym_infer(self.op_estimate, var_vals)
+    GlobalCounters.global_mem += sym_infer(self.mem_estimate, var_vals)
+    if et is not None: GlobalCounters.time_sum_s += et
+
+  def clear_jit_inputs(self):
+    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
+
 # **************** for Interpreted Buffers ****************
 
 class Interpreted:
   def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_underlying=None):
     self.buffer, self.fxn_for_op, self.from_underlying = buffer, fxn_for_op, from_underlying
     self.synchronize = lambda: None
-    self.batch_executor = None
+    self.batch_executor = BatchExecutor
     self.codegen = None
     self.method_cache: Dict[LazyOp, Callable] = {}
 
@@ -233,8 +275,9 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, compiler, runtime, synchronize=lambda: None, batch_executor=None):
-    self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize, self.batch_executor = buffer, linearizer_opts, renderer, compiler, runtime, synchronize, batch_executor
+  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, compiler, runtime, synchronize=lambda: None, batch_executor=BatchExecutor):
+    self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize = buffer, linearizer_opts, renderer, compiler, runtime, synchronize
+    self.batch_executor = BatchExecutor if getenv("JIT") == 2 else batch_executor
     self.method_cache: Dict[LazyOp, ASTRunner] = {}
 
   def to_program(self, k):

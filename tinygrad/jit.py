@@ -1,55 +1,14 @@
 from __future__ import annotations
 from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional
 import functools, itertools
-from tinygrad.helpers import DEBUG, DType, merge_dicts, GlobalCounters, getenv, colored
-from tinygrad.ops import RawBuffer, Device, ASTRunner
+from tinygrad.helpers import DEBUG, DType, merge_dicts
+from tinygrad.ops import RawBuffer, Device, ASTRunner, BatchExecutor, JitItem
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, NumNode, sym_infer
-from dataclasses import dataclass
+from tinygrad.shape.symbolic import Variable
 from weakref import ref, WeakKeyDictionary
 
 JIT_SUPPORTED_DEVICE = ["GPU", "CLANG", "METAL", "CUDA", "HIP", "WEBGPU", "LLVM"]
-
-@dataclass(frozen=True)
-class JitItem:
-  prg: ASTRunner
-  rawbufs: List[Optional[RawBuffer]]
-
-class BatchExecutor:
-  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int]):
-    self.jit_cache: List[JitItem] = jit_cache
-    self.input_replace: Dict[Tuple[int, int], Union[int, str]] = {}
-    self.op_estimate, self.mem_estimate = NumNode(0), NumNode(0)
-    for j,ji in enumerate(jit_cache):
-      if isinstance(ji.prg, ASTRunner):  # TODO: this is just for world and needs to be refactored
-        self.op_estimate += ji.prg.op_estimate
-        self.mem_estimate += ji.prg.mem_estimate
-      for i,a in enumerate(ji.rawbufs):
-        if a in [v for v in input_rawbuffers.values()]:
-          self.input_replace[(j,i)] = [k for k,v in input_rawbuffers.items() if v == a][0]
-    assert set(self.input_replace.values()) == set(input_rawbuffers.keys()), "some input tensors not found"
-    self.clear_jit_inputs()
-
-  def __call__(self, input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int], wait=False):
-    for (j,i),input_name in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name]
-    for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), {v:var_vals[v] for v in getattr(ji.prg,"vars",[])}, jit=True)
-    self.clear_jit_inputs()
-
-  def update_stats(self, var_vals: Dict[Variable, int], et: Optional[float]):
-    # TODO: this is mostly copied from ASTRunner
-    op_estimate = sym_infer(self.op_estimate, var_vals)
-    mem_estimate = sym_infer(self.mem_estimate, var_vals)
-    if DEBUG >= 2:
-      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'CYAN')}    kernels:{len(self.jit_cache):4d}  inputs:{len(self.input_replace):3d}   {' '.join([f'{k.expr}={v}' for k,v in var_vals.items()])[:50]:50s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
-            (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
-    GlobalCounters.kernel_count += len(self.jit_cache)
-    GlobalCounters.global_ops += sym_infer(self.op_estimate, var_vals)
-    GlobalCounters.global_mem += sym_infer(self.mem_estimate, var_vals)
-    if et is not None: GlobalCounters.time_sum_s += et
-
-  def clear_jit_inputs(self):
-    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
 
 class TinyJit:
   def __init__(self, fxn:Callable):
@@ -98,8 +57,7 @@ class TinyJit:
       assert len(jit_cache) != 0, "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
-      alt_batch_exec = Device[Device.DEFAULT].batch_executor
-      self.jit_fxn = (BatchExecutor if alt_batch_exec is None or getenv("JIT") == 2 else alt_batch_exec)(jit_cache, input_rawbuffers, var_vals)
+      self.jit_fxn = Device[Device.DEFAULT].batch_executor(jit_cache, input_rawbuffers, var_vals)
     elif self.cnt == 0:
       self.ret = self.fxn(*args, **kwargs)
 

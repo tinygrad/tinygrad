@@ -4,9 +4,10 @@ import Metal, Cocoa, libdispatch
 from typing import List, Any, Tuple, Dict, Union, Set
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup, CI
-from tinygrad.ops import Compiled
+from tinygrad.ops import Compiled, BatchExecutor, JitItem
 from tinygrad.renderer.metal import MetalRenderer
 from tinygrad.runtime.lib import RawBufferMapped, RawBuffer, LRUAllocator
+from tinygrad.shape.symbolic import Variable, Node
 
 class MetalAllocator(LRUAllocator):
   def _do_alloc(self, size, dtype, device, **kwargs): return METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
@@ -80,8 +81,6 @@ class MetalProgram:
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
     METAL.mtl_buffers_in_flight.append(command_buffer)
 
-from tinygrad.jit import BatchExecutor, JitItem
-from tinygrad.shape.symbolic import Variable, Node
 class MetalBatchExecutor(BatchExecutor):
   def __init__(self, jit_cache: List[JitItem], input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
