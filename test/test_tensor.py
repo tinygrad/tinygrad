@@ -268,7 +268,6 @@ class TestZeroShapeTensor(unittest.TestCase):
     assert t.shape == (3, 2, 0)
     np.testing.assert_equal(t.numpy(), np.zeros((3, 2, 0)))
 
-  @unittest.skip("not working yet")
   def test_full(self):
     t = Tensor.zeros(3, 2, 0)
     assert t.shape == (3, 2, 0)
