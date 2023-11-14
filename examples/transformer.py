@@ -5,7 +5,7 @@ import random
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn.optim import Adam
 from extra.training import train, evaluate
-from models.transformer import Transformer
+from extra.models.transformer import Transformer
 
 # dataset idea from https://github.com/karpathy/minGPT/blob/master/projects/adder/adder.py
 def make_dataset():
