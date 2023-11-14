@@ -123,7 +123,7 @@ class Interpreted:
     @functools.lru_cache(None)
     def gstr(x:Any, nm=None) -> str:
       if self != InterpretedFlopCounter and ('Variable' in (str_arg := repr(x)) or 'NumNode' in str_arg):
-        str_arg = re.sub(r'Variable\(.*?\)', lambda m: f'var_vals[{m.group(0)!r}]', str_arg)
+        str_arg = re.sub(r'Variable\(.*?\)', lambda m: f'var_vals[{str(m.group(0))}]', str_arg)
         # TODO: (Variable - Variable) might create NumNode. can we remove it?
         return re.sub(r'NumNode\((.*?)\)', r'\1', str_arg)
       ret = str(nm).replace(".", "_") if nm else f"m{len(tglob):04d}"
