@@ -1,11 +1,11 @@
 from __future__ import annotations
 from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional
 import functools, itertools
-from tinygrad.helpers import DEBUG, DType, merge_dicts
+from tinygrad.helpers import DEBUG, DType, merge_dicts, GlobalCounters, getenv, colored
 from tinygrad.ops import RawBuffer, Device, ASTRunner
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable
+from tinygrad.shape.symbolic import Variable, NumNode, sym_infer
 from dataclasses import dataclass
 from weakref import ref, WeakKeyDictionary
 
@@ -16,13 +16,54 @@ class JitItem:
   prg: ASTRunner
   rawbufs: List[Optional[RawBuffer]]
 
+class BatchExecutor:
+  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int]):
+    self.jit_cache: List[JitItem] = jit_cache
+    self.input_replace: Dict[Tuple[int, int], Union[int, str]] = {}
+    self.op_estimate, self.mem_estimate = NumNode(0), NumNode(0)
+    for j,ji in enumerate(jit_cache):
+      if isinstance(ji.prg, ASTRunner):  # TODO: this is just for world and needs to be refactored
+        self.op_estimate += ji.prg.op_estimate
+        self.mem_estimate += ji.prg.mem_estimate
+      for i,a in enumerate(ji.rawbufs):
+        if a in [v for v in input_rawbuffers.values()]:
+          self.input_replace[(j,i)] = [k for k,v in input_rawbuffers.items() if v == a][0]
+    assert set(self.input_replace.values()) == set(input_rawbuffers.keys()), "some input tensors not found"
+    self.clear_jit_inputs()
+
+  def __call__(self, input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int], wait=False):
+    for (j,i),input_name in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name]
+    for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), {v:var_vals[v] for v in getattr(ji.prg,"vars",[])}, jit=True)
+    self.clear_jit_inputs()
+
+  def update_stats(self, var_vals: Dict[Variable, int], et: Optional[float]):
+    # TODO: this is mostly copied from ASTRunner
+    op_estimate = sym_infer(self.op_estimate, var_vals)
+    mem_estimate = sym_infer(self.mem_estimate, var_vals)
+    if DEBUG >= 2:
+      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'CYAN')}    kernels:{len(self.jit_cache):4d}  inputs:{len(self.input_replace):3d}   {' '.join([f'{k.expr}={v}' for k,v in var_vals.items()])[:50]:50s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+            (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
+    GlobalCounters.kernel_count += len(self.jit_cache)
+    GlobalCounters.global_ops += sym_infer(self.op_estimate, var_vals)
+    GlobalCounters.global_mem += sym_infer(self.mem_estimate, var_vals)
+    if et is not None: GlobalCounters.time_sum_s += et
+
+  def clear_jit_inputs(self):
+    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
+
 class TinyJit:
   def __init__(self, fxn:Callable):
     self.fxn: Callable = fxn
+    self.jit_fxn: Optional[BatchExecutor] = None
     self.cnt: int = 0
-    self.jit_cache: List[JitItem] = []
     self.ret: Any = None
-    self.input_replace: Dict[Tuple[int, int], Tuple[Union[int, str], ShapeTracker, DType]] = {}   # (kernel_number, buffer_number) -> (input_name, expected_shapetracker, expected_type)
+    self.expected_vals: Optional[Tuple[Variable, ...]] = None
+    self.expected_sts_dtype: Optional[Tuple[Tuple[ShapeTracker, DType], ...]] = None
+
+  @property
+  def jit_cache(self) -> List[JitItem]: return self.jit_fxn.jit_cache if self.jit_fxn else []
+  @property
+  def input_replace(self) -> Dict[Tuple[int, int], Union[int, str]]: return self.jit_fxn.input_replace if self.jit_fxn else {}
 
   # add support for instance methods
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
@@ -32,39 +73,36 @@ class TinyJit:
 
     # all inputs are realized
     input_tensors: Dict[Union[int, str], Tensor] = {cast(Union[int, str], k):v.realize() for k,v in itertools.chain(enumerate(args), kwargs.items()) if v.__class__ is Tensor}
+    expected_sts_dtype = tuple([(v.lazydata.st.unbind(), v.dtype) for v in input_tensors.values()])
 
     # get rawbuffers
-    input_rawbuffers: Dict[Union[int, str], Tuple[RawBuffer, ShapeTracker]] = {k:(cast(RawBuffer, v.lazydata.realized), v.lazydata.st) for k,v in input_tensors.items()}
+    input_rawbuffers: Dict[Union[int, str], RawBuffer] = {k:cast(RawBuffer, v.lazydata.realized) for k,v in input_tensors.items()}
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
     assert len(set(input_rawbuffers.values())) == len(input_rawbuffers), "duplicate inputs to JIT"
 
     # get variables: they can either be in Tensors or passed in as arguments, and all must be bound. these are all global
     var_vals: Dict[Variable, int] = merge_dicts([arg.lazydata.st.var_vals for arg in input_tensors.values()] + [dict(x.unbind() for x in itertools.chain(args, kwargs.values()) if isinstance(x, Variable))])
+    expected_vals = tuple(var_vals.keys())
 
     if self.cnt >= 2:
-      # check validity and assign the inputs
-      for (j,i),(input_name, expected_st, expected_type) in self.input_replace.items():
-        assert input_rawbuffers[input_name][0].dtype == expected_type, f"type mismatch in JIT, {input_rawbuffers[input_name][0].dtype} != {expected_type}"
-        assert input_rawbuffers[input_name][1].unbind() == expected_st, f"ShapeTracker mismatch in JIT, {input_rawbuffers[input_name][1].unbind()} != {expected_st}"
-        self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name][0]
-      for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), {v:var_vals[v] for v in getattr(ji.prg,"vars",[])}, jit=True)
+      assert self.expected_vals == expected_vals, "mismatch of var_vals"
+      assert self.expected_sts_dtype == expected_sts_dtype, "mismatch of sts"
+      assert self.jit_fxn, "didn't get jitted?"
+      self.jit_fxn(input_rawbuffers, var_vals, DEBUG>=2)
     elif self.cnt == 1:
+      self.expected_vals, self.expected_sts_dtype = expected_vals, expected_sts_dtype
+
       CacheCollector.start(var_vals)
       self.ret = self.fxn(*args, **kwargs)
-      self.jit_cache = CacheCollector.finish()
-      assert len(self.jit_cache) != 0, "didn't JIT anything!"
-      if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
-      # get the inputs for replacement
-      for j,ji in enumerate(self.jit_cache):
-        for i,a in enumerate(ji.rawbufs):
-          if a in [v[0] for v in input_rawbuffers.values()]:
-            self.input_replace[(j,i)] = [(k, v[1].unbind(), v[0].dtype) for k,v in input_rawbuffers.items() if v[0] == a][0]
-      assert set([x[0] for x in self.input_replace.values()]) == set(input_rawbuffers.keys()), "some input tensors not found"
+      jit_cache = CacheCollector.finish()
+      assert len(jit_cache) != 0, "didn't JIT anything!"
+      if DEBUG >= 1: print(f"JIT captured {len(jit_cache)} kernels with {len(input_rawbuffers)} inputs")
+
+      alt_batch_exec = Device[Device.DEFAULT].batch_executor
+      self.jit_fxn = (BatchExecutor if alt_batch_exec is None or getenv("JIT") == 2 else alt_batch_exec)(jit_cache, input_rawbuffers, var_vals)
     elif self.cnt == 0:
       self.ret = self.fxn(*args, **kwargs)
 
-    # clear the inputs
-    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
     self.cnt += 1
     return self.ret
 

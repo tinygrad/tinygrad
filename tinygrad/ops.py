@@ -112,6 +112,7 @@ class Interpreted:
   def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_underlying=None):
     self.buffer, self.fxn_for_op, self.from_underlying = buffer, fxn_for_op, from_underlying
     self.synchronize = lambda: None
+    self.batch_executor = None
     self.codegen = None
     self.method_cache: Dict[LazyOp, Callable] = {}
 
@@ -232,8 +233,8 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, compiler, runtime, synchronize=lambda: None):
-    self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize = buffer, linearizer_opts, renderer, compiler, runtime, synchronize
+  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, compiler, runtime, synchronize=lambda: None, batch_executor=None):
+    self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize, self.batch_executor = buffer, linearizer_opts, renderer, compiler, runtime, synchronize, batch_executor
     self.method_cache: Dict[LazyOp, ASTRunner] = {}
 
   def to_program(self, k):
