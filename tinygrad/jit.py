@@ -92,7 +92,7 @@ class _CacheCollector:
     if self.cache is None: return
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
     self.placeholders[rawbufs[0]] = PlaceHolder(rawbufs[0])
-    self.cache.append((prg, [self.placeholders.get(x, x) for x in rawbufs]))
+    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, RawBuffer) else x for x in rawbufs]))
 
   def finish(self) -> List[JitItem]:
     if self.cache is None: return []
