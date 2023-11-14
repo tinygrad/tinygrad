@@ -1,21 +1,14 @@
-import socket
-import numpy as np
-import sys
-from llama import LLaMa
-from pathlib import Path
-from tinygrad.ops import Device
-from tinygrad.tensor import Tensor
 import argparse
-from tinygrad.helpers import Timing, getenv, DEBUG, dtypes, CI
+import socket
+import sys
+from pathlib import Path
+
+import numpy as np
+from llama import LLaMa
+
+from tinygrad.helpers import DEBUG, GlobalCounters, Timing
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
-from tinygrad.nn import Embedding, Linear
-from tinygrad.nn.state import safe_load, torch_load, load_state_dict
-from tinygrad.helpers import GlobalCounters
-from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
-from tinygrad.shape.symbolic import Variable
-import threading
-
 
 if __name__ == "__main__":
   Tensor.no_grad = True
@@ -77,7 +70,7 @@ After you are done speaking, output [EOS]. You are not the User.
   sys.stdout.flush()
 
   # Server code because my laptop is shit
-  host, port = "0.0.0.0", 5000
+  host, port = "0.0.0.0", 5001
   server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
   server.bind((host, port))
   server.listen(5)
@@ -88,6 +81,7 @@ After you are done speaking, output [EOS]. You are not the User.
     print(f"Accepted connection from {addr[0]}:{addr[1]}")
     while True:
       user_data = client.recv(1024).decode()
+      if user_data.strip() == "": break
       user_prompt = user_delim + user_data + "\n"
       outputted += user_prompt
 
@@ -123,5 +117,6 @@ After you are done speaking, output [EOS]. You are not the User.
 
         if outputted.endswith(end_delim):
           client.sendall(outputted.splitlines()[-1].encode())
+          break
     
 
