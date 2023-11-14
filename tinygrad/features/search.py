@@ -2,7 +2,7 @@ from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, random, math
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
-from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context
+from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, all_int
 from tinygrad.codegen.linearizer import Linearizer, UOp
 from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
@@ -24,12 +24,14 @@ actions += [
 def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, disable_cache=False, clear_l2=False) -> float:
   key = {"ast": str(lin.ast), "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size}
   if not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
-  var_vals = {k:k.min for k in vars_from_ast(lin.ast)}
+
+  # Set the midpoint value value for var_vals to optimize shapes.
+  var_vals = {k:(k.max+k.min)//2 for k in vars_from_ast(lin.ast)}
   try:
     lin.linearize()
     prg = cast(Compiled, Device[Device.DEFAULT]).to_program(lin)
     real_global_size = prg.global_size
-    if allow_test_size and prg.global_size:
+    if allow_test_size and prg.global_size and all_int(tuple(prg.global_size)):
       test_global_size = prg.global_size[:]
       while prod(test_global_size) > max_global_size:
         for j in range(2,-1,-1):
@@ -41,12 +43,13 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
       #print(real_global_size, test_global_size, factor)
     else:
       factor = 1
-    # TODO: this is super broken for var_vals
+
     # TODO: this is copied from prg.__call__
     global_size, local_size = prg.launch_dims(var_vals)
-    if global_size is not None and local_size is None:
+    if global_size is not None and local_size is None and all_int(tuple(prg.global_size)): # type: ignore[arg-type]
       local_size = optimize_local_size(prg.clprg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
+
     tms = []
     for _ in range(cnt):
       if clear_l2:
