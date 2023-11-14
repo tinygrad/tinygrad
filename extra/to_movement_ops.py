@@ -51,13 +51,11 @@ def st_equivalent(st: ShapeTracker, st_rebuilt: ShapeTracker):
     if view == rebuilt_view:
       i += 1
       continue
-    # remove shrink-then-pad
-    elif len(rebuilt_view.shape) == 1 and i < len(rebuilt_views)-1:
-      rebuilt_views.pop(i)
     # hack to skip expands for overlapped strides
-    elif view.shape != rebuilt_view.shape:
+    elif view.shape == rebuilt_view.shape:
+      i += 1
+    else:
       rebuilt_views.pop(i)
-    i += 1
   return True
 
 def test_rebuild(st: ShapeTracker):
