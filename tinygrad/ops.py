@@ -2,11 +2,10 @@ from __future__ import annotations
 import importlib, inspect, functools, pathlib, re
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT, dedup
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer
 from dataclasses import dataclass
-from tinygrad.helpers import dedup
 
 # these are the llops your accelerator must implement, along with toCpu
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
@@ -53,10 +52,8 @@ class LazyOp:
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
   arg: Any = None
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
-
   @functools.cached_property
   def buffers(self)-> Tuple[LazyBuffer,...]: return tuple(dedup(sum([x.buffers for x in self.src],())))
-
   @functools.cached_property
   def hash(self): return hash((self.op,self.src, self.arg))
   def __hash__(self):return self.hash
