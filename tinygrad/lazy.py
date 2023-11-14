@@ -183,7 +183,7 @@ class LazyBuffer:
     # NOTE: dtypes.from_np(self.dtype.np) to deal with image types
     return self.loadop(LoadOps.CONST, tuple(), dtypes.from_np(self.dtype.np), self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
 
-  def copy_device(self, device:str) -> LazyBuffer:
+  def copy_to_device(self, device:str) -> LazyBuffer:
     # back off a FROM if it's a double FROM
     if not self.realized and self.op.op == LoadOps.FROM and cast(LazyBuffer, self.op.src[0]).device == device: return cast(LazyBuffer, self.op.src[0])
     return LazyBuffer.loadop(LoadOps.FROM, self.shape, self.dtype, device, src=self.contiguous())
