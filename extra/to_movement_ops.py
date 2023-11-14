@@ -9,20 +9,20 @@ from tinygrad.shape.view import View
 from tinygrad.shape.symbolic import Node, Variable
 inf, nan = float('inf'), float('nan')
 
-def get_buffer_size(shape, strides, offset, mask):
+def get_real_view(shape, strides, offset, mask):
   real_shape = tuple(y-x for x,y in mask) if mask else shape
-  offset = offset + sum(strides[i] * (real_shape[i]-1) for i in range(len(strides)) if strides[i]<0)
+  offset = offset + sum(st * (s-1) for s,st in zip(real_shape, strides) if st<0)
   real_offset = offset + (sum(x*st for (x,_),st in zip(mask, strides)) if mask else 0)
   real_real_shape = [s for s,st in zip(real_shape, strides) if st]
-  strides = [abs(st) for st in strides if st and not isinstance(st, Node)]
+  strides = [abs(st) if isinstance(st,int) else st for st in strides if st]
+  return real_real_shape, strides, real_offset
+
+def get_buffer_size(shape, strides, offset, mask):
+  real_real_shape, strides, real_offset = get_real_view(shape, strides, offset, mask)
   return real_offset + sum((s-1)*st for s, st in zip(real_real_shape,strides)) + 1
 
 def flatten_view(view: View):
-  real_shape = tuple(y-x for x,y in view.mask) if view.mask else view.shape
-  offset = view.offset + sum(view.strides[i] * (real_shape[i]-1) for i in range(len(view.strides)) if view.strides[i]<0)
-  real_offset = offset + (sum(x*st for (x,_),st in zip(view.mask, view.strides)) if view.mask else 0)
-  real_real_shape = [s for s,st in zip(real_shape, view.strides) if st]
-  strides = [abs(st) for st in view.strides if st and not isinstance(st, Node)]
+  real_real_shape, strides, real_offset = get_real_view(view.shape, view.strides, view.offset, view.mask)
   def sort_by_strides(shape, strides): return sorted(zip(shape, strides), key=lambda k: (k[1],-k[0]), reverse=True), sorted(range(len(strides)), key=lambda k: (strides[k],-real_real_shape[k]), reverse=True)
   ordered_shape_strides, _ = sort_by_strides(real_real_shape, strides)
   ordered_shape_strides = [list(s) for s in ordered_shape_strides]
@@ -35,11 +35,10 @@ def flatten_view(view: View):
     flat_shape = [shape_stride[0] for shape_stride in ordered_shape_strides]
     flat_strides = [shape_stride[1] for shape_stride in ordered_shape_strides]
     return (flat_shape, flat_strides, real_offset)
-  return (real_shape, view.strides, real_offset)
+  return (real_real_shape, view.strides, real_offset)
 
 def views_equivalent(v1: View, v2: View) -> bool:
-  if v1 == v2: return True
-  return flatten_view(v1) == flatten_view(v2)
+  return v1 == v2 or flatten_view(v1) == flatten_view(v2)
 
 
 def st_equivalent(st: ShapeTracker, st_rebuilt: ShapeTracker):

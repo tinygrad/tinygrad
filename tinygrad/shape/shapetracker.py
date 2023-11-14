@@ -99,7 +99,7 @@ class ShapeTracker:
     to_apply:List[Tuple[MovementOps, Tuple]] = []
     for i, v in enumerate(self.views):
       real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
-      offset = v.offset + sum(v.strides[i] * (real_shape[i]-1) for i in range(len(v.strides)) if v.strides[i]<0)
+      offset = v.offset + sum(st*(s-1) for s,st in zip(real_shape, v.strides) if st<0)
       real_offset = offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
       real_real_shape = [s for s,st in zip(real_shape, v.strides) if st]
       strides = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
