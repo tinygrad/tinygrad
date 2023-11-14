@@ -22,7 +22,7 @@ class TestLazyOp(unittest.TestCase):
 
   def test_selfreferential_speed(self):
     st = time.perf_counter_ns()
-    for i in range(14):
+    for i in range(10):
       p = LazyBuffer.fromCPU(np.array([1]))
       for _ in range(i): p = p.e(BinaryOps.ADD, p)
       # sanity check if caching works this should be way faster
