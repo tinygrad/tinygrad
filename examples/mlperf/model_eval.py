@@ -4,12 +4,12 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.helpers import getenv, dtypes, GlobalCounters
-from tinygrad.examples.mlperf import helpers
+from examples.mlperf import helpers
 
 def eval_resnet():
   # Resnet50-v1.5
   from tinygrad.jit import TinyJit
-  from tinygrad.models.resnet import ResNet50
+  from tinygrad.extra.models.resnet import ResNet50
   mdl = ResNet50()
   mdl.load_from_pretrained()
 
@@ -53,9 +53,9 @@ def eval_resnet():
 
 def eval_unet3d():
   # UNet3D
-  from tinygrad.models.unet3d import UNet3D
+  from tinygrad.extra.models.unet3d import UNet3D
   from tinygrad.extra.datasets.kits19 import iterate, sliding_window_inference
-  from tinygrad.examples.mlperf.metrics import get_dice_score
+  from examples.mlperf.metrics import get_dice_score
   mdl = UNet3D()
   mdl.load_from_pretrained()
   s = 0
@@ -71,8 +71,8 @@ def eval_unet3d():
 
 def eval_retinanet():
   # RetinaNet with ResNeXt50_32X4D
-  from tinygrad.models.resnet import ResNeXt50_32X4D
-  from tinygrad.models.retinanet import RetinaNet
+  from tinygrad.extra.models.resnet import ResNeXt50_32X4D
+  from tinygrad.extra.models.retinanet import RetinaNet
   mdl = RetinaNet(ResNeXt50_32X4D())
   mdl.load_from_pretrained()
 
@@ -129,12 +129,12 @@ def eval_retinanet():
 
 def eval_rnnt():
   # RNN-T
-  from tinygrad.models.rnnt import RNNT
+  from tinygrad.extra.models.rnnt import RNNT
   mdl = RNNT()
   mdl.load_from_pretrained()
 
   from tinygrad.extra.datasets.librispeech import iterate
-  from tinygrad.examples.mlperf.metrics import word_error_rate
+  from examples.mlperf.metrics import word_error_rate
 
   LABELS = [" ", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "'"]
 
@@ -158,7 +158,7 @@ def eval_rnnt():
 
 def eval_bert():
   # Bert-QA
-  from tinygrad.models.bert import BertForQuestionAnswering
+  from tinygrad.extra.models.bert import BertForQuestionAnswering
   mdl = BertForQuestionAnswering()
   mdl.load_from_pretrained()
 
@@ -167,8 +167,8 @@ def eval_bert():
     return mdl(input_ids, input_mask, segment_ids).realize()
 
   from tinygrad.extra.datasets.squad import iterate
-  from tinygrad.examples.mlperf.helpers import get_bert_qa_prediction
-  from tinygrad.examples.mlperf.metrics import f1_score
+  from examples.mlperf.helpers import get_bert_qa_prediction
+  from examples.mlperf.metrics import f1_score
   from transformers import BertTokenizer
 
   tokenizer = BertTokenizer(str(Path(__file__).parents[2] / "weights/bert_vocab.txt"))
@@ -194,10 +194,10 @@ def eval_bert():
 
 def eval_mrcnn():
   from tqdm import tqdm
-  from tinygrad.models.mask_rcnn import MaskRCNN
-  from tinygrad.models.resnet import ResNet
+  from tinygrad.extra.models.mask_rcnn import MaskRCNN
+  from tinygrad.extra.models.resnet import ResNet
   from tinygrad.extra.datasets.coco import BASEDIR, images, convert_prediction_to_coco_bbox, convert_prediction_to_coco_mask, accumulate_predictions_for_coco, evaluate_predictions_on_coco, iterate
-  from tinygrad.examples.mask_rcnn import compute_prediction_batched, Image
+  from examples.mask_rcnn import compute_prediction_batched, Image
   mdl = MaskRCNN(ResNet(50, num_classes=None, stride_in_1x1=True))
   mdl.load_from_pretrained()
 

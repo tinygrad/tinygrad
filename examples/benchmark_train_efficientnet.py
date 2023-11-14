@@ -2,7 +2,7 @@
 import gc
 import time
 from tqdm import trange
-from tinygrad.models.efficientnet import EfficientNet
+from tinygrad.extra.models.efficientnet import EfficientNet
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.tensor import Tensor

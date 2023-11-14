@@ -1,5 +1,5 @@
 from pathlib import Path
-from tinygrad.models.efficientnet import EfficientNet
+from tinygrad.extra.models.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_save
 from tinygrad.extra.utils import fetch

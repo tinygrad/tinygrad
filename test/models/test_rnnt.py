@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.models.rnnt import LSTM
+from tinygrad.extra.models.rnnt import LSTM
 import torch
 
 class TestRNNT(unittest.TestCase):

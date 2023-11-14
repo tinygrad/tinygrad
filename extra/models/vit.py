@@ -1,6 +1,6 @@
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.models.transformer import TransformerBlock
+from tinygrad.extra.models.transformer import TransformerBlock
 
 class ViT:
   def __init__(self, layers=12, embed_dim=192, num_heads=3):

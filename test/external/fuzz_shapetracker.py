@@ -1,6 +1,6 @@
 import random
 from tinygrad.helpers import DEBUG, getenv
-from tinygrad.test.unit.test_shapetracker import CheckingShapeTracker
+from test.unit.test_shapetracker import CheckingShapeTracker
 random.seed(42)
 
 def do_permute(st):

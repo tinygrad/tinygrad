@@ -7,9 +7,9 @@ from tinygrad.helpers import GlobalCounters
 from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, prod
 from tinygrad.ops import Device
-from tinygrad.test.helpers import derandomize_model
+from test.helpers import derandomize_model
 
-from tinygrad.examples.llama import Transformer
+from examples.llama import Transformer
 
 ALLOCATED_DEV_BUFS = 0
 class FakeDeviceBuffer:
@@ -115,7 +115,7 @@ class TestAllocators(unittest.TestCase):
 
   @unittest.skip("huge for CI")
   def test_stable_diffusion(self):
-    from tinygrad.examples.stable_diffusion import UNetModel
+    from examples.stable_diffusion import UNetModel
     model = UNetModel()
     derandomize_model(model)
     def test(t, t2): return model(t, 801, t2).realize()

@@ -102,7 +102,7 @@ def thneed_test_onnx(onnx_data, output_fn):
     new_torch_out = onnx_output[0]
   else:
     # test with torch
-    from tinygrad.test.models.test_onnx import run_onnx_torch
+    from test.models.test_onnx import run_onnx_torch
     new_torch_out = run_onnx_torch(onnx_model, new_np_inputs).numpy()
 
   if output_fn is None:

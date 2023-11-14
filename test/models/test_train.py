@@ -6,11 +6,11 @@ from tinygrad.nn import optim
 from tinygrad.tensor import Device
 from tinygrad.helpers import getenv
 from tinygrad.extra.training import train
-from tinygrad.models.convnext import ConvNeXt
-from tinygrad.models.efficientnet import EfficientNet
-from tinygrad.models.transformer import Transformer
-from tinygrad.models.vit import ViT
-from tinygrad.models.resnet import ResNet18
+from tinygrad.extra.models.convnext import ConvNeXt
+from tinygrad.extra.models.efficientnet import EfficientNet
+from tinygrad.extra.models.transformer import Transformer
+from tinygrad.extra.models.vit import ViT
+from tinygrad.extra.models.resnet import ResNet18
 import pytest
 
 pytestmark = [pytest.mark.exclude_gpu, pytest.mark.exclude_clang]

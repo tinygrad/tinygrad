@@ -1,8 +1,8 @@
 # NOTE: this only tests the speed of the LLaMA codegen, it doesn't actually run the net
 import unittest, time
 import numpy as np
-from tinygrad.examples.llama import Transformer, MODEL_PARAMS
-from tinygrad.test.test_net_speed import start_profile, stop_profile
+from examples.llama import Transformer, MODEL_PARAMS
+from test.test_net_speed import start_profile, stop_profile
 from tinygrad.tensor import Tensor
 from tinygrad.ops import Device
 from tinygrad.nn.state import get_state_dict

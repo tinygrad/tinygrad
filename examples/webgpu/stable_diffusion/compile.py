@@ -1,6 +1,6 @@
 import os
 from tinygrad.extra.export_model import compile_net, jit_model
-from tinygrad.examples.stable_diffusion import StableDiffusion
+from examples.stable_diffusion import StableDiffusion
 from tinygrad.nn.state import get_state_dict, safe_save, safe_load_metadata, torch_load, load_state_dict
 from tinygrad.tensor import Tensor
 from tinygrad.ops import Device

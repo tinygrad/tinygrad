@@ -2,7 +2,7 @@ from lm_eval.base import BaseLM
 from lm_eval import evaluator, tasks
 import torch, json, argparse
 
-from tinygrad.examples.llama import LLaMa
+from examples.llama import LLaMa
 from tinygrad.tensor import Tensor
 from tinygrad.ops import Device
 

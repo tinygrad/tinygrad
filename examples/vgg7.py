@@ -7,7 +7,7 @@ from PIL import Image
 from tinygrad.tensor import Tensor
 from tinygrad.nn.optim import SGD
 from tinygrad.nn.state import safe_save, safe_load, get_state_dict, load_state_dict
-from tinygrad.examples.vgg7_helpers.waifu2x import image_load, image_save, Vgg7
+from examples.vgg7_helpers.waifu2x import image_load, image_save, Vgg7
 
 # amount of context erased by model
 CONTEXT = 7

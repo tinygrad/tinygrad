@@ -12,29 +12,29 @@ def test_model(model, *inputs):
 
 def spec_resnet():
   # Resnet50-v1.5
-  from tinygrad.models.resnet import ResNet50
+  from tinygrad.extra.models.resnet import ResNet50
   mdl = ResNet50()
   img = Tensor.randn(1, 3, 224, 224)
   test_model(mdl, img)
 
 def spec_retinanet():
   # Retinanet with ResNet backbone
-  from tinygrad.models.resnet import ResNet50
-  from tinygrad.models.retinanet import RetinaNet
+  from tinygrad.extra.models.resnet import ResNet50
+  from tinygrad.extra.models.retinanet import RetinaNet
   mdl = RetinaNet(ResNet50(), num_classes=91, num_anchors=9)
   img = Tensor.randn(1, 3, 224, 224)
   test_model(mdl, img)
 
 def spec_unet3d():
   # 3D UNET
-  from tinygrad.models.unet3d import UNet3D
+  from tinygrad.extra.models.unet3d import UNet3D
   mdl = UNet3D()
   #mdl.load_from_pretrained()
   img = Tensor.randn(1, 1, 128, 128, 128)
   test_model(mdl, img)
 
 def spec_rnnt():
-  from tinygrad.models.rnnt import RNNT
+  from tinygrad.extra.models.rnnt import RNNT
   mdl = RNNT()
   #mdl.load_from_pretrained()
   x = Tensor.randn(220, 1, 240)
@@ -42,7 +42,7 @@ def spec_rnnt():
   test_model(mdl, x, y)
 
 def spec_bert():
-  from tinygrad.models.bert import BertForQuestionAnswering
+  from tinygrad.extra.models.bert import BertForQuestionAnswering
   mdl = BertForQuestionAnswering()
   #mdl.load_from_pretrained()
   x = Tensor.randn(1, 384)
@@ -51,7 +51,7 @@ def spec_bert():
   test_model(mdl, x, am, tt)
 
 def spec_mrcnn():
-  from tinygrad.models.mask_rcnn import MaskRCNN, ResNet
+  from tinygrad.extra.models.mask_rcnn import MaskRCNN, ResNet
   mdl = MaskRCNN(ResNet(50, num_classes=None, stride_in_1x1=True))
   #mdl.load_from_pretrained()
   x = Tensor.randn(3, 224, 224)

@@ -1,6 +1,6 @@
-from tinygrad.models.mask_rcnn import MaskRCNN
-from tinygrad.models.resnet import ResNet
-from tinygrad.models.mask_rcnn import BoxList
+from tinygrad.extra.models.mask_rcnn import MaskRCNN
+from tinygrad.extra.models.resnet import ResNet
+from tinygrad.extra.models.mask_rcnn import BoxList
 from torch.nn import functional as F
 from torchvision import transforms as T
 from torchvision.transforms import functional as Ft

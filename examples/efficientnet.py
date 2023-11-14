@@ -13,7 +13,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.extra.utils import fetch
 from tinygrad.jit import TinyJit
-from tinygrad.models.efficientnet import EfficientNet
+from tinygrad.extra.models.efficientnet import EfficientNet
 np.set_printoptions(suppress=True)
 
 # TODO: you should be able to put these in the jitted function

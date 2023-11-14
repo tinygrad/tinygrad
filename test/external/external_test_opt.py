@@ -33,10 +33,10 @@ class CLCache:
     if self.allowed is not None:
       assert len(cache) <= self.allowed and (not self.strict or len(cache) == self.allowed), f"used too many kernels! {len(cache)} > {self.allowed}"
 
-from tinygrad.models.convnext import ConvNeXt
-from tinygrad.models.efficientnet import EfficientNet
-from tinygrad.models.resnet import ResNet18
-from tinygrad.models.vit import ViT
+from tinygrad.extra.models.convnext import ConvNeXt
+from tinygrad.extra.models.efficientnet import EfficientNet
+from tinygrad.extra.models.resnet import ResNet18
+from tinygrad.extra.models.vit import ViT
 from tinygrad.nn.state import get_parameters
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
@@ -84,7 +84,7 @@ class TestInferenceMinKernels(unittest.TestCase):
       out.realize()
 
   def test_llama(self):
-    from tinygrad.examples.llama import Transformer
+    from examples.llama import Transformer
     from tinygrad.shape.symbolic import Variable
     args_tiny = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 4, "norm_eps": 1e-05, "vocab_size": 1000}
     model = Transformer(**args_tiny)

@@ -54,7 +54,7 @@ if __name__ == "__main__":
   model = get_model("tiny", True)
 
   # load image
-  from tinygrad.test.models.test_efficientnet import chicken_img, preprocess, _LABELS
+  from test.models.test_efficientnet import chicken_img, preprocess, _LABELS
   img = Tensor(preprocess(chicken_img))
 
   Tensor.training = False

@@ -4,7 +4,7 @@ import zipfile
 import numpy as np
 from tinygrad.extra.utils import download_file
 import pycocotools._mask as _mask
-from tinygrad.examples.mask_rcnn import Masker
+from examples.mask_rcnn import Masker
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 

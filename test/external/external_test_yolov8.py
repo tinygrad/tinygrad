@@ -1,6 +1,6 @@
 import numpy as np
 from tinygrad.extra.utils import fetch, download_file, get_child
-from tinygrad.examples.yolov8 import YOLOv8, get_variant_multiples, preprocess, postprocess, label_predictions
+from examples.yolov8 import YOLOv8, get_variant_multiples, preprocess, postprocess, label_predictions
 from pathlib import Path
 import unittest
 import io, cv2, os
