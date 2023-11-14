@@ -54,7 +54,7 @@ class LazyOp:
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
 
   @functools.cached_property
-  def buffers(self): return sum([x.buffers for x in self.src],())
+  def buffers(self): return tuple(x.buffers for x in self.src)
 
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
