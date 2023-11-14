@@ -17,8 +17,8 @@ def helper_test_lin(lin: Linearizer, opts, fixed_platforms):
     try:
       lin.apply_opt(opt)
     except AssertionError:
-      # invalid opt
-      return "PASS"
+      # it's considered fixed if we invalidated the opts
+      return Device.DEFAULT in fixed_platforms
   if Device.DEFAULT in fixed_platforms:
     return run_linearizer(lin) == "PASS"
   else:
