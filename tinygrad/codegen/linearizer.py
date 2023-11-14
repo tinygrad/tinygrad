@@ -122,11 +122,13 @@ class Linearizer(Kernel):
     assert buf_uop is not None, f"buffer {i} wasn't UOped"
 
     expanded_nodes = [idx.expand() for idx in idxs]
+
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
     upcast_dim = self.get_upcast_dim(i)
+
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
@@ -197,7 +199,20 @@ class Linearizer(Kernel):
     self.function_name, self.display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
 
     # define indexes
+
+    print(self.full_shape)
+    def push_to_first(s, global_dims):
+      print(f"s={s}")
+      if (global_dims > 1):
+        return [prod(s[:global_dims])] + list(s[global_dims:])
+      else:
+        return s
+      
+    self.reshape_and_permute(lambda x: push_to_first(x, self.global_dims), None)
     global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)
+    print(f"full_shape: {self.full_shape}")
+    print(f"global_dims: {self.global_dims}")
+    print(f"loop_global_idxs={loop_global_idxs} INIT")
     local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+len(self.group_for_reduce)], 3 if self.opts.has_local else 0)
     full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[self.shape_len-self.upcasted:]]
     upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
@@ -214,7 +229,13 @@ class Linearizer(Kernel):
     self.global_size: Optional[List[int]] = None
     self.local_size: Optional[List[int]] = None
     global_loop_ctx: Tuple[UOp, ...] = tuple()
-    if self.dont_use_locals:
+    if self.opts.no_global_loop:
+      self.uops.append(UnaryOps.NOOP)
+    elif self.dont_use_locals:
+      print(f"loop global index={loop_global_idxs}")
+      
+      #a = loop_global_idxs[0]
+
       self.global_size = [x.max+1 for x in loop_global_idxs][::-1]
       self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr.replace("gidx", "idx"), x.max+1)) for i,x in enumerate(loop_global_idxs)})
     elif self.opts.has_local:

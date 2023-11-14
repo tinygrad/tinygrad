@@ -28,7 +28,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     del si.out.op
     for v in si.out.views: del v.op
     assert si.out.realized and isinstance(si.out.realized, Device[si.out.device].buffer), f"device mismatch on realized got {type(si.out.realized)} expected {si.out.device}"
-    assert si.out.realized.dtype == si.out.dtype, "realized dtype is incorrect"
+    assert si.out.realized.dtype == si.out.dtype, f"realized dtype is incorrect, got={si.out.realized.dtype}"
 
 # *** zero op LoadOps ***
 
