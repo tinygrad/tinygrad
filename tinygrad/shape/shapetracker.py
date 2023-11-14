@@ -97,14 +97,13 @@ class ShapeTracker:
 
   def to_movement_ops(self) -> List[Tuple[MovementOps, Tuple]]:
     to_apply:List[Tuple[MovementOps, Tuple]] = []
-    for i, v in enumerate(self.views):
+    for v in self.views:
       real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
       offset = v.offset + sum(v.strides[i] * (real_shape[i]-1) for i in range(len(v.strides)) if v.strides[i]<0)
       real_offset = offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
       real_real_shape = [s for s,st in zip(real_shape, v.strides) if st]
       strides = [abs(st) for st in v.strides if st and not isinstance(st, Node)]
       buffer_size = sum((s-1)*st for s, st in zip(real_real_shape,strides)) + 1
-      if i > 0 and strides: buffer_size = max(buffer_size, prod(self.views[i-1].shape) - real_offset)
       def sort_by_strides(shape, strides): return sorted(zip(shape, strides), key=lambda k: (k[1],-k[0]), reverse=True), sorted(range(len(strides)), key=lambda k: (strides[k],-real_real_shape[k]), reverse=True)
       ordered_shape_strides, order = sort_by_strides(real_real_shape, strides)
       to_apply.extend([(MovementOps.RESHAPE, (-1,)), (MovementOps.SHRINK, ((real_offset, real_offset+buffer_size),))])

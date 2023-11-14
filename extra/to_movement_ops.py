@@ -51,9 +51,9 @@ def st_equivalent(st: ShapeTracker, st_rebuilt: ShapeTracker):
     if view == rebuilt_view:
       i += 1
       continue
-    # hack to skip expands for overlapped strides
     elif view.shape == rebuilt_view.shape:
       i += 1
+    # hack to skip expands for overlapped strides
     else:
       rebuilt_views.pop(i)
   return True
