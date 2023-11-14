@@ -104,7 +104,7 @@ class ShapeTracker:
       real_real_shape = [s for s,st in zip(real_shape, v.strides) if st]
       strides = [abs(st) for st in v.strides if st and not isinstance(st, Node)]
       buffer_size = sum((s-1)*st for s, st in zip(real_real_shape,strides)) + 1
-      if i > 0: buffer_size = prod(self.views[i-1].shape) - real_offset
+      if i > 0: buffer_size = max(buffer_size, prod(self.views[i-1].shape) - real_offset)
       def sort_by_strides(shape, strides): return sorted(zip(shape, strides), key=lambda k: (k[1],-k[0]), reverse=True), sorted(range(len(strides)), key=lambda k: (strides[k],-real_real_shape[k]), reverse=True)
       ordered_shape_strides, order = sort_by_strides(real_real_shape, strides)
       to_apply.extend([(MovementOps.RESHAPE, (-1,)), (MovementOps.SHRINK, ((real_offset, real_offset+buffer_size),))])
