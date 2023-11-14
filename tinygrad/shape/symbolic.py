@@ -355,7 +355,7 @@ VariableOrNum = Union[Variable, NumNode]
 
 render_python: Dict[Type, Callable] = {
   Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}{'='+str(self.val) if self._val is not None else ''}]" if ctx == "DEBUG" else (f"Variable('{self.expr}', {self.min}, {self.max})"+(f".bind({self.val})" if self._val is not None else '') if ctx == "REPR" else f"{self.expr}"),
-  NumNode: lambda self,ops,ctx: f"{self.b}",
+  NumNode: lambda self,ops,ctx: f"NumNode({self.b})" if ctx == "REPR" else f"{self.b}",
   MulNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}*{sym_render(self.b,ops,ctx)})",
   DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}//{self.b})",
   ModNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}%{self.b})",
