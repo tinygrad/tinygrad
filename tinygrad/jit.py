@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional
 import functools, itertools
 from tinygrad.helpers import DEBUG, DType, merge_dicts
@@ -6,7 +7,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
 from dataclasses import dataclass
-from weakref import ref
+from weakref import ref, WeakKeyDictionary
 
 JIT_SUPPORTED_DEVICE = ["GPU", "CLANG", "METAL", "CUDA", "HIP", "WEBGPU", "LLVM"]
 
@@ -89,33 +90,35 @@ class TinyJit:
     self.cnt += 1
     return self.ret
 
-class _PlaceHolder:
-  def __init__(self, buf): self.size, self.dtype, self._device, self.ref, self.buftype, self.bufid = buf.size, buf.dtype, getattr(buf, '_device', None), ref(buf), type(buf), id(buf._buf)
-  def alloc_rawbuf(self): return self.buftype(self.size, self.dtype, **({'device':self._device} if self._device is not None else dict()))
+class PlaceHolder:
+  def __init__(self, buf:RawBuffer): self.size, self.dtype, self._device, self.ref, self.buftype, self.bufid = buf.size, buf.dtype, getattr(buf, '_device', None), ref(buf), type(buf), id(buf._buf)
+  def to_tuple(self): return (self.size, self.dtype, self._device, self.buftype, self.bufid)
+  def __hash__(self): return hash(self.to_tuple())
+  def __eq__(self, x): return isinstance(x, PlaceHolder) and self.to_tuple() == x.to_tuple()
+  def alloc_if_needed(self, buffer_cache: Dict[PlaceHolder, RawBuffer]) -> RawBuffer:
+    ret = self.ref()
+    if ret: return ret
+    if self not in buffer_cache: buffer_cache[self] = self.buftype(self.size, self.dtype, **({'device':self._device} if self._device is not None else dict()))
+    return buffer_cache[self]
 
 class _CacheCollector:
   def __init__(self):
-    self.cache: Optional[List[Tuple[ASTRunner, List[_PlaceHolder]]]] = None
+    self.cache: Optional[List[Tuple[ASTRunner, List[Union[RawBuffer, PlaceHolder]]]]] = None
 
   def start(self, var_vals:Optional[Dict[Variable, int]]=None):
     self.cache = []
+    self.placeholders: WeakKeyDictionary[RawBuffer, PlaceHolder] = WeakKeyDictionary()
     self.var_vals = var_vals if var_vals is not None else {}
 
   def add(self, prg, rawbufs, var_vals):
     if self.cache is None: return
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
-    self.cache.append((prg, [_PlaceHolder(x) for x in rawbufs]))
+    self.placeholders[rawbufs[0]] = PlaceHolder(rawbufs[0])
+    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, RawBuffer) else x for x in rawbufs]))
 
   def finish(self) -> List[JitItem]:
     if self.cache is None: return []
-    alloc = {}
-    def fix(pl:_PlaceHolder) -> RawBuffer:
-      ret = pl.ref()
-      if ret: return ret
-      if pl.bufid not in alloc: alloc[pl.bufid] = pl.alloc_rawbuf()
-      return alloc[pl.bufid]
-    ret = [JitItem(prg, [fix(x) for x in pl]) for prg, pl in self.cache]
-    self.cache = None
-    return ret
-
+    buffer_cache: Dict[PlaceHolder, RawBuffer] = {}
+    saved_cache, self.cache = self.cache, None
+    return [JitItem(prg, [x.alloc_if_needed(buffer_cache) if isinstance(x, PlaceHolder) else x for x in pl]) for prg, pl in saved_cache]
 CacheCollector = _CacheCollector()
