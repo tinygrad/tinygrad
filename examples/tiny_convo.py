@@ -5,10 +5,10 @@ from examples.whisper import init_whisper, prep_audio
 from pathlib import Path
 from examples.llama import LLaMa
 from examples.vits import MODELS, download_if_not_present, get_hparams_from_file, TextMapper, VITS_PATH, load_model
+from examples.tinyconvo.helpers import audio_stream
 
 import multiprocessing
 import numpy as np
-import pyaudio
 import sys
 
 # Whisper
@@ -19,7 +19,7 @@ NUM_RUNS = int(SAMPLE_RATE / N_FRAME_CHUNK * RECORD_SECONDS)
 
 # LLaMA
 # TODO: reuse it from examples/llama.py file
-LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code"}["1"]
+LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code"}["2"]
 MODEL_PATH = Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/7B"
 TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
 N_LLAMA_COUNT = 100
@@ -32,55 +32,40 @@ LENGTH_SCALE = 1
 NOISE_SCALE_W = 0.8
 
 def listen(q: multiprocessing.Queue):
-  p = pyaudio.PyAudio()
-  stream = p.open(
-      format=pyaudio.paInt16,
-      channels=1,
-      rate=SAMPLE_RATE,
-      input=True,
-      frames_per_buffer=N_FRAME_CHUNK
-  )
-  print("Start listening...")
+  with audio_stream(True, SAMPLE_RATE, N_FRAME_CHUNK) as stream:
+    print("Start listening...")
 
-  for _ in range(0, NUM_RUNS):
-    au_data = stream.read(N_FRAME_CHUNK)
-    au = ((np.frombuffer(au_data, np.int16)/32768).astype(np.float32)*3)
-    q.put(au)
+    for _ in range(0, NUM_RUNS):
+      au_data = stream.read(N_FRAME_CHUNK)
+      au = ((np.frombuffer(au_data, np.int16)/32768).astype(np.float32)*3)
+      q.put(au)
 
-  print("Done listening!")
+    print("Done listening!")
 
-  stream.close()
-  p.terminate()
-
-# TODO: refactor Whisper example to expose API to perform decoding
 def whisper_decode(au_buffer: np.ndarray) -> str:
   model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en")
   lst = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
   idx_2_spec_toks = {v: k for k, v in enc._special_tokens.items()}
   output_history = ""
 
-  for _ in range(NUM_RUNS):
-    log_spec = prep_audio(au_buffer)
-    encoded_audio = model.encoder(Tensor(log_spec)).realize()
+  log_spec = prep_audio(au_buffer)
+  encoded_audio = model.encoder(Tensor(log_spec)).realize()
 
+  for _ in range(NUM_RUNS):
     out = model.decoder(Tensor([lst]), encoded_audio).realize()
     idx = int(out[0,-1].argmax().numpy().item())
     lst.append(idx)
 
-    lst_no_special_tokens = [token for token in lst if token not in idx_2_spec_toks]
-
-    unmod_dec = enc.decode(lst)
-    dec = enc.decode(lst_no_special_tokens)
+    # decode a version with no special tokens as input to LLaMA
+    dec = enc.decode([token for token in lst if token not in idx_2_spec_toks])
 
     sys.stdout.write(dec[len(output_history):])
     sys.stdout.flush()
 
     output_history = dec
 
-    if unmod_dec.endswith("<|endoftext|>"):
-      break
-
-  return dec
+    if lst[-1] == enc._special_tokens["<|endoftext|>"]:
+      return dec
 
 # TODO: refactor LLaMA example to expose API to perform decoding
 def llama_response(prompt: str) -> str:
@@ -93,7 +78,7 @@ def llama_response(prompt: str) -> str:
 
   print("Getting response...")
   for i in range(N_LLAMA_COUNT):
-    probs = llama.model(Tensor([llama_tokens[start_pos:]]), Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), TEMP).realize()
+    probs = llama.model(Tensor([llama_tokens[start_pos:]]), start_pos, TEMP).realize()
     probs_np = probs.numpy()
     tok = int(np.random.choice(len(probs_np), p=probs_np))
 
@@ -134,18 +119,8 @@ def tts(text_to_synthesize: str) -> np.ndarray:
   return audio_data
 
 def play_audio(audio: np.ndarray):
-  p = pyaudio.PyAudio()
-  stream = p.open(
-      format=pyaudio.paInt16,
-      channels=1,
-      rate=SAMPLE_RATE,
-      output=True
-  )
-
-  stream.write(audio.tobytes())
-
-  stream.close()
-  p.terminate()
+  with audio_stream(False, SAMPLE_RATE, 0) as stream:
+    stream.write(audio.tobytes())
 
 
 if __name__ == "__main__":
