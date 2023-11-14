@@ -280,12 +280,44 @@ class Compiled:
     self.batch_executor = BatchExecutor if getenv("JIT") == 2 else batch_executor
     self.method_cache: Dict[LazyOp, ASTRunner] = {}
 
-  def to_program(self, k):
+  def to_program(self, k) -> ASTRunner:
     k.linearize()
     src, runtime_args = self.renderer(k.function_name, k.uops)
     return ASTRunner(k.function_name, src, k.global_size, k.local_size,
                      op_estimate=k.info.flops, mem_estimate=k.info.mem_estimate,
                      display_name=k.display_name, runtime_args=runtime_args).build(self.compiler, self.runtime)
+
+  def get_optimized_program(self, ast:LazyOp, rawbuffers:List[RawBuffer]) -> ASTRunner:
+    if DEBUG >= 3:
+      from tinygrad.graph import print_tree
+      print_tree(ast)
+    from tinygrad.codegen.linearizer import Linearizer
+    from tinygrad.lazy import vars_from_ast
+    k = Linearizer(ast, self.linearizer_opts)
+    assert k.info.dtype == rawbuffers[0].dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {rawbuffers[0].dtype}"
+    if not NOOPT:
+      if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
+      if BEAM >= 1 and not vars_from_ast(ast):
+        lins = [(("tc" if used_tensor_cores else "hc"), k)]
+        # allocate a scratch buffer if output buffer is also input
+        test_rawbuffers = [type(rawbuffers[0])(rawbuffers[0].size, rawbuffers[0].dtype), *rawbuffers[1:]] if rawbuffers[0] in rawbuffers[1:] else rawbuffers
+        kb = Linearizer(ast, self.linearizer_opts)
+        kb.required_optimizations()
+        from tinygrad.features.search import beam_search, time_linearizer
+        lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
+        if used_tensor_cores:
+          lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
+          lins[-1][1].hand_coded_optimizations()
+        timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, disable_cache=True, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
+        if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
+        k = timed[0][1]
+    else:
+      k.required_optimizations()
+    prg = self.to_program(k)
+    # extract real vars used in ast
+    prg.vars = vars_from_ast(ast)
+    assert all(v._val is None for v in prg.vars), f"ast contains bound Variable {prg.vars}"
+    return prg
 
   def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
     # check if we can reuse the output buffer
@@ -307,44 +339,11 @@ class Compiled:
     # all the rawbuffers
     rawbuffers = [output.realized] + [x.realized for x in inputs]
 
-    # compilation time
-    def get_program():
-      if DEBUG >= 3:
-        from tinygrad.graph import print_tree
-        print_tree(ast)
-      from tinygrad.codegen.linearizer import Linearizer
-      from tinygrad.lazy import vars_from_ast
-      k = Linearizer(ast, self.linearizer_opts)
-      assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
-      if not NOOPT:
-        if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
-        if BEAM >= 1 and not vars_from_ast(ast):
-          lins = [(("tc" if used_tensor_cores else "hc"), k)]
-          # allocate a scratch buffer if output buffer is also input
-          test_rawbuffers = [type(rawbuffers[0])(rawbuffers[0].size, rawbuffers[0].dtype), *rawbuffers[1:]] if rawbuffers[0] in rawbuffers[1:] else rawbuffers
-          kb = Linearizer(ast, self.linearizer_opts)
-          kb.required_optimizations()
-          from tinygrad.features.search import beam_search, time_linearizer
-          lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
-          if used_tensor_cores:
-            lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
-            lins[-1][1].hand_coded_optimizations()
-          timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, disable_cache=True, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
-          if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
-          k = timed[0][1]
-      else:
-        k.required_optimizations()
-      prg = self.to_program(k)
-      # extract real vars used in ast
-      prg.vars = vars_from_ast(ast)
-      assert all(v._val is None for v in prg.vars), f"ast contains bound Variable {prg.vars}"
-      return prg
-
     if getenv("ENABLE_METHOD_CACHE", 1):
-      if ast not in self.method_cache: self.method_cache[ast] = get_program()
+      if ast not in self.method_cache: self.method_cache[ast] = self.get_optimized_program(ast, rawbuffers)
       prg = self.method_cache[ast]
     else:
-      prg = get_program()
+      prg = self.get_optimized_program(ast, rawbuffers)
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
