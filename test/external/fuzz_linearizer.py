@@ -20,7 +20,7 @@ class LB:
 
 
 def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
-  if rawbufs is None: rawbufs = rawbufs = bufs_from_lin(lin)
+  if rawbufs is None: rawbufs = bufs_from_lin(lin)
   if var_vals is None: var_vals = {v: v.min for v in vars_from_ast(lin.ast)}
 
   # TODO: images needs required_optimization
