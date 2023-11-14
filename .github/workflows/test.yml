@@ -130,7 +130,7 @@ jobs:
         run: |
           echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
           sudo apt update
-          sudo apt install --allow-unauthenticated -y --no-install-recommends intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
+          sudo apt install --allow-unauthenticated -y --no-install-recommends intel-oneapi-runtime-opencl
       - name: Set up Python 3.11
         uses: actions/setup-python@v4
         with:
