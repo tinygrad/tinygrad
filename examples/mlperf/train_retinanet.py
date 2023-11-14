@@ -8,7 +8,7 @@ from tinygrad.nn import optim
 from tinygrad.state import get_parameters
 from tqdm import trange
 from typing import List, Tuple
-from extra.training import focal_loss, smooth_l1_loss
+from extra.training import l1_loss,focal_loss
 from torch import tensor as torch_tensor
 import torch
 from contextlib import redirect_stdout
@@ -16,6 +16,90 @@ from train_retinanet_tests import *
 from models.retinanet import decode_bbox
 from tinygrad.helpers import dtypes
 import pickle as pkl
+from numba import njit
+
+def focal_loss_np(p,targets,alpha: float = 0.25,gamma: float = 2,reduction: str = "none",):
+
+    p , targets = p.astype(np.float32) , targets.astype(np.float32)
+    p_t = p * targets + (1 - p) * (1 - targets)
+    ce_loss = -np.log(p_t + 1e-10)
+
+    loss = ce_loss * ((1 - p_t) ** gamma)
+
+    if alpha >= 0:
+        alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
+        loss = alpha_t * loss
+
+    if reduction == "mean":
+        loss = loss.mean()
+    elif reduction == "sum":
+        loss = loss.sum()
+
+    return loss
+
+def l1_loss_np(input, target, reduction: str = "none"):
+    
+    
+    loss = np.abs(input - target)
+    
+
+
+    if reduction == "mean":
+        return loss.mean() if loss.size > 0 else 0.0 * loss.sum()
+    elif reduction == "sum":
+        return loss.sum()
+    return loss
+
+def encode_single(reference_boxes, proposals,weights=(1.0, 1.0, 1.0, 1.0)):
+        
+        dtype = reference_boxes.dtype
+        weights = np.array(weights, dtype=dtype)
+        targets = encode_boxes(reference_boxes, proposals, weights)
+        return targets
+
+@njit
+def encode_boxes(reference_boxes, proposals, weights):
+    # perform some unpacking to make it JIT-fusion friendly
+    wx = weights[0]
+    wy = weights[1]
+    ww = weights[2]
+    wh = weights[3]
+
+
+    proposals_x1 = np.expand_dims(proposals[:, 0],axis=1)
+    proposals_y1 = np.expand_dims(proposals[:, 1],axis=1)
+    proposals_x2 = np.expand_dims(proposals[:, 2],axis=1)
+    proposals_y2 = np.expand_dims(proposals[:, 3],axis=1)
+
+    reference_boxes_x1 = np.expand_dims(reference_boxes[:, 0],axis=1)
+    reference_boxes_y1 = np.expand_dims(reference_boxes[:, 1],axis=1)
+    reference_boxes_x2 = np.expand_dims(reference_boxes[:, 2],axis=1)
+    reference_boxes_y2 = np.expand_dims(reference_boxes[:, 3],axis=1)
+
+    # implementation starts here
+    ex_widths = proposals_x2 - proposals_x1
+    ex_heights = proposals_y2 - proposals_y1
+    ex_ctr_x = proposals_x1 + 0.5 * ex_widths
+    ex_ctr_y = proposals_y1 + 0.5 * ex_heights
+
+    gt_widths = reference_boxes_x2 - reference_boxes_x1
+    gt_heights = reference_boxes_y2 - reference_boxes_y1
+    gt_ctr_x = reference_boxes_x1 + 0.5 * gt_widths
+    gt_ctr_y = reference_boxes_y1 + 0.5 * gt_heights
+
+    targets_dx = wx * (gt_ctr_x - ex_ctr_x) / ex_widths
+    targets_dy = wy * (gt_ctr_y - ex_ctr_y) / ex_heights
+    targets_dw = ww * np.log(gt_widths / ex_widths)
+    targets_dh = wh * np.log(gt_heights / ex_heights)
+
+    targets = np.concatenate((targets_dx, targets_dy, targets_dw, targets_dh), axis=1)
+    return targets
+
+def _sum(x: List[np.ndarray]) -> np.ndarray:
+    res = x[0]
+    for i in x[1:]:
+        res = res + i
+    return res
 
 def resize_box_based_on_new_image_size(box: List[float], img_old_size: Tuple[int], img_new_size: Tuple[int]) -> List[float]:
   ratio_height, ratio_width = [new / orig for new, orig in zip(img_new_size[:2], img_old_size[:2])]
@@ -118,7 +202,10 @@ class RetinaNetTrainer:
     def __init__(self,  model : RetinaNet = RetinaNet(ResNeXt50_32X4D(num_classes=None)), debug = False):
         
         self.model, self.reference = RetinaNetTrainingInitializer().setup(load_debug_weights=True)
-        Warning("TODO: at training, ResNet weights should be loaded and most of its layers should be frozen.")
+        self.model.head.compute_loss = self.head_loss_fn
+        self.model.head.classification_head.compute_loss = self.cls_loss_fn
+        self.model.head.regression_head.compute_loss = self.reg_loss_fn
+        
         #self.model.backbone.load_from_pretrained()
         self.input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
         self.input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
@@ -246,7 +333,7 @@ class RetinaNetTrainer:
         retina, anchors_orig, anchors_flattened_levels, optimizer = self.tg_init_setup()
         
         self.reference.train()
-        
+
         checker = None
 
         for x, annotations in iterate(self.dataset, BS):
@@ -260,7 +347,9 @@ class RetinaNetTrainer:
 
 
             if sys.argv[1]=='m':
-                model_head_outputs = retina(images).numpy()
+                model_head_outputs = retina(images)
+                model_head_outputs = {'cls_logits' : model_head_outputs[:,:,4:], 
+                                      'bbox_regression' : model_head_outputs[:,:,:4]}
 
             if sys.argv[1]=='r':
                 reference_loss = self.reference_forward(reference_images.double(),annotations=annotations)
@@ -272,7 +361,8 @@ class RetinaNetTrainer:
             else:
                 #self.dataset_annotations_to_tg(annotations)
                 anchors_flattened_levels = [anchors_flattened_levels.astype("float32") for _ in range(BS)]
-                self.compute_loss(annotations, model_head_outputs, anchors_flattened_levels)
+                losses = self.compute_loss(annotations, model_head_outputs, anchors_flattened_levels)
+                breakpoint()
             #if self.debug: checker.check_losses(imgwise_loss)
             optimizer.zero_grad()
             imgwise_loss.backward()
@@ -420,6 +510,72 @@ class RetinaNetTrainer:
         print((classification_losses + regression_losses).numpy() , " batch loss")
 
         return classification_losses + regression_losses
+    
+    def head_loss_fn(self, targets, head_outputs, anchors, matched_idxs):
+        breakpoint()
+
+        return {
+            'classification': self.model.head.classification_head.compute_loss(targets, head_outputs, matched_idxs),
+            'bbox_regression': self.model.head.regression_head.compute_loss(targets, head_outputs, anchors, matched_idxs),
+        }
+    def cls_loss_fn(self, targets, head_outputs, matched_idxs):
+        losses = []
+
+        cls_logits = head_outputs['cls_logits']
+
+        for targets_per_image, cls_logits_per_image, matched_idxs_per_image in zip(targets, cls_logits, matched_idxs):
+            # determine only the foreground
+            foreground_idxs_per_image = matched_idxs_per_image >= 0
+            num_foreground = foreground_idxs_per_image.sum()
+
+            # create the target classification
+            gt_classes_target = np.zeros(cls_logits_per_image.shape, dtype=np.float32)
+
+            gt_classes_target[
+                foreground_idxs_per_image,
+                targets_per_image['labels'][matched_idxs_per_image[foreground_idxs_per_image]]
+            ] = 1.0
+
+            # find indices for which anchors should be ignored
+            valid_idxs_per_image = matched_idxs_per_image != self.BETWEEN_THRESHOLDS
+            # compute the classification loss
+
+            #TODO maybe using mul by mask may be more efficient than gather, depends on sparsity
+            #FIXME ^
+            losses.append(focal_loss(
+                cls_logits_per_image.gather(Tensor(np.argwhere(valid_idxs_per_image).flatten()),0),
+                Tensor(gt_classes_target[valid_idxs_per_image],device=cls_logits_per_image.device,requires_grad=False),
+                reduction='sum',
+            ) / max(1, num_foreground))
+        breakpoint()
+        return _sum(losses) / len(targets)
+    def reg_loss_fn(self, targets, head_outputs, anchors, matched_idxs):
+        # type: (List[Dict[str, Tensor]], Dict[str, Tensor], List[Tensor], List[Tensor]) -> Tensor
+        losses = []
+
+        bbox_regression = head_outputs['bbox_regression']
+
+        for targets_per_image, bbox_regression_per_image, anchors_per_image, matched_idxs_per_image in \
+                zip(targets, bbox_regression, anchors, matched_idxs):
+            # determine only the foreground indices, ignore the rest
+            foreground_idxs_per_image = np.where(matched_idxs_per_image >= 0)[0]
+            num_foreground = foreground_idxs_per_image.size
+
+            # select only the foreground boxes
+            matched_gt_boxes_per_image = targets_per_image['boxes'][matched_idxs_per_image[foreground_idxs_per_image]]
+
+            bbox_regression_per_image = bbox_regression_per_image.gather(Tensor(foreground_idxs_per_image.flatten()),0)
+            anchors_per_image = anchors_per_image[foreground_idxs_per_image, :]
+            # compute the regression targets
+            target_regression = encode_single(matched_gt_boxes_per_image, anchors_per_image).astype(np.float32)
+            # compute the loss
+            losses.append(l1_loss(
+                bbox_regression_per_image,
+                Tensor(target_regression,requires_grad=False,device=bbox_regression_per_image.device),
+                reduction='sum'
+            ) / max(1, num_foreground))
+        breakpoint()
+        return _sum(losses) / max(1, len(targets))
     def compute_loss(self, targets, head_outputs, anchors):
         # type: (List[Dict[str, Tensor]], Dict[str, Tensor], List[Tensor]) -> Dict[str, Tensor]
         matched_idxs = []
@@ -430,8 +586,7 @@ class RetinaNetTrainer:
 
             match_quality_matrix = self.box_iou(targets_per_image['boxes'], anchors_per_image)
             matched_idxs.append(self.proposal_matcher(match_quality_matrix))
-        breakpoint()
-        return self.head.compute_loss(targets, head_outputs, anchors, matched_idxs)
+        return self.model.head.compute_loss(targets, head_outputs, anchors, matched_idxs)
 
     def box_iou(self,boxes1, boxes2):
         inter, union = self._box_inter_union(boxes1, boxes2)
@@ -477,7 +632,6 @@ class RetinaNetTrainer:
                 continue
 
             match_quality_matrix = self.box_iou(targets_per_image['boxes'], anchors_per_image)
-            breakpoint()
             matched_idxs.append(self.proposal_matcher(match_quality_matrix))
         
         return self.head.compute_loss(targets, head_outputs, anchors, matched_idxs)

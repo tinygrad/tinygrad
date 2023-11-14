@@ -37,6 +37,15 @@ def dummy_tensor_identifier(t:Tensor):
     print(" sums ", t.sum().numpy())
     print("grad info: ", t.requires_grad, t.grad)
 
+def l1_loss(input, target, reduction: str = "none"):
+    loss = (input - target).abs()
+  
+    if reduction == "mean":
+        return loss.mean() if loss.size > 0 else 0.0 * loss.sum()
+    elif reduction == "sum":
+        return loss.sum()
+    return loss
+
 def smooth_l1_loss(input: Tensor, target: Tensor, 
                    beta: float, reduction: str = "none") -> Tensor:
   dti = dummy_tensor_identifier #temporal, for debugging
