@@ -6,7 +6,7 @@ def test_basic_operation():
   test = RawCUDABuffer.fromCPU(np.zeros(10, np.float32))
   prg = CUDAProgram("test", """
   .version 7.8
-  .target sm_86
+  .target sm_75
   .address_size 64
   .visible .entry test(.param .u64 x) {
     .reg .b32       %r<2>;
@@ -17,9 +17,9 @@ def test_basic_operation():
     mov.u32         %r1, 0x40000000; // 2.0 in float
     st.global.u32   [%rd2], %r1;
     ret;
-  }""", binary=True)
-  prg([1], [1], test)
-  print(test.toCPU())
+  }""".encode('utf-8'))
+  prg(test, global_size=(10, 1, 1), local_size=(10, 1, 1))
+  print("Basic Operation Test Result:", test.toCPU())
 
 def test_arithmetic_operations():
   arr1 = RawCUDABuffer.fromCPU(np.array([1.0, 2.0, 3.0, 4.0], np.float32))
@@ -28,11 +28,11 @@ def test_arithmetic_operations():
 
   prg = CUDAProgram("arithmetic_op", """
   .version 7.8
-  .target sm_86
+  .target sm_75
   .address_size 64
   .visible .entry arithmetic_op(.param .u64 x, .param .u64 y, .param .u64 z) {
-    .reg .b64 %rd[];
-    .reg .f32 %f<4>;
+    .reg .b64 %rd1, %rd2, %rd3;
+    .reg .f32 %f1, %f2, %f3;
 
     ld.param.u64 %rd1, [x];
     ld.param.u64 %rd2, [y];
@@ -48,11 +48,10 @@ def test_arithmetic_operations():
 
     st.global.f32 [%rd3], %f3;
     ret;
-  }""", binary=True)
-
-  prg([1], [1], arr1, arr2, output)
+  }
+  """.encode('utf-8'))
+  prg(arr1, arr2, output, global_size=(4, 1, 1), local_size=(4, 1, 1))
   print("Arithmetic Operation Test Result:", output.toCPU())
-
 
 def test_memory_operations():
   input_data = RawCUDABuffer.fromCPU(np.array([9.0, 10.0, 11.0, 12.0], np.float32))
@@ -60,10 +59,10 @@ def test_memory_operations():
   
   prg = CUDAProgram("memory_op", """
   .version 7.8
-  .target sm_86
+  .target sm_75
   .address_size 64
   .visible .entry memory_op(.param .u64 in, .param .u64 out) {
-    .reg .b64 %rd[];
+    .reg .b64 %rd1, %rd2;
     .reg .f32 %f1;
 
     ld.param.u64 %rd1, [in];
@@ -75,9 +74,9 @@ def test_memory_operations():
     ld.global.f32 %f1, [%rd1];
     st.global.f32 [%rd2], %f1;
     ret;
-  }""", binary=True)
-
-  prg([1], [1], input_data, output_data)
+  }
+  """.encode('utf-8'))
+  prg(input_data, output_data, global_size=(4, 1, 1), local_size=(4, 1, 1))
   print("Memory Operation Test Result:", output_data.toCPU())
 
 def main():
