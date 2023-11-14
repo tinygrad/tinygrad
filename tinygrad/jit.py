@@ -1,7 +1,7 @@
 from __future__ import annotations
-from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional
+from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional, Set
 import functools, itertools
-from tinygrad.helpers import DEBUG, DType, merge_dicts, GlobalCounters, getenv, colored
+from tinygrad.helpers import DEBUG, DType, merge_dicts, GlobalCounters, getenv, colored, partition
 from tinygrad.ops import RawBuffer, Device, ASTRunner
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -98,6 +98,17 @@ class TinyJit:
       assert len(jit_cache) != 0, "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
+      # get kernels that depend on the inputs
+      depends: Set[Optional[RawBuffer]] = set(input_rawbuffers.values())
+      for ji in jit_cache:
+        if any(b in depends for b in ji.rawbufs[1:]):
+          depends.add(ji.rawbufs[0])
+      jit_cache, jit_cache_independent = partition(jit_cache, lambda ji: ji.rawbufs[0] in depends)
+
+      # run the independent here and once
+      for ji in jit_cache_independent: ji.prg(cast(List[RawBuffer], ji.rawbufs), {v:var_vals[v] for v in getattr(ji.prg,"vars",[])}, jit=True)
+
+      # batch exec for the depends
       alt_batch_exec = Device[Device.DEFAULT].batch_executor
       self.jit_fxn = (BatchExecutor if alt_batch_exec is None or getenv("JIT") == 2 else alt_batch_exec)(jit_cache, input_rawbuffers, var_vals)
     elif self.cnt == 0:
