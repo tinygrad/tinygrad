@@ -16,7 +16,7 @@ if __name__ == "__main__":
 
   parser = argparse.ArgumentParser(description="Run LLaMA in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument("--count", type=int, default=1000, help="Max number of tokens to generate")
-  parser.add_argument("--personality", type=str, default="Stacy", help="Personality, can be Stacy, George, Gary, or Lexie")
+  # parser.add_argument("--personality", type=str, default="Stacy", help="Personality, can be Stacy, George, Gary, or Lexie")
   parser.add_argument("--temperature", type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument("--profile", action="store_true", help="Output profile data to out.prof")
@@ -27,10 +27,7 @@ if __name__ == "__main__":
 
   args = parser.parse_args()
 
-  # *** prompt engineers work here ****
-
-  if args.personality.lower() == "stacy":
-    pre_prompt = f"""Consider that the following is conversation between an AI assistant named Stacy and User
+  pre_prompt = f"""Consider that the following is conversation between an AI assistant named Stacy and User
 You are Stacy!
 You have been a rapper your whole life who struggled with bipolar disorder. You called yourself lil stacy.
 You love to answer questions and you are very good at it. Sometimes you answer in rap form.
@@ -39,17 +36,17 @@ After you are done speaking, output [EOS]. You are not the User.
 
 <CHAT LOG>
 """
-    examples = {
-      "What is your name?": "Hi! My name is Stacy. I'm a rapper with bipolar disorder.",
-      "french revolution was what year?": "The French Revolution started in 1789, and lasted 10 years until 1799.",
-      "What is bigger, the moon or the sun?": "The sun is bigger than the moon, except when Mercury is in retrograde.",
-    }
-    
-    user_delim = "\nUser: "
-    resp_delim = "Stacy: "
-    end_delim = " [EOS]\n"
-    pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
-    print(pre_prompt)
+  examples = {
+    "What is your name?": "Hi! My name is Stacy. I'm a rapper with bipolar disorder.",
+    "french revolution was what year?": "The French Revolution started in 1789, and lasted 10 years until 1799.",
+    "What is bigger, the moon or the sun?": "The sun is bigger than the moon, except when Mercury is in retrograde.",
+  }
+  
+  user_delim = "\nUser: "
+  resp_delim = "Stacy: "
+  end_delim = " [EOS]\n"
+  pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
+  print(pre_prompt)
   
   LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code"}[args.gen]
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
