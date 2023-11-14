@@ -36,7 +36,7 @@ class BatchExecutor:
     for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), {v:var_vals[v] for v in getattr(ji.prg,"vars",[])}, jit=True)
     self.clear_jit_inputs()
 
-  def update_stats(self, var_vals: Dict[Variable, int], et:Optional[float]):
+  def update_stats(self, var_vals: Dict[Variable, int], et: Optional[float]):
     # TODO: this is mostly copied from ASTRunner
     op_estimate = sym_infer(self.op_estimate, var_vals)
     mem_estimate = sym_infer(self.mem_estimate, var_vals)
