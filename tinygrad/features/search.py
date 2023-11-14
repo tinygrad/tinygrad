@@ -31,7 +31,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
     lin.linearize()
     prg = cast(Compiled, Device[Device.DEFAULT]).to_program(lin)
     real_global_size = prg.global_size
-    if allow_test_size and prg.global_size and all_int(prg.global_size):
+    if allow_test_size and prg.global_size and all_int(tuple(prg.global_size)):
       test_global_size = prg.global_size[:]
       while prod(test_global_size) > max_global_size:
         for j in range(2,-1,-1):
@@ -46,7 +46,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
 
     # TODO: this is copied from prg.__call__
     global_size, local_size = prg.launch_dims(var_vals)
-    if global_size is not None and local_size is None and all_int(prg.global_size):
+    if global_size is not None and local_size is None and all_int(tuple(prg.global_size)): # type: ignore[arg-type]
       local_size = optimize_local_size(prg.clprg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
 
