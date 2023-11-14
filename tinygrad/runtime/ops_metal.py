@@ -145,7 +145,11 @@ class MetalBatchExecutor(BatchExecutor):
     self.command_buffer = command_buffer
     if wait:
       command_buffer.waitUntilCompleted()
-      return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
-    METAL.mtl_buffers_in_flight.append(command_buffer)
+      et = command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
+    else:
+      METAL.mtl_buffers_in_flight.append(command_buffer)
+      et = None
+    super().update_stats(var_vals, et)
+    return et
 
 MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, METAL.synchronize, batch_executor=MetalBatchExecutor)
