@@ -22,8 +22,9 @@ class BatchExecutor:
     self.input_replace: Dict[Tuple[int, int], Union[int, str]] = {}
     self.op_estimate, self.mem_estimate = NumNode(0), NumNode(0)
     for j,ji in enumerate(jit_cache):
-      self.op_estimate += ji.prg.op_estimate
-      self.mem_estimate += ji.prg.mem_estimate
+      if isinstance(ji.prg, ASTRunner):  # TODO: this is just for world and needs to be refactored
+        self.op_estimate += ji.prg.op_estimate
+        self.mem_estimate += ji.prg.mem_estimate
       for i,a in enumerate(ji.rawbufs):
         if a in [v for v in input_rawbuffers.values()]:
           self.input_replace[(j,i)] = [k for k,v in input_rawbuffers.items() if v == a][0]

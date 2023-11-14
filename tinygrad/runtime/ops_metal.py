@@ -3,7 +3,7 @@ import os, subprocess, pathlib, ctypes, tempfile
 import Metal, Cocoa, libdispatch
 from typing import List, Any, Tuple, Dict, Union, Set
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup
+from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup, CI
 from tinygrad.ops import Compiled
 from tinygrad.renderer.metal import MetalRenderer
 from tinygrad.runtime.lib import RawBufferMapped, RawBuffer, LRUAllocator
@@ -96,6 +96,8 @@ class MetalBatchExecutor(BatchExecutor):
     icb_descriptor.setInheritPipelineState_(False)
     icb_descriptor.setMaxKernelBufferBindCount_(31)
     self.icb = METAL.device.newIndirectCommandBufferWithDescriptor_maxCommandCount_options_(icb_descriptor, len(self.jit_cache), Metal.MTLResourceOptions(0))
+    assert self.icb is not None, "create indirect command buffer failed, does your system support this?"
+
     self.int_buf = RawMetalBuffer(len(var_vals), dtypes.int32)
     self.input_has_variable_dims: Set[int] = set()
     read_resources, write_resources = [], []
@@ -152,4 +154,4 @@ class MetalBatchExecutor(BatchExecutor):
     super().update_stats(var_vals, et)
     return et
 
-MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, METAL.synchronize, batch_executor=MetalBatchExecutor)
+MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, METAL.synchronize, batch_executor=MetalBatchExecutor if not CI else None)
