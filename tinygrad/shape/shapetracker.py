@@ -102,8 +102,8 @@ class ShapeTracker:
       offset = v.offset + sum(st*(s-1) for s,st in zip(real_shape, v.strides) if st<0)
       real_offset = offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
       real_real_shape = [s for s,st in zip(real_shape, v.strides) if st]
-      strides = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
-      buffer_size = sum((s-1)*st for s, st in zip(real_real_shape,strides)) + 1
+      strides: List[Node|int] = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
+      buffer_size = sum((s-1)*st for s,st in zip(real_real_shape,strides)) + 1
       if i: buffer_size = prod(self.views[i-1].shape) - real_offset
       def sort_by_strides(shape, strides): return sorted(zip(shape, strides), key=lambda k: (k[1],-k[0]), reverse=True), sorted(range(len(strides)), key=lambda k: (strides[k],-real_real_shape[k]), reverse=True)
       ordered_shape_strides, order = sort_by_strides(real_real_shape, strides)
