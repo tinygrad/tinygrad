@@ -262,5 +262,26 @@ class TestTinygrad(unittest.TestCase):
     # force device copy - to() is opt'd away - Tensor(dev)/1 is ignored
     np.testing.assert_allclose(ua_arr, (Tensor(ua_arr)/Tensor(1)).numpy())
 
+class TestZeroShapeTensor(unittest.TestCase):
+  def test_rand(self):
+    t = Tensor.rand(3, 2, 0)
+    assert t.shape == (3, 2, 0)
+    np.testing.assert_equal(t.numpy(), np.zeros((3, 2, 0)))
+
+  @unittest.skip("not working yet")
+  def test_full(self):
+    t = Tensor.zeros(3, 2, 0)
+    assert t.shape == (3, 2, 0)
+    np.testing.assert_equal(t.numpy(), np.zeros((3, 2, 0)))
+    t = Tensor.full((3, 2, 0), 12)
+    assert t.shape == (3, 2, 0)
+    np.testing.assert_equal(t.numpy(), np.full((3, 2, 0), 12))
+
+  def test_elementwise(self):
+    pass
+
+  def test_reduce(self):
+    pass
+
 if __name__ == '__main__':
   unittest.main()

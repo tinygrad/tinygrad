@@ -96,7 +96,10 @@ class View:
   def reshape(self, new_shape: Tuple[sint, ...]) -> Optional[View]:
     if self.shape == new_shape: return self
 
-    assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
+    assert all(is_sym_int(x) and x >= 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
+    if any(s == 0 for s in self.shape):
+      assert not new_shape or any(s == 0 for s in new_shape), f"cannot reshape 0 size to {new_shape}"
+      return View.create(new_shape)
     # check for the same size
     if all_int(self.shape):
       if all_int(new_shape):

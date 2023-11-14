@@ -110,6 +110,7 @@ backend_test.exclude('test_bernoulli_*')
 backend_test.exclude('test_cumsum_*')
 backend_test.exclude('test_det_*')
 
+# enable this. uses reduce
 backend_test.exclude('test_tril_zero_cpu') # TODO: zero array support
 backend_test.exclude('test_triu_zero_cpu') # TODO: zero array support
 
@@ -147,9 +148,8 @@ backend_test.exclude('test_resize_upsample_sizes_cubic_*') # unsure how to imple
 # rest of the failing tests
 backend_test.exclude('test_regex_*') # does not support string Tensors
 backend_test.exclude('test_optional_has_element_empty_optional_input_cpu') # Attempts to create Tensor from None
+# spec for this? allowzero?
 backend_test.exclude('test_reshape_allowzero_reordered_cpu') # reshaping to shape with 0
-backend_test.exclude('test_reduce_min_empty_set_cpu') # max a tensor with 0 in shape
-backend_test.exclude('test_reduce_sum_empty_set_non_reduced_axis_zero_cpu') # reducing a tensor with 0 in shape
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
@@ -175,6 +175,7 @@ if getenv('METAL'):
   backend_test.exclude('test_maxpool_2d_same_lower_cpu')
 
 # compiled backends cannot reshape to or from 0
+# these we should fix, it should not go into kernel?
 if getenv('LLVM') or getenv('GPU') or getenv('CLANG') or getenv('METAL') or getenv('CUDA'):
   backend_test.exclude('test_slice_start_out_of_bounds_cpu')
   backend_test.exclude('test_constantofshape_int_shape_zero_cpu')
