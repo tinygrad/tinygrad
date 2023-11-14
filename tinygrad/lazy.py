@@ -36,7 +36,7 @@ def _ast_reduceops(op:LazyOp) -> LazyOp:
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
 def _ast_binaryops(op:LazyOp, shape: Tuple[sint, ...]) -> LazyOp:
-  real_srcs: Dict[LazyBuffer, Optional[Union[LazyOp, LazyBuffer]]] = {x:None for x in op.buffers()}
+  real_srcs: Dict[LazyBuffer, Optional[Union[LazyOp, LazyBuffer]]] = {x:None for x in op.buffers}
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
   psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and not x.realized and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
@@ -46,7 +46,7 @@ def _ast_binaryops(op:LazyOp, shape: Tuple[sint, ...]) -> LazyOp:
     if psrc[1].optype == ReduceOps:
       top = _ast_reduceops(psrc[1].op)
     real_srcs[psrc[0]] = top
-    real_srcs.update({x:x for x in top.buffers()})  # the reduce op buffers are not modified
+    real_srcs.update({x:x for x in top.buffers})  # the reduce op buffers are not modified
 
     # if the ReduceOp is followed by a reshape, we push this reshape before all the ElementwiseOp inputs
     if psrc[0].shape != psrc[1].shape:
@@ -63,8 +63,8 @@ def _ast_binaryops(op:LazyOp, shape: Tuple[sint, ...]) -> LazyOp:
 
 def _replace_bufferops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
   replacements:Dict[LazyBuffer, LazyOp] = {}
-  base_bufs = dedup([x.base for x in op.buffers() if not x.is_unrealized_const()])
-  for x in op.buffers():
+  base_bufs = dedup([x.base for x in op.buffers if not x.is_unrealized_const()])
+  for x in op.buffers:
     st = x.st.simplify().unbind()
     if x.base in base_bufs:
       replacements[x] = LazyOp(BufferOps.MEM, (), MemBuffer(base_bufs.index(x.base)+1, x.dtype, st))
@@ -90,7 +90,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dty
   # wop is the deduping key. i feel this used to compare more deeply
   wop = (device, dtype, optype, ref(op), ref(base) if base else None)
   if wop in lazycache:
-    for x in op.buffers(): x.children.add(lazycache[wop])
+    for x in op.buffers: x.children.add(lazycache[wop])
     return lazycache[wop]
 
   lazycache[wop] = ret = LazyBuffer(device, st, optype, op, dtype, base=base)
@@ -111,7 +111,7 @@ class LazyBuffer:
     # NOTE: op should be read only after construction of LazyBuffer. it is now with schedule
     if op is not None:
       self.op: LazyOp = op
-      for x in op.buffers(): x.children.add(self)
+      for x in op.buffers: x.children.add(self)
     assert optype != MovementOps or (base is not None and base.optype != MovementOps), "MovementOps must be based"
     self._base = base
     if base: base.views.add(self)
@@ -143,7 +143,9 @@ class LazyBuffer:
 
   def _device_extra_args(self) -> Dict[str, str]: return {"device": self.device.split(":", 1)[1]} if ":" in self.device else {}
 
-  def buffers(self,_=None) -> Tuple[LazyBuffer, ...]: return (self,)
+  @property
+  def buffers(self) -> Tuple[LazyBuffer, ...]: return (self,)
+
   def map_buffers(self, real_srcs: Mapping[Any, Union[LazyBuffer, LazyOp]]): return real_srcs.get(self, self)
   def get_lazyops(self) -> List[LazyOp]: return []
 
@@ -163,9 +165,9 @@ class LazyBuffer:
 
     # schedule the past
     ret = []
-    for x in op.buffers(): ret += x.schedule(seen)
+    for x in op.buffers: ret += x.schedule(seen)
 
-    var_vals = dict(sorted(merge_dicts([self.st.var_vals] + [buf.st.var_vals for buf in op.buffers()]).items(), key=lambda kv:cast(Variable,kv[0]).key))
+    var_vals = dict(sorted(merge_dicts([self.st.var_vals] + [buf.st.var_vals for buf in op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
@@ -230,7 +232,7 @@ class LazyBuffer:
       # remove the buffers from any (childless) BinaryOps that feed into this
       _srcs = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])
       # TODO: needs general merge limiting
-      if out_device != "WEBGPU" or len(dedup([x.base for _src in _srcs for x in _src.buffers() if not x.is_unrealized_const()])) < 7: srcs = _srcs # type: ignore
+      if out_device != "WEBGPU" or len(dedup([x.base for _src in _srcs for x in _src.buffers if not x.is_unrealized_const()])) < 7: srcs = _srcs # type: ignore
 
     return create_lazybuffer(out_device, ShapeTracker.from_shape(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype)
 
