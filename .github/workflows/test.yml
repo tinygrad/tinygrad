@@ -54,7 +54,7 @@ jobs:
     - name: Fuzz Test shapetracker
       run: PYTHONPATH="." python test/external/fuzz_shapetracker.py
     - name: Test shapetracker to_movement_ops
-      run: PYTHONPATH="." python extra/to_movement_ops.py
+      run: python extra/to_movement_ops.py
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
