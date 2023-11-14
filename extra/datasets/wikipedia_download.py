@@ -2,7 +2,6 @@
 # Mostly copied from https://github.com/mlcommons/training/blob/master/language_model/tensorflow/bert/cleanup_scripts/
 import os, bz2, hashlib, subprocess
 from pathlib import Path
-from typing import List
 import gdown
 from tqdm import tqdm
 from tinygrad.helpers import getenv
