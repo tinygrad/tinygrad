@@ -297,7 +297,7 @@ class Compiled:
     assert k.info.dtype == rawbuffers[0].dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {rawbuffers[0].dtype}"
     if not NOOPT:
       if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
-      if BEAM >= 1 and not vars_from_ast(ast):
+      if BEAM >= 1:
         lins = [(("tc" if used_tensor_cores else "hc"), k)]
         # allocate a scratch buffer if output buffer is also input
         test_rawbuffers = [type(rawbuffers[0])(rawbuffers[0].size, rawbuffers[0].dtype), *rawbuffers[1:]] if rawbuffers[0] in rawbuffers[1:] else rawbuffers

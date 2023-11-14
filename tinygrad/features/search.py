@@ -2,7 +2,7 @@ from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, random, math
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
-from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context
+from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, all_int
 from tinygrad.codegen.linearizer import Linearizer, UOp
 from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
@@ -11,10 +11,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.codegen.kernel import Opt, OptOps
 actions = flatten([[Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,7]] for axis in range(6)])
 actions += flatten([[Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4]] for axis in range(4)])
-actions += flatten([[Opt(op=OptOps.LOCAL, axis=axis, amt=amt) for amt in [2,3,4,8,13,16,29]] for axis in range(5)])
+actions += flatten([[Opt(op=OptOps.LOCAL, axis=axis, amt=amt) for amt in [2,3,4,8,13,16,29,32]] for axis in range(5)])
 actions += flatten([[Opt(op=OptOps.GROUPTOP, axis=axis, amt=amt) for amt in [13,16,29,32,256]] for axis in range(3)])
 actions += [
-  Opt(op=OptOps.LOCAL, axis=0, amt=32),
   Opt(op=OptOps.GROUP, axis=0, amt=4), Opt(op=OptOps.GROUP, axis=0, amt=8), Opt(op=OptOps.GROUP, axis=1, amt=8),
   Opt(op=OptOps.UPCASTMID, axis=1, amt=4),
   Opt(op=OptOps.NOLOCALS),
@@ -24,12 +23,12 @@ actions += [
 def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, disable_cache=False, clear_l2=False) -> float:
   key = {"ast": str(lin.ast), "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size}
   if not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
-  var_vals = {k:k.min for k in vars_from_ast(lin.ast)}
+  var_vals = {k:k.min+(k.max-k.min)//2 for k in vars_from_ast(lin.ast)}
   try:
     lin.linearize()
     prg = cast(Compiled, Device[Device.DEFAULT]).to_program(lin)
     real_global_size = prg.global_size
-    if allow_test_size and prg.global_size:
+    if allow_test_size and prg.global_size and all_int(prg.global_size):
       test_global_size = prg.global_size[:]
       while prod(test_global_size) > max_global_size:
         for j in range(2,-1,-1):
@@ -41,12 +40,13 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
       #print(real_global_size, test_global_size, factor)
     else:
       factor = 1
-    # TODO: this is super broken for var_vals
+
     # TODO: this is copied from prg.__call__
     global_size, local_size = prg.launch_dims(var_vals)
-    if global_size is not None and local_size is None:
+    if global_size is not None and local_size is None and all_int(prg.global_size):
       local_size = optimize_local_size(prg.clprg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
+
     tms = []
     for _ in range(cnt):
       if clear_l2:
