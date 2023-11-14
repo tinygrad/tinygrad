@@ -61,27 +61,26 @@ def st_equivalent(st: ShapeTracker, st_rebuilt: ShapeTracker):
 def test_rebuild(st: ShapeTracker):
   rebuilt_st = ShapeTracker.from_shape((get_buffer_size(st.views[0].shape, st.views[0].strides, st.views[0].offset, st.views[0].mask),))
   for mop, arg in st.to_movement_ops():
-    match mop:
-      case MovementOps.RESHAPE:
-        # shapetracker doesn't allow flattening with -1 but required for MovementOps.RESHAPE
-        if arg == (-1,):
-          rebuilt_st = rebuilt_st.reshape((prod(rebuilt_st.views[-1].shape),))
-        else:
-          rebuilt_st = rebuilt_st.reshape(arg)
-      case MovementOps.PERMUTE:
-        rebuilt_st = rebuilt_st.permute(arg)
-      case MovementOps.EXPAND:
-        if len(arg) != len(rebuilt_st.shape):
-          rebuilt_st = rebuilt_st.reshape((1,*rebuilt_st.shape))
-        rebuilt_st = rebuilt_st.expand(arg)
-      case MovementOps.PAD:
-        rebuilt_st = rebuilt_st.pad(arg)
-      case MovementOps.SHRINK:
-        rebuilt_st = rebuilt_st.shrink(arg)
-      case MovementOps.STRIDE:
-        rebuilt_st = rebuilt_st.stride(arg)
-      case _:
-        raise Exception("invalid mop")
+    if mop == MovementOps.RESHAPE:
+      # shapetracker doesn't allow flattening with -1 but required for MovementOps.RESHAPE
+      if arg == (-1,):
+        rebuilt_st = rebuilt_st.reshape((prod(rebuilt_st.views[-1].shape),))
+      else:
+        rebuilt_st = rebuilt_st.reshape(arg)
+    elif mop == MovementOps.PERMUTE:
+      rebuilt_st = rebuilt_st.permute(arg)
+    elif mop == MovementOps.EXPAND:
+      if len(arg) != len(rebuilt_st.shape):
+        rebuilt_st = rebuilt_st.reshape((1,*rebuilt_st.shape))
+      rebuilt_st = rebuilt_st.expand(arg)
+    elif mop == MovementOps.PAD:
+      rebuilt_st = rebuilt_st.pad(arg)
+    elif mop == MovementOps.SHRINK:
+      rebuilt_st = rebuilt_st.shrink(arg)
+    elif mop == MovementOps.STRIDE:
+      rebuilt_st = rebuilt_st.stride(arg)
+    else:
+      raise Exception("invalid mop")
   rebuilt_st = rebuilt_st.simplify()
   if len(st.views) != len(rebuilt_st.views):
     if not set(st.views).issubset(set(rebuilt_st.views)):
