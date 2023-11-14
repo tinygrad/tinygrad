@@ -150,7 +150,7 @@ if __name__ == "__main__":
       did_read = True
     if did_read:
       log_spec = prep_audio(total)
-      encoded_audio = model.encoder(Tensor(log_spec[:1500])).realize() # it sometimes laggs and passes longer audio
+      encoded_audio = model.encoder(Tensor(log_spec)).realize() # it sometimes laggs and passes longer audio
     out = model.decoder(Tensor([lst]), encoded_audio).realize()
     lst.append(int(out[0,-1].argmax().numpy().item()))
     dec = enc.decode(lst)
