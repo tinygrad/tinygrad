@@ -52,7 +52,8 @@ def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(20, 2
   x = tiny_func(*shape).numpy().flatten()
   if numpy_func is not None: y = numpy_func(shape).flatten()
   if torch_func is not None: z = torch_func(shape).numpy().flatten()
-  return (numpy_func is None or kstest(x, y) >= alpha) and (torch_func is None or kstest(x, z) >= alpha)
+  return (numpy_func is None or (x.shape == y.shape and kstest(x, y) >= alpha)) \
+    and (torch_func is None or (x.shape == z.shape and kstest(x, z) >= alpha))
 
 def normal_test(func, shape=(20, 23), alpha=0.05): return equal_distribution(func, numpy_func=lambda x: np.random.randn(*x), shape=shape, alpha=alpha)
 
@@ -97,10 +98,13 @@ class TestRandomness(unittest.TestCase):
       self.assertTrue(equal_distribution(Tensor.kaiming_normal, lambda x: torch.nn.init.kaiming_normal_(torch.empty(x)), shape=shape))
 
   def test_multinomial(self):
-    p = [0.231, 0, 1, 0.5]
     n_samples = 1000
-    assert equal_distribution(lambda *_: Tensor.multinomial(Tensor(p), n_samples, replacement=True), lambda _: torch.multinomial(torch.tensor(p), n_samples, replacement=True))
-    self.assertRaises(AssertionError, lambda: Tensor.multinomial(Tensor(p), n_samples, replacement=False))  # without replacement is not supported
+    p = [0.231, 0., 1., 0.5]
+    self.assertTrue(equal_distribution(lambda *_: Tensor.multinomial(Tensor(p), n_samples, replacement=True), lambda _: torch.multinomial(torch.tensor(p), n_samples, replacement=True)))
+    p = [[0.453, 0., 1., 0.81], [0.1, 0.8, 0., 0.1]]
+    self.assertTrue(equal_distribution(lambda *_: Tensor.multinomial(Tensor(p), n_samples, replacement=True), lambda _: torch.multinomial(torch.tensor(p), n_samples, replacement=True)))
+    # Not supported without replacement
+    self.assertRaises(AssertionError, lambda: Tensor.multinomial(Tensor(p), n_samples, replacement=False))
 
   def test_conv2d_init(self):
     params = (128, 256, (3,3))

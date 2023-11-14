@@ -217,14 +217,16 @@ class Tensor:
     return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
   @staticmethod
-  def multinomial(p: Tensor, num_samples: int, replacement: bool = False):
-    assert p.ndim == 1, "p must be 1-dimensional"
-    assert replacement, "only with replacement is supported"
-    cdf = p.cumsum()
-    cdf /= cdf[-1] # probabilities should sum to 1
-    unif_samples = Tensor.rand(num_samples, 1)
-    indices = (unif_samples.expand(num_samples, p.numel()) >= cdf).sum(1).cast(dtypes.int32)
-    return indices
+  def multinomial(p: Tensor, num_samples: int, replacement: bool = False) -> Tensor:
+    assert p.ndim <= 2, "p must be 1 or 2 dim"
+    assert replacement, "supported only with replacement"
+    if p.ndim == 1:
+      p = p.unsqueeze(0)
+    cdf = p.cumsum(1)
+    cdf /= cdf[:, -1].unsqueeze(1)
+    unif_samples = Tensor.rand(num_samples, p.shape[0], 1)
+    indices = (unif_samples.expand((-1, -1, p.shape[1])) >= cdf).sum(2)
+    return indices.cast(dtypes.int32)
 
   # ***** toposort and backward pass *****
   def deepwalk(self):
