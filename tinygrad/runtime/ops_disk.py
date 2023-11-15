@@ -1,8 +1,9 @@
-import os, mmap
+import os, mmap, functools
 from typing import Optional
 from typing import Callable, Dict, Tuple
 from tinygrad.helpers import prod, DType
 from tinygrad.runtime.lib import RawBufferMapped
+from tinygrad.runtime.interpreted import interpret_ast
 from tinygrad.ops import Interpreted, Op, MovementOps, UnaryOps, BufferOps
 
 class RawDiskBuffer(RawBufferMapped):
@@ -38,4 +39,4 @@ class RawDiskBuffer(RawBufferMapped):
     self._buf[0].readinto(buf)
 
 disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.MEM: lambda x: x, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
-DiskBuffer = Interpreted(RawDiskBuffer, disk_fxn_for_op, from_underlying=lambda x:x)
+DiskBuffer = Interpreted(RawDiskBuffer, functools.partial(interpret_ast, disk_fxn_for_op, None))
