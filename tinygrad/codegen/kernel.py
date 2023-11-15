@@ -279,6 +279,7 @@ class Kernel:
     for i,x in enumerate(rets[:len(self.sts)]): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
 
   # ******************** GPU simplifiers ********************
+
   def _limit_size(self, x: Tuple[int], max_size: List) -> Tuple[int, ...]:
     new_shape,dims = list(x), len(x)
     for i in range(dims):

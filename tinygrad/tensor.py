@@ -220,7 +220,8 @@ class Tensor:
     assert self.ndim <= 2, "p must be 1 or 2 dim"
     assert replacement or num_samples == 1, "supported only with replacement"
     p = self.unsqueeze(0) if self.ndim == 1 else self
-    cdf = p.cumsum(1)[:, -1].unsqueeze(1)
+    cdf = p.cumsum(1)
+    cdf /= cdf[:, -1].unsqueeze(1)
     unif_samples = Tensor.rand(num_samples, p.shape[0], 1)
     indices = (unif_samples.expand((-1, -1, p.shape[1])) >= cdf).sum(2).permute((1, 0))
     if self.ndim == 1: indices = indices.squeeze(0)
