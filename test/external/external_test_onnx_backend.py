@@ -146,7 +146,6 @@ backend_test.exclude('test_resize_upsample_sizes_cubic_*') # unsure how to imple
 
 # rest of the failing tests
 backend_test.exclude('test_regex_*') # does not support string Tensors
-backend_test.exclude('test_convtranspose_autopad_same_cpu') # TODO geohotstan has no idea how this is done, autopad requires output_shape but output_shape requires pads from autopad
 backend_test.exclude('test_optional_has_element_empty_optional_input_cpu') # Attempts to create Tensor from None
 backend_test.exclude('test_reshape_allowzero_reordered_cpu') # reshaping to shape with 0
 backend_test.exclude('test_reduce_min_empty_set_cpu') # max a tensor with 0 in shape
