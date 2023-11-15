@@ -26,6 +26,8 @@ OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOp
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.lazy import LazyBuffer
+  from tinygrad.codegen.linearizer import Linearizer
+  from tinygrad.codegen.kernel import LinearizerOptions
 
 @dataclass(frozen=True)
 class MemBuffer:
@@ -176,16 +178,17 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter:
 
 # **************** for Interpreted Buffers ****************
 
+from tinygrad.runtime.interpreted import interpret_ast
 class Interpreted:
-  def __init__(self, buffer: Type[RawBuffer], compiler: Callable[[LazyOp], Callable]):
-    self.buffer, self.compiler = buffer, compiler
+  def __init__(self, buffer: Type[RawBuffer], fxn_for_op:Dict[Op, Callable], from_underlying:Optional[Callable]=None):
+    self.buffer, self.fxn_for_op, self.from_underlying = buffer, fxn_for_op, from_underlying
     self.synchronize = lambda: None
     self.batch_executor = BatchExecutor
     self.codegen = None
     self.method_cache: Dict[LazyOp, Callable] = {}
 
   def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
-    if ast not in self.method_cache: self.method_cache[ast] = self.compiler(ast)
+    if ast not in self.method_cache: self.method_cache[ast] = interpret_ast(self.fxn_for_op, self.from_underlying, ast)
     output.realized = output.output_buffer   # NOTE: assuming this is the right size and dtype from assign
     ret: RawBuffer = self.method_cache[ast]([x.realized for x in inputs] if inputs else None, var_vals)
     assert output.dtype == ret.dtype, f"expected {output.dtype}, got {ret.dtype}"
@@ -195,10 +198,11 @@ class Interpreted:
 # **************** for Compiled Buffers ****************
 
 class ASTRunner:
-  def __init__(self, name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
+  def __init__(self, name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None, ast_vars:Optional[List[Variable]]=None):
     if DEBUG >= 4: print(prg)
-    self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
-    self.vars:List[Variable] = []
+    self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args, self.vars = \
+      name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}, ast_vars if ast_vars is not None else []
+    assert all(v._val is None for v in self.vars), f"ASTRunner contains bound Variable {self.vars}"
 
   def build(self, compiler, runtime):
     self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
@@ -239,49 +243,18 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, compiler, runtime, synchronize=lambda: None, batch_executor=BatchExecutor):
+  def __init__(self, buffer: Type[RawBuffer], linearizer_opts:LinearizerOptions, renderer, compiler, runtime, synchronize=lambda: None, batch_executor=BatchExecutor):
     self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize = buffer, linearizer_opts, renderer, compiler, runtime, synchronize
     self.batch_executor = BatchExecutor if getenv("JIT") == 2 else batch_executor
     self.method_cache: Dict[LazyOp, ASTRunner] = {}
 
-  def to_program(self, k) -> ASTRunner:
+  def to_program(self, k:Linearizer) -> ASTRunner:
     k.linearize()
     src, runtime_args = self.renderer(k.function_name, k.uops)
+    from tinygrad.lazy import vars_from_ast
     return ASTRunner(k.function_name, src, k.global_size, k.local_size,
                      op_estimate=k.info.flops, mem_estimate=k.info.mem_estimate,
-                     display_name=k.display_name, runtime_args=runtime_args).build(self.compiler, self.runtime)
-
-  def get_optimized_program(self, ast:LazyOp, rawbuffers:List[RawBuffer]) -> ASTRunner:
-    if DEBUG >= 3:
-      from tinygrad.graph import print_tree
-      print_tree(ast)
-    from tinygrad.codegen.linearizer import Linearizer
-    from tinygrad.lazy import vars_from_ast
-    k = Linearizer(ast, self.linearizer_opts)
-    assert k.info.dtype == rawbuffers[0].dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {rawbuffers[0].dtype}"
-    if not NOOPT:
-      if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
-      if BEAM >= 1:
-        lins = [(("tc" if used_tensor_cores else "hc"), k)]
-        # allocate a scratch buffer if output buffer is also input
-        test_rawbuffers = [type(rawbuffers[0])(rawbuffers[0].size, rawbuffers[0].dtype), *rawbuffers[1:]] if rawbuffers[0] in rawbuffers[1:] else rawbuffers
-        kb = Linearizer(ast, self.linearizer_opts)
-        kb.required_optimizations()
-        from tinygrad.features.search import beam_search, time_linearizer
-        lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
-        if used_tensor_cores:
-          lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
-          lins[-1][1].hand_coded_optimizations()
-        timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, disable_cache=True, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
-        if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
-        k = timed[0][1]
-    else:
-      k.required_optimizations()
-    prg = self.to_program(k)
-    # extract real vars used in ast
-    prg.vars = vars_from_ast(ast)
-    assert all(v._val is None for v in prg.vars), f"ast contains bound Variable {prg.vars}"
-    return prg
+                     display_name=k.display_name, runtime_args=runtime_args, ast_vars=vars_from_ast(k.ast)).build(self.compiler, self.runtime)
 
   def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
     # check if we can reuse the output buffer
@@ -305,5 +278,32 @@ class Compiled:
     # all the rawbuffers
     rawbuffers = [output.realized] + [x.realized for x in inputs]
 
-    if ast not in self.method_cache: self.method_cache[ast] = self.get_optimized_program(ast, rawbuffers)
+    if ast not in self.method_cache: self.method_cache[ast] = get_optimized_program(self.linearizer_opts, self.to_program, ast, rawbuffers)
     self.method_cache[ast].exec(rawbuffers, var_vals)
+
+def get_optimized_program(linearizer_opts:LinearizerOptions, to_program, ast:LazyOp, rawbuffers:List[RawBuffer]) -> ASTRunner:
+  if DEBUG >= 3:
+    from tinygrad.graph import print_tree
+    print_tree(ast)
+  from tinygrad.codegen.linearizer import Linearizer
+  k = Linearizer(ast, linearizer_opts)
+  assert k.info.dtype == rawbuffers[0].dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {rawbuffers[0].dtype}"
+  if not NOOPT:
+    if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
+    if BEAM >= 1:
+      lins = [(("tc" if used_tensor_cores else "hc"), k)]
+      # allocate a scratch buffer if output buffer is also input
+      test_rawbuffers = [type(rawbuffers[0])(rawbuffers[0].size, rawbuffers[0].dtype), *rawbuffers[1:]] if rawbuffers[0] in rawbuffers[1:] else rawbuffers
+      kb = Linearizer(ast, linearizer_opts)
+      kb.required_optimizations()
+      from tinygrad.features.search import beam_search, time_linearizer
+      lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
+      if used_tensor_cores:
+        lins.append(("hc", Linearizer(ast, linearizer_opts)))
+        lins[-1][1].hand_coded_optimizations()
+      timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, disable_cache=True, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
+      if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
+      k = timed[0][1]
+  else:
+    k.required_optimizations()
+  return to_program(k)

@@ -1,11 +1,10 @@
-import os, mmap, functools
+import os, mmap
 try: import _posixshmem
 except Exception: pass
 from typing import Callable, Dict
 from tinygrad.helpers import DType, OSX
 from tinygrad.runtime.lib import RawBufferMapped
 from tinygrad.ops import Interpreted, Op, UnaryOps, MovementOps, BufferOps
-from tinygrad.runtime.interpreted import interpret_ast
 
 class RawShmBuffer(RawBufferMapped):
   def __init__(self, size, dtype:DType, device:str):
@@ -26,4 +25,4 @@ class RawShmBuffer(RawBufferMapped):
 
 # TODO: is this wrong?
 shm_fxn_for_op: Dict[Op, Callable] = { BufferOps.MEM: lambda x: x, UnaryOps.NOOP: lambda x:x, MovementOps.RESHAPE: lambda x,_:x, MovementOps.AS_STRIDED: lambda x,_:x }
-ShmBuffer = Interpreted(RawShmBuffer, functools.partial(interpret_ast, shm_fxn_for_op, None))
+ShmBuffer = Interpreted(RawShmBuffer, shm_fxn_for_op)
