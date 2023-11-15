@@ -351,16 +351,26 @@ def get_optimized_program(linearizer_opts:LinearizerOptions, to_program, ast:Laz
   if not NOOPT:
     if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
     if BEAM >= 1:
-      lins = [(("tc" if used_tensor_cores else "hc"), k)]
       # allocate a scratch buffer if output buffer is also input
       test_rawbuffers = [type(rawbuffers[0])(rawbuffers[0].size, rawbuffers[0].dtype), *rawbuffers[1:]] if rawbuffers[0] in rawbuffers[1:] else rawbuffers
-      kb = Linearizer(ast, linearizer_opts)
-      kb.required_optimizations()
-      from tinygrad.features.search import beam_search, time_linearizer
-      lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
+
+      lins = [(("tc" if used_tensor_cores else "hc"), k)]
       if used_tensor_cores:
-        lins.append(("hc", Linearizer(ast, linearizer_opts)))
-        lins[-1][1].hand_coded_optimizations()
+        lins.append(("hc", k_ := Linearizer(ast, linearizer_opts)))
+        k_.hand_coded_optimizations()
+
+      beam_starts = []
+
+      beam_starts.append(("", kb_ := Linearizer(ast, linearizer_opts)))
+      kb_.required_optimizations()
+
+      if used_tensor_cores:
+        beam_starts.append(("tc", kb_tc := Linearizer(ast, linearizer_opts)))
+        kb_tc.apply_tensor_cores(hand_coded=False)
+
+      from tinygrad.features.search import beam_search, time_linearizer
+      for name, kb in beam_starts:
+        lins.append((f"beam{BEAM.value}" + (f"_{name}" if name else ""), beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)), variant=name)))
       timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, disable_cache=True, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
       if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
       k = timed[0][1]
