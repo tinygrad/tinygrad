@@ -314,6 +314,9 @@ class TestZeroShapeTensor(unittest.TestCase):
 
   def test_pad(self):
     pass
+    # t = Tensor.rand(3, 2, 0)
+    # a = t.pad(((1, 1), None, None), 1)
+    # assert a.shape == (5, 2, 0)
 
   def test_shrink_into_zero(self):
     t = Tensor.rand(3, 4).realize()
@@ -355,7 +358,7 @@ class TestZeroShapeTensor(unittest.TestCase):
 
     a = Tensor.ones(3, 2, 0).sum(axis=2, keepdim=True)
     assert a.shape == (3, 2, 1)
-    np.testing.assert_equal(a.numpy(), np.sum(np.zeros((3, 2, 1)), axis=2, keepdims=True))
+    np.testing.assert_equal(a.numpy(), np.sum(np.zeros((3, 2, 0)), axis=2, keepdims=True))
 
   def test_reduce_default(self):
     np.testing.assert_equal(Tensor([]).max().numpy(), -float("inf"))
