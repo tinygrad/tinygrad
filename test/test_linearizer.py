@@ -110,6 +110,22 @@ class TestLinearizer(unittest.TestCase):
     assert lin.full_shape[:lin.global_dims] == (5, 6, 7, 8, 9)
     lin.limit_dims_to_max(global_max=[16, 16, 16], local_max=[16, 16, 16])
 
+  def test_tensor_core_multi_linearize(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.has_local:
+      self.skipTest("Only Compiled uses linearizer with locals")
+    if Device.DEFAULT not in tensor_cores:
+      self.skipTest("No tensor cores for device")
+    N = 128
+    Tensor.manual_seed(1552)
+    a = Tensor.rand(N, N)
+    b = Tensor.rand(N, N)
+    r = a@b
+
+    k = Linearizer(r.lazydata.schedule()[-1].ast)
+    k.linearize()
+    k2 = k.copy()
+    k2.linearize()
+
 def helper_realized_ast(r:Tensor):
   s = r.lazydata.schedule()
   run_schedule(s[:-1])  # run all kernels except the last one

@@ -331,7 +331,7 @@ class Kernel:
 
   # ******************** high level optimizers ********************
 
-  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None):
+  def apply_tensor_cores(self, use_tensor_cores=1, hand_coded=True):
     if use_tensor_cores and self.opts.has_local and self.reduceop and self.reduceop.op == ReduceOps.SUM and self.opts.device in tensor_cores:
       for tc in tensor_cores[self.opts.device]:
         if not((tc.arch is None or tc.arch == os.uname().machine) and isinstance(self.reduceop.src[0], LazyOp)): continue
@@ -348,6 +348,7 @@ class Kernel:
         axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides[:self.first_reduce]) if s == 0 and self.full_shape[i]%tc.dims[0] == 0]
         axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides[:self.first_reduce]) if s == 0 and self.full_shape[i]%tc.dims[1] == 0]
 
+        # remove (self.shape_len-self.first_reduce) == 1 to enable wmma conv support
         if not(axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%tc.dims[2] == 0 and self.full_shape[self.first_reduce] >= tc.dims[2] and (self.shape_len-self.first_reduce) == 1): continue
 
         if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
@@ -372,12 +373,10 @@ class Kernel:
           fix(self.apply_opt(Opt(OptOps.LASTLOCAL, s0 if tc_dim == 0 else s1, tc_amt), simd=True), s0 if tc_dim == 0 else s1)
 
         # assert tensor core and prevent extra_opts from altering the key shape structure
-        if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
+        if use_tensor_cores == 1: self.tensor_core = tc  # TC=2 will do the shape ops without the WMMA
+        self.tensor_core_buffers = (tc, buf0, buf1)  # defer aliasing to linearizer, after opts have been applied
 
-        if extra_opts is not None:
-          for opt in extra_opts:
-            self.apply_opt(opt)
-        else:
+        if hand_coded:
           # hand-coded TC opts
           if s1_exists:
             s1_div = [upc for upc in [5,4,3,2,1] if self.full_shape[s1]%upc == 0][0]
@@ -391,10 +390,6 @@ class Kernel:
                 self.apply_opt(Opt(OptOps.LASTLOCAL, s0, upc))
                 break
 
-        # alias buffer
-        alias_pattern = [0]*(self.global_dims+(self.local_dims-len(tc.threads))) + [2]*(len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)
-        self.alias_buffer(buf0, alias_pattern)
-        self.alias_buffer(buf1, alias_pattern)
         return True
     return False
 

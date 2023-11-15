@@ -152,13 +152,21 @@ class Linearizer(Kernel):
     if self.applied_opts == self.applied_opts_cache: return self
 
     # save backups
-    sts_backup, gfr_backup, upc_backup = self.sts[:], self.group_for_reduce[:], self.upcasted
+    bufs_backup, sts_backup, local_alias_backup, gfr_backup, upc_backup = self.bufs[:], self.sts[:], {**self.local_alias},self.group_for_reduce[:], self.upcasted
 
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
 
     # limit dims if we need to
     if self.opts.global_max and self.opts.local_max: self.limit_dims_to_max(self.opts.global_max, self.opts.local_max)
+
+    # apply TC simd local buffer transform
+    if self.tensor_core_buffers is not None:
+      # alias buffer
+      tc, buf0, buf1 = self.tensor_core_buffers
+      alias_pattern = [0] * (self.global_dims + (self.local_dims - len(tc.threads))) + [2] * (len(tc.threads)) + [0] * (self.shape_len - self.upcasted - self.first_reduce) + [1, 1] + [3] * (self.upcasted - 2)
+      self.alias_buffer(buf0, alias_pattern)
+      self.alias_buffer(buf1, alias_pattern)
 
     # uops
     self.uops: List[UOp] = []
@@ -438,7 +446,7 @@ class Linearizer(Kernel):
       graph_uops(self.uops)
 
     # restore backups
-    self.sts, self.group_for_reduce, self.upcasted = sts_backup, gfr_backup, upc_backup
+    self.bufs, self.sts, self.local_alias, self.group_for_reduce, self.upcasted = bufs_backup, sts_backup, local_alias_backup, gfr_backup, upc_backup
 
     # set cache and return
     self.applied_opts_cache = self.applied_opts[:]
