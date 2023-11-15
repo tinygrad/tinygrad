@@ -129,7 +129,7 @@ def train_cifar():
     def _patches(data, patch_size=(kernel_size,kernel_size)):
       h, w = patch_size
       c = data.shape[1]
-      axis: SupportsIndex = (2, 3)
+      axis: SupportsIndex = (2, 3) # type: ignore
       return np.lib.stride_tricks.sliding_window_view(data, window_shape=(h,w), axis=axis).transpose((0,3,2,1,4,5)).reshape((-1,c,h,w))
 
     def _eigens(patches):
