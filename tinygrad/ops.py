@@ -53,7 +53,7 @@ class LazyOp:
   arg: Any = None
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
   @functools.cached_property
-  def buffers(self) -> Tuple[LazyBuffer,...]: return tuple(dedup(sum([x.buffers for x in self.src],())))
+  def buffers(self) -> Tuple[LazyBuffer, ...]: return tuple(dedup(sum([x.buffers for x in self.src], ())))
   @functools.cached_property
   def hash(self): return hash((self.op,self.src, self.arg))
   def __hash__(self): return self.hash
