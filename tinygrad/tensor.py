@@ -125,12 +125,6 @@ class Tensor:
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
     return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().reshape(self.shape)
 
-  # TODO: if things are realized this won't work
-  def to_(self, device:str):
-    assert self.lazydata.realized is None
-    self.lazydata.device = device
-    if self.grad: self.grad.to_(device)
-
   def to(self, device:str) -> Tensor:
     ret = Tensor(self.lazydata, device)
     if self.grad: ret.grad = self.grad.to(device)
@@ -792,9 +786,7 @@ class Tensor:
   def is_floating_point(self) -> bool: return dtypes.is_float(self.dtype)
 
 # register functions to move between devices
-for device in Device._buffers:
-  setattr(Tensor, f"{device.lower()}", partialmethod(Tensor.to, device))
-  setattr(Tensor, f"{device.lower()}_", partialmethod(Tensor.to_, device))
+for device in Device._buffers: setattr(Tensor, f"{device.lower()}", partialmethod(Tensor.to, device))
 
 if IMAGE:
   # if IMAGE>0 we install these replacement functions in Tensor (hack!)
