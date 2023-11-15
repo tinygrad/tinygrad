@@ -226,6 +226,7 @@ class Tensor:
     cdf /= cdf[:, -1].unsqueeze(1)
     unif_samples = Tensor.rand(num_samples, p.shape[0], 1)
     indices = (unif_samples.expand((-1, -1, p.shape[1])) >= cdf).sum(2)
+    indices = indices.permute((1, 0)).squeeze(0)
     return indices.cast(dtypes.int32)
 
   # ***** toposort and backward pass *****
