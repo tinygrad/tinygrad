@@ -263,10 +263,32 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_allclose(ua_arr, (Tensor(ua_arr)/Tensor(1)).numpy())
 
 class TestZeroShapeTensor(unittest.TestCase):
+  def test_shape_stride(self):
+    t = Tensor.rand(3, 2, 0)
+    assert t.shape == (3, 2, 0)
+    # numpy has stride 0, 0, 0; torch has stride 2, 1, 1
+    assert t.lazydata.st.real_strides() == (0, 0, 1)
+
+    t = Tensor.rand(3, 0, 2)
+    assert t.shape == (3, 0, 2)
+    # numpy has stride 0, 0, 0; torch has stride 2, 2, 1
+    assert t.lazydata.st.real_strides() == (0, 2, 1)
+
+    t = Tensor.rand(0, 0, 0)
+    assert t.shape == (0, 0, 0)
+    # numpy has stride 0, 0, 0; torch has stride 1, 1, 1
+    assert t.lazydata.st.real_strides() == (0, 0, 1)
+
   def test_rand(self):
     t = Tensor.rand(3, 2, 0)
     assert t.shape == (3, 2, 0)
     np.testing.assert_equal(t.numpy(), np.zeros((3, 2, 0)))
+    t = Tensor.rand(0)
+    assert t.shape == (0,)
+    np.testing.assert_equal(t.numpy(), np.zeros((0,)))
+    t = Tensor.rand(0, 0, 0)
+    assert t.shape == (0, 0, 0)
+    np.testing.assert_equal(t.numpy(), np.zeros((0, 0, 0)))
 
   def test_full(self):
     t = Tensor.zeros(3, 2, 0)
@@ -276,8 +298,35 @@ class TestZeroShapeTensor(unittest.TestCase):
     assert t.shape == (3, 2, 0)
     np.testing.assert_equal(t.numpy(), np.full((3, 2, 0), 12))
 
-  def test_elementwise(self):
+  def test_expand(self):
     pass
+    # t = Tensor.full((3, 2, 0), 12).contiguous()
+    # a = t.expand((6, 2, 0))
+
+  def test_pad(self):
+    pass
+
+  def test_shrink_into_zero(self):
+    pass
+
+  def test_elementwise(self):
+    a = Tensor.rand(3, 2, 0)
+    a_exp = a.exp()
+    assert a_exp.shape == (3, 2, 0)
+    np.testing.assert_equal(a_exp.numpy(), np.exp(a.numpy()))
+
+    b = Tensor.rand(3, 2, 0)
+    assert b.shape == (3, 2, 0)
+    ab = a * b
+    assert ab.shape == (3, 2, 0)
+    np.testing.assert_equal(ab.numpy(), a.numpy() * b.numpy())
+
+    # # this needs broadcast expand
+    # mask = (Tensor.rand(3, 2, 0) > 0.5)
+    # assert mask.shape == (3, 2, 0)
+    # c = mask.where(a, b)
+    # assert c.shape == (3, 2, 0)
+    # np.testing.assert_equal(c.numpy(), np.where(mask.numpy(), a.numpy() * b.numpy()))
 
   def test_reduce(self):
     pass
