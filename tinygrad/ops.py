@@ -159,6 +159,9 @@ class Interpreted:
     self.method_cache: Dict[LazyOp, Callable] = {}
 
   def interpret_ast(self:Interpreted, ast:LazyOp) -> Callable:
+    if DEBUG >= 3:
+      from tinygrad.graph import print_tree
+      print_tree(ast)
     tglob: Dict[str, Any] = {"Variable": Variable}
     lines: List[str] = []
     f = self.fxn_for_op
@@ -198,9 +201,7 @@ class Interpreted:
   def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
     if ast not in self.method_cache: self.method_cache[ast] = self.interpret_ast(ast)
     ret = self.method_cache[ast]([x.realized for x in inputs] if inputs else None, var_vals)
-    if ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op:
-      ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.fxn_for_op[BufferOps.MEM](ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
-    # TODO: is this used?
+    assert ret.dtype == output.dtype, f"{ret.dtype} != {output.dtype}"
     if output.output_buffer is not None:
       assert output.output_buffer.dtype == ret.dtype
       output.output_buffer._buf = ret._buf
