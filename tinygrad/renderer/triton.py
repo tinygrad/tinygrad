@@ -41,7 +41,7 @@ def define_scalar(local_size, dtype, args):
 
 def uops_to_triton(function_name:str, uops:List[UOp]):
   local_size: List[int] = []
-  dims: List[Any] = []
+  dims: List[str] = []
   valid: List[str] = []
   depth = 1
   signatures, bufs, kernel = [], [], []
