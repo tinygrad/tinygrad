@@ -298,6 +298,15 @@ class TestZeroShapeTensor(unittest.TestCase):
     assert t.shape == (3, 2, 0)
     np.testing.assert_equal(t.numpy(), np.full((3, 2, 0), 12))
 
+  def test_reshape(self):
+    t = Tensor.zeros(3, 2, 0)
+    a = t.reshape(7, 0)
+    assert a.shape == (7, 0)
+    np.testing.assert_equal(a.numpy(), np.zeros((7, 0)))
+    with self.assertRaises(AssertionError):
+      # cannot reshape from size 0 to size 1
+      a = t.reshape(())
+
   def test_expand(self):
     t = Tensor.full((3, 2, 0), 12).expand((6, 2, 0))
     assert t.shape == (6, 2, 0)

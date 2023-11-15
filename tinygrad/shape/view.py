@@ -101,7 +101,7 @@ class View:
 
     assert all(x >= 0 for x in new_shape), f"shape can't contain negative numbers {new_shape}"
     if any(s == 0 for s in self.shape):
-      assert not new_shape or any(s == 0 for s in new_shape), f"cannot reshape 0 size to {new_shape}"
+      assert any(s == 0 for s in new_shape), f"cannot reshape 0 size to {new_shape}"
       return View.create(new_shape)
     # check for the same size
     if all_int(self.shape):
