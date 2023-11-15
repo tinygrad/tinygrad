@@ -263,6 +263,10 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_allclose(ua_arr, (Tensor(ua_arr)/Tensor(1)).numpy())
 
 class TestZeroShapeTensor(unittest.TestCase):
+  def test_from_empty(self):
+    np.testing.assert_equal(Tensor([]).numpy(), np.array([]))
+    np.testing.assert_equal(Tensor(None).numpy(), np.array([]))
+
   def test_shape_stride(self):
     t = Tensor.rand(3, 2, 0)
     assert t.shape == (3, 2, 0)
