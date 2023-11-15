@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
-from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
+from tinygrad.jit import TinyJit
 from tinygrad.ops import Device, GlobalCounters
 from tinygrad.helpers import CI, dtypes, getenv, prod
 from test.helpers import derandomize_model
@@ -47,7 +47,7 @@ class TestRealWorld(unittest.TestCase):
     def test(t, t2): return model(t, 801, t2).realize()
     helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 967)
 
-  @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["LLVM"], "needs JIT, too long on CI LLVM")
+  @unittest.skipUnless((Device.DEFAULT not in ["LLVM", "CPU"] or not CI), "needs JIT, too long on CI LLVM")
   def test_llama(self):
     Tensor.default_type = dtypes.float16
 
@@ -59,7 +59,7 @@ class TestRealWorld(unittest.TestCase):
     # NOTE: only test one pass, not testing the dynamic shape autoregressive part
     helper_test("test_llama", lambda: (Tensor([[1,]]),), test, 0.22 if CI else 13.5, 137 if CI else 521, all_jitted=True)
 
-  @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and (Device.DEFAULT not in ["LLVM"] or not CI), "needs JIT, too long on CI LLVM")
+  @unittest.skipUnless((Device.DEFAULT not in ["LLVM", "CPU"] or not CI), "needs JIT, too long on CI LLVM")
   def test_gpt2(self):
     Tensor.default_type = dtypes.float16
 
@@ -70,7 +70,7 @@ class TestRealWorld(unittest.TestCase):
     def test(t): return model(t, 0).realize()
     helper_test("test_gpt2", lambda: (Tensor([[1,]]),), test, 0.21 if CI else 0.9, 140 if CI else 396, all_jitted=True)
 
-  @unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and (Device.DEFAULT not in ["LLVM", "CLANG"] or not CI), "needs JIT, too long on CI LLVM and CLANG")
+  @unittest.skipUnless((Device.DEFAULT not in ["LLVM", "CLANG", "CPU"] or not CI), "needs JIT, too long on CI LLVM and CLANG")
   def test_train_cifar(self):
     # TODO: with default device
     #old_default = Device.DEFAULT
