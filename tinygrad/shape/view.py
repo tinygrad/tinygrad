@@ -3,7 +3,7 @@ import functools, operator
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, cast
 from tinygrad.helpers import prod, all_int, dedup
-from tinygrad.shape.symbolic import Node, NumNode, Variable, VariableOrNum, is_sym_int, sint
+from tinygrad.shape.symbolic import Node, NumNode, Variable, VariableOrNum, sint
 
 @functools.lru_cache(maxsize=None)
 def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
