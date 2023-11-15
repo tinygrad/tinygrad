@@ -16,7 +16,7 @@ from tinygrad.nn import Embedding, Linear
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict
 from tinygrad.helpers import GlobalCounters
 from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
-from tinygrad.shape.symbolic import Variable, sym_infer
+from tinygrad.shape.symbolic import Variable
 
 JIT = getenv("JIT", 0 if CI else int(Device.DEFAULT in JIT_SUPPORTED_DEVICE))
 
