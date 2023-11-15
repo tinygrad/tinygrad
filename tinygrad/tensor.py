@@ -248,7 +248,6 @@ class Tensor:
   # ***** movement mlops *****
   def reshape(self, shape, *args) -> Tensor:
     new_shape = argfix(shape, *args)
-    assert 0 not in new_shape, f"zeros not allowed in shape {new_shape}"
     return mlops.Reshape.apply(self, shape=tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape]))
   def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple([x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))]))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
@@ -430,7 +429,8 @@ class Tensor:
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False) -> Tensor:
     axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if isinstance(axis, int) else list(axis))
     axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
-    shape = [s for i,s in enumerate(self.shape) if i not in axis_]
+    shape = tuple(s for i,s in enumerate(self.shape) if i not in axis_)
+    if 0 in self.shape and 0 not in shape: return Tensor.full(tuple(1 if s == 0 else s for s in self.shape) if keepdim else shape, {mlops.Sum: 0, mlops.Max: -float("inf")}[fxn])
     ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else s for i,s in enumerate(self.shape)]))
     return ret if keepdim else ret.reshape(shape=shape)
 
@@ -684,6 +684,7 @@ class Tensor:
   def minimum(self, x:Union[Tensor, float]) -> Tensor: return -((-self).maximum(-x))
 
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
+    if 0 in self.shape: return self
     x_,y = self._broadcasted(input_)
     x,z = x_._broadcasted(other)
     return mlops.Where.apply(x, *y._broadcasted(z))
