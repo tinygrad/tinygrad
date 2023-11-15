@@ -124,6 +124,7 @@ class Tensor:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
     return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().reshape(self.shape)
+  def item(self) -> Union[float, int]: return self.numpy().item()
 
   # TODO: if things are realized this won't work
   def to_(self, device:str):
@@ -216,7 +217,7 @@ class Tensor:
     std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(shape[1:]))
     return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
-  def multinomial(self: Tensor, num_samples: int, replacement: bool = False) -> Tensor:
+  def multinomial(self: Tensor, num_samples: int = 1, replacement: bool = False) -> Tensor:
     assert self.ndim <= 2, "p must be 1 or 2 dim"
     assert replacement or num_samples == 1, "supported only with replacement"
     p = self.unsqueeze(0) if self.ndim == 1 else self
