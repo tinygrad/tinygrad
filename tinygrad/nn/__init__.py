@@ -2,7 +2,7 @@ import math
 from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, all_int
-
+from tinygrad import nn
 class BatchNorm2d:
   def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
@@ -126,3 +126,41 @@ class Embedding:
   def __call__(self, idx:Tensor) -> Tensor:
     if not hasattr(self, 'vocab_counter'): self.vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False).reshape(1, 1, self.vocab_size)
     return (self.vocab_counter == idx.unsqueeze(2)).expand(*idx.shape, self.vocab_size) @ self.weight
+
+class MultiHeadAttention:
+    def __init__(self, input_dim:int, embed_dim:int, num_heads:int):
+        assert embed_dim % num_heads == 0, "Embedding dimension must be 0 modulo number of heads."
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+
+        self.qkv_proj = nn.Linear(input_dim, 3*embed_dim)
+        self.o_proj = nn.Linear(embed_dim, embed_dim)
+
+    def __call__(self, x, mask=None):
+        batch_size, seq_length, _ = x.shape[0],x.shape[1],x.shape[2]
+        if mask is not None:
+            mask = mask.expand_mask()
+        
+        qkv = self.qkv_proj(x)
+
+        # Deconstruct Linear Output into Q, K, and V
+        qkv = qkv.reshape(batch_size, seq_length, self.num_heads, 3*self.head_dim)
+        qkv = qkv.permute(0, 2, 1, 3) # [Batch, Head, SeqLen, Dims]
+        q, k, v = qkv.chunk(3, dim=-1)
+
+        # Determine value outputs
+        values = q.scaled_dot_product_attention(k, v, attn_mask=mask)
+        values = values.permute(0, 2, 1, 3) # [Batch, SeqLen, Head, Dims]
+        values = values.reshape(batch_size, seq_length, self.embed_dim)
+        output = self.o_proj(values)
+
+        return output
+    
+    def expand_mask(self):
+        assert self.ndim > 2, "The mask must be a two-dimensional tensor with dimensions of sequence length by sequence length."
+        if self.ndim == 3:
+            self = self.unsqueeze(1)
+        while self.ndim < 4:
+            self = self.unsqueeze(0)
+        return self
