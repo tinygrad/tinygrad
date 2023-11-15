@@ -110,7 +110,7 @@ def torch_load(fn:str):
     for n in myzip.namelist():
       if n.startswith(f'{base_name}/data/'):
         with myzip.open(n) as myfile:
-          offsets[n.split("/")[-1]] = myfile.tell() if myfile.seekable() else None
+          offsets[n.split("/")[-1]] = myfile.tell()
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       return TorchPickle(myfile).load()
   else:
