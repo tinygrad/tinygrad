@@ -1,5 +1,4 @@
 import unittest
-from tinygrad.jit import JIT_SUPPORTED_DEVICE
 from tinygrad.shape.symbolic import Variable
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor, Device

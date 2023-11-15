@@ -1,10 +1,10 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib, ctypes, tempfile
 import Metal, Cocoa, libdispatch
-from typing import List, Any, Tuple, Dict, Union, Set
+from typing import List, Any, Tuple, Dict, Union, Set, cast
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup, CI
-from tinygrad.ops import Compiled, BatchExecutor, JitItem
+from tinygrad.ops import Compiled, BatchExecutor, JitItem, CompiledASTRunner
 from tinygrad.renderer.metal import MetalRenderer
 from tinygrad.runtime.lib import RawBufferMapped, RawBuffer, LRUAllocator
 from tinygrad.shape.symbolic import Variable, Node
@@ -98,8 +98,9 @@ class MetalBatchExecutor(BatchExecutor):
     self.input_has_variable_dims: Set[int] = set()
     read_resources, write_resources = [], []
     for j,ji in enumerate(self.jit_cache):
+      prg: CompiledASTRunner = cast(CompiledASTRunner, ji.prg)
       descriptor = Metal.MTLComputePipelineDescriptor.new()
-      descriptor.setComputeFunction_(ji.prg.clprg.fxn)
+      descriptor.setComputeFunction_(prg.clprg.fxn)
       descriptor.setSupportIndirectCommandBuffers_(True)
       pipeline_state = unwrap(METAL.device.newComputePipelineStateWithDescriptor_options_reflection_error_(descriptor, Metal.MTLPipelineOption(0), None, None))
       icb_command = self.icb.indirectComputeCommandAtIndex_(j)
@@ -110,11 +111,11 @@ class MetalBatchExecutor(BatchExecutor):
           if i == 0: write_resources.append(b._buf)
           else: read_resources.append(b._buf)
       var_vals_keys = list(var_vals.keys())
-      for i,v in enumerate(getattr(ji.prg,"vars",[])):
+      for i,v in enumerate(prg.vars):
         icb_command.setKernelBuffer_offset_atIndex_(self.int_buf._buf, var_vals_keys.index(v)*4, len(ji.rawbufs)+i)
-      global_size, local_size = ji.prg.launch_dims(var_vals)
-      assert ji.prg.global_size and ji.prg.local_size, "need global and local size to JIT"
-      if any(isinstance(x, Node) for x in ji.prg.global_size) or any(isinstance(x, Node) for x in ji.prg.local_size):
+      global_size, local_size = prg.launch_dims(var_vals)
+      assert prg.global_size and prg.local_size, "need global and local size to JIT"
+      if any(isinstance(x, Node) for x in prg.global_size) or any(isinstance(x, Node) for x in prg.local_size):
         self.input_has_variable_dims.add(j)
       else:
         icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
@@ -130,7 +131,7 @@ class MetalBatchExecutor(BatchExecutor):
     for (j,i),input_name in self.input_replace.items():
       self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_name]._buf, 0, i)
     for j in self.input_has_variable_dims:
-      global_size, local_size = self.jit_cache[j].prg.launch_dims(var_vals)
+      global_size, local_size = cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals)
       self.icb.indirectComputeCommandAtIndex_(j).concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
     self.int_buf_view[:] = list(var_vals.values())
     command_buffer = METAL.mtl_queue.commandBuffer()
