@@ -1,6 +1,12 @@
 repos:
   - repo: local
     hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy tinygrad/ extra/helpers.py
+        language: system
+        always_run: true
+        pass_filenames: false
       - id: ruff
         name: ruff
         entry: ruff .
@@ -19,15 +25,9 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
-      - id: mypy
-        name: mypy
-        entry: mypy tinygrad/ extra/helpers.py
-        language: system
-        always_run: true
-        pass_filenames: false
       - id: tests
-        name: subset of (CPU) tests
-        entry: env PYTHONPATH="." CPU=1 pytest test/unit/ test/test_ops.py test/test_dtype.py test/test_schedule.py test/test_custom_function.py test/test_assign.py test/test_symbolic_shapetracker.py
+        name: subset of TORCH tests
+        entry: env PYTHONPATH="." TORCH=1 python3 -m pytest -n=4 test/unit/ test/test_ops.py test/test_dtype.py test/test_schedule.py test/test_custom_function.py test/test_assign.py test/test_symbolic_shapetracker.py
         language: system
         always_run: true
         pass_filenames: false
@@ -39,7 +39,7 @@ repos:
         pass_filenames: false
       - id: pylint
         name: pylint
-        entry: python3 -m pylint tinygrad/
+        entry: env PYTHONPATH="." python3 -m pylint tinygrad/
         language: system
         always_run: true
         pass_filenames: false

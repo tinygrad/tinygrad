@@ -3,7 +3,7 @@ from collections import defaultdict
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
 from tinygrad.helpers import DType, dtypes, ImageDType, DEBUG, getenv
 from tinygrad.codegen.linearizer import  UOp, UOps
-from triton.compiler import compile as triton_compile  # type: ignore
+from triton.compiler import compile as triton_compile
 import linecache
 import math
 import re
@@ -108,6 +108,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
         kk(f"{args[1]} = tl.arange({0}, {next_power_of_2(args[2])})")
         local_size.append(args[2])
       r[u] = args[1]
+    elif uop == UOps.CAST and dtype is not None: r[u] = render_cast(r[vin[0]], dtype)
     else: raise NotImplementedError(f"unimplemented: {uop}")
 
   prg = f"import triton\nimport triton.language as tl\ntl.core.TRITON_MAX_TENSOR_NUMEL = float('inf')\n@triton.jit\ndef {function_name}("+','.join(f"{buf[0]}" for buf in bufs)+"):\n"

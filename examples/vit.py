@@ -4,7 +4,7 @@ import numpy as np
 from PIL import Image
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
-from models.vit import ViT
+from extra.models.vit import ViT
 from extra.utils import fetch
 """
 fn = "gs://vit_models/augreg/Ti_16-i21k-300ep-lr_0.001-aug_none-wd_0.03-do_0.0-sd_0.0.npz"

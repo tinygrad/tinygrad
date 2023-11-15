@@ -1,6 +1,6 @@
 import os, atexit, functools
 try:
-  import networkx as nx  # type: ignore
+  import networkx as nx
 except ImportError:
   nx = None # graph won't work
 from collections import defaultdict
@@ -80,7 +80,7 @@ def log_schedule_item(si: ScheduleItem):
       if lo.op != BufferOps.MEM: continue
       input_to_st[si.inputs[lo.arg.idx-1]].append(lo.arg.st)
 
-    # add them to the graph, potentially with a movement op seperating them
+    # add them to the graph, potentially with a movement op separating them
     for x in input_to_st:
       for st in dedup(input_to_st[x]):
         if st.contiguous:
@@ -114,8 +114,8 @@ def graph_uops(uops):
   G = nx.DiGraph()
   for u in uops:
     if u.uop == UOps.END: continue
-    G.add_node(u.num, label=f"{str(u.uop)[5:]}{(' '+str(u.arg)) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.uop, "#ffffff"))
-    for v in u.vin: G.add_edge(v.num, u.num)
+    G.add_node(uops.index(u), label=f"{str(u.uop)[5:]}{(' '+str(u.arg)) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.uop, "#ffffff"))
+    for v in u.vin: G.add_edge(uops.index(v), uops.index(u))
   GRAPHPATH = "/tmp/uops"
   nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
   os.system(f'dot -Grankdir=LR -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')

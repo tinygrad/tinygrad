@@ -7,21 +7,22 @@ from pathlib import Path
 import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Union
 
 from tinygrad.helpers import Timing, getenv, DEBUG, dtypes, CI
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
-from tinygrad.nn.state import safe_load, torch_load, load_state_dict
+from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad.helpers import GlobalCounters
-from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
+from tinygrad.jit import TinyJit
 from tinygrad.shape.symbolic import Variable
 
-JIT = getenv("JIT", 0 if CI else int(Device.DEFAULT in JIT_SUPPORTED_DEVICE))
+MAX_CONTEXT = 1024
+JIT = getenv("JIT", 0 if CI else 1)
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
   freqs = Tensor.arange(end).unsqueeze(dim=1)*freqs.unsqueeze(dim=0)
   return Tensor.stack([Tensor.cos(freqs), Tensor.sin(freqs)], dim=-1).reshape(1, end, 1, dim//2, 2)
@@ -69,27 +70,30 @@ class Attention:
     self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
-  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor], jit_ctx:Optional[Dict[Variable,int]]=None) -> Tuple[Tensor, Tensor, Tensor]:
-    bsz, seqlen, _ = x.shape
+  def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
     xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+    bsz, seqlen, n_heads, head_dim = xq.shape
 
-    # kv caching!
-    if start_pos == 0:
-      keys, values = xk, xv
-    else:
-      assert cache_k is not None and cache_v is not None, "no cache"
-      assert start_pos == (cache_k.shape[1].val if isinstance(cache_k.shape[1], Variable) else cache_k.shape[1]) == (cache_v.shape[1].val if isinstance(cache_v.shape[1], Variable) else cache_v.shape[1]), f"cache has wrong shape, {start_pos=}, {cache_k.shape[1]=}, {cache_v.shape[1]=}"
-      assert seqlen == xk.shape[1] and seqlen == xv.shape[1], "seqlen is wrong shape?!?"
-      keys, values = cache_k.cat(xk, dim=1), cache_v.cat(xv, dim=1)
+    # create kv cache
+    if not hasattr(self, "cache_k"):
+      self.cache_k, self.cache_v = Tensor.zeros(bsz, MAX_CONTEXT, self.n_kv_heads, self.head_dim), Tensor.zeros(bsz, MAX_CONTEXT, self.n_kv_heads, self.head_dim)
 
-    cache_k, cache_v = keys, values
-    keys, values = repeat_kv(keys, self.n_rep).realize(), repeat_kv(values, self.n_rep).realize()
-    attn = Tensor.scaled_dot_product_attention(xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2), mask).transpose(1, 2).reshape(bsz, seqlen, -1)
-    return self.wo(attn).realize(), cache_k.realize(), cache_v.realize()
+    keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
+    values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
+
+    # update the cache
+    self.cache_k.assign(keys.pad((None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()).realize()
+    self.cache_v.assign(values.pad((None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()).realize()
+
+    keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
+
+    xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
+    attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1)
+    return self.wo(attn)
 
 class FeedForward:
   def __init__(self, dim, hidden_dim, multiple_of, linear=Linear, ffn_dim_multiplier=None):
@@ -113,60 +117,35 @@ class TransformerBlock:
     self.attention_norm = RMSNorm(dim, norm_eps)
     self.ffn_norm = RMSNorm(dim, norm_eps)
 
-  def __call__(self, x:Tensor, cache_k:Optional[Tensor], cache_v:Optional[Tensor], start_pos:int, freqs_cis:Tensor, mask:Optional[Tensor], jit_ctx:Optional[Dict[Variable,int]]=None):
-    bsz, seqlen, _ = x.shape
-    if JIT and mask is None:
-      assert cache_k is not None and cache_v is not None, "no cache"
-      pos = Variable("pos", 1, 1024).bind(start_pos)
-      cache_k = cache_k.reshape(cache_k.shape[0], pos, cache_k.shape[2], cache_k.shape[3])
-      cache_v = cache_v.reshape(cache_v.shape[0], pos, cache_v.shape[2], cache_v.shape[3])
-
-    output, cache_k, cache_v = self.attention(self.attention_norm(x), cache_k, cache_v, start_pos, freqs_cis, mask, jit_ctx=jit_ctx)
-    h = x + output
-    return (h + self.feed_forward(self.ffn_norm(h))).realize(), cache_k.realize(), cache_v.realize()
+  def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
+    h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
+    return (h + self.feed_forward(self.ffn_norm(h))).realize()
 
 class Transformer:
   def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None, n_kv_heads=None, rope_theta=10000):
     self.layers = [TransformerBlock(dim, multiple_of, n_heads, n_kv_heads, norm_eps, linear, ffn_dim_multiplier) for _ in range(n_layers)]
-    self.kv_caches = [(None, None) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = Embedding(vocab_size, dim)
     self.output = linear(dim, vocab_size, bias=False)
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_seq_len * 2, rope_theta)
-    self.norm_output = lambda x: self.output(self.norm(x))
+    self.forward_jit = TinyJit(self.forward)
 
-    self.tok_embeddings_jitted = TinyJit(lambda x: self.tok_embeddings(x).realize())
-    self.postprocess_jitted = TinyJit(self.postprocess)
-    self.layers_jitted = [TinyJit(layer.__call__) for layer in self.layers]
-
-  def postprocess(self, x, temperature:Optional[float]):
-    logits = self.output(self.norm(x))
-    if temperature is not None: return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
-    return logits.realize()
-
-  def __call__(self, tokens:Tensor, start_pos:int, temperature:Optional[float]=None):
+  def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float=0.0):
     _bsz, seqlen = tokens.shape
-    if seqlen == 1 and start_pos > 0 and JIT:
-      pos = Variable("pos", 1, 1024).bind(start_pos)
-      # get only the part of freqs_cis that we are using.
-      freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (pos, pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
-      h = self.tok_embeddings_jitted(tokens)
-      for i, (layer, (cache_k, cache_v)) in enumerate(zip(self.layers_jitted, self.kv_caches)):
-        h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=freqs_cis, mask=None, jit_ctx={pos.unbind()[0]: start_pos})
-        self.kv_caches[i] = (cache_k, cache_v)
-      return self.postprocess_jitted(h, temperature)
-    else:
-      freqs_cis = self.freqs_cis.shrink(((0, self.freqs_cis.shape[0]), (start_pos, start_pos+seqlen),(0, self.freqs_cis.shape[2]),(0, self.freqs_cis.shape[3]),(0, self.freqs_cis.shape[4])))
-      mask = Tensor.full((1, 1, seqlen, start_pos + seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize()
-      h = self.tok_embeddings(tokens)
-      for i, (layer, (cache_k, cache_v)) in enumerate(zip(self.layers, self.kv_caches)):
-        # need this reshape back to int shape in conversational mode because jitted and unjitted calls share the same cache
-        if cache_k is not None and start_pos > 0:
-          cache_k = cache_k.reshape(cache_k.shape[0], start_pos, cache_k.shape[2], cache_k.shape[3])
-          cache_v = cache_v.reshape(cache_v.shape[0], start_pos, cache_v.shape[2], cache_v.shape[3])
-        h, cache_k, cache_v = layer(h, cache_k, cache_v, start_pos=start_pos, freqs_cis=freqs_cis, mask=mask)
-        self.kv_caches[i] = (cache_k, cache_v)
-      return self.postprocess(h, temperature)
+    freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
+    mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
+
+    h = self.tok_embeddings(tokens)
+    for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
+    logits = self.output(self.norm(h))
+    return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
+
+  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
+    # TODO: better way to handle the first call v.s. the rest?
+    if tokens.shape[0:2] == (1,1) and JIT:
+      assert start_pos > 0
+      return self.forward_jit(tokens, Variable("start_pos", 1, MAX_CONTEXT).bind(start_pos), temperature)
+    return self.forward(tokens, start_pos, temperature)
 
 # **** files and arguments ****
 MODEL_PARAMS = {
@@ -329,7 +308,7 @@ class LLaMa:
     toks = [self.tokenizer.bos_id()] + self.tokenizer.encode(prompt)
     start_pos = 0
     for i in range(max_length):
-      probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
+      probs = llama.model(Tensor([toks[start_pos:]]), start_pos, temperature).realize()
       probs_np = probs.numpy()
       tok = int(np.random.choice(len(probs_np), p=probs_np))
       start_pos = len(toks)
@@ -515,6 +494,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
+  param_count = sum(x.lazydata.st.size() for x in get_parameters(llama.model))
 
   if chatbot:
     # encode pre prompt
@@ -522,7 +502,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
     print(f"Preparing KV cache for chatbot with personality {args.personality}...")
     with Timing():
-      llama.model(Tensor([toks]), 0, args.temperature).realize()  # NOTE: output logits are not used
+      llama.model(Tensor([toks]), 0, args.temperature).realize()  # NOTE: outputs are not used
     start_pos = len(toks)
   else:
     # non chat bot mode
@@ -558,7 +538,7 @@ After you are done speaking, output [EOS]. You are not Chad.
       with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
         with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                     f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                    (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
+                    (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
           probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
         probs_np = probs.numpy()
         tok = int(np.random.choice(len(probs_np), p=probs_np))
