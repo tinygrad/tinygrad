@@ -358,8 +358,7 @@ class TestZeroShapeTensor(unittest.TestCase):
     assert ab.shape == (3, 2, 0)
     np.testing.assert_equal(ab.numpy(), a.numpy() * b.numpy())
 
-    # NOTE: cannot compare with a constant to construct the mask because 0-dim tensor is not broadcastable
-    mask = (Tensor.rand(3, 2, 0) > Tensor.rand(3, 2, 0))
+    mask = (Tensor.rand(3, 2, 0) > 0.5)
     assert mask.shape == (3, 2, 0)
     c = mask.where(a, b)
     assert c.shape == (3, 2, 0)
@@ -383,6 +382,7 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_equal(Tensor([]).max().numpy(), -float("inf"))
     np.testing.assert_equal(Tensor([]).min().numpy(), float("inf"))
     np.testing.assert_equal(Tensor([]).sum().numpy(), 0)
+    np.testing.assert_equal(Tensor([]).mean().numpy(), 0)
 
 if __name__ == '__main__':
   unittest.main()

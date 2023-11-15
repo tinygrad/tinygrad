@@ -441,7 +441,7 @@ class Tensor:
   def mean(self, axis=None, keepdim=False):
     assert all_int(self.shape), "does not support symbolic shape"
     out = self.sum(axis=axis, keepdim=keepdim)
-    return out.mul(prod(out.shape)/prod(self.shape))
+    return out.mul(prod(out.shape)/prod(self.shape)) if not 0 in self.shape else out
   def std(self, axis=None, keepdim=False, correction=1):
     assert all_int(self.shape), "does not support symbolic shape"
     square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
@@ -625,6 +625,7 @@ class Tensor:
   def _broadcasted(self, y:Union[Tensor, float], reverse:bool=False) -> Tuple[Tensor, Tensor]:
     x: Tensor = self
     if not isinstance(y, Tensor):
+      if 0 in x.shape: return x, x.full_like(y)
       y = Tensor(y, device=self.device, requires_grad=False, dtype=self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32)
     if reverse: x, y = y, x
     if (xshape:=x.shape) == (yshape:=y.shape): return (x, y)
@@ -684,7 +685,6 @@ class Tensor:
   def minimum(self, x:Union[Tensor, float]) -> Tensor: return -((-self).maximum(-x))
 
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
-    if 0 in self.shape: return self
     x_,y = self._broadcasted(input_)
     x,z = x_._broadcasted(other)
     return mlops.Where.apply(x, *y._broadcasted(z))
