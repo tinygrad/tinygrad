@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Final, Callable, DefaultDict
+from typing import Dict, List, Final, Callable, DefaultDict
 from collections import defaultdict
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
 from tinygrad.helpers import DType, dtypes, ImageDType, DEBUG, getenv
