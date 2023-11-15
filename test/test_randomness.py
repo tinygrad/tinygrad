@@ -107,6 +107,7 @@ class TestRandomness(unittest.TestCase):
       for i in range(torch_res.shape[0]):
         self.assertTrue(equal_distribution(lambda *_: tiny_res[i], lambda _: torch_res[i]))
     _check_with_torch(p=[0.231, 0., 1., 0.5], num_samples=2000, replacement=True)
+    _check_with_torch(p=[[0.2, 0.8]], num_samples=2000, replacement=True)  # 2D but only one row
     _check_with_torch(p=[[0.453, 0., 1., 0.81], [0.1, 0.8, 0., 0.1]], num_samples=2000, replacement=True)
     # without-replacement isn't supported, unless taking only one sample
     p = [0.1, 0.9]
