@@ -4,7 +4,7 @@
 #typeguard.importhook.install_import_hook('tinygrad')
 
 from pathlib import Path
-import functools, sys, argparse, json, os
+import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple, Dict
