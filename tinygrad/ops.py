@@ -128,7 +128,7 @@ class BatchExecutor:
 
   def __call__(self, input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int], wait=False):
     for (j,i),input_name in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name]
-    for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), {v:var_vals[v] for v in getattr(ji.prg,"vars",[])}, jit=True)
+    for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), var_vals, jit=True)
     self.clear_jit_inputs()
 
   def update_stats(self, var_vals: Dict[Variable, int], et: Optional[float]):
@@ -145,24 +145,6 @@ class BatchExecutor:
 
   def clear_jit_inputs(self):
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
-
-# **************** for Interpreted Buffers ****************
-
-class Interpreted:
-  def __init__(self, buffer: Type[RawBuffer], compiler: Callable):
-    self.buffer, self.compiler = buffer, compiler
-    self.synchronize = lambda: None
-    self.batch_executor = BatchExecutor
-    self.codegen = None
-    self.method_cache: Dict[LazyOp, Callable] = {}
-
-  def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
-    if ast not in self.method_cache: self.method_cache[ast] = self.compiler(ast)
-    output.realized = output.output_buffer   # NOTE: assuming this is the right size and dtype from assign
-    ret: RawBuffer = self.method_cache[ast]([x.realized for x in inputs] if inputs else None, var_vals)
-    assert output.dtype == ret.dtype, f"expected {output.dtype}, got {ret.dtype}"
-    if output.realized is not None: output.realized._buf = ret._buf
-    else: output.realized = ret
 
 # **************** independent FlopCounter ****************
 
@@ -192,6 +174,24 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter:
   def run_ast(ast): return InterpretedFlopCounter[ast.op](*([run_ast(x) for x in ast.src]+([ast.arg] if ast.arg is not None else [])))
   return run_ast(ast)
 
+# **************** for Interpreted Buffers ****************
+
+class Interpreted:
+  def __init__(self, buffer: Type[RawBuffer], compiler: Callable):
+    self.buffer, self.compiler = buffer, compiler
+    self.synchronize = lambda: None
+    self.batch_executor = BatchExecutor
+    self.codegen = None
+    self.method_cache: Dict[LazyOp, Callable] = {}
+
+  def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
+    if ast not in self.method_cache: self.method_cache[ast] = self.compiler(ast)
+    output.realized = output.output_buffer   # NOTE: assuming this is the right size and dtype from assign
+    ret: RawBuffer = self.method_cache[ast]([x.realized for x in inputs] if inputs else None, var_vals)
+    assert output.dtype == ret.dtype, f"expected {output.dtype}, got {ret.dtype}"
+    if output.realized is not None: output.realized._buf = ret._buf
+    else: output.realized = ret
+
 # **************** for Compiled Buffers ****************
 
 class ASTRunner:
@@ -205,7 +205,7 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.lib)
     return self
 
-  def exec(self, rawbufs, var_vals:Optional[Dict[Variable, int]]=None, force_wait=False) -> Optional[float]:
+  def exec(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, force_wait=False) -> Optional[float]:
     from tinygrad.jit import CacheCollector
     CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
     return self(rawbufs, var_vals, force_wait=force_wait)
@@ -217,6 +217,7 @@ class ASTRunner:
 
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
     if var_vals is None: var_vals = {}
+    var_vals = {k:var_vals[k] for k in self.vars}   # filter the var_vals
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
@@ -285,7 +286,8 @@ class Compiled:
   def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
-    # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
+    # TODO: this is pretty wrong actually, who knows where else this buffer is used?
+    # TODO: what if an assign is required? this silently is wrong
     output.realized = output.output_buffer
     if output.realized:
       for i,a in enumerate(inputs):
@@ -302,12 +304,5 @@ class Compiled:
     # all the rawbuffers
     rawbuffers = [output.realized] + [x.realized for x in inputs]
 
-    if getenv("ENABLE_METHOD_CACHE", 1):
-      if ast not in self.method_cache: self.method_cache[ast] = self.get_optimized_program(ast, rawbuffers)
-      prg = self.method_cache[ast]
-    else:
-      prg = self.get_optimized_program(ast, rawbuffers)
-
-    if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
-
-    prg.exec(rawbuffers, var_vals={k:var_vals[k] for k in prg.vars})
+    if ast not in self.method_cache: self.method_cache[ast] = self.get_optimized_program(ast, rawbuffers)
+    self.method_cache[ast].exec(rawbuffers, var_vals)
