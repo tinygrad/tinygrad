@@ -159,13 +159,16 @@ class Interpreted:
     self.method_cache: Dict[LazyOp, Callable] = {}
 
   def interpret_ast(self:Interpreted, ast:LazyOp) -> Callable:
+    if DEBUG >= 3:
+      from tinygrad.graph import print_tree
+      print_tree(ast)
     tglob: Dict[str, Any] = {"Variable": Variable}
     lines: List[str] = []
     f = self.fxn_for_op
 
     @functools.lru_cache(None)
     def gstr(x:Any, nm=None) -> str:
-      if self != InterpretedFlopCounter and ('Variable' in (str_arg := repr(x)) or 'NumNode' in str_arg):
+      if ('Variable' in (str_arg := repr(x)) or 'NumNode' in str_arg):
         str_arg = re.sub(r'Variable\(.*?\)', lambda m: f'var_vals[{str(m.group(0))}]', str_arg)
         # TODO: (Variable - Variable) might create NumNode. can we remove it?
         return re.sub(r'NumNode\((.*?)\)', r'\1', str_arg)
@@ -190,22 +193,22 @@ class Interpreted:
       return ret
 
     ret = _interpret_ast(ast)
-    src = '\n'.join(['def run(inputs, var_vals):'] + lines + [f"  return {gstr(self.from_underlying, 'from_underlying')}({ret})" if self.from_underlying else f"  return {ret}"])
-    if DEBUG >= 4 and self != InterpretedFlopCounter: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
+    src = '\n'.join(['def run(inputs, var_vals):'] + lines + [f"  return {gstr(self.from_underlying, 'from_underlying')}({ret})"])
+    if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
     exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
     return tglob['run']
 
-  def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, **kwargs):
+  def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
     if ast not in self.method_cache: self.method_cache[ast] = self.interpret_ast(ast)
     ret = self.method_cache[ast]([x.realized for x in inputs] if inputs else None, var_vals)
-    if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op:
-      ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.fxn_for_op[BufferOps.MEM](ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
-    # TODO: is this used?
-    if output is not None and output.output_buffer is not None:
+    assert ret.dtype == output.dtype, f"{ret.dtype} != {output.dtype}"
+    if output.output_buffer is not None:
       assert output.output_buffer.dtype == ret.dtype
       output.output_buffer._buf = ret._buf
       return output.output_buffer
     return ret
+
+# **************** independent FlopCounter ****************
 
 @dataclass
 class FlopCounter:
@@ -218,16 +221,20 @@ class FlopCounter:
   def consume_flops(self):
     self.flops, ret = 0, self.flops
     return ret
-InterpretedFlopCounter = Interpreted(FlopCounter, {
+
+InterpretedFlopCounter: Dict[Op, Callable] = {
   BufferOps.MEM: lambda arg: FlopCounter(arg.st.shape, arg.dtype, 0, {arg.idx: arg.dtype.itemsize*arg.st.size()}), BufferOps.CONST: lambda arg: FlopCounter(arg.st.shape, arg.dtype, 0, {}),
   UnaryOps.CAST: lambda self,arg: FlopCounter(self.shape, arg[0], self.consume_flops(), self.mem),   # cast uses no flops
   **{op:lambda self: FlopCounter(self.shape, self.dtype, self.consume_flops() + prod(self.shape), self.mem) for op in UnaryOps if op != UnaryOps.CAST},
   **{op:lambda self,y: FlopCounter(self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape), {**self.mem, **y.mem}) for op in BinaryOps},
   **{op:lambda self,new_shape: FlopCounter(new_shape, self.dtype, self.consume_flops() + prod(self.shape), self.mem) for op in ReduceOps},
-  TernaryOps.WHERE: lambda self,y,z: FlopCounter(self.shape, y.dtype, self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape), {**self.mem, **y.mem, **z.mem})})
+  TernaryOps.WHERE: lambda self,y,z: FlopCounter(self.shape, y.dtype, self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape), {**self.mem, **y.mem, **z.mem})}
 
 @functools.lru_cache(None)
-def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.exec_ast(ast)
+def get_lazyop_info(ast:LazyOp) -> FlopCounter:
+  @functools.lru_cache(None) # NOTE: this cache needs to be recreated for new ASTs
+  def run_ast(ast): return InterpretedFlopCounter[ast.op](*([run_ast(x) for x in ast.src]+([ast.arg] if ast.arg is not None else [])))
+  return run_ast(ast)
 
 # **************** for Compiled Buffers ****************
 
@@ -319,7 +326,7 @@ class Compiled:
     assert all(v._val is None for v in prg.vars), f"ast contains bound Variable {prg.vars}"
     return prg
 
-  def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
+  def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
