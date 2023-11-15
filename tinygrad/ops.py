@@ -195,13 +195,13 @@ class Interpreted:
     exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
     return tglob['run']
 
-  def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, **kwargs):
+  def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
     if ast not in self.method_cache: self.method_cache[ast] = self.interpret_ast(ast)
     ret = self.method_cache[ast]([x.realized for x in inputs] if inputs else None, var_vals)
-    if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op:
+    if ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op:
       ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.fxn_for_op[BufferOps.MEM](ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
     # TODO: is this used?
-    if output is not None and output.output_buffer is not None:
+    if output.output_buffer is not None:
       assert output.output_buffer.dtype == ret.dtype
       output.output_buffer._buf = ret._buf
       return output.output_buffer
@@ -325,7 +325,7 @@ class Compiled:
     assert all(v._val is None for v in prg.vars), f"ast contains bound Variable {prg.vars}"
     return prg
 
-  def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
+  def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
     # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
