@@ -163,7 +163,7 @@ class LazyBuffer:
     elif self.optype is ReduceOps: op = _ast_reduceops(op)
 
     # schedule the past
-    ret = []
+    ret:List[ScheduleItem] = []
     for x in op.buffers: ret += x.schedule(seen)
 
     var_vals = merge_dicts([self.st.var_vals] + [buf.st.var_vals for buf in op.buffers])
