@@ -8,8 +8,6 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
 from weakref import ref, WeakKeyDictionary
 
-JIT_SUPPORTED_DEVICE = ["GPU", "CLANG", "METAL", "CUDA", "HIP", "WEBGPU", "LLVM"]
-
 class TinyJit:
   def __init__(self, fxn:Callable):
     self.fxn: Callable = fxn
@@ -28,8 +26,6 @@ class TinyJit:
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
 
   def __call__(self, *args, **kwargs) -> Any:
-    if Device.DEFAULT.split(":")[0] not in JIT_SUPPORTED_DEVICE: return self.fxn(*args, **kwargs)  # only jit on supported device
-
     # all inputs are realized
     input_tensors: Dict[Union[int, str], Tensor] = {cast(Union[int, str], k):v.realize() for k,v in itertools.chain(enumerate(args), kwargs.items()) if v.__class__ is Tensor}
     expected_sts_dtype = tuple([(v.lazydata.st.unbind(), v.dtype) for v in input_tensors.values()])
