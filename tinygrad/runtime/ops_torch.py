@@ -12,7 +12,6 @@ inverse_type_map = {v:k for k,v in type_map.items()}
 
 def output_type(x, y): return x.dtype if type_map[x.dtype].priority > type_map[y.dtype].priority else y.dtype
 def match_types(x, y, disallow_bool=False):
-  print(x, y, torch.mul(x,y).type(output_type(x,y)))
   up = output_type(x, y)
   if disallow_bool and up == torch.bool: up = torch.float
   return x.type(up), y.type(up)
