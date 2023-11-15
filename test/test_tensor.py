@@ -357,5 +357,10 @@ class TestZeroShapeTensor(unittest.TestCase):
     assert a.shape == (3, 2, 1)
     np.testing.assert_equal(a.numpy(), np.sum(np.zeros((3, 2, 1)), axis=2, keepdims=True))
 
+  def test_reduce_default(self):
+    np.testing.assert_equal(Tensor([]).max().numpy(), -float("inf"))
+    np.testing.assert_equal(Tensor([]).min().numpy(), float("inf"))
+    np.testing.assert_equal(Tensor([]).sum().numpy(), 0)
+
 if __name__ == '__main__':
   unittest.main()
