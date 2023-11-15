@@ -16,7 +16,8 @@ class RawShmBuffer(RawBufferMapped):
       fd = _posixshmem.shm_open(device, os.O_RDWR, 0o600)
       # TODO: these flags are somewhat platform specific, but python doesn't expose the ones we need
       shm = mmap.mmap(fd, size * dtype.itemsize, flags=mmap.MAP_SHARED | 0x2000 | 0x008000)
-      shm.madvise(mmap.MADV_HUGEPAGE)     # type: ignore   # not on OSX
+      if hasattr(mmap, 'MADV_HUGEPAGE'):
+        shm.madvise(mmap.MADV_HUGEPAGE) # not on OSX
       os.close(fd)
 
     super().__init__(size, dtype, shm)
