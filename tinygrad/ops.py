@@ -158,13 +158,11 @@ class Interpreted:
 
   def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
     if ast not in self.method_cache: self.method_cache[ast] = self.compiler(ast)
-    ret = self.method_cache[ast]([x.realized for x in inputs] if inputs else None, var_vals)
-    assert ret.dtype == output.dtype, f"{ret.dtype} != {output.dtype}"
-    if output.output_buffer is not None:
-      assert output.output_buffer.dtype == ret.dtype
-      output.output_buffer._buf = ret._buf
-      return output.output_buffer
-    return ret
+    output.realized = output.output_buffer   # NOTE: assuming this is the right size and dtype from assign
+    ret: RawBuffer = self.method_cache[ast]([x.realized for x in inputs] if inputs else None, var_vals)
+    assert output.dtype == ret.dtype, f"expected {output.dtype}, got {ret.dtype}"
+    if output.realized is not None: output.realized._buf = ret._buf
+    else: output.realized = ret
 
 # **************** independent FlopCounter ****************
 
@@ -313,4 +311,3 @@ class Compiled:
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
     prg.exec(rawbuffers, var_vals={k:var_vals[k] for k in prg.vars})
-    return output.realized
