@@ -216,6 +216,13 @@ jobs:
         key: metal-webgpu-testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Cache model weights
+      uses: actions/cache@v3
+      with:
+        path: |
+          weights/whisper-tiny.en.pt
+          weights/gpt2.tiktoken
+        key: model-weights-v1
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
     #- name: Run dtype test
@@ -233,8 +240,8 @@ jobs:
       run: METAL=1 python -m pytest -n=auto test/test_symbolic_shapetracker.py test/test_symbolic_ops.py test/test_symbolic_jit.py
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
-    #- name: Run whisper test
-    #  run: METAL=1 python -m pytest test/models/test_whisper.py
+    - name: Run whisper test
+      run: METAL=1 python -m pytest test/models/test_whisper.py
     - name: Check Device.DEFAULT (WEBGPU) and print some source
       run: |
         WEBGPU=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
