@@ -327,12 +327,12 @@ class TestZeroShapeTensor(unittest.TestCase):
     assert ab.shape == (3, 2, 0)
     np.testing.assert_equal(ab.numpy(), a.numpy() * b.numpy())
 
-    # # this needs broadcast expand
-    # mask = (Tensor.rand(3, 2, 0) > 0.5)
-    # assert mask.shape == (3, 2, 0)
-    # c = mask.where(a, b)
-    # assert c.shape == (3, 2, 0)
-    # np.testing.assert_equal(c.numpy(), np.where(mask.numpy(), a.numpy() * b.numpy()))
+    # NOTE: cannot compare with a constant to construct the mask because 0-dim tensor has size 1
+    mask = (Tensor.rand(3, 2, 0) > Tensor.rand(3, 2, 0))
+    assert mask.shape == (3, 2, 0)
+    c = mask.where(a, b)
+    assert c.shape == (3, 2, 0)
+    np.testing.assert_equal(c.numpy(), np.where(mask.numpy(), a.numpy(), b.numpy()))
 
   def test_reduce_over_non_zero(self):
     a = Tensor.ones(3, 2, 0).sum(axis=1)
