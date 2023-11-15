@@ -207,6 +207,8 @@ class Interpreted:
       return output.output_buffer
     return ret
 
+# **************** independent FlopCounter ****************
+
 @dataclass
 class FlopCounter:
   shape: Tuple[int, ...]
@@ -218,16 +220,20 @@ class FlopCounter:
   def consume_flops(self):
     self.flops, ret = 0, self.flops
     return ret
-InterpretedFlopCounter = Interpreted(FlopCounter, {
+
+InterpretedFlopCounter: Dict[Op, Callable] = {
   BufferOps.MEM: lambda arg: FlopCounter(arg.st.shape, arg.dtype, 0, {arg.idx: arg.dtype.itemsize*arg.st.size()}), BufferOps.CONST: lambda arg: FlopCounter(arg.st.shape, arg.dtype, 0, {}),
   UnaryOps.CAST: lambda self,arg: FlopCounter(self.shape, arg[0], self.consume_flops(), self.mem),   # cast uses no flops
   **{op:lambda self: FlopCounter(self.shape, self.dtype, self.consume_flops() + prod(self.shape), self.mem) for op in UnaryOps if op != UnaryOps.CAST},
   **{op:lambda self,y: FlopCounter(self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape), {**self.mem, **y.mem}) for op in BinaryOps},
   **{op:lambda self,new_shape: FlopCounter(new_shape, self.dtype, self.consume_flops() + prod(self.shape), self.mem) for op in ReduceOps},
-  TernaryOps.WHERE: lambda self,y,z: FlopCounter(self.shape, y.dtype, self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape), {**self.mem, **y.mem, **z.mem})})
+  TernaryOps.WHERE: lambda self,y,z: FlopCounter(self.shape, y.dtype, self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape), {**self.mem, **y.mem, **z.mem})}
 
 @functools.lru_cache(None)
-def get_lazyop_info(ast:LazyOp) -> FlopCounter: return InterpretedFlopCounter.exec_ast(ast)
+def get_lazyop_info(ast:LazyOp) -> FlopCounter:
+  @functools.lru_cache(None) # NOTE: this cache needs to be recreated for new ASTs
+  def run_ast(ast): return InterpretedFlopCounter[ast.op](*([run_ast(x) for x in ast.src]+([ast.arg] if ast.arg is not None else [])))
+  return run_ast(ast)
 
 # **************** for Compiled Buffers ****************
 
