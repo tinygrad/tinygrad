@@ -628,6 +628,7 @@ class Tensor:
     if reverse: x, y = y, x
     if (xshape:=x.shape) == (yshape:=y.shape): return (x, y)
 
+    # something here is sketchy, cannot assume we are adding 1s
     shape_delta = len(xshape) - len(yshape)
     if shape_delta > 0: y = y.reshape((1,) * shape_delta + yshape)
     elif shape_delta < 0: x = x.reshape((1,) * -shape_delta + xshape)

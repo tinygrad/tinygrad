@@ -299,14 +299,20 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_equal(t.numpy(), np.full((3, 2, 0), 12))
 
   def test_expand(self):
-    pass
-    # t = Tensor.full((3, 2, 0), 12).contiguous()
-    # a = t.expand((6, 2, 0))
+    t = Tensor.full((3, 2, 0), 12).expand((6, 2, 0))
+    assert t.shape == (6, 2, 0)
+    np.testing.assert_equal(t.numpy(), np.full((6, 2, 0), 12))
 
   def test_pad(self):
     pass
 
   def test_shrink_into_zero(self):
+    t = Tensor.rand(3, 4).realize()
+    assert t.shrink((None, (2, 2))).realize().shape == (3, 0)
+    assert t.shrink(((2, 2), None)).realize().shape == (0, 4)
+    assert t.shrink(((2, 2), (2, 2))).realize().shape == (0, 0)
+
+  def test_cat(self):
     pass
 
   def test_elementwise(self):
