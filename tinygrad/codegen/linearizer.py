@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, getenv, all_same
 from tinygrad.ops import LazyOp, UnaryOps, ConstBuffer, MemBuffer, BufferOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
-from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import Variable, NumNode, VariableOrNum, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode, sym_rename
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.lazy import vars_from_ast
@@ -270,6 +270,10 @@ class Linearizer(Kernel):
 
       # compute local aliases
       locals_to_store = []
+      tc_views = []
+      if self.tensor_core:
+        assert self.simd_upcasted == (len(self.tensor_core.thread_local_aliases[0]) - len(self.tensor_core.threads))
+        assert self.simd_local_dims == len(self.tensor_core.threads)
       for i in self.local_alias:
         localbuf_idx = self.bufs.index(self.local_alias[i])
         buf_idxs = [idx*0 if s == 0 else idx for idx,s in zip(global_idxs+local_idxs+reduce_idxs+full_upcast_idxs,self.sts[i].real_strides())]
@@ -280,31 +284,37 @@ class Linearizer(Kernel):
             buf_idxs[self.first_reduce-len(self.tensor_core.threads)+n] = replace_input_idxs[n] # replace locals
           for n in range(len(replace_input_idxs)-len(self.tensor_core.threads)):
             buf_idxs[self.shape_len-self.upcasted+n] = replace_input_idxs[len(self.tensor_core.threads)+n] # replace upcasts
+          # after this replacement, the buf_idxs don't actually correspond to the localbuf shape
+
+          tc_upcast_shape = self.full_shape[self.shape_len - self.upcasted + self.simd_upcasted:] if self.upcasted - self.simd_upcasted > 0 else [1]
+          localbuf_shape = [shp if strd != 0 else 1 for shp, strd in zip(tc_upcast_shape, self.sts[i].real_strides()[-len(tc_upcast_shape):])]
+          localbuf_strides = [prod(localbuf_shape[:j]) if shp != 1 else 0 for j, shp in enumerate(localbuf_shape)]
+          tc_views.append(ShapeTracker((View.create(tuple(tc_upcast_shape), tuple(localbuf_strides)),)))
         if DEBUG >= 3: print(f"{localbuf_idx} alias {i}: idxs=", buf_idxs)
         ll = self.global_load(i, buf_idxs)
         locals_to_store.append((localbuf_idx, buf_idxs, ll))
 
       # copy in any global buffers
       if self.tensor_core:
+        # reconstruct upcast pattern for wmma
+        def rename_var(v: VariableOrNum, expr: str): return v if isinstance(v, NumNode) else Variable(expr, v.min, v.max)
+        tc_upcast_idxs = tuple(full_upcast_idxs[self.simd_upcasted:] if self.upcasted > self.simd_upcasted else (Variable(None, 0, 1),))
+        tc_upcast_idxs = tuple([rename_var(idx.expand_idx(), f"_uidx{j}") for j, idx in enumerate(tc_upcast_idxs)])
         wmma_sz = self.tensor_core.thread_local_sizes
-        # calculate the number of local accumulator reduces and render WMMAs: this is bad... this needs to come from someplace else
-        nx, ny, nacc = (len(locals_to_store[0][2])//wmma_sz[0]), (len(locals_to_store[1][2])//wmma_sz[1]), (len(acc)//wmma_sz[2])
-        acc_reds = math.isqrt((nx*ny)//nacc)
-        i, bx, by = 0, nx//acc_reds, ny//acc_reds
-        for y in range(by):
-          for x in range(bx):
-            for j in range(acc_reds):
-              op1, op2, op3 = locals_to_store[0][2][(x+(j*bx))*wmma_sz[0]:(x+(j*bx)+1)*wmma_sz[0]], locals_to_store[1][2][(y+(j*by))*wmma_sz[1]:(y+(j*by)+1)*wmma_sz[1]], acc[i:i+wmma_sz[2]]
-              if self.opts.device != "HIP":
-                ops = tuple(op1+op2+op3)
-              else:
-                ops = (self.uop(UOps.CAST, dtypes._half16, tuple(op1)),
-                       self.uop(UOps.CAST, dtypes._half16, tuple(op2)),
-                       self.uop(UOps.CAST, dtypes._float8, tuple(op3)))
-              ret = self.uop(UOps.WMMA, dtypes._float2 if wmma_sz[2] == 2 else dtypes._float8, ops, (self.opts.device, self.tensor_core.dtype_in, self.tensor_core.dtype_out,))
-              for z in range(cast(DType, ret.dtype).sz):
-                acc[i+z] = self.uop(UOps.PHI, dtypes.float, (op3[z], self.uop(UOps.GEP, dtypes.float, (ret,), z)) + loop_ctx)
-            i += wmma_sz[2]
+        x_idxs, y_idxs = tc_views[0].expr_idxs(tc_upcast_idxs)[0].expand(tc_upcast_idxs), tc_views[1].expr_idxs(tc_upcast_idxs)[0].expand(tc_upcast_idxs)
+        tc_upcast_block_size = self.tensor_core.thread_local_sizes[2] * self.tensor_core.dims[2]  # outputs * reduce
+        for x_idx, y_idx, acc_i in zip(x_idxs, y_idxs, self.acc_offsets(self.full_buf_index)[::tc_upcast_block_size]):
+          x, y = x_idx.unwrap(), y_idx.unwrap()
+          op1, op2, op3 = locals_to_store[0][2][x * wmma_sz[0]:(x + 1) * wmma_sz[0]], locals_to_store[1][2][y * wmma_sz[1]:(y + 1) * wmma_sz[1]], acc[acc_i:(acc_i + wmma_sz[2])]  # acc_i is multiplied by output upcast size by construction
+          if self.opts.device != "HIP":
+            ops = tuple(op1+op2+op3)
+          else:
+            ops = (self.uop(UOps.CAST, dtypes._half16, tuple(op1)),
+                   self.uop(UOps.CAST, dtypes._half16, tuple(op2)),
+                   self.uop(UOps.CAST, dtypes._float8, tuple(op3)))
+          ret = self.uop(UOps.WMMA, dtypes._float2 if wmma_sz[2] == 2 else dtypes._float8, ops, (self.opts.device, self.tensor_core.dtype_in, self.tensor_core.dtype_out,))
+          for z in range(cast(DType, ret.dtype).sz):
+            acc[acc_i+z] = self.uop(UOps.PHI, dtypes.float, (op3[z], self.uop(UOps.GEP, dtypes.float, (ret,), z)) + loop_ctx)
       else:
         if locals_to_store:
           self.uop(UOps.BARRIER, None, (), cachable=False)
