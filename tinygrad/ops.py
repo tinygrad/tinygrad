@@ -134,6 +134,19 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter:
   def run_ast(ast): return InterpretedFlopCounter[ast.op](*([run_ast(x) for x in ast.src]+([ast.arg] if ast.arg is not None else [])))
   return run_ast(ast)
 
+# **************** GlobalCounters stats ****************
+
+def update_stats(name, op_estimate, mem_estimate, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count, jit=False, num_kernels=1, lra=None):
+  if var_vals is None: var_vals = {}
+  op_estimate, mem_estimate = sym_infer(op_estimate, var_vals), sym_infer(mem_estimate, var_vals)
+  if DEBUG >= 2:
+    print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', ('magenta' if num_kernels == 1 else 'CYAN') if jit else None)} {name+' '*(37-ansilen(name))} arg {buf_count:3d} sz {str(lra.get('global_size', '') if lra else ''):18s} {str(lra.get('local_size', '') if lra else ''):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+          (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
+  GlobalCounters.kernel_count += num_kernels
+  GlobalCounters.global_ops += op_estimate
+  GlobalCounters.global_mem += mem_estimate
+  if et is not None: GlobalCounters.time_sum_s += et
+
 # **************** batch executor ****************
 
 @dataclass(frozen=True)
@@ -161,18 +174,6 @@ class BatchExecutor:
     for ji in self.jit_cache: ji.prg(ji.rawbufs, var_vals, jit=True)
     self.clear_jit_inputs()
 
-  def update_stats(self, var_vals: Dict[Variable, int], et: Optional[float]):
-    # TODO: this is mostly copied from ASTRunner
-    op_estimate = sym_infer(self.op_estimate, var_vals)
-    mem_estimate = sym_infer(self.mem_estimate, var_vals)
-    if DEBUG >= 2:
-      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'CYAN')}    kernels:{len(self.jit_cache):4d}  inputs:{len(self.input_replace):3d}   {' '.join([f'{k.expr}={v}' for k,v in var_vals.items()])[:50]:50s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
-            (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
-    GlobalCounters.kernel_count += len(self.jit_cache)
-    GlobalCounters.global_ops += sym_infer(self.op_estimate, var_vals)
-    GlobalCounters.global_mem += sym_infer(self.mem_estimate, var_vals)
-    if et is not None: GlobalCounters.time_sum_s += et
-
   def clear_jit_inputs(self):
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
 
@@ -193,17 +194,6 @@ class ASTRunner:
     CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
     return et
 
-  def update_stats(self, name, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count, lra, jit):
-    if var_vals is None: var_vals = {}
-    op_estimate = sym_infer(self.op_estimate, var_vals)
-    mem_estimate = sym_infer(self.mem_estimate, var_vals)
-    if DEBUG >= 2:
-      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'magenta' if jit else None)} {name+' '*(37-ansilen(name))} arg {buf_count:3d} sz {str(lra.get('global_size', '')):18s} {str(lra.get('local_size', '')):12s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
-            (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
-    GlobalCounters.kernel_count += 1
-    GlobalCounters.global_ops += op_estimate
-    GlobalCounters.global_mem += mem_estimate
-
   def __call__(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
@@ -218,7 +208,7 @@ class InterpretedASTRunner(ASTRunner):
     st = time.perf_counter()
     ret: RawBuffer = self.fxn(rawbufs[1:], var_vals)
     et = time.perf_counter() - st
-    self.update_stats(f"<interpreted {ret.size}>", var_vals, et, len(rawbufs), {}, jit)
+    update_stats(f"<interpreted {ret.size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit)
     if rawbufs[0] is not None:
       assert rawbufs[0].dtype == ret.dtype
       rawbufs[0].size = ret.size  # NOTE: for symbolic this can change
@@ -310,8 +300,8 @@ class CompiledASTRunner(ASTRunner):
     lra = self.runtime_args.copy()
     if global_size: lra['global_size'] = global_size
     if local_size and 'local_size' not in lra: lra['local_size'] = local_size
-    if et := self.clprg(*rawbufs, *var_vals.values(), **lra, wait=force_wait or DEBUG>=2): GlobalCounters.time_sum_s += et
-    self.update_stats(self.display_name if self.display_name is not None else self.name, var_vals, et, len(rawbufs), lra, jit)
+    et = self.clprg(*rawbufs, *var_vals.values(), **lra, wait=force_wait or DEBUG>=2)
+    update_stats(self.display_name if self.display_name is not None else self.name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra)
     return et
 
 class Compiled:
