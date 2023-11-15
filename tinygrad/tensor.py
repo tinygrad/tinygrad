@@ -441,7 +441,7 @@ class Tensor:
   def mean(self, axis=None, keepdim=False):
     assert all_int(self.shape), "does not support symbolic shape"
     out = self.sum(axis=axis, keepdim=keepdim)
-    return out.mul(prod(out.shape)/prod(self.shape)) if not 0 in self.shape else out
+    return out.mul(prod(out.shape)/prod(self.shape)) if 0 not in self.shape else out
   def std(self, axis=None, keepdim=False, correction=1):
     assert all_int(self.shape), "does not support symbolic shape"
     square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
