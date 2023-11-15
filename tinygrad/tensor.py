@@ -219,7 +219,7 @@ class Tensor:
   @staticmethod
   def multinomial(p: Tensor, num_samples: int, replacement: bool = False) -> Tensor:
     assert p.ndim <= 2, "p must be 1 or 2 dim"
-    assert replacement, "supported only with replacement"
+    assert replacement or num_samples == 1, "supported only with replacement"
     if p.ndim == 1:
       p = p.unsqueeze(0)
     cdf = p.cumsum(1)

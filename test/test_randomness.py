@@ -108,8 +108,9 @@ class TestRandomness(unittest.TestCase):
         self.assertTrue(equal_distribution(lambda *_: tiny_res[i], lambda _: torch_res[i]))
     _check_with_torch(p=[0.231, 0., 1., 0.5], num_samples=1000, replacement=True)
     _check_with_torch(p=[[0.453, 0., 1., 0.81], [0.1, 0.8, 0., 0.1]], num_samples=1000, replacement=True)
-    # Not supported without replacement
+    # without-replacement isn't supported, unless taking only one sample
     self.assertRaises(AssertionError, lambda: Tensor.multinomial(Tensor([0.5, 0.5]), num_samples=100, replacement=False))
+    _check_with_torch(p=[[0.5, 0.5], [0.99, 0.01]], num_samples=1, replacement=False)
 
   def test_conv2d_init(self):
     params = (128, 256, (3,3))
