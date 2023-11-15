@@ -126,12 +126,6 @@ class Tensor:
     return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().reshape(self.shape)
   def item(self) -> Union[float, int]: return self.numpy().item()
 
-  # TODO: if things are realized this won't work
-  def to_(self, device:str):
-    assert self.lazydata.realized is None
-    self.lazydata.device = device
-    if self.grad: self.grad.to_(device)
-
   def to(self, device:str) -> Tensor:
     ret = Tensor(self.lazydata, device)
     if self.grad: ret.grad = self.grad.to(device)
@@ -224,10 +218,8 @@ class Tensor:
     cdf = p.cumsum(1)
     cdf /= cdf[:, -1].unsqueeze(1)
     unif_samples = Tensor.rand(num_samples, p.shape[0], 1)
-    indices = (unif_samples.expand((-1, -1, p.shape[1])) >= cdf).sum(2)
-    indices = indices.permute((1, 0))
-    if self.ndim == 1:
-      indices = indices.squeeze(0)
+    indices = (unif_samples.expand((-1, -1, p.shape[1])) >= cdf).sum(2).permute((1, 0))
+    if self.ndim == 1: indices = indices.squeeze(0)
     return indices.cast(dtypes.int32)
 
   # ***** toposort and backward pass *****
@@ -795,9 +787,7 @@ class Tensor:
   def is_floating_point(self) -> bool: return dtypes.is_float(self.dtype)
 
 # register functions to move between devices
-for device in Device._buffers:
-  setattr(Tensor, f"{device.lower()}", partialmethod(Tensor.to, device))
-  setattr(Tensor, f"{device.lower()}_", partialmethod(Tensor.to_, device))
+for device in Device._buffers: setattr(Tensor, f"{device.lower()}", partialmethod(Tensor.to, device))
 
 if IMAGE:
   # if IMAGE>0 we install these replacement functions in Tensor (hack!)

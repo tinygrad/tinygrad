@@ -16,12 +16,6 @@ def match_types(x, y, disallow_bool=False):
   if disallow_bool and up == torch.bool: up = torch.float
   return x.type(up), y.type(up)
 
-def as_strided(x, arg):
-  if any(i < 0 for i in arg[1]):
-    return torch.as_strided(x.contiguous(), arg[0], tuple(abs(i) for i in arg[1]),
-      arg[2] + sum((s-1)*a if a < 0 else 0 for (s,a) in zip(arg[0], arg[1]))).flip([i for i,a in enumerate(arg[1]) if a < 0])
-  return torch.as_strided(x.contiguous(), arg[0], arg[1], arg[2])
-
 torch_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
   # TODO: torch.tensor should work here
   #BufferOps.CONST: lambda val, dtype: torch.tensor(val, device=device, dtype=inverse_type_map[dtype]),
@@ -38,7 +32,6 @@ torch_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
   TernaryOps.WHERE: lambda x, y, z: torch.where(x != 0, y, z),
   MovementOps.STRIDE: lambda x, arg: x[tuple(slice(None, None, abs(i)) for i in arg)].flip([i for i,a in enumerate(arg) if a < 0]),
   MovementOps.EXPAND: lambda x, arg: x.expand(arg), MovementOps.PERMUTE: lambda x, arg: x.permute(arg),
-  MovementOps.AS_STRIDED: as_strided
 }}
 
 class RawTorchBuffer(RawBuffer):
