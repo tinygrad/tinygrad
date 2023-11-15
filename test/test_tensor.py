@@ -328,7 +328,15 @@ class TestZeroShapeTensor(unittest.TestCase):
     assert t.shrink(((2, 2), (2, 2))).realize().shape == (0, 0)
 
   def test_cat(self):
-    pass
+    s = Tensor.rand(3, 2, 2)
+    t = Tensor.rand(3, 2, 0).cat(s, dim=2)
+    assert t.shape == (3, 2, 2)
+    np.testing.assert_equal(t.numpy(), s.numpy())
+
+    s = Tensor.rand(3, 4, 0)
+    t = Tensor.rand(3, 2, 0).cat(s, dim=1)
+    assert t.shape == (3, 6, 0)
+    np.testing.assert_equal(t.numpy(), np.zeros((3, 6, 0)))
 
   def test_elementwise(self):
     a = Tensor.rand(3, 2, 0)
@@ -342,7 +350,7 @@ class TestZeroShapeTensor(unittest.TestCase):
     assert ab.shape == (3, 2, 0)
     np.testing.assert_equal(ab.numpy(), a.numpy() * b.numpy())
 
-    # NOTE: cannot compare with a constant to construct the mask because 0-dim tensor has size 1
+    # NOTE: cannot compare with a constant to construct the mask because 0-dim tensor is not broadcastable
     mask = (Tensor.rand(3, 2, 0) > Tensor.rand(3, 2, 0))
     assert mask.shape == (3, 2, 0)
     c = mask.where(a, b)
