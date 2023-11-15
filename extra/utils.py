@@ -1,4 +1,3 @@
-# type: ignore
 import pickle, hashlib, zipfile, io, requests, struct, tempfile, platform, concurrent.futures
 import numpy as np
 from tqdm import tqdm

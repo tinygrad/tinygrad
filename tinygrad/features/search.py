@@ -1,4 +1,4 @@
-from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
+from typing import Any, Dict, Iterable, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, random, math
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
@@ -46,7 +46,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
 
     # TODO: this is copied from prg.__call__
     global_size, local_size = prg.launch_dims(var_vals)
-    if global_size is not None and local_size is None and all_int(tuple(prg.global_size)): # type: ignore[arg-type]
+    if global_size is not None and local_size is None and all_int(tuple(cast(Iterable[Any], prg.global_size))):
       local_size = optimize_local_size(prg.clprg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
 

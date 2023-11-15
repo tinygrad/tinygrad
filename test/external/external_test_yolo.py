@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 import cv2
-import requests  # type: ignore
+import requests
 import numpy as np
 
 from tinygrad.tensor import Tensor
