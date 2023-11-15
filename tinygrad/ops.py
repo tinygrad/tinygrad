@@ -2,7 +2,7 @@ from __future__ import annotations
 import importlib, inspect, functools, pathlib, re
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping, cast
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT, all_int
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT, dedup, all_int
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer, NumNode
 from dataclasses import dataclass
@@ -52,13 +52,11 @@ class LazyOp:
   src: Tuple[Union[LazyOp, LazyBuffer], ...]
   arg: Any = None
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
-  @property
-  def buffers(self):
-    buffers: Tuple[Union[LazyOp, LazyBuffer], ...] = ()
-    try:  # NOTE: the linearizer's key function maps the buffers to ints, and LOCAL_BUFFER is used. we don't care about buffers in these cases
-      for x in self.src: buffers += x.buffers
-    except AttributeError: buffers = ()
-    return buffers
+  @functools.cached_property
+  def buffers(self) -> Tuple[LazyBuffer, ...]: return tuple(dedup(sum([x.buffers for x in self.src], ())))
+  @functools.cached_property
+  def hash(self): return hash((self.op,self.src, self.arg))
+  def __hash__(self): return self.hash
 
   @property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
