@@ -346,12 +346,16 @@ class TestZeroShapeTensor(unittest.TestCase):
   def test_reduce_over_non_zero(self):
     a = Tensor.ones(3, 2, 0).sum(axis=1)
     assert a.shape == (3, 0)
-    np.testing.assert_equal(a.numpy(), np.sum(np.ones((3, 2, 0)), axis=1))
+    np.testing.assert_equal(a.numpy(), np.sum(np.zeros((3, 2, 0)), axis=1))
 
   def test_reduce_over_zero(self):
     a = Tensor.ones(3, 2, 0).sum(axis=2)
     assert a.shape == (3, 2)
-    np.testing.assert_equal(a.numpy(), np.sum(np.ones((3, 2, 0)), axis=2))
+    np.testing.assert_equal(a.numpy(), np.sum(np.zeros((3, 2, 0)), axis=2))
+
+    a = Tensor.ones(3, 2, 0).sum(axis=2, keepdim=True)
+    assert a.shape == (3, 2, 1)
+    np.testing.assert_equal(a.numpy(), np.sum(np.zeros((3, 2, 1)), axis=2, keepdims=True))
 
 if __name__ == '__main__':
   unittest.main()
