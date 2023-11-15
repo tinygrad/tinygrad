@@ -177,7 +177,7 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter:
 # **************** for Interpreted Buffers ****************
 
 class Interpreted:
-  def __init__(self, buffer: Type[RawBuffer], compiler: Callable):
+  def __init__(self, buffer: Type[RawBuffer], compiler: Callable[[LazyOp], Callable]):
     self.buffer, self.compiler = buffer, compiler
     self.synchronize = lambda: None
     self.batch_executor = BatchExecutor

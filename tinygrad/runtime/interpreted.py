@@ -3,8 +3,9 @@ import functools, re
 from tinygrad.helpers import DEBUG
 from tinygrad.ops import LazyOp, TernaryOps, ReduceOps, BinaryOps, BufferOps, Op
 from tinygrad.shape.symbolic import Variable
+from tinygrad.runtime.lib import RawBuffer
 
-def interpret_ast(fxn_for_op:Dict[Op, Callable], from_underlying:Optional[Callable], ast:LazyOp) -> Callable:
+def interpret_ast(fxn_for_op:Dict[Op, Callable], from_underlying:Optional[Callable], ast:LazyOp) -> Callable[[List[RawBuffer], Dict[Variable, int]], RawBuffer]:
   if DEBUG >= 3:
     from tinygrad.graph import print_tree
     print_tree(ast)
