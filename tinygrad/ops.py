@@ -1,5 +1,5 @@
 from __future__ import annotations
-import importlib, inspect, functools, pathlib, time
+import importlib, inspect, functools, pathlib, time, re
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT, dedup, all_int
@@ -226,7 +226,6 @@ class InterpretedASTRunner(ASTRunner):
     else: rawbufs[0] = ret
     return et
 
-from tinygrad.runtime.interpreted import interpret_ast
 class Interpreted:
   def __init__(self, buffer: Type[RawBuffer], fxn_for_op:Dict[Op, Callable], from_underlying:Optional[Callable]=None):
     self.buffer, self.fxn_for_op, self.from_underlying = buffer, fxn_for_op, from_underlying
@@ -236,10 +235,49 @@ class Interpreted:
     self.method_cache: Dict[LazyOp, InterpretedASTRunner] = {}
 
   def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
-    if ast not in self.method_cache: self.method_cache[ast] = InterpretedASTRunner(ast, interpret_ast(self.fxn_for_op, self.from_underlying, ast))
+    if ast not in self.method_cache: self.method_cache[ast] = get_interpreted_fxn(self.fxn_for_op, self.from_underlying, ast)
     rawbufs = [output.realized if output.realized is not None else output.output_buffer] + [x.realized for x in inputs]
     self.method_cache[ast].exec(rawbufs, var_vals)
     output.realized = rawbufs[0]
+
+def get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], from_underlying:Optional[Callable], ast:LazyOp) -> InterpretedASTRunner:
+  if DEBUG >= 3:
+    from tinygrad.graph import print_tree
+    print_tree(ast)
+  tglob: Dict[str, Any] = {"Variable": Variable}
+  lines: List[str] = []
+
+  @functools.lru_cache(None)
+  def gstr(x:Any, nm=None) -> str:
+    if ('Variable' in (str_arg := repr(x)) or 'NumNode' in str_arg):
+      str_arg = re.sub(r'Variable\(.*?\)', lambda m: f'var_vals[{str(m.group(0))}]', str_arg)
+      # TODO: (Variable - Variable) might create NumNode. can we remove it?
+      return re.sub(r'NumNode\((.*?)\)', r'\1', str_arg)
+    ret = str(nm).replace(".", "_") if nm else f"m{len(tglob):04d}"
+    tglob[ret] = x
+    return ret
+
+  @functools.lru_cache(None)
+  def _interpret_ast(ast:LazyOp) -> str:
+    if TernaryOps.MULACC in fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
+      ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
+
+    if ast.op in BufferOps:
+      tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"{gstr(fxn_for_op[ast.op], ast.op)}(inputs[{ast.arg.idx-1}])"
+      for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(fxn_for_op[mop], mop)}({tmp}, {gstr(arg)})"
+    else:
+      inp = [_interpret_ast(src) for src in ast.src]
+      tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({', '.join(inp + ([gstr(ast.arg)] if ast.arg else []))})"
+
+    ret = f"a{len(lines)}"
+    lines.append(f"  {ret} = {tmp}")
+    return ret
+
+  ret = _interpret_ast(ast)
+  src = '\n'.join(['def run(inputs, var_vals):'] + lines + [f"  return {gstr(from_underlying, 'from_underlying')}({ret})" if from_underlying is not None else f"  return {ret}"])
+  if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
+  exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
+  return InterpretedASTRunner(ast, tglob['run'])
 
 # **************** for Compiled Buffers ****************
 
