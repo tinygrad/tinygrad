@@ -131,5 +131,4 @@ class View:
       return View.create(new_shape, new_strides_tuple, self.offset, new_mask_tuple)
 
     # TODO: bring the merge_views logic here for more caching
-
     return None
