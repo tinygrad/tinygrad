@@ -216,20 +216,16 @@ class Tensor:
     std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(shape[1:]))
     return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
-  @staticmethod
-  def multinomial(p: Tensor, num_samples: int, replacement: bool = False) -> Tensor:
-    assert p.ndim <= 2, "p must be 1 or 2 dim"
+  def multinomial(self: Tensor, num_samples: int, replacement: bool = False) -> Tensor:
+    assert self.ndim <= 2, "p must be 1 or 2 dim"
     assert replacement or num_samples == 1, "supported only with replacement"
-    out_1d = False
-    if p.ndim == 1:
-      out_1d = True
-      p = p.unsqueeze(0)
+    p = self.unsqueeze(0) if self.ndim == 1 else self
     cdf = p.cumsum(1)
     cdf /= cdf[:, -1].unsqueeze(1)
     unif_samples = Tensor.rand(num_samples, p.shape[0], 1)
     indices = (unif_samples.expand((-1, -1, p.shape[1])) >= cdf).sum(2)
     indices = indices.permute((1, 0))
-    if out_1d:
+    if self.ndim == 1:
       indices = indices.squeeze(0)
     return indices.cast(dtypes.int32)
 
