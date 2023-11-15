@@ -6,7 +6,7 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import getenv
 from extra.training import train, evaluate
-from models.resnet import ResNet
+from extra.models.resnet import ResNet
 from extra.datasets import fetch_mnist
 
 

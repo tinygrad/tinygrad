@@ -63,12 +63,13 @@ def compile(dat, output_fn):
 
   # pull out inputs and put them in the jit cache
   input_rawbuffers = {k:inputs[k].lazydata.realized for k in inputs.keys()}
-  for (j,i),(idx,_,_) in model_exec.input_replace.items(): model_exec.jit_cache[j][1][i] = input_rawbuffers[idx]
+  for (j,i),idx in model_exec.input_replace.items(): model_exec.jit_cache[j].rawbufs[i] = input_rawbuffers[idx]
 
   # transform to CL.CACHE
   used_ops = 0
   cl_cache = []
-  for prg,args,_ in model_exec.jit_cache:
+  for ji in model_exec.jit_cache:
+    prg = ji.prg
     # pass these to thneed
     setattr(prg.clprg, 'op_estimate', prg.op_estimate)
     setattr(prg.clprg, 'prg', prg.prg)
@@ -79,7 +80,7 @@ def compile(dat, output_fn):
 
     global_size = prg.global_size + [1]*(3-len(prg.global_size))
     local_size = prg.local_size + [1]*(3-len(prg.local_size))
-    cl_cache.append((prg.clprg, [[int(g*l) for g,l in zip(global_size, local_size)], local_size, *[x._buf for x in args]]))
+    cl_cache.append((prg.clprg, [[int(g*l) for g,l in zip(global_size, local_size)], local_size, *[x._buf for x in ji.rawbufs]]))
     used_ops += prg.op_estimate
 
   from extra.thneed import Thneed

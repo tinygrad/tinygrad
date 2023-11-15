@@ -1,10 +1,10 @@
 from __future__ import annotations
-import importlib, inspect, functools, pathlib
+import importlib, inspect, functools, pathlib, re
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping, cast
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT, all_int
 from tinygrad.runtime.lib import RawBuffer
-from tinygrad.shape.symbolic import Variable, sym_infer
+from tinygrad.shape.symbolic import Variable, sym_infer, NumNode
 from dataclasses import dataclass
 
 # these are the llops your accelerator must implement, along with toCpu
@@ -97,7 +97,7 @@ class _Device:
     return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
   @functools.cached_property
   def DEFAULT(self) -> str:
-    device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None)
+    device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None)   # type: ignore
     if device_from_env: return device_from_env
     for device in ["METAL", "CUDA", "GPU"]:
       try:
@@ -106,22 +106,69 @@ class _Device:
     return "CPU"
 Device = _Device()
 
+# **************** batch executor ****************
+
+@dataclass(frozen=True)
+class JitItem:
+  prg: ASTRunner
+  rawbufs: List[Optional[RawBuffer]]
+
+class BatchExecutor:
+  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int]):
+    self.jit_cache: List[JitItem] = jit_cache
+    self.input_replace: Dict[Tuple[int, int], Union[int, str]] = {}
+    self.op_estimate, self.mem_estimate = NumNode(0), NumNode(0)
+    for j,ji in enumerate(jit_cache):
+      if isinstance(ji.prg, ASTRunner):  # TODO: this is just for world and needs to be refactored
+        self.op_estimate += ji.prg.op_estimate
+        self.mem_estimate += ji.prg.mem_estimate
+      for i,a in enumerate(ji.rawbufs):
+        if a in [v for v in input_rawbuffers.values()]:
+          self.input_replace[(j,i)] = [k for k,v in input_rawbuffers.items() if v == a][0]
+    assert set(self.input_replace.values()) == set(input_rawbuffers.keys()), "some input tensors not found"
+    self.clear_jit_inputs()
+
+  def __call__(self, input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int], wait=False):
+    for (j,i),input_name in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name]
+    for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), {v:var_vals[v] for v in getattr(ji.prg,"vars",[])}, jit=True)
+    self.clear_jit_inputs()
+
+  def update_stats(self, var_vals: Dict[Variable, int], et: Optional[float]):
+    # TODO: this is mostly copied from ASTRunner
+    op_estimate = sym_infer(self.op_estimate, var_vals)
+    mem_estimate = sym_infer(self.mem_estimate, var_vals)
+    if DEBUG >= 2:
+      print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', 'CYAN')}    kernels:{len(self.jit_cache):4d}  inputs:{len(self.input_replace):3d}   {' '.join([f'{k.expr}={v}' for k,v in var_vals.items()])[:50]:50s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+            (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
+    GlobalCounters.kernel_count += len(self.jit_cache)
+    GlobalCounters.global_ops += sym_infer(self.op_estimate, var_vals)
+    GlobalCounters.global_mem += sym_infer(self.mem_estimate, var_vals)
+    if et is not None: GlobalCounters.time_sum_s += et
+
+  def clear_jit_inputs(self):
+    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
+
 # **************** for Interpreted Buffers ****************
 
 class Interpreted:
   def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_underlying=None):
     self.buffer, self.fxn_for_op, self.from_underlying = buffer, fxn_for_op, from_underlying
     self.synchronize = lambda: None
+    self.batch_executor = BatchExecutor
     self.codegen = None
     self.method_cache: Dict[LazyOp, Callable] = {}
 
   def interpret_ast(self:Interpreted, ast:LazyOp) -> Callable:
-    tglob: Dict[str, Any] = {}
+    tglob: Dict[str, Any] = {"Variable": Variable}
     lines: List[str] = []
     f = self.fxn_for_op
 
     @functools.lru_cache(None)
     def gstr(x:Any, nm=None) -> str:
+      if self != InterpretedFlopCounter and ('Variable' in (str_arg := repr(x)) or 'NumNode' in str_arg):
+        str_arg = re.sub(r'Variable\(.*?\)', lambda m: f'var_vals[{str(m.group(0))}]', str_arg)
+        # TODO: (Variable - Variable) might create NumNode. can we remove it?
+        return re.sub(r'NumNode\((.*?)\)', r'\1', str_arg)
       ret = str(nm).replace(".", "_") if nm else f"m{len(tglob):04d}"
       tglob[ret] = x
       return ret
@@ -143,14 +190,14 @@ class Interpreted:
       return ret
 
     ret = _interpret_ast(ast)
-    src = '\n'.join(['def run(inputs):'] + lines + [f"  return {gstr(self.from_underlying, 'from_underlying')}({ret})" if self.from_underlying else f"  return {ret}"])
+    src = '\n'.join(['def run(inputs, var_vals):'] + lines + [f"  return {gstr(self.from_underlying, 'from_underlying')}({ret})" if self.from_underlying else f"  return {ret}"])
     if DEBUG >= 4 and self != InterpretedFlopCounter: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
     exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
     return tglob['run']
 
   def exec_ast(self, ast:LazyOp, output=None, inputs=None, var_vals=None, **kwargs):
     if ast not in self.method_cache: self.method_cache[ast] = self.interpret_ast(ast)
-    ret = self.method_cache[ast]([x.realized for x in inputs] if inputs else None)
+    ret = self.method_cache[ast]([x.realized for x in inputs] if inputs else None, var_vals)
     if output is not None and ret.dtype != output.dtype and UnaryOps.CAST in self.fxn_for_op:
       ret = self.from_underlying(self.fxn_for_op[UnaryOps.CAST](self.fxn_for_op[BufferOps.MEM](ret), (output.dtype, False))) # Do manual casting of ret if it does not match the required output dtype.
     # TODO: is this used?
@@ -188,6 +235,7 @@ class ASTRunner:
   def __init__(self, name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
     if DEBUG >= 4: print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
+    self.vars:List[Variable] = []
 
   def build(self, compiler, runtime):
     self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
@@ -207,7 +255,7 @@ class ASTRunner:
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
     if var_vals is None: var_vals = {}
     global_size, local_size = self.launch_dims(var_vals)
-    if global_size is not None and local_size is None:
+    if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
       from tinygrad.features.search import optimize_local_size
       local_size = self.local_size = optimize_local_size(self.clprg, global_size, rawbufs)
@@ -227,16 +275,49 @@ class ASTRunner:
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, compiler, runtime, synchronize=lambda: None):
+  def __init__(self, buffer: Type[RawBuffer], linearizer_opts, renderer, compiler, runtime, synchronize=lambda: None, batch_executor=BatchExecutor):
     self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize = buffer, linearizer_opts, renderer, compiler, runtime, synchronize
+    self.batch_executor = BatchExecutor if getenv("JIT") == 2 else batch_executor
     self.method_cache: Dict[LazyOp, ASTRunner] = {}
 
-  def to_program(self, k):
+  def to_program(self, k) -> ASTRunner:
     k.linearize()
     src, runtime_args = self.renderer(k.function_name, k.uops)
     return ASTRunner(k.function_name, src, k.global_size, k.local_size,
                      op_estimate=k.info.flops, mem_estimate=k.info.mem_estimate,
                      display_name=k.display_name, runtime_args=runtime_args).build(self.compiler, self.runtime)
+
+  def get_optimized_program(self, ast:LazyOp, rawbuffers:List[RawBuffer]) -> ASTRunner:
+    if DEBUG >= 3:
+      from tinygrad.graph import print_tree
+      print_tree(ast)
+    from tinygrad.codegen.linearizer import Linearizer
+    from tinygrad.lazy import vars_from_ast
+    k = Linearizer(ast, self.linearizer_opts)
+    assert k.info.dtype == rawbuffers[0].dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {rawbuffers[0].dtype}"
+    if not NOOPT:
+      if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
+      if BEAM >= 1:
+        lins = [(("tc" if used_tensor_cores else "hc"), k)]
+        # allocate a scratch buffer if output buffer is also input
+        test_rawbuffers = [type(rawbuffers[0])(rawbuffers[0].size, rawbuffers[0].dtype), *rawbuffers[1:]] if rawbuffers[0] in rawbuffers[1:] else rawbuffers
+        kb = Linearizer(ast, self.linearizer_opts)
+        kb.required_optimizations()
+        from tinygrad.features.search import beam_search, time_linearizer
+        lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
+        if used_tensor_cores:
+          lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
+          lins[-1][1].hand_coded_optimizations()
+        timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, disable_cache=True, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
+        if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
+        k = timed[0][1]
+    else:
+      k.required_optimizations()
+    prg = self.to_program(k)
+    # extract real vars used in ast
+    prg.vars = vars_from_ast(ast)
+    assert all(v._val is None for v in prg.vars), f"ast contains bound Variable {prg.vars}"
+    return prg
 
   def exec_ast(self, ast:LazyOp, output, inputs, var_vals, **kwargs):
     # check if we can reuse the output buffer
@@ -258,43 +339,13 @@ class Compiled:
     # all the rawbuffers
     rawbuffers = [output.realized] + [x.realized for x in inputs]
 
-    # extract real vars used in ast
-    from tinygrad.lazy import vars_from_ast
-    ast_vars = vars_from_ast(ast)
-    assert all(v.val is None for v in ast_vars), f"ast contains bound Variable {ast_vars}"
-
-    # compilation time
-    def get_program():
-      from tinygrad.codegen.linearizer import Linearizer
-      k = Linearizer(ast, self.linearizer_opts)
-      assert k.info.dtype == output.dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {output.dtype}"
-      if not NOOPT:
-        if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
-        if BEAM >= 1 and not vars_from_ast(ast):
-          lins = [(("tc" if used_tensor_cores else "hc"), k)]
-          # allocate a scratch buffer if output buffer is also input
-          test_rawbuffers = [type(rawbuffers[0])(rawbuffers[0].size, rawbuffers[0].dtype), *rawbuffers[1:]] if rawbuffers[0] in rawbuffers[1:] else rawbuffers
-          kb = Linearizer(ast, self.linearizer_opts)
-          kb.required_optimizations()
-          from tinygrad.features.search import beam_search, time_linearizer
-          lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
-          if used_tensor_cores:
-            lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
-            lins[-1][1].hand_coded_optimizations()
-          timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, disable_cache=True, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
-          if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
-          k = timed[0][1]
-      else:
-        k.required_optimizations()
-      return self.to_program(k)
-
     if getenv("ENABLE_METHOD_CACHE", 1):
-      if ast not in self.method_cache: self.method_cache[ast] = get_program()
+      if ast not in self.method_cache: self.method_cache[ast] = self.get_optimized_program(ast, rawbuffers)
       prg = self.method_cache[ast]
     else:
-      prg = get_program()
+      prg = self.get_optimized_program(ast, rawbuffers)
 
     if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
 
-    prg.exec(rawbuffers, var_vals={k:var_vals[k] for k in ast_vars})
+    prg.exec(rawbuffers, var_vals={k:var_vals[k] for k in prg.vars})
     return output.realized

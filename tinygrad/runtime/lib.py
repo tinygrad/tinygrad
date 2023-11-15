@@ -83,8 +83,8 @@ class LRUAllocator:
 
   def _alloc_buffer(self, size, dtype, device, **kwargs):
     self.ensure_has_free_space(size*dtype.itemsize, device)
-    while True: 
-      try: 
+    while True:
+      try:
         newbuf = self._do_alloc(max(1, size), dtype, device, **kwargs)
         break
       except Exception:

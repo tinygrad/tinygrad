@@ -1,5 +1,5 @@
 from typing import List
-from models.resnet import ResNet50
+from extra.models.resnet import ResNet50
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps, Device, Compiled
 from tinygrad.codegen.linearizer import Linearizer
