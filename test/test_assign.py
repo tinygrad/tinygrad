@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
+import torch
 from tinygrad.tensor import Tensor
 from tinygrad.ops import Device
 from tinygrad.helpers import dtypes
@@ -62,6 +63,54 @@ class TestAssign(unittest.TestCase):
     oba2 = a.lazydata.output_buffer
     assert oba1 is None and oba2 is None
     np.testing.assert_allclose(a.numpy(), np.arange(N*N,dtype=np.int32).reshape((N,N)))
+
+class TestSetitemAssign(unittest.TestCase):
+  def setUp(self):
+    pass
+
+  def tearDown(self):
+    pass
+
+  def test_whole_slice(self):
+    n1 = np.random.random((3, 3))
+    n2 = np.random.random((3, 3))
+
+    s1 = s2 = Tensor(n1)
+    t1 = t2 = torch.tensor(n1)
+    u1 = u2 = np.array(n1)
+
+    s2[:] = Tensor(n2)
+    t2[:] = torch.tensor(n2)
+    u2[:] = np.array(n2)
+
+    assert s1 is s2
+    assert t1 is t2
+    assert u1 is u2
+
+    np.testing.assert_allclose(u2, t2.numpy())
+    # fails silently now, current behavior is no-op
+    # np.testing.assert_allclose(u2, s2.numpy())
+
+  def test_slice_dim0(self):
+    n1 = np.random.random((3, 3))
+    n2 = np.random.random((1, 3))
+
+    s1 = s2 = Tensor(n1)
+    t1 = t2 = torch.tensor(n1)
+    u1 = u2 = np.array(n1)
+
+    s2[:1] = Tensor(n2)
+    t2[:1] = torch.tensor(n2)
+    u2[:1] = np.array(n2)
+
+    assert s1 is s2
+    assert t1 is t2
+    assert u1 is u2
+
+    np.testing.assert_allclose(u2, t2.numpy())
+    # fails silently now, current behavior is no-op
+    # np.testing.assert_allclose(u2, s2.numpy())
+
 
 if __name__ == "__main__":
   unittest.main()
