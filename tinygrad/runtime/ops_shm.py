@@ -25,4 +25,4 @@ class RawShmBuffer(RawBufferMapped):
 
 # TODO: is this wrong?
 shm_fxn_for_op: Dict[Op, Callable] = { BufferOps.MEM: lambda x: x, UnaryOps.NOOP: lambda x:x, MovementOps.RESHAPE: lambda x,_:x }
-ShmBuffer = Interpreted(RawShmBuffer, shm_fxn_for_op, from_underlying=lambda x:x)
+ShmBuffer = Interpreted(RawShmBuffer, shm_fxn_for_op)

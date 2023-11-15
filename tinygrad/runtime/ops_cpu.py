@@ -50,4 +50,4 @@ class RawNumpyBuffer(RawBuffer):
   @classmethod
   def fromCPU(cls, x): return cls(x.size, dtypes.from_np(x.dtype), x)
   def toCPU(self): return self._buf
-CPUBuffer = Interpreted(RawNumpyBuffer, numpy_fxn_for_op, from_underlying=RawNumpyBuffer.fromCPU)
+CPUBuffer = Interpreted(RawNumpyBuffer, numpy_fxn_for_op, RawNumpyBuffer.fromCPU)
