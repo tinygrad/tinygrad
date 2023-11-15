@@ -1157,8 +1157,7 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(AssertionError):
       x.repeat((2, 4))
 
-    # TODO: properly update
-    x.repeat((2, 0, 4))
+    np.testing.assert_allclose(x.repeat((2, 0, 4)).numpy(), Tensor.zeros(8, 0, 12).numpy())
 
   def test_clip(self):
     helper_test_op([(45,65)], lambda x: x.clip(-2.3, 1.2), lambda x: x.clip(-2.3, 1.2))

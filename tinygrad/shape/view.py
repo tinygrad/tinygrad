@@ -72,7 +72,7 @@ class View:
   def expand(self, new_shape: Tuple[sint, ...]) -> View:
     assert len(new_shape) == len(self.shape)
     if 0 in self.shape:
-      assert all((s == x == 0 or (x % s) == 0) for s,x in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
+      assert all((s == x == 0) or (s > 0 and (x % s) == 0) for s,x in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
       return View.create(new_shape)
     assert all((s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
