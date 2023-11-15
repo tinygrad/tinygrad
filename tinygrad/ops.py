@@ -1,5 +1,5 @@
 from __future__ import annotations
-import importlib, inspect, functools, pathlib, re
+import importlib, inspect, functools, pathlib
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT, dedup, all_int
@@ -128,7 +128,7 @@ class BatchExecutor:
 
   def __call__(self, input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int], wait=False):
     for (j,i),input_name in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name]
-    for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), {v:var_vals[v] for v in getattr(ji.prg,"vars",[])}, jit=True)
+    for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), var_vals, jit=True)
     self.clear_jit_inputs()
 
   def update_stats(self, var_vals: Dict[Variable, int], et: Optional[float]):
@@ -145,66 +145,6 @@ class BatchExecutor:
 
   def clear_jit_inputs(self):
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
-
-# **************** for Interpreted Buffers ****************
-
-class Interpreted:
-  def __init__(self, buffer, fxn_for_op: Dict[Op, Callable], from_underlying=None):
-    self.buffer, self.fxn_for_op, self.from_underlying = buffer, fxn_for_op, from_underlying
-    self.synchronize = lambda: None
-    self.batch_executor = BatchExecutor
-    self.codegen = None
-    self.method_cache: Dict[LazyOp, Callable] = {}
-
-  def interpret_ast(self:Interpreted, ast:LazyOp) -> Callable:
-    if DEBUG >= 3:
-      from tinygrad.graph import print_tree
-      print_tree(ast)
-    tglob: Dict[str, Any] = {"Variable": Variable}
-    lines: List[str] = []
-    f = self.fxn_for_op
-
-    @functools.lru_cache(None)
-    def gstr(x:Any, nm=None) -> str:
-      if ('Variable' in (str_arg := repr(x)) or 'NumNode' in str_arg):
-        str_arg = re.sub(r'Variable\(.*?\)', lambda m: f'var_vals[{str(m.group(0))}]', str_arg)
-        # TODO: (Variable - Variable) might create NumNode. can we remove it?
-        return re.sub(r'NumNode\((.*?)\)', r'\1', str_arg)
-      ret = str(nm).replace(".", "_") if nm else f"m{len(tglob):04d}"
-      tglob[ret] = x
-      return ret
-
-    @functools.lru_cache(None)
-    def _interpret_ast(ast:LazyOp) -> str:
-      if TernaryOps.MULACC in f and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
-        ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
-
-      if MovementOps.AS_STRIDED in f and ast.op in BufferOps:
-        tmp = f"{gstr(f[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"{gstr(f[ast.op], ast.op)}(inputs[{ast.arg.idx-1}])"
-        for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(f[mop], mop)}({tmp}, {gstr(arg)})"
-      else:
-        inp = [_interpret_ast(src) for src in ast.src]
-        tmp = f"{gstr(f[ast.op], ast.op)}({', '.join(inp + ([gstr(ast.arg)] if ast.arg else []))})"
-
-      ret = f"a{len(lines)}"
-      lines.append(f"  {ret} = {tmp}")
-      return ret
-
-    ret = _interpret_ast(ast)
-    src = '\n'.join(['def run(inputs, var_vals):'] + lines + [f"  return {gstr(self.from_underlying, 'from_underlying')}({ret})"])
-    if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
-    exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
-    return tglob['run']
-
-  def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
-    if ast not in self.method_cache: self.method_cache[ast] = self.interpret_ast(ast)
-    ret = self.method_cache[ast]([x.realized for x in inputs] if inputs else None, var_vals)
-    assert ret.dtype == output.dtype, f"{ret.dtype} != {output.dtype}"
-    if output.output_buffer is not None:
-      assert output.output_buffer.dtype == ret.dtype
-      output.output_buffer._buf = ret._buf
-      return output.output_buffer
-    return ret
 
 # **************** independent FlopCounter ****************
 
@@ -234,6 +174,24 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter:
   def run_ast(ast): return InterpretedFlopCounter[ast.op](*([run_ast(x) for x in ast.src]+([ast.arg] if ast.arg is not None else [])))
   return run_ast(ast)
 
+# **************** for Interpreted Buffers ****************
+
+class Interpreted:
+  def __init__(self, buffer: Type[RawBuffer], compiler: Callable[[LazyOp], Callable]):
+    self.buffer, self.compiler = buffer, compiler
+    self.synchronize = lambda: None
+    self.batch_executor = BatchExecutor
+    self.codegen = None
+    self.method_cache: Dict[LazyOp, Callable] = {}
+
+  def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
+    if ast not in self.method_cache: self.method_cache[ast] = self.compiler(ast)
+    output.realized = output.output_buffer   # NOTE: assuming this is the right size and dtype from assign
+    ret: RawBuffer = self.method_cache[ast]([x.realized for x in inputs] if inputs else None, var_vals)
+    assert output.dtype == ret.dtype, f"expected {output.dtype}, got {ret.dtype}"
+    if output.realized is not None: output.realized._buf = ret._buf
+    else: output.realized = ret
+
 # **************** for Compiled Buffers ****************
 
 class ASTRunner:
@@ -247,7 +205,7 @@ class ASTRunner:
     self.clprg = runtime(self.name, self.lib)
     return self
 
-  def exec(self, rawbufs, var_vals:Optional[Dict[Variable, int]]=None, force_wait=False) -> Optional[float]:
+  def exec(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, force_wait=False) -> Optional[float]:
     from tinygrad.jit import CacheCollector
     CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
     return self(rawbufs, var_vals, force_wait=force_wait)
@@ -259,6 +217,7 @@ class ASTRunner:
 
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
     if var_vals is None: var_vals = {}
+    var_vals = {k:var_vals[k] for k in self.vars}   # filter the var_vals
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
@@ -327,7 +286,8 @@ class Compiled:
   def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
-    # NOTE: this is pretty wrong actually, who knows where else this buffer is used?
+    # TODO: this is pretty wrong actually, who knows where else this buffer is used?
+    # TODO: what if an assign is required? this silently is wrong
     output.realized = output.output_buffer
     if output.realized is not None:
       for i,a in enumerate(inputs):
@@ -345,13 +305,5 @@ class Compiled:
     # all the rawbuffers
     rawbuffers = [output.realized] + [x.realized for x in inputs]
 
-    if getenv("ENABLE_METHOD_CACHE", 1):
-      if ast not in self.method_cache: self.method_cache[ast] = self.get_optimized_program(ast, rawbuffers)
-      prg = self.method_cache[ast]
-    else:
-      prg = self.get_optimized_program(ast, rawbuffers)
-
-    if prg.name == getenv("PRINT_PRG", ''): print(prg.prg)
-
-    prg.exec(rawbuffers, var_vals={k:var_vals[k] for k in prg.vars})
-    return output.realized
+    if ast not in self.method_cache: self.method_cache[ast] = self.get_optimized_program(ast, rawbuffers)
+    self.method_cache[ast].exec(rawbuffers, var_vals)
