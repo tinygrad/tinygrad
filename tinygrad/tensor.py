@@ -684,6 +684,7 @@ class Tensor:
   def minimum(self, x:Union[Tensor, float]) -> Tensor: return -((-self).maximum(-x))
 
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
+    if 0 in self.shape: return self
     x_,y = self._broadcasted(input_)
     x,z = x_._broadcasted(other)
     return mlops.Where.apply(x, *y._broadcasted(z))

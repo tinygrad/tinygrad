@@ -313,10 +313,13 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_equal(t.numpy(), np.full((6, 2, 0), 12))
 
   def test_pad(self):
-    pass
-    # t = Tensor.rand(3, 2, 0)
-    # a = t.pad(((1, 1), None, None), 1)
-    # assert a.shape == (5, 2, 0)
+    t = Tensor.rand(3, 2, 0).pad((None, None, (1, 1)), 1)
+    assert t.shape == (3, 2, 2)
+    np.testing.assert_equal(t.numpy(), np.ones((3, 2, 2)))
+
+    t = Tensor.rand(3, 2, 0).pad(((1, 1), None, None), 1)
+    assert t.shape == (5, 2, 0)
+    np.testing.assert_equal(t.numpy(), np.ones((5, 2, 0)))
 
   def test_shrink_into_zero(self):
     t = Tensor.rand(3, 4).realize()
