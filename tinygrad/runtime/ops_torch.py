@@ -32,7 +32,7 @@ torch_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
 }}
 
 class RawTorchBuffer(RawBuffer):
-  def __init__(self, size:int, dtype:DType, buf:Optional[torch.Tensor]=None): super().__init__(size, dtype, buf if buf is not None else torch.empty([size], device=device, dtype=inverse_type_map[dtype]))
+  def __init__(self, size:int, dtype:DType, buf:Optional[torch.Tensor]=None, allocator=lambda size, dtype: torch.empty([size], device=device, dtype=inverse_type_map[dtype])): super().__init__(size, dtype, buf, allocator)
   @classmethod
   def fromCPU(cls, x):
     buf = torch.from_numpy(x if all(s>=0 for s in x.strides) else x.copy()).requires_grad_(False).to(device)

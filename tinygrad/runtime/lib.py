@@ -9,14 +9,14 @@ class RawBuffer:  # pylint: disable=abstract-method
   def __init__(self, size:int, dtype:DType, buf:Any=None, allocator:Any=None, **kwargs):
     self.size: int = size
     self.dtype: DType = dtype
-    self._buf = buf if buf is not None else (allocator.alloc(size, dtype, **kwargs) if allocator else None) # If buf is provided, use it. Otherwise try to allocate from the allocator.
+    self._buf = buf if buf is not None else (allocator(size, dtype, **kwargs) if allocator else None) # If buf is provided, use it. Otherwise try to allocate from the allocator.
     self._memsz: int = size*dtype.itemsize
     self._allocator = allocator
     self._device = kwargs.get('device', None)
     GlobalCounters.mem_used += self._memsz
   def __del__(self):  # NOTE: if it fails on init (bad dtype), it won't have a _memsz
     if hasattr(self, '_memsz'): GlobalCounters.mem_used -= self._memsz
-    if hasattr(self, '_allocator') and self._allocator: self._allocator.free(self._buf)
+    if hasattr(self, '_allocator') and self._allocator and hasattr(self._allocator, 'free'): self._allocator.free(self._buf)
   def __repr__(self): return f"buffer<{self.size}, {self.dtype}, {id(self)}>"
   @property
   def key(self): return (self.size, self.dtype)
@@ -100,7 +100,7 @@ class LRUAllocator:
     self.buffer_info.pop(buf_to_free)
     self._do_free(buf_to_free)
 
-  def alloc(self, size, dtype, device='0', **kwargs):
+  def __call__(self, size, dtype, device='0', **kwargs): # allocate
     rawbufs = self.cached_buffers.get(self._cached_bufkey(size, dtype, device), None)
     return self._cache_reuse_buffer(rawbufs) if rawbufs else self._alloc_buffer(size, dtype, device, **kwargs)
 

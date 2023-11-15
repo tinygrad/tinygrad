@@ -165,7 +165,7 @@ class Interpreted:
 
     @functools.lru_cache(None)
     def gstr(x:Any, nm=None) -> str:
-      if self != InterpretedFlopCounter and ('Variable' in (str_arg := repr(x)) or 'NumNode' in str_arg):
+      if ('Variable' in (str_arg := repr(x)) or 'NumNode' in str_arg):
         str_arg = re.sub(r'Variable\(.*?\)', lambda m: f'var_vals[{str(m.group(0))}]', str_arg)
         # TODO: (Variable - Variable) might create NumNode. can we remove it?
         return re.sub(r'NumNode\((.*?)\)', r'\1', str_arg)
@@ -191,7 +191,7 @@ class Interpreted:
 
     ret = _interpret_ast(ast)
     src = '\n'.join(['def run(inputs, var_vals):'] + lines + [f"  return {gstr(self.from_underlying, 'from_underlying')}({ret})" if self.from_underlying else f"  return {ret}"])
-    if DEBUG >= 4 and self != InterpretedFlopCounter: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
+    if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
     exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
     return tglob['run']
 
