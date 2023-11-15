@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
-from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
+from tinygrad.jit import TinyJit
 import pytest
 
 pytestmark = pytest.mark.webgpu
