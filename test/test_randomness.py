@@ -106,11 +106,21 @@ class TestRandomness(unittest.TestCase):
         torch_res = torch_res.unsqueeze(0)
       for i in range(torch_res.shape[0]):
         self.assertTrue(equal_distribution(lambda *_: tiny_res[i], lambda _: torch_res[i]))
-    _check_with_torch(p=[0.231, 0., 1., 0.5], num_samples=1000, replacement=True)
-    _check_with_torch(p=[[0.453, 0., 1., 0.81], [0.1, 0.8, 0., 0.1]], num_samples=1000, replacement=True)
+    _check_with_torch(p=[0.231, 0., 1., 0.5], num_samples=2000, replacement=True)
+    _check_with_torch(p=[[0.453, 0., 1., 0.81], [0.1, 0.8, 0., 0.1]], num_samples=2000, replacement=True)
     # without-replacement isn't supported, unless taking only one sample
-    self.assertRaises(AssertionError, lambda: Tensor.multinomial(Tensor([0.5, 0.5]), num_samples=100, replacement=False))
-    _check_with_torch(p=[[0.5, 0.5], [0.99, 0.01]], num_samples=1, replacement=False)
+    p = [0.1, 0.9]
+    self.assertRaises(AssertionError, lambda: Tensor.multinomial(Tensor(p), 100, replacement=False))
+    tiny_samples = [Tensor.multinomial(Tensor(p), 1, replacement=False).numpy().item() for _ in range(1000)]
+    torch_samples = [torch.multinomial(torch.tensor(p), 1, replacement=False).item() for _ in range(1000)]
+    self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_samples), lambda _: torch.tensor(torch_samples)))
+
+  def test_multinomial_counterexample(self):
+    tiny_res = Tensor.multinomial(Tensor([0.3, 0.6, 0.1]), 2000, replacement=True)
+    torch_res = torch.multinomial(torch.tensor([0.3, 0.6, 0.1]), 2000, replacement=True)
+    self.assertTrue(equal_distribution(lambda *_: tiny_res, lambda _: torch_res))
+    torch_res = torch.multinomial(torch.tensor([0.2, 0.7, 0.1]), 2000, replacement=True)
+    self.assertFalse(equal_distribution(lambda *_: tiny_res, lambda _: torch_res))
 
   def test_conv2d_init(self):
     params = (128, 256, (3,3))
