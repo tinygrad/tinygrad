@@ -1,6 +1,6 @@
 from __future__ import annotations
 import sys, operator, math, functools
-from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapping
+from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapping, Set
 from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
@@ -150,7 +150,7 @@ class LazyBuffer:
 
   # *** scheduling ***
 
-  def schedule(self, seen=None) -> List[ScheduleItem]:
+  def schedule(self, seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
     if seen is None: seen = set()
     if self in seen or self.realized or self.is_unrealized_const(): return []
     seen.add(self)
@@ -166,7 +166,8 @@ class LazyBuffer:
     ret = []
     for x in op.buffers: ret += x.schedule(seen)
 
-    var_vals = dict(sorted(merge_dicts([self.st.var_vals] + [buf.st.var_vals for buf in op.buffers]).items(), key=lambda kv:cast(Variable,kv[0]).key))
+    var_vals = self.st.var_vals
+    for buf in op.buffers: var_vals |= buf.st.var_vals
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
