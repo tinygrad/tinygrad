@@ -4,7 +4,7 @@ from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapp
 from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
-from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, dedup, all_int
+from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, dedup, merge_dicts, all_int
 from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
@@ -166,8 +166,7 @@ class LazyBuffer:
     ret = []
     for x in op.buffers: ret += x.schedule(seen)
 
-    var_vals = self.st.var_vals
-    for buf in op.buffers: var_vals |= buf.st.var_vals
+    var_vals = merge_dicts([self.st.var_vals] + [buf.st.var_vals for buf in op.buffers])
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
