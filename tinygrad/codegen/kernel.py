@@ -95,8 +95,11 @@ class Kernel:
     self.group_for_reduce: List[int] = []
     self.upcasted: int = 0
     self.local_dims: int = 0
+    self.simd_local_dims: int = 0
+    self.simd_upcasted: int = 0
     self.local_alias: Dict[int, LocalBuffer] = {}
     self.tensor_core: Optional[TensorCore] = None
+    self.tensor_core_buffers: Optional[Tuple[TensorCore, int, int]] = None
     self.dont_use_locals: bool = False
 
     # group simplifies
@@ -118,8 +121,8 @@ class Kernel:
       self.info, self.reduceop, self.bufs[:], self.earlybufs, self.full_buf_index, self.sts[:]
 
     # parameters for optimizations
-    ret.applied_opts, ret.group_for_reduce, ret.upcasted, ret.local_dims, ret.local_alias, ret.tensor_core, ret.dont_use_locals = \
-      self.applied_opts[:], self.group_for_reduce[:], self.upcasted, self.local_dims, self.local_alias.copy(), self.tensor_core, self.dont_use_locals
+    ret.applied_opts, ret.group_for_reduce, ret.upcasted, ret.local_dims, ret.simd_upcasted, ret.simd_local_dims, ret.local_alias, ret.tensor_core, ret.tensor_core_buffers, ret.dont_use_locals = \
+      self.applied_opts[:], self.group_for_reduce[:], self.upcasted, self.local_dims, self.simd_upcasted, self.simd_local_dims, self.local_alias.copy(), self.tensor_core, self.tensor_core_buffers, self.dont_use_locals
 
     # uncached since linearize didn't run
     ret.applied_opts_cache = None
@@ -363,10 +366,10 @@ class Kernel:
             s1_exists = False
 
         # tensor core -- unroll the reduce dim, upcast input, then create the correct thread pattern
-        self.apply_opt(Opt(OptOps.UNROLL, 0, tc.dims[2]))
-        self.apply_opt(Opt(OptOps.UPCAST, s0 if tc.upcast_dim == 0 else s1, (tc.dims[0]*tc.dims[2])//prod([a[1] for a in tc.threads])))
+        self.apply_opt(Opt(OptOps.UNROLL, 0, tc.dims[2]), simd=True)
+        self.apply_opt(Opt(OptOps.UPCAST, s0 if tc.upcast_dim == 0 else s1, (tc.dims[0]*tc.dims[2])//prod([a[1] for a in tc.threads])), simd=True)
         for (tc_dim, tc_amt) in tc.threads:
-          fix(self.apply_opt(Opt(OptOps.LASTLOCAL, s0 if tc_dim == 0 else s1, tc_amt)), s0 if tc_dim == 0 else s1)
+          fix(self.apply_opt(Opt(OptOps.LASTLOCAL, s0 if tc_dim == 0 else s1, tc_amt), simd=True), s0 if tc_dim == 0 else s1)
 
         # assert tensor core and prevent extra_opts from altering the key shape structure
         if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
@@ -395,7 +398,7 @@ class Kernel:
         return True
     return False
 
-  def apply_opt(self, opt:Opt):
+  def apply_opt(self, opt:Opt, simd=False):
     assert not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.LASTLOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals"
     self.applied_opts.append(opt)
     if opt.axis is not None:
@@ -408,39 +411,46 @@ class Kernel:
       assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
     else:
       amt = -1
+    if simd: assert opt.op in [OptOps.LOCAL, OptOps.LASTLOCAL, OptOps.UNROLL, OptOps.UPCAST], "SIMD dims must be local or upcast"
+    if simd: assert not self.group_for_reduce, "SIMD with group not supported"
+    assert not (self.first_reduce - self.simd_local_dims <= axis < self.first_reduce or self.shape_len - self.upcasted <= axis < self.shape_len - self.upcasted + self.simd_upcasted), "cannot modify simd dims"
     if opt.op == OptOps.LOCAL:        # cyan
       assert self.opts.has_local, "target does not support local"
       assert axis < self.first_reduce, "can't local a reduce"
-      assert not(self.tensor_core), "can't local with tensor cores"
-      self.shift_to(axis, amt, insert_before=self.first_reduce)
+      self.shift_to(axis, amt, insert_before=self.first_reduce - self.simd_local_dims if not simd else self.first_reduce)
       self.local_dims += 1
+      if simd: self.simd_local_dims += 1
     elif opt.op == OptOps.LASTLOCAL:  # cyan
       assert self.opts.has_local, "target does not support local"
       assert axis < self.first_reduce, "can't local a reduce"
-      self.shift_to(axis, amt, insert_before=self.first_reduce-self.local_dims)
+      self.shift_to(axis, amt, insert_before=self.first_reduce-self.local_dims if not simd else self.first_reduce - self.simd_local_dims)
       self.local_dims += 1
+      if simd: self.simd_local_dims += 1
     elif opt.op == OptOps.GROUP:      # green
       assert self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem"
       assert axis >= self.first_reduce + len(self.group_for_reduce) and axis < self.shape_len-self.upcasted, "must be reduce axis to group"
-      assert not(self.tensor_core), "can't group with tensor cores"
+      assert not(self.tensor_core) and not self.simd_local_dims, "can't group with tensor cores"
       self.shift_to(axis, amt, insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(amt)
     elif opt.op == OptOps.GROUPTOP:   # green
       assert self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem"
       assert axis >= self.first_reduce + len(self.group_for_reduce) and axis < self.shape_len-self.upcasted, "must be reduce axis to group"
-      assert not(self.tensor_core), "can't group with tensor cores"
+      assert not(self.tensor_core) and not self.simd_local_dims, "can't group with tensor cores"
       self.shift_to(axis, amt, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(amt)
     elif opt.op == OptOps.UNROLL:     # purple
       assert axis < self.shape_len-self.upcasted, "can't upcasted already upcasted"
       assert amt <= 32, "don't unroll more than 32"
-      self.shift_to(axis, amt, insert_before=None)
+      if self.full_shape[axis] == amt and axis == self.first_reduce: self.local_dims += 1  # a fully unrolled leftmost reduce dim looks like a local dim :(
+      self.shift_to(axis, amt, insert_before=self.shape_len if not simd else self.shape_len - self.upcasted + self.simd_upcasted)
       self.upcast()
+      if simd: self.simd_upcasted += 1
     elif opt.op == OptOps.UPCAST:     # yellow
       assert axis < self.first_reduce, "upcast is for non-reduce"
       assert amt <= 8, "don't upcast more than 8"
-      self.shift_to(axis, amt, insert_before=None)
+      self.shift_to(axis, amt, insert_before=self.shape_len if not simd else self.shape_len - self.upcasted + self.simd_upcasted)
       self.upcast()
+      if simd: self.simd_upcasted += 1
     elif opt.op == OptOps.UPCASTMID:  # white
       assert self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1, "invalid upcast mid reduce"
       axes = self.sts[0].unit_stride_axes()
