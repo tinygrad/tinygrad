@@ -7,7 +7,7 @@ import pytest
 
 pytestmark = pytest.mark.webgpu
 
-@unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT != "WEBGPU", f"no JIT on {Device.DEFAULT}")
+@unittest.skipUnless(Device.DEFAULT != "WEBGPU", f"no JIT on {Device.DEFAULT}")
 class TestJit(unittest.TestCase):
   def test_simple_jit(self):
     @TinyJit
