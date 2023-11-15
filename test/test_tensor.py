@@ -348,11 +348,10 @@ class TestZeroShapeTensor(unittest.TestCase):
     assert a.shape == (3, 0)
     np.testing.assert_equal(a.numpy(), np.sum(np.ones((3, 2, 0)), axis=1))
 
-  # # does not work yet
-  # def test_reduce_over_zero(self):
-  #   a = Tensor.ones(3, 2, 0).sum(axis=2)
-  #   assert a.shape == (3, 2)
-  #   np.testing.assert_equal(a.numpy(), np.sum(np.ones((3, 2, 0)), axis=2))
+  def test_reduce_over_zero(self):
+    a = Tensor.ones(3, 2, 0).sum(axis=2)
+    assert a.shape == (3, 2)
+    np.testing.assert_equal(a.numpy(), np.sum(np.ones((3, 2, 0)), axis=2))
 
 if __name__ == '__main__':
   unittest.main()

@@ -71,7 +71,7 @@ class View:
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def expand(self, new_shape: Tuple[sint, ...]) -> View:
     assert len(new_shape) == len(self.shape)
-    if any(s == 0 for s in self.shape):
+    if 0 in self.shape:
       assert all((s == x == 0 or (x % s) == 0) for s,x in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
       return View.create(new_shape)
     assert all((s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), f"can't expand {self.shape} into {new_shape}"
@@ -100,8 +100,8 @@ class View:
     if self.shape == new_shape: return self
 
     assert all(x >= 0 for x in new_shape), f"shape can't contain negative numbers {new_shape}"
-    if any(s == 0 for s in self.shape):
-      assert any(s == 0 for s in new_shape), f"cannot reshape 0 size to {new_shape}"
+    if 0 in self.shape:
+      assert 0 in new_shape, f"cannot reshape 0 size to {new_shape}"
       return View.create(new_shape)
     # check for the same size
     if all_int(self.shape):
