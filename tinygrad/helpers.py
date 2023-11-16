@@ -5,7 +5,8 @@ from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassV
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
 
-T, U = TypeVar("T"), TypeVar("U")
+T = TypeVar("T")
+U = TypeVar("U")
 # NOTE: it returns int 1 if x is empty regardless of the type of x
 def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.__mul__, x, 1)
 
