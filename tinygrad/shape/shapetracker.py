@@ -24,7 +24,7 @@ def expr_node(view:View, idx=None) -> Node:
   if idx is None: idx = Variable('idx', 0, prod(view.shape)-1)
   ret: List[Node] = [Variable.num(view.offset) if isinstance(view.offset, int) else view.offset] if view.offset else []
   acc = 1
-  for d,s in reversed(to_shape_strides(view.shape, view.strides)):
+  for d,s,_ in reversed(to_shape_strides(view.shape, view.strides)):
     ret.append(((idx//acc)%d)*s)
     acc *= d
   return Variable.sum(ret)

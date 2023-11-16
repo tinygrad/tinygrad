@@ -16,28 +16,28 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   return filter_strides(shape, tuple(strides))
 
 @functools.lru_cache(maxsize=None)
-def to_shape_strides(_shape:Tuple[int, ...], _strides:Tuple[int, ...], _mask:Optional[Tuple[Tuple[int, int], ...]] = None) -> Tuple[Tuple[int, int], ...]:
+def to_shape_strides(_shape:Tuple[int, ...], _strides:Tuple[int, ...], _mask:Optional[Tuple[Tuple[int, int], ...]] = None) -> Tuple[Tuple[int, int, int], ...]:
   assert len(_shape) == len(_strides)
   shape = [s for idx, s in enumerate(_shape) if _shape[idx] != 1]
   strides = [s for idx, s in enumerate(_strides) if _shape[idx] != 1]
   mask = [s for idx, s in enumerate(_mask) if _shape[idx] != 1] if _mask else None
-  ret = [(shape[0], strides[0])] if shape else ([(1, 0)] if len(_shape) else [])
   state = 1 if mask and mask[0][1] - mask[0][0] == 1 and strides[0] == 0 else 0
+  ret = [(shape[0], strides[0], state)] if shape else ([(1, 0, 0)] if len(_shape) else [])
   for i in range(1, len(shape)):
     if mask and strides[i] == 0 and mask[i][1] - mask[i][0] == 1 and i != len(shape) - 1:
       if state == 1:
-        ret[-1] = (ret[-1][0] * shape[i], 0)
+        ret[-1] = (ret[-1][0] * shape[i], 0, 1)
       else:
-        ret.append((shape[i], 0))
+        ret.append((shape[i], 0, 1))
         state = 1
     elif state == 1:
-      ret[-1] = (ret[-1][0] * shape[i], strides[i])
+      ret[-1] = (ret[-1][0] * shape[i], strides[i], 2)
       state = 2
     elif (ret[-1][1] == shape[i] * strides[i] or ret[-1][0] == 1) and state != 2:
-      ret[-1] = (ret[-1][0] * shape[i], strides[i])
+      ret[-1] = (ret[-1][0] * shape[i], strides[i], 0)
       state = 0
     else:
-      ret.append((shape[i], strides[i]))
+      ret.append((shape[i], strides[i], 0))
       state = 0
   return tuple(ret)
 
@@ -196,13 +196,15 @@ class View:
       return View.create(new_shape, new_strides_tuple, self.offset, new_mask_tuple)
     
     strides, reverse_shape = [], reversed(new_shape)
-    for d, s in reversed(to_shape_strides(self.shape, self.strides, self.mask)):
+    for d, s, state in reversed(to_shape_strides(self.shape, self.strides, self.mask)):
       acc, new_stride, equal = 1, s, False
       while acc <= d and not equal:
         try: new_dim = next(reverse_shape)
         except StopIteration: break
         acc *= new_dim
         strides.append(new_stride)
+        if state == 2:
+          new_stride = 0
         new_stride *= new_dim
         if acc == d: equal = True
       if not equal: break
