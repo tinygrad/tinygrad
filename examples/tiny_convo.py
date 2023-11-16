@@ -7,6 +7,7 @@ from examples.llama import LLaMa
 from examples.vits import MODELS, download_if_not_present, get_hparams_from_file, TextMapper, VITS_PATH, load_model
 from examples.tinyconvo.helpers import audio_stream
 
+import argparse
 import multiprocessing
 import numpy as np
 import sys
@@ -14,7 +15,7 @@ import sys
 # Whisper
 SAMPLE_RATE = 16000
 N_FRAME_CHUNK = 1600
-RECORD_SECONDS = 3
+RECORD_SECONDS = 3 # TODO: remove this
 NUM_RUNS = int(SAMPLE_RATE / N_FRAME_CHUNK * RECORD_SECONDS)
 
 # LLaMA
@@ -31,12 +32,12 @@ NOISE_SCALE = 0.667
 LENGTH_SCALE = 1
 NOISE_SCALE_W = 0.8
 
-def listen(q: multiprocessing.Queue):
-  with audio_stream(True, SAMPLE_RATE, N_FRAME_CHUNK) as stream:
+def listen(q: multiprocessing.Queue, n_frame_chunk: int):
+  with audio_stream(True, SAMPLE_RATE, n_frame_chunk) as stream:
     print("Start listening...")
 
     for _ in range(0, NUM_RUNS):
-      au_data = stream.read(N_FRAME_CHUNK)
+      au_data = stream.read(n_frame_chunk)
       au = ((np.frombuffer(au_data, np.int16)/32768).astype(np.float32)*3)
       q.put(au)
 
@@ -124,11 +125,16 @@ def play_audio(audio: np.ndarray):
 
 
 if __name__ == "__main__":
+  arg_parser = argparse.ArgumentParser(prog="tiny convo", description="Run a conversation with tinygrad using Whisper + LLaMA + VITS", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  arg_parser.add_argument("--n_frame_chunk", type=int, default=N_FRAME_CHUNK, help="the number of chunks to read when speaking")
+
+  args = arg_parser.parse_args()
+
   Tensor.no_grad = True
 
   q = multiprocessing.Queue()
 
-  p = multiprocessing.Process(target=listen, args=(q,))
+  p = multiprocessing.Process(target=listen, args=(q, args.n_frame_chunk))
   p.daemon = True
 
   p.start()
@@ -144,7 +150,7 @@ if __name__ == "__main__":
     else:
       au_buffer = np.concatenate([au_buffer, au])
 
-    if au_buffer.shape[0] == N_FRAME_CHUNK * NUM_RUNS:
+    if au_buffer.shape[0] == args.n_frame_chunk * NUM_RUNS:
       break
 
   # decode what user is saying
