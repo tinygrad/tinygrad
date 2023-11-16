@@ -5,6 +5,7 @@ from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
+np.set_printoptions(linewidth=200)
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set
 
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int
@@ -571,7 +572,18 @@ class Tensor:
     w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
     return (x*w).sum(-1)
 
-  def cumsum(self, axis:int=0) -> Tensor: return self.transpose(axis,-1).pad2d((self.shape[axis]-1,0))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
+  def cumsum(self, axis:int=0) -> Tensor:
+    #SPLIT = 64
+    ret = self.transpose(axis,-1).pad2d((self.shape[axis]-1,0))._pool((self.shape[axis],))
+    #ret = ret.pad2d((0, (SPLIT-self.shape[axis])%SPLIT))
+    #ret = ret.reshape(*ret.shape[0:-1], ret.shape[-1]//SPLIT, SPLIT)
+    #ret = ret.sum(-1)
+    #print(ret.shape)
+    #print(ret.numpy())
+    #ret = ret.sum(-1).sum(-1)
+
+    return ret.sum(-1).transpose(axis,-1)
+    #return ret.transpose(axis, -1)
 
   # ***** mlops (unary) *****
 

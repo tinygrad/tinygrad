@@ -422,9 +422,9 @@ class Linearizer(Kernel):
             const_gp, non_gp = partition(non_const_parent[0].vin, lambda x: x.uop == UOps.CONST)
             if len(non_gp) == 1 and const_gp[0].arg == -1:
               if u.vin[0] == non_gp[0]:
-                u.vin = (non_gp[0], self.uop(UOps.ALU, u.dtype, (const_parent[0], const_gp[0]), BinaryOps.MUL, insert_before=self.uops.index(u)))
+                u.vin = (non_gp[0], self.uop(UOps.ALU, const_parent[0].dtype, (const_parent[0], const_gp[0]), BinaryOps.MUL, insert_before=self.uops.index(u)))
               else:
-                u.vin = (self.uop(UOps.ALU, u.dtype, (const_parent[0], const_gp[0]), BinaryOps.MUL, insert_before=self.uops.index(u)), non_gp[0])
+                u.vin = (self.uop(UOps.ALU, const_parent[0].dtype, (const_parent[0], const_gp[0]), BinaryOps.MUL, insert_before=self.uops.index(u)), non_gp[0])
               changed_something = True
               break
         if u.uop == UOps.LOOP:  # loop ALU pushing
