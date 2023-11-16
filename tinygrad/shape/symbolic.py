@@ -150,10 +150,14 @@ class Variable(Node):
 
   def __init__(self, expr:Optional[str], nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
-    self.val:Optional[int] = None
+    self._val: Optional[int] = None
+  @property
+  def val(self):
+    assert self._val is not None, f"Variable isn't bound, can't access val of {self}"
+    return self._val
   def bind(self, val):
-    assert self.val is None and self.min<=val<=self.max, f"cannot bind {val} to {self}"
-    self.val = val
+    assert self._val is None and self.min<=val<=self.max, f"cannot bind {val} to {self}"
+    self._val = val
     return self
   def unbind(self) -> Tuple[Variable, int]:
     assert self.val is not None, f"cannot unbind {self}"
@@ -261,8 +265,11 @@ class SumNode(RedNode):
         if x.b%b == 0: fully_divided.append(x//b)
         else:
           rest.append(x)
-          _gcd = gcd(_gcd, x.b)
-          if x.__class__ == MulNode and divisor == 1 and b%x.b == 0: divisor = x.b
+          if isinstance(x.b, int):
+            _gcd = gcd(_gcd, x.b)
+            if x.__class__ == MulNode and divisor == 1 and b%x.b == 0: divisor = x.b
+          else:
+            _gcd = 1
       else:
         rest.append(x)
         _gcd = 1
@@ -341,8 +348,8 @@ sint = Union[Node, int]
 VariableOrNum = Union[Variable, NumNode]
 
 render_python: Dict[Type, Callable] = {
-  Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}{'='+str(self.val) if self.val is not None else ''}]" if ctx == "DEBUG" else (f"Variable('{self.expr}', {self.min}, {self.max})" if ctx == "REPR" else f"{self.expr}"),
-  NumNode: lambda self,ops,ctx: f"{self.b}",
+  Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}{'='+str(self.val) if self._val is not None else ''}]" if ctx == "DEBUG" else (f"Variable('{self.expr}', {self.min}, {self.max})"+(f".bind({self.val})" if self._val is not None else '') if ctx == "REPR" else f"{self.expr}"),
+  NumNode: lambda self,ops,ctx: f"NumNode({self.b})" if ctx == "REPR" else f"{self.b}",
   MulNode: lambda self,ops,ctx: f"({sym_render(self.b,ops,ctx)}*{self.a.render(ops,ctx)})" if isinstance(self.a,Variable) and isinstance(self.b,Variable) and self.a.expr and self.b.expr and self.b.expr < self.a.expr else f"({self.a.render(ops,ctx)}*{sym_render(self.b,ops,ctx)})",
   DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}//{self.b})",
   ModNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}%{self.b})",

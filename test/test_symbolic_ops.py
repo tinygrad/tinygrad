@@ -1,12 +1,11 @@
 import unittest
-from tinygrad.jit import JIT_SUPPORTED_DEVICE
 from tinygrad.shape.symbolic import Variable
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor, Device
 import numpy as np
 
 @unittest.skipIf(getenv("ARM64") or getenv("PTX"), "ARM64 and PTX are not supported")
-@unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["HIP", "WEBGPU"], f"{Device.DEFAULT} is not supported")
+@unittest.skipIf(Device.DEFAULT in ["HIP", "WEBGPU"], f"{Device.DEFAULT} is not supported")
 class TestSymbolicOps(unittest.TestCase):
   def test_plus1(self):
     def f(a): return (a+1).realize()

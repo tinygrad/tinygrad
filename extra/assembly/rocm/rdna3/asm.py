@@ -67,13 +67,13 @@ with open("/tmp/cc2.elf", "wb") as f:
   f.write(asm)
 
 print(colored("creating CLProgram", "green"))
-prg = CLProgram("code", asm, binary=True)
+prg = CLProgram("code", asm)
 
 print(colored("running program", "green"))
 G = 512
 FLOPS *= 100000*G*G  # loop * global_size
 for i in range(3):
-  tm = prg([G//256, G], [256, 1], buf, wait=True)
+  tm = prg(buf, global_size=[G//256, G, 1], local_size=[256, 1, 1], wait=True)
   print(f"ran in {tm*1e3:.2f} ms, {FLOPS/(tm*1e9):.2f} GFLOPS")
 
 print(colored("transferring buffer", "green"))

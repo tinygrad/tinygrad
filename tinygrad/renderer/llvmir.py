@@ -1,5 +1,5 @@
 from typing import Final, Dict, Callable, Any, List, Optional, Tuple
-from llvmlite import ir  # type: ignore
+from llvmlite import ir
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.helpers import dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
@@ -19,7 +19,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
   # TODO: this should be casted
   BinaryOps.CMPLT: lambda builder,x,y: builder.zext(builder.icmp_signed("<", x, y),ir.IntType(32)) if isinstance(x.type, ir.IntType) else builder.uitofp(builder.fcmp_ordered("<", x, y, flags=LLVM_FAST_MATH_FLAGS), ir.FloatType()),
   BinaryOps.MAX: lambda builder,x,y: builder.select(builder.fcmp_unordered(">", x, y, flags=LLVM_FAST_MATH_FLAGS), x, y, flags=LLVM_FAST_MATH_FLAGS),
-  BinaryOps.MOD: lambda builder,x,y: builder.srem(x,y),
+  BinaryOps.MOD: lambda builder,x,y: builder.srem(x,y) if isinstance(x.type, ir.IntType) else builder.frem(x,y) if isinstance(x.type, ir.FloatType) else builder.urem(x,y),
   TernaryOps.MULACC: lambda builder,x,y,z: builder.fadd(builder.fmul(x,y, flags=LLVM_FAST_MATH_FLAGS), z, flags=LLVM_FAST_MATH_FLAGS),
   TernaryOps.WHERE: lambda builder,x,y,z: builder.select(builder.fcmp_unordered("!=", x, ir.Constant(ir.FloatType(), 0), flags=LLVM_FAST_MATH_FLAGS) if isinstance(x.type, ir.FloatType) else builder.trunc(x, ir.IntType(1)), y, z, flags=LLVM_FAST_MATH_FLAGS),
 }
@@ -29,33 +29,34 @@ dtype_to_llvm_dtype = {dtypes.float64:ir.DoubleType(), dtypes.float16:ir.HalfTyp
 def cast(bb, val, input_type, output_type):
   if input_type == output_type: return val
 
-  if output_type == dtypes.float32:
-    if dtypes.is_int(input_type) or input_type == dtypes.bool:
-      val = bb[-1].uitofp(val, ir.FloatType()) if dtypes.is_unsigned(input_type) or input_type == dtypes.bool else bb[-1].sitofp(val, ir.FloatType())
-    elif input_type == dtypes.bfloat16:
-      val = bb[-1].sext(val, ir.IntType(32))
-      val = bb[-1].shl(val, ir.Constant(ir.IntType(32), 16))
-      val = bb[-1].bitcast(val, ir.FloatType())
-    elif input_type == dtypes.float64:
-      val = bb[-1].fptrunc(val, ir.FloatType())
-    else:
-      val = bb[-1].fpext(val, ir.FloatType())
-    return val
+  if dtypes.is_float(input_type):
+    if dtypes.is_float(output_type):
+      if output_type.itemsize > input_type.itemsize: return bb[-1].fpext(val, dtype_to_llvm_dtype[output_type])
+      return bb[-1].fptrunc(val, dtype_to_llvm_dtype[output_type])
+    if dtypes.is_int(output_type):
+      if dtypes.is_unsigned(output_type): return bb[-1].fptoui(val, dtype_to_llvm_dtype[output_type])
+      return bb[-1].fptosi(val, dtype_to_llvm_dtype[output_type])
+    if output_type == dtypes.bool: return bb[-1].fcmp_unordered('!=', cast(bb, val, input_type, dtypes.float32), ir.Constant(ir.FloatType(), 0))
 
-  if input_type == dtypes.float32:
-    if dtypes.is_int(output_type) or output_type == dtypes.bool:
-      if dtypes.is_unsigned(output_type): val = bb[-1].fptoui(val, dtype_to_llvm_dtype[output_type])
-      elif output_type == dtypes.bool: val = bb[-1].fcmp_ordered("!=", val, ir.Constant(ir.FloatType(), 0), flags=LLVM_FAST_MATH_FLAGS)
-      else: val = bb[-1].fptosi(val, dtype_to_llvm_dtype[output_type])
-    elif output_type == dtypes.bfloat16:
-      val = bb[-1].bitcast(val, ir.IntType(32))
-      val = bb[-1].lshr(val, ir.Constant(ir.IntType(32), 16))
-      val = bb[-1].trunc(val, ir.IntType(16))
-    elif output_type == dtypes.float64:
-      val = bb[-1].fpext(val, ir.DoubleType())
-    else:
-      val = bb[-1].fptrunc(val, dtype_to_llvm_dtype[output_type])
-    return val
+  if dtypes.is_unsigned(input_type) or input_type == dtypes.bool:
+    if output_type == dtypes.float16:
+      val = bb[-1].uitofp(val, ir.FloatType())
+      return bb[-1].fptrunc(val, ir.HalfType())
+    if dtypes.is_float(output_type): return bb[-1].uitofp(val, dtype_to_llvm_dtype[output_type])
+    if dtypes.is_int(output_type):
+      if input_type.itemsize > output_type.itemsize: return bb[-1].trunc(val, dtype_to_llvm_dtype[output_type])
+      return bb[-1].zext(val, dtype_to_llvm_dtype[output_type])
+    if output_type == dtypes.bool: return bb[-1].icmp_unsigned('!=', val, ir.Constant(val.type, 0))
+
+  if dtypes.is_int(input_type):
+    if output_type == dtypes.float16:
+      val = bb[-1].sitofp(val, ir.FloatType())
+      return bb[-1].fptrunc(val, ir.HalfType())
+    if dtypes.is_float(output_type): return bb[-1].sitofp(val, dtype_to_llvm_dtype[output_type])
+    if dtypes.is_int(output_type):
+      if input_type.itemsize > output_type.itemsize: return bb[-1].trunc(val, dtype_to_llvm_dtype[output_type])
+      return bb[-1].sext(val, dtype_to_llvm_dtype[output_type])
+    if output_type == dtypes.bool: return bb[-1].icmp_signed('!=', val, ir.Constant(val.type, 0))
 
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
@@ -64,7 +65,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
   module = ir.Module(name=__file__)
 
   # extract global buffers
-  buf_to_dtype = {args[0]:args[1] for uop,_,_,args,_ in uops if uop == UOps.DEFINE_GLOBAL}
+  buf_to_dtype = {u.arg[0]:u.arg[1] for u in uops if u.uop == UOps.DEFINE_GLOBAL}
   buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
 
   # create llvm function
@@ -87,7 +88,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
     if dtype == dtypes._arg_int32: lvars[bufname] = bb[-1].sext(func.args[buf_index[bufname]], ir.IntType(32))
 
   for u in uops:
-    uop,dtype,vin,args,_ = u
+    uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
     if uop == UOps.LOOP:
       bb.append(ir.IRBuilder(func.append_basic_block(f"loop_body_{len(loop_blocks)}")))
       bb[-2].branch(bb[-1]._block)
@@ -141,7 +142,8 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
       element = cast(bb, lvars[vin[2]], vin[2].dtype, vin[0].dtype)
       bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
     if uop == UOps.ALU:
-      lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin])
+      lvars[u] = cast(bb, code_for_op[args](bb[-1], *[cast(bb, lvars[x], x.dtype, dtypes.float) for x in vin]), dtypes.float, dtype)
+    if uop == UOps.CAST: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype)
 
   bb[-1].ret_void()
   return str(module), {}
