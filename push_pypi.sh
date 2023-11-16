@@ -1,5 +1,5 @@
 #!/bin/bash -e
 rm -rf dist
-ipython3 setup.py sdist bdist_wheel
+ipython3 -m build . --wheel --sdist
 twine upload dist/*
 
