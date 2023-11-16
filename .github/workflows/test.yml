@@ -217,7 +217,7 @@ jobs:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
         key: metal-webgpu-testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
-      run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Cache model weights
       uses: actions/cache@v3
       with:
