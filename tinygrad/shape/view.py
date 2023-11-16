@@ -3,7 +3,7 @@ import functools, operator
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, cast
 from tinygrad.helpers import prod, all_int, dedup
-from tinygrad.shape.symbolic import Node, NumNode, Variable, VariableOrNum, is_sym_int, sint
+from tinygrad.shape.symbolic import Node, NumNode, Variable, VariableOrNum, sint
 
 @functools.lru_cache(maxsize=None)
 def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
@@ -92,9 +92,6 @@ class View:
     contiguous = offset == 0 and mask is None and all(s1 == s2 for s1,s2 in zip(strides, strides_for_shape(shape)))
     return View(shape, strides, offset, mask, contiguous)
 
-  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def size(self): return prod([s.max if isinstance(s, Node) else s for s,st in zip(self.shape, self.strides) if st != 0])
-
   def vars(self) -> List[Variable]:
     flatten_mask = tuple(x for m in self.mask for x in m) if self.mask is not None else tuple()
     return dedup(functools.reduce(operator.add, [x.vars() for x in self.shape+self.strides+(self.offset,)+flatten_mask if isinstance(x, Node)], []))
@@ -136,7 +133,10 @@ class View:
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def expand(self, new_shape: Tuple[sint, ...]) -> View:
     assert len(new_shape) == len(self.shape)
-    assert all(is_sym_int(x) and (s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), f"can't expand {self.shape} into {new_shape}"
+    if 0 in self.shape:
+      assert all((s == x == 0) or (s > 0 and (x % s) == 0) for s,x in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
+      return View.create(new_shape)
+    assert all((s == x or (s == 1 and st == 0)) for s,x,st in zip(self.shape, new_shape, self.strides)), f"can't expand {self.shape} into {new_shape}"
     # NOTE: can the mask ever be (0,0)?
     mask = tuple([(((0,0) if m != (0,1) else (0,ns)) if s != ns else m) for m,s,ns in zip(self.mask, self.shape, new_shape)]) if self.mask else None
     return View.create(new_shape, self.strides, self.offset, mask)
@@ -161,7 +161,10 @@ class View:
   def reshape(self, new_shape: Tuple[sint, ...]) -> Optional[View]:
     if self.shape == new_shape: return self
 
-    assert all(is_sym_int(x) and x > 0 for x in new_shape), f"shape must be symbolic ints and can't contain 0 or negative numbers {new_shape}"
+    assert all(x >= 0 for x in new_shape), f"shape can't contain negative numbers {new_shape}"
+    if 0 in self.shape:
+      assert 0 in new_shape, f"cannot reshape 0 size to {new_shape}"
+      return View.create(new_shape)
     # check for the same size
     if all_int(self.shape):
       if all_int(new_shape):

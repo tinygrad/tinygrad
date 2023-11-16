@@ -8,9 +8,9 @@ from PIL import Image
 
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
-from models.efficientnet import EfficientNet
-from models.vit import ViT
-from models.resnet import ResNet50
+from extra.models.efficientnet import EfficientNet
+from extra.models.vit import ViT
+from extra.models.resnet import ResNet50
 
 def _load_labels():
   labels_filename = pathlib.Path(__file__).parent / 'efficientnet/imagenet1000_clsidx_to_labels.txt'

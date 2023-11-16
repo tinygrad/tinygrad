@@ -3,7 +3,7 @@ import os
 os.environ['PYOPENCL_NO_CACHE'] = '1'
 import pathlib
 import numpy as np
-import pyopencl as cl  # type: ignore
+import pyopencl as cl
 from typing import Optional, List, Tuple
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport, diskcache
 from tinygrad.ops import Compiled
@@ -54,7 +54,7 @@ class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
     self.event = cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements=['C', 'A']), is_blocking=False)
   def _copyout(self, x:np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
-    CL.cl_allocator.ensure_has_free_space(self.size, self.dtype, self._device)
+    CL.cl_allocator.ensure_has_free_space(self.size*self.dtype.itemsize, self._device)
     buf = cl.Buffer(CL.cl_ctxs[self._buf.device], cl.mem_flags.WRITE_ONLY | cl.mem_flags.USE_HOST_PTR, 0, hostbuf=x.data)
     mapped, event = cl.enqueue_map_buffer(CL.cl_queue[self._buf.device], buf, cl.map_flags.WRITE, 0, self.size, dtype=self.dtype.np, is_blocking=False)
     with mapped.base: cl.enqueue_copy(CL.cl_queue[self._buf.device], mapped, self._buf, is_blocking=True, wait_for=[event] + ([self.event] if hasattr(self, "event") else []))
@@ -71,7 +71,7 @@ def compile_gpu(prg:str) -> bytes:
 
 class CLProgram:
   def __init__(self, name:str, prg:bytes, argdtypes=None, options=None):
-    self.name, self.clprograms = name, [cl.Program(ctx, ctx.devices, [prg]*len(ctx.devices)) for ctx in CL.cl_ctxs]  # type: ignore
+    self.name, self.clprograms = name, [cl.Program(ctx, ctx.devices, [prg]*len(ctx.devices)) for ctx in CL.cl_ctxs]
     self._clprgs = [clprogram.build(options=options) for clprogram in self.clprograms]
     self.clprgs = [clprg.__getattr__(name) for clprg in self._clprgs]
     if DEBUG >= 5 and not OSX:

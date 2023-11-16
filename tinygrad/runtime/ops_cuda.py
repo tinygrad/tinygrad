@@ -2,7 +2,7 @@ import subprocess, time, re, hashlib, tempfile
 from pathlib import Path
 from typing import Optional, Tuple
 import numpy as np
-from pycuda.compiler import compile as cuda_compile # type: ignore
+from pycuda.compiler import compile as cuda_compile
 from tinygrad.helpers import DEBUG, getenv, colored, diskcache
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
@@ -42,16 +42,18 @@ if getenv("CUDACPU", 0) == 1:
     class device:
       compute_capability = lambda: (3,5) # pylint: disable=unnecessary-lambda # noqa: E731
     get_device = lambda: context.device # pylint: disable=unnecessary-lambda # noqa: E731
-  import pycuda.driver # type: ignore
+  import pycuda.driver
   pycuda.driver.Context = context
   RawCUDABuffer = RawMallocBuffer
 else:
-  import pycuda.autoprimaryctx # type: ignore # pylint: disable=unused-import # noqa: F401
+  import pycuda.autoprimaryctx # pylint: disable=unused-import # noqa: F401
   import pycuda.driver as cuda # type: ignore
   class CUDAAllocator(LRUAllocator):
+    def __init__(self): super().__init__(self._get_cur_free_space(None))
     def _do_alloc(self, size, dtype, device, **kwargs): return cuda.mem_alloc(size * dtype.itemsize) # type: ignore
     def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
-  CUDAAlloc = CUDAAllocator(pycuda.driver.Context.get_device().total_memory())
+    def _get_cur_free_space(self, device): return cuda.mem_get_info()[0] # type: ignore
+  CUDAAlloc = CUDAAllocator()
   class RawCUDABuffer(RawBufferCopyInOut): # type: ignore
     def __init__(self, size, dtype): super().__init__(size, dtype, allocator=CUDAAlloc)
     def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x.ravel(), stream) # type: ignore

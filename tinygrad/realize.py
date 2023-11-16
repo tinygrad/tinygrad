@@ -1,7 +1,7 @@
 from typing import List, cast, Dict, Callable
 import numpy as np
 from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps
-from tinygrad.graph import log_schedule_item, print_tree
+from tinygrad.graph import log_schedule_item
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import DEBUG, prod, all_int, getenv, IMAGE
 
@@ -18,17 +18,16 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     si = schedule.pop(0)
     if not disable_logging: log_schedule_item(si)
     assert all(x.realized for x in si.inputs), "can't run schedule, some inputs aren't realized"
-    if DEBUG >= 3: print_tree(si.ast)
     if si.ast.op in LoadOps:
       # confirm the LoadOps are contiguous and in order
       for i,s in enumerate(si.ast.src): assert isinstance(s, LazyOp) and s.op == BufferOps.MEM and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
       LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out, *si.inputs)
     else:
-      si.out.realized = Device[si.out.device].exec_ast(si.ast, output=si.out, inputs=si.inputs, var_vals=si.var_vals, **si.out._device_extra_args())
+      Device[si.out.device].exec_ast(si.ast, output=si.out, inputs=si.inputs, var_vals=si.var_vals, **si.out._device_extra_args())
     del si.out.op
     for v in si.out.views: del v.op
     assert si.out.realized and isinstance(si.out.realized, Device[si.out.device].buffer), f"device mismatch on realized got {type(si.out.realized)} expected {si.out.device}"
-    assert si.out.realized.dtype == si.out.dtype, "realized dtype is incorrect"
+    assert si.out.realized.dtype == si.out.dtype, f"realized dtype is incorrect, {si.out.realized.dtype} != {si.out.dtype}"
 
 # *** zero op LoadOps ***
 

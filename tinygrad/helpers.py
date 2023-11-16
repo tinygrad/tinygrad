@@ -109,29 +109,31 @@ class dtypes:
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", np.bool_)
-  float16: Final[DType] = DType(0, 2, "half", np.float16)
+  float16: Final[DType] = DType(9, 2, "half", np.float16)
   half = float16
-  float32: Final[DType] = DType(4, 4, "float", np.float32)
+  float32: Final[DType] = DType(10, 4, "float", np.float32)
   float = float32
-  float64: Final[DType] = DType(0, 8, "double", np.float64)
+  float64: Final[DType] = DType(11, 8, "double", np.float64)
   double = float64
-  int8: Final[DType] = DType(0, 1, "char", np.int8)
-  int16: Final[DType] = DType(1, 2, "short", np.int16)
-  int32: Final[DType] = DType(2, 4, "int", np.int32)
-  int64: Final[DType] = DType(3, 8, "long", np.int64)
-  uint8: Final[DType] = DType(0, 1, "unsigned char", np.uint8)
-  uint16: Final[DType] = DType(1, 2, "unsigned short", np.uint16)
-  uint32: Final[DType] = DType(2, 4, "unsigned int", np.uint32)
-  uint64: Final[DType] = DType(3, 8, "unsigned long", np.uint64)
+  int8: Final[DType] = DType(1, 1, "char", np.int8)
+  int16: Final[DType] = DType(3, 2, "short", np.int16)
+  int32: Final[DType] = DType(5, 4, "int", np.int32)
+  int64: Final[DType] = DType(7, 8, "long", np.int64)
+  uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
+  uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
+  uint32: Final[DType] = DType(6, 4, "unsigned int", np.uint32)
+  uint64: Final[DType] = DType(8, 8, "unsigned long", np.uint64)
 
   # NOTE: bfloat16 isn't supported in numpy
-  bfloat16: Final[DType] = DType(0, 2, "__bf16", None)
+  bfloat16: Final[DType] = DType(9, 2, "__bf16", None)
 
   # NOTE: these are internal dtypes, should probably check for that
   _int2: Final[DType] = DType(2, 4*2, "int2", None, 2)
   _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
+  _half16: Final[DType] = DType(0, 2*16, "half16", None, 16)
   _float2: Final[DType] = DType(4, 4*2, "float2", None, 2)
   _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
+  _float8: Final[DType] = DType(4, 4*8, "float8", None, 8)
   _arg_int32: Final[DType] = DType(2, 4, "_arg_int32", None)
 
   # NOTE: these are image dtypes
@@ -157,7 +159,7 @@ class GlobalCounters:
 # *** universal database cache ***
 
 _cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache"))
-CACHEDB: str = getenv("CACHEDB", os.path.join(_cache_dir, "tinygrad", "cache.db"))
+CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
 VERSION = 6
@@ -165,11 +167,12 @@ _db_connection = None
 def db_connection():
   global _db_connection
   if _db_connection is None:
-    os.makedirs(CACHEDB.rsplit("/", 1)[0], exist_ok=True)
+    os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
     _db_connection = sqlite3.connect(CACHEDB)
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
     if diskcache_get("meta", "version") != VERSION:
       print("cache is out of date, clearing it")
+      _db_connection.close()
       del _db_connection
       os.unlink(CACHEDB)
       _db_connection = sqlite3.connect(CACHEDB)

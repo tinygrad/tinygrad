@@ -1,77 +1,94 @@
+from __future__ import annotations
 from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional
-from collections import defaultdict
 import functools, itertools
 from tinygrad.helpers import DEBUG, DType, merge_dicts
-from tinygrad.ops import RawBuffer, Device
+from tinygrad.ops import RawBuffer, Device, ASTRunner, BatchExecutor, JitItem
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
-
-JIT_SUPPORTED_DEVICE = ["GPU", "CLANG", "METAL", "CUDA", "HIP", "WEBGPU", "LLVM"]
+from weakref import ref, WeakKeyDictionary
 
 class TinyJit:
   def __init__(self, fxn:Callable):
     self.fxn: Callable = fxn
+    self.jit_fxn: Optional[BatchExecutor] = None
     self.cnt: int = 0
-    self.jit_cache: List[Tuple[Any, List[Optional[RawBuffer]], Dict[Variable, int]]] = []
     self.ret: Any = None
-    self.input_replace: Dict[Tuple[int, int], Tuple[Union[int, str], ShapeTracker, DType]]= {}   # (kernel_number, buffer_number) -> (input_name, expected_shapetracker, expected_type)
-    self.updatable_entries: Dict[int, List[int]] = defaultdict(list) # (kernel_number) -> list(argument id). These are buffers from input + variables.
+    self.expected_vals: Optional[Tuple[Variable, ...]] = None
+    self.expected_sts_dtype: Optional[Tuple[Tuple[ShapeTracker, DType], ...]] = None
+
+  @property
+  def jit_cache(self) -> List[JitItem]: return self.jit_fxn.jit_cache if self.jit_fxn else []
+  @property
+  def input_replace(self) -> Dict[Tuple[int, int], Union[int, str]]: return self.jit_fxn.input_replace if self.jit_fxn else {}
 
   # add support for instance methods
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
 
   def __call__(self, *args, **kwargs) -> Any:
-    if Device.DEFAULT.split(":")[0] not in JIT_SUPPORTED_DEVICE: return self.fxn(*args, **kwargs)  # only jit on supported device
-    # NOTE: this cast is needed since although we know realize will create a ".realized" RawBuffer, the type checker doesn't
-    input_rawbuffers: Dict[Union[int, str], Tuple[RawBuffer, ShapeTracker]] = {cast(Union[int, str], k):(cast(RawBuffer, v.realize().lazydata.realized), v.lazydata.st) for k,v in itertools.chain(enumerate(args), kwargs.items()) if v.__class__ is Tensor}
+    # all inputs are realized
+    input_tensors: Dict[Union[int, str], Tensor] = {cast(Union[int, str], k):v.realize() for k,v in itertools.chain(enumerate(args), kwargs.items()) if v.__class__ is Tensor}
+    expected_sts_dtype = tuple([(v.lazydata.st.unbind(), v.dtype) for v in input_tensors.values()])
+
+    # get rawbuffers
+    input_rawbuffers: Dict[Union[int, str], RawBuffer] = {k:cast(RawBuffer, v.lazydata.realized) for k,v in input_tensors.items()}
     assert len(input_rawbuffers) != 0, "no inputs to JIT"
     assert len(set(input_rawbuffers.values())) == len(input_rawbuffers), "duplicate inputs to JIT"
-    if self.cnt >= 2:
-      try: var_vals: Dict[Variable, int] = kwargs["jit_ctx"]
-      except KeyError: var_vals = merge_dicts([arg.lazydata.st.var_vals for arg in args if arg.__class__ is Tensor])
-      if len(var_vals) > 1: var_vals = dict(sorted(var_vals.items(), key=lambda kv: kv[0].key))
-      for (j,i),(input_name, expected_st, expected_type) in self.input_replace.items():
-        assert input_rawbuffers[input_name][0].dtype == expected_type, f"type mismatch in JIT, {input_rawbuffers[input_name][0].dtype} != {expected_type}"
-        # NOTE: if we pass jit_ctx instead of using reshape to update the var_vals, we cannot compare the shapetracker directly
-        if "jit_ctx" not in kwargs: assert input_rawbuffers[input_name][1].unbind() == expected_st, f"ShapeTracker mismatch in JIT, {input_rawbuffers[input_name][1].unbind()} != {expected_st}"
-        self.jit_cache[j][1][i] = input_rawbuffers[input_name][0]
-      for j in self.updatable_entries.keys():
-        for k in self.jit_cache[j][2].keys():
-          try: self.jit_cache[j][2][k] = var_vals[k]
-          except KeyError: pass
-      for prg, pargs, variables in self.jit_cache: prg(pargs, variables, jit=True)
-      for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
-    elif self.cnt == 1:
-      CacheCollector.start()
-      self.ret = self.fxn(*args, **kwargs)
-      self.jit_cache = CacheCollector.finish()
-      assert len(self.jit_cache) != 0, "didn't JIT anything!"
-      if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
-      # get the inputs for replacement
-      for j_,cache in enumerate(self.jit_cache): # type: Tuple[int, Tuple[Callable, List[Optional[RawBuffer]], Dict[Variable, int]]]
-        for i,a in enumerate(cache[1]):
-          if a in [v[0] for v in input_rawbuffers.values()]:
-            self.input_replace[(j_,i)] = [(k, v[1].unbind(), v[0].dtype) for k,v in input_rawbuffers.items() if v[0] == a][0]
-            self.updatable_entries[j_].append(i)
-        for i in range(len(cache[2])): self.updatable_entries[j_].append(len(cache[1])+i)
-      assert set([x[0] for x in self.input_replace.values()]) == set(input_rawbuffers.keys()), "some input tensors not found"
-      for (j,i) in self.input_replace.keys(): self.jit_cache[j][1][i] = None
+    # get variables: they can either be in Tensors or passed in as arguments, and all must be bound. these are all global
+    var_vals: Dict[Variable, int] = merge_dicts([arg.lazydata.st.var_vals for arg in input_tensors.values()] + [dict(x.unbind() for x in itertools.chain(args, kwargs.values()) if isinstance(x, Variable))])
+    expected_vals = tuple(var_vals.keys())
+
+    if self.cnt >= 2:
+      assert self.expected_vals == expected_vals, "mismatch of var_vals"
+      assert self.expected_sts_dtype == expected_sts_dtype, "mismatch of sts"
+      assert self.jit_fxn, "didn't get jitted?"
+      self.jit_fxn(input_rawbuffers, var_vals, DEBUG>=2)
+    elif self.cnt == 1:
+      self.expected_vals, self.expected_sts_dtype = expected_vals, expected_sts_dtype
+
+      CacheCollector.start(var_vals)
+      self.ret = self.fxn(*args, **kwargs)
+      jit_cache = CacheCollector.finish()
+      assert len(jit_cache) != 0, "didn't JIT anything!"
+      if DEBUG >= 1: print(f"JIT captured {len(jit_cache)} kernels with {len(input_rawbuffers)} inputs")
+
+      self.jit_fxn = Device[Device.DEFAULT].batch_executor(jit_cache, input_rawbuffers, var_vals)
     elif self.cnt == 0:
       self.ret = self.fxn(*args, **kwargs)
+
     self.cnt += 1
     return self.ret
 
+class PlaceHolder:
+  def __init__(self, buf:RawBuffer): self.size, self.dtype, self._device, self.ref, self.buftype, self.bufid = buf.size, buf.dtype, getattr(buf, '_device', None), ref(buf), type(buf), id(buf._buf)
+  def to_tuple(self): return (self.size, self.dtype, self._device, self.buftype, self.bufid)
+  def __hash__(self): return hash(self.to_tuple())
+  def __eq__(self, x): return isinstance(x, PlaceHolder) and self.to_tuple() == x.to_tuple()
+  def alloc_if_needed(self, buffer_cache: Dict[PlaceHolder, RawBuffer]) -> RawBuffer:
+    ret = self.ref()
+    if ret: return ret
+    if self not in buffer_cache: buffer_cache[self] = self.buftype(self.size, self.dtype, **({'device':self._device} if self._device is not None else dict()))
+    return buffer_cache[self]
+
 class _CacheCollector:
-  def __init__(self): self.cache: Optional[List[Tuple[Callable, List[Any], Dict[Any,Any]]]] = None
-  def start(self): self.cache = []
+  def __init__(self):
+    self.cache: Optional[List[Tuple[ASTRunner, List[Union[RawBuffer, PlaceHolder]]]]] = None
+
+  def start(self, var_vals:Optional[Dict[Variable, int]]=None):
+    self.cache = []
+    self.placeholders: WeakKeyDictionary[RawBuffer, PlaceHolder] = WeakKeyDictionary()
+    self.var_vals = var_vals if var_vals is not None else {}
+
   def add(self, prg, rawbufs, var_vals):
     if self.cache is None: return
-    self.cache.append((prg, rawbufs, var_vals))
-  def finish(self):
+    for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
+    self.placeholders[rawbufs[0]] = PlaceHolder(rawbufs[0])    # NOTE: this is making an assumption that 0 is special
+    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, RawBuffer) else x for x in rawbufs]))
+
+  def finish(self) -> List[JitItem]:
     if self.cache is None: return []
-    ret = self.cache
-    self.cache = None
-    return ret
+    buffer_cache: Dict[PlaceHolder, RawBuffer] = {}
+    saved_cache, self.cache = self.cache, None
+    return [JitItem(prg, [x.alloc_if_needed(buffer_cache) if isinstance(x, PlaceHolder) else x for x in pl]) for prg, pl in saved_cache]
 CacheCollector = _CacheCollector()
