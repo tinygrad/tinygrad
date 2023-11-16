@@ -137,6 +137,9 @@ class TestOps(unittest.TestCase):
   def test_arange_big(self):
     helper_test_op([], lambda: torch.arange(256), lambda: Tensor.arange(256), forward_only=True)
 
+  def test_multinomial(self):
+    helper_test_op([(1000,)], lambda x: torch.multinomial(x.clip(0,1), num_samples=1), lambda x: Tensor.multinomial(x.clip(0,1)), forward_only=True, atol=1000.)
+
   def test_sum_collapse(self):
     helper_test_op([], lambda: torch.ones(256,256).sum(axis=1), lambda: Tensor.ones(256,256).sum(axis=1), forward_only=True)
 

@@ -3,7 +3,8 @@ from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, S
 import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from weakref import WeakSet
 
 from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, getenv, all_same
 from tinygrad.ops import LazyOp, UnaryOps, ConstBuffer, MemBuffer, BufferOps
@@ -27,6 +28,9 @@ class UOp:
   dtype: Optional[DType]
   vin: Tuple[UOp, ...]
   arg: Any
+  children: WeakSet[UOp] = field(default_factory=WeakSet)
+  def __post_init__(self):
+    for u in self.vin: u.children.add(self)
   def __repr__(self): return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
 
 def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
@@ -387,7 +391,13 @@ class Linearizer(Kernel):
     def replace_op(old:UOp, new:UOp):
       for u in self.uops:
         u.vin = tuple(new if x is old else x for x in u.vin)
-      self.uops.remove(old)
+        if old in u.children: u.children.remove(old)
+      new.children |= old.children
+      if self.uops.index(old) > self.uops.index(new):
+        self.uops.remove(new)
+        self.uops[self.uops.index(old)] = new
+      else:
+        self.uops.remove(old)
 
     # uops optimization
     changed_something = True
@@ -405,6 +415,36 @@ class Linearizer(Kernel):
             if loop_len.dtype != u.dtype: loop_len = self.uop(UOps.CAST, u.dtype, (loop_len,), insert_before=self.uops.index(u))
             replace_op(u, self.uop(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u)))
             changed_something = True
+            break
+        if u.uop == UOps.LOOP:  # loop ALU pushing
+          non_phi_children = [x for x in u.children if x.uop != UOps.PHI]
+          if len(non_phi_children) == 1 and non_phi_children[0].uop == UOps.ALU:
+            non_loop_parent = [x for x in non_phi_children[0].vin if x != u]
+            if non_phi_children[0].arg == BinaryOps.MUL and non_loop_parent[0].uop == UOps.CONST and non_loop_parent[0].arg == -1:
+              replace_op(non_phi_children[0], u)
+              new_early_const_1 = self.const(1, insert_before=self.uops.index(u))
+              def muladd(uv, o, c_1):
+                mul = self.uop(UOps.ALU, uv.dtype, (uv, o), BinaryOps.MUL, insert_before=self.uops.index(c_1)+1)
+                return self.uop(UOps.ALU, uv.dtype, (mul, c_1), BinaryOps.ADD, insert_before=self.uops.index(mul)+1)
+              u.vin = (muladd(u.vin[1], non_loop_parent[0], new_early_const_1), muladd(u.vin[0], non_loop_parent[0], new_early_const_1))   # reverse order
+              changed_something = True
+              break
+            if non_phi_children[0].arg == BinaryOps.ADD:
+              replace_op(non_phi_children[0], u)
+              u.vin = (self.uop(UOps.ALU, u.vin[0].dtype, (u.vin[0], non_loop_parent[0]), BinaryOps.ADD, insert_before=self.uops.index(u)),
+                       self.uop(UOps.ALU, u.vin[1].dtype, (u.vin[1], non_loop_parent[0]), BinaryOps.ADD, insert_before=self.uops.index(u)))
+              changed_something = True
+              break
+            if non_phi_children[0].arg == BinaryOps.CMPLT:
+              grandchildren = list(non_phi_children[0].children)
+              if len(grandchildren) == 1 and grandchildren[0].uop == UOps.ALU and grandchildren[0].arg == TernaryOps.WHERE and grandchildren[0].vin[2].uop == UOps.CONST and grandchildren[0].vin[2].arg == 0.0:
+                greatgrandchildren = list(grandchildren[0].children)
+                if len(greatgrandchildren) == 1 and greatgrandchildren[0].uop == UOps.ALU and greatgrandchildren[0].arg == BinaryOps.ADD:
+                  # TODO: split the loop into two
+                  replace_op(non_phi_children[0], self.const(1, dtype=dtypes.bool, insert_before=0))
+                  u.vin = (u.vin[0], non_loop_parent[0])
+                  changed_something = True
+                  break
 
     # (recursively) remove childless uops
     # NOTE: DEFINE_GLOBAL should be removable, but we'd have to propagate that
@@ -462,7 +502,7 @@ class Linearizer(Kernel):
           if arg == BinaryOps.MUL and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[x]
         if arg == BinaryOps.SUB and vin[1].uop == UOps.CONST and vin[1].arg == 0.0: return vin[0]
         if arg == BinaryOps.DIV and vin[1].uop == UOps.CONST and vin[1].arg == 1.0: return vin[0]
-    if cachable and key in self.saved_exprs: return self.saved_exprs[key]
+    if cachable and key in self.saved_exprs and insert_before is None: return self.saved_exprs[key]
     ret = UOp(uop, dtype, vin, arg)
     if insert_before is not None:
       self.uops.insert(insert_before, ret)
