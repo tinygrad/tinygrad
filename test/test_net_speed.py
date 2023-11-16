@@ -8,13 +8,6 @@ import pytest
 
 pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
 
-def start_profile():
-  pr = Profiling(sort='time', frac=0.2)
-  pr.__enter__()
-  return pr
-
-def stop_profile(pr: Profiling): pr.__exit__(None, None, None)
-
 class TestConvSpeed(unittest.TestCase):
 
   def test_mnist(self):
@@ -79,12 +72,13 @@ class TestConvSpeed(unittest.TestCase):
       [x.grad.realize() for x in [c1, c2, l1]]
       et2 = time.time()
       if i == 0:
-        pr = start_profile()
+        pr = Profiling(sort='time', frac=0.2)
+        pr.__enter__()
       else:
         fpt += (et1-et0)
         bpt += (et2-et1)
 
-    stop_profile(pr)
+    pr.__exit__(None, None, None)
     fpt = (fpt*1000/cnt)
     bpt = (bpt*1000/cnt)
     print("forward pass:  %.3f ms, %.2fx off baseline %.3f ms" % (fpt, fpt/fpt_baseline, fpt_baseline))
