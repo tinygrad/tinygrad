@@ -28,13 +28,17 @@ def to_shape_strides(_shape:Tuple[int, ...], _strides:Tuple[int, ...], _mask:Tup
       if state == 1:
         ret[-1] = (ret[-1][0] * shape[i], 0)
       else:
-        ret.append((shape[i], 0)); state = 1
+        ret.append((shape[i], 0))
+        state = 1
     elif state == 1:
-      ret[-1] = (ret[-1][0] * shape[i], strides[i]); state = 2
+      ret[-1] = (ret[-1][0] * shape[i], strides[i])
+      state = 2
     elif (ret[-1][1] == shape[i] * strides[i] or ret[-1][0] == 1) and state != 2:
-      ret[-1] = (ret[-1][0] * shape[i], strides[i]); state = 0
+      ret[-1] = (ret[-1][0] * shape[i], strides[i])
+      state = 0
     else:
-      ret.append((shape[i], strides[i])); state = 0
+      ret.append((shape[i], strides[i]))
+      state = 0
   return tuple(ret)
 
 @functools.lru_cache(maxsize=None)
@@ -186,8 +190,8 @@ class View:
       if not equal: break
     else:
       strides += [0,] * (len(new_shape) - len(strides))
-      mask, off_mask , extra = _reshape_mask(self, new_shape)
-      strides = tuple(reversed(strides)); total_offset = 0
+      mask, off_mask, extra = _reshape_mask(self, new_shape)
+      strides, total_offset = tuple(reversed(strides)), 0
       if off_mask:
         for off, s in zip(off_mask, strides):
           total_offset += off * s
