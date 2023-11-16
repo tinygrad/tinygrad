@@ -415,8 +415,15 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(AssertionError):
       a = Tensor(3.14)
       a.matmul(a)
+
+  def test_multinomial(self):
+    # NOTE: this is random, so it has a very large atol
+    helper_test_op([(1000,)], lambda x: torch.multinomial(x.clip(0,1), num_samples=1), lambda x: Tensor.multinomial(x.clip(0,1)), forward_only=True, atol=1000.)
+
+  def test_small_cumsum(self):
+    helper_test_op([(10)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
   def test_simple_cumsum(self):
-    helper_test_op([(1024)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
+    helper_test_op([(1022)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
   def test_cumsum(self):
     helper_test_op([(20)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
     helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
@@ -625,6 +632,9 @@ class TestOps(unittest.TestCase):
     np.testing.assert_allclose(a[:, 2:0:-1], t[:, 2:0:-1].numpy())
     np.testing.assert_allclose(a[:, 2:0:-1, 3:1:-2], t[:, 2:0:-1, 3:1:-2].numpy())
     np.testing.assert_allclose(a[4:0:-3, 2:0:-1, -1:-5:-2], t[4:0:-3, 2:0:-1, -1:-5:-2].numpy())
+    np.testing.assert_allclose(a[2:5:-1, :, :], t[2:5:-1, :, :].numpy())  # shape = (0, 10, 10)
+    np.testing.assert_allclose(a[:, 2:5:-1, :], t[:, 2:5:-1, :].numpy())  # shape = (0, 10, 10)
+    np.testing.assert_allclose(a[:, :, 2:5:-1], t[:, :, 2:5:-1].numpy())  # shape = (0, 10, 10)
 
   def test_slice_both_endpoints_out_of_bounds(self):
     helper_test_op([(3,3,3)], lambda x: x[5:10], lambda x: x[5:10], forward_only=True)
@@ -632,16 +642,14 @@ class TestOps(unittest.TestCase):
 
   def test_slice_start_gt_end(self):
     helper_test_op([(3,3,3)], lambda x: x[-2:2], lambda x: x[-2:2], forward_only=True)
-    # TODO: bug in getitem?
-    # helper_test_op([(3,3,3)], lambda x: x[-2:-5], lambda x: x[-2:-5], forward_only=True)
+    helper_test_op([(3,3,3)], lambda x: x[-2:-5], lambda x: x[-2:-5], forward_only=True)
 
   def test_slice_empty(self):
     helper_test_op([(10,10)], lambda x: x[1:1], lambda x: x[1:1], forward_only=True)
 
   def test_slice_zero_in_shape(self):
     helper_test_op([(10,10)], lambda x: x[1:1], lambda x: x[1:1], forward_only=True)  # x.shape = (0, 10)
-    # TODO: bug in getitem?
-    # helper_test_op([(3,3,3)], lambda x: x[-2:-5], lambda x: x[-2:-5], forward_only=True)  # x.shape = (0, 3, 3)
+    helper_test_op([(3,3,3)], lambda x: x[-2:-5], lambda x: x[-2:-5], forward_only=True)  # x.shape = (0, 3, 3)
 
   def test_slice_errors(self):
     a = Tensor.ones(4, 3)

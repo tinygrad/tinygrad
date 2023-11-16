@@ -29,7 +29,7 @@ setup(name='tinygrad',
         'cuda': ["pycuda"],
         'arm': ["unicorn"],
         'triton': ["triton-nightly>=2.1.0.dev20231014192330", "pycuda"],
-        'webgpu': ["wgpu"],
+        'webgpu': ["wgpu>=v0.12.0"],
         'linting': [
             "flake8",
             "pylint",

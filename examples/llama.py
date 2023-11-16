@@ -538,8 +538,8 @@ After you are done speaking, output [EOS]. You are not Chad.
                       f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                       (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
             probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
-        probs_np = probs.numpy()
-        tok = int(np.random.choice(len(probs_np), p=probs_np))
+        # TODO: fix JIT rand so we can put this in the JIT
+        tok = probs.multinomial().item()
 
       # use the kv cache
       start_pos = len(toks)

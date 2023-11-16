@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod
+from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up
 from tinygrad.shape.symbolic import Variable, NumNode
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -137,6 +137,15 @@ class TestProd(unittest.TestCase):
   def test_variable(self): self.assertEqual("(a*12)", prod((Variable("a", 1, 5), 3, 4)).render())
   def test_variable_order(self): self.assertEqual("(a*12)", prod((3, 4, Variable("a", 1, 5))).render())
   def test_num_nodes(self): self.assertEqual(NumNode(6), prod((NumNode(2), NumNode(3))))
+
+class TestRoundUp(unittest.TestCase):
+  def test_round_up(self):
+    self.assertEqual(round_up(-3,4), 0)
+    self.assertEqual(round_up(-4,4), -4)
+    self.assertEqual(round_up(6,4), 8)
+    self.assertEqual(round_up(8,4), 8)
+    self.assertEqual(round_up(232, 24984), 24984)
+    self.assertEqual(round_up(24984, 232), 25056)
 
 if __name__ == '__main__':
   unittest.main()
