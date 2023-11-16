@@ -11,9 +11,8 @@ from tinygrad.shape.symbolic import Variable, Node
 
 class MetalAllocator(LRUAllocator):
   def _do_alloc(self, size, dtype, device, **kwargs):
-    if (buf_len := size*dtype.itemsize) > (max_len := METAL.device.maxBufferLength()): raise RuntimeError(f"tried to create a {buf_len/1e9:5.2f} GB Metal buffer, but the max buffer length is {max_len/1e9:5.2f} GB")
-    if (buf := METAL.device.newBufferWithLength_options_(buf_len, Metal.MTLResourceStorageModeShared)): return buf
-    else: raise RuntimeError(f"failed to create a {buf_len/1e9:5.2f} GB Metal buffer")
+    assert (buf_len := size*dtype.itemsize) < (max_len := METAL.device.maxBufferLength()) and (buf := METAL.device.newBufferWithLength_options_(buf_len, Metal.MTLResourceStorageModeShared)), f"Failed to create a {buf_len/1e9:5.2f} GB Metal buffer. {f'The max buffer length is {max_len/1e9:5.2f} GB.' if buf_len > max_len else 'Metal returned None {buf}.'}"
+    return buf
   def _do_free(self, buf): buf.release()
   def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
 
