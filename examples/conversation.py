@@ -1,4 +1,6 @@
 import argparse
+import re
+import time
 import wave
 import multiprocessing as mp
 import sys
@@ -36,6 +38,7 @@ VITS_Y_LENGTH_ESTIMATE_SCALARS = {"ljs": 2.8, "vctk": 1.74, "mmts-tts": 1.9, "um
 def clean_text(enc: Encoding, txt: str) -> str:
   for t in enc.special_tokens_set:
     txt = txt.replace(t, "")
+  txt = re.sub("\(.+\)", "", txt)
   return txt.replace("[BLANK_AUDIO]", "").strip()
 
 
@@ -159,7 +162,6 @@ def listener(q: mp.Queue):
   try:
     p = pyaudio.PyAudio()
     stream = p.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
-    print("Talk")
     while True: q.put(((np.frombuffer(stream.read(CHUNK), np.int16)/32768).astype(np.float32)*3))
   except: q.put(None)
   finally:
@@ -204,11 +206,11 @@ if __name__ == "__main__":
 
   # Init models
   model, enc = init_whisper(arguments.whisper_model_name)
-  llama = LLaMa.build(arguments.llama_model, arguments.llama_model / "tokenizer.model", arguments.llama_gen, arguments.llama_size, arguments.llama_quantize)
   cfg_path, hp_path = download_vits_model(arguments.vits_model_to_use)
   synth, emotion_embedding, text_mapper, hps, model_has_multiple_speakers = init_vits(cfg_path, hp_path, arguments.vits_emotion_path, arguments.vits_vocab_path, arguments.vits_speaker_id, arguments.vits_seed)
 
   # Prepare personality
+  llama = LLaMa.build(arguments.llama_model, arguments.llama_model / "tokenizer.model", arguments.llama_gen, arguments.llama_size, arguments.llama_quantize)
   toks, user_delim, resp_delim, end_delim = llama_prepare(llama)
   start_pos = len(toks)
   outputted = llama.tokenizer.decode(toks)
@@ -226,28 +228,23 @@ if __name__ == "__main__":
   tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
   total = np.array([])
   prev_length = 0
-  while (data := q.get()) is not None:
-    total = np.concatenate([total, data])
-
-    # convert voice to text
-    txt = voice2text(model, enc, total, tokens)
-    print(txt)
-    if not txt.endswith("<|endoftext|>"): 
-      continue # Didn't reach the end of users' speech
-    txt = clean_text(enc, txt)
-    if len(txt) == prev_length: 
-      tokens.pop()
-      continue
-    txt = txt[prev_length:]
-
-    # generate response from llama
-    outputted, start_pos = llama_generate(
-      llama, txt, start_pos, outputted, 
-      arguments.llama_count, arguments.llama_temperature, 
-      user_delim, end_delim
-    )
-
-    # TODO: convert llama output to voice
-
-    prev_length = len(txt)
-    tokens.pop()
+  phrase_timeout = 3
+  while True:
+    print("Talk")
+    time.sleep(phrase_timeout)
+    while not q.empty() or total is None: total = np.concatenate([total, q.get()])
+    print("finished listening")
+    with lock:
+      # Transcribe text
+      while True:
+        txt = voice2text(model, enc, total, tokens)
+        print(txt)
+        if txt.endswith("<|endoftext|>"): 
+          tokens.pop()
+          txt = clean_text(enc, txt)
+          break
+      
+      # Generate with llama
+      outputted, start_pos = llama_generate(llama, txt, start_pos, outputted)
+      response = outputted.splitlines()[-1]
+    
