@@ -67,10 +67,10 @@ class LazyOp:
   # def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
 
-  def map_buffers(self, real_srcs: MutableMapping[Any, Any]) -> LazyOp: 
+  def map_buffers(self, real_srcs: MutableMapping[Any, Any]) -> LazyOp:
     real_srcs[self] = LazyOp(self.op, tuple([y.map_buffers(real_srcs) if y not in real_srcs else real_srcs[y] for y in self.src]), self.arg)
     return real_srcs[self]
-  @functools.lru_cache 
+  @functools.lru_cache
   def get_lazyops(self) -> List[LazyOp]: return [self] + dedup([item for x in self.src for item in x.get_lazyops()])
 
   def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
