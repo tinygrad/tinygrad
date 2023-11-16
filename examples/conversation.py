@@ -203,10 +203,10 @@ def play_audio(path: Path):
                   channels=wf.getnchannels(),
                   rate=wf.getframerate(),
                   output=True)
-        
+
   # Read and play audio data
   while (data := wf.readframes(CHUNK)):
-      stream.write(data)
+    stream.write(data)
 
   # Stop stream and close PyAudio
   stream.stop_stream()
@@ -273,7 +273,7 @@ if __name__ == "__main__":
   outputted = llama.tokenizer.decode(toks)
   sys.stdout.write(outputted)
   sys.stdout.flush()
-  
+
   # Start child process for mic input
   q = mp.Queue()
   p = mp.Process(target=listener, args=(q,))
@@ -295,15 +295,15 @@ if __name__ == "__main__":
       while True:
         txt = voice2text(model, enc, total, tokens)
         print(txt)
-        if txt.endswith("<|endoftext|>"): 
+        if txt.endswith("<|endoftext|>"):
           tokens.pop()
           txt = clean_text(enc, txt)
           break
-      
+
       # Generate with llama
       outputted, start_pos = llama_generate(llama, txt, start_pos, outputted)
       response = outputted.splitlines()[-1].replace(resp_delim, "").replace(end_delim, "")
 
       # Convert to voice
-      tts(response, synth, hps, emotion_embedding, arguments.vits_speaker_id, arguments.vits_model_to_use, arguments.vits_noise_scale, arguments.vits_noise_scale_w, arguments.vits_length_scale, arguments.vits_estimate_max_y_length, arguments.vits_out_path, arguments.vits_num_channels, arguments.vits_sample_width) 
+      tts(response, synth, hps, emotion_embedding, arguments.vits_speaker_id, arguments.vits_model_to_use, arguments.vits_noise_scale, arguments.vits_noise_scale_w, arguments.vits_length_scale, arguments.vits_estimate_max_y_length, arguments.vits_out_path, arguments.vits_num_channels, arguments.vits_sample_width)
       play_audio(Path(arguments.vits_out_path))
