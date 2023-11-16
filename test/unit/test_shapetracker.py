@@ -242,7 +242,6 @@ class TestIndexExpressions2d(unittest.TestCase):
     assert len(self.st.views) == 1
     self.st.assert_same()
 
-  @unittest.skip("Can't make this optimization yet")
   def test_reshape_combining_2(self):
     self.st = CheckingShapeTracker((1,1,5))
     self.st.pad(((3,6), (0,0), (0,5)))
@@ -499,7 +498,6 @@ class TestShapeTrackerFuzzFailures(unittest.TestCase):
     self.st = CheckingShapeTracker((3,3,3))
   def tearDown(self):
     self.st.assert_same()
-  @unittest.skip("simplify doesn't work in this case")
   def test_case_1(self):
     self.st.shrink(((1, 2), (1, 3), (1, 3)))
     self.st.reshape((1, 4))
