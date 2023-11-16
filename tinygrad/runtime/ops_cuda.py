@@ -53,12 +53,12 @@ else:
     def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
     def _get_cur_free_space(self, device): return pycuda_driver.mem_get_info()[0]
   CUDAAlloc = CUDAAllocator()
-  class RawCUDABufferCopyInOut(RawBufferCopyInOut):
+  class CUDAMemoryBuffer(RawBufferCopyInOut):
     def __init__(self, size, dtype): super().__init__(size, dtype, allocator=CUDAAlloc)
     def _copyin(self, x:np.ndarray, stream:Optional[pycuda_driver.Stream]=None): pycuda_driver.memcpy_htod_async(self._buf, x.ravel(), stream)
     def _copyout(self, x:np.ndarray): pycuda_driver.memcpy_dtoh(x, self._buf)
 
-RawCUDABuffer = RawMallocBuffer if getenv("CUDACPU", 0) == 1 else RawCUDABufferCopyInOut
+RawCUDABuffer = RawMallocBuffer if getenv("CUDACPU", 0) == 1 else CUDAMemoryBuffer
 
 @diskcache
 def compile_cuda(prg) -> bytes: return cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets'])
