@@ -89,7 +89,7 @@ class Transformer:
     return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
 
   # TODO: fix empty token
-  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
+  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
     return (self.forward_jit if tokens.shape[0:2] == (1,1) and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257
@@ -135,7 +135,7 @@ class GPT2:
                     (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
           probs = self.model(Tensor([toks[start_pos:]]), Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature)
         # TODO: fix JIT rand so we can put this in the JIT
-        tok = probs.multinomial(1).item()
+        tok = probs.multinomial().item()
       start_pos = len(toks)
       toks.append(tok)
       output = self.tokenizer.decode(toks)
