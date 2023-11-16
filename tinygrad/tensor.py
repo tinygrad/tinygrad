@@ -7,7 +7,7 @@ from itertools import accumulate
 import numpy as np
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set
 
-from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int
+from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int, round_up
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import Device, LoadOps
 from tinygrad.shape.symbolic import sint
@@ -124,6 +124,7 @@ class Tensor:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
     return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().reshape(self.shape)
+  def item(self) -> Union[float, int]: return self.numpy().item()
 
   def to(self, device:str) -> Tensor:
     ret = Tensor(self.lazydata, device)
@@ -210,7 +211,7 @@ class Tensor:
     std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(shape[1:]))
     return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
-  def multinomial(self: Tensor, num_samples: int, replacement: bool = False) -> Tensor:
+  def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
     assert self.ndim <= 2, "p must be 1 or 2 dim"
     assert replacement or num_samples == 1, "supported only with replacement"
     p = self.unsqueeze(0) if self.ndim == 1 else self
@@ -570,7 +571,18 @@ class Tensor:
     w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
     return (x*w).sum(-1)
 
-  def cumsum(self, axis:int=0) -> Tensor: return self.transpose(axis,-1).pad2d((self.shape[axis]-1,0))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
+  def _cumsum(self, axis:int=0, _first_zero=False) -> Tensor: return self.transpose(axis,-1).pad2d((self.shape[axis]-int(not _first_zero),0))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
+  def cumsum(self, axis:int=0) -> Tensor:
+    # TODO: someday the optimizer will find this on it's own
+    # for now this is a two stage cumsum
+    SPLIT = 256
+    if self.shape[axis] <= SPLIT*2: return self._cumsum(axis)
+    ret = self.transpose(axis,-1).pad2d((round_up(self.shape[axis], SPLIT)-self.shape[axis], 0))
+    ret = ret.reshape(*ret.shape[0:-1], ret.shape[-1]//SPLIT, SPLIT)._cumsum(-1)
+    base_add = ret[..., -1]._cumsum(-1, _first_zero=True)[..., :-1]
+    base_add = base_add.unsqueeze(-1).expand(*base_add.shape, ret.shape[-1])
+    def fix(x:Tensor): return x.reshape(*ret.shape[0:-2], ret.shape[-2] * ret.shape[-1])[..., -self.shape[axis]:].transpose(axis,-1)
+    return fix(ret) + fix(base_add)
 
   # ***** mlops (unary) *****
 
