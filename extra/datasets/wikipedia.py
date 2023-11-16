@@ -1,5 +1,6 @@
 import os
 import sys, pickle, random, unicodedata
+from multiprocessing import Pool
 from pathlib import Path
 import numpy as np
 from tqdm import tqdm
@@ -340,33 +341,33 @@ def iterate(bs=1, start=0, val=False):
   else:
     files = get_train_files()
 
+  def load_file(file):
+    with open(file, "rb") as f:
+      features, instance = pickle.load(f)
+      return {
+        "input_ids": features["input_ids"],
+        "input_mask": features["input_mask"],
+        "segment_ids": features["segment_ids"],
+        "masked_lm_positions": features["masked_lm_positions"],
+        "masked_lm_ids": features["masked_lm_ids"],
+        "next_sentence_labels": features["next_sentence_labels"],
+      }, instance
+
+  p = Pool()
   for i in range(start, len(files), bs):
-    input_ids = []
-    input_mask = []
-    segment_ids = []
-    masked_lm_positions = []
-    masked_lm_ids = []
-    next_sentence_labels = []
-    instances = []
-    for j in range(bs):
-      with open(files[i + j], "rb") as f:
-        features, instance = pickle.load(f)
-        input_ids.append(features["input_ids"])
-        input_mask.append(features["input_mask"])
-        segment_ids.append(features["segment_ids"])
-        masked_lm_positions.append(features["masked_lm_positions"])
-        masked_lm_ids.append(features["masked_lm_ids"])
-        next_sentence_labels.append(features["next_sentence_labels"])
-        instances.append(instance)
+    results = p.map(load_file, files[i:i+bs])
+    features, instances = zip(*results)
 
     yield {
-      "input_ids": np.concatenate(input_ids, axis=0),
-      "input_mask": np.concatenate(input_mask, axis=0),
-      "segment_ids": np.concatenate(segment_ids, axis=0),
-      "masked_lm_positions": np.concatenate(masked_lm_positions, axis=0),
-      "masked_lm_ids": np.concatenate(masked_lm_ids, axis=0),
-      "next_sentence_labels": np.concatenate(next_sentence_labels, axis=0),
+      "input_ids": np.concatenate([f["input_ids"] for f in features], axis=0),
+      "input_mask": np.concatenate([f["input_mask"] for f in features], axis=0),
+      "segment_ids": np.concatenate([f["segment_ids"] for f in features], axis=0),
+      "masked_lm_positions": np.concatenate([f["masked_lm_positions"] for f in features], axis=0),
+      "masked_lm_ids": np.concatenate([f["masked_lm_ids"] for f in features], axis=0),
+      "next_sentence_labels": np.concatenate([f["next_sentence_labels"] for f in features], axis=0),
     }, instances
+  p.close()
+  p.join()
 
 if __name__ == "__main__":
   tokenizer = Tokenizer(Path(__file__).parent / "wiki" / "vocab.txt")
