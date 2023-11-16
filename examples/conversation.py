@@ -1,21 +1,18 @@
 import argparse
+import multiprocessing as mp
 import re
+import sys
 import time
 import wave
-import multiprocessing as mp
-import sys
-import string
 from pathlib import Path
 
 import numpy as np
 import pyaudio
 from llama import LLaMa
 from tiktoken import Encoding
+from vits import TextMapper, download_if_not_present, get_hparams_from_file, load_model
 from whisper import Whisper, init_whisper, prep_audio
-from vits import download_if_not_present, load_checkpoint, TextMapper, load_model, get_hparams_from_file, Synthesizer
 
-from tinygrad.tensor import Tensor
-from pathlib import Path
 from tinygrad.helpers import dtypes
 from tinygrad.tensor import Tensor
 
@@ -106,8 +103,43 @@ def llama_generate(
   return outputted, start_pos
 
 
-def tts():
-  pass
+def tts(
+  text_to_synthesize: str,
+  synth,
+  hps,
+  emotion_embedding,
+  speaker_id,
+  model_to_use,
+  noise_scale,
+  noise_scale_w,
+  length_scale,
+  estimate_max_y_length,
+  out_path,
+  num_channels,
+  sample_width
+):
+  # TODO: support mmts-tts
+  # if args.model_to_use == "mmts-tts": text_to_synthesize = text_mapper.filter_oov(text_to_synthesize.lower())
+
+  # Convert the input text to a tensor.
+  stn_tst = text_mapper.get_text(text_to_synthesize, hps.data.add_blank, hps.data.text_cleaners)
+  x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([stn_tst.shape[0]], dtype=dtypes.int64)
+  sid = Tensor([speaker_id], dtype=dtypes.int64) if model_has_multiple_speakers else None
+
+  # Perform inference.
+  audio_tensor = synth.infer(x_tst, x_tst_lengths, sid, noise_scale, length_scale, noise_scale_w, emotion_embedding=emotion_embedding,
+                             max_y_length_estimate_scale=VITS_Y_LENGTH_ESTIMATE_SCALARS[model_to_use] if estimate_max_y_length else None)[0, 0].realize()
+
+  # Save the audio output.
+  audio_data = (np.clip(audio_tensor.numpy(), -1.0, 1.0) * 32767).astype(np.int16)
+  out_path = Path(out_path)
+  out_path.parent.mkdir(parents=True, exist_ok=True)
+  with wave.open(str(out_path), 'wb') as wav_file:
+    wav_file.setnchannels(num_channels)
+    wav_file.setsampwidth(sample_width)
+    wav_file.setframerate(hps.data.sampling_rate)
+    wav_file.setnframes(len(audio_data))
+    wav_file.writeframes(audio_data.tobytes())
 
 
 def download_vits_model(
@@ -118,21 +150,23 @@ def download_vits_model(
   return download_if_not_present(cfg_path, cfg_url), download_if_not_present(hp_path, hp_url)
 
 def init_vits(
-  config_path: Path,
-  weights_path: Path,
+  model_to_use: str,
   emotion_path: Path,
-  vocab_path: Path,
   speaker_id: int,
   seed: int,
 ):
+  model_config = VITS_MODELS[model_to_use]
+
   # Load the hyperparameters from the config file.
+  config_path = model_config[0]
+  download_if_not_present(config_path, model_config[2])
   hps = get_hparams_from_file(config_path)
 
   # If model has multiple speakers, validate speaker id and retrieve name if available.
   model_has_multiple_speakers = hps.data.n_speakers > 0
   if model_has_multiple_speakers:
     if speaker_id >= hps.data.n_speakers: raise ValueError(f"Speaker ID {speaker_id} is invalid for this model.")
-    if "speakers" in hps: # maps speaker ids to names
+    if hps.__contains__("speakers"): # maps speaker ids to names
       speakers = hps.speakers
       if isinstance(speakers, list): speakers = {speaker: i for i, speaker in enumerate(speakers)}
 
@@ -143,19 +177,42 @@ def init_vits(
     else: raise ValueError("Emotion path must be a .npy file.")
 
   # Load symbols, instantiate TextMapper and clean the text.
-  if "symbols" in hps: symbols = hps.symbols
-  elif vocab_path is not None: symbols = list(filter(lambda x: x != "\n", open(vocab_path).read()))
-  else: symbols = ['_', ' '] + list(string.punctuation) + list(string.ascii_letters) + list("ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ")
+  if hps.__contains__("symbols"): symbols = hps.symbols
+  else: symbols = ['_'] + list(';:,.!?¡¿—…"«»“” ') + list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz') + list("ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ")
   text_mapper = TextMapper(apply_cleaners=True, symbols=symbols)
 
   # Load the model.
+  Tensor.no_grad = True
   if seed is not None:
     Tensor.manual_seed(seed)
     np.random.seed(seed)
-  
-  synth = Synthesizer(len(symbols), hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, n_speakers = hps.data.n_speakers, **hps.model)
-  load_checkpoint(weights_path, synth, None)
-  return synth, emotion_embedding, text_mapper, hps, model_has_multiple_speakers
+  net_g = load_model(text_mapper.symbols, hps, model_config)
+
+  return net_g, emotion_embedding, text_mapper, hps, model_has_multiple_speakers
+
+
+def play_audio(path: Path):
+  # Initialize PyAudio
+  p = pyaudio.PyAudio()
+
+  # Open the audio file
+  wf = wave.open(path.as_posix(), 'rb')
+
+  # Open PyAudio stream
+  stream = p.open(format=p.get_format_from_width(wf.getsampwidth()),
+                  channels=wf.getnchannels(),
+                  rate=wf.getframerate(),
+                  output=True)
+        
+  # Read and play audio data
+  while (data := wf.readframes(CHUNK)):
+      stream.write(data)
+
+  # Stop stream and close PyAudio
+  stream.stop_stream()
+  stream.close()
+  p.terminate()
+  wf.close()
 
 
 def listener(q: mp.Queue):
@@ -207,7 +264,7 @@ if __name__ == "__main__":
   # Init models
   model, enc = init_whisper(arguments.whisper_model_name)
   cfg_path, hp_path = download_vits_model(arguments.vits_model_to_use)
-  synth, emotion_embedding, text_mapper, hps, model_has_multiple_speakers = init_vits(cfg_path, hp_path, arguments.vits_emotion_path, arguments.vits_vocab_path, arguments.vits_speaker_id, arguments.vits_seed)
+  synth, emotion_embedding, text_mapper, hps, model_has_multiple_speakers = init_vits(arguments.vits_model_to_use, arguments.vits_emotion_path, arguments.vits_speaker_id, arguments.vits_seed)
 
   # Prepare personality
   llama = LLaMa.build(arguments.llama_model, arguments.llama_model / "tokenizer.model", arguments.llama_gen, arguments.llama_size, arguments.llama_quantize)
@@ -225,11 +282,10 @@ if __name__ == "__main__":
   lock = mp.Lock()
 
   # Start the pipeline
-  tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
-  total = np.array([])
-  prev_length = 0
-  phrase_timeout = 3
+  phrase_timeout = 5
   while True:
+    tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
+    total = np.array([])
     print("Talk")
     time.sleep(phrase_timeout)
     while not q.empty() or total is None: total = np.concatenate([total, q.get()])
@@ -246,5 +302,8 @@ if __name__ == "__main__":
       
       # Generate with llama
       outputted, start_pos = llama_generate(llama, txt, start_pos, outputted)
-      response = outputted.splitlines()[-1]
-    
+      response = outputted.splitlines()[-1].replace(resp_delim, "").replace(end_delim, "")
+
+      # Convert to voice
+      tts(response, synth, hps, emotion_embedding, arguments.vits_speaker_id, arguments.vits_model_to_use, arguments.vits_noise_scale, arguments.vits_noise_scale_w, arguments.vits_length_scale, arguments.vits_estimate_max_y_length, arguments.vits_out_path, arguments.vits_num_channels, arguments.vits_sample_width) 
+      play_audio(Path(arguments.vits_out_path))
