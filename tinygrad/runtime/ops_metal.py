@@ -10,7 +10,9 @@ from tinygrad.runtime.lib import RawBufferMapped, RawBuffer, LRUAllocator
 from tinygrad.shape.symbolic import Variable, Node
 
 class MetalAllocator(LRUAllocator):
-  def _do_alloc(self, size, dtype, device, **kwargs): return METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
+  def _do_alloc(self, size, dtype, device, **kwargs):
+    if (buf := METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)): return buf
+    else: raise RuntimeError(f"failed to create a {size*dtype.itemsize/1e9:5.2f} GB METAL buffer")
   def _do_free(self, buf): buf.release()
   def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
 
