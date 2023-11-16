@@ -45,7 +45,6 @@ class TestLLaMASpeed(unittest.TestCase):
     run_llama("codegen")
     run_llama("methodcache", False)
 
-
     with Profiling(sort='time', frac=0.1):
       run_llama("profile")
 
