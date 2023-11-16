@@ -142,13 +142,6 @@ class Kernel:
                     self.sts[i].real_strides()[self.shape_len-self.upcasted:],
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
 
-  # TODO: is there a better way to write this?
-  def acc_offsets(self, i) -> List[int]:
-    if self.upcasted == 0: return [0]
-    upcasted_i = self.upcasted_axis(i)
-    acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
-    return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
-
   def get_upcast_dim(self, i) -> List[int]:
     should_upcast = self.opts.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
