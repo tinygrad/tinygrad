@@ -1,6 +1,12 @@
 repos:
   - repo: local
     hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy tinygrad/ extra/helpers.py
+        language: system
+        always_run: true
+        pass_filenames: false
       - id: ruff
         name: ruff
         entry: ruff .
@@ -16,12 +22,6 @@ repos:
       - id: flake8
         name: flake8
         entry: flake8 --statistics -j4
-        language: system
-        always_run: true
-        pass_filenames: false
-      - id: mypy
-        name: mypy
-        entry: mypy tinygrad/ extra/helpers.py
         language: system
         always_run: true
         pass_filenames: false
