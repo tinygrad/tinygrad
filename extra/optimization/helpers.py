@@ -8,7 +8,8 @@ inf, nan = float('inf'), float('nan')
 
 # kernel unpacker
 from tinygrad.codegen.linearizer import Linearizer
-def ast_str_to_lin(ast_str): return Linearizer(eval(ast_str))
+def ast_str_to_ast(ast_str:str) -> LazyOp: return eval(ast_str)
+def ast_str_to_lin(ast_str:str): return Linearizer(ast_str_to_ast(ast_str))
 
 # load worlds, a dataset of about 12k kernels
 import gzip
