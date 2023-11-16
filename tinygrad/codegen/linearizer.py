@@ -502,6 +502,10 @@ class Linearizer(Kernel):
           if arg == BinaryOps.MUL and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[x]
         if arg == BinaryOps.SUB and vin[1].uop == UOps.CONST and vin[1].arg == 0.0: return vin[0]
         if arg == BinaryOps.DIV and vin[1].uop == UOps.CONST and vin[1].arg == 1.0: return vin[0]
+        # int32 add/mul
+        # TODO: all the constant folding
+        if arg == BinaryOps.ADD and vin[0].uop == UOps.CONST and vin[1].uop == UOps.CONST: return self.const(vin[0].arg + vin[1].arg, dtype, insert_before)
+        if arg == BinaryOps.MUL and vin[0].uop == UOps.CONST and vin[1].uop == UOps.CONST: return self.const(vin[0].arg * vin[1].arg, dtype, insert_before)
     if cachable and key in self.saved_exprs and insert_before is None: return self.saved_exprs[key]
     ret = UOp(uop, dtype, vin, arg)
     if insert_before is not None:

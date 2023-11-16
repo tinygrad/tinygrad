@@ -240,7 +240,9 @@ class RedNode(Node):
 
 class SumNode(RedNode):
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
+  def __mul__(self, b: Union[Node, int]):
+    if not any(isinstance(x, NumNode) for x in self.nodes): return super().__mul__(b)
+    return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     fully_divided: List[Node] = []
