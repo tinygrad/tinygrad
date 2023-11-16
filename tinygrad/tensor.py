@@ -354,7 +354,14 @@ class Tensor:
         ret = ret.permute(ret_dims[dim[0]:dim[0]+max_dim] + ret_dims[:dim[0]] + ret_dims[dim[0]+max_dim:])
     return ret
 
-  def __setitem__(self,s,v): return self.__getitem__(s).assign(v)
+  def __setitem__(self,s,v):
+    s = argfix(s)
+    # canonical form of slices?
+    # print(f"{s=}, {[si == slice(None,None,None) for si in s]=}")
+    if all(si == slice(None,None,None) for si in s) and self.shape == v.shape:
+      # print("assigned!")
+      self.assign(v)
+    return self.__getitem__(s).assign(v)
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
   def slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:

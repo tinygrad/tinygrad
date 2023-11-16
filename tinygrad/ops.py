@@ -348,6 +348,8 @@ def get_optimized_program(linearizer_opts:LinearizerOptions, to_program, ast:Laz
   from tinygrad.codegen.linearizer import Linearizer
   k = Linearizer(ast, linearizer_opts)
   assert k.info.dtype == rawbuffers[0].dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {rawbuffers[0].dtype}"
+  # can we optimize?
+  if not k.membufs[0].st.contiguous: return to_program(k)
   if not NOOPT:
     if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
     if BEAM >= 1:

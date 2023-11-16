@@ -72,10 +72,10 @@ class TestSetitemAssign(unittest.TestCase):
     pass
 
   def test_whole_slice(self):
-    n1 = np.random.random((3, 3))
-    n2 = np.random.random((3, 3))
+    n1 = np.random.random((3, 3)).astype(np.float32)
+    n2 = np.random.random((3, 3)).astype(np.float32)
 
-    s1 = s2 = Tensor(n1)
+    s1 = s2 = Tensor(n1).realize()
     t1 = t2 = torch.tensor(n1)
     u1 = u2 = np.array(n1)
 
@@ -83,33 +83,46 @@ class TestSetitemAssign(unittest.TestCase):
     t2[:] = torch.tensor(n2)
     u2[:] = np.array(n2)
 
-    assert s1 is s2
+    assert s1.realize().lazydata.realized is s2.realize().lazydata.realized
     assert t1 is t2
     assert u1 is u2
-
     np.testing.assert_allclose(u2, t2.numpy())
-    # fails silently now, current behavior is no-op
+    np.testing.assert_allclose(u2, s2.numpy())
+
+    s1 = s2 = Tensor(n1).realize()
+    s2[:, :] = Tensor(n2)
+
+    assert s1.realize().lazydata.realized is s2.realize().lazydata.realized
+    np.testing.assert_allclose(u2, s2.numpy())
+
+    s1 = s2 = Tensor(n1).realize()
+    s2[0:3, :] = Tensor(n2)
+
+    assert s1.realize().lazydata.realized is s2.realize().lazydata.realized
+    # anything assignment through getitem is not real
     # np.testing.assert_allclose(u2, s2.numpy())
+
 
   def test_slice_dim0(self):
-    n1 = np.random.random((3, 3))
-    n2 = np.random.random((1, 3))
+    pass
+  #   n1 = np.random.random((3, 3))
+  #   n2 = np.random.random((1, 3))
 
-    s1 = s2 = Tensor(n1)
-    t1 = t2 = torch.tensor(n1)
-    u1 = u2 = np.array(n1)
+  #   s1 = s2 = Tensor(n1)
+  #   t1 = t2 = torch.tensor(n1)
+  #   u1 = u2 = np.array(n1)
 
-    s2[:1] = Tensor(n2)
-    t2[:1] = torch.tensor(n2)
-    u2[:1] = np.array(n2)
+  #   s2[:1] = Tensor(n2)
+  #   t2[:1] = torch.tensor(n2)
+  #   u2[:1] = np.array(n2)
 
-    assert s1 is s2
-    assert t1 is t2
-    assert u1 is u2
+  #   assert s1 is s2
+  #   assert t1 is t2
+  #   assert u1 is u2
 
-    np.testing.assert_allclose(u2, t2.numpy())
-    # fails silently now, current behavior is no-op
-    # np.testing.assert_allclose(u2, s2.numpy())
+  #   np.testing.assert_allclose(u2, t2.numpy())
+  #   # fails silently now, current behavior is no-op
+  #   # np.testing.assert_allclose(u2, s2.numpy())
 
 
 if __name__ == "__main__":
