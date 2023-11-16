@@ -80,7 +80,7 @@ class LRUAllocator:
     while len(self.aging_order[device]) and self._get_cur_free_space(device) < space_to_free: # When OOM removing lru buffers.
       bucket, epoch = self.aging_order[device].popleft()
       if self.cached_buffers[bucket] and self.cached_buffers[bucket][-1][1] == epoch: self._free_buffer(self.cached_buffers[bucket].pop()[0]) # Free cached buffer if it is still in cache.
-    assert self._get_cur_free_space(device) > space_to_free, f"out of memory - requested: {space_to_free/1e9:5.2f} GB, available: {self._get_cur_free_space(device)/1e9:5.2f} GB"
+    assert (curr_free := self._get_cur_free_space(device)) > space_to_free, f"out of memory - requested: {space_to_free/1e9:5.2f} GB, available: {curr_free/1e9:5.2f} GB"
 
   def _alloc_buffer(self, size, dtype, device, **kwargs):
     self.ensure_has_free_space(size*dtype.itemsize, device)
