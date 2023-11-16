@@ -78,7 +78,7 @@ class TestConvSpeed(unittest.TestCase):
         fpt += (et1-et0)
         bpt += (et2-et1)
 
-    pr.__exit__(None, None, None)
+    pr.__exit__()
     fpt = (fpt*1000/cnt)
     bpt = (bpt*1000/cnt)
     print("forward pass:  %.3f ms, %.2fx off baseline %.3f ms" % (fpt, fpt/fpt_baseline, fpt_baseline))
