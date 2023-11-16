@@ -497,10 +497,8 @@ class Linearizer(Kernel):
         self.acc[off] = self.uop(UOps.ALU, dtypes.float32, val+(self.acc[off],), ops[x.op])
         ret.append((idx, self.acc[off]))
       for off in range(len(self.acc)):
-        if input_acc[off] != self.acc[off]:
-          self.acc[off] = self.uop(UOps.PHI, dtypes.float32, (input_acc[off], self.acc[off]) + tuple(loop_ctx))
-    else:
-      ret = [(idx, self.uop(UOps.ALU, dtypes.float32, val, x.op)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
+        if input_acc[off] != self.acc[off]: self.acc[off] = self.uop(UOps.PHI, dtypes.float32, (input_acc[off], self.acc[off]) + tuple(loop_ctx))
+    else: ret = [(idx, self.uop(UOps.ALU, dtypes.float32, val, x.op)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
     ordered_ret: List[Optional[UOp]] = [None]*len(values[0])
     # scatter
     for i,j in ret:
