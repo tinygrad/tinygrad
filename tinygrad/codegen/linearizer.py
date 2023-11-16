@@ -6,7 +6,7 @@ from enum import Enum, auto
 from dataclasses import dataclass, field
 from weakref import WeakSet
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, getenv, all_same
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, getenv, all_same, partition
 from tinygrad.ops import LazyOp, UnaryOps, ConstBuffer, MemBuffer, BufferOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -416,6 +416,17 @@ class Linearizer(Kernel):
             replace_op(u, self.uop(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u)))
             changed_something = True
             break
+        if u.uop == UOps.ALU and u.arg == BinaryOps.CMPLT:
+          const_parent, non_const_parent = partition(u.vin, lambda x: x.uop == UOps.CONST)
+          if len(non_const_parent) == 1 and non_const_parent[0].uop == UOps.ALU and non_const_parent[0].arg == BinaryOps.MUL:
+            const_gp, non_gp = partition(non_const_parent[0].vin, lambda x: x.uop == UOps.CONST)
+            if len(non_gp) == 1 and const_gp[0].arg == -1:
+              if u.vin[0] == non_gp[0]:
+                u.vin = (non_gp[0], self.uop(UOps.ALU, u.dtype, (const_parent[0], const_gp[0]), BinaryOps.MUL, insert_before=self.uops.index(u)))
+              else:
+                u.vin = (self.uop(UOps.ALU, u.dtype, (const_parent[0], const_gp[0]), BinaryOps.MUL, insert_before=self.uops.index(u)), non_gp[0])
+              changed_something = True
+              break
         if u.uop == UOps.LOOP:  # loop ALU pushing
           non_phi_children = [x for x in u.children if x.uop != UOps.PHI]
           if len(non_phi_children) == 1 and non_phi_children[0].uop == UOps.ALU:
