@@ -9,7 +9,7 @@ import numpy as np
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple, Union
 
-from tinygrad.helpers import Timing, getenv, DEBUG, dtypes, CI
+from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes, CI
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
@@ -514,8 +514,6 @@ After you are done speaking, output [EOS]. You are not Chad.
   sys.stdout.write(outputted)
   sys.stdout.flush()
 
-  if args.profile: from test.test_net_speed import start_profile, stop_profile
-
   # chatbot loop
   while 1:
     # add tokens from user in chatbot mode
@@ -531,19 +529,17 @@ After you are done speaking, output [EOS]. You are not Chad.
     last_break = len(outputted)
     for i in range(args.count):
       GlobalCounters.reset()
-      if args.profile: pr = start_profile()
 
-      if args.timing: print("")
+      if args.timing or args.profile: print("")
       st = GlobalCounters.time_sum_s
-      with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
-        with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
-                    f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                    (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
-          probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
+      with Profiling(enabled=args.profile):
+        with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
+          with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+                      f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                      (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
+            probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
         probs_np = probs.numpy()
         tok = int(np.random.choice(len(probs_np), p=probs_np))
-
-      if args.profile: stop_profile(pr, sort='time')
 
       # use the kv cache
       start_pos = len(toks)
