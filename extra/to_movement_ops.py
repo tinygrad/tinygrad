@@ -30,11 +30,12 @@ def st_equivalent(st1: ShapeTracker, st2: ShapeTracker):
   # Maybe there are cases that vars are different yet the sts are the same?
   if var1 != var2: return False
 
-  # brute force over the idx range
+  # brute force over the vars range
   vs = list(var1)
   for i, ranges in enumerate(itertools.product(*[range(v.min, v.max+1) for v in vs])):
     if i > 1000:
-      # not a thing for now
+      print("WARNING: did not search all possible combinations")
+      # not happening for now
       break
     var_vals = {k:v for k,v in zip(vs, ranges)}
     r1 = sym_infer(idx1, var_vals) if sym_infer(valid1, var_vals) else 0
@@ -72,14 +73,14 @@ def test_rebuild(st: ShapeTracker):
   last_v2 = rebuilt_st.views[-1]
   assert last_v1.shape == last_v2.shape, f"{last_v1.shape} != {last_v2.shape}"
 
-def interpret_ast(ast:LazyOp):
+def test_interpret_ast(ast:LazyOp):
   if ast.op in BufferOps:
     test_rebuild(ast.arg.st)
   else:
-    for src in ast.src: interpret_ast(src)
+    for src in ast.src: test_interpret_ast(src)
 
 
 if __name__ == "__main__":
-  ast_strs = load_worlds(False, False, True)[:2000]
+  ast_strs = load_worlds(False, False, True)[:4000]
   for ast_str in tqdm(ast_strs):
-    interpret_ast(ast_str_to_ast(ast_str))
+    test_interpret_ast(ast_str_to_ast(ast_str))
