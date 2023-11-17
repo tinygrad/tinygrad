@@ -1,13 +1,9 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
-import pytest
 
-pytestmark = pytest.mark.webgpu
-
-@unittest.skipUnless(Device.DEFAULT != "WEBGPU", f"no JIT on {Device.DEFAULT}")
 class TestJit(unittest.TestCase):
   def test_simple_jit(self):
     @TinyJit
@@ -239,6 +235,9 @@ class TestJit(unittest.TestCase):
     np.testing.assert_equal([2], cache.good_jitted(zero).numpy())
     # but the bad_jitted doesn't!
     np.testing.assert_equal([1], cache.bad_jitted(zero).numpy())
+
+    assert len(cache.good_jitted.jit_cache) == 1
+    assert len(cache.bad_jitted.jit_cache) == 1
 
 if __name__ == '__main__':
   unittest.main()
