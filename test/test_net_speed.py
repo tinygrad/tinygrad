@@ -1,26 +1,12 @@
 #!/usr/bin/env python
 import time
-import cProfile
-import pstats
 import unittest
 import torch
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
+from tinygrad.helpers import Profiling
 import pytest
 
 pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
-
-def start_profile():
-  import time
-  pr = cProfile.Profile(timer=lambda: int(time.time()*1e9), timeunit=1e-6)
-  pr.enable()
-  return pr
-
-def stop_profile(pr, sort='cumtime', frac=0.2):
-  pr.disable()
-  ps = pstats.Stats(pr)
-  ps.strip_dirs()
-  ps.sort_stats(sort)
-  ps.print_stats(frac)
 
 class TestConvSpeed(unittest.TestCase):
 
@@ -86,12 +72,13 @@ class TestConvSpeed(unittest.TestCase):
       [x.grad.realize() for x in [c1, c2, l1]]
       et2 = time.time()
       if i == 0:
-        pr = start_profile()
+        pr = Profiling(sort='time', frac=0.2)
+        pr.__enter__()
       else:
         fpt += (et1-et0)
         bpt += (et2-et1)
 
-    stop_profile(pr, sort='time')
+    pr.__exit__()
     fpt = (fpt*1000/cnt)
     bpt = (bpt*1000/cnt)
     print("forward pass:  %.3f ms, %.2fx off baseline %.3f ms" % (fpt, fpt/fpt_baseline, fpt_baseline))

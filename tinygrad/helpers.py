@@ -1,7 +1,7 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats
 import numpy as np
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
 
@@ -26,12 +26,13 @@ def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (
 def flatten(l:Union[List, Iterator]): return [item for sublist in l for item in sublist]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
+def round_up(num, amt): return num if num%amt == 0 else num+(amt-(num%amt))
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
   return {k:v for d in ds for k,v in d.items()}
-def partition(lst, fxn):
-  a: list[Any] = []
-  b: list[Any] = []
+def partition(lst:List[T], fxn:Callable[[T],bool]):
+  a:List[T] = []
+  b:List[T] = []
   for s in lst: (a if fxn(s) else b).append(s)
   return a,b
 
@@ -67,9 +68,19 @@ GRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 class Timing(contextlib.ContextDecorator):
   def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
   def __enter__(self): self.st = time.perf_counter_ns()
-  def __exit__(self, exc_type, exc_val, exc_tb):
+  def __exit__(self, *exc):
     self.et = time.perf_counter_ns() - self.st
     if self.enabled: print(f"{self.prefix}{self.et*1e-6:.2f} ms"+(self.on_exit(self.et) if self.on_exit else ""))
+
+class Profiling(contextlib.ContextDecorator):
+  def __init__(self, enabled=True, sort='cumtime', frac=0.2): self.enabled, self.sort, self.frac = enabled, sort, frac
+  def __enter__(self):
+    self.pr = cProfile.Profile(timer=lambda: int(time.time()*1e9), timeunit=1e-6)
+    if self.enabled: self.pr.enable()
+  def __exit__(self, *exc):
+    if self.enabled:
+      self.pr.disable()
+      pstats.Stats(self.pr).strip_dirs().sort_stats(self.sort).print_stats(self.frac)
 
 # **** tinygrad now supports dtypes! *****
 
@@ -163,7 +174,7 @@ _cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches"
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 6
+VERSION = 7
 _db_connection = None
 def db_connection():
   global _db_connection
@@ -190,8 +201,7 @@ def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
     res = cur.execute(f"SELECT val FROM {table} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
   except sqlite3.OperationalError:
     return None  # table doesn't exist
-  if (val:=res.fetchone()) is not None:
-    return pickle.loads(val[0])
+  if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
   return None
 
 _db_tables = set()
