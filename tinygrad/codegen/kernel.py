@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, math, itertools
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, Device, Compiled
-from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int, ansilen, getenv, prod, DEBUG
+from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, ansilen, getenv, prod, DEBUG
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import View, strides_for_shape
@@ -128,11 +128,6 @@ class Kernel:
 
   @property
   def membufs(self) -> List[MemBuffer]: return [x for x in self.bufs if isinstance(x, MemBuffer)]
-
-  def has_variable_shape(self) -> bool:
-    for b in self.bufs:
-      if not isinstance(b, LocalBuffer) and not all_int(b.st.views[-1].shape): return True
-    return False
 
   def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
   def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]

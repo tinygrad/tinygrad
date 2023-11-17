@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats
 import numpy as np
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
 
@@ -29,9 +29,9 @@ def round_up(num, amt): return num if num%amt == 0 else num+(amt-(num%amt))
 def merge_dicts(ds:Iterable[Dict]) -> Dict:
   assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
   return {k:v for d in ds for k,v in d.items()}
-def partition(lst, fxn):
-  a: list[Any] = []
-  b: list[Any] = []
+def partition(lst:List[T], fxn:Callable[[T],bool]):
+  a:List[T] = []
+  b:List[T] = []
   for s in lst: (a if fxn(s) else b).append(s)
   return a,b
 
@@ -200,8 +200,7 @@ def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
     res = cur.execute(f"SELECT val FROM {table} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
   except sqlite3.OperationalError:
     return None  # table doesn't exist
-  if (val:=res.fetchone()) is not None:
-    return pickle.loads(val[0])
+  if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
   return None
 
 _db_tables = set()
