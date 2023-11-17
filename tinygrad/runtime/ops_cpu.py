@@ -32,6 +32,12 @@ def einsum_mulacc(einsum, get_strides, expand):
     return expand(ret.reshape([(1 if i not in a_axes and i not in b_axes else s) for i,s in enumerate(new_shape)]), new_shape)
   return mulacc
 
+def as_strided(x, arg):
+  if any(i < 0 for i in arg[1]):
+    offset = arg[2] + sum((s-1)*a if a < 0 else 0 for (s,a) in zip(arg[0], arg[1]))
+    return np.flip(np.ndarray(arg[0], buffer=np.require(x, requirements='C'), dtype=x.dtype, offset=offset*x.dtype.itemsize, strides=tuple(abs(y)*x.dtype.itemsize for y in arg[1])), axis=[i for i,a in enumerate(arg[1]) if a < 0])
+  return np.ndarray(arg[0], buffer=np.require(x, requirements='C'), dtype=x.dtype, offset=arg[2]*x.dtype.itemsize, strides=tuple(y*x.dtype.itemsize for y in arg[1])),
+
 numpy_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
   BufferOps.CONST: lambda val, dtype: np.array(val, dtype=dtype.np),
   UnaryOps.NOOP: lambda x: np.require(x, requirements='C'), UnaryOps.EXP2: np.exp2, UnaryOps.LOG2: np.log2, UnaryOps.SIN: np.sin,
@@ -41,7 +47,7 @@ numpy_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
   BinaryOps.DIV: lambda x, y: np.divide(*match_types(x, y)).astype(output_type(x, y), copy=False), UnaryOps.SQRT: np.sqrt,
   MovementOps.PERMUTE: lambda x, order: x.transpose(order), MovementOps.PAD: np.pad, MovementOps.EXPAND: np.broadcast_to,
   MovementOps.STRIDE: lambda x, arg: x[tuple(slice(None, None, i) for i in arg)],
-  MovementOps.AS_STRIDED: lambda x, arg: np.ndarray(arg[0], buffer=np.require(x, requirements='C'), dtype=x.dtype, offset=arg[2]*x.dtype.itemsize, strides=tuple(y*x.dtype.itemsize for y in arg[1])),
+  MovementOps.AS_STRIDED: as_strided,
   TernaryOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, *match_types(a.copy(), b.copy()), optimize=True), lambda x: x.strides, np.broadcast_to),
   TernaryOps.WHERE: np.where,
 }}
