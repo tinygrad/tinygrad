@@ -174,5 +174,9 @@ class TestAllocators(unittest.TestCase):
     test()
     check_gc()
 
+  def test_lru_allocate_massive_buffer(self):
+    with self.assertRaises(AssertionError) as context: alloc(allocator := FakeAllocator(), size := 1e13, dt := dtypes.float)
+    self.assertEqual(str(context.exception), f"out of memory - requested: {(size*dt.itemsize)/1e9:5.2f} GB, available: {allocator._get_cur_free_space('0')/1e9:5.2f} GB")
+
 if __name__ == "__main__":
   unittest.main()
