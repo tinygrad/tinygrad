@@ -37,4 +37,3 @@ class RawDiskBuffer(RawBufferMapped):
 
 disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.MEM: lambda x: x, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.SHRINK: RawDiskBuffer.shrink, MovementOps.RESHAPE: RawDiskBuffer.reshape, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
 DiskBuffer = Interpreted(RawDiskBuffer, disk_fxn_for_op)
-
