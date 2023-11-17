@@ -73,7 +73,10 @@ class HIPProgram:
     if wait:
       hip.hipEventRecord(end)
       hip.hipEventSynchronize(end)
-      return hip.hipEventElapsedTime(start, end)*1e-3
+      ret = hip.hipEventElapsedTime(start, end)*1e-3
+      hip.hipEventDestroy(start)
+      hip.hipEventDestroy(end)
+      return ret
 
   def __del__(self):
     for module in self.modules: hip.hipModuleUnload(module)
