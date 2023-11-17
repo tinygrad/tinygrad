@@ -11,6 +11,9 @@ from weakref import ref, WeakKeyDictionary
 class TinyJit:
   def __init__(self, fxn:Callable):
     self.fxn: Callable = fxn
+    self.reset()
+
+  def reset(self):
     self.jit_fxn: Optional[BatchExecutor] = None
     self.cnt: int = 0
     self.ret: Any = None
