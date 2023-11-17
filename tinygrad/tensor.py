@@ -41,9 +41,7 @@ class Tensor:
   training: ClassVar[bool] = False
   class train:
     def __init__(self, val=True): self.val = val
-    def __enter__(self):
-      self.prev = Tensor.training
-      Tensor.training = self.val
+    def __enter__(self): self.prev, Tensor.training = Tensor.training, self.val
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any): Tensor.training = self.prev
 
   no_grad: ClassVar[bool] = False
@@ -171,8 +169,7 @@ class Tensor:
   @staticmethod
   def eye(dim:int, **kwargs): return Tensor.full((dim,1),1,**kwargs).pad(((0,0),(0,dim))).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
 
-  def full_like(self, fill_value, **kwargs):
-    return Tensor.full(self.shape, fill_value=fill_value, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
+  def full_like(self, fill_value, **kwargs): return Tensor.full(self.shape, fill_value=fill_value, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
   def zeros_like(self, **kwargs): return self.full_like(0, **kwargs)
   def ones_like(self, **kwargs): return self.full_like(1, **kwargs)
 
@@ -382,8 +379,7 @@ class Tensor:
     shapes = [s.shape[dim] for s in catargs]
     shape_cumsum = [0, *accumulate(shapes)]
     slc = [[(0, 0) for _ in self.shape] for _ in catargs]
-    for shp,k,s in zip(shapes, shape_cumsum[:-1], slc):
-      s[dim] = (k, shape_cumsum[-1] - k - shp)
+    for shp,k,s in zip(shapes, shape_cumsum[:-1], slc): s[dim] = (k, shape_cumsum[-1] - k - shp)
     return reduce(Tensor.__add__, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
 
   @staticmethod
