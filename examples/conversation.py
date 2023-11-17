@@ -41,9 +41,9 @@ def clean_text(enc: Encoding, txt: str) -> str:
   return txt.replace("[BLANK_AUDIO]", "").strip()
 
 
-def voice2text(model: Whisper, enc: Encoding, waveform: bytes, tokens: list[int]):
-  encoded_audio = model.encoder(Tensor(prep_audio(waveform))).realize()
-  out = model.decoder(Tensor([tokens]), encoded_audio).realize()
+def voice2text(model: Whisper, enc: Encoding, waveform: np.ndarray, tokens: list[int]):
+  encoded_audio = model.encoder(Tensor(prep_audio(waveform.reshape(1, -1), 1)))
+  out = model.decoder(Tensor([tokens]), 0, encoded_audio, streaming=True).realize()
   tokens.append(int(out[0,-1].argmax().numpy().item()))
   return enc.decode(tokens)
 
