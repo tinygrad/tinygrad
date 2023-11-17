@@ -66,9 +66,7 @@ class HIPProgram:
     if wait:
       start, end = hip.hipEventCreate(), hip.hipEventCreate()
       hip.hipEventRecord(start)
-    class PackageStruct(ctypes.Structure):
-      _fields_ = [(f'field{idx}', ctypes.c_void_p if not isinstance(args[idx], int) else ctypes.c_int) for idx in range(len(args))]
-    struct = PackageStruct(*[data._buf if not isinstance(data, int) else np.int32(data) for data in args])
+    struct = hip.getStructTypeForArgs(*args)(*[data._buf if not isinstance(data, int) else np.int32(data) for data in args])
     hip.hipModuleLaunchKernel(self.prgs[args[0]._device], global_size[0], global_size[1], global_size[2], local_size[0], local_size[1], local_size[2], 0, 0, struct)
     if wait:
       hip.hipEventRecord(end)
