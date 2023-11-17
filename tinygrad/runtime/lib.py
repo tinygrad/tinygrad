@@ -9,9 +9,9 @@ class RawBuffer:  # pylint: disable=abstract-method
   def __init__(self, size:int, dtype:DType, buf:Any=None, allocator:Any=None, **kwargs):
     self.size: int = size
     self.dtype: DType = dtype
-    self._buf = buf if buf is not None else (allocator.alloc(size, dtype, **kwargs) if allocator else None) # If buf is provided, use it. Otherwise try to allocate from the allocator.
+    self._buf = buf if buf is not None else (allocator(size, dtype, **kwargs) if allocator else None) # If buf is provided, use it. Otherwise try to allocate from the allocator.
     self._memsz: int = size*dtype.itemsize
-    self._allocator = allocator
+    self._allocator = allocator if allocator and hasattr(allocator, 'free') else None
     self._device = kwargs.get('device', None)
     GlobalCounters.mem_used += self._memsz
   def __del__(self):  # NOTE: if it fails on init (bad dtype), it won't have a _memsz
@@ -38,7 +38,7 @@ class RawBufferCopyIn(RawBuffer):
 class RawBufferMapped(RawBufferCopyIn):
   def _buffer(self) -> memoryview: raise NotImplementedError("must be implemented")
   # NOTE: this metadata prevents the backing buffer from being freed. hack can be removed with PEP688
-  def buffer_view(self) -> np.ndarray: return np.frombuffer(self._buffer(), dtype=np.dtype(self.dtype.np, metadata={"backing": self}), count=self.size)
+  def buffer_view(self) -> np.ndarray: return np.frombuffer(self._buffer(), dtype=np.dtype(self.dtype.np, metadata={"backing": self}), count=self.size)  # type: ignore
   def toCPU(self) -> np.ndarray: return self.buffer_view().copy() # Need a copy, since jit will write to the same buffer.
   def _copyin(self, x:np.ndarray) -> None: np.copyto(self.buffer_view(), x.reshape(-1))
 
@@ -83,8 +83,8 @@ class LRUAllocator:
 
   def _alloc_buffer(self, size, dtype, device, **kwargs):
     self.ensure_has_free_space(size*dtype.itemsize, device)
-    while True: 
-      try: 
+    while True:
+      try:
         newbuf = self._do_alloc(max(1, size), dtype, device, **kwargs)
         break
       except Exception:
@@ -100,7 +100,7 @@ class LRUAllocator:
     self.buffer_info.pop(buf_to_free)
     self._do_free(buf_to_free)
 
-  def alloc(self, size, dtype, device='0', **kwargs):
+  def __call__(self, size, dtype, device='0', **kwargs): # allocate
     rawbufs = self.cached_buffers.get(self._cached_bufkey(size, dtype, device), None)
     return self._cache_reuse_buffer(rawbufs) if rawbufs else self._alloc_buffer(size, dtype, device, **kwargs)
 

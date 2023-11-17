@@ -1,6 +1,6 @@
 import numpy as np
 import functools
-from wgpu.utils._device import get_default_device
+from wgpu.utils.device import get_default_device
 from tinygrad.runtime.lib import RawBufferCopyIn, LRUAllocator
 from tinygrad.helpers import dtypes, DType
 from tinygrad.ops import Compiled

@@ -262,5 +262,131 @@ class TestTinygrad(unittest.TestCase):
     # force device copy - to() is opt'd away - Tensor(dev)/1 is ignored
     np.testing.assert_allclose(ua_arr, (Tensor(ua_arr)/Tensor(1)).numpy())
 
+class TestZeroShapeTensor(unittest.TestCase):
+  def test_from_empty(self):
+    np.testing.assert_equal(Tensor([]).numpy(), np.array([]))
+    np.testing.assert_equal(Tensor(None).numpy(), np.array([]))
+
+  def test_shape_stride(self):
+    t = Tensor.rand(3, 2, 0)
+    assert t.shape == (3, 2, 0)
+    # numpy has stride 0, 0, 0; torch has stride 2, 1, 1
+    assert t.lazydata.st.real_strides() == (0, 0, 1)
+
+    t = Tensor.rand(3, 0, 2)
+    assert t.shape == (3, 0, 2)
+    # numpy has stride 0, 0, 0; torch has stride 2, 2, 1
+    assert t.lazydata.st.real_strides() == (0, 2, 1)
+
+    t = Tensor.rand(0, 0, 0)
+    assert t.shape == (0, 0, 0)
+    # numpy has stride 0, 0, 0; torch has stride 1, 1, 1
+    assert t.lazydata.st.real_strides() == (0, 0, 1)
+
+  def test_rand(self):
+    t = Tensor.rand(3, 2, 0)
+    assert t.shape == (3, 2, 0)
+    np.testing.assert_equal(t.numpy(), np.zeros((3, 2, 0)))
+    t = Tensor.rand(0)
+    assert t.shape == (0,)
+    np.testing.assert_equal(t.numpy(), np.zeros((0,)))
+    t = Tensor.rand(0, 0, 0)
+    assert t.shape == (0, 0, 0)
+    np.testing.assert_equal(t.numpy(), np.zeros((0, 0, 0)))
+
+  def test_full(self):
+    t = Tensor.zeros(3, 2, 0)
+    assert t.shape == (3, 2, 0)
+    np.testing.assert_equal(t.numpy(), np.zeros((3, 2, 0)))
+    t = Tensor.full((3, 2, 0), 12)
+    assert t.shape == (3, 2, 0)
+    np.testing.assert_equal(t.numpy(), np.full((3, 2, 0), 12))
+
+  def test_reshape(self):
+    t = Tensor.zeros(3, 2, 0)
+    a = t.reshape(7, 0)
+    assert a.shape == (7, 0)
+    np.testing.assert_equal(a.numpy(), np.zeros((7, 0)))
+    with self.assertRaises(AssertionError):
+      # cannot reshape from size 0 to size 1
+      a = t.reshape(())
+
+  def test_expand(self):
+    t = Tensor.full((3, 2, 0), 12).expand((6, 2, 0))
+    assert t.shape == (6, 2, 0)
+    np.testing.assert_equal(t.numpy(), np.full((6, 2, 0), 12))
+
+  def test_pad(self):
+    t = Tensor.rand(3, 2, 0).pad((None, None, (1, 1)), 1)
+    assert t.shape == (3, 2, 2)
+    np.testing.assert_equal(t.numpy(), np.ones((3, 2, 2)))
+
+    if Device.DEFAULT != "TORCH":
+      # torch does not support padding non-zero dim with 0-size. torch.nn.functional.pad(torch.zeros(3,2,0), [0,0,0,4,0,0])
+      t = Tensor.rand(3, 2, 0).pad((None, (1, 1), None), 1)
+      assert t.shape == (3, 4, 0)
+      np.testing.assert_equal(t.numpy(), np.ones((3, 4, 0)))
+
+      t = Tensor.rand(3, 2, 0).pad(((1, 1), None, None), 1)
+      assert t.shape == (5, 2, 0)
+      np.testing.assert_equal(t.numpy(), np.ones((5, 2, 0)))
+
+  def test_shrink_into_zero(self):
+    t = Tensor.rand(3, 4).realize()
+    assert t.shrink((None, (2, 2))).realize().shape == (3, 0)
+    assert t.shrink(((2, 2), None)).realize().shape == (0, 4)
+    assert t.shrink(((2, 2), (2, 2))).realize().shape == (0, 0)
+
+  def test_cat(self):
+    s = Tensor.rand(3, 2, 2)
+    t = Tensor.rand(3, 2, 0).cat(s, dim=2)
+    assert t.shape == (3, 2, 2)
+    np.testing.assert_equal(t.numpy(), s.numpy())
+
+    if Device.DEFAULT != "TORCH":
+      # torch does not support padding non-zero dim with 0-size. torch.nn.functional.pad(torch.zeros(3,2,0), [0,0,0,4,0,0])
+      s = Tensor.rand(3, 4, 0)
+      t = Tensor.rand(3, 2, 0).cat(s, dim=1)
+      assert t.shape == (3, 6, 0)
+      np.testing.assert_equal(t.numpy(), np.zeros((3, 6, 0)))
+
+  def test_elementwise(self):
+    a = Tensor.rand(3, 2, 0)
+    a_exp = a.exp()
+    assert a_exp.shape == (3, 2, 0)
+    np.testing.assert_equal(a_exp.numpy(), np.exp(a.numpy()))
+
+    b = Tensor.rand(3, 2, 0)
+    assert b.shape == (3, 2, 0)
+    ab = a * b
+    assert ab.shape == (3, 2, 0)
+    np.testing.assert_equal(ab.numpy(), a.numpy() * b.numpy())
+
+    mask = (Tensor.rand(3, 2, 0) > 0.5)
+    assert mask.shape == (3, 2, 0)
+    c = mask.where(a, b)
+    assert c.shape == (3, 2, 0)
+    np.testing.assert_equal(c.numpy(), np.where(mask.numpy(), a.numpy(), b.numpy()))
+
+  def test_reduce_over_non_zero(self):
+    a = Tensor.ones(3, 2, 0).sum(axis=1)
+    assert a.shape == (3, 0)
+    np.testing.assert_equal(a.numpy(), np.sum(np.zeros((3, 2, 0)), axis=1))
+
+  def test_reduce_over_zero(self):
+    a = Tensor.ones(3, 2, 0).sum(axis=2)
+    assert a.shape == (3, 2)
+    np.testing.assert_equal(a.numpy(), np.sum(np.zeros((3, 2, 0)), axis=2))
+
+    a = Tensor.ones(3, 2, 0).sum(axis=2, keepdim=True)
+    assert a.shape == (3, 2, 1)
+    np.testing.assert_equal(a.numpy(), np.sum(np.zeros((3, 2, 0)), axis=2, keepdims=True))
+
+  def test_reduce_default(self):
+    np.testing.assert_equal(Tensor([]).max().numpy(), -float("inf"))
+    np.testing.assert_equal(Tensor([]).min().numpy(), float("inf"))
+    np.testing.assert_equal(Tensor([]).sum().numpy(), 0)
+    np.testing.assert_equal(Tensor([]).mean().numpy(), 0)
+
 if __name__ == '__main__':
   unittest.main()

@@ -1,7 +1,7 @@
 import math
 from tinygrad.helpers import flatten
 import tinygrad.nn as nn
-from models.resnet import ResNet
+from extra.models.resnet import ResNet
 from extra.utils import get_child
 import numpy as np
 
@@ -231,7 +231,7 @@ class FPN:
     return results
 
 if __name__ == "__main__":
-  from models.resnet import ResNeXt50_32X4D
+  from extra.models.resnet import ResNeXt50_32X4D
   backbone = ResNeXt50_32X4D()
   retina = RetinaNet(backbone)
   retina.load_from_pretrained()

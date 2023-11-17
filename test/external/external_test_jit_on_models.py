@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
+from tinygrad.jit import TinyJit
 from tinygrad.helpers import dtypes, CI
 from tinygrad.ops import Device
 from test.helpers import derandomize_model
@@ -14,7 +14,6 @@ def helper_test_jitted_correctness(gen, train, train_jit):
   for _ in range(5): jit = train_jit(*gen()).numpy()
   np.testing.assert_allclose(nojit, jit, rtol=1e-3, atol=1e-5)
 
-@unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE, "needs JIT")
 class TestJittedModels(unittest.TestCase):
   def test_jitted_tiny_llama(self):
     old_type = Tensor.default_type

@@ -9,17 +9,17 @@ import numpy as np
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple, Union
 
-from tinygrad.helpers import Timing, getenv, DEBUG, dtypes, CI
+from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes, CI
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
-from tinygrad.nn.state import safe_load, torch_load, load_state_dict
+from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad.helpers import GlobalCounters
-from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
+from tinygrad.jit import TinyJit
 from tinygrad.shape.symbolic import Variable
 
 MAX_CONTEXT = 1024
-JIT = getenv("JIT", 0 if CI else int(Device.DEFAULT in JIT_SUPPORTED_DEVICE))
+JIT = getenv("JIT", 0 if CI else 1)
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
@@ -494,6 +494,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
+  param_count = sum(x.lazydata.st.size() for x in get_parameters(llama.model))
 
   if chatbot:
     # encode pre prompt
@@ -513,10 +514,6 @@ After you are done speaking, output [EOS]. You are not Chad.
   sys.stdout.write(outputted)
   sys.stdout.flush()
 
-  if args.profile:
-    import cProfile, pstats
-    profiler = cProfile.Profile()
-
   # chatbot loop
   while 1:
     # add tokens from user in chatbot mode
@@ -532,17 +529,17 @@ After you are done speaking, output [EOS]. You are not Chad.
     last_break = len(outputted)
     for i in range(args.count):
       GlobalCounters.reset()
-      if args.profile and i == 2: profiler.enable()
 
-      if args.timing: print("")
+      if args.timing or args.profile: print("")
       st = GlobalCounters.time_sum_s
-      with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
-        with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
-                    f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                    (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
-          probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
-        probs_np = probs.numpy()
-        tok = int(np.random.choice(len(probs_np), p=probs_np))
+      with Profiling(enabled=args.profile):
+        with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
+          with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+                      f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                      (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
+            probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
+          # TODO: fix JIT rand so we can put this in the JIT
+          tok = probs.multinomial().item()
 
       # use the kv cache
       start_pos = len(toks)
@@ -559,8 +556,3 @@ After you are done speaking, output [EOS]. You are not Chad.
       # stop after you have your answer
       if chatbot and outputted.endswith(end_delim): break
     if not chatbot: break
-
-  if args.profile:
-    profiler.disable()
-    stats = pstats.Stats(profiler)
-    stats.dump_stats("out.prof")
