@@ -41,11 +41,10 @@ def clean_text(enc: Encoding, txt: str) -> str:
   return txt.replace("[BLANK_AUDIO]", "").strip()
 
 
-def voice2text(model: Whisper, enc: Encoding, waveform: np.ndarray, tokens: list[int]):
-  encoded_audio = model.encoder(Tensor(prep_audio(waveform.reshape(1, -1), 1)))
+def voice2text(model: Whisper, enc: Encoding, encoded_audio: Tensor, tokens: list[int]):
   out = model.decoder(Tensor([tokens]), 0, encoded_audio, streaming=True).realize()
   tokens.append(int(out[0,-1].argmax().numpy().item()))
-  return enc.decode(tokens)
+  if tokens[-1] == enc._special_tokens["<|endoftext|>"]: return enc.decode(tokens)
 
 
 def llama_prepare(llama: LLaMa, temperature: float, pre_prompt_path: Path) -> tuple[list[int], str, str, str]:
@@ -253,13 +252,9 @@ if __name__ == "__main__":
       is_listening_event.clear()
 
       # Transcribe text
-      while True:
-        txt = voice2text(model, enc, total, tokens)
-        print(txt)
-        if txt.endswith("<|endoftext|>"):
-          tokens.pop()
-          txt = clean_text(enc, txt)
-          break
+      encoded_audio = model.encoder(Tensor(prep_audio(total.reshape(1, -1), 1)))
+      while (txt := voice2text(model, enc, encoded_audio, tokens)) is None: continue
+      txt = clean_text(enc, txt)
 
       # Generate with llama
       outputted, start_pos = llama_generate(llama, txt, start_pos, outputted)
