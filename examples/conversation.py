@@ -3,6 +3,7 @@ import multiprocessing as mp
 import re
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -175,20 +176,15 @@ def init_vits(
   return net_g, emotion_embedding, text_mapper, hps, model_has_multiple_speakers
 
 
-def play_audio(audio_data: np.ndarray, num_channels: int, sample_rate: int):
-  # Initialize PyAudio
-  p = pyaudio.PyAudio()
-
-  # Open PyAudio stream
-  stream = p.open(format=pyaudio.paInt16, channels=num_channels, rate=sample_rate, output=True)
-
-  # Play audio data
-  stream.write(audio_data.tobytes())
-
-  # Stop stream and close PyAudio
-  stream.stop_stream()
-  stream.close()
-  p.terminate()
+@contextmanager
+def output_stream(num_channels: int, sample_rate: int):
+  try:
+    p = pyaudio.PyAudio()
+    yield p.open(format=pyaudio.paInt16, channels=num_channels, rate=sample_rate, output=True)
+  finally:
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
 
 
 def listener(q: mp.Queue, event: mp.Event):
@@ -260,34 +256,35 @@ if __name__ == "__main__":
   p.start()
 
   # Start the pipeline
-  while True:
-    tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
-    total = np.array([])
-
-    # Listen to mic input
-    is_listening_event.set()
-    time.sleep(args.phrase_timeout)
-    while not q.empty(): total = np.concatenate([total, q.get()])
-    is_listening_event.clear()
-
-    # Transcribe text
+  with output_stream(args.vits_num_channels, hps.data.sampling_rate) as stream:
     while True:
-      txt = voice2text(model, enc, total, tokens)
-      print(txt)
-      if txt.endswith("<|endoftext|>"):
-        tokens.pop()
-        txt = clean_text(enc, txt)
-        break
+      tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
+      total = np.array([])
 
-    # Generate with llama
-    outputted, start_pos = llama_generate(llama, txt, start_pos, outputted)
-    response = outputted.splitlines()[-1].replace(resp_delim.strip(), "").replace(end_delim.strip(), "")
+      # Listen to mic input
+      is_listening_event.set()
+      time.sleep(args.phrase_timeout)
+      while not q.empty(): total = np.concatenate([total, q.get()])
+      is_listening_event.clear()
 
-    # Convert to voice
-    audio_data = tts(
-      response, synth, hps, emotion_embedding,
-      args.vits_speaker_id, args.vits_model_to_use, args.vits_noise_scale,
-      args.vits_noise_scale_w, args.vits_length_scale,
-      args.vits_estimate_max_y_length
-    )
-    play_audio(audio_data, args.vits_num_channels, hps.data.sampling_rate)
+      # Transcribe text
+      while True:
+        txt = voice2text(model, enc, total, tokens)
+        print(txt)
+        if txt.endswith("<|endoftext|>"):
+          tokens.pop()
+          txt = clean_text(enc, txt)
+          break
+
+      # Generate with llama
+      outputted, start_pos = llama_generate(llama, txt, start_pos, outputted)
+      response = outputted.splitlines()[-1].replace(resp_delim.strip(), "").replace(end_delim.strip(), "")
+
+      # Convert to voice
+      audio_data = tts(
+        response, synth, hps, emotion_embedding,
+        args.vits_speaker_id, args.vits_model_to_use, args.vits_noise_scale,
+        args.vits_noise_scale_w, args.vits_length_scale,
+        args.vits_estimate_max_y_length
+      )
+      stream.write(audio_data.tobytes())
