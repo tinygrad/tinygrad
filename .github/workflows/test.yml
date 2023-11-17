@@ -53,6 +53,8 @@ jobs:
       run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
       run: PYTHONPATH="." python test/external/fuzz_shapetracker.py
+    - name: Test shapetracker to_movement_ops
+      run: PYTHONPATH="." python extra/to_movement_ops.py
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
@@ -215,7 +217,7 @@ jobs:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
         key: metal-webgpu-testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
-      run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Cache model weights
       uses: actions/cache@v3
       with:
@@ -242,18 +244,18 @@ jobs:
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
     - name: Run whisper test
       run: METAL=1 python -m pytest test/models/test_whisper.py
-    - name: Check Device.DEFAULT (WEBGPU) and print some source
-      run: |
-        WEBGPU=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
-        WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run linearizer and tensor core test
       run: METAL=1 python -m pytest -n=auto test/test_linearizer.py
     - name: Test tensor core reshape-only ops
       run: METAL=1 TC=2 python -m pytest -n=auto test/test_ops.py
+    - name: Check Device.DEFAULT (WEBGPU) and print some source
+      run: |
+        WEBGPU=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
+        WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     #- name: Run webgpu pytest
     #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
-    - name: Run webgpu dtype tests
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_dtype.py
+    - name: Run selected webgpu tests
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_dtype.py test/test_jit.py
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
     - name: Install Puppeteer
@@ -299,7 +301,8 @@ jobs:
         run: |
           echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           sudo apt update -y
-          sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+          sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
+            flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
       - name: Cache gpuocelot
         if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         id: cache-build
@@ -308,7 +311,7 @@ jobs:
           cache-name: cache-gpuocelot-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480
+          key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480-rebuild
       - name: Clone/compile gpuocelot
         if: (matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
@@ -317,7 +320,7 @@ jobs:
           git checkout 18401f4245b27ca4b3af433196583cc81ef84480
           mkdir build
           cd build
-          cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0
+          cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF
           ninja
       - name: Install gpuocelot
         if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'

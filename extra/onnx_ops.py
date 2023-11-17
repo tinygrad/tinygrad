@@ -344,14 +344,21 @@ def Conv(X: Tensor, W: Tensor, B=None, auto_pad="NOTSET", dilations=1, group=1, 
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=padding)
 
 def ConvTranspose(X: Tensor, W: Tensor, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, output_shape=None, output_padding=0, strides=1):
-  if not kernel_shape: kernel_shape = W.shape
-  if pads is None and auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
-  elif pads is None and auto_pad == "NOTSET": pads = [0,0] * (X.ndim - 2)
-  strides_ = [1]*(W.ndim-1) + [strides] if isinstance(strides, int) else [1]*(W.ndim-len(strides)) + list(strides)
-  dilations_ = [1]*(W.ndim-1) + [dilations] if isinstance(dilations, int) else [1]*(W.ndim-len(dilations)) + list(dilations)
-  if output_shape and not output_padding:
-    out_sh = [st*(xs-1) + (ks-1)*di+1 if n < 2 else st*(xs-1) + (ks-1)*di+1 - pads[n-2] - pads[n-1] for n, (st, xs, ks, di) in enumerate(zip(strides_, X.shape, kernel_shape, dilations_))]
-    output_padding = [os - rs for os, rs in zip(output_shape, out_sh[-len(output_shape):])]
+  if kernel_shape is None: kernel_shape = W.shape[2:]
+  if isinstance(strides, int): strides = [strides]*(W.ndim-2)
+  if isinstance(dilations, int): dilations = [dilations]*(W.ndim-2)
+  if isinstance(output_padding, int): output_padding = [output_padding]*(W.ndim-2)
+  out_sh = [st*(xs-1) + (ks-1)*di+1 if n < 2 else st*(xs-1) + (ks-1)*di+1 - pads[n-2] - pads[n-1] for n, (st, xs, ks, di) in enumerate(zip(strides, X.shape[2:], kernel_shape, dilations))] if output_shape is not None or auto_pad != "NOTSET" else []
+  if pads is None:
+    if output_shape is None: output_shape = [xs*st for xs, st in zip(X.shape[2:], strides)]
+    if auto_pad == "NOTSET": pads = [0,0] * (X.ndim - 2)
+    else:
+      total_padding = [st*(ish-1) + pad + ((ks-1)*dil+1)-osh for st, ish, pad, ks, dil, osh in zip(strides, X.shape[2:], output_padding, kernel_shape, dilations, output_shape)]
+      pad_shape = flatten([[sh//2, sh-sh//2] for sh in total_padding])
+      pads = pad_shape[::2] + pad_shape[1::2] if auto_pad == "SAME_UPPER" else pad_shape[1::2] + pad_shape[::2]
+  else:
+    if output_shape is None: output_shape = [st*(xs-1) + (ks-1)*di+1 if n < 2 else st*(xs-1) + (ks-1)*di+1 - pads[n-2] - pads[n-1] for n, (st, xs, ks, di) in enumerate(zip(strides, X.shape[2:], kernel_shape, dilations))]
+  if out_sh: output_padding = [os - rs for os, rs in zip(output_shape, out_sh)]
   return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding)
 
 # Reimplemented here because you need legacy RNG for passing ONNX tests.

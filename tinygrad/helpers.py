@@ -1,11 +1,12 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats
 import numpy as np
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
 
 T = TypeVar("T")
+U = TypeVar("U")
 # NOTE: it returns int 1 if x is empty regardless of the type of x
 def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.__mul__, x, 1)
 
@@ -25,12 +26,13 @@ def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (
 def flatten(l:Union[List, Iterator]): return [item for sublist in l for item in sublist]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
-def merge_dicts(ds:Iterable[Dict]) -> Dict:
+def round_up(num, amt): return num if num%amt == 0 else num+(amt-(num%amt))
+def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
   return {k:v for d in ds for k,v in d.items()}
-def partition(lst, fxn):
-  a: list[Any] = []
-  b: list[Any] = []
+def partition(lst:List[T], fxn:Callable[[T],bool]):
+  a:List[T] = []
+  b:List[T] = []
   for s in lst: (a if fxn(s) else b).append(s)
   return a,b
 
@@ -66,9 +68,19 @@ GRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 class Timing(contextlib.ContextDecorator):
   def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
   def __enter__(self): self.st = time.perf_counter_ns()
-  def __exit__(self, exc_type, exc_val, exc_tb):
+  def __exit__(self, *exc):
     self.et = time.perf_counter_ns() - self.st
     if self.enabled: print(f"{self.prefix}{self.et*1e-6:.2f} ms"+(self.on_exit(self.et) if self.on_exit else ""))
+
+class Profiling(contextlib.ContextDecorator):
+  def __init__(self, enabled=True, sort='cumtime', frac=0.2): self.enabled, self.sort, self.frac = enabled, sort, frac
+  def __enter__(self):
+    self.pr = cProfile.Profile(timer=lambda: int(time.time()*1e9), timeunit=1e-6)
+    if self.enabled: self.pr.enable()
+  def __exit__(self, *exc):
+    if self.enabled:
+      self.pr.disable()
+      pstats.Stats(self.pr).strip_dirs().sort_stats(self.sort).print_stats(self.frac)
 
 # **** tinygrad now supports dtypes! *****
 
@@ -109,23 +121,23 @@ class dtypes:
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", np.bool_)
-  float16: Final[DType] = DType(8, 2, "half", np.float16)
+  float16: Final[DType] = DType(9, 2, "half", np.float16)
   half = float16
-  float32: Final[DType] = DType(9, 4, "float", np.float32)
+  float32: Final[DType] = DType(10, 4, "float", np.float32)
   float = float32
-  float64: Final[DType] = DType(10, 8, "double", np.float64)
+  float64: Final[DType] = DType(11, 8, "double", np.float64)
   double = float64
-  int8: Final[DType] = DType(0, 1, "char", np.int8)
-  int16: Final[DType] = DType(2, 2, "short", np.int16)
-  int32: Final[DType] = DType(4, 4, "int", np.int32)
-  int64: Final[DType] = DType(6, 8, "long", np.int64)
-  uint8: Final[DType] = DType(1, 1, "unsigned char", np.uint8)
-  uint16: Final[DType] = DType(3, 2, "unsigned short", np.uint16)
-  uint32: Final[DType] = DType(5, 4, "unsigned int", np.uint32)
-  uint64: Final[DType] = DType(7, 8, "unsigned long", np.uint64)
+  int8: Final[DType] = DType(1, 1, "char", np.int8)
+  int16: Final[DType] = DType(3, 2, "short", np.int16)
+  int32: Final[DType] = DType(5, 4, "int", np.int32)
+  int64: Final[DType] = DType(7, 8, "long", np.int64)
+  uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
+  uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
+  uint32: Final[DType] = DType(6, 4, "unsigned int", np.uint32)
+  uint64: Final[DType] = DType(8, 8, "unsigned long", np.uint64)
 
   # NOTE: bfloat16 isn't supported in numpy
-  bfloat16: Final[DType] = DType(0, 2, "__bf16", None)
+  bfloat16: Final[DType] = DType(9, 2, "__bf16", None)
 
   # NOTE: these are internal dtypes, should probably check for that
   _int2: Final[DType] = DType(2, 4*2, "int2", None, 2)
@@ -162,7 +174,7 @@ _cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches"
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 6
+VERSION = 7
 _db_connection = None
 def db_connection():
   global _db_connection
@@ -170,14 +182,6 @@ def db_connection():
     os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
     _db_connection = sqlite3.connect(CACHEDB)
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
-    if diskcache_get("meta", "version") != VERSION:
-      print("cache is out of date, clearing it")
-      _db_connection.close()
-      del _db_connection
-      os.unlink(CACHEDB)
-      _db_connection = sqlite3.connect(CACHEDB)
-      if DEBUG >= 7: _db_connection.set_trace_callback(print)
-      diskcache_put("meta", "version", VERSION)
   return _db_connection
 
 def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
@@ -186,11 +190,10 @@ def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
   conn = db_connection()
   cur = conn.cursor()
   try:
-    res = cur.execute(f"SELECT val FROM {table} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
+    res = cur.execute(f"SELECT val FROM {table}_{VERSION} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
   except sqlite3.OperationalError:
     return None  # table doesn't exist
-  if (val:=res.fetchone()) is not None:
-    return pickle.loads(val[0])
+  if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
   return None
 
 _db_tables = set()
@@ -202,9 +205,9 @@ def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
   if table not in _db_tables:
     TYPES = {str: "text", bool: "integer", int: "integer", float: "numeric", bytes: "blob"}
     ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
-    cur.execute(f"CREATE TABLE IF NOT EXISTS {table} ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
+    cur.execute(f"CREATE TABLE IF NOT EXISTS {table}_{VERSION} ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
     _db_tables.add(table)
-  cur.execute(f"REPLACE INTO {table} ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val), ))
+  cur.execute(f"REPLACE INTO {table}_{VERSION} ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val), ))
   conn.commit()
   cur.close()
   return val
