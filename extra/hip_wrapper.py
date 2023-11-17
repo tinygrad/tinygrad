@@ -688,5 +688,5 @@ try:
     status = _libhiprtc.hiprtcGetCode(prog, e_code)
     hipCheckStatus(status)
     return e_code
-except:
-  if DEBUG >= 1: print("WARNING: libamdhip64.so or libhiprtc.so not found. HIP support will not work.")
+except Exception as e:
+  if DEBUG >= 1: print(f"WARNING: libamdhip64.so or libhiprtc.so not found. HIP support will not work. {e}")
