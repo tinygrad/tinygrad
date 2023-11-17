@@ -3,8 +3,13 @@ from tinygrad.shape.symbolic import Variable
 
 # specify an output shapetracker
 
-a = Tensor.ones(5, 5)
-b = a.contiguous().realize()
+a = Tensor.ones(10, 10) * 3
+a.assign(a.contiguous()).realize()
+
+print(a.numpy())
+
+# how does symbolic work?
+# how does interpreted work?
 
 # with output shapetracker ShapeTracker.from_shape(self.info.shape).shrink(((1, 4), (1, 4)))
 

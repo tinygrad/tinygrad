@@ -76,7 +76,8 @@ class Kernel:
     self.reduceop = reduceops[0] if reduceops else None
 
     # create new shapetrackers inside this kernel, we will permute them
-    output_shapetracker = ShapeTracker.from_shape(self.info.shape)#.shrink(((2, 5), (2, 5))).stride((1, 2))
+    from tinygrad.shape.symbolic import Variable
+    output_shapetracker = ShapeTracker.from_shape(self.info.shape).shrink(((0, Variable("v", 0, 10)), (0, 10)))#.stride((1, 2))
     self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = [MemBuffer(0, self.info.dtype, output_shapetracker)] + dedup([x.arg for x in self.ast.get_lazyops() if x.op in BufferOps])
 
     # get earlybufs, before the one reduce op

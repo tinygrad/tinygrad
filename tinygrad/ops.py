@@ -291,6 +291,9 @@ class CompiledASTRunner(ASTRunner):
   def __call__(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
     if var_vals is None: var_vals = {}
     var_vals = {k:var_vals[k] for k in self.vars}   # filter the var_vals
+
+    var_vals = {Variable("v", 0, 10): 5}
+
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
