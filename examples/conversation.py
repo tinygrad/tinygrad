@@ -4,6 +4,7 @@ import re
 import sys
 import time
 from contextlib import contextmanager
+from itertools import cycle
 from pathlib import Path
 
 import numpy as np
@@ -44,7 +45,7 @@ def clean_text(enc: Encoding, txt: str) -> str:
 def voice2text(model: Whisper, enc: Encoding, encoded_audio: Tensor, tokens: list[int]):
   out = model.decoder(Tensor([tokens]), 0, encoded_audio, streaming=True).realize()
   tokens.append(int(out[0,-1].argmax().numpy().item()))
-  if tokens[-1] == enc._special_tokens["<|endoftext|>"]: return enc.decode(tokens)
+  return enc.decode(tokens)
 
 
 def llama_prepare(llama: LLaMa, temperature: float, pre_prompt_path: Path) -> tuple[list[int], str, str, str]:
@@ -86,6 +87,7 @@ def llama_generate(
 
     # stop after you have your answer
     if outputted.endswith(end_delim): break
+  print() # because the output is flushed
   return outputted, start_pos
 
 
@@ -175,11 +177,16 @@ def listener(q: mp.Queue, event: mp.Event):
   try:
     p = pyaudio.PyAudio()
     stream = p.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
+    spinner = cycle(['-', '/', '|', '\\'])
+    n = 0
     while True:
       data = stream.read(CHUNK) # read data to avoid overflow
       if event.is_set():
-        print('listening')
+        if n % 4 == 0:
+          sys.stdout.write(f"listening {next(spinner)}\r")
+          sys.stdout.flush()
         q.put(((np.frombuffer(data, np.int16)/32768).astype(np.float32)*3))
+        n += 1
   finally:
     stream.stop_stream()
     stream.close()
@@ -253,7 +260,7 @@ if __name__ == "__main__":
 
       # Transcribe text
       encoded_audio = model.encoder(Tensor(prep_audio(total.reshape(1, -1), 1)))
-      while (txt := voice2text(model, enc, encoded_audio, tokens)) is None: continue
+      while not (txt := voice2text(model, enc, encoded_audio, tokens)).endswith("<|endoftext|>"): print(txt)
       txt = clean_text(enc, txt)
 
       # Generate with llama
