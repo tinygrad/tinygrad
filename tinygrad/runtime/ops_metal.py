@@ -1,6 +1,6 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib, ctypes, tempfile
-import Metal, Cocoa, libdispatch
+import Metal, pickle, libdispatch
 from typing import List, Any, Tuple, Dict, Union, Set, cast
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup
@@ -54,9 +54,7 @@ def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
   options = Metal.MTLCompileOptions.new()
   library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
   # TODO: avoid file write here?
-  with tempfile.NamedTemporaryFile(delete=True) as output_file:
-    unwrap(library.serializeToURL_error_(Cocoa.NSURL.URLWithString_(f"file://{output_file.name}"), None))
-    return pathlib.Path(output_file.name).read_bytes()
+  return pickle.dumps(library)
 
 class MetalProgram:
   def __init__(self, name:str, lib:bytes):
