@@ -191,13 +191,15 @@ def play_audio(audio_data: np.ndarray, num_channels: int, sample_rate: int):
   p.terminate()
 
 
-def listener(q: mp.Queue):
+def listener(q: mp.Queue, event: mp.Event):
   try:
     p = pyaudio.PyAudio()
     stream = p.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
-    print("started listener")
-    while True: q.put(((np.frombuffer(stream.read(CHUNK), np.int16)/32768).astype(np.float32)*3))
-  except Exception: q.put(None)
+    while True:
+      data = stream.read(CHUNK) # read data to avoid overflow
+      if event.is_set():
+        print('listening')
+        q.put(((np.frombuffer(data, np.int16)/32768).astype(np.float32)*3))
   finally:
     stream.stop_stream()
     stream.close()
@@ -235,6 +237,9 @@ if __name__ == "__main__":
   parser.add_argument("--vits_estimate_max_y_length", type=str, default=False, help="If true, overestimate the output length and then trim it to the correct length, to prevent premature realization, much more performant for larger inputs, for smaller inputs not so much. Default is False.")
   parser.add_argument("--vits_vocab_path", type=Path, default=None, help="Path to the TTS vocabulary.")
 
+  # conversation args
+  parser.add_argument("--phrase_timeout", type=int, default=5, help="Specify how long phrases should be recorded")
+
   args = parser.parse_args()
 
   # Init models
@@ -246,43 +251,43 @@ if __name__ == "__main__":
   toks, user_delim, resp_delim, end_delim = llama_prepare(llama, args.llama_temperature)
   start_pos = len(toks)
   outputted = llama.tokenizer.decode(toks)
-  sys.stdout.write(outputted)
-  sys.stdout.flush()
 
   # Start child process for mic input
   q = mp.Queue()
-  p = mp.Process(target=listener, args=(q,))
+  is_listening_event = mp.Event()
+  p = mp.Process(target=listener, args=(q, is_listening_event,))
   p.daemon = True
   p.start()
-  lock = mp.Lock()
 
   # Start the pipeline
-  phrase_timeout = 5
   while True:
     tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
     total = np.array([])
-    time.sleep(phrase_timeout)
-    while not q.empty() or total is None: total = np.concatenate([total, q.get()])
-    with lock:
-      # Transcribe text
-      while True:
-        txt = voice2text(model, enc, total, tokens)
-        print(txt)
-        if txt.endswith("<|endoftext|>"):
-          tokens.pop()
-          txt = clean_text(enc, txt)
-          break
 
-      # Generate with llama
-      outputted, start_pos = llama_generate(llama, txt, start_pos, outputted)
-      response = outputted.splitlines()[-1].replace(resp_delim.strip(), "").replace(end_delim.strip(), "")
-      print(response)
+    # Listen to mic input
+    is_listening_event.set()
+    time.sleep(args.phrase_timeout)
+    while not q.empty(): total = np.concatenate([total, q.get()])
+    is_listening_event.clear()
 
-      # Convert to voice
-      audio_data = tts(
-        response, synth, hps, emotion_embedding,
-        args.vits_speaker_id, args.vits_model_to_use, args.vits_noise_scale,
-        args.vits_noise_scale_w, args.vits_length_scale,
-        args.vits_estimate_max_y_length
-      )
-      play_audio(audio_data, args.vits_num_channels, hps.data.sampling_rate)
+    # Transcribe text
+    while True:
+      txt = voice2text(model, enc, total, tokens)
+      print(txt)
+      if txt.endswith("<|endoftext|>"):
+        tokens.pop()
+        txt = clean_text(enc, txt)
+        break
+
+    # Generate with llama
+    outputted, start_pos = llama_generate(llama, txt, start_pos, outputted)
+    response = outputted.splitlines()[-1].replace(resp_delim.strip(), "").replace(end_delim.strip(), "")
+
+    # Convert to voice
+    audio_data = tts(
+      response, synth, hps, emotion_embedding,
+      args.vits_speaker_id, args.vits_model_to_use, args.vits_noise_scale,
+      args.vits_noise_scale_w, args.vits_length_scale,
+      args.vits_estimate_max_y_length
+    )
+    play_audio(audio_data, args.vits_num_channels, hps.data.sampling_rate)
