@@ -1,4 +1,5 @@
 from tinygrad import Tensor, TinyJit, nn
+from tinygrad.helpers import GlobalCounters
 from extra.datasets import fetch_mnist
 from tqdm import trange
 
@@ -27,6 +28,7 @@ if __name__ == "__main__":
     with Tensor.train():
       opt.zero_grad()
       # TODO: this "gather" of samples is very slow and not the desired way to do things in practice
+      # will be under 5s when this is fixed
       loss = model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]).backward()
       opt.step()
       return loss.realize()
@@ -36,6 +38,7 @@ if __name__ == "__main__":
 
   test_acc = float('nan')
   for i in (t:=trange(70)):
+    GlobalCounters.reset()
     samples = Tensor.randint(512, high=X_train.shape[0])  # TODO: put this in the JIT when rand is fixed
     loss = train_step(samples)
     if i%10 == 9: test_acc = get_test_acc().item()
