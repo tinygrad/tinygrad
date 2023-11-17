@@ -66,7 +66,7 @@ def prepare_test_op(a, b, shps, vals, forward_only=False):
 class TestOps(unittest.TestCase):
 
   def helper_test_exception(self, shps, torch_fxn, tinygrad_fxn, expected, exact=False, vals=None, a=-0.5, b=3):
-    if getenv("CUDACPU"): return
+    if getenv("CUDACPU"): self.skipTest('helper_test_exception fails in CUDACPU')
     ts, tst = prepare_test_op(a, b, shps, vals)
     with self.assertRaises(expected) as torch_cm:
       torch_fxn(*ts)
