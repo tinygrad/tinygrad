@@ -132,7 +132,7 @@ def truncate_seq_pair(tokens_a, tokens_b, max_num_tokens, rng):
     else:
       trunc_tokens.pop()
 
-def create_masked_lm_predictions(tokens, rng, vocab_words):
+def create_masked_lm_predictions(tokens, tokenizer, rng, vocab_words):
   cand_indices = []
   for i, token in enumerate(tokens):
     if token == "[CLS]" or token == "[SEP]":
@@ -239,7 +239,7 @@ def create_instances_from_document(rng, tokenizer, doc, di, documents):
         tokens.append("[SEP]")
         segment_ids.append(1)
 
-        tokens, masked_lm_positions, masked_lm_labels = create_masked_lm_predictions(tokens, rng, list(tokenizer.vocab.keys()))
+        tokens, masked_lm_positions, masked_lm_labels = create_masked_lm_predictions(tokens, tokenizer, rng, list(tokenizer.vocab.keys()))
         instances.append({
           "tokens": tokens,
           "segment_ids": segment_ids,
@@ -255,7 +255,7 @@ def create_instances_from_document(rng, tokenizer, doc, di, documents):
 def get_documents(rng, tokenizer, fn):
   documents = [[]]
   with open(BASEDIR / fn) as f:
-    for line in tqdm(f.readlines()):
+    for line in f.readlines():
       if not (line := line.decode("utf-8", "ignore") if isinstance(line, bytes) else line): break
       if not (line := line.strip()): documents.append([])
       if (tokens := tokenizer.tokenize(line)): documents[-1].append(tokens)
@@ -266,7 +266,7 @@ def get_documents(rng, tokenizer, fn):
 def get_instances(rng, tokenizer, documents):
   instances = []
   for i in range(getenv('DUPE_FACTOR', 10)):
-    for di, doc in tqdm(enumerate(documents), desc=f"dupe {i}", total=len(documents)):
+    for di, doc in enumerate(documents):
       instances.extend(create_instances_from_document(rng, tokenizer, doc, di, documents))
   rng.shuffle(instances)
   return instances
@@ -369,6 +369,14 @@ def iterate(bs=1, start=0, val=False):
   p.close()
   p.join()
 
+def process_part(part, all=False):
+  tokenizer = Tokenizer(Path(__file__).parent / "wiki" / "vocab.txt")
+  print(f"Working on part {part}")
+  for i, (X, Y) in enumerate(process_iterate(tokenizer, val=False, part=part)):
+    os.makedirs(BASEDIR / "train" / str(part), exist_ok=True)
+    with open(BASEDIR / f"train/{str(part)}/{part}_{i}.pkl", "wb") as f:
+      pickle.dump((X, Y), f)
+
 if __name__ == "__main__":
   tokenizer = Tokenizer(Path(__file__).parent / "wiki" / "vocab.txt")
 
@@ -390,8 +398,13 @@ if __name__ == "__main__":
         with open(BASEDIR / f"eval/{i}.pkl", "wb") as f:
           pickle.dump((X, Y), f)
     elif sys.argv[1] == "pre-train":
-      part = int(sys.argv[2])
       os.makedirs(BASEDIR / "train", exist_ok=True)
-      for i, (X, Y) in tqdm(enumerate(process_iterate(tokenizer, val=False, part=part))):
-        with open(BASEDIR / f"train/{part}_{i}.pkl", "wb") as f:
-          pickle.dump((X, Y), f)
+      if sys.argv[2] == "all":
+        with Pool(4) as p:
+          p.map(process_part, [part for part in range(500)])
+      else:
+        part = int(sys.argv[2])
+        for i, (X, Y) in tqdm(enumerate(process_iterate(tokenizer, val=False, part=part))):
+          os.makedirs(BASEDIR / "train" / str(part), exist_ok=True)
+          with open(BASEDIR / f"train/{str(part)}/{part}_{i}.pkl", "wb") as f:
+            pickle.dump((X, Y), f)
