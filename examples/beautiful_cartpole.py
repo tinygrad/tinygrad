@@ -70,7 +70,6 @@ if __name__ == "__main__":
         act_mask[act] = np.sum(rews[i:])
         Y.append(act_mask)
 
-    # TODO: is it possible to fix ".item" highlighting through the JIT?
     loss = train_step(Tensor(X[:BS]), Tensor(Y[:BS]))  # TODO: randomize this?
     t.set_description(f"loss: {loss.item():6.2f} ep_count: {len(ep_rews):2d} avg_ep_rew: {sum(ep_rews)/len(ep_rews):6.2f}")
 
