@@ -50,8 +50,7 @@ if __name__ == "__main__":
         # pick actions
         # TODO: move the random.choice into jitted tinygrad (it's the same sampler for llama)
         # TODO: what's the temperature here?
-        act_dist = model(tobs).exp()
-        act = np.random.choice(range(env.action_space.n), p=act_dist.numpy())
+        act = model(tobs).exp().multinomial().item()
 
         # save this state action pair
         # TODO: don't use .numpy here, what's the tinygrad way to do this?

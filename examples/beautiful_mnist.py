@@ -1,5 +1,5 @@
 from tinygrad import Tensor, TinyJit, nn
-from tinygrad.extra.datasets import fetch_mnist
+from extra.datasets import fetch_mnist
 from tqdm import trange
 
 class Model:
@@ -11,10 +11,10 @@ class Model:
   def __call__(self, x:Tensor) -> Tensor:
     x = self.c1(x).relu().max_pool2d()
     x = self.c2(x).relu().max_pool2d()
-    return self.l1(x.flatten(1)).log_softmax()   # TODO: there's a second log_softmax in sparse_categorical_crossentropy
+    return self.l1(x.flatten(1))
 
 if __name__ == "__main__":
-  X_train, Y_train, X_test, Y_test = fetch_mnist()
+  X_train, Y_train, X_test, Y_test = fetch_mnist(tensors=True)
 
   model = Model()
   opt = nn.optim.Adam(nn.state.get_parameters(model))
@@ -23,6 +23,7 @@ if __name__ == "__main__":
   @TinyJit
   def train_step(samples:Tensor) -> Tensor:
     opt.zero_grad()
+    # TODO: this "gather" of samples is very slow and not the desired way to do things in practice
     loss = model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]).backward()
     opt.step()
     return loss.realize()  # TODO: should the jit do this automatically? i think yes

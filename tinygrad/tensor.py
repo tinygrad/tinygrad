@@ -217,9 +217,9 @@ class Tensor:
     assert replacement or num_samples == 1, "supported only with replacement"
     p = self.unsqueeze(0) if self.ndim == 1 else self
     cdf = p.cumsum(1)
-    cdf /= cdf[:, -1].unsqueeze(1)
+    cdf_normalized = cdf / cdf[:, -1].unsqueeze(1)
     unif_samples = Tensor.rand(num_samples, p.shape[0], 1)
-    indices = (unif_samples.expand((-1, -1, p.shape[1])) >= cdf).sum(2).permute((1, 0))
+    indices = (unif_samples.expand((-1, -1, p.shape[1])) >= cdf_normalized).sum(2).permute((1, 0))
     if self.ndim == 1: indices = indices.squeeze(0)
     return indices.cast(dtypes.int32)
 
@@ -775,6 +775,7 @@ class Tensor:
     return (self.maximum(0) - y * self + (1 + self.abs().__neg__().exp()).log()).mean()
 
   def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
+    # NOTE: self is a logits input
     loss_mask = Y != ignore_index
     y_counter = Tensor.arange(self.shape[-1], dtype=dtypes.int32, requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
     y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
