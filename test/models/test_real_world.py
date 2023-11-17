@@ -5,7 +5,7 @@ from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.jit import TinyJit
 from tinygrad.ops import Device, GlobalCounters
-from tinygrad.helpers import CI, dtypes, getenv, prod
+from tinygrad.helpers import CI, dtypes
 from test.helpers import derandomize_model
 
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
@@ -56,8 +56,8 @@ class TestRealWorld(unittest.TestCase):
     derandomize_model(model)
     @TinyJit
     def test(t): return model(t, 0).realize()
-    # NOTE: only test one pass, not testing the dynamic shape autoregressive part
-    helper_test("test_llama", lambda: (Tensor([[1,]]),), test, 0.22 if CI else 13.5, 137 if CI else 521, all_jitted=True)
+    # TODO: test first token vs rest properly, also memory test is broken with CacheCollector
+    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.22 if CI else 13.5, 181 if CI else 685, all_jitted=True)
 
   @unittest.skipUnless((Device.DEFAULT not in ["LLVM", "CPU"] or not CI), "needs JIT, too long on CI LLVM")
   def test_gpt2(self):
