@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pyaudio
+import yaml
 from llama import LLaMa
 from tiktoken import Encoding
 from vits import HParams, Synthesizer, TextMapper, download_if_not_present, get_hparams_from_file, load_model
@@ -47,26 +48,10 @@ def voice2text(model: Whisper, enc: Encoding, waveform: bytes, tokens: list[int]
   return enc.decode(tokens)
 
 
-def llama_prepare(llama: LLaMa, temperature: float) -> tuple[list[int], str, str, str]:
-  pre_prompt = """Consider that the following is conversation between an AI assistant named Stacy and User
-You are Stacy!
-You have been a rapper your whole life who struggled with bipolar disorder. You called yourself lil stacy.
-You love to answer questions and you are very good at it. Sometimes you answer in rap form.
-You are verbose, honest, and accurate when you answer questions, but sometimes your mental illness manifests.
-After you are done speaking, output [EOS]. You are not the User.
-
-<CHAT LOG>
-"""
-  examples = {
-    "What is your name?": "Hi! My name is Stacy. I'm a rapper with bipolar disorder.",
-    "french revolution was what year?": "The French Revolution started in 1789, and lasted 10 years until 1799.",
-    "What is bigger, the moon or the sun?": "The sun is bigger than the moon, except when Mercury is in retrograde.",
-  }
-
-  user_delim = "\nUser: "
-  resp_delim = "Stacy: "
-  end_delim = " [EOS]\n"
-  pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
+def llama_prepare(llama: LLaMa, temperature: float, pre_prompt_path: Path) -> tuple[list[int], str, str, str]:
+  config = yaml.safe_load(open(str(pre_prompt_path)).read())
+  pre_prompt, user_delim, resp_delim, end_delim = config["pre_prompt"], config["user_delim"], config["resp_delim"], config["end_delim"]
+  pre_prompt += ''.join(f"{user_delim}{i['user_prompt']}\n{resp_delim}{i['resp_prompt']}{end_delim}" for i in config["examples"])
 
   toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(pre_prompt)
   llama.model(Tensor([toks]), 0, temperature).realize()  # NOTE: outputs are not used
@@ -211,7 +196,7 @@ if __name__ == "__main__":
   parser.add_argument("--whisper_model_name", type=str, default="tiny.en")
 
   # LLAMA args
-  parser.add_argument("--llama_prompt", type=str, default=None, help="Phrase to start with. Without this, it goes into chatbot mode")
+  parser.add_argument("--llama_pre_prompt_path", type=Path, default=Path(__file__).parent / "conversation_data" / "pre_prompt_stacy.yaml", help="Path to yaml file which contains all pre-prompt data needed. ")
   parser.add_argument("--llama_count", type=int, default=1000, help="Max number of tokens to generate")
   parser.add_argument("--llama_personality", type=str, default="Stacy", help="Personality, can be Stacy, George, Gary, or Lexie")
   parser.add_argument("--llama_temperature", type=float, default=0.7, help="Temperature in the softmax")
@@ -244,7 +229,7 @@ if __name__ == "__main__":
 
   # Prepare personality
   llama = LLaMa.build(args.llama_model, args.llama_model / "tokenizer.model", args.llama_gen, args.llama_size, args.llama_quantize)
-  toks, user_delim, resp_delim, end_delim = llama_prepare(llama, args.llama_temperature)
+  toks, user_delim, resp_delim, end_delim = llama_prepare(llama, args.llama_temperature, args.llama_pre_prompt_path)
   start_pos = len(toks)
   outputted = llama.tokenizer.decode(toks)
 
