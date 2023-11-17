@@ -8,7 +8,7 @@ from tinygrad.nn import optim
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
 from extra.datasets import fetch_cifar
-from models.efficientnet import EfficientNet
+from extra.models.efficientnet import EfficientNet
 
 class TinyConvNet:
   def __init__(self, classes=10):

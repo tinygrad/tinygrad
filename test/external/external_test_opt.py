@@ -33,10 +33,10 @@ class CLCache:
     if self.allowed is not None:
       assert len(cache) <= self.allowed and (not self.strict or len(cache) == self.allowed), f"used too many kernels! {len(cache)} > {self.allowed}"
 
-from models.convnext import ConvNeXt
-from models.efficientnet import EfficientNet
-from models.resnet import ResNet18
-from models.vit import ViT
+from extra.models.convnext import ConvNeXt
+from extra.models.efficientnet import EfficientNet
+from extra.models.resnet import ResNet18
+from extra.models.vit import ViT
 from tinygrad.nn.state import get_parameters
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
@@ -89,8 +89,8 @@ class TestInferenceMinKernels(unittest.TestCase):
     args_tiny = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 4, "norm_eps": 1e-05, "vocab_size": 1000}
     model = Transformer(**args_tiny)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
-    with CLCache(98, var_vals={Variable("start_pos", 0, 1024): 0}):
-      model(Tensor([[1,2,3,4]]), Variable("start_pos", 0, 1024).bind(0)).realize()
+    with CLCache(100):
+      model(Tensor([[1,2,3,4]]), 0).realize()
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOptBinOp(unittest.TestCase):

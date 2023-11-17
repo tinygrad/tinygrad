@@ -1,6 +1,6 @@
 import os, atexit, functools
 try:
-  import networkx as nx  # type: ignore
+  import networkx as nx
 except ImportError:
   nx = None # graph won't work
 from collections import defaultdict
@@ -80,7 +80,7 @@ def log_schedule_item(si: ScheduleItem):
       if lo.op != BufferOps.MEM: continue
       input_to_st[si.inputs[lo.arg.idx-1]].append(lo.arg.st)
 
-    # add them to the graph, potentially with a movement op seperating them
+    # add them to the graph, potentially with a movement op separating them
     for x in input_to_st:
       for st in dedup(input_to_st[x]):
         if st.contiguous:

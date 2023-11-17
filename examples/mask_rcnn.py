@@ -1,6 +1,6 @@
-from models.mask_rcnn import MaskRCNN
-from models.resnet import ResNet
-from models.mask_rcnn import BoxList
+from extra.models.mask_rcnn import MaskRCNN
+from extra.models.resnet import ResNet
+from extra.models.mask_rcnn import BoxList
 from torch.nn import functional as F
 from torchvision import transforms as T
 from torchvision.transforms import functional as Ft

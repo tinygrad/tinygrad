@@ -4,22 +4,22 @@
 #typeguard.importhook.install_import_hook('tinygrad')
 
 from pathlib import Path
-import functools, sys, argparse, json, os
+import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Union
 
-from tinygrad.helpers import Timing, getenv, DEBUG, dtypes, CI
+from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes, CI
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
-from tinygrad.nn.state import safe_load, torch_load, load_state_dict
+from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad.helpers import GlobalCounters
-from tinygrad.jit import TinyJit, JIT_SUPPORTED_DEVICE
-from tinygrad.shape.symbolic import Variable, sym_infer
+from tinygrad.jit import TinyJit
+from tinygrad.shape.symbolic import Variable
 
 MAX_CONTEXT = 1024
-JIT = getenv("JIT", 0 if CI else int(Device.DEFAULT in JIT_SUPPORTED_DEVICE))
+JIT = getenv("JIT", 0 if CI else 1)
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
@@ -70,11 +70,7 @@ class Attention:
     self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
-  def __call__(self, x:Tensor, start_pos:Variable, freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
-    if mask is not None:
-      # no symbolic shape qkv when consuming prompts
-      start_pos = start_pos.val
-
+  def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
     xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
@@ -90,8 +86,8 @@ class Attention:
     values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
 
     # update the cache
-    self.cache_k.assign(keys.pad(((0,0),(0,MAX_CONTEXT-start_pos-seqlen),(0,0),(0,0))).contiguous()).realize()
-    self.cache_v.assign(values.pad(((0,0),(0,MAX_CONTEXT-start_pos-seqlen),(0,0),(0,0))).contiguous()).realize()
+    self.cache_k.assign(keys.pad((None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()).realize()
+    self.cache_v.assign(values.pad((None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()).realize()
 
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
 
@@ -121,7 +117,7 @@ class TransformerBlock:
     self.attention_norm = RMSNorm(dim, norm_eps)
     self.ffn_norm = RMSNorm(dim, norm_eps)
 
-  def __call__(self, x:Tensor, start_pos:Variable, freqs_cis:Tensor, mask:Optional[Tensor]):
+  def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
     return (h + self.feed_forward(self.ffn_norm(h))).realize()
 
@@ -134,10 +130,10 @@ class Transformer:
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_seq_len * 2, rope_theta)
     self.forward_jit = TinyJit(self.forward)
 
-  def forward(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
+  def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float=0.0):
     _bsz, seqlen = tokens.shape
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
-    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos.val+1).realize() if seqlen > 1 else None
+    mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
 
     h = self.tok_embeddings(tokens)
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
@@ -145,7 +141,11 @@ class Transformer:
     return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
 
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
-    return (self.forward_jit if tokens.shape[0:2] == (1,1) and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
+    # TODO: better way to handle the first call v.s. the rest?
+    if tokens.shape[0:2] == (1,1) and JIT:
+      assert start_pos > 0
+      return self.forward_jit(tokens, Variable("start_pos", 1, MAX_CONTEXT).bind(start_pos), temperature)
+    return self.forward(tokens, start_pos, temperature)
 
 # **** files and arguments ****
 MODEL_PARAMS = {
@@ -308,7 +308,7 @@ class LLaMa:
     toks = [self.tokenizer.bos_id()] + self.tokenizer.encode(prompt)
     start_pos = 0
     for i in range(max_length):
-      probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
+      probs = llama.model(Tensor([toks[start_pos:]]), start_pos, temperature).realize()
       probs_np = probs.numpy()
       tok = int(np.random.choice(len(probs_np), p=probs_np))
       start_pos = len(toks)
@@ -494,6 +494,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
+  param_count = sum(x.lazydata.st.size() for x in get_parameters(llama.model))
 
   if chatbot:
     # encode pre prompt
@@ -501,7 +502,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
     print(f"Preparing KV cache for chatbot with personality {args.personality}...")
     with Timing():
-      llama.model(Tensor([toks]), Variable("start_pos", 0, MAX_CONTEXT).bind(0), args.temperature).realize()  # NOTE: output logits are not used
+      llama.model(Tensor([toks]), 0, args.temperature).realize()  # NOTE: outputs are not used
     start_pos = len(toks)
   else:
     # non chat bot mode
@@ -512,10 +513,6 @@ After you are done speaking, output [EOS]. You are not Chad.
   outputted = llama.tokenizer.decode(toks)
   sys.stdout.write(outputted)
   sys.stdout.flush()
-
-  if args.profile:
-    import cProfile, pstats
-    profiler = cProfile.Profile()
 
   # chatbot loop
   while 1:
@@ -532,17 +529,17 @@ After you are done speaking, output [EOS]. You are not Chad.
     last_break = len(outputted)
     for i in range(args.count):
       GlobalCounters.reset()
-      if args.profile and i == 2: profiler.enable()
 
-      if args.timing: print("")
+      if args.timing or args.profile: print("")
       st = GlobalCounters.time_sum_s
-      with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
-        with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
-                    f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                    (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
-          probs = llama.model(Tensor([toks[start_pos:]]), Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), args.temperature).realize()
-        probs_np = probs.numpy()
-        tok = int(np.random.choice(len(probs_np), p=probs_np))
+      with Profiling(enabled=args.profile):
+        with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
+          with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+                      f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                      (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
+            probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
+          # TODO: fix JIT rand so we can put this in the JIT
+          tok = probs.multinomial().item()
 
       # use the kv cache
       start_pos = len(toks)
@@ -559,8 +556,3 @@ After you are done speaking, output [EOS]. You are not Chad.
       # stop after you have your answer
       if chatbot and outputted.endswith(end_delim): break
     if not chatbot: break
-
-  if args.profile:
-    profiler.disable()
-    stats = pstats.Stats(profiler)
-    stats.dump_stats("out.prof")

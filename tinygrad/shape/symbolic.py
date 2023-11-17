@@ -1,5 +1,4 @@
 from __future__ import annotations
-from abc import abstractmethod
 import functools
 from math import gcd
 from itertools import product
@@ -34,12 +33,6 @@ class Node:
   # substitute Variables with the values in var_vals
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: raise RuntimeError(self.__class__.__name__)
   def unbind(self) -> Tuple[Node, Optional[int]]: return self.substitute({v: v.unbind()[0] for v in self.vars() if v.val is not None}), None
-
-  @property
-  def val(self):
-    ret = self.substitute({x:NumNode(x.val) for x in self.vars()})
-    assert isinstance(ret, NumNode), f"val must be NumNode, it's {ret}"
-    return ret.b
 
   @functools.cached_property
   def key(self) -> str: return self.render(ctx="DEBUG")
@@ -193,8 +186,7 @@ class OpNode(Node):
     self.a, self.b = a, b
     self.min, self.max = self.get_bounds()
   def vars(self): return self.a.vars() + (self.b.vars() if isinstance(self.b, Node) else [])
-  @abstractmethod
-  def get_bounds(self) -> Tuple[int, int]: pass
+  def get_bounds(self) -> Tuple[int, int]: raise NotImplementedError("must be implemented")
 
 class LtNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], _=False): return (self.a//b) < (self.b//b)
@@ -217,8 +209,7 @@ class MulNode(OpNode):
   def __mod__(self, b: Union[Node, int]):
     a = (self.a * (self.b%b))
     return Node.__mod__(a, b)
-  def get_bounds(self) -> Tuple[int, int]:
-    return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
+  def get_bounds(self) -> Tuple[int, int]: return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) * (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
 class DivNode(OpNode):
@@ -355,7 +346,7 @@ VariableOrNum = Union[Variable, NumNode]
 
 render_python: Dict[Type, Callable] = {
   Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}{'='+str(self.val) if self._val is not None else ''}]" if ctx == "DEBUG" else (f"Variable('{self.expr}', {self.min}, {self.max})"+(f".bind({self.val})" if self._val is not None else '') if ctx == "REPR" else f"{self.expr}"),
-  NumNode: lambda self,ops,ctx: f"{self.b}",
+  NumNode: lambda self,ops,ctx: f"NumNode({self.b})" if ctx == "REPR" else f"{self.b}",
   MulNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}*{sym_render(self.b,ops,ctx)})",
   DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}//{self.b})",
   ModNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}%{self.b})",

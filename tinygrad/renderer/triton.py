@@ -3,7 +3,7 @@ from collections import defaultdict
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
 from tinygrad.helpers import DType, dtypes, ImageDType, DEBUG, getenv
 from tinygrad.codegen.linearizer import  UOp, UOps
-from triton.compiler import compile as triton_compile  # type: ignore
+from triton.compiler import compile as triton_compile
 import linecache
 import math
 import re

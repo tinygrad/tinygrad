@@ -135,9 +135,8 @@ class TestSymbolicReshape(unittest.TestCase):
 
 class TestSymbolicExpand(unittest.TestCase):
   def test_expand_into_symbols(self):
-    # TODO: enfore expand only into bound variables
-    vi = Variable("i", 1, 5)
-    vj = Variable("j", 1, 5)
+    vi = Variable("i", 1, 5).bind(3)
+    vj = Variable("j", 1, 5).bind(3)
     a = Tensor([[1], [2], [3]]).expand((3, vi))
     assert a.shape == (3, vi)
     a = a.reshape(3, vi, 1).expand((3, vi, vj))

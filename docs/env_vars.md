@@ -45,10 +45,8 @@ OPT                 | [1-3]      | optimization level
 BEAM                | [#]        | number of beams in kernel beam search
 GRAPH               | [1]        | create a graph of all operations (requires graphviz)
 GRAPHPATH           | [/path/to] | where to put the generated graph
-PRINT_PRG           | [1]        | print program code
 IMAGE               | [1]        | enable 2d specific optimizations
 FLOAT16             | [1]        | use float16 for images instead of float32
-ENABLE_METHOD_CACHE | [1]        | enable method cache (this is the default)
 DISALLOW_ASSIGN     | [1]        | disallow assignment of tensors
 CL_EXCLUDE          | [name0,name1] | comma-separated list of device names to exclude when using OpenCL GPU backend (like `CL_EXCLUDE=gfx1036`)
 CL_PLATFORM         | [# >= 0]   | index of the OpenCL [platform](https://documen.tician.de/pyopencl/runtime_platform.html#pyopencl.Platform) to run on. Defaults to 0.
