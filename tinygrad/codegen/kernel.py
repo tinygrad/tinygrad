@@ -77,7 +77,9 @@ class Kernel:
 
     # create new shapetrackers inside this kernel, we will permute them
     from tinygrad.shape.symbolic import Variable
-    output_shapetracker = ShapeTracker.from_shape(self.info.shape).shrink(((0, Variable("v", 0, 10)), (0, 10)))#.stride((1, 2))
+    # # this breaks?
+    output_shapetracker = ShapeTracker.from_shape(self.info.shape).shrink(((Variable("v", 0, 10), 10), (0, 10)))
+    # output_shapetracker = ShapeTracker.from_shape(self.info.shape).shrink(((3, Variable("v", 0, 10)+2), (0, 10)))#.stride((1, 2))
     self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = [MemBuffer(0, self.info.dtype, output_shapetracker)] + dedup([x.arg for x in self.ast.get_lazyops() if x.op in BufferOps])
 
     # get earlybufs, before the one reduce op
