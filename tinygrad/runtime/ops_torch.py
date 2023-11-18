@@ -33,8 +33,8 @@ torch_fxn_for_op: Dict[Op, Callable] = {**base_fxn_for_op, **{
   BinaryOps.SUB: lambda x,y: torch.sub(*match_types(x, y, disallow_bool=True)).type(output_type(x,y)),
   BinaryOps.MUL: lambda x,y: torch.mul(*match_types(x, y)).type(output_type(x,y)),
   BinaryOps.DIV: lambda x,y: torch.div(*match_types(x, y)).type(torch.promote_types(x.dtype, y.dtype)),
+  MovementOps.AS_STRIDED: as_strided,
   MovementOps.PAD: lambda x, padding: torch.nn.functional.pad(x, [item for sublist in padding[::-1] for item in sublist]), # pylint: disable=E1102
-  MovementOps.EXPAND: lambda x, arg: x.expand(arg), MovementOps.AS_STRIDED: as_strided,
   TernaryOps.MULACC: einsum_mulacc(lambda s,a,b: torch.einsum(s, a.float(), b.float()).type(output_type(a,b)), lambda x: x.stride(), lambda x,s: x.expand(s)),
   TernaryOps.WHERE: lambda x, y, z: torch.where(x != 0, y, z),
 }}

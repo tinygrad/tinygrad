@@ -6,7 +6,7 @@ from typing import Tuple, List, Optional, Dict, cast
 from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, DEBUG, dedup, merge_dicts
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, sint
-from tinygrad.shape.view import View
+from tinygrad.shape.view import View, strides_for_shape
 
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
@@ -102,8 +102,9 @@ class ShapeTracker:
           to_apply.append((MovementOps.AS_STRIDED, (tuple([s if st != 0 else 1 for s,st in zip(real_shape, v.strides)]), v.strides, real_offset)))
           to_apply.append((MovementOps.PAD, pre_expand_pads))
           real_shape = tuple(x+s[0]+s[1] for x,s in zip(real_shape, pre_expand_pads))
-          # then, we do any expands
-          if any(s != 1 and st == 0 for s,st in zip(real_shape, v.strides)): to_apply.append((MovementOps.EXPAND, real_shape))
+          # then, we do any expands (but with AS_STRIDED)
+          if any(s != 1 and st == 0 for s,st in zip(real_shape, v.strides)):
+            to_apply.append((MovementOps.AS_STRIDED, (real_shape, strides_for_shape(tuple(1 if st == 0 else s for s,st in zip(real_shape, v.strides))), 0)))
         else:
           to_apply.append((MovementOps.AS_STRIDED, (real_shape, v.strides, real_offset)))
         # lastly, we apply post expand pads
