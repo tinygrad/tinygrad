@@ -267,20 +267,25 @@ class TestSymbolicVars(unittest.TestCase):
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
-    assert z.vars() == z.vars() == []
-    assert a.vars() == a.vars() == [a]
+    assert z.vars() == z.vars() == set()
+    assert a.vars() == a.vars() == {a}
     m = MulNode(a, 3)
-    assert m.vars() == [a]
+    assert m.vars() == {a}
     s = SumNode([a, b, c])
-    assert s.vars() == [a, b, c]
+    assert s.vars() == {a, b, c}
 
   def test_compound(self):
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
-    assert (a + b * c).vars() == [a, b, c]
-    assert (a % 3 + b // 5).vars() == [a, b]
-    assert (a + b + c - a).vars() == [b, c]
+    assert (a + b * c).vars() == {a, b, c}
+    assert (a % 3 + b // 5).vars() == {a, b}
+    assert (a + b + c - a).vars() == {b, c}
+
+  def test_dedup(self):
+    a = Variable("a", 0, 10)
+    assert (a * a).vars() == {a}
+    assert (a//4 + a//6).vars() == {a}
 
 class TestSymbolicMinMax(unittest.TestCase):
   def test_min_max_known(self):
