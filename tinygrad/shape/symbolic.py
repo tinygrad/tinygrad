@@ -105,27 +105,18 @@ class Node:
   def num(num:int) -> NumNode: return NumNode(num)
 
   @staticmethod
-  def factorize(nodes:List[Node]) -> List[Node]:
-    mul_groups: Dict[Node, int] = {}
-    for x in nodes:
-      a,b = (x.a,x.b) if isinstance(x, MulNode) else (x,1)
-      mul_groups[a] = mul_groups.get(a, 0) + b
-    return [MulNode(a, b_sum) if b_sum != 1 else a for a, b_sum in mul_groups.items() if b_sum != 0]
-
-  @staticmethod
   def sum(nodes:List[Node]) -> Node:
     nodes = [x for x in nodes if x.max or x.min]
     if not nodes: return NumNode(0)
     if len(nodes) == 1: return nodes[0]
 
-    new_nodes: List[Node] = []
+    mul_groups: Dict[Node, int] = {}
     num_node_sum = 0
     for node in SumNode(nodes).flat_components:
       if node.__class__ is NumNode: num_node_sum += node.b
-      else: new_nodes.append(node)
-
-    if len(new_nodes) > 1 and len(set([x.a if isinstance(x, MulNode) else x for x in new_nodes])) < len(new_nodes):
-      new_nodes = Node.factorize(new_nodes)
+      elif node.__class__ is MulNode: mul_groups[node.a] = mul_groups.get(node.a, 0) + node.b
+      else: mul_groups[node] = mul_groups.get(node, 0) + 1
+    new_nodes = [MulNode(a, b_sum) if b_sum != 1 else a for a, b_sum in mul_groups.items() if b_sum != 0]
     if num_node_sum: new_nodes.append(NumNode(num_node_sum))
     return create_rednode(SumNode, new_nodes) if len(new_nodes) > 1 else new_nodes[0] if len(new_nodes) == 1 else NumNode(0)
 
