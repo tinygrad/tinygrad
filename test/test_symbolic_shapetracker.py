@@ -1,6 +1,6 @@
 import unittest
 from tinygrad.shape.shapetracker import ShapeTracker, View
-from tinygrad.shape.symbolic import Variable
+from tinygrad.shape.symbolic import Variable, NumNode
 from tinygrad.tensor import Tensor
 
 class TestSymbolic(unittest.TestCase):
@@ -161,7 +161,7 @@ class TestSymbolicShapeExpr(unittest.TestCase):
     i = Variable("i", 1, 120)
     gidx0 = Variable("gidx0", 0, i)
     lidx1 = Variable("lidx1", 0, 7)
-    idx = (gidx0, lidx1, Variable.num(1))
+    idx = (gidx0, lidx1, NumNode(1))
     shape = (i+1, 8, 4)
     strides = (1, (i*4)+4, i+1)
     st = ShapeTracker((View.create(shape, strides), ))

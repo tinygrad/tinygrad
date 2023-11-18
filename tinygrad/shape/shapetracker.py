@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, cast, Union, Iterable
 from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, DEBUG, dedup, merge_dicts
-from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, sint
+from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
 from tinygrad.shape.view import View
 
 @functools.lru_cache(maxsize=None)
@@ -35,7 +35,7 @@ def expr_node_mask(view:View, idx:Node, valid:Optional[Node]=None) -> Node:
 # generate an expression if you have a single idx variable
 def expr_node(view:View, idx:Optional[Node]=None) -> Node:
   if idx is None: idx = Variable('idx', 0, prod(view.shape)-1)
-  ret: List[Node] = [Variable.num(view.offset) if isinstance(view.offset, int) else view.offset] if view.offset else []
+  ret: List[Node] = [NumNode(view.offset) if isinstance(view.offset, int) else view.offset] if view.offset else []
   acc = 1
   for d,s in reversed(to_shape_strides(view.shape, view.strides)):
     ret.append(((idx//acc)%d)*s)
@@ -45,7 +45,7 @@ def expr_node(view:View, idx:Optional[Node]=None) -> Node:
 # generate an expression if you have a variable or expression for each index
 def expr_idxs(view:View, idxs:Tuple[Node, ...]) -> Node:
   assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
-  return Variable.sum([Variable.num(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])
+  return Variable.sum([NumNode(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])
 
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
@@ -129,7 +129,7 @@ class ShapeTracker:
 
   def _expr_idx(self, idx:Node, valid:Node) -> Tuple[Node, Node]:
     for v in reversed(self.views[0:-1]):
-      if valid.max == 0: return Variable.num(-1), valid
+      if valid.max == 0: return NumNode(-1), valid
       valid = expr_node_mask(v, idx, valid)
       idx = expr_node(v, idx)
     return idx, valid
