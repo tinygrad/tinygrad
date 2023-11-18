@@ -15,7 +15,7 @@ from tiktoken import Encoding
 from vits import HParams, Synthesizer, TextMapper, download_if_not_present, get_hparams_from_file, load_model
 from whisper import Whisper, init_whisper, prep_audio
 
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import Timing, dtypes
 from tinygrad.tensor import Tensor
 
 # Whisper constants
@@ -254,24 +254,27 @@ if __name__ == "__main__":
 
       # Listen to mic input
       is_listening_event.set()
-      time.sleep(args.phrase_timeout)
-      while not q.empty(): total = np.concatenate([total, q.get()])
+      start = time.time()
+      while time.time() - start < args.phrase_timeout: total = np.concatenate([total, q.get()])
       is_listening_event.clear()
 
       # Transcribe text
-      encoded_audio = model.encoder(Tensor(prep_audio(total.reshape(1, -1), 1)))
-      while not (txt := voice2text(model, enc, encoded_audio, tokens)).endswith("<|endoftext|>"): print(txt)
-      txt = clean_text(enc, txt)
+      with Timing("transcription: "):
+        encoded_audio = model.encoder.encode(Tensor(prep_audio(total.reshape(1, -1), 1)))
+        while not (txt := voice2text(model, enc, encoded_audio, tokens)).endswith("<|endoftext|>"): print(txt)
+        txt = clean_text(enc, txt)
 
       # Generate with llama
-      outputted, start_pos = llama_generate(llama, txt, start_pos, outputted)
-      response = outputted.splitlines()[-1].replace(resp_delim.strip(), "").replace(end_delim.strip(), "")
+      with Timing("llama generation: "):
+        outputted, start_pos = llama_generate(llama, txt, start_pos, outputted)
+        response = outputted.splitlines()[-1].replace(resp_delim.strip(), "").replace(end_delim.strip(), "")
 
       # Convert to voice
-      audio_data = tts(
-        response, synth, hps, emotion_embedding,
-        args.vits_speaker_id, args.vits_model_to_use, args.vits_noise_scale,
-        args.vits_noise_scale_w, args.vits_length_scale,
-        args.vits_estimate_max_y_length
-      )
-      stream.write(audio_data.tobytes())
+      with Timing("tts: "):
+        audio_data = tts(
+          response, synth, hps, emotion_embedding,
+          args.vits_speaker_id, args.vits_model_to_use, args.vits_noise_scale,
+          args.vits_noise_scale_w, args.vits_length_scale,
+          args.vits_estimate_max_y_length
+        )
+      with Timing("audio play: "): stream.write(audio_data.tobytes())
