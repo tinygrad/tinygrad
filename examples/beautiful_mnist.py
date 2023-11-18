@@ -23,12 +23,12 @@ if __name__ == "__main__":
   model = Model()
   opt = nn.optim.Adam(nn.state.get_parameters(model))
 
-  # TODO: there's a compiler error if you comment out TinyJit since randint isn't being realized and there's something weird with int
   @TinyJit
-  def train_step(samples:Tensor) -> Tensor:
+  def train_step() -> Tensor:
     with Tensor.train():
       opt.zero_grad()
       # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
+      samples = Tensor.randint(512, high=X_train.shape[0])
       loss = model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]).backward()
       opt.step()
       return loss.realize()
@@ -39,7 +39,6 @@ if __name__ == "__main__":
   test_acc = float('nan')
   for i in (t:=trange(70)):
     GlobalCounters.reset()   # NOTE: this makes it nice for DEBUG=2 timing
-    samples = Tensor.randint(512, high=X_train.shape[0])  # TODO: put this in the JIT when rand is fixed
-    loss = train_step(samples)
+    loss = train_step()
     if i%10 == 9: test_acc = get_test_acc().item()
     t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
