@@ -43,12 +43,12 @@ class RawDiskBuffer(RawBufferMapped):
     return RawDiskBuffer(prod(arg[0]), self.dtype, buf=self._buf, offset=self.offset+arg[2]*self.dtype.itemsize, shape=arg[0])
 
   def _buffer(self): return memoryview(self._buf[1])[self.offset:self.offset+self.size*self.dtype.itemsize]
-  def readinto(self, buf):
+  def readinto(self, buf:memoryview):
     if self._buf[0] is not None:
       self._buf[0].seek(self.offset)
       self._buf[0].readinto(buf)
     else:
-      buf[:] = self._buffer()
+      buf.cast('B')[:] = self._buffer()
 
 disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.MEM: lambda x: x, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
 DiskBuffer = Interpreted(RawDiskBuffer, disk_fxn_for_op)
