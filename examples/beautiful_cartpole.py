@@ -37,24 +37,30 @@ if __name__ == "__main__":
 
   @TinyJit
   def train_step(x:Tensor, rtg:Tensor, mask:Tensor, old_log_dist:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
-    log_dist, value = model(x)
-    advantage = rtg - value
+    with Tensor.train():
+      log_dist, value = model(x)
+      advantage = rtg - value
 
-    # PPO
-    masked_advantage = mask * advantage.detach()
-    ratios = (log_dist - old_log_dist).exp() * masked_advantage
-    clipped_ratios = ratios.clip(1-0.2, 1+0.2) * masked_advantage
-    action_loss = -ratios.minimum(clipped_ratios).sum(-1).mean()
+      # PPO
+      masked_advantage = mask * advantage.detach()
+      ratios = (log_dist - old_log_dist).exp() * masked_advantage
+      clipped_ratios = ratios.clip(1-0.2, 1+0.2) * masked_advantage
+      action_loss = -ratios.minimum(clipped_ratios).sum(-1).mean()
 
-    entropy_loss = (log_dist.exp() * log_dist).sum(-1).mean()   # this encourages diversity
-    critic_loss = advantage.square().mean()
-    opt.zero_grad()
-    (action_loss + entropy_loss*0.001 + critic_loss).backward()
-    opt.step()
-    return action_loss.realize(), entropy_loss.realize(), critic_loss.realize()
+      entropy_loss = (log_dist.exp() * log_dist).sum(-1).mean()   # this encourages diversity
+      critic_loss = advantage.square().mean()
+      opt.zero_grad()
+      (action_loss + entropy_loss*0.001 + critic_loss).backward()
+      opt.step()
+      return action_loss.realize(), entropy_loss.realize(), critic_loss.realize()
 
   @TinyJit
-  def get_action_dist(obs:Tensor) -> Tensor: return model(obs)[0].exp().realize()
+  def get_action_dist(obs:Tensor) -> Tensor:
+    # TODO: with no_grad
+    Tensor.no_grad = True
+    ret = model(obs)[0].exp().realize()
+    Tensor.no_grad = False
+    return ret
 
   BS = 256
   for i in (t:=trange(30)):
@@ -92,12 +98,13 @@ if __name__ == "__main__":
         act_mask[act] = 1.0
         Mn.append(act_mask)
 
-    # TODO: this shouldn't be numpy
-    X, R, M = np.array(Xn, dtype=np.float32), np.array(Rn, dtype=np.float32), np.array(Mn, dtype=np.float32)
-    old_log_dist = model(Tensor(X))[0].numpy()   # TODO: could save these instead of recomputing
+    X, R, M = Tensor(Xn), Tensor(Rn), Tensor(Mn)
+    old_log_dist = model(X)[0]   # TODO: could save these instead of recomputing
     for i in range(5):
-      samples = Tensor.randint(BS, high=X.shape[0], device="CPU").numpy()
-      action_loss, entropy_loss, critic_loss = train_step(Tensor(X[samples]), Tensor(R[samples]), Tensor(M[samples]), Tensor(old_log_dist[samples]))
+      samples = Tensor.randint(BS, high=X.shape[0]).realize()  # TODO: remove the need for this
+      # TODO: is this recompiling based on the shape?
+      action_loss, entropy_loss, critic_loss = train_step(X[samples], R[samples], M[samples], old_log_dist[samples])
+
     t.set_description(f"action_loss: {action_loss.item():7.2f} entropy_loss: {entropy_loss.item():7.2f} critic_loss: {critic_loss.item():7.2f} ep_count: {len(ep_rews):2d} avg_ep_rew: {sum(ep_rews)/len(ep_rews):6.2f}")
 
   test_rew = evaluate(model, gym.make('CartPole-v1', render_mode='human'))

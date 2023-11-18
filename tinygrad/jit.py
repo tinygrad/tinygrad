@@ -45,7 +45,7 @@ class TinyJit(Generic[ReturnType]):
 
     if self.cnt >= 2:
       assert self.expected_vals == expected_vals, "mismatch of var_vals"
-      assert self.expected_sts_dtype == expected_sts_dtype, "mismatch of sts"
+      assert self.expected_sts_dtype == expected_sts_dtype, f"mismatch of sts, expected {self.expected_sts_dtype} got {expected_sts_dtype}"
       assert self.jit_fxn, "didn't get jitted?"
       self.jit_fxn(input_rawbuffers, var_vals, DEBUG>=2)
     elif self.cnt == 1:
