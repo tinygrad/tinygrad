@@ -112,7 +112,6 @@ if __name__ == '__main__':
     st = time.time()
     post_predictions = postprocess(preds=predictions, img=pre_processed_image, orig_imgs=image)
     print(f'post processing in {int(round(((time.time() - st) * 1000)))}ms')
-    print(post_predictions)
 
     ret, img = cap.read()
     draw_bounding_boxes_and_display(orig_imgs=image, all_predictions=post_predictions, class_labels=class_labels, is_last=not ret)

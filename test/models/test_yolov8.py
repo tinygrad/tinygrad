@@ -5,7 +5,6 @@ import numpy as np
 from PIL import Image
 import cv2
 
-from tinygrad.helpers import getenv
 from extra.models.yolov8 import YOLOv8, preprocess, postprocess
 from extra.utils import fetch
 
