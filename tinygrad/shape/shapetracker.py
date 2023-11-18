@@ -21,7 +21,7 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tu
       ret.append((shape[i], strides[i]))
   return tuple(ret)
 
-def expr_node_mask(view:View, idx, valid=None) -> Node:
+def expr_node_mask(view:View, idx:Node, valid=None) -> Node:
   expr = [valid] if valid is not None else []
   if view.mask is not None:
     acc = 1
@@ -33,7 +33,7 @@ def expr_node_mask(view:View, idx, valid=None) -> Node:
   return Variable.ands(expr)
 
 # generate an expression if you have a single idx variable
-def expr_node(view:View, idx=None) -> Node:
+def expr_node(view:View, idx:Optional[Node]=None) -> Node:
   if idx is None: idx = Variable('idx', 0, prod(view.shape)-1)
   ret: List[Node] = [Variable.num(view.offset) if isinstance(view.offset, int) else view.offset] if view.offset else []
   acc = 1
@@ -43,7 +43,7 @@ def expr_node(view:View, idx=None) -> Node:
   return Variable.sum(ret)
 
 # generate an expression if you have a variable or expression for each index
-def expr_idxs(view:View, idxs) -> Node:
+def expr_idxs(view:View, idxs:Tuple[Node, ...]) -> Node:
   assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
   return Variable.sum([Variable.num(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])
 
@@ -54,7 +54,7 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
   return View.create(vm1.shape, cast(Tuple[sint, ...], strides), vm2.offset, vm1.mask)
 
 @functools.lru_cache(maxsize=None)
-def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
+def idxs_to_idx(shape:Tuple[int, ...], idxs:Tuple[Node, ...]) -> Node:
   assert len(idxs) == len(shape), "need an idx for all dimensions"
   acc = 1
   ret = []
@@ -111,7 +111,7 @@ class ShapeTracker:
   # NOTE: if a stride is not always valid, it will be None
   def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
-    idxs: List[Node] = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
+    idxs = tuple(Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape))
     idx, valid = self.expr_idxs(idxs)
     ret: List[Optional[sint]] = [None] * len(self.views[-1].shape)
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
@@ -126,7 +126,7 @@ class ShapeTracker:
 
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
-  def _expr_idx(self, idx, valid) -> Tuple[Node, Node]:
+  def _expr_idx(self, idx:Node, valid:Node) -> Tuple[Node, Node]:
     for v in reversed(self.views[0:-1]):
       if valid.max == 0: return Variable.num(-1), valid
       valid = expr_node_mask(v, idx, valid)
@@ -140,10 +140,10 @@ class ShapeTracker:
         return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
     return self
 
-  def expr_idxs(self, idxs=None):
-    if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
-    idx = expr_idxs(self.views[-1], tuple(idxs))
-    valid = expr_node_mask(self.views[-1], idxs_to_idx(self.views[-1].shape, tuple(idxs)))
+  def expr_idxs(self, idxs:Optional[Tuple[Node, ...]]=None):
+    if idxs is None: idxs = tuple(Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape))
+    idx = expr_idxs(self.views[-1], idxs)
+    valid = expr_node_mask(self.views[-1], idxs_to_idx(self.views[-1].shape, idxs))
     return self._expr_idx(idx, valid)
 
   def expr_node(self, idx='idx'):

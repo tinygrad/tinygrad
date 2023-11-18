@@ -68,9 +68,9 @@ class Linearizer(Kernel):
       dim, amt = upcast_dim[0], len(float4_expand)
 
     expand_vars = tuple([rename_var(idx.expand_idx(), f"_uidx{j}") for j, idx in enumerate(idxs)])
-    fake_idxs = [idx.substitute({idx.expand_idx(): ev}) for idx, ev in zip(idxs, expand_vars)]
+    fake_idxs = tuple(idx.substitute({idx.expand_idx(): ev}) for idx, ev in zip(idxs, expand_vars))
     if dim is not None:
-      g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs[:dim] + [float4_expand[0]] + fake_idxs[dim+1:])
+      g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs[:dim] + (float4_expand[0],) + fake_idxs[dim+1:])
       if (g_idx // amt * amt).render() != g_idx.render():
         (g_idx, g_valid), amt, dim = self.sts[i].expr_idxs(fake_idxs), 1, None
     else:
@@ -320,7 +320,7 @@ class Linearizer(Kernel):
         if self.opts.has_local:
           fake_idxs = [Variable.num(0)]*len(self.sts[-1].shape)
           fake_idxs[self.global_dims+self.local_dims:self.global_dims+len(local_idxs)] = local_idxs[self.local_dims:]
-          if_cond: UOp = (self.sts[-1].expr_idxs(fake_idxs)[0]<1).render(self.render_ops, self)
+          if_cond: UOp = (self.sts[-1].expr_idxs(tuple(fake_idxs))[0]<1).render(self.render_ops, self)
           barrier = self.uop(UOps.IF, None, (if_cond, barrier), cachable=False)
 
         # create new late reduce local loops and replace local_idxs that have been used
