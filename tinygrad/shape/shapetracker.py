@@ -4,7 +4,7 @@ import functools, operator
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast
 from tinygrad.ops import MovementOps
-from tinygrad.helpers import prod, DEBUG, dedup, merge_dicts
+from tinygrad.helpers import prod, DEBUG, merge_dicts
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
 from tinygrad.shape.view import View
 
