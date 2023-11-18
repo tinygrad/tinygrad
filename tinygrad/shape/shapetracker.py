@@ -21,7 +21,7 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tu
       ret.append((shape[i], strides[i]))
   return tuple(ret)
 
-def expr_node_mask(view:View, idx:Node, valid=None) -> Node:
+def expr_node_mask(view:View, idx:Node, valid:Optional[Node]=None) -> Node:
   expr = [valid] if valid is not None else []
   if view.mask is not None:
     acc = 1
