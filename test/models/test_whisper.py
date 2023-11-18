@@ -1,9 +1,10 @@
 import unittest
 import pathlib
 from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
+from tinygrad.helpers import CI
 from tinygrad.ops import Device
 
-@unittest.skipUnless(Device.DEFAULT == "METAL", "Some non-metal backends spend too long trying to allocate a 20GB array")
+@unittest.skipIf(CI and Device.DEFAULT in ["LLVM", "CLANG", "CPU"], "Not working on LLVM, slow on others")
 class TestWhisper(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
