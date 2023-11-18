@@ -27,10 +27,10 @@ def flatten(l:Union[List, Iterator]): return [item for sublist in l for item in 
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def round_up(num, amt): return num if num%amt == 0 else num+(amt-(num%amt))
-def merge_dicts(ds:Iterable[Dict]) -> Dict:
+def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
   return {k:v for d in ds for k,v in d.items()}
-def partition(lst: List[T], fxn: Callable[[T],bool]):
+def partition(lst: List[T], fxn:Callable[[T],bool]):
   a:List[T] = []
   b:List[T] = []
   for s in lst: (a if fxn(s) else b).append(s)
