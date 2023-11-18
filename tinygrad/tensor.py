@@ -182,6 +182,10 @@ class Tensor:
     return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(Tensor.default_type if dtype is None else dtype)
 
   @staticmethod
+  def randint(*shape, low=0, high=10, **kwargs) -> Tensor:
+    return (Tensor.rand(*shape, **kwargs)*(high-low)+low).cast(dtypes.int32)
+
+  @staticmethod
   def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor: return (std * Tensor.randn(*shape, **kwargs)) + mean
 
   @staticmethod
@@ -213,9 +217,9 @@ class Tensor:
     assert replacement or num_samples == 1, "supported only with replacement"
     p = self.unsqueeze(0) if self.ndim == 1 else self
     cdf = p.cumsum(1)
-    cdf /= cdf[:, -1].unsqueeze(1)
+    cdf_normalized = cdf / cdf[:, -1].unsqueeze(1)
     unif_samples = Tensor.rand(num_samples, p.shape[0], 1)
-    indices = (unif_samples.expand((-1, -1, p.shape[1])) >= cdf).sum(2).permute((1, 0))
+    indices = (unif_samples.expand((-1, -1, p.shape[1])) >= cdf_normalized).sum(2).permute((1, 0))
     if self.ndim == 1: indices = indices.squeeze(0)
     return indices.cast(dtypes.int32)
 
@@ -230,7 +234,7 @@ class Tensor:
       return nodes
     return _deepwalk(self, set(), [])
 
-  def backward(self):
+  def backward(self) -> Tensor:
     assert self.shape == tuple(), f"backward can only be called for scalar tensors, but it has shape {self.shape})"
 
     # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
@@ -247,11 +251,12 @@ class Tensor:
           assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
           t.grad = g if t.grad is None else (t.grad + g)
       del t0._ctx
+    return self
 
   # ***** movement mlops *****
   def reshape(self, shape, *args) -> Tensor:
     new_shape = argfix(shape, *args)
-    return mlops.Reshape.apply(self, shape=tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape]))
+    return mlops.Reshape.apply(self, shape=tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)]))
   def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple([x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))]))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
@@ -770,6 +775,7 @@ class Tensor:
     return (self.maximum(0) - y * self + (1 + self.abs().__neg__().exp()).log()).mean()
 
   def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
+    # NOTE: self is a logits input
     loss_mask = Y != ignore_index
     y_counter = Tensor.arange(self.shape[-1], dtype=dtypes.int32, requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
     y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
