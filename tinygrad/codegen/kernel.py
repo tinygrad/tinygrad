@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, math, itertools
-from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union, Callable, Iterable
+from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, Device, Compiled
 from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, ansilen, getenv, prod, DEBUG
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
