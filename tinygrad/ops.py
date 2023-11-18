@@ -180,7 +180,7 @@ class BatchExecutor:
 class ASTRunner:
   def __init__(self, ast:Optional[LazyOp]):
     if ast is None:
-      self.op_estimate, self.mem_estimate, self.vars = 0, 0, []
+      self.op_estimate, self.mem_estimate, self.vars = 0, 0, set()
     else:
       info = get_lazyop_info(ast)
       self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate

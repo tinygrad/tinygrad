@@ -2,7 +2,7 @@
 from __future__ import annotations
 import functools, operator
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, cast
+from typing import Tuple, List, Optional, Dict, Set, cast
 from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, DEBUG, dedup, merge_dicts
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
@@ -79,7 +79,7 @@ class ShapeTracker:
 
   def size(self): return 0 if (0 in self.shape) else self.expr_idxs()[0].max+1
 
-  def vars(self) -> List[Variable]: return dedup(functools.reduce(operator.add, [v.vars() for v in self.views], []))
+  def vars(self) -> Set[Variable]: return functools.reduce(operator.or_, [v.vars() for v in self.views], set())
 
   @property
   def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
