@@ -1,11 +1,7 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats
 import numpy as np
-<<<<<<< HEAD
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, Callable, TYPE_CHECKING
-=======
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
->>>>>>> master
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
 
@@ -29,7 +25,6 @@ def ansilen(s): return len(ansistrip(s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Union[List, Iterator]): return [item for sublist in l for item in sublist]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
-<<<<<<< HEAD
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def round_up(num, amt): return num if num%amt == 0 else num+(amt-(num%amt))
 def merge_dicts(ds:Iterable[Dict]) -> Dict:
@@ -38,16 +33,6 @@ def merge_dicts(ds:Iterable[Dict]) -> Dict:
 def partition(lst: List[T], fxn: Callable[[T],bool]):
   a:List[T] = []
   b:List[T] = []
-=======
-def strip_parens(fst): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
-def round_up(num, amt): return num if num%amt == 0 else num+(amt-(num%amt))
-def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
-  assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
-  return {k:v for d in ds for k,v in d.items()}
-def partition(lst:List[T], fxn:Callable[[T],bool]):
-  a:List[T] = []
-  b:List[T] = []
->>>>>>> master
   for s in lst: (a if fxn(s) else b).append(s)
   return a,b
 
