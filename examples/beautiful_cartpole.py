@@ -42,6 +42,7 @@ if __name__ == "__main__":
     action_loss = -(log_dist * mask * advantage.detach()).sum(-1).mean()
     entropy_loss = (log_dist.exp() * log_dist).sum(-1).mean()   # this encourages diversity
     critic_loss = advantage.square().mean()
+    opt.zero_grad()
     (action_loss + entropy_loss*0.001 + critic_loss).backward()
     opt.step()
     return action_loss.realize(), entropy_loss.realize(), critic_loss.realize()
