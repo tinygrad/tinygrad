@@ -2,7 +2,7 @@
 from __future__ import annotations
 import functools, operator
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, cast
+from typing import Tuple, List, Optional, Dict, cast, Union
 from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, DEBUG, dedup, merge_dicts
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, sint
@@ -146,21 +146,21 @@ class ShapeTracker:
     valid = expr_node_mask(self.views[-1], idxs_to_idx(self.views[-1].shape, idxs))
     return self._expr_idx(idx, valid)
 
-  def expr_node(self, idx='idx'):
-    if idx.__class__ is str: idx = Variable(idx, 0, prod(self.shape)-1)
+  def expr_node(self, idx:Union[Node,str]='idx'):
+    if isinstance(idx, str): idx = Variable(idx, 0, prod(self.shape)-1)
     return self._expr_idx(expr_node(self.views[-1], idx), expr_node_mask(self.views[-1], idx))
 
-  def axis_is_masked(self, axis) -> bool:
+  def axis_is_masked(self, axis:int) -> bool:
     _, valid = self.expr_idxs()
     return f'idx{axis}' in [v.expr for v in valid.vars()]
 
   # *** under this line are the movement ops ***
 
-  def pad(self, arg: Tuple[Tuple[int, int], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].pad(arg), ))
-  def shrink(self, arg: Tuple[Tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].shrink(arg), ))
-  def expand(self, new_shape: Tuple[sint, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].expand(new_shape), ))
-  def permute(self, axis: Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].permute(axis), ))
-  def stride(self, mul: Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].stride(mul), ))
+  def pad(self, arg:Tuple[Tuple[int, int], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].pad(arg), ))
+  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].shrink(arg), ))
+  def expand(self, new_shape:Tuple[sint, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].expand(new_shape), ))
+  def permute(self, axis:Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].permute(axis), ))
+  def stride(self, mul:Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].stride(mul), ))
 
   def reshape(self, new_shape: Tuple[sint, ...]) -> ShapeTracker:
     if (new_view := self.views[-1].reshape(new_shape)) is None:
