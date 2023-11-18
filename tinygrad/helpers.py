@@ -154,6 +154,14 @@ class dtypes:
   @staticmethod
   def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp)
 
+  @staticmethod
+  @functools.lru_cache(None)
+  def promote_on_negation(t):
+    return {dtypes.uint8:dtypes.int8,
+            dtypes.uint16:dtypes.int16,
+            dtypes.uint32:dtypes.int32,
+            dtypes.uint64:dtypes.int64}.get(t, t)
+
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod}
 INVERSE_DTYPES_DICT = {v:k for k,v in DTYPES_DICT.items()}
