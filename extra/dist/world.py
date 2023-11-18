@@ -6,7 +6,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawBuffer, RawBufferCopyIn, RawBufferCopyInOut
 try: from tinygrad.runtime.ops_hip import RawHIPBuffer
 except: RawHIPBuffer = None
-from tinygrad.runtime.ops_shm import RawShmBuffer
+from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.jit import CacheCollector
 from tinygrad.tensor import Tensor, Function
 import extra.hip_wrapper as hip
@@ -51,7 +51,7 @@ def _send_rb(x:RawBuffer, target_rank:int):
     s.close()
 
     # copy the buffer into shared memory
-    y = RawShmBuffer(x.size, x.dtype, device=shm_name)
+    y = RawDiskBuffer(x.size, x.dtype, device="shm:"+shm_name)
     # fast path when we can directly copyout
     if isinstance(x, RawBufferCopyInOut): x._copyout(np.frombuffer(y._buffer(), dtype=x.dtype.np))
     else: y.fromCPU(x.toCPU())
@@ -78,7 +78,7 @@ def _recv_rb(x:RawBuffer, target_rank:int):
     CacheCollector.add(__recv_rb, [x, target_rank, y], {})
   else:
     shm_name = dist.OOB.recv(target_rank)
-    y = RawShmBuffer(x.size, x.dtype, device=shm_name)
+    y = RawDiskBuffer(x.size, x.dtype, device="shm:"+shm_name)
 
     # fast path when we can directly copyin
     if isinstance(x, RawBufferCopyIn): x._copyin(y.toCPU())
