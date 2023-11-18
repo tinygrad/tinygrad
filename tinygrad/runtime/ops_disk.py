@@ -22,18 +22,14 @@ class RawDiskBuffer(RawBufferMapped):
     self._buf[2] -= 1
     if self._buf[2] == 0: self._buf[0].close()
   def cast(self, arg:Tuple[DType, bool]): return RawDiskBuffer(self.size, arg[0], buf=self._buf, shape=self.shape, offset=self.offset)
-  def reshape(self, arg): return RawDiskBuffer(self.size, self.dtype, buf=self._buf, shape=arg, offset=self.offset)
-  def shrink(self, arg):
-    assert len(arg)<2 or arg[1:] == tuple([(0,x) for x in self.shape[1:]]), f"can only slice the first dim of disk tensor {arg}"
-    offset = arg[0][0]*(prod(self.shape[1:]) if len(arg)>1 else 1)*self.dtype.itemsize
-    size = (arg[0][1]-arg[0][0]) * (prod(self.shape[1:]) if len(arg)>1 else 1)
-    return RawDiskBuffer(size, self.dtype, buf=self._buf, offset=self.offset+offset, shape=(arg[0][1]-arg[0][0],)+(self.shape[1:] if len(arg)>1 else ()))
-  def as_strided(self, arg): return RawDiskBuffer(prod(arg[0]), self.dtype, buf=self._buf, offset=self.offset+arg[2]*self.dtype.itemsize, shape=arg[0])
+  def as_strided(self, arg):
+    # TOOD: test the correctness of this stride
+    return RawDiskBuffer(prod(arg[0]), self.dtype, buf=self._buf, offset=self.offset+arg[2]*self.dtype.itemsize, shape=arg[0])
 
   def _buffer(self): return memoryview(self._buf[1])[self.offset:self.offset+self.size*self.dtype.itemsize]
   def readinto(self, buf):
     self._buf[0].seek(self.offset)
     self._buf[0].readinto(buf)
 
-disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.MEM: lambda x: x, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.SHRINK: RawDiskBuffer.shrink, MovementOps.RESHAPE: RawDiskBuffer.reshape, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
+disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.MEM: lambda x: x, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
 DiskBuffer = Interpreted(RawDiskBuffer, disk_fxn_for_op)
