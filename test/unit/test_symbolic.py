@@ -282,6 +282,10 @@ class TestSymbolicVars(unittest.TestCase):
     assert (a % 3 + b // 5).vars() == [a, b]
     assert (a + b + c - a).vars() == [b, c]
 
+  def test_reduce_dedup(self):
+    a = Variable("a", 0, 10)
+    assert (a//4 + a//6).vars() == [a]
+
 class TestSymbolicMinMax(unittest.TestCase):
   def test_min_max_known(self):
     a = Variable("a", 1, 8)

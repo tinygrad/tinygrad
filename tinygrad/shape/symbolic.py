@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools
 from math import gcd
 from itertools import product
-from tinygrad.helpers import partition
+from tinygrad.helpers import partition, dedup
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Iterator
 
 # NOTE: Python has different behavior for negative mod and floor div than c
@@ -18,7 +18,7 @@ class Node:
     if ops is None: ops = render_python
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
     return ops[type(self)](self, ops, ctx)
-  def vars(self): return []
+  def vars(self) -> List[Variable]: return []
 
   def expand_idx(self) -> VariableOrNum: return next((v for v in self.vars() if v.expr is None), NumNode(0))
   # expand a Node into List[Node] that enumerates the underlying Variables from min to max
@@ -221,7 +221,7 @@ class ModNode(OpNode):
 
 class RedNode(Node):
   def __init__(self, nodes:List[Node]): self.nodes = nodes
-  def vars(self): return functools.reduce(lambda l,x: l+x.vars(), self.nodes, [])
+  def vars(self): return dedup(functools.reduce(lambda l,x: l+x.vars(), self.nodes, []))
 
 class SumNode(RedNode):
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
