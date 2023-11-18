@@ -51,7 +51,7 @@ def _send_rb(x:RawBuffer, target_rank:int):
     s.close()
 
     # copy the buffer into shared memory
-    y = RawDiskBuffer(x.size, x.dtype, device="shm:"+shm_name)
+    y = RawDiskBuffer(x.size, x.dtype, device="disk:shm:"+shm_name)
     # fast path when we can directly copyout
     if isinstance(x, RawBufferCopyInOut): x._copyout(np.frombuffer(y._buffer(), dtype=x.dtype.np))
     else: y.fromCPU(x.toCPU())
@@ -78,7 +78,7 @@ def _recv_rb(x:RawBuffer, target_rank:int):
     CacheCollector.add(__recv_rb, [x, target_rank, y], {})
   else:
     shm_name = dist.OOB.recv(target_rank)
-    y = RawDiskBuffer(x.size, x.dtype, device="shm:"+shm_name)
+    y = RawDiskBuffer(x.size, x.dtype, device="disk:shm:"+shm_name)
 
     # fast path when we can directly copyin
     if isinstance(x, RawBufferCopyIn): x._copyin(y.toCPU())
