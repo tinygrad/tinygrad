@@ -2,7 +2,7 @@
 from __future__ import annotations
 import functools, operator
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, cast, Union
+from typing import Tuple, List, Optional, Dict, cast, Union, Iterable
 from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, DEBUG, dedup, merge_dicts
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, sint
@@ -140,8 +140,9 @@ class ShapeTracker:
         return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
     return self
 
-  def expr_idxs(self, idxs:Optional[Tuple[Node, ...]]=None):
-    if idxs is None: idxs = tuple(Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape))
+  # Should this be a Tuple all the way instead of an Iterable?
+  def expr_idxs(self, idxs:Optional[Iterable[Node]]=None):
+    idxs = tuple(Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)) if idxs is None else tuple(idxs)
     idx = expr_idxs(self.views[-1], idxs)
     valid = expr_node_mask(self.views[-1], idxs_to_idx(self.views[-1].shape, idxs))
     return self._expr_idx(idx, valid)
