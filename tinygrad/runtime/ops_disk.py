@@ -14,7 +14,7 @@ class RawDiskBuffer(RawBufferMapped):
     self.offset = offset  # this is an offset in bytes
     assert device is not None or buf is not None, "disk tensor needs a path or a buf"
     if device is not None:
-      if device.startswith("shm:"):
+      if str(device).startswith("shm:"):
         if OSX:
           with open(f"/tmp/shm_{device[4:]}", "w+b") as f:
             f.truncate(size * dtype.itemsize)
