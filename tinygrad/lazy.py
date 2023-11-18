@@ -99,6 +99,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dty
 UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
 
 class LazyBuffer:
+  __slots__ = ('st', 'device', 'shape', 'optype', '_dtype', '_realized', 'output_buffer', 'children', 'views', 'op', '_base', '__weakref__')
   __deletable__ = ('op',)
   def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:Optional[LazyOp], dtype:DType, src:Optional[RawBuffer]=None, base:Optional[LazyBuffer]=None):
     self.st: ShapeTracker = st
@@ -118,7 +119,7 @@ class LazyBuffer:
     else: assert st.contiguous, "unbased LazyBuffers must be contiguous"
 
   @property
-  def base(self): return self._base if self._base is not None else self
+  def base(self): return self._base or self
 
   def is_unrealized_const(self): return not self.realized and self.base.op.op == LoadOps.CONST
 
