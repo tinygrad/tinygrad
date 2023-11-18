@@ -46,7 +46,7 @@ class Node:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
   def __neg__(self): return self*-1
-  def __add__(self, b:Union[Node,int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
+  def __add__(self, b:Union[Node,int]): return Variable.sum([self, b if isinstance(b, Node) else NumNode(b)])
   def __radd__(self, b:int): return self+b
   def __sub__(self, b:Union[Node,int]): return self+-b
   def __rsub__(self, b:int): return -self+b
@@ -100,9 +100,6 @@ class Node:
     if (self.min//b) == (self.max//b): return self - (b*(self.min//b))
     if self.min < 0: return (self - ((self.min//b)*b)) % b
     return create_node(ModNode(self, b))
-
-  @staticmethod
-  def num(num:int) -> NumNode: return NumNode(num)
 
   @staticmethod
   def sum(nodes:List[Node]) -> Node:
@@ -274,7 +271,7 @@ class SumNode(RedNode):
     if isinstance(b, Node) and (b - self).min > 0: return self # b - self simplifies the node
     new_nodes: List[Node] = []
     for x in self.nodes:
-      if x.__class__ is NumNode: new_nodes.append(Variable.num(x.b%b))
+      if x.__class__ is NumNode: new_nodes.append(NumNode(x.b%b))
       elif isinstance(x, MulNode): new_nodes.append(x.a * (x.b%b))
       else: new_nodes.append(x)
     return Node.__mod__(Node.sum(new_nodes), b)
@@ -327,7 +324,7 @@ def sym_rename(s) -> str: return f"s{sym_rename.cache_info().currsize}"
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
 def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
   if isinstance(a, (int, float)): return a
-  ret = a.substitute({k:Variable.num(v) for k, v in var_vals.items()})
+  ret = a.substitute({k:NumNode(v) for k, v in var_vals.items()})
   assert isinstance(ret, NumNode), f"sym_infer didn't produce NumNode from {a} with {var_vals}"
   return ret.b
 
