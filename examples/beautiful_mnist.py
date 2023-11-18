@@ -1,4 +1,5 @@
 # model based off https://towardsdatascience.com/going-beyond-99-mnist-handwritten-digits-recognition-cfff96337392
+from typing import List, Callable
 from tinygrad import Tensor, TinyJit, nn
 from tinygrad.helpers import GlobalCounters
 from extra.datasets import fetch_mnist
@@ -6,7 +7,7 @@ from tqdm import trange
 
 class Model:
   def __init__(self):
-    self.layers = [
+    self.layers: List[Callable[[Tensor], Tensor]] = [
       nn.Conv2d(1, 32, 5), Tensor.relu,
       nn.Conv2d(32, 32, 5, bias=False),
       nn.BatchNorm2d(32), Tensor.relu, Tensor.max_pool2d,

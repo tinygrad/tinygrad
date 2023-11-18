@@ -14,7 +14,7 @@ class ActorCritic:
     self.c1 = nn.Linear(in_features, hidden_state)
     self.c2 = nn.Linear(hidden_state, 1)
 
-  def __call__(self, obs:Tensor) -> Tensor:
+  def __call__(self, obs:Tensor) -> Tuple[Tensor, Tensor]:
     x = self.l1(obs).tanh()
     act = self.l2(x).log_softmax()
     x = self.c1(obs).relu()
@@ -26,24 +26,27 @@ def evaluate(model:ActorCritic, test_env:gym.Env) -> float:
   while not terminated and not truncated:
     act = model(Tensor(obs))[0].argmax().cast(dtypes.int32).item()
     obs, rew, terminated, truncated, _ = test_env.step(act)
-    total_rew += rew
+    total_rew += float(rew)
   return total_rew
 
 # TODO: time should be < 5s on M1 Max
 if __name__ == "__main__":
   env = gym.make('CartPole-v1')
 
-  model = ActorCritic(env.observation_space.shape[0], int(env.action_space.n))
+  model = ActorCritic(env.observation_space.shape[0], int(env.action_space.n))    # type: ignore
   opt = nn.optim.Adam(nn.state.get_parameters(model), lr=1e-2)
 
   @TinyJit
-  def train_step(x:Tensor, rtg:Tensor, mask:Tensor, old_log_dist:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+  def train_step(x:Tensor, selected_action:Tensor, reward:Tensor, old_log_dist:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
     with Tensor.train():
       log_dist, value = model(x)
-      advantage = rtg - value
+
+      # get advantage
+      advantage = reward.reshape(-1, 1) - value
+      mask = selected_action.reshape(-1, 1) == Tensor.arange(log_dist.shape[1]).reshape(1, -1).expand(selected_action.shape[0], -1)
+      masked_advantage = mask * advantage.detach()
 
       # PPO
-      masked_advantage = mask * advantage.detach()
       ratios = (log_dist - old_log_dist).exp() * masked_advantage
       clipped_ratios = ratios.clip(1-0.2, 1+0.2) * masked_advantage
       action_loss = -ratios.minimum(clipped_ratios).sum(-1).mean()
@@ -64,14 +67,14 @@ if __name__ == "__main__":
     return ret
 
   BS = 256
-  MAX_REPLAY_BUFFER = 2000
+  MAX_REPLAY_BUFFER = 3000
   st, steps = time.perf_counter(), 0
-  Xn, Rn, Mn = [], [], []
-  for i in (t:=trange(50)):
+  Xn, An, Rn = [], [], []
+  for i in (t:=trange(40)):
     get_action_dist.reset()   # NOTE: if you don't reset the jit here it captures the wrong model on the first run through
 
     obs:np.ndarray = env.reset()[0]
-    acts, rews, terminated, truncated = [], [], False, False
+    rews, terminated, truncated = [], False, False
     # NOTE: we don't want to early stop since then the rewards are wrong for the last episode
     while not terminated and not truncated:
       # pick actions
@@ -82,31 +85,24 @@ if __name__ == "__main__":
       # save this state action pair
       # TODO: don't use np.copy here on the CPU, what's the tinygrad way to do this and keep on device? need __setitem__ assignment
       Xn.append(np.copy(obs))
-      acts.append(act)
+      An.append(act)
 
       obs, rew, terminated, truncated, _ = env.step(act)
-      rews.append(rew)
+      rews.append(float(rew))
     steps += len(rews)
 
     # reward to go
     # TODO: move this into tinygrad
-    for i, act in enumerate(acts):
-      rew, discount = 0, 1.0
-      for r in rews[i:]:
-        rew += r * discount
-        discount *= 0.98
-      Rn.append([rew])
-      act_mask = np.zeros((env.action_space.n), dtype=np.float32)
-      act_mask[act] = 1.0
-      Mn.append(act_mask)
+    discounts = np.power(0.99, np.arange(len(rews)))
+    Rn += [np.sum(rews[i:] * discounts[:len(rews)-i]) for i in range(len(rews))]
 
-    Xn, Rn, Mn = Xn[-MAX_REPLAY_BUFFER:], Rn[-MAX_REPLAY_BUFFER:], Mn[-MAX_REPLAY_BUFFER:]
-    X, R, M = Tensor(Xn), Tensor(Rn), Tensor(Mn)
+    Xn, An, Rn = Xn[-MAX_REPLAY_BUFFER:], An[-MAX_REPLAY_BUFFER:], Rn[-MAX_REPLAY_BUFFER:]
+    X, A, R = Tensor(Xn), Tensor(An), Tensor(Rn)
     old_log_dist = model(X)[0]   # TODO: could save these instead of recomputing
     for i in range(5):
       samples = Tensor.randint(BS, high=X.shape[0]).realize()  # TODO: remove the need for this
       # TODO: is this recompiling based on the shape?
-      action_loss, entropy_loss, critic_loss = train_step(X[samples], R[samples], M[samples], old_log_dist[samples])
+      action_loss, entropy_loss, critic_loss = train_step(X[samples], A[samples], R[samples], old_log_dist[samples])
     t.set_description(f"sz: {len(Xn):5d} steps/s: {steps/(time.perf_counter()-st):7.2f} action_loss: {action_loss.item():7.2f} entropy_loss: {entropy_loss.item():7.2f} critic_loss: {critic_loss.item():7.2f} reward: {sum(rews):6.2f}")
 
   test_rew = evaluate(model, gym.make('CartPole-v1', render_mode='human'))
