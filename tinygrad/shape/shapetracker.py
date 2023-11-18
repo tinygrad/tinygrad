@@ -104,7 +104,7 @@ class ShapeTracker:
           real_shape = tuple(x+s[0]+s[1] for x,s in zip(real_shape, pre_expand_pads))
           # then, we do any expands (but with AS_STRIDED)
           if any(s != 1 and st == 0 for s,st in zip(real_shape, v.strides)):
-            to_apply.append((MovementOps.AS_STRIDED, (real_shape, strides_for_shape(tuple(1 if st == 0 else s for s,st in zip(real_shape, v.strides))), 0)))
+            to_apply.append((MovementOps.AS_STRIDED, (real_shape, strides_for_shape(tuple(s if st != 0 else 1 for s,st in zip(real_shape, v.strides))), 0)))
         else:
           to_apply.append((MovementOps.AS_STRIDED, (real_shape, v.strides, real_offset)))
         # lastly, we apply post expand pads
