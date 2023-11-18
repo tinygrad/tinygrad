@@ -1,7 +1,7 @@
 from typing import Tuple
 import time
-from tinygrad import Tensor, TinyJit, nn
-from tinygrad.helpers import dtypes, Timing  # TODO: wouldn't need this if argmax returned the right dtype
+from tinygrad import Tensor, TinyJit, nn, Variable
+from tinygrad.helpers import dtypes  # TODO: wouldn't need this if argmax returned the right dtype
 import gymnasium as gym
 from tqdm import trange
 import numpy as np  # TODO: remove numpy import
@@ -98,6 +98,11 @@ if __name__ == "__main__":
 
     Xn, An, Rn = Xn[-MAX_REPLAY_BUFFER:], An[-MAX_REPLAY_BUFFER:], Rn[-MAX_REPLAY_BUFFER:]
     X, A, R = Tensor(Xn), Tensor(An), Tensor(Rn)
+
+    # TODO: make this work
+    #vsz = Variable("sz", 1, MAX_REPLAY_BUFFER-1).bind(len(Xn))
+    #X, A, R = Tensor(Xn).reshape(vsz, None), Tensor(An).reshape(vsz), Tensor(Rn).reshape(vsz)
+
     old_log_dist = model(X)[0]   # TODO: could save these instead of recomputing
     for i in range(5):
       samples = Tensor.randint(BS, high=X.shape[0]).realize()  # TODO: remove the need for this
