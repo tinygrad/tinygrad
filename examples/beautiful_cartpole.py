@@ -14,7 +14,7 @@ class ActorCritic:
     self.c2 = nn.Linear(hidden_state, 1)
 
   def __call__(self, obs:Tensor) -> Tensor:
-    x = self.l1(obs).relu()
+    x = self.l1(obs).tanh()
     act = self.l2(x).log_softmax()
     x = self.c1(obs).relu()
     return act, self.c2(x)
@@ -36,10 +36,16 @@ if __name__ == "__main__":
   opt = nn.optim.Adam(nn.state.get_parameters(model), lr=1e-2)
 
   @TinyJit
-  def train_step(x:Tensor, rtg:Tensor, mask:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+  def train_step(x:Tensor, rtg:Tensor, mask:Tensor, old_log_dist:Tensor) -> Tuple[Tensor, Tensor, Tensor]:
     log_dist, value = model(x)
     advantage = rtg - value
-    action_loss = -(log_dist * mask * advantage.detach()).sum(-1).mean()
+
+    # PPO
+    masked_advantage = mask * advantage.detach()
+    ratios = (log_dist - old_log_dist).exp() * masked_advantage
+    clipped_ratios = ratios.clip(1-0.2, 1+0.2) * masked_advantage
+    action_loss = -ratios.minimum(clipped_ratios).sum(-1).mean()
+
     entropy_loss = (log_dist.exp() * log_dist).sum(-1).mean()   # this encourages diversity
     critic_loss = advantage.square().mean()
     opt.zero_grad()
@@ -50,8 +56,8 @@ if __name__ == "__main__":
   @TinyJit
   def get_action_dist(obs:Tensor) -> Tensor: return model(obs)[0].exp().realize()
 
-  BS = 128
-  for i in (t:=trange(100)):
+  BS = 256
+  for i in (t:=trange(30)):
     Xn, Rn, Mn = [], [], []
     ep_rews = []
     get_action_dist.reset()   # NOTE: if you don't reset the jit here it captures the wrong model on the first run through
@@ -80,7 +86,7 @@ if __name__ == "__main__":
         rew, discount = 0, 1.0
         for r in rews[i:]:
           rew += r * discount
-          discount *= 0.9
+          discount *= 0.98
         Rn.append([rew])
         act_mask = np.zeros((env.action_space.n), dtype=np.float32)
         act_mask[act] = 1.0
@@ -88,9 +94,11 @@ if __name__ == "__main__":
 
     # TODO: this shouldn't be numpy
     X, R, M = np.array(Xn, dtype=np.float32), np.array(Rn, dtype=np.float32), np.array(Mn, dtype=np.float32)
-    samples = Tensor.randint(BS, high=X.shape[0], device="CPU").numpy()
-    action_loss, entropy_loss, critic_loss = train_step(Tensor(X[samples]), Tensor(R[samples]), Tensor(M[samples]))
-    t.set_description(f"action_loss: {action_loss.item():6.2f} entropy_loss: {entropy_loss.item():6.2f} critic_loss: {critic_loss.item():6.2f} ep_count: {len(ep_rews):2d} avg_ep_rew: {sum(ep_rews)/len(ep_rews):6.2f}")
+    old_log_dist = model(Tensor(X))[0].numpy()   # TODO: could save these instead of recomputing
+    for i in range(5):
+      samples = Tensor.randint(BS, high=X.shape[0], device="CPU").numpy()
+      action_loss, entropy_loss, critic_loss = train_step(Tensor(X[samples]), Tensor(R[samples]), Tensor(M[samples]), Tensor(old_log_dist[samples]))
+    t.set_description(f"action_loss: {action_loss.item():7.2f} entropy_loss: {entropy_loss.item():7.2f} critic_loss: {critic_loss.item():7.2f} ep_count: {len(ep_rews):2d} avg_ep_rew: {sum(ep_rews)/len(ep_rews):6.2f}")
 
   test_rew = evaluate(model, gym.make('CartPole-v1', render_mode='human'))
   print(f"test reward: {test_rew}")
