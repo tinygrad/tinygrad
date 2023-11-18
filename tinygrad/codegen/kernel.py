@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, math, itertools
-from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
+from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union, Callable, Iterable
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, Device, Compiled
 from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, ansilen, getenv, prod, DEBUG
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
@@ -296,7 +296,7 @@ class Kernel:
     if global_dims > 0:
       if global_max:
         tmp = global_max[:global_dims] + (local_max[:self.local_dims] if local_max else [])
-        if max(global_max) < max(self.full_shape[:global_dims]): self.reshape_and_permute(lambda x: self._limit_size(x, tmp + [math.inf] * (len(self.full_shape)-len(tmp))), None)
+        if max(global_max) < max(self.full_shape[:global_dims]): self.reshape_and_permute(lambda shape: self._limit_size(shape, tmp + [math.inf] * (len(self.full_shape)-len(tmp))), None)
         assert max(global_max) >= max(self.full_shape[:global_dims]), f"device max allocation {max(self.full_shape[:global_dims])} exceeds global dim maximum {max(global_max)}"
       for i in range(global_dims-1):
         if i < len(global_max) and self.full_shape[i] > global_max[i]:
