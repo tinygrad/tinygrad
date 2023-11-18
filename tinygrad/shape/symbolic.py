@@ -11,7 +11,7 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Iter
 def is_sym_int(x: Any) -> bool: return isinstance(x, (int, Node))
 
 class Node:
-  b: Union[Node, int]
+  b:sint
   min: int
   max: int
   def render(self, ops=None, ctx=None) -> Any:
@@ -46,15 +46,15 @@ class Node:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
   def __neg__(self): return self*-1
-  def __add__(self, b:Union[Node,int]): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
+  def __add__(self, b:sint): return Variable.sum([self, b if isinstance(b, Node) else Variable.num(b)])
   def __radd__(self, b:int): return self+b
-  def __sub__(self, b:Union[Node,int]): return self+-b
+  def __sub__(self, b:sint): return self+-b
   def __rsub__(self, b:int): return -self+b
-  def __le__(self, b:Union[Node,int]): return self < (b+1)
-  def __gt__(self, b:Union[Node,int]): return (-self) < (-b)
-  def __ge__(self, b:Union[Node,int]): return (-self) < (-b+1)
-  def __lt__(self, b:Union[Node,int]): return create_node(LtNode(self, b))
-  def __mul__(self, b:Union[Node, int]):
+  def __le__(self, b:sint): return self < (b+1)
+  def __gt__(self, b:sint): return (-self) < (-b)
+  def __ge__(self, b:sint): return (-self) < (-b+1)
+  def __lt__(self, b:sint): return create_node(LtNode(self, b))
+  def __mul__(self, b:sint):
     if b == 0: return NumNode(0)
     if b == 1: return self
     if self.__class__ is NumNode: return NumNode(self.b*b) if isinstance(b, int) else b*self.b
@@ -67,7 +67,7 @@ class Node:
     if self.min > b >= 0: return NumNode(0)
     if isinstance(self, NumNode): return NumNode(b // self.b)
     raise RuntimeError(f"not supported: {b} // {self}")
-  def __floordiv__(self, b:Union[Node,int], factoring_allowed=True):
+  def __floordiv__(self, b:sint, factoring_allowed=True):
     if isinstance(b, Node):
       if b.__class__ is NumNode: return self // b.b
       if self == b: return NumNode(1)
@@ -88,7 +88,7 @@ class Node:
     if self.min > b >= 0: return NumNode(b)
     if isinstance(self, NumNode): return NumNode(b % self.b)
     raise RuntimeError(f"not supported: {b} % {self}")
-  def __mod__(self, b:Union[Node,int]):
+  def __mod__(self, b:sint):
     if isinstance(b, Node):
       if b.__class__ is NumNode: return self % b.b
       if self == b: return NumNode(0)
@@ -182,14 +182,14 @@ def create_node(ret:Node):
   return ret
 
 class OpNode(Node):
-  def __init__(self, a:Node, b:Union[Node, int]):
+  def __init__(self, a:Node, b:sint):
     self.a, self.b = a, b
     self.min, self.max = self.get_bounds()
   def vars(self): return self.a.vars() + (self.b.vars() if isinstance(self.b, Node) else [])
   def get_bounds(self) -> Tuple[int, int]: raise NotImplementedError("must be implemented")
 
 class LtNode(OpNode):
-  def __floordiv__(self, b: Union[Node, int], _=False): return (self.a//b) < (self.b//b)
+  def __floordiv__(self, b:sint, _=False): return (self.a//b) < (self.b//b)
   def get_bounds(self) -> Tuple[int, int]:
     if isinstance(self.b, int):
       return (1, 1) if self.a.max < self.b else (0, 0) if self.a.min >= self.b else (0, 1)
@@ -197,33 +197,33 @@ class LtNode(OpNode):
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) < (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
 class MulNode(OpNode):
-  def __lt__(self, b: Union[Node, int]):
+  def __lt__(self, b:sint):
     if isinstance(b, Node) or isinstance(self.b, Node) or self.b == -1: return Node.__lt__(self, b)
     sgn = 1 if self.b > 0 else -1
     return Node.__lt__(self.a*sgn, (b + abs(self.b) - 1)//abs(self.b))
-  def __mul__(self, b: Union[Node, int]): return self.a*(self.b*b) # two muls in one mul
-  def __floordiv__(self, b: Union[Node, int], factoring_allowed=False): # NOTE: mod negative isn't handled right
+  def __mul__(self, b:sint): return self.a*(self.b*b) # two muls in one mul
+  def __floordiv__(self, b:sint, factoring_allowed=False): # NOTE: mod negative isn't handled right
     if self.b % b == 0: return self.a*(self.b//b)
     if b % self.b == 0 and self.b > 0: return self.a//(b//self.b)
     return Node.__floordiv__(self, b, factoring_allowed)
-  def __mod__(self, b: Union[Node, int]):
+  def __mod__(self, b:sint):
     a = (self.a * (self.b%b))
     return Node.__mod__(a, b)
   def get_bounds(self) -> Tuple[int, int]: return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) * (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
 class DivNode(OpNode):
-  def __floordiv__(self, b: Union[Node, int], _=False): return self.a//(self.b*b) # two divs is one div
+  def __floordiv__(self, b:sint, _=False): return self.a//(self.b*b) # two divs is one div
   def get_bounds(self) -> Tuple[int, int]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     return self.a.min//self.b, self.a.max//self.b
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) // self.b
 
 class ModNode(OpNode):
-  def __mod__(self, b: Union[Node, int]):
+  def __mod__(self, b:sint):
     if isinstance(b, Node) or isinstance(self.b, Node): return Node.__mod__(self, b)
     return self.a % b if gcd(self.b, b) == b else Node.__mod__(self, b)
-  def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
+  def __floordiv__(self, b:sint, factoring_allowed=True):
     if (self.b % b == 0): return (self.a//b) % (self.b//b) # put the div inside mod
     return Node.__floordiv__(self, b, factoring_allowed)
   def get_bounds(self) -> Tuple[int, int]:
@@ -237,9 +237,9 @@ class RedNode(Node):
 
 class SumNode(RedNode):
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
+  def __mul__(self, b:sint): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
+  def __floordiv__(self, b:sint, factoring_allowed=True):
     fully_divided: List[Node] = []
     rest: List[Node] = []
     if isinstance(b, SumNode):
@@ -275,7 +275,7 @@ class SumNode(RedNode):
     return Node.sum(fully_divided) + Node.__floordiv__(Node.sum(rest), b)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def __mod__(self, b: Union[Node, int]):
+  def __mod__(self, b:sint):
     if isinstance(b, SumNode):
       nu_num = sum(node.b for node in self.flat_components if node.__class__ is NumNode)
       de_num = sum(node.b for node in b.flat_components if node.__class__ is NumNode)
@@ -288,7 +288,7 @@ class SumNode(RedNode):
       else: new_nodes.append(x)
     return Node.__mod__(Node.sum(new_nodes), b)
 
-  def __lt__(self, b:Union[Node,int]):
+  def __lt__(self, b:sint):
     lhs: Node = self
     if isinstance(b, int):
       new_sum = []
@@ -317,7 +317,7 @@ class SumNode(RedNode):
     return new_nodes
 
 class AndNode(RedNode):
-  def __floordiv__(self, b: Union[Node, int], _=True): return Variable.ands([x//b for x in self.nodes])
+  def __floordiv__(self, b:sint, _=True): return Variable.ands([x//b for x in self.nodes])
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node:
     subed = []
     for node in self.nodes:
@@ -332,9 +332,9 @@ def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   return create_node(ret)
 
 @functools.lru_cache(maxsize=None)
-def sym_rename(s) -> str: return f"s{sym_rename.cache_info().currsize}"
-def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
-def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
+def sym_rename(s:sint) -> str: return f"s{sym_rename.cache_info().currsize}"
+def sym_render(a:sint, ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
+def sym_infer(a:sint, var_vals: Dict[Variable, int]) -> int:
   if isinstance(a, int): return a
   ret = a.substitute({k:Variable.num(v) for k, v in var_vals.items()})
   assert isinstance(ret, NumNode), f"sym_infer didn't produce NumNode from {a} with {var_vals}"
