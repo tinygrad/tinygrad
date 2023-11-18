@@ -1,3 +1,4 @@
+# model based off https://towardsdatascience.com/going-beyond-99-mnist-handwritten-digits-recognition-cfff96337392
 from tinygrad import Tensor, TinyJit, nn
 from tinygrad.helpers import GlobalCounters
 from extra.datasets import fetch_mnist
@@ -7,10 +8,10 @@ class Model:
   def __init__(self):
     self.layers = [
       nn.Conv2d(1, 32, 5), Tensor.relu,
-      nn.Conv2d(32, 32, 5, bias=False), Tensor.relu,
+      nn.Conv2d(32, 32, 5, bias=False),
       nn.BatchNorm2d(32), Tensor.relu, Tensor.max_pool2d,
       nn.Conv2d(32, 64, 3), Tensor.relu,
-      nn.Conv2d(64, 64, 3, bias=False), Tensor.relu,
+      nn.Conv2d(64, 64, 3, bias=False),
       nn.BatchNorm2d(64), Tensor.relu, Tensor.max_pool2d,
       lambda x: x.flatten(1), nn.Linear(576, 10)]
 
