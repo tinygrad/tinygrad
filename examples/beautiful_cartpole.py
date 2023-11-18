@@ -1,6 +1,7 @@
 from typing import Tuple
+import time
 from tinygrad import Tensor, TinyJit, nn
-from tinygrad.helpers import dtypes  # TODO: wouldn't need this if argmax returned the right dtype
+from tinygrad.helpers import dtypes, Timing  # TODO: wouldn't need this if argmax returned the right dtype
 import gymnasium as gym
 from tqdm import trange
 import numpy as np  # TODO: remove numpy import
@@ -63,49 +64,50 @@ if __name__ == "__main__":
     return ret
 
   BS = 256
-  for i in (t:=trange(30)):
-    Xn, Rn, Mn = [], [], []
-    ep_rews = []
+  MAX_REPLAY_BUFFER = 2000
+  st, steps = time.perf_counter(), 0
+  Xn, Rn, Mn = [], [], []
+  for i in (t:=trange(50)):
     get_action_dist.reset()   # NOTE: if you don't reset the jit here it captures the wrong model on the first run through
-    while len(Xn) < BS:
-      obs:np.ndarray = env.reset()[0]
-      acts, rews, terminated, truncated = [], [], False, False
-      # NOTE: we don't want to early stop since then the rewards are wrong for the last episode
-      while not terminated and not truncated:
-        # pick actions
-        # TODO: move the multinomial into jitted tinygrad when JIT rand works
-        # TODO: what's the temperature here?
-        act = get_action_dist(Tensor(obs)).multinomial().item()
 
-        # save this state action pair
-        # TODO: don't use np.copy here on the CPU, what's the tinygrad way to do this and keep on device? need __setitem__ assignment
-        Xn.append(np.copy(obs))
-        acts.append(act)
+    obs:np.ndarray = env.reset()[0]
+    acts, rews, terminated, truncated = [], [], False, False
+    # NOTE: we don't want to early stop since then the rewards are wrong for the last episode
+    while not terminated and not truncated:
+      # pick actions
+      # TODO: move the multinomial into jitted tinygrad when JIT rand works
+      # TODO: what's the temperature here?
+      act = get_action_dist(Tensor(obs)).multinomial().item()
 
-        obs, rew, terminated, truncated, _ = env.step(act)
-        rews.append(rew)
-      ep_rews.append(sum(rews))
+      # save this state action pair
+      # TODO: don't use np.copy here on the CPU, what's the tinygrad way to do this and keep on device? need __setitem__ assignment
+      Xn.append(np.copy(obs))
+      acts.append(act)
 
-      # reward to go
-      # TODO: move this into tinygrad
-      for i, act in enumerate(acts):
-        rew, discount = 0, 1.0
-        for r in rews[i:]:
-          rew += r * discount
-          discount *= 0.98
-        Rn.append([rew])
-        act_mask = np.zeros((env.action_space.n), dtype=np.float32)
-        act_mask[act] = 1.0
-        Mn.append(act_mask)
+      obs, rew, terminated, truncated, _ = env.step(act)
+      rews.append(rew)
+    steps += len(rews)
 
+    # reward to go
+    # TODO: move this into tinygrad
+    for i, act in enumerate(acts):
+      rew, discount = 0, 1.0
+      for r in rews[i:]:
+        rew += r * discount
+        discount *= 0.98
+      Rn.append([rew])
+      act_mask = np.zeros((env.action_space.n), dtype=np.float32)
+      act_mask[act] = 1.0
+      Mn.append(act_mask)
+
+    Xn, Rn, Mn = Xn[-MAX_REPLAY_BUFFER:], Rn[-MAX_REPLAY_BUFFER:], Mn[-MAX_REPLAY_BUFFER:]
     X, R, M = Tensor(Xn), Tensor(Rn), Tensor(Mn)
     old_log_dist = model(X)[0]   # TODO: could save these instead of recomputing
     for i in range(5):
       samples = Tensor.randint(BS, high=X.shape[0]).realize()  # TODO: remove the need for this
       # TODO: is this recompiling based on the shape?
       action_loss, entropy_loss, critic_loss = train_step(X[samples], R[samples], M[samples], old_log_dist[samples])
-
-    t.set_description(f"action_loss: {action_loss.item():7.2f} entropy_loss: {entropy_loss.item():7.2f} critic_loss: {critic_loss.item():7.2f} ep_count: {len(ep_rews):2d} avg_ep_rew: {sum(ep_rews)/len(ep_rews):6.2f}")
+    t.set_description(f"sz: {len(Xn):5d} steps/s: {steps/(time.perf_counter()-st):7.2f} action_loss: {action_loss.item():7.2f} entropy_loss: {entropy_loss.item():7.2f} critic_loss: {critic_loss.item():7.2f} reward: {sum(rews):6.2f}")
 
   test_rew = evaluate(model, gym.make('CartPole-v1', render_mode='human'))
   print(f"test reward: {test_rew}")
