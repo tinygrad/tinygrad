@@ -3,7 +3,7 @@ import functools
 from math import gcd
 from itertools import product
 from tinygrad.helpers import partition
-from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Iterator
+from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Iterator, Set
 
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
@@ -18,7 +18,7 @@ class Node:
     if ops is None: ops = render_python
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
     return ops[type(self)](self, ops, ctx)
-  def vars(self): return []
+  def vars(self) -> Set[Variable]: return set()
 
   def expand_idx(self) -> VariableOrNum: return next((v for v in self.vars() if v.expr is None), NumNode(0))
   # expand a Node into List[Node] that enumerates the underlying Variables from min to max
@@ -149,7 +149,7 @@ class Variable(Node):
   def unbind(self) -> Tuple[Variable, int]:
     assert self.val is not None, f"cannot unbind {self}"
     return Variable(self.expr, self.min, self.max), self.val
-  def vars(self): return [self]
+  def vars(self): return {self}
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return var_vals[self] if self in var_vals else self
 
 class NumNode(Node):
@@ -173,7 +173,7 @@ class OpNode(Node):
   def __init__(self, a:Node, b:Union[Node, int]):
     self.a, self.b = a, b
     self.min, self.max = self.get_bounds()
-  def vars(self): return self.a.vars() + (self.b.vars() if isinstance(self.b, Node) else [])
+  def vars(self): return self.a.vars() | (self.b.vars() if isinstance(self.b, Node) else set())
   def get_bounds(self) -> Tuple[int, int]: raise NotImplementedError("must be implemented")
 
 class LtNode(OpNode):
@@ -221,7 +221,7 @@ class ModNode(OpNode):
 
 class RedNode(Node):
   def __init__(self, nodes:List[Node]): self.nodes = nodes
-  def vars(self): return functools.reduce(lambda l,x: l+x.vars(), self.nodes, [])
+  def vars(self) -> Set[Variable]: return functools.reduce(lambda l,x: l | x.vars(), self.nodes, set())
 
 class SumNode(RedNode):
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none

@@ -71,8 +71,8 @@ def st_equivalent(st1: ShapeTracker, st2: ShapeTracker):
   # always invalid
   if valid1 == 0 and valid2 == 0: return True
 
-  var1 = set(idx1.vars() + valid1.vars())
-  var2 = set(idx2.vars() + valid2.vars())
+  var1 = idx1.vars() | valid1.vars()
+  var2 = idx2.vars() | valid2.vars()
   # Maybe there are cases that vars are different yet the sts are the same?
   if var1 != var2: return False
 
