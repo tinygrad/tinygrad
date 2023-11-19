@@ -99,7 +99,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dty
 UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
 
 class LazyBuffer:
-  __slots__ = ('st', 'device', 'shape', 'optype', '_dtype', '_realized', 'output_buffer', 'children', 'views', 'op', '_base', '__weakref__')
+  __slots__ = ('st', 'device', 'shape', 'optype', '_dtype', '_realized', 'output_buffer', 'children', 'op', '_base', '__weakref__')
   __deletable__ = ('op',)
   def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:Optional[LazyOp], dtype:DType, src:Optional[RawBuffer]=None, base:Optional[LazyBuffer]=None):
     self.st: ShapeTracker = st
@@ -108,15 +108,16 @@ class LazyBuffer:
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: WeakSet[LazyBuffer] = WeakSet()
-    self.views: WeakSet[LazyBuffer] = WeakSet()
+    # self.views: WeakSet[LazyBuffer] = WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer. it is now with schedule
     if op is not None:
       self.op: LazyOp = op
       for x in op.buffers: x.children.add(self)
     assert optype != MovementOps or (base is not None and base.optype != MovementOps), "MovementOps must be based"
     self._base = base
-    if base: base.views.add(self)
-    else: assert st.contiguous, "unbased LazyBuffers must be contiguous"
+    # if base: base.views.add(self)
+    # else: assert st.contiguous, "unbased LazyBuffers must be contiguous"
+    assert base is not None or st.contiguous, "unbased LazyBuffers must be contiguous"
 
   @property
   def base(self): return self._base or self
