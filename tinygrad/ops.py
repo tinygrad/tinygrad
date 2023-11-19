@@ -1,7 +1,8 @@
 from __future__ import annotations
+from collections import deque
 import importlib, inspect, functools, pathlib, time, re
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping, cast
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping, cast, Iterator
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT, dedup, all_int
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer, NumNode
@@ -55,7 +56,11 @@ class LazyOp:
   arg: Any = None
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
   @functools.cached_property
-  def buffers(self) -> Tuple[LazyBuffer, ...]: return tuple(dedup(sum([x.buffers for x in self.src], ())))
+  def buffers(self) -> Tuple[LazyBuffer, ...]: return tuple(dedup(self.buffers_iter()))
+  def buffers_iter(self) -> Iterator[LazyBuffer]:
+    for x in self.src:
+      if isinstance(x, LazyOp): yield from x.buffers_iter()
+      else: yield x
   @functools.cached_property
   def hash(self): return hash((self.op,self.src, self.arg))
   def __hash__(self): return self.hash
