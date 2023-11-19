@@ -1,5 +1,4 @@
 from __future__ import annotations
-from collections import deque
 import importlib, inspect, functools, pathlib, time, re
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping, cast, Iterator
