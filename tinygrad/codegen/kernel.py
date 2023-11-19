@@ -232,12 +232,12 @@ class Kernel:
   def simplify_ones(self) -> bool:
     # remove places where the shape is all ones
     # TODO: this should be factored in to multi shape stride
-    if self.shape_len == 0: return False
+    if 1 not in self.full_shape: return False
     all_ones = [s==1 for s in self.full_shape]
     self.local_dims -= sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce])
     self.upcasted -= sum(all_ones[self.shape_len-self.upcasted:])
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
-    return any(all_ones)
+    return True
 
   def simplify_merge_adjacent(self):
     if self.shape_len == 0: return
