@@ -2,7 +2,7 @@ from tinygrad.nn import Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
 import numpy as np
 from itertools import chain
-from extra.utils import get_child, fetch, download_file
+from extra.utils import fetch
 from pathlib import Path
 import cv2
 from collections import defaultdict
@@ -412,8 +412,7 @@ if __name__ == '__main__':
   depth, width, ratio = get_variant_multiples(yolo_variant)
   yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
 
-  weights_location = Path(__file__).parents[1] / "weights" / f'yolov8{yolo_variant}.safetensors'
-  download_file(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors', weights_location)
+  weights_location = fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors')
 
   state_dict = safe_load(weights_location)
   load_state_dict(yolo_infer, state_dict)
