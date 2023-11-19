@@ -97,6 +97,7 @@ class TestRandomness(unittest.TestCase):
       self.assertTrue(equal_distribution(Tensor.kaiming_normal, lambda x: torch.nn.init.kaiming_normal_(torch.empty(x)), shape=shape))
 
   def test_multinomial(self):
+    self.assertRaises(AssertionError, lambda: Tensor(2).multinomial(1, replacement=False))
     self.assertRaises(AssertionError, lambda: Tensor([1, 9]).multinomial(0, replacement=False))
     def _check_with_torch(w, num_samples, replacement):
       tiny_res = Tensor(w).multinomial(num_samples, replacement=replacement)
