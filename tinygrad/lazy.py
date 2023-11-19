@@ -63,13 +63,13 @@ def _ast_binaryops(op:LazyOp, shape: Tuple[sint, ...]) -> LazyOp:
 
 def _replace_bufferops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
   replacements:Dict[LazyBuffer, LazyOp] = {}
-  base_bufs = dedup([(x._base or x) for x in op.buffers if not x.is_unrealized_const()])
+  base_bufs = dedup([x.base for x in op.buffers if not x.is_unrealized_const()])
   for x in op.buffers:
     st = x.st.simplify().unbind()
-    if (x._base or x) in base_bufs:
-      replacements[x] = LazyOp(BufferOps.MEM, (), MemBuffer(base_bufs.index(x._base or x)+1, x.dtype, st))
-    elif not x.realized and (x._base or x).op.op == LoadOps.CONST:
-      replacements[x] = LazyOp(BufferOps.CONST, (), ConstBuffer(float((x._base or x).op.arg), x.dtype, st))
+    if x.base in base_bufs:
+      replacements[x] = LazyOp(BufferOps.MEM, (), MemBuffer(base_bufs.index(x.base)+1, x.dtype, st))
+    elif not x.realized and x.base.op.op == LoadOps.CONST:
+      replacements[x] = LazyOp(BufferOps.CONST, (), ConstBuffer(float(x.base.op.arg), x.dtype, st))
     else:
       raise NotImplementedError(f"not handled {x}")
   return (op.src[0] if op.op == MovementOps.RESHAPE else op).map_buffers(replacements), base_bufs
@@ -122,16 +122,16 @@ class LazyBuffer:
   @property
   def base(self): return self._base or self
 
-  def is_unrealized_const(self): return not self.realized and (self._base or self).op.op == LoadOps.CONST
+  def is_unrealized_const(self): return not self.realized and self.base.op.op == LoadOps.CONST
 
   @property
-  def realized(self): return (self._base or self)._realized
+  def realized(self): return self.base._realized
   @realized.setter
   def realized(self, val):
     assert self._base is None, "no setting realized of based LazyBuffers"
     self._realized = val
   @property
-  def dtype(self): return (self._base or self)._dtype
+  def dtype(self): return self.base._dtype
   @dtype.setter
   def dtype(self, val):
     assert self._base is None, "no setting dtype of based LazyBuffers"
@@ -156,7 +156,7 @@ class LazyBuffer:
     if seen is None: seen = set()
     if self in seen or self.realized or self.is_unrealized_const(): return []
     seen.add(self)
-    if self._base: return self._base.schedule(seen)
+    if self.base is not self: return self.base.schedule(seen)
 
     # rewrite unbased CONTIGUOUS into UnaryOps.NOOP
     op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
@@ -192,10 +192,10 @@ class LazyBuffer:
 
   def contiguous(self:LazyBuffer) -> LazyBuffer:
     if not self.realized and self.op.op in LoadOps and self.op.op != LoadOps.CONST: return self  # all LoadOps are already contiguous (except CONST)
-    if self.st.contiguous and self.st.size() == (self._base or self).st.size() and not self.is_unrealized_const():
+    if self.st.contiguous and self.st.size() == self.base.st.size() and not self.is_unrealized_const():
       # this will turn into nothing, it's based and a copy
       # TODO: based lazybuffers shouldn't take dtype or var_vals, same issue in movementops
-      return create_lazybuffer(self.device, ShapeTracker.from_shape(tuple(self.shape)), LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype, base=(self._base or self))
+      return create_lazybuffer(self.device, ShapeTracker.from_shape(tuple(self.shape)), LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype, base=self.base)
     # real contiguous, this will turn into a UnaryOps.NOOP
     return LazyBuffer.loadop(LoadOps.CONTIGUOUS, self.shape, self.dtype, self.device, src=self)
 
@@ -233,7 +233,7 @@ class LazyBuffer:
       # remove the buffers from any (childless) BinaryOps that feed into this
       _srcs = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])
       # TODO: needs general merge limiting
-      if out_device != "WEBGPU" or len(dedup([(x._base or x) for _src in _srcs for x in _src.buffers if not x.is_unrealized_const()])) < 7: srcs = _srcs # type: ignore
+      if out_device != "WEBGPU" or len(dedup([x.base for _src in _srcs for x in _src.buffers if not x.is_unrealized_const()])) < 7: srcs = _srcs # type: ignore
 
     return create_lazybuffer(out_device, ShapeTracker.from_shape(out_shape), BinaryOps, LazyOp(op, srcs, arg), out_dtype)
 
@@ -263,7 +263,7 @@ class LazyBuffer:
       root = get_movementroot(self)
       if root.st.contiguous and root != self and prod(st.shape) == prod(root.shape):
         return root.reshape(st.shape)
-    return create_lazybuffer(self.device, st, MovementOps, LazyOp(op, (self,), arg), self.dtype, base=(self._base or self))
+    return create_lazybuffer(self.device, st, MovementOps, LazyOp(op, (self,), arg), self.dtype, base=self.base)
 
   def reshape(self:LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == arg: return self
