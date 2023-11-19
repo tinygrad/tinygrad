@@ -30,6 +30,7 @@ class View:
     contiguous = offset == 0 and mask is None and all(s1 == s2 for s1,s2 in zip(strides, strides_for_shape(shape)))
     return View(shape, strides, offset, mask, contiguous)
 
+  @functools.lru_cache(maxsize=None)
   def vars(self) -> Set[Variable]:
     flatten_mask = tuple(x for m in self.mask for x in m) if self.mask is not None else tuple()
     return functools.reduce(operator.or_, [x.vars() for x in self.shape+self.strides+(self.offset,)+flatten_mask if isinstance(x, Node)], set())
