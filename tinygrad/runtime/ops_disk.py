@@ -23,7 +23,7 @@ class RawDiskBuffer(RawBufferMapped):
           fd = _posixshmem.shm_open(device[4:], os.O_RDWR, 0o600)
           # TODO: these flags are somewhat platform specific, but python doesn't expose the ones we need
           shm = mmap.mmap(fd, size * dtype.itemsize, flags=mmap.MAP_SHARED | 0x2000 | 0x008000)
-          shm.madvise(mmap.MADV_HUGEPAGE)     # type: ignore   # not on OSX
+          shm.madvise(getattr(mmap, 'MADV_HUGEPAGE')) # not on OSX
           os.close(fd)
         buf = [None, shm, 1]
       else:
