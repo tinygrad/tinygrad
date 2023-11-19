@@ -1,6 +1,7 @@
-import unittest
+import unittest, io
 import numpy as np
-from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up
+from PIL import Image
+from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch
 from tinygrad.shape.symbolic import Variable, NumNode
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -146,6 +147,18 @@ class TestRoundUp(unittest.TestCase):
     self.assertEqual(round_up(8,4), 8)
     self.assertEqual(round_up(232, 24984), 24984)
     self.assertEqual(round_up(24984, 232), 25056)
+
+class TestFetch(unittest.TestCase):
+  def test_fetch_bad_http(self):
+    self.assertRaises(AssertionError, fetch, 'http://www.google.com/404')
+
+  def test_fetch_small(self):
+    assert(len(fetch('https://google.com').read_bytes())>0)
+
+  def test_fetch_img(self):
+    img = fetch("https://media.istockphoto.com/photos/hen-picture-id831791190")
+    with Image.open(img) as pimg:
+      assert pimg.size == (705, 1024)
 
 if __name__ == '__main__':
   unittest.main()
