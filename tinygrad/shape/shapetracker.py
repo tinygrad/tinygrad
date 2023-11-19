@@ -71,6 +71,9 @@ class ShapeTracker:
   @staticmethod
   def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),))
 
+  @functools.cached_property
+  def is_all_int(self) -> bool: return all(v.is_all_int for v in self.views)
+
   @property
   def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
 
@@ -79,12 +82,12 @@ class ShapeTracker:
 
   def size(self): return 0 if (0 in self.shape) else self.expr_idxs()[0].max+1
 
-  def vars(self) -> Set[Variable]: return functools.reduce(operator.or_, [v.vars for v in self.views], set())
+  def vars(self) -> Set[Variable]: return set() if self.is_all_int else functools.reduce(operator.or_, [v.vars for v in self.views], set())
 
   @property
-  def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
+  def var_vals(self) -> Dict[Variable, int]: return dict() if self.is_all_int else merge_dicts([dict([v.unbind()]) for v in self.vars()])
 
-  def unbind(self) -> ShapeTracker: return ShapeTracker(tuple(v.unbind() for v in self.views))
+  def unbind(self) -> ShapeTracker: return self if self.is_all_int else ShapeTracker(tuple([v.unbind() for v in self.views]))
 
   def to_movement_ops(self) -> List[Tuple[MovementOps, Tuple]]:
     to_apply:List[Tuple[MovementOps, Tuple]] = []
