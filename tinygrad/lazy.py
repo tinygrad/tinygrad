@@ -36,17 +36,17 @@ def _ast_reduceops(op:LazyOp) -> LazyOp:
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
 def _ast_binaryops(op:LazyOp, shape: Tuple[sint, ...]) -> LazyOp:
-  real_srcs: Dict[LazyBuffer, Optional[Union[LazyOp, LazyBuffer]]] = {x:None for x in op.buffers}
+  real_srcs: Dict[LazyBuffer, Union[LazyOp, LazyBuffer]] = {}
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
-  psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(real_srcs.keys(), map(get_movementroot_contiguous, real_srcs.keys())) if x.optype == ReduceOps and not x.realized and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
+  psrcs: List[Tuple[LazyBuffer, LazyBuffer]] = [(k,x) for k,x in zip(op.buffers, map(get_movementroot_contiguous, op.buffers)) if x.optype == ReduceOps and not x.realized and prod(k.shape) == prod(x.shape) and len(x.children) <= 1 and len(k.children) <= 1]
   intermediate_shape: Tuple[sint, ...] = shape
   if MERGE_ONE_REDUCE_INTO_ELEMENTWISE and psrcs:
     psrc = psrcs[0] # NOTE: right now we can't handle multiple, as we'd have to check for loop
     if psrc[1].optype == ReduceOps:
       top = _ast_reduceops(psrc[1].op)
     real_srcs[psrc[0]] = top
-    real_srcs.update({x:x for x in top.buffers})  # the reduce op buffers are not modified
+    for b in top.buffers: real_srcs[b] = b  # the reduce op buffers are not modified
 
     # if the ReduceOp is followed by a reshape, we push this reshape before all the ElementwiseOp inputs
     if psrc[0].shape != psrc[1].shape:
@@ -55,10 +55,9 @@ def _ast_binaryops(op:LazyOp, shape: Tuple[sint, ...]) -> LazyOp:
 
   # reshape all the late ops into the output shape
   # NOTE: these RESHAPEs will return self if they don't change the shape
-  for x in real_srcs.keys():
-    if real_srcs[x] is None: real_srcs[x] = x.reshape(intermediate_shape)
-  # NOTE: cast the type to remove the Optional
-  ast = op.map_buffers(cast(Dict[LazyBuffer, Union[LazyOp, LazyBuffer]], real_srcs))
+  for x in op.buffers:
+    if x not in real_srcs: real_srcs[x] = x.reshape(intermediate_shape)
+  ast = op.map_buffers(real_srcs)
   return LazyOp(MovementOps.RESHAPE, (ast, ), shape) if intermediate_shape != shape else ast
 
 def _replace_bufferops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
@@ -80,7 +79,7 @@ def get_single_root(root:LazyBuffer) -> LazyBuffer: return get_single_root(root.
 def get_movementroot(root:LazyBuffer, allow_contiguous=False) -> LazyBuffer: return get_movementroot(cast(LazyBuffer, root.op.src[0]), allow_contiguous) if not root.realized and (root.optype == MovementOps or (root.op.op == LoadOps.CONTIGUOUS and allow_contiguous and root.op.src[0].st.contiguous)) else root
 def get_movementroot_contiguous(x:LazyBuffer) -> LazyBuffer: return get_movementroot_contiguous(cast(LazyBuffer, x.op.src[0])) if not x.realized and x.op.op == LoadOps.CONTIGUOUS else (get_movementroot(x, True) if x.optype == MovementOps and x.st.contiguous else x)
 
-def vars_from_ast(ast:LazyOp) -> Set[Variable]: return functools.reduce(operator.or_, [x.arg.st.vars() for x in ast.get_lazyops() if x.op in BufferOps], set())
+def vars_from_ast(ast:LazyOp) -> Set[Variable]: return functools.reduce(operator.or_, [x.arg.st.vars() for x in ast.get_lazyops() if x.op in BufferOps and not x.arg.st.is_all_int], set())
 
 lazycache: WeakValueDictionary = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType, base:Optional[LazyBuffer]=None):
@@ -147,9 +146,9 @@ class LazyBuffer:
   # *** scheduling ***
 
   def schedule(self, seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
-    if seen is None: seen = set()
-    if self in seen or self.realized or self.is_unrealized_const(): return []
-    seen.add(self)
+    if (seen is not None and self in seen) or self.realized or self.is_unrealized_const(): return []
+    if seen is None: seen = set([self])
+    else: seen.add(self)
     if self.base is not self: return self.base.schedule(seen)
 
     # rewrite unbased CONTIGUOUS into UnaryOps.NOOP
@@ -159,10 +158,9 @@ class LazyBuffer:
     elif self.optype is ReduceOps: op = _ast_reduceops(op)
 
     # schedule the past
-    ret:List[ScheduleItem] = []
-    for x in op.buffers: ret += x.schedule(seen)
+    ret:List[ScheduleItem] = sum([x.schedule(seen) for x in op.buffers], [])
 
-    var_vals = merge_dicts([self.st.var_vals] + [buf.st.var_vals for buf in op.buffers])
+    var_vals = merge_dicts([buf.st.var_vals for buf in [self, *op.buffers] if not buf.st.is_all_int])
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)

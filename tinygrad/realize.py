@@ -14,7 +14,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
   if IMAGE >= 2: schedule = fix_schedule_for_images(schedule)
 
   # NOTE: if you for loop the schedule it's slow because nothing frees
-  while len(schedule):
+  while schedule:
     si = schedule.pop(0)
     if not disable_logging: log_schedule_item(si)
     assert all(x.realized for x in si.inputs), "can't run schedule, some inputs aren't realized"
