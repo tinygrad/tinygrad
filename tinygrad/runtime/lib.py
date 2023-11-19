@@ -3,13 +3,22 @@ import numpy as np
 from collections import defaultdict, deque
 from typing import TypeVar, Type, Any, Dict, Deque, Tuple
 from tinygrad.helpers import DType, dtypes, prod, GlobalCounters, ImageDType
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class RawBufferInfo:
+  size: int
+  dtype: DType
+  device: str
+  memsz: int
+  key: Tuple[int, ...]
 
 _T = TypeVar("_T")
 class RawBuffer:  # pylint: disable=abstract-method
   def __init__(self, size:int, dtype:DType, buf:Any=None, allocator:Any=None, **kwargs):
     self.size: int = size
     self.dtype: DType = dtype
-    self._buf = buf if buf is not None else (allocator(size, dtype, **kwargs) if allocator else None) # If buf is provided, use it. Otherwise try to allocate from the allocator.
+    self._buf = buf if buf is not None else (allocator(size, dtype, **kwargs) if allocator is not None else None) # If buf is provided, use it. Otherwise try to allocate from the allocator.
     self._memsz: int = size*dtype.itemsize
     self._allocator = allocator if allocator and hasattr(allocator, 'free') else None
     self._device = kwargs.get('device', None)
@@ -69,51 +78,50 @@ class LRUAllocator:
   def __init__(self, dev_memsz=(4<<30)):
     self.epoch = 0
     self.free_space: Dict[Any, int] = defaultdict(lambda: dev_memsz)
-    self.buffer_info: Dict[Any, Tuple[int, DType, str]] = dict()
+    self.buffer_info: Dict[Any, RawBufferInfo] = dict()
     self.cached_buffers: Dict[Tuple[int, ...], Deque[Tuple[Any, int]]] = defaultdict(deque) # Cached buffer storage, splitted by type and size, newest first.
     self.aging_order: Dict[Any, Deque[Tuple[Tuple[int, ...], int]]] = defaultdict(deque) # Keys of cached_buffers, ordered from oldest to newest updates.
 
   def _cache_reuse_buffer(self, rawbufs: Deque[Tuple[Any, int]]): # The newest cached buffer is reused.
-    GlobalCounters.mem_cached -= self._underlying_buf_memsz(rawbufs[0][0])
+    GlobalCounters.mem_cached -= self.buffer_info[rawbufs[0][0]].memsz
     return rawbufs.popleft()[0]
 
   def ensure_has_free_space(self, space_to_free, device):
-    while len(self.aging_order[device]) and self._get_cur_free_space(device) < space_to_free: # When OOM removing lru buffers.
+    while self.aging_order[device] and self._get_cur_free_space(device) < space_to_free: # When OOM removing lru buffers.
       bucket, epoch = self.aging_order[device].popleft()
       if self.cached_buffers[bucket] and self.cached_buffers[bucket][-1][1] == epoch: self._free_buffer(self.cached_buffers[bucket].pop()[0]) # Free cached buffer if it is still in cache.
     assert (curr_free := self._get_cur_free_space(device)) > space_to_free, f"out of memory - requested: {space_to_free/1e9:5.2f} GB, available: {curr_free/1e9:5.2f} GB"
 
   def _alloc_buffer(self, size, dtype, device, **kwargs):
-    self.ensure_has_free_space(size*dtype.itemsize, device)
+    self.ensure_has_free_space((memsz:=size*dtype.itemsize), device)
     while True:
       try:
         newbuf = self._do_alloc(max(1, size), dtype, device, **kwargs)
         break
       except Exception:
-        if len(self.aging_order[device]) == 0: raise
+        if not self.aging_order[device]: raise
         self.ensure_has_free_space(1.1*self._get_cur_free_space(device), device) # increase free space by 10% and try again.
-    self.free_space[device] -= size*dtype.itemsize
-    self.buffer_info[newbuf] = (size, dtype, device)
+    self.free_space[device] -= memsz
+    self.buffer_info[newbuf] = RawBufferInfo(size, dtype, device, memsz, self._cached_bufkey(size, dtype, device))
     return newbuf
 
   def _free_buffer(self, buf_to_free):
-    self.free_space[self.buffer_info[buf_to_free][2]] += self._underlying_buf_memsz(buf_to_free)
-    GlobalCounters.mem_cached -= self._underlying_buf_memsz(buf_to_free)
+    b = self.buffer_info[buf_to_free]
+    self.free_space[b.device] += b.memsz
+    GlobalCounters.mem_cached -= b.memsz
     self.buffer_info.pop(buf_to_free)
     self._do_free(buf_to_free)
-
   def __call__(self, size, dtype, device='0', **kwargs): # allocate
     rawbufs = self.cached_buffers.get(self._cached_bufkey(size, dtype, device), None)
     return self._cache_reuse_buffer(rawbufs) if rawbufs else self._alloc_buffer(size, dtype, device, **kwargs)
 
   def free(self, buf): # free() just caches buffer. It might be freed later when OOM during allocation.
     self.epoch += 1
-    size, dtype, device = self.buffer_info[buf]
-    self.cached_buffers[self._cached_bufkey(size, dtype, device)].appendleft((buf, self.epoch))
-    self.aging_order[device].append((self._cached_bufkey(size, dtype, device), self.epoch))
-    GlobalCounters.mem_cached += self._underlying_buf_memsz(buf)
+    b = self.buffer_info[buf]
+    self.cached_buffers[b.key].appendleft((buf, self.epoch))
+    self.aging_order[b.device].append((b.key, self.epoch))
+    GlobalCounters.mem_cached += b.memsz
 
-  def _underlying_buf_memsz(self, buf): return self.buffer_info[buf][0] * self.buffer_info[buf][1].itemsize
   def _cached_bufkey(self, size, dtype, device) -> Tuple[int, ...]: return (device, size, dtype, dtype.shape) if isinstance(dtype, ImageDType) else (device, size, dtype) # Provides a key for reusing device buffers with identical keys.
   def _do_alloc(self, size, dtype, device, **kwargs): raise NotImplementedError("must be implemented")
   def _do_free(self, buf): pass
