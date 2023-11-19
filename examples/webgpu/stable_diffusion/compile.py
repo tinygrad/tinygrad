@@ -1,12 +1,11 @@
 import os
 from extra.export_model import compile_net, jit_model
 from examples.stable_diffusion import StableDiffusion
+from tinygrad.helpers import fetch
 from tinygrad.nn.state import get_state_dict, safe_save, safe_load_metadata, torch_load, load_state_dict
 from tinygrad.tensor import Tensor
 from tinygrad.ops import Device
-from extra.utils import download_file
 from typing import NamedTuple, Any, List
-from pathlib import Path
 import argparse
 import numpy as np
 
@@ -27,8 +26,6 @@ def convert_f32_to_f16(input_file, output_file):
     f.write(metadata_json_bytes)
     front_float16_values.tofile(f)
     rest_float32_values.tofile(f)
-
-FILENAME = Path(__file__).parent.parent.parent.parent / "weights/sd-v1-4.ckpt"
 
 def split_safetensor(fn):
   _, json_len, metadata = safe_load_metadata(fn)
@@ -81,8 +78,8 @@ if __name__ == "__main__":
   model = StableDiffusion()
 
   # load in weights
-  download_file('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', FILENAME)
-  load_state_dict(model, torch_load(FILENAME)['state_dict'], strict=False)
+  model_ckpt = fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt')
+  load_state_dict(model, torch_load(model_ckpt)['state_dict'], strict=False)
 
   class Step(NamedTuple):
     name: str = ""
