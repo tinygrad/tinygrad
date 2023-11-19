@@ -79,7 +79,7 @@ class ShapeTracker:
 
   def size(self): return 0 if (0 in self.shape) else self.expr_idxs()[0].max+1
 
-  def vars(self) -> Set[Variable]: return functools.reduce(operator.or_, [v.vars() for v in self.views], set())
+  def vars(self) -> Set[Variable]: return functools.reduce(operator.or_, [v.vars for v in self.views], set())
 
   @property
   def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])

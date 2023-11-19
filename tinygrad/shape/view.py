@@ -22,20 +22,26 @@ class View:
   offset:sint
   mask:Optional[Tuple[Tuple[sint, sint], ...]]
   contiguous:bool
+  is_all_int: bool = False
 
   @staticmethod
-  @functools.lru_cache(maxsize=None)
+  @functools.lru_cache(None)
   def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
     strides = filter_strides(shape, strides) if strides else strides_for_shape(shape)
     contiguous = offset == 0 and mask is None and all(s1 == s2 for s1,s2 in zip(strides, strides_for_shape(shape)))
-    return View(shape, strides, offset, mask, contiguous)
+    flat = shape+strides+(offset,)+(tuple(x for m in mask for x in m) if mask is not None else tuple())
+    return View(shape, strides, offset, mask, contiguous, all_int(flat))
 
+  @functools.cached_property
   def vars(self) -> Set[Variable]:
+    if self.is_all_int: return set()
     flatten_mask = tuple(x for m in self.mask for x in m) if self.mask is not None else tuple()
     return functools.reduce(operator.or_, [x.vars() for x in self.shape+self.strides+(self.offset,)+flatten_mask if isinstance(x, Node)], set())
 
+  @functools.lru_cache(None)
   def unbind(self) -> View:
-    unbound_vars:Dict[VariableOrNum,Node] = {v: v.unbind()[0] for v in self.vars() if v.val is not None}
+    if self.is_all_int: return self
+    unbound_vars:Dict[VariableOrNum,Node] = {v: v.unbind()[0] for v in self.vars if v.val is not None}
     new_shape = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.shape])
     new_strides = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.strides])
     new_offset = self.offset if isinstance(self.offset, int) else self.offset.substitute(unbound_vars)
