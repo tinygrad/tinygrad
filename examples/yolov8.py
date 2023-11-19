@@ -6,7 +6,7 @@ from collections import defaultdict
 import time, sys
 
 def draw_bounding_boxes_and_display(orig_imgs, all_predictions, class_labels, iou_threshold=0.5, is_last=True):
-  color_dict = {label: tuple((((i+1) * 50) % 256, ((i+1) * 100) % 256, ((i+1) * 150) % 256)) for i, label in enumerate(class_labels)}
+  color_dict = {label: tuple((((i+1) * 150) % 256, ((i+1) * 100) % 256, ((i+1) * 50) % 256)) for i, label in enumerate(class_labels)}
   font = cv2.FONT_HERSHEY_SIMPLEX
 
   def is_bright_color(color):
@@ -55,7 +55,7 @@ def draw_bounding_boxes_and_display(orig_imgs, all_predictions, class_labels, io
     print("Objects detected:")
     for obj, count in object_count.items():
       print(f"- {obj}: {count}")
-    cv2.imshow('Video', orig_img[...,::-1]) # convert back to BGR
+    cv2.imshow('Video', orig_img) # convert back to BGR
   if is_last:
     print('Press enter to quit')
     cv2.waitKey(0)
@@ -100,7 +100,7 @@ if __name__ == '__main__':
     cap = cv2.VideoCapture(img_path)
   ret, img = cap.read()
   while cap.isOpened():
-    image = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB)]
+    image = [img]
     st = time.time()
     pre_processed_image = preprocess(image)
     print(f'pre processing in {int(round(((time.time() - st) * 1000)))}ms')
