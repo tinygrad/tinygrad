@@ -174,5 +174,15 @@ class TestAllocators(unittest.TestCase):
     test()
     check_gc()
 
+  def test_lru_allocator_massive_buffer(self):
+    with self.assertRaises(AssertionError) as context: alloc(allocator := FakeAllocator(), size := 1e13, dtypes.int8)
+    self.assertEqual(str(context.exception), f"out of memory - requested: {size/1e9:5.2f} GB, available: {allocator._get_cur_free_space('0')/1e9:5.2f} GB")
+
+  @unittest.skipIf(Device.DEFAULT != "METAL", "only applies to Metal")
+  def test_lru_allocator_metal_max_buffer_length(self):
+    from tinygrad.runtime.ops_metal import METAL
+    with self.assertRaises(AssertionError) as context: METAL.allocator._do_alloc(buf_len := (max_buf_len := METAL.device.maxBufferLength()+1), dtypes.int8, '0')
+    self.assertEqual(str(context.exception), f"Buffer length of {buf_len/1e9:5.2f} GB exceeds Metal's max buffer length of {max_buf_len/1e9:5.2f} GB.")
+
 if __name__ == "__main__":
   unittest.main()

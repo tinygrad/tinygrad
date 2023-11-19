@@ -1,7 +1,7 @@
 import itertools
 import random
 from tinygrad.helpers import DEBUG
-from tinygrad.shape.symbolic import Variable
+from tinygrad.shape.symbolic import Variable, NumNode
 random.seed(42)
 
 def add_v(expr, rng=None):
@@ -51,7 +51,7 @@ if __name__ == "__main__":
     tape = [random.choice(ops) for _ in range(random.randint(2, 30))]
     # 10% of the time, add one of lt, le, gt, ge
     if random.random() < 0.1: tape.append(random.choice([lt, le, gt, ge]))
-    expr = Variable.num(0)
+    expr = NumNode(0)
     rngs = []
     for t in tape:
       expr, rng = t(expr)

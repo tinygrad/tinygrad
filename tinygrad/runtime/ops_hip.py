@@ -66,14 +66,15 @@ class HIPProgram:
     if wait:
       start, end = hip.hipEventCreate(), hip.hipEventCreate()
       hip.hipEventRecord(start)
-    class PackageStruct(ctypes.Structure):
-      _fields_ = [(f'field{idx}', ctypes.c_void_p if not isinstance(args[idx], int) else ctypes.c_int) for idx in range(len(args))]
-    struct = PackageStruct(*[data._buf if not isinstance(data, int) else np.int32(data) for data in args])
+    struct = hip.getStructTypeForArgs(*args)(*[data._buf if not isinstance(data, int) else np.int32(data) for data in args])
     hip.hipModuleLaunchKernel(self.prgs[args[0]._device], global_size[0], global_size[1], global_size[2], local_size[0], local_size[1], local_size[2], 0, 0, struct)
     if wait:
       hip.hipEventRecord(end)
       hip.hipEventSynchronize(end)
-      return hip.hipEventElapsedTime(start, end)*1e-3
+      ret = hip.hipEventElapsedTime(start, end)*1e-3
+      hip.hipEventDestroy(start)
+      hip.hipEventDestroy(end)
+      return ret
 
   def __del__(self):
     for module in self.modules: hip.hipModuleUnload(module)
@@ -100,5 +101,6 @@ __device__ void vstore_half2(float2 data, size_t offset, half *p) { *(p + offset
 __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset*4) = (half)data.x; *(p + offset*4 + 1) = (half)data.y; *(p + offset*4 + 2) = (half)data.z; *(p + offset*4 + 3) = (half)data.w; }
   """,
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
-  lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]))
+  lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
+  xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]))
 HIPBuffer = Compiled(RawHIPBuffer, LinearizerOptions(device="HIP"), renderer, compile_hip, HIPProgram, hip.hipDeviceSynchronize)

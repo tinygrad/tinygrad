@@ -2,10 +2,10 @@
 from __future__ import annotations
 import functools, operator
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, cast
+from typing import Tuple, List, Optional, Dict, Set, cast
 from tinygrad.ops import MovementOps
-from tinygrad.helpers import prod, DEBUG, dedup
-from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, sint
+from tinygrad.helpers import prod, DEBUG, merge_dicts
+from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
 from tinygrad.shape.view import View
 
 @functools.lru_cache(maxsize=None)
@@ -35,7 +35,7 @@ def expr_node_mask(view:View, idx, valid=None) -> Node:
 # generate an expression if you have a single idx variable
 def expr_node(view:View, idx=None) -> Node:
   if idx is None: idx = Variable('idx', 0, prod(view.shape)-1)
-  ret: List[Node] = [Variable.num(view.offset) if isinstance(view.offset, int) else view.offset] if view.offset else []
+  ret: List[Node] = [NumNode(view.offset) if isinstance(view.offset, int) else view.offset] if view.offset else []
   acc = 1
   for d,s in reversed(to_shape_strides(view.shape, view.strides)):
     ret.append(((idx//acc)%d)*s)
@@ -45,15 +45,12 @@ def expr_node(view:View, idx=None) -> Node:
 # generate an expression if you have a variable or expression for each index
 def expr_idxs(view:View, idxs) -> Node:
   assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
-  return Variable.sum([Variable.num(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])
+  return Variable.sum([NumNode(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])
 
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
-  if vm2.mask: return None  # this isn't supported yet
-  if vm1.offset != 0: return None  # this isn't supported yet
-  mst = ShapeTracker((vm2, vm1))
-  strides = mst.real_strides()
-  if None in strides: return None
+  if vm2.mask or vm1.offset != 0: return None  # this isn't supported yet
+  if None in (strides := ShapeTracker((vm2, vm1)).real_strides()): return None
   return View.create(vm1.shape, cast(Tuple[sint, ...], strides), vm2.offset, vm1.mask)
 
 @functools.lru_cache(maxsize=None)
@@ -80,52 +77,24 @@ class ShapeTracker:
   @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
 
-  def size(self): return 0 if prod(self.shape)==0 else self.expr_idxs()[0].max+1
+  def size(self): return 0 if (0 in self.shape) else self.expr_idxs()[0].max+1
 
-  def vars(self) -> List[Variable]: return dedup(functools.reduce(operator.add, [v.vars() for v in self.views], []))
+  def vars(self) -> Set[Variable]: return functools.reduce(operator.or_, [v.vars() for v in self.views], set())
 
   @property
-  def var_vals(self) -> Dict[Variable, int]:
-    ret:Dict[Variable, int] = {}
-    for v in self.vars():
-      var, val = v.unbind()
-      assert var not in ret or ret[var] == val, f"{var} has conflicted values {val} and {ret[var]}"
-      ret[var] = val
-    return ret
+  def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
 
   def unbind(self) -> ShapeTracker: return ShapeTracker(tuple(v.unbind() for v in self.views))
 
   def to_movement_ops(self) -> List[Tuple[MovementOps, Tuple]]:
     to_apply:List[Tuple[MovementOps, Tuple]] = []
-    for i, v in enumerate(self.views):
+    for v in self.views:
       real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
-      offset = v.offset + sum(st*(s-1) for s,st in zip(real_shape, v.strides) if st<0)
-      real_offset = offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
-      real_real_shape = [s for s,st in zip(real_shape, v.strides) if st]
-      strides: List[Node|int] = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
-      buffer_size = sum((s-1)*st for s,st in zip(real_real_shape,strides)) + 1
-      if i: buffer_size = prod(self.views[i-1].shape) - real_offset
-      def sort_by_strides(shape, strides): return sorted(zip(shape, strides), key=lambda k: (k[1],-k[0]), reverse=True), sorted(range(len(strides)), key=lambda k: (strides[k],-real_real_shape[k]), reverse=True)
-      ordered_shape_strides, order = sort_by_strides(real_real_shape, strides)
-      to_apply.extend([(MovementOps.RESHAPE, (-1,)), (MovementOps.SHRINK, ((real_offset, real_offset+buffer_size),))])
-      if strides:
-        if (ordered_shape_strides[0][0]*ordered_shape_strides[0][1])-buffer_size>0: to_apply.append((MovementOps.PAD, ((0, (ordered_shape_strides[0][0] * ordered_shape_strides[0][1]) - buffer_size),)))
-        for i, shape_stride in enumerate(ordered_shape_strides):
-          if i<len(ordered_shape_strides)-1 and shape_stride[1] < ordered_shape_strides[i+1][0]*ordered_shape_strides[i+1][1]:
-            remaining_buffer = ordered_shape_strides[i-1][1] if i>0 else buffer_size
-            to_apply.append((MovementOps.EXPAND, (shape_stride[0], *(s[0] for s in ordered_shape_strides[:i]), remaining_buffer)))
-            to_apply.append((MovementOps.PERMUTE, (*range(1,i+1), 0, i+1)))
-            to_apply.append((MovementOps.RESHAPE, (*(s[0] for s in ordered_shape_strides[:i]), shape_stride[0]*remaining_buffer)))
-            to_apply.append((MovementOps.PAD, (*((0,0) for _ in range(i)), (0, shape_stride[0]*shape_stride[1]))))
-            to_apply.append((MovementOps.RESHAPE, (*(s[0] for s in ordered_shape_strides[:i+1]), remaining_buffer+shape_stride[1])))
-            ordered_shape_strides[i] = (ordered_shape_strides[i][0], remaining_buffer+shape_stride[1])
-          else:
-            to_apply.append((MovementOps.SHRINK, (*((0, s[0]) for s in ordered_shape_strides[:i]), (0, shape_stride[0]*shape_stride[1]))))
-            to_apply.append((MovementOps.RESHAPE, (*[s[0] for s in ordered_shape_strides[:i+1]], shape_stride[1])))
-        to_apply.extend([(MovementOps.SHRINK, (*[(0, s[0]) for s in ordered_shape_strides], (0,1))), (MovementOps.RESHAPE, tuple(s[0] for s in ordered_shape_strides))])
-        if order != list(range(len(order))): to_apply.append((MovementOps.PERMUTE, tuple(order.index(i) for i in range(len(strides)))))
-      to_apply.append((MovementOps.RESHAPE, tuple(s if st else 1 for s,st in zip(real_shape, v.strides))))
-      if any(i<0 for i in v.strides): to_apply.append((MovementOps.STRIDE, tuple(-1 if st<0 else 1 for st in v.strides)))
+      real_offset = v.offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
+      # first, we apply the offset
+      # then, we make it the correct shape
+      # then, we apply permutations
+      to_apply.append((MovementOps.AS_STRIDED, (tuple([s if st != 0 else 1 for s,st in zip(real_shape, v.strides)]), v.strides, real_offset)))
       # then, we apply pre expand pads
       if v.mask is not None:
         pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
@@ -134,6 +103,7 @@ class ShapeTracker:
           to_apply.append((MovementOps.PAD, pre_expand_pads))
           real_shape = tuple(x+s[0]+s[1] for x,s in zip(real_shape, pre_expand_pads))
       # then, we do any expands
+      # NOTE: this is a good idea even without masks, since torch doesn't support negative strides and has to make a copy
       if any(s != 1 and st == 0 for s,st in zip(real_shape, v.strides)): to_apply.append((MovementOps.EXPAND, real_shape))
       # lastly, we apply post expand pads
       if v.mask is not None and any(x != (0,0) for x in post_expand_pads): to_apply.append((MovementOps.PAD, post_expand_pads))
@@ -142,32 +112,31 @@ class ShapeTracker:
   # NOTE: if a stride is not always valid, it will be None
   def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
-    idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
+    idxs: List[Node] = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx, valid = self.expr_idxs(idxs)
     ret: List[Optional[sint]] = [None] * len(self.views[-1].shape)
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
-      if isinstance(this_dim, MulNode) and isinstance(this_dim.a, Variable) and this_dim.a in idxs:
-        ret[idxs.index(this_dim.a)] = this_dim.b
-      elif isinstance(this_dim, Variable) and this_dim in idxs:
-        ret[idxs.index(this_dim)] = 1
+      idx_maybe, stride_maybe = (this_dim.a, this_dim.b) if isinstance(this_dim, MulNode) else (this_dim, 1)
+      try: ret[idxs.index(idx_maybe)] = stride_maybe
+      except ValueError: pass
     idx_vars, valid_vars = idx.vars(), valid.vars()
     for i,tidx in enumerate(idxs):
       if tidx in valid_vars and not ignore_valid: ret[i] = None
       elif tidx not in idx_vars: ret[i] = 0
     return tuple(ret)
+
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
   def _expr_idx(self, idx, valid) -> Tuple[Node, Node]:
     for v in reversed(self.views[0:-1]):
-      if valid.max == 0: return Variable.num(-1), valid
+      if valid.max == 0: return NumNode(-1), valid
       valid = expr_node_mask(v, idx, valid)
       idx = expr_node(v, idx)
     return idx, valid
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2:
-      new_view = merge_views(self.views[-2], self.views[-1])
-      if new_view:
+      if (new_view := merge_views(self.views[-2], self.views[-1])) is not None:
         if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
         return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
     return self
@@ -195,8 +164,7 @@ class ShapeTracker:
   def stride(self, mul: Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].stride(mul), ))
 
   def reshape(self, new_shape: Tuple[sint, ...]) -> ShapeTracker:
-    new_view = self.views[-1].reshape(new_shape)
-    if new_view is None:
+    if (new_view := self.views[-1].reshape(new_shape)) is None:
       extra_view = View.create(new_shape)
       # last chance to merge. TODO: move into View
       if (merged_view := merge_views(self.views[-1], extra_view)) is not None:
