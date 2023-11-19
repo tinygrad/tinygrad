@@ -1,4 +1,6 @@
 # for imagenet download prepare.sh and run it
+from extra.datasets.imagenet_download import IMAGENET_CLASS_INDEX_URL
+from tinygrad.helpers import fetch
 import glob, random
 import json
 import numpy as np
@@ -6,7 +8,8 @@ from PIL import Image
 import functools, pathlib
 
 BASEDIR = pathlib.Path(__file__).parent / "imagenet"
-ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
+print(BASEDIR)
+ci = json.load(open(fetch(IMAGENET_CLASS_INDEX_URL)))
 cir = {v[0]: int(k) for k,v in ci.items()}
 
 @functools.lru_cache(None)
