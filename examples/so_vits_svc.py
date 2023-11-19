@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Tuple, Optional, Type
 from tinygrad import nn
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes, getenv
+from tinygrad.helpers import dtypes, getenv, fetch
 from tinygrad.nn.state import torch_load
-from examples.vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, download_if_not_present, get_hparams_from_file, load_checkpoint, weight_norm, HParams
+from examples.vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, get_hparams_from_file, load_checkpoint, weight_norm, HParams
 from examples.sovits_helpers import preprocess
 import soundfile
 
@@ -24,8 +24,8 @@ class SpeechEncoder:
   def __init__(self, hidden_dim, model:ContentVec): self.hidden_dim, self.model = hidden_dim, model
   def encode(self, ): raise NotImplementedError("implement me")
   @classmethod
-  def load_from_pretrained(cls, checkpoint_path:str, checkpoint_url:str) -> ContentVec:
-    contentvec = ContentVec.load_from_pretrained(checkpoint_path, checkpoint_url)
+  def load_from_pretrained(cls, checkpoint_url:str) -> ContentVec:
+    contentvec = ContentVec.load_from_pretrained(checkpoint_url)
     return cls(contentvec)
 
 class ContentVec256L9(SpeechEncoder):
@@ -93,8 +93,8 @@ class ContentVec:
     res = features if ret_conv else x
     return res, padding_mask
   @classmethod
-  def load_from_pretrained(cls, checkpoint_path:str, checkpoint_url:str) -> ContentVec:
-    download_if_not_present(checkpoint_path, checkpoint_url)
+  def load_from_pretrained(cls, checkpoint_url:str) -> ContentVec:
+    checkpoint_path = fetch(checkpoint_url)
     cfg = load_fairseq_cfg(checkpoint_path)
     enc = cls(cfg.model)
     _ = load_checkpoint_enc(checkpoint_path, enc, None)
@@ -320,10 +320,10 @@ class Synthesizer:
     f0_coarse = f0_coarse + ((f0_coarse >= F0_BIN) * (F0_BIN - 1))
     return f0_coarse
   @classmethod
-  def load_from_pretrained(cls, config_path:str, config_url:str, weights_path:str, weights_url:str) -> Synthesizer:
-    download_if_not_present(config_path, config_url)
+  def load_from_pretrained(cls, config_url:str, weights_url:str) -> Synthesizer:
+    config_path = fetch(config_url)
     hps = get_hparams_from_file(config_path)
-    download_if_not_present(weights_path, weights_url)
+    weights_path = fetch(weights_url)
     net_g = cls(hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, **hps.model)
     _ = load_checkpoint(weights_path, net_g, None, skip_list=["f0_decoder"])
     logging.debug(f"{cls.__name__}:Loaded model with hps: {hps}")
@@ -551,24 +551,24 @@ def get_encoder(ssl_dim) -> Type[SpeechEncoder]:
 # python3 examples/so_vits_svc.py --model saul_goodman
 #########################################################################################
 SO_VITS_SVC_PATH = Path(__file__).parents[1] / "weights/So-VITS-SVC"
-VITS_MODELS = { # config_path, weights_path, config_url, weights_url
-  "saul_goodman" : (SO_VITS_SVC_PATH / "config_saul_gman.json", SO_VITS_SVC_PATH / "pretrained_saul_gman.pth", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/config.json", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/G_80000.pth"),
-  "drake" : (SO_VITS_SVC_PATH / "config_drake.json", SO_VITS_SVC_PATH / "pretrained_drake.pth", "https://huggingface.co/jaspa/so-vits-svc/resolve/main/aubrey/config_aubrey.json", "https://huggingface.co/jaspa/so-vits-svc/resolve/main/aubrey/pretrained_aubrey.pth"),
-  "cartman" : (SO_VITS_SVC_PATH / "config_cartman.json", SO_VITS_SVC_PATH / "pretrained_cartman.pth", "https://huggingface.co/marcoc2/so-vits-svc-4.0-models/resolve/main/EricCartman/config.json", "https://huggingface.co/marcoc2/so-vits-svc-4.0-models/resolve/main/EricCartman/G_10200.pth"),
-  "tf2spy" : (SO_VITS_SVC_PATH / "config_tf2spy.json", SO_VITS_SVC_PATH / "pretrained_tf2spy.pth", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/TF2_spy_60k/config.json", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/TF2_spy_60k/G_60000.pth"),
-  "tf2heavy" : (SO_VITS_SVC_PATH / "config_tf2heavy.json", SO_VITS_SVC_PATH / "pretrained_tf2heavy.pth", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/TF2_heavy_100k/config.json", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/TF2_heavy_100k/G_100000.pth"),
-  "lady_gaga" : (SO_VITS_SVC_PATH / "config_gaga.json", SO_VITS_SVC_PATH / "pretrained_gaga.pth", "https://huggingface.co/marcoc2/so-vits-svc-4.0-models/resolve/main/LadyGaga/config.json", "https://huggingface.co/marcoc2/so-vits-svc-4.0-models/resolve/main/LadyGaga/G_14400.pth")
+VITS_MODELS = { # config_url, weights_url
+  "saul_goodman" : ("https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/config.json", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/Saul_Goodman_80000/G_80000.pth"),
+  "drake" : ("https://huggingface.co/jaspa/so-vits-svc/resolve/main/aubrey/config_aubrey.json", "https://huggingface.co/jaspa/so-vits-svc/resolve/main/aubrey/pretrained_aubrey.pth"),
+  "cartman" : ("https://huggingface.co/marcoc2/so-vits-svc-4.0-models/resolve/main/EricCartman/config.json", "https://huggingface.co/marcoc2/so-vits-svc-4.0-models/resolve/main/EricCartman/G_10200.pth"),
+  "tf2spy" : ("https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/TF2_spy_60k/config.json", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/TF2_spy_60k/G_60000.pth"),
+  "tf2heavy" : ("https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/TF2_heavy_100k/config.json", "https://huggingface.co/Amo/so-vits-svc-4.0_GA/resolve/main/ModelsFolder/TF2_heavy_100k/G_100000.pth"),
+  "lady_gaga" : ("https://huggingface.co/marcoc2/so-vits-svc-4.0-models/resolve/main/LadyGaga/config.json", "https://huggingface.co/marcoc2/so-vits-svc-4.0-models/resolve/main/LadyGaga/G_14400.pth")
 }
-ENCODER_MODELS = { # weights_path, weights_url
-  "contentvec": (SO_VITS_SVC_PATH / "contentvec_checkpoint.pt", "https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/hubert_base.pt")
+ENCODER_MODELS = { # weights_url
+  "contentvec": "https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/main/hubert_base.pt"
 }
 ENCODER_MODEL = "contentvec"
-DEMO_PATH, DEMO_URL = Path(__file__).parents[1] / "temp/LJ037-0171.wav", "https://keithito.com/LJ-Speech-Dataset/LJ037-0171.wav"
+DEMO_URL = "https://keithito.com/LJ-Speech-Dataset/LJ037-0171.wav"
 if __name__=="__main__":
   logging.basicConfig(stream=sys.stdout, level=(logging.INFO if DEBUG < 1 else logging.DEBUG))
   parser = argparse.ArgumentParser()
   parser.add_argument("-m", "--model", default=None, help=f"Specify the model to use. All supported models: {VITS_MODELS.keys()}", required=True)
-  parser.add_argument("-f", "--file", default=DEMO_PATH, help=f"Specify the path of the input file")
+  parser.add_argument("-f", "--file", default=None, help=f"Specify the path of the input file")
   parser.add_argument("--out_dir", default=str(Path(__file__).parents[1] / "temp"), help="Specify the output path.")
   parser.add_argument("--out_path", default=None, help="Specify the full output path. Overrides the --out_dir and --name parameter.")
   parser.add_argument("--base_name", default="test", help="Specify the base of the output file name. Default is 'test'.")
@@ -586,9 +586,9 @@ if __name__=="__main__":
 
   Tensor.no_grad, Tensor.training = True, False
   # Get Synthesizer and ContentVec
-  net_g, hps = Synthesizer.load_from_pretrained(vits_location[0], vits_location[2], vits_location[1], vits_location[3])
+  net_g, hps = Synthesizer.load_from_pretrained(vits_location[0], vits_location[1])
   Encoder = get_encoder(hps.model.ssl_dim)
-  encoder = Encoder.load_from_pretrained(encoder_location[0], encoder_location[1])
+  encoder = Encoder.load_from_pretrained(encoder_location)
 
   # model config args
   target_sample, spk2id, hop_length, target_sample = hps.data.sampling_rate, hps.spk, hps.data.hop_length, hps.data.sampling_rate
@@ -599,8 +599,8 @@ if __name__=="__main__":
   speaker = args.speaker if args.speaker is not None else list(hps.spk.__dict__.keys())[0]
 
   ### Loading audio and slicing ###
-  if audio_path == DEMO_PATH: download_if_not_present(DEMO_PATH, DEMO_URL)
-  assert Path(audio_path).is_file() and Path(audio_path).suffix == ".wav"
+  audio_path = fetch(DEMO_URL) if audio_path is None else audio_path
+  assert Path(audio_path).is_file()
   chunks = preprocess.cut(audio_path, db_thresh=slice_db)
   audio_data, audio_sr = preprocess.chunks2audio(audio_path, chunks)
 
