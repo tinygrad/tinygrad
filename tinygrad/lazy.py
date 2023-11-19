@@ -108,15 +108,12 @@ class LazyBuffer:
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: WeakSet[LazyBuffer] = WeakSet()
-    # self.views: WeakSet[LazyBuffer] = WeakSet()
     # NOTE: op should be read only after construction of LazyBuffer. it is now with schedule
     if op is not None:
       self.op: LazyOp = op
       for x in op.buffers: x.children.add(self)
     assert optype != MovementOps or (base is not None and base.optype != MovementOps), "MovementOps must be based"
     self._base = base
-    # if base: base.views.add(self)
-    # else: assert st.contiguous, "unbased LazyBuffers must be contiguous"
     assert base is not None or st.contiguous, "unbased LazyBuffers must be contiguous"
 
   @property
