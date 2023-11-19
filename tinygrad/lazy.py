@@ -1,7 +1,7 @@
 from __future__ import annotations
 import sys, operator, math, functools
 from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapping, Set
-from weakref import ref, WeakSet, WeakValueDictionary
+from weakref import ref, WeakSet, WeakValueDictionary, ReferenceType
 
 import numpy as np
 from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, dedup, merge_dicts, all_int
@@ -107,14 +107,14 @@ class LazyBuffer:
     self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: WeakSet[LazyBuffer] = WeakSet()
-    self.views: WeakSet[LazyBuffer] = WeakSet()
+    self.views: set[ReferenceType[LazyBuffer]] = set()
     # NOTE: op should be read only after construction of LazyBuffer. it is now with schedule
     if op is not None:
       self.op: LazyOp = op
       for x in op.buffers: x.children.add(self)
     assert optype != MovementOps or (base is not None and base.optype != MovementOps), "MovementOps must be based"
     self._base = base
-    if base: base.views.add(self)
+    if base: base.views.add(ref(self))
     else: assert st.contiguous, "unbased LazyBuffers must be contiguous"
 
   @property
