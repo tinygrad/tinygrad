@@ -15,7 +15,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv 
 input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
 input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
-IMAGE_SIZES = {"debug" : (200,200), "mlperf" : (800,800)}
+IMAGE_SIZES = {"debug" : (200,200), "mlperf" : (800,800), "tiny" : (150,150)}
 NUM = getenv("NUM", 18)
 BS = getenv("BS", 4)
 CNT = getenv("CNT", 10)

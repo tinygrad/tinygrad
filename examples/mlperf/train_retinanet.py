@@ -14,9 +14,13 @@ import torch
 from contextlib import redirect_stdout
 from train_retinanet_tests import *
 from models.retinanet import decode_bbox
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import dtypes, Context
 import pickle as pkl
 from numba import njit
+
+
+
+
 
 def focal_loss_np(p,targets,alpha: float = 0.25,gamma: float = 2,reduction: str = "none",):
 
@@ -212,7 +216,10 @@ class RetinaNetTrainer:
         self.dataset = COCO(openimages())
         self.coco_eval = COCOeval(self.dataset, iouType="bbox")
         self.debug = debug
+        
         self.image_size = IMAGE_SIZES["debug"] if debug else IMAGE_SIZES["mlperf"]
+        Warning("setting sizes to tiny")
+        self.image_size = IMAGE_SIZES["debug"]
         self.set_matcher_attributes()
     
     def get_ground_truths(self, anchors, annotations, n_classes):
@@ -326,14 +333,16 @@ class RetinaNetTrainer:
         outs = self.model(model_input)
         Tensor.training = TRAINING
         return outs
-    
-    def train(self):
-        #self.check_weight_init_forward() FIXME this works but may modify gradients
 
+    def train(self):
+        import time
+        #self.check_weight_init_forward() FIXME this works but may modify gradients
+    
         retina, anchors_orig, anchors_flattened_levels, optimizer = self.tg_init_setup()
+        anchors_flattened_levels = [anchors_flattened_levels.astype("float32") for _ in range(BS)]
         
         self.reference.train()
-
+        ref_optimizer = torch.optim.Adam([p for p in self.reference.parameters() if p.requires_grad], lr=0.0001)
         checker = None
 
         for x, annotations in iterate(self.dataset, BS):
@@ -349,8 +358,8 @@ class RetinaNetTrainer:
             if sys.argv[1]=='m':
                 model_head_outputs = retina(images)
                 model_head_outputs = {'cls_logits' : model_head_outputs[:,:,4:], 
-                                      'bbox_regression' : model_head_outputs[:,:,:4]}
-
+                                    'bbox_regression' : model_head_outputs[:,:,:4]}
+            reference_loss, model_loss = None, None
             if sys.argv[1]=='r':
                 reference_loss = self.reference_forward(reference_images.double(),annotations=annotations)
                 reference_head_outputs = self.reference.last_head_outputs
@@ -358,15 +367,26 @@ class RetinaNetTrainer:
 
             
             if len(sys.argv)>2 and sys.argv[2]=="old_loss": imgwise_loss = self._imgwise_compute_loss(BS, precomp_tg_targets, model_head_outputs)
-            else:
+            elif sys.argv[1]=='m':
                 #self.dataset_annotations_to_tg(annotations)
-                anchors_flattened_levels = [anchors_flattened_levels.astype("float32") for _ in range(BS)]
-                losses = self.compute_loss(annotations, model_head_outputs, anchors_flattened_levels)
-                breakpoint()
+                model_loss = self.compute_loss(annotations, model_head_outputs, anchors_flattened_levels)
+            
+            
             #if self.debug: checker.check_losses(imgwise_loss)
             optimizer.zero_grad()
-            imgwise_loss.backward()
-            optimizer.step()
+            if sys.argv[1]=='m':
+                losses = model_loss["classification"]+model_loss["bbox_regression"]
+                losses.backward()
+                print(losses.numpy())
+                optimizer.step()
+            elif sys.argv[1]=='r':
+                losses = reference_loss["classification"]+reference_loss["bbox_regression"]
+                losses.backward()
+                print(losses)
+                ref_optimizer.step()
+            
+            time.sleep(0.2)
+            
             
             #TODO input_size=self.image_size? WATCH OUT PARAMETERS AND USAGE
             if self.debug:
@@ -512,8 +532,6 @@ class RetinaNetTrainer:
         return classification_losses + regression_losses
     
     def head_loss_fn(self, targets, head_outputs, anchors, matched_idxs):
-        breakpoint()
-
         return {
             'classification': self.model.head.classification_head.compute_loss(targets, head_outputs, matched_idxs),
             'bbox_regression': self.model.head.regression_head.compute_loss(targets, head_outputs, anchors, matched_idxs),
@@ -547,7 +565,7 @@ class RetinaNetTrainer:
                 Tensor(gt_classes_target[valid_idxs_per_image],device=cls_logits_per_image.device,requires_grad=False),
                 reduction='sum',
             ) / max(1, num_foreground))
-        breakpoint()
+
         return _sum(losses) / len(targets)
     def reg_loss_fn(self, targets, head_outputs, anchors, matched_idxs):
         # type: (List[Dict[str, Tensor]], Dict[str, Tensor], List[Tensor], List[Tensor]) -> Tensor
@@ -574,7 +592,7 @@ class RetinaNetTrainer:
                 Tensor(target_regression,requires_grad=False,device=bbox_regression_per_image.device),
                 reduction='sum'
             ) / max(1, num_foreground))
-        breakpoint()
+
         return _sum(losses) / max(1, len(targets))
     def compute_loss(self, targets, head_outputs, anchors):
         # type: (List[Dict[str, Tensor]], Dict[str, Tensor], List[Tensor]) -> Dict[str, Tensor]
@@ -886,5 +904,5 @@ class RetinaNetMlPerfTrainingChecker:
 
 
 if __name__ == "__main__":
-    trainer = RetinaNetTrainer(debug=True)
+    trainer = RetinaNetTrainer(debug=False)
     trainer.train()
