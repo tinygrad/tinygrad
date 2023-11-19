@@ -34,8 +34,9 @@ class MultiHeadAttention:
         if not hasattr(self, 'cache_k'):
           self.cache_k, self.cache_v = k, v
         else:
-          self.cache_k.assign(k).realize()
-          self.cache_v.assign(v).realize()
+          # see test_jitted_read_assign in test_jit.py
+          self.cache_k.assign(k+1-1).realize()
+          self.cache_v.assign(v+1-1).realize()
       else:
         k, v = self.cache_k, self.cache_v
     else:

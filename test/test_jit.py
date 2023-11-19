@@ -218,12 +218,12 @@ class TestJit(unittest.TestCase):
     np.testing.assert_equal([1], cache.bad_cache.numpy())
 
     for i in range(5):
-      cache.good_jitted(zero, one)
-      cache.bad_jitted(zero, one)
+      cache.good_jitted(zero)
+      cache.bad_jitted(zero)
 
     # verify the jitted calls read 1 from the cache
-    np.testing.assert_equal([1], cache.good_jitted(zero, one).numpy())
-    np.testing.assert_equal([1], cache.bad_jitted(zero, one).numpy())
+    np.testing.assert_equal([1], cache.good_jitted(zero).numpy())
+    np.testing.assert_equal([1], cache.bad_jitted(zero).numpy())
 
     # save [2] in the caches
     cache.good(zero, two)
@@ -232,12 +232,11 @@ class TestJit(unittest.TestCase):
     np.testing.assert_equal([2], cache.bad_cache)
 
     # verify the jitted calls read 2 from the cache
-    np.testing.assert_equal([2], cache.good_jitted(zero, two).numpy())
+    np.testing.assert_equal([2], cache.good_jitted(zero).numpy())
     # but the bad_jitted doesn't!
-    # fixed if we always pass the cache_v
-    np.testing.assert_equal([2], cache.bad_jitted(zero, two).numpy())
+    np.testing.assert_equal([1], cache.bad_jitted(zero).numpy())
 
-    assert len(cache.good_jitted.jit_cache) == 2
+    assert len(cache.good_jitted.jit_cache) == 1
     assert len(cache.bad_jitted.jit_cache) == 1
 
 if __name__ == '__main__':
