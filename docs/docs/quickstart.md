@@ -50,7 +50,7 @@ randn = Tensor.randn(2, 3) # create a tensor of shape (2, 3) filled with random 
 uniform = Tensor.uniform(2, 3, low=0, high=10) # create a tensor of shape (2, 3) filled with random values from a uniform distribution between 0 and 10
 ```
 
-There are even more of these factory methods, you can find them in the [tensor.py](/tinygrad/tensor.py) file.
+There are even more of these factory methods, you can find them in the [tensor.py](https://github.com/tinygrad/tinygrad/blob/master/tinygrad/tensor.py) file.
 
 All the tensors creation methods can take a `dtype` argument to specify the data type of the tensor.
 
@@ -75,7 +75,7 @@ print(t6.numpy())
 # [-56. -48. -36. -20.   0.]
 ```
 
-There are a lot more operations that can be performed on tensors, you can find them in the [tensor.py](/tinygrad/tensor.py) file.
+There are a lot more operations that can be performed on tensors, you can find them in the [tensor.py](https://github.com/tinygrad/tinygrad/blob/master/tinygrad/tensor.py) file.
 Additionally reading through [abstractions.py](./abstractions.py) will help you understand how operations on these tensors make their way down to your hardware.
 
 ## Models
@@ -97,7 +97,7 @@ class Linear:
     return x.linear(self.weight.transpose(), self.bias)
 ```
 
-There are more neural network modules already implemented in [nn](/tinygrad/nn/__init__.py), and you can also implement your own.
+There are more neural network modules already implemented in [nn](https://github.com/tinygrad/tinygrad/blob/master/tinygrad/nn/__init__.py), and you can also implement your own.
 
 We will be implementing a simple neural network that can classify handwritten digits from the MNIST dataset.
 Our classifier will be a simple 2 layer neural network with a Leaky ReLU activation function.
@@ -129,7 +129,7 @@ Finally, we just initialize an instance of our neural network, and we are ready 
 Now that we have our neural network defined we can start training it.
 Training neural networks in tinygrad is super simple.
 All we need to do is define our neural network, define our loss function, and then call `.backward()` on the loss function to compute the gradients.
-They can then be used to update the parameters of our neural network using one of the many optimizers in [optim.py](/tinygrad/nn/optim.py).
+They can then be used to update the parameters of our neural network using one of the many optimizers in [optim.py](https://github.com/tinygrad/tinygrad/blob/master/tinygrad/nn/optim.py).
 
 For our loss function we will be using sparse categorical cross entropy loss.
 
@@ -160,7 +160,7 @@ There is a simpler way to do this just by using `get_parameters(net)` from `tiny
 The parameters are just listed out explicitly here for clarity.
 
 Now that we have our network, loss function, and optimizer defined all we are missing is the data to train on!
-There are a couple of dataset loaders in tinygrad located in [/extra/datasets](/extra/datasets).
+There are a couple of dataset loaders in tinygrad located in [/extra/datasets](https://github.com/tinygrad/tinygrad/blob/master/extra/datasets).
 We will be using the MNIST dataset loader.
 
 ```python
@@ -233,10 +233,10 @@ with Timing("Time: "):
 
 ## And that's it
 
-Highly recommend you check out the [examples/](/examples) folder for more examples of using tinygrad.
+Highly recommend you check out the [examples/](https://github.com/tinygrad/tinygrad/blob/master/examples) folder for more examples of using tinygrad.
 Reading the source code of tinygrad is also a great way to learn how it works.
-Specifically the tests in [test/](/test) are a great place to see how to use and the semantics of the different operations.
-There are also a bunch of models implemented in [models/](/models) that you can use as a reference.
+Specifically the tests in [test/](https://github.com/tinygrad/tinygrad/blob/master/test) are a great place to see how to use and the semantics of the different operations.
+There are also a bunch of models implemented in [models/](https://github.com/tinygrad/tinygrad/blob/master/models) that you can use as a reference.
 
 Additionally, feel free to ask questions in the `#learn-tinygrad` channel on the [discord](https://discord.gg/beYbxwxVdx). Don't ask to ask, just ask!
 
@@ -280,7 +280,7 @@ You will find that the evaluation time is much faster than before and that your 
 ### Saving and Loading Models
 
 The standard weight format for tinygrad is [safetensors](https://github.com/huggingface/safetensors). This means that you can load the weights of any model also using safetensors into tinygrad.
-There are functions in [state.py](/tinygrad/nn/state.py) to save and load models to and from this format.
+There are functions in [state.py](https://github.com/tinygrad/tinygrad/blob/master/tinygrad/nn/state.py) to save and load models to and from this format.
 
 ```python
 from tinygrad.nn.state import safe_save, safe_load, get_state_dict, load_state_dict
@@ -296,7 +296,7 @@ state_dict = safe_load("model.safetensors")
 load_state_dict(net, state_dict)
 ```
 
-Many of the models in the [models/](/models) folder have a `load_from_pretrained` method that will download and load the weights for you. These usually are pytorch weights meaning that you would need pytorch installed to load them.
+Many of the models in the [models/](https://github.com/tinygrad/tinygrad/blob/master/models) folder have a `load_from_pretrained` method that will download and load the weights for you. These usually are pytorch weights meaning that you would need pytorch installed to load them.
 
 ### Environment Variables
 

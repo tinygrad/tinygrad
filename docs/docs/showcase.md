@@ -17,7 +17,7 @@ python3 examples/efficientnet.py webcam
 
 ### YOLOv8
 
-Take a look at [yolov8.py](/examples/yolov8.py).
+Take a look at [yolov8.py](https://github.com/tinygrad/tinygrad/tree/master/examples/yolov8.py).
 
 ![yolov8 by tinygrad](./showcase/yolov8_showcase_image.png)
 
@@ -25,7 +25,7 @@ Take a look at [yolov8.py](/examples/yolov8.py).
 
 ### Whisper
 
-Take a look at [whisper.py](/examples/whisper.py). You need pyaudio and torchaudio installed.
+Take a look at [whisper.py](https://github.com/tinygrad/tinygrad/tree/master/examples/whisper.py). You need pyaudio and torchaudio installed.
 
 ```sh
 SMALL=1 python3 examples/whisper.py
@@ -35,7 +35,7 @@ SMALL=1 python3 examples/whisper.py
 
 ### Generative Adversarial Networks
 
-Take a look at [mnist_gan.py](/examples/mnist_gan.py).
+Take a look at [mnist_gan.py](https://github.com/tinygrad/tinygrad/tree/master/examples/mnist_gan.py).
 
 ![mnist gan by tinygrad](./showcase/mnist_by_tinygrad.jpg)
 

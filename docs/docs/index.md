@@ -8,7 +8,7 @@ Read the quick start guide [here](./quickstart.md).
 
 Or if you want to jump right in to how tinygrad works, you can read the [abstraction stack](./abstractions.py) documentation.
 
-Or if you want to see some examples, you can look at the examples in the [examples](/examples) directory.
+Or if you want to see some examples, you can look at the examples in the [examples](https://github.com/tinygrad/tinygrad/tree/master/examples) directory.
 
 Or if you just want to see some of the things tinygrad can do, check out the [showcase](./showcase.md).
 
@@ -32,6 +32,6 @@ This is currently a big work in progress.
 
 ## Contributing
 
-The documentation mainly follows the core contributing guidelines in the [README.md](/README.md#contributing).
+The documentation mainly follows the core contributing guidelines in the [README.md](https://github.com/tinygrad/tinygrad/blob/master/README.md#contributing).
 
 Additionally, we always welcome documentation contributions, especially for features that are currently under documented.

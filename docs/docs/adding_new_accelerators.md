@@ -26,10 +26,10 @@ Maximum, Add, Sub, Mul, Pow, Div, Equal        # binary ops (no broadcasting, us
 Expand, Reshape, Permute, Pad, Shrink, Flip    # movement ops
 Where                                          # ternary ops
 ```
-These are implemented in [mlops.py](/tinygrad/mlops.py).
+These are implemented in [mlops.py](https://github.com/tinygrad/tinygrad/blob/master/tinygrad/mlops.py).
 
 ## hlops
 
 These are the syntax sugar. They are built on top of the mlops and support most of the things that you could expect from a tensor library.
 
-These are implemented in [tensor.py](/tinygrad/tensor.py).
+These are implemented in [tensor.py](https://github.com/tinygrad/tinygrad/blob/master/tinygrad/tensor.py).
