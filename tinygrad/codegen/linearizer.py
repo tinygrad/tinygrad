@@ -462,7 +462,9 @@ class Linearizer(Kernel):
           if arg == BinaryOps.MUL and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[x]
         if arg == BinaryOps.SUB and vin[1].uop == UOps.CONST and vin[1].arg == 0.0: return vin[0]
         if arg == BinaryOps.DIV and vin[1].uop == UOps.CONST and vin[1].arg == 1.0: return vin[0]
-    if cachable and key in self.saved_exprs: return self.saved_exprs[key]
+
+    # When cachable with insert_before, need to check if this cache is valid for the new place.
+    if cachable and key in self.saved_exprs and not(insert_before is not None and self.uops.index(self.saved_exprs[key]) > insert_before): return self.saved_exprs[key]
     ret = UOp(uop, dtype, vin, arg)
     if insert_before is not None:
       self.uops.insert(insert_before, ret)
