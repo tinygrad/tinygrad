@@ -205,6 +205,12 @@ class TestTinygrad(unittest.TestCase):
     self.assertEqual(Tensor.zeros([10,20,40]).shape, (10,20,40))
     self.assertEqual(Tensor.ones([10,20,40]).shape, (10,20,40))
 
+    self.assertEqual(Tensor.rand(1,10,20).shape, (1,10,20))
+    self.assertEqual(Tensor.rand((10,20,40)).shape, (10,20,40))
+
+    self.assertEqual(Tensor.empty(1,10,20).shape, (1,10,20))
+    self.assertEqual(Tensor.empty((10,20,40)).shape, (10,20,40))
+
   def test_numel(self):
     assert Tensor.randn(10, 10).numel() == 100
     assert Tensor.randn(1,2,5).numel() == 10
