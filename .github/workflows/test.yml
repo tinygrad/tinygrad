@@ -257,7 +257,7 @@ jobs:
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
     - name: Print cache
-      run: ls -lt ~/Library/Caches/tinygrad
+      run: ls -lt ~/Library/Caches/tinygrad/downloads/
     - name: Run whisper test
       run: METAL=1 python -m pytest test/models/test_whisper.py
     - name: Run linearizer and tensor core test
@@ -357,7 +357,7 @@ jobs:
           python -c "from tinygrad.ops import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
           DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Print cache
-        run: ls -lt ~/Library/Caches/tinygrad
+        run: ls -lt ~/Library/Caches/tinygrad/downloads/
       - name: Run pytest (not cuda)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
         run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}' --durations=20
