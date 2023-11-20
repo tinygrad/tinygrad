@@ -23,7 +23,7 @@ def loader_process(q_in, q_out, X, Y):
     img = Image.open(fn)
     img = img.convert('RGB') if img.mode != "RGB" else img
 
-    # eval: 76.08%, load in 0m7.366s (0m5.866s with simd)
+    # eval: 76.08%, load in 0m7.366s (0m5.301s with simd)
     # CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
     rescale = min(img.size) / 256
     crop_left = (img.width - 224*rescale) / 2.0
@@ -38,7 +38,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
   from extra.datasets.imagenet import get_train_files, get_val_files
   files = get_val_files() if val else get_train_files()
 
-  BATCH_COUNT = 10
+  BATCH_COUNT = 32
   q_in, q_out = Queue(), Queue()
   X = Tensor.empty(batch_size*BATCH_COUNT, 224, 224, 3, dtype=dtypes.uint8, device=f"disk:/dev/shm/resnet_X")
   Y = Tensor.empty(batch_size*BATCH_COUNT, dtype=dtypes.uint32, device=f"disk:/dev/shm/resnet_Y")
