@@ -64,6 +64,8 @@ class Tensor:
     elif data is None or data.__class__ is list:
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
       data = LazyBuffer.fromCPU(np.array([] if data is None else data, dtype=(dtype or Tensor.default_type).np))
+    elif isinstance(data, bytes):
+      data = LazyBuffer.fromCPU(np.frombuffer(data, np.uint8))
     elif isinstance(data, np.ndarray):
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
       if data.shape == ():
