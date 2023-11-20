@@ -1,7 +1,6 @@
 import os
 import math
 import json
-from extra.utils import OSX
 import numpy as np
 from PIL import Image
 import pathlib

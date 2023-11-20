@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from extra.utils import WINDOWS
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, WINDOWS
 from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import BatchNorm2d, Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, GroupNorm, LayerNorm, LayerNorm2d, Embedding, InstanceNorm
