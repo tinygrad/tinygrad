@@ -66,20 +66,17 @@ def torch_load(fn:str):
 
   offsets: Dict[str, int] = {}
   lens: Dict[str, int] = {}
-  def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None):
+  def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad=None, backward_hooks=None, metadata=None):
     #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize
     if storage[2] not in offsets: return None
     byte_offset = offsets[storage[2]]+storage_offset*storage[1].itemsize
-    return _build_tensor(byte_offset, size, stride, storage[1])
-
-  def _build_tensor(byte_offset, size, stride, dtype):
-    ret = t[byte_offset:byte_offset+prod(size)].cast(dtype)
+    ret = t[byte_offset:byte_offset+prod(size)].cast(storage[1])
     # convert bfloat16 -> float16 using LLVM for Llama 2
     # upstream LLaMA also does this conversion:
     # https://github.com/facebookresearch/llama/blob/6c7fe276574e78057f917549435a2554000a876d/llama/generation.py#L95
     # TODO: should this be done in the example instead? or maybe we don't need this anymore with better bfloat16 support
-    if dtype == dtypes.bfloat16:
+    if storage[1] == dtypes.bfloat16:
       ret = ret.bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half()
       #ret = ret.to("LLVM").half().to(Device.DEFAULT)
 
@@ -105,16 +102,12 @@ def torch_load(fn:str):
   class Dummy: pass
   class TorchPickle(pickle.Unpickler):
     def find_class(self, module, name):
-      #if DEBUG >= 5: print("find_class", module, name)
       module_root = module.split(".")[0]
       if module_root not in whitelist:
         if DEBUG >= 2: print(f"WARNING: returning Dummy for {module} {name}")
         return Dummy
       return intercept[name] if module_root == "torch" else super().find_class(module, name)
-    def persistent_load(self, pid):
-      #if DEBUG >= 5: print("persistent_load", pid)
-      if int(pid) in deserialized_objects: return deserialized_objects[int(pid)]
-      return pid
+    def persistent_load(self, pid): return deserialized_objects[pid] if pid in deserialized_objects else pid
 
   if tuple(t[0:2].numpy()) == (0x50, 0x4b):
     myzip = zipfile.ZipFile(fn, 'r')
@@ -129,21 +122,15 @@ def torch_load(fn:str):
     with tarfile.open(fn, "r") as tar:
       storages_offset = tar.getmember('storages').offset_data
       f = tar.extractfile('storages')
-      num_storages = TorchPickle(f).load()
-      storages = {}
-      for i in range(num_storages):
-        key, location, storage_type = TorchPickle(f).load()
-        sz = struct.unpack('<q', f.read(8))[0]
-        storages[key] = (location, storage_type, sz, f.tell())
+      for i in range(TorchPickle(f).load()):  # num_storages
+        (key, location, storage_type), sz = TorchPickle(f).load(), struct.unpack('<q', f.read(8))[0]
+        offsets[str(key)] = storages_offset + f.tell()
         f.seek(sz*storage_type.itemsize, 1)
       f = tar.extractfile('tensors')
-      num_tensors = TorchPickle(f).load()
-      for _ in range(num_tensors):
-        key, storage_id, original_tensor_type = TorchPickle(f).load()
-        ndim, _ = struct.unpack('<i', f.read(4))[0], f.read(4)  # skip next 4 bytes; legacy encoding treated ndim as 8 bytes
+      for _ in range(TorchPickle(f).load()):  # num_tensors
+        (key, storage_id, original_tensor_type), ndim, _ = TorchPickle(f).load(), struct.unpack('<i', f.read(4))[0], f.read(4)
         size, stride, storage_offset = struct.unpack(f'<{ndim}q', f.read(8 * ndim)), struct.unpack(f'<{ndim}q', f.read(8 * ndim)), struct.unpack('<q', f.read(8))[0]
-        location, storage_type, sz, real_storage_offset = storages[storage_id]
-        deserialized_objects[key] = _build_tensor(storages_offset+real_storage_offset+storage_offset, size, stride, storage_type)
+        deserialized_objects[str(key)] = _rebuild_tensor_v2((None, storage_type, str(storage_id), None, -1), storage_offset, size, stride)
       return {k:v.tensor if isinstance(v, Parameter) else v for k,v in TorchPickle(tar.extractfile('pickle')).load().items()}
   else:
     with open(fn, "rb") as f:
