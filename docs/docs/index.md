@@ -1,3 +1,10 @@
+<p style="text-align: center">
+<img src="./logo.png" alt=logo width="66%"></img></br>
+<em>You like <a href="https://github.com/pytorch/pytorch">PyTorch</a>? You like <a href="https://github.com/karpathy/micrograd">karpathy/micrograd</a>? You love tinygrad! ❤️</em>
+</p>
+
+---
+
 # Welcome to the tinygrad documentation!
 
 Here you will find documentation for tinygrad, as well as some examples and tutorials.
