@@ -16,7 +16,6 @@ def shuffled_indices(n):
     del indices[i]
 
 def loader_process(q_in, q_out, X, Y):
-  #import torchvision.transforms.functional as F
   from extra.datasets.imagenet import get_imagenet_categories
   cir = get_imagenet_categories()
   while (_recv := q_in.get()) is not None:
@@ -24,35 +23,11 @@ def loader_process(q_in, q_out, X, Y):
     img = Image.open(fn)
     img = img.convert('RGB') if img.mode != "RGB" else img
 
-    # 75.32%
-    #factor = min(img.size)/256
-    #l, t = ((img.size[0]/factor)-224)/2 * factor, ((img.size[1]/factor)-224)/2 * factor
-    #img = img.transform((224, 224), Image.Transform.AFFINE, (factor, 0, l, 0, factor, t), Image.Resampling.BILINEAR)
-
-    # 75.84% (non BILINEAR)
-    # 76.02% with BILINEAR and rounded
-    #factor = min(img.size)/256
-    #print(l, t)
-    #l, t = (img.size[0]-min(img.size))/2, (img.size[1]-min(img.size))/2
-    #img = img.transform((256, 256), Image.Transform.EXTENT, (l, t, img.size[0]-l, img.size[1]-t), Image.Resampling.BILINEAR)
-    #img = img.transform((256, 256), Image.Transform.AFFINE, (factor, 0, 0, 0, factor, 0), Image.Resampling.BILINEAR)
-    #img = img.transform((int(img.size[0]/factor), int(img.size[1]/factor)), Image.Transform.EXTENT, (0, 0, img.size[0], img.size[1]), Image.Resampling.BILINEAR)
-    #img = img.resize((int(img.width/factor), int(img.height/factor)), Image.Resampling.BILINEAR)
-    #print(img.size, l, t)
-    #l, t = int((img.width-224)/2+0.5), int((img.height-224)/2+0.5)
-    #img = img.crop((l, t, l+224, t+224))
-
-    # 76.14%
-    #img = F.resize(img, 256, Image.BILINEAR)
-    #img = F.center_crop(img, 224)
-
-    # 76.14%
-    factor = min(img.size)/256
-    img = img.resize((int(img.width/factor), int(img.height/factor)), Image.Resampling.BILINEAR)
-    crop_left = int(round((img.width - 224) / 2.0))
-    crop_top = int(round((img.height - 224) / 2.0))
-    img = img.crop((crop_left, crop_top, crop_left+224, crop_top+224))
-
+    # eval: 76.08%, load in 0m7.366s
+    rescale = min(img.size) / 256
+    crop_left = (img.width - 224*rescale) / 2.0
+    crop_top = (img.height - 224*rescale) / 2.0
+    img = img.resize((224, 224), Image.Resampling.BILINEAR, box=(crop_left, crop_top, crop_left+224*rescale, crop_top+224*rescale))
 
     X[idx].assign(img.tobytes())
     Y[idx].assign(cir[fn.split("/")[-2]])
