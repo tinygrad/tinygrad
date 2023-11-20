@@ -1,6 +1,6 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib, ctypes, tempfile
-import Metal, Cocoa, libdispatch
+import Metal
 from typing import List, Any, Tuple, Dict, Union, Set, cast
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup
@@ -41,22 +41,18 @@ def unwrap(x):
   return ret
 
 @diskcache
-def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
+def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))):
   if use_xcode:
     # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
     air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
     return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
   options = Metal.MTLCompileOptions.new()
   library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
-  # TODO: avoid file write here?
-  with tempfile.NamedTemporaryFile(delete=True) as output_file:
-    unwrap(library.serializeToURL_error_(Cocoa.NSURL.URLWithString_(f"file://{output_file.name}"), None))
-    return pathlib.Path(output_file.name).read_bytes()
+  return library
 
 class MetalProgram:
-  def __init__(self, name:str, lib:bytes):
-    data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
-    self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
+  def __init__(self, name:str, lib):
+    self.library = lib
     self.fxn = self.library.newFunctionWithName_(name)
     if DEBUG >= 6:
       with tempfile.NamedTemporaryFile(delete=True) as shader:
