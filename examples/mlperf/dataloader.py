@@ -16,16 +16,28 @@ def shuffled_indices(n):
     del indices[i]
 
 def loader_process(q_in, q_out, X, Y):
+  import torchvision.transforms.functional as F
   from extra.datasets.imagenet import get_imagenet_categories
   cir = get_imagenet_categories()
   while (_recv := q_in.get()) is not None:
     idx, fn = _recv
     img = Image.open(fn)
-    img = img.convert('RGB')
+    img = img.convert('RGB') if img.mode != "RGB" else img
     factor = min(img.size)/256
-    img = img.resize((int(img.size[0]/factor), int(img.size[1]/factor)))
-    l, t = (img.size[0]-224)//2, (img.size[1]-224)//2
-    img = img.crop((l, t, l+224, t+224))
+
+    # 75.32%
+    #l, t = ((img.size[0]/factor)-224)/2 * factor, ((img.size[1]/factor)-224)/2 * factor
+    #img = img.transform((224, 224), Image.Transform.AFFINE, (factor, 0, l, 0, factor, t), Image.Resampling.BILINEAR)
+
+    # 75.84%
+    #img = img.resize((int(img.size[0]/factor), int(img.size[1]/factor)))
+    #l, t = (img.size[0]-224)//2, (img.size[1]-224)//2
+    #img = img.crop((l, t, l+224, t+224))
+
+    # 76.14%
+    img = F.resize(img, 256, Image.BILINEAR)
+    img = F.center_crop(img, 224)
+
     X[idx].assign(img.tobytes())
     Y[idx].assign(cir[fn.split("/")[-2]])
     q_out.put(idx)
