@@ -1,4 +1,4 @@
-import os, json, pathlib, zipfile, pickle
+import os, json, pathlib, zipfile, pickle, tarfile, struct
 from tqdm import tqdm
 from typing import Dict, Union, List, Optional, Any, Tuple
 from tinygrad.tensor import Tensor
@@ -71,12 +71,15 @@ def torch_load(fn:str):
     lens[storage[2]] = storage[4] * storage[1].itemsize
     if storage[2] not in offsets: return None
     byte_offset = offsets[storage[2]]+storage_offset*storage[1].itemsize
-    ret = t[byte_offset:byte_offset+prod(size)].cast(storage[1])
+    return _build_tensor(byte_offset, size, stride, storage[1])
+
+  def _build_tensor(byte_offset, size, stride, dtype):
+    ret = t[byte_offset:byte_offset+prod(size)].cast(dtype)
     # convert bfloat16 -> float16 using LLVM for Llama 2
     # upstream LLaMA also does this conversion:
     # https://github.com/facebookresearch/llama/blob/6c7fe276574e78057f917549435a2554000a876d/llama/generation.py#L95
     # TODO: should this be done in the example instead? or maybe we don't need this anymore with better bfloat16 support
-    if storage[1] == dtypes.bfloat16:
+    if dtype == dtypes.bfloat16:
       ret = ret.bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half()
       #ret = ret.to("LLVM").half().to(Device.DEFAULT)
 
@@ -92,17 +95,26 @@ def torch_load(fn:str):
 
     return ret.reshape(size)
 
-  intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "BFloat16Storage": dtypes.bfloat16, "IntStorage": dtypes.int32, "LongStorage": dtypes.int64, "_rebuild_tensor_v2": _rebuild_tensor_v2}
+  class Parameter:
+    def __setstate__(self, state): self.tensor = state[0]
+
+  deserialized_objects: Dict[int, Any] = {}
+  intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "BFloat16Storage": dtypes.bfloat16, "IntStorage": dtypes.int32, "LongStorage": dtypes.int64,
+               "_rebuild_tensor_v2": _rebuild_tensor_v2, "FloatTensor": None, "Parameter": Parameter}
   whitelist = {"torch", "collections", "numpy", "_codecs"}  # NOTE: this is not for security, only speed
   class Dummy: pass
   class TorchPickle(pickle.Unpickler):
     def find_class(self, module, name):
+      #if DEBUG >= 5: print("find_class", module, name)
       module_root = module.split(".")[0]
       if module_root not in whitelist:
         if DEBUG >= 2: print(f"WARNING: returning Dummy for {module} {name}")
         return Dummy
       return intercept[name] if module_root == "torch" else super().find_class(module, name)
-    def persistent_load(self, pid): return pid
+    def persistent_load(self, pid):
+      #if DEBUG >= 5: print("persistent_load", pid)
+      if int(pid) in deserialized_objects: return deserialized_objects[int(pid)]
+      return pid
 
   if tuple(t[0:2].numpy()) == (0x50, 0x4b):
     myzip = zipfile.ZipFile(fn, 'r')
@@ -113,6 +125,26 @@ def torch_load(fn:str):
           offsets[n.split("/")[-1]] = myfile._orig_compress_start # type: ignore
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       return TorchPickle(myfile).load()
+  elif bytes(t[0:0xe].numpy()) == b"././@PaxHeader":  # TODO: is this how you detect a tarfile?
+    with tarfile.open(fn, "r") as tar:
+      storages_offset = tar.getmember('storages').offset_data
+      f = tar.extractfile('storages')
+      num_storages = TorchPickle(f).load()
+      storages = {}
+      for i in range(num_storages):
+        key, location, storage_type = TorchPickle(f).load()
+        sz = struct.unpack('<q', f.read(8))[0]
+        storages[key] = (location, storage_type, sz, f.tell())
+        f.seek(sz*storage_type.itemsize, 1)
+      f = tar.extractfile('tensors')
+      num_tensors = TorchPickle(f).load()
+      for _ in range(num_tensors):
+        key, storage_id, original_tensor_type = TorchPickle(f).load()
+        ndim, _ = struct.unpack('<i', f.read(4))[0], f.read(4)  # skip next 4 bytes; legacy encoding treated ndim as 8 bytes
+        size, stride, storage_offset = struct.unpack(f'<{ndim}q', f.read(8 * ndim)), struct.unpack(f'<{ndim}q', f.read(8 * ndim)), struct.unpack('<q', f.read(8))[0]
+        location, storage_type, sz, real_storage_offset = storages[storage_id]
+        deserialized_objects[key] = _build_tensor(storages_offset+real_storage_offset+storage_offset, size, stride, storage_type)
+      return {k:v.tensor if isinstance(v, Parameter) else v for k,v in TorchPickle(tar.extractfile('pickle')).load().items()}
   else:
     with open(fn, "rb") as f:
       pkl = TorchPickle(f)

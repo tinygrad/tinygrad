@@ -131,6 +131,11 @@ class Tensor:
     if self.grad: ret.grad = self.grad.to(device)
     return ret
 
+  def to_(self, device:str):
+    if self.grad: self.grad = self.grad.to_(device)
+    _ret = Tensor(self.lazydata, device)
+    self.lazydata = _ret.lazydata
+
   # ***** creation llop entrypoint *****
 
   @staticmethod

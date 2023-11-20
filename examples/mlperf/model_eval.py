@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 from tinygrad.tensor import Tensor, Device
 from tinygrad.jit import TinyJit
+from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import getenv, dtypes, GlobalCounters
 from examples.mlperf import helpers
 
@@ -12,6 +13,15 @@ def eval_resnet():
   from extra.models.resnet import ResNet50
   mdl = ResNet50()
   mdl.load_from_pretrained()
+  print("loaded model")
+
+  SECOND_GPU = False
+  if SECOND_GPU:
+    # load second model
+    mdl2 = ResNet50()
+    for x in get_parameters(mdl2): x.to_('gpu:1')
+    mdl2.load_from_pretrained()
+    print("loaded model 2")
 
   input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
   input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
@@ -32,17 +42,17 @@ def eval_resnet():
   n,d = 0,0
   st = time.perf_counter()
   x,ny = next(iterator)
-  dat = x.to(Device.DEFAULT)
-  while dat is not None:
+  dat_0 = x.to(Device.DEFAULT)
+  while dat_0 is not None:
     y = ny.numpy()
     GlobalCounters.reset()
     mt = time.perf_counter()
-    outs = mdlrun(dat) if dat.shape[0] != BS else mdljit(dat)
+    outs = mdlrun(dat_0) if dat_0.shape[0] != BS else mdljit(dat_0)
     try:
       x,ny = next(iterator)
-      dat = x.to(Device.DEFAULT)
+      dat_0 = x.to(Device.DEFAULT)
     except StopIteration:
-      dat = None
+      dat_0 = None
     t = outs.argmax(axis=1).numpy()
     et = time.perf_counter()
     n += (t==y).sum()
