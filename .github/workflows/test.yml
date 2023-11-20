@@ -257,7 +257,7 @@ jobs:
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
     - name: Print cache
-      run: ls -lt ~/.cache/tinygrad/downloads
+      run: python -c "from tinygrad.helpers import _cache_dir; print(_cache_dir)"
     - name: Run whisper test
       run: METAL=1 python -m pytest test/models/test_whisper.py
     - name: Run linearizer and tensor core test
