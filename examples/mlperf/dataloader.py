@@ -1,7 +1,7 @@
 import random
 from PIL import Image
 from tqdm import tqdm
-from tinygrad.helpers import dtypes, partition
+from tinygrad.helpers import dtypes, partition, getenv
 from tinygrad.tensor import Tensor, Device
 from multiprocessing import Queue, Process
 
@@ -80,7 +80,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
 
 if __name__ == "__main__":
   from extra.datasets.imagenet import get_train_files, get_val_files
-  VAL = True
+  VAL = getenv("VAL", 1)
   files = get_val_files() if VAL else get_train_files()
   with tqdm(total=len(files)) as pbar:
     for x,y in batch_load_resnet(val=VAL):
