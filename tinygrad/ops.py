@@ -251,7 +251,7 @@ class CompiledASTRunner(ASTRunner):
     super().__init__(ast)
 
   def build(self, compiler, runtime):
-    self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") or getenv("METAL") or Device.DEFAULT is "METAL" else compiler(self.prg)
+    self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") or getenv("METAL") or Device.DEFAULT == "METAL" or getenv("METAL_XCODE") else compiler(self.prg)
     self.clprg = runtime(self.name, self.lib)
     return self
 
