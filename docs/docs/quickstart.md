@@ -1,6 +1,6 @@
 # tinygrad Quick Start Guide
 
-This guide assumes no prior knowledge of pytorch or any other deep learning framework, but does assume some basic knowledge of neural networks.
+This guide assumes no prior knowledge of PyTorch or any other deep learning framework, but does assume some basic knowledge of neural networks.
 It is intended to be a very quick overview of the high level API that tinygrad provides.
 
 This guide is also structured as a tutorial which at the end of it you will have a working model that can classify handwritten digits.
