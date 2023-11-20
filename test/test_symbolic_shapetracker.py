@@ -13,7 +13,7 @@ class TestSymbolic(unittest.TestCase):
   def test_expr_idxs(self):
     x = Variable("x", 1, 100)
     st = ShapeTracker.from_shape((x, 3))
-    idxs = [Variable("x", 0, 100), Variable("y", 0, 100)]
+    idxs = (Variable("x", 0, 100), Variable("y", 0, 100))
     e1, e2 = st.expr_idxs(idxs)
     assert e1.render() == "((x*3)+y)"
     assert e2.render() == "1"

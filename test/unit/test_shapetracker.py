@@ -160,7 +160,7 @@ class TestIndexExpressions2d(unittest.TestCase):
       idx1s = [(0,0), (0, min(1, st.shape[1]-1)), (0, st.shape[1]-1), (min(3, st.shape[1]-1), min(6, st.shape[1]-1)), (st.shape[1]-1, st.shape[1]-1)]
       idx2s = [(0,0), (0, min(1, st.shape[2]-1)), (0, st.shape[2]-1), (min(3, st.shape[2]-1), min(6, st.shape[2]-1)), (st.shape[2]-1, st.shape[2]-1)] if len(st.shape) == 3 else [None for _ in idx0s]
       for idx0, idx1, idx2 in product(idx0s, idx1s, idx2s):
-        idxs = [Variable(f"idx{i}", idx[0], idx[1]) for i, idx in enumerate((idx0, idx1, idx2)) if idx is not None]
+        idxs = tuple([Variable(f"idx{i}", idx[0], idx[1]) for i, idx in enumerate((idx0, idx1, idx2)) if idx is not None])
         assert idxs_expr(idxs) == st.expr_idxs(idxs)[0]
         self.check_bounds(idxs_expr(idxs), offset, numel)
 

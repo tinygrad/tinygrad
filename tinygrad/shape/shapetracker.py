@@ -20,7 +20,7 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tu
     else:
       ret.append((shape[i], strides[i]))
   return tuple(ret)
-
+@functools.lru_cache(maxsize=None)
 def expr_node_mask(view:View, idx:Node, valid:Optional[Node]=None) -> Node:
   expr = [valid] if valid is not None else []
   if view.mask is not None:
@@ -33,6 +33,7 @@ def expr_node_mask(view:View, idx:Node, valid:Optional[Node]=None) -> Node:
   return Variable.ands(expr)
 
 # generate an expression if you have a single idx variable
+@functools.lru_cache(maxsize=None)
 def expr_node(view:View, idx:Optional[Node]=None) -> Node:
   if idx is None: idx = Variable('idx', 0, prod(view.shape)-1)
   ret: List[Node] = [NumNode(view.offset) if isinstance(view.offset, int) else view.offset] if view.offset else []
@@ -43,6 +44,7 @@ def expr_node(view:View, idx:Optional[Node]=None) -> Node:
   return Variable.sum(ret)
 
 # generate an expression if you have a variable or expression for each index
+@functools.lru_cache(maxsize=None)
 def expr_idxs(view:View, idxs:Tuple[Node, ...]) -> Node:
   assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
   return Variable.sum([NumNode(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])
@@ -87,6 +89,7 @@ class ShapeTracker:
   @property
   def var_vals(self) -> Dict[Variable, int]: return dict() if self.is_all_int else merge_dicts([dict([v.unbind()]) for v in self.vars()])
 
+  @functools.lru_cache(maxsize=None)
   def unbind(self) -> ShapeTracker: return self if self.is_all_int else ShapeTracker(tuple([v.unbind() for v in self.views]))
 
   def to_movement_ops(self) -> List[Tuple[MovementOps, Tuple]]:
@@ -113,9 +116,10 @@ class ShapeTracker:
     return to_apply
 
   # NOTE: if a stride is not always valid, it will be None
+  @functools.lru_cache(maxsize=None)
   def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
     if len(self.views) == 1 and self.views[-1].mask is None: return self.views[-1].strides
-    idxs: List[Node] = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
+    idxs: Tuple[Node,...] = tuple([Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)])
     idx, valid = self.expr_idxs(idxs)
     ret: List[Optional[sint]] = [None] * len(self.views[-1].shape)
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
@@ -128,8 +132,10 @@ class ShapeTracker:
       elif tidx not in idx_vars: ret[i] = 0
     return tuple(ret)
 
+  @functools.lru_cache(maxsize=None)
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
+  @functools.lru_cache(maxsize=None)
   def _expr_idx(self, idx:Node, valid:Node) -> Tuple[Node, Node]:
     for v in reversed(self.views[0:-1]):
       if valid.max == 0: return NumNode(-1), valid
@@ -143,29 +149,33 @@ class ShapeTracker:
         if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
         return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
     return self
-
+  @functools.lru_cache(maxsize=None)
   def expr_idxs(self, idxs:Optional[Iterable[Node]]=None):
     if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx = expr_idxs(self.views[-1], tuple(idxs))
     valid = expr_node_mask(self.views[-1], idxs_to_idx(self.views[-1].shape, tuple(idxs)))
     return self._expr_idx(idx, valid)
-
+  @functools.lru_cache(maxsize=None)
   def expr_node(self, idx:Union[Node,str]='idx'):
     if isinstance(idx, str): idx = Variable(idx, 0, prod(self.shape)-1)
     return self._expr_idx(expr_node(self.views[-1], idx), expr_node_mask(self.views[-1], idx))
-
+  @functools.lru_cache(maxsize=None)
   def axis_is_masked(self, axis:int) -> bool:
     _, valid = self.expr_idxs()
     return f'idx{axis}' in [v.expr for v in valid.vars()]
 
   # *** under this line are the movement ops ***
-
+  @functools.lru_cache(maxsize=None)
   def pad(self, arg: Tuple[Tuple[int, int], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].pad(arg), ))
+  @functools.lru_cache(None)
   def shrink(self, arg: Tuple[Tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].shrink(arg), ))
+  @functools.lru_cache(None)
   def expand(self, new_shape: Tuple[sint, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].expand(new_shape), ))
+  @functools.lru_cache(None)
   def permute(self, axis: Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].permute(axis), ))
+  @functools.lru_cache(None)
   def stride(self, mul: Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].stride(mul), ))
-
+  @functools.lru_cache(maxsize=None)
   def reshape(self, new_shape: Tuple[sint, ...]) -> ShapeTracker:
     if (new_view := self.views[-1].reshape(new_shape)) is None:
       extra_view = View.create(new_shape)
