@@ -4,13 +4,13 @@ Here you will find documentation for tinygrad, as well as some examples and tuto
 
 ## Getting Started
 
-Read the quick start guide [here](/docs/quickstart.md).
+Read the quick start guide [here](./quickstart.md).
 
-Or if you want to jump right in to how tinygrad works, you can read the [abstraction stack](/docs/abstractions.py) documentation.
+Or if you want to jump right in to how tinygrad works, you can read the [abstraction stack](./abstractions.py) documentation.
 
 Or if you want to see some examples, you can look at the examples in the [examples](/examples) directory.
 
-Or if you just want to see some of the things tinygrad can do, check out the [showcase](/docs/showcase.md).
+Or if you just want to see some of the things tinygrad can do, check out the [showcase](./showcase.md).
 
 ## API
 
@@ -20,11 +20,11 @@ This is currently a big work in progress.
 
 ### Environment Variables
 
-[env_vars.md](/docs/env_vars.md)
+[List of environment variables that control tinygrad behavior.](./env_vars.md)
 
 ### Adding New Accelerators
 
-[adding_new_accelerators.md](/docs/adding_new_accelerators.md)
+[Adding a new accelerator to tinygrad.](./adding_new_accelerators.md)
 
 ### Community
 

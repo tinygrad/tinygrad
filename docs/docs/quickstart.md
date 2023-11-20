@@ -76,7 +76,7 @@ print(t6.numpy())
 ```
 
 There are a lot more operations that can be performed on tensors, you can find them in the [tensor.py](/tinygrad/tensor.py) file.
-Additionally reading through [abstractions.py](/docs/abstractions.py) will help you understand how operations on these tensors make their way down to your hardware.
+Additionally reading through [abstractions.py](./abstractions.py) will help you understand how operations on these tensors make their way down to your hardware.
 
 ## Models
 
@@ -303,7 +303,7 @@ Many of the models in the [models/](/models) folder have a `load_from_pretrained
 There exist a bunch of environment variables that control the runtime behavior of tinygrad.
 Some of the commons ones are `DEBUG` and the different backend enablement variables.
 
-You can find a full list and their descriptions in [env_vars.md](/docs/env_vars.md).
+You can find a full list and their descriptions in [env_vars.md](./env_vars.md).
 
 ### Visualizing the Computation Graph
 
