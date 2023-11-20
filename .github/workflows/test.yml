@@ -85,8 +85,8 @@ jobs:
       uses: actions/cache@v3
       with:
         path: |
-          ~/.cache/3a2cae277fcec4464349df535729caaf
-          ~/.cache/5386a662f5b1245493601b29a5e61f40
+          ~/.cache/tinygrad/downloads/3a2cae277fcec4464349df535729caaf
+          ~/.cache/tinygrad/downloads/5386a662f5b1245493601b29a5e61f40
         key: model-weights-v1
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
@@ -120,8 +120,8 @@ jobs:
       uses: actions/cache@v3
       with:
         path: |
-          ~/.cache/3a2cae277fcec4464349df535729caaf
-          ~/.cache/5386a662f5b1245493601b29a5e61f40
+          ~/.cache/tinygrad/downloads/3a2cae277fcec4464349df535729caaf
+          ~/.cache/tinygrad/downloads/5386a662f5b1245493601b29a5e61f40
         key: model-weights-v1
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
@@ -236,8 +236,8 @@ jobs:
       uses: actions/cache@v3
       with:
         path: |
-          ~/Library/Caches/3a2cae277fcec4464349df535729caaf
-          ~/Library/Caches/5386a662f5b1245493601b29a5e61f40
+          ~/Library/Caches/tinygrad/downloads/3a2cae277fcec4464349df535729caaf
+          ~/Library/Caches/tinygrad/downloads/5386a662f5b1245493601b29a5e61f40
         key: model-weights-v1
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
@@ -303,8 +303,8 @@ jobs:
         uses: actions/cache@v3
         with:
           path: |
-            ~/Library/Caches/3a2cae277fcec4464349df535729caaf
-            ~/Library/Caches/5386a662f5b1245493601b29a5e61f40
+            ~/Library/Caches/tinygrad/downloads/3a2cae277fcec4464349df535729caaf
+            ~/Library/Caches/tinygrad/downloads/5386a662f5b1245493601b29a5e61f40
           key: model-weights-v1
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas'}}" >> $GITHUB_ENV
