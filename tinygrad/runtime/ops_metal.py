@@ -53,10 +53,7 @@ def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
     return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
   options = Metal.MTLCompileOptions.new()
   library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
-  # TODO: avoid file write here?
-  with tempfile.NamedTemporaryFile(delete=True) as output_file:
-    unwrap(library.serializeToURL_error_(Cocoa.NSURL.URLWithString_(f"file://{output_file.name}"), None))
-    return pathlib.Path(output_file.name).read_bytes()
+  return library.libraryDataContents().bytes().tobytes()
 
 class MetalProgram:
   def __init__(self, name:str, lib:bytes):
