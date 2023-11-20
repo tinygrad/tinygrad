@@ -218,6 +218,12 @@ MODEL_PARAMS = {
       "args": {"dim": 8192, "n_layers": 48, "n_heads": 64, "n_kv_heads": 8, "multiple_of": 256, "ffn_dim_multiplier": 1.0, "norm_eps": 1e-5, "rope_theta": 1000000, "vocab_size": 32000},
       "files": 4,
     },
+  },
+  "tiny": {
+    "1B": {
+      "args": {"dim": 2048, "multiple_of": 256, "n_heads": 32, "n_kv_heads": 4, "n_layers": 22, "norm_eps": 1e-05, "vocab_size": 32000},
+      "files": 1,
+    }
   }
 }
 
