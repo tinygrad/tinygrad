@@ -1,12 +1,12 @@
 <div align="center">
 
-[![logo](https://raw.githubusercontent.com/tinygrad/tinygrad/master/docs/logo.png)](https://tinygrad.org)
+[![logo](https://raw.githubusercontent.com/tinygrad/tinygrad/master/docs/docs/logo.png)](https://tinygrad.org)
 
 tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) and [karpathy/micrograd](https://github.com/karpathy/micrograd). Maintained by [tiny corp](https://tinygrad.org).
 
 <h3>
 
-[Homepage](https://github.com/tinygrad/tinygrad) | [Documentation](/docs) | [Examples](/examples) | [Showcase](/docs/showcase.md) | [Discord](https://discord.gg/ZjZadyC7PK)
+[Homepage](https://github.com/tinygrad/tinygrad) | [Documentation](/docs) | [Examples](/examples) | [Showcase](/docs/docs/showcase.md) | [Discord](https://discord.gg/ZjZadyC7PK)
 
 </h3>
 
@@ -28,7 +28,7 @@ tinygrad is still alpha software, but we [raised some money](https://geohot.gith
 
 ### LLaMA and Stable Diffusion
 
-tinygrad can run [LLaMA](/docs/showcase.md#llama) and [Stable Diffusion](/docs/showcase.md#stable-diffusion)!
+tinygrad can run [LLaMA](/docs/docs/showcase.md#llama) and [Stable Diffusion](/docs/docs/showcase.md#stable-diffusion)!
 
 ### Laziness
 
@@ -90,7 +90,7 @@ tinygrad already supports numerous accelerators, including:
 - [x] [WebGPU](tinygrad/runtime/ops_webgpu.py)
 
 And it is easy to add more! Your accelerator of choice only needs to support a total of 26 (optionally 27) low level ops.
-More information can be found in the [documentation for adding new accelerators](/docs/adding_new_accelerators.md).
+More information can be found in the [documentation for adding new accelerators](/docs/docs/adding_new_accelerators.md).
 
 ## Installation
 
