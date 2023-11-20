@@ -43,7 +43,7 @@ class WebGLProgram:
 
 class RawWebGLAllocator(LRUAllocator):
     def _do_alloc(self, size, dtype, device, **kwargs): 
-      print("Allocating..." + str(size))
+      print(f"ALLOCATING SIZE={size}")
       return ctx.texture((size, 1), 1, dtype=dtype_map[dtype])
     def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize)
 GLAlloc = RawWebGLAllocator()
@@ -52,11 +52,9 @@ class RawWebGLBuffer(RawBufferCopyIn):
   def __init__(self, size:int, dtype:DType):
     assert dtype not in [dtypes.int64, dtypes.uint64], f"dtype {dtype} not supported on WebGL"
     super().__init__(size, dtype, allocator=GLAlloc)
-  def _copyin(self, x:np.ndarray): 
-    print("Creating array....")
-    return self._buf.write(np.ascontiguousarray(x))
+  def _copyin(self, x:np.ndarray): return self._buf.write(np.ascontiguousarray(x))
   def toCPU(self) -> np.ndarray: 
-    backing = bytearray(self.size * self.dtype.itemsize)
+    backing = bytearray(self.size*self.dtype.itemsize)
     self._buf.read_into(backing)
     return np.frombuffer(backing, dtype=self.dtype.np)
 

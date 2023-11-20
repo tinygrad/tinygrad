@@ -6,6 +6,8 @@ import math
 from typing import Tuple, Dict
 
 type_map = {dtypes.float: "float", dtypes.half: "float16", dtypes.int32: "int", dtypes.uint32: "uint", dtypes.bool: "bool"}
+
+sampler_prefix = {dtypes.float: "", dtypes.half: "", dtypes.int32: "i", dtypes.uint32: "u",dtypes.int8: "i", dtypes.uint8: "u", dtypes.bool: "i"}
 fragment_center_offset = 0.5
 class GLSLLanguage(CStyleLanguage):
   no_global_loop = True
@@ -39,12 +41,11 @@ class GLSLLanguage(CStyleLanguage):
   
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     local_size = local_size[::-1] if local_size else [1]
-    bind_it = iter(range(len(bufs)))
     prg = "#version 330\n"
     prg += "in vec2 uv;\n"
-    prg += "\n".join([f"uniform sampler2D {name};" for name,dtype in bufs if name != "data0"])
+    prg += "\n".join([f"uniform {sampler_prefix[dtype]}sampler2D {name};" for name,dtype in bufs if name != "data0"])
     dummy_line = "float dummy = float(texture(data1, vec2(0.0f,0.0f)).r);\n" if ("sampler2D data1" in prg) else ""
-    prg += "\nout vec4 out_data;\n"
+    prg += f"\nout {sampler_prefix[bufs[0][1]]}vec4 out_data;\n"
     prg += f"\nvoid main() {{\n{dummy_line}" + "\n".join(kernel) + "\n}"
     return prg
 
@@ -55,12 +56,13 @@ class GLSLLanguage(CStyleLanguage):
     return f"if ((bool){cond}) {{"
 
   def render_cast(self, x:List[str], var_dtype:DType) -> str:
-    print("Rendering cast...")
-    if type_map[var_dtype]: return f"{type_map[var_dtype]}({x[0]})"
+    if type_map[var_dtype]: 
+      return f"{type_map[var_dtype]}({x[0]})"
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
-    return f"texture({buf_name}, vec2(float({idx} + {fragment_center_offset})/textureSize({buf_name}, 0).x, 0.0)).r"
+    out_val = f"texture({buf_name}, vec2(float({idx} + {fragment_center_offset})/textureSize({buf_name}, 0).x, 0.0)).r"
+    return f"{self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val}"
 
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
-    return f"out_data = vec4({var_name}, 0.0, 0.0, 0.0);"
+    return f"out_data = {sampler_prefix[buf_dtype]}vec4({var_name}, 0.0, 0.0, 0.0);"
