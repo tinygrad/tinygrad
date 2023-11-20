@@ -23,11 +23,12 @@ def loader_process(q_in, q_out, X, Y):
     img = Image.open(fn)
     img = img.convert('RGB') if img.mode != "RGB" else img
 
-    # eval: 76.08%, load in 0m7.366s
+    # eval: 76.08%, load in 0m7.366s (0m5.866s with simd)
+    # CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
     rescale = min(img.size) / 256
     crop_left = (img.width - 224*rescale) / 2.0
     crop_top = (img.height - 224*rescale) / 2.0
-    img = img.resize((224, 224), Image.Resampling.BILINEAR, box=(crop_left, crop_top, crop_left+224*rescale, crop_top+224*rescale))
+    img = img.resize((224, 224), Image.BILINEAR, box=(crop_left, crop_top, crop_left+224*rescale, crop_top+224*rescale))
 
     X[idx].assign(img.tobytes())
     Y[idx].assign(cir[fn.split("/")[-2]])
