@@ -1,6 +1,6 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib, ctypes, tempfile
-import Metal, Cocoa, libdispatch
+import Metal, libdispatch
 from typing import List, Any, Tuple, Dict, Union, Set, cast
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup
