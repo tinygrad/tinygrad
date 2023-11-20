@@ -6,9 +6,8 @@ import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
 import onnxruntime as ort
 from onnx2torch import convert
-from extra.utils import download_file
 from extra.onnx import get_run_onnx
-from tinygrad.helpers import OSX, DEBUG
+from tinygrad.helpers import OSX, DEBUG, fetch
 from tinygrad.tensor import Tensor
 from tinygrad.ops import Device
 
@@ -49,8 +48,7 @@ def benchmark_model(m, validate_outs=False):
   global open_csv, CSV
   CSV = {"model": m}
 
-  fn = BASE / MODELS[m].split("/")[-1]
-  download_file(MODELS[m], fn)
+  fn = fetch(MODELS[m])
   onnx_model = onnx.load(fn)
   output_names = [out.name for out in onnx_model.graph.output]
   excluded = {inp.name for inp in onnx_model.graph.initializer}

@@ -4,9 +4,8 @@ import struct
 import unittest, copy
 import mmap
 from tinygrad.tensor import Tensor, Device
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import dtypes, temp
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
-from extra.utils import temp
 
 x_init = np.random.randn(1,3).astype(np.float32)
 U_init = np.random.randn(3,3).astype(np.float32)

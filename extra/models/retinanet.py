@@ -1,8 +1,7 @@
 import math
-from tinygrad.helpers import flatten
+from tinygrad.helpers import flatten, get_child
 import tinygrad.nn as nn
 from extra.models.resnet import ResNet
-from extra.utils import get_child
 import numpy as np
 
 def nms(boxes, scores, thresh=0.5):

@@ -1,8 +1,6 @@
-from tinygrad.helpers import fetch
+from tinygrad.helpers import fetch, get_child
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear, LayerNorm, Embedding
-from extra.utils import get_child
-from pathlib import Path
 
 
 class BertForQuestionAnswering:

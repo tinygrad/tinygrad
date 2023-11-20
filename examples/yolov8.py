@@ -2,7 +2,7 @@ from tinygrad.nn import Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
 import numpy as np
 from itertools import chain
-from extra.utils import fetch
+from tinygrad.helpers import fetch
 from pathlib import Path
 import cv2
 from collections import defaultdict
@@ -400,7 +400,9 @@ if __name__ == '__main__':
   output_folder_path = Path('./outputs_yolov8')
   output_folder_path.mkdir(parents=True, exist_ok=True)
   #absolute image path or URL
-  image_location = [np.frombuffer(io.BytesIO(fetch(img_path)).read(), np.uint8)]
+  with open(fetch(img_path), "rb") as f:
+    img = f.read()
+  image_location = [np.frombuffer(io.BytesIO(img).read(), np.uint8)]
   image = [cv2.imdecode(image_location[0], 1)]
   out_paths = [(output_folder_path / f"{Path(img_path).stem}_output{Path(img_path).suffix}").as_posix()]
   if not isinstance(image[0], np.ndarray):
@@ -424,7 +426,8 @@ if __name__ == '__main__':
   post_predictions = postprocess(preds=predictions, img=pre_processed_image, orig_imgs=image)
 
   #v8 and v3 have same 80 class names for Object Detection
-  class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
+  with open(fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names'), "rb") as f:
+    class_labels = f.read()
   class_labels = class_labels.decode('utf-8').split('\n')
 
   draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=post_predictions, class_labels=class_labels)

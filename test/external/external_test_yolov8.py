@@ -1,5 +1,4 @@
 import numpy as np
-from extra.utils import fetch, download_file, get_child
 from examples.yolov8 import YOLOv8, get_variant_multiples, preprocess, postprocess, label_predictions
 from pathlib import Path
 import unittest
@@ -7,12 +6,15 @@ import io, cv2, os
 import onnxruntime as ort
 import ultralytics
 from tinygrad.nn.state import safe_load, load_state_dict
+from tinygrad.helpers import fetch
+
+def _read(fn: Path) -> io.BufferedReader:
+  with open(fn, "rb") as f: return f.read()
 
 class TestYOLOv8(unittest.TestCase):
   def test_all_load_weights(self):
     for variant in ['n', 's', 'm', 'l', 'x']:
-      weights_location = Path(__file__).parents[2] / "weights" / f'yolov8{variant}.safetensors'
-      download_file(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{variant}.safetensors', weights_location)
+      weights_location = fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{variant}.safetensors')
 
       depth, width, ratio = get_variant_multiples(variant)
       TinyYolov8 = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
@@ -23,14 +25,14 @@ class TestYOLOv8(unittest.TestCase):
   def test_predictions(self):
     test_image_urls = ['https://raw.githubusercontent.com/ultralytics/yolov5/master/data/images/bus.jpg', 'https://www.aljazeera.com/wp-content/uploads/2022/10/2022-04-28T192650Z_1186456067_UP1EI4S1I0P14_RTRMADP_3_SOCCER-ENGLAND-MUN-CHE-REPORT.jpg']
     variant = 'n'
-    weights_location = Path(__file__).parents[2] / "weights" / f'yolov8{variant}.safetensors'
+    weights_location = fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{variant}.safetensors')
     depth, width, ratio = get_variant_multiples(variant)
     TinyYolov8 = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
     state_dict = safe_load(weights_location)
     load_state_dict(TinyYolov8, state_dict)
 
     for i in range(len(test_image_urls)):
-      img_stream = io.BytesIO(fetch(test_image_urls[i]))
+      img_stream = io.BytesIO(_read(fetch(test_image_urls[i])))
       img = cv2.imdecode(np.frombuffer(img_stream.read(), np.uint8), 1)
       test_image = preprocess([img])
       predictions = TinyYolov8(test_image)
@@ -40,11 +42,10 @@ class TestYOLOv8(unittest.TestCase):
 
   def test_forward_pass_torch_onnx(self):
     variant = 'n'
-    weights_location_onnx = Path(__file__).parents[2] / "weights" / f'yolov8{variant}.onnx'
-    weights_location_pt = Path(__file__).parents[2] / "weights" / f'yolov8{variant}.pt'
-    weights_location = Path(__file__).parents[2] / "weights" / f'yolov8{variant}.safetensors'
+    weights_location_pt = fetch(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{variant}.pt', ext='.pt')
+    weights_location = fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{variant}.safetensors')
+    weights_location_onnx = weights_location_pt.with_suffix('.onnx')
 
-    download_file(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{variant}.pt', weights_location_pt)
     # the ultralytics export prints a lot of unneccesary things
     if not weights_location_onnx.is_file():
       model = ultralytics.YOLO(model=weights_location_pt, task='Detect')
@@ -55,7 +56,8 @@ class TestYOLOv8(unittest.TestCase):
     state_dict = safe_load(weights_location)
     load_state_dict(TinyYolov8, state_dict)
 
-    image_location = [np.frombuffer(io.BytesIO(fetch('https://raw.githubusercontent.com/ultralytics/yolov5/master/data/images/bus.jpg')).read(), np.uint8)]
+    fn = fetch('https://raw.githubusercontent.com/ultralytics/yolov5/master/data/images/bus.jpg')
+    image_location = [np.frombuffer(io.BytesIO(_read(fn)).read(), np.uint8)]
     orig_image = [cv2.imdecode(image_location[0], 1)]
 
     input_image = preprocess(orig_image)

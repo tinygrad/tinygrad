@@ -12,11 +12,10 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/mod
 
 import onnx
 from typing import Tuple, List
-from extra.utils import fetch
 from extra.onnx import get_run_onnx
-from tinygrad.graph import print_tree, log_schedule_item
+from tinygrad.graph import log_schedule_item
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, DEBUG, getenv, ImageDType, GRAPH
+from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, DEBUG, getenv, ImageDType, GRAPH, fetch
 from tinygrad.realize import run_schedule
 from tinygrad.ops import LoadOps, Device, ScheduleItem
 from tinygrad.features.image import fix_schedule_for_images
@@ -129,7 +128,8 @@ def thneed_test_onnx(onnx_data, output_fn):
     print("thneed self-test passed!")
 
 if __name__ == "__main__":
-  onnx_data = fetch(sys.argv[1] if len(sys.argv) > 1 else OPENPILOT_MODEL)
+  with open(fetch(sys.argv[1] if len(sys.argv) > 1 else OPENPILOT_MODEL), "rb") as f:
+    onnx_data = f.read()
 
   # quick test for ONNX issues
   #thneed_test_onnx(onnx_data, None)

@@ -30,7 +30,7 @@ class ViT:
 
   def load_from_pretrained(m):
     import io
-    from extra.utils import fetch
+    from tinygrad.helpers import fetch
 
     # https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py
     if m.embed_dim == 192:
@@ -39,7 +39,9 @@ class ViT:
       url = "https://storage.googleapis.com/vit_models/augreg/B_16-i21k-300ep-lr_0.001-aug_medium1-wd_0.1-do_0.0-sd_0.0--imagenet2012-steps_20k-lr_0.01-res_224.npz"
     else:
       raise Exception("no pretrained weights for configuration")
-    dat = np.load(io.BytesIO(fetch(url)))
+    with open(fetch(url), "rb") as f:
+      dat = f.read()
+    dat = np.load(io.BytesIO(dat))
 
     #for x in dat.keys():
     #  print(x, dat[x].shape, dat[x].dtype)

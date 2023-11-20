@@ -22,7 +22,7 @@ from tinygrad.jit import TinyJit, CacheCollector
 
 import pyopencl as cl
 from tinygrad.runtime.ops_gpu import CL
-from extra.utils import fetch
+from tinygrad.helpers import fetch
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 
@@ -146,5 +146,6 @@ def compile(dat, output_fn):
 # UNSAFE_FLOAT4=1 DEBUGCL=1 FLOAT16=1 python3 openpilot/compile.py
 # 22.59 ms
 if __name__ == "__main__":
-  dat = fetch(OPENPILOT_MODEL if len(sys.argv) == 1 else sys.argv[1])
+  with open(fetch(OPENPILOT_MODEL if len(sys.argv) == 1 else sys.argv[1]), "rb") as f:
+    dat = f.read()
   compile(dat, sys.argv[2] if len(sys.argv) >= 3 else "/tmp/output.thneed")

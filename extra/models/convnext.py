@@ -1,6 +1,6 @@
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d, LayerNorm, LayerNorm2d, Linear
-from tinygrad.helpers import fetch
+from tinygrad.helpers import fetch, get_child
 
 class Block:
   def __init__(self, dim):
@@ -44,7 +44,6 @@ versions = {
 def get_model(version, load_weights=False):
   model = ConvNeXt(**versions[version])
   if load_weights:
-    from extra.utils import get_child
     from tinygrad.nn.state import torch_load
     weights = torch_load(fetch(f'https://dl.fbaipublicfiles.com/convnext/convnext_{version}_1k_224_ema.pth'))['model']
     for k,v in weights.items():

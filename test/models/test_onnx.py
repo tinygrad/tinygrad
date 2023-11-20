@@ -5,10 +5,9 @@ import io
 import unittest
 import numpy as np
 import onnx
-from extra.utils import fetch, temp
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, fetch, temp
 import pytest
 
 pytestmark = [pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
@@ -27,7 +26,8 @@ np.random.seed(1337)
 
 class TestOnnxModel(unittest.TestCase):
   def test_benchmark_openpilot_model(self):
-    dat = fetch(OPENPILOT_MODEL)
+    with open(fetch(OPENPILOT_MODEL), "rb") as f:
+      dat = f.read()
     onnx_model = onnx.load(io.BytesIO(dat))
     run_onnx = get_run_onnx(onnx_model)
     def get_inputs():
@@ -71,7 +71,8 @@ class TestOnnxModel(unittest.TestCase):
       ps.print_stats(30)
 
   def test_openpilot_model(self):
-    dat = fetch(OPENPILOT_MODEL)
+    with open(fetch(OPENPILOT_MODEL), "rb") as f:
+      dat = f.read()
     onnx_model = onnx.load(io.BytesIO(dat))
     run_onnx = get_run_onnx(onnx_model)
     print("got run_onnx")
@@ -103,12 +104,14 @@ class TestOnnxModel(unittest.TestCase):
     np.testing.assert_allclose(torch_out, tinygrad_out, atol=1e-4, rtol=1e-2)
 
   def test_efficientnet(self):
-    dat = fetch("https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx")
+    with open(fetch("https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx"), "rb") as f:
+      dat = f.read()
     input_name, input_new = "images:0", True
     self._test_model(dat, input_name, input_new)
 
   def test_shufflenet(self):
-    dat = fetch("https://github.com/onnx/models/raw/main/vision/classification/shufflenet/model/shufflenet-9.onnx")
+    with open(fetch("https://github.com/onnx/models/raw/main/vision/classification/shufflenet/model/shufflenet-9.onnx"), "rb") as f:
+      dat = f.read()
     print(f"shufflenet downloaded : {len(dat)/1e6:.2f} MB")
     input_name, input_new = "gpu_0/data_0", False
     self._test_model(dat, input_name, input_new)
@@ -116,7 +119,8 @@ class TestOnnxModel(unittest.TestCase):
   @unittest.skip("test is very slow")
   def test_resnet(self):
     # NOTE: many onnx models can't be run right now due to max pool with strides != kernel_size
-    dat = fetch("https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet18-v2-7.onnx")
+    with open(fetch("https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet18-v2-7.onnx"), "rb") as f:
+        dat = f.read()
     print(f"resnet downloaded : {len(dat)/1e6:.2f} MB")
     input_name, input_new = "data", False
     self._test_model(dat, input_name, input_new)

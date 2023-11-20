@@ -8,7 +8,7 @@ import numpy as np
 
 from tinygrad.tensor import Tensor
 from examples.yolov3 import Darknet, infer, show_labels
-from extra.utils import fetch
+from tinygrad.helpers import fetch
 
 chicken_img = cv2.imread(str(Path(__file__).parent / 'efficientnet/Chicken.jpg'))
 car_img = cv2.imread(str(Path(__file__).parent / 'efficientnet/car.jpg'))
@@ -16,7 +16,9 @@ car_img = cv2.imread(str(Path(__file__).parent / 'efficientnet/car.jpg'))
 class TestYOLO(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    cls.model = Darknet(fetch("https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg"))
+    with open(fetch("https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg"), "rb") as f:
+      model = f.read()
+    cls.model = Darknet(model)
     print("Loading weights file (237MB). This might take a while…")
     cls.model.load_weights("https://pjreddie.com/media/files/yolov3.weights")
 

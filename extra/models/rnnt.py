@@ -1,8 +1,8 @@
+from tinygrad.helpers import fetch
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.nn import Linear, Embedding
 import numpy as np
-from extra.utils import download_file
 from pathlib import Path
 
 
@@ -60,8 +60,7 @@ class RNNT:
     return out.realize()
 
   def load_from_pretrained(self):
-    fn = Path(__file__).parents[1] / "weights/rnnt.pt"
-    download_file("https://zenodo.org/record/3662521/files/DistributedDataParallel_1576581068.9962234-epoch-100.pt?download=1", fn)
+    fn = fetch("https://zenodo.org/record/3662521/files/DistributedDataParallel_1576581068.9962234-epoch-100.pt?download=1")
 
     import torch
     with open(fn, "rb") as f:

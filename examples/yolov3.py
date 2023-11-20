@@ -8,10 +8,11 @@ import numpy as np
 from PIL import Image
 from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d, Conv2d
-from extra.utils import fetch
+from tinygrad.helpers import fetch
 
 def show_labels(prediction, confidence=0.5, num_classes=80):
-  coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
+  with open(fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names'), "rb") as f:
+    coco_labels = f.read()
   coco_labels = coco_labels.decode('utf-8').split('\n')
   prediction = prediction.detach().numpy()
   conf_mask = (prediction[:,:,4] > confidence)
@@ -38,7 +39,8 @@ def show_labels(prediction, confidence=0.5, num_classes=80):
 def add_boxes(img, prediction):
   if isinstance(prediction, int): # no predictions
     return img
-  coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
+  with open(fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names'), "rb") as f:
+    coco_labels = f.read()
   coco_labels = coco_labels.decode('utf-8').split('\n')
   height, width = img.shape[0:2]
   scale_factor = 608 / width
@@ -281,7 +283,9 @@ class Darknet:
           print("None biases for layer", i)
 
   def load_weights(self, url):
-    weights = np.frombuffer(fetch(url), dtype=np.float32)[5:]
+    with open(fetch(url), "rb") as f:
+      weights = f.read()
+    weights = np.frombuffer(weights, dtype=np.float32)[5:]
     ptr = 0
     for i in range(len(self.module_list)):
       module_type = self.blocks[i + 1]["type"]
@@ -369,7 +373,9 @@ class Darknet:
     return detections
 
 if __name__ == "__main__":
-  model = Darknet(fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg'))
+  with open(fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/cfg/yolov3.cfg'), "rb") as f:
+    model = f.read()
+  model = Darknet(model)
   print("Loading weights file (237MB). This might take a while…")
   model.load_weights('https://pjreddie.com/media/files/yolov3.weights')
   if len(sys.argv) > 1:
@@ -392,7 +398,9 @@ if __name__ == "__main__":
     cap.release()
     cv2.destroyAllWindows()
   elif url.startswith('http'):
-    img_stream = io.BytesIO(fetch(url))
+    with open(fetch(url), "rb") as f:
+      img_stream = f.read()
+    img_stream = io.BytesIO(img_stream)
     img = cv2.imdecode(np.frombuffer(img_stream.read(), np.uint8), 1)
   else:
     img = cv2.imread(url)
