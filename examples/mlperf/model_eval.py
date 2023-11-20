@@ -25,13 +25,9 @@ def eval_resnet():
   mdljit = TinyJit(mdlrun)
 
   # evaluation on the mlperf classes of the validation set from imagenet
-  #from extra.datasets.imagenet import iterate
-  #from extra.helpers import cross_process
   from examples.mlperf.dataloader import batch_load_resnet
-
   BS = 64
-  iterator = batch_load_resnet(val=True)
-  #iterator = cross_process(lambda: iterate(BS))
+  iterator = batch_load_resnet(BS, val=True)
 
   n,d = 0,0
   st = time.perf_counter()
