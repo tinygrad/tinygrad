@@ -27,7 +27,7 @@ def eval_resnet():
   # evaluation on the mlperf classes of the validation set from imagenet
   from examples.mlperf.dataloader import batch_load_resnet
   BS = 64
-  iterator = batch_load_resnet(BS, val=True)
+  iterator = batch_load_resnet(BS, val=True, shuffle=False)
 
   n,d = 0,0
   st = time.perf_counter()
