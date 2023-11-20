@@ -248,9 +248,9 @@ def load(fn:str):
   else:
     return torch_load(fn)
 
-def convert_from_huggingface(weights, model: Transformer):
-  def permute(v: Tensor, n_head, dim1, dim2):
-    return v.reshape(n_head, 2, dim1 // n_head // 2, dim2).transpose(1, 2).reshape(dim1, dim2)
+def convert_from_huggingface(weights, model: Transformer, n_heads: int, n_kv_heads: int):
+  def permute(v: Tensor, n_heads: int, shape):
+    return v.reshape(n_heads, 2, shape[0] // n_heads // 2, shape[1]).transpose(1, 2).reshape(shape[0], shape[1])
 
   keymap = {
     "model.embed_tokens.weight": "tok_embeddings.weight",
@@ -269,10 +269,10 @@ def convert_from_huggingface(weights, model: Transformer):
     to_name = keymap[k]
     if "model.layers" in k:
       if "q_proj" in k:
-        sd[to_name] = permute(v, 32, 2048, 2048)
+        sd[to_name] = permute(v, n_heads, v.shape)
         continue
       elif "k_proj" in k:
-        sd[to_name] = permute(v, 4, 256, 2048)
+        sd[to_name] = permute(v, n_kv_heads, v.shape)
         continue
     sd[to_name] = v
   return sd
@@ -307,14 +307,15 @@ class LLaMa:
     assert sp_model.vocab_size() == MODEL_PARAMS[model_gen][model_size]["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {MODEL_PARAMS[model_gen][model_size]['args']['vocab_size']}"
 
     params = MODEL_PARAMS[model_gen][model_size]
-    model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
+    model_args = params["args"]
+    model = Transformer(**model_args, linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
 
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
     else:
       weights = load(str(model_path))
     if "model.embed_tokens.weight" in weights:
-      weights = convert_from_huggingface(weights, model)
+      weights = convert_from_huggingface(weights, model, model_args["n_heads"], model_args["n_kv_heads"])
 
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
@@ -512,7 +513,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
   # *** prompt engineers stop here ****
 
-  LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code"}[args.gen]
+  LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code", "tiny": "tiny"}[args.gen]
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
