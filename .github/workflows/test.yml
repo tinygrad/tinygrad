@@ -96,6 +96,8 @@ jobs:
       run: PYTHONPATH="." CLANG=1 python examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
       run: clang -O2 recognize.c -lm -o recognize
+    - name: Print cache
+      run: ls -lt ~/.cache/tinygrad/downloads
     - name: Test EfficientNet
       run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
 
@@ -256,6 +258,8 @@ jobs:
       run: METAL=1 python -m pytest -n=auto test/test_symbolic_shapetracker.py test/test_symbolic_ops.py test/test_symbolic_jit.py
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
+    - name: Print cache
+      run: ls -lt ~/Library/Caches/tinygrad/downloads
     - name: Run whisper test
       run: METAL=1 python -m pytest test/models/test_whisper.py
     - name: Run linearizer and tensor core test
