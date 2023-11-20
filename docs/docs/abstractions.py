@@ -1,8 +1,9 @@
+# %% [markdown]
 """
-Welcome to the tinygrad documentation
-=================
+# tinygrad Abstraction Stack
 
 this file will take you on a whirlwind journey from a Tensor all the way down
+
 tinygrad has been aggressively refactored in the 2.5 years it's been worked on.
 what you see here is a refined library (with more refining to go still!)
 
@@ -10,17 +11,19 @@ the whole tinygrad is ~2300 lines, so while it's readable in an evening or two,
 this documentation will help with entry points and understanding the abstraction stack
 """
 
+# %% [markdown]
+# ## Boilerplate imports for typing
 # %%
-# == Boilerplate imports for typing ==
 from __future__ import annotations
 from typing import Optional, Tuple, Union, Any, Dict, Callable, Type, List, ClassVar
 from enum import Enum, auto
 from abc import ABC
 
-# %%
-# == Example: Tensor 2+3 ==
+# %% [markdown]
+# ## Example: Tensor 2+3
 # let's trace an addition down through the layers of abstraction.
 
+# %%
 # we will be using the clang backend
 from tinygrad.ops import Device
 Device.DEFAULT = "CLANG"
@@ -33,9 +36,11 @@ result = a + b
 print(f"{a.numpy()} + {b.numpy()} = {result.numpy()}")
 assert result.numpy()[0] == 5.
 
-# %%
-# == Tensor (in tinygrad/tensor.py, code 8/10) ==
+# %% [markdown]
+# ## Tensor (in tinygrad/tensor.py, code 8/10)
 # it's worth reading tinygrad/tensor.py. it's pretty beautiful
+
+# %%
 import tinygrad.mlops as mlops
 
 # this is the good old familiar Tensor class
@@ -56,17 +61,22 @@ class Tensor:
   # log is an mlop, this is the wrapper function in Tensor
   def log(self): return mlops.Log.apply(self)
 
+# %% [markdown]
 # all the definitions of the derivatives are subclasses of Function (like mlops.Log)
 # there's only 18 mlops for derivatives for everything (in tinygrad/mlops.py, code 9/10)
 # if you read one file, read mlops.py. if you read two files, also read tinygrad/tensor.py
 # you can differentiate the world using the chain rule
+
+# %%
 class Function:
   # example types of forward and backward
   def forward(self, x:LazyBuffer) -> LazyBuffer: pass
   def backward(self, x:LazyBuffer) -> LazyBuffer: pass
 
+# %% [markdown]
+# ## LazyBuffer (in tinygrad/lazy.py, code 5/10)
+
 # %%
-# == LazyBuffer (in tinygrad/lazy.py, code 5/10) ==
 from tinygrad.helpers import DType
 
 # this is where the properties live that you thought were a part of Tensor
@@ -113,9 +123,10 @@ Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, TernaryOps, LoadOps]
 # most of tinygrad/lazy.py is concerned with fusing Ops into LazyOps ASTs that map to GPUKernels
 # it's beyond the scope of this tutorial, but you can read the file if interested
 
-# %%
-# == Example: LazyBuffer for 2+3 ==
+# %% [markdown]
+# ## Example: LazyBuffer for 2+3
 
+# %%
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LazyOp, BinaryOps, LoadOps
 
@@ -146,11 +157,12 @@ assert 'RawMallocBuffer' in str(type(result.lazydata.realized))
 # getting ahead of ourselves, but we can copy the DeviceBuffer toCPU
 assert result.lazydata.realized.toCPU()[0] == 5, "when put in numpy with toCPU, it's 5"
 
-# %%
-# == Union[Interpreted, Compiled] (in tinygrad/ops.py, code 5/10) ==
+# %% [markdown]
+# ## Union[Interpreted, Compiled] (in tinygrad/ops.py, code 5/10)
 
 # Now you have a choice, you can either write a "Interpreted" backend or "Compiled" backend
 
+# %%
 # Interpreted backends are very simple (example: CPU and TORCH)
 class Interpreted:
   # they have a backing RawBuffer
@@ -180,8 +192,10 @@ class Runtime(ABC):
   # call runs the code on the bufs. NOTE: the output is always bufs[0], but this is just a convention
   def __call__(self, global_size:Optional[List[int]], local_size:Optional[List[int]], *bufs:List[RawBuffer]): pass
 
+# %% [markdown]
+# ## RawBuffer (in tinygrad/runtime/lib.py, code 5/10)
+
 # %%
-# == RawBuffer (in tinygrad/runtime/lib.py, code 5/10) ==
 import numpy as np
 
 # RawBuffer is where the data is actually held. it's pretty close to just memory
@@ -206,12 +220,14 @@ class RawNumpyBuffer(RawBuffer):
   def fromCPU(cls, x): return cls(x)
   def toCPU(self): return self._buf
 
-# %%
-# == Example: 2+3 in raw clang ==
+# %% [markdown]
+# ## Example: 2+3 in raw clang
 
 # RawMallocBuffer is the simplest concrete version of RawBuffer (in tinygrad/ops.py)
 # it's used for the CLANG and LLVM backends
 # it's just malloc(size * dtype.itemsize)
+
+# %%
 from tinygrad.runtime.lib import RawMallocBuffer
 
 # ClangProgram is the simplest runtime (in tinygrad/runtime/ops_clang.py, code 7/10)
@@ -235,14 +251,15 @@ print(output.toCPU())
 assert output.toCPU()[0] == 5, "it's still 5"
 np.testing.assert_allclose(output.toCPU(), numpy_a+numpy_b)
 
-# %%
-# == Linearizer (in tinygrad/codegen/linearizer.py, code 4/10) ==
+# %% [markdown]
+# ## Linearizer (in tinygrad/codegen/linearizer.py, code 4/10)
 
 # in the above example, we wrote the code by hand
 # normally while using tinygrad you don't do that
 # the first step of transforming an AST into code is to "linearize" it, think like toposort on the AST
 # for that, we use the Linearizer, which turns an AST into a list of (linear) UOps
 
+# %%
 class UOps(Enum): LOOP = auto(); DEFINE_LOCAL = auto(); LOAD = auto(); ALU = auto(); CONST = auto(); ENDLOOP = auto(); STORE = auto();
 
 class UOp:
@@ -283,11 +300,12 @@ for uop in linearizer.uops: print(uop)
    5 UOps.STORE          :                           [0, 4, 3]                        None
 """
 
-# %%
-# == Example: 2+3 autogenerated clang code ==
+# %% [markdown]
+# ## Example: 2+3 autogenerated clang code
 # to generate clang code, the Linearizer is wrapped with CStyleCodegen
 # here, we have an example where we fetch the generated code from the JIT
 
+# %%
 from tinygrad.tensor import Tensor
 result = Tensor(2) + Tensor(3)
 
@@ -312,12 +330,14 @@ void E_n2(float* restrict data0) {
 }
 """
 
-# %%
-# == Example: ShapeTracker (in tinygrad/shape/shapetracker.py, code 7/10) ==
+# %% [markdown]
+# ## Example: ShapeTracker (in tinygrad/shape/shapetracker.py, code 7/10)
 
 # remember how I said you don't have to write the MovementOps for CompiledBuffers?
 # that's all thanks to ShapeTracker!
 # ShapeTracker tracks the indices into the RawBuffer
+
+# %%
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # create a virtual (10, 10) Tensor. this is just a shape, there's no actual tensor
@@ -367,10 +387,12 @@ print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (10, 1), 0)])
 # and it's even contiguous
 assert a.contiguous == True
 
-# %%
-# == Example: Variable (in tinygrad/shape/symbolic.py, code 6/10) ==
+# %% [markdown]
+# ## Example: Variable (in tinygrad/shape/symbolic.py, code 6/10)
 
 # Under the hood, ShapeTracker is powered by a small symbolic algebra library
+
+# %%
 from tinygrad.shape.symbolic import Variable
 
 # Variable is the basic class from symbolic
@@ -393,5 +415,3 @@ print(expr.render())       # (a*2)
 print(expr.min, expr.max)  # 0 20
 # this is just "(a*2)"
 # since b only has a range from 0-10, it can't affect the output
-
-# %%
