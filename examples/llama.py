@@ -242,7 +242,10 @@ def load(fn:str):
   else:
     return torch_load(fn)
 
-def convert_from_huggingface(weights, model):
+def convert_from_huggingface(weights, model: Transformer):
+  def permute(v: Tensor, n_head, dim1, dim2):
+    return v.reshape(n_head, 2, dim1 // n_head // 2, dim2).transpose(1, 2).reshape(dim1, dim2)
+
   keymap = {
     "model.embed_tokens.weight": "tok_embeddings.weight",
     **{f"model.layers.{l}.input_layernorm.weight": f"layers.{l}.attention_norm.weight" for l in range(len(model.layers))},
@@ -252,7 +255,21 @@ def convert_from_huggingface(weights, model):
     "model.norm.weight": "norm.weight",
     "lm_head.weight": "output.weight",
   }
-  return {keymap[k]: v for k,v in weights.items() if ".rotary_emb." not in k}
+  sd = {}
+  for k, v in weights.items():
+    if ".rotary_emb." in k:
+      continue
+    v = v.to(Device.DEFAULT)
+    to_name = keymap[k]
+    if "model.layers" in k:
+      if "q_proj" in k:
+        sd[to_name] = permute(v, 32, 2048, 2048)
+        continue
+      elif "k_proj" in k:
+        sd[to_name] = permute(v, 4, 256, 2048)
+        continue
+    sd[to_name] = v
+  return sd
 
 class AbsmaxQuantizedLinear:
   def __init__(self, in_features, out_features, bias=False):
