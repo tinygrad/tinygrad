@@ -27,16 +27,17 @@ def loader_process(q_in, q_out, X):
     q_out.put(idx)
 
 def batch_load_resnet(val=False):
-  from extra.datasets.imagenet import get_train_files, get_val_files
+  from extra.datasets.imagenet import get_train_files, get_val_files, get_imagenet_categories
   files = get_val_files() if val else get_train_files()
+  cir = get_imagenet_categories()
   print(f"imagenet files {len(files)}")
   gen = shuffled_indices(len(files))
 
   BATCH_COUNT = 10
   BS = 64
   q_in, q_out = Queue(), Queue()
-  x_buf_shape = BS*BATCH_COUNT, 224, 224, 3
-  X = Tensor.empty(*x_buf_shape, dtype=dtypes.uint8, device=f"disk:/dev/shm/resnet_X")
+  X = Tensor.empty(BS*BATCH_COUNT, 224, 224, 3, dtype=dtypes.uint8, device=f"disk:/dev/shm/resnet_X")
+  Y = Tensor.empty(BS*BATCH_COUNT, dtype=dtypes.uint32, device=f"disk:/dev/shm/resnet_Y")
 
   for _ in range(64):
     p = Process(target=loader_process, args=(q_in, q_out, X))
@@ -55,7 +56,7 @@ def batch_load_resnet(val=False):
       if x >= num*BS and x < (num+1)*BS: gotten.append(x)
       else: next_gotten.append(x)
     gotten = next_gotten
-    return X[num*BS:(num+1)*BS]
+    return X[num*BS:(num+1)*BS], Y[num*BS:(num+1)*BS]
 
   for bn in range(BATCH_COUNT): enqueue_batch(bn)
   cbn = 0
