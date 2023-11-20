@@ -1,7 +1,7 @@
 import time
 from pathlib import Path
 import numpy as np
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, Device
 from tinygrad.jit import TinyJit
 from tinygrad.helpers import getenv, dtypes, GlobalCounters
 from examples.mlperf import helpers
@@ -25,23 +25,26 @@ def eval_resnet():
   mdljit = TinyJit(mdlrun)
 
   # evaluation on the mlperf classes of the validation set from imagenet
-  from extra.datasets.imagenet import iterate
-  from extra.helpers import cross_process
+  #from extra.datasets.imagenet import iterate
+  #from extra.helpers import cross_process
+  from examples.mlperf.dataloader import batch_load_resnet
 
   BS = 64
+  iterator = batch_load_resnet(val=True)
+  #iterator = cross_process(lambda: iterate(BS))
+
   n,d = 0,0
   st = time.perf_counter()
-  iterator = cross_process(lambda: iterate(BS))
   x,ny = next(iterator)
-  dat = Tensor(x)
+  dat = x.to(Device.DEFAULT)
   while dat is not None:
-    y = ny
+    y = ny.numpy()
     GlobalCounters.reset()
     mt = time.perf_counter()
     outs = mdlrun(dat) if dat.shape[0] != BS else mdljit(dat)
     try:
       x,ny = next(iterator)
-      dat = Tensor(x)
+      dat = x.to(Device.DEFAULT)
     except StopIteration:
       dat = None
     t = outs.argmax(axis=1).numpy()

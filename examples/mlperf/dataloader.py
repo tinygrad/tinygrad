@@ -15,7 +15,9 @@ def shuffled_indices(n):
     yield indices[i]
     del indices[i]
 
-def loader_process(q_in, q_out, X):
+def loader_process(q_in, q_out, X, Y):
+  from extra.datasets.imagenet import get_imagenet_categories
+  cir = get_imagenet_categories()
   while 1:
     idx, fn = q_in.get()
     img = Image.open(fn).convert('RGB')
@@ -24,14 +26,12 @@ def loader_process(q_in, q_out, X):
     l, t = (img.size[0]-224)//2, (img.size[1]-224)//2
     img = img.crop((l, t, l+224, t+224))
     X[idx].assign(img.tobytes())
+    Y[idx].assign(cir[fn.split("/")[-2]])
     q_out.put(idx)
 
 def batch_load_resnet(val=False):
-  from extra.datasets.imagenet import get_train_files, get_val_files, get_imagenet_categories
+  from extra.datasets.imagenet import get_train_files, get_val_files
   files = get_val_files() if val else get_train_files()
-  cir = get_imagenet_categories()
-  print(f"imagenet files {len(files)}")
-  gen = shuffled_indices(len(files))
 
   BATCH_COUNT = 10
   BS = 64
@@ -40,10 +40,11 @@ def batch_load_resnet(val=False):
   Y = Tensor.empty(BS*BATCH_COUNT, dtype=dtypes.uint32, device=f"disk:/dev/shm/resnet_Y")
 
   for _ in range(64):
-    p = Process(target=loader_process, args=(q_in, q_out, X))
+    p = Process(target=loader_process, args=(q_in, q_out, X, Y))
     p.daemon = True
     p.start()
 
+  gen = shuffled_indices(len(files))
   def enqueue_batch(num):
     for i in range(BS): q_in.put((num*BS+i, files[next(gen)]))
 
@@ -60,18 +61,18 @@ def batch_load_resnet(val=False):
 
   for bn in range(BATCH_COUNT): enqueue_batch(bn)
   cbn = 0
-  with tqdm(total=len(files)) as pbar:
-    # NOTE: this is batch aligned
-    for _ in range(0, len(files)//BS):
-      yield receive_batch(cbn)
-      pbar.update(BS)
-      try:
-        enqueue_batch(cbn)
-      except StopIteration:
-        pass
-      cbn = (cbn+1) % BATCH_COUNT
+  # NOTE: this is batch aligned
+  for _ in range(0, len(files)//BS):
+    yield receive_batch(cbn)
+    try:
+      enqueue_batch(cbn)
+    except StopIteration:
+      pass
+    cbn = (cbn+1) % BATCH_COUNT
 
 if __name__ == "__main__":
-  for batch in batch_load_resnet(val=False):
-    pass
-    #print(batch.to(Device.DEFAULT))
+  from extra.datasets.imagenet import get_train_files
+  files = get_train_files()
+  with tqdm(total=len(files)) as pbar:
+    for x,y in batch_load_resnet(val=False):
+      pbar.update(x.shape[0])
