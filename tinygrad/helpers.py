@@ -1,7 +1,8 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, requests, tempfile, pathlib
 import numpy as np
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
+from tqdm import tqdm
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
 
@@ -14,18 +15,18 @@ def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.__mul_
 OSX = platform.system() == "Darwin"
 CI = os.getenv("CI", "") != ""
 
-def dedup(x): return list(dict.fromkeys(x))   # retains list order
+def dedup(x:Iterable[T]): return list(dict.fromkeys(x))   # retains list order
 def argfix(*x): return tuple(x[0]) if x and x[0].__class__ in (tuple, list) else x
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
-def all_same(items): return all(x == items[0] for x in items)
+def all_same(items:List[T]): return all(x == items[0] for x in items)
 def all_int(t: Tuple[Any, ...]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
-def colored(st, color, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
-def ansistrip(s): return re.sub('\x1b\\[(K|.*?m)', '', s)
-def ansilen(s): return len(ansistrip(s))
+def colored(st, color:Optional[str], background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
+def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
+def ansilen(s:str): return len(ansistrip(s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
-def flatten(l:Union[List, Iterator]): return [item for sublist in l for item in sublist]
+def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
-def strip_parens(fst): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
+def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def round_up(num, amt): return num if num%amt == 0 else num+(amt-(num%amt))
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
@@ -174,7 +175,7 @@ _cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches"
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 7
+VERSION = 9
 _db_connection = None
 def db_connection():
   global _db_connection
@@ -219,3 +220,18 @@ def diskcache(func):
     return diskcache_put(table, key, func(*args, **kwargs))
   setattr(wrapper, "__wrapped__", func)
   return wrapper
+
+# *** http support ***
+
+def fetch(url:str) -> pathlib.Path:
+  fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / hashlib.md5(url.encode('utf-8')).hexdigest()
+  if not fp.is_file():
+    r = requests.get(url, stream=True, timeout=10)
+    assert r.status_code == 200
+    progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
+    (path := fp.parent).mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
+      for chunk in r.iter_content(chunk_size=16384): progress_bar.update(f.write(chunk))
+      f.close()
+      pathlib.Path(f.name).rename(fp)
+  return fp
