@@ -12,7 +12,8 @@ lin = Linearizer(sched[0].ast)
 # lin.apply_opt(Opt(op=OptOps.LOCAL, axis=0, amt=32))
 
 lin.apply_opt(Opt(op=OptOps.PADTO, axis=0, amt=32))
-# lin.hand_coded_optimizations()
+lin.apply_opt(Opt(op=OptOps.PADTO, axis=1, amt=32))
+lin.hand_coded_optimizations()
 lin.linearize()
 
 run_linearizer(lin)

@@ -456,11 +456,14 @@ class Kernel:
       assert not self.dont_use_locals, "already not using locals"
       self.dont_use_locals = True
     elif opt.op == OptOps.PADTO:
-      ru = round_up(self.sts[0].shape[axis], amt) - self.sts[0].shape[axis]
-      print(f"{self.sts[0].shape[axis]=}, {amt=}, {ru=}")
-      # TODO: does it matter if you pad left or pad right?
+      padded = False
       for i,st in enumerate(self.sts):
-        self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
+        if self.sts[i].shape[axis] != 1:
+          if (ru := round_up(self.sts[i].shape[axis], amt) - self.sts[i].shape[axis]):
+            # TODO: does it matter if you pad left or pad right?
+            self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
+            padded = True
+      assert padded, "nothing was padded"
     return self.simplify_ones()
 
   def required_optimizations(self, early_only=False):
