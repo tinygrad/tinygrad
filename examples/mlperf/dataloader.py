@@ -1,4 +1,4 @@
-import random
+import random, time
 from PIL import Image
 from tqdm import tqdm
 from tinygrad.helpers import dtypes, partition, getenv
@@ -51,9 +51,17 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
     procs.append(p)
 
   gen = shuffled_indices(len(files)) if shuffle else iter(range(len(files)))
+  enqueued_batches = []
   def enqueue_batch(num):
     for i in range(batch_size): q_in.put((num*batch_size+i, files[next(gen)]))
+    enqueued_batches.append(num)
   for bn in range(BATCH_COUNT): enqueue_batch(bn)
+
+  class Cookie:
+    def __init__(self, num): self.num = num
+    def __del__(self):
+      try: enqueue_batch(self.num)
+      except StopIteration: pass
 
   gotten = []
   def receive_batch(num):
@@ -64,17 +72,11 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
       if x >= num*batch_size and x < (num+1)*batch_size: gotten.append(x)
       else: next_gotten.append(x)
     gotten = next_gotten
-    return X[num*batch_size:(num+1)*batch_size], Y[num*batch_size:(num+1)*batch_size]
+    return X[num*batch_size:(num+1)*batch_size], Y[num*batch_size:(num+1)*batch_size], Cookie(num)
 
   # NOTE: this is batch aligned, last ones are ignored
-  cbn = 0
   for _ in range(0, len(files)//batch_size):
-    yield receive_batch(cbn)
-    try:
-      enqueue_batch(cbn)
-    except StopIteration:
-      pass
-    cbn = (cbn+1) % BATCH_COUNT
+    yield receive_batch(enqueued_batches.pop(0))
 
   for _ in procs: q_in.put(None)
   for p in procs: p.join()
@@ -84,5 +86,5 @@ if __name__ == "__main__":
   VAL = getenv("VAL", 1)
   files = get_val_files() if VAL else get_train_files()
   with tqdm(total=len(files)) as pbar:
-    for x,y in batch_load_resnet(val=VAL):
+    for x,y,_ in batch_load_resnet(val=VAL):
       pbar.update(x.shape[0])

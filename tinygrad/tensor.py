@@ -126,12 +126,14 @@ class Tensor:
     return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().reshape(self.shape)
   def item(self) -> Union[float, int]: return self.numpy().item()
 
-  def to(self, device:str) -> Tensor:
+  def to(self, device:Optional[str]) -> Tensor:
+    if device is None or device == self.device: return self
     ret = Tensor(self.lazydata, device)
     if self.grad: ret.grad = self.grad.to(device)
     return ret
 
-  def to_(self, device:str):
+  def to_(self, device:Optional[str]):
+    if device is None or device == self.device: return
     if self.grad: self.grad = self.grad.to_(device)
     _ret = Tensor(self.lazydata, device)
     self.lazydata = _ret.lazydata

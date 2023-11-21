@@ -8,57 +8,57 @@ from tinygrad.helpers import getenv, dtypes, GlobalCounters
 from examples.mlperf import helpers
 
 def eval_resnet():
+  Tensor.no_grad = True
   # Resnet50-v1.5
   from tinygrad.jit import TinyJit
   from extra.models.resnet import ResNet50
-  mdl = ResNet50()
-  mdl.load_from_pretrained()
-  print("loaded model")
 
-  SECOND_GPU = False
-  if SECOND_GPU:
-    # load second model
-    mdl2 = ResNet50()
-    for x in get_parameters(mdl2): x.to_('gpu:1')
-    mdl2.load_from_pretrained()
-    print("loaded model 2")
+  class ResnetRunner:
+    def __init__(self, device=None):
+      self.mdl = ResNet50()
+      if device:
+        for x in get_parameters(self.mdl): x.to_(device)
+      self.mdl.load_from_pretrained()
+      self.input_mean = Tensor([0.485, 0.456, 0.406], device=device).reshape(1, -1, 1, 1)
+      self.input_std = Tensor([0.229, 0.224, 0.225], device=device).reshape(1, -1, 1, 1)
+    def __call__(self, x:Tensor) -> Tensor:
+      x = x.permute([0,3,1,2]).cast(dtypes.float32) / 255.0
+      x -= self.input_mean
+      x /= self.input_std
+      return self.mdl(x).argmax(axis=1).realize()
 
-  input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
-  input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
-  def input_fixup(x):
-    x = x.permute([0,3,1,2]).cast(dtypes.float32) / 255.0
-    x -= input_mean
-    x /= input_std
-    return x
-
-  mdlrun = lambda x: mdl(input_fixup(x)).realize()
-  mdljit = TinyJit(mdlrun)
+  GPUS = list(range(6))
+  mdljit = [TinyJit(ResnetRunner(f'gpu:{i}')) for i in GPUS]
+  print("loaded models")
 
   # evaluation on the mlperf classes of the validation set from imagenet
   from examples.mlperf.dataloader import batch_load_resnet
   BS = 64
   iterator = batch_load_resnet(BS, val=True, shuffle=False)
+  def data_get(device):
+    x,y,cookie = next(iterator)
+    return x.to(device).realize(), y.numpy(), cookie
 
   n,d = 0,0
   st = time.perf_counter()
-  x,ny = next(iterator)
-  dat_0 = x.to(Device.DEFAULT)
-  while dat_0 is not None:
-    y = ny.numpy()
+  datas = [data_get(f'gpu:{i}') for i in GPUS]
+  while datas is not None:
     GlobalCounters.reset()
     mt = time.perf_counter()
-    outs = mdlrun(dat_0) if dat_0.shape[0] != BS else mdljit(dat_0)
+    outs = [m(x) for m,(x,_,_) in zip(mdljit, datas)]
+    run = time.perf_counter()
     try:
-      x,ny = next(iterator)
-      dat_0 = x.to(Device.DEFAULT)
+      next_datas = [data_get(f'gpu:{i}') for i in GPUS]
     except StopIteration:
-      dat_0 = None
-    t = outs.argmax(axis=1).numpy()
+      next_datas = None
+    ts = [x.numpy() for x in outs]
     et = time.perf_counter()
-    n += (t==y).sum()
-    d += len(t)
-    print(f"****** {n}/{d}  {n*100.0/d:.2f}% -- {(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:7.2f} ms to run model. {len(t)/(et-mt):.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-mt):.2f} TFLOPS")
+    for t,(_,y,_) in list(zip(ts, datas)):
+      n += (t==y).sum()
+      d += len(t)
+    print(f"****** {n}/{d}  {n*100.0/d:.2f}% -- {(mt-st)*1000:.2f} ms loading data, {(run-mt)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize. {(len(t)*len(ts))/(et-mt):.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-mt):.2f} TFLOPS")
     st = time.perf_counter()
+    datas = next_datas
 
 def eval_unet3d():
   # UNet3D
