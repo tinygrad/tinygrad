@@ -38,6 +38,7 @@ setup(name='tinygrad',
             "pre-commit",
             "ruff",
             "types-tqdm",
+            "types-requests",
         ],
         'testing': [
             "torch",
