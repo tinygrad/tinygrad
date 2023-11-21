@@ -36,7 +36,7 @@ def run_evaluation(model_name, tinygrad_expected_wer, reference_wer):
   references = []
 
   for audio, texts in tqdm.tqdm(loader):
-    transcriptions = transcribe_waveform(model, enc, audio.numpy())
+    transcriptions = transcribe_waveform(model, enc, audio.numpy(), truncate=True)
     hypotheses.extend(transcriptions)
     references.extend(texts)
 
