@@ -488,8 +488,8 @@ class TestLinearizerOpts(unittest.TestCase):
     ], apply_tc=True)
 
   def test_padto(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled):
-      self.skipTest("Only Compiled uses linearizer")
+    if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
+    if Device.DEFAULT in ["CUDA", "LLVM"]: self.skipTest("no supported for triton and LLVM")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)

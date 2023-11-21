@@ -400,10 +400,8 @@ class Kernel:
       axis = -1
     if opt.amt is not None:
       amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
-      assert isinstance(amt, int), "no symbolic amt"
-      if opt.op != OptOps.PADTO:
-        assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-        assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
+      assert isinstance(amt, int) and amt != 1, "shift/padto of amt 1 or Node is meaningless"
+      if opt.op != OptOps.PADTO: assert self.full_shape[axis] % amt == 0, "no longer valid shift"
     else:
       amt = -1
     if opt.op == OptOps.LOCAL:        # cyan
@@ -453,6 +451,7 @@ class Kernel:
       assert not self.dont_use_locals, "already not using locals"
       self.dont_use_locals = True
     elif opt.op == OptOps.PADTO:
+      assert Device.DEFAULT not in ["CUDA", "LLVM"], "no supported for triton and LLVM"
       padded = False
       for i,st in enumerate(self.sts):
         if self.sts[i].shape[axis] != 1:
