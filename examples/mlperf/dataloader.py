@@ -1,10 +1,10 @@
-import random, time
+import random, time, ctypes
+import numpy as np
 from PIL import Image
 from tqdm import tqdm
-from tinygrad.helpers import dtypes, partition, getenv
-from tinygrad.tensor import Tensor, Device
+from tinygrad.helpers import dtypes, getenv
+from tinygrad.tensor import Tensor
 from multiprocessing import Queue, Process
-from collections import defaultdict
 
 def shuffled_indices(n):
   indices = {}
@@ -16,7 +16,7 @@ def shuffled_indices(n):
     yield indices[i]
     del indices[i]
 
-def loader_process(q_in, q_out, X):
+def loader_process(q_in, q_out, X:Tensor):
   while (_recv := q_in.get()) is not None:
     idx, fn = _recv
     img = Image.open(fn)
@@ -29,7 +29,15 @@ def loader_process(q_in, q_out, X):
     crop_top = (img.height - 224*rescale) / 2.0
     img = img.resize((224, 224), Image.BILINEAR, box=(crop_left, crop_top, crop_left+224*rescale, crop_top+224*rescale))
 
-    X[idx].assign(img.tobytes())   # NOTE: this is slow!
+    # broken out
+    #img_tensor = Tensor(img.tobytes(), device='CPU')
+    #storage_tensor = X[idx].contiguous().realize().lazydata.realized
+    #storage_tensor._copyin(img_tensor.numpy())
+
+    # faster
+    X[idx].contiguous().realize().lazydata.realized._buffer()[:] = img.tobytes()
+
+    #X[idx].assign(img.bytes)   # NOTE: this is slow!
     q_out.put(idx)
 
 def batch_load_resnet(batch_size=64, val=False, shuffle=True):
@@ -73,11 +81,10 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
     gotten[num] = 0
     return X[num*batch_size:(num+1)*batch_size], Y[num*batch_size:(num+1)*batch_size], Cookie(num)
 
-
   # NOTE: this is batch aligned, last ones are ignored
-  for _ in range(0, len(files)//batch_size):
-    yield receive_batch()
+  for _ in range(0, len(files)//batch_size): yield receive_batch()
 
+  # shutdown processes
   for _ in procs: q_in.put(None)
   for p in procs: p.join()
 

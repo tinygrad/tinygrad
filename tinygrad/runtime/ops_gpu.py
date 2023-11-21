@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os
 os.environ['PYOPENCL_NO_CACHE'] = '1'
-import pathlib
+import pathlib, hashlib
 import numpy as np
 import pyopencl as cl
 from typing import Optional, List, Tuple
@@ -15,7 +15,6 @@ OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external/external_osx_pr
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
 ROCM_LLVM_PATH = pathlib.Path("/opt/rocm/llvm/bin")
-#ROCM_LLVM_PATH = pathlib.Path(__file__).parents[3] / "extra/rocm/build/llvm-project/bin"
 if DEBUG >= 5:
   early_exec = fromimport("extra.helpers", "enable_early_exec")()
 
@@ -72,6 +71,7 @@ def compile_gpu(prg:str) -> bytes:
 class CLProgram:
   def __init__(self, name:str, prg:bytes, argdtypes=None, options=None):
     self.name, self.clprograms = name, [cl.Program(ctx, ctx.devices, [prg]*len(ctx.devices)) for ctx in CL.cl_ctxs]
+    self.hash = hashlib.md5(prg).hexdigest()
     self._clprgs = [clprogram.build(options=options) for clprogram in self.clprograms]
     self.clprgs = [clprg.__getattr__(name) for clprg in self._clprgs]
     if DEBUG >= 5 and not OSX:

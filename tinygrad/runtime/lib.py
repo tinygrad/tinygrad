@@ -55,7 +55,7 @@ class RawBufferCopyInOut(RawBufferCopyIn):
     return x
 
 class RawBufferTransfer(RawBuffer):
-  def _transfer(self, x) -> None: raise NotImplementedError("must be implemented")
+  def _transfer(self, x:RawBuffer) -> None: raise NotImplementedError("must be implemented")
 
   @classmethod
   def transfer(cls, x, shape, dtype, **kwargs):

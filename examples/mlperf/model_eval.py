@@ -8,6 +8,7 @@ from tinygrad.helpers import getenv, dtypes, GlobalCounters
 from examples.mlperf import helpers
 
 def eval_resnet():
+  start = time.perf_counter()
   Tensor.no_grad = True
   # Resnet50-v1.5
   from tinygrad.jit import TinyJit
@@ -27,35 +28,35 @@ def eval_resnet():
       x /= self.input_std
       return self.mdl(x).argmax(axis=1).realize()
 
-  GPUS = list(range(6))
-  mdljit = [TinyJit(ResnetRunner(f'gpu:{i}')) for i in GPUS]
-  print("loaded models")
+  GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 6))]
+  mdljit = [TinyJit(ResnetRunner(d)) for d in GPUS]
+  print(f"loaded models @ {time.perf_counter()-start:.2f}s")
 
   # evaluation on the mlperf classes of the validation set from imagenet
   from examples.mlperf.dataloader import batch_load_resnet
-  BS = 64
-  iterator = batch_load_resnet(BS, val=True, shuffle=False)
+  iterator = batch_load_resnet(getenv("BS", 128), val=True, shuffle=False)
   def data_get(device):
     x,y,cookie = next(iterator)
     return x.to(device).realize(), y, cookie
 
   n,d = 0,0
   st = time.perf_counter()
-  proc = [data_get(f'gpu:{i}') for i in GPUS]
+  proc = [data_get(d) for d in GPUS]
+  print(f"loaded initial data @ {time.perf_counter()-start:.2f}s")
   while proc is not None:
     GlobalCounters.reset()
     mt = time.perf_counter()
     proc = [(m(x), y, c) for m,(x,y,c) in zip(mdljit, proc)]   # this frees the images
     run = time.perf_counter()
     # load the next data here
-    try: next_proc = [data_get(f'gpu:{i}') for i in GPUS]
+    try: next_proc = [data_get(d) for d in GPUS]
     except StopIteration: next_proc = None
     proc = [t.numpy() == y for t, y, _ in proc]   # this realizes the models and frees the cookies
     et = time.perf_counter()
     for match in proc:
       n += match.sum()
       d += len(match)
-    print(f"****** {n:5d}/{d:5d}  {n*100.0/d:.2f}% -- {(mt-st)*1000:7.2f} ms loading data, {(run-mt)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize. {(len(match)*len(proc))/(et-mt):.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-mt):.2f} TFLOPS")
+    print(f"****** {n:5d}/{d:5d}  {n*100.0/d:.2f}% -- {(mt-st)*1000:7.2f} ms loading data, {(run-mt)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize. {(len(match)*len(proc))/(et-mt):8.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-mt):.2f} TFLOPS")
     st = time.perf_counter()
     proc = next_proc
 
