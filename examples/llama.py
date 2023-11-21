@@ -412,12 +412,14 @@ if __name__ == "__main__":
   parser.add_argument("--temperature", type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument("--profile", action="store_true", help="Output profile data to out.prof")
-  parser.add_argument("--size", type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B, 70B] for Gen 2, [7B, 13B, 34B] for Code LLaMA")
-  parser.add_argument("--gen", default="1", help="Generation of the model to use ['1', '2', 'code']")
+  parser.add_argument("--gen", default="tiny", help=f"""Generation of the model to use {list(MODEL_PARAMS.keys())}""")
+  parser.add_argument("--size", type=str, default=None, help=f"""Size of model to use {", ".join([f"{list(v.keys())} for gen '{k}'" for k, v in MODEL_PARAMS.items()])}""")
   parser.add_argument("--quantize", action="store_true", help="Quantize the weights to int8 in memory")
   parser.add_argument("--model", type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
 
   args = parser.parse_args()
+  if args.gen not in MODEL_PARAMS: raise ValueError("Invalid model generation")
+  if args.size is None: args.size = list(MODEL_PARAMS[args.gen].items())[0][0]
   chatbot = args.prompt == None
 
   # *** prompt engineers work here ****
