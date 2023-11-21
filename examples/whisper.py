@@ -34,7 +34,7 @@ class MultiHeadAttention:
         if not hasattr(self, 'cache_k'):
           self.cache_k, self.cache_v = k, v
         else:
-          # see test_jitted_read_assign in test_jit.py
+          # see test_jitted_read_assign in test_jit.py. more context https://github.com/tinygrad/tinygrad/pull/2360#issuecomment-1817989994
           self.cache_k.assign(k+1-1).realize()
           self.cache_v.assign(v+1-1).realize()
       else:

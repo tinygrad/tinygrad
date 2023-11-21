@@ -23,7 +23,7 @@ class TinyBobNet:
     return get_parameters(self)
 
   def forward(self, x):
-    return x.dot(self.l1).relu().dot(self.l2).log_softmax()
+    return x.dot(self.l1).relu().dot(self.l2)
 
 # create a model with a conv layer
 class TinyConvNet:
@@ -49,7 +49,7 @@ class TinyConvNet:
     x = self.bn1(x.conv2d(self.c1)).relu().max_pool2d()
     x = self.bn2(x.conv2d(self.c2)).relu().max_pool2d()
     x = x.reshape(shape=[x.shape[0], -1])
-    return x.dot(self.l1).log_softmax()
+    return x.dot(self.l1)
 
 class TestMNIST(unittest.TestCase):
   def test_sgd_onestep(self):

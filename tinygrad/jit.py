@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable, List, Tuple, Any, Dict, cast, Union, Optional
+from typing import Callable, List, Tuple, Dict, cast, Union, Optional, TypeVar, Generic
 import functools, itertools
 from tinygrad.helpers import DEBUG, DType, merge_dicts
 from tinygrad.ops import RawBuffer, Device, ASTRunner, BatchExecutor, JitItem
@@ -8,12 +8,17 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
 from weakref import ref, WeakKeyDictionary
 
-class TinyJit:
-  def __init__(self, fxn:Callable):
-    self.fxn: Callable = fxn
+ReturnType = TypeVar('ReturnType')
+
+class TinyJit(Generic[ReturnType]):
+  def __init__(self, fxn:Callable[..., ReturnType]):
+    self.fxn = fxn
+    self.reset()
+
+  def reset(self):
     self.jit_fxn: Optional[BatchExecutor] = None
     self.cnt: int = 0
-    self.ret: Any = None
+    self.ret: Optional[ReturnType] = None
     self.expected_vals: Optional[Tuple[Variable, ...]] = None
     self.expected_sts_dtype: Optional[Tuple[Tuple[ShapeTracker, DType], ...]] = None
 
@@ -25,14 +30,13 @@ class TinyJit:
   # add support for instance methods
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
 
-  def __call__(self, *args, **kwargs) -> Any:
+  def __call__(self, *args, **kwargs) -> ReturnType:
     # all inputs are realized
     input_tensors: Dict[Union[int, str], Tensor] = {cast(Union[int, str], k):v.realize() for k,v in itertools.chain(enumerate(args), kwargs.items()) if v.__class__ is Tensor}
     expected_sts_dtype = tuple([(v.lazydata.st.unbind(), v.dtype) for v in input_tensors.values()])
 
     # get rawbuffers
     input_rawbuffers: Dict[Union[int, str], RawBuffer] = {k:cast(RawBuffer, v.lazydata.realized) for k,v in input_tensors.items()}
-    assert len(input_rawbuffers) != 0, "no inputs to JIT"
     assert len(set(input_rawbuffers.values())) == len(input_rawbuffers), "duplicate inputs to JIT"
 
     # get variables: they can either be in Tensors or passed in as arguments, and all must be bound. these are all global
@@ -41,7 +45,7 @@ class TinyJit:
 
     if self.cnt >= 2:
       assert self.expected_vals == expected_vals, "mismatch of var_vals"
-      assert self.expected_sts_dtype == expected_sts_dtype, "mismatch of sts"
+      assert self.expected_sts_dtype == expected_sts_dtype, f"mismatch of sts, expected {self.expected_sts_dtype} got {expected_sts_dtype}"
       assert self.jit_fxn, "didn't get jitted?"
       self.jit_fxn(input_rawbuffers, var_vals, DEBUG>=2)
     elif self.cnt == 1:
@@ -58,7 +62,7 @@ class TinyJit:
       self.ret = self.fxn(*args, **kwargs)
 
     self.cnt += 1
-    return self.ret
+    return cast(ReturnType, self.ret)
 
 class PlaceHolder:
   def __init__(self, buf:RawBuffer): self.size, self.dtype, self._device, self.ref, self.buftype, self.bufid = buf.size, buf.dtype, getattr(buf, '_device', None), ref(buf), type(buf), id(buf._buf)
