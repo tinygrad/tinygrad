@@ -487,7 +487,7 @@ class TestLinearizerOpts(unittest.TestCase):
       # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
     ], apply_tc=True)
 
-  def test_padto(self):
+  def test_padto_matmul(self):
     if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
     if Device.DEFAULT in ["CUDA", "LLVM"]: self.skipTest("no supported for triton and LLVM")
     N = 17 * 17
@@ -502,6 +502,15 @@ class TestLinearizerOpts(unittest.TestCase):
       # can optimize further post PADTO
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UNROLL, 0, 4)],
     ])
+
+  def test_padto_max(self):
+    # pad uses invalid value 0, so max is not allowed
+    if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
+    if Device.DEFAULT in ["CUDA", "LLVM"]: self.skipTest("no supported for triton and LLVM")
+    N = 17 * 17
+    a = -Tensor.ones(N, N)
+    with self.assertRaises(AssertionError):
+      helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
 
 if __name__ == '__main__':
   unittest.main()
