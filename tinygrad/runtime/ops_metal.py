@@ -1,6 +1,6 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib, ctypes, tempfile
-import Metal, Cocoa, libdispatch
+import Metal, libdispatch
 from typing import List, Any, Tuple, Dict, Union, Set, cast
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup
@@ -10,7 +10,12 @@ from tinygrad.runtime.lib import RawBufferMapped, RawBuffer, LRUAllocator
 from tinygrad.shape.symbolic import Variable, Node
 
 class MetalAllocator(LRUAllocator):
-  def _do_alloc(self, size, dtype, device, **kwargs): return METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
+  def _do_alloc(self, size, dtype, device, **kwargs):
+    buf_len, max_buf_len = size*dtype.itemsize, METAL.device.maxBufferLength()
+    assert buf_len < max_buf_len, f"Buffer length of {buf_len/1e9:5.2f} GB exceeds Metal's max buffer length of {max_buf_len/1e9:5.2f} GB."
+    buf = METAL.device.newBufferWithLength_options_(buf_len, Metal.MTLResourceStorageModeShared)
+    assert buf, f"Metal buffer allocation failed with {buf}."
+    return buf
   def _do_free(self, buf): buf.release()
   def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
 
@@ -48,10 +53,7 @@ def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
     return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
   options = Metal.MTLCompileOptions.new()
   library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
-  # TODO: avoid file write here?
-  with tempfile.NamedTemporaryFile(delete=True) as output_file:
-    unwrap(library.serializeToURL_error_(Cocoa.NSURL.URLWithString_(f"file://{output_file.name}"), None))
-    return pathlib.Path(output_file.name).read_bytes()
+  return library.libraryDataContents().bytes().tobytes()
 
 class MetalProgram:
   def __init__(self, name:str, lib:bytes):

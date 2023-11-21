@@ -30,22 +30,38 @@ async function waitForText(selector, text) {
     return ready;
 }
 
-puppeteer.launch({ headless: false, args: ["--enable-unsafe-webgpu"]}).then(async browser => {
-    const page = await browser.newPage();
-    page.on("console", message => console.log(`message from console ${message.text()}`))
-        .on("pageerror", ({ message }) => console.log(`error from page ${message}`))
+async function runTest(retryCount) {
+    try {
+        const browser = await puppeteer.launch({ headless: false, args: ["--enable-unsafe-webgpu"] });
+        const page = await browser.newPage();
 
-    const res = await page.goto("http://localhost:8000/examples/index.html");
-    if(res.status() != 200) throw new Error("Failed to load page");
-    const textSelector = await page.waitForSelector("#result");
-    const buttonSelector = await page.waitForSelector("input[type=button]");
-    const ready = await waitForText(textSelector, "ready");
-    if(!ready) throw new Error("Failed to load page");
-    await buttonSelector.evaluate(e => e.click());
-    const done = await waitForText(textSelector, "hen");
-    if(!done) throw new Error("failed to get hen");
-    browser.close();
-    cleanup(null);
-}).catch(err => {
-    cleanup(err);
-});
+        page.on("console", message => console.log(`message from console ${message.text()}`))
+            .on("pageerror", ({ message }) => console.log(`error from page ${message}`));
+
+        const res = await page.goto("http://localhost:8000/examples/index.html");
+        if (res.status() !== 200) throw new Error("Failed to load page");
+
+        const textSelector = await page.waitForSelector("#result");
+        const buttonSelector = await page.waitForSelector("input[type=button]");
+        const ready = await waitForText(textSelector, "ready");
+        if (!ready) throw new Error("Failed to load page");
+
+        await buttonSelector.evaluate(e => e.click());
+        const done = await waitForText(textSelector, "hen");
+        if (!done) throw new Error("failed to get hen");
+
+        await browser.close();
+        cleanup(null);
+    } catch (err) {
+        if (retryCount > 0) {
+            console.log(`Retrying... attempts left: ${retryCount - 1}`);
+            await runTest(retryCount - 1);
+        } else {
+            cleanup(err);
+            throw err;
+        }
+    }
+}
+
+// Start the test with 3 retries
+runTest(3).catch(err => console.error(err));

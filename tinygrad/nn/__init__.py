@@ -2,9 +2,10 @@ import math
 from typing import Optional, Union, Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, all_int
+from tinygrad.nn import optim, state  # noqa: F401
 
 class BatchNorm2d:
-  def __init__(self, sz, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
+  def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
     if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)

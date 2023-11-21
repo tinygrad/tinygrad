@@ -6,7 +6,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawBuffer, RawBufferCopyIn, RawBufferCopyInOut
 try: from tinygrad.runtime.ops_hip import RawHIPBuffer
 except: RawHIPBuffer = None
-from tinygrad.runtime.ops_shm import RawShmBuffer
+from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.jit import CacheCollector
 from tinygrad.tensor import Tensor, Function
 import extra.hip_wrapper as hip
@@ -51,7 +51,7 @@ def _send_rb(x:RawBuffer, target_rank:int):
     s.close()
 
     # copy the buffer into shared memory
-    y = RawShmBuffer(x.size, x.dtype, device=shm_name)
+    y = RawDiskBuffer(x.size, x.dtype, device="disk:shm:"+shm_name)
     # fast path when we can directly copyout
     if isinstance(x, RawBufferCopyInOut): x._copyout(np.frombuffer(y._buffer(), dtype=x.dtype.np))
     else: y.fromCPU(x.toCPU())
@@ -60,7 +60,7 @@ def _send_rb(x:RawBuffer, target_rank:int):
 
     # jit support
     CacheCollector.add(__send_rb, [x, target_rank, y], {})
-setattr(_send_rb, "shared_memory_cache", {})
+  if DEBUG >= 2: print(f"****  rank {getenv('RANK')} sent {x} to rank {target_rank}")
 
 # receive a rawbuffer from the target rank
 def _recv_rb(x:RawBuffer, target_rank:int):
@@ -74,19 +74,18 @@ def _recv_rb(x:RawBuffer, target_rank:int):
     y = RawHIPBuffer(x.size, x.dtype, device=str(y_device), buf=ptr, allocator=None)
     x._transfer(y)
 
-    if DEBUG >= 2: print(f"****  rank {getenv('RANK')} got {x} from rank {target_rank}")
     CacheCollector.add(__recv_rb, [x, target_rank, y], {})
   else:
     shm_name = dist.OOB.recv(target_rank)
-    y = RawShmBuffer(x.size, x.dtype, device=shm_name)
+    y = RawDiskBuffer(x.size, x.dtype, device="disk:shm:"+shm_name)
 
     # fast path when we can directly copyin
     if isinstance(x, RawBufferCopyIn): x._copyin(y.toCPU())
     else: x.fromCPU(y.toCPU())
-    if DEBUG >= 2: print(f"****  rank {getenv('RANK')} got {x} from rank {target_rank}")
 
     # jit support
     CacheCollector.add(__recv_rb, [x, target_rank, y], {})
+  if DEBUG >= 2: print(f"****  rank {getenv('RANK')} got {x} from rank {target_rank}")
 
 # sends a lazybuffer from our rank to the target rank
 def _send_lb(x:LazyBuffer, target_rank:int) -> None:
