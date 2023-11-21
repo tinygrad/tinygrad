@@ -101,7 +101,7 @@ class AudioEncoder:
 class TextDecoder:
   def __init__(self, n_vocab, n_text_ctx, n_text_state, n_text_head, n_text_layer, **_):
     self.max_tokens_to_sample = n_text_ctx // 2
-    self.max_self_attn_cache_len = self.max_tokens_to_sample * 2 # double the size as an extra buffer for prefix/start tokens
+    self.max_self_attn_cache_len = self.max_tokens_to_sample * 2 + 5  # roughly prompt + start toks + max_tokens_to_sample
 
     self.token_embedding = nn.Embedding(n_vocab, n_text_state)
     self.positional_embedding = Tensor.empty(n_text_ctx, n_text_state)
@@ -286,7 +286,7 @@ def transcribe_waveform(model, enc, waveforms, truncate=False):
       # pass the previously inferred tokens as 'prompt' - https://github.com/openai/whisper/discussions/117#discussioncomment-3727051
       prompt = np.concatenate((
         [enc._special_tokens["<|startofprev|>"]],
-        transcription_tokens[0][-model.decoder.max_tokens_to_sample+1+len(start_tokens):],
+        transcription_tokens[0][-model.decoder.max_tokens_to_sample+1:],
         start_tokens))
       curr_segment_tokens = np.tile(prompt, (log_spec.shape[0], 1))
       transcription_start_index = len(curr_segment_tokens[0])
