@@ -412,7 +412,7 @@ if __name__ == "__main__":
   parser.add_argument("--temperature", type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument("--profile", action="store_true", help="Output profile data to out.prof")
-  parser.add_argument("--gen", default="tiny", help=f"""Generation of the model to use {list(MODEL_PARAMS.keys())}""")
+  parser.add_argument("--gen", default="1", help=f"""Generation of the model to use {list(MODEL_PARAMS.keys())}""")
   parser.add_argument("--size", type=str, default=None, help=f"""Size of model to use {", ".join([f"{list(v.keys())} for gen '{k}'" for k, v in MODEL_PARAMS.items()])}""")
   parser.add_argument("--quantize", action="store_true", help="Quantize the weights to int8 in memory")
   parser.add_argument("--model", type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
