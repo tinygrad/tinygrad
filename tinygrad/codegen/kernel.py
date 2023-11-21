@@ -459,6 +459,7 @@ class Kernel:
       padded = False
       for i,st in enumerate(self.sts):
         if self.sts[i].shape[axis] != 1:
+          assert self.sts[i].shape[axis] > 16, "too slow"
           if (ru := round_up(self.sts[i].shape[axis], amt) - self.sts[i].shape[axis]):
             # TODO: does it matter if you pad left or pad right?
             self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))

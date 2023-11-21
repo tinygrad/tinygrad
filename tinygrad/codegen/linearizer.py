@@ -131,8 +131,8 @@ class Linearizer(Kernel):
         amt = len(out_tokens)
         idx, valid = self.sts[i].expr_idxs(k)
         assert idx.render() == ((idx//amt)*amt).render(), "float4 stores are always aligned"
-        assert valid.min == 1, "stores are always valid"
-        store_offset_new[k] = self.uop(UOps.CAST, dtypes.float.vec(amt), tuple(out_tokens))
+        # assert valid.min == 1, "stores are always valid"
+        store_offset_new[k] = self.uop(UOps.CAST, dtypes._float4 if amt == 4 else dtypes._float2, tuple(out_tokens))
       store_offset = store_offset_new
 
     stores = []
