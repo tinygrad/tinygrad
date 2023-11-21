@@ -361,9 +361,6 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
   for x in opts: # Check custom transformations if any.
     check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_program)
 
-class TestLinearizerPadShapetracker(unittest.TestCase):
-  pass
-
 class TestLinearizerOpts(unittest.TestCase):
   def test_local_and_grouped_reduce(self):
     if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.has_local or not Device[Device.DEFAULT].linearizer_opts.has_shared:
@@ -490,6 +487,21 @@ class TestLinearizerOpts(unittest.TestCase):
       # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
     ], apply_tc=True)
 
+  def test_padto(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Only Compiled uses linearizer")
+    N = 17 * 17
+    Tensor.manual_seed(289)
+    a = Tensor.rand(N, N)
+    b = Tensor.rand(N, N)
+    helper_linearizer_opt(a@b, [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 1, 32)],
+      [Opt(OptOps.PADTO, 2, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32)],
+      # can optimize further post PADTO
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UNROLL, 0, 4)],
+    ])
 
 if __name__ == '__main__':
   unittest.main()
