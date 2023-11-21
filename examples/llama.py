@@ -249,8 +249,8 @@ def load(fn:str):
     return torch_load(fn)
 
 def convert_from_huggingface(weights, model: Transformer, n_heads: int, n_kv_heads: int):
-  def permute(v: Tensor, n_heads: int, shape):
-    return v.reshape(n_heads, 2, shape[0] // n_heads // 2, shape[1]).transpose(1, 2).reshape(shape[0], shape[1])
+  def permute(v: Tensor, n_heads: int):
+    return v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1]).transpose(1, 2).reshape(*v.shape[:2])
 
   keymap = {
     "model.embed_tokens.weight": "tok_embeddings.weight",
@@ -263,18 +263,14 @@ def convert_from_huggingface(weights, model: Transformer, n_heads: int, n_kv_hea
   }
   sd = {}
   for k, v in weights.items():
-    if ".rotary_emb." in k:
-      continue
+    if ".rotary_emb." in k: continue
     v = v.to(Device.DEFAULT)
-    to_name = keymap[k]
     if "model.layers" in k:
       if "q_proj" in k:
-        sd[to_name] = permute(v, n_heads, v.shape)
-        continue
+        v = permute(v, n_heads)
       elif "k_proj" in k:
-        sd[to_name] = permute(v, n_kv_heads, v.shape)
-        continue
-    sd[to_name] = v
+        v = permute(v, n_kv_heads)
+    sd[keymap[k]] = v
   return sd
 
 class AbsmaxQuantizedLinear:
@@ -513,7 +509,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
   # *** prompt engineers stop here ****
 
-  LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code", "tiny": "tiny"}[args.gen]
+  LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code", "tiny": "-tiny"}[args.gen]
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
