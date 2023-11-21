@@ -78,9 +78,6 @@ class CStyleLanguage(NamedTuple):
   def render_if(self, cond: str):
     return f"if ({cond}) {{"
 
-  def render_inline_if(self, cond: str, body:str):
-    return f"if ({cond}) {{ {body} }}"
-
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"({cond})?({x}):{y}"
 
@@ -190,9 +187,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       r[u] = r[vin[0]]
     elif uop == UOps.STORE:
       assert vin[0].dtype is not None and vin[2].dtype is not None
-      store = lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
-      if len(vin) > 3: kk(lang.render_inline_if(r[vin[3]], store))
-      else: kk(store)
+      if len(vin) > 3: kk(lang.render_if(r[vin[3]]))
+      kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
+      if len(vin) > 3: kk("}")
     elif uop == UOps.CAST and dtype is not None:
       val = lang.render_cast([r[x] for x in vin], dtype)
       if child_count[u] <= 1: r[u] = val

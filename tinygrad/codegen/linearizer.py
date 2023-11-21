@@ -86,7 +86,6 @@ class Linearizer(Kernel):
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"
       if key not in self.load_cache:
         if acc is not None:
-          # assert valid.min == 1
           self.load_cache[key] = self.uop(UOps.DEFINE_ACC, localtype, (), this_const, cachable=False)
         elif this_const is not None:
           self.load_cache[key] = self.const(this_const, localtype)
@@ -131,7 +130,6 @@ class Linearizer(Kernel):
         amt = len(out_tokens)
         idx, valid = self.sts[i].expr_idxs(k)
         assert idx.render() == ((idx//amt)*amt).render(), "float4 stores are always aligned"
-        # assert valid.min == 1, "stores are always valid"
         store_offset_new[k] = self.uop(UOps.CAST, dtypes._float4 if amt == 4 else dtypes._float2, tuple(out_tokens))
       store_offset = store_offset_new
 
@@ -143,10 +141,8 @@ class Linearizer(Kernel):
         rendered_idx = self.uop(UOps.CAST, dtypes.int.vec(2), tuple(x.render(self.render_ops, self) for x in idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
-      if valid.min == 1:
-        stores.append(self.uop(UOps.STORE, None, (buf_uop, rendered_idx, var)))
-      else:
-        stores.append(self.uop(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(self.render_ops, self))))
+      if valid.min == 1: stores.append(self.uop(UOps.STORE, None, (buf_uop, rendered_idx, var)))
+      else: stores.append(self.uop(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(self.render_ops, self))))
     return stores
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
@@ -393,8 +389,6 @@ class Linearizer(Kernel):
       self.uops.remove(old)
 
     # fix loop scope, push CONST and ALU out of loop
-    # TODO: what if we have 2 independent for loop? is it fine?
-    # TODO: how about if?
     loop_stack: List[List[UOp]] = [[]]
     for u in self.uops:
       if not loop_stack[-1]: loop_stack[-1].append(u)
@@ -402,11 +396,10 @@ class Linearizer(Kernel):
       elif u.uop not in [UOps.CONST, UOps.ALU]: loop_stack[-1].append(u)
       else:
         parents = get_recursive_parents([u])
-        for i in range(len(loop_stack)):
+        for i in reversed(range(len(loop_stack))):
           # check backwards and put the uop in the first encounter with some dependency
-          idx = len(loop_stack)-i-1
-          if any(x in parents for x in loop_stack[idx]) or idx == 0:
-            loop_stack[idx].append(u)
+          if any(x in parents for x in loop_stack[i]) or i == 0:
+            loop_stack[i].append(u)
             break
     self.uops = functools.reduce(operator.__add__, loop_stack, [])
 

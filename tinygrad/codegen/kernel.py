@@ -398,17 +398,14 @@ class Kernel:
       axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op == OptOps.GROUP or opt.op == OptOps.GROUPTOP else 0))
     else:
       axis = -1
-    if opt.op != OptOps.PADTO:
-      if opt.amt is not None:
-        amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
+    if opt.amt is not None:
+      amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
+      assert isinstance(amt, int), "no symbolic amt"
+      if opt.op != OptOps.PADTO:
         assert self.full_shape[axis] % amt == 0, "no longer valid shift"
         assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
-      else:
-        # what is this?
-        amt = -1
     else:
-      assert isinstance(opt.amt, int)
-      amt = opt.amt
+      amt = -1
     if opt.op == OptOps.LOCAL:        # cyan
       assert self.opts.has_local, "target does not support local"
       assert axis < self.first_reduce, "can't local a reduce"
@@ -459,9 +456,9 @@ class Kernel:
       padded = False
       for i,st in enumerate(self.sts):
         if self.sts[i].shape[axis] != 1:
-          assert self.sts[i].shape[axis] > 16, "too slow"
+          assert self.sts[i].shape[axis] > amt//2, "pad adds more than double the work"
           if (ru := round_up(self.sts[i].shape[axis], amt) - self.sts[i].shape[axis]):
-            # TODO: does it matter if you pad left or pad right?
+            # pad right seems to be faster
             self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
             padded = True
       assert padded, "nothing was padded"

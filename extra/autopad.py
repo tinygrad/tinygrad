@@ -5,12 +5,6 @@ from test.external.fuzz_linearizer import run_linearizer
 from tinygrad.codegen.kernel import Opt, OptOps
 
 N = 17**3
-# N = 4096
-# a = Tensor.rand(N,N)
-# b = Tensor.rand(N,N)
-# (a @ b).realize()
-
-# quit()
 
 a = Tensor.rand(N, N)
 b = Tensor.rand(N, N)
