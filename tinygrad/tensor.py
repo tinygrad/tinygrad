@@ -133,12 +133,12 @@ class Tensor:
 
   @staticmethod
   def _loadop(op, sz, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
+    assert isinstance(sz, int), f"cannot create with symbolic size {sz}"
     return Tensor(LazyBuffer.loadop(op, (sz,), Tensor.default_type if dtype is None else dtype, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
 
   @staticmethod
   def empty(*shape, **kwargs):
-    assert all_int(shape), f"cannot create with symbolic shape {shape}"
-    return Tensor._loadop(LoadOps.EMPTY, prod(shape), **kwargs).reshape(shape)
+    return Tensor._loadop(LoadOps.EMPTY, prod((shape:=argfix(*shape))), **kwargs).reshape(shape)
 
   _seed: int = int(time.time())
   @staticmethod
@@ -146,9 +146,8 @@ class Tensor:
 
   @staticmethod
   def rand(*shape, **kwargs):
-    assert all_int(shape), f"cannot create with symbolic shape {shape}"
     Tensor._seed += 1
-    return Tensor._loadop(LoadOps.RAND, prod(shape), arg=Tensor._seed, **kwargs).reshape(shape)
+    return Tensor._loadop(LoadOps.RAND, prod((shape:=argfix(*shape))), arg=Tensor._seed, **kwargs).reshape(shape)
 
   # ***** creation helper functions *****
 
@@ -213,15 +212,13 @@ class Tensor:
     return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
   def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
-    assert self.ndim <= 2, "p must be 1 or 2 dim"
-    assert replacement or num_samples == 1, "supported only with replacement"
-    p = self.unsqueeze(0) if self.ndim == 1 else self
-    cdf = p.cumsum(1)
-    cdf_normalized = cdf / cdf[:, -1].unsqueeze(1)
-    unif_samples = Tensor.rand(num_samples, p.shape[0], 1)
-    indices = (unif_samples.expand((-1, -1, p.shape[1])) >= cdf_normalized).sum(2).permute((1, 0))
-    if self.ndim == 1: indices = indices.squeeze(0)
-    return indices.cast(dtypes.int32)
+    assert 1 <= self.ndim <= 2 and num_samples > 0, f"{self.ndim=} must be 1 or 2 dim, {num_samples=} must be positive"
+    assert replacement or num_samples == 1, "no replacement only supports num_samples = 1"
+    weight = self.unsqueeze(0) if self.ndim == 1 else self
+    cdf = (cw := weight.cumsum(1)) / cw[:, -1].unsqueeze(1)
+    unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1)
+    indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
+    return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
   # ***** toposort and backward pass *****
   def deepwalk(self):

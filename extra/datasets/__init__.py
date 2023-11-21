@@ -2,8 +2,7 @@ import os, gzip, tarfile, pickle
 import numpy as np
 from pathlib import Path
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes
-from extra.utils import download_file
+from tinygrad.helpers import dtypes, fetch
 
 def fetch_mnist(tensors=False):
   parse = lambda file: np.frombuffer(gzip.open(file).read(), dtype=np.uint8).copy()
@@ -36,8 +35,7 @@ def fetch_cifar():
       assert idx == X.shape[0] and X.shape[0] == Y.shape[0]
 
     print("downloading and extracting CIFAR...")
-    fn = Path(__file__).parent.resolve() / "cifar-10-python.tar.gz"
-    download_file('https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz', fn)
+    fn = fetch('https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz')
     tt = tarfile.open(fn, mode='r:gz')
     _load_disk_tensor(X_train, Y_train, [pickle.load(tt.extractfile(f'cifar-10-batches-py/data_batch_{i}'), encoding="bytes") for i in range(1,6)])
     _load_disk_tensor(X_test, Y_test, [pickle.load(tt.extractfile('cifar-10-batches-py/test_batch'), encoding="bytes")])
