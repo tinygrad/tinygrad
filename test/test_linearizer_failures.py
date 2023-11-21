@@ -67,6 +67,13 @@ class TestLinearizerFailures(unittest.TestCase):
     # COMPILE FAILED, KeyError: UOps.CONST
     assert helper_test_lin(Linearizer(ast), opts, fixed_platforms=["CUDA", "METAL", "GPU"])
 
+  @unittest.skip("Segmentation fault")
+  @unittest.skipUnless(Device.DEFAULT in ["LLVM"], "fails on these backends")
+  def test_failure_7(self):
+    ast = LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.MEM, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(512, 32, 6, 8, 4, 6, 8, 4), strides=(2048, 64, 6291456, 8, 0, 1048576, 1, 0), offset=0, mask=((0, 512), (0, 32), (0, 6), (0, 8), (0, 1), (0, 6), (0, 8), (0, 1)), contiguous=False), View(shape=(512, 32, 6, 35, 6, 35), strides=(1179648, 36864, 6144, 192, 32, 1), offset=0, mask=((0, 512), (0, 32), (0, 6), (0, 32), (0, 6), (0, 32)), contiguous=False), View(shape=(512, 32, 238, 238), strides=(1411200, 44100, 210, 1), offset=0, mask=((0, 512), (0, 32), (0, 210), (0, 210)), contiguous=False), View(shape=(512, 32, 7, 34, 7, 34), strides=(1812608, 56644, 8092, 238, 34, 1), offset=0, mask=None, contiguous=True))))),), arg=(512, 32, 1, 34, 1, 34))
+    opts = [Opt(op=OptOps.UPCAST, axis=0, amt=4)]
+    # test/test_linearizer_failures.py Fatal Python error: Segmentation fault
+    assert helper_test_lin(Linearizer(ast), opts, fixed_platforms=[])
 
 if __name__ == '__main__':
   unittest.main()
