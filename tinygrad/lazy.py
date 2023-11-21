@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, operator, math, functools
+import sys, operator, math
 from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapping, Set
 from weakref import ref, WeakSet, WeakValueDictionary
 
