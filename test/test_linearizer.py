@@ -361,6 +361,9 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
   for x in opts: # Check custom transformations if any.
     check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_program)
 
+class TestLinearizerPadShapetracker(unittest.TestCase):
+  pass
+
 class TestLinearizerOpts(unittest.TestCase):
   def test_local_and_grouped_reduce(self):
     if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.has_local or not Device[Device.DEFAULT].linearizer_opts.has_shared:
