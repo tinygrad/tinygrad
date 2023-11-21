@@ -37,7 +37,7 @@ def eval_resnet():
   iterator = batch_load_resnet(BS, val=True, shuffle=False)
   def data_get(device):
     x,y,cookie = next(iterator)
-    return x.to(device).realize(), y.numpy(), cookie
+    return x.to(device).realize(), y, cookie
 
   n,d = 0,0
   st = time.perf_counter()
