@@ -36,7 +36,7 @@ def get_model_and_config(path:str):
   )
   return model, config
 
-def one_hot(arr:Tensor, num_classes=3):
+def one_hot(arr: np.ndarray, num_classes=3):
   res = np.eye(num_classes)[np.array(arr, dtype=np.int32).reshape(-1)]
   arr = res.reshape(list(arr.shape) + [num_classes])
   return arr.astype(np_dtype)
@@ -51,7 +51,7 @@ def gather_indexes(sequence_tensor:Tensor, positions:Tensor):
   flat_sequence_tensor = sequence_tensor.reshape([batch_size * seq_length, width])
   return flat_sequence_tensor[flat_positions]
 
-def get_masked_lm_output(bert_config:dict, input_tensor:Tensor, output_weights:Tensor, positions:Tensor, label_ids, label_weights:Tensor): 
+def get_masked_lm_output(bert_config:dict, input_tensor:Tensor, output_weights:Tensor, positions:Tensor, label_ids: np.ndarray, label_weights:Tensor): 
   input_tensor = gather_indexes(input_tensor, positions)
   input_tensor = Tensor.gelu(input_tensor.linear(Tensor.empty(*(1024, input_tensor.shape[1])))) # TODO get_activation, hidden_size and init weight range from config file
   input_tensor = Tensor.layernorm(input_tensor)
@@ -67,7 +67,7 @@ def get_masked_lm_output(bert_config:dict, input_tensor:Tensor, output_weights:T
   loss = numerator / denominator
   return loss, per_example_loss, log_probs
 
-def get_next_sentence_output(bert_config:dict, input_tensor:Tensor, labels):
+def get_next_sentence_output(bert_config:dict, input_tensor:Tensor, labels: np.ndarray):
   logits = input_tensor.matmul(Tensor.empty(*(2, bert_config["hidden_size"])).transpose()).add(Tensor.zeros(2)) # Weight init?
   log_probs = Tensor.softmax(logits, axis=-1)
   labels = labels.reshape([-1])
