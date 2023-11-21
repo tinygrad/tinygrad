@@ -35,9 +35,10 @@ def loader_process(q_in, q_out, X:Tensor):
     #storage_tensor._copyin(img_tensor.numpy())
 
     # faster
-    X[idx].contiguous().realize().lazydata.realized._buffer()[:] = img.tobytes()
+    #X[idx].contiguous().realize().lazydata.realized._buffer()[:] = img.tobytes()
 
-    #X[idx].assign(img.bytes)   # NOTE: this is slow!
+    # ideal
+    X[idx].assign(img.tobytes())   # NOTE: this is slow!
     q_out.put(idx)
 
 def batch_load_resnet(batch_size=64, val=False, shuffle=True):

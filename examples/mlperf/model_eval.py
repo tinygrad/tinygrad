@@ -1,4 +1,5 @@
 import time
+start = time.perf_counter()
 from pathlib import Path
 import numpy as np
 from tinygrad.tensor import Tensor, Device
@@ -6,13 +7,15 @@ from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import getenv, dtypes, GlobalCounters
 from examples.mlperf import helpers
+def tlog(x): print(f"{x:25s}  @ {time.perf_counter()-start:5.2f}s")
 
 def eval_resnet():
-  start = time.perf_counter()
   Tensor.no_grad = True
   # Resnet50-v1.5
-  from tinygrad.jit import TinyJit
   from extra.models.resnet import ResNet50
+  tlog("imports")
+  Device.DEFAULT
+  tlog("loaded devices")
 
   class ResnetRunner:
     def __init__(self, device=None):
@@ -30,34 +33,34 @@ def eval_resnet():
 
   GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 6))]
   mdljit = [TinyJit(ResnetRunner(d)) for d in GPUS]
-  print(f"loaded models @ {time.perf_counter()-start:.2f}s")
+  tlog("loaded models")
 
   # evaluation on the mlperf classes of the validation set from imagenet
   from examples.mlperf.dataloader import batch_load_resnet
-  iterator = batch_load_resnet(getenv("BS", 128), val=True, shuffle=False)
+  iterator = batch_load_resnet(getenv("BS", 128), val=getenv("VAL", 1), shuffle=False)
   def data_get(device):
     x,y,cookie = next(iterator)
     return x.to(device).realize(), y, cookie
 
   n,d = 0,0
-  st = time.perf_counter()
   proc = [data_get(d) for d in GPUS]
-  print(f"loaded initial data @ {time.perf_counter()-start:.2f}s")
+  tlog("loaded initial data")
+  st = time.perf_counter()
   while proc is not None:
     GlobalCounters.reset()
-    mt = time.perf_counter()
     proc = [(m(x), y, c) for m,(x,y,c) in zip(mdljit, proc)]   # this frees the images
     run = time.perf_counter()
     # load the next data here
     try: next_proc = [data_get(d) for d in GPUS]
     except StopIteration: next_proc = None
+    nd = time.perf_counter()
     proc = [t.numpy() == y for t, y, _ in proc]   # this realizes the models and frees the cookies
-    et = time.perf_counter()
     for match in proc:
       n += match.sum()
       d += len(match)
-    print(f"****** {n:5d}/{d:5d}  {n*100.0/d:.2f}% -- {(mt-st)*1000:7.2f} ms loading data, {(run-mt)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize. {(len(match)*len(proc))/(et-mt):8.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-mt):.2f} TFLOPS")
-    st = time.perf_counter()
+    et = time.perf_counter()
+    tlog(f"****** {n:5d}/{d:5d}  {n*100.0/d:.2f}% -- {(run-st)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize ({(nd-run)*1000:7.2f} ms fetching). {(len(match)*len(proc))/(et-st):8.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-st):5.2f} TFLOPS")
+    st = et
     proc = next_proc
 
 def eval_unet3d():
