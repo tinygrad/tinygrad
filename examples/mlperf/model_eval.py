@@ -41,24 +41,23 @@ def eval_resnet():
 
   n,d = 0,0
   st = time.perf_counter()
-  datas = [data_get(f'gpu:{i}') for i in GPUS]
-  while datas is not None:
+  proc = [data_get(f'gpu:{i}') for i in GPUS]
+  while proc is not None:
     GlobalCounters.reset()
     mt = time.perf_counter()
-    outs = [m(x) for m,(x,_,_) in zip(mdljit, datas)]
+    proc = [(m(x), y, c) for m,(x,y,c) in zip(mdljit, proc)]   # this frees the images
     run = time.perf_counter()
-    try:
-      next_datas = [data_get(f'gpu:{i}') for i in GPUS]
-    except StopIteration:
-      next_datas = None
-    ts = [x.numpy() for x in outs]
+    # load the next data here
+    try: next_proc = [data_get(f'gpu:{i}') for i in GPUS]
+    except StopIteration: next_proc = None
+    proc = [t.numpy() == y for t, y, _ in proc]   # this realizes the models and frees the cookies
     et = time.perf_counter()
-    for t,(_,y,_) in list(zip(ts, datas)):
-      n += (t==y).sum()
-      d += len(t)
-    print(f"****** {n}/{d}  {n*100.0/d:.2f}% -- {(mt-st)*1000:.2f} ms loading data, {(run-mt)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize. {(len(t)*len(ts))/(et-mt):.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-mt):.2f} TFLOPS")
+    for match in proc:
+      n += match.sum()
+      d += len(match)
+    print(f"****** {n:5d}/{d:5d}  {n*100.0/d:.2f}% -- {(mt-st)*1000:7.2f} ms loading data, {(run-mt)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize. {(len(match)*len(proc))/(et-mt):.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-mt):.2f} TFLOPS")
     st = time.perf_counter()
-    datas = next_datas
+    proc = next_proc
 
 def eval_unet3d():
   # UNet3D
