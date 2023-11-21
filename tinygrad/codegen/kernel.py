@@ -451,7 +451,7 @@ class Kernel:
       assert not self.dont_use_locals, "already not using locals"
       self.dont_use_locals = True
     elif opt.op == OptOps.PADTO:
-      assert Device.DEFAULT not in ["CUDA", "LLVM"], "no supported for triton and LLVM"
+      assert Device.DEFAULT not in ["CUDA", "LLVM"], "not supported for triton and LLVM"
       padded = False
       for i,st in enumerate(self.sts):
         if self.sts[i].shape[axis] != 1:

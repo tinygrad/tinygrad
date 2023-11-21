@@ -388,7 +388,7 @@ class Linearizer(Kernel):
         u.vin = tuple(new if x is old else x for x in u.vin)
       self.uops.remove(old)
 
-    # fix loop scope, push CONST and ALU out of loop
+    # fix loop scope, push CONST and ALU upward out of loop if it does not depend on the loop
     loop_stack: List[List[UOp]] = [[]]
     for u in self.uops:
       if not loop_stack[-1]: loop_stack[-1].append(u)
