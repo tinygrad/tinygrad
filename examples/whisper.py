@@ -309,6 +309,19 @@ def transcribe_waveform(model, enc, waveforms, truncate=False):
   transcriptions = list(map(lambda tokens: enc.decode(tokens).strip(), transcription_tokens))
   return transcriptions[:N_audio] if N_audio > 1 else transcriptions[0]
 
+CHUNK = 1600
+RECORD_SECONDS = 10
+
+def listener(q):
+  import pyaudio
+  p = pyaudio.PyAudio()
+  stream = p.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
+  print("listening")
+  for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+    data = stream.read(CHUNK)
+    waveform = ((np.frombuffer(data, np.int16)/32768).astype(np.float32)*3)
+    q.put(waveform)
+  print("done listening")
 
 if __name__ == "__main__":
   model, enc = init_whisper("small.en" if getenv("SMALL") else "tiny.en", batch_size=1)
@@ -317,20 +330,6 @@ if __name__ == "__main__":
     print(transcribe_file(model, enc, sys.argv[1]))
   else:
     # online
-    CHUNK = 1600
-    RECORD_SECONDS = 10
-
-    def listener(q):
-      import pyaudio
-      p = pyaudio.PyAudio()
-      stream = p.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
-      print("listening")
-      for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
-        data = stream.read(CHUNK)
-        waveform = ((np.frombuffer(data, np.int16)/32768).astype(np.float32)*3)
-        q.put(waveform)
-      print("done listening")
-
     q = multiprocessing.Queue()
     p = multiprocessing.Process(target=listener, args=(q,))
     p.daemon = True
