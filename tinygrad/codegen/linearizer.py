@@ -395,7 +395,7 @@ class Linearizer(Kernel):
     # fix loop scope, push CONST and ALU out of loop
     # TODO: what if we have 2 independent for loop? is it fine?
     # TODO: how about if?
-    loop_stack = [[]]
+    loop_stack: List[List[UOp]] = [[]]
     for u in self.uops:
       if not loop_stack[-1]: loop_stack[-1].append(u)
       elif u.uop == UOps.LOOP: loop_stack.append([u])
