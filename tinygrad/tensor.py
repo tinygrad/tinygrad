@@ -133,12 +133,12 @@ class Tensor:
 
   @staticmethod
   def _loadop(op, sz, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
+    assert isinstance(sz, int), f"cannot create with symbolic size {sz}"
     return Tensor(LazyBuffer.loadop(op, (sz,), Tensor.default_type if dtype is None else dtype, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
 
   @staticmethod
   def empty(*shape, **kwargs):
-    assert all_int(shape), f"cannot create with symbolic shape {shape}"
-    return Tensor._loadop(LoadOps.EMPTY, prod(shape), **kwargs).reshape(shape)
+    return Tensor._loadop(LoadOps.EMPTY, prod((shape:=argfix(*shape))), **kwargs).reshape(shape)
 
   _seed: int = int(time.time())
   @staticmethod
@@ -146,9 +146,8 @@ class Tensor:
 
   @staticmethod
   def rand(*shape, **kwargs):
-    assert all_int(shape), f"cannot create with symbolic shape {shape}"
     Tensor._seed += 1
-    return Tensor._loadop(LoadOps.RAND, prod(shape), arg=Tensor._seed, **kwargs).reshape(shape)
+    return Tensor._loadop(LoadOps.RAND, prod((shape:=argfix(*shape))), arg=Tensor._seed, **kwargs).reshape(shape)
 
   # ***** creation helper functions *****
 
@@ -182,6 +181,10 @@ class Tensor:
     return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(Tensor.default_type if dtype is None else dtype)
 
   @staticmethod
+  def randint(*shape, low=0, high=10, **kwargs) -> Tensor:
+    return (Tensor.rand(*shape, **kwargs)*(high-low)+low).cast(dtypes.int32)
+
+  @staticmethod
   def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor: return (std * Tensor.randn(*shape, **kwargs)) + mean
 
   @staticmethod
@@ -209,15 +212,13 @@ class Tensor:
     return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
   def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
-    assert self.ndim <= 2, "p must be 1 or 2 dim"
-    assert replacement or num_samples == 1, "supported only with replacement"
-    p = self.unsqueeze(0) if self.ndim == 1 else self
-    cdf = p.cumsum(1)
-    cdf /= cdf[:, -1].unsqueeze(1)
-    unif_samples = Tensor.rand(num_samples, p.shape[0], 1)
-    indices = (unif_samples.expand((-1, -1, p.shape[1])) >= cdf).sum(2).permute((1, 0))
-    if self.ndim == 1: indices = indices.squeeze(0)
-    return indices.cast(dtypes.int32)
+    assert 1 <= self.ndim <= 2 and num_samples > 0, f"{self.ndim=} must be 1 or 2 dim, {num_samples=} must be positive"
+    assert replacement or num_samples == 1, "no replacement only supports num_samples = 1"
+    weight = self.unsqueeze(0) if self.ndim == 1 else self
+    cdf = (cw := weight.cumsum(1)) / cw[:, -1].unsqueeze(1)
+    unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1)
+    indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
+    return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
   # ***** toposort and backward pass *****
   def deepwalk(self):
@@ -230,7 +231,7 @@ class Tensor:
       return nodes
     return _deepwalk(self, set(), [])
 
-  def backward(self):
+  def backward(self) -> Tensor:
     assert self.shape == tuple(), f"backward can only be called for scalar tensors, but it has shape {self.shape})"
 
     # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
@@ -247,11 +248,12 @@ class Tensor:
           assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
           t.grad = g if t.grad is None else (t.grad + g)
       del t0._ctx
+    return self
 
   # ***** movement mlops *****
   def reshape(self, shape, *args) -> Tensor:
     new_shape = argfix(shape, *args)
-    return mlops.Reshape.apply(self, shape=tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape]))
+    return mlops.Reshape.apply(self, shape=tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)]))
   def expand(self, shape, *args) -> Tensor: return mlops.Expand.apply(self, shape=tuple([x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))]))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
@@ -287,7 +289,7 @@ class Tensor:
   #    - There's a special case where a permute is needed at the end:
   #        - if first Tensor passed in (expand dims) is not at dim 0
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
-  def __getitem__(self, val): # val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
+  def __getitem__(self, val) -> Tensor: # val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
     def normalize_int(e, i, dim_sz):
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
@@ -362,7 +364,7 @@ class Tensor:
     padding = tuple([(max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg_)])
     return self.pad(padding, value=value).shrink(tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)]))
 
-  def gather(self: Tensor, idx: Tensor, dim: int):
+  def gather(self: Tensor, idx: Tensor, dim: int) -> Tensor:
     assert idx.ndim == self.ndim, "self.ndim must equal idx.ndim"
     assert all(s >= i for s,i in zip(self.shape, idx.shape)), "all dim of idx.shape must be smaller than self.shape"
     if dim < 0: dim += self.ndim
@@ -371,7 +373,7 @@ class Tensor:
     permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
     return ((idx == Tensor.arange(self.shape[dim], dtype=dtypes.int32, requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])).unsqueeze(0)).sum(-1).transpose(ax1=0, ax2=dim)
 
-  def cat(self, *args, dim=0):
+  def cat(self, *args, dim=0) -> Tensor:
     dim = (dim + len(self.shape)) if dim < 0 else dim
     assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args)
     catargs = [self, *args]
@@ -383,13 +385,13 @@ class Tensor:
     return reduce(Tensor.__add__, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
 
   @staticmethod
-  def stack(tensors, dim=0):
+  def stack(tensors, dim=0) -> Tensor:
     first = tensors[0].unsqueeze(dim)
     unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors[1:]]
     # checks for shapes and number of dimensions delegated to cat
     return first.cat(*unsqueezed_tensors, dim=dim)
 
-  def repeat(self, repeats):
+  def repeat(self, repeats) -> Tensor:
     base_shape = (1,) * (len(repeats) - self.ndim) + self.shape
     new_shape = [x for b in base_shape for x in [1, b]]
     expand_shape = [x for rs in zip(repeats, base_shape) for x in rs]
@@ -402,19 +404,19 @@ class Tensor:
     slice_params = [[slice(None)]*dim + [slice(k, k + step)] for k in range(0, self.shape[dim], step)]
     return [self[tuple(sl)] for sl in slice_params]
 
-  def squeeze(self, dim=None):
+  def squeeze(self, dim=None) -> Tensor:
     if dim is None: return self if 1 not in self.shape else self.reshape(*[size for size in self.shape if size != 1])
     if dim <= 0 and self.ndim == 0: return self # This is to match PyTorch behavior
     if not -self.ndim <= dim < self.ndim: raise IndexError(f"Dimension out of range (expected to be in range of [{-self.ndim if self.ndim > 0 else self.ndim-1}, {self.ndim-1 if self.ndim > 0 else self.ndim}], but got {dim})")
     if dim < 0: dim += self.ndim
     return self if self.shape[dim] != 1 else self.reshape(*[size for idx, size in enumerate(self.shape) if idx != dim])
 
-  def unsqueeze(self, dim):
+  def unsqueeze(self, dim) -> Tensor:
     if dim < 0: dim = len(self.shape) + dim + 1
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
   # (padding_left, padding_right, padding_top, padding_bottom)
-  def pad2d(self, padding:Union[List[int], Tuple[int, ...]], value:float=0):
+  def pad2d(self, padding:Union[List[int], Tuple[int, ...]], value:float=0) -> Tensor:
     slc = [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], self.shape[::-1])][::-1]
     return self.slice([(0,s) for s in self.shape[:-(len(padding)//2)]] + slc, value=value)
 
@@ -473,9 +475,9 @@ class Tensor:
 
   # ***** processing ops *****
 
-  def _pool(self, k_:Tuple[int, ...], stride:Union[Tuple[int, ...], int]=1, dilation:Union[Tuple[int, ...], int]=1) -> Tensor:
+  def _pool(self, k_:Tuple[sint, ...], stride:Union[Tuple[int, ...], int]=1, dilation:Union[Tuple[int, ...], int]=1) -> Tensor:
     assert len(self.shape) >= len(k_), f"can't pool {self.shape} with {k_}"
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+    assert all_int(self.shape) and all_int(k_), f"does not support symbolic {self.shape=}, {k_=}"
     s_, d_ = make_pair(stride, len(k_)), make_pair(dilation, len(k_))
     assert len(k_) == len(s_) and len(k_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
     slc_prefix, prefix, i_ = [(0,x) for x in self.shape[0:-len(k_)]], self.shape[0:-len(k_)], self.shape[-len(k_):]
@@ -770,6 +772,7 @@ class Tensor:
     return (self.maximum(0) - y * self + (1 + self.abs().__neg__().exp()).log()).mean()
 
   def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
+    # NOTE: self is a logits input
     loss_mask = Y != ignore_index
     y_counter = Tensor.arange(self.shape[-1], dtype=dtypes.int32, requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
     y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])

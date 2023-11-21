@@ -101,5 +101,6 @@ __device__ void vstore_half2(float2 data, size_t offset, half *p) { *(p + offset
 __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset*4) = (half)data.x; *(p + offset*4 + 1) = (half)data.y; *(p + offset*4 + 2) = (half)data.z; *(p + offset*4 + 3) = (half)data.w; }
   """,
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)],
-  lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]))
+  lid = [f'threadIdx.{chr(120+i)}' for i in range(3)],
+  xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]))
 HIPBuffer = Compiled(RawHIPBuffer, LinearizerOptions(device="HIP"), renderer, compile_hip, HIPProgram, hip.hipDeviceSynchronize)

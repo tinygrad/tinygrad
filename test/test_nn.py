@@ -19,8 +19,8 @@ class TestNN(unittest.TestCase):
     loss = loss_fun(input, target)
 
     input_tiny = Tensor(input.detach().numpy())
-    taret_tiny = Tensor(target.detach().numpy())
-    loss_tiny = input_tiny.sparse_categorical_crossentropy(taret_tiny)
+    target_tiny = Tensor(target.detach().numpy())
+    loss_tiny = input_tiny.sparse_categorical_crossentropy(target_tiny)
 
     np.testing.assert_allclose(loss_tiny.numpy(), loss.detach().numpy(), atol=1e-5, rtol=1e-6)
 
