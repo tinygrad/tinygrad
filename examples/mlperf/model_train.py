@@ -6,14 +6,11 @@ def train_resnet():
   # TODO: Resnet50-v1.5
   pass
 
-def train_retinanet():
-  from models.resnet import ResNeXt50_32X4D
-  from models.retinanet import RetinaNet
+def train_retinanet(n_epochs=1, target_mAP=0.34, walltime_h=24):
   from examples.mlperf.train_retinanet import RetinaNetTrainer
-  backbone = ResNeXt50_32X4D(num_classes=None)
-  retina = RetinaNet(backbone) #remember num_classes = 600 for openimages
-  trainer = RetinaNetTrainer(retina, debug=True)
-  trainer.train()
+  trainer = RetinaNetTrainer(debug=False)
+  for epoch in range(n_epochs):
+    trainer.train_one_epoch()
   # reference torch implementation https://github.com/mlcommons/training/blob/master/object_detection/pytorch/maskrcnn_benchmark/modeling/rpn/retinanet
 
 
