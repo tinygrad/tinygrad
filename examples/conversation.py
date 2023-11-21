@@ -206,10 +206,11 @@ if __name__ == "__main__":
   parser.add_argument("--llama_count", type=int, default=1000, help="Max number of tokens to generate")
   parser.add_argument("--llama_personality", type=str, default="Stacy", help="Personality, can be Stacy, George, Gary, or Lexie")
   parser.add_argument("--llama_temperature", type=float, default=0.7, help="Temperature in the softmax")
-  parser.add_argument("--llama_size", type=str, default="7B", help="Size of model to use [7B, 13B, 30B, 65B] for Gen 1, [7B, 13B, 70B] for Gen 2, [7B, 13B, 34B] for Code LLaMA")
-  parser.add_argument("--llama_gen", default="1", help="Generation of the model to use ['1', '2', 'code']")
   parser.add_argument("--llama_quantize", action="store_true", help="Quantize the weights to int8 in memory")
   parser.add_argument("--llama_model", type=Path, default=None, required=True, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
+  parser.add_argument("--llama_gen", type=str, default="tiny", required=False, help="Generation of the model to use")
+  parser.add_argument("--llama_size", type=str, default="1B", required=False, help="Size of model to use")
+  parser.add_argument("--llama_tokenizer", type=Path, default=None, required=True, help="Path to llama tokenizer.model")
 
   # vits args
   parser.add_argument("--vits_model_to_use", default="vctk", help="Specify the model to use. Default is 'vctk'.")
@@ -234,7 +235,7 @@ if __name__ == "__main__":
   synth, emotion_embedding, text_mapper, hps, model_has_multiple_speakers = init_vits(args.vits_model_to_use, args.vits_emotion_path, args.vits_speaker_id, args.vits_seed)
 
   # Prepare personality
-  llama = LLaMa.build(args.llama_model, args.llama_model / "tokenizer.model", args.llama_gen, args.llama_size, args.llama_quantize)
+  llama = LLaMa.build(args.llama_model, args.llama_tokenizer or args.llama_model / "tokenizer.model", args.llama_gen, args.llama_size, args.llama_quantize)
   toks, user_delim, resp_delim, end_delim = llama_prepare(llama, args.llama_temperature, args.llama_pre_prompt_path)
   start_pos = len(toks)
   outputted = llama.tokenizer.decode(toks)
