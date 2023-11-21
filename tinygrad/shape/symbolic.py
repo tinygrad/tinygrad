@@ -221,7 +221,7 @@ class ModNode(OpNode):
 
 class RedNode(Node):
   def __init__(self, nodes:List[Node]): self.nodes = nodes
-  def vars(self) -> Set[Variable]: return functools.reduce(lambda l,x: l | x.vars(), self.nodes, set())
+  def vars(self) -> Set[Variable]: return set.union(*[x.vars() for x in self.nodes], set())
 
 class SumNode(RedNode):
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
