@@ -41,6 +41,10 @@ def one_hot(arr: np.ndarray, num_classes=3):
   arr = res.reshape(list(arr.shape) + [num_classes])
   return arr.astype(np_dtype)
 
+def pool_output(config:dict, output:Tensor):
+  pooled_output = output[:, 0]
+  return Tensor.tanh(pooled_output.linear(Tensor.empty(*(config["hidden_size"], config["hidden_size"])))) # Weight init?
+
 def gather_indexes(sequence_tensor:Tensor, positions:Tensor):
   assert len(sequence_tensor.shape) == 3, f"Expected tensor to have rank 3, but got {len(sequence_tensor.shape)}"
   sequence_shape = list(sequence_tensor.shape)
@@ -57,11 +61,11 @@ def get_masked_lm_output(bert_config:dict, input_tensor:Tensor, output_weights:T
   input_tensor = Tensor.layernorm(input_tensor)
   output_bias = Tensor.zeros((bert_config["vocab_size"],))
   logits = input_tensor.matmul(output_weights.transpose()).add(output_bias)
-  log_probs = logits.softmax()
+  log_probs = logits.log_softmax()
 
   label_weights = label_weights.reshape((-1))
   one_hot_labels = one_hot(label_ids.reshape(-1), num_classes=bert_config["vocab_size"])
-  per_example_loss = -(log_probs * Tensor(one_hot_labels)).sum(axis=-1)
+  per_example_loss = -1 * (log_probs * Tensor(one_hot_labels)).sum(axis=-1)
   numerator = (label_weights * per_example_loss).sum()
   denominator = label_weights.sum() + 1e-5
   loss = numerator / denominator
@@ -69,19 +73,19 @@ def get_masked_lm_output(bert_config:dict, input_tensor:Tensor, output_weights:T
 
 def get_next_sentence_output(bert_config:dict, input_tensor:Tensor, labels: np.ndarray):
   logits = input_tensor.matmul(Tensor.empty(*(2, bert_config["hidden_size"])).transpose()).add(Tensor.zeros(2)) # Weight init?
-  log_probs = Tensor.softmax(logits, axis=-1)
+  log_probs = logits.log_softmax(axis=-1)
   labels = labels.reshape([-1])
   one_hot_labels = one_hot(labels, num_classes=2)
-  per_example_loss = -((log_probs * Tensor(one_hot_labels)).sum(axis=-1))
+  per_example_loss = -1 * ((log_probs * Tensor(one_hot_labels)).sum(axis=-1))
   loss = per_example_loss.mean()
   return loss, per_example_loss, log_probs
 
 def pretrain():
   model, config = get_model_and_config(Path(__file__).parent.parents[2] / "extra" / "datasets" / "wiki" / "bert_config.json")
   embedding_table = model.embeddings.word_embeddings.weight
-  pooled_output = ... # TODO get pooled output
   for X, Y in iterate(bs=BS, val=False):
     output = model(input_ids=Tensor(X["input_ids"]), attention_mask=Tensor(X["input_mask"]), token_type_ids=Tensor(X["segment_ids"])) # check input_mask == attention_mask?
+    pooled_output = pool_output(config, output)
     
     masked_lm_loss, masked_lm_example_loss, masked_lm_log_probs = get_masked_lm_output(config, output, embedding_table, Tensor(X["masked_lm_positions"]), X["masked_lm_ids"], Tensor(X["masked_lm_weights"]))
     next_sentence_loss, next_sentence_example_loss, next_sentence_log_probs = get_next_sentence_output(config, pooled_output, X["next_sentence_labels"])
