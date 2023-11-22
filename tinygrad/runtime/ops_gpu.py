@@ -48,15 +48,17 @@ if not getenv("DELAYED_RUNTIME_INIT", False): CL.post_init()
 
 class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device='0'): super().__init__(size, dtype, allocator=CL.cl_allocator, **{'device': device})
+  def _clear_event(self, _): del self.event
   def _copyin(self, x:np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
     self.event = cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements=['C', 'A']), is_blocking=False)
+    self.event.set_callback(cl.command_execution_status.COMPLETE, self._clear_event)
   def _copyout(self, x:np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
     CL.cl_allocator.ensure_has_free_space(self.size*self.dtype.itemsize, self._device)
     buf = cl.Buffer(CL.cl_ctxs[self._buf.device], cl.mem_flags.WRITE_ONLY | cl.mem_flags.USE_HOST_PTR, 0, hostbuf=x.data)
     mapped, event = cl.enqueue_map_buffer(CL.cl_queue[self._buf.device], buf, cl.map_flags.WRITE, 0, self.size, dtype=self.dtype.np, is_blocking=False)
-    with mapped.base: cl.enqueue_copy(CL.cl_queue[self._buf.device], mapped, self._buf, is_blocking=True, wait_for=[event] + ([self.event] if hasattr(self, "event") else []))
+    with mapped.base: cl.enqueue_copy(CL.cl_queue[self._buf.device], mapped, self._buf, is_blocking=True, wait_for=[event] + ([evt] if (evt:=getattr(self, "event", None)) else []))
   def _transfer(self, x):
     if "gfx" in CL.cl_ctxs[x._buf.device].devices[0].name:
       cl.enqueue_copy_buffer_p2p_amd(CL.cl_platform, CL.cl_queue[x._buf.device], x._buf, self._buf, x.size * x.dtype.itemsize).wait()

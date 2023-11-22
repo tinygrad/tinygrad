@@ -5,7 +5,7 @@ import numpy as np
 from tinygrad.tensor import Tensor, Device
 from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import getenv, dtypes, GlobalCounters
+from tinygrad.helpers import getenv, dtypes, GlobalCounters, Timing
 from examples.mlperf import helpers
 def tlog(x): print(f"{x:25s}  @ {time.perf_counter()-start:5.2f}s")
 
@@ -15,7 +15,7 @@ def eval_resnet():
   from extra.models.resnet import ResNet50
   tlog("imports")
   Device.DEFAULT
-  tlog("loaded devices")
+  tlog("got devices")    # NOTE: this is faster with rocm-smi running
 
   class ResnetRunner:
     def __init__(self, device=None):
@@ -41,7 +41,6 @@ def eval_resnet():
   def data_get(device):
     x,y,cookie = next(iterator)
     return x.to(device).realize(), y, cookie
-
   n,d = 0,0
   proc = [data_get(d) for d in GPUS]
   tlog("loaded initial data")
@@ -61,7 +60,7 @@ def eval_resnet():
     et = time.perf_counter()
     tlog(f"****** {n:5d}/{d:5d}  {n*100.0/d:.2f}% -- {(run-st)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize ({(nd-run)*1000:7.2f} ms fetching). {(len(match)*len(proc))/(et-st):8.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-st):5.2f} TFLOPS")
     st = et
-    proc = next_proc
+    proc, next_proc = next_proc, None
 
 def eval_unet3d():
   # UNet3D

@@ -1,10 +1,26 @@
-import random, time, ctypes
+import random, time, ctypes, struct
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
-from tinygrad.helpers import dtypes, getenv
+import pickle
+from tinygrad.helpers import dtypes, getenv, prod, Timing
 from tinygrad.tensor import Tensor
-from multiprocessing import Queue, Process
+from multiprocessing import Queue, Process, shared_memory, connection, Lock
+
+class MyQueue:
+  def __init__(self, multiple_readers=True, multiple_writers=True):
+    self._reader, self._writer = connection.Pipe(duplex=False)
+    self._rlock = Lock() if multiple_readers else None
+    self._wlock = Lock() if multiple_writers else None
+  def get(self):
+    if self._rlock: self._rlock.acquire()
+    ret = pickle.loads(self._reader.recv_bytes())
+    if self._rlock: self._rlock.release()
+    return ret
+  def put(self, obj):
+    if self._wlock: self._wlock.acquire()
+    self._writer.send_bytes(pickle.dumps(obj))
+    if self._wlock: self._wlock.release()
 
 def shuffled_indices(n):
   indices = {}
@@ -35,10 +51,10 @@ def loader_process(q_in, q_out, X:Tensor):
     #storage_tensor._copyin(img_tensor.numpy())
 
     # faster
-    #X[idx].contiguous().realize().lazydata.realized._buffer()[:] = img.tobytes()
+    X[idx].contiguous().realize().lazydata.realized._buffer()[:] = img.tobytes()
 
     # ideal
-    X[idx].assign(img.tobytes())   # NOTE: this is slow!
+    #X[idx].assign(img.tobytes())   # NOTE: this is slow!
     q_out.put(idx)
 
 def batch_load_resnet(batch_size=64, val=False, shuffle=True):
@@ -48,8 +64,14 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
   cir = get_imagenet_categories()
 
   BATCH_COUNT = 32
+  #q_in, q_out = MyQueue(multiple_writers=False), MyQueue(multiple_readers=False)
   q_in, q_out = Queue(), Queue()
-  X = Tensor.empty(batch_size*BATCH_COUNT, 224, 224, 3, dtype=dtypes.uint8, device=f"disk:/dev/shm/resnet_X")
+
+  sz = (batch_size*BATCH_COUNT, 224, 224, 3)
+  shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
+  # disk:shm is slower
+  #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
+  X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/resnet_X")
   Y = [None] * (batch_size*BATCH_COUNT)
 
   procs = []
@@ -88,11 +110,13 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
   # shutdown processes
   for _ in procs: q_in.put(None)
   for p in procs: p.join()
+  shm.close()
+  shm.unlink()
 
 if __name__ == "__main__":
   from extra.datasets.imagenet import get_train_files, get_val_files
   VAL = getenv("VAL", 1)
   files = get_val_files() if VAL else get_train_files()
   with tqdm(total=len(files)) as pbar:
-    for x,y,_ in batch_load_resnet(val=VAL):
+    for x,y,c in batch_load_resnet(val=VAL):
       pbar.update(x.shape[0])
