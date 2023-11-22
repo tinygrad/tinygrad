@@ -1,6 +1,6 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
-import functools, operator
+import functools
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast, Union, Iterable
 from tinygrad.ops import MovementOps
@@ -67,7 +67,7 @@ class ShapeTracker:
 
   def size(self): return 0 if (0 in self.shape) else self.expr_idxs()[0].max+1
 
-  def vars(self) -> Set[Variable]: return functools.reduce(operator.or_, [v.vars() for v in self.views], set())
+  def vars(self) -> Set[Variable]: return set.union(*[v.vars() for v in self.views], set())
 
   @property
   def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
