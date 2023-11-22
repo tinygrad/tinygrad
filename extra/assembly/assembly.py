@@ -7,7 +7,7 @@ import functools
 import math
 from collections import defaultdict
 
-_type_to_letter = {dtypes.float32: 'f', dtypes.bool: 'p', dtypes.int32: 'i', dtypes.int64: 'a', dtypes.uint32: 'u', dtypes.uint64: 'b', dtypes._float4: 'x', dtypes.uint8: 'uc', dtypes.float16: 'h',
+_type_to_letter = {dtypes.float32: 'f', dtypes.bool: 'p', dtypes.int32: 'i', dtypes.int64: 'a', dtypes.uint32: 'u', dtypes.uint64: 'b', dtypes.float.vec(4): 'x', dtypes.uint8: 'uc', dtypes.float16: 'h',
                    dtypes.int8: 'c', dtypes.uint16: 'us', dtypes.float64: 'd'}
 
 class Register(NamedTuple):
@@ -17,7 +17,7 @@ class Register(NamedTuple):
   off:Optional[int] = None
   def __repr__(self): return self.nm if self.off is None else f"{self.nm}:{self.off}"
   def subregs(self):
-    if self.dtype == dtypes._float4:
+    if self.dtype == dtypes.float.vec(4):
       return [Register(self.nm, dtypes.float, False, off=off) for off in range(4)]
     return []
 
@@ -40,7 +40,7 @@ class AssemblyLanguage:
   def type_to_letter(self,x): return _type_to_letter[x[0]].upper() if x[1] else _type_to_letter[x[0]]
   def newreg(self, tok, dtype=dtypes.float32, scalar=False) -> Register:
     self.tor[tok] = ret = Register(f"%{self.type_to_letter((dtype, scalar))}{self.cnts[(dtype, scalar)]}", dtype, scalar)
-    if dtype == dtypes._float4:
+    if dtype == dtypes.float.vec(4):
       for off in range(4):
         self.tor[tok] = Register(ret.nm, dtypes.float, ret.scalar, off)
     self.cnts[(dtype, scalar)] += 1
