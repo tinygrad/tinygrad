@@ -324,7 +324,7 @@ class Compiled:
       for i,a in enumerate(inputs):
         # TODO: if this is contiguous it's fine
         if a.realized == output.realized:
-          if any(not x.arg.st.contiguous for x in ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
+          if any(x.arg.st != output.st for x in ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
             output.realized = None
             break
 
