@@ -6,7 +6,10 @@ from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict
 from tinygrad.ops import Device
 from tinygrad.shape.symbolic import Node
 from extra.lr_scheduler import MultiStepLR
+from extra.datasets.kits19 import iterate
+
 from examples.mlperf.metrics import get_dice_score
+from examples.mlperf.conf import Conf
 
 def train_resnet():
   # TODO: Resnet50-v1.5
@@ -18,6 +21,9 @@ def train_retinanet():
 
 def train_unet3d():
   device = Device.DEFAULT
+  conf = Conf()
+  rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
+  is_successful, diverged = False, False
 
   def cross_entropy_loss(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
     divisor = y.shape[1]
@@ -33,11 +39,6 @@ def train_unet3d():
     dice = (1. - dice_score).mean()
     return (ce + dice) / 2
 
-  train_loader = None
-  rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
-
-  flags = {"epochs": 1, "ga_steps": 1, "warmup_step": 4, "batch_size": 2, "optimizer": "sgd", "init_lr": 1e-4, "lr": 0.1, "lr_decay_epochs": [], "weight_decay": 0.0, "momentum": 0.9, "verbose": False}
-
   def get_batch(generator, batch_size=32):
     bX, bY = [], []
     for _ in range(batch_size):
@@ -49,16 +50,16 @@ def train_unet3d():
         break
     return np.concatenate(bX, axis=0), np.concatenate(bY, axis=0)
 
-  def get_optimizer(params, flags: dict):
+  def get_optimizer(params, conf: dict):
     from tinygrad.nn.optim import Adam, SGD
-    if flags["optimizer"] == "adam":
-      optim = Adam(params, lr=flags["lr"], weight_decay=flags["weight_decay"])
-    elif flags["optimizer"] == "sgd":
-      optim = SGD(params, lr=flags["lr"], momentum=flags["momentum"], nesterov=True, weight_decay=flags["weight_decay"])
-    elif flags["optimizer"] == "lamb":
+    if conf.optimizer == "adam":
+      optim = Adam(params, lr=conf.lr, weight_decay=conf.weight_decay)
+    elif conf.optimizer == "sgd":
+      optim = SGD(params, lr=conf.lr, momentum=conf.momentum, nesterov=True, weight_decay=conf.weight_decay)
+    elif conf.optimizer == "lamb":
       pass
     else:
-      raise ValueError("Optimizer {} unknown.".format(flags["optimizer"]))
+      raise ValueError("Optimizer {} unknown.".format(conf.optimizer))
     return optim
 
   def lr_warmup(optimizer, init_lr, lr, current_epoch, warmup_epochs):
@@ -82,40 +83,45 @@ def train_unet3d():
   mdl_run = TinyJit(lambda x: mdl(x).realize())
 
   is_successful, diverged = False, False
-  optimizer = get_optimizer(get_parameters(mdl), flags)
-  if flags["lr_decay_epochs"]:
-    scheduler = MultiStepLR(optimizer, milestones=flags["lr_decay_epochs"], gamma=flags["lr_decay_factor"])
+  optim = get_optimizer(get_parameters(mdl), conf)
+  if conf.lr_decay_epochs:
+    scheduler = MultiStepLR(optim, milestones=conf.lr_decay_epochs, gamma=conf.lr_decay_factor)
 
-  if getenv("TESTTRAIN", 0):
+  if getenv("MOCKTRAIN", 0):
     train_loader = [(Tensor.rand(1,1,128,128,128), Tensor.rand(1,1,128,128,128)) for i in range(3)]
   else:
-    train_loader = [(Tensor.rand(1,1,128,128,128), Tensor.rand(1,1,128,128,128)) for i in range(3)]
+    train_loader = get_batch(iterate(), batch_size=conf.batch_size) # TODO
 
-  for epoch in range(1, flags["epochs"] + 1):
+  @TinyJit
+  def train_step(im, y):
+    # network
+    out = mdl_run(im).numpy()
+    loss = dice_ce_loss(out, y)
+    optim.zero_grad()
+    loss.backward()
+    # if noloss: del loss
+    optim.step()
+    # if noloss: return None
+    return loss.realize()
+
+  for epoch in range(1, conf.epochs + 1):
     cumulative_loss = []
+    # if epoch <= conf.lr_warmup_epochs:
+    #   lr_warmup(optim, conf.init_lr, conf.lr, epoch, conf.lr_warmup_epochs)
 
-    loss_value = None
-    optimizer.zero_grad()
-    # for i, batch in enumerate(tqdm(train_loader, disable=(rank != 0) or not flags["verbose"])):
+    # for i, batch in enumerate(tqdm(train_loader, disable=(rank != 0) or not conf.verbose)):
     for i, batch in enumerate(tqdm(train_loader)):
       im, label = batch
+      im, label = im.to(device), label.to(device)
       print(im.shape, label.shape)
 
-      im, label = im.to(device), label.to(device)
-      out = mdl(im).numpy()
-
-      loss_value = dice_ce_loss(out, label)
-      loss_value /= flags["ga_steps"]
-      print("loss", loss_value)
-
-      loss_value.backward()
-      optimizer.step()
-      optimizer.zero_grad()
+      loss_value = train_step(im, label)
 
       cumulative_loss.append(loss_value)
 
-    if flags["lr_decay_epochs"]:
+    if conf.lr_decay_epochs:
       scheduler.step()
+    print(f'loss for epoch {epoch} {sum(cumulative_loss) / len(cumulative_loss)}')
 
 def train_rnnt():
   # TODO: RNN-T
