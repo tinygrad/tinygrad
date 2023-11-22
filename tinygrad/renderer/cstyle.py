@@ -46,12 +46,7 @@ class CStyleLanguage(NamedTuple):
     if len(x) == 1: return f"({var_dtype.name})({x[0]})"
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.float4 is not None, "cast is not supported on this platform"
-    if var_dtype == dtypes.half.vec(16): return f"{{{','.join(f'(half){x}' for x in x)}}}"
-    if var_dtype == dtypes.float.vec(8): return f"{{{','.join(x)}}}"
-    if var_dtype == dtypes.float.vec(4): return f"{self.float4}({','.join(x)})"
-    if var_dtype == dtypes.float.vec(2): return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
-    if var_dtype == dtypes.int.vec(2): return f"{self.float4.replace('float4', 'int2')}({','.join(x)})"
-    raise NotImplementedError(f"no cast for {var_dtype}")
+    return f"{self.float4.replace('float4', var_dtype.name)}({','.join(f'(half){x}' if var_dtype.scalar() == dtypes.half else x for x in x)})"
 
   # returns a str expression of the const with the given type
   def render_const(self, x:Union[float,int], var_dtype) -> str:
