@@ -489,7 +489,6 @@ class TestLinearizerOpts(unittest.TestCase):
 
   def test_padto_matmul(self):
     if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
-    if getenv("TRITON") and CI: self.skipTest("works locally, hangs in CI")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)
