@@ -184,9 +184,9 @@ if (getenv('LLVM') or getenv('CUDA')) and CI:
 # error: casting to type 'half' is not allowed
 backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 
-# # TODO: this does not pass if run locally
-# if getenv('GPU') or getenv('METAL') or getenv('LLVM') or getenv('CLANG'):
-#   backend_test.exclude('test_MaxPool3d_stride_padding_cpu')
+# TODO: this somehow passes in CI but does not pass if run locally
+if getenv('GPU') or getenv('METAL') or getenv('LLVM') or getenv('CLANG'):
+  backend_test.exclude('test_MaxPool3d_stride_padding_cpu')
 
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):

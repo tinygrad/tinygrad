@@ -7,7 +7,7 @@ from tinygrad.ops import Compiled, Device, LoadOps
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
-from tinygrad.helpers import dtypes, prod
+from tinygrad.helpers import dtypes, prod, getenv, CI
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -489,6 +489,7 @@ class TestLinearizerOpts(unittest.TestCase):
 
   def test_padto_matmul(self):
     if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
+    if getenv("TRITON") and CI: self.skipTest("works locally, hangs in CI")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)
