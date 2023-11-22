@@ -102,6 +102,8 @@ def tts(
   noise_scale_w: float,
   length_scale: float,
   estimate_max_y_length: bool,
+  text_mapper: TextMapper,
+  model_has_multiple_speakers: bool,
 ):
   if model_to_use == "mmts-tts": text_to_synthesize = text_mapper.filter_oov(text_to_synthesize.lower())
 
@@ -112,8 +114,7 @@ def tts(
 
   # Perform inference.
   audio_tensor = synth.infer(x_tst, x_tst_lengths, sid, noise_scale, length_scale, noise_scale_w, emotion_embedding=emotion_embedding,
-                             max_y_length_estimate_scale=VITS_Y_LENGTH_ESTIMATE_SCALARS[model_to_use] if estimate_max_y_length else None)[0, 0].realize()
-
+                             max_y_length_estimate_scale=VITS_Y_LENGTH_ESTIMATE_SCALARS[model_to_use] if estimate_max_y_length else None)[0, 0]
   # Save the audio output.
   audio_data = (np.clip(audio_tensor.numpy(), -1.0, 1.0) * 32767).astype(np.int16)
   return audio_data
@@ -166,7 +167,8 @@ def init_vits(
 def output_stream(num_channels: int, sample_rate: int):
   try:
     p = pyaudio.PyAudio()
-    yield p.open(format=pyaudio.paInt16, channels=num_channels, rate=sample_rate, output=True)
+    stream = p.open(format=pyaudio.paInt16, channels=num_channels, rate=sample_rate, output=True)
+    yield stream
   finally:
     stream.stop_stream()
     stream.close()
@@ -276,6 +278,6 @@ if __name__ == "__main__":
           response, synth, hps, emotion_embedding,
           args.vits_speaker_id, args.vits_model_to_use, args.vits_noise_scale,
           args.vits_noise_scale_w, args.vits_length_scale,
-          args.vits_estimate_max_y_length
+          args.vits_estimate_max_y_length, text_mapper, model_has_multiple_speakers
         )
       with Timing("audio play: "): stream.write(audio_data.tobytes())
