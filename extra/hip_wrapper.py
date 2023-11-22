@@ -200,20 +200,22 @@ try:
         fields.append((f'field{idx}', ctypes.c_void_p))
     return __get_struct(types, fields)
 
-  def updateKernelNodeParams(npwrapper:kernelNodeParamsWrapper, *args, grid=(1,1,1), block=(1,1,1), updated_args=None):
-    _, struct, _ = npwrapper.context
-    if updated_args is not None:
-      for i in updated_args:
-        setattr(struct, f'field{i}', (args[i] if args[i].__class__ is int else args[i]._buf))
-    else:
-      for i,d in enumerate(args):
-        setattr(struct, f'field{i}', (d if d.__class__ is int else d._buf))
+  def setKernelNodeParam(npwrapper:kernelNodeParamsWrapper, arg, id):
+    setattr(npwrapper.context[1], f'field{id}', (arg if arg.__class__ is int else arg._buf))
+
+  def setKernelNodeLaunchDims(npwrapper:kernelNodeParamsWrapper, launch_dims):
+    grid, block = launch_dims
     npwrapper.c_struct.blockDimX = block[0]
     npwrapper.c_struct.blockDimY = block[1]
     npwrapper.c_struct.blockDimZ = block[2]
     npwrapper.c_struct.gridDimX = grid[0]
     npwrapper.c_struct.gridDimY = grid[1]
     npwrapper.c_struct.gridDimZ = grid[2]
+
+  def setKernelNodeParams(npwrapper:kernelNodeParamsWrapper, args, ids):
+    _, struct, _ = npwrapper.context
+    for j,i in enumerate(ids):
+      setattr(struct, f'field{i}', (args[j] if args[j].__class__ is int else args[j]._buf))
 
   def buildKernelNodeParams(*args, func=None, grid=(1,1,1), block=(1,1,1), sharedMemBytes=0, argsStructType=None):
     data = [d if d.__class__ is int else d._buf for d in args]
