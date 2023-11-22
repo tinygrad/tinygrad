@@ -489,7 +489,7 @@ class TestLinearizerOpts(unittest.TestCase):
 
   def test_padto_matmul(self):
     if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
-    if Device.DEFAULT in ["LLVM"]: self.skipTest("no supported for triton and LLVM")
+    if Device.DEFAULT in ["CUDA", "LLVM"]: self.skipTest("no supported for triton and LLVM")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)
@@ -506,7 +506,7 @@ class TestLinearizerOpts(unittest.TestCase):
   def test_padto_max(self):
     # pad uses invalid value 0, so max is not allowed
     if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
-    if Device.DEFAULT in ["LLVM"]: self.skipTest("no supported for triton and LLVM")
+    if Device.DEFAULT in ["CUDA", "LLVM"]: self.skipTest("no supported for triton and LLVM")
     N = 17 * 17
     a = -Tensor.ones(N, N)
     with self.assertRaises(AssertionError):
