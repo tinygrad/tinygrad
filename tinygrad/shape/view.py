@@ -18,8 +18,6 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
 @functools.lru_cache(maxsize=None)
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]] = None) -> Tuple[Tuple[int, int, int], ...]:
   assert len(shape) == len(strides)
-  # state = 0, 1, 2 means NO, PROGRESS, DONE for combining zero-strided-range-one-masked dimensions
-  # 3rd dim of ret represents dimensions which are accumulated without zero stride
   state = 1 if mask and strides[0] == 0 and mask[0][1] - mask[0][0] == 1 and shape[0] != 1 else 0
   ret = [(shape[0], strides[0], shape[0] if strides[0] else 0)] if shape else []
   for i in range(1, len(shape)):
@@ -31,15 +29,12 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Option
         state = 1
       else:
         ret[-1] = (ret[-1][0] * shape[i], 0, 0)
-    elif state == 1:
-      ret[-1] = (ret[-1][0] * shape[i], strides[i], shape[i] if strides[i] else 0)
-      state = 2
-    elif state == 0 and ret[-1][1] == shape[i] * strides[i]:
-      ret[-1] = (ret[-1][0] * shape[i], strides[i], ret[-1][0] * shape[i] if strides[i] else 0)
-      state = 0
     else:
-      ret.append((shape[i], strides[i], shape[i] if strides[i] else 0))
-      state = 0
+      if state == 1 or (state == 0 and ret[-1][1] == shape[i] * strides[i]):
+        ret[-1] = (ret[-1][0] * shape[i], strides[i], shape[i] if state == 1 else ret[-1][0] * shape[i] if strides[i] else 0)
+      else:
+        ret.append((shape[i], strides[i], shape[i] if strides[i] else 0))
+      state = (2 if state == 1 else 0) 
       
   return tuple(ret)
 
