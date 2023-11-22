@@ -510,5 +510,13 @@ class TestLinearizerOpts(unittest.TestCase):
     with self.assertRaises(AssertionError):
       helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
 
+  def test_padto_where(self):
+    # pad uses invalid value 0, so kernel with max is not allowed
+    if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
+    N = 17 * 17
+    a = (Tensor.rand(N, N).max(axis=0) > 1).where(1, 0)
+    with self.assertRaises(AssertionError):
+      helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
+
 if __name__ == '__main__':
   unittest.main()

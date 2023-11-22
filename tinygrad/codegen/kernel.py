@@ -453,7 +453,7 @@ class Kernel:
       self.dont_use_locals = True
     elif opt.op == OptOps.PADTO:
       assert not vars_from_ast(self.ast), "does not work with symbolic shape"
-      assert self.reduceop is None or self.reduceop is not ReduceOps.MAX, "cannot pad with MAX"
+      assert all(op.op is not ReduceOps.MAX for op in self.ast.get_lazyops()), "cannot pad with MAX"
       padded = False
       for i,st in enumerate(self.sts):
         if self.sts[i].shape[axis] != 1:
