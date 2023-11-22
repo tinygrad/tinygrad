@@ -236,9 +236,8 @@ def diskcache(func):
 
 # *** http support ***
 
-def fetch(url:str, ext:Optional[str]=None) -> pathlib.Path:
+def fetch(url:str) -> pathlib.Path:
   fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / hashlib.md5(url.encode('utf-8')).hexdigest()
-  if ext is not None: fp = fp.with_suffix(ext)
   if not fp.is_file():
     r = requests.get(url, stream=True, timeout=10)
     assert r.status_code == 200

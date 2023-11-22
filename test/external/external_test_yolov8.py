@@ -42,7 +42,8 @@ class TestYOLOv8(unittest.TestCase):
 
   def test_forward_pass_torch_onnx(self):
     variant = 'n'
-    weights_location_pt = fetch(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{variant}.pt', ext='.pt')
+    weights_location_pt = fetch(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{variant}.pt')
+    weights_location_pt = weights_location_pt.rename(f"{weights_location_pt}.pt")
     weights_location = fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{variant}.safetensors')
     weights_location_onnx = weights_location_pt.with_suffix('.onnx')
 

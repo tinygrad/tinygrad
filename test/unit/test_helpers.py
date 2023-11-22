@@ -160,12 +160,6 @@ class TestFetch(unittest.TestCase):
     with Image.open(img) as pimg:
       assert pimg.size == (705, 1024)
 
-  def test_fetch_with_ext(self):
-    img = fetch("https://media.istockphoto.com/photos/hen-picture-id831791190", ext=".jpg")
-    assert img.suffix == ".jpg"
-    with Image.open(img) as pimg:
-      assert pimg.size == (705, 1024)
-
 
 if __name__ == '__main__':
   unittest.main()
