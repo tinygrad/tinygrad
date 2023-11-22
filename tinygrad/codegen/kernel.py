@@ -452,7 +452,7 @@ class Kernel:
       assert not self.dont_use_locals, "already not using locals"
       self.dont_use_locals = True
     elif opt.op == OptOps.PADTO:
-      assert Device.DEFAULT not in ["CUDA", "LLVM"], "not supported for triton and LLVM"
+      assert Device.DEFAULT not in ["LLVM"], "not supported for triton and LLVM"
       assert not vars_from_ast(self.ast), "does not work with symbolic shape"
       assert all(op.op is not ReduceOps.MAX for op in self.ast.get_lazyops()), "cannot pad with MAX"
       padded = False
