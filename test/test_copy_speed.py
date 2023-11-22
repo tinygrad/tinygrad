@@ -8,6 +8,15 @@ class TestCopySpeed(unittest.TestCase):
   @classmethod
   def setUpClass(cls): Device[Device.DEFAULT].synchronize()
 
+  def testCopySHMtoDefault(self):
+    t = Tensor.empty(N, N, device="disk:/dev/shm/test_X").realize()
+    #t = Tensor.empty(N, N, device="disk:shm:test_X").realize()
+    for _ in range(3):
+      with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
+        with Timing("queue: "):
+          t.to(Device.DEFAULT).realize()
+        Device[Device.DEFAULT].synchronize()
+
   def testCopyCPUtoDefault(self):
     t = Tensor.rand(N, N, device="cpu").realize()
     print(f"buffer: {t.nbytes()*1e-9:.2f} GB")
