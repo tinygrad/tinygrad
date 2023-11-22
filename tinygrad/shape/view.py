@@ -16,29 +16,31 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   return filter_strides(shape, tuple(strides))
 
 @functools.lru_cache(maxsize=None)
-def to_shape_strides(_shape:Tuple[int, ...], _strides:Tuple[int, ...], _mask:Optional[Tuple[Tuple[int, int], ...]] = None) -> Tuple[Tuple[int, int, int], ...]:
-  assert len(_shape) == len(_strides)
-  shape = [s for idx, s in enumerate(_shape) if _shape[idx] != 1]
-  strides = [s for idx, s in enumerate(_strides) if _shape[idx] != 1]
-  mask = [s for idx, s in enumerate(_mask) if _shape[idx] != 1] if _mask else None
-  state = 1 if mask and mask[0][1] - mask[0][0] == 1 and strides[0] == 0 else 0
-  ret = [(shape[0], strides[0], shape[0] if strides[0] else 0)] if shape else ([(1, 0, 0)] if len(_shape) else [])
+def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]] = None) -> Tuple[Tuple[int, int, int], ...]:
+  assert len(shape) == len(strides)
+  # state = 0, 1, 2 means NO, PROGRESS, DONE for combining zero-strided-range-one-masked dimensions
+  # 3rd dim of ret represents dimensions which are accumulated without zero stride
+  state = 1 if mask and strides[0] == 0 and mask[0][1] - mask[0][0] == 1 and shape[0] != 1 else 0
+  ret = [(shape[0], strides[0], shape[0] if strides[0] else 0)] if shape else []
   for i in range(1, len(shape)):
-    if mask and strides[i] == 0 and mask[i][1] - mask[i][0] == 1 and i != len(shape) - 1:
-      if state == 1:
-        ret[-1] = (ret[-1][0] * shape[i], 0, 0)
-      else:
+    if shape[i] == 1:
+      continue
+    if mask and strides[i] == 0 and mask[i][1] - mask[i][0] == 1:
+      if state != 1:
         ret.append((shape[i], 0, 0))
         state = 1
+      else:
+        ret[-1] = (ret[-1][0] * shape[i], 0, 0)
     elif state == 1:
       ret[-1] = (ret[-1][0] * shape[i], strides[i], shape[i] if strides[i] else 0)
       state = 2
-    elif (ret[-1][1] == shape[i] * strides[i] or ret[-1][0] == 1) and state != 2:
+    elif state == 0 and ret[-1][1] == shape[i] * strides[i]:
       ret[-1] = (ret[-1][0] * shape[i], strides[i], ret[-1][0] * shape[i] if strides[i] else 0)
       state = 0
     else:
       ret.append((shape[i], strides[i], shape[i] if strides[i] else 0))
       state = 0
+      
   return tuple(ret)
 
 @functools.lru_cache(maxsize=None)
