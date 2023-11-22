@@ -197,18 +197,13 @@ class View:
         except StopIteration: break
         strides.append(new_stride)
         acc *= new_dim
-        if acc >= real_dim:
-          new_stride = 0
-        new_stride *= new_dim
+        new_stride = new_stride * new_dim if acc < real_dim else 0
         if acc == d: equal = True
       if not equal: break
     else:
       strides += [0,] * (len(new_shape) - len(strides))
       mask, off_mask, extra = _reshape_mask(self, new_shape)
-      total_offset = 0
-      if off_mask:
-        for off, s in zip(off_mask, strides):
-          total_offset += off * s
+      total_offset = sum([off * s for off, s in zip(off_mask, strides)]) if off_mask else 0
       if not extra: return View.create(new_shape, tuple(reversed(strides)), self.offset - total_offset, mask)
 
     return None
