@@ -9,10 +9,10 @@ from collections import namedtuple
 from tqdm import tqdm
 from tinygrad.tensor import Tensor
 from tinygrad.ops import Device
-from tinygrad.helpers import dtypes, GlobalCounters, Timing, Context, getenv
+from tinygrad.helpers import dtypes, GlobalCounters, Timing, Context, getenv, fetch
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from extra.utils import download_file
-from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
+from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict, safe_load
 from tinygrad.jit import TinyJit
 
 class AttnBlock:
@@ -589,14 +589,23 @@ if __name__ == "__main__":
   parser.add_argument('--timing', action='store_true', help="Print timing per step")
   parser.add_argument('--seed', type=int, help="Set the random latent seed")
   parser.add_argument('--guidance', type=float, default=7.5, help="Prompt strength")
+  parser.add_argument('--mode', type=str, default="sd", help="mode type to use. available options are: 'sd' (stable diffusion) and 'svd' (stable video diffusion)")
   args = parser.parse_args()
+
+  assert args.mode in ["sd", "svd"]
 
   Tensor.no_grad = True
   model = StableDiffusion()
 
   # load in weights
-  download_file('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', FILENAME)
-  load_state_dict(model, torch_load(FILENAME)['state_dict'], strict=False)
+  if args.mode == "sd":
+    download_file('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', FILENAME)
+    weights = torch_load(FILENAME)['state_dict']
+  elif args.mode == "svd":
+    fn = fetch("https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt/resolve/main/svd_xt.safetensors")
+    weights = safe_load(fn)
+
+  load_state_dict(model, weights, strict=False)
 
   if args.fp16:
     for l in get_state_dict(model).values():
