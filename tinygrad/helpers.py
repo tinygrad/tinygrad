@@ -1,7 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, requests, tempfile, pathlib
 import numpy as np
-from pathlib import Path
 from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -38,17 +37,6 @@ def partition(lst:List[T], fxn:Callable[[T],bool]):
   b:List[T] = []
   for s in lst: (a if fxn(s) else b).append(s)
   return a,b
-def temp(x:str) -> str: return (Path(tempfile.gettempdir()) / x).as_posix()
-def get_child(parent, key):
-  obj = parent
-  for k in key.split('.'):
-    if k.isnumeric():
-      obj = obj[int(k)]
-    elif isinstance(obj, dict):
-      obj = obj[k]
-    else:
-      obj = getattr(obj, k)
-  return obj
 
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))

@@ -1,7 +1,7 @@
 import math
 from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d
-from tinygrad.helpers import get_child
+from extra.utils import get_child
 
 class MBConvBlock:
   def __init__(self, kernel_size, strides, expand_ratio, input_filters, output_filters, se_ratio, has_se, track_running_stats=True):

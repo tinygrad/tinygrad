@@ -1,6 +1,7 @@
-from tinygrad.helpers import fetch, get_child
+from tinygrad.helpers import fetch
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Linear, LayerNorm, Embedding
+from extra.utils import get_child
 
 
 class BertForQuestionAnswering:

@@ -1,6 +1,6 @@
 import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import get_child
+from extra.utils import get_child
 
 class BasicBlock:
   expansion = 1

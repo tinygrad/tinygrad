@@ -4,7 +4,8 @@ import numpy as np
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
 from tinygrad.runtime.ops_disk import RawDiskBuffer
-from tinygrad.helpers import Timing, fetch, temp, dtypes
+from extra.utils import temp
+from tinygrad.helpers import Timing, fetch, dtypes
 
 def compare_weights_both(url):
   import torch

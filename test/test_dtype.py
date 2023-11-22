@@ -1,9 +1,10 @@
 import unittest
 import numpy as np
-from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, temp, OSX
+from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
+from extra.utils import OSX, temp
 
 def is_dtype_supported(dtype: DType):
   # for GPU, cl_khr_fp16 isn't supported (except now we don't need it!)

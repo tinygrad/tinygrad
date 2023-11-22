@@ -1,6 +1,7 @@
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d, LayerNorm, LayerNorm2d, Linear
-from tinygrad.helpers import fetch, get_child
+from tinygrad.helpers import fetch
+from extra.utils import get_child
 
 class Block:
   def __init__(self, dim):
