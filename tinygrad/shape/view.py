@@ -24,11 +24,11 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Option
     if shape[i] == 1:
       continue
     if mask and strides[i] == 0 and mask[i][1] - mask[i][0] == 1:
-      if state != 1:
-        ret.append((shape[i], 0, 0))
-        state = 1
-      else:
+      if state == 1:
         ret[-1] = (ret[-1][0] * shape[i], 0, 0)
+      else:
+        ret.append((shape[i], 0, 0))
+      state = 1
     else:
       if state == 1 or (state == 0 and ret[-1][1] == shape[i] * strides[i]):
         ret[-1] = (ret[-1][0] * shape[i], strides[i], shape[i] if state == 1 else ret[-1][0] * shape[i] if strides[i] else 0)
