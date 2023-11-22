@@ -60,9 +60,6 @@ class LazyOp:
   def hash(self): return hash((self.op,self.src, self.arg))
   def __hash__(self): return self.hash
 
-  @property
-  def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
-
   def map_buffers(self, real_srcs: Mapping[Any, Union[LazyBuffer, LazyOp]]) -> LazyOp: return LazyOp(self.op, tuple([y.map_buffers(real_srcs) if y not in real_srcs else real_srcs[y] for y in self.src]), self.arg)
   def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
@@ -205,6 +202,7 @@ class InterpretedASTRunner(ASTRunner):
     super().__init__(ast)
 
   def __call__(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> float:
+    var_vals = {k:var_vals[k] for k in sorted(self.vars)} if var_vals is not None else {}
     st = time.perf_counter()
     ret: RawBuffer = self.fxn(rawbufs[1:], var_vals)
     et = time.perf_counter() - st
@@ -289,8 +287,8 @@ class CompiledASTRunner(ASTRunner):
     return global_size, local_size
 
   def __call__(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
-    if var_vals is None: var_vals = {}
-    var_vals = {k:var_vals[k] for k in self.vars}   # filter the var_vals
+    # filter the var_vals
+    var_vals = {k:var_vals[k] for k in sorted(self.vars)} if var_vals is not None else {}
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program

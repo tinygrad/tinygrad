@@ -1,8 +1,8 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
-import functools, operator
+import functools
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, cast
+from typing import Tuple, List, Optional, Dict, Set, cast, Union, Iterable
 from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, DEBUG, merge_dicts
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
@@ -21,7 +21,7 @@ def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tu
       ret.append((shape[i], strides[i]))
   return tuple(ret)
 
-def expr_node_mask(view:View, idx, valid=None) -> Node:
+def expr_node_mask(view:View, idx:Node, valid:Optional[Node]=None) -> Node:
   expr = [valid] if valid is not None else []
   if view.mask is not None:
     acc = 1
@@ -33,7 +33,7 @@ def expr_node_mask(view:View, idx, valid=None) -> Node:
   return Variable.ands(expr)
 
 # generate an expression if you have a single idx variable
-def expr_node(view:View, idx=None) -> Node:
+def expr_node(view:View, idx:Optional[Node]=None) -> Node:
   if idx is None: idx = Variable('idx', 0, prod(view.shape)-1)
   ret: List[Node] = [NumNode(view.offset) if isinstance(view.offset, int) else view.offset] if view.offset else []
   acc = 1
@@ -43,7 +43,7 @@ def expr_node(view:View, idx=None) -> Node:
   return Variable.sum(ret)
 
 # generate an expression if you have a variable or expression for each index
-def expr_idxs(view:View, idxs) -> Node:
+def expr_idxs(view:View, idxs:Tuple[Node, ...]) -> Node:
   assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
   return Variable.sum([NumNode(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])
 
@@ -54,7 +54,7 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
   return View.create(vm1.shape, cast(Tuple[sint, ...], strides), vm2.offset, vm1.mask)
 
 @functools.lru_cache(maxsize=None)
-def idxs_to_idx(shape:Tuple[int, ...], idxs) -> Node:
+def idxs_to_idx(shape:Tuple[int, ...], idxs:Tuple[Node, ...]) -> Node:
   assert len(idxs) == len(shape), "need an idx for all dimensions"
   acc = 1
   ret = []
@@ -79,7 +79,7 @@ class ShapeTracker:
 
   def size(self): return 0 if (0 in self.shape) else self.expr_idxs()[0].max+1
 
-  def vars(self) -> Set[Variable]: return functools.reduce(operator.or_, [v.vars() for v in self.views], set())
+  def vars(self) -> Set[Variable]: return set.union(*[v.vars() for v in self.views], set())
 
   @property
   def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
@@ -127,7 +127,7 @@ class ShapeTracker:
 
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
-  def _expr_idx(self, idx, valid) -> Tuple[Node, Node]:
+  def _expr_idx(self, idx:Node, valid:Node) -> Tuple[Node, Node]:
     for v in reversed(self.views[0:-1]):
       if valid.max == 0: return NumNode(-1), valid
       valid = expr_node_mask(v, idx, valid)
@@ -141,17 +141,17 @@ class ShapeTracker:
         return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
     return self
 
-  def expr_idxs(self, idxs=None):
+  def expr_idxs(self, idxs:Optional[Iterable[Node]]=None):
     if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx = expr_idxs(self.views[-1], tuple(idxs))
     valid = expr_node_mask(self.views[-1], idxs_to_idx(self.views[-1].shape, tuple(idxs)))
     return self._expr_idx(idx, valid)
 
-  def expr_node(self, idx='idx'):
-    if idx.__class__ is str: idx = Variable(idx, 0, prod(self.shape)-1)
+  def expr_node(self, idx:Union[Node,str]='idx'):
+    if isinstance(idx, str): idx = Variable(idx, 0, prod(self.shape)-1)
     return self._expr_idx(expr_node(self.views[-1], idx), expr_node_mask(self.views[-1], idx))
 
-  def axis_is_masked(self, axis) -> bool:
+  def axis_is_masked(self, axis:int) -> bool:
     _, valid = self.expr_idxs()
     return f'idx{axis}' in [v.expr for v in valid.vars()]
 
