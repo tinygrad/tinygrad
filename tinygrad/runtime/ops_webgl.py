@@ -10,7 +10,7 @@ import moderngl
 from array import array
 
 ctx = moderngl.create_standalone_context()
-dtype_map = { dtypes.float: "f4", dtypes.int32: "i4", dtypes.uint8: "u1", dtypes.int8: "i1", dtypes.bool: "i1"}
+dtype_map = { dtypes.half: "f2", dtypes.float: "f4", dtypes.int32: "i4", dtypes.uint8: "u1", dtypes.int8: "i1", dtypes.bool: "i1"}
 class WebGLProgram:
   def __init__(self, name: str, prg: str):
     self.name, self.prg = name, ctx.program(
@@ -36,15 +36,25 @@ class WebGLProgram:
       self.prg[f"data{i}"] = i
       x._buf.use(i)
     
+    self.prg["w"].value = self.fbo.size[0]
     self.fbo.use()
     self.quad.render(mode=moderngl.TRIANGLE_STRIP)
 
     return
+  
+def reshape_texture(num, threshold):
+  if num <= threshold: return (num, 1)
+  
+  for i in range(2, threshold + 1):
+    if num % i == 0 and (num // i) <= threshold:
+      return (num // i, i)
+  
+  return (num, 1)
 
 class RawWebGLAllocator(LRUAllocator):
     def _do_alloc(self, size, dtype, device, **kwargs): 
       print(f"ALLOCATING SIZE={size}")
-      return ctx.texture((size, 1), 1, dtype=dtype_map[dtype])
+      return ctx.texture(reshape_texture(size, 4096), 1, dtype=dtype_map[dtype])
     def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize)
 GLAlloc = RawWebGLAllocator()
 

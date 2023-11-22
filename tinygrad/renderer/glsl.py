@@ -6,12 +6,12 @@ import math
 from typing import Tuple, Dict
 
 type_map = {dtypes.float: "float", dtypes.half: "float16", dtypes.int32: "int", dtypes.uint32: "uint", dtypes.bool: "bool"}
-
 sampler_prefix = {dtypes.float: "", dtypes.half: "", dtypes.int32: "i", dtypes.uint32: "u",dtypes.int8: "i", dtypes.uint8: "u", dtypes.bool: "i"}
 fragment_center_offset = 0.5
+
 class GLSLLanguage(CStyleLanguage):
   no_global_loop = True
-  xid = ["int(gl_FragCoord.x)", "int(gl_FragCoord.x)"]
+  xid = ["int(gl_FragCoord.y-0.5) * w + int(gl_FragCoord.x-0.5)"]
   code_for_op: Dict = {
     UnaryOps.NEG: lambda x: f"(-{x})",
     UnaryOps.EXP2: lambda x: f"exp2({x})",
@@ -43,8 +43,10 @@ class GLSLLanguage(CStyleLanguage):
     local_size = local_size[::-1] if local_size else [1]
     prg = "#version 330\n"
     prg += "in vec2 uv;\n"
+    prg += "uniform int w;\n"
     prg += "\n".join([f"uniform {sampler_prefix[dtype]}sampler2D {name};" for name,dtype in bufs if name != "data0"])
     dummy_line = "float dummy = float(texture(data1, vec2(0.0f,0.0f)).r);\n" if ("sampler2D data1" in prg) else ""
+    dummy_line += "\nint xyz = w;\n"
     prg += f"\nout {sampler_prefix[bufs[0][1]]}vec4 out_data;\n"
     prg += f"\nvoid main() {{\n{dummy_line}" + "\n".join(kernel) + "\n}"
     return prg
@@ -61,7 +63,9 @@ class GLSLLanguage(CStyleLanguage):
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
-    out_val = f"texture({buf_name}, vec2(float({idx} + {fragment_center_offset})/textureSize({buf_name}, 0).x, 0.0)).r"
+    x_calc = f"({idx})%textureSize({buf_name}, 0).x"
+    y_calc = f"({idx})/textureSize({buf_name}, 0).x"
+    out_val = f"texture({buf_name}, vec2(float({x_calc} + 0.5)/textureSize({buf_name}, 0).x, float({y_calc} + 0.5)/textureSize({buf_name}, 0).y)).r"
     return f"{self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val}"
 
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
