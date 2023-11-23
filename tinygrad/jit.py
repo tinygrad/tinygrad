@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import Callable, List, Tuple, Dict, cast, Union, Optional, TypeVar, Generic
-import functools, itertools
+import functools, itertools, operator
 from tinygrad.helpers import DEBUG, DType, merge_dicts, getenv
-from tinygrad.ops import RawBuffer, ASTRunner, Device, JITRunner
+from tinygrad.ops import RawBuffer, Device, JITRunner
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node
@@ -15,13 +15,7 @@ class JitItem:
   rawbufs: List[Optional[RawBuffer]]
 
 def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[Node, Node]:
-  op_estimate, mem_estimate = NumNode(0), NumNode(0)
-  for ji in jit_cache:
-    if isinstance(ji.prg, ASTRunner):  # TODO: this is just for world and needs to be refactored
-      op_estimate += ji.prg.op_estimate
-      mem_estimate += ji.prg.mem_estimate
-  return op_estimate, mem_estimate
-
+  return functools.reduce(operator.__add__, [ji.prg.op_estimate for ji in jit_cache], NumNode(0)), functools.reduce(operator.__add__, [ji.prg.mem_estimate for ji in jit_cache], NumNode(0))
 def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[RawBuffer]) -> Dict[Tuple[int, int], int]:
   input_replace: Dict[Tuple[int, int], int] = {}
   for j,ji in enumerate(jit_cache):
@@ -109,7 +103,7 @@ class PlaceHolder:
 
 class _CacheCollector:
   def __init__(self):
-    self.cache: Optional[List[Tuple[ASTRunner, List[Union[RawBuffer, PlaceHolder]]]]] = None
+    self.cache: Optional[List[Tuple[JITRunner, List[Union[RawBuffer, PlaceHolder]]]]] = None
 
   def start(self, var_vals:Optional[Dict[Variable, int]]=None):
     self.cache = []
@@ -120,7 +114,7 @@ class _CacheCollector:
     if self.cache is None: return
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
     self.placeholders[rawbufs[0]] = PlaceHolder(rawbufs[0])    # NOTE: this is making an assumption that 0 is special
-    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(prg, ASTRunner) and isinstance(x, RawBuffer) else x for x in rawbufs]))
+    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, RawBuffer) else x for x in rawbufs]))
 
   def finish(self) -> List[JitItem]:
     if self.cache is None: return []

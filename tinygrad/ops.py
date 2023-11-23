@@ -1,7 +1,7 @@
 from __future__ import annotations
 import importlib, inspect, functools, pathlib, time, re
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping, Protocol
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping, Set
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT, dedup, all_int
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -146,33 +146,25 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
 
 # **************** shared AST runner ****************
 
-class JITRunner(Protocol):
-  def __call__(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
-    raise NotImplementedError("override this")
-
-class ASTRunner(JITRunner):  # pylint: disable=abstract-method
-  def __init__(self, ast:Optional[LazyOp]):
-    if ast is None:
-      self.op_estimate, self.mem_estimate, self.vars = 0, 0, set()
-    else:
-      info = get_lazyop_info(ast)
-      self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
-      from tinygrad.lazy import vars_from_ast
-      self.vars = vars_from_ast(ast)
-      assert all(v._val is None for v in self.vars), f"ASTRunner contains bound Variable {self.vars}"
-
+class JITRunner:
+  def __init__(self):
+    self.op_estimate, self.mem_estimate = 0, 0
   def exec(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int]) -> Optional[float]:
     from tinygrad.jit import CacheCollector
     et = self(rawbufs, var_vals)
-    CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
+    CacheCollector.add(self, rawbufs, var_vals)
     return et
+  def __call__(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+    raise NotImplementedError("override this")
 
 # **************** for Interpreted Buffers ****************
 
-class InterpretedASTRunner(ASTRunner):
+class InterpretedASTRunner(JITRunner):
   def __init__(self, ast:LazyOp, fxn:Callable):
+    super().__init__()
     self.fxn = fxn
-    super().__init__(ast)
+    info = get_lazyop_info(ast)
+    self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
 
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> float:
     st = time.perf_counter()
@@ -237,12 +229,19 @@ def get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], from_underlying:Optional[
 
 # **************** for Compiled Buffers ****************
 
-class CompiledASTRunner(ASTRunner):
+class CompiledASTRunner(JITRunner):
   def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
+    super().__init__()
     if DEBUG >= 4: print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = \
       name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
-    super().__init__(ast)
+    self.vars: Set[Variable] = set()
+    if ast:
+      info = get_lazyop_info(ast)
+      self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
+      from tinygrad.lazy import vars_from_ast
+      self.vars = vars_from_ast(ast)
+      assert all(v._val is None for v in self.vars), f"ASTRunner contains bound Variable {self.vars}"
 
   def build(self, compiler, runtime):
     self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
@@ -256,7 +255,7 @@ class CompiledASTRunner(ASTRunner):
 
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # filter the var_vals
-    var_vals = {k:var_vals[k] for k in sorted(self.vars)} if var_vals is not None else {}
+    var_vals = {k:var_vals[k] for k in sorted(self.vars)}
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
