@@ -81,7 +81,7 @@ jobs:
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
         key: testing-packages-${{ hashFiles('**/setup.py') }}
-    - name: Cache model weights
+    - name: Cache downloads
       uses: actions/cache@v3
       with:
         path: ~/.cache/tinygrad/downloads/
@@ -114,7 +114,7 @@ jobs:
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
         key: testing-packages-${{ hashFiles('**/setup.py') }}
-    - name: Cache model weights
+    - name: Cache downloads
       uses: actions/cache@v3
       with:
         path: ~/.cache/tinygrad/downloads/
@@ -225,7 +225,7 @@ jobs:
         key: metal-webgpu-testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Cache model weights
+    - name: Cache downloads
       uses: actions/cache@v3
       with:
         path: ~/Library/Caches/tinygrad/downloads/
@@ -290,7 +290,7 @@ jobs:
         with:
           path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
           key: ${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
-      - name: Cache model weights
+      - name: Cache downloads
         uses: actions/cache@v3
         with:
           path: ~/Library/Caches/tinygrad/downloads/
