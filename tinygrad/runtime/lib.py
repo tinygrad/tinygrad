@@ -1,3 +1,4 @@
+from __future__ import annotations
 import ctypes
 import numpy as np
 from collections import defaultdict, deque
@@ -23,7 +24,7 @@ class RawBuffer:  # pylint: disable=abstract-method
   @classmethod
   def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
   @classmethod
-  def fromBuffer(cls, src, shape: Tuple, dtype:DType, **kwargs): return cls.fromCPU(src.realized.toCPU(), **kwargs)
+  def fromBuffer(cls, src:RawBuffer, shape: Tuple, dtype:DType, **kwargs): return cls.fromCPU(src.toCPU(), **kwargs)
   def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
 
 class RawBufferCopyIn(RawBuffer):
@@ -45,9 +46,9 @@ class RawBufferMapped(RawBufferCopyIn):
   @classmethod
   def fromBuffer(cls, src, shape, dtype, **kwargs):
     from tinygrad.runtime.ops_disk import RawDiskBuffer
-    if isinstance(src.realized, RawDiskBuffer):
-      return src.realized.transfer(cls, shape, dtype, **kwargs)
-    return cast(RawBufferMapped, cls.fromCPU(src.realized.toCPU(), **kwargs))
+    if isinstance(src, RawDiskBuffer):
+      return src.transfer(cls, shape, dtype, **kwargs)
+    return cast(RawBufferMapped, cls.fromCPU(src.toCPU(), **kwargs))
 
 # this one is simple enough that i moved it out of the runtimes
 ctypes_map = {dtypes.float64:ctypes.c_double, dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16, dtypes.bfloat16: ctypes.c_int16, dtypes.int8: ctypes.c_int8, dtypes.uint8: ctypes.c_uint8, dtypes.bool: ctypes.c_uint8, dtypes.int32: ctypes.c_int32, dtypes.uint32: ctypes.c_uint32, dtypes.int64: ctypes.c_int64, dtypes.uint64: ctypes.c_uint64, dtypes.int16: ctypes.c_int16, dtypes.uint16: ctypes.c_uint16}
@@ -74,9 +75,9 @@ class RawBufferTransfer(RawBuffer):
 
   @classmethod
   def fromBuffer(cls, src, shape, dtype, **kwargs):
-    if isinstance(src.realized, RawBufferTransfer) and getenv("P2P", 0) >= 1:
-      return cls.transfer(src.realized, cls.size, cls.dtype, **kwargs)
-    return cls.fromCPU(src.realized.toCPU(), **kwargs)
+    if isinstance(src, RawBufferTransfer) and getenv("P2P", 0) >= 1:
+      return cls.transfer(src, cls.size, cls.dtype, **kwargs)
+    return cls.fromCPU(src.toCPU(), **kwargs)
 
 class LRUAllocator:
   def __init__(self, dev_memsz=(4<<30)):
