@@ -1,5 +1,7 @@
 import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
+from tinygrad.nn.state import torch_load
+from tinygrad.helpers import fetch
 from extra.utils import get_child
 
 class BasicBlock:
@@ -131,11 +133,8 @@ class ResNet:
     }
 
     self.url = model_urls[(self.num, self.groups, self.base_width)]
-
-    from torch.hub import load_state_dict_from_url
-    state_dict = load_state_dict_from_url(self.url, progress=True)
-    for k, v in state_dict.items():
-      obj = get_child(self, k)
+    for k, v in torch_load(fetch(self.url)).items():
+      obj: Tensor = get_child(self, k)
       dat = v.detach().numpy()
 
       if 'fc.' in k and obj.shape != dat.shape:

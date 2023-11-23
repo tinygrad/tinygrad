@@ -10,8 +10,10 @@ class Optimizer:
       if x.requires_grad is None: x.requires_grad = True
 
     self.params: List[Tensor] = dedup([x for x in params if x.requires_grad])
+    assert len(self.params) != 0, "optimizer must have at least one param"
+    self.device = self.params[0].device
     self.buffers: List[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
-    self.lr = Tensor([lr], requires_grad=False).contiguous()
+    self.lr = Tensor([lr], requires_grad=False, device=self.device).contiguous()
 
   def zero_grad(self):
     for param in self.params: param.grad = None
