@@ -7,6 +7,7 @@ from tinygrad.helpers import prod, DType, OSX
 from tinygrad.runtime.lib import RawBufferMapped
 from tinygrad.ops import Interpreted, Op, MovementOps, UnaryOps, BufferOps
 from tinygrad.shape.view import strides_for_shape
+MAP_LOCKED, MAP_POPULATE = 0x2000, 0x008000
 
 class RawDiskBuffer(RawBufferMapped):
   def __init__(self, size, dtype:DType, device:Optional[str]=None, buf=None, shape=None, offset=0):  # pylint: disable=super-init-not-called
@@ -22,7 +23,7 @@ class RawDiskBuffer(RawBufferMapped):
         else:
           fd = _posixshmem.shm_open(device[4:], os.O_RDWR, 0o600)
           # TODO: these flags are somewhat platform specific, but python doesn't expose the ones we need
-          shm = mmap.mmap(fd, size * dtype.itemsize, flags=mmap.MAP_SHARED | 0x2000 | 0x008000)
+          shm = mmap.mmap(fd, size * dtype.itemsize, flags=mmap.MAP_SHARED | MAP_LOCKED | MAP_POPULATE)
           shm.madvise(mmap.MADV_HUGEPAGE)     # type: ignore   # not on OSX
           os.close(fd)
         buf = [None, shm, 1]
