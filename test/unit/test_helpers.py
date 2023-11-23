@@ -150,7 +150,7 @@ class TestRoundUp(unittest.TestCase):
 
 class TestFetch(unittest.TestCase):
   def test_fetch_bad_http(self):
-    self.assertRaises(AssertionError, fetch, 'http://www.google.com/404')
+    self.assertRaises(Exception, fetch, 'http://www.google.com/404')
 
   def test_fetch_small(self):
     assert(len(fetch('https://google.com').read_bytes())>0)

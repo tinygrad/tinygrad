@@ -1,6 +1,7 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, requests, tempfile, pathlib
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib
 import numpy as np
+from urllib import request
 from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -228,12 +229,14 @@ def diskcache(func):
 def fetch(url:str, name:Optional[str]=None) -> pathlib.Path:
   fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())
   if not fp.is_file():
-    r = requests.get(url, stream=True, timeout=10)
-    assert r.status_code == 200
-    progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
-    (path := fp.parent).mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
-      for chunk in r.iter_content(chunk_size=16384): progress_bar.update(f.write(chunk))
-      f.close()
-      pathlib.Path(f.name).rename(fp)
+    with request.urlopen(url, timeout=10) as r:
+      progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
+      (path := fp.parent).mkdir(parents=True, exist_ok=True)
+      with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
+        while True:
+          chunk = r.read(16384)
+          if not chunk: break
+          progress_bar.update(f.write(chunk))
+        f.close()
+        pathlib.Path(f.name).rename(fp)
   return fp
