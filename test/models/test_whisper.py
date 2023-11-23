@@ -62,4 +62,5 @@ class TestWhisper(unittest.TestCase):
     with self.assertRaises(Exception):
       transcribe_waveform(self.model, self.enc, waveforms)
 
-
+if __name__ == '__main__':
+  unittest.main()
