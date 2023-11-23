@@ -110,9 +110,8 @@ class TestLinearizer(unittest.TestCase):
     assert lin.full_shape[:lin.global_dims] == (5, 6, 7, 8, 9)
     lin.limit_dims_to_max(global_max=[16, 16, 16], local_max=[16, 16, 16])
 
-  @unittest.skipIf(Device.DEFAULT in ["CLANG", "LLVM"], "clang and llvm have outer loops")
   def test_sum_collapse(self):
-    t = Tensor.ones(256,256).sum(axis=1)
+    t = Tensor.ones(256,256).sum()
     sched = [si for si in t.lazydata.schedule() if si.ast.op not in LoadOps]
     assert len(sched) == 1
     lin = Linearizer(sched[0].ast)
