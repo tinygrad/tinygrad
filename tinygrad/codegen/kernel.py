@@ -1,8 +1,9 @@
 from __future__ import annotations
 import os, math, itertools
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
+from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, Device, Compiled
-from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, ansilen, getenv, prod, DEBUG
+from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, ansilen, getenv, prod, DEBUG, round_up
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import View, strides_for_shape
@@ -10,7 +11,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 class OptOps(Enum):
-  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); LASTLOCAL = auto(); GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto() # noqa: E702
+  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); LASTLOCAL = auto(); GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 @dataclass(frozen=True, order=True)
@@ -400,8 +401,8 @@ class Kernel:
       axis = -1
     if opt.amt is not None:
       amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
-      assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-      assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
+      assert isinstance(amt, int) and amt != 1, "shift/padto of amt 1 or Node is meaningless"
+      if opt.op != OptOps.PADTO: assert self.full_shape[axis] % amt == 0, "no longer valid shift"
     else:
       amt = -1
     if opt.op == OptOps.LOCAL:        # cyan
@@ -450,6 +451,18 @@ class Kernel:
       assert self.local_dims == 0 and len(self.group_for_reduce) == 0, "can't have no locals with locals"
       assert not self.dont_use_locals, "already not using locals"
       self.dont_use_locals = True
+    elif opt.op == OptOps.PADTO:
+      assert not vars_from_ast(self.ast), "does not work with symbolic shape"
+      assert all(op.op is not ReduceOps.MAX for op in self.ast.get_lazyops()), "cannot pad with MAX"
+      padded = False
+      for i,st in enumerate(self.sts):
+        if self.sts[i].shape[axis] != 1:
+          assert self.sts[i].shape[axis] > amt//2, "pad adds more than double the work"
+          if (ru := round_up(self.sts[i].shape[axis], amt) - self.sts[i].shape[axis]):
+            # pad right seems to be faster
+            self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
+            padded = True
+      assert padded, "nothing was padded"
     return self.simplify_ones()
 
   def required_optimizations(self, early_only=False):
