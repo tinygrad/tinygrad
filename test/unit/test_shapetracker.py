@@ -235,6 +235,13 @@ class TestIndexExpressions2d(unittest.TestCase):
     assert len(self.st.views) == 1
     self.st.assert_same()
 
+  def test_reshape_splitting_1(self):
+    self.st = CheckingShapeTracker((1,10,1))
+    self.st.pad(((0,4),(0,0),(1,0)))
+    self.st.reshape((5,5,2,2))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+
   def test_reshape_combining_1(self):
     self.st = CheckingShapeTracker((2,1,10))
     self.st.pad(((2,6), (0,0), (0,0)))
@@ -246,6 +253,21 @@ class TestIndexExpressions2d(unittest.TestCase):
     self.st = CheckingShapeTracker((1,1,5))
     self.st.pad(((3,6), (0,0), (0,5)))
     self.st.reshape((100,))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+
+  def test_reshape_combining_3(self):
+    self.st = CheckingShapeTracker((1,1,4))
+    self.st.pad(((3,6), (0,0), (1,5)))
+    self.st.reshape((100,))
+    assert len(self.st.views) == 1
+    assert self.st.views[0].mask[0] == (31, 35)
+    self.st.assert_same()
+
+  def test_reshape_combining_4(self):
+    self.st = CheckingShapeTracker((1,1,5,5,1,1,5))
+    self.st.pad(((3,6), (0,0), (0,5), (0,0), (3,6), (0,0), (0,5)))
+    self.st.reshape((100,5,100))
     assert len(self.st.views) == 1
     self.st.assert_same()
 
