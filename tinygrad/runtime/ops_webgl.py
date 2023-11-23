@@ -52,9 +52,7 @@ def reshape_texture(num, threshold):
   return (num, 1)
 
 class RawWebGLAllocator(LRUAllocator):
-    def _do_alloc(self, size, dtype, device, **kwargs): 
-      print(f"ALLOCATING SIZE={size}")
-      return ctx.texture(reshape_texture(size, 4096), 1, dtype=dtype_map[dtype])
+    def _do_alloc(self, size, dtype, device, **kwargs): return ctx.texture(reshape_texture(size, 4096), 1, dtype=dtype_map[dtype])
     def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize)
 GLAlloc = RawWebGLAllocator()
 

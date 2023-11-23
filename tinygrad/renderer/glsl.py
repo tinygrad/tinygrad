@@ -10,7 +10,6 @@ sampler_prefix = {dtypes.float: "", dtypes.half: "", dtypes.int32: "i", dtypes.u
 fragment_center_offset = 0.5
 
 class GLSLLanguage(CStyleLanguage):
-  no_global_loop = True
   xid = ["int(gl_FragCoord.y-0.5) * w + int(gl_FragCoord.x-0.5)"]
   code_for_op: Dict = {
     UnaryOps.NEG: lambda x: f"(-{x})",
@@ -29,12 +28,10 @@ class GLSLLanguage(CStyleLanguage):
     if math.isnan(x): val = "intBitsToFloat(int(0xFFC00000u))"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "(1. / 0.)"
     else: 
-      x = "0.0" if x == 0 and dtypes.is_float(var_dtype) else x
+      x = "{:.1f}".format(x) if x == int(x) and dtypes.is_float(var_dtype) else x
       val = f"({x}" + ("" if dtypes.is_int(var_dtype) else "f") + ")"
     
-    print(x)
     return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
-
 
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"bool({cond})?({x}):{y}"

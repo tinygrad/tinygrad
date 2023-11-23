@@ -115,13 +115,11 @@ class Linearizer(Kernel):
     assert buf_uop is not None, f"buffer {i} wasn't UOped"
 
     expanded_nodes = [idx.expand() for idx in idxs]
-
     _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
     upcast_dim = self.get_upcast_dim(i)
-
     if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
@@ -193,10 +191,9 @@ class Linearizer(Kernel):
     suffix = f"{'n'+str(Linearizer.kernel_cnt[self.function_name]-1)}" if Linearizer.kernel_cnt[self.function_name] > 1 else ""
     self.function_name, self.display_name = self.function_name+suffix, self.display_name+colored(suffix, 'BLACK')
 
+    if self.opts.device == "WEBGL": self.reshape_and_permute(lambda x: [prod(x[:self.global_dims])] + list(x[self.global_dims:]) if (self.global_dims > 1) else x, None)
+
     # define indexes
-    def push_to_first(s, global_dims): return ([prod(s[:global_dims])] + list(s[global_dims:]) if (global_dims > 1) else s)
-    
-    if self.opts.device == "WEBGL": self.reshape_and_permute(lambda x: push_to_first(x, self.global_dims), None)
     global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)
     local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+len(self.group_for_reduce)], 3 if self.opts.has_local else 0)
     full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[self.shape_len-self.upcasted:]]
