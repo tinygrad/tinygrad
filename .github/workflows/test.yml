@@ -84,10 +84,8 @@ jobs:
     - name: Cache model weights
       uses: actions/cache@v3
       with:
-        path: |
-          weights/whisper-tiny.en.pt
-          weights/gpt2.tiktoken
-        key: model-weights-v1
+        path: ~/.cache/tinygrad/downloads/
+        key: model-weights
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
@@ -119,10 +117,8 @@ jobs:
     - name: Cache model weights
       uses: actions/cache@v3
       with:
-        path: |
-          weights/whisper-tiny.en.pt
-          weights/gpt2.tiktoken
-        key: model-weights-v1
+        path: ~/.cache/tinygrad/downloads/
+        key: model-weights
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
@@ -232,10 +228,8 @@ jobs:
     - name: Cache model weights
       uses: actions/cache@v3
       with:
-        path: |
-          weights/whisper-tiny.en.pt
-          weights/gpt2.tiktoken
-        key: model-weights-v1
+        path: ~/Library/Caches/tinygrad/downloads/
+        key: model-weights
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
     #- name: Run dtype test
@@ -299,10 +293,8 @@ jobs:
       - name: Cache model weights
         uses: actions/cache@v3
         with:
-          path: |
-            weights/whisper-tiny.en.pt
-            weights/gpt2.tiktoken
-          key: model-weights-v1
+          path: ~/Library/Caches/tinygrad/downloads/
+          key: model-weights
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas'}}" >> $GITHUB_ENV
       - name: Install OpenCL

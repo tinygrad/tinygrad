@@ -6,10 +6,9 @@ import base64
 import multiprocessing
 import numpy as np
 from typing import Optional, Union, Literal, List
-from extra.utils import download_file
 from tinygrad.jit import TinyJit
 from tinygrad.nn.state import torch_load, load_state_dict
-from tinygrad.helpers import getenv, DEBUG, CI
+from tinygrad.helpers import getenv, DEBUG, CI, fetch
 import tinygrad.nn as nn
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
@@ -194,11 +193,9 @@ LANGUAGES = {
   "as": "assamese", "tt": "tatar", "haw": "hawaiian", "ln": "lingala", "ha": "hausa", "ba": "bashkir", "jw": "javanese", "su": "sundanese",
 }
 
-BASE = pathlib.Path(__file__).parents[1] / "weights"
 def get_encoding(encoding_name):
-  filename = encoding_name + ".tiktoken"
-  download_file("https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/" + filename, BASE / filename)
-  with open(BASE / filename) as f:
+  filename = fetch(f"https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/{encoding_name}.tiktoken")
+  with open(filename) as f:
     ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in f if line)}
   n_vocab = len(ranks)
   specials = [
@@ -239,8 +236,7 @@ MODEL_URLS = {
 def init_whisper(model_name="tiny.en", batch_size=1):
   assert MODEL_URLS[model_name] is not None
 
-  filename = BASE / "whisper-{}.pt".format(model_name)
-  download_file(MODEL_URLS[model_name], filename)
+  filename = fetch(MODEL_URLS[model_name])
   state = torch_load(filename)
   model = Whisper(state['dims'], batch_size)
   load_state_dict(model, state['model_state_dict'], strict=False)
