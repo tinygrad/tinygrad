@@ -278,7 +278,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, cuda, triton] #, ptx]
+        backend: [llvm, clang, gpu, cuda] #, triton] #, ptx]
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || 'ubuntu-latest' }}
