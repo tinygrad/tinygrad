@@ -1,31 +1,45 @@
 from __future__ import annotations
 from typing import Callable, List, Tuple, Dict, cast, Union, Optional, TypeVar, Generic
-import functools, itertools
-from tinygrad.helpers import DEBUG, DType, merge_dicts
-from tinygrad.ops import RawBuffer, Device, ASTRunner, BatchExecutor, JitItem
+import functools, itertools, operator
+from tinygrad.helpers import DEBUG, DType, merge_dicts, getenv
+from tinygrad.ops import RawBuffer, Device, JITRunner
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable
+from tinygrad.shape.symbolic import Variable, NumNode, Node
 from weakref import ref, WeakKeyDictionary
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class JitItem:
+  prg: JITRunner
+  rawbufs: List[Optional[RawBuffer]]
+
+def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[Node, Node]:
+  return functools.reduce(operator.__add__, [ji.prg.op_estimate for ji in jit_cache], NumNode(0)), functools.reduce(operator.__add__, [ji.prg.mem_estimate for ji in jit_cache], NumNode(0))
+def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[RawBuffer]) -> Dict[Tuple[int, int], int]:
+  input_replace: Dict[Tuple[int, int], int] = {}
+  for j,ji in enumerate(jit_cache):
+    for i,a in enumerate(ji.rawbufs):
+      if a in input_rawbuffers:
+        input_replace[(j,i)] = input_rawbuffers.index(a)
+  assert len(set(input_replace.values())) == len(input_rawbuffers), "some input tensors not found"
+  return input_replace
+
+class GraphException(Exception): pass
 
 ReturnType = TypeVar('ReturnType')
-
 class TinyJit(Generic[ReturnType]):
   def __init__(self, fxn:Callable[..., ReturnType]):
     self.fxn = fxn
     self.reset()
 
   def reset(self):
-    self.jit_fxn: Optional[BatchExecutor] = None
+    self.jit_cache: List[JitItem] = []
+    self.input_replace: Dict[Tuple[int, int], int] = {}
     self.cnt: int = 0
     self.ret: Optional[ReturnType] = None
     self.expected_vals: Optional[Tuple[Variable, ...]] = None
     self.expected_name_sts_dtype: Optional[Tuple[Tuple[Union[int, str], ShapeTracker, DType], ...]] = None
-
-  @property
-  def jit_cache(self) -> List[JitItem]: return self.jit_fxn.jit_cache if self.jit_fxn else []
-  @property
-  def input_replace(self) -> Dict[Tuple[int, int], int]: return self.jit_fxn.input_replace if self.jit_fxn else {}
 
   # add support for instance methods
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
@@ -44,22 +58,34 @@ class TinyJit(Generic[ReturnType]):
     expected_vals = tuple(var_vals.keys())
 
     if self.cnt >= 2:
+      # jit exec
       assert self.expected_vals == expected_vals, "mismatch of var_vals"
       assert self.expected_name_sts_dtype == expected_name_sts_dtype, f"mismatch of sts, expected {self.expected_name_sts_dtype} got {expected_name_sts_dtype}"
-      assert self.jit_fxn, "didn't get jitted?"
-      self.jit_fxn(input_rawbuffers, var_vals, DEBUG>=2)
+      for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_idx]
+      for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), var_vals, jit=True)
     elif self.cnt == 1:
+      # jit capture
       self.expected_vals, self.expected_name_sts_dtype = expected_vals, expected_name_sts_dtype
-
       CacheCollector.start(var_vals)
       self.ret = self.fxn(*args, **kwargs)
-      jit_cache = CacheCollector.finish()
-      assert len(jit_cache) != 0, "didn't JIT anything!"
-      if DEBUG >= 1: print(f"JIT captured {len(jit_cache)} kernels with {len(input_rawbuffers)} inputs")
+      self.jit_cache = CacheCollector.finish()
+      assert len(self.jit_cache) != 0, "didn't JIT anything!"
+      if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
-      self.jit_fxn = Device[Device.DEFAULT].batch_executor(jit_cache, input_rawbuffers, var_vals)
+      # if your Device supports it, condense the items into a graph executor
+      if (make_graph := Device[Device.DEFAULT].graph) and getenv("JIT") != 2:
+        try:
+          self.jit_cache = [JitItem(make_graph(self.jit_cache, input_rawbuffers, var_vals), cast(List[Optional[RawBuffer]], input_rawbuffers))]
+        except GraphException as e:
+          if DEBUG >= 1: print(f"graph create failed {e}")
+
+      self.input_replace = get_input_replace(self.jit_cache, input_rawbuffers)
     elif self.cnt == 0:
+      # jit ignore
       self.ret = self.fxn(*args, **kwargs)
+
+    # clear jit inputs
+    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
 
     self.cnt += 1
     return cast(ReturnType, self.ret)
@@ -77,7 +103,7 @@ class PlaceHolder:
 
 class _CacheCollector:
   def __init__(self):
-    self.cache: Optional[List[Tuple[ASTRunner, List[Union[RawBuffer, PlaceHolder]]]]] = None
+    self.cache: Optional[List[Tuple[JITRunner, List[Union[RawBuffer, PlaceHolder]]]]] = None
 
   def start(self, var_vals:Optional[Dict[Variable, int]]=None):
     self.cache = []
@@ -88,7 +114,7 @@ class _CacheCollector:
     if self.cache is None: return
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
     self.placeholders[rawbufs[0]] = PlaceHolder(rawbufs[0])    # NOTE: this is making an assumption that 0 is special
-    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(prg, ASTRunner) and isinstance(x, RawBuffer) else x for x in rawbufs]))
+    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, RawBuffer) else x for x in rawbufs]))
 
   def finish(self) -> List[JitItem]:
     if self.cache is None: return []

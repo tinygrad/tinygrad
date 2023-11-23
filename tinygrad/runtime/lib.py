@@ -10,6 +10,7 @@ class RawBuffer:  # pylint: disable=abstract-method
   def __init__(self, size:int, dtype:DType, buf:Any=None, allocator:Any=None, **kwargs):
     self.size: int = size
     self.dtype: DType = dtype
+    self.offset: int = 0    # TODO: this is very unsupported, only in disk
     self._buf = buf if buf is not None else (allocator(size, dtype, **kwargs) if allocator else None) # If buf is provided, use it. Otherwise try to allocate from the allocator.
     self._memsz: int = size*dtype.itemsize
     self._allocator = allocator if allocator and hasattr(allocator, 'free') else None

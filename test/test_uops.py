@@ -26,7 +26,7 @@ def _test_single_value(vals, op, dtype):
   buf = Device[Device.DEFAULT].buffer(1, dtype)
   buf2 = [Device[Device.DEFAULT].buffer.fromCPU(np.array([a], dtype=dtype.np)) for a in vals]
   prg = _uops_to_prg(uops)
-  prg([buf]+buf2)
+  prg.exec([buf]+buf2)
   return buf.toCPU()[0]
 
 def _test_single_value_const(vals, op, dtype):
@@ -37,7 +37,7 @@ def _test_single_value_const(vals, op, dtype):
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Device[Device.DEFAULT].buffer(1, dtype)
   prg = _uops_to_prg(uops)
-  prg([buf])
+  prg.exec([buf])
   return buf.toCPU()[0]
 
 class TestUOps(unittest.TestCase):
