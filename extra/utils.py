@@ -6,7 +6,7 @@ from pathlib import Path
 from collections import defaultdict
 from typing import Union
 
-from tinygrad.helpers import prod, getenv, DEBUG, dtypes
+from tinygrad.helpers import prod, getenv, DEBUG, dtypes, get_child
 from tinygrad.helpers import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
@@ -47,13 +47,4 @@ def download_file(url, fp, skip_if_exists=True):
     f.close()
     Path(f.name).rename(fp)
 
-def get_child(parent, key):
-  obj = parent
-  for k in key.split('.'):
-    if k.isnumeric():
-      obj = obj[int(k)]
-    elif isinstance(obj, dict):
-      obj = obj[k]
-    else:
-      obj = getattr(obj, k)
-  return obj
+
