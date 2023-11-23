@@ -363,17 +363,10 @@ class Linearizer(Kernel):
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
     # graph helper functions
-    def get_recursive_parents(x:List[UOp]) -> List[UOp]:
-      ret: Set[UOp] = set()
-      this_round: Set[UOp] = set(x)
-      while len(this_round):
-        ret = ret.union(this_round)
-        next_round: Set[UOp] = set()
-        for r in this_round: next_round = next_round.union(set(r.vin))
-        this_round = next_round
-      return list(ret)
+    @functools.lru_cache(None)
+    def get_recursive_parents(x:UOp) -> Set[UOp]: return set.union(set(x.vin), *[get_recursive_parents(p) for p in x.vin])
 
-    def get_recursive_children(x:UOp) -> List[UOp]:
+    def get_recursive_children(x:UOp) -> Set[UOp]:
       deps = set([x])
       ssize = 0
       while ssize != len(deps):
@@ -381,7 +374,7 @@ class Linearizer(Kernel):
         for u in self.uops:
           if len(deps.intersection([x for x in u.vin if x.uop != UOps.PHI])):
             deps.add(u)
-      return sorted(list(deps), key=self.uops.index)    # get the last one
+      return deps
 
     def replace_op(old:UOp, new:UOp):
       for u in self.uops:
@@ -395,7 +388,7 @@ class Linearizer(Kernel):
       elif u.uop == UOps.LOOP: loop_stack.append([u])
       elif u.uop not in [UOps.CONST, UOps.ALU]: loop_stack[-1].append(u)
       else:
-        parents = get_recursive_parents([u])
+        parents = get_recursive_parents(u)
         for i in reversed(range(len(loop_stack))):
           # check backwards and put the uop in the first encounter with some dependency
           if any(x in parents for x in loop_stack[i]) or i == 0:
@@ -411,7 +404,7 @@ class Linearizer(Kernel):
         if u.uop == UOps.PHI and len(u.vin) == 3:
           # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
           # TODO: ADD becomes a MUL, MAX can just become nothing
-          if all(x.uop != UOps.LOOP for x in get_recursive_parents(list(u.vin[0:2]))) and u.vin[1].arg == BinaryOps.ADD:
+          if all(x.uop != UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) and u.vin[1].arg == BinaryOps.ADD:
             if DEBUG >= 4: print(f"removing PHI node {u}")
             del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
             # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
@@ -438,7 +431,7 @@ class Linearizer(Kernel):
     for u in self.uops:
       if u.uop == UOps.LOOP:
         # add END of loops after the last thing that (recursively) depends on them
-        self.uop(UOps.END, None, (u,), cachable=False, insert_before=self.uops.index(get_recursive_children(u)[-1])+1)
+        self.uop(UOps.END, None, (u,), cachable=False, insert_before=self.uops.index(sorted(list(get_recursive_children(u)), key=self.uops.index)[-1])+1)
       elif u.uop == UOps.IF:
         # END any if statements at the end of the uops
         self.uop(UOps.END, None, (u,), cachable=False)
