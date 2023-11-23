@@ -98,7 +98,7 @@ class DType(NamedTuple):
   def vec(self, sz:int):
     assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
     return DType(self.priority, self.itemsize*sz, self.name+str(sz), None, sz)
-  def scalar(self): return DTYPES_DICT[self.name[:-1]] if self.sz > 1 else self
+  def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
 
 # dependent typing?
 class ImageDType(DType):
