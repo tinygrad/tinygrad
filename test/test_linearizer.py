@@ -7,7 +7,7 @@ from tinygrad.ops import Compiled, Device, LoadOps
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
-from tinygrad.helpers import dtypes, prod
+from tinygrad.helpers import dtypes, prod, getenv, CI
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -487,6 +487,36 @@ class TestLinearizerOpts(unittest.TestCase):
       # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
     ], apply_tc=True)
 
+  def test_padto_matmul(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
+    N = 17 * 17
+    Tensor.manual_seed(289)
+    a = Tensor.rand(N, N)
+    b = Tensor.rand(N, N)
+    helper_linearizer_opt(a@b, [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 1, 32)],
+      [Opt(OptOps.PADTO, 2, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32)],
+      # can optimize further post PADTO
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UNROLL, 0, 4)],
+    ])
+
+  def test_padto_max(self):
+    # pad uses invalid value 0, so max is not allowed
+    if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
+    N = 17 * 17
+    a = -Tensor.ones(N, N)
+    with self.assertRaises(AssertionError):
+      helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
+
+  def test_padto_where(self):
+    # pad uses invalid value 0, so kernel with max is not allowed
+    if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
+    N = 17 * 17
+    a = (Tensor.rand(N, N).max(axis=0) > 1).where(1, 0)
+    with self.assertRaises(AssertionError):
+      helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
 
 if __name__ == '__main__':
   unittest.main()
