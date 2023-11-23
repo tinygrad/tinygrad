@@ -35,8 +35,8 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
 
   def render_cast(self, x, var_dtype):
-    if var_dtype == dtypes.half.vec(16): return f"{{{','.join(f'(half){x}' for x in x)}}}"
-    if var_dtype == dtypes.float.vec(8): return f"{{{','.join(x)}}}"
+    if var_dtype.sz > 1 and var_dtype.scalar() == dtypes.half: return f"{{{','.join(f'(half){x}' for x in x)}}}"
+    if var_dtype.sz == 8: return f"{{{','.join(x)}}}"
     return super().render_cast(x, var_dtype)
 
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
