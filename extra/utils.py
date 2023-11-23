@@ -37,7 +37,7 @@ def fetch_as_file(url):
 def download_file(url, fp, skip_if_exists=True):
   if skip_if_exists and Path(fp).is_file() and Path(fp).stat().st_size > 0:
     return
-  r = requests.get(url, stream=True)
+  r = requests.get(url, stream=True, timeout=10)
   assert r.status_code == 200
   progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
   (path := Path(fp).parent).mkdir(parents=True, exist_ok=True)
