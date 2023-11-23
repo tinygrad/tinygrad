@@ -10,6 +10,7 @@ class Conf:
     log_dir: str = ""
     save_ckpt_path: str = ""
     load_ckpt_path: str = ""
+    val_split: float = 0.1
 
     epochs: int = 1
     ga_steps: int = 1
@@ -32,7 +33,8 @@ class Conf:
     lr_decay_factor: float = 0.1
     momentum: float = 0.9
     weight_decay: float = 0.0
-    evaluate_every: int = None
+    eval_every: int = 10
+    start_eval_at: int = 0
     verbose: bool = True
     normalization: str = "instancenorm"
     activation: str = "relu"

@@ -181,8 +181,7 @@ def rand_crop(image, label, patch_size, oversampling):
     image, label, cords = _rand_crop(image, label, patch_size)
   return image, label
 
-def get_batch(batch_size=32, patch_size=(128, 128, 128), oversampling=0.25, val=True, shuffle=True):
-  files = get_val_files()
+def get_batch(files, batch_size=32, patch_size=(128, 128, 128), oversampling=0.25, shuffle=True):
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
   for file in files:
