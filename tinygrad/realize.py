@@ -1,7 +1,7 @@
 from typing import List, cast, Dict, Callable
 import numpy as np
 from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps
-from tinygrad.graph import log_schedule_item
+from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import DEBUG, prod, all_int, getenv, IMAGE
 
@@ -23,6 +23,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
       for i,s in enumerate(si.ast.src): assert isinstance(s, LazyOp) and s.op == BufferOps.MEM and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
       LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out, *si.inputs)
     else:
+      assert all(si.out.device == x.device for x in si.inputs), f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
       Device[si.out.device].exec_ast(si.ast, output=si.out, inputs=si.inputs, var_vals=si.var_vals, **si.out._device_extra_args())
     del si.out.op
     for v in si.out.views: del v.op

@@ -6,7 +6,7 @@ from tinygrad.tensor import Tensor
 class LR_Scheduler:
   def __init__(self, optimizer: Optimizer):
     self.optimizer = optimizer
-    self.epoch_counter = Tensor([0], requires_grad=False)
+    self.epoch_counter = Tensor([0], requires_grad=False, device=self.optimizer.device)
 
   def get_lr(self): pass
 
@@ -61,7 +61,7 @@ class CosineAnnealingLR(LR_Scheduler):
     self.eta_max = optimizer.lr.numpy()[0]
 
   def get_lr(self) -> Tensor:
-    return Tensor([self.eta_min + 0.5 * (self.eta_max - self.eta_min) * (1 + math.cos((self.epoch_counter.numpy()[0]/self.T_max) * math.pi))])
+    return Tensor([self.eta_min + 0.5 * (self.eta_max - self.eta_min) * (1 + math.cos((self.epoch_counter.numpy()[0]/self.T_max) * math.pi))], device=self.optimizer.device)
 
 class OneCycleLR(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, max_lr: float, div_factor: float, final_div_factor: float, total_steps: int, pct_start: float,
