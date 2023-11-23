@@ -1,12 +1,11 @@
 from tqdm import tqdm
-import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, dtypes
 from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict
 from tinygrad.ops import Device
 from tinygrad.shape.symbolic import Node
 from extra.lr_scheduler import MultiStepLR
-from extra.datasets.kits19 import iterate, get_batch
+from extra.datasets.kits19 import get_batch, get_val_files
 
 from examples.mlperf.metrics import get_dice_score
 from examples.mlperf.conf import Conf
@@ -38,20 +37,6 @@ def train_unet3d():
     dice_score = get_dice_score(out, label)
     dice = (1. - dice_score).mean()
     return (ce + dice) / 2
-
-  # def get_batch(generator, batch_size=32):
-  #   bX, bY = [], []
-  #   for _ in range(batch_size):
-  #     try:
-  #       X, Y = next(generator)
-  #       print("get_batch", X.shape, Y.shape)
-  #       bX.append(X)
-  #       bY.append(X)
-  #     except StopIteration:
-  #       break
-  #   res = np.concatenate(bX, axis=0)
-  #   print("get_batch", res.shape)
-  #   return (np.concatenate(bX, axis=0), np.concatenate(bY, axis=0))
 
   def get_optimizer(params, conf: dict):
     from tinygrad.nn.optim import Adam, SGD, LAMB
@@ -93,15 +78,12 @@ def train_unet3d():
   if getenv("MOCKTRAIN", 0):
     train_loader = [(Tensor.rand(1,1,128,128,128), Tensor.rand(1,1,128,128,128)) for i in range(3)]
   else:
-    train_loader = get_batch(iterate(shuffle=True, expand_dims=False), 2, (128, 128, 128), 0.25)
-    print("train_loader", train_loader[0].shape, train_loader[1].shape)
-    # train_loader = get_batch(iterate(), batch_size=conf.batch_size)
-    # print("train_loader", train_loader[0].shape, train_loader[1].shape)
-    # train_loader = iterate()
+    total_files = len(get_val_files())
+    total_batches = (total_files + conf.batch_size - 1) // conf.batch_size
+    train_loader = get_batch(conf.batch_size, conf.input_shape, conf.oversampling)
 
   @TinyJit
   def train_step(im, y):
-    # network
     out = mdl_run(im).numpy()
     loss = dice_ce_loss(out, y)
     optim.zero_grad()
@@ -116,17 +98,14 @@ def train_unet3d():
     # if epoch <= conf.lr_warmup_epochs:
     #   lr_warmup(optim, conf.init_lr, conf.lr, epoch, conf.lr_warmup_epochs)
 
-    # for i, batch in enumerate(tqdm(train_loader, disable=(rank != 0) or not conf.verbose)):
-    for i, batch in enumerate(tqdm(train_loader)):
-      # print(type(i))
-      # print(type(batch))
+    for i, batch in enumerate(tqdm(train_loader, total=total_batches, disable=(rank != 0) or not conf.verbose)):
       im, label = batch
       print(im.shape, label.shape)
-      # im, label = im.to(device), label.to(device)
-      # print(im.shape, label.shape)
+
+      dtype_im = dtypes.half if getenv("FP16") else dtypes.float
+      im, label = Tensor(im, dtype=dtype_im), Tensor(label, dtype=dtype_im)
 
       loss_value = train_step(im, label)
-
       cumulative_loss.append(loss_value)
 
     if conf.lr_decay_epochs:

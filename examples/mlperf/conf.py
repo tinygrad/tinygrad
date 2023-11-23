@@ -16,8 +16,8 @@ class Conf:
     warmup_step: int = 4
     batch_size: int = 2
     layout: str = "NDHWC"
-    input_shape: Tuple[int, int, int, int] = (1, 128, 128, 128)
-    val_input_shape: Tuple[int, int, int, int] = (1, 128, 128, 128)
+    input_shape: Tuple[int, int, int] = (128, 128, 128)
+    val_input_shape: Tuple[int, int, int] = (128, 128, 128)
     seed: int = 0
     num_workers: int = 8
     exec_mode: str = "train"
@@ -33,5 +33,8 @@ class Conf:
     momentum: float = 0.9
     weight_decay: float = 0.0
     evaluate_every: int = None
+    verbose: bool = True
     normalization: str = "instancenorm"
     activation: str = "relu"
+
+    oversampling: float = 0.4

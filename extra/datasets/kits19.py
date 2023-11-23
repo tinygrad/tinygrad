@@ -181,17 +181,18 @@ def rand_crop(image, label, patch_size, oversampling):
     image, label, cords = _rand_crop(image, label, patch_size)
   return image, label
 
-def get_batch(generator, batch_size=32, patch_size=(128, 128, 128), oversampling=0.25):
-  bX, bY = [], []
-  for _ in range(batch_size):
-    try:
-      X,Y = next(generator)
+def get_batch(batch_size=32, patch_size=(128, 128, 128), oversampling=0.25, val=True, shuffle=True):
+  files = get_val_files()
+  order = list(range(0, len(files)))
+  if shuffle: random.shuffle(order)
+  for file in files:
+    bX, bY = [], []
+    for _ in range(batch_size):
+      X,Y = preprocess(file)
       X,Y = rand_crop(X, Y, patch_size, oversampling)
       bX.append(X)
       bY.append(Y)
-    except StopIteration:
-      break
-  return (np.concatenate(bX, axis=0), np.concatenate(bY, axis=0))
+    yield (np.stack(bX, axis=0), np.stack(bY, axis=0))
 
 if __name__ == "__main__":
   for X, Y in iterate():
