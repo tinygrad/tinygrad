@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 from tinygrad.tensor import Tensor, Device
 from tinygrad.jit import TinyJit
-from tinygrad.nn.state import get_parameters
+from tinygrad.nn.state import get_parameters, load_state_dict, safe_load
 from tinygrad.helpers import getenv, dtypes, GlobalCounters, Timing
 from examples.mlperf import helpers
 def tlog(x): print(f"{x:25s}  @ {time.perf_counter()-start:5.2f}s")
@@ -20,9 +20,9 @@ def eval_resnet():
   class ResnetRunner:
     def __init__(self, device=None):
       self.mdl = ResNet50()
-      if device:
-        for x in get_parameters(self.mdl): x.to_(device)
+      for x in get_parameters(self.mdl) if device else []: x.to_(device)
       self.mdl.load_from_pretrained()
+      #load_state_dict(self.mdl, safe_load("/tmp/resnet_epoch_5.safetensors"))
       self.input_mean = Tensor([0.485, 0.456, 0.406], device=device).reshape(1, -1, 1, 1)
       self.input_std = Tensor([0.229, 0.224, 0.225], device=device).reshape(1, -1, 1, 1)
     def __call__(self, x:Tensor) -> Tensor:

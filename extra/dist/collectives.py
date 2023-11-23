@@ -3,8 +3,8 @@ from tinygrad.helpers import getenv
 
 from extra.dist import world
 
-def allreduce(t:Tensor) -> Tensor:
-  RANK, WORLD_SIZE = getenv("RANK"), getenv("WORLD_SIZE")
+def allreduce(t:Tensor, rank:int=0, world_size:int=1) -> Tensor:
+  RANK, WORLD_SIZE = getenv("RANK", rank), getenv("WORLD_SIZE", world_size)
 
   # flatten
   flattened = t.flatten()
