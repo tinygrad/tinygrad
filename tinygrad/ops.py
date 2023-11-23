@@ -1,7 +1,7 @@
 from __future__ import annotations
 import importlib, inspect, functools, pathlib, time, re
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping, Set
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT, dedup, all_int
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -184,10 +184,8 @@ class Interpreted:
 
   def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
     if ast not in self.method_cache: self.method_cache[ast] = get_interpreted_fxn(self.fxn_for_op, ast)
-    rawbufs = [output.realized if output.realized is not None else output.output_buffer] + [x.realized for x in inputs]
-    if rawbufs[0] is None: rawbufs[0] = self.buffer.__new__(self.buffer)
-    self.method_cache[ast].exec(rawbufs, var_vals)
-    output.realized = rawbufs[0]
+    output.realized = output.output_buffer if output.output_buffer is not None else self.buffer.__new__(self.buffer)
+    self.method_cache[ast].exec([output.realized] + [x.realized for x in inputs], var_vals)
 
 def get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> InterpretedASTRunner:
   if DEBUG >= 3:
@@ -236,7 +234,7 @@ class CompiledASTRunner(JITRunner):
     if DEBUG >= 4: print(prg)
     self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = \
       name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
-    self.vars: Set[Variable] = set()
+    self.vars: List[Variable] = []
     if ast:
       info = get_lazyop_info(ast)
       self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
@@ -255,8 +253,6 @@ class CompiledASTRunner(JITRunner):
     return global_size, local_size
 
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
-    # filter the var_vals
-    var_vals = {k:var_vals[k] for k in sorted(self.vars)}
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
@@ -266,7 +262,7 @@ class CompiledASTRunner(JITRunner):
     lra = self.runtime_args.copy()
     if global_size: lra['global_size'] = global_size
     if local_size and 'local_size' not in lra: lra['local_size'] = local_size
-    et = self.clprg(*rawbufs, *var_vals.values(), **lra, wait=wait or DEBUG>=2)
+    et = self.clprg(*rawbufs, *[var_vals[k] for k in self.vars], **lra, wait=wait or DEBUG>=2)
     update_stats(self.display_name if self.display_name is not None else self.name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra)
     return et
 
