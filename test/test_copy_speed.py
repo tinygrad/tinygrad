@@ -13,7 +13,7 @@ class TestCopySpeed(unittest.TestCase):
     #t = Tensor.empty(N, N, device="disk:/dev/shm/test_X").realize()
     s = shared_memory.SharedMemory(name="test_X", create=True, size=N*N*4)
     s.close()
-    t = Tensor.empty(N, N, device="disk:shm:test_X").realize()
+    t = Tensor.empty(N, N, device=f"disk:shm:{s.name}").realize()
     for _ in range(3):
       with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
         with Timing("queue: "):
