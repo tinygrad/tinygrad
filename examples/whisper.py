@@ -194,8 +194,7 @@ LANGUAGES = {
 }
 
 def get_encoding(encoding_name):
-  filename = fetch(f"https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/{encoding_name}.tiktoken")
-  with open(filename) as f:
+  with fetch(f"https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/{encoding_name}.tiktoken").open() as f:
     ranks = {base64.b64decode(token): int(rank) for token, rank in (line.split() for line in f if line)}
   n_vocab = len(ranks)
   specials = [
