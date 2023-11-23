@@ -57,6 +57,10 @@ class TinyJit(Generic[ReturnType]):
       assert len(jit_cache) != 0, "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
+      # Marking output buffers to create a copy when toCPU() is called, since jit can overwrite the same buffers which are already copied to CPU.
+      for ji in jit_cache:
+        if isinstance(ji.prg, ASTRunner): setattr(ji.rawbufs[0], "_needs_explicit_copy", True)
+
       self.jit_fxn = Device[Device.DEFAULT].batch_executor(jit_cache, input_rawbuffers, var_vals)
     elif self.cnt == 0:
       self.ret = self.fxn(*args, **kwargs)
