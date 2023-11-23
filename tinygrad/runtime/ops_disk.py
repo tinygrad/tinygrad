@@ -11,7 +11,8 @@ MAP_LOCKED, MAP_POPULATE = 0x2000, 0x008000
 
 class UnderlyingDiskBuffer:
   def __init__(self, fd, mem, offset=0): self.fd, self.mem, self.offset = fd, mem, offset
-  def __del__(self): self.fd.close()
+  def __del__(self):
+    if self.fd: self.fd.close()
 
 class RawDiskBuffer(RawBufferMapped):
   def __init__(self, size, dtype:DType, buf=None, device:Optional[str]=None):  # pylint: disable=super-init-not-called
@@ -35,9 +36,6 @@ class RawDiskBuffer(RawBufferMapped):
         buf = UnderlyingDiskBuffer(f, mmap.mmap(f.fileno(), size * dtype.itemsize))
     # NOTE: we don't call super since disk tensors don't use RAM
     self.size, self.dtype, self._buf = size, dtype, buf
-  def __del__(self):
-    self._buf[2] -= 1
-    if self._buf[2] == 0 and self._buf[0] is not None: self._buf[0].close()
   def cast(self, arg:Tuple[DType, bool]):
     return RawDiskBuffer(self.size, arg[0], self._buf)
   def as_strided(self, arg):
