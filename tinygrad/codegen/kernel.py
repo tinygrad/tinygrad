@@ -1,8 +1,9 @@
 from __future__ import annotations
 import os, math, itertools
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
+from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, Device, Compiled
-from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, all_int, ansilen, getenv, prod, DEBUG
+from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, ansilen, getenv, prod, DEBUG, round_up
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import View, strides_for_shape
@@ -10,7 +11,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 class OptOps(Enum):
-  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); LASTLOCAL = auto(); GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto() # noqa: E702
+  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); LASTLOCAL = auto(); GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
 @dataclass(frozen=True, order=True)
@@ -68,7 +69,7 @@ class Kernel:
     self.ast = ast
 
     # fetch lazyop info
-    self.info: FlopCounter = get_lazyop_info(cast(LazyOp, self.ast))
+    self.info: FlopCounter = get_lazyop_info(self.ast)
 
     # there's only allowed to be one reduceop
     reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
@@ -129,27 +130,23 @@ class Kernel:
   @property
   def membufs(self) -> List[MemBuffer]: return [x for x in self.bufs if isinstance(x, MemBuffer)]
 
-  def has_variable_shape(self) -> bool:
-    for b in self.bufs:
-      if not isinstance(b, LocalBuffer) and not all_int(b.st.views[-1].shape): return True
-    return False
+  # TODO: these need more tests or it might silently be no-op
+  def shape_offsets(self, i:int): return itertools.product(*[list(range(cast(int, s))) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
+  def float4_axis(self, i:int): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]
 
-  def shape_offsets(self, i): return itertools.product(*[list(range(s)) for s in self.sts[i].shape[self.shape_len-self.upcasted:][::-1]]) if self.upcasted > 0 else [tuple()]
-  def float4_axis(self, i): return [x-(self.shape_len-self.upcasted) for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x]%4 == 0]
-
-  def upcasted_axis(self, i):
+  def upcasted_axis(self, i:int):
     return list(zip(self.sts[i].shape[self.shape_len-self.upcasted:],
                     self.sts[i].real_strides()[self.shape_len-self.upcasted:],
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
 
   # TODO: is there a better way to write this?
-  def acc_offsets(self, i):
+  def acc_offsets(self, i:int) -> List[int]:
     if self.upcasted == 0: return [0]
     upcasted_i = self.upcasted_axis(i)
     acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
-  def get_upcast_dim(self, i) -> List[int]:
+  def get_upcast_dim(self, i:int) -> List[int]:
     should_upcast = self.opts.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))
     return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
 
@@ -198,7 +195,7 @@ class Kernel:
     assert len(colors) == self.shape_len, "colors size mismatch"
     return colors
 
-  def colored_shape(self, pad=None, dense=False) -> str:
+  def colored_shape(self, pad:Optional[int]=None, dense=False) -> str:
     ret = ' '.join(colored(s, color) for s,color in zip([f"{s:4d}" if isinstance(s, int) and not dense else s for s in self.full_shape], self.colors()))
     if pad: ret += ' '*(pad-ansilen(ret))
     return ret
@@ -279,6 +276,7 @@ class Kernel:
     for i,x in enumerate(rets[:len(self.sts)]): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
 
   # ******************** GPU simplifiers ********************
+
   def _limit_size(self, x: Tuple[int], max_size: List) -> Tuple[int, ...]:
     new_shape,dims = list(x), len(x)
     for i in range(dims):
@@ -403,25 +401,29 @@ class Kernel:
       axis = -1
     if opt.amt is not None:
       amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
-      assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-      assert isinstance(amt, int) and amt != 1, "shift of amt 1 or Node is meaningless"
+      assert isinstance(amt, int) and amt != 1, "shift/padto of amt 1 or Node is meaningless"
+      if opt.op != OptOps.PADTO: assert self.full_shape[axis] % amt == 0, "no longer valid shift"
     else:
       amt = -1
     if opt.op == OptOps.LOCAL:        # cyan
+      assert self.opts.has_local, "target does not support local"
       assert axis < self.first_reduce, "can't local a reduce"
       assert not(self.tensor_core), "can't local with tensor cores"
       self.shift_to(axis, amt, insert_before=self.first_reduce)
       self.local_dims += 1
     elif opt.op == OptOps.LASTLOCAL:  # cyan
+      assert self.opts.has_local, "target does not support local"
       assert axis < self.first_reduce, "can't local a reduce"
       self.shift_to(axis, amt, insert_before=self.first_reduce-self.local_dims)
       self.local_dims += 1
     elif opt.op == OptOps.GROUP:      # green
+      assert self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem"
       assert axis >= self.first_reduce + len(self.group_for_reduce) and axis < self.shape_len-self.upcasted, "must be reduce axis to group"
       assert not(self.tensor_core), "can't group with tensor cores"
       self.shift_to(axis, amt, insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(amt)
     elif opt.op == OptOps.GROUPTOP:   # green
+      assert self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem"
       assert axis >= self.first_reduce + len(self.group_for_reduce) and axis < self.shape_len-self.upcasted, "must be reduce axis to group"
       assert not(self.tensor_core), "can't group with tensor cores"
       self.shift_to(axis, amt, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
@@ -445,9 +447,22 @@ class Kernel:
       self.shift_to(axis, amt, insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(amt)
     elif opt.op == OptOps.NOLOCALS:
+      assert self.opts.has_local, "target does not support local, so this optimization is meaningless"
       assert self.local_dims == 0 and len(self.group_for_reduce) == 0, "can't have no locals with locals"
       assert not self.dont_use_locals, "already not using locals"
       self.dont_use_locals = True
+    elif opt.op == OptOps.PADTO:
+      assert not vars_from_ast(self.ast), "does not work with symbolic shape"
+      assert all(op.op is not ReduceOps.MAX for op in self.ast.get_lazyops()), "cannot pad with MAX"
+      padded = False
+      for i,st in enumerate(self.sts):
+        if self.sts[i].shape[axis] != 1:
+          assert self.sts[i].shape[axis] > amt//2, "pad adds more than double the work"
+          if (ru := round_up(self.sts[i].shape[axis], amt) - self.sts[i].shape[axis]):
+            # pad right seems to be faster
+            self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
+            padded = True
+      assert padded, "nothing was padded"
     return self.simplify_ones()
 
   def required_optimizations(self, early_only=False):
@@ -471,8 +486,8 @@ class Kernel:
         self.reduceop and self.reduceop.op == ReduceOps.SUM and len(self.full_shape) >= 2 and self.opts.has_shared and \
         isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
         self.reduceop.src[0].src[0].op == BufferOps.MEM and self.reduceop.src[0].src[1].op == BufferOps.MEM:
-      buf0 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[0]).arg)
-      buf1 = self.bufs.index(cast(LazyOp, self.reduceop.src[0].src[1]).arg)
+      buf0 = self.bufs.index(self.reduceop.src[0].src[0].arg)
+      buf1 = self.bufs.index(self.reduceop.src[0].src[1].arg)
       buf0_strides = self.sts[buf0].real_strides()
       buf1_strides = self.sts[buf1].real_strides()
       def has_expanded_axis(s, st): return any(x > 1 and y == 0 for x,y in zip(s,st))

@@ -9,7 +9,7 @@ from examples.mlperf import helpers
 def eval_resnet():
   # Resnet50-v1.5
   from tinygrad.jit import TinyJit
-  from models.resnet import ResNet50
+  from extra.models.resnet import ResNet50
   mdl = ResNet50()
   mdl.load_from_pretrained()
 
@@ -53,7 +53,7 @@ def eval_resnet():
 
 def eval_unet3d():
   # UNet3D
-  from models.unet3d import UNet3D
+  from extra.models.unet3d import UNet3D
   from extra.datasets.kits19 import iterate, sliding_window_inference
   from examples.mlperf.metrics import get_dice_score
   mdl = UNet3D()
@@ -71,8 +71,8 @@ def eval_unet3d():
 
 def eval_retinanet():
   # RetinaNet with ResNeXt50_32X4D
-  from models.resnet import ResNeXt50_32X4D
-  from models.retinanet import RetinaNet
+  from extra.models.resnet import ResNeXt50_32X4D
+  from extra.models.retinanet import RetinaNet
   mdl = RetinaNet(ResNeXt50_32X4D())
   mdl.load_from_pretrained()
 
@@ -129,7 +129,7 @@ def eval_retinanet():
 
 def eval_rnnt():
   # RNN-T
-  from models.rnnt import RNNT
+  from extra.models.rnnt import RNNT
   mdl = RNNT()
   mdl.load_from_pretrained()
 
@@ -158,7 +158,7 @@ def eval_rnnt():
 
 def eval_bert():
   # Bert-QA
-  from models.bert import BertForQuestionAnswering
+  from extra.models.bert import BertForQuestionAnswering
   mdl = BertForQuestionAnswering()
   mdl.load_from_pretrained()
 
@@ -194,8 +194,8 @@ def eval_bert():
 
 def eval_mrcnn():
   from tqdm import tqdm
-  from models.mask_rcnn import MaskRCNN
-  from models.resnet import ResNet
+  from extra.models.mask_rcnn import MaskRCNN
+  from extra.models.resnet import ResNet
   from extra.datasets.coco import BASEDIR, images, convert_prediction_to_coco_bbox, convert_prediction_to_coco_mask, accumulate_predictions_for_coco, evaluate_predictions_on_coco, iterate
   from examples.mask_rcnn import compute_prediction_batched, Image
   mdl = MaskRCNN(ResNet(50, num_classes=None, stride_in_1x1=True))

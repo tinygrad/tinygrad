@@ -1,12 +1,11 @@
 import unittest
-from tinygrad.jit import JIT_SUPPORTED_DEVICE
 from tinygrad.shape.symbolic import Variable
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor, Device
 import numpy as np
 
 @unittest.skipIf(getenv("ARM64") or getenv("PTX"), "ARM64 and PTX are not supported")
-@unittest.skipUnless(Device.DEFAULT in JIT_SUPPORTED_DEVICE and Device.DEFAULT not in ["HIP", "WEBGPU"], f"{Device.DEFAULT} is not supported")
+@unittest.skipIf(Device.DEFAULT in ["HIP", "WEBGPU"], f"{Device.DEFAULT} is not supported")
 class TestSymbolicOps(unittest.TestCase):
   def test_plus1(self):
     def f(a): return (a+1).realize()
@@ -99,7 +98,7 @@ class TestSymbolicOps(unittest.TestCase):
         expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
-  def test_two_vars_plus1(self):
+  def test_two_vars_plus1_ij(self):
     def f(a, b): return (a@b+1).realize()
     for i in range(1, 5):
       for j in range(1, 5):
@@ -108,6 +107,19 @@ class TestSymbolicOps(unittest.TestCase):
         a = Tensor.rand(i, 3)
         b = Tensor.rand(3, j)
         symbolic = f(a.reshape(vi, 3), b.reshape(3, vj)).reshape(i, j).numpy()
+        expected = f(a, b).numpy()
+        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+
+  def test_two_vars_plus1_ji(self):
+    # reverse the order of variables
+    def f(a, b): return (a@b+1).realize()
+    for i in range(1, 5):
+      for j in range(1, 5):
+        vi = Variable("i", 1, 10).bind(i)
+        vj = Variable("j", 1, 10).bind(j)
+        a = Tensor.rand(j, 3)
+        b = Tensor.rand(3, i)
+        symbolic = f(a.reshape(vj, 3), b.reshape(3, vi)).reshape(j, i).numpy()
         expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 

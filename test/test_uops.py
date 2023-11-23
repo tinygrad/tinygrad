@@ -3,17 +3,17 @@ import unittest, math
 import numpy as np
 from tinygrad.helpers import dtypes, getenv, DType, PtrDType
 from tinygrad.tensor import Device
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ASTRunner, Compiled
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, CompiledASTRunner, Compiled
 from tinygrad.codegen.linearizer import UOps, UOp
 
 def _uops_to_prg(uops):
   src, runtime_args = Device[Device.DEFAULT].renderer("test", uops)
-  return ASTRunner("test", src,
-                   [1] if Device[Device.DEFAULT].linearizer_opts.has_local else None, [1] if Device[Device.DEFAULT].linearizer_opts.has_local else None,
-                   runtime_args=runtime_args).build(Device[Device.DEFAULT].compiler, Device[Device.DEFAULT].runtime)
+  return CompiledASTRunner(None, "test", src,
+                           [1] if Device[Device.DEFAULT].linearizer_opts.has_local else None, [1] if Device[Device.DEFAULT].linearizer_opts.has_local else None,
+                           runtime_args=runtime_args).build(Device[Device.DEFAULT].compiler, Device[Device.DEFAULT].runtime)
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
-  uops.append(UOp(uop, dtype, tuple(vin), arg, len(uops)))
+  uops.append(UOp(uop, dtype, tuple(vin), arg))
   return uops[-1]
 
 def _test_single_value(vals, op, dtype):

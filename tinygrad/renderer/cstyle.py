@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict
+from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict, cast
 import math
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
@@ -46,10 +46,9 @@ class CStyleLanguage(NamedTuple):
     if len(x) == 1: return f"({var_dtype.name})({x[0]})"
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.float4 is not None, "cast is not supported on this platform"
-    if var_dtype == dtypes._float4: return f"{self.float4}({','.join(x)})"
-    if var_dtype == dtypes._float2: return f"{self.float4.replace('float4', 'float2')}({','.join(x)})"
-    if var_dtype == dtypes._int2: return f"{self.float4.replace('float4', 'int2')}({','.join(x)})"
-    raise NotImplementedError(f"no cast for {var_dtype}")
+    if var_dtype == dtypes.half.vec(16): return f"{{{','.join(f'(half){x}' for x in x)}}}"
+    if var_dtype == dtypes.float.vec(8): return f"{{{','.join(x)}}}"
+    return f"{self.float4.replace('float4', var_dtype.name)}({','.join(f'(half){x}' if var_dtype.scalar() == dtypes.half else x for x in x)})"
 
   # returns a str expression of the const with the given type
   def render_const(self, x:Union[float,int], var_dtype) -> str:
@@ -61,7 +60,7 @@ class CStyleLanguage(NamedTuple):
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
     if isinstance(buf_dtype, ImageDType):
-      assert output_dtype == dtypes._float4, f"images must be float4, getting {output_dtype}"
+      assert output_dtype == dtypes.float.vec(4), f"images must be float4, getting {output_dtype}"
       return f"read_imagef({buf_name}, smp, {idx})"
     if self.uses_vload and buf_dtype == dtypes.float16:
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx})"
@@ -98,9 +97,9 @@ class CStyleLanguage(NamedTuple):
   # returns a str statement that does the store
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx:str, local=False) -> str:
     if isinstance(buf_dtype, ImageDType):
-      assert var_dtype == dtypes._float4, "images must be float4"
+      assert var_dtype == dtypes.float.vec(4), "images must be float4"
       return f"write_imagef({buf_name}, {idx}, {var_name});"
-    if self.uses_vload and buf_dtype == dtypes.float16:
+    if self.uses_vload and buf_dtype == dtypes.float16 and var_dtype != dtypes.float16:
       return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.sz > 1:
       return f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
@@ -127,7 +126,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       child_count[v] += 1
 
   for u in uops:
-    uop,dtype,vin,args,_ = u
+    uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
     if uop == UOps.LOOP:
       kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]))
       depth += 1
@@ -141,21 +140,19 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       kk("}")
     elif uop == UOps.WMMA:
       if args[0] == "METAL":
+        assert dtype == dtypes.float.vec(2), "output dtype of METAL TC is _float2"
         # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
+        output = ssa(u, 'wmma')
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {output};")
         kk("{ simdgroup_float8x8 a,b,c;")
         kk(f"a.thread_elements()[0] = {r[vin[0]]}; a.thread_elements()[1] = {r[vin[1]]};")
         kk(f"b.thread_elements()[0] = {r[vin[2]]}; b.thread_elements()[1] = {r[vin[3]]};")
         kk(f"c.thread_elements()[0] = {r[vin[4]]}; c.thread_elements()[1] = {r[vin[5]]};")
         kk("simdgroup_multiply_accumulate(c, a, b, c);")
-        kk(f"{r[vin[4]]} = c.thread_elements()[0]; {r[vin[5]]} = c.thread_elements()[1]; }}")
+        kk(f"{output}.x = c.thread_elements()[0]; {output}.y = c.thread_elements()[1]; }}")
       elif args[0] == "HIP":
-        kk("{")
-        kk(f"half16 a_frag = {{ {','.join(['(half)'+r[x] for x in vin[0:16]])} }};")
-        kk(f"half16 b_frag = {{ {','.join(['(half)'+r[x] for x in vin[16:32]])} }};")
-        kk(f"float8 c_frag = {{ {','.join([r[x] for x in vin[32:]])} }};")
-        kk("c_frag = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(a_frag, b_frag, c_frag);")
-        for i in range(8): kk(f"{r[vin[32+i]]} = c_frag[{i}];")
-        kk("}")
+        assert dtype == dtypes.float.vec(8), "output dtype of HIP TC is _float8"
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
       else:
         raise NotImplementedError(f"WMMA not implemented for {args}")
     elif uop == UOps.ALU:
@@ -163,10 +160,12 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       # remove parens if ALU types are the same. TODO: can do more here
       if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL}:
         val = lang.code_for_op[args](strip_parens(r[vin[0]]), *[r[x] for x in vin[1:]])
+      elif args == BinaryOps.MAX:
+        val = lang.code_for_op[args](*[lang.render_cast([r[x]], dtype) if x.dtype != dtype else r[x] for x in vin])
       else:
         val = lang.code_for_op[args](*[r[x] for x in vin])
       assert child_count[u] != 0, f"childless ALU op found {u}"
-      if child_count[u] <= 1 or dtypes.is_int(dtype):  # fix index rendering issue
+      if (child_count[u] <= 1 or dtypes.is_int(dtype)) and args != BinaryOps.MAX:  # fix index rendering issue. fix clang nested max macro issue
         r[u] = val
       else:
         kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'alu')} = {val};")
@@ -183,15 +182,17 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
     elif uop == UOps.LOAD:
       assert dtype is not None
       val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
-      if len(vin) > 2: val = lang.render_conditional(r[vin[2]], val, r[vin[3]])
+      if len(vin) > 3: val = lang.render_conditional(r[vin[2]], val, r[vin[3]])
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'val')} = {val};")
     elif uop == UOps.PHI:
       kk(f"{r[vin[0]]} = {r[vin[1]]};")
       r[u] = r[vin[0]]
     elif uop == UOps.STORE:
       assert vin[0].dtype is not None and vin[2].dtype is not None
+      if len(vin) > 3: kk(lang.render_if(r[vin[3]]))
       kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
-    elif uop == UOps.CAST and dtype is not None and dtype.sz > 1:
+      if len(vin) > 3: kk("}")
+    elif uop == UOps.CAST and dtype is not None:
       val = lang.render_cast([r[x] for x in vin], dtype)
       if child_count[u] <= 1: r[u] = val
       else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
@@ -205,7 +206,10 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       bufs.append(args)
       r[u] = args[0]
     elif uop == UOps.GEP:
-      r[u] = f"({r[vin[0]]}).{'xyzw'[args]}"
+      if cast(DType, vin[0].dtype).sz > 4:
+        r[u] = f"({r[vin[0]]})[{args}]"  # this is correct for HIP
+      else:
+        r[u] = f"({r[vin[0]]}).{'xyzw'[args]}"
     else:
       raise RuntimeError(f"failed to render {uop}")
 

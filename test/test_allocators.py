@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 import unittest
+import pytest
 import numpy as np
 from weakref import ref
+
 from tinygrad.helpers import GlobalCounters
 from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, prod
@@ -23,7 +25,9 @@ class FakeDeviceBuffer:
     assert self.id == 0, "Should called _do_free() before"
 
 class FakeAllocator(LRUAllocator):
-  def _do_alloc(self, size, dtype, device, **kwargs): return FakeDeviceBuffer(size, dtype, device)
+  def _do_alloc(self, size, dtype, device, **kwargs):
+    if size*dtype.itemsize > self._get_cur_free_space(device): raise Exception("OOM")
+    return FakeDeviceBuffer(size, dtype, device)
   def _do_free(self, buf):
     buf.id -= 1
     assert buf.id == 0, f"Free should be called once, but {buf.id}"
@@ -108,6 +112,44 @@ class TestAllocators(unittest.TestCase):
     test()
     check_gc()
 
+  def test_lru_allocator_failing_alloc_cleans_cache(self):
+    def test():
+      lru_allocator = FakeAllocator(128)
+      for size in range(1, 4):
+        alloc_free_trace(lru_allocator, size, dtypes.float32, device='0')
+      assert len(lru_allocator.aging_order['0']) == 3, "All buffers should be cached"
+      assert lru_allocator.free_space['0'] == 128 - 24, "24 bytes to be used by current cached buffers"
+
+      def always_raise_exception(*args, **kwargs):
+        raise Exception("OOM")
+      lru_allocator._do_alloc = always_raise_exception
+
+      with pytest.raises(Exception):
+        buff = alloc(lru_allocator, 5, dtypes.float32, device='0')
+      assert len(lru_allocator.aging_order['0']) == 0, "All buffers should be freed from cache due to failing alloc"
+    test()
+    check_gc()
+
+  def test_lru_allocator_fail_first_alloc_pass_after_clear_cahce(self):
+    def test():
+      lru_allocator = FakeAllocator(128)
+      for size in range(1, 4):
+        alloc_free_trace(lru_allocator, size, dtypes.float32, device='0')
+      cache_length = 3
+      assert len(lru_allocator.aging_order['0']) == cache_length, "All buffers should be cached"
+      assert lru_allocator.free_space['0'] == 128 - 24, "24 bytes to be used by current cached buffers"
+
+      original_do_alloc = lru_allocator._do_alloc  # save the original method
+      def single_fail_then_pass(*args, **kwargs):
+        lru_allocator._do_alloc = original_do_alloc  # restore the original method
+        raise Exception("OOM")
+      lru_allocator._do_alloc = single_fail_then_pass
+
+      buff = alloc(lru_allocator, 5, dtypes.float32, device='0')
+      assert len(lru_allocator.aging_order['0']) < cache_length, "Some buffers should be cleaned as first alloc failed"
+    test()
+    check_gc()
+
   @unittest.skip("failing in CI")
   def test_gpu_copyout(self):
     def test():
@@ -131,6 +173,16 @@ class TestAllocators(unittest.TestCase):
       _ = xx.numpy()
     test()
     check_gc()
+
+  def test_lru_allocator_massive_buffer(self):
+    with self.assertRaises(AssertionError) as context: alloc(allocator := FakeAllocator(), size := 1e13, dtypes.int8)
+    self.assertEqual(str(context.exception), f"out of memory - requested: {size/1e9:5.2f} GB, available: {allocator._get_cur_free_space('0')/1e9:5.2f} GB")
+
+  @unittest.skipIf(Device.DEFAULT != "METAL", "only applies to Metal")
+  def test_lru_allocator_metal_max_buffer_length(self):
+    from tinygrad.runtime.ops_metal import METAL
+    with self.assertRaises(AssertionError) as context: METAL.allocator._do_alloc(buf_len := (max_buf_len := METAL.device.maxBufferLength()+1), dtypes.int8, '0')
+    self.assertEqual(str(context.exception), f"Buffer length of {buf_len/1e9:5.2f} GB exceeds Metal's max buffer length of {max_buf_len/1e9:5.2f} GB.")
 
 if __name__ == "__main__":
   unittest.main()

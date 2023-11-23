@@ -3,9 +3,9 @@ from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 import importlib
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod, getenv, DEBUG, dtypes
-from typing import List,Dict
-from onnx.onnx_pb import AttributeProto, ModelProto, TensorProto, TypeProto
+from tinygrad.helpers import getenv, DEBUG, dtypes
+from typing import List, Dict
+from onnx import AttributeProto, ModelProto, TensorProto, TypeProto # onnx 1.50 uses serialized file (see onnx/onnx-ml.proto) as descriptors
 try:
   from onnx.helper import tensor_dtype_to_np_dtype
 except ImportError:
@@ -51,7 +51,7 @@ def get_run_onnx(onnx_model: ModelProto):
       else: raise Exception(f"unknown attr: {attr}, {type_proto}")
 
   def buffer_parse(inp: TensorProto) -> Tensor:
-    if inp.data_type in (1,10,6,7):
+    if inp.data_type in (1,10,6,7,5):
       # TODO: this is shared with below
       if len(inp.float_data) > 0:
         ret = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
@@ -74,7 +74,7 @@ def get_run_onnx(onnx_model: ModelProto):
     elif a.type == AttributeProto.FLOATS: return tuple(float(x) for x in a.floats)
     elif a.type == AttributeProto.INTS: return tuple(int(x) for x in a.ints)
     elif a.type == AttributeProto.STRINGS: return tuple(x.decode("utf-8") for x in a.strings)
-    elif a.type == AttributeProto.GRAPH: raise Exception(f"graph not implemented: {a.g}")
+    elif a.type == AttributeProto.GRAPH: raise Exception(f"graph not implemented: {a.g}\n likely an OP requiring control flow")
     else: raise Exception(f"can't parse {a.type} {a}")
   def attribute_to_dict(a: RepeatedCompositeFieldContainer[AttributeProto]): return {x.name:attribute_parse(x) for x in a}
 
@@ -144,8 +144,10 @@ def get_run_onnx(onnx_model: ModelProto):
         inp.append(t)
       opt: Dict = attribute_dict[num]
       if debug >= 1: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
-      # some ops live here because they require some local variables
-      if n.op_type == "Split": # have to use n.output for cases when num_outputs is absent
+
+      # NOTE some ops live here because they require access to some local variables
+      # have to use n.output for cases when num_outputs is absent
+      if n.op_type == "Split":
         axis = opt.get("axis", 0)
         split = None if len(inp) == 1 else [int(x) for x in safe_numpy(inp[1])]
         if split is None:
@@ -159,7 +161,9 @@ def get_run_onnx(onnx_model: ModelProto):
           ret.append(inp[0].shrink(arg=tuple(arg)))
           i = i+s
         ret = tuple(ret)
-      elif n.op_type == "Slice": # need to check onnx_model_version
+
+      # need to check onnx_model_version
+      elif n.op_type == "Slice":
         if onnx_model_version < 10:
           axes, ends, starts, steps = list(opt.get("axes", range(inp[0].ndim))), list(opt["ends"]), list(opt["starts"]), [1]*inp[0].ndim
         else:
@@ -177,11 +181,15 @@ def get_run_onnx(onnx_model: ModelProto):
         new_shape = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in arg)
         if any(s==e for s,e in new_shape): ret = inp[0].shrink(new_shape)
         else: ret = inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
-      elif n.op_type == "Gradient": # need to call backward on intermediate_tensors
+
+      # need to call backward on intermediate_tensors
+      elif n.op_type == "Gradient":
         assert len(opt["xs"]) == len(inp), f"len(opt['xs']):{len(opt['xs'])}, len(inp):{len(inp)} output and input has to match"
         y = opt["y"]
         intermediate_tensors[y].backward()
         ret = tuple([t.grad for t in inp])
+
+      # onnx_ops.py
       elif hasattr(onnx_ops, n.op_type):
         fxn = getattr(onnx_ops, n.op_type)
         if isinstance(fxn, dict):
@@ -194,6 +202,7 @@ def get_run_onnx(onnx_model: ModelProto):
       else:
         print("UNSUPPORTED", n.op_type, n.input, n.output)
         raise Exception(f"op_type {n.op_type} not supported")
+
       if not isinstance(ret, tuple): ret = (ret, )
       assert len(n.output) <= len(ret), f"expected output size must be less than {len(ret)}, it's {n.output}"
       if debug >= 2: print([x.shape if isinstance(x, Tensor) else None for x in ret])

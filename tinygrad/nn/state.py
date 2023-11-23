@@ -1,8 +1,8 @@
-import os, json, pathlib, zipfile, pickle
+import os, json, pathlib, zipfile, pickle, tarfile, struct
 from tqdm import tqdm
 from typing import Dict, Union, List, Optional, Any, Tuple
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes, prod, argsort, DEBUG, Timing, GlobalCounters, CI
+from tinygrad.helpers import dtypes, prod, argsort, DEBUG, Timing, GlobalCounters, CI, unwrap
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.ops import Device
 
@@ -64,9 +64,9 @@ def load_state_dict(model, state_dict, strict=True, verbose=True):
 def torch_load(fn:str):
   t = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
 
-  offsets: Dict[str, int] = {}
-  lens: Dict[str, int] = {}
-  def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None):
+  offsets: Dict[Union[str, int], int] = {}
+  lens: Dict[Union[str, int], int] = {}
+  def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad=None, backward_hooks=None, metadata=None):
     #print(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata)
     lens[storage[2]] = storage[4] * storage[1].itemsize
     if storage[2] not in offsets: return None
@@ -92,7 +92,12 @@ def torch_load(fn:str):
 
     return ret.reshape(size)
 
-  intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "BFloat16Storage": dtypes.bfloat16, "IntStorage": dtypes.int32, "LongStorage": dtypes.int64, "_rebuild_tensor_v2": _rebuild_tensor_v2}
+  class Parameter:
+    def __setstate__(self, state): self.tensor = state[0]
+
+  deserialized_objects: Dict[str, Any] = {}
+  intercept = {"HalfStorage": dtypes.float16, "FloatStorage": dtypes.float32, "BFloat16Storage": dtypes.bfloat16, "IntStorage": dtypes.int32, "LongStorage": dtypes.int64,
+               "_rebuild_tensor_v2": _rebuild_tensor_v2, "FloatTensor": None, "Parameter": Parameter}
   whitelist = {"torch", "collections", "numpy", "_codecs"}  # NOTE: this is not for security, only speed
   class Dummy: pass
   class TorchPickle(pickle.Unpickler):
@@ -102,7 +107,7 @@ def torch_load(fn:str):
         if DEBUG >= 2: print(f"WARNING: returning Dummy for {module} {name}")
         return Dummy
       return intercept[name] if module_root == "torch" else super().find_class(module, name)
-    def persistent_load(self, pid): return pid
+    def persistent_load(self, pid): return deserialized_objects[pid] if pid in deserialized_objects else pid
 
   if tuple(t[0:2].numpy()) == (0x50, 0x4b):
     myzip = zipfile.ZipFile(fn, 'r')
@@ -113,6 +118,20 @@ def torch_load(fn:str):
           offsets[n.split("/")[-1]] = myfile._orig_compress_start # type: ignore
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       return TorchPickle(myfile).load()
+  elif bytes(t[0:0xe].numpy()) == b"././@PaxHeader":  # TODO: is this how you detect a tarfile?
+    with tarfile.open(fn, "r") as tar:
+      storages_offset = tar.getmember('storages').offset_data
+      f = unwrap(tar.extractfile('storages'))
+      for i in range(TorchPickle(f).load()):  # num_storages
+        (key, _, storage_type), sz = TorchPickle(f).load(), struct.unpack('<q', f.read(8))[0]
+        offsets[key] = storages_offset + f.tell()
+        f.seek(sz*storage_type.itemsize, 1)
+      f = unwrap(tar.extractfile('tensors'))
+      for _ in range(TorchPickle(f).load()):  # num_tensors
+        (key, storage_id, _), ndim, _ = TorchPickle(f).load(), struct.unpack('<i', f.read(4))[0], f.read(4)
+        size, stride, storage_offset = struct.unpack(f'<{ndim}q', f.read(8 * ndim)), struct.unpack(f'<{ndim}q', f.read(8 * ndim)), struct.unpack('<q', f.read(8))[0]
+        deserialized_objects[str(key)] = _rebuild_tensor_v2((None, storage_type, storage_id, None, -1), storage_offset, size, stride)
+      return {k:v.tensor if isinstance(v, Parameter) else v for k,v in TorchPickle(unwrap(tar.extractfile('pickle'))).load().items()}
   else:
     with open(fn, "rb") as f:
       pkl = TorchPickle(f)

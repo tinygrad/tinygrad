@@ -9,7 +9,7 @@ from tinygrad.helpers import prod, dtypes
 # *** first, we implement the atan2 op at the lowest level ***
 # `atan2_gpu` for GPUBuffers and `atan2_cpu` for CPUBuffers
 from tinygrad.lazy import LazyBuffer, create_lazybuffer
-from tinygrad.ops import ASTRunner, Device
+from tinygrad.ops import CompiledASTRunner, Device
 from tinygrad.shape.shapetracker import ShapeTracker
 import pytest
 
@@ -20,7 +20,7 @@ def atan2_gpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
   assert a.device == "GPU" and b.device == "GPU", "gpu function requires GPUBuffers"
   assert a.dtype == b.dtype and a.dtype == dtypes.float32, "gpu function only supports float32"
   ret.realized = Device[ret.device].buffer(prod(ret.shape), ret.dtype)
-  ASTRunner("atan2_gpu", """
+  CompiledASTRunner(None, "atan2_gpu", """
     __kernel void atan2_gpu(global float *c, global float *a, global float *b) {
       int idx = get_global_id(0);
       c[idx] = atan2(a[idx], b[idx]);
@@ -28,7 +28,7 @@ def atan2_gpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
   return ret.realized
 
 def atan2_cpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
-  return Device[ret.device].from_underlying(np.arctan2(a.realized._buf, b.realized._buf))
+  return Device[ret.device].buffer.fromCPU(np.arctan2(a.realized._buf, b.realized._buf))
 
 # *** second, we write the ATan2 mlop ***
 # NOTE: The derivative of atan2 doesn't need a custom op! https://www.liquisearch.com/atan2/derivative
@@ -89,6 +89,7 @@ class TestCustomFunction(unittest.TestCase):
     np.testing.assert_allclose(a.grad.numpy(), ta.grad.numpy(), atol=1e-5)
     np.testing.assert_allclose(b.grad.numpy(), tb.grad.numpy(), atol=1e-5)
 
+  @unittest.skipIf(Device.DEFAULT in ["CPU"], "atan2_cpu not jittable")
   def test_atan2_jit(self):
     # custom ops even work in the JIT!
     from tinygrad.jit import TinyJit
