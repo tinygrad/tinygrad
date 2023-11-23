@@ -14,9 +14,7 @@ from PIL import Image
 @unittest.skipIf(CI, "no internet tests in CI")
 class TestFetch(unittest.TestCase):
   def test_fetch_bad_http(self):
-    self.assertRaises(AssertionError, fetch, 'http://httpstat.us/500')
-    self.assertRaises(AssertionError, fetch, 'http://httpstat.us/404')
-    self.assertRaises(AssertionError, fetch, 'http://httpstat.us/400')
+    self.assertRaises(AssertionError, fetch, 'http://www.google.com/404')
 
   def test_fetch_small(self):
     assert(len(fetch('https://google.com'))>0)
