@@ -5,8 +5,8 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 import math
 from typing import Tuple, Dict
 
-type_map = {dtypes.float: "float", dtypes.half: "float16", dtypes.int32: "int", dtypes.uint32: "uint", dtypes.bool: "bool"}
-sampler_prefix = {dtypes.float: "", dtypes.half: "", dtypes.int32: "i", dtypes.uint32: "u",dtypes.int8: "i", dtypes.uint8: "u", dtypes.bool: "i"}
+type_map = {dtypes.float64: "double", dtypes.float: "float", dtypes.int32: "int", dtypes.uint32: "uint", dtypes.bool: "bool"}
+sampler_prefix = {dtypes.float64: "d", dtypes.float: "", dtypes.int32: "i", dtypes.uint32: "u", dtypes.bool: "i"}
 fragment_center_offset = 0.5
 
 class GLSLLanguage(CStyleLanguage):
@@ -35,7 +35,7 @@ class GLSLLanguage(CStyleLanguage):
   
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     local_size = local_size[::-1] if local_size else [1]
-    prg = "#version 330\nin vec2 uv;\nuniform int w;\n"
+    prg = "#version 330\nin vec2 uv;\nuniform int w;\nprecision highp float;\n"
     prg += "\n".join([f"uniform {sampler_prefix[dtype]}sampler2D {name};" for name,dtype in bufs if name != "data0"])
     dummy_line = "float dummy = float(texture(data1, vec2(0.0f,0.0f)).r);\n" if ("sampler2D data1" in prg) else ""
     dummy_line += "\nint xyz = w;\n"
