@@ -40,6 +40,12 @@ def partition(lst:List[T], fxn:Callable[[T],bool]):
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
   return x
+def get_child(obj, key):
+  for k in key.split('.'):
+    if k.isnumeric(): obj = obj[int(k)]
+    elif isinstance(obj, dict): obj = obj[k]
+    else: obj = getattr(obj, k)
+  return obj
 
 @functools.lru_cache(maxsize=None)
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
@@ -226,7 +232,7 @@ def diskcache(func):
 
 # *** http support ***
 
-def fetch(url:str, name:Optional[str]=None, allow_caching=True) -> pathlib.Path:
+def fetch(url:str, name:Optional[str]=None, allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
   fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())
   if not fp.is_file() or not allow_caching:
     with request.urlopen(url, timeout=10) as r:
