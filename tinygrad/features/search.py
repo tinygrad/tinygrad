@@ -118,7 +118,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
 
   exiting, st = False, time.perf_counter()
   while not exiting:
-    with Timing(enabled=DEBUG>=3):
+    with Timing("linearize:  ", enabled=DEBUG>=3):
       acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam])
 
       # linearize all
@@ -132,7 +132,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
         seen_uops[tuops] = tuple(lin.applied_opts)
         acted_lins_dedup.append(lin)
 
-    with Timing(enabled=DEBUG>=3):
+    with Timing("compile:    ",enabled=DEBUG>=3):
       # time linearizers
       timed_lins: List[Tuple[Linearizer, float]] = [(v,time_linearizer(v,rawbufs,allow_test_size=allow_test_size)) for v in acted_lins_dedup]
       opts = sorted(timed_lins, key=lambda x: x[1])
