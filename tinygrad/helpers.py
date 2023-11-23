@@ -235,10 +235,7 @@ def fetch(url:str, name:Optional[str]=None, allow_caching=True) -> pathlib.Path:
       progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=url)
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
-        while True:
-          chunk = r.read(16384)
-          if not chunk: break
-          progress_bar.update(f.write(chunk))
+        while chunk := r.read(16384): progress_bar.update(f.write(chunk))
         f.close()
         if (file_size:=os.stat(f.name).st_size) < total_length: raise RuntimeError(f"fetch size incomplete, {file_size} < {total_length}")
         pathlib.Path(f.name).rename(fp)
