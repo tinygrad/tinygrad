@@ -114,8 +114,8 @@ class HIPGraph:
     self.instance = hip.hipGraphInstantiate(self.graph)
 
   def __del__(self):
-    if hasattr(self, 'instance'): hip.hipGraphExecDestroy(self.instance)
-    if hasattr(self, 'graph'): hip.hipGraphDestroy(self.graph)
+    hip.hipGraphExecDestroy(self.instance)
+    hip.hipGraphDestroy(self.graph)
 
   def __call__(self, input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # Update cached params structs with the new values.
