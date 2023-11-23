@@ -1,10 +1,10 @@
 from __future__ import annotations
 import importlib, inspect, functools, pathlib, time, re
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping, cast
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping, Protocol
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT, dedup, all_int
 from tinygrad.runtime.lib import RawBuffer
-from tinygrad.shape.symbolic import Variable, sym_infer, NumNode, sint
+from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from dataclasses import dataclass
 
 # these are the llops your accelerator must implement, along with toCpu
@@ -144,37 +144,13 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
   GlobalCounters.global_mem += mem_estimate
   if et is not None: GlobalCounters.time_sum_s += et
 
-# **************** batch executor ****************
+# **************** shared AST runner ****************
 
-@dataclass(frozen=True)
-class JitItem:
-  prg: ASTRunner
-  rawbufs: List[Optional[RawBuffer]]
+class JITRunner(Protocol):
+  def __call__(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+    raise NotImplementedError("override this")
 
-class BatchExecutor:
-  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int]):
-    self.jit_cache: List[JitItem] = jit_cache
-    self.input_replace: Dict[Tuple[int, int], int] = {}
-    self.op_estimate, self.mem_estimate = NumNode(0), NumNode(0)
-    for j,ji in enumerate(jit_cache):
-      if isinstance(ji.prg, ASTRunner):  # TODO: this is just for world and needs to be refactored
-        self.op_estimate += ji.prg.op_estimate
-        self.mem_estimate += ji.prg.mem_estimate
-      for i,a in enumerate(ji.rawbufs):
-        if a in input_rawbuffers:
-          self.input_replace[(j,i)] = input_rawbuffers.index(a)
-    assert len(set(self.input_replace.values())) == len(input_rawbuffers), "some input tensors not found"
-    self.clear_jit_inputs()
-
-  def __call__(self, input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int], wait=False):
-    for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_idx]
-    for ji in self.jit_cache: ji.prg(ji.rawbufs, var_vals, jit=True)
-    self.clear_jit_inputs()
-
-  def clear_jit_inputs(self):
-    for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
-
-class ASTRunner:
+class ASTRunner(JITRunner):  # pylint: disable=abstract-method
   def __init__(self, ast:Optional[LazyOp]):
     if ast is None:
       self.op_estimate, self.mem_estimate, self.vars = 0, 0, set()
@@ -185,14 +161,11 @@ class ASTRunner:
       self.vars = vars_from_ast(ast)
       assert all(v._val is None for v in self.vars), f"ASTRunner contains bound Variable {self.vars}"
 
-  def exec(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
+  def exec(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int]) -> Optional[float]:
     from tinygrad.jit import CacheCollector
     et = self(rawbufs, var_vals)
     CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
     return et
-
-  def __call__(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None, jit=False) -> Optional[float]:
-    raise NotImplementedError("override this")
 
 # **************** for Interpreted Buffers ****************
 
@@ -201,30 +174,25 @@ class InterpretedASTRunner(ASTRunner):
     self.fxn = fxn
     super().__init__(ast)
 
-  def __call__(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None, jit=False) -> float:
-    var_vals = {k:var_vals[k] for k in sorted(self.vars)} if var_vals is not None else {}
+  def __call__(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> float:
     st = time.perf_counter()
     ret: RawBuffer = self.fxn(rawbufs[1:], var_vals)
     et = time.perf_counter() - st
     update_stats(f"<interpreted {ret.size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit)
-    if rawbufs[0] is not None:
-      assert rawbufs[0].dtype == ret.dtype
-      rawbufs[0].size = ret.size  # NOTE: for symbolic this can change
-      rawbufs[0]._buf = ret._buf
-    else: rawbufs[0] = ret
+    assert getattr(rawbufs[0], 'dtype', ret.dtype) == ret.dtype
+    rawbufs[0].dtype, rawbufs[0].size, rawbufs[0]._buf = ret.dtype, ret.size, ret._buf
     return et
 
 class Interpreted:
   def __init__(self, buffer: Type[RawBuffer], fxn_for_op:Dict[Op, Callable], from_underlying:Optional[Callable]=None):
     self.buffer, self.fxn_for_op, self.from_underlying = buffer, fxn_for_op, from_underlying
-    self.synchronize = lambda: None
-    self.batch_executor = BatchExecutor
-    self.codegen = None
+    self.synchronize, self.codegen, self.graph = lambda: None, None, None
     self.method_cache: Dict[LazyOp, InterpretedASTRunner] = {}
 
   def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
     if ast not in self.method_cache: self.method_cache[ast] = get_interpreted_fxn(self.fxn_for_op, self.from_underlying, ast)
     rawbufs = [output.realized if output.realized is not None else output.output_buffer] + [x.realized for x in inputs]
+    if rawbufs[0] is None: rawbufs[0] = self.buffer.__new__(self.buffer)
     self.method_cache[ast].exec(rawbufs, var_vals)
     output.realized = rawbufs[0]
 
@@ -286,26 +254,25 @@ class CompiledASTRunner(ASTRunner):
     local_size = ([sym_infer(sz, var_vals) for sz in self.local_size] + [1]*(3-len(self.local_size))) if self.local_size is not None else self.local_size
     return global_size, local_size
 
-  def __call__(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None, jit=False) -> Optional[float]:
+  def __call__(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # filter the var_vals
     var_vals = {k:var_vals[k] for k in sorted(self.vars)} if var_vals is not None else {}
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
       from tinygrad.features.search import optimize_local_size
-      local_size = self.local_size = optimize_local_size(self.clprg, global_size, cast(List[RawBuffer], rawbufs))
+      local_size = self.local_size = optimize_local_size(self.clprg, global_size, rawbufs)
       global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
     lra = self.runtime_args.copy()
     if global_size: lra['global_size'] = global_size
     if local_size and 'local_size' not in lra: lra['local_size'] = local_size
-    et = self.clprg(*rawbufs, *var_vals.values(), **lra, wait=DEBUG>=2)
+    et = self.clprg(*rawbufs, *var_vals.values(), **lra, wait=wait or DEBUG>=2)
     update_stats(self.display_name if self.display_name is not None else self.name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra)
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], linearizer_opts:LinearizerOptions, renderer, compiler, runtime, synchronize=lambda: None, batch_executor=BatchExecutor):
-    self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize = buffer, linearizer_opts, renderer, compiler, runtime, synchronize
-    self.batch_executor = BatchExecutor if getenv("JIT") == 2 else batch_executor
+  def __init__(self, buffer: Type[RawBuffer], linearizer_opts:LinearizerOptions, renderer, compiler, runtime, synchronize=lambda: None, graph=None):
+    self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize, self.graph = buffer, linearizer_opts, renderer, compiler, runtime, synchronize, graph
     self.method_cache: Dict[LazyOp, CompiledASTRunner] = {}
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:

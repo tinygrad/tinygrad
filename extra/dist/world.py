@@ -12,8 +12,8 @@ from tinygrad.tensor import Tensor, Function
 import extra.hip_wrapper as hip
 import numpy as np
 
-# fake the function signature of ASTRunner so we can put it in the cache
-def __send_rb(args, variables=None, jit=False):
+# match the function signature of JITRunner so we can put it in the cache
+def __send_rb(args, variables=None, wait=False, jit=False):
   x, target_rank, y = args[:3]
   if RawHIPBuffer and x.__class__ is RawHIPBuffer:
     hip.hipSetDevice(x._device)
@@ -24,7 +24,7 @@ def __send_rb(args, variables=None, jit=False):
   dist.OOB.send(None, target_rank)
   if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}  rank {getenv('RANK')} sent {x} to rank {target_rank}")
 
-def __recv_rb(args, variables=None, jit=False):
+def __recv_rb(args, variables=None, wait=False, jit=False):
   x, target_rank, y = args[:3]
   dist.OOB.recv(target_rank)
   if RawHIPBuffer and x.__class__ is RawHIPBuffer:
