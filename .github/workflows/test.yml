@@ -232,8 +232,8 @@ jobs:
         key: downloads-cache
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
-    #- name: Run dtype test
-    #  run: DEBUG=4 METAL=1 python -m pytest -n=auto test/test_dtype.py
+    - name: Run dtype test
+      run: DEBUG=4 METAL=1 python -m pytest -n=auto test/test_dtype.py
     # dtype test has issues on test_half_to_int8
     - name: Check Device.DEFAULT (METAL) and print some source
       run: |
