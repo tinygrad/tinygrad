@@ -4,7 +4,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping, cast
 from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT, dedup, all_int
 from tinygrad.runtime.lib import RawBuffer
-from tinygrad.shape.symbolic import Variable, sym_infer, NumNode
+from tinygrad.shape.symbolic import Variable, sym_infer, NumNode, sint
 from dataclasses import dataclass
 
 # these are the llops your accelerator must implement, along with toCpu
@@ -133,7 +133,7 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter:
 
 # **************** GlobalCounters stats ****************
 
-def update_stats(name, op_estimate, mem_estimate, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count, jit=False, num_kernels=1, lra=None):
+def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count, jit=False, num_kernels=1, lra=None):
   if var_vals is None: var_vals = {}
   op_estimate, mem_estimate = sym_infer(op_estimate, var_vals), sym_infer(mem_estimate, var_vals)
   if DEBUG >= 2:
