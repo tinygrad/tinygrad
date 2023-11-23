@@ -47,17 +47,17 @@ if getenv("CUDACPU", 0) == 1:
   RawCUDABuffer = RawMallocBuffer
 else:
   import pycuda.autoprimaryctx # pylint: disable=unused-import # noqa: F401
-  import pycuda.driver as cuda # type: ignore
+  import pycuda.driver as cuda 
   class CUDAAllocator(LRUAllocator):
     def __init__(self): super().__init__(self._get_cur_free_space(None))
-    def _do_alloc(self, size, dtype, device, **kwargs): return cuda.mem_alloc(size * dtype.itemsize) # type: ignore
+    def _do_alloc(self, size, dtype, device, **kwargs): return cuda.mem_alloc(size * dtype.itemsize) 
     def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
-    def _get_cur_free_space(self, device): return cuda.mem_get_info()[0] # type: ignore
+    def _get_cur_free_space(self, device): return cuda.mem_get_info()[0] 
   CUDAAlloc = CUDAAllocator()
-  class RawCUDABuffer(RawBufferCopyInOut): # type: ignore
+  class RawCUDABuffer(RawBufferCopyInOut): 
     def __init__(self, size, dtype): super().__init__(size, dtype, allocator=CUDAAlloc)
-    def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x.ravel(), stream) # type: ignore
-    def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf) # type: ignore
+    def _copyin(self, x:np.ndarray, stream:Optional[cuda.Stream]=None): cuda.memcpy_htod_async(self._buf, x.ravel(), stream) 
+    def _copyout(self, x:np.ndarray): cuda.memcpy_dtoh(x, self._buf) 
 
 @diskcache
 def compile_cuda(prg) -> bytes: return cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets'])
