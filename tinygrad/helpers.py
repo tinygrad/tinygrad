@@ -230,6 +230,7 @@ def fetch(url:str, name:Optional[str]=None) -> pathlib.Path:
   fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())
   if not fp.is_file():
     with request.urlopen(url, timeout=10) as r:
+      assert r.status == 200
       progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
