@@ -12,20 +12,7 @@ from array import array
 ctx = moderngl.create_standalone_context()
 dtype_map = { dtypes.half: "f2", dtypes.float: "f4", dtypes.int32: "i4", dtypes.uint8: "u1", dtypes.int8: "i1", dtypes.bool: "i1"}
 class WebGLProgram:
-  def __init__(self, name: str, prg: str):
-    self.name, self.prg = name, ctx.program(
-      vertex_shader="""
-        #version 330
-
-        in vec2 in_position;
-        in vec2 in_uv;
-        out vec2 uv;
-
-        void main() {
-            gl_Position = vec4(in_position, 0.0, 1.0);
-            uv = in_uv;
-        }
-      """, fragment_shader=prg)
+  def __init__(self, name: str, prg: str): self.name, self.prg = name, ctx.program(vertex_shader="#version 330\nin vec2 in_position;in vec2 in_uv;out vec2 uv;void main(){gl_Position=vec4(in_position,0.0,1.0);uv=in_uv;}", fragment_shader=prg)
   def __call__(self, *bufs, global_size, local_size, wait=False):
     self.vertices = ctx.buffer(array('f',[-1, 1, 0, 1, -1, -1, 0, 0, 1, 1, 1, 1, 1, -1, 1, 0]))
     self.quad = ctx.vertex_array(self.prg, [(self.vertices, '2f 2f', 'in_position', 'in_uv')])
@@ -39,8 +26,6 @@ class WebGLProgram:
     self.prg["w"].value = self.fbo.size[0]
     self.fbo.use()
     self.quad.render(mode=moderngl.TRIANGLE_STRIP)
-
-    return
   
 def reshape_texture(num, threshold):
   if num <= threshold: return (num, 1)

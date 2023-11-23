@@ -26,11 +26,8 @@ class GLSLLanguage(CStyleLanguage):
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): val = "intBitsToFloat(int(0xFFC00000u))"
-    elif math.isinf(x): val = ("-" if x < 0 else "") + "(1. / 0.)"
-    else: 
-      x = "{:.1f}".format(x) if x == int(x) and dtypes.is_float(var_dtype) else x
-      val = f"({x}" + ("" if dtypes.is_int(var_dtype) else "f") + ")"
-    
+    elif math.isinf(x): val = ("-" if x < 0 else "") + "(1./0.)"
+    else: val = "({:.1f})".format(x) if x == int(x) and dtypes.is_float(var_dtype) else f"({x})"
     return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
 
   def render_conditional(self, cond: str, x:str, y:str) -> str:
@@ -38,21 +35,12 @@ class GLSLLanguage(CStyleLanguage):
   
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     local_size = local_size[::-1] if local_size else [1]
-    prg = "#version 330\n"
-    prg += "in vec2 uv;\n"
-    prg += "uniform int w;\n"
+    prg = "#version 330\nin vec2 uv;\nuniform int w;\n"
     prg += "\n".join([f"uniform {sampler_prefix[dtype]}sampler2D {name};" for name,dtype in bufs if name != "data0"])
     dummy_line = "float dummy = float(texture(data1, vec2(0.0f,0.0f)).r);\n" if ("sampler2D data1" in prg) else ""
     dummy_line += "\nint xyz = w;\n"
     prg += f"\nout {sampler_prefix[bufs[0][1]]}vec4 out_data;\n"
-    prg += f"\nvoid main() {{\n{dummy_line}" + "\n".join(kernel) + "\n}"
-    return prg
-
-  def render_for(self, expr:str, _min:Union[int,str], _max:Union[int,str]) -> str:
-    return f"for(int {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
-
-  def render_if(self, cond: str):
-    return f"if ((bool){cond}) {{"
+    return prg + f"\nvoid main() {{\n{dummy_line}" + "\n".join(kernel) + "\n}"
 
   def render_cast(self, x:List[str], var_dtype:DType) -> str:
     if type_map[var_dtype]: 
@@ -67,3 +55,4 @@ class GLSLLanguage(CStyleLanguage):
 
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
     return f"out_data = {sampler_prefix[buf_dtype]}vec4({var_name}, 0.0, 0.0, 0.0);"
+  
