@@ -226,12 +226,13 @@ def diskcache(func):
 
 # *** http support ***
 
-def fetch(url:str, name:Optional[str]=None) -> pathlib.Path:
+def fetch(url:str, name:Optional[str]=None, allow_caching=True) -> pathlib.Path:
   fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())
-  if not fp.is_file():
+  if not fp.is_file() or not allow_caching:
     with request.urlopen(url, timeout=10) as r:
       assert r.status == 200
-      progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
+      total_length = int(r.headers.get('content-length', 0))
+      progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=url)
       (path := fp.parent).mkdir(parents=True, exist_ok=True)
       with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
         while True:
@@ -239,5 +240,6 @@ def fetch(url:str, name:Optional[str]=None) -> pathlib.Path:
           if not chunk: break
           progress_bar.update(f.write(chunk))
         f.close()
+        if (file_size:=os.stat(f.name).st_size) < total_length: raise RuntimeError(f"fetch size incomplete, {file_size} < {total_length}")
         pathlib.Path(f.name).rename(fp)
   return fp

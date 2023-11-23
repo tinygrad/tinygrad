@@ -153,10 +153,10 @@ class TestFetch(unittest.TestCase):
     self.assertRaises(Exception, fetch, 'http://www.google.com/404')
 
   def test_fetch_small(self):
-    assert(len(fetch('https://google.com').read_bytes())>0)
+    assert(len(fetch('https://google.com', allow_caching=False).read_bytes())>0)
 
   def test_fetch_img(self):
-    img = fetch("https://media.istockphoto.com/photos/hen-picture-id831791190")
+    img = fetch("https://media.istockphoto.com/photos/hen-picture-id831791190", allow_caching=False)
     with Image.open(img) as pimg:
       assert pimg.size == (705, 1024)
 
