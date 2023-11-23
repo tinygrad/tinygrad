@@ -10,12 +10,12 @@ from tinygrad.shape.view import strides_for_shape
 MAP_LOCKED, MAP_POPULATE = 0x2000, 0x008000
 
 class UnderlyingDiskBuffer:
-  def __init__(self, fd, mem, offset=0): self.fd, self.mem, self.offset = fd, mem, offset
+  def __init__(self, fd, mem): self.fd, self.mem = fd, mem
   def __del__(self):
     if self.fd: self.fd.close()
 
 class RawDiskBuffer(RawBufferMapped):
-  def __init__(self, size, dtype:DType, buf=None, device:Optional[str]=None):  # pylint: disable=super-init-not-called
+  def __init__(self, size, dtype:DType, buf=None, device:Optional[str]=None, offset:int=0):  # pylint: disable=super-init-not-called
     assert device is not None or buf is not None, "disk tensor needs a path or a buf"
     if device is not None:
       if str(device).startswith("shm:"):
@@ -35,16 +35,16 @@ class RawDiskBuffer(RawBufferMapped):
         if os.path.getsize(device) < size * dtype.itemsize: os.ftruncate(f.fileno(), size * dtype.itemsize)
         buf = UnderlyingDiskBuffer(f, mmap.mmap(f.fileno(), size * dtype.itemsize))
     # NOTE: we don't call super since disk tensors don't use RAM
-    self.size, self.dtype, self._buf = size, dtype, buf
+    self.size, self.dtype, self._buf, self.offset = size, dtype, buf, offset
   def cast(self, arg:Tuple[DType, bool]):
-    return RawDiskBuffer(self.size, arg[0], self._buf)
+    return RawDiskBuffer(self.size, arg[0], self._buf, offset=self.offset)
   def as_strided(self, arg):
     assert strides_for_shape(arg[0]) == arg[1], "disk tensors don't support strides"
-    return RawDiskBuffer(prod(arg[0]), self.dtype, UnderlyingDiskBuffer(self._buf.fd, self._buf.mem, offset=self._buf.offset+arg[2]*self.dtype.itemsize))
-  def _buffer(self): return memoryview(self._buf.mem)[self._buf.offset:self._buf.offset+self.size*self.dtype.itemsize]
+    return RawDiskBuffer(prod(arg[0]), self.dtype, self._buf, offset=self.offset+arg[2]*self.dtype.itemsize)
+  def _buffer(self): return memoryview(self._buf.mem)[self.offset:self.offset+self.size*self.dtype.itemsize]
   def readinto(self, buf:memoryview):
     if self._buf.fd is not None:
-      self._buf.fd.seek(self._buf.offset)
+      self._buf.fd.seek(self.offset)
       self._buf.fd.readinto(buf)
     else:
       buf.cast('B')[:] = self._buffer()

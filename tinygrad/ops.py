@@ -149,7 +149,8 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
 class JITRunner:
   def __init__(self):
     self.op_estimate, self.mem_estimate = 0, 0
-  def exec(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int]) -> Optional[float]:
+  def exec(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]) -> Optional[float]:
+    var_vals = var_vals if var_vals is not None else {}
     from tinygrad.jit import CacheCollector
     et = self(rawbufs, var_vals)
     CacheCollector.add(self, rawbufs, var_vals)
@@ -172,7 +173,7 @@ class InterpretedASTRunner(JITRunner):
     et = time.perf_counter() - st
     update_stats(f"<interpreted {ret.size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit)
     assert getattr(rawbufs[0], 'dtype', ret.dtype) == ret.dtype
-    rawbufs[0].dtype, rawbufs[0].size, rawbufs[0]._buf = ret.dtype, ret.size, ret._buf
+    rawbufs[0].dtype, rawbufs[0].size, rawbufs[0]._buf, rawbufs[0].offset = ret.dtype, ret.size, ret._buf, ret.offset
     return et
 
 class Interpreted:
