@@ -233,8 +233,8 @@ jobs:
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
     - name: Run dtype test
-      run: DEBUG=4 METAL=1 python -m pytest -n=auto test/test_dtype.py
-    # dtype test has issues on test_half_to_int8
+      # run: DEBUG=4 METAL=1 python -m pytest -n=auto test/test_dtype.py
+      run: DEBUG=4 METAL=1 python -m pytest -n=auto test/
     - name: Check Device.DEFAULT (METAL) and print some source
       run: |
         METAL=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
