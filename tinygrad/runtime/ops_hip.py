@@ -1,13 +1,14 @@
 import numpy as np
-import ctypes, collections
+import ctypes
 import extra.hip_wrapper as hip
-from typing import Tuple, List, Union, Dict, cast
+from typing import Tuple, List, Any, Dict, cast, Optional
 from tinygrad.helpers import DEBUG, getenv, diskcache
-from tinygrad.ops import Compiled, BatchExecutor, JitItem, CompiledASTRunner, update_stats
+from tinygrad.ops import Compiled, CompiledASTRunner, update_stats
 from tinygrad.renderer.hip import HIPRenderer
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer, RawBuffer
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.shape.symbolic import Variable, Node
+from tinygrad.shape.symbolic import Variable
+from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, get_jc_idxs_with_updatable_var_vals, GraphException
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
 if DEBUG >= 6:
@@ -83,19 +84,20 @@ class HIPProgram:
   def __del__(self):
     for module in self.modules: hip.hipModuleUnload(module)
 
-class HIPGraph(BatchExecutor):
-  UpdateEntry = collections.namedtuple("UpdateEntry", ["node", "params"])
-
-  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int]):
-    super().__init__(jit_cache, input_rawbuffers, var_vals)
-
+class HIPGraph:
+  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int]):
     # TODO: Only HIPProgram can be captured for now.
-    if not all(isinstance(ji.prg, CompiledASTRunner) and isinstance(ji.prg.clprg, HIPProgram) for ji in self.jit_cache): return
+    if not all(isinstance(ji.prg, CompiledASTRunner) and isinstance(ji.prg.clprg, HIPProgram) for ji in jit_cache): raise GraphException
 
-    self.updatable_var_vals: List[int] = []
-    self.updatable_launch_dims: List[int] = []
-    self.all_updatable_entries: Dict[int, HIPGraph.UpdateEntry] = {}
+    self.jit_cache = jit_cache
+    self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
+    self.op_estimate, self.mem_estimate = get_jit_stats(jit_cache)
+    self.jc_idxs_with_updatable_launch_dims = get_jc_idxs_with_updatable_launch_dims(jit_cache)
+    self.jc_idxs_with_updatable_var_vals = get_jc_idxs_with_updatable_var_vals(jit_cache)
+    self.jc_idxs_with_updatable_rawbufs = [x[0] for x in self.input_replace.keys()]
+
     self.graph, graph_node = hip.hipGraphCreate(), None
+    self.updatable_nodes: Dict[int, Tuple[Any, hip.kernelNodeParamsWrapper]] = {} # Dict[jc index] = tuple(graph_node, node_params)
 
     for (j,i),input_name in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name]
     for j,ji in enumerate(self.jit_cache):
@@ -103,43 +105,33 @@ class HIPGraph(BatchExecutor):
       global_size, local_size = prg.launch_dims(var_vals)
 
       assert all(x is not None for x in ji.rawbufs) and ji.rawbufs[0] is not None, "buffers could not be None" # for linters
-      assert prg.global_size and prg.local_size, "need global and local size to JIT"
-
       params = hip.buildKernelNodeParams(*ji.rawbufs, *[var_vals[x] for x in prg.vars], func=prg.clprg.prgs[ji.rawbufs[0]._device], grid=global_size, block=local_size)
       graph_node = hip.hipGraphAddKernelNode(self.graph, [graph_node] if graph_node else [], params)
 
-      # Record info needed to update jit cache entry.
-      if prg.vars:
-        self.updatable_var_vals.append(j)
-      if any(isinstance(x, Node) for x in prg.global_size) or any(isinstance(x, Node) for x in prg.local_size):
-        self.updatable_launch_dims.append(j)
-      if j in self.updatable_launch_dims or j in self.updatable_var_vals or j in [x[0] for x in self.input_replace.keys()]:
-        self.all_updatable_entries[j] = HIPGraph.UpdateEntry(graph_node, params)
+      if j in self.jc_idxs_with_updatable_launch_dims or j in self.jc_idxs_with_updatable_var_vals or j in self.jc_idxs_with_updatable_rawbufs:
+        self.updatable_nodes[j] = (graph_node, params)
 
     self.instance = hip.hipGraphInstantiate(self.graph)
-    self.clear_jit_inputs()
 
   def __del__(self):
     if hasattr(self, 'instance'): hip.hipGraphExecDestroy(self.instance)
     if hasattr(self, 'graph'): hip.hipGraphDestroy(self.graph)
 
-  def __call__(self, input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int], wait=False):
-    if not hasattr(self, 'instance'): return super().__call__(input_rawbuffers, var_vals, wait)
-
+  def __call__(self, input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # Update cached params structs with the new values.
-    for (j,i),input_name in self.input_replace.items():
-      hip.setKernelNodeParam(self.all_updatable_entries[j].params, input_rawbuffers[input_name], i)
-    for j in self.updatable_launch_dims:
-      hip.setKernelNodeLaunchDims(self.all_updatable_entries[j].params, cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals))
-    for j in self.updatable_var_vals:
-      hip.setKernelNodeParams(self.all_updatable_entries[j].params, [var_vals[x] for x in self.jit_cache[j].prg.vars], list(range(len(self.jit_cache[j].rawbufs), len(self.jit_cache[j].rawbufs) + len(self.jit_cache[j].prg.vars))))
+    for (j,i),input_idx in self.input_replace.items():
+      hip.setKernelNodeParam(self.updatable_nodes[j][1], input_rawbuffers[input_idx], i)
+    for j in self.jc_idxs_with_updatable_launch_dims:
+      hip.setKernelNodeLaunchDims(self.updatable_nodes[j][1], cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals))
+    for j in self.jc_idxs_with_updatable_var_vals:
+      hip.setKernelNodeParams(self.updatable_nodes[j][1], [var_vals[x] for x in self.jit_cache[j].prg.vars], list(range(len(self.jit_cache[j].rawbufs), len(self.jit_cache[j].rawbufs) + len(self.jit_cache[j].prg.vars))))
 
     # Update graph nodes with the updated structs.
-    for j in self.all_updatable_entries:
-      hip.hipGraphExecKernelNodeSetParams(self.instance, self.all_updatable_entries[j].node, self.all_updatable_entries[j].params)
+    for node, params in self.updatable_nodes.values():
+      hip.hipGraphExecKernelNodeSetParams(self.instance, node, params)
 
     et = time_exection(lambda: hip.hipGraphLaunch(self.instance), enable=wait)
-    update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=True, num_kernels=len(self.jit_cache))
+    update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=jit, num_kernels=len(self.jit_cache))
     return et
 
 HIPBuffer = Compiled(RawHIPBuffer, LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, HIPProgram, hip.hipDeviceSynchronize, graph=HIPGraph)
