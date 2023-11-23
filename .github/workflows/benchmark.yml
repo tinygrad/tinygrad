@@ -36,8 +36,8 @@ jobs:
       shell: bash
     - name: Run LLaMA
       run: |
-        JIT=0 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
-        JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+        JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+        JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
       shell: bash
     - name: Run GPT2
       run: |
@@ -121,8 +121,8 @@ jobs:
       shell: bash
     - name: Run LLaMA
       run: |
-        JIT=0 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
-        JIT=1 python3 examples/llama.py --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+        JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+        JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
       shell: bash
     - name: Run GPT2
       run: |
