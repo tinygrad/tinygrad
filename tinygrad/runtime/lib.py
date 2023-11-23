@@ -9,17 +9,15 @@ class RawBuffer:  # pylint: disable=abstract-method
   def __init__(self, size:int, dtype:DType, buf:Any=None, allocator:Any=None, **kwargs):
     self.size: int = size
     self.dtype: DType = dtype
-    self._buf = buf if buf is not None else (allocator.alloc(size, dtype, **kwargs) if allocator else None) # If buf is provided, use it. Otherwise try to allocate from the allocator.
+    self._buf = buf if buf is not None else (allocator(size, dtype, **kwargs) if allocator else None) # If buf is provided, use it. Otherwise try to allocate from the allocator.
     self._memsz: int = size*dtype.itemsize
-    self._allocator = allocator
+    self._allocator = allocator if allocator and hasattr(allocator, 'free') else None
     self._device = kwargs.get('device', None)
     GlobalCounters.mem_used += self._memsz
   def __del__(self):  # NOTE: if it fails on init (bad dtype), it won't have a _memsz
     if hasattr(self, '_memsz'): GlobalCounters.mem_used -= self._memsz
     if hasattr(self, '_allocator') and self._allocator: self._allocator.free(self._buf)
   def __repr__(self): return f"buffer<{self.size}, {self.dtype}, {id(self)}>"
-  @property
-  def key(self): return (self.size, self.dtype)
 
   # NOTE: this interface allows for 0 copy
   @classmethod
@@ -43,8 +41,9 @@ class RawBufferMapped(RawBufferCopyIn):
   def _copyin(self, x:np.ndarray) -> None: np.copyto(self.buffer_view(), x.reshape(-1))
 
 # this one is simple enough that i moved it out of the runtimes
+ctypes_map = {dtypes.float64:ctypes.c_double, dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16, dtypes.bfloat16: ctypes.c_int16, dtypes.int8: ctypes.c_int8, dtypes.uint8: ctypes.c_uint8, dtypes.bool: ctypes.c_uint8, dtypes.int32: ctypes.c_int32, dtypes.uint32: ctypes.c_uint32, dtypes.int64: ctypes.c_int64, dtypes.uint64: ctypes.c_uint64, dtypes.int16: ctypes.c_int16, dtypes.uint16: ctypes.c_uint16}
 class RawMallocBuffer(RawBufferMapped):
-  def __init__(self, size, dtype: DType): super().__init__(size, dtype, ({dtypes.float64:ctypes.c_double, dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16, dtypes.bfloat16: ctypes.c_int16, dtypes.int8: ctypes.c_int8, dtypes.uint8: ctypes.c_uint8, dtypes.bool: ctypes.c_uint8, dtypes.int32: ctypes.c_int32, dtypes.uint32: ctypes.c_uint32, dtypes.int64: ctypes.c_int64, dtypes.uint64: ctypes.c_uint64, dtypes.int16: ctypes.c_int16, dtypes.uint16: ctypes.c_uint16}[dtype] * size)())
+  def __init__(self, size, dtype: DType): super().__init__(size, dtype, (ctypes_map[dtype] * size)())
   def _buffer(self): return memoryview(self._buf)
 
 class RawBufferCopyInOut(RawBufferCopyIn):
@@ -56,7 +55,7 @@ class RawBufferCopyInOut(RawBufferCopyIn):
     return x
 
 class RawBufferTransfer(RawBuffer):
-  def _transfer(self, x) -> None: raise NotImplementedError("must be implemented")
+  def _transfer(self, x:RawBuffer) -> None: raise NotImplementedError("must be implemented")
 
   @classmethod
   def transfer(cls, x, shape, dtype, **kwargs):
@@ -80,11 +79,12 @@ class LRUAllocator:
     while len(self.aging_order[device]) and self._get_cur_free_space(device) < space_to_free: # When OOM removing lru buffers.
       bucket, epoch = self.aging_order[device].popleft()
       if self.cached_buffers[bucket] and self.cached_buffers[bucket][-1][1] == epoch: self._free_buffer(self.cached_buffers[bucket].pop()[0]) # Free cached buffer if it is still in cache.
+    assert (curr_free := self._get_cur_free_space(device)) > space_to_free, f"out of memory - requested: {space_to_free/1e9:5.2f} GB, available: {curr_free/1e9:5.2f} GB"
 
   def _alloc_buffer(self, size, dtype, device, **kwargs):
     self.ensure_has_free_space(size*dtype.itemsize, device)
-    while True: 
-      try: 
+    while True:
+      try:
         newbuf = self._do_alloc(max(1, size), dtype, device, **kwargs)
         break
       except Exception:
@@ -100,7 +100,7 @@ class LRUAllocator:
     self.buffer_info.pop(buf_to_free)
     self._do_free(buf_to_free)
 
-  def alloc(self, size, dtype, device='0', **kwargs):
+  def __call__(self, size, dtype, device='0', **kwargs): # allocate
     rawbufs = self.cached_buffers.get(self._cached_bufkey(size, dtype, device), None)
     return self._cache_reuse_buffer(rawbufs) if rawbufs else self._alloc_buffer(size, dtype, device, **kwargs)
 

@@ -1,6 +1,5 @@
 import unittest
 from tinygrad.helpers import prod
-from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import GlobalCounters
 from tinygrad.jit import CacheCollector
@@ -12,9 +11,9 @@ class TestCopy(unittest.TestCase):
       t = Tensor.randn(i).realize()
       CacheCollector.start()
       t.assign(t+1).realize()
-      fxn, args, _ = CacheCollector.finish()[0]
+      ji = CacheCollector.finish()[0]
       GlobalCounters.reset()
-      def run(): return fxn(args, force_wait=True)
+      def run(): return ji.prg(ji.rawbufs, force_wait=True)
       ct = min([run() for _ in range(10)])
       mb = prod(t.shape)*t.dtype.itemsize*2*1e-6
       print(f"{mb*1e3:.2f} kB, {ct*1e3:.2f} ms, {mb/ct:.2f} MB/s")

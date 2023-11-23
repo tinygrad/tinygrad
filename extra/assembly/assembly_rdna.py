@@ -62,7 +62,7 @@ class RDNACodegen(AssemblyCodegen):
       return rtor[x]
     for uop, out, vin, arg in asm:
       if uop == UOps.DEFINE_REGISTER:
-        if arg[0][0] in [dtypes.uint32, dtypes.uint64, dtypes.int64, dtypes.int32, dtypes.float32, dtypes._float4]:
+        if arg[0][0] in [dtypes.uint32, dtypes.uint64, dtypes.int64, dtypes.int32, dtypes.float32, dtypes.float.vec(4)]:
           for i in range(arg[2]):
             # TODO: Re-use gaps created by this to avoid wasting registers
             align = int(arg[0][0].itemsize / 4)
@@ -76,7 +76,7 @@ class RDNACodegen(AssemblyCodegen):
               v_cnt += align
             rtor[Register(f"%{arg[1]}{i}", *arg[0])] = reg_name
 
-            if arg[0][0] == dtypes._float4:
+            if arg[0][0] == dtypes.float.vec(4):
               for off in range(4):
                 reg_name = f"s{s_cnt-align+off}" if arg[0][1] else f"v{v_cnt-align+off}"
                 rtor[Register(f"%{arg[1]}{i}", dtypes.float, False, off=off)] = reg_name
@@ -109,7 +109,7 @@ class RDNACodegen(AssemblyCodegen):
       elif uop == UOps.CONST:
         if arg == float('inf'): arg = "0x7f800000"
         elif arg == float('-inf'): arg = "0xff800000"
-        if out.dtype == dtypes._float4:
+        if out.dtype == dtypes.float.vec(4):
           for off in range(4):
             ins.append(f"{'s_' if out.scalar else 'v_'}mov_b32 {reg_out(Register(out.nm, dtypes.float, False, off=off))}, {arg}")
         else:
@@ -122,8 +122,8 @@ class RDNACodegen(AssemblyCodegen):
           if arg == TernaryOps.MULACC and out == vin[2]:
             alu_arg = "fmac"
             vin = vin[0:2]
-          if out.dtype == dtypes._float4:
-            for rr in zip(*[x.subregs() if x.dtype == dtypes._float4 else [x,x,x,x] for x in [out]+vin]):
+          if out.dtype == dtypes.float.vec(4):
+            for rr in zip(*[x.subregs() if x.dtype == dtypes.float.vec(4) else [x,x,x,x] for x in [out]+vin]):
               ins.append(f"{'s_' if rr[0].scalar else 'v_'}{alu_arg}_{dtype_to_rdnatype[rr[0].dtype]} {reg_out(rr[0])}, {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in rr[1:])}")
           else:
             ins.append(f"{'s_' if out.scalar else 'v_'}{alu_arg}_{dtype_to_rdnatype[out.dtype] if arg != UnaryOps.NOOP else 'b32'}{'_i24' if arg == BinaryOps.MUL and out.dtype != dtypes.float32 and not out.scalar else ''} {reg_out(out)}, {', '.join(reg_in(x) if x.__class__ is Register else str(x) for x in vin)}")
@@ -132,11 +132,11 @@ class RDNACodegen(AssemblyCodegen):
           # swap arg order
           ins.append(f's_load_b32 {reg_out(out)}, {reg_in(vin[0])}, {reg_in(vin[1])} offset:{arg[0]}')
         else:
-          ins.append(f'global_load_{"b128" if out.dtype == dtypes._float4 else "b32"} {reg_out(out)}, {reg_in(vin[1])}, {reg_in(vin[0])} offset:{arg[0]}')
+          ins.append(f'global_load_{"b128" if out.dtype == dtypes.float.vec(4) else "b32"} {reg_out(out)}, {reg_in(vin[1])}, {reg_in(vin[0])} offset:{arg[0]}')
         pend_regs.add(out)
         for r in out.subregs(): pend_regs.add(r)
       elif uop == UOps.STORE:
-        ins.append(f'global_store_{"b128" if vin[1].dtype == dtypes._float4 else "b32"} {reg_in(vin[2])}, {reg_in(vin[1])}, {reg_in(vin[0])} offset:{arg[0]}')
+        ins.append(f'global_store_{"b128" if vin[1].dtype == dtypes.float.vec(4) else "b32"} {reg_in(vin[2])}, {reg_in(vin[1])}, {reg_in(vin[0])} offset:{arg[0]}')
       elif uop == UOps.LABEL:
         ins.append(f"{arg}:")
       elif uop == UOps.COND_BRANCH:

@@ -65,9 +65,9 @@ class TestLazyBuffer(unittest.TestCase):
     de.realize()
     cache = CacheCollector.finish()
     assert len(cache) == 3
-    assert cache[0][0].name.startswith("r_") # Reduce should not merged 2 times.
-    assert cache[1][0].name.startswith("E_")
-    assert cache[2][0].name.startswith("E_")
+    assert cache[0].prg.name.startswith("r_") # Reduce should not merged 2 times.
+    assert cache[1].prg.name.startswith("E_")
+    assert cache[2].prg.name.startswith("E_")
 
 if __name__ == "__main__":
   unittest.main()

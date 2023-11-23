@@ -74,13 +74,13 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 8)+1, 1, 9, "(1+a)")
 
   def test_add_num_1(self):
-    self.helper_test_variable(Variable("a", 0, 8)+Variable.num(1), 1, 9, "(1+a)")
+    self.helper_test_variable(Variable("a", 0, 8)+NumNode(1), 1, 9, "(1+a)")
 
   def test_sub_1(self):
     self.helper_test_variable(Variable("a", 0, 8)-1, -1, 7, "(-1+a)")
 
   def test_sub_num_1(self):
-    self.helper_test_variable(Variable("a", 0, 8)-Variable.num(1), -1, 7, "(-1+a)")
+    self.helper_test_variable(Variable("a", 0, 8)-NumNode(1), -1, 7, "(-1+a)")
 
   def test_mul_0(self):
     self.helper_test_variable(Variable("a", 0, 8)*0, 0, 0, "0")
@@ -120,7 +120,7 @@ class TestSymbolic(unittest.TestCase):
 
   def test_sum_div_some_partial_factor(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*6, Variable("b", 0, 7)*6]) // 16, 0, 5, "(((a*3)+(b*3))//8)")
-    self.helper_test_variable(Variable.sum([Variable.num(16), Variable("a", 0, 7)*6, Variable("b", 0, 7)*6]) // 16, 1, 6, "((((a*3)+(b*3))//8)+1)")
+    self.helper_test_variable(Variable.sum([NumNode(16), Variable("a", 0, 7)*6, Variable("b", 0, 7)*6]) // 16, 1, 6, "((((a*3)+(b*3))//8)+1)")
 
   def test_sum_div_no_factor(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*5, Variable("b", 0, 3)*5]) // 2, 0, 25, "(((a*5)+(b*5))//2)")
@@ -134,10 +134,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((1+Variable("a",1,2))%2, 0, 1, (Variable("a",1,2)-1).render())
 
   def test_sum_div_const(self):
-    self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*4, Variable.num(3)]) // 4, 0, 7, "a")
+    self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 4, 0, 7, "a")
 
   def test_sum_div_const_big(self):
-    self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*4, Variable.num(3)]) // 16, 0, 1, "(a//4)")
+    self.helper_test_variable(Variable.sum([Variable("a", 0, 7)*4, NumNode(3)]) // 16, 0, 1, "(a//4)")
 
   def test_sum_lt_fold(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 3)]) < 16, 0, 1, "(a<4)")
@@ -195,23 +195,23 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("a", 0, 6) + 2) < 3, 0, 1, "(a<1)")
 
   def test_and_fold(self):
-    self.helper_test_variable(Variable.ands([Variable.num(0), Variable("a", 0, 1)]), 0, 0, "0")
+    self.helper_test_variable(Variable.ands([NumNode(0), Variable("a", 0, 1)]), 0, 0, "0")
 
   def test_and_remove(self):
-    self.helper_test_variable(Variable.ands([Variable.num(1), Variable("a", 0, 1)]), 0, 1, "a")
+    self.helper_test_variable(Variable.ands([NumNode(1), Variable("a", 0, 1)]), 0, 1, "a")
 
   def test_mod_factor_negative(self):
-    self.helper_test_variable(Variable.sum([Variable.num(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, 0, 27, "((27+a)%28)")
-    self.helper_test_variable(Variable.sum([Variable.num(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, 0, 27, "((27+a)%28)")
+    self.helper_test_variable(Variable.sum([NumNode(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, 0, 27, "((27+a)%28)")
+    self.helper_test_variable(Variable.sum([NumNode(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, 0, 27, "((27+a)%28)")
 
   def test_sum_combine_num(self):
-    self.helper_test_variable(Variable.sum([Variable.num(29), Variable("a", 0, 10), Variable.num(-23)]), 6, 16, "(6+a)")
+    self.helper_test_variable(Variable.sum([NumNode(29), Variable("a", 0, 10), NumNode(-23)]), 6, 16, "(6+a)")
 
   def test_sum_num_hoisted_and_factors_cancel_out(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 1) * -4 + 1, Variable("a", 0, 1) * 4]), 1, 1, "1")
 
   def test_div_factor(self):
-    self.helper_test_variable(Variable.sum([Variable.num(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")
+    self.helper_test_variable(Variable.sum([NumNode(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) // 40, -1, 9, "(-1+b)")
 
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
@@ -238,7 +238,7 @@ class TestSymbolicNumeric(unittest.TestCase):
     MIN, MAX = 0, 10
     # one number
     for i in range(MIN, MAX):
-      v = f(Variable.num(i))
+      v = f(NumNode(i))
       #print(i, f(i), v.min, v.max)
       self.assertEqual(v.min, v.max)
       self.assertEqual(v.min, f(i))
@@ -267,20 +267,25 @@ class TestSymbolicVars(unittest.TestCase):
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
-    assert z.vars() == z.vars() == []
-    assert a.vars() == a.vars() == [a]
+    assert z.vars() == z.vars() == set()
+    assert a.vars() == a.vars() == {a}
     m = MulNode(a, 3)
-    assert m.vars() == [a]
+    assert m.vars() == {a}
     s = SumNode([a, b, c])
-    assert s.vars() == [a, b, c]
+    assert s.vars() == {a, b, c}
 
   def test_compound(self):
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
-    assert (a + b * c).vars() == [a, b, c]
-    assert (a % 3 + b // 5).vars() == [a, b]
-    assert (a + b + c - a).vars() == [b, c]
+    assert (a + b * c).vars() == {a, b, c}
+    assert (a % 3 + b // 5).vars() == {a, b}
+    assert (a + b + c - a).vars() == {b, c}
+
+  def test_dedup(self):
+    a = Variable("a", 0, 10)
+    assert (a * a).vars() == {a}
+    assert (a//4 + a//6).vars() == {a}
 
 class TestSymbolicMinMax(unittest.TestCase):
   def test_min_max_known(self):

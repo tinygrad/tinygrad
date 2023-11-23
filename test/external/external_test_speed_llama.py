@@ -2,12 +2,11 @@
 import unittest, time
 import numpy as np
 from examples.llama import Transformer, MODEL_PARAMS
-from test.test_net_speed import start_profile, stop_profile
 from tinygrad.tensor import Tensor
 from tinygrad.ops import Device
 from tinygrad.nn.state import get_state_dict
 from tinygrad.ops import Compiled
-from tinygrad.helpers import dtypes, prod
+from tinygrad.helpers import dtypes, prod, Profiling
 from tinygrad.runtime.lib import RawBuffer
 
 class FakeProgram:
@@ -38,7 +37,7 @@ class TestLLaMASpeed(unittest.TestCase):
       if empty_method_cache: Device[Device.DEFAULT].method_cache.clear()
       tms = [time.perf_counter()]
       for i in range(10):
-        model(Tensor([[2]]), i).realize()
+        model(Tensor([[1,2,3,4]]), i).realize()
         tms.append(time.perf_counter())
       timings = [(tms[i+1]-tms[i])*1000 for i in range(len(tms)-1)]
       print(f"{st:15s} mean runtime: {sum(timings)/len(timings):7.2f}ms, runs: ", ", ".join(f'{x:7.2f}' for x in timings))
@@ -46,9 +45,8 @@ class TestLLaMASpeed(unittest.TestCase):
     run_llama("codegen")
     run_llama("methodcache", False)
 
-    pr = start_profile()
-    run_llama("profile")
-    stop_profile(pr, sort='time', frac=0.1)
+    with Profiling(sort='time', frac=0.1):
+      run_llama("profile")
 
     Device[Device.DEFAULT].runtime = backup_program
     Device[Device.DEFAULT].buffer = backup_buffer

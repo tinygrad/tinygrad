@@ -30,7 +30,6 @@ def run():
 
   # reset jit
   allreduce_jit.cnt = 0
-  allreduce_jit.input_replace = {}
 
   # test uneven chunk sizes
   for _ in range(3):

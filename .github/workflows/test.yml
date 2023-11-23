@@ -53,6 +53,8 @@ jobs:
       run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
       run: PYTHONPATH="." python test/external/fuzz_shapetracker.py
+    - name: Test shapetracker to_movement_ops
+      run: PYTHONPATH="." python extra/to_movement_ops.py
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
@@ -79,6 +81,13 @@ jobs:
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
         key: testing-packages-${{ hashFiles('**/setup.py') }}
+    - name: Cache model weights
+      uses: actions/cache@v3
+      with:
+        path: |
+          weights/whisper-tiny.en.pt
+          weights/gpt2.tiktoken
+        key: model-weights-v1
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
@@ -107,6 +116,13 @@ jobs:
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
         key: testing-packages-${{ hashFiles('**/setup.py') }}
+    - name: Cache model weights
+      uses: actions/cache@v3
+      with:
+        path: |
+          weights/whisper-tiny.en.pt
+          weights/gpt2.tiktoken
+        key: model-weights-v1
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
@@ -130,7 +146,10 @@ jobs:
         run: |
           echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
           sudo apt update
-          sudo apt install --allow-unauthenticated -y --no-install-recommends intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
+          sudo apt install --allow-unauthenticated -y --no-install-recommends \
+            intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
+            intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
+            intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
       - name: Set up Python 3.11
         uses: actions/setup-python@v4
         with:
@@ -212,7 +231,14 @@ jobs:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
         key: metal-webgpu-testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
-      run: pip install -e '.[metal,webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Cache model weights
+      uses: actions/cache@v3
+      with:
+        path: |
+          weights/whisper-tiny.en.pt
+          weights/gpt2.tiktoken
+        key: model-weights-v1
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
     #- name: Run dtype test
@@ -230,20 +256,20 @@ jobs:
       run: METAL=1 python -m pytest -n=auto test/test_symbolic_shapetracker.py test/test_symbolic_ops.py test/test_symbolic_jit.py
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
-    #- name: Run whisper test
-    #  run: METAL=1 python -m pytest test/models/test_whisper.py
-    - name: Check Device.DEFAULT (WEBGPU) and print some source
-      run: |
-        WEBGPU=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
-        WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+    - name: Run whisper test
+      run: METAL=1 python -m pytest test/models/test_whisper.py
     - name: Run linearizer and tensor core test
       run: METAL=1 python -m pytest -n=auto test/test_linearizer.py
     - name: Test tensor core reshape-only ops
       run: METAL=1 TC=2 python -m pytest -n=auto test/test_ops.py
+    - name: Check Device.DEFAULT (WEBGPU) and print some source
+      run: |
+        WEBGPU=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
+        WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     #- name: Run webgpu pytest
     #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
-    - name: Run webgpu dtype tests
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_dtype.py
+    - name: Run selected webgpu tests
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_dtype.py test/test_jit.py
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
     - name: Install Puppeteer
@@ -273,6 +299,13 @@ jobs:
         with:
           path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
           key: ${{ matrix.backend }}-packages-${{ hashFiles('**/setup.py') }}
+      - name: Cache model weights
+        uses: actions/cache@v3
+        with:
+          path: |
+            weights/whisper-tiny.en.pt
+            weights/gpt2.tiktoken
+          key: model-weights-v1
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas'}}" >> $GITHUB_ENV
       - name: Install OpenCL
@@ -280,13 +313,17 @@ jobs:
         run: |
           echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
           sudo apt update
-          sudo apt install --allow-unauthenticated -y --no-install-recommends intel-oneapi-runtime-compilers intel-oneapi-runtime-opencl
+          sudo apt install --allow-unauthenticated -y --no-install-recommends \
+            intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
+            intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
+            intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
       - name: Install packages (cuda)
         if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         run: |
           echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           sudo apt update -y
-          sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+          sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
+            flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
       - name: Cache gpuocelot
         if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         id: cache-build
@@ -295,7 +332,7 @@ jobs:
           cache-name: cache-gpuocelot-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480
+          key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480-rebuild
       - name: Clone/compile gpuocelot
         if: (matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
@@ -304,7 +341,7 @@ jobs:
           git checkout 18401f4245b27ca4b3af433196583cc81ef84480
           mkdir build
           cd build
-          cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0
+          cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF
           ninja
       - name: Install gpuocelot
         if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'

@@ -25,7 +25,6 @@ exclude = [
   "docs/",
   "examples/",
   "extra/",
-  "models/",
   "openpilot/",
 ]
 

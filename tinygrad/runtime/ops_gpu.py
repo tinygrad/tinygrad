@@ -3,7 +3,7 @@ import os
 os.environ['PYOPENCL_NO_CACHE'] = '1'
 import pathlib
 import numpy as np
-import pyopencl as cl  # type: ignore
+import pyopencl as cl
 from typing import Optional, List, Tuple
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport, diskcache
 from tinygrad.ops import Compiled
@@ -15,7 +15,6 @@ OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external/external_osx_pr
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
 ROCM_LLVM_PATH = pathlib.Path("/opt/rocm/llvm/bin")
-#ROCM_LLVM_PATH = pathlib.Path(__file__).parents[3] / "extra/rocm/build/llvm-project/bin"
 if DEBUG >= 5:
   early_exec = fromimport("extra.helpers", "enable_early_exec")()
 
@@ -49,15 +48,17 @@ if not getenv("DELAYED_RUNTIME_INIT", False): CL.post_init()
 
 class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
   def __init__(self, size, dtype, device='0'): super().__init__(size, dtype, allocator=CL.cl_allocator, **{'device': device})
+  def _clear_event(self, _): del self.event
   def _copyin(self, x:np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
     self.event = cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements=['C', 'A']), is_blocking=False)
+    self.event.set_callback(cl.command_execution_status.COMPLETE, self._clear_event)
   def _copyout(self, x:np.ndarray):
     assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
     CL.cl_allocator.ensure_has_free_space(self.size*self.dtype.itemsize, self._device)
     buf = cl.Buffer(CL.cl_ctxs[self._buf.device], cl.mem_flags.WRITE_ONLY | cl.mem_flags.USE_HOST_PTR, 0, hostbuf=x.data)
     mapped, event = cl.enqueue_map_buffer(CL.cl_queue[self._buf.device], buf, cl.map_flags.WRITE, 0, self.size, dtype=self.dtype.np, is_blocking=False)
-    with mapped.base: cl.enqueue_copy(CL.cl_queue[self._buf.device], mapped, self._buf, is_blocking=True, wait_for=[event] + ([self.event] if hasattr(self, "event") else []))
+    with mapped.base: cl.enqueue_copy(CL.cl_queue[self._buf.device], mapped, self._buf, is_blocking=True, wait_for=[event] + ([evt] if (evt:=getattr(self, "event", None)) else []))
   def _transfer(self, x):
     if "gfx" in CL.cl_ctxs[x._buf.device].devices[0].name:
       cl.enqueue_copy_buffer_p2p_amd(CL.cl_platform, CL.cl_queue[x._buf.device], x._buf, self._buf, x.size * x.dtype.itemsize).wait()
@@ -71,7 +72,7 @@ def compile_gpu(prg:str) -> bytes:
 
 class CLProgram:
   def __init__(self, name:str, prg:bytes, argdtypes=None, options=None):
-    self.name, self.clprograms = name, [cl.Program(ctx, ctx.devices, [prg]*len(ctx.devices)) for ctx in CL.cl_ctxs]  # type: ignore
+    self.name, self.clprograms = name, [cl.Program(ctx, ctx.devices, [prg]*len(ctx.devices)) for ctx in CL.cl_ctxs]
     self._clprgs = [clprogram.build(options=options) for clprogram in self.clprograms]
     self.clprgs = [clprg.__getattr__(name) for clprg in self._clprgs]
     if DEBUG >= 5 and not OSX:
@@ -96,7 +97,7 @@ class CLProgram:
     for x in bufs:
       if x.__class__ is CLBuffer:
         cl_bufs.append(x._buf)
-        if hasattr(x, "event"): wait_for.append(x.event)
+        if (event:=getattr(x, "event",None)): wait_for.append(event)
       else: cl_bufs.append(x)
     e = self.clprgs[cl_bufs[0].device](CL.cl_queue[cl_bufs[0].device], [int(g*l) for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *cl_bufs, wait_for=wait_for)
     if wait:
