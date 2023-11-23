@@ -21,7 +21,6 @@ setup(name='tinygrad',
       ],
       install_requires=["numpy", "tqdm", "pyopencl",
                         "pyobjc-framework-Metal; platform_system=='Darwin'",
-                        "pyobjc-framework-Cocoa; platform_system=='Darwin'",
                         "pyobjc-framework-libdispatch; platform_system=='Darwin'"],
       python_requires='>=3.8',
       extras_require={
