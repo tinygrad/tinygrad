@@ -1,5 +1,5 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
-import itertools, random, math, hashlib
+import itertools, random, math
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
 from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, all_int

@@ -122,7 +122,7 @@ class TestSymbolicJit(unittest.TestCase):
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert len(jf.jit_cache) == 1
 
-  def test_two_vars_plus1(self):
+  def test_two_vars_plus1_ij(self):
     def f(a, b): return (a@b+1).realize()
     jf = TinyJit(f)
     for i in range(1, 5):
@@ -132,6 +132,20 @@ class TestSymbolicJit(unittest.TestCase):
         a = Tensor.rand(i, 3)
         b = Tensor.rand(3, j)
         symbolic = jf(a.reshape(vi, 3), b.reshape(3, vj)).reshape(i, j).numpy()
+        expected = f(a, b).numpy()
+        np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
+    assert len(jf.jit_cache) == 1
+
+  def test_two_vars_plus1_ji(self):
+    def f(a, b): return (a@b+1).realize()
+    jf = TinyJit(f)
+    for i in range(1, 5):
+      for j in range(1, 5):
+        vi = Variable("i", 1, 10).bind(i)
+        vj = Variable("j", 1, 10).bind(j)
+        a = Tensor.rand(j, 3)
+        b = Tensor.rand(3, i)
+        symbolic = jf(a.reshape(vj, 3), b.reshape(3, vi)).reshape(j, i).numpy()
         expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert len(jf.jit_cache) == 1

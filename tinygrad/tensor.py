@@ -46,7 +46,7 @@ class Tensor:
 
   no_grad: ClassVar[bool] = False
   default_type: ClassVar[DType] = dtypes.float32
-  def __init__(self, data:Union[None, int, float, list, LazyBuffer, np.ndarray], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+  def __init__(self, data:Union[None, int, float, list, LazyBuffer, np.ndarray, bytes], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     device = Device.canonicalize(device)
     # tensors have gradients, buffers do not
@@ -142,12 +142,12 @@ class Tensor:
 
   @staticmethod
   def _loadop(op, sz, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
+    assert isinstance(sz, int), f"cannot create with symbolic size {sz}"
     return Tensor(LazyBuffer.loadop(op, (sz,), Tensor.default_type if dtype is None else dtype, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
 
   @staticmethod
   def empty(*shape, **kwargs):
-    assert all_int(shape), f"cannot create with symbolic shape {shape}"
-    return Tensor._loadop(LoadOps.EMPTY, prod(shape), **kwargs).reshape(shape)
+    return Tensor._loadop(LoadOps.EMPTY, prod((shape:=argfix(*shape))), **kwargs).reshape(shape)
 
   _seed: int = int(time.time())
   @staticmethod
@@ -155,9 +155,8 @@ class Tensor:
 
   @staticmethod
   def rand(*shape, **kwargs):
-    assert all_int(shape), f"cannot create with symbolic shape {shape}"
     Tensor._seed += 1
-    return Tensor._loadop(LoadOps.RAND, prod(shape), arg=Tensor._seed, **kwargs).reshape(shape)
+    return Tensor._loadop(LoadOps.RAND, prod((shape:=argfix(*shape))), arg=Tensor._seed, **kwargs).reshape(shape)
 
   # ***** creation helper functions *****
 
@@ -408,7 +407,7 @@ class Tensor:
     final_shape = [r*s for r,s in zip(repeats, base_shape)]
     return self.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
-  def chunk(self, num:int, dim:int) -> List[Tensor]:
+  def chunk(self, num:int, dim:int=0) -> List[Tensor]:
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     dim, step = dim + self.ndim if dim < 0 else dim, math.ceil(self.shape[dim]/num)
     slice_params = [[slice(None)]*dim + [slice(k, k + step)] for k in range(0, self.shape[dim], step)]

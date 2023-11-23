@@ -1,6 +1,6 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib, ctypes, tempfile
-import Metal, Cocoa, libdispatch
+import Metal, libdispatch
 from typing import List, Any, Tuple, Dict, Union, Set, cast
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup
@@ -53,10 +53,7 @@ def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
     return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
   options = Metal.MTLCompileOptions.new()
   library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
-  # TODO: avoid file write here?
-  with tempfile.NamedTemporaryFile(delete=True) as output_file:
-    unwrap(library.serializeToURL_error_(Cocoa.NSURL.URLWithString_(f"file://{output_file.name}"), None))
-    return pathlib.Path(output_file.name).read_bytes()
+  return library.libraryDataContents().bytes().tobytes()
 
 class MetalProgram:
   def __init__(self, name:str, lib:bytes):
@@ -116,7 +113,7 @@ class MetalBatchExecutor(BatchExecutor):
           icb_command.setKernelBuffer_offset_atIndex_(b._buf, 0, i)
           if i == 0: write_resources.append(b._buf)
           else: read_resources.append(b._buf)
-      var_vals_keys = list(var_vals.keys())
+      var_vals_keys = sorted(var_vals.keys())
       for i,v in enumerate(prg.vars):
         icb_command.setKernelBuffer_offset_atIndex_(self.int_buf._buf, var_vals_keys.index(v)*4, len(ji.rawbufs)+i)
       global_size, local_size = prg.launch_dims(var_vals)
