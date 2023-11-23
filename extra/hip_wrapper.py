@@ -265,6 +265,14 @@ try:
   hipMemcpyDeviceToDevice = 3
   hipMemcpyDefault = 4
 
+  _libhip.hipHostMalloc.restype = int
+  _libhip.hipHostMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t, ctypes.c_uint32]
+  def hipHostMalloc(count, flags=0):
+    ptr = ctypes.c_void_p()
+    status = _libhip.hipHostMalloc(ctypes.byref(ptr), count, flags)
+    hipCheckStatus(status)
+    return ptr.value
+
   _libhip.hipMemcpy.restype = int
   _libhip.hipMemcpy.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
   def hipMemcpy(dst, src, count, direction):

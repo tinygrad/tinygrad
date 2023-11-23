@@ -18,8 +18,6 @@ class RawBuffer:  # pylint: disable=abstract-method
     if hasattr(self, '_memsz'): GlobalCounters.mem_used -= self._memsz
     if hasattr(self, '_allocator') and self._allocator: self._allocator.free(self._buf)
   def __repr__(self): return f"buffer<{self.size}, {self.dtype}, {id(self)}>"
-  @property
-  def key(self): return (self.size, self.dtype)
 
   # NOTE: this interface allows for 0 copy
   @classmethod
@@ -57,7 +55,7 @@ class RawBufferCopyInOut(RawBufferCopyIn):
     return x
 
 class RawBufferTransfer(RawBuffer):
-  def _transfer(self, x) -> None: raise NotImplementedError("must be implemented")
+  def _transfer(self, x:RawBuffer) -> None: raise NotImplementedError("must be implemented")
 
   @classmethod
   def transfer(cls, x, shape, dtype, **kwargs):

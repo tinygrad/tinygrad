@@ -7,7 +7,7 @@ from tinygrad.ops import Compiled, Device, LoadOps
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
-from tinygrad.helpers import dtypes, prod
+from tinygrad.helpers import dtypes, prod, getenv, CI
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -110,6 +110,13 @@ class TestLinearizer(unittest.TestCase):
     assert lin.full_shape[:lin.global_dims] == (5, 6, 7, 8, 9)
     lin.limit_dims_to_max(global_max=[16, 16, 16], local_max=[16, 16, 16])
 
+  def test_sum_collapse(self):
+    t = Tensor.ones(256,256).sum()
+    sched = [si for si in t.lazydata.schedule() if si.ast.op not in LoadOps]
+    assert len(sched) == 1
+    lin = Linearizer(sched[0].ast)
+    assert not any(u.uop == UOps.LOOP for u in lin.linearize().uops), "found loop in sum collapse"
+
 def helper_realized_ast(r:Tensor):
   s = r.lazydata.schedule()
   run_schedule(s[:-1])  # run all kernels except the last one
@@ -124,8 +131,8 @@ class TestFloat4(unittest.TestCase):
 
   @staticmethod
   def count_float4(k):
-    return (len([uop for uop in k.uops if uop.uop == UOps.LOAD and uop.dtype == dtypes._float4]),
-            len([uop for uop in k.uops if uop.uop == UOps.STORE and len(uop.vin) == 3 and uop.vin[2].dtype == dtypes._float4]))
+    return (len([uop for uop in k.uops if uop.uop == UOps.LOAD and uop.dtype == dtypes.float.vec(4)]),
+            len([uop for uop in k.uops if uop.uop == UOps.STORE and len(uop.vin) == 3 and uop.vin[2].dtype == dtypes.float.vec(4)]))
 
   # TODO: express opts below as auto opts
 
@@ -487,6 +494,37 @@ class TestLinearizerOpts(unittest.TestCase):
       # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
     ], apply_tc=True)
 
+  def test_padto_matmul(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
+    if Device.DEFAULT == "CUDA": self.skipTest("super slow on CUDA/triton")
+    N = 17 * 17
+    Tensor.manual_seed(289)
+    a = Tensor.rand(N, N)
+    b = Tensor.rand(N, N)
+    helper_linearizer_opt(a@b, [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 1, 32)],
+      [Opt(OptOps.PADTO, 2, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32)],
+      # can optimize further post PADTO
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UNROLL, 0, 4)],
+    ])
+
+  def test_padto_max(self):
+    # pad uses invalid value 0, so max is not allowed
+    if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
+    N = 17 * 17
+    a = -Tensor.ones(N, N)
+    with self.assertRaises(AssertionError):
+      helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
+
+  def test_padto_where(self):
+    # pad uses invalid value 0, so kernel with max is not allowed
+    if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
+    N = 17 * 17
+    a = (Tensor.rand(N, N).max(axis=0) > 1).where(1, 0)
+    with self.assertRaises(AssertionError):
+      helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
 
 if __name__ == '__main__':
   unittest.main()

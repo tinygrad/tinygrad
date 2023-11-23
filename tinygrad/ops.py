@@ -37,7 +37,7 @@ class MemBuffer:
 
 @dataclass(frozen=True)
 class ConstBuffer:
-  val: Any
+  val: Union[int, float]
   dtype: DType
   st: ShapeTracker
 
@@ -152,22 +152,22 @@ class JitItem:
   rawbufs: List[Optional[RawBuffer]]
 
 class BatchExecutor:
-  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int]):
     self.jit_cache: List[JitItem] = jit_cache
-    self.input_replace: Dict[Tuple[int, int], Union[int, str]] = {}
+    self.input_replace: Dict[Tuple[int, int], int] = {}
     self.op_estimate, self.mem_estimate = NumNode(0), NumNode(0)
     for j,ji in enumerate(jit_cache):
       if isinstance(ji.prg, ASTRunner):  # TODO: this is just for world and needs to be refactored
         self.op_estimate += ji.prg.op_estimate
         self.mem_estimate += ji.prg.mem_estimate
       for i,a in enumerate(ji.rawbufs):
-        if a in [v for v in input_rawbuffers.values()]:
-          self.input_replace[(j,i)] = [k for k,v in input_rawbuffers.items() if v == a][0]
-    assert set(self.input_replace.values()) == set(input_rawbuffers.keys()), "some input tensors not found"
+        if a in input_rawbuffers:
+          self.input_replace[(j,i)] = input_rawbuffers.index(a)
+    assert len(set(self.input_replace.values())) == len(input_rawbuffers), "some input tensors not found"
     self.clear_jit_inputs()
 
-  def __call__(self, input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int], wait=False):
-    for (j,i),input_name in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name]
+  def __call__(self, input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int], wait=False):
+    for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_idx]
     for ji in self.jit_cache: ji.prg(ji.rawbufs, var_vals, jit=True)
     self.clear_jit_inputs()
 
@@ -336,7 +336,7 @@ class Compiled:
     # all the rawbuffers
     rawbuffers = [output.realized] + [x.realized for x in inputs]
 
-    if ast not in self.method_cache: self.method_cache[ast] = get_optimized_program(self.linearizer_opts, self.to_program, ast, rawbuffers)
+    if ast not in self.method_cache or getenv("DISABLE_METHOD_CACHE"): self.method_cache[ast] = get_optimized_program(self.linearizer_opts, self.to_program, ast, rawbuffers)
     self.method_cache[ast].exec(rawbuffers, var_vals)
 
 def get_optimized_program(linearizer_opts:LinearizerOptions, to_program, ast:LazyOp, rawbuffers:List[RawBuffer]) -> CompiledASTRunner:

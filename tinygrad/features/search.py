@@ -1,8 +1,8 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
-import itertools, random, math
+import itertools, random, math, time
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
-from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, all_int
+from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, all_int, colored, Timing
 from tinygrad.codegen.linearizer import Linearizer, UOp
 from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
@@ -13,12 +13,13 @@ actions = flatten([[Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,
 actions += flatten([[Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4]] for axis in range(4)])
 actions += flatten([[Opt(op=OptOps.LOCAL, axis=axis, amt=amt) for amt in [2,3,4,8,13,16,29]] for axis in range(5)])
 actions += flatten([[Opt(op=OptOps.GROUPTOP, axis=axis, amt=amt) for amt in [13,16,29,32,256]] for axis in range(3)])
+actions += flatten([[Opt(op=OptOps.PADTO, axis=axis, amt=amt) for amt in [32]] for axis in range(7)])
 actions += [
   Opt(op=OptOps.LOCAL, axis=0, amt=32),
   Opt(op=OptOps.GROUP, axis=0, amt=4), Opt(op=OptOps.GROUP, axis=0, amt=8), Opt(op=OptOps.GROUP, axis=1, amt=8),
   Opt(op=OptOps.UPCASTMID, axis=1, amt=4),
-  Opt(op=OptOps.NOLOCALS),
 ]
+if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
 
 # returns time in seconds
 def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, disable_cache=False, clear_l2=False) -> float:
@@ -115,28 +116,31 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   # NOTE: real uops use a weird compare method that's only valid inside a linearizer
   seen_uops = {tuplize_uops(lin.linearize().uops): tuple(lin.applied_opts)}
 
-  while 1:
-    acted_lins = lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam])
+  exiting, st = False, time.perf_counter()
+  while not exiting:
+    with Timing("linearize:  ", enabled=DEBUG>=3):
+      acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam])
 
-    # dedup with uops (TODO: double linearize not needed)
-    acted_lins_dedup = []
-    for lin in acted_lins:
-      tuops = tuplize_uops(lin.linearize().uops)
-      if tuops in seen_uops:
-        #print(seen_uops[tuops], lin.applied_opts)
-        continue
-      seen_uops[tuops] = tuple(lin.applied_opts)
-      acted_lins_dedup.append(lin)
-    acted_lins = acted_lins_dedup
+      # linearize all
+      for x in acted_lins: x.linearize()
 
-    # time linearizers
-    timed_lins: List[Tuple[Linearizer, float]] = [(v,time_linearizer(v,rawbufs,allow_test_size=allow_test_size)) for v in acted_lins]
-    opts = sorted(timed_lins, key=lambda x: x[1])
-    if len(opts) == 0 or beam[0][1] <= opts[0][1]: break  # we didn't get faster
+      # dedup with uops
+      acted_lins_dedup = []
+      for lin in acted_lins:
+        tuops = tuplize_uops(lin.uops)
+        if tuops in seen_uops: continue
+        seen_uops[tuops] = tuple(lin.applied_opts)
+        acted_lins_dedup.append(lin)
 
-    # keep the BEAM best
-    beam = opts[:amt]
-    if DEBUG >= 2: print(f"{opts[0][1]*1e6:12.2f} us from {len(lins):3d} -> {len(opts):3d} actions", beam[0][0].colored_shape())
+    with Timing("compile:    ",enabled=DEBUG>=3):
+      # time linearizers
+      timed_lins: List[Tuple[Linearizer, float]] = [(v,time_linearizer(v,rawbufs,allow_test_size=allow_test_size)) for v in acted_lins_dedup]
+      opts = sorted(timed_lins, key=lambda x: x[1])
+
+    # done
+    exiting = len(opts) == 0 or beam[0][1] <= opts[0][1]
+    if not exiting: beam = opts[:amt]
+    if DEBUG >= 2: print(f"{time.perf_counter() - st:7.2f}s:", colored(f"{beam[0][1]*1e6:12.2f} us", "green" if exiting else None), f"from {len(acted_lins):3d} -> {len(opts):3d} actions", beam[0][0].colored_shape())
 
   if CACHELEVEL >= 1: diskcache_put("beam_search", key, beam[0][0].applied_opts)
   if DEBUG >= 3: print(beam[0][0].applied_opts)

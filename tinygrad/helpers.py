@@ -36,6 +36,9 @@ def partition(lst:List[T], fxn:Callable[[T],bool]):
   b:List[T] = []
   for s in lst: (a if fxn(s) else b).append(s)
   return a,b
+def unwrap(x:Optional[T]) -> T:
+  assert x is not None
+  return x
 
 @functools.lru_cache(maxsize=None)
 def getenv(key, default=0): return type(default)(os.getenv(key, default))
@@ -91,7 +94,11 @@ class DType(NamedTuple):
   name: str
   np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
   sz: int = 1
-  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}"
+  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
+  def vec(self, sz:int):
+    assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
+    return DType(self.priority, self.itemsize*sz, self.name+str(sz), None, sz)
+  def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
 
 # dependent typing?
 class ImageDType(DType):
@@ -114,7 +121,7 @@ class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
   def is_int(x: DType)-> bool: return x in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
-  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes.float64, dtypes._half4, dtypes._float2, dtypes._float4)
+  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes.float64, dtypes.half.vec(4), dtypes.float.vec(2), dtypes.float.vec(4))
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
@@ -131,6 +138,7 @@ class dtypes:
   int8: Final[DType] = DType(1, 1, "char", np.int8)
   int16: Final[DType] = DType(3, 2, "short", np.int16)
   int32: Final[DType] = DType(5, 4, "int", np.int32)
+  int = int32
   int64: Final[DType] = DType(7, 8, "long", np.int64)
   uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
   uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
@@ -141,12 +149,6 @@ class dtypes:
   bfloat16: Final[DType] = DType(9, 2, "__bf16", None)
 
   # NOTE: these are internal dtypes, should probably check for that
-  _int2: Final[DType] = DType(2, 4*2, "int2", None, 2)
-  _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
-  _half16: Final[DType] = DType(0, 2*16, "half16", None, 16)
-  _float2: Final[DType] = DType(4, 4*2, "float2", None, 2)
-  _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
-  _float8: Final[DType] = DType(4, 4*8, "float8", None, 8)
   _arg_int32: Final[DType] = DType(2, 4, "_arg_int32", None)
 
   # NOTE: these are image dtypes
@@ -175,7 +177,7 @@ _cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches"
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 9
+VERSION = 10
 _db_connection = None
 def db_connection():
   global _db_connection
