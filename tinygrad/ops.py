@@ -185,13 +185,13 @@ class ASTRunner:
       self.vars = vars_from_ast(ast)
       assert all(v._val is None for v in self.vars), f"ASTRunner contains bound Variable {self.vars}"
 
-  def exec(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None, force_wait=False) -> Optional[float]:
+  def exec(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     from tinygrad.jit import CacheCollector
-    et = self(rawbufs, var_vals, force_wait=force_wait)
+    et = self(rawbufs, var_vals)
     CacheCollector.add(self, rawbufs, var_vals if var_vals is not None else {})
     return et
 
-  def __call__(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
+  def __call__(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
 # **************** for Interpreted Buffers ****************
@@ -201,7 +201,7 @@ class InterpretedASTRunner(ASTRunner):
     self.fxn = fxn
     super().__init__(ast)
 
-  def __call__(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> float:
+  def __call__(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None, jit=False) -> float:
     var_vals = {k:var_vals[k] for k in sorted(self.vars)} if var_vals is not None else {}
     st = time.perf_counter()
     ret: RawBuffer = self.fxn(rawbufs[1:], var_vals)
@@ -286,7 +286,7 @@ class CompiledASTRunner(ASTRunner):
     local_size = ([sym_infer(sz, var_vals) for sz in self.local_size] + [1]*(3-len(self.local_size))) if self.local_size is not None else self.local_size
     return global_size, local_size
 
-  def __call__(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None, jit=False, force_wait=False) -> Optional[float]:
+  def __call__(self, rawbufs:List[Optional[RawBuffer]], var_vals:Optional[Dict[Variable, int]]=None, jit=False) -> Optional[float]:
     # filter the var_vals
     var_vals = {k:var_vals[k] for k in sorted(self.vars)} if var_vals is not None else {}
     global_size, local_size = self.launch_dims(var_vals)
@@ -298,7 +298,7 @@ class CompiledASTRunner(ASTRunner):
     lra = self.runtime_args.copy()
     if global_size: lra['global_size'] = global_size
     if local_size and 'local_size' not in lra: lra['local_size'] = local_size
-    et = self.clprg(*rawbufs, *var_vals.values(), **lra, wait=force_wait or DEBUG>=2)
+    et = self.clprg(*rawbufs, *var_vals.values(), **lra, wait=DEBUG>=2)
     update_stats(self.display_name if self.display_name is not None else self.name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra)
     return et
 

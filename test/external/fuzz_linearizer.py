@@ -29,7 +29,7 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
     return "COMPILE_ERROR"
 
   try:
-    prg.exec(rawbufs, var_vals, force_wait=True)
+    prg.exec(rawbufs, var_vals)
   except:
     print(lin.ast)
     traceback.print_exc()
