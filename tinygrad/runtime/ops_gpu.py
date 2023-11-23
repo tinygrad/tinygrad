@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os
 os.environ['PYOPENCL_NO_CACHE'] = '1'
-import pathlib, hashlib
+import pathlib
 import numpy as np
 import pyopencl as cl
 from typing import Optional, List, Tuple
@@ -73,7 +73,6 @@ def compile_gpu(prg:str) -> bytes:
 class CLProgram:
   def __init__(self, name:str, prg:bytes, argdtypes=None, options=None):
     self.name, self.clprograms = name, [cl.Program(ctx, ctx.devices, [prg]*len(ctx.devices)) for ctx in CL.cl_ctxs]
-    self.hash = hashlib.md5(prg).hexdigest()
     self._clprgs = [clprogram.build(options=options) for clprogram in self.clprograms]
     self.clprgs = [clprg.__getattr__(name) for clprg in self._clprgs]
     if DEBUG >= 5 and not OSX:
