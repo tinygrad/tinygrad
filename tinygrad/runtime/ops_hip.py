@@ -94,7 +94,7 @@ class HIPGraph:
     self.op_estimate, self.mem_estimate = get_jit_stats(jit_cache)
     self.jc_idxs_with_updatable_launch_dims = get_jc_idxs_with_updatable_launch_dims(jit_cache)
     self.jc_idxs_with_updatable_var_vals = get_jc_idxs_with_updatable_var_vals(jit_cache)
-    self.jc_idxs_with_updatable_rawbufs = [x[0] for x in self.input_replace.keys()]
+    self.jc_idxs_with_updatable_rawbufs = list(set([x[0] for x in self.input_replace.keys()]))
 
     self.graph, graph_node = hip.hipGraphCreate(), None
     self.updatable_nodes: Dict[int, Tuple[Any, hip.kernelNodeParamsWrapper]] = {} # Dict[jc index] = tuple(graph_node, node_params)
@@ -124,7 +124,8 @@ class HIPGraph:
     for j in self.jc_idxs_with_updatable_launch_dims:
       hip.setKernelNodeLaunchDims(self.updatable_nodes[j][1], cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals))
     for j in self.jc_idxs_with_updatable_var_vals:
-      hip.setKernelNodeParams(self.updatable_nodes[j][1], [var_vals[x] for x in self.jit_cache[j].prg.vars], list(range(len(self.jit_cache[j].rawbufs), len(self.jit_cache[j].rawbufs) + len(self.jit_cache[j].prg.vars))))
+      prg: CompiledASTRunner = cast(CompiledASTRunner, self.jit_cache[j].prg)
+      hip.setKernelNodeParams(self.updatable_nodes[j][1], [var_vals[x] for x in prg.vars], list(range(len(self.jit_cache[j].rawbufs), len(self.jit_cache[j].rawbufs) + len(prg.vars))))
 
     # Update graph nodes with the updated structs.
     for node, params in self.updatable_nodes.values():
