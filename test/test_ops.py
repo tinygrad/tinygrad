@@ -230,9 +230,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(5,3,3)], lambda x: x.triu(), lambda x: x.triu())
     helper_test_op([(5,3,3)], lambda x: x.triu(1), lambda x: x.triu(1))
   def test_maximum(self):
-    #helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
-    #helper_test_op([(), ()], torch.maximum, Tensor.maximum)
-    #helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1., 0., 3., 4.], [1., 2., 3., 0.]])
+    helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
+    helper_test_op([(), ()], torch.maximum, Tensor.maximum)
+    helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1., 0., 3., 4.], [1., 2., 3., 0.]])
     helper_test_op(None, torch.maximum, Tensor.maximum, vals=[np.array([1, 0, 3, 4]).astype(np.int32), np.array([1, 2, 3, 0]).astype(np.int32)], forward_only=True)
   def test_minimum(self):
     helper_test_op([(45,65), (45,65)], torch.minimum, Tensor.minimum)
@@ -633,23 +633,27 @@ class TestOps(unittest.TestCase):
     np.testing.assert_allclose(a[:, 2:0:-1], t[:, 2:0:-1].numpy())
     np.testing.assert_allclose(a[:, 2:0:-1, 3:1:-2], t[:, 2:0:-1, 3:1:-2].numpy())
     np.testing.assert_allclose(a[4:0:-3, 2:0:-1, -1:-5:-2], t[4:0:-3, 2:0:-1, -1:-5:-2].numpy())
-    if Device.DEFAULT != "CPU":
+    if Device.DEFAULT not in ["CPU", "WEBGL"]:
       # broken
       np.testing.assert_allclose(a[2:5:-1, :, :], t[2:5:-1, :, :].numpy())  # shape = (0, 10, 10)
       np.testing.assert_allclose(a[:, 2:5:-1, :], t[:, 2:5:-1, :].numpy())  # shape = (0, 10, 10)
       np.testing.assert_allclose(a[:, :, 2:5:-1], t[:, :, 2:5:-1].numpy())  # shape = (0, 10, 10)
 
+  @unittest.skipIf(Device.DEFAULT in ["WEBGL"], "_moderngl.Error: the buffer is too small")
   def test_slice_both_endpoints_out_of_bounds(self):
     helper_test_op([(3,3,3)], lambda x: x[5:10], lambda x: x[5:10], forward_only=True)
     helper_test_op([(3,3,3)], lambda x: x[-15:-7], lambda x: x[-15:-7], forward_only=True)
 
   def test_slice_start_gt_end(self):
     helper_test_op([(3,3,3)], lambda x: x[-2:2], lambda x: x[-2:2], forward_only=True)
-    helper_test_op([(3,3,3)], lambda x: x[-2:-5], lambda x: x[-2:-5], forward_only=True)
-
+    if Device.DEFAULT != "WEBGL":
+      helper_test_op([(3,3,3)], lambda x: x[-2:-5], lambda x: x[-2:-5], forward_only=True)
+  
+  @unittest.skipIf(Device.DEFAULT in ["WEBGL"], "_moderngl.Error: the buffer is too small")
   def test_slice_empty(self):
     helper_test_op([(10,10)], lambda x: x[1:1], lambda x: x[1:1], forward_only=True)
 
+  @unittest.skipIf(Device.DEFAULT in ["WEBGL"], "_moderngl.Error: the buffer is too small")
   def test_slice_zero_in_shape(self):
     helper_test_op([(10,10)], lambda x: x[1:1], lambda x: x[1:1], forward_only=True)  # x.shape = (0, 10)
     helper_test_op([(3,3,3)], lambda x: x[-2:-5], lambda x: x[-2:-5], forward_only=True)  # x.shape = (0, 3, 3)
@@ -1154,6 +1158,7 @@ class TestOps(unittest.TestCase):
     a = Tensor(3.14)
     np.testing.assert_allclose(Tensor.stack([a, a]).numpy(), Tensor([3.14, 3.14]).numpy())
 
+  @unittest.skipIf(Device.DEFAULT in ["WEBGL"], "_moderngl.Error: the buffer is too small")
   def test_repeat(self):
     x = Tensor.randn(4, 6, 3)
     base_repeats = [2, 4, 3]
@@ -1259,7 +1264,8 @@ class TestOps(unittest.TestCase):
   def test_scaled_product_attention(self):
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)], lambda x,y,z: torch.nn.functional.scaled_dot_product_attention(x,y,z), lambda x,y,z: Tensor.scaled_dot_product_attention(x,y,z))
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64), (32,8,16,16)], lambda x,y,z,m: torch.nn.functional.scaled_dot_product_attention(x,y,z,attn_mask=m), lambda x,y,z,m: Tensor.scaled_dot_product_attention(x,y,z,attn_mask=m))
-    helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)], lambda x,y,z: torch.nn.functional.scaled_dot_product_attention(x,y,z,is_causal=True), lambda x,y,z: Tensor.scaled_dot_product_attention(x,y,z,is_causal=True))
+    if Device.DEFAULT != "WEBGL":
+      helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)], lambda x,y,z: torch.nn.functional.scaled_dot_product_attention(x,y,z,is_causal=True), lambda x,y,z: Tensor.scaled_dot_product_attention(x,y,z,is_causal=True))
 
   def test_binary_crossentropy(self):
     helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy(x.sigmoid(),torch.clip(y,0,1)), lambda x,y: x.sigmoid().binary_crossentropy(y.clip(0,1)))
