@@ -4,7 +4,7 @@ from pathlib import Path
 import requests
 import numpy as np
 import nibabel as nib
-from scipy import signal
+from scipy import signal, ndimage
 import torch
 import torch.nn.functional as F
 from tinygrad.tensor import Tensor
@@ -65,14 +65,14 @@ def preprocess(file_path):
   image, label = pad_to_min_shape(image, label)
   return image, label
 
-def iterate(val=True, shuffle=False):
+def iterate(val=True, shuffle=False, expand_dims=True):
   if not val: raise NotImplementedError
   files = get_val_files()
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
   for file in files:
     X, Y = preprocess(file)
-    X = np.expand_dims(X, axis=0)
+    if expand_dims: X = np.expand_dims(X, axis=0)
     yield (X, Y)
 
 def gaussian_kernel(n, std):
@@ -125,6 +125,73 @@ def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), o
   result /= norm_map
   result = result[..., paddings[4]:image_shape[0]+paddings[4], paddings[2]:image_shape[1]+paddings[2], paddings[0]:image_shape[2]+paddings[0]]
   return result, labels
+
+def randrange(max_range):
+  return 0 if max_range == 0 else random.randrange(max_range)
+
+def get_cords(cord, idx, patch_size):
+  return cord[idx], cord[idx] + patch_size[idx]
+
+def _rand_crop(image, label, patch_size):
+  ranges = [s - p for s, p in zip(image.shape[1:], patch_size)]
+  cord = [randrange(x) for x in ranges]
+  low_x, high_x = get_cords(cord, 0, patch_size)
+  low_y, high_y = get_cords(cord, 1, patch_size)
+  low_z, high_z = get_cords(cord, 2, patch_size)
+  image = image[:, low_x:high_x, low_y:high_y, low_z:high_z]
+  label = label[:, low_x:high_x, low_y:high_y, low_z:high_z]
+  return image, label, [low_x, high_x, low_y, high_y, low_z, high_z]
+
+def _rand_foreg_cropd(image, label, patch_size):
+  def adjust(foreg_slice, patch_size, label, idx):
+    diff = patch_size[idx - 1] - (foreg_slice[idx].stop - foreg_slice[idx].start)
+    sign = -1 if diff < 0 else 1
+    diff = abs(diff)
+    ladj = randrange(diff)
+    hadj = diff - ladj
+    low = max(0, foreg_slice[idx].start - sign * ladj)
+    high = min(label.shape[idx], foreg_slice[idx].stop + sign * hadj)
+    diff = patch_size[idx - 1] - (high - low)
+    if diff > 0 and low == 0:
+      high += diff
+    elif diff > 0:
+      low -= diff
+    return low, high
+
+  cl = np.random.choice(np.unique(label[label > 0]))
+  foreg_slices = ndimage.find_objects(ndimage.measurements.label(label==cl)[0])
+  foreg_slices = [x for x in foreg_slices if x is not None]
+  slice_volumes = [np.prod([s.stop - s.start for s in sl]) for sl in foreg_slices]
+  slice_idx = np.argsort(slice_volumes)[-2:]
+  foreg_slices = [foreg_slices[i] for i in slice_idx]
+  if not foreg_slices:
+      return _rand_crop(image, label, patch_size)
+  foreg_slice = foreg_slices[random.randrange(len(foreg_slices))]
+  low_x, high_x = adjust(foreg_slice, patch_size, label, 1)
+  low_y, high_y = adjust(foreg_slice, patch_size, label, 2)
+  low_z, high_z = adjust(foreg_slice, patch_size, label, 3)
+  image = image[:, low_x:high_x, low_y:high_y, low_z:high_z]
+  label = label[:, low_x:high_x, low_y:high_y, low_z:high_z]
+  return image, label, [low_x, high_x, low_y, high_y, low_z, high_z]
+
+def rand_crop(image, label, patch_size, oversampling):
+  if random.random() < oversampling:
+    image, label, cords = _rand_foreg_cropd(image, label, patch_size)
+  else:
+    image, label, cords = _rand_crop(image, label, patch_size)
+  return image, label
+
+def get_batch(generator, batch_size=32, patch_size=(128, 128, 128), oversampling=0.25):
+  bX, bY = [], []
+  for _ in range(batch_size):
+    try:
+      X,Y = next(generator)
+      X,Y = rand_crop(X, Y, patch_size, oversampling)
+      bX.append(X)
+      bY.append(Y)
+    except StopIteration:
+      break
+  return (np.concatenate(bX, axis=0), np.concatenate(bY, axis=0))
 
 if __name__ == "__main__":
   for X, Y in iterate():

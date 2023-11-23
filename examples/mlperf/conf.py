@@ -14,7 +14,7 @@ class Conf:
     epochs: int = 1
     ga_steps: int = 1
     warmup_step: int = 4
-    batch_size: int = 1
+    batch_size: int = 2
     layout: str = "NDHWC"
     input_shape: Tuple[int, int, int, int] = (1, 128, 128, 128)
     val_input_shape: Tuple[int, int, int, int] = (1, 128, 128, 128)

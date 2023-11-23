@@ -6,7 +6,7 @@ from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict
 from tinygrad.ops import Device
 from tinygrad.shape.symbolic import Node
 from extra.lr_scheduler import MultiStepLR
-from extra.datasets.kits19 import iterate
+from extra.datasets.kits19 import iterate, get_batch
 
 from examples.mlperf.metrics import get_dice_score
 from examples.mlperf.conf import Conf
@@ -39,25 +39,28 @@ def train_unet3d():
     dice = (1. - dice_score).mean()
     return (ce + dice) / 2
 
-  def get_batch(generator, batch_size=32):
-    bX, bY = [], []
-    for _ in range(batch_size):
-      try:
-        X, Y = next(generator)
-        bX.append(X)
-        bY.append(X)
-      except StopIteration:
-        break
-    return np.concatenate(bX, axis=0), np.concatenate(bY, axis=0)
+  # def get_batch(generator, batch_size=32):
+  #   bX, bY = [], []
+  #   for _ in range(batch_size):
+  #     try:
+  #       X, Y = next(generator)
+  #       print("get_batch", X.shape, Y.shape)
+  #       bX.append(X)
+  #       bY.append(X)
+  #     except StopIteration:
+  #       break
+  #   res = np.concatenate(bX, axis=0)
+  #   print("get_batch", res.shape)
+  #   return (np.concatenate(bX, axis=0), np.concatenate(bY, axis=0))
 
   def get_optimizer(params, conf: dict):
-    from tinygrad.nn.optim import Adam, SGD
+    from tinygrad.nn.optim import Adam, SGD, LAMB
     if conf.optimizer == "adam":
       optim = Adam(params, lr=conf.lr, weight_decay=conf.weight_decay)
     elif conf.optimizer == "sgd":
       optim = SGD(params, lr=conf.lr, momentum=conf.momentum, nesterov=True, weight_decay=conf.weight_decay)
     elif conf.optimizer == "lamb":
-      pass
+      optim = LAMB(params, lr=conf.lr, weight_decay=conf.weight_decay)
     else:
       raise ValueError("Optimizer {} unknown.".format(conf.optimizer))
     return optim
@@ -90,7 +93,11 @@ def train_unet3d():
   if getenv("MOCKTRAIN", 0):
     train_loader = [(Tensor.rand(1,1,128,128,128), Tensor.rand(1,1,128,128,128)) for i in range(3)]
   else:
-    train_loader = get_batch(iterate(), batch_size=conf.batch_size) # TODO
+    train_loader = get_batch(iterate(shuffle=True, expand_dims=False), 2, (128, 128, 128), 0.25)
+    print("train_loader", train_loader[0].shape, train_loader[1].shape)
+    # train_loader = get_batch(iterate(), batch_size=conf.batch_size)
+    # print("train_loader", train_loader[0].shape, train_loader[1].shape)
+    # train_loader = iterate()
 
   @TinyJit
   def train_step(im, y):
@@ -111,9 +118,12 @@ def train_unet3d():
 
     # for i, batch in enumerate(tqdm(train_loader, disable=(rank != 0) or not conf.verbose)):
     for i, batch in enumerate(tqdm(train_loader)):
+      # print(type(i))
+      # print(type(batch))
       im, label = batch
-      im, label = im.to(device), label.to(device)
       print(im.shape, label.shape)
+      # im, label = im.to(device), label.to(device)
+      # print(im.shape, label.shape)
 
       loss_value = train_step(im, label)
 
