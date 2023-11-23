@@ -43,6 +43,8 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
   if view.mask is None: return view.mask, tuple(), False
   new_mask: List[Tuple[int, int]] = []
   r_masks, r_shape, r_new_shape = reversed(view.mask), reversed(view.shape), reversed(new_shape)
+  # stride represents the curr stride while accumulating. offset is needed while combining masks of range one & zero stride
+  # View(shape=(10, 10), strides=(0, 1), offset=0, mask=((3, 4), (1, 5)), contiguous=False).reshape((100,))
   stride, off, offsets, old_dim, new_dim, mask = 1, 0, [], next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
   while len(new_mask) < len(new_shape):
     if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape), tuple(), False
@@ -50,18 +52,16 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
       new_mask.append((mask[0] // stride, (mask[1] - 1) // stride + 1))
       offsets.append(off)
       stride, off, old_dim, new_dim, mask = 1, 0, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
-    elif old_dim > new_dim:
-      # split the mask if reshape doesn't cut across mask.
+    elif old_dim > new_dim: # split the mask if reshape doesn't cut across mask.
       next_stride = new_dim * stride
       if (mask[0] % next_stride != 0 or mask[1] % next_stride != 0) and mask[0] // next_stride != (mask[1] - 1) // next_stride: return view.mask, tuple(), True
       new_mask.append((mask[0] % next_stride // stride, (mask[1] - 1) % next_stride // stride + 1))
       offsets.append(off)
-      stride, new_dim = next_stride, next(r_new_shape, 1)
-    elif old_dim < new_dim * stride:
+      stride, new_dim = next_stride, next(r_new_shape, 1) # maintain stride for splitting the remaining mask
+    elif old_dim < new_dim * stride: # combine if the mask can unfold continuously
       next_mask = next(r_masks, (0, 1)) 
-      # combine if the mask can unfold continuously
       if (mask[0] != 0 or mask[1] != old_dim) and next_mask[1] - next_mask[0] != 1: return view.mask, tuple(), True
-      if (next_mask[1] - next_mask[0] == 1 and next_mask[0]) and not (mask[1] - mask[0] == 1 and not mask[0]): off += next_mask[0]*old_dim
+      if (next_mask[1] - next_mask[0] == 1 and next_mask[0]) and not (mask[1] - mask[0] == 1 and not mask[0]): off += next_mask[0] * old_dim
       mask, old_dim = (next_mask[0] * old_dim + mask[0], (next_mask[1] - 1) * old_dim + mask[1]), old_dim * next(r_shape, 1) 
   for mask in r_masks: 
     if mask != (0, 1): return ((0, 0),) * len(new_shape), tuple(), False
