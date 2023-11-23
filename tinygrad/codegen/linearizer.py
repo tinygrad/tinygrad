@@ -366,7 +366,7 @@ class Linearizer(Kernel):
     @functools.lru_cache(None)
     def get_recursive_parents(x:UOp) -> Set[UOp]: return set.union(set(x.vin), *[get_recursive_parents(p) for p in x.vin])
 
-    def get_recursive_children(x:UOp) -> List[UOp]:
+    def get_recursive_children(x:UOp) -> Set[UOp]:
       deps = set([x])
       ssize = 0
       while ssize != len(deps):
@@ -374,7 +374,7 @@ class Linearizer(Kernel):
         for u in self.uops:
           if len(deps.intersection([x for x in u.vin if x.uop != UOps.PHI])):
             deps.add(u)
-      return sorted(list(deps), key=self.uops.index)    # get the last one
+      return deps
 
     def replace_op(old:UOp, new:UOp):
       for u in self.uops:
@@ -431,7 +431,7 @@ class Linearizer(Kernel):
     for u in self.uops:
       if u.uop == UOps.LOOP:
         # add END of loops after the last thing that (recursively) depends on them
-        self.uop(UOps.END, None, (u,), cachable=False, insert_before=self.uops.index(get_recursive_children(u)[-1])+1)
+        self.uop(UOps.END, None, (u,), cachable=False, insert_before=self.uops.index(sorted(list(get_recursive_children(u)), key=self.uops.index)[-1])+1)
       elif u.uop == UOps.IF:
         # END any if statements at the end of the uops
         self.uop(UOps.END, None, (u,), cachable=False)

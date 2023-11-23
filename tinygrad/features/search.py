@@ -2,7 +2,7 @@ from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, random, math, time
 from tinygrad.lazy import vars_from_ast
 from tinygrad.ops import Device, Compiled, MemBuffer
-from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, all_int, colored
+from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, all_int, colored, Timing
 from tinygrad.codegen.linearizer import Linearizer, UOp
 from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
@@ -118,22 +118,24 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
 
   exiting, st = False, time.perf_counter()
   while not exiting:
-    acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam])
+    with Timing(enabled=DEBUG>=3):
+      acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam])
 
-    # linearize all
-    for x in acted_lins: x.linearize()
+      # linearize all
+      for x in acted_lins: x.linearize()
 
-    # dedup with uops
-    acted_lins_dedup = []
-    for lin in acted_lins:
-      tuops = tuplize_uops(lin.uops)
-      if tuops in seen_uops: continue
-      seen_uops[tuops] = tuple(lin.applied_opts)
-      acted_lins_dedup.append(lin)
+      # dedup with uops
+      acted_lins_dedup = []
+      for lin in acted_lins:
+        tuops = tuplize_uops(lin.uops)
+        if tuops in seen_uops: continue
+        seen_uops[tuops] = tuple(lin.applied_opts)
+        acted_lins_dedup.append(lin)
 
-    # time linearizers
-    timed_lins: List[Tuple[Linearizer, float]] = [(v,time_linearizer(v,rawbufs,allow_test_size=allow_test_size)) for v in acted_lins_dedup]
-    opts = sorted(timed_lins, key=lambda x: x[1])
+    with Timing(enabled=DEBUG>=3):
+      # time linearizers
+      timed_lins: List[Tuple[Linearizer, float]] = [(v,time_linearizer(v,rawbufs,allow_test_size=allow_test_size)) for v in acted_lins_dedup]
+      opts = sorted(timed_lins, key=lambda x: x[1])
 
     # done
     exiting = len(opts) == 0 or beam[0][1] <= opts[0][1]
