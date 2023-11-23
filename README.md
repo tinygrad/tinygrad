@@ -84,7 +84,7 @@ tinygrad already supports numerous accelerators, including:
 - [x] [LLVM](tinygrad/runtime/ops_llvm.py)
 - [x] [METAL](tinygrad/runtime/ops_metal.py)
 - [x] [CUDA](tinygrad/runtime/ops_cuda.py)
-- [x] [Triton](extra/accel/triton/ops_triton.py)
+- [x] [Triton](extra/triton/triton.py)
 - [x] [PyTorch](tinygrad/runtime/ops_torch.py)
 - [x] [HIP](tinygrad/runtime/ops_hip.py)
 - [x] [WebGPU](tinygrad/runtime/ops_webgpu.py)
