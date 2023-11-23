@@ -82,7 +82,8 @@ def train_resnet():
       GlobalCounters.reset()
       st = time.perf_counter()
       outs = mega_train(*flatten([(x,y) for x,y,_ in proc]))
-      proc = [data_get(iterator, rank) for rank in range(GPUS)]
+      try: proc = [data_get(iterator, rank) for rank in range(GPUS)]
+      except StopIteration: proc = None
       out_items = [(loss.item(), acc.item()) for loss, acc in outs]
       loss, acc = sum([x[0] for x in out_items])/len(out_items), sum([x[1] for x in out_items])/len(out_items)
       et = (time.perf_counter()-st)*1000
