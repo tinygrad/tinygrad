@@ -20,12 +20,12 @@ class TinyJit(Generic[ReturnType]):
     self.cnt: int = 0
     self.ret: Optional[ReturnType] = None
     self.expected_vals: Optional[Tuple[Variable, ...]] = None
-    self.expected_sts_dtype: Optional[Tuple[Tuple[ShapeTracker, DType], ...]] = None
+    self.expected_name_sts_dtype: Optional[Tuple[Tuple[Union[int, str], ShapeTracker, DType], ...]] = None
 
   @property
   def jit_cache(self) -> List[JitItem]: return self.jit_fxn.jit_cache if self.jit_fxn else []
   @property
-  def input_replace(self) -> Dict[Tuple[int, int], Union[int, str]]: return self.jit_fxn.input_replace if self.jit_fxn else {}
+  def input_replace(self) -> Dict[Tuple[int, int], int]: return self.jit_fxn.input_replace if self.jit_fxn else {}
 
   # add support for instance methods
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
@@ -33,11 +33,11 @@ class TinyJit(Generic[ReturnType]):
   def __call__(self, *args, **kwargs) -> ReturnType:
     # all inputs are realized
     input_tensors: Dict[Union[int, str], Tensor] = {cast(Union[int, str], k):v.realize() for k,v in itertools.chain(enumerate(args), kwargs.items()) if v.__class__ is Tensor}
-    expected_sts_dtype = tuple([(v.lazydata.st.unbind(), v.dtype) for v in input_tensors.values()])
+    expected_name_sts_dtype = tuple([(k, v.lazydata.st.unbind(), v.dtype) for k,v in input_tensors.items()])
 
     # get rawbuffers
-    input_rawbuffers: Dict[Union[int, str], RawBuffer] = {k:cast(RawBuffer, v.lazydata.realized) for k,v in input_tensors.items()}
-    assert len(set(input_rawbuffers.values())) == len(input_rawbuffers), "duplicate inputs to JIT"
+    input_rawbuffers: List[RawBuffer] = [cast(RawBuffer, v.lazydata.realized) for v in input_tensors.values()]
+    assert len(set(input_rawbuffers)) == len(input_rawbuffers), "duplicate inputs to JIT"
 
     # get variables: they can either be in Tensors or passed in as arguments, and all must be bound. these are all global
     var_vals: Dict[Variable, int] = merge_dicts([arg.lazydata.st.var_vals for arg in input_tensors.values()] + [dict(x.unbind() for x in itertools.chain(args, kwargs.values()) if isinstance(x, Variable))])
@@ -45,11 +45,11 @@ class TinyJit(Generic[ReturnType]):
 
     if self.cnt >= 2:
       assert self.expected_vals == expected_vals, "mismatch of var_vals"
-      assert self.expected_sts_dtype == expected_sts_dtype, f"mismatch of sts, expected {self.expected_sts_dtype} got {expected_sts_dtype}"
+      assert self.expected_name_sts_dtype == expected_name_sts_dtype, f"mismatch of sts, expected {self.expected_name_sts_dtype} got {expected_name_sts_dtype}"
       assert self.jit_fxn, "didn't get jitted?"
       self.jit_fxn(input_rawbuffers, var_vals, DEBUG>=2)
     elif self.cnt == 1:
-      self.expected_vals, self.expected_sts_dtype = expected_vals, expected_sts_dtype
+      self.expected_vals, self.expected_name_sts_dtype = expected_vals, expected_name_sts_dtype
 
       CacheCollector.start(var_vals)
       self.ret = self.fxn(*args, **kwargs)
