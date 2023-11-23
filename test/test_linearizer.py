@@ -110,6 +110,13 @@ class TestLinearizer(unittest.TestCase):
     assert lin.full_shape[:lin.global_dims] == (5, 6, 7, 8, 9)
     lin.limit_dims_to_max(global_max=[16, 16, 16], local_max=[16, 16, 16])
 
+  def test_sum_collapse(self):
+    t = Tensor.ones(256,256).sum()
+    sched = [si for si in t.lazydata.schedule() if si.ast.op not in LoadOps]
+    assert len(sched) == 1
+    lin = Linearizer(sched[0].ast)
+    assert not any(u.uop == UOps.LOOP for u in lin.linearize().uops), "found loop in sum collapse"
+
 def helper_realized_ast(r:Tensor):
   s = r.lazydata.schedule()
   run_schedule(s[:-1])  # run all kernels except the last one
