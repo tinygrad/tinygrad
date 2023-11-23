@@ -21,7 +21,7 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
     if isinstance(device, Compiled):
       prg = device.to_program(lin)
     else:
-      prg = get_interpreted_fxn(device.fxn_for_op, device.from_underlying, lin.ast)
+      prg = get_interpreted_fxn(device.fxn_for_op, lin.ast)
   except:
     print(lin.ast)
     traceback.print_exc()
