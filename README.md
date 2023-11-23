@@ -48,8 +48,6 @@ And we can change `DEBUG` to `4` to see the generated code.
 As it turns out, 90% of what you need for neural networks are a decent autograd/tensor library.
 Throw in an optimizer, a data loader, and some compute, and you have all you need.
 
-#### Neural network example (see examples/beautiful_mnist.py for the full thing)
-
 ```py
 from tinygrad import Tensor, nn
 
@@ -71,6 +69,8 @@ for i in range(10):
   optim.step()
   print(i, loss.item())
 ```
+
+See [examples/beautiful_mnist.py](examples/beautiful_mnist.py) for the full version that gets 98% in ~5 seconds
 
 ## Accelerators
 
