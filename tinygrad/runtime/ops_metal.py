@@ -1,7 +1,7 @@
 # pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib, ctypes, tempfile
 import Metal, libdispatch
-from typing import List, Any, Tuple, Dict, Union, Set, cast
+from typing import List, Any, Tuple, Dict, Set, cast
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup
 from tinygrad.ops import Compiled, BatchExecutor, JitItem, CompiledASTRunner, update_stats
@@ -85,7 +85,7 @@ class MetalProgram:
     METAL.mtl_buffers_in_flight.append(command_buffer)
 
 class MetalBatchExecutor(BatchExecutor):
-  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
 
     # create metal batch exec
@@ -127,12 +127,12 @@ class MetalBatchExecutor(BatchExecutor):
     self.command_buffer: Any = None
     self.int_buf_view = self.int_buf.buffer_view()    # TODO: this is metal syncing when it doesn't need to
 
-  def __call__(self, input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int], wait=False):
+  def __call__(self, input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int], wait=False):
     # NOTE: you at least can't update the ints if this is running
     if self.command_buffer is not None and self.command_buffer in METAL.mtl_buffers_in_flight: self.command_buffer.waitUntilCompleted()
-    all_read_resources = self.read_resources + [x._buf for x in input_rawbuffers.values()]
-    for (j,i),input_name in self.input_replace.items():
-      self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_name]._buf, 0, i)
+    all_read_resources = self.read_resources + [x._buf for x in input_rawbuffers]
+    for (j,i),input_idx in self.input_replace.items():
+      self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_idx]._buf, 0, i)
     for j in self.input_has_variable_dims:
       global_size, local_size = cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals)
       self.icb.indirectComputeCommandAtIndex_(j).concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
