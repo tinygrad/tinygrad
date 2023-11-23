@@ -1,4 +1,3 @@
-# pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib, ctypes, tempfile
 import Metal, libdispatch
 from typing import List, Any, Tuple, Dict, Set, cast, Optional
