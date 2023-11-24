@@ -10,8 +10,7 @@ from tinygrad.shape.symbolic import Variable
 from tinygrad.jit import TinyJit
 import tiktoken
 from tinygrad.nn.state import torch_load, load_state_dict
-from extra.utils import fetch_as_file
-from tinygrad.helpers import GlobalCounters, Timing, DEBUG, getenv
+from tinygrad.helpers import GlobalCounters, Timing, DEBUG, getenv, fetch
 
 MAX_CONTEXT = 128
 
@@ -89,7 +88,7 @@ class Transformer:
     return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
 
   # TODO: fix empty token
-  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
+  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
     return (self.forward_jit if tokens.shape[0:2] == (1,1) and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257
@@ -106,7 +105,7 @@ class GPT2:
     tokenizer = tiktoken.get_encoding("gpt2")
 
     model = Transformer(**MODEL_PARAMS[model_size])
-    weights = torch_load(fetch_as_file(f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'))
+    weights = torch_load(fetch(f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'))
     # special treatment for the Conv1D weights we need to transpose
     transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
     for k in weights.keys():
@@ -134,8 +133,8 @@ class GPT2:
                     f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                     (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
           probs = self.model(Tensor([toks[start_pos:]]), Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature)
-        probs_np = probs.numpy()
-        tok = int(np.random.choice(len(probs_np), p=probs_np))
+        # TODO: fix JIT rand so we can put this in the JIT
+        tok = probs.multinomial().item()
       start_pos = len(toks)
       toks.append(tok)
       output = self.tokenizer.decode(toks)
