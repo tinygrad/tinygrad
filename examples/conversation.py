@@ -104,12 +104,16 @@ def tts(
   estimate_max_y_length: bool,
   text_mapper: TextMapper,
   model_has_multiple_speakers: bool,
+  batch_size = 500
 ):
   if model_to_use == "mmts-tts": text_to_synthesize = text_mapper.filter_oov(text_to_synthesize.lower())
 
   # Convert the input text to a tensor.
   stn_tst = text_mapper.get_text(text_to_synthesize, hps.data.add_blank, hps.data.text_cleaners)
-  x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([stn_tst.shape[0]], dtype=dtypes.int64)
+  init_shape = stn_tst.shape
+  assert init_shape[0] < batch_size, "text is too long"
+  stn_tst = stn_tst.pad(((0, batch_size - init_shape[0]),), 1)
+  x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([init_shape[0]], dtype=dtypes.int64)
   sid = Tensor([speaker_id], dtype=dtypes.int64) if model_has_multiple_speakers else None
 
   # Perform inference.

@@ -7,6 +7,7 @@ from tinygrad import nn
 from tinygrad.helpers import dtypes
 from tinygrad.nn.state import torch_load
 from tinygrad.tensor import Tensor
+from tinygrad.jit import TinyJit
 from unidecode import unidecode
 
 LRELU_SLOPE = 0.1
@@ -21,9 +22,10 @@ class Synthesizer:
     self.dp = StochasticDurationPredictor(hidden_channels, 192, 3, 0.5, 4, gin_channels=gin_channels) if use_sdp else DurationPredictor(hidden_channels, 256, 3, 0.5, gin_channels=gin_channels)
     if n_speakers > 1: self.emb_g = nn.Embedding(n_speakers, gin_channels)
   def infer(self, x, x_lengths, sid=None, noise_scale=1.0, length_scale=1, noise_scale_w=1., max_len=None, emotion_embedding=None, max_y_length_estimate_scale=None):
-    x, m_p, logs_p, x_mask = self.enc_p.forward(x, x_lengths, emotion_embedding)
+    x = x.realize()
+    x, m_p, logs_p, x_mask = self.enc_p.forward(x, x_lengths.realize(), emotion_embedding.realize() if emotion_embedding is not None else emotion_embedding)
     g = self.emb_g(sid.reshape(1, 1)).squeeze(1).unsqueeze(-1) if self.n_speakers > 0 else None
-    logw = self.dp.forward(x, x_mask, g=g, reverse=self.use_sdp, noise_scale=noise_scale_w if self.use_sdp else 1.0)
+    logw = self.dp.forward(x, x_mask.realize(), g=g.realize(), reverse=self.use_sdp, noise_scale=noise_scale_w if self.use_sdp else 1.0)
     w_ceil = Tensor.ceil(logw.exp() * x_mask * length_scale)
     y_lengths = Tensor.maximum(w_ceil.sum([1, 2]), 1).cast(dtypes.int64)
     return self.generate(g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths)
@@ -69,6 +71,7 @@ class StochasticDurationPredictor:
     self.pre, self.proj = nn.Conv1d(in_channels, filter_channels, 1), nn.Conv1d(filter_channels, filter_channels, 1)
     self.convs = DDSConv(filter_channels, kernel_size, n_layers=3, p_dropout=p_dropout)
     if gin_channels != 0: self.cond = nn.Conv1d(gin_channels, filter_channels, 1)
+  @TinyJit
   def forward(self, x: Tensor, x_mask, w=None, g=None, reverse=False, noise_scale=1.0):
     x = self.pre(x.detach())
     if g is not None: x = x + self.cond(g.detach())
@@ -97,13 +100,13 @@ class StochasticDurationPredictor:
         z, log_det = flow.forward(z, x_mask, g=x, reverse=reverse)
         log_det_tot = log_det_tot + log_det
       nll = Tensor.sum(0.5 * (math.log(2*math.pi) + (z**2)) * x_mask, [1,2]) - log_det_tot
-      return nll + log_q # [b]
+      return (nll + log_q).realize() # [b]
     flows = list(reversed(self.flows))
     flows = flows[:-2] + [flows[-1]] # remove a useless vflow
     z = Tensor.randn(x.shape[0], 2, x.shape[2], dtype=x.dtype).to(device=x.device) * noise_scale
     for flow in flows: z = flow.forward(z, x_mask, g=x, reverse=reverse)
     z0, z1 = split(z, [1, 1], 1)
-    return z0
+    return z0.realize()
 
 class DurationPredictor:
   def __init__(self, in_channels, filter_channels, kernel_size, p_dropout, gin_channels=0):
@@ -128,6 +131,7 @@ class TextEncoder:
     if emotion_embedding: self.emo_proj = nn.Linear(1024, hidden_channels)
     self.encoder = Encoder(hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout)
     self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
+  @TinyJit
   def forward(self, x: Tensor, x_lengths: Tensor, emotion_embedding=None):
     if self.n_vocab!=0: x = (self.emb(x) * math.sqrt(self.hidden_channels))
     if emotion_embedding: x = x + self.emo_proj(emotion_embedding).unsqueeze(1)
@@ -135,7 +139,7 @@ class TextEncoder:
     x_mask = sequence_mask(x_lengths, x.shape[2]).unsqueeze(1).cast(x.dtype)
     x = self.encoder.forward(x * x_mask, x_mask)
     m, logs = split(self.proj(x) * x_mask, self.out_channels, dim=1)
-    return x, m, logs, x_mask
+    return x.realize(), m.realize(), logs.realize(), x_mask.realize()
 
 class ResidualCouplingBlock:
   def __init__(self, channels, hidden_channels, kernel_size, dilation_rate, n_layers, n_flows=4, gin_channels=0):

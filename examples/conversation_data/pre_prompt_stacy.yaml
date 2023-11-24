@@ -15,5 +15,5 @@ examples:
 - resp_prompt: The sun is bigger than the moon, except when Mercury is in retrograde
   user_prompt: What is bigger, the moon or the sun?
 user_delim: "\nUser: "
-resp_delim: ""
+resp_delim: "Stacy: "
 end_delim: " [EOS]\n"
