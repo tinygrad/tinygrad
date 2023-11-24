@@ -515,9 +515,8 @@ class HParams:
 
 # MODEL LOADING
 def load_model(symbols, hps, model) -> Synthesizer:
-  weights_path = fetch(model[1])
   net_g = Synthesizer(len(symbols), hps.data.filter_length // 2 + 1, hps.train.segment_size // hps.data.hop_length, n_speakers = hps.data.n_speakers, **hps.model)
-  _ = load_checkpoint(weights_path, net_g, None)
+  _ = load_checkpoint(fetch(model[1]), net_g, None)
   return net_g
 def load_checkpoint(checkpoint_path, model: Synthesizer, optimizer=None, skip_list=[]):
   assert Path(checkpoint_path).is_file()
@@ -673,9 +672,7 @@ if __name__ == '__main__':
   model_config = MODELS[args.model_to_use]
 
   # Load the hyperparameters from the config file.
-  config_path = fetch(model_config[0])
-  fetch(model_config[1])
-  hps = get_hparams_from_file(config_path)
+  hps = get_hparams_from_file(fetch(model_config[0]))
 
   # If model has multiple speakers, validate speaker id and retrieve name if available.
   model_has_multiple_speakers = hps.data.n_speakers > 0
