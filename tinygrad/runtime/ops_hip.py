@@ -50,7 +50,7 @@ def compile_hip(prg) -> bytes:
   hip.hiprtcCompileProgram(prog, [f'--offload-arch={hip.hipGetDeviceProperties(HIP.default_device).gcnArchName}'])
   return hip.hiprtcGetCode(prog)
 
-def time_exection(cb, enable=False):
+def time_execution(cb, enable=False):
   if enable:
     start, end = hip.hipEventCreate(), hip.hipEventCreate()
     hip.hipEventRecord(start)
@@ -79,7 +79,7 @@ class HIPProgram:
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
     hip.hipSetDevice(args[0]._device)
     struct = hip.getStructTypeForArgs(*args)(*[data._buf if not isinstance(data, int) else np.int32(data) for data in args])
-    return time_exection(lambda: hip.hipModuleLaunchKernel(self.prgs[args[0]._device], global_size[0], global_size[1], global_size[2], local_size[0], local_size[1], local_size[2], 0, 0, struct), enable=wait)
+    return time_execution(lambda: hip.hipModuleLaunchKernel(self.prgs[args[0]._device], global_size[0], global_size[1], global_size[2], local_size[0], local_size[1], local_size[2], 0, 0, struct), enable=wait)
 
   def __del__(self):
     for module in self.modules: hip.hipModuleUnload(module)
@@ -131,7 +131,7 @@ class HIPGraph:
     for node, params in self.updatable_nodes.values():
       hip.hipGraphExecKernelNodeSetParams(self.instance, node, params)
 
-    et = time_exection(lambda: hip.hipGraphLaunch(self.instance), enable=wait)
+    et = time_execution(lambda: hip.hipGraphLaunch(self.instance), enable=wait)
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=jit, num_kernels=len(self.jit_cache))
     return et
 
