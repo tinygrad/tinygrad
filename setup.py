@@ -19,9 +19,8 @@ setup(name='tinygrad',
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
       ],
-      install_requires=["numpy", "requests", "tqdm", "networkx", "pyopencl",
+      install_requires=["numpy", "tqdm", "pyopencl",
                         "pyobjc-framework-Metal; platform_system=='Darwin'",
-                        "pyobjc-framework-Cocoa; platform_system=='Darwin'",
                         "pyobjc-framework-libdispatch; platform_system=='Darwin'"],
       python_requires='>=3.8',
       extras_require={
@@ -55,6 +54,8 @@ setup(name='tinygrad',
             "sentencepiece",
             "tiktoken",
             "librosa",
+            "requests",
+            "networkx",
         ]
       },
       include_package_data=True)

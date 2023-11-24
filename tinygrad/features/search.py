@@ -47,20 +47,21 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
 
     # TODO: this is copied from prg.__call__
     global_size, local_size = prg.launch_dims(var_vals)
+    prg.global_size = real_global_size
     if global_size is not None and local_size is None and all_int(tuple(prg.global_size)): # type: ignore[arg-type]
       local_size = optimize_local_size(prg.clprg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
+
+    lra = prg.runtime_args.copy()
+    if global_size: lra['global_size'] = global_size
+    if local_size: lra['local_size'] = local_size
 
     tms = []
     for _ in range(cnt):
       if clear_l2:
         # TODO: this is too small for many L2 caches
         with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
-      lra = prg.runtime_args.copy()
-      if global_size: lra['global_size'] = global_size
-      if local_size: lra['local_size'] = local_size
       tms.append(prg.clprg(*rawbufs, *var_vals.values(), **lra, wait=True)*factor)
-    prg.global_size = real_global_size
   except Exception:
     if DEBUG >= 4:
       import traceback
