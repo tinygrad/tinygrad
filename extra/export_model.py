@@ -5,7 +5,7 @@ from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
 import json
 
-EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CLANG", "CUDA", "GPU", "METAL"]
+EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "WEBGL", "CLANG", "CUDA", "GPU", "METAL"]
 
 def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
@@ -65,6 +65,16 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
   cprog += list(functions.values())
   cprog += [f"void net({inputs}, {outputs}) {{"] + [f"{name}({', '.join(args)});" for (name, args, _global_size, _local_size) in statements] + ["}"]
   return '\n'.join(cprog)
+
+def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names) -> str:
+  kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
+  kernel_names = ', '.join([name for (name, _args, _global_size, _local_size) in statements])
+  prg = "let gl = canvas.getContext('webgl2');\n"
+  header = """window.addEventListener("load", setupWebGL, false);\n
+              function setupWebGL(evt) {\n
+              window.removeEventListener(evt.type, setupWebGL, false);\n"""
+  prg += f"[{kernel_names}].forEach((code) => {{ const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(fragmentShader, code); gl.compileShader(fragmentShader);const message = gl.getShaderInfoLog(fragmentShader); if (message.length > 0) {{console.log(code + message); }}; }});"
+  return f"{kernel_code}\n{header}{prg}\n}}"
 
 def export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names) -> Tuple[str,int,int]:
   kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
@@ -137,7 +147,7 @@ const setupNet = async (device, safetensor) => {{
   """ + f"\n\nconst loadNet = async (device) => {{ return await fetch('net.safetensors').then(x => x.arrayBuffer()).then(x => setupNet(device, new Uint8Array(x))); }}"
 
 def export_model(model, target:str, *inputs):
-  assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, "only WEBGPU, CLANG, CUDA, GPU, METAL are supported"
+  assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, "only WEBGPU, WEBGL, CLANG, CUDA, GPU, METAL are supported"
   run,special_names = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
   state = get_state_dict(model)
@@ -149,6 +159,8 @@ def export_model(model, target:str, *inputs):
     prg = export_model_clang(functions, statements, bufs, bufs_to_save, input_names, output_names)
   elif target == "webgpu":
     prg = export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names)
+  elif target == "webgl":
+    prg = export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names)
   else:
     prg = json.dumps({
       "backend": Device.DEFAULT,

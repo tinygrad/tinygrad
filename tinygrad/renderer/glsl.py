@@ -35,7 +35,7 @@ class GLSLLanguage(CStyleLanguage):
   
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     local_size = local_size[::-1] if local_size else [1]
-    prg = "#version 330\nin vec2 uv;\nuniform int w;\nprecision highp float;\n"
+    prg = "#version 330\nprecision highp float;\nin vec2 uv;\nuniform int w;\n"
     prg += "\n".join([f"uniform {sampler_prefix[dtype]}sampler2D {name};" for name,dtype in bufs if name != "data0"])
     dummy_line = "float dummy = float(texture(data1, vec2(0.0f,0.0f)).r);\n" if ("sampler2D data1" in prg) else ""
     dummy_line += "\nint xyz = w;\n"
@@ -48,9 +48,9 @@ class GLSLLanguage(CStyleLanguage):
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
-    x_calc = f"({idx})%textureSize({buf_name}, 0).x"
-    y_calc = f"({idx})/textureSize({buf_name}, 0).x"
-    out_val = f"texture({buf_name}, vec2(float({x_calc} + 0.5)/textureSize({buf_name}, 0).x, float({y_calc} + 0.5)/textureSize({buf_name}, 0).y)).r"
+    x_calc = f"float(int({idx})%textureSize({buf_name}, 0).x)"
+    y_calc = f"float(int({idx})/textureSize({buf_name}, 0).x)"
+    out_val = f"texture({buf_name}, vec2(float({x_calc} + 0.5)/float(textureSize({buf_name}, 0).x), float({y_calc} + 0.5)/float(textureSize({buf_name}, 0).y))).r"
     return f"{self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val}"
 
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:

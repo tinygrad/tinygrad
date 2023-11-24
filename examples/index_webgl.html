@@ -1,0 +1,40 @@
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+#result {  font-size: 48px; }
+#time {  font-size: 16px;  color: grey; }
+#mybox {  padding: 20px; }
+#resultbox {  padding: 50px; }
+.bigggg {  font-size: 18px;  margin-top: 10px; }
+.bigg {  font-size: 18px; }
+#url {  font-size: 18px;  width: 70%; }
+a {  text-decoration: none; }
+h1 {  padding: 50px;  padding-bottom: 0px;  font-size: 36px;  font-weight: normal; }
+#imagebox {  height:224px;  width:224px;  border: 1px dotted black; }
+#video {  height:0px;  width:0px;  border: 1px dotted black;  object-fit: cover;}
+canvas {  display: none; }
+* {  text-align: center;  font-family: monospace; }
+</style>
+<title>tinygrad has WebGL</title>
+<script src="./net.js"></script>
+<link rel="icon" type="image/x-icon" href="https://raw.githubusercontent.com/tinygrad/tinygrad/master/docs/logo.png">
+</head>
+<body>
+<h1>WebGL <a href="https://github.com/geohot/tinygrad">tinygrad</a> EfficientNet!</h1>
+<div id="mybox">
+<input type="text" id="url" placeholder="put url here" value="https://upload.wikimedia.org/wikipedia/commons/d/da/Norwegian_hen.jpg">
+<input class="bigg" type="button" onclick="runNetWResource(document.getElementById('url').value)" value="Use URL">
+</div>
+<br/>
+<img id="imagebox"></img>
+<canvas id="canvas" width="200" height="200"> </canvas>
+<div id="resultbox">
+<div id="result">result will go here</div>
+<div id="time"></div>
+</div>
+<script>
+	
+</script>
+</body>
+</html>
