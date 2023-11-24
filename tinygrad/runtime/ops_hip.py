@@ -1,7 +1,7 @@
 import numpy as np
 import ctypes
 import extra.hip_wrapper as hip
-from typing import Tuple, List, Any, Dict, cast, Optional
+from typing import Tuple, List, Any, Dict, cast, Optional, Callable
 from tinygrad.helpers import DEBUG, getenv, diskcache
 from tinygrad.ops import Compiled, CompiledASTRunner, update_stats
 from tinygrad.renderer.hip import HIPRenderer
@@ -65,7 +65,7 @@ def time_execution(cb, enable=False):
 
 class HIPProgram:
   def __init__(self, name:str, prg:bytes):
-    self.modules, self.prgs = [], []
+    self.modules, self.prgs, self.c_struct_t = [], [], None
 
     if DEBUG >= 6:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
@@ -78,8 +78,9 @@ class HIPProgram:
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
     hip.hipSetDevice(args[0]._device)
-    struct = hip.getStructTypeForArgs(*args)(*[data._buf if not isinstance(data, int) else np.int32(data) for data in args])
-    return time_execution(lambda: hip.hipModuleLaunchKernel(self.prgs[args[0]._device], global_size[0], global_size[1], global_size[2], local_size[0], local_size[1], local_size[2], 0, 0, struct), enable=wait)
+    if self.c_struct_t is None: self.c_struct_t = hip.getCStructForType([(ctypes.c_void_p if not isinstance(x, int) else ctypes.c_int) for x in args])
+    c_params = cast(Callable, self.c_struct_t)(*[x._buf if not isinstance(x, int) else x for x in args])
+    return time_execution(lambda: hip.hipModuleLaunchKernel(self.prgs[args[0]._device], *global_size, *local_size, 0, 0, c_params), enable=wait)
 
   def __del__(self):
     for module in self.modules: hip.hipModuleUnload(module)
@@ -102,14 +103,15 @@ class HIPGraph:
     for (j,i),input_name in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name]
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledASTRunner = cast(CompiledASTRunner, ji.prg)
-      global_size, local_size = prg.launch_dims(var_vals)
-
       assert all(x is not None for x in ji.rawbufs) and ji.rawbufs[0] is not None, "buffers could not be None" # for linters
-      params = hip.buildKernelNodeParams(*ji.rawbufs, *[var_vals[x] for x in prg.vars], func=prg.clprg.prgs[ji.rawbufs[0]._device], grid=global_size, block=local_size)
-      graph_node = hip.hipGraphAddKernelNode(self.graph, [graph_node] if graph_node else [], params)
+
+      args = [cast(RawBuffer, x)._buf for x in ji.rawbufs] + [var_vals[x] for x in prg.vars]
+      types = [ctypes.c_void_p] * len(ji.rawbufs) + [ctypes.c_int] * len(prg.vars)
+      c_params = hip.buildKernelNodeParams(args, types, prg.clprg.prgs[ji.rawbufs[0]._device], *prg.launch_dims(var_vals))
+      graph_node = hip.hipGraphAddKernelNode(self.graph, [graph_node] if graph_node else [], c_params)
 
       if j in self.jc_idxs_with_updatable_launch_dims or j in self.jc_idxs_with_updatable_var_vals or j in self.jc_idxs_with_updatable_rawbufs:
-        self.updatable_nodes[j] = (graph_node, params)
+        self.updatable_nodes[j] = (graph_node, c_params)
 
     self.instance = hip.hipGraphInstantiate(self.graph)
 
@@ -120,9 +122,9 @@ class HIPGraph:
   def __call__(self, input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # Update cached params structs with the new values.
     for (j,i),input_idx in self.input_replace.items():
-      hip.setKernelNodeParam(self.updatable_nodes[j][1], input_rawbuffers[input_idx], i)
+      hip.setKernelNodeParams(self.updatable_nodes[j][1], [input_rawbuffers[input_idx]._buf], [i])
     for j in self.jc_idxs_with_updatable_launch_dims:
-      hip.setKernelNodeLaunchDims(self.updatable_nodes[j][1], cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals))
+      hip.setKernelNodeLaunchDims(self.updatable_nodes[j][1], *cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals))
     for j in self.jc_idxs_with_updatable_var_vals:
       prg: CompiledASTRunner = cast(CompiledASTRunner, self.jit_cache[j].prg)
       hip.setKernelNodeParams(self.updatable_nodes[j][1], [var_vals[x] for x in prg.vars], list(range(len(self.jit_cache[j].rawbufs), len(self.jit_cache[j].rawbufs) + len(prg.vars))))
