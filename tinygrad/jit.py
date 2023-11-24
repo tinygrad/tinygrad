@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import Callable, List, Tuple, Dict, cast, Union, Optional, TypeVar, Generic
 import functools, itertools, operator
-from tinygrad.helpers import DEBUG, DType, merge_dicts, getenv
-from tinygrad.ops import RawBuffer, Device, JITRunner
+from tinygrad.helpers import DEBUG, DType, merge_dicts, getenv, all_int
+from tinygrad.ops import RawBuffer, Device, JITRunner, CompiledASTRunner
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node
@@ -24,6 +24,10 @@ def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[RawBuffer]
         input_replace[(j,i)] = input_rawbuffers.index(a)
   assert len(set(input_replace.values())) == len(input_rawbuffers), "some input tensors not found"
   return input_replace
+def get_jc_idxs_with_updatable_launch_dims(jit_cache: List[JitItem]) -> List[int]:
+  return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledASTRunner) and ((ji.prg.global_size and not all_int(tuple(ji.prg.global_size))) or (ji.prg.local_size and not all_int(tuple(ji.prg.local_size))))]
+def get_jc_idxs_with_updatable_var_vals(jit_cache: List[JitItem]) -> List[int]:
+  return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledASTRunner) and ji.prg.vars]
 
 class GraphException(Exception): pass
 

@@ -177,37 +177,16 @@ try:
     c_struct: Any
     context: Any = None
 
-  # Better to cache struct_types since they reused often and take a lot of time to create.
-  struct_type_cache: Dict[str, Any] = {}
-  def __get_struct(name, field_list):
-    global struct_type_cache
-    if name in struct_type_cache:
-      return struct_type_cache[name]
+  def getCStructForType(argtypes):
+    fields = []
+    for j,typ in enumerate(argtypes):
+      fields.append((f'field{j}', typ))
+
     class CStructure(ctypes.Structure):
-      _fields_ = field_list
-    struct_type_cache[name] = CStructure
-    return struct_type_cache[name]
+      _fields_ = fields
+    return CStructure
 
-  def getStructTypeForArgs(*args):
-    types = ""
-    fields: List[Tuple[str, Any]] = []
-    for idx in range(len(args)):
-      if args[idx].__class__ is int:
-        types += 'i'
-        fields.append((f'field{idx}', ctypes.c_int))
-      else:
-        types += 'P'
-        fields.append((f'field{idx}', ctypes.c_void_p))
-    return __get_struct(types, fields)
-
-  def updateKernelNodeParams(npwrapper:kernelNodeParamsWrapper, *args, grid=(1,1,1), block=(1,1,1), updated_args=None):
-    _, struct, _ = npwrapper.context
-    if updated_args is not None:
-      for i in updated_args:
-        setattr(struct, f'field{i}', (args[i] if args[i].__class__ is int else args[i]._buf))
-    else:
-      for i,d in enumerate(args):
-        setattr(struct, f'field{i}', (d if d.__class__ is int else d._buf))
+  def setKernelNodeLaunchDims(npwrapper:kernelNodeParamsWrapper, grid, block):
     npwrapper.c_struct.blockDimX = block[0]
     npwrapper.c_struct.blockDimY = block[1]
     npwrapper.c_struct.blockDimZ = block[2]
@@ -215,10 +194,13 @@ try:
     npwrapper.c_struct.gridDimY = grid[1]
     npwrapper.c_struct.gridDimZ = grid[2]
 
-  def buildKernelNodeParams(*args, func=None, grid=(1,1,1), block=(1,1,1), sharedMemBytes=0, argsStructType=None):
-    data = [d if d.__class__ is int else d._buf for d in args]
-    if argsStructType is None: argsStructType = getStructTypeForArgs(*args)
-    struct = argsStructType(*data)
+  def setKernelNodeParams(npwrapper:kernelNodeParamsWrapper, args, ids):
+    for j,i in enumerate(ids):
+      setattr(npwrapper.context[1], f'field{i}', args[j])
+
+  def buildKernelNodeParams(args, argtypes, func, grid, block, sharedMemBytes=0):
+    c_struct_t = getCStructForType(argtypes)
+    struct = c_struct_t(*args)
     size = ctypes.c_size_t(ctypes.sizeof(struct))
     p_size = ctypes.c_void_p(ctypes.addressof(size))
     p_struct = ctypes.c_void_p(ctypes.addressof(struct))
