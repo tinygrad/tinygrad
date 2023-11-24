@@ -303,7 +303,7 @@ class LLaMa:
       _model_path = fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-955k-token-2T/resolve/main/model.safetensors?download=true", "model.safetensors")
       _tokenizer_path = fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-955k-token-2T/resolve/main/tokenizer.model?download=true" "tokenizer.model")
     os.replace(_model_path, Path.joinpath(model_path, "model.safetensors"))
-    os.replace(_tokenizer_path, Path.joinpath(tokenizer_path, model_size, "tokenizer.model"))
+    os.replace(_tokenizer_path, tokenizer_path)
     from sentencepiece import SentencePieceProcessor
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == MODEL_PARAMS[model_gen][model_size]["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {MODEL_PARAMS[model_gen][model_size]['args']['vocab_size']}"
