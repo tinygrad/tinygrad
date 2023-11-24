@@ -2,7 +2,7 @@ from __future__ import annotations
 import importlib, inspect, functools, pathlib, time, re
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT, dedup, all_int
+from tinygrad.helpers import ansilen, ansistrip, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT, dedup, all_int
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from dataclasses import dataclass
@@ -228,11 +228,11 @@ def get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interprete
 # **************** for Compiled Buffers ****************
 
 class CompiledASTRunner(JITRunner):
-  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, op_estimate=0, mem_estimate=0, display_name:Optional[str]=None, runtime_args:Optional[dict]=None):
+  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None):
     super().__init__()
     if DEBUG >= 4: print(prg)
-    self.name, self.prg, self.global_size, self.local_size, self.op_estimate, self.mem_estimate, self.display_name, self.runtime_args = \
-      name, prg, global_size, local_size, op_estimate, mem_estimate, display_name, runtime_args if runtime_args is not None else {}
+    self.name, self.prg, self.global_size, self.local_size, self.runtime_args = \
+      name, prg, global_size, local_size, runtime_args if runtime_args is not None else {}
     self.vars: List[Variable] = []
     if ast:
       info = get_lazyop_info(ast)
@@ -243,7 +243,7 @@ class CompiledASTRunner(JITRunner):
 
   def build(self, compiler, runtime):
     self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
-    self.clprg = runtime(self.name, self.lib)
+    self.clprg = runtime(ansistrip(self.name), self.lib)
     return self
 
   def launch_dims(self, var_vals):
@@ -262,7 +262,7 @@ class CompiledASTRunner(JITRunner):
     if global_size: lra['global_size'] = global_size
     if local_size and 'local_size' not in lra: lra['local_size'] = local_size
     et = self.clprg(*rawbufs, *[var_vals[k] for k in self.vars], **lra, wait=wait or DEBUG>=2)
-    update_stats(self.display_name if self.display_name is not None else self.name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra)
+    update_stats(self.name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra)
     return et
 
 class Compiled:
@@ -273,8 +273,7 @@ class Compiled:
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     k.linearize()
     src, runtime_args = self.renderer(k.function_name, k.uops)
-    return CompiledASTRunner(k.ast, k.function_name, src, k.global_size, k.local_size,
-                             display_name=k.display_name, runtime_args=runtime_args).build(self.compiler, self.runtime)
+    return CompiledASTRunner(k.ast, k.display_name, src, k.global_size, k.local_size, runtime_args=runtime_args).build(self.compiler, self.runtime)
 
   def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
     # check if we can reuse the output buffer
