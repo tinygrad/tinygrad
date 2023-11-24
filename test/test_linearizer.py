@@ -349,13 +349,13 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
         k.apply_opt(opt)
     prg = to_prg(k)
     real_bufs[0] = real_bufs[0].fromCPU(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np)) # Zero to check that all values are filled
-    prg.exec(real_bufs, force_wait=True)
+    prg.exec(real_bufs)
     np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
 
   # Get baseline, which is not optimized at all.
   k = Linearizer(realized_ast)
   prg = Device[Device.DEFAULT].to_program(k)
-  prg.exec(real_bufs, force_wait=True)
+  prg.exec(real_bufs)
   wanna_output = real_bufs[0].toCPU().copy()
 
   # Check correctness of handcoded optimiztions.
@@ -363,7 +363,7 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
   k.hand_coded_optimizations()
   prg = Device[Device.DEFAULT].to_program(k)
   real_bufs[0] = real_bufs[0].fromCPU(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np)) # Zero to check that all values are filled
-  prg.exec(real_bufs, force_wait=True)
+  prg.exec(real_bufs)
   np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
   for x in opts: # Check custom transformations if any.
     check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_program)
@@ -496,7 +496,7 @@ class TestLinearizerOpts(unittest.TestCase):
 
   def test_padto_matmul(self):
     if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
-    if Device.DEFAULT == "CUDA": self.skipTest("super slow on CUDA/triton")
+    if Device.DEFAULT == "CUDA": self.skipTest("super slow on CUDA")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)

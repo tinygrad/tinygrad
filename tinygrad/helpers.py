@@ -1,6 +1,7 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, requests, tempfile, pathlib
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string
 import numpy as np
+from urllib import request
 from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -27,7 +28,7 @@ def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
-def round_up(num, amt): return num if num%amt == 0 else num+(amt-(num%amt))
+def round_up(num, amt:int): return (num+amt-1)//amt * amt
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
   return {k:v for d in ds for k,v in d.items()}
@@ -39,9 +40,17 @@ def partition(lst:List[T], fxn:Callable[[T],bool]):
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
   return x
+def get_child(obj, key):
+  for k in key.split('.'):
+    if k.isnumeric(): obj = obj[int(k)]
+    elif isinstance(obj, dict): obj = obj[k]
+    else: obj = getattr(obj, k)
+  return obj
 
 @functools.lru_cache(maxsize=None)
-def getenv(key, default=0): return type(default)(os.getenv(key, default))
+def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])
+@functools.lru_cache(maxsize=None)
+def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 
 class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
@@ -225,15 +234,17 @@ def diskcache(func):
 
 # *** http support ***
 
-def fetch(url:str) -> pathlib.Path:
-  fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / hashlib.md5(url.encode('utf-8')).hexdigest()
-  if not fp.is_file():
-    r = requests.get(url, stream=True, timeout=10)
-    assert r.status_code == 200
-    progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
-    (path := fp.parent).mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
-      for chunk in r.iter_content(chunk_size=16384): progress_bar.update(f.write(chunk))
-      f.close()
-      pathlib.Path(f.name).rename(fp)
+def fetch(url:str, name:Optional[str]=None, allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
+  fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())
+  if not fp.is_file() or not allow_caching:
+    with request.urlopen(url, timeout=10) as r:
+      assert r.status == 200
+      total_length = int(r.headers.get('content-length', 0))
+      progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=url)
+      (path := fp.parent).mkdir(parents=True, exist_ok=True)
+      with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
+        while chunk := r.read(16384): progress_bar.update(f.write(chunk))
+        f.close()
+        if (file_size:=os.stat(f.name).st_size) < total_length: raise RuntimeError(f"fetch size incomplete, {file_size} < {total_length}")
+        pathlib.Path(f.name).rename(fp)
   return fp

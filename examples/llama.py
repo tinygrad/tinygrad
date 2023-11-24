@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# pip3 install sentencepiece pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
+# pip3 install sentencepiece
 #import typeguard.importhook
 #typeguard.importhook.install_import_hook('tinygrad')
 

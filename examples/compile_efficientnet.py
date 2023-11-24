@@ -2,9 +2,8 @@ from pathlib import Path
 from extra.models.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_save
-from extra.utils import fetch
 from extra.export_model import export_model
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, fetch
 import ast
 
 if __name__ == "__main__":
@@ -21,11 +20,10 @@ if __name__ == "__main__":
   else:
     cprog = [prg]
     # image library!
-    cprog += ["#define STB_IMAGE_IMPLEMENTATION", fetch("https://raw.githubusercontent.com/nothings/stb/master/stb_image.h").decode('utf-8').replace("half", "_half")]
+    cprog += ["#define STB_IMAGE_IMPLEMENTATION", fetch("https://raw.githubusercontent.com/nothings/stb/master/stb_image.h").read_text().replace("half", "_half")]
 
     # imagenet labels, move to datasets?
-    lbls = fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt")
-    lbls = ast.literal_eval(lbls.decode('utf-8'))
+    lbls = ast.literal_eval(fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt").read_text())
     lbls = ['"'+lbls[i]+'"' for i in range(1000)]
     inputs = "\n".join([f"float {inp}[{inp_size}];" for inp,inp_size in inp_sizes.items()])
     outputs = "\n".join([f"float {out}[{out_size}];" for out,out_size in out_sizes.items()])

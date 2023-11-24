@@ -147,7 +147,9 @@ def get_run_onnx(onnx_model: ModelProto):
 
       # NOTE some ops live here because they require access to some local variables
       # have to use n.output for cases when num_outputs is absent
-      if n.op_type == "Split":
+      if n.op_type in onnx_ops.tensor_methods:
+        ret = getattr(Tensor, n.op_type.lower())(*inp, **opt)
+      elif n.op_type == "Split":
         axis = opt.get("axis", 0)
         split = None if len(inp) == 1 else [int(x) for x in safe_numpy(inp[1])]
         if split is None:

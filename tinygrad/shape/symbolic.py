@@ -319,8 +319,6 @@ def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   elif typ == AndNode: ret.min, ret.max = (min([x.min for x in nodes]), max([x.max for x in nodes]))
   return create_node(ret)
 
-@functools.lru_cache(maxsize=None)
-def sym_rename(s) -> str: return f"s{sym_rename.cache_info().currsize}"
 def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
 def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
   if isinstance(a, (int, float)): return a
