@@ -1,8 +1,4 @@
 import os, atexit, functools
-try:
-  import networkx as nx
-except ImportError:
-  nx = None # graph won't work
 from collections import defaultdict
 from typing import Dict, List
 from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, OpType, LazyOp
@@ -13,7 +9,6 @@ from tinygrad.shape.symbolic import NumNode
 
 # **** debugging and graphing ****
 
-G = nx.DiGraph() if nx is not None else None
 cnts: Dict[OpType, int] = defaultdict(int)
 if DEBUG >= 2:
   def print_globalcounters():
@@ -22,6 +17,8 @@ if DEBUG >= 2:
           f"{' '*10}total: {GlobalCounters.kernel_count:5d} kernels {GlobalCounters.global_ops*1e-9:8.2f} GOPS {GlobalCounters.global_mem*1e-9:8.2f} GB {GlobalCounters.time_sum_s*1e3:8.2f} ms")
   atexit.register(print_globalcounters)
 if GRAPH:
+  import networkx as nx
+  G = nx.DiGraph()
   def save_graph_exit():
     for k,v in cnts.items(): print(k, v)
     print("saving", G)
@@ -61,8 +58,7 @@ def add_st_node(nmx, nmo, label, st:ShapeTracker):
 logops = open(getenv("LOGOPS", ""),"a") if getenv("LOGOPS", "") else None
 def log_schedule_item(si: ScheduleItem):
   if logops and si.ast.op not in LoadOps: logops.write(str(si.ast)+"\n")
-  show_graph = bool(GRAPH)
-  if not DEBUG and not show_graph: return
+  if not DEBUG and not GRAPH: return
   if si.ast.op == LoadOps.CONTIGUOUS: setattr(si.out, 'node_id', nm(si.inputs[0].base))
   if si.ast.op in {LoadOps.CONST, LoadOps.CONTIGUOUS}: return
 
@@ -70,7 +66,7 @@ def log_schedule_item(si: ScheduleItem):
   oporder = [LoadOps, TernaryOps, ReduceOps, BinaryOps, UnaryOps, MovementOps, BufferOps]
   optype = type(sorted(op, key=lambda x: oporder.index(type(x)))[0])
   cnts[optype] += 1
-  if show_graph:
+  if GRAPH:
     assert si.out.base == si.out, "all outputs based"
     top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#FF8080'}
 
