@@ -231,6 +231,7 @@ class CompiledASTRunner(JITRunner):
   def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None):
     super().__init__()
     if DEBUG >= 4: print(prg)
+    assert (not global_size or len(global_size)==3) and (not local_size or len(local_size)==3), f"global and local size must be len(3), {global_size} and {local_size} isn't"
     self.name, self.display_name, self.prg, self.global_size, self.local_size, self.runtime_args = \
       to_function_name(name), name, prg, global_size, local_size, runtime_args if runtime_args is not None else {}
     self.vars: List[Variable] = []
