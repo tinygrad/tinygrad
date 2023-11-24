@@ -231,8 +231,8 @@ class CompiledASTRunner(JITRunner):
   def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None):
     super().__init__()
     if DEBUG >= 4: print(prg)
-    self.name, self.prg, self.global_size, self.local_size, self.runtime_args = \
-      name, prg, global_size, local_size, runtime_args if runtime_args is not None else {}
+    self.name, self.display_name, self.prg, self.global_size, self.local_size, self.runtime_args = \
+      to_function_name(name), name, prg, global_size, local_size, runtime_args if runtime_args is not None else {}
     self.vars: List[Variable] = []
     if ast:
       info = get_lazyop_info(ast)
@@ -243,7 +243,7 @@ class CompiledASTRunner(JITRunner):
 
   def build(self, compiler, runtime):
     self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
-    self.clprg = runtime(to_function_name(self.name), self.lib)
+    self.clprg = runtime(self.name, self.lib)
     return self
 
   def launch_dims(self, var_vals):
@@ -262,7 +262,7 @@ class CompiledASTRunner(JITRunner):
     if global_size: lra['global_size'] = global_size
     if local_size and 'local_size' not in lra: lra['local_size'] = local_size
     et = self.clprg(*rawbufs, *[var_vals[k] for k in self.vars], **lra, wait=wait or DEBUG>=2)
-    update_stats(self.name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra)
+    update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra)
     return et
 
 class Compiled:
