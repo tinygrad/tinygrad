@@ -97,6 +97,7 @@ class Profiling(contextlib.ContextDecorator):
 
 # **** tinygrad now supports dtypes! *****
 
+# TODO: migrate this from NamedTuple -> dataclass
 class DType(NamedTuple):
   priority: int  # this determines when things get upcasted
   itemsize: int

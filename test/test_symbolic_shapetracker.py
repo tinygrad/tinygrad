@@ -115,7 +115,7 @@ class TestSymbolicReshape(unittest.TestCase):
 
   def test_reshape_into_symbols_bad_shape(self):
     vi = Variable("i", 1, 10).bind(4)
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(ValueError):
       t = Tensor.rand(4, 6).reshape(vi, 6).reshape(1, 77) # reshape to a different size new shape through symbolic shape
     with self.assertRaises(AssertionError):
       t = Tensor.rand(3, 4).reshape(3, (vi+1)) # reshape into non-Variable Node

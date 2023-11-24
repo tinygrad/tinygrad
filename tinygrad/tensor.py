@@ -71,9 +71,9 @@ class Tensor:
         data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
       else:
         data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
-    else: raise RuntimeError(f"can't create Tensor from {data} with type {type(data)}")
 
     # data is a LazyBuffer, but it might be on the wrong device
+    if not isinstance(data, LazyBuffer): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
     self.lazydata = data if data.device == device else data.copy_to_device(device)
 
   def __repr__(self):
@@ -673,8 +673,8 @@ class Tensor:
     return (x, y)
 
   def _to_float(self, x:Union[Tensor, float]):
-    return x.lazydata.base.op.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_const() and not x.requires_grad \
-      and x.lazydata.st.contiguous and self._broadcasted(x)[0].shape == self.shape else x
+    return x.lazydata.base.op.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
+      and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     x = self._to_float(x)
