@@ -13,28 +13,16 @@ import pyaudio
 import yaml
 from llama import LLaMa
 from tiktoken import Encoding
-from vits import HParams, Synthesizer, TextMapper, download_if_not_present, get_hparams_from_file, load_model
+from vits import MODELS as VITS_MODELS
+from vits import VITS_PATH, Y_LENGTH_ESTIMATE_SCALARS, HParams, Synthesizer, TextMapper, get_hparams_from_file, load_model
 from whisper import Whisper, init_whisper, prep_audio
 
-from tinygrad.helpers import Timing, dtypes
+from tinygrad.helpers import Timing, dtypes, fetch
 from tinygrad.tensor import Tensor
 
 # Whisper constants
 RATE = 16000
 CHUNK = 1600
-
-# vits constants
-VITS_PATH = Path(__file__).parents[1] / "weights/VITS/"
-VITS_MODELS = { # config_path, weights_path, config_url, weights_url
-  "ljs": (VITS_PATH / "config_ljs.json", VITS_PATH / "pretrained_ljs.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/ljs_base.json", "https://drive.google.com/uc?export=download&id=1q86w74Ygw2hNzYP9cWkeClGT5X25PvBT&confirm=t"),
-  "vctk": (VITS_PATH / "config_vctk.json", VITS_PATH / "pretrained_vctk.pth", "https://raw.githubusercontent.com/jaywalnut310/vits/main/configs/vctk_base.json", "https://drive.google.com/uc?export=download&id=11aHOlhnxzjpdWDpsz1vFDCzbeEfoIxru&confirm=t"),
-  "mmts-tts": (VITS_PATH / "config_mmts-tts.json", VITS_PATH / "pretrained_mmts-tts.pth", "https://huggingface.co/facebook/mms-tts/raw/main/full_models/eng/config.json", "https://huggingface.co/facebook/mms-tts/resolve/main/full_models/eng/G_100000.pth"),
-  "uma_trilingual": (VITS_PATH / "config_uma_trilingual.json", VITS_PATH / "pretrained_uma_trilingual.pth", "https://huggingface.co/spaces/Plachta/VITS-Umamusume-voice-synthesizer/raw/main/configs/uma_trilingual.json", "https://huggingface.co/spaces/Plachta/VITS-Umamusume-voice-synthesizer/resolve/main/pretrained_models/G_trilingual.pth"),
-  "cjks": (VITS_PATH / "config_cjks.json", VITS_PATH / "pretrained_cjks.pth", "https://huggingface.co/spaces/skytnt/moe-tts/resolve/main/saved_model/14/config.json", "https://huggingface.co/spaces/skytnt/moe-tts/resolve/main/saved_model/14/model.pth"),
-  "voistock": (VITS_PATH / "config_voistock.json", VITS_PATH / "pretrained_voistock.pth", "https://huggingface.co/spaces/skytnt/moe-tts/resolve/main/saved_model/15/config.json", "https://huggingface.co/spaces/skytnt/moe-tts/resolve/main/saved_model/15/model.pth"),
-}
-VITS_Y_LENGTH_ESTIMATE_SCALARS = {"ljs": 2.8, "vctk": 1.74, "mmts-tts": 1.9, "uma_trilingual": 2.3, "cjks": 3.3, "voistock": 3.1}
-
 
 def clean_text(enc: Encoding, txt: str) -> str:
   for t in enc.special_tokens_set:
@@ -119,7 +107,7 @@ def tts(
 
   # Perform inference.
   audio_tensor = synth.infer(x_tst, x_tst_lengths, sid, noise_scale, length_scale, noise_scale_w, emotion_embedding=emotion_embedding,
-                             max_y_length_estimate_scale=VITS_Y_LENGTH_ESTIMATE_SCALARS[model_to_use] if estimate_max_y_length else None, batch_size=batch_size)[0, 0]
+                             max_y_length_estimate_scale=Y_LENGTH_ESTIMATE_SCALARS[model_to_use] if estimate_max_y_length else None, batch_size=batch_size)[0, 0]
   # Save the audio output.
   audio_data = (np.clip(audio_tensor.numpy(), -1.0, 1.0) * 32767).astype(np.int16)
   return audio_data
@@ -134,9 +122,7 @@ def init_vits(
   model_config = VITS_MODELS[model_to_use]
 
   # Load the hyperparameters from the config file.
-  config_path = model_config[0]
-  download_if_not_present(config_path, model_config[2])
-  hps = get_hparams_from_file(config_path)
+  hps = get_hparams_from_file(fetch(model_config[0]))
 
   # If model has multiple speakers, validate speaker id and retrieve name if available.
   model_has_multiple_speakers = hps.data.n_speakers > 0
@@ -154,7 +140,7 @@ def init_vits(
 
   # Load symbols, instantiate TextMapper and clean the text.
   if hps.__contains__("symbols"): symbols = hps.symbols
-  elif model_to_use == "mmts-tts": symbols = list(open(download_if_not_present(VITS_PATH / "vocab_mmts-tts.txt", "https://huggingface.co/facebook/mms-tts/raw/main/full_models/eng/vocab.txt"), encoding="utf-8").read().splitlines())
+  elif model_to_use == "mmts-tts": symbols = [x.replace("\n", "") for x in fetch("https://huggingface.co/facebook/mms-tts/raw/main/full_models/eng/vocab.txt").open(encoding="utf-8").readlines()]
   else: symbols = ['_'] + list(';:,.!?¡¿—…"«»“” ') + list('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz') + list("ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸθœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷˠˤ˞↓↑→↗↘'̩'ᵻ")
   text_mapper = TextMapper(apply_cleaners=True, symbols=symbols)
 
