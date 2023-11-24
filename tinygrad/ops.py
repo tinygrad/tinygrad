@@ -228,11 +228,10 @@ def get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interprete
 # **************** for Compiled Buffers ****************
 
 class CompiledASTRunner(JITRunner):
-  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None):
+  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, runtime_args:Optional[dict]=None):
     super().__init__()
     if DEBUG >= 4: print(prg)
-    self.name, self.prg, self.global_size, self.local_size, self.runtime_args = \
-      name, prg, global_size, local_size, runtime_args if runtime_args is not None else {}
+    self.name, self.prg, self.runtime_args = name, prg, runtime_args if runtime_args is not None else {}
     self.vars: List[Variable] = []
     if ast:
       info = get_lazyop_info(ast)
@@ -247,20 +246,19 @@ class CompiledASTRunner(JITRunner):
     return self
 
   def launch_dims(self, var_vals):
-    global_size = ([sym_infer(sz, var_vals) for sz in self.global_size] + [1]*(3-len(self.global_size))) if self.global_size is not None else self.global_size
-    local_size = ([sym_infer(sz, var_vals) for sz in self.local_size] + [1]*(3-len(self.local_size))) if self.local_size is not None else self.local_size
+    global_size = [sym_infer(sz, var_vals) for sz in self.runtime_args['global_size']] if 'global_size' in self.runtime_args else None
+    local_size = [sym_infer(sz, var_vals) for sz in self.runtime_args['local_size']] if 'local_size' in self.runtime_args else None
     return global_size, local_size
 
   def __call__(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
-    global_size, local_size = self.launch_dims(var_vals)
-    if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
-      # TODO: this is copied from get_program
+    if 'global_size' in self.runtime_args and 'local_size' not in self.runtime_args and all_int(self.runtime_args['global_size']):
       from tinygrad.features.search import optimize_local_size
-      local_size = self.local_size = optimize_local_size(self.clprg, global_size, rawbufs)
-      global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
+      self.runtime_args['local_size'] = optimize_local_size(self.clprg, self.runtime_args['global_size'], rawbufs)
+      self.runtime_args['global_size'] = [g//l if g%l == 0 else g/l for g,l in zip(self.runtime_args['global_size'], self.runtime_args['local_size'])]
+    global_size, local_size = self.launch_dims(var_vals)
     lra = self.runtime_args.copy()
     if global_size: lra['global_size'] = global_size
-    if local_size and 'local_size' not in lra: lra['local_size'] = local_size
+    if local_size: lra['local_size'] = local_size
     et = self.clprg(*rawbufs, *[var_vals[k] for k in self.vars], **lra, wait=wait or DEBUG>=2)
     update_stats(self.name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra)
     return et
@@ -273,7 +271,7 @@ class Compiled:
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     k.linearize()
     src, runtime_args = self.renderer(k.function_name, k.uops)
-    return CompiledASTRunner(k.ast, k.display_name, src, k.global_size, k.local_size, runtime_args=runtime_args).build(self.compiler, self.runtime)
+    return CompiledASTRunner(k.ast, k.display_name, src, runtime_args).build(self.compiler, self.runtime)
 
   def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
     # check if we can reuse the output buffer

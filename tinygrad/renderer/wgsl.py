@@ -1,6 +1,6 @@
 from tinygrad.helpers import dtypes, DType
 from tinygrad.renderer.cstyle import CStyleLanguage
-from typing import List, Union
+from typing import List, Union, Optional
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 import math
 from typing import Tuple
@@ -32,7 +32,7 @@ class WGSLLanguage(CStyleLanguage):
     else: val = f"({x}" + ("" if dtypes.is_int(var_dtype) else "f") + ")"
     return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
 
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:Optional[List[int]], prekernel:List[str]) -> str:
     local_size = local_size[::-1] if local_size else [1]
     bind_it = iter(range(len(bufs)))
     prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
