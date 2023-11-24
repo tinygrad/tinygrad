@@ -496,9 +496,10 @@ class Linearizer(Kernel):
       input_acc = acc[:]
       for val, off in zip(zip(*values), cast(List[int], offs)):
         acc[off] = self.uop(UOps.ALU, dtypes.float32, val+(acc[off],), ops[x.op])
+        ret.append(acc[off])
+      for off in range(len(acc)):
         if input_acc[off] != acc[off]:
           acc[off] = self.uop(UOps.PHI, dtypes.float32, (input_acc[off], acc[off]) + tuple(loop_ctx))
-        ret.append(acc[off])
     else:
       ret = [self.uop(UOps.ALU, dtypes.float32, val, x.op) for val in zip(*values)]
     return ret
