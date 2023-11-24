@@ -223,6 +223,8 @@ MODEL_PARAMS = {
     "1B": {
       "args": {"dim": 2048, "n_layers": 22, "n_heads": 32, "n_kv_heads": 4, "multiple_of": 256, "norm_eps": 1e-05, "vocab_size": 32000},
       "files": 1,
+      "model_url": "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/model.safetensors?download=true",
+      "tokenizer_url": "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/tokenizer.model?download=true",
     }
   }
 }
@@ -302,7 +304,7 @@ class LLaMa:
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
     if model_gen == "tiny":
-      model_path = LLaMa._prepare_model(model_path, tokenizer_path, LLaMa.TINY_MODEL_URL, LLaMa.TINY_TOKENIZER_URL)
+      model_path = LLaMa._prepare_model(model_path, tokenizer_path, MODEL_PARAMS[model_gen][model_size]["model_url"], MODEL_PARAMS[model_gen][model_size]["tokenizer_url"])
 
     from sentencepiece import SentencePieceProcessor
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
