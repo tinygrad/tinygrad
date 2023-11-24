@@ -316,7 +316,7 @@ class LLaMa:
     model_args = params["args"]
     model = Transformer(**model_args, linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
 
-    if model_path.is_dir() and not any(map(lambda f: f.endswith(".safetensors"), os.listdir(model_path))):
+    if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
     else:
       weights = load(str(model_path))
