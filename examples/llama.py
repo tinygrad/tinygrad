@@ -296,8 +296,8 @@ class AbsmaxQuantizedLinear:
     return new_tensors
 
 class LLaMa:
-  TINY_MODEL_URL = "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/model.safetensors?download=true"
-  TINY_TOKENIZER_URL = "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/tokenizer.model?download=true"
+  TINY_MODEL_URL = "https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-955k-token-2T/resolve/main/model.safetensors?download=true"
+  TINY_TOKENIZER_URL = "https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-955k-token-2T/resolve/main/tokenizer.model?download=true"
 
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
@@ -354,6 +354,14 @@ class LLaMa:
     if not tokenizer_path.exists(): tokenizer_path.replace(fetch(tokenizer_url))
     return model_safetensors_path
 
+<<<<<<< HEAD
+=======
+  @staticmethod
+  def _fetch_and_replace_file(url, destination_path):
+    downloaded_path = fetch(url)
+    os.replace(downloaded_path, destination_path)
+
+>>>>>>> parent of 4ae75251 (cleanup)
 # **** main code ****
 """
 test:
