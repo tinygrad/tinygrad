@@ -94,6 +94,7 @@ def train_unet3d():
 
   if getenv("MOCKTRAIN", 0):
     train_loader = [(Tensor.rand(1,1,128,128,128), Tensor.rand(1,1,128,128,128)) for i in range(3)]
+    total_batches = 1
   else:
     def get_train_val_split(files): return files[:-int(len(files)*conf.val_split)], files[-int(len(files)*conf.val_split):]
     files = get_val_files()
@@ -104,8 +105,7 @@ def train_unet3d():
     val_loader = get_batch(val_files, 1, conf.val_input_shape, conf.oversampling)
 
   @TinyJit
-  def train_step(im, y):
-    out = mdl_run(im).numpy()
+  def train_step(out, y):
     loss = dice_ce_loss(out, y)
     optim.zero_grad()
     loss.backward()
@@ -126,7 +126,10 @@ def train_unet3d():
       dtype_im = dtypes.half if getenv("FP16") else dtypes.float
       im, label = Tensor(im, dtype=dtype_im), Tensor(label, dtype=dtype_im)
 
-      loss_value = train_step(im, label)
+      out = mdl_run(im)
+      del im
+
+      loss_value = train_step(out, label)
       cumulative_loss.append(loss_value)
 
     if conf.lr_decay_epochs:
