@@ -1,11 +1,11 @@
 from __future__ import annotations
 from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Sequence, Final, Set
-import itertools, math, functools, operator
+import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, getenv, all_same, to_function_name
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, getenv, all_same, to_function_name, flatten
 from tinygrad.ops import LazyOp, UnaryOps, ConstBuffer, MemBuffer, BufferOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -391,7 +391,7 @@ class Linearizer(Kernel):
           if any(x in parents for x in loop_stack[i]) or i == 0:
             loop_stack[i].append(u)
             break
-    self.uops = functools.reduce(operator.__add__, loop_stack, [])
+    self.uops = flatten(loop_stack)
 
     # uops optimization
     changed_something = True
