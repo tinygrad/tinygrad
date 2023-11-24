@@ -390,5 +390,25 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_equal(Tensor([]).sum().numpy(), 0)
     np.testing.assert_equal(Tensor([]).mean().numpy(), 0)
 
+  def test_self_attention(self):
+    def test_tinygrad(q, k, v):
+      return Tensor.scaled_dot_product_attention(Tensor(q), Tensor(k), Tensor(v)).numpy()
+    def test_pytorch(q, k, v):
+      return torch.nn.functional.scaled_dot_product_attention(torch.Tensor(q), torch.Tensor(k), torch.Tensor(v)).cpu()
+    np.random.seed(1337)
+    sz = (4,2,8,16)
+    q, k, v = [np.random.randn(*sz).astype(np.float32) for _ in range(3)]
+    np.testing.assert_allclose(test_tinygrad(q, k, v), test_pytorch(q, k, v), atol=1e-5)
+
+  def test_cross_attention(self):
+    def test_tinygrad(q, k, v):
+      return Tensor.scaled_dot_product_attention(Tensor(q), Tensor(k), Tensor(v), is_causal=True).numpy()
+    def test_pytorch(q, k, v):
+      return torch.nn.functional.scaled_dot_product_attention(torch.Tensor(q), torch.Tensor(k), torch.Tensor(v), is_causal=True).cpu()
+    np.random.seed(1337)
+    sz = (4,2,8,16)
+    q, k, v = [np.random.randn(*sz).astype(np.float32) for _ in range(3)]
+    np.testing.assert_allclose(test_tinygrad(q, k, v), test_pytorch(q, k, v), atol=1e-5)
+
 if __name__ == '__main__':
   unittest.main()
