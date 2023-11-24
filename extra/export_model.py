@@ -67,14 +67,53 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
   return '\n'.join(cprog)
 
 def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names) -> str:
-  kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
+  kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main').replace('version 330', 'version 300 es')}`;" for key, code in functions.items()])
   kernel_names = ', '.join([name for (name, _args, _global_size, _local_size) in statements])
+  init_shader = """
+function createShaderProgram(gl, code) {
+  const vertexShader = loadShader(gl, gl.VERTEX_SHADER, '#version 300 es\\nin vec2 in_position;in vec2 in_uv;out vec2 uv;void main(){gl_Position=vec4(in_position,0.0,1.0);uv=in_uv;}');
+  const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, code);
+
+  const shaderProgram = gl.createProgram();
+  gl.attachShader(shaderProgram, vertexShader);
+  gl.attachShader(shaderProgram, fragmentShader);
+  gl.linkProgram(shaderProgram);
+
+  if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+    alert(
+      `Unable to initialize the shader program: ${gl.getProgramInfoLog(
+        shaderProgram,
+      )}`,
+    );
+    return null;
+  }
+
+  return shaderProgram;
+}
+
+function loadShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    alert(
+      `An error occurred compiling the shaders: ${gl.getShaderInfoLog(shader)}`,
+    );
+    gl.deleteShader(shader);
+    return null;
+  }
+
+  return shader;
+}
+"""
+  textures = "\n".join([f"let {name} = gl.createTexture();" for name,(size,dtype,_key) in bufs.items()])
   prg = "let gl = canvas.getContext('webgl2');\n"
   header = """window.addEventListener("load", setupWebGL, false);\n
               function setupWebGL(evt) {\n
               window.removeEventListener(evt.type, setupWebGL, false);\n"""
-  prg += f"[{kernel_names}].forEach((code) => {{ const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(fragmentShader, code); gl.compileShader(fragmentShader);const message = gl.getShaderInfoLog(fragmentShader); if (message.length > 0) {{console.log(code + message); }}; }});"
-  return f"{kernel_code}\n{header}{prg}\n}}"
+  prg += f"[{kernel_names}].forEach((code) => {{ createShaderProgram(gl, code); }});"
+  return f"{init_shader}\n{kernel_code}\n{header}{prg}{textures}\n}}"
 
 def export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names) -> Tuple[str,int,int]:
   kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
