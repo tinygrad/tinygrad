@@ -60,7 +60,14 @@ class LazyOp:
   def hash(self): return hash((self.op,self.src, self.arg))
   def __hash__(self): return self.hash
 
-  @property
+  def __eq__(self,x):
+    def eq(ka,kb,cache):
+      if type(ka) != tuple or type(kb) != tuple: return ka == kb
+      if (id(ka), id(kb)) in cache or all(eq(a,b,cache) for a,b in zip(ka,kb)): cache.add ((id(ka),id(kb)))
+      return (id(ka),id(kb)) in cache
+    return eq(self.key,x.key,set())
+
+  @functools.cached_property
   def key(self): return (self.op, tuple(map(lambda x: getattr(x, "key", x), self.src)), getattr(self.arg, "key", self.arg))
 
   def map_buffers(self, real_srcs: MutableMapping[Any, Any]) -> LazyOp: return real_srcs.get(self) or real_srcs.update ({self:LazyOp(self.op, tuple([y.map_buffers(real_srcs) if y not in real_srcs else real_srcs[y] for y in self.src]), self.arg)}) or real_srcs[self]
