@@ -514,7 +514,8 @@ After you are done speaking, output [EOS]. You are not Chad.
 
   LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code", "tiny": "-tiny"}[args.gen]
   MODEL_PATH = args.model or fetch('https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-240k-503b/resolve/main/model.safetensors', 'tinyllama-503b.safetensors')
-  TOKENIZER_PATH = Path(args.model).parent / "tokenizer.model" if args.model else fetch('https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-240k-503b/resolve/main/tokenizer.model', 'tinyllama-503b-tokenizer.model')
+  if args.model: TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
+  else:  TOKENIZER_PATH = fetch('https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-240k-503b/resolve/main/tokenizer.model', 'tinyllama-503b-tokenizer.model')
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
   param_count = sum(x.lazydata.st.size() for x in get_parameters(llama.model))
