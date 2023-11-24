@@ -339,7 +339,7 @@ class TestIndexExpressions2d(unittest.TestCase):
     self.st.reshape((1,1,1,105,1,1))
     assert len(self.st.views) == 1
     v = self.st.views[-1]
-    assert v.strides == (0, 0, 0, 1, 0, 0) and v.mask == ((0, 1), (0, 1), (0, 1), (30, 75), (0, 1), (0, 1)), v.offset == -30
+    assert v.strides == (0, 0, 0, 1, 0, 0) and v.mask == ((0, 1), (0, 1), (0, 1), (30, 75), (0, 1), (0, 1)) and v.offset == -30
     self.st.assert_same()
 class TestSimplifyingShapeTracker(unittest.TestCase):
   def setUp(self):
