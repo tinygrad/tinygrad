@@ -1,5 +1,6 @@
 import argparse
 import multiprocessing as mp
+import os
 import re
 import sys
 import time
@@ -177,6 +178,18 @@ def output_stream(num_channels: int, sample_rate: int):
     stream.stop_stream()
     stream.close()
     p.terminate()
+  
+@contextmanager
+def log_writer():
+  try:
+    logs = []
+    yield logs
+  finally:
+    sep = "="*os.get_terminal_size()[1]
+    print(sep[:-1])
+    print("CHAT LOG")
+    print(*logs, sep="\n")
+    print(sep)
 
 
 def listener(q: mp.Queue, event: mp.Event):
@@ -253,8 +266,17 @@ if __name__ == "__main__":
   p.daemon = True
   p.start()
 
+  # JIT tts
+  for i in ["Hello, I'm a chat bot", "I am capable of doing a lot of things"]:
+    tts(
+      i, synth, hps, emotion_embedding,
+      args.vits_speaker_id, args.vits_model_to_use, args.vits_noise_scale,
+      args.vits_noise_scale_w, args.vits_length_scale,
+      args.vits_estimate_max_y_length, text_mapper, model_has_multiple_speakers
+    )
+
   # Start the pipeline
-  with output_stream(args.vits_num_channels, hps.data.sampling_rate) as stream:
+  with output_stream(args.vits_num_channels, hps.data.sampling_rate) as stream, log_writer() as log:
     while True:
       tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
       total = np.array([])
@@ -266,15 +288,18 @@ if __name__ == "__main__":
       is_listening_event.clear()
 
       # Transcribe text
+      s = time.perf_counter()
       with Timing("transcription: "):
         encoded_audio = model.encoder.encode(Tensor(prep_audio(total.reshape(1, -1), 1)))
         while not (txt := voice2text(model, enc, encoded_audio, tokens)).endswith("<|endoftext|>"): print(txt)
         txt = clean_text(enc, txt)
+        log.append(user_delim + txt)
 
       # Generate with llama
       with Timing("llama generation: "):
         outputted, start_pos = llama_generate(llama, txt, start_pos, outputted)
         response = outputted.splitlines()[-1].replace(resp_delim.strip(), "").replace(end_delim.strip(), "")
+        log.append(resp_delim + response)
 
       # Convert to voice
       with Timing("tts: "):
@@ -285,3 +310,4 @@ if __name__ == "__main__":
           args.vits_estimate_max_y_length, text_mapper, model_has_multiple_speakers
         )
       with Timing("audio play: "): stream.write(audio_data.tobytes())
+      log.append(f"Total: {time.perf_counter() - s}")
