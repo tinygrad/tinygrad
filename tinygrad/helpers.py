@@ -1,11 +1,14 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string
 import numpy as np
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, Iterator, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING
+from urllib import request
+from tqdm import tqdm
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
 
 T = TypeVar("T")
+U = TypeVar("U")
 # NOTE: it returns int 1 if x is empty regardless of the type of x
 def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.__mul__, x, 1)
 
@@ -13,29 +16,41 @@ def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.__mul_
 OSX = platform.system() == "Darwin"
 CI = os.getenv("CI", "") != ""
 
-def dedup(x): return list(dict.fromkeys(x))   # retains list order
+def dedup(x:Iterable[T]): return list(dict.fromkeys(x))   # retains list order
 def argfix(*x): return tuple(x[0]) if x and x[0].__class__ in (tuple, list) else x
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
-def all_same(items): return all(x == items[0] for x in items)
+def all_same(items:List[T]): return all(x == items[0] for x in items)
 def all_int(t: Tuple[Any, ...]) -> TypeGuard[Tuple[int, ...]]: return all(isinstance(s, int) for s in t)
-def colored(st, color, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
-def ansistrip(s): return re.sub('\x1b\\[(K|.*?m)', '', s)
-def ansilen(s): return len(ansistrip(s))
+def colored(st, color:Optional[str], background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line
+def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
+def ansilen(s:str): return len(ansistrip(s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
-def flatten(l:Union[List, Iterator]): return [item for sublist in l for item in sublist]
+def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
-def strip_parens(fst): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
-def merge_dicts(ds:Iterable[Dict]) -> Dict:
+def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
+def round_up(num, amt:int): return (num+amt-1)//amt * amt
+def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
   return {k:v for d in ds for k,v in d.items()}
-def partition(lst, fxn):
-  a: list[Any] = []
-  b: list[Any] = []
+def partition(lst:List[T], fxn:Callable[[T],bool]):
+  a:List[T] = []
+  b:List[T] = []
   for s in lst: (a if fxn(s) else b).append(s)
   return a,b
+def unwrap(x:Optional[T]) -> T:
+  assert x is not None
+  return x
+def get_child(obj, key):
+  for k in key.split('.'):
+    if k.isnumeric(): obj = obj[int(k)]
+    elif isinstance(obj, dict): obj = obj[k]
+    else: obj = getattr(obj, k)
+  return obj
 
 @functools.lru_cache(maxsize=None)
-def getenv(key, default=0): return type(default)(os.getenv(key, default))
+def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])
+@functools.lru_cache(maxsize=None)
+def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 
 class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
@@ -66,9 +81,19 @@ GRAPH, GRAPHPATH = getenv("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 class Timing(contextlib.ContextDecorator):
   def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
   def __enter__(self): self.st = time.perf_counter_ns()
-  def __exit__(self, exc_type, exc_val, exc_tb):
+  def __exit__(self, *exc):
     self.et = time.perf_counter_ns() - self.st
     if self.enabled: print(f"{self.prefix}{self.et*1e-6:.2f} ms"+(self.on_exit(self.et) if self.on_exit else ""))
+
+class Profiling(contextlib.ContextDecorator):
+  def __init__(self, enabled=True, sort='cumtime', frac=0.2): self.enabled, self.sort, self.frac = enabled, sort, frac
+  def __enter__(self):
+    self.pr = cProfile.Profile(timer=lambda: int(time.time()*1e9), timeunit=1e-6)
+    if self.enabled: self.pr.enable()
+  def __exit__(self, *exc):
+    if self.enabled:
+      self.pr.disable()
+      pstats.Stats(self.pr).strip_dirs().sort_stats(self.sort).print_stats(self.frac)
 
 # **** tinygrad now supports dtypes! *****
 
@@ -78,7 +103,11 @@ class DType(NamedTuple):
   name: str
   np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
   sz: int = 1
-  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}"
+  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
+  def vec(self, sz:int):
+    assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
+    return DType(self.priority, self.itemsize*sz, self.name+str(sz), None, sz)
+  def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
 
 # dependent typing?
 class ImageDType(DType):
@@ -101,7 +130,7 @@ class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
   def is_int(x: DType)-> bool: return x in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
-  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes.float64, dtypes._half4, dtypes._float2, dtypes._float4)
+  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes.float64, dtypes.half.vec(4), dtypes.float.vec(2), dtypes.float.vec(4))
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
@@ -118,6 +147,7 @@ class dtypes:
   int8: Final[DType] = DType(1, 1, "char", np.int8)
   int16: Final[DType] = DType(3, 2, "short", np.int16)
   int32: Final[DType] = DType(5, 4, "int", np.int32)
+  int = int32
   int64: Final[DType] = DType(7, 8, "long", np.int64)
   uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
   uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
@@ -128,12 +158,6 @@ class dtypes:
   bfloat16: Final[DType] = DType(9, 2, "__bf16", None)
 
   # NOTE: these are internal dtypes, should probably check for that
-  _int2: Final[DType] = DType(2, 4*2, "int2", None, 2)
-  _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
-  _half16: Final[DType] = DType(0, 2*16, "half16", None, 16)
-  _float2: Final[DType] = DType(4, 4*2, "float2", None, 2)
-  _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
-  _float8: Final[DType] = DType(4, 4*8, "float8", None, 8)
   _arg_int32: Final[DType] = DType(2, 4, "_arg_int32", None)
 
   # NOTE: these are image dtypes
@@ -162,7 +186,7 @@ _cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches"
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 6
+VERSION = 10
 _db_connection = None
 def db_connection():
   global _db_connection
@@ -170,14 +194,6 @@ def db_connection():
     os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
     _db_connection = sqlite3.connect(CACHEDB)
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
-    if diskcache_get("meta", "version") != VERSION:
-      print("cache is out of date, clearing it")
-      _db_connection.close()
-      del _db_connection
-      os.unlink(CACHEDB)
-      _db_connection = sqlite3.connect(CACHEDB)
-      if DEBUG >= 7: _db_connection.set_trace_callback(print)
-      diskcache_put("meta", "version", VERSION)
   return _db_connection
 
 def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
@@ -186,11 +202,10 @@ def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
   conn = db_connection()
   cur = conn.cursor()
   try:
-    res = cur.execute(f"SELECT val FROM {table} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
+    res = cur.execute(f"SELECT val FROM {table}_{VERSION} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
   except sqlite3.OperationalError:
     return None  # table doesn't exist
-  if (val:=res.fetchone()) is not None:
-    return pickle.loads(val[0])
+  if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
   return None
 
 _db_tables = set()
@@ -202,9 +217,9 @@ def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
   if table not in _db_tables:
     TYPES = {str: "text", bool: "integer", int: "integer", float: "numeric", bytes: "blob"}
     ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
-    cur.execute(f"CREATE TABLE IF NOT EXISTS {table} ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
+    cur.execute(f"CREATE TABLE IF NOT EXISTS {table}_{VERSION} ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
     _db_tables.add(table)
-  cur.execute(f"REPLACE INTO {table} ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val), ))
+  cur.execute(f"REPLACE INTO {table}_{VERSION} ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val), ))
   conn.commit()
   cur.close()
   return val
@@ -216,3 +231,20 @@ def diskcache(func):
     return diskcache_put(table, key, func(*args, **kwargs))
   setattr(wrapper, "__wrapped__", func)
   return wrapper
+
+# *** http support ***
+
+def fetch(url:str, name:Optional[str]=None, allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
+  fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())
+  if not fp.is_file() or not allow_caching:
+    with request.urlopen(url, timeout=10) as r:
+      assert r.status == 200
+      total_length = int(r.headers.get('content-length', 0))
+      progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=url)
+      (path := fp.parent).mkdir(parents=True, exist_ok=True)
+      with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
+        while chunk := r.read(16384): progress_bar.update(f.write(chunk))
+        f.close()
+        if (file_size:=os.stat(f.name).st_size) < total_length: raise RuntimeError(f"fetch size incomplete, {file_size} < {total_length}")
+        pathlib.Path(f.name).rename(fp)
+  return fp

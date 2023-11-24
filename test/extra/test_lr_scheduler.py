@@ -57,7 +57,9 @@ def get_lrs(optim, sched, epochs, steps=1, accs=None):
 class TestLrScheduler(unittest.TestCase):
   def _test_lr_scheduler(self, tinygrad_sched, torch_sched, epochs, opts, atol, rtol):
     accs = opts.pop('accs', None)
-    tinygrad_optim, torch_optim = Adam([], lr=0.01), torch.optim.Adam([torch.tensor([0.], requires_grad=True)], lr=0.01)
+    test_tensor = Tensor([0], requires_grad=True)    # NOTE: optimizers are broken on 0-dim tensors because it broadcasts to [lr]
+    test_tensor.mean().backward()
+    tinygrad_optim, torch_optim = Adam([test_tensor], lr=0.01), torch.optim.Adam([torch.tensor([0.], requires_grad=True)], lr=0.01)
     tinygrad_sched, torch_sched = tinygrad_sched(tinygrad_optim, **opts), torch_sched(torch_optim, **opts)
 
     tinygrad_lrs = get_lrs(tinygrad_optim, tinygrad_sched, epochs, accs=accs)

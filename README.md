@@ -35,7 +35,7 @@ tinygrad can run [LLaMA](/docs/showcase.md#llama) and [Stable Diffusion](/docs/s
 Try a matmul. See how, despite the style, it is fused into one kernel with the power of laziness.
 
 ```sh
-DEBUG=3 python3 -c "from tinygrad.tensor import Tensor;
+DEBUG=3 python3 -c "from tinygrad import Tensor;
 N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N);
 c = (a.reshape(N, 1, N) * b.permute(1,0).reshape(1, N, N)).sum(axis=2);
 print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
@@ -48,31 +48,29 @@ And we can change `DEBUG` to `4` to see the generated code.
 As it turns out, 90% of what you need for neural networks are a decent autograd/tensor library.
 Throw in an optimizer, a data loader, and some compute, and you have all you need.
 
-#### Neural network example (from test/models/test_mnist.py)
-
 ```py
-from tinygrad.tensor import Tensor
-import tinygrad.nn.optim as optim
+from tinygrad import Tensor, nn
 
-class TinyBobNet:
+class LinearNet:
   def __init__(self):
-    self.l1 = Tensor.uniform(784, 128)
-    self.l2 = Tensor.uniform(128, 10)
+    self.l1 = Tensor.kaiming_uniform(784, 128)
+    self.l2 = Tensor.kaiming_uniform(128, 10)
+  def __call__(self, x:Tensor) -> Tensor:
+    return x.flatten(1).dot(self.l1).relu().dot(self.l2)
 
-  def forward(self, x):
-    return x.dot(self.l1).relu().dot(self.l2).log_softmax()
+model = LinearNet()
+optim = nn.optim.Adam([model.l1, model.l2], lr=0.001)
 
-model = TinyBobNet()
-optim = optim.SGD([model.l1, model.l2], lr=0.001)
+x, y = Tensor.rand(4, 1, 28, 28), Tensor([2,4,3,7])  # replace with real mnist dataloader
 
-# ... complete data loader here
-
-out = model.forward(x)
-loss = out.mul(y).mean()
-optim.zero_grad()
-loss.backward()
-optim.step()
+for i in range(10):
+  optim.zero_grad()
+  loss = model(x).sparse_categorical_crossentropy(y).backward()
+  optim.step()
+  print(i, loss.item())
 ```
+
+See [examples/beautiful_mnist.py](examples/beautiful_mnist.py) for the full version that gets 98% in ~5 seconds
 
 ## Accelerators
 
@@ -84,7 +82,7 @@ tinygrad already supports numerous accelerators, including:
 - [x] [LLVM](tinygrad/runtime/ops_llvm.py)
 - [x] [METAL](tinygrad/runtime/ops_metal.py)
 - [x] [CUDA](tinygrad/runtime/ops_cuda.py)
-- [x] [Triton](extra/accel/triton/ops_triton.py)
+- [x] [Triton](extra/triton/triton.py)
 - [x] [PyTorch](tinygrad/runtime/ops_torch.py)
 - [x] [HIP](tinygrad/runtime/ops_hip.py)
 - [x] [WebGPU](tinygrad/runtime/ops_webgpu.py)
@@ -112,7 +110,7 @@ Documentation along with a quick start guide can be found in the [docs/](/docs) 
 ### Quick example comparing to PyTorch
 
 ```py
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor
 
 x = Tensor.eye(3, requires_grad=True)
 y = Tensor([[2.0,0,-2.0]], requires_grad=True)
