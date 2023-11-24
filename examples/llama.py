@@ -298,12 +298,12 @@ class AbsmaxQuantizedLinear:
 class LLaMa:
   TINY_MODEL_URL = "https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-955k-token-2T/resolve/main/model.safetensors?download=true"
   TINY_TOKENIZER_URL = "https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-955k-token-2T/resolve/main/tokenizer.model?download=true"
-   
+
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
     if model_gen == "tiny":
       model_path = LLaMa._prepare_model(model_path, tokenizer_path, LLaMa.TINY_MODEL_URL, LLaMa.TINY_TOKENIZER_URL)
-    
+
     from sentencepiece import SentencePieceProcessor
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == MODEL_PARAMS[model_gen][model_size]["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {MODEL_PARAMS[model_gen][model_size]['args']['vocab_size']}"
@@ -345,7 +345,7 @@ class LLaMa:
       for s in until:
         if output.endswith(s): return output[0:-len(s)]
     return output
-  
+
   @staticmethod
   def _prepare_model(model_path, tokenizer_path, model_url, tokenizer_url):
     os.makedirs(model_path, exist_ok=True)
@@ -355,7 +355,7 @@ class LLaMa:
     if not tokenizer_path.exists():
       LLaMa._fetch_and_replace_file(tokenizer_url, tokenizer_path)
     return model_safetensors_path
-  
+
   @staticmethod
   def _fetch_and_replace_file(url, destination_path):
     downloaded_path = fetch(url)
