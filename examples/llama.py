@@ -4,12 +4,12 @@
 #typeguard.importhook.install_import_hook('tinygrad')
 
 from pathlib import Path
-import sys, argparse, json
+import os, sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple, Union
 
-from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes, CI
+from tinygrad.helpers import Timing, Profiling, getenv, fetch, DEBUG, dtypes, CI
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
@@ -298,6 +298,12 @@ class AbsmaxQuantizedLinear:
 class LLaMa:
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
+    if not Path.joinpath(model_path, "model.safetensors").exists() or not Path.joinpath(tokenizer_path, "tokenizer.model").exists():
+      os.makedirs(model_path, exist_ok=True)
+      _model_path = fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-955k-token-2T/resolve/main/model.safetensors?download=true", "model.safetensors")
+      _tokenizer_path = fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-955k-token-2T/resolve/main/tokenizer.model?download=true" "tokenizer.model")
+    os.replace(_model_path, Path.joinpath(model_path, "model.safetensors"))
+    os.replace(_tokenizer_path, Path.joinpath(tokenizer_path, "tokenizer.model"))
     from sentencepiece import SentencePieceProcessor
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == MODEL_PARAMS[model_gen][model_size]["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {MODEL_PARAMS[model_gen][model_size]['args']['vocab_size']}"
@@ -306,7 +312,7 @@ class LLaMa:
     model_args = params["args"]
     model = Transformer(**model_args, linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
 
-    if model_path.is_dir():
+    if model_path.is_dir() and not any(map(lambda f: f.endswith(".safetensors"), os.listdir(model_path))):
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
     else:
       weights = load(str(model_path))
