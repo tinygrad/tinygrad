@@ -2,7 +2,7 @@ from __future__ import annotations
 import importlib, inspect, functools, pathlib, time, re
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Optional, Dict, Callable, Mapping
-from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT, dedup, all_int, ansistrip
+from tinygrad.helpers import ansilen, prod, DEBUG, getenv, GlobalCounters, DType, colored, BEAM, NOOPT, dedup, all_int, to_function_name
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from dataclasses import dataclass
@@ -243,7 +243,7 @@ class CompiledASTRunner(JITRunner):
 
   def build(self, compiler, runtime):
     self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
-    self.clprg = runtime(ansistrip(self.name), self.lib)
+    self.clprg = runtime(to_function_name(self.name), self.lib)
     return self
 
   def launch_dims(self, var_vals):
@@ -272,10 +272,8 @@ class Compiled:
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     k.linearize()
-    src, runtime_args = self.renderer(k.function_name, k.uops)
-    assert ansistrip(k.display_name) == k.function_name, f"{k.display_name} != {k.function_name}"
-    return CompiledASTRunner(k.ast, k.display_name, src, k.global_size, k.local_size,
-                             runtime_args=runtime_args).build(self.compiler, self.runtime)
+    src, runtime_args = self.renderer(to_function_name(k.name), k.uops)
+    return CompiledASTRunner(k.ast, k.name, src, k.global_size, k.local_size, runtime_args).build(self.compiler, self.runtime)
 
   def exec_ast(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], var_vals:Dict[Variable, int], **kwargs):
     # check if we can reuse the output buffer
