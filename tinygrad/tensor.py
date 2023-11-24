@@ -71,9 +71,9 @@ class Tensor:
         data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
       else:
         data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
-    else: raise RuntimeError(f"can't create Tensor from {data} with type {type(data)}")
 
     # data is a LazyBuffer, but it might be on the wrong device
+    if not isinstance(data, LazyBuffer): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
     self.lazydata = data if data.device == device else data.copy_to_device(device)
 
   def __repr__(self):
@@ -603,7 +603,7 @@ class Tensor:
 
   # ***** mlops (unary) *****
 
-  def __neg__(self): return mlops.Neg.apply(self)
+  def neg(self): return mlops.Neg.apply(self)
   def contiguous(self): return mlops.Contiguous.apply(self)
   def contiguous_backward(self): return mlops.ContiguousBackward.apply(self)
   def log(self): return mlops.Log.apply(self)
@@ -639,6 +639,11 @@ class Tensor:
   def relu6(self): return self.relu() - (self-6).relu()
   def hardswish(self): return self * (self+3).relu6() * (1/6)
   def tanh(self): return 2.0 * ((2.0 * self).sigmoid()) - 1.0
+  def sinh(self): return (self.exp() - self.neg().exp()) / 2
+  def cosh(self): return (self.exp() + self.neg().exp()) / 2
+  def atanh(self): return ((1 + self)/(1 - self)).log() / 2
+  def asinh(self): return (self + (self.square() + 1).sqrt()).log()
+  def acosh(self): return (self + (self.square() - 1).sqrt()).log()
   def hardtanh(self, min_val=-1, max_val=1): return self.clip(min_val, max_val)
   def gelu(self): return 0.5 * self * (1 + (self * 0.7978845608 * (1 + 0.044715 * self * self)).tanh())
   def quick_gelu(self): return self * (self * 1.702).sigmoid()
@@ -668,8 +673,8 @@ class Tensor:
     return (x, y)
 
   def _to_float(self, x:Union[Tensor, float]):
-    return x.lazydata.base.op.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_const() and not x.requires_grad \
-      and x.lazydata.st.contiguous and self._broadcasted(x)[0].shape == self.shape else x
+    return x.lazydata.base.op.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
+      and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     x = self._to_float(x)
@@ -716,7 +721,9 @@ class Tensor:
     x,z = x_._broadcasted(other)
     return mlops.Where.apply(x, *y._broadcasted(z))
 
-  # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
+  # ***** op wrappers (wasted lines to make the typechecker happy) *****
+
+  def __neg__(self) -> Tensor: return self.neg()
 
   def __add__(self, x) -> Tensor: return self.add(x)
   def __sub__(self, x) -> Tensor: return self.sub(x)
