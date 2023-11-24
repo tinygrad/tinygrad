@@ -1,6 +1,7 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, requests, tempfile, pathlib
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string
 import numpy as np
+from urllib import request
 from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -27,7 +28,7 @@ def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
-def round_up(num, amt): return num if num%amt == 0 else num+(amt-(num%amt))
+def round_up(num, amt:int): return (num+amt-1)//amt * amt
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
   return {k:v for d in ds for k,v in d.items()}
@@ -36,9 +37,20 @@ def partition(lst:List[T], fxn:Callable[[T],bool]):
   b:List[T] = []
   for s in lst: (a if fxn(s) else b).append(s)
   return a,b
+def unwrap(x:Optional[T]) -> T:
+  assert x is not None
+  return x
+def get_child(obj, key):
+  for k in key.split('.'):
+    if k.isnumeric(): obj = obj[int(k)]
+    elif isinstance(obj, dict): obj = obj[k]
+    else: obj = getattr(obj, k)
+  return obj
 
 @functools.lru_cache(maxsize=None)
-def getenv(key, default=0): return type(default)(os.getenv(key, default))
+def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])
+@functools.lru_cache(maxsize=None)
+def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 
 class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
@@ -91,7 +103,11 @@ class DType(NamedTuple):
   name: str
   np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
   sz: int = 1
-  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}"
+  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
+  def vec(self, sz:int):
+    assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
+    return DType(self.priority, self.itemsize*sz, self.name+str(sz), None, sz)
+  def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
 
 # dependent typing?
 class ImageDType(DType):
@@ -114,7 +130,7 @@ class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
   def is_int(x: DType)-> bool: return x in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
-  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes.float64, dtypes._half4, dtypes._float2, dtypes._float4)
+  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes.float64, dtypes.half.vec(4), dtypes.float.vec(2), dtypes.float.vec(4))
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
@@ -131,6 +147,7 @@ class dtypes:
   int8: Final[DType] = DType(1, 1, "char", np.int8)
   int16: Final[DType] = DType(3, 2, "short", np.int16)
   int32: Final[DType] = DType(5, 4, "int", np.int32)
+  int = int32
   int64: Final[DType] = DType(7, 8, "long", np.int64)
   uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
   uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
@@ -141,12 +158,6 @@ class dtypes:
   bfloat16: Final[DType] = DType(9, 2, "__bf16", None)
 
   # NOTE: these are internal dtypes, should probably check for that
-  _int2: Final[DType] = DType(2, 4*2, "int2", None, 2)
-  _half4: Final[DType] = DType(0, 2*4, "half4", None, 4)
-  _half16: Final[DType] = DType(0, 2*16, "half16", None, 16)
-  _float2: Final[DType] = DType(4, 4*2, "float2", None, 2)
-  _float4: Final[DType] = DType(4, 4*4, "float4", None, 4)
-  _float8: Final[DType] = DType(4, 4*8, "float8", None, 8)
   _arg_int32: Final[DType] = DType(2, 4, "_arg_int32", None)
 
   # NOTE: these are image dtypes
@@ -175,7 +186,7 @@ _cache_dir: str = getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches"
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(_cache_dir, "tinygrad", "cache.db")))
 CACHELEVEL = getenv("CACHELEVEL", 2)
 
-VERSION = 9
+VERSION = 10
 _db_connection = None
 def db_connection():
   global _db_connection
@@ -223,15 +234,17 @@ def diskcache(func):
 
 # *** http support ***
 
-def fetch(url:str) -> pathlib.Path:
-  fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / hashlib.md5(url.encode('utf-8')).hexdigest()
-  if not fp.is_file():
-    r = requests.get(url, stream=True, timeout=10)
-    assert r.status_code == 200
-    progress_bar = tqdm(total=int(r.headers.get('content-length', 0)), unit='B', unit_scale=True, desc=url)
-    (path := fp.parent).mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
-      for chunk in r.iter_content(chunk_size=16384): progress_bar.update(f.write(chunk))
-      f.close()
-      pathlib.Path(f.name).rename(fp)
+def fetch(url:str, name:Optional[str]=None, allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
+  fp = pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())
+  if not fp.is_file() or not allow_caching:
+    with request.urlopen(url, timeout=10) as r:
+      assert r.status == 200
+      total_length = int(r.headers.get('content-length', 0))
+      progress_bar = tqdm(total=total_length, unit='B', unit_scale=True, desc=url)
+      (path := fp.parent).mkdir(parents=True, exist_ok=True)
+      with tempfile.NamedTemporaryFile(dir=path, delete=False) as f:
+        while chunk := r.read(16384): progress_bar.update(f.write(chunk))
+        f.close()
+        if (file_size:=os.stat(f.name).st_size) < total_length: raise RuntimeError(f"fetch size incomplete, {file_size} < {total_length}")
+        pathlib.Path(f.name).rename(fp)
   return fp

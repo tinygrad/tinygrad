@@ -1,6 +1,6 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
-import functools, operator
+import functools
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast, Union, Iterable
 from tinygrad.ops import MovementOps
@@ -12,13 +12,10 @@ from tinygrad.shape.view import View
 def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
   assert len(shape) == len(strides)
   ret = [(shape[0], strides[0])] if shape else []
-  for i in range(1, len(shape)):
-    if ret[-1][1] == shape[i]*strides[i] or ret[-1][0] == 1:
-      ret[-1] = (ret[-1][0] * shape[i], strides[i])
-    elif shape[i] == 1:
-      continue
-    else:
-      ret.append((shape[i], strides[i]))
+  for s,st in zip(shape[1:], strides[1:]):
+    ps,pst = ret[-1]
+    if pst == s*st or ps == 1: ret[-1] = (ps*s, st)
+    elif s != 1: ret.append((s, st))
   return tuple(ret)
 
 def expr_node_mask(view:View, idx:Node, valid:Optional[Node]=None) -> Node:
@@ -79,7 +76,7 @@ class ShapeTracker:
 
   def size(self): return 0 if (0 in self.shape) else self.expr_idxs()[0].max+1
 
-  def vars(self) -> Set[Variable]: return functools.reduce(operator.or_, [v.vars() for v in self.views], set())
+  def vars(self) -> Set[Variable]: return set.union(*[v.vars() for v in self.views], set())
 
   @property
   def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
