@@ -178,7 +178,7 @@ def output_stream(num_channels: int, sample_rate: int):
     stream.stop_stream()
     stream.close()
     p.terminate()
-  
+
 @contextmanager
 def log_writer():
   try:
