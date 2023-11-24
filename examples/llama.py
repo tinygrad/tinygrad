@@ -347,19 +347,12 @@ class LLaMa:
     return output
 
   @staticmethod
-  def _prepare_model(model_path, tokenizer_path, model_url, tokenizer_url):
+  def _prepare_model(model_path:Path, tokenizer_path:Path, model_url:str, tokenizer_url:str):
     os.makedirs(model_path, exist_ok=True)
     model_safetensors_path = Path.joinpath(model_path, "model.safetensors")
-    if not model_safetensors_path.exists():
-      LLaMa._fetch_and_replace_file(model_url, model_safetensors_path)
-    if not tokenizer_path.exists():
-      LLaMa._fetch_and_replace_file(tokenizer_url, tokenizer_path)
+    if not model_safetensors_path.exists(): model_path.replace(fetch(model_url))
+    if not tokenizer_path.exists(): tokenizer_path.replace(fetch(tokenizer_url))
     return model_safetensors_path
-
-  @staticmethod
-  def _fetch_and_replace_file(url, destination_path):
-    downloaded_path = fetch(url)
-    destination_path.replace(downloaded_path)
 
 # **** main code ****
 """

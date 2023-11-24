@@ -16,7 +16,12 @@ def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   t, json_len, metadata = safe_load_metadata(fn)
-  return {k:t[8+json_len+v['data_offsets'][0]:].cast(safe_dtypes[v['dtype']])[:prod(v['shape'])].reshape(v['shape']) for k,v in metadata.items() if k != "__metadata__"}
+  #ret = {k:t[8+json_len+v['data_offsets'][0]:].bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half()[:prod(v['shape'])].reshape(v['shape']) for k,v in metadata.items() if k != "__metadata__"}
+  #if metadata['model.embed_tokens.weight']['dtype'] == "BF16":
+  #  for k,v in metadata.items():
+  #    if k != "__metadata__":
+  return {k:t[8+json_len+v['data_offsets'][0]:].bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half()[:prod(v['shape'])].reshape(v['shape'])}
+  return ret
 
 def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any]]=None):
   headers, offset = {}, 0
