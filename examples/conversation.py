@@ -118,7 +118,7 @@ def tts(
 
   # Perform inference.
   audio_tensor = synth.infer(x_tst, x_tst_lengths, sid, noise_scale, length_scale, noise_scale_w, emotion_embedding=emotion_embedding,
-                             max_y_length_estimate_scale=VITS_Y_LENGTH_ESTIMATE_SCALARS[model_to_use] if estimate_max_y_length else None)[0, 0]
+                             max_y_length_estimate_scale=VITS_Y_LENGTH_ESTIMATE_SCALARS[model_to_use] if estimate_max_y_length else None, batch_size=batch_size)[0, 0]
   # Save the audio output.
   audio_data = (np.clip(audio_tensor.numpy(), -1.0, 1.0) * 32767).astype(np.int16)
   return audio_data

@@ -9,6 +9,7 @@ from tinygrad.nn.state import torch_load
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from unidecode import unidecode
+from icecream.icecream import ic
 
 LRELU_SLOPE = 0.1
 
@@ -21,15 +22,15 @@ class Synthesizer:
     self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, 4, gin_channels=gin_channels)
     self.dp = StochasticDurationPredictor(hidden_channels, 192, 3, 0.5, 4, gin_channels=gin_channels) if use_sdp else DurationPredictor(hidden_channels, 256, 3, 0.5, gin_channels=gin_channels)
     if n_speakers > 1: self.emb_g = nn.Embedding(n_speakers, gin_channels)
-  def infer(self, x, x_lengths, sid=None, noise_scale=1.0, length_scale=1, noise_scale_w=1., max_len=None, emotion_embedding=None, max_y_length_estimate_scale=None):
-    x = x.realize()
-    x, m_p, logs_p, x_mask = self.enc_p.forward(x, x_lengths.realize(), emotion_embedding.realize() if emotion_embedding is not None else emotion_embedding)
+  def infer(self, x, x_lengths, sid=None, noise_scale=1.0, length_scale=1, noise_scale_w=1., max_len=None, emotion_embedding=None, max_y_length_estimate_scale=None, batch_size=500):
+    x, m_p, logs_p, x_mask = self.enc_p.forward(x.realize(), x_lengths.realize(), emotion_embedding.realize() if emotion_embedding is not None else emotion_embedding)
     g = self.emb_g(sid.reshape(1, 1)).squeeze(1).unsqueeze(-1) if self.n_speakers > 0 else None
     logw = self.dp.forward(x, x_mask.realize(), g=g.realize(), reverse=self.use_sdp, noise_scale=noise_scale_w if self.use_sdp else 1.0)
     w_ceil = Tensor.ceil(logw.exp() * x_mask * length_scale)
     y_lengths = Tensor.maximum(w_ceil.sum([1, 2]), 1).cast(dtypes.int64)
-    return self.generate(g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths)
-  def generate(self, g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths):
+    return self.generate(g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths, batch_size)
+  def generate(self, g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths, batch_size):
+    from tinygrad.helpers import Timing
     max_y_length = y_lengths.max().numpy() if max_y_length_estimate_scale is None else max(15, x.shape[-1]) * max_y_length_estimate_scale
     y_mask = sequence_mask(y_lengths, max_y_length).unsqueeze(1).cast(x_mask.dtype)
     attn_mask = x_mask.unsqueeze(2) * y_mask.unsqueeze(-1)
@@ -37,8 +38,14 @@ class Synthesizer:
     m_p_2 = attn.squeeze(1).matmul(m_p.transpose(1, 2)).transpose(1, 2)        # [b, t', t], [b, t, d] -> [b, d, t']
     logs_p_2 = attn.squeeze(1).matmul(logs_p.transpose(1, 2)).transpose(1, 2)  # [b, t', t], [b, t, d] -> [b, d, t']
     z_p = m_p_2 + Tensor.randn(*m_p_2.shape, dtype=m_p_2.dtype) * logs_p_2.exp() * noise_scale
-    y_mask = y_mask.cast(z_p.dtype)
-    z = self.flow.forward(z_p, y_mask, g=g, reverse=True)
+    # Pad flow forward inputs to enable JIT
+    row_len = y_mask.shape[2]
+    y_mask = y_mask.pad(((0, 0), (0, 0), (0, batch_size - y_mask.shape[2])), 0).cast(z_p.dtype)
+    y_mask = Tensor(y_mask.numpy(), device=y_mask.device, dtype=y_mask.dtype, requires_grad=y_mask.requires_grad)
+    z_p = z_p.squeeze(0).pad(((0, 0), (0, batch_size - z_p.shape[2])), 1).unsqueeze(0)
+    z = self.flow.forward(z_p.realize(), y_mask.realize(), g=g.realize(), reverse=True)
+    # Unpad outputs for good generate results
+    z, y_mask = z[:, :, :row_len], y_mask[:, :, :row_len]
     o = self.dec.forward((z * y_mask)[:, :, :max_len], g=g)
     if max_y_length_estimate_scale is not None:
       length_scaler = o.shape[-1] / max_y_length
@@ -148,9 +155,10 @@ class ResidualCouplingBlock:
     for _ in range(n_flows):
       self.flows.append(ResidualCouplingLayer(channels, hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels=gin_channels, mean_only=True))
       self.flows.append(Flip())
+  @TinyJit
   def forward(self, x, x_mask, g=None, reverse=False):
     for flow in reversed(self.flows) if reverse else self.flows: x = flow.forward(x, x_mask, g=g, reverse=reverse)
-    return x
+    return x.realize()
 
 class PosteriorEncoder:
   def __init__(self, in_channels, out_channels, hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels=0):
@@ -450,7 +458,7 @@ def rational_quadratic_spline(inputs: Tensor, unnormalized_widths: Tensor, unnor
   derivative_numerator = input_delta.pow(2) * (input_derivatives_plus_one * theta.pow(2) + 2 * input_delta * theta_one_minus_theta + input_derivatives * (1 - theta).pow(2))
   return input_cum_heights + numerator / denominator, derivative_numerator.log() - 2 * denominator.log()
 
-def sequence_mask(length: Tensor, max_length): return Tensor.arange(max_length, dtype=length.dtype, device=length.device).unsqueeze(0).__lt__(length.unsqueeze(1))
+def sequence_mask(length: Tensor, max_length): return Tensor.arange(max_length, dtype=length.dtype, device=length.device).unsqueeze(0) < length.unsqueeze(1)
 def generate_path(duration: Tensor, mask: Tensor):  # duration: [b, 1, t_x], mask: [b, 1, t_y, t_x]
   b, _, t_y, t_x = mask.shape
   path = sequence_mask(duration.cumsum(axis=2).reshape(b * t_x), t_y).cast(mask.dtype).reshape(b, t_x, t_y)
