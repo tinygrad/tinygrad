@@ -298,12 +298,16 @@ class AbsmaxQuantizedLinear:
 class LLaMa:
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
-    if not Path.joinpath(model_path, "model.safetensors").exists() or not Path.joinpath(tokenizer_path, "tokenizer.model").exists():
+    if model_gen == "tiny":
       os.makedirs(model_path, exist_ok=True)
-      _model_path = fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-955k-token-2T/resolve/main/model.safetensors?download=true", "model.safetensors")
-      _tokenizer_path = fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-955k-token-2T/resolve/main/tokenizer.model?download=true" "tokenizer.model")
-    os.replace(_model_path, Path.joinpath(model_path, "model.safetensors"))
-    os.replace(_tokenizer_path, tokenizer_path)
+      model_path = Path.joinpath(model_path, "model.safetensors")
+      if not model_path.exists():
+        _model_path = fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-955k-token-2T/resolve/main/model.safetensors?download=true")
+        os.replace(_model_path, model_path)
+      if not tokenizer_path.exists():
+        _tokenizer_path = fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-955k-token-2T/resolve/main/tokenizer.model?download=true")
+        os.replace(_tokenizer_path, tokenizer_path)
+
     from sentencepiece import SentencePieceProcessor
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == MODEL_PARAMS[model_gen][model_size]["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {MODEL_PARAMS[model_gen][model_size]['args']['vocab_size']}"
