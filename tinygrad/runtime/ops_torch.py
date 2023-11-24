@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from typing import Dict, Callable, Optional
 from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, MovementOps, TernaryOps, ReduceOps, Op, Interpreted
 from tinygrad.helpers import getenv, dtypes, prod, DType
@@ -30,8 +31,10 @@ def as_strided(x, arg):
   return torch.as_strided(x.contiguous(), arg[0], arg[1], arg[2])
 
 torch_fxn_for_op: Dict[Op, Callable] = {
-  BufferOps.MEM: lambda x: x._buf, BufferOps.CONST: lambda val, dtype: torch.tensor(val, device=device, dtype=inverse_type_map[dtype]),
-  BufferOps.FROM_UNDERLYING: lambda x: RawTorchBuffer(prod(x.shape), type_map[x.dtype], x),
+  # TODO: torch.tensor should work here. it doesn't due to "overflow" in uint8
+  #BufferOps.CONST: lambda val, dtype: torch.tensor(val, device=device, dtype=inverse_type_map[dtype]),
+  BufferOps.CONST: lambda val, dtype: torch.from_numpy(np.array(val, dtype=dtype.np)).to(device),
+  BufferOps.MEM: lambda x: x._buf, BufferOps.FROM_UNDERLYING: lambda x: RawTorchBuffer(prod(x.shape), type_map[x.dtype], x),
   UnaryOps.NOOP: lambda x: x.contiguous(), UnaryOps.SQRT: lambda x: x.sqrt(), UnaryOps.EXP2: lambda x: x.exp2(), UnaryOps.LOG2: lambda x: x.log2(), UnaryOps.SIN: torch.sin,
   UnaryOps.CAST: lambda x,y: (x.view if y[1] else x.type)(next(k for k,v in type_map.items() if v==y[0])), UnaryOps.NEG: lambda x: torch.logical_not(x) if x.dtype is torch.bool else torch.neg(x),
   BinaryOps.MAX: torch.maximum, BinaryOps.CMPLT: lambda x,y: (x<y).type(torch.promote_types(x.dtype, y.dtype)),
