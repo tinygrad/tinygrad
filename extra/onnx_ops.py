@@ -11,13 +11,15 @@ from typing import Union, Tuple, Optional, List, Any
 import math
 
 tensor_methods = {"Neg", "Reciprocal", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "Tanh", "MatMul",
-                  "Floor", "Ceil", "Tanh", "Softplus", "HardSwish", "Where", "Mul", "Div", "Sinh", "Cosh", "Softsign", "Pow", "Asinh", "Acosh", "Atanh"}
+                  "Floor", "Ceil", "Tanh", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Softsign", "Asinh", "Acosh", "Atanh"}
 
 # **************** Free Ops ****************
 
 def Identity(input: Tensor): return input
 def Add(input: Tensor, other: Tensor, broadcast=None): return input + other if input.dtype == dtypes.float or isinstance(input.dtype, ImageDType) else (input + other).cast(input.dtype)
 def Sub(input: Union[Tensor, Any], other: Tensor): return input - other # some test has input as int
+def Div(input: Tensor, other: Tensor): return input / other if input.dtype == dtypes.float or isinstance(input.dtype, ImageDType) else input.div(other).floor()   # TODO: this has dtype issues
+def Pow(input: Tensor, other: Tensor): return (input.float() ** other.float()).cast(input.dtype)   # TODO: this has dtype issues
 def Less(x:Tensor,y:Tensor): return (x<y).cast(dtypes.bool)
 def LessOrEqual(x:Tensor,y:Tensor): return (x<=y).cast(dtypes.bool)
 def Greater(x:Tensor,y:Tensor): return (x>y).cast(dtypes.bool)
