@@ -224,6 +224,12 @@ MODEL_PARAMS = {
       "args": {"dim": 2048, "n_layers": 22, "n_heads": 32, "n_kv_heads": 4, "multiple_of": 256, "norm_eps": 1e-05, "vocab_size": 32000},
       "files": 1,
     }
+  },
+  "intel": {
+    "7B": {
+      "args": {"dim": 4096, "n_layers": 32, "n_heads": 32, "n_kv_heads": 8, "multiple_of": 14336, "norm_eps": 1e-05, "rope_theta": 1000000, "vocab_size": 32000},
+      "files": "2",
+    }
   }
 }
 
@@ -511,7 +517,7 @@ After you are done speaking, output [EOS]. You are not Chad.
 
   # *** prompt engineers stop here ****
 
-  LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code", "tiny": "-tiny"}[args.gen]
+  LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code", "tiny": "-tiny", "intel": "-intel"}[args.gen]
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
