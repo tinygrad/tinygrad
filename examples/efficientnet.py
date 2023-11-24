@@ -3,15 +3,12 @@
 # a rough copy of
 # https://github.com/lukemelas/EfficientNet-PyTorch/blob/master/efficientnet_pytorch/model.py
 import sys
-import io
 import ast
 import time
-import cv2
 import numpy as np
 from PIL import Image
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv
-from extra.utils import fetch
+from tinygrad.helpers import getenv, fetch, Timing
 from tinygrad.jit import TinyJit
 from extra.models.efficientnet import EfficientNet
 np.set_printoptions(suppress=True)
@@ -61,12 +58,12 @@ if __name__ == "__main__":
   model.load_from_pretrained()
 
   # category labels
-  lbls = fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt")
-  lbls = ast.literal_eval(lbls.decode('utf-8'))
+  lbls = ast.literal_eval(fetch("https://gist.githubusercontent.com/yrevar/942d3a0ac09ec9e5eb3a/raw/238f720ff059c1f82f368259d1ca4ffa5dd8f9f5/imagenet1000_clsidx_to_labels.txt").read_text())
 
   # load image and preprocess
   url = sys.argv[1] if len(sys.argv) >= 2 else "https://raw.githubusercontent.com/tinygrad/tinygrad/master/docs/showcase/stable_diffusion_by_tinygrad.jpg"
   if url == 'webcam':
+    import cv2
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     while 1:
@@ -85,8 +82,7 @@ if __name__ == "__main__":
     cap.release()
     cv2.destroyAllWindows()
   else:
-    img = Image.open(io.BytesIO(fetch(url)))
-    st = time.time()
-    out, _ = infer(model, img)
-    print(np.argmax(out), np.max(out), lbls[np.argmax(out)])
-    print(f"did inference in {(time.time()-st):2f}")
+    img = Image.open(fetch(url))
+    with Timing("did inference in "):
+      out, _ = infer(model, img)
+      print(np.argmax(out), np.max(out), lbls[np.argmax(out)])
