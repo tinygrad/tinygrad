@@ -10,6 +10,9 @@ jobs:
   testmacbenchmark:
     name: Mac Benchmark
     runs-on: [self-hosted, macOS]
+    defaults:
+      run:
+        shell: bash {0} -o pipefail
     if: github.repository_owner == 'tinygrad'
     env:
       PYTHONPATH: .
@@ -68,6 +71,9 @@ jobs:
   testnvidiabenchmark:
     name: NVIDIA Benchmark
     runs-on: [self-hosted, Linux, CUDA]
+    defaults:
+      run:
+        shell: bash {0} -o pipefail
     if: github.repository_owner == 'tinygrad'
     env:
       PYTHONPATH: .
@@ -96,6 +102,9 @@ jobs:
   testamdbenchmark:
     name: AMD Benchmark
     runs-on: [self-hosted, Linux, ROCM]
+    defaults:
+      run:
+        shell: bash {0} -o pipefail
     if: github.repository_owner == 'tinygrad'
     env:
       PYTHONPATH: .
@@ -124,10 +133,10 @@ jobs:
         JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
         JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
       shell: bash
-    - name: Run GPT2
+    - name: Run GPT2 (with HIP)
       run: |
-        JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
-        JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
+        HIP=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
+        HIP=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
       shell: bash
     - name: Run 10 CIFAR training steps
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
