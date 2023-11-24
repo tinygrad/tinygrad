@@ -1,10 +1,11 @@
 import unittest
+from typing import Any, Tuple
 from onnx.backend.base import Backend, BackendRep
 import onnx.backend.test
 import numpy as np
 from tinygrad.tensor import Tensor
-from typing import Any, Tuple
 from tinygrad.helpers import getenv, CI
+from tinygrad.ops import Device
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
@@ -167,17 +168,17 @@ backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
 backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
 
 # issue 2067 potentially also a fastmath issue https://github.com/tinygrad/tinygrad/issues/2067
-if getenv('METAL'):
+if Device.DEFAULT in ['METAL']:
   backend_test.exclude('test_maxpool_2d_pads_cpu')
   backend_test.exclude('test_maxpool_2d_same_lower_cpu')
 
-if getenv('GPU') or getenv('METAL'):
+if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_mish_cpu') # weird inaccuracy
   backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
   backend_test.exclude('test_eyelike_with_dtype_cpu') # backend does not support dtype: Double
 
 # Segfaults in CI
-if (getenv('LLVM') or getenv('CUDA')) and CI:
+if Device.DEFAULT in ['LLVM', 'CUDA'] and CI:
   backend_test.exclude('test_max_float16_cpu')
   backend_test.exclude('test_min_float16_cpu')
 
@@ -185,7 +186,7 @@ if (getenv('LLVM') or getenv('CUDA')) and CI:
 backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 
 # TODO: this somehow passes in CI but does not pass if run locally
-if getenv('GPU') or getenv('METAL') or getenv('LLVM') or getenv('CLANG'):
+if Device.DEFAULT in ['GPU', 'METAL', 'LLVM', 'CLANG']:
   backend_test.exclude('test_MaxPool3d_stride_padding_cpu')
 
 # disable model tests for now since they are slow
