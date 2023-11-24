@@ -9,7 +9,7 @@ import numpy as np
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple, Union
 
-from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes, CI
+from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes, CI, fetch
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
@@ -420,6 +420,7 @@ if __name__ == "__main__":
   args = parser.parse_args()
   if args.gen not in MODEL_PARAMS: raise ValueError("Invalid model generation")
   if args.size is None: args.size = list(MODEL_PARAMS[args.gen].items())[0][0]
+  if args.gen != "tiny" and args.model is None: raise ValueError("Must specify --model for non-tiny models")
   chatbot = args.prompt == None
 
   # *** prompt engineers work here ****
@@ -512,8 +513,8 @@ After you are done speaking, output [EOS]. You are not Chad.
   # *** prompt engineers stop here ****
 
   LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code", "tiny": "-tiny"}[args.gen]
-  MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
-  TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
+  MODEL_PATH = args.model or fetch('https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-240k-503b/resolve/main/model.safetensors', 'tinyllama-503b.safetensors')
+  TOKENIZER_PATH = Path(args.model).parent / "tokenizer.model" if args.model else fetch('https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-240k-503b/resolve/main/tokenizer.model', 'tinyllama-503b-tokenizer.model')
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
   param_count = sum(x.lazydata.st.size() for x in get_parameters(llama.model))
