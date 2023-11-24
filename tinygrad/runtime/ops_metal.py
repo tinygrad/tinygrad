@@ -1,13 +1,13 @@
 import os, subprocess, pathlib, ctypes, tempfile
 import Metal, libdispatch
-from typing import List, Any, Tuple, Dict, Set, cast, Optional
+from typing import List, Any, Tuple, Dict, cast, Optional
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup
 from tinygrad.ops import Compiled, CompiledASTRunner, update_stats
 from tinygrad.renderer.metal import MetalRenderer
 from tinygrad.runtime.lib import RawBufferMapped, RawBuffer, LRUAllocator
-from tinygrad.shape.symbolic import Variable, Node
-from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, GraphException
+from tinygrad.shape.symbolic import Variable
+from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, GraphException
 
 class MetalAllocator(LRUAllocator):
   def _do_alloc(self, size, dtype, device, **kwargs):
@@ -88,6 +88,7 @@ class MetalGraph:
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
     self.op_estimate, self.mem_estimate = get_jit_stats(jit_cache)
+    self.jc_idx_with_updatable_launch_dims = get_jc_idxs_with_updatable_launch_dims(jit_cache)
 
     # create metal batch exec
     icb_descriptor = Metal.MTLIndirectCommandBufferDescriptor.new()
@@ -99,7 +100,6 @@ class MetalGraph:
     if self.icb is None: raise GraphException("create indirect command buffer failed, does your system support this?")
 
     self.int_buf = RawMetalBuffer(len(var_vals), dtypes.int32)
-    self.input_has_variable_dims: Set[int] = set()
     read_resources, write_resources = [], []
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledASTRunner = cast(CompiledASTRunner, ji.prg)
@@ -117,11 +117,8 @@ class MetalGraph:
       var_vals_keys = list(var_vals.keys())
       for i,v in enumerate(prg.vars):
         icb_command.setKernelBuffer_offset_atIndex_(self.int_buf._buf, var_vals_keys.index(v)*4, len(ji.rawbufs)+i)
-      global_size, local_size = prg.launch_dims(var_vals)
-      assert prg.global_size and prg.local_size, "need global and local size to JIT"
-      if any(isinstance(x, Node) for x in prg.global_size) or any(isinstance(x, Node) for x in prg.local_size):
-        self.input_has_variable_dims.add(j)
-      else:
+      if j not in self.jc_idx_with_updatable_launch_dims:
+        global_size, local_size = prg.launch_dims(var_vals)
         icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
       icb_command.setBarrier()
     self.read_resources, self.write_resources = dedup(read_resources), dedup(write_resources)
@@ -134,7 +131,7 @@ class MetalGraph:
     all_read_resources = self.read_resources + [x._buf for x in input_rawbuffers]
     for (j,i),input_idx in self.input_replace.items():
       self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_idx]._buf, 0, i)
-    for j in self.input_has_variable_dims:
+    for j in self.jc_idx_with_updatable_launch_dims:
       global_size, local_size = cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals)
       self.icb.indirectComputeCommandAtIndex_(j).concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
     self.int_buf_view[:] = list(var_vals.values())
