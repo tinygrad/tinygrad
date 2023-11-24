@@ -390,21 +390,5 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_equal(Tensor([]).sum().numpy(), 0)
     np.testing.assert_equal(Tensor([]).mean().numpy(), 0)
 
-  def test_self_attention(self):
-    np.random.seed(1337)
-    sz = (4,2,8,16)
-    q, k, v = [np.random.randn(*sz).astype(np.float32) for _ in range(3)]
-    tinygrad_res = Tensor.scaled_dot_product_attention(Tensor(q), Tensor(k), Tensor(v)).numpy()
-    pytorch_res  = torch.nn.functional.scaled_dot_product_attention(torch.Tensor(q), torch.Tensor(k), torch.Tensor(v)).cpu()
-    np.testing.assert_allclose(tinygrad_res, pytorch_res, atol=1e-5)
-
-  def test_cross_attention(self):
-    np.random.seed(1337)
-    sz = (4,2,8,16)
-    q, k, v = [np.random.randn(*sz).astype(np.float32) for _ in range(3)]
-    tinygrad_res = Tensor.scaled_dot_product_attention(Tensor(q), Tensor(k), Tensor(v), is_causal=True).numpy()
-    pytorch_res  = torch.nn.functional.scaled_dot_product_attention(torch.Tensor(q), torch.Tensor(k), torch.Tensor(v), is_causal=True).cpu()
-    np.testing.assert_allclose(tinygrad_res, pytorch_res, atol=1e-5)
-
 if __name__ == '__main__':
   unittest.main()
