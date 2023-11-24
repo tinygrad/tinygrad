@@ -162,33 +162,19 @@ class View:
 
     # after the asserts, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)
-    # check if this is adding or removing 1s (only)
-    # NOTE: this is optional, but removes most calls to (expensive!) merge_views (with mask, not optional)
-    if [x for x in self.shape if x != 1] == [x for x in new_shape if x != 1]:
-      new_strides: List[sint] = [y for x,y in zip(self.shape, self.strides) if x != 1]
-      new_strides_tuple: Tuple[sint, ...] = tuple([0 if x == 1 else new_strides.pop(0) for x in new_shape])
-      new_mask_tuple: Optional[Tuple[Tuple[sint, sint], ...]] = None
-      if self.mask:
-        for x,y in zip(self.shape, self.mask):
-          if x == 1 and y != (0, 1):
-            new_mask_tuple = ((0,0),) * len(new_shape)
-            break
-        else:
-          new_mask: List[Tuple[sint, sint]] = [y for x,y in zip(self.shape, self.mask) if x != 1]
-          new_mask_tuple = tuple([(0,1) if x == 1 else new_mask.pop(0) for x in new_shape])
-      return View.create(new_shape, new_strides_tuple, self.offset, new_mask_tuple)
-    
+
     strides, reverse_shape = [], reversed(new_shape)
     for d, s, real_dim in reversed(to_shape_strides(self.shape, self.strides, self.mask)):
       acc, new_stride, equal = 1, s, False
       while acc <= d and not equal:
         try: new_dim = next(reverse_shape)
         except StopIteration: break
-        strides.append(new_stride)
+        strides.append(new_stride) if new_dim != 1 else strides.append(0)
+        if new_dim == 1: continue
         acc *= new_dim
         new_stride = new_stride * new_dim if acc < real_dim else 0
         if acc == d: equal = True
-      if not equal: break
+      if not equal and d != 1: break
     else:
       strides += [0,] * (len(new_shape) - len(strides))
       mask, off_mask, extra = _reshape_mask(self, new_shape)
