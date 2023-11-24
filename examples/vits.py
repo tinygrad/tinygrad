@@ -12,7 +12,6 @@ from tinygrad.nn.state import torch_load
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from unidecode import unidecode
-from icecream.icecream import ic
 
 LRELU_SLOPE = 0.1
 
@@ -33,7 +32,6 @@ class Synthesizer:
     y_lengths = Tensor.maximum(w_ceil.sum([1, 2]), 1).cast(dtypes.int64)
     return self.generate(g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths, batch_size)
   def generate(self, g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths, batch_size):
-    from tinygrad.helpers import Timing
     max_y_length = y_lengths.max().numpy() if max_y_length_estimate_scale is None else max(15, x.shape[-1]) * max_y_length_estimate_scale
     y_mask = sequence_mask(y_lengths, max_y_length).unsqueeze(1).cast(x_mask.dtype)
     attn_mask = x_mask.unsqueeze(2) * y_mask.unsqueeze(-1)
@@ -48,9 +46,8 @@ class Synthesizer:
     y_mask = Tensor(y_mask.numpy(), device=y_mask.device, dtype=y_mask.dtype, requires_grad=y_mask.requires_grad)
     z_p = z_p.squeeze(0).pad(((0, 0), (0, batch_size - z_p.shape[2])), 1).unsqueeze(0)
     z = self.flow.forward(z_p.realize(), y_mask.realize(), g=g.realize(), reverse=True)
-    # Unpad outputs for good generate results
-    z, y_mask = z[:, :, :row_len], y_mask[:, :, :row_len]
-    o = self.dec.forward((z * y_mask)[:, :, :max_len], g=g)
+    result_length = reduce(lambda x, y: x * y, self.dec.upsample_rates, row_len)
+    o = self.dec.forward((z * y_mask)[:, :, :max_len], g=g)[:, :, :result_length]
     if max_y_length_estimate_scale is not None:
       length_scaler = o.shape[-1] / max_y_length
       o.realize()
@@ -183,22 +180,23 @@ class Generator:
     resblock = ResBlock1 if resblock == '1' else ResBlock2
     self.ups = [nn.ConvTranspose1d(upsample_initial_channel//(2**i), upsample_initial_channel//(2**(i+1)), k, u, padding=(k-u)//2) for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes))]
     self.resblocks = []
+    self.upsample_rates = upsample_rates
     for i in range(len(self.ups)):
       ch = upsample_initial_channel // (2 ** (i + 1))
       for _, (k, d) in enumerate(zip(resblock_kernel_sizes, resblock_dilation_sizes)):
         self.resblocks.append(resblock(ch, k, d))
     self.conv_post = nn.Conv1d(ch, 1, 7, 1, padding=3, bias=False)
     if gin_channels != 0: self.cond = nn.Conv1d(gin_channels, upsample_initial_channel, 1)
+  @TinyJit
   def forward(self, x: Tensor, g=None):
     x = self.conv_pre(x)
     if g is not None:  x = x + self.cond(g)
     for i in range(self.num_upsamples):
-      x, xs = self.ups[i](x.leakyrelu(LRELU_SLOPE)), None
-      for j in range(self.num_kernels):
-        if xs is None: xs = self.resblocks[i * self.num_kernels + j].forward(x)
-        else: xs += self.resblocks[i * self.num_kernels + j].forward(x)
-      x = xs / self.num_kernels
-    return self.conv_post(x.leakyrelu()).tanh()
+      x = self.ups[i](x.leakyrelu(LRELU_SLOPE))
+      xs = sum(self.resblocks[i * self.num_kernels + j].forward(x) for j in range(self.num_kernels))
+      x = (xs / self.num_kernels).realize()
+    res = self.conv_post(x.leakyrelu()).tanh().realize()
+    return res
 
 class LayerNorm(nn.LayerNorm):
   def __init__(self, channels, eps=1e-5): super().__init__(channels, eps, elementwise_affine=True)
