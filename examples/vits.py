@@ -1,4 +1,7 @@
 import json, logging, math, re, sys, time, wave, argparse, numpy as np
+from phonemizer.phonemize import default_separator, _phonemize
+from phonemizer.backend import EspeakBackend
+from phonemizer.punctuation import Punctuation
 from functools import reduce
 from pathlib import Path
 from typing import List
@@ -41,6 +44,7 @@ class Synthesizer:
     # Pad flow forward inputs to enable JIT
     row_len = y_mask.shape[2]
     y_mask = y_mask.pad(((0, 0), (0, 0), (0, batch_size - y_mask.shape[2])), 0).cast(z_p.dtype)
+    # New y_mask tensor to remove sts mask
     y_mask = Tensor(y_mask.numpy(), device=y_mask.device, dtype=y_mask.dtype, requires_grad=y_mask.requires_grad)
     z_p = z_p.squeeze(0).pad(((0, 0), (0, batch_size - z_p.shape[2])), 1).unsqueeze(0)
     z = self.flow.forward(z_p.realize(), y_mask.realize(), g=g.realize(), reverse=True)
@@ -579,6 +583,9 @@ class TextMapper: # Based on https://github.com/keithito/tacotron
     self.apply_cleaners, self.symbols, self._inflect = apply_cleaners, symbols, None
     self._symbol_to_id, _id_to_symbol = {s: i for i, s in enumerate(symbols)}, {i: s for i, s in enumerate(symbols)}
     self._whitespace_re, self._abbreviations = re.compile(r'\s+'), [(re.compile('\\b%s\\.' % x[0], re.IGNORECASE), x[1]) for x in [('mrs', 'misess'), ('mr', 'mister'), ('dr', 'doctor'), ('st', 'saint'), ('co', 'company'), ('jr', 'junior'), ('maj', 'major'), ('gen', 'general'), ('drs', 'doctors'), ('rev', 'reverend'), ('lt', 'lieutenant'), ('hon', 'honorable'), ('sgt', 'sergeant'), ('capt', 'captain'), ('esq', 'esquire'), ('ltd', 'limited'), ('col', 'colonel'), ('ft', 'fort'), ]]
+    self.phonemizer = EspeakBackend(
+        language="en-us", punctuation_marks=Punctuation.default_marks(), preserve_punctuation=True, with_stress=True,
+    )
   def text_to_sequence(self, text, cleaner_names):
     if self.apply_cleaners:
       for name in cleaner_names:
@@ -587,18 +594,16 @@ class TextMapper: # Based on https://github.com/keithito/tacotron
         text = cleaner(text)
     else: text = text.strip()
     return [self._symbol_to_id[symbol] for symbol in text]
-  def get_text(self, text, add_blank=False, cleaners=('english_cleaners',)):
+  def get_text(self, text, add_blank=False, cleaners=('english_cleaners2',)):
     text_norm = self.text_to_sequence(text, cleaners)
     return Tensor(self.intersperse(text_norm, 0) if add_blank else text_norm, dtype=dtypes.int64)
   def intersperse(self, lst, item):
     (result := [item] * (len(lst) * 2 + 1))[1::2] = lst
     return result
+  def phonemize(self, text, strip=True): return _phonemize(self.phonemizer, text, default_separator, strip, 1, False, False)
   def filter_oov(self, text): return "".join(list(filter(lambda x: x in self._symbol_to_id, text)))
-  def base_english_cleaners(self, text, preserve_punctuation=False, with_stress=False):
-    from phonemizer import phonemize
-    return self.collapse_whitespace(phonemize(self.expand_abbreviations(unidecode(text.lower())), language='en-us', backend='espeak', strip=True, preserve_punctuation=preserve_punctuation, with_stress=with_stress))
-  def english_cleaners(self, text): return self.base_english_cleaners(text)
-  def english_cleaners2(self, text): return self.base_english_cleaners(text, preserve_punctuation=True, with_stress=True)
+  def base_english_cleaners(self, text): return self.collapse_whitespace(self.phonemize(self.expand_abbreviations(unidecode(text.lower()))))
+  def english_cleaners2(self, text): return self.base_english_cleaners(text)
   def transliteration_cleaners(self, text): return self.collapse_whitespace(unidecode(text.lower()))
   def cjke_cleaners(self, text): return re.sub(r'([^\.,!\?\-…~])$', r'\1.', re.sub(r'\s+$', '', self.english_to_ipa2(text).replace('ɑ', 'a').replace('ɔ', 'o').replace('ɛ', 'e').replace('ɪ', 'i').replace('ʊ', 'u')))
   def cjke_cleaners2(self, text): return re.sub(r'([^\.,!\?\-…~])$', r'\1.', re.sub(r'\s+$', '', self.english_to_ipa2(text)))
