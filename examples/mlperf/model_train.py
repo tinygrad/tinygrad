@@ -21,6 +21,7 @@ def train_retinanet():
 
 def train_unet3d():
   device = Device.DEFAULT
+  print("Device:", device)
   conf = Conf()
   rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
   is_successful, diverged = False, False
@@ -30,15 +31,13 @@ def train_unet3d():
     s, i = 0, 0
     for i, batch in enumerate(tqdm(loader, disable=not conf.verbose)):
       vol, label = batch
-      vol, label = vol.numpy(), label.numpy()
-      output, label = sliding_window_inference(model, vol, label)
+      out, label = sliding_window_inference(model, vol.numpy(), label.numpy())
       label = label.squeeze(axis=1)
-      score = score_fn(output, label).mean()
+      score = score_fn(out, label).mean()
       s += score
-      del output, label
+      del out, label
 
     val_dice_score = s / (i+1)
-
     return {"epoch": epoch, "mean_dice": val_dice_score}
 
   def cross_entropy_loss(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
@@ -67,13 +66,13 @@ def train_unet3d():
       raise ValueError("Optimizer {} unknown.".format(conf.optimizer))
     return optim
 
-  def lr_warmup(optimizer, init_lr, lr, current_epoch, warmup_epochs):
-    scale = current_epoch / warmup_epochs
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = init_lr + (lr - init_lr) * scale
+  # def lr_warmup(optimizer, init_lr, lr, current_epoch, warmup_epochs):
+  #   scale = current_epoch / warmup_epochs
+  #   for param_group in optimizer.param_groups:
+  #       param_group['lr'] = init_lr + (lr - init_lr) * scale
 
-  # model init
   from extra.models.unet3d import UNet3D
+  print("Model: UNet3D", Device.DEFAULT)
   mdl = UNet3D()
   if getenv("PRETRAINED"):
     mdl.load_from_pretrained()
@@ -114,6 +113,7 @@ def train_unet3d():
     # if noloss: return None
     return loss.realize()
 
+  # with Tensor.train():
   for epoch in range(1, conf.epochs + 1):
     cumulative_loss = []
     # if epoch <= conf.lr_warmup_epochs:
@@ -132,12 +132,12 @@ def train_unet3d():
       loss_value = train_step(out, label)
       cumulative_loss.append(loss_value)
 
-    if conf.lr_decay_epochs:
-      scheduler.step()
-    print(f'loss for epoch {epoch} {sum(cumulative_loss) / len(cumulative_loss)}')
+    # if conf.lr_decay_epochs:
+    #   scheduler.step()
+    print(f'loss for epoch {epoch}: {sum(cumulative_loss) / len(cumulative_loss)}')
 
     if epoch == next_eval_at:
-      next_eval_at += conf.evaluate_every
+      next_eval_at += conf.eval_every
       dtype_im = dtypes.half if getenv("FP16") else dtypes.float
 
       eval_model = lambda x : mdl_run(Tensor(x, dtype=dtype_im)).numpy()
