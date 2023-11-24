@@ -1,4 +1,3 @@
-# pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib, ctypes, tempfile
 import Metal, libdispatch
 from typing import List, Any, Tuple, Dict, cast, Optional
@@ -115,7 +114,7 @@ class MetalGraph:
           icb_command.setKernelBuffer_offset_atIndex_(b._buf, 0, i)
           if i == 0: write_resources.append(b._buf)
           else: read_resources.append(b._buf)
-      var_vals_keys = sorted(var_vals.keys())
+      var_vals_keys = list(var_vals.keys())
       for i,v in enumerate(prg.vars):
         icb_command.setKernelBuffer_offset_atIndex_(self.int_buf._buf, var_vals_keys.index(v)*4, len(ji.rawbufs)+i)
       if j not in self.jc_idx_with_updatable_launch_dims:
