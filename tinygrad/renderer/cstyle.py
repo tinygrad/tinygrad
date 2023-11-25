@@ -158,10 +158,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       # remove parens if ALU types are the same. TODO: can do more here
       if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL}:
         val = lang.code_for_op[args](strip_parens(r[vin[0]]), *[r[x] for x in vin[1:]])
-      elif args == BinaryOps.MAX:
-        val = lang.code_for_op[args](*[lang.render_cast([r[x]], dtype) if x.dtype != dtype else r[x] for x in vin])
       else:
-        val = lang.code_for_op[args](*[r[x] for x in vin])
+        val = lang.code_for_op[args](*[r[x] for x in vin]) if not (args == UnaryOps.NEG and dtype == dtypes.bool) else f"!{r[vin[0]]}"
       assert child_count[u] != 0, f"childless ALU op found {u}"
       if (child_count[u] <= 1 or dtypes.is_int(dtype)) and args != BinaryOps.MAX:  # fix index rendering issue. fix clang nested max macro issue
         r[u] = val

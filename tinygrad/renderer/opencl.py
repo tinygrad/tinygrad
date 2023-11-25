@@ -1,6 +1,6 @@
 import functools
-from tinygrad.helpers import ImageDType, dtypes
-from tinygrad.ops import TernaryOps
+from tinygrad.helpers import OSX, ImageDType, dtypes
+from tinygrad.ops import BinaryOps, TernaryOps
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
 type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint64: "ulong" }
@@ -18,7 +18,7 @@ class OpenCLLanguage(CStyleLanguage):
   xid = [f'get_global_id({i})' for i in range(3)]
   uses_vload = True
   # NOTE: mad is used so the loads aren't reordered into the math on 845
-  code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda a,b,c: f"mad({a},{b},{c})"}
+  code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda a,b,c: f"mad({a},{b},{c})", BinaryOps.MAX: CStyleLanguage().code_for_op[BinaryOps.MAX] if not OSX else lambda a,b: f"max((float){a},(float){b})"} # HACK: OpenCL to METAL doesn't support non-fp32 max!
 
   def render_store(self, buf_name, buf_dtype, var_name, var_dtype, idx, local):
     if var_dtype.sz > 1 and not isinstance(buf_dtype, ImageDType):
