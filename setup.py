@@ -25,7 +25,7 @@ setup(name='tinygrad',
       python_requires='>=3.8',
       extras_require={
         'llvm': ["llvmlite"],
-        'cuda': ["pycuda", "cuda-python"],
+        'cuda': ["triton-nightly>=2.1.0.dev20231014192330", "pycuda", "cuda-python"],
         'arm': ["unicorn"],
         'triton': ["triton-nightly>=2.1.0.dev20231014192330", "pycuda", "cuda-python"],
         'webgpu': ["wgpu>=v0.12.0"],
