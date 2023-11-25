@@ -151,7 +151,7 @@ try:
     status = _libcuda.cuGraphLaunch(graph_exec, stream)
     cuCheckStatus(status)
 
-  class hipKernelNodeParams(ctypes.Structure):
+  class cudaKernelNodeParams(ctypes.Structure):
     _fields_ = [("blockDimX", ctypes.c_uint32), ("blockDimY", ctypes.c_uint32), ("blockDimZ", ctypes.c_uint32),
                 ("extra", ctypes.POINTER(ctypes.c_void_p)),
                 ("func", ctypes.c_void_p),
@@ -194,7 +194,7 @@ try:
     p_struct = ctypes.c_void_p(ctypes.addressof(struct))
     config = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), p_struct,
                                   ctypes.c_void_p(2), p_size, ctypes.c_void_p(3))
-    params = hipKernelNodeParams(block[0], block[1], block[2], config, func, grid[0], grid[1], grid[2], None, sharedMemBytes)
+    params = cudaKernelNodeParams(block[0], block[1], block[2], config, func, grid[0], grid[1], grid[2], None, sharedMemBytes)
     return kernelNodeParamsWrapper(c_struct=params, context=(size, struct, config))
 
   _libcuda.cuGraphAddKernelNode.restype = int
