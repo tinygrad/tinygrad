@@ -223,9 +223,13 @@ MODEL_PARAMS = {
     "1B": {
       "args": {"dim": 2048, "n_layers": 22, "n_heads": 32, "n_kv_heads": 4, "multiple_of": 256, "norm_eps": 1e-05, "vocab_size": 32000},
       "files": 1,
+      "default_urls": {"model": "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/model.safetensors",
+                       "tokenizer": "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/tokenizer.model",
+                       "name": "TinyLlama-1.1B-Chat-v0.6"},
     }
   }
 }
+
 
 # **** helper functions ****
 def concat_weights(models):
@@ -312,7 +316,7 @@ class LLaMa:
       weights = load(str(model_path))
     if "model.embed_tokens.weight" in weights:
       weights = convert_from_huggingface(weights, model, model_args["n_heads"], model_args["n_kv_heads"])
-
+    
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
       for _,v in weights.items(): v.realize()
@@ -511,11 +515,10 @@ After you are done speaking, output [EOS]. You are not Chad.
     pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
 
   # *** prompt engineers stop here ****
-
   LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code", "tiny": "-tiny"}[args.gen]
-  MODEL_PATH = args.model or fetch('https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-240k-503b/resolve/main/model.safetensors', 'tinyllama-503b.safetensors')
+  MODEL_PATH = args.model or fetch(MODEL_PARAMS[args.gen][args.size]["default_urls"]["model"], f'{MODEL_PARAMS[args.gen][args.size]["default_urls"]["name"]}-model.safetensors')
   if args.model: TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
-  else:  TOKENIZER_PATH = fetch('https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-240k-503b/resolve/main/tokenizer.model', 'tinyllama-503b-tokenizer.model')
+  else:  TOKENIZER_PATH = fetch(MODEL_PARAMS[args.gen][args.size]["default_urls"]["tokenizer"], f'{MODEL_PARAMS[args.gen][args.size]["default_urls"]["name"]}-tokenizer.model')
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
   param_count = sum(x.lazydata.st.size() for x in get_parameters(llama.model))
