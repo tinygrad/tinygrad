@@ -30,12 +30,10 @@ def clean_text(enc: Encoding, txt: str) -> str:
   txt = re.sub(r"\(.+\)", "", txt)
   return txt.replace("[BLANK_AUDIO]", "").strip()
 
-
 def voice2text(model: Whisper, enc: Encoding, encoded_audio: Tensor, tokens: list[int]):
   out = model.decoder(Tensor([tokens]), 0, encoded_audio, streaming=True).realize()
   tokens.append(int(out[0,-1].argmax().numpy().item()))
   return enc.decode(tokens)
-
 
 def llama_prepare(llama: LLaMa, temperature: float, pre_prompt_path: Path) -> tuple[list[int], str, str, str]:
   config = yaml.safe_load(open(str(pre_prompt_path)).read())
@@ -44,8 +42,7 @@ def llama_prepare(llama: LLaMa, temperature: float, pre_prompt_path: Path) -> tu
 
   toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(pre_prompt)
   llama.model(Tensor([toks]), 0, temperature).realize()  # NOTE: outputs are not used
-  return toks, user_delim, resp_delim, end_delim
-
+  return toks, user_delim, resp_delim, end_delim, len(toks), llama.tokenizer.decode(toks)
 
 def llama_generate(
   llama: LLaMa,
@@ -61,7 +58,7 @@ def llama_generate(
   toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(outputted)
 
   while not outputted.endswith(end_delim):
-    probs_np = llama.model(Tensor([toks[start_pos:]]), start_pos, temperature).realize().numpy()
+    probs_np = llama.model(Tensor([toks[start_pos:]]), start_pos, temperature).numpy()
     token = int(np.random.choice(len(probs_np), p=probs_np))
     start_pos = len(toks)
     toks.append(token)
@@ -74,7 +71,6 @@ def llama_generate(
     outputted = cur
   print() # because the output is flushed
   return outputted, start_pos
-
 
 def tts(
   text_to_synthesize: str,
@@ -89,7 +85,7 @@ def tts(
   estimate_max_y_length: bool,
   text_mapper: TextMapper,
   model_has_multiple_speakers: bool,
-  batch_size = 500
+  batch_size = 800
 ):
   if model_to_use == "mmts-tts": text_to_synthesize = text_mapper.filter_oov(text_to_synthesize.lower())
 
@@ -97,8 +93,7 @@ def tts(
   stn_tst = text_mapper.get_text(text_to_synthesize, hps.data.add_blank, hps.data.text_cleaners)
   init_shape = stn_tst.shape
   assert init_shape[0] < batch_size, "text is too long"
-  stn_tst = stn_tst.pad(((0, batch_size - init_shape[0]),), 1)
-  x_tst, x_tst_lengths = stn_tst.unsqueeze(0), Tensor([init_shape[0]], dtype=dtypes.int64)
+  x_tst, x_tst_lengths = stn_tst.pad(((0, batch_size - init_shape[0]),), 1).unsqueeze(0), Tensor([init_shape[0]], dtype=dtypes.int64)
   sid = Tensor([speaker_id], dtype=dtypes.int64) if model_has_multiple_speakers else None
 
   # Perform inference.
@@ -107,7 +102,6 @@ def tts(
   # Save the audio output.
   audio_data = (np.clip(audio_tensor.numpy(), -1.0, 1.0) * 32767).astype(np.int16)
   return audio_data
-
 
 def init_vits(
   model_to_use: str,
@@ -149,13 +143,13 @@ def init_vits(
 
   return net_g, emotion_embedding, text_mapper, hps, model_has_multiple_speakers
 
-
 @contextmanager
 def output_stream(num_channels: int, sample_rate: int):
   try:
     p = pyaudio.PyAudio()
     stream = p.open(format=pyaudio.paInt16, channels=num_channels, rate=sample_rate, output=True)
     yield stream
+  except KeyboardInterrupt: pass
   finally:
     stream.stop_stream()
     stream.close()
@@ -168,11 +162,9 @@ def log_writer():
     yield logs
   finally:
     sep = "="*os.get_terminal_size()[1]
-    print(sep[:-1])
-    print("CHAT LOG")
+    print(f"{sep[:-1]}\nCHAT LOG")
     print(*logs, sep="\n")
     print(sep)
-
 
 def listener(q: mp.Queue, event: mp.Event):
   try:
@@ -210,7 +202,7 @@ if __name__ == "__main__":
   parser.add_argument("--llama_model", type=Path, default=None, required=True, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
   parser.add_argument("--llama_gen", type=str, default="1", required=False, help="Generation of the model to use")
   parser.add_argument("--llama_size", type=str, default="7B", required=False, help="Size of model to use")
-  parser.add_argument("--llama_tokenizer", type=Path, default=None, required=True, help="Path to llama tokenizer.model")
+  parser.add_argument("--llama_tokenizer", type=Path, default=None, required=False, help="Path to llama tokenizer.model")
 
   # vits args
   parser.add_argument("--vits_model_to_use", default="vctk", help="Specify the model to use. Default is 'vctk'.")
@@ -236,10 +228,8 @@ if __name__ == "__main__":
   synth, emotion_embedding, text_mapper, hps, model_has_multiple_speakers = init_vits(args.vits_model_to_use, args.vits_emotion_path, args.vits_speaker_id, args.vits_seed)
 
   # Prepare personality
-  llama = LLaMa.build(args.llama_model, args.llama_tokenizer or args.llama_model / "tokenizer.model", args.llama_gen, args.llama_size, args.llama_quantize)
-  toks, user_delim, resp_delim, end_delim = llama_prepare(llama, args.llama_temperature, args.llama_pre_prompt_path)
-  start_pos = len(toks)
-  outputted = llama.tokenizer.decode(toks)
+  llama = LLaMa.build(args.llama_model, args.llama_tokenizer or args.llama_model.parent / "tokenizer.model", args.llama_gen, args.llama_size, args.llama_quantize)
+  toks, user_delim, resp_delim, end_delim, start_pos, outputted = llama_prepare(llama, args.llama_temperature, args.llama_pre_prompt_path)
 
   # Start child process for mic input
   q = mp.Queue()
