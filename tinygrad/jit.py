@@ -26,7 +26,7 @@ def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[RawBuffer]
   return input_replace
 def get_output_replace(jit_cache: List[JitItem], fxn_ret:Tuple[Any]) -> Dict[int, int]:
   output_replace: Dict[int, int] = {}
-  raw_retbufs = [t.lazydata.realized if isinstance(t, Tensor) else None for t in fxn_ret if isinstance(t, Tensor)]
+  raw_retbufs = [t.lazydata.realized for t in fxn_ret if isinstance(t, Tensor)]
   for j,ji in enumerate(jit_cache):
     for i,a in enumerate(ji.rawbufs):
       if a in raw_retbufs:
