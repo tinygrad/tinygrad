@@ -77,7 +77,7 @@ class TinyJit(Generic[ReturnType]):
       assert self.expected_vals == expected_vals, "mismatch of var_vals"
       assert self.expected_name_sts_dtype == expected_name_sts_dtype, f"mismatch of sts, expected {self.expected_name_sts_dtype} got {expected_name_sts_dtype}"
       for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_idx]
-      ret = (self.ret, ) if not isinstance(self.ret, tuple) else self.ret
+      ret = (self.ret, ) if not isinstance(self.ret, (tuple, list)) else self.ret
       for j, output_idx in self.output_replace.items(): self.jit_cache[j].rawbufs[0] = ret[output_idx].lazydata.base.realized = self.jit_cache[j].rawbufs[0].fromCPU(self.jit_cache[j].rawbufs[0].toCPU().copy()) # type:ignore
       for ji in self.jit_cache: ji.prg(cast(List[RawBuffer], ji.rawbufs), var_vals, wait=DEBUG>=2, jit=True)
     elif self.cnt == 1:
@@ -101,7 +101,7 @@ class TinyJit(Generic[ReturnType]):
     elif self.cnt == 0:
       # jit ignore
       self.ret = self.fxn(*args, **kwargs)
-      assert isinstance(self.ret, (tuple, Tensor, list)) or self.ret is None, f"Jitted function return value must be None, tuple, list, or Tensor. Got {type(self.ret)}"
+      assert isinstance(self.ret, (tuple, list, Tensor)) or self.ret is None, f"Jitted function return value must be None, tuple, list, or Tensor. Got {type(self.ret)}"
 
     # clear jit inputs
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None
