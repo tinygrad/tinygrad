@@ -14,7 +14,7 @@ import yaml
 from llama import LLaMa
 from tiktoken import Encoding
 from vits import MODELS as VITS_MODELS
-from vits import VITS_PATH, Y_LENGTH_ESTIMATE_SCALARS, HParams, Synthesizer, TextMapper, get_hparams_from_file, load_model
+from vits import Y_LENGTH_ESTIMATE_SCALARS, HParams, Synthesizer, TextMapper, get_hparams_from_file, load_model
 from whisper import Whisper, init_whisper, prep_audio
 
 from tinygrad.helpers import Timing, dtypes, fetch
@@ -186,7 +186,7 @@ def listener(q: mp.Queue, event: mp.Event):
         if n % 4 == 0:
           sys.stdout.write(f"listening {next(spinner)}\r")
           sys.stdout.flush()
-        q.put(((np.frombuffer(data, np.int16)/32768).astype(np.float32)*3))
+        q.put(np.frombuffer(data, dtype=np.int16))
         n += 1
   finally:
     stream.stop_stream()
@@ -226,7 +226,8 @@ if __name__ == "__main__":
   parser.add_argument("--vits_vocab_path", type=Path, default=None, help="Path to the TTS vocabulary.")
 
   # conversation args
-  parser.add_argument("--phrase_timeout", type=int, default=5, help="Specify how long phrases should be recorded")
+  parser.add_argument("--silence_timeout", type=int, default=1, help="Specify the max seconds of silence in a phrase")
+  parser.add_argument("--threshold", type=int, default=30, help="Specify the lower bound of your voices' rms from mic")
 
   args = parser.parse_args()
 
@@ -264,9 +265,30 @@ if __name__ == "__main__":
 
       # Listen to mic input
       is_listening_event.set()
-      start = time.time()
-      while time.time() - start < args.phrase_timeout: total = np.concatenate([total, q.get()])
-      is_listening_event.clear()
+
+      # Detect start of speech
+      while True:
+        samples = q.get()
+        rms = np.sqrt(np.mean(np.square(samples)))
+        if rms > args.threshold:
+          total = (samples / 32768).astype(np.float32)*3
+          break
+
+      # Record voice until user stops speaking
+      start_silence = None
+      while True:
+        samples = q.get()
+        rms = np.sqrt(np.mean(np.square(samples)))
+        total = np.concatenate([total, (samples / 32768).astype(np.float32)*3])
+
+        if rms > args.threshold:
+          start_silence = None
+        elif start_silence is None:
+          start_silence = time.time()
+
+        if start_silence is not None and time.time() - start_silence > args.silence_timeout:
+          is_listening_event.clear()
+          break
 
       # Transcribe text
       s = time.perf_counter()
@@ -274,6 +296,7 @@ if __name__ == "__main__":
         encoded_audio = model.encoder.encode(Tensor(prep_audio(total.reshape(1, -1), 1)))
         while not (txt := voice2text(model, enc, encoded_audio, tokens)).endswith("<|endoftext|>"): print(txt)
         txt = clean_text(enc, txt)
+        if txt.strip() == "": continue
         log.append(user_delim + txt)
 
       # Generate with llama
