@@ -9,20 +9,20 @@ from tinygrad.helpers import Timing, colored, getenv
 from examples.llama import Transformer
 from sentencepiece import SentencePieceProcessor
 
-def create_fixed_tokenizer():
+def create_fixed_tokenizer(output_file):
   print("creating fixed tokenizer")
-  import examples.sentencepiece_model_pb2 as spb2
+  import extra.junk.sentencepiece_model_pb2 as spb2
   mp = spb2.ModelProto()
   with open("weights/OpenHermes/tokenizer.model", "rb") as f:
     mp.ParseFromString(f.read())
   mp.pieces.append(spb2.ModelProto.SentencePiece(piece="<|im_end|>", score=0))
   mp.pieces.append(spb2.ModelProto.SentencePiece(piece="<|im_start|>", score=0))
-  with open("/tmp/tokenizer.model", "wb") as f:
+  with open(output_file, "wb") as f:
     f.write(mp.SerializeToString())
 
 # TODO: make loading bf16 fast so we can remove this
-def create_model_cache(model):
-  print("creating model cache")
+def create_model_cache(output_file, model):
+  print(f"creating model cache at {output_file}")
   # TODO: add read only Tensors
   with Timing("load weights: "):
     part1 = nn.state.torch_load("weights/OpenHermes/pytorch_model-00001-of-00002.bin")
@@ -34,7 +34,10 @@ def create_model_cache(model):
     nn.state.load_state_dict(model, convert_from_huggingface(part2, model, 32, 8), strict=False)
 
   with Timing("saving float16 cache: "):
-    nn.state.safe_save(nn.state.get_state_dict(model), "/tmp/cached_openhermes")
+    nn.state.safe_save(nn.state.get_state_dict(model), output_file)
+
+  print("cache created, rerun to use")
+  exit(0)
 
 if __name__ == "__main__":
   Tensor.no_grad = True
@@ -43,11 +46,12 @@ if __name__ == "__main__":
   with Timing("create model: "):
     model = Transformer(4096, 14336, n_heads=32, n_layers=32, norm_eps=1e-5, vocab_size=32002, n_kv_heads=8)
 
-  if not os.path.isfile("/tmp/cached_openhermes"): create_model_cache(model)
+  cached_model = "/tmp/cached_openhermes.safetensors"
+  if not os.path.isfile(cached_model): create_model_cache(cached_model, model)
   with Timing("loading float16 cache: "):
-    nn.state.load_state_dict(model, nn.state.safe_load("/tmp/cached_openhermes"))
+    nn.state.load_state_dict(model, nn.state.safe_load(cached_model))
 
-  if not os.path.isfile("/tmp/tokenizer.model"): create_fixed_tokenizer()
+  if not os.path.isfile("/tmp/tokenizer.model"): create_fixed_tokenizer("/tmp/tokenizer.model")
   spp = SentencePieceProcessor(model_file="/tmp/tokenizer.model")
 
   # https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/blob/main/tokenizer_config.json
