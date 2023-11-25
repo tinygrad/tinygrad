@@ -10,7 +10,7 @@ try:
   _nvrtc_includes = None
   def _get_include_paths():
     global _nvrtc_includes
-    if _nvrtc_includes is not None: return _nvrtc_includes
+    if _nvrtc_includes is not None: return _nvrtc_includes # type: ignore
 
     compiler = "nvcc"
     result = subprocess.check_output([compiler, "-E", "-x", "c", "-", "-v"], input="", stderr=subprocess.STDOUT, universal_newlines=True)
