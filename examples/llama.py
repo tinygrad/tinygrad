@@ -7,7 +7,7 @@ from pathlib import Path
 import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, Dict
 
 from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes, CI
 from tinygrad.ops import Device
@@ -96,13 +96,7 @@ class Attention:
     return self.wo(attn)
 
 class FeedForward:
-  def __init__(self, dim, hidden_dim, multiple_of, linear=Linear, ffn_dim_multiplier=None):
-    # TODO: what is this?
-    hidden_dim = int(2 * hidden_dim / 3)
-    # custom dim factor multiplier
-    if ffn_dim_multiplier is not None:
-      hidden_dim = int(ffn_dim_multiplier * hidden_dim)
-    hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
+  def __init__(self, dim, hidden_dim, linear=Linear, ffn_dim_multiplier=None):
     self.w1 = linear(dim, hidden_dim, bias=False)
     self.w2 = linear(hidden_dim, dim, bias=False)
     self.w3 = linear(dim, hidden_dim, bias=False)
@@ -111,9 +105,9 @@ class FeedForward:
     return self.w2(self.w1(x).silu() * self.w3(x))
 
 class TransformerBlock:
-  def __init__(self, dim, multiple_of, n_heads, n_kv_heads, norm_eps, linear=Linear, ffn_dim_multiplier=None):
+  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, linear=Linear, ffn_dim_multiplier=None):
     self.attention = Attention(dim, n_heads, n_kv_heads, linear)
-    self.feed_forward = FeedForward(dim, 4*dim, multiple_of, linear, ffn_dim_multiplier)
+    self.feed_forward = FeedForward(dim, hidden_dim, linear, ffn_dim_multiplier)
     self.attention_norm = RMSNorm(dim, norm_eps)
     self.ffn_norm = RMSNorm(dim, norm_eps)
 
@@ -122,8 +116,8 @@ class TransformerBlock:
     return (h + self.feed_forward(self.ffn_norm(h))).realize()
 
 class Transformer:
-  def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None, n_kv_heads=None, rope_theta=10000):
-    self.layers = [TransformerBlock(dim, multiple_of, n_heads, n_kv_heads, norm_eps, linear, ffn_dim_multiplier) for _ in range(n_layers)]
+  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size, linear=Linear, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None, n_kv_heads=None, rope_theta=10000):
+    self.layers = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, linear, ffn_dim_multiplier) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = Embedding(vocab_size, dim)
     self.output = linear(dim, vocab_size, bias=False)
@@ -146,6 +140,8 @@ class Transformer:
       assert start_pos > 0
       return self.forward_jit(tokens, Variable("start_pos", 1, MAX_CONTEXT).bind(start_pos), temperature)
     return self.forward(tokens, start_pos, temperature)
+
+# ******* refactor below this line *******
 
 # **** files and arguments ****
 MODEL_PARAMS = {
@@ -248,7 +244,7 @@ def load(fn:str):
   else:
     return torch_load(fn)
 
-def convert_from_huggingface(weights, model: Transformer, n_heads: int, n_kv_heads: int):
+def convert_from_huggingface(weights:Dict[str, Tensor], model: Transformer, n_heads: int, n_kv_heads: int):
   def permute(v: Tensor, n_heads: int):
     return v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1]).transpose(1, 2).reshape(*v.shape[:2])
 
@@ -304,6 +300,19 @@ class LLaMa:
 
     params = MODEL_PARAMS[model_gen][model_size]
     model_args = params["args"]
+
+    # moved this out here
+    ffn_dim_multiplier = model_args['ffn_dim_multiplier']
+    multiple_of = model_args['multiple_of']
+    # TODO: what is this?
+    hidden_dim = int(2 * hidden_dim / 3)
+    # custom dim factor multiplier
+    if ffn_dim_multiplier is not None:
+      hidden_dim = int(ffn_dim_multiplier * hidden_dim)
+    hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
+    model_args['hidden_dim'] = hidden_dim
+    del model_args['ffn_dim_multiplier'], model_args['multiple_of']
+
     model = Transformer(**model_args, linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
 
     if model_path.is_dir():
