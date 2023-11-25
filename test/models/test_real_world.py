@@ -47,7 +47,7 @@ class TestRealWorld(unittest.TestCase):
     def test(t, t2): return model(t, 801, t2).realize()
     helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 967)
 
-  @unittest.skipUnless((Device.DEFAULT not in ["LLVM", "CPU"] or not CI), "needs JIT, too long on CI LLVM")
+  @unittest.skipUnless((Device.DEFAULT not in ["LLVM", "CPU", "GPU"] or not CI), "needs JIT, too long on CI LLVM, GPU requires cl_khr_fp16")
   def test_llama(self):
     Tensor.default_type = dtypes.float16
 
@@ -59,7 +59,7 @@ class TestRealWorld(unittest.TestCase):
     # TODO: test first token vs rest properly, also memory test is broken with CacheCollector
     helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.22 if CI else 13.5, 181 if CI else 685, all_jitted=True)
 
-  @unittest.skipUnless((Device.DEFAULT not in ["LLVM", "CPU"] or not CI), "needs JIT, too long on CI LLVM")
+  @unittest.skipUnless((Device.DEFAULT not in ["LLVM", "CPU", "GPU"] or not CI), "needs JIT, too long on CI LLVM, GPU requires cl_khr_fp16")
   def test_gpt2(self):
     Tensor.default_type = dtypes.float16
 
