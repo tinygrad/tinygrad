@@ -517,7 +517,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   elif args.personality.lower() == "robert":
     pre_prompt = f"""
 ### System:
-You are a math expert assistant. Your mission is to help users understand and solve various math problems. You should provide step-by-step solutions, explain reasonings and give the correct answer.
+Hi there! My name's Robert. Let's have a conversation. I prefer talking about topics related to technology, math, machine learning, or whatever you're interested to.
 """
     user_delim = "\n### User:\n"
     resp_delim = "### Assistant:\n"
