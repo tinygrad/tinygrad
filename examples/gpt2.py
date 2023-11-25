@@ -10,7 +10,7 @@ from tinygrad.shape.symbolic import Variable
 from tinygrad.jit import TinyJit
 import tiktoken
 from tinygrad.nn.state import torch_load, load_state_dict
-from tinygrad.helpers import GlobalCounters, Timing, DEBUG, getenv, fetch, colored
+from tinygrad.helpers import GlobalCounters, Timing, DEBUG, getenv, fetch, colored, CI
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 
@@ -89,7 +89,7 @@ class Transformer:
 
   # TODO: fix empty token
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
-    return (self.forward_jit if tokens.shape[1] == 1 and getenv("JIT", 1) else self.forward)(tokens, start_pos, temperature)
+    return (self.forward_jit if tokens.shape[1] == 1 and getenv("JIT", int(not CI)) else self.forward)(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257
 MODEL_PARAMS = {
