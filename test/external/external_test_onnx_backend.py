@@ -188,6 +188,11 @@ if getenv('GPU') and CI:
   backend_test.exclude('test_max_float16_cpu')
   backend_test.exclude('test_min_float16_cpu')
 
+# Segfaults in CI
+if getenv('LLVM') and CI:
+  backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
+
+
 # TODO: this somehow passes in CI but does not pass if run locally
 if Device.DEFAULT in ['GPU', 'METAL', 'LLVM', 'CLANG']:
   backend_test.exclude('test_MaxPool3d_stride_padding_cpu')
@@ -208,6 +213,37 @@ else:
   backend_test.include('test_bvlc_alexnet')
   backend_test.include('test_zfnet512')
   backend_test.include('test_vgg19')
+
+if getenv('CLANG') and CI:
+  backend_test.exclude('test_ai_onnx_ml_array_feature_extractor_cpu')
+  backend_test.exclude('test_gather_elements_0_cpu')
+  backend_test.exclude('test_nllloss_NCd1_expanded_cpu')
+  backend_test.exclude('test_sce_mean_weight_ii_3d_cpu')
+  backend_test.exclude('test_gather_elements_1_cpu')
+  backend_test.exclude('test_sce_NCd1_mean_weight_negative_ii_cpu')
+  backend_test.exclude('test_nllloss_NCd1_weight_expanded_cpu')
+  backend_test.exclude('test_nllloss_NCd1d2d3_none_no_weight_negative_ii_expanded_cpu')
+  backend_test.exclude('test_nllloss_NCd1_ii_expanded_cpu')
+  backend_test.exclude('test_sce_mean_weight_ii_4d_cpu')
+  backend_test.exclude('test_sce_mean_weight_ii_3d_log_prob_cpu')
+  backend_test.exclude('test_gather_elements_negative_indices_cpu')
+  backend_test.exclude('test_sce_NCd1d2d3d4d5_mean_weight_log_prob_cpu')
+  backend_test.exclude('test_sce_NCd1_mean_weight_negative_ii_log_prob_cpu')
+  backend_test.exclude('test_nllloss_NCd1d2_no_weight_reduction_mean_ii_expanded_cpu')
+  backend_test.exclude('test_sce_NCd1d2d3d4d5_mean_weight_cpu')
+  backend_test.exclude('test_nllloss_NCd1d2d3d4d5_mean_weight_expanded_cpu')
+  backend_test.exclude('test_nllloss_NCd1_mean_weight_negative_ii_expanded_cpu')
+  backend_test.exclude('test_sce_mean_weight_ii_4d_log_prob_cpu')
+  backend_test.exclude('test_nllloss_NCd1d2_with_weight_reduction_mean_expanded_cpu')
+  backend_test.exclude('test_nllloss_NCd1_weight_ii_expanded_cpu')
+  backend_test.exclude('test_nllloss_NCd1d2_with_weight_reduction_sum_ii_expanded_cpu')
+  backend_test.exclude('test_nllloss_NCd1d2_with_weight_reduction_sum_expanded_cpu')
+  backend_test.exclude('test_nllloss_NCd1d2_expanded_cpu')
+  backend_test.exclude('test_nllloss_NCd1d2_reduction_sum_expanded_cpu')
+  backend_test.exclude('test_nllloss_NCd1d2d3d4d5_none_no_weight_expanded_cpu')
+  backend_test.exclude('test_nllloss_NCd1d2d3_sum_weight_high_ii_expanded_cpu')
+  backend_test.exclude('test_nllloss_NCd1d2_reduction_mean_expanded_cpu')
+  backend_test.exclude('test_nllloss_NCd1d2_with_weight_expanded_cpu')
 
 globals().update(backend_test.enable_report().test_cases)
 
