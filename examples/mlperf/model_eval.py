@@ -21,8 +21,8 @@ def eval_resnet():
     def __init__(self, device=None):
       self.mdl = ResNet50()
       for x in get_parameters(self.mdl) if device else []: x.to_(device)
-      self.mdl.load_from_pretrained()
-      #load_state_dict(self.mdl, safe_load("/tmp/resnet_epoch_5.safetensors"))
+      if (fn:=getenv("RESNET_MODEL", "")): load_state_dict(self.mdl, safe_load(fn))
+      else: self.mdl.load_from_pretrained()
       self.input_mean = Tensor([0.485, 0.456, 0.406], device=device).reshape(1, -1, 1, 1)
       self.input_std = Tensor([0.229, 0.224, 0.225], device=device).reshape(1, -1, 1, 1)
     def __call__(self, x:Tensor) -> Tensor:
