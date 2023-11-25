@@ -105,9 +105,9 @@ class FeedForward:
     return self.w2(self.w1(x).silu() * self.w3(x))
 
 class TransformerBlock:
-  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, linear=Linear, ffn_dim_multiplier=None):
+  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, linear=Linear):
     self.attention = Attention(dim, n_heads, n_kv_heads, linear)
-    self.feed_forward = FeedForward(dim, hidden_dim, linear, ffn_dim_multiplier)
+    self.feed_forward = FeedForward(dim, hidden_dim, linear)
     self.attention_norm = RMSNorm(dim, norm_eps)
     self.ffn_norm = RMSNorm(dim, norm_eps)
 
@@ -116,12 +116,12 @@ class TransformerBlock:
     return (h + self.feed_forward(self.ffn_norm(h))).realize()
 
 class Transformer:
-  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size, linear=Linear, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None, n_kv_heads=None, rope_theta=10000):
-    self.layers = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, linear, ffn_dim_multiplier) for _ in range(n_layers)]
+  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size, linear=Linear, n_kv_heads=None, rope_theta=10000):
+    self.layers = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, linear) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = Embedding(vocab_size, dim)
     self.output = linear(dim, vocab_size, bias=False)
-    self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_seq_len * 2, rope_theta)
+    self.freqs_cis = precompute_freqs_cis(dim // n_heads, MAX_CONTEXT * 2, rope_theta)
     self.forward_jit = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float=0.0):
@@ -302,16 +302,18 @@ class LLaMa:
     model_args = params["args"]
 
     # moved this out here
-    ffn_dim_multiplier = model_args['ffn_dim_multiplier']
+    hidden_dim = model_args['dim'] * 4
     multiple_of = model_args['multiple_of']
     # TODO: what is this?
     hidden_dim = int(2 * hidden_dim / 3)
     # custom dim factor multiplier
+    ffn_dim_multiplier = getattr(model_args, 'ffn_dim_multiplier', None)
     if ffn_dim_multiplier is not None:
       hidden_dim = int(ffn_dim_multiplier * hidden_dim)
+      del model_args['ffn_dim_multiplier']
     hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
     model_args['hidden_dim'] = hidden_dim
-    del model_args['ffn_dim_multiplier'], model_args['multiple_of']
+    del model_args['multiple_of']
 
     model = Transformer(**model_args, linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
 
