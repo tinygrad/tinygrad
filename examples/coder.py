@@ -62,37 +62,38 @@ if __name__ == "__main__":
     nn.state.load_state_dict(model, nn.state.safe_load("/tmp/cached_mistral"))
 
   spp = get_spp()
-  outputted = ""
-  def output(toks, color):
-    global outputted
+  def output(outputted, toks, color):
     cur = spp.decode(toks)[len(outputted):]
     sys.stdout.write(colored(cur, color))
     sys.stdout.flush()
     outputted += cur
-
-  def encode_prompt(k, v):
-    ret = []
-    ret += [IM_START]+spp.encode(f"{k}\n{v}")+[IM_END]+spp.encode("\n")
-    if k == "user": ret += [IM_START]+spp.encode("assistant\n")
-    return ret
-
-  toks = [spp.bos_id()] + encode_prompt("system", "You are Quentin. Quentin is a useful assistant who writes Python code to answer questions in a\n\n```python\n# insert code here\n```\n block")
+    return outputted
+  def encode_prompt(k, v): return [IM_START]+spp.encode(f"{k}\n{v}")+[IM_END]+spp.encode("\n")
+  def start_prompt(k): return [IM_START]+spp.encode(f"{k}\n")
 
   temperature = 0.7
-  max_length = 1000
+
+  # *** app below this line ***
+
+  toks = [spp.bos_id()] + encode_prompt("system", "You are Quentin. Quentin is a useful assistant who writes Python code to answer questions")
+                                         #in a\n\n```python\n# insert code here\n```\n block")
+  PROMPT = True
 
   start_pos = 0
-  output(toks, "green")
-  skip_user = False
+  outputted = output("", toks, "green")
+  turn = True
   while 1:
-    toks += encode_prompt("user", input("Q: "))
+    if PROMPT:
+      toks += encode_prompt("user", input("Q: ")) + start_prompt("assistant")
+    else:
+      toks += start_prompt("user" if turn else "assistant")
+      turn = not turn
     old_output_len = len(outputted)
     while 1:
-      assert len(toks) < MAX_CONTEXT, "context length exceeded"
       tok = model(Tensor([toks[start_pos:]]), start_pos, temperature).multinomial().item()
       start_pos = len(toks)
       toks.append(tok)
-      output(toks, "blue")
+      outputted = output(outputted, toks, "blue" if not turn else "cyan")
       if tok == IM_END: break
       if tok == spp.eos_id(): break
       new_output = outputted[old_output_len:]
@@ -109,5 +110,5 @@ if __name__ == "__main__":
           except Exception as e:
             result = str(e)
           toks += spp.encode(f"\nOutput:\n```\n{result}```")
-          output(toks, "yellow")
+          outputted = output(outputted, toks, "yellow")
     print("")
