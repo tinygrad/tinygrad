@@ -52,7 +52,7 @@ class TestRealWorld(unittest.TestCase):
     Tensor.default_type = dtypes.float16
 
     args_tiny = {"dim": 1024, "hidden_dim": 2048, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
-    model = LLaMaTransformer(**args_tiny)
+    model = LLaMaTransformer(**(args_tiny if CI else LLAMA_MODEL_PARAMS["1"]["7B"]["args"]))
     derandomize_model(model)
     @TinyJit
     def test(t): return model(t, 0).realize()

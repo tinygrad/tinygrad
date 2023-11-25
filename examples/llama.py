@@ -223,6 +223,23 @@ MODEL_PARAMS = {
   }
 }
 
+# fix up MODEL_PARAMS to have hidden_dim
+for model_gen in MODEL_PARAMS.values():
+  for model_type in model_gen.values():
+    model_args = model_type['args']
+    hidden_dim = model_args['dim'] * 4
+    multiple_of = model_args['multiple_of']
+    # TODO: what is this?
+    hidden_dim = int(2 * hidden_dim / 3)
+    # custom dim factor multiplier
+    ffn_dim_multiplier = getattr(model_args, 'ffn_dim_multiplier', None)
+    if ffn_dim_multiplier is not None:
+      hidden_dim = int(ffn_dim_multiplier * hidden_dim)
+      del model_args['ffn_dim_multiplier']
+    hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
+    model_args['hidden_dim'] = hidden_dim
+    del model_args['multiple_of']
+
 # **** helper functions ****
 def concat_weights(models):
   def convert(name) -> Tensor:
@@ -299,23 +316,7 @@ class LLaMa:
     assert sp_model.vocab_size() == MODEL_PARAMS[model_gen][model_size]["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {MODEL_PARAMS[model_gen][model_size]['args']['vocab_size']}"
 
     params = MODEL_PARAMS[model_gen][model_size]
-    model_args = params["args"]
-
-    # moved this out here
-    hidden_dim = model_args['dim'] * 4
-    multiple_of = model_args['multiple_of']
-    # TODO: what is this?
-    hidden_dim = int(2 * hidden_dim / 3)
-    # custom dim factor multiplier
-    ffn_dim_multiplier = getattr(model_args, 'ffn_dim_multiplier', None)
-    if ffn_dim_multiplier is not None:
-      hidden_dim = int(ffn_dim_multiplier * hidden_dim)
-      del model_args['ffn_dim_multiplier']
-    hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
-    model_args['hidden_dim'] = hidden_dim
-    del model_args['multiple_of']
-
-    model = Transformer(**model_args, linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
+    model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
 
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
