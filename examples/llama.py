@@ -13,8 +13,8 @@ from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes, CI, fetch
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear
-from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
-from tinygrad.helpers import GlobalCounters
+from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters, safe_load_metadata
+from tinygrad.helpers import GlobalCounters, prod
 from tinygrad.jit import TinyJit
 from tinygrad.shape.symbolic import Variable
 
@@ -225,7 +225,8 @@ MODEL_PARAMS = {
       "files": 1,
       "default_urls": {"model": "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/model.safetensors",
                        "tokenizer": "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/tokenizer.model",
-                       "name": "TinyLlama-1.1B-Chat-v0.6"},
+                       "name": "TinyLlama-1.1B-Chat-v0.6",
+                       "bfloat16": True},
     }
   }
 }
@@ -242,15 +243,21 @@ def concat_weights(models):
     return lazy_tensors[0].cat(*lazy_tensors[1:], dim=axis)
   return {name: convert(name) for name in {name: None for model in models for name in model}}
 
-def load(fn:str):
+def load(fn:str, bfloat:bool=False):
   if fn.endswith('.index.json'):
     with open(fn) as fp: weight_map = json.load(fp)['weight_map']
     parts = {n: load(str(Path(fn).parent / Path(n).name)) for n in set(weight_map.values())}
     return {k: parts[n][k] for k, n in weight_map.items()}
   elif fn.endswith(".safetensors"):
-    return safe_load(fn)
+    if bfloat: return safe_load_bfloat(fn)
+    else: return safe_load(fn)
   else:
     return torch_load(fn)
+
+def safe_load_bfloat(fn):
+  t, json_len, metadata = safe_load_metadata(fn)
+  return {k:t[8+json_len+v['data_offsets'][0]:].cast(dtypes.bfloat16)[:prod(v['shape'])].reshape(v['shape']).bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half() for k,v in metadata.items() if k != "__metadata__"}
+
 
 def convert_from_huggingface(weights, model: Transformer, n_heads: int, n_kv_heads: int):
   def permute(v: Tensor, n_heads: int):
@@ -307,16 +314,16 @@ class LLaMa:
     assert sp_model.vocab_size() == MODEL_PARAMS[model_gen][model_size]["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {MODEL_PARAMS[model_gen][model_size]['args']['vocab_size']}"
 
     params = MODEL_PARAMS[model_gen][model_size]
+    bfloat = params["default_urls"].get("bfloat16", False)
     model_args = params["args"]
     model = Transformer(**model_args, linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
 
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
     else:
-      weights = load(str(model_path))
+      weights = load(str(model_path),bfloat=bfloat)
     if "model.embed_tokens.weight" in weights:
       weights = convert_from_huggingface(weights, model, model_args["n_heads"], model_args["n_kv_heads"])
-    
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
       for _,v in weights.items(): v.realize()
