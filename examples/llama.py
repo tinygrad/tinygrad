@@ -223,8 +223,8 @@ MODEL_PARAMS = {
     "1B": {
       "args": {"dim": 2048, "n_layers": 22, "n_heads": 32, "n_kv_heads": 4, "multiple_of": 256, "norm_eps": 1e-05, "vocab_size": 32000},
       "files": 1,
-      "model_url": "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/model.safetensors?download=true",
-      "tokenizer_url": "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/tokenizer.model?download=true",
+      "weights": ["https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/model.safetensors?download=true"],
+      "tokenizer": "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/tokenizer.model?download=true",
     }
   }
 }
@@ -298,13 +298,10 @@ class AbsmaxQuantizedLinear:
     return new_tensors
 
 class LLaMa:
-  TINY_MODEL_URL = "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/model.safetensors?download=true"
-  TINY_TOKENIZER_URL = "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/tokenizer.model?download=true"
-
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
     if model_gen == "tiny":
-      model_path = LLaMa._prepare_model(model_path, tokenizer_path, MODEL_PARAMS[model_gen][model_size]["model_url"], MODEL_PARAMS[model_gen][model_size]["tokenizer_url"])
+      model_path = LLaMa._prepare_model(model_path, tokenizer_path, model_gen, model_size, "safetensors")
 
     from sentencepiece import SentencePieceProcessor
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
@@ -349,12 +346,16 @@ class LLaMa:
     return output
 
   @staticmethod
-  def _prepare_model(model_path:Path, tokenizer_path:Path, model_url:str, tokenizer_url:str):
+  def _prepare_model(model_path:Path, tokenizer_path:Path, model_gen, model_size:str, fmt:str):
     os.makedirs(model_path, exist_ok=True)
-    model_safetensors_path = Path.joinpath(model_path, "model.safetensors")
-    if not model_safetensors_path.exists(): model_path.replace(fetch(model_url))
-    if not tokenizer_path.exists(): tokenizer_path.replace(fetch(tokenizer_url))
-    return model_safetensors_path
+    if fmt == "safetensors":
+      model_path = Path.joinpath(model_path, "model.safetensors")
+      if not model_path.exists(): model_path.replace(fetch(MODEL_PARAMS[model_gen][model_size]["weights"]))
+    elif fmt == "torch":
+      for model_torch_path in [Path.joinpath(model_path, f"consolidated.{i:02d}.pth") for i in range(MODEL_PARAMS[model_gen][model_size]["files"])]:
+        if not model_torch_path.exists(): model_path.replace(fetch(MODEL_PARAMS[model_gen][model_size]["weights"][i]))
+    if not tokenizer_path.exists(): tokenizer_path.replace(fetch(MODEL_PARAMS[model_gen][model_size]["tokenizer"]))
+    return model_path
 
 # **** main code ****
 """
