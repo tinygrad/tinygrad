@@ -9,7 +9,7 @@ from tinygrad.helpers import dtypes, prod
 from tinygrad.ops import Device
 from test.helpers import derandomize_model
 
-from examples.llama import Transformer
+from extra.models.llama import Transformer
 
 ALLOCATED_DEV_BUFS = 0
 class FakeDeviceBuffer:

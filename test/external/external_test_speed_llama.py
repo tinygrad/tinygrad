@@ -1,7 +1,7 @@
 # NOTE: this only tests the speed of the LLaMA codegen, it doesn't actually run the net
 import unittest, time
 import numpy as np
-from examples.llama import Transformer, MODEL_PARAMS
+from extra.models.llama import Transformer, MODEL_PARAMS
 from tinygrad.tensor import Tensor
 from tinygrad.ops import Device
 from tinygrad.nn.state import get_state_dict
