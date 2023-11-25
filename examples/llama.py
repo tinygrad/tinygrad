@@ -18,7 +18,7 @@ from tinygrad.helpers import GlobalCounters
 from tinygrad.jit import TinyJit
 from tinygrad.shape.symbolic import Variable
 
-MAX_CONTEXT = 1024
+MAX_CONTEXT = getenv("MAX_CONTEXT", 1024)
 JIT = getenv("JIT", 0 if CI else 1)
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
