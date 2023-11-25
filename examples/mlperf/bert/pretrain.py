@@ -1,8 +1,12 @@
-import json, math
+import json, math, time
 from pathlib import Path
 import numpy as np
-from tinygrad.helpers import getenv
+from tinygrad.helpers import GlobalCounters, getenv
+from tinygrad.jit import TinyJit
+from tinygrad.nn import optim
+from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor, dtypes
+from extra.lr_scheduler import OneCycleLR
 from extra.models.bert import Bert
 from extra.datasets.wikipedia import iterate
 from extra import dist
@@ -18,7 +22,7 @@ else:
   Tensor.default_type = dtypes.float32
   np_dtype = np.float32
 
-BS, EVAL_BS, STEPS, WARMUP_STEPS, EPOCH,  = getenv("BS", 32), getenv('EVAL_BS', 8), getenv("STEPS", 100000), getenv("WARMUP_STEPS", 10000), getenv("EPOCHS", 30)
+BS, EVAL_BS, STEPS, WARMUP_STEPS, EPOCH, MAX_LR  = getenv("BS", 32), getenv('EVAL_BS', 8), getenv("STEPS", 100000), getenv("WARMUP_STEPS", 10000), getenv("EPOCHS", 30), getenv('MAX_LR', 2.0)
 EVAL_FREQ = math.floor(min(0.05*(230.23 * BS + 3000000), 25000))
 
 def get_model_and_config(path:str):
@@ -36,10 +40,10 @@ def get_model_and_config(path:str):
   )
   return model, config
 
-def one_hot(arr: np.ndarray, num_classes=3):
-  res = np.eye(num_classes)[np.array(arr, dtype=np.int32).reshape(-1)]
+def one_hot(arr: Tensor, num_classes=3): #TODO: REMOVE GRAPH BREAK
+  res = np.eye(num_classes)[np.array(arr.numpy(), dtype=np.int32).reshape(-1)]
   arr = res.reshape(list(arr.shape) + [num_classes])
-  return arr.astype(np_dtype)
+  return Tensor(arr.astype(np_dtype))
 
 def pool_output(config:dict, output:Tensor):
   pooled_output = output[:, 0]
@@ -65,31 +69,55 @@ def get_masked_lm_output(bert_config:dict, input_tensor:Tensor, output_weights:T
 
   label_weights = label_weights.reshape((-1))
   one_hot_labels = one_hot(label_ids.reshape(-1), num_classes=bert_config["vocab_size"])
-  per_example_loss = -1 * (log_probs * Tensor(one_hot_labels)).sum(axis=-1)
+  per_example_loss = -1 * (log_probs * one_hot_labels).sum(axis=-1)
   numerator = (label_weights * per_example_loss).sum()
   denominator = label_weights.sum() + 1e-5
   loss = numerator / denominator
   return loss, per_example_loss, log_probs
 
-def get_next_sentence_output(bert_config:dict, input_tensor:Tensor, labels: np.ndarray):
+def get_next_sentence_output(bert_config:dict, input_tensor:Tensor, labels: Tensor):
   logits = input_tensor.matmul(Tensor.empty(*(2, bert_config["hidden_size"])).transpose()).add(Tensor.zeros(2)) # Weight init?
   log_probs = logits.log_softmax(axis=-1)
   labels = labels.reshape([-1])
   one_hot_labels = one_hot(labels, num_classes=2)
-  per_example_loss = -1 * ((log_probs * Tensor(one_hot_labels)).sum(axis=-1))
+  per_example_loss = -1 * ((log_probs * one_hot_labels).sum(axis=-1))
   loss = per_example_loss.mean()
   return loss, per_example_loss, log_probs
+
+@TinyJit
+def train_step_jitted(model, config:dict, embedding_table, optimizer, lr_scheduler, input_ids, input_mask, masked_lm_ids, masked_lm_weights, segment_ids, masked_lm_positions, next_sentence_labels):
+  output = model(input_ids=input_ids, attention_mask=input_mask, token_type_ids=segment_ids) # check input_mask == attention_mask?
+  pooled_output = pool_output(config, output)
+
+  masked_lm_loss, _, _  = get_masked_lm_output(config, output, embedding_table, masked_lm_positions, masked_lm_ids, masked_lm_weights)
+  next_sentence_loss, _, _ = get_next_sentence_output(config, pooled_output, next_sentence_labels)
+  loss = masked_lm_loss + next_sentence_loss
+
+  if not getenv('DISABLE_BACKWARD', 0):
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    lr_scheduler.step()
+  return loss.realize()
 
 def pretrain():
   model, config = get_model_and_config(Path(__file__).parent.parents[2] / "extra" / "datasets" / "wiki" / "bert_config.json")
   embedding_table = model.embeddings.word_embeddings.weight
-  for X, Y in iterate(bs=BS, val=False):
-    output = model(input_ids=Tensor(X["input_ids"]), attention_mask=Tensor(X["input_mask"]), token_type_ids=Tensor(X["segment_ids"])) # check input_mask == attention_mask?
-    pooled_output = pool_output(config, output)
-    
-    masked_lm_loss, masked_lm_example_loss, masked_lm_log_probs = get_masked_lm_output(config, output, embedding_table, Tensor(X["masked_lm_positions"]), X["masked_lm_ids"], Tensor(X["masked_lm_weights"]))
-    next_sentence_loss, next_sentence_example_loss, next_sentence_log_probs = get_next_sentence_output(config, pooled_output, X["next_sentence_labels"])
+  optimizer = optim.LAMB(get_parameters(model), 1 / WARMUP_STEPS, eps=1e-6, wd=0.01, adam=True) # TODO: Exclude LayerNorm, and bias from weight decay
+  lr_scheduler = OneCycleLR(optimizer, getenv('INIT_LR', 2.0), MAX_LR * WARMUP_STEPS, MAX_LR * 1e12, STEPS, WARMUP_STEPS / STEPS)
 
-    total_loss = masked_lm_loss + next_sentence_loss
-    print(total_loss.numpy())
-    break
+  for _ in range(EPOCH):
+    i = 0
+    while i <= STEPS:
+      st = time.monotonic()
+      for X, Y in iterate(bs=BS, val=False):
+        GlobalCounters.reset()
+        loss = train_step_jitted(model, config, embedding_table, optimizer, lr_scheduler, Tensor(X["input_ids"]), Tensor(X["input_mask"]), Tensor(X["masked_lm_ids"]), Tensor(X["masked_lm_weights"]), Tensor(X["segment_ids"]), Tensor(X["masked_lm_positions"]), Tensor(X["next_sentence_labels"]))
+        et = time.monotonic()
+
+        loss_cpu = loss.numpy()
+        cl = time.monotonic()
+
+        print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+        st = cl
+        i += 1
