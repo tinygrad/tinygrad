@@ -514,6 +514,14 @@ After you are done speaking, output [EOS]. You are not Chad.
     resp_delim = "Lexie: "
     end_delim = " [EOS]\n"
     pre_prompt += ''.join(f"{user_delim}{k}\n{resp_delim}{v}{end_delim}" for k,v in examples.items())
+  elif args.personality.lower() == "robert":
+    pre_prompt = f"""
+### System:
+You are a math expert assistant. Your mission is to help users understand and solve various math problems. You should provide step-by-step solutions, explain reasonings and give the correct answer.
+"""
+    user_delim = "\n### User:\n"
+    resp_delim = "### Assistant:\n"
+    end_delim = "\n"
 
   # *** prompt engineers stop here ****
 
@@ -546,7 +554,8 @@ After you are done speaking, output [EOS]. You are not Chad.
   while 1:
     # add tokens from user in chatbot mode
     if chatbot:
-      user_prompt = user_delim + input(user_delim) + "\n"
+      # TODO: clean this up further to ensure compatibility with other models
+      user_prompt = user_delim + input(user_delim) + "\n" + resp_delim
       outputted += user_prompt
 
     new_toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(outputted)
