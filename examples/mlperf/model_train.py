@@ -21,7 +21,6 @@ def train_retinanet():
 
 def train_unet3d():
   device = Device.DEFAULT
-  print("Device:", device)
   conf = Conf()
   rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
   is_successful, diverged = False, False
@@ -72,7 +71,6 @@ def train_unet3d():
   #       param_group['lr'] = init_lr + (lr - init_lr) * scale
 
   from extra.models.unet3d import UNet3D
-  print("Model: UNet3D", Device.DEFAULT)
   mdl = UNet3D()
   if getenv("PRETRAINED"):
     mdl.load_from_pretrained()
