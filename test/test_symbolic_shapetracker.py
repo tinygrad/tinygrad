@@ -1,6 +1,6 @@
 import unittest
 from tinygrad.shape.shapetracker import ShapeTracker, View
-from tinygrad.shape.symbolic import Variable
+from tinygrad.shape.symbolic import Variable, NumNode
 from tinygrad.tensor import Tensor
 
 class TestSymbolic(unittest.TestCase):
@@ -115,7 +115,7 @@ class TestSymbolicReshape(unittest.TestCase):
 
   def test_reshape_into_symbols_bad_shape(self):
     vi = Variable("i", 1, 10).bind(4)
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(ValueError):
       t = Tensor.rand(4, 6).reshape(vi, 6).reshape(1, 77) # reshape to a different size new shape through symbolic shape
     with self.assertRaises(AssertionError):
       t = Tensor.rand(3, 4).reshape(3, (vi+1)) # reshape into non-Variable Node
@@ -135,9 +135,8 @@ class TestSymbolicReshape(unittest.TestCase):
 
 class TestSymbolicExpand(unittest.TestCase):
   def test_expand_into_symbols(self):
-    # TODO: enfore expand only into bound variables
-    vi = Variable("i", 1, 5)
-    vj = Variable("j", 1, 5)
+    vi = Variable("i", 1, 5).bind(3)
+    vj = Variable("j", 1, 5).bind(3)
     a = Tensor([[1], [2], [3]]).expand((3, vi))
     assert a.shape == (3, vi)
     a = a.reshape(3, vi, 1).expand((3, vi, vj))
@@ -162,7 +161,7 @@ class TestSymbolicShapeExpr(unittest.TestCase):
     i = Variable("i", 1, 120)
     gidx0 = Variable("gidx0", 0, i)
     lidx1 = Variable("lidx1", 0, 7)
-    idx = (gidx0, lidx1, Variable.num(1))
+    idx = (gidx0, lidx1, NumNode(1))
     shape = (i+1, 8, 4)
     strides = (1, (i*4)+4, i+1)
     st = ShapeTracker((View.create(shape, strides), ))

@@ -3,8 +3,6 @@ from tinygrad.helpers import ImageDType, prod, IMAGE, getenv, dtypes, DEBUG, fla
 
 # *** image Tensor function replacements ***
 
-from tinygrad.lazy import get_single_root
-
 def image_dot(self, w):
   # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
   n1, n2 = len(self.shape), len(w.shape)
@@ -60,7 +58,6 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
   if IMAGE >= 2: x,w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))), w.cast(base_image_type((cout//4, H*W*cin, 4)))
   x, w = x.contiguous(), w.contiguous()
-  if getenv("PREREALIZE", 1) and get_single_root(w.lazydata).realized: w.realize()
 
   # expand out
   rcin_hi, rcin_lo = cin//4 if cin >= 4 else 1, 4 if cin >= 4 else 1
@@ -162,7 +159,8 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
   if valid.min == 0 and isinstance(idxy, SumNode):
     nodes = valid.nodes if isinstance(valid, AndNode) else [valid]
     val_dict: Dict[Node, Any] = {}
-    idxy_flat_var = [(i, i.vars()[0]) for i in idxy.flat_components if not isinstance(i, NumNode)]
+    # TODO: is this correct? should it check there's only one variable from each component?
+    idxy_flat_var = [(i, list(i.vars())[0]) for i in idxy.flat_components if not isinstance(i, NumNode)]
 
     for node in nodes:
       assert isinstance(node, LtNode)

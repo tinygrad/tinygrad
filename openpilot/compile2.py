@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-import os, sys, io, pathlib
+import os, sys, io, pathlib, re
 sys.path.insert(0, str(pathlib.Path(__file__).parents[1]))
 
 if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
 if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
 if "NOLOCALS" not in os.environ: os.environ["NOLOCALS"] = "1"
 if "OPT" not in os.environ: os.environ["OPT"] = "99"
-os.environ["PREREALIZE"] = "0"
 
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
@@ -55,6 +54,9 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
 def schedule_to_thneed(schedule, output_fn):
   from extra.thneed import Thneed
 
+  print("kernel count:", len(schedule))
+  assert len(schedule) <= getenv("ALLOWED_KERNEL_COUNT", 0) or getenv("ALLOWED_KERNEL_COUNT", 0) == 0, "too many kernels!"
+
   # transform to CL.CACHE
   used_ops = 0
   cl_cache = []
@@ -65,6 +67,10 @@ def schedule_to_thneed(schedule, output_fn):
     # pass these to thneed
     setattr(prg.clprg, 'op_estimate', prg.op_estimate)
     setattr(prg.clprg, 'prg', prg.prg)
+
+    if getenv("VALIDTEST") == 1:
+      src = re.search(r"=.*\?.*?read_image", prg.prg)
+      if src is not None: raise Exception("Openpilot has valid checks!")
 
     global_size = prg.global_size + [1]*(3-len(prg.global_size))
     local_size = prg.local_size + [1]*(3-len(prg.local_size))

@@ -1,16 +1,21 @@
-# pip3 install pyobjc-framework-Metal pyobjc-framework-Cocoa pyobjc-framework-libdispatch
 import os, subprocess, pathlib, ctypes, tempfile
-import Metal, Cocoa, libdispatch
-from typing import List, Any, Tuple, Dict, Union, Set, cast
+import Metal, libdispatch
+from typing import List, Any, Tuple, Dict, cast, Optional
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup
-from tinygrad.ops import Compiled, BatchExecutor, JitItem, CompiledASTRunner, update_stats
+from tinygrad.ops import Compiled, CompiledASTRunner, update_stats
 from tinygrad.renderer.metal import MetalRenderer
 from tinygrad.runtime.lib import RawBufferMapped, RawBuffer, LRUAllocator
-from tinygrad.shape.symbolic import Variable, Node
+from tinygrad.shape.symbolic import Variable
+from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, GraphException
 
 class MetalAllocator(LRUAllocator):
-  def _do_alloc(self, size, dtype, device, **kwargs): return METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
+  def _do_alloc(self, size, dtype, device, **kwargs):
+    buf_len, max_buf_len = size*dtype.itemsize, METAL.device.maxBufferLength()
+    assert buf_len < max_buf_len, f"Buffer length of {buf_len/1e9:5.2f} GB exceeds Metal's max buffer length of {max_buf_len/1e9:5.2f} GB."
+    buf = METAL.device.newBufferWithLength_options_(buf_len, Metal.MTLResourceStorageModeShared)
+    assert buf, f"Metal buffer allocation failed with {buf}."
+    return buf
   def _do_free(self, buf): buf.release()
   def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
 
@@ -18,7 +23,6 @@ class _METAL:
   def __init__(self):
     self.mtl_buffers_in_flight: List[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
-    self.supports_icb = (self.device.supportsFamily_(Metal.MTLGPUFamilyMac2) or self.device.supportsFamily_(Metal.MTLGPUFamilyApple3) or self.device.supportsFamily_(Metal.MTLGPUFamilyCommon2)) and self.device.argumentBuffersSupport() is Metal.MTLArgumentBuffersTier2
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     self.allocator = MetalAllocator(self.device.dedicatedMemorySize() or self.device.sharedMemorySize())
   # TODO: is there a better way to do this?
@@ -48,10 +52,7 @@ def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
     return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
   options = Metal.MTLCompileOptions.new()
   library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
-  # TODO: avoid file write here?
-  with tempfile.NamedTemporaryFile(delete=True) as output_file:
-    unwrap(library.serializeToURL_error_(Cocoa.NSURL.URLWithString_(f"file://{output_file.name}"), None))
-    return pathlib.Path(output_file.name).read_bytes()
+  return library.libraryDataContents().bytes().tobytes()
 
 class MetalProgram:
   def __init__(self, name:str, lib:bytes):
@@ -82,9 +83,12 @@ class MetalProgram:
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
     METAL.mtl_buffers_in_flight.append(command_buffer)
 
-class MetalBatchExecutor(BatchExecutor):
-  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int]):
-    super().__init__(jit_cache, input_rawbuffers, var_vals)
+class MetalGraph:
+  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int]):
+    self.jit_cache = jit_cache
+    self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
+    self.op_estimate, self.mem_estimate = get_jit_stats(jit_cache)
+    self.jc_idx_with_updatable_launch_dims = get_jc_idxs_with_updatable_launch_dims(jit_cache)
 
     # create metal batch exec
     icb_descriptor = Metal.MTLIndirectCommandBufferDescriptor.new()
@@ -93,10 +97,9 @@ class MetalBatchExecutor(BatchExecutor):
     icb_descriptor.setInheritPipelineState_(False)
     icb_descriptor.setMaxKernelBufferBindCount_(31)
     self.icb = METAL.device.newIndirectCommandBufferWithDescriptor_maxCommandCount_options_(icb_descriptor, len(self.jit_cache), Metal.MTLResourceOptions(0))
-    assert self.icb is not None, "create indirect command buffer failed, does your system support this?"
+    if self.icb is None: raise GraphException("create indirect command buffer failed, does your system support this?")
 
     self.int_buf = RawMetalBuffer(len(var_vals), dtypes.int32)
-    self.input_has_variable_dims: Set[int] = set()
     read_resources, write_resources = [], []
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledASTRunner = cast(CompiledASTRunner, ji.prg)
@@ -114,24 +117,21 @@ class MetalBatchExecutor(BatchExecutor):
       var_vals_keys = list(var_vals.keys())
       for i,v in enumerate(prg.vars):
         icb_command.setKernelBuffer_offset_atIndex_(self.int_buf._buf, var_vals_keys.index(v)*4, len(ji.rawbufs)+i)
-      global_size, local_size = prg.launch_dims(var_vals)
-      assert prg.global_size and prg.local_size, "need global and local size to JIT"
-      if any(isinstance(x, Node) for x in prg.global_size) or any(isinstance(x, Node) for x in prg.local_size):
-        self.input_has_variable_dims.add(j)
-      else:
+      if j not in self.jc_idx_with_updatable_launch_dims:
+        global_size, local_size = prg.launch_dims(var_vals)
         icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
       icb_command.setBarrier()
     self.read_resources, self.write_resources = dedup(read_resources), dedup(write_resources)
     self.command_buffer: Any = None
     self.int_buf_view = self.int_buf.buffer_view()    # TODO: this is metal syncing when it doesn't need to
 
-  def __call__(self, input_rawbuffers: Dict[Union[int, str], RawBuffer], var_vals: Dict[Variable, int], wait=False):
+  def __call__(self, input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # NOTE: you at least can't update the ints if this is running
     if self.command_buffer is not None and self.command_buffer in METAL.mtl_buffers_in_flight: self.command_buffer.waitUntilCompleted()
-    all_read_resources = self.read_resources + [x._buf for x in input_rawbuffers.values()]
-    for (j,i),input_name in self.input_replace.items():
-      self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_name]._buf, 0, i)
-    for j in self.input_has_variable_dims:
+    all_read_resources = self.read_resources + [x._buf for x in input_rawbuffers]
+    for (j,i),input_idx in self.input_replace.items():
+      self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_idx]._buf, 0, i)
+    for j in self.jc_idx_with_updatable_launch_dims:
       global_size, local_size = cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals)
       self.icb.indirectComputeCommandAtIndex_(j).concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
     self.int_buf_view[:] = list(var_vals.values())
@@ -149,7 +149,7 @@ class MetalBatchExecutor(BatchExecutor):
     else:
       METAL.mtl_buffers_in_flight.append(command_buffer)
       et = None
-    update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=True, num_kernels=len(self.jit_cache))
+    update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=jit, num_kernels=len(self.jit_cache))
     return et
 
-MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, METAL.synchronize, batch_executor=MetalBatchExecutor if METAL.supports_icb else BatchExecutor)
+MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, METAL.synchronize, graph=MetalGraph)

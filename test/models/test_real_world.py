@@ -5,7 +5,7 @@ from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.jit import TinyJit
 from tinygrad.ops import Device, GlobalCounters
-from tinygrad.helpers import CI, dtypes, getenv, prod
+from tinygrad.helpers import CI, dtypes
 from test.helpers import derandomize_model
 
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
@@ -29,7 +29,7 @@ def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed, all_jit
   assert GlobalCounters.mem_used/1e9 < max_memory_allowed, f"{nm} used more than {max_memory_allowed:.2f} GB"
   assert not kernels_used or kernels_used <= max_kernels_allowed, f"{nm} used more than {max_kernels_allowed} kernels"
   if all_jitted:
-    assert kernels_used > 0 and kernels_used == GlobalCounters.kernel_count, f"only {kernels_used} out of {GlobalCounters.kernel_count} were jitted"
+    assert kernels_used > 0 and kernels_used == GlobalCounters.kernel_count or (kernels_used == 1 and getattr(Device[Device.DEFAULT], "graph", None)), f"only {kernels_used} out of {GlobalCounters.kernel_count} were jitted"
 
 class TestRealWorld(unittest.TestCase):
   def setUp(self):
@@ -56,8 +56,8 @@ class TestRealWorld(unittest.TestCase):
     derandomize_model(model)
     @TinyJit
     def test(t): return model(t, 0).realize()
-    # NOTE: only test one pass, not testing the dynamic shape autoregressive part
-    helper_test("test_llama", lambda: (Tensor([[1,]]),), test, 0.22 if CI else 13.5, 137 if CI else 521, all_jitted=True)
+    # TODO: test first token vs rest properly, also memory test is broken with CacheCollector
+    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.22 if CI else 13.5, 181 if CI else 685, all_jitted=True)
 
   @unittest.skipUnless((Device.DEFAULT not in ["LLVM", "CPU"] or not CI), "needs JIT, too long on CI LLVM")
   def test_gpt2(self):

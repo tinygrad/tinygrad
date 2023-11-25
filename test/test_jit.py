@@ -1,14 +1,10 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor, Device
+from tinygrad.ops import Device
+from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
-import pytest
 
-pytestmark = pytest.mark.webgpu
-
-# NOTE: METAL fails, might be platform and optimization options dependent.
-@unittest.skipUnless(Device.DEFAULT not in ["METAL", "WEBGPU"], f"no JIT on {Device.DEFAULT}")
 class TestJit(unittest.TestCase):
   def test_simple_jit(self):
     @TinyJit
@@ -30,7 +26,7 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
       np.testing.assert_allclose(d.numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
       np.testing.assert_allclose(e.numpy(), a.numpy()*b.numpy(), atol=1e-4, rtol=1e-5)
-    assert len(f.jit_cache) == 3
+    assert len(f.jit_cache) == 3 or (len(f.jit_cache) == 1 and getattr(Device[Device.DEFAULT], "graph", None))
 
   def test_nothing_jitted(self):
     @TinyJit
@@ -189,6 +185,60 @@ class TestJit(unittest.TestCase):
             [1., 2., 5., 4., 7.],
             [0., 2., 3., 1., 0.]]
     np.testing.assert_allclose(want, Y)
+
+  def test_jitted_read_assign(self):
+    class Cache:
+      def __init__(self):
+        self.good_cache = Tensor.zeros(1)
+        self.bad_cache = Tensor.zeros(1)
+        self.good_jitted = TinyJit(self.good)
+        self.bad_jitted = TinyJit(self.bad)
+
+      def good(self, y, cache_v=None):
+        if cache_v is not None:
+          self.good_cache.assign(cache_v+1-1).realize()
+        return (self.good_cache + y).realize()  # need + y to provide inputs to JIT
+
+      def bad(self, y, cache_v=None):
+        if cache_v is not None:
+          self.bad_cache.assign(cache_v).realize()
+        return (self.bad_cache + y).realize()
+
+    cache = Cache()
+    np.testing.assert_equal([0], cache.good_cache.numpy())
+    np.testing.assert_equal([0], cache.bad_cache.numpy())
+
+    zero = Tensor([0])
+    one = Tensor([1])
+    two = Tensor([2])
+
+    # save [1] in the caches
+    cache.good(zero, one)
+    cache.bad(zero, one)
+    np.testing.assert_equal([1], cache.good_cache.numpy())
+    np.testing.assert_equal([1], cache.bad_cache.numpy())
+
+    for i in range(5):
+      cache.good_jitted(zero)
+      cache.bad_jitted(zero)
+
+    # verify the jitted calls read 1 from the cache
+    np.testing.assert_equal([1], cache.good_jitted(zero).numpy())
+    np.testing.assert_equal([1], cache.bad_jitted(zero).numpy())
+
+    # save [2] in the caches
+    cache.good(zero, two)
+    cache.bad(zero, two)
+    np.testing.assert_equal([2], cache.good_cache)
+    np.testing.assert_equal([2], cache.bad_cache)
+
+    # verify the jitted calls read 2 from the cache
+    np.testing.assert_equal([2], cache.good_jitted(zero).numpy())
+    # but the bad_jitted doesn't!
+    np.testing.assert_equal([1], cache.bad_jitted(zero).numpy())
+
+    assert len(cache.good_jitted.jit_cache) == 1
+    assert len(cache.bad_jitted.jit_cache) == 1
 
 if __name__ == '__main__':
   unittest.main()
