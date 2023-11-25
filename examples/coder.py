@@ -5,7 +5,7 @@ sys.path.append(os.getcwd())
 from io import StringIO
 from contextlib import redirect_stdout
 from tinygrad import Tensor, nn
-from tinygrad.helpers import Timing, colored, getenv
+from tinygrad.helpers import Timing, colored, getenv, fetch
 from examples.llama import Transformer
 from sentencepiece import SentencePieceProcessor
 
@@ -13,8 +13,7 @@ def create_fixed_tokenizer(output_file):
   print("creating fixed tokenizer")
   import extra.junk.sentencepiece_model_pb2 as spb2
   mp = spb2.ModelProto()
-  with open("weights/OpenHermes/tokenizer.model", "rb") as f:
-    mp.ParseFromString(f.read())
+  mp.ParseFromString(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/tokenizer.model?download=true").read_bytes())
   mp.pieces.append(spb2.ModelProto.SentencePiece(piece="<|im_end|>", score=0))
   mp.pieces.append(spb2.ModelProto.SentencePiece(piece="<|im_start|>", score=0))
   with open(output_file, "wb") as f:
@@ -24,9 +23,9 @@ def create_fixed_tokenizer(output_file):
 def create_model_cache(output_file, model):
   print(f"creating model cache at {output_file}")
   # TODO: add read only Tensors
-  with Timing("load weights: "):
-    part1 = nn.state.torch_load("weights/OpenHermes/pytorch_model-00001-of-00002.bin")
-    part2 = nn.state.torch_load("weights/OpenHermes/pytorch_model-00002-of-00002.bin")
+  with Timing("download weights: "):
+    part1 = nn.state.torch_load(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/pytorch_model-00001-of-00002.bin?download=true"))
+    part2 = nn.state.torch_load(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/pytorch_model-00002-of-00002.bin?download=true"))
 
   from examples.llama import convert_from_huggingface
   with Timing("weights -> model: "):
@@ -69,7 +68,7 @@ if __name__ == "__main__":
 
   # *** app below this line ***
 
-  toks = [spp.bos_id()] + encode_prompt("system", "You are Quentin. Quentin is a useful assistant who writes Python code to answer questions. He keeps the code as short as possible")
+  toks = [spp.bos_id()] + encode_prompt("system", "You are Quentin. Quentin is a useful assistant who writes Python code to answer questions. He keeps the code as short as possible and doesn't read from user input")
 
   PROMPT = getenv("PROMPT", 1)
   temperature = getenv("TEMP", 0.7)
