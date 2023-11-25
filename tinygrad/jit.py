@@ -24,7 +24,7 @@ def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[RawBuffer]
         input_replace[(j,i)] = input_rawbuffers.index(a)
   assert len(set(input_replace.values())) == len(input_rawbuffers), "some input tensors not found"
   return input_replace
-def get_output_replace(jit_cache: List[JitItem], fxn_ret:Tuple[Any]) -> Dict[int, int]:
+def get_output_replace(jit_cache: List[JitItem], fxn_ret:Union[Tuple[Any], List[Any]]) -> Dict[int, int]:
   output_replace: Dict[int, int] = {}
   raw_retbufs = [t.lazydata.realized for t in fxn_ret if isinstance(t, Tensor)]
   for j,ji in enumerate(jit_cache):
