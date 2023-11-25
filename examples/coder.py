@@ -5,7 +5,7 @@ sys.path.append(os.getcwd())
 
 from tinygrad import Tensor, nn
 from tinygrad.helpers import Timing, colored
-from examples.llama import Transformer, convert_from_huggingface
+from examples.llama import Transformer, convert_from_huggingface, MAX_CONTEXT
 from contextlib import redirect_stdout
 
 # https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/blob/main/tokenizer_config.json
@@ -88,6 +88,7 @@ if __name__ == "__main__":
     toks += encode_prompt("user", input("Q: "))
     old_output_len = len(outputted)
     while 1:
+      assert len(toks) < MAX_CONTEXT, "context length exceeded"
       tok = model(Tensor([toks[start_pos:]]), start_pos, temperature).multinomial().item()
       start_pos = len(toks)
       toks.append(tok)
@@ -104,9 +105,9 @@ if __name__ == "__main__":
           my_stdout = StringIO()
           try:
             with redirect_stdout(my_stdout): exec(python_code)
-            result = my_stdout.getvalue().strip()
+            result = my_stdout.getvalue()
           except Exception as e:
             result = str(e)
-          toks += spp.encode(f"\nOutput:\n```\n{result}\n```")
+          toks += spp.encode(f"\nOutput:\n```\n{result}```")
           output(toks, "yellow")
     print("")
