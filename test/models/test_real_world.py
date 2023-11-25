@@ -10,7 +10,7 @@ from test.helpers import derandomize_model
 
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
 from examples.hlb_cifar10 import SpeedyResNet
-from extra.models.llama import Transformer as LLaMaTransformer, MODEL_PARAMS as LLAMA_MODEL_PARAMS
+from examples.llama import Transformer as LLaMaTransformer, MODEL_PARAMS as LLAMA_MODEL_PARAMS
 from examples.stable_diffusion import UNetModel
 
 def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed, all_jitted=False):
