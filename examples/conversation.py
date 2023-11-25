@@ -52,7 +52,6 @@ def llama_generate(
   prompt: str,
   start_pos: int,
   outputted: str,
-  count=30,
   temperature=0.7,
   user_delim="\nUser: ",
   end_delim=" [EOS]",
@@ -61,7 +60,7 @@ def llama_generate(
   outputted += f"{user_delim}{prompt}\n"
   toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(outputted)
 
-  for _ in range(count):
+  while not outputted.endswith(end_delim):
     probs_np = llama.model(Tensor([toks[start_pos:]]), start_pos, temperature).realize().numpy()
     token = int(np.random.choice(len(probs_np), p=probs_np))
     start_pos = len(toks)
@@ -73,9 +72,6 @@ def llama_generate(
     sys.stdout.write(cur[len(outputted):])
     sys.stdout.flush()
     outputted = cur
-
-    # stop after you have your answer
-    if outputted.endswith(end_delim): break
   print() # because the output is flushed
   return outputted, start_pos
 
@@ -208,13 +204,12 @@ if __name__ == "__main__":
 
   # LLAMA args
   parser.add_argument("--llama_pre_prompt_path", type=Path, default=Path(__file__).parent / "conversation_data" / "pre_prompt_stacy.yaml", help="Path to yaml file which contains all pre-prompt data needed. ")
-  parser.add_argument("--llama_count", type=int, default=1000, help="Max number of tokens to generate")
   parser.add_argument("--llama_personality", type=str, default="Stacy", help="Personality, can be Stacy, George, Gary, or Lexie")
   parser.add_argument("--llama_temperature", type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument("--llama_quantize", action="store_true", help="Quantize the weights to int8 in memory")
   parser.add_argument("--llama_model", type=Path, default=None, required=True, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
-  parser.add_argument("--llama_gen", type=str, default="tiny", required=False, help="Generation of the model to use")
-  parser.add_argument("--llama_size", type=str, default="1B", required=False, help="Size of model to use")
+  parser.add_argument("--llama_gen", type=str, default="1", required=False, help="Generation of the model to use")
+  parser.add_argument("--llama_size", type=str, default="7B", required=False, help="Size of model to use")
   parser.add_argument("--llama_tokenizer", type=Path, default=None, required=True, help="Path to llama tokenizer.model")
 
   # vits args
@@ -283,7 +278,7 @@ if __name__ == "__main__":
 
       # Generate with llama
       with Timing("llama generation: "):
-        outputted, start_pos = llama_generate(llama, txt, start_pos, outputted)
+        outputted, start_pos = llama_generate(llama, txt, start_pos, outputted, args.llama_temperature, user_delim, end_delim)
         response = outputted.splitlines()[-1].replace(resp_delim.strip(), "").replace(end_delim.strip(), "")
         log.append(resp_delim + response)
 
