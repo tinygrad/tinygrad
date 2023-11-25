@@ -29,7 +29,7 @@ def get_output_replace(jit_cache: List[JitItem], fxn_ret:Union[Tuple[Any], List[
   raw_retbufs = [t.lazydata.realized for t in fxn_ret if isinstance(t, Tensor)]
   for j,ji in enumerate(jit_cache):
     if (a:=ji.rawbufs[0]) in raw_retbufs: output_replace[j] = raw_retbufs.index(a) # output buffers are always 0
-  assert (_:=len(set(output_replace.values()))) == (__:=len(raw_retbufs)), f"some output tensors not found {_}, {__}"
+  assert (__a:=len(set(output_replace.values()))) == (__b:=len(raw_retbufs)), f"some output tensors not found {__a}, {__b}"
   return output_replace
 def get_jc_idxs_with_updatable_launch_dims(jit_cache: List[JitItem]) -> List[int]:
   return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledASTRunner) and ((ji.prg.global_size and not all_int(tuple(ji.prg.global_size))) or (ji.prg.local_size and not all_int(tuple(ji.prg.local_size))))]
