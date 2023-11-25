@@ -97,7 +97,7 @@ class TinyJit(Generic[ReturnType]):
           if DEBUG >= 1: print(f"graph create failed {e}")
 
       self.input_replace = get_input_replace(self.jit_cache, input_rawbuffers)
-      self.output_replace = get_output_replace(self.jit_cache, self.ret if isinstance(self.ret, tuple) else (self.ret, ))
+      self.output_replace = get_output_replace(self.jit_cache, self.ret if isinstance(self.ret, (tuple, list)) else (self.ret, ))
     elif self.cnt == 0:
       # jit ignore
       self.ret = self.fxn(*args, **kwargs)
