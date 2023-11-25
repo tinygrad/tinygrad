@@ -33,6 +33,7 @@ try:
     ptr = ctypes.c_char_p()
     status = _libcuda.cuGetErrorString(status, ctypes.byref(ptr))
     if status != 0: raise RuntimeError("CUDA error: cuGetErrorString failed")
+    assert ptr.value is not None
     return ptr.value.decode("utf-8")
 
   def cuCheckStatus(status):

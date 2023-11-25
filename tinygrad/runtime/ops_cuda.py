@@ -25,7 +25,7 @@ if getenv("CUDACPU", 0) == 1:
   lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
   class cuda_class:
     cuDeviceComputeCapability = lambda x: (3,5) # noqa: E731
-    cuEventRecord = cuEventDestroy = cuModuleLoadData = cuModuleUnload = lambda x: x # noqa: E731
+    cuEventRecord = cuEventSynchronize = cuEventDestroy = cuModuleLoadData = cuModuleUnload = lambda x: x # noqa: E731
     cuModuleGetFunction = lambda x, y: x # noqa: E731
     cuLaunchKernel = lambda src, gx, gy, gz, lx, ly, lz, shared, stream, args: lib.ptx_run(src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), lx, ly, lz, gx, gy, gz, shared)  # noqa: E731
     cuEventCreate = lambda: time.perf_counter() # noqa: E731
