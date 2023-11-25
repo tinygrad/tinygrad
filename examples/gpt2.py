@@ -12,7 +12,7 @@ import tiktoken
 from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import GlobalCounters, Timing, DEBUG, getenv, fetch, colored
 
-MAX_CONTEXT = 128
+MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 
 class Attention:
   def __init__(self, dim, n_heads):
@@ -89,7 +89,7 @@ class Transformer:
 
   # TODO: fix empty token
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
-    return (self.forward_jit if tokens.shape[0:2] == (1,1) and getenv("JIT", 1) else self.forward)(tokens, start_pos, temperature)
+    return (self.forward_jit if tokens.shape[1] == 1 and getenv("JIT", 1) else self.forward)(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257
 MODEL_PARAMS = {
@@ -155,6 +155,7 @@ if __name__ == "__main__":
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
   parser.add_argument('--seed', type=int, help="Set the random seed")
   parser.add_argument('--batch_size', type=int, default=1, help="Size of model to use [gpt2, gpt2-medium, gpt2-large, gpt2-xl]")
+  parser.add_argument('--benchmark', type=int, default=-1, help="Benchmark GPT with the given number of tokens")
   args = parser.parse_args()
 
   if args.seed is not None:
@@ -163,8 +164,12 @@ if __name__ == "__main__":
 
   print(f"using {args.model_size}")
   gpt2 = GPT2.build(args.model_size)
-  print('Generating text...')
-  texts = gpt2.greedy_until(args.prompt, args.count, args.temperature, timing=args.timing, batch_size=args.batch_size)
-  if len(texts) == 1: print(texts[0])
+
+  if args.benchmark != -1:
+    gpt2.model(Tensor.rand(args.batch_size, args.benchmark), Variable("a", 0, MAX_CONTEXT).bind(0)).realize()
   else:
-    for i,text in enumerate(texts): print(colored(f"Response {i}:", "green"), text)
+    print('Generating text...')
+    texts = gpt2.greedy_until(args.prompt, args.count, args.temperature, timing=args.timing, batch_size=args.batch_size)
+    if len(texts) == 1: print(texts[0])
+    else:
+      for i,text in enumerate(texts): print(colored(f"Response {i}:", "green"), text)
