@@ -6,7 +6,7 @@ from io import StringIO
 from contextlib import redirect_stdout
 from tinygrad import Tensor, nn
 from tinygrad.helpers import Timing, colored, getenv, fetch
-from examples.llama import Transformer
+from extra.models.llama import Transformer, convert_from_huggingface
 from sentencepiece import SentencePieceProcessor
 
 def create_fixed_tokenizer(output_file):
@@ -27,7 +27,6 @@ def create_model_cache(output_file, model):
     part1 = nn.state.torch_load(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/pytorch_model-00001-of-00002.bin?download=true"))
     part2 = nn.state.torch_load(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/pytorch_model-00002-of-00002.bin?download=true"))
 
-  from examples.llama import convert_from_huggingface
   with Timing("weights -> model: "):
     nn.state.load_state_dict(model, convert_from_huggingface(part1, model, 32, 8), strict=False)
     nn.state.load_state_dict(model, convert_from_huggingface(part2, model, 32, 8), strict=False)
@@ -43,7 +42,7 @@ if __name__ == "__main__":
 
   # https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/blob/main/config.json
   with Timing("create model: "):
-    model = Transformer(4096, 14336, n_heads=32, n_layers=32, norm_eps=1e-5, vocab_size=32002, n_kv_heads=8)
+    model = Transformer(4096, 14336, n_heads=32, n_layers=32, norm_eps=1e-5, vocab_size=32002, n_kv_heads=8, max_context=4096)
 
   cached_model = "/tmp/cached_openhermes.safetensors"
   if not os.path.isfile(cached_model): create_model_cache(cached_model, model)
