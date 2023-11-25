@@ -10,9 +10,9 @@ from tinygrad.shape.symbolic import Variable
 from tinygrad.jit import TinyJit
 import tiktoken
 from tinygrad.nn.state import torch_load, load_state_dict
-from tinygrad.helpers import GlobalCounters, Timing, DEBUG, getenv, fetch
+from tinygrad.helpers import GlobalCounters, Timing, DEBUG, getenv, fetch, colored, CI
 
-MAX_CONTEXT = 128
+MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 
 class Attention:
   def __init__(self, dim, n_heads):
@@ -85,11 +85,11 @@ class Transformer:
     for hi in self.h: h = hi(h, start_pos=start_pos, mask=mask)
 
     logits = self.lm_head(self.ln_f(h))
-    return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
+    return (logits[:, -1, :] / (temperature+1e-10)).softmax().realize()
 
   # TODO: fix empty token
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
-    return (self.forward_jit if tokens.shape[0:2] == (1,1) and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
+    return (self.forward_jit if tokens.shape[1] == 1 and getenv("JIT", int(not CI)) else self.forward)(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257
 MODEL_PARAMS = {
@@ -121,8 +121,9 @@ class GPT2:
     self.model = model
     self.tokenizer = tokenizer
 
-  def greedy_until(self, prompt:str, max_length:int, temperature:float, timing:bool=False):
-    toks = self.tokenizer.encode(prompt, allowed_special={"<|endoftext|>"})
+  def greedy_until(self, prompt:str, max_length:int, temperature:float, timing:bool=False, batch_size:int=1):
+    prompt_tokens = self.tokenizer.encode(prompt, allowed_special={"<|endoftext|>"})
+    toks = [prompt_tokens[:] for _ in range(batch_size)]
     start_pos = 0
     for _ in trange(max_length, disable=(timing==True)):
       GlobalCounters.reset()
@@ -132,12 +133,12 @@ class GPT2:
         with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                     f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                     (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
-          probs = self.model(Tensor([toks[start_pos:]]), Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature)
+          probs = self.model(Tensor([x[start_pos:] for x in toks]), Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature)
         # TODO: fix JIT rand so we can put this in the JIT
-        tok = probs.multinomial().item()
-      start_pos = len(toks)
-      toks.append(tok)
-      output = self.tokenizer.decode(toks)
+        tok = probs.multinomial().flatten().numpy().tolist()
+      start_pos = len(toks[0])
+      for i,t in enumerate(tok): toks[i].append(t)
+      output = [self.tokenizer.decode(x) for x in toks]
     return output
 
 # **** main code ****
@@ -153,6 +154,8 @@ if __name__ == "__main__":
   parser.add_argument('--model_size', type=str, default="gpt2-medium", help="Size of model to use [gpt2, gpt2-medium, gpt2-large, gpt2-xl]")
   parser.add_argument('--timing', action='store_true', help="Print timing per token")
   parser.add_argument('--seed', type=int, help="Set the random seed")
+  parser.add_argument('--batch_size', type=int, default=1, help="Size of model to use [gpt2, gpt2-medium, gpt2-large, gpt2-xl]")
+  parser.add_argument('--benchmark', type=int, default=-1, help="Benchmark GPT with the given number of tokens")
   args = parser.parse_args()
 
   if args.seed is not None:
@@ -161,6 +164,12 @@ if __name__ == "__main__":
 
   print(f"using {args.model_size}")
   gpt2 = GPT2.build(args.model_size)
-  print('Generating text...')
-  y = gpt2.greedy_until(args.prompt, args.count, args.temperature, timing=args.timing)
-  print(y)
+
+  if args.benchmark != -1:
+    gpt2.model(Tensor.rand(args.batch_size, args.benchmark), Variable("a", 0, MAX_CONTEXT).bind(0)).realize()
+  else:
+    print('Generating text...')
+    texts = gpt2.greedy_until(args.prompt, args.count, args.temperature, timing=args.timing, batch_size=args.batch_size)
+    if len(texts) == 1: print(texts[0])
+    else:
+      for i,text in enumerate(texts): print(colored(f"Response {i}:", "green"), text)
