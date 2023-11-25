@@ -60,6 +60,8 @@ def cast(bb, val, input_type, output_type):
 
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
+def const(args, dtype): return ir.Constant(dtype_to_llvm_dtype[dtype], int(args) if dtypes.is_int(dtype) else bool(args) if dtype == dtypes.bool else args)
+
 def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
   # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
@@ -113,13 +115,12 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
     if uop == UOps.DEFINE_GLOBAL:
       lvars[u] = func.args[buf_index[args[0]]]
     if uop == UOps.DEFINE_ACC:
-      lvars[u] = ir.Constant(dtype_to_llvm_dtype[dtype], args)
+      lvars[u] = const(args, dtype)
       reduce_phis.append(u)
     if uop == UOps.SPECIAL:
       lvars[u] = lvars[args.expr]
     if uop == UOps.CONST:
-      value = int(args) if dtypes.is_int(dtype) else bool(args) if dtype == dtypes.bool else args
-      lvars[u] = ir.Constant(dtype_to_llvm_dtype[dtype], value)
+      lvars[u] = const(args, dtype)
     if uop == UOps.LOAD:
       assert dtype is not None
       if len(vin) > 2:
