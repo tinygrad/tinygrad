@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes
+import ctypes, time
 import numpy as np
 from collections import defaultdict, deque
 from typing import TypeVar, Type, Any, Dict, Deque, Tuple
@@ -111,3 +111,8 @@ class LRUAllocator:
   def _do_alloc(self, size, dtype, device, **kwargs): raise NotImplementedError("must be implemented")
   def _do_free(self, buf): pass
   def _get_cur_free_space(self, device): return self.free_space[device]
+
+def cpu_time_execution(cb, enable):
+  if enable: st = time.perf_counter()
+  cb()
+  if enable: return time.perf_counter()-st

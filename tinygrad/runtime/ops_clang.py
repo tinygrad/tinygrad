@@ -2,7 +2,7 @@ import time, ctypes, subprocess, platform, functools, pathlib, tempfile
 from typing import Any
 from tinygrad.device import Compiled
 from tinygrad.helpers import diskcache
-from tinygrad.runtime.lib import RawMallocBuffer
+from tinygrad.runtime.lib import RawMallocBuffer, cpu_time_execution
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
@@ -27,10 +27,7 @@ class ClangProgram:
       pathlib.Path(cached_file_path.name).write_bytes(prg)
       self.fxn: Any = ctypes.CDLL(str(cached_file_path.name))[name]
 
-  def __call__(self, *args, wait=False):
-    if wait: st = time.perf_counter()
-    self.fxn(*[x._buf if isinstance(x, RawMallocBuffer) else x for x in args])
-    if wait: return time.perf_counter()-st
+  def __call__(self, *args, wait=False): return cpu_time_execution(lambda: self.fxn(*[x._buf if isinstance(x, RawMallocBuffer) else x for x in args]), enable=wait)
 
 renderer = functools.partial(uops_to_cstyle, CStyleLanguage(buffer_suffix=" restrict", arg_int_prefix="const int"))
 ClangDevice = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False), renderer, compile_clang, ClangProgram)
