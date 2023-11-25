@@ -2,7 +2,6 @@ import subprocess, time, re, hashlib, tempfile, ctypes, ctypes.util
 from pathlib import Path
 from typing import Optional, Tuple, cast, Callable
 import numpy as np
-import extra.cuda_wrapper as cuda
 from tinygrad.helpers import DEBUG, getenv, colored, diskcache
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
@@ -20,20 +19,25 @@ def pretty_ptx(s):
   return s
 
 if getenv("CUDACPU", 0) == 1:
+  import extra.cuda_wrapper as cuda_wrapper
   lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
   lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
   class cuda:
     cuDeviceComputeCapability = lambda x: (3,5)
-    cuModuleLoadData = lambda x: x
+    cuEventRecord = cuModuleLoadData = lambda x: x
     cuModuleGetFunction = lambda x, y: x
-    cuModuleUnload = lambda x: None
-    cuLaunchKernel: lambda src, gx, gy, gz, lx, ly, lz, shared, stream, args: lib.ptx_run(src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), lx, ly, lz, gx, gy, gz, shared)
-    cuCtxSynchronize = lambda: None
+    cuLaunchKernel = lambda src, gx, gy, gz, lx, ly, lz, shared, stream, args: lib.ptx_run(src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), lx, ly, lz, gx, gy, gz, shared)
     cuEventCreate = lambda: time.perf_counter()
-    cuEventDestroy = lambda: None
     cuEventElapsedTime = lambda x, y: y - x
+
+    nvrtcCreateProgram = cuda_wrapper.nvrtcCreateProgram
+    nvrtcCompileProgram = cuda_wrapper.nvrtcCompileProgram
+    nvrtcGetPTX = cuda_wrapper.nvrtcGetPTX
+
+    cuModuleUnload = cuCtxSynchronize = cuEventDestroy = lambda: None
   RawCUDABuffer = RawMallocBuffer
 else:
+  import extra.cuda_wrapper as cuda
   cuda.cuInit(0)
   device = cuda.cuDeviceGet(0)
   cuda.cuCtxCreate(0, device)
@@ -90,7 +94,7 @@ class CUDAProgram:
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], shared:int=0, wait=False):
     if getenv("CUDACPU", 0) == 1:
-      c_params = [x._buf if not isinstance(x, int) else x]
+      c_params = [x._buf if not isinstance(x, int) else x for x in args]
     else:
       if self.c_struct_t is None: self.c_struct_t = cuda.getCStructForType([(ctypes.c_void_p if not isinstance(x, int) else ctypes.c_int) for x in args])
       c_params = cast(Callable, self.c_struct_t)(*[x._buf if not isinstance(x, int) else x for x in args])
