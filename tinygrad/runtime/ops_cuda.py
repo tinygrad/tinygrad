@@ -47,7 +47,7 @@ else:
     def _do_alloc(self, size, dtype, device, **kwargs): return cuda.cuMemAlloc(size * dtype.itemsize)
     def _do_free(self, buf): cuda.cuMemFree(buf)
     def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
-    def _get_cur_free_space(self, device): return cuda.cuMemGetInfo()[0] # type: ignore
+    def _get_cur_free_space(self, device): return cuda.cuMemGetInfo()[0]
   CUDAAlloc = CUDAAllocator()
   class RawCUDABuffer(RawBufferCopyInOut): # type: ignore
     def __init__(self, size, dtype): super().__init__(size, dtype, allocator=CUDAAlloc)

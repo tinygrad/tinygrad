@@ -9,6 +9,7 @@ from dataclasses import dataclass
 try:
   def cu_get_include_paths(compiler):
     result = subprocess.check_output([compiler, "-E", "-x", "c", "-", "-v"], input="", stderr=subprocess.STDOUT, universal_newlines=True)
+    print("nvcc", result)
     lines = result.splitlines()
 
     includes = []
