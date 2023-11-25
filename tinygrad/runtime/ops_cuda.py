@@ -52,7 +52,7 @@ cuda.cuCtxCreate(0, device)
 #   RawCUDABuffer = RawMallocBuffer
 # else:
 class CUDAAllocator(LRUAllocator):
-  def _do_alloc(self, size, dtype, device, **kwargs): return cuda.cuMemAlloc(size * dtype.itemsize)
+  def _do_alloc(self, size, dtype, device, **kwargs):  return cuda.cuMemAlloc(size * dtype.itemsize)
   def _do_free(self, buf): cuda.cuMemFree(buf)
   def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
   #TODO: missing size on device.
@@ -65,8 +65,14 @@ class RawCUDABuffer(RawBufferCopyInOut): # type: ignore
   def _copyout(self, x:np.ndarray): cuda.cuMemcpyDtoH(np.require(x, requirements='C').ctypes.data_as(ctypes.c_void_p), self._buf, self.size * self.dtype.itemsize)
 
 # TODO: reimplement as cuda compiler.
-@diskcache
-def compile_cuda(prg) -> bytes: return cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets'])
+# @diskcache
+# def compile_cuda(prg) -> bytes: return cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets'])
+
+# @diskcache
+def compile_cuda(prg) -> bytes:
+  prog = cuda.nvrtcCreateProgram(prg, "<null>", [], [])
+  cuda.nvrtcCompileProgram(prog, ['--gpu-architecture=sm_' + "".join([str(x) for x in cuda.cuDeviceComputeCapability(0)])])
+  return cuda.nvrtcGetPTX(prog)
 
 def time_execution(cb, enable=False):
   # if enable:
