@@ -24,18 +24,18 @@ if getenv("CUDACPU", 0) == 1:
   lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
   lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
   class cuda_class:
-    cuDeviceComputeCapability = lambda x: (3,5)
+    cuDeviceComputeCapability = _ = lambda x: (3,5)
     cuEventRecord = cuEventDestroy = cuModuleLoadData = cuModuleUnload = lambda x: x
-    cuModuleGetFunction = lambda x, y: x
-    cuLaunchKernel = lambda src, gx, gy, gz, lx, ly, lz, shared, stream, args: lib.ptx_run(src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), lx, ly, lz, gx, gy, gz, shared)
-    cuEventCreate = lambda: time.perf_counter()
-    cuEventElapsedTime = lambda x, y: y - x
+    cuModuleGetFunction = _ = lambda x, y: x
+    cuLaunchKernel = _ = lambda src, gx, gy, gz, lx, ly, lz, shared, stream, args: lib.ptx_run(src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), lx, ly, lz, gx, gy, gz, shared)
+    cuEventCreate = _ = lambda: time.perf_counter()
+    cuEventElapsedTime = _ = lambda x, y: y - x
 
     nvrtcCreateProgram = cuda.nvrtcCreateProgram
     nvrtcCompileProgram = cuda.nvrtcCompileProgram
     nvrtcGetPTX = cuda.nvrtcGetPTX
 
-    cuCtxSynchronize = lambda: None
+    cuCtxSynchronize = _ = lambda: None
 
   cuda: Any = cuda_class # type: ignore
   RawCUDABuffer = RawMallocBuffer
