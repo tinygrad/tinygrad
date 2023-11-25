@@ -7,9 +7,13 @@ from typing import Any, Dict, List, Tuple
 from dataclasses import dataclass
 
 try:
-  def cu_get_include_paths(compiler):
+  _nvrtc_includes = None
+  def _get_include_paths():
+    global _nvrtc_includes
+    if _nvrtc_includes is not None: return _nvrtc_includes
+
+    compiler = "nvcc"
     result = subprocess.check_output([compiler, "-E", "-x", "c", "-", "-v"], input="", stderr=subprocess.STDOUT, universal_newlines=True)
-    print("nvcc", result)
     lines = result.splitlines()
 
     includes = []
@@ -17,11 +21,11 @@ try:
       if line.startswith("#$ INCLUDES="):
         line = line.strip().rstrip()[len("#$ INCLUDES=\""):-1]
         includes = line.split()
-    return includes
+    _nvrtc_includes = includes + ["-I/usr/local/cuda/include"]
+    return _nvrtc_includes
 
   _libcuda = ctypes.cdll.LoadLibrary("libcuda.so.1")
   _libnvrtc = ctypes.cdll.LoadLibrary("libnvrtc.so")
-  _nvrtc_includes = cu_get_include_paths(compiler="nvcc")
 
   _libcuda.cuGetErrorString.restype = ctypes.c_int
   _libcuda.cuGetErrorString.argtypes = [ctypes.c_int, ctypes.c_void_p]
@@ -348,7 +352,7 @@ try:
   _libnvrtc.nvrtcCompileProgram.restype = int
   _libnvrtc.nvrtcCompileProgram.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_char_p)]
   def nvrtcCompileProgram(prog, options):
-    options += _nvrtc_includes
+    options += _get_include_paths()
     c_options = (ctypes.c_char_p * len(options))()
     c_options[:] = [o.encode("utf-8") for o in options]
 

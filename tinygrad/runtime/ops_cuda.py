@@ -1,7 +1,8 @@
 import subprocess, time, re, hashlib, tempfile, ctypes, ctypes.util
 from pathlib import Path
-from typing import Optional, Tuple, cast, Callable
+from typing import Tuple, cast, Callable, Any
 import numpy as np
+import extra.cuda_wrapper as cuda
 from tinygrad.helpers import DEBUG, getenv, colored, diskcache
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
@@ -19,25 +20,26 @@ def pretty_ptx(s):
   return s
 
 if getenv("CUDACPU", 0) == 1:
-  import extra.cuda_wrapper as cuda_wrapper
+  
   lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
   lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
-  class cuda:
+  class cuda_class:
     cuDeviceComputeCapability = lambda x: (3,5)
-    cuEventRecord = cuModuleLoadData = lambda x: x
+    cuEventRecord = cuEventDestroy = cuModuleLoadData = cuModuleUnload = lambda x: x
     cuModuleGetFunction = lambda x, y: x
     cuLaunchKernel = lambda src, gx, gy, gz, lx, ly, lz, shared, stream, args: lib.ptx_run(src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), lx, ly, lz, gx, gy, gz, shared)
     cuEventCreate = lambda: time.perf_counter()
     cuEventElapsedTime = lambda x, y: y - x
 
-    nvrtcCreateProgram = cuda_wrapper.nvrtcCreateProgram
-    nvrtcCompileProgram = cuda_wrapper.nvrtcCompileProgram
-    nvrtcGetPTX = cuda_wrapper.nvrtcGetPTX
+    nvrtcCreateProgram = cuda.nvrtcCreateProgram
+    nvrtcCompileProgram = cuda.nvrtcCompileProgram
+    nvrtcGetPTX = cuda.nvrtcGetPTX
 
-    cuModuleUnload = cuCtxSynchronize = cuEventDestroy = lambda: None
+    cuCtxSynchronize = lambda: None
+
+  cuda: Any = cuda_class # type: ignore
   RawCUDABuffer = RawMallocBuffer
 else:
-  import extra.cuda_wrapper as cuda
   cuda.cuInit(0)
   device = cuda.cuDeviceGet(0)
   cuda.cuCtxCreate(0, device)
@@ -81,7 +83,7 @@ class CUDAProgram:
       try:
         fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}").as_posix()
         with open(fn + ".ptx", "wb") as f: f.write(prg.encode('utf-8'))
-        subprocess.run(["ptxas", f"-arch=sm_"+"".join([str(x) for x in cuda.cuDeviceComputeCapability(0)]), "-o", fn, fn+".ptx"], check=True)
+        subprocess.run(["ptxas", "-arch=sm_"+"".join([str(x) for x in cuda.cuDeviceComputeCapability(0)]), "-o", fn, fn+".ptx"], check=True)
         print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
       except Exception as e: print("failed to generate SASS", str(e))
 
@@ -89,7 +91,7 @@ class CUDAProgram:
     self.module = cuda.cuModuleLoadData(prg.encode('utf-8'))
     self.prg = cuda.cuModuleGetFunction(self.module, name)
 
-  def __del__():
+  def __del__(self):
     cuda.cuModuleUnload(self.module)
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], shared:int=0, wait=False):
