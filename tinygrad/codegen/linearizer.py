@@ -75,7 +75,8 @@ class Linearizer(Kernel):
         (g_idx, g_valid), amt, dim = self.sts[i].expr_idxs(fake_idxs), 1, None
     else:
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
-    localtype = dtypes.float32 if amt == 1 else dtypes.float.vec(amt)
+    localtype = buf.dtype if amt == 1 else buf.dtype.vec(amt)
+    if isinstance(buf.dtype, ImageDType): localtype = dtypes.float if amt == 1 else dtypes.float.vec(amt)
 
     e_idxs, e_valids = g_idx.expand(expand_vars), g_valid.expand(expand_vars)
 
@@ -130,7 +131,7 @@ class Linearizer(Kernel):
         amt = len(out_tokens)
         idx, valid = self.sts[i].expr_idxs(k)
         assert idx.render() == ((idx//amt)*amt).render(), "float4 stores are always aligned"
-        store_offset_new[k] = self.uop(UOps.CAST, dtypes.float.vec(amt), tuple(out_tokens))
+        store_offset_new[k] = self.uop(UOps.CAST, out_tokens[0].dtype.vec(amt), tuple(out_tokens))
       store_offset = store_offset_new
 
     stores = []

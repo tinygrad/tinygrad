@@ -53,9 +53,6 @@ class WGSLLanguage(CStyleLanguage):
     if type_map[var_dtype]: return f"{type_map[var_dtype]}({x[0]})"
     raise NotImplementedError(f"no cast for {var_dtype}")
 
-  def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
-    return f"f32({super().render_load(output_dtype, buf_name, buf_dtype, idx, local)})"
-
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
     if buf_dtype != var_dtype:
       var_name = f"{type_map[buf_dtype]}({var_name})"

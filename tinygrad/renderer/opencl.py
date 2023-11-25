@@ -1,5 +1,5 @@
 import functools
-from tinygrad.helpers import dtypes
+from tinygrad.helpers import ImageDType, dtypes
 from tinygrad.ops import TernaryOps
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
@@ -19,5 +19,10 @@ class OpenCLLanguage(CStyleLanguage):
   uses_vload = True
   # NOTE: mad is used so the loads aren't reordered into the math on 845
   code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda a,b,c: f"mad({a},{b},{c})"}
+
+  def render_store(self, buf_name, buf_dtype, var_name, var_dtype, idx, local):
+    if var_dtype.sz > 1 and not isinstance(buf_dtype, ImageDType):
+      return f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = {self.render_cast([f'{var_name}.s{i}' for i in range(var_dtype.sz)], buf_dtype.vec(var_dtype.sz))};"
+    return super().render_store(buf_name, buf_dtype, var_name, var_dtype, idx, local)
 
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
