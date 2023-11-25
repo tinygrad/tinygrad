@@ -87,7 +87,7 @@ tinygrad already supports numerous accelerators, including:
 - [x] [HIP](tinygrad/runtime/ops_hip.py)
 - [x] [WebGPU](tinygrad/runtime/ops_webgpu.py)
 
-And it is easy to add more! Your accelerator of choice only needs to support a total of 26 (optionally 27) low level ops.
+And it is easy to add more! Your accelerator of choice only needs to support a total of 27 (optionally 28) low level ops.
 More information can be found in the [documentation for adding new accelerators](/docs/adding_new_accelerators.md).
 
 ## Installation
