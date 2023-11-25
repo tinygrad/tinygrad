@@ -1,11 +1,11 @@
 from __future__ import annotations
 from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Sequence, Final, Set
-import itertools, math, functools, operator
+import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, getenv, all_same, to_function_name
+from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, getenv, all_same, to_function_name, flatten
 from tinygrad.ops import LazyOp, UnaryOps, ConstBuffer, MemBuffer, BufferOps
 from tinygrad.ops import ReduceOps, BinaryOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -391,7 +391,7 @@ class Linearizer(Kernel):
           if any(x in parents for x in loop_stack[i]) or i == 0:
             loop_stack[i].append(u)
             break
-    self.uops = functools.reduce(operator.__add__, loop_stack, [])
+    self.uops = flatten(loop_stack)
 
     # uops optimization
     changed_something = True
@@ -492,20 +492,14 @@ class Linearizer(Kernel):
     values = [self.ast_parse(cast(LazyOp, v), acc, offs, loaded_buffers, loop_ctx=loop_ctx) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:
-      ret = []
+      ret: List[UOp] = []
       input_acc = acc[:]
-      for idx, val, off in zip([[i] for i in range(len(values[0]))], zip(*values), cast(List[int], offs)):
+      for val, off in zip(zip(*values), cast(List[int], offs)):
         acc[off] = self.uop(UOps.ALU, dtypes.float32, val+(acc[off],), ops[x.op])
-        ret.append((idx, acc[off]))
+        ret.append(acc[off])
       for off in range(len(acc)):
         if input_acc[off] != acc[off]:
           acc[off] = self.uop(UOps.PHI, dtypes.float32, (input_acc[off], acc[off]) + tuple(loop_ctx))
     else:
-      ret = [(idx, self.uop(UOps.ALU, dtypes.float32, val, x.op)) for idx, val in zip([[i] for i in range(len(values[0]))], zip(*values))]
-    ordered_ret: List[Optional[UOp]] = [None]*len(values[0])
-    # scatter
-    for i,j in ret:
-      for k in i:
-        ordered_ret[k] = j
-    assert all(isinstance(x, UOp) for x in ordered_ret), "some tokens didn't get scattered?"
-    return cast(List[UOp], ordered_ret)
+      ret = [self.uop(UOps.ALU, dtypes.float32, val, x.op) for val in zip(*values)]
+    return ret
