@@ -1,9 +1,8 @@
-import subprocess, time, re, hashlib, tempfile, ctypes
+import subprocess, time, re, hashlib, tempfile, ctypes, ctypes.util
 from pathlib import Path
 from typing import Optional, Tuple, cast, Callable
 import numpy as np
 import extra.cuda_wrapper as cuda
-from pycuda.compiler import compile as cuda_compile
 from tinygrad.helpers import DEBUG, getenv, colored, diskcache
 from tinygrad.ops import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
@@ -19,99 +18,83 @@ def pretty_ptx(s):
   s = re.sub(r'(\.)(param|reg|global)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # space
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
-def arch(): return "sm_" + "".join([str(x) for x in pycuda.driver.Context.get_device().compute_capability()])
 
-cuda.cuInit(0)
-device = cuda.cuDeviceGet(0)
-cuda.cuCtxCreate(0, device)
+if getenv("CUDACPU", 0) == 1:
+  lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
+  lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+  class cuda:
+    cuDeviceComputeCapability = lambda x: (3,5)
+    cuModuleLoadData = lambda x: x
+    cuModuleGetFunction = lambda x, y: x
+    cuModuleUnload = lambda x: None
+    cuLaunchKernel: lambda src, gx, gy, gz, lx, ly, lz, shared, stream, args: lib.ptx_run(src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), lx, ly, lz, gx, gy, gz, shared)
+    cuCtxSynchronize = lambda: None
+    cuEventCreate = lambda: time.perf_counter()
+    cuEventDestroy = lambda: None
+    cuEventElapsedTime = lambda x, y: y - x
+  RawCUDABuffer = RawMallocBuffer
+else:
+  cuda.cuInit(0)
+  device = cuda.cuDeviceGet(0)
+  cuda.cuCtxCreate(0, device)
 
-# if getenv("CUDACPU", 0) == 1:
-#   import ctypes, ctypes.util
-#   lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
-#   lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
-#   class cuda:
-#     class module:
-#       def __init__(self, src): self.src = src
-#       def get_function(self, _): return self
-#       def __call__(self, *args, block, grid, shared): lib.ptx_run(self.src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), *block, *grid, shared)
-#     module_from_buffer = lambda src: cuda.module(src) # pylint: disable=unnecessary-lambda # noqa: E731
-#     class Event:
-#       def __init__(self): pass
-#       def record(self): self.start = time.perf_counter()
-#       def time_till(self, other): return other.start - self.start
-#       def synchronize(self): pass
-#     class Context:
-#       synchronize = lambda:0 # noqa: E731
-#     CompileError = Exception
-#   class context:
-#     class device:
-#       compute_capability = lambda: (3,5) # pylint: disable=unnecessary-lambda # noqa: E731
-#     get_device = lambda: context.device # pylint: disable=unnecessary-lambda # noqa: E731
-#   import pycuda.driver
-#   pycuda.driver.Context = context
-#   RawCUDABuffer = RawMallocBuffer
-# else:
-class CUDAAllocator(LRUAllocator):
-  def _do_alloc(self, size, dtype, device, **kwargs):  return cuda.cuMemAlloc(size * dtype.itemsize)
-  def _do_free(self, buf): cuda.cuMemFree(buf)
-  def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
-  #TODO: missing size on device.
+  class CUDAAllocator(LRUAllocator):
+    def __init__(self): super().__init__(self._get_cur_free_space(None))
+    def _do_alloc(self, size, dtype, device, **kwargs): return cuda.cuMemAlloc(size * dtype.itemsize)
+    def _do_free(self, buf): cuda.cuMemFree(buf)
+    def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
+    def _get_cur_free_space(self, device): return cuda.cuMemGetInfo()[0] # type: ignore
+  CUDAAlloc = CUDAAllocator()
+  class RawCUDABuffer(RawBufferCopyInOut): # type: ignore
+    def __init__(self, size, dtype): super().__init__(size, dtype, allocator=CUDAAlloc)
+    def _copyin(self, x:np.ndarray): cuda.cuMemcpyHtoDAsync(self._buf, np.require(x, requirements='C').ctypes.data_as(ctypes.c_void_p), self.size * self.dtype.itemsize, 0)
+    def _copyout(self, x:np.ndarray): cuda.cuMemcpyDtoH(np.require(x, requirements='C').ctypes.data_as(ctypes.c_void_p), self._buf, self.size * self.dtype.itemsize)
 
-CUDAAlloc = CUDAAllocator()
-
-class RawCUDABuffer(RawBufferCopyInOut): # type: ignore
-  def __init__(self, size, dtype): super().__init__(size, dtype, allocator=CUDAAlloc)
-  def _copyin(self, x:np.ndarray): cuda.cuMemcpyHtoDAsync(self._buf, np.require(x, requirements='C').ctypes.data_as(ctypes.c_void_p), self.size * self.dtype.itemsize, 0)
-  def _copyout(self, x:np.ndarray): cuda.cuMemcpyDtoH(np.require(x, requirements='C').ctypes.data_as(ctypes.c_void_p), self._buf, self.size * self.dtype.itemsize)
-
-# TODO: reimplement as cuda compiler.
-# @diskcache
-# def compile_cuda(prg) -> bytes: return cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets'])
-
-# @diskcache
+@diskcache
 def compile_cuda(prg) -> bytes:
   prog = cuda.nvrtcCreateProgram(prg, "<null>", [], [])
   cuda.nvrtcCompileProgram(prog, ['--gpu-architecture=sm_' + "".join([str(x) for x in cuda.cuDeviceComputeCapability(0)])])
   return cuda.nvrtcGetPTX(prog)
 
 def time_execution(cb, enable=False):
-  # if enable:
-  #   start, end = hip.hipEventCreate(), hip.hipEventCreate()
-  #   hip.hipEventRecord(start)
+  if enable:
+    start, end = cuda.cuEventCreate(), cuda.cuEventCreate()
+    cuda.cuEventRecord(start)
   cb()
-  # if enable:
-  #   hip.hipEventRecord(end)
-  #   hip.hipEventSynchronize(end)
-  #   ret = hip.hipEventElapsedTime(start, end)*1e-3
-  #   hip.hipEventDestroy(start)
-  #   hip.hipEventDestroy(end)
-  #   return ret
+  if enable:
+    cuda.cuEventRecord(end)
+    cuda.cuEventSynchronize(end)
+    ret = cuda.cuEventElapsedTime(start, end) * 1e-3
+    cuda.cuEventDestroy(start)
+    cuda.cuEventDestroy(end)
+    return ret
 
 class CUDAProgram:
   def __init__(self, name:str, _prg:bytes):
     prg = _prg.decode('utf-8')
-    # if DEBUG >= 5: print(pretty_ptx(prg))
-    # if DEBUG >= 6:
-    #   try:
-    #     fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}").as_posix()
-    #     with open(fn + ".ptx", "wb") as f: f.write(prg.encode('utf-8'))
-    #     subprocess.run(["ptxas", f"-arch={arch()}", "-o", fn, fn+".ptx"], check=True)
-    #     print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
-    #   except Exception as e: print("failed to generate SASS", str(e))
-    # # TODO: name is wrong, so we get it from the ptx using hacks
-    # self.prg = cuda.module_from_buffer(prg.encode('utf-8')).get_function(prg.split(".visible .entry ")[1].split("(")[0])
-    
-    # print("Here")
+    if DEBUG >= 5: print(pretty_ptx(prg))
+    if DEBUG >= 6:
+      try:
+        fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(prg.encode('utf-8')).hexdigest()}").as_posix()
+        with open(fn + ".ptx", "wb") as f: f.write(prg.encode('utf-8'))
+        subprocess.run(["ptxas", f"-arch=sm_"+"".join([str(x) for x in cuda.cuDeviceComputeCapability(0)]), "-o", fn, fn+".ptx"], check=True)
+        print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
+      except Exception as e: print("failed to generate SASS", str(e))
 
-    # TODO: name is wrong, so we get it from the ptx using hacks
-    name = prg.split(".visible .entry ")[1].split("(")[0]
     self.c_struct_t = None
     self.module = cuda.cuModuleLoadData(prg.encode('utf-8'))
     self.prg = cuda.cuModuleGetFunction(self.module, name)
 
+  def __del__():
+    cuda.cuModuleUnload(self.module)
+
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], shared:int=0, wait=False):
-    if self.c_struct_t is None: self.c_struct_t = cuda.getCStructForType([(ctypes.c_void_p if not isinstance(x, int) else ctypes.c_int) for x in args])
-    c_params = cast(Callable, self.c_struct_t)(*[x._buf if not isinstance(x, int) else x for x in args])
+    if getenv("CUDACPU", 0) == 1:
+      c_params = [x._buf if not isinstance(x, int) else x]
+    else:
+      if self.c_struct_t is None: self.c_struct_t = cuda.getCStructForType([(ctypes.c_void_p if not isinstance(x, int) else ctypes.c_int) for x in args])
+      c_params = cast(Callable, self.c_struct_t)(*[x._buf if not isinstance(x, int) else x for x in args])
+
     return time_execution(lambda: cuda.cuLaunchKernel(self.prg, *global_size, *local_size, 0, 0, c_params), enable=wait)
 
 CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False if getenv("PTX") else True, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]),

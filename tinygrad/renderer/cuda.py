@@ -2,7 +2,7 @@ import functools
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
 class CUDALanguage(CStyleLanguage):
-  kernel_prefix = "#include <math_constants.h>\n#define INFINITY (CUDART_INF_F)\n#define NAN (CUDART_NAN_F)\n__global__ "
+  kernel_prefix = "#include <math_constants.h>\n#define INFINITY (CUDART_INF_F)\n#define NAN (CUDART_NAN_F)\nextern \"C\" __global__ "
   smem_prefix = "__shared__ "
   smem_prefix_for_cast = False
   arg_int_prefix = "const int"

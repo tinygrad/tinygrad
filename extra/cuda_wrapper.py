@@ -39,11 +39,11 @@ try:
     status = _libcuda.cuInit(flags)
     cuCheckStatus(status)
 
-  _libcuda.cuCtxCreate.restype = int
-  _libcuda.cuCtxCreate.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p]
+  _libcuda.cuCtxCreate_v2.restype = int
+  _libcuda.cuCtxCreate_v2.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p]
   def cuCtxCreate(flags, device):
     ptr = ctypes.c_void_p()
-    status = _libcuda.cuCtxCreate(ctypes.byref(ptr), flags, device)
+    status = _libcuda.cuCtxCreate_v2(ctypes.byref(ptr), flags, device)
     cuCheckStatus(status)
     return ptr
 
@@ -60,10 +60,10 @@ try:
     cuCheckStatus(status)
 
   _libcuda.cuEventCreate.restype = int
-  _libcuda.cuEventCreate.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
-  def cuEventCreate():
+  _libcuda.cuEventCreate.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint]
+  def cuEventCreate(flags=0):
     ptr = ctypes.c_void_p()
-    status = _libcuda.cuEventCreate(ctypes.byref(ptr))
+    status = _libcuda.cuEventCreate(ctypes.byref(ptr), flags)
     cuCheckStatus(status)
     return ptr
 
@@ -208,38 +208,38 @@ try:
     status = _libcuda.cuGraphExecKernelNodeSetParams(gexec, node, ctypes.byref(params.c_struct))
     cuCheckStatus(status)
 
-  _libcuda.cuMemAlloc.restype = int
-  _libcuda.cuMemAlloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
+  _libcuda.cuMemAlloc_v2.restype = int
+  _libcuda.cuMemAlloc_v2.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
   def cuMemAlloc(count):
     ptr = ctypes.c_void_p()
-    status = _libcuda.cuMemAlloc(ctypes.byref(ptr), count)
+    status = _libcuda.cuMemAlloc_v2(ctypes.byref(ptr), count)
     cuCheckStatus(status)
     return ptr.value
 
-  _libcuda.cuMemFree.restype = int
-  _libcuda.cuMemFree.argtypes = [ctypes.c_void_p]
+  _libcuda.cuMemFree_v2.restype = int
+  _libcuda.cuMemFree_v2.argtypes = [ctypes.c_void_p]
   def cuMemFree(ptr):
-    status = _libcuda.cuMemFree(ptr)
+    status = _libcuda.cuMemFree_v2(ptr)
     cuCheckStatus(status)
 
-  _libcuda.cuMemcpyAsync.restype = int
-  _libcuda.cuMemcpyAsync.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p]
+  _libcuda.cuMemcpyHtoDAsync_v2.restype = int
+  _libcuda.cuMemcpyHtoDAsync_v2.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p]
   def cuMemcpyHtoDAsync(dst, src, count, stream):
-    status = _libcuda.cuMemcpyHtoDAsync(dst, src, ctypes.c_size_t(count), stream)
+    status = _libcuda.cuMemcpyHtoDAsync_v2(dst, src, ctypes.c_size_t(count), stream)
     cuCheckStatus(status)
 
-  _libcuda.cuMemcpyAsync.restype = int
-  _libcuda.cuMemcpyAsync.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+  _libcuda.cuMemcpyDtoH_v2.restype = int
+  _libcuda.cuMemcpyDtoH_v2.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
   def cuMemcpyDtoH(dst, src, count):
-    status = _libcuda.cuMemcpyDtoH(dst, src, ctypes.c_size_t(count))
+    status = _libcuda.cuMemcpyDtoH_v2(dst, src, ctypes.c_size_t(count))
     cuCheckStatus(status)
 
-  _libcuda.cuMemGetInfo.restype = int
-  _libcuda.cuMemGetInfo.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+  _libcuda.cuMemGetInfo_v2.restype = int
+  _libcuda.cuMemGetInfo_v2.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
   def cuMemGetInfo():
     free = ctypes.c_size_t()
     total = ctypes.c_size_t()
-    status = _libcuda.cuMemGetInfo(ctypes.byref(free), ctypes.byref(total))
+    status = _libcuda.cuMemGetInfo_v2(ctypes.byref(free), ctypes.byref(total))
     cuCheckStatus(status)
     return free.value, total.value
 
