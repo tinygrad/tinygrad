@@ -20,7 +20,7 @@ This is currently a big work in progress.
 
 ### Environment Variables
 
-[env_vars.md](/docs/env_vars.md)
+[env_vars.md](/docs/env_vars.md)P
 
 ### Adding New Accelerators
 
