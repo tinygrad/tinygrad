@@ -7,7 +7,6 @@ from pathlib import Path
 import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
-from typing import Dict
 from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
