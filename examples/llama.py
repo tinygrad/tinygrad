@@ -248,7 +248,10 @@ def load(fn:str):
   else:
     return torch_load(fn)
 
-def convert_from_huggingface(weights, model: Transformer, n_heads: int, n_kv_heads: int):
+def convert_from_huggingface(weights, model: Transformer, n_heads: int, n_kv_heads: Optional[int]):
+  if n_kv_heads is None:
+    n_kv_heads = n_heads # smaller models don't use GQA
+
   def permute(v: Tensor, n_heads: int):
     return v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1]).transpose(1, 2).reshape(*v.shape[:2])
 
@@ -311,7 +314,7 @@ class LLaMa:
     else:
       weights = load(str(model_path))
     if "model.embed_tokens.weight" in weights:
-      weights = convert_from_huggingface(weights, model, model_args["n_heads"], model_args["n_kv_heads"])
+      weights = convert_from_huggingface(weights, model, model_args["n_heads"], model_args.get("n_kv_heads"))
 
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
