@@ -130,8 +130,59 @@ def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, 
     window.removeEventListener(evt.type, setupWebGL, false);\n
     let gl = canvas.getContext('webgl2');\n
   """
-  compile_shaders = f"[{kernel_names}].forEach((code) => {{ createShaderProgram(gl, code); }});"
-  return f"{header}\n{init_shader}\n{create_texture}\n{kernel_code}\n{textures}\n{compile_shaders}}}"
+
+  run_program = """
+  function setupVertexData(gl, program, vertices) {
+    let vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+
+    let vertexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+    const positionLocation = gl.getAttribLocation(program, 'in_position');
+    const uvLocation = gl.getAttribLocation(program, 'in_uv');
+    
+    gl.enableVertexAttribArray(positionLocation);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 4 * 4, 0);
+
+    gl.enableVertexAttribArray(uvLocation);
+    gl.vertexAttribPointer(uvLocation, 2, gl.FLOAT, false, 4 * 4, 2 * 4);
+
+    gl.bindVertexArray(null);
+
+    return vao;
+  }
+
+  function runProgram(gl, kernelName, program, textures) {
+    let framebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures[0], 0);
+    gl.useProgram(program);
+
+    setupVertexData(gl, program, [-1, 1, 0, 1, -1, -1, 0, 0, 1, 1, 1, 1, 1, -1, 1, 0]);
+
+    // Texture 0 is the framebuffer texture, so we skip that
+    for (let i = 0; i < textures.length-1; i++) {
+      gl.activeTexture(gl.TEXTURE0 + i);
+      gl.bindTexture(gl.TEXTURE_2D, textures[i]);
+      gl.uniform1i(gl.getUniformLocation(program, 'data' + (i + 1)), i);
+    }
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    for (let i = 0; i < textures.length; i++) {
+      gl.activeTexture(gl.TEXTURE0 + i);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    }
+
+    console.log("Finished running: " + kernelName);
+  }
+  """
+  kernel_calls = '\n        '.join([f"runProgram(gl, '{name}', programs[{i}], [{', '.join(args)}]);" for i, (name, args, _global_size, _local_size) in enumerate(statements) ])
+  programs = f"let programs = [{kernel_names}].map((code) => createShaderProgram(gl, code));"
+  return f"{header}\n{run_program}\n{init_shader}\n{create_texture}\n{kernel_code}\n{textures}\n{programs}\n{kernel_calls}}}"
 
 def export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names) -> Tuple[str,int,int]:
   kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
