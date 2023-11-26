@@ -57,17 +57,18 @@ class TestSafetensors(unittest.TestCase):
       "weight2": torch.arange(0, 17, dtype=torch.uint8),
       "weight3": torch.arange(0, 17, dtype=torch.int32).reshape(17,1,1),
       "weight4": torch.arange(0, 2, dtype=torch.uint8),
-      }
+      "weight5": torch.arange(0.42, 2.13, dtype=torch.float16),
+    }
     save_file(tensors, temp("model.safetensors"))
 
     ret = safe_load(temp("model.safetensors"))
-    for k,v in tensors.items(): np.testing.assert_array_equal(ret[k].numpy(), v.numpy())
+    for k,v in tensors.items():np.testing.assert_array_equal(ret[k].numpy(), v.numpy())
     safe_save(ret, temp("model.safetensors_alt"))
     with open(temp("model.safetensors"), "rb") as f:
       with open(temp("model.safetensors_alt"), "rb") as g:
         assert f.read() == g.read()
     ret2 = safe_load(temp("model.safetensors_alt"))
-    for k,v in tensors.items(): np.testing.assert_array_equal(ret2[k].numpy(), v.numpy())
+    for k,v in tensors.items():np.testing.assert_array_equal(ret2[k].numpy(), v.numpy())
 
   def test_efficientnet_safetensors(self):
     from extra.models.efficientnet import EfficientNet
