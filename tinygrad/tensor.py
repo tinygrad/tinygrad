@@ -122,7 +122,7 @@ class Tensor:
   def numpy(self) -> np.ndarray:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
-    return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().reshape(self.shape)
+    return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().reshape(self.shape).astype(self.dtype.np, copy=True)
   def item(self) -> Union[float, int]: return self.numpy().item()
 
   def to(self, device:Optional[str]) -> Tensor:
