@@ -134,7 +134,7 @@ They can then be used to update the parameters of our neural network using one o
 For our loss function we will be using sparse categorical cross entropy loss.
 
 ```python
-# from tinygrad.tensor import sparse_categorical_crossentropy
+# Tensor method from tinygrad.tensor
 def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
     loss_mask = Y != ignore_index
     y_counter = Tensor.arange(self.shape[-1], dtype=dtypes.int32, requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
@@ -188,7 +188,7 @@ with Tensor.train():
     out = net(batch)
 
     # compute loss
-    loss = sparse_categorical_crossentropy(out, labels)
+    loss = out.sparse_categorical_crossentropy(labels)
 
     # zero gradients
     opt.zero_grad()
