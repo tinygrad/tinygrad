@@ -69,10 +69,10 @@ def helper_test_alloc_count(mm, gen, train):
   backup_buffer = Device[Device.DEFAULT].buffer
   Device[Device.DEFAULT].runtime = FakeProgram
   Device[Device.DEFAULT].buffer = FakeBuffer
-  Device[Device.DEFAULT].method_cache.clear()
+  Device[Device.DEFAULT].get_runner.cache_clear()
   FAKE_GLOBAL_ALLOCATOR = FakeAllocator(16<<30)
   new_allocs = __helper_test_alloc_count(gen, train)
-  Device[Device.DEFAULT].method_cache.clear()
+  Device[Device.DEFAULT].get_runner.cache_clear()
   FAKE_GLOBAL_ALLOCATOR = FakeAllocator(0)
   old_allocs = __helper_test_alloc_count(gen, train)
   print(f"{mm}: llama: old allocs count {old_allocs}, new allocs count {new_allocs}")
