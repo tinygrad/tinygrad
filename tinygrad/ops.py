@@ -182,9 +182,9 @@ class Interpreted:
     self.synchronize, self.codegen, self.graph = lambda: None, None, None
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, ast:LazyOp) -> InterpretedASTRunner: return get_interpreted_fxn(self.fxn_for_op, ast)
+  def get_runner(self, ast:LazyOp) -> InterpretedASTRunner: return _get_interpreted_fxn(self.fxn_for_op, ast)
 
-def get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> InterpretedASTRunner:
+def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> InterpretedASTRunner:
   if DEBUG >= 3:
     from tinygrad.graph import print_tree
     print_tree(ast)
@@ -274,9 +274,9 @@ class Compiled:
     return CompiledASTRunner(k.ast, k.name, src, k.global_size, k.local_size, runtime_args).build(self.compiler, self.runtime)
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.to_program(get_optimized_linearizer(self.linearizer_opts, ast))
+  def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.to_program(_get_optimized_linearizer(self.linearizer_opts, ast))
 
-def get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> Linearizer:
+def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> Linearizer:
   if DEBUG >= 3:
     from tinygrad.graph import print_tree
     print_tree(ast)

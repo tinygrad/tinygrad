@@ -79,7 +79,7 @@ def bufs_from_lin(lin:Linearizer) -> List[RawBuffer]:
   for x in lin.membufs: bufsts[x.idx].append(x)
   rawbufs:List[Optional[RawBuffer]] = [None]*len(bufsts)
   for k,lx in bufsts.items():
-    rawbufs[k] = cast(Compiled, Device[Device.DEFAULT]).buffer(prod(lx[0].dtype.shape) if isinstance(lx[0].dtype, ImageDType) else max(y.st.size() for y in lx), lx[0].dtype)
+    rawbufs[k] = cast(Compiled, Device[Device.DEFAULT]).buffer(prod(lx[0].dtype.shape) if isinstance(lx[0].dtype, ImageDType) else max(1, max(y.st.size() for y in lx)), lx[0].dtype)
   assert all(r is not None for r in rawbufs)
   return cast(List[RawBuffer], rawbufs)
 
