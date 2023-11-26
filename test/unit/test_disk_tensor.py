@@ -57,6 +57,7 @@ class TestSafetensors(unittest.TestCase):
       "weight2": torch.arange(0, 17, dtype=torch.uint8),
       "weight3": torch.arange(0, 17, dtype=torch.int32).reshape(17,1,1),
       "weight4": torch.arange(0, 2, dtype=torch.uint8),
+      "weight5": torch.arange(0, 17, dtype=torch.bfloat16),
       }
     save_file(tensors, temp("model.safetensors"))
 
@@ -96,7 +97,7 @@ class TestSafetensors(unittest.TestCase):
     assert state_dict['blocks.2.0.bn2.num_batches_tracked'].numpy() == 276570
 
   def test_metadata(self):
-    metadata = {"hello": "world"}
+    metadata = {"hello": "world", "goodbye": "world"}
     safe_save({}, temp('metadata.safetensors'), metadata)
     import struct
     with open(temp('metadata.safetensors'), 'rb') as f:
