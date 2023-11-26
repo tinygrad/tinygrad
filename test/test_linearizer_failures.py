@@ -74,7 +74,7 @@ class TestLinearizerFailures(unittest.TestCase):
     opts = [Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4), Opt(op=OptOps.UNROLL, axis=0, amt=4)]
     # fatal error: bracket nesting level exceeded maximum of 256
     # note: use -fbracket-depth=N to increase maximum nesting level
-    helper_test_lin(Linearizer(ast), opts, failed_platforms=["CLANG", "METAL"])
+    helper_test_lin(Linearizer(ast), opts, failed_platforms=[])
 
 if __name__ == '__main__':
   unittest.main()

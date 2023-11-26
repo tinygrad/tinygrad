@@ -463,6 +463,12 @@ class Kernel:
             self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
             padded = True
       assert padded, "nothing was padded"
+    # TODO: make this a kernel property
+    up, lcl = 1, 1
+    for s,c in zip(self.full_shape, self.colors()):
+      if c in {"magenta", "yellow"}: up *= s
+      if c in {"cyan", "green", "white"}: lcl *= s
+    assert up < 256 and lcl < 256
     return self.simplify_ones()
 
   def required_optimizations(self, early_only=False):
