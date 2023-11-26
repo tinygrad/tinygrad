@@ -21,7 +21,11 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
       LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out, *si.inputs)
     else:
       assert all(si.out.device == x.device for x in si.inputs), f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
-      Device[si.out.device].exec_ast(si.ast, output=si.out, inputs=si.inputs, var_vals=si.var_vals, **si.out._device_extra_args())
+      # TODO: populate_output should be at the top of this function
+      Device[si.out.device].populate_output(si.ast, si.out, si.inputs, **si.out._device_extra_args())
+      rawbuffers = [si.out.realized] + [x.realized for x in si.inputs]
+      # TODO: remove rawbuffers from get_runner
+      Device[si.out.device].get_runner(si.ast, rawbuffers).exec(rawbuffers, si.var_vals)
     del si.out.op
     for v in si.out.views: del v.op
     assert si.out.realized and isinstance(si.out.realized, Device[si.out.device].buffer), f"device mismatch on realized got {type(si.out.realized)} expected {si.out.device}"
