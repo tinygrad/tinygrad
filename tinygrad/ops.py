@@ -172,7 +172,7 @@ class InterpretedASTRunner(JITRunner):
     ret: RawBuffer = self.fxn(rawbufs[1:], var_vals)
     et = time.perf_counter() - st
     update_stats(f"<interpreted {ret.size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit)
-    assert rawbufs[0].dtype == ret.dtype, "dtype mismatch"
+    assert rawbufs[0].dtype == ret.dtype, f"dtype mismatch in Interpreted, {rawbufs[0].dtype=} != {ret.dtype=}"
     rawbufs[0].dtype, rawbufs[0].size, rawbufs[0]._buf, rawbufs[0].offset = ret.dtype, ret.size, ret._buf, ret.offset
     return et
 
