@@ -19,7 +19,7 @@ class HIPLanguage(CStyleLanguage):
   smem_prefix_for_cast=False
   barrier = "__syncthreads();"
   float4 = "make_float4"
-  uses_vload=True 
+  uses_vload=True
   uses_ptr_arithmetic=True
   arg_int_prefix = "const int"
   half_prekernel = "#include <hip/hip_fp16.h>\nusing half4 = HIP_vector_type<half, 4>;" + """
