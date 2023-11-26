@@ -7,8 +7,7 @@ from pathlib import Path
 import os, sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
-from typing import Optional, Tuple, Union
-from tinygrad.helpers import Timing, Profiling, getenv, fetch, DEBUG, dtypes, CI
+from tinygrad.helpers import Timing, Profiling, getenv, fetch, DEBUG, dtypes
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
