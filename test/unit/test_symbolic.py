@@ -456,7 +456,5 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     c = b.substitute({a: NumNode(1)})
     assert c == NumNode(2)
 
-
-
 if __name__ == '__main__':
   unittest.main()
