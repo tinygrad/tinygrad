@@ -22,7 +22,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     else:
       assert all(si.out.device == x.device for x in si.inputs), f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
       # TODO: populate_output should be at the top of this function
-      Device[si.out.device].populate_output(si.ast, si.out, si.inputs, **si.out._device_extra_args())
+      Device[si.out.device].populate_output(si.ast, si.out, si.inputs)
       rawbuffers = [si.out.realized] + [x.realized for x in si.inputs]
       # TODO: remove rawbuffers from get_runner
       Device[si.out.device].get_runner(si.ast, rawbuffers).exec(rawbuffers, si.var_vals)

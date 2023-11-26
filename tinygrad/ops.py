@@ -182,11 +182,11 @@ class Interpreted:
     self.synchronize, self.codegen, self.graph = lambda: None, None, None
     self.method_cache: Dict[LazyOp, InterpretedASTRunner] = {}
 
-  def populate_output(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], **kwargs):
+  def populate_output(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...]):
     output.realized = output.output_buffer if output.output_buffer is not None else self.buffer.__new__(self.buffer)
 
   def get_runner(self, ast:LazyOp, rawbuffers:List[RawBuffer]) -> InterpretedASTRunner:
-    if ast not in self.method_cache: self.method_cache[ast] = get_interpreted_fxn(self.fxn_for_op, ast)
+    if ast not in self.method_cache or getenv("DISABLE_METHOD_CACHE"): self.method_cache[ast] = get_interpreted_fxn(self.fxn_for_op, ast)
     return self.method_cache[ast]
 
 def get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> InterpretedASTRunner:
@@ -279,7 +279,7 @@ class Compiled:
     src, runtime_args = self.renderer(to_function_name(k.name), k.uops)
     return CompiledASTRunner(k.ast, k.name, src, k.global_size, k.local_size, runtime_args).build(self.compiler, self.runtime)
 
-  def populate_output(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...], **kwargs):
+  def populate_output(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...]):
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
     # TODO: this is pretty wrong actually, who knows where else this buffer is used?
@@ -295,7 +295,7 @@ class Compiled:
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
     if output.realized is None:
-      output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **kwargs)
+      output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **output._device_extra_args())
       if output.realized.size == 0: return output.realized
 
   # TODO: the rawbuffers are only used for optimization, they should be removed and optimizer should realloc
