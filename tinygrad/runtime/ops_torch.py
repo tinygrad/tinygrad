@@ -11,12 +11,13 @@ type_map = {torch.float64: dtypes.float64, torch.float16: dtypes.float16, torch.
 inverse_type_map = {v:k for k,v in type_map.items()}
 
 class RawTorchBuffer(RawBuffer):
-  def __init__(self, size:int, dtype:DType, buf:Optional[torch.Tensor]=None, allocator=lambda size, dtype: torch.empty([size], device=device, dtype=inverse_type_map[dtype])): super().__init__(size, dtype, buf, allocator)
+  def __init__(self, size:int, dtype:DType, buf:Optional[torch.Tensor]=None): super().__init__(size, dtype, buf)
   @classmethod
   def fromCPU(cls, x):
     buf = torch.from_numpy(x if all(s>=0 for s in x.strides) else x.copy()).requires_grad_(False).to(device)
     return cls(prod(x.shape), type_map[buf.dtype], buf)
-  def toCPU(self): return self._buf.cpu().numpy()
+  def _get_buf(self): return self._buf if self._buf is not None else torch.empty([self.size], device=device, dtype=inverse_type_map[self.dtype])
+  def toCPU(self): return self._get_buf().cpu().numpy()
 
 def output_type(x, y): return x.dtype if type_map[x.dtype].priority > type_map[y.dtype].priority else y.dtype
 def match_types(x, y, disallow_bool=False):
@@ -34,7 +35,7 @@ torch_fxn_for_op: Dict[Op, Callable] = {
   # TODO: torch.tensor should work here. it doesn't due to "overflow" in uint8
   #BufferOps.CONST: lambda val, dtype: torch.tensor(val, device=device, dtype=inverse_type_map[dtype]),
   BufferOps.CONST: lambda val, dtype: torch.from_numpy(np.array(val, dtype=dtype.np)).to(device),
-  BufferOps.MEM: lambda x: x._buf, BufferOps.FROM_UNDERLYING: lambda x: RawTorchBuffer(prod(x.shape), type_map[x.dtype], x),
+  BufferOps.MEM: lambda x: x._get_buf(), BufferOps.FROM_UNDERLYING: lambda x: RawTorchBuffer(prod(x.shape), type_map[x.dtype], x),
   UnaryOps.NOOP: lambda x: x.contiguous(), UnaryOps.SQRT: lambda x: x.sqrt(), UnaryOps.EXP2: lambda x: x.exp2(), UnaryOps.LOG2: lambda x: x.log2(), UnaryOps.SIN: torch.sin,
   UnaryOps.CAST: lambda x,y: (x.view if y[1] else x.type)(next(k for k,v in type_map.items() if v==y[0])), UnaryOps.NEG: lambda x: torch.logical_not(x) if x.dtype is torch.bool else torch.neg(x),
   BinaryOps.MAX: torch.maximum, BinaryOps.CMPLT: lambda x,y: (x<y).type(torch.promote_types(x.dtype, y.dtype)),
