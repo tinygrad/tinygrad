@@ -21,11 +21,13 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
       LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out, *si.inputs)
     else:
       assert all(si.out.device == x.device for x in si.inputs), f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
-      # TODO: populate_output should be at the top of this function
+      # TODO: populate_output should be at the top of this function for global memory management
       Device[si.out.device].populate_output(si.ast, si.out, si.inputs)
-      rawbuffers = [si.out.realized] + [x.realized for x in si.inputs]
-      # TODO: remove rawbuffers from get_runner
-      Device[si.out.device].get_runner(si.ast, rawbuffers).exec(rawbuffers, si.var_vals)
+      # TODO: should this be handled here? it probably just shouldn't be in the schedule
+      if not hasattr(si.out.realized, 'size') or si.out.realized.size != 0:
+        rawbuffers = [si.out.realized] + [x.realized for x in si.inputs]
+        # TODO: remove rawbuffers from get_runner, optimizer should reallocate them
+        Device[si.out.device].get_runner(si.ast, rawbuffers).exec(rawbuffers, si.var_vals)
     del si.out.op
     for v in si.out.views: del v.op
     assert si.out.realized and isinstance(si.out.realized, Device[si.out.device].buffer), f"device mismatch on realized got {type(si.out.realized)} expected {si.out.device}"

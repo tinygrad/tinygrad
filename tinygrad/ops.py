@@ -296,7 +296,6 @@ class Compiled:
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
     if output.realized is None:
       output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **output._device_extra_args())
-      if output.realized.size == 0: return output.realized
 
   # TODO: the rawbuffers are only used for optimization, they should be removed and optimizer should realloc
   def get_runner(self, ast:LazyOp, rawbuffers:List[RawBuffer]) -> CompiledASTRunner:
