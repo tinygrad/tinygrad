@@ -4,7 +4,7 @@
 #typeguard.importhook.install_import_hook('tinygrad')
 
 from pathlib import Path
-import os, sys, argparse, json
+import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
 from typing import Optional, Tuple, Union
@@ -93,8 +93,6 @@ MODEL_PARAMS = {
     "1B": {
       "args": {"dim": 2048, "n_layers": 22, "n_heads": 32, "n_kv_heads": 4, "multiple_of": 256, "norm_eps": 1e-05, "vocab_size": 32000},
       "files": 1,
-      "weights": ["https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/model.safetensors?download=true"],
-      "tokenizer": "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.6/resolve/main/tokenizer.model?download=true",
     }
   }
 }
@@ -162,9 +160,6 @@ class AbsmaxQuantizedLinear:
 class LLaMa:
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
-    if model_gen == "tiny":
-      model_path = LLaMa._prepare_model(model_path, tokenizer_path, model_gen, model_size, "safetensors")
-
     from sentencepiece import SentencePieceProcessor
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == MODEL_PARAMS[model_gen][model_size]["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {MODEL_PARAMS[model_gen][model_size]['args']['vocab_size']}"
@@ -205,19 +200,6 @@ class LLaMa:
       for s in until:
         if output.endswith(s): return output[0:-len(s)]
     return output
-
-  @staticmethod
-  def _prepare_model(model_path:Path, tokenizer_path:Path, model_gen, model_size:str, fmt:str):
-    os.makedirs(model_path, exist_ok=True)
-    if fmt == "safetensors":
-      model_path = Path.joinpath(model_path, "model.safetensors")
-      if not model_path.exists(): fetch(MODEL_PARAMS[model_gen][model_size]["weights"][0]).replace(model_path)
-    elif fmt == "torch":
-      for model_torch_path in [Path.joinpath(model_path, f"consolidated.{i:02d}.pth") for i in range(MODEL_PARAMS[model_gen][model_size]["files"])]:
-        if not model_torch_path.exists(): fetch(MODEL_PARAMS[model_gen][model_size]["weights"][i]).replace(model_torch_path)
-    if not tokenizer_path.exists(): fetch(MODEL_PARAMS[model_gen][model_size]["tokenizer"]).replace(tokenizer_path)
-    return model_path
-
 # **** main code ****
 """
 test:
