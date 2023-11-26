@@ -172,7 +172,7 @@ class InterpretedASTRunner(JITRunner):
     ret: RawBuffer = self.fxn(rawbufs[1:], var_vals)
     et = time.perf_counter() - st
     update_stats(f"<interpreted {ret.size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit)
-    assert getattr(rawbufs[0], 'dtype', ret.dtype) == ret.dtype
+    assert rawbufs[0].dtype == ret.dtype, f"dtype mismatch in Interpreted, {rawbufs[0].dtype=} != {ret.dtype=}"
     rawbufs[0].dtype, rawbufs[0].size, rawbufs[0]._buf, rawbufs[0].offset = ret.dtype, ret.size, ret._buf, ret.offset
     return et
 
@@ -180,16 +180,11 @@ class Interpreted:
   def __init__(self, buffer: Type[RawBuffer], fxn_for_op:Dict[Op, Callable]):
     self.buffer, self.fxn_for_op = buffer, fxn_for_op
     self.synchronize, self.codegen, self.graph = lambda: None, None, None
-    self.method_cache: Dict[LazyOp, InterpretedASTRunner] = {}
 
-  def allocate_output(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...]):
-    output.realized = output.output_buffer if output.output_buffer is not None else self.buffer.__new__(self.buffer)
+  @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
+  def get_runner(self, ast:LazyOp) -> InterpretedASTRunner: return _get_interpreted_fxn(self.fxn_for_op, ast)
 
-  def get_runner(self, ast:LazyOp, rawbuffers:List[RawBuffer]) -> InterpretedASTRunner:
-    if ast not in self.method_cache or getenv("DISABLE_METHOD_CACHE"): self.method_cache[ast] = get_interpreted_fxn(self.fxn_for_op, ast)
-    return self.method_cache[ast]
-
-def get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> InterpretedASTRunner:
+def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> InterpretedASTRunner:
   if DEBUG >= 3:
     from tinygrad.graph import print_tree
     print_tree(ast)
@@ -272,53 +267,30 @@ class CompiledASTRunner(JITRunner):
 class Compiled:
   def __init__(self, buffer: Type[RawBuffer], linearizer_opts:LinearizerOptions, renderer, compiler, runtime, synchronize=lambda: None, graph=None):
     self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize, self.graph = buffer, linearizer_opts, renderer, compiler, runtime, synchronize, graph
-    self.method_cache: Dict[LazyOp, CompiledASTRunner] = {}
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     k.linearize()
     src, runtime_args = self.renderer(to_function_name(k.name), k.uops)
     return CompiledASTRunner(k.ast, k.name, src, k.global_size, k.local_size, runtime_args).build(self.compiler, self.runtime)
 
-  def allocate_output(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...]):
-    # check if we can reuse the output buffer
-    # if it's aliased, don't use it
-    # TODO: this is pretty wrong actually, who knows where else this buffer is used?
-    # TODO: what if an assign is required? this silently is wrong
-    # TODO: this logic just doesn't belong here
-    output.realized = output.output_buffer
-    if output.realized is not None:
-      for i,a in enumerate(inputs):
-        # TODO: if this is contiguous it's fine
-        if a.realized == output.realized:
-          if any(not x.arg.st.contiguous for x in ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
-            output.realized = None
-            break
+  @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
+  def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.to_program(_get_optimized_linearizer(self.linearizer_opts, ast))
 
-    # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-    if output.realized is None:
-      output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **output._device_extra_args())
-
-  # TODO: the rawbuffers are only used for optimization, they should be removed and optimizer should realloc
-  def get_runner(self, ast:LazyOp, rawbuffers:List[RawBuffer]) -> CompiledASTRunner:
-    if ast not in self.method_cache or getenv("DISABLE_METHOD_CACHE"): self.method_cache[ast] = self.to_program(get_optimized_linearizer(ast, self.linearizer_opts, rawbuffers))
-    return self.method_cache[ast]
-
-def get_optimized_linearizer(ast:LazyOp, linearizer_opts:LinearizerOptions, rawbuffers:List[RawBuffer]) -> Linearizer:
+def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> Linearizer:
   if DEBUG >= 3:
     from tinygrad.graph import print_tree
     print_tree(ast)
   from tinygrad.codegen.linearizer import Linearizer
   k = Linearizer(ast, linearizer_opts)
-  assert k.info.dtype == rawbuffers[0].dtype, f"linearizer must match dtype. linearizer wants {k.info.dtype} but buffer is {rawbuffers[0].dtype}"
   if not NOOPT:
     if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
     if BEAM >= 1:
       lins = [(("tc" if used_tensor_cores else "hc"), k)]
-      # allocate a scratch buffer if output buffer is also input
-      test_rawbuffers = [type(rawbuffers[0])(rawbuffers[0].size, rawbuffers[0].dtype), *rawbuffers[1:]] if rawbuffers[0] in rawbuffers[1:] else rawbuffers
       kb = Linearizer(ast, linearizer_opts)
       kb.required_optimizations()
-      from tinygrad.features.search import beam_search, time_linearizer
+      from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
+      # TODO: this shouldn't use Device.DEFAULT, it should get the device from the LinearizerOptions
+      test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
       lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
       if used_tensor_cores:
         lins.append(("hc", Linearizer(ast, linearizer_opts)))
