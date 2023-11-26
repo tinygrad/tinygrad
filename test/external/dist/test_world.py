@@ -33,13 +33,11 @@ def run():
     if rank == 0:
       send_jit(t, 1)
     elif rank == 1:
-      t2 = Tensor.empty(SIZE, SIZE)
-      recv_jit(t2, 0)
+      t2 = recv_jit(Tensor.empty(SIZE, SIZE), 0)
 
     # recv from rank 1
     if rank == 0:
-      t2 = Tensor.empty(SIZE, SIZE)
-      recv_jit(t2, 1)
+      t2 = recv_jit(Tensor.empty(SIZE, SIZE), 1)
     elif rank == 1:
       send_jit(t2, 0)
 
