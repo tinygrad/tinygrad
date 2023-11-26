@@ -300,10 +300,10 @@ class Compiled:
 
   # TODO: the rawbuffers are only used for optimization, they should be removed and optimizer should realloc
   def get_runner(self, ast:LazyOp, rawbuffers:List[RawBuffer]) -> CompiledASTRunner:
-    if ast not in self.method_cache or getenv("DISABLE_METHOD_CACHE"): self.method_cache[ast] = get_optimized_program(self.linearizer_opts, self.to_program, ast, rawbuffers)
+    if ast not in self.method_cache or getenv("DISABLE_METHOD_CACHE"): self.method_cache[ast] = self.to_program(get_optimized_linearizer(ast, self.linearizer_opts, rawbuffers))
     return self.method_cache[ast]
 
-def get_optimized_program(linearizer_opts:LinearizerOptions, to_program, ast:LazyOp, rawbuffers:List[RawBuffer]) -> CompiledASTRunner:
+def get_optimized_linearizer(ast:LazyOp, linearizer_opts:LinearizerOptions, rawbuffers:List[RawBuffer]) -> Linearizer:
   if DEBUG >= 3:
     from tinygrad.graph import print_tree
     print_tree(ast)
@@ -328,4 +328,4 @@ def get_optimized_program(linearizer_opts:LinearizerOptions, to_program, ast:Laz
       k = timed[0][1]
   else:
     k.required_optimizations()
-  return to_program(k)
+  return k
