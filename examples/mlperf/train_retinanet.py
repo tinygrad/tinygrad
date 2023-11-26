@@ -266,11 +266,11 @@ class RetinaNetTrainer:
         
         self.reference.train()
         ref_optimizer = torch.optim.Adam([p for p in self.reference.parameters() if p.requires_grad], lr=0.0001)
-
+        self.coco_evalimgs, self.evaluated_imgs, self.ncats, self.narea = [], [], len(self.coco_eval.params.catIds), len(self.coco_eval.params.areaRng)
 
         for x, annotations in iterate(self.dataset, BS):
             Warning("Annotations not being resized for MLPERF reference model")
-            breakpoint()
+            
             resized = [Image.fromarray(image) for image in x]
             resized = [np.asarray(image.resize(self.image_size)) for image in resized]
 
@@ -282,9 +282,9 @@ class RetinaNetTrainer:
 
 
             if sys.argv[1]=='m':
-                model_head_outputs = retina(images)
-                model_head_outputs = {'cls_logits' : model_head_outputs[:,:,4:], 
-                                    'bbox_regression' : model_head_outputs[:,:,:4]}
+                tensor_model_head_outputs = retina(images)
+                model_head_outputs = {'cls_logits' : tensor_model_head_outputs[:,:,4:], 
+                                    'bbox_regression' : tensor_model_head_outputs[:,:,:4]}
             reference_loss, model_loss = None, None
             if sys.argv[1]=='r':
                 reference_loss = self.reference_forward(reference_images.double(),annotations=annotations)
@@ -314,10 +314,17 @@ class RetinaNetTrainer:
             
             
             #TODO input_size=self.image_size? WATCH OUT PARAMETERS AND USAGE
-            if self.debug:
-                predictions = retina.postprocess_detections(model_head_outputs.numpy(),input_size=self.image_size,anchors=anchors_orig,orig_image_sizes=[t["image_size"] for t in annotations])
-                #TODO this should be done on validation split predictions (no grad)
-                self.mAP_compute(annotations, predictions)
+
+            Tensor.no_grad = True
+            predictions = retina.postprocess_detections(tensor_model_head_outputs.numpy(),input_size=self.image_size,anchors=anchors_orig,orig_image_sizes=[t["image_size"] for t in annotations])
+            #TODO this should be done on validation split predictions (no grad)
+            self.mAP_compute(annotations, predictions)
+            Tensor.no_grad = False
+        self.coco_eval.params.imgIds = self.evaluated_imgs
+        self.coco_eval._paramsEval.imgIds = self.evaluated_imgs
+        self.coco_eval.evalImgs = list(np.concatenate(self.coco_evalimgs, -1).flatten())
+        self.coco_eval.accumulate()
+        self.coco_eval.summarize()
 
     def tg_init_setup(self, mlperf_model = None):
         retina = self.model
@@ -385,18 +392,20 @@ class RetinaNetTrainer:
             img_annotations["labels"] = Tensor(img_annotations["labels"])
         return
     def mAP_compute(self, annotations, predictions):
-        coco_results  = [{"image_id": annotations[i]["image_id"], "category_id": label, "bbox": box.tolist(), "score": score}
-      for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
-        coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(self.coco_eval.params.catIds), len(self.coco_eval.params.areaRng)
+        breakpoint()
         img_ids = [t["image_id"] for t in annotations]
-        with redirect_stdout(None):
-            self.coco_eval.cocoDt = self.dataset.loadRes(coco_results)
-            self.coco_eval.params.imgIds = img_ids
-            self.coco_eval.evaluate()
-            self.coco_eval.accumulate()
-            self.coco_eval.summarize()
-        evaluated_imgs.extend(img_ids)
-        coco_evalimgs.append(np.array(self.coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
+        coco_results  = [{"image_id": annotations[i]["image_id"], "category_id": label, "bbox": box, "score": score} 
+            for i, prediction in enumerate(predictions)  for box, score, label in zip(*prediction.values())]
+        for coco_result in coco_results:
+            coco_result["bbox"] = coco_result["bbox"].tolist()
+        #with redirect_stdout(None):
+        if(len(coco_results)==0): coco_results.append({"bbox":[], "image_id":img_ids[0], "category_id":0, "score":0})
+
+        self.coco_eval.cocoDt = self.dataset.loadRes(coco_results)
+        self.coco_eval.params.imgIds = img_ids
+        self.coco_eval.evaluate()
+        self.evaluated_imgs.extend(img_ids)
+        self.coco_evalimgs.append(np.array(self.coco_eval.evalImgs).reshape(self.ncats, self.narea, len(img_ids)))
     
     
     
