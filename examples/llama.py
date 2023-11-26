@@ -199,6 +199,7 @@ class LLaMa:
       for s in until:
         if output.endswith(s): return output[0:-len(s)]
     return output
+
 # **** main code ****
 """
 test:
