@@ -182,7 +182,7 @@ class Interpreted:
     self.synchronize, self.codegen, self.graph = lambda: None, None, None
     self.method_cache: Dict[LazyOp, InterpretedASTRunner] = {}
 
-  def populate_output(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...]):
+  def allocate_output(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...]):
     output.realized = output.output_buffer if output.output_buffer is not None else self.buffer.__new__(self.buffer)
 
   def get_runner(self, ast:LazyOp, rawbuffers:List[RawBuffer]) -> InterpretedASTRunner:
@@ -279,11 +279,12 @@ class Compiled:
     src, runtime_args = self.renderer(to_function_name(k.name), k.uops)
     return CompiledASTRunner(k.ast, k.name, src, k.global_size, k.local_size, runtime_args).build(self.compiler, self.runtime)
 
-  def populate_output(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...]):
+  def allocate_output(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...]):
     # check if we can reuse the output buffer
     # if it's aliased, don't use it
     # TODO: this is pretty wrong actually, who knows where else this buffer is used?
     # TODO: what if an assign is required? this silently is wrong
+    # TODO: this logic just doesn't belong here
     output.realized = output.output_buffer
     if output.realized is not None:
       for i,a in enumerate(inputs):

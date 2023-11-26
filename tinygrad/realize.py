@@ -21,8 +21,8 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
       LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out, *si.inputs)
     else:
       assert all(si.out.device == x.device for x in si.inputs), f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
-      # TODO: populate_output should be at the top of this function for global memory management
-      Device[si.out.device].populate_output(si.ast, si.out, si.inputs)
+      # TODO: allocate_output should be at the top of this function for global memory management
+      Device[si.out.device].allocate_output(si.ast, si.out, si.inputs)
       # TODO: should this be handled here? it probably just shouldn't be in the schedule
       if not hasattr(si.out.realized, 'size') or si.out.realized.size != 0:
         rawbuffers = [si.out.realized] + [x.realized for x in si.inputs]
