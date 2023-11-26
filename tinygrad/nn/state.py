@@ -16,7 +16,7 @@ def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   t, json_len, metadata = safe_load_metadata(fn)
-  for k,v in metadata.items():
+  for k,v in metadata.items() if metadata is not None:
     if k != "__metadata__":
       if v["dtype"] == "BF16":
         return {k:t[8+json_len+v['data_offsets'][0]:].cast(dtypes.bfloat16)[:prod(v['shape'])].reshape(v['shape']).bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half() for k,v in metadata.items() if k != "__metadata__"}
