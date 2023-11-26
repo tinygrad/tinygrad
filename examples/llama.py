@@ -211,11 +211,11 @@ class LLaMa:
     os.makedirs(model_path, exist_ok=True)
     if fmt == "safetensors":
       model_path = Path.joinpath(model_path, "model.safetensors")
-      if not model_path.exists(): model_path.replace(fetch(MODEL_PARAMS[model_gen][model_size]["weights"]))
+      if not model_path.exists(): fetch(MODEL_PARAMS[model_gen][model_size]["weights"][0]).replace(model_path)
     elif fmt == "torch":
       for model_torch_path in [Path.joinpath(model_path, f"consolidated.{i:02d}.pth") for i in range(MODEL_PARAMS[model_gen][model_size]["files"])]:
-        if not model_torch_path.exists(): model_path.replace(fetch(MODEL_PARAMS[model_gen][model_size]["weights"][i]))
-    if not tokenizer_path.exists(): tokenizer_path.replace(fetch(MODEL_PARAMS[model_gen][model_size]["tokenizer"]))
+        if not model_torch_path.exists(): fetch(MODEL_PARAMS[model_gen][model_size]["weights"][i]).replace(model_torch_path)
+    if not tokenizer_path.exists(): fetch(MODEL_PARAMS[model_gen][model_size]["tokenizer"]).replace(tokenizer_path)
     return model_path
 
 # **** main code ****
