@@ -271,7 +271,6 @@ class TestIndexExpressions2d(unittest.TestCase):
     assert len(self.st.views) == 1
     self.st.assert_same()
 
-  @unittest.skip("Can't make this optimization yet")
   def test_reshape_splitting_combining(self):
     self.st = CheckingShapeTracker((1,5,5))
     self.st.pad(((0,4), (0,5), (0,0)))
