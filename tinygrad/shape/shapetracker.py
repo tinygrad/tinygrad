@@ -77,7 +77,7 @@ class ShapeTracker:
   def size(self) -> int:
     if 0 in self.shape: return 0
     ret = self.expr_idxs()[0].max
-    if not isinstance(ret, int): ret = ret.max
+    while not isinstance(ret, int): ret = ret.max    # TODO: this is a while loop?!? it should be more clear what max does
     assert isinstance(ret, int), f"ret must be integer, {ret=} isn't"
     return ret+1
 
