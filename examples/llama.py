@@ -207,6 +207,7 @@ class LLaMa:
 
   @staticmethod
   def _prepare_model(model_path:Path, tokenizer_path:Path, model_gen, model_size:str, fmt:str):
+    assert fmt == "safetensors" or fmt == "torch", "load model not specified or invalid"
     os.makedirs(model_path, exist_ok=True)
     if fmt == "safetensors":
       model_path = Path.joinpath(model_path, "model.safetensors")
