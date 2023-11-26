@@ -394,6 +394,14 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     assert a < 3 and (a < 3).min == 0 and (a < 3).max == 1
     assert a > 3 and (a > 3).min == 0 and (a > 3).max == 1
 
+  def test_sumnode_mulnode_lt(self):
+    a = Variable("a", 1, 2)
+    b = Variable("b", 1, 2)
+    c = Variable("c", 1, 2)
+    x = SumNode([MulNode(a, b), c])
+    assert isinstance((x < 3), Node) and (x < 3) == 0 
+    assert isinstance((x < 4), LtNode) and (x < 4).min == 0 and (x < 4).max == 1
+
   def test_num_node_mul_node(self):
     a = Variable("a", 1, 5)
     b = NumNode(2) * a
@@ -447,6 +455,7 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     b = a + 1
     c = b.substitute({a: NumNode(1)})
     assert c == NumNode(2)
+
 
 
 if __name__ == '__main__':
