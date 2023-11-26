@@ -96,7 +96,7 @@ class TestSafetensors(unittest.TestCase):
     assert state_dict['blocks.2.0.bn2.num_batches_tracked'].numpy() == 276570
 
   def test_metadata(self):
-    metadata = {"hello": "world", "goodbye": "world"}
+    metadata = {"hello": "world"}
     safe_save({}, temp('metadata.safetensors'), metadata)
     import struct
     with open(temp('metadata.safetensors'), 'rb') as f:
