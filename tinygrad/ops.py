@@ -172,7 +172,7 @@ class InterpretedASTRunner(JITRunner):
     ret: RawBuffer = self.fxn(rawbufs[1:], var_vals)
     et = time.perf_counter() - st
     update_stats(f"<interpreted {ret.size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit)
-    assert getattr(rawbufs[0], 'dtype', ret.dtype) == ret.dtype
+    assert rawbufs[0].dtype == ret.dtype, "dtype mismatch"
     rawbufs[0].dtype, rawbufs[0].size, rawbufs[0]._buf, rawbufs[0].offset = ret.dtype, ret.size, ret._buf, ret.offset
     return et
 
@@ -183,7 +183,7 @@ class Interpreted:
     self.method_cache: Dict[LazyOp, InterpretedASTRunner] = {}
 
   def allocate_output(self, ast:LazyOp, output:LazyBuffer, inputs:Tuple[LazyBuffer, ...]):
-    output.realized = output.output_buffer if output.output_buffer is not None else self.buffer.__new__(self.buffer)
+    output.realized = output.output_buffer if output.output_buffer is not None else self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **output._device_extra_args())
 
   def get_runner(self, ast:LazyOp, rawbuffers:List[RawBuffer]) -> InterpretedASTRunner:
     if ast not in self.method_cache or getenv("DISABLE_METHOD_CACHE"): self.method_cache[ast] = get_interpreted_fxn(self.fxn_for_op, ast)
@@ -285,18 +285,16 @@ class Compiled:
     # TODO: this is pretty wrong actually, who knows where else this buffer is used?
     # TODO: what if an assign is required? this silently is wrong
     # TODO: this logic just doesn't belong here
-    output.realized = output.output_buffer
-    if output.realized is not None:
+    if output.output_buffer is not None:
       for i,a in enumerate(inputs):
         # TODO: if this is contiguous it's fine
-        if a.realized == output.realized:
+        if a.realized == output.output_buffer:
           if any(not x.arg.st.contiguous for x in ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
-            output.realized = None
+            output.output_buffer = None
             break
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-    if output.realized is None:
-      output.realized = self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **output._device_extra_args())
+    output.realized = output.output_buffer if output.output_buffer is not None else self.buffer(prod((s if isinstance(s, int) else s.max for s in output.shape)), output.dtype, **output._device_extra_args())
 
   # TODO: the rawbuffers are only used for optimization, they should be removed and optimizer should realloc
   def get_runner(self, ast:LazyOp, rawbuffers:List[RawBuffer]) -> CompiledASTRunner:
