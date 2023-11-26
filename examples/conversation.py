@@ -1,7 +1,6 @@
 import argparse
 import multiprocessing as mp
 import os
-import re
 import sys
 import time
 from contextlib import contextmanager
@@ -12,10 +11,9 @@ import numpy as np
 import pyaudio
 import yaml
 from llama import LLaMa
-from tiktoken import Encoding
 from vits import MODELS as VITS_MODELS
 from vits import Y_LENGTH_ESTIMATE_SCALARS, HParams, Synthesizer, TextMapper, get_hparams_from_file, load_model
-from whisper import Whisper, init_whisper, prep_audio
+from whisper import init_whisper, transcribe_waveform
 
 from tinygrad.helpers import Timing, dtypes, fetch
 from tinygrad.tensor import Tensor
@@ -23,17 +21,6 @@ from tinygrad.tensor import Tensor
 # Whisper constants
 RATE = 16000
 CHUNK = 1600
-
-def clean_text(enc: Encoding, txt: str) -> str:
-  for t in enc.special_tokens_set:
-    txt = txt.replace(t, "")
-  txt = re.sub(r"\(.+\)", "", txt)
-  return txt.replace("[BLANK_AUDIO]", "").strip()
-
-def voice2text(model: Whisper, enc: Encoding, encoded_audio: Tensor, tokens: list[int]):
-  out = model.decoder(Tensor([tokens]), 0, encoded_audio, streaming=True).realize()
-  tokens.append(int(out[0,-1].argmax().numpy().item()))
-  return enc.decode(tokens)
 
 def llama_prepare(llama: LLaMa, temperature: float, pre_prompt_path: Path) -> tuple[list[int], str, str, str]:
   config = yaml.safe_load(open(str(pre_prompt_path)).read())
@@ -178,7 +165,7 @@ def listener(q: mp.Queue, event: mp.Event):
         if n % 4 == 0:
           sys.stdout.write(f"listening {next(spinner)}\r")
           sys.stdout.flush()
-        q.put(np.frombuffer(data, dtype=np.int16))
+        q.put(((np.frombuffer(data, np.int16)/32768).astype(np.float32)*3))
         n += 1
   finally:
     stream.stop_stream()
@@ -253,41 +240,19 @@ if __name__ == "__main__":
       tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
       total = np.array([])
 
-      # Listen to mic input
+      s = time.perf_counter()
       is_listening_event.set()
-
-      # Detect start of speech
+      prev_text = None
       while True:
-        samples = q.get()
-        rms = np.sqrt(np.mean(np.square(samples)))
-        if rms > args.threshold:
-          total = (samples / 32768).astype(np.float32)*3
-          break
-
-      # Record voice until user stops speaking
-      start_silence = None
-      while True:
-        samples = q.get()
-        rms = np.sqrt(np.mean(np.square(samples)))
-        total = np.concatenate([total, (samples / 32768).astype(np.float32)*3])
-
-        if rms > args.threshold:
-          start_silence = None
-        elif start_silence is None:
-          start_silence = time.time()
-
-        if start_silence is not None and time.time() - start_silence > args.silence_timeout:
+        for _ in range(RATE // CHUNK): total = np.concatenate([total, q.get()])
+        txt = transcribe_waveform(model, enc, [total], truncate=True)
+        print(txt)
+        if txt == "[BLANK_AUDIO]": continue
+        if prev_text is not None and prev_text == txt:
           is_listening_event.clear()
           break
-
-      # Transcribe text
-      s = time.perf_counter()
-      with Timing("transcription: "):
-        encoded_audio = model.encoder.encode(Tensor(prep_audio(total.reshape(1, -1), 1)))
-        while not (txt := voice2text(model, enc, encoded_audio, tokens)).endswith("<|endoftext|>"): print(txt)
-        txt = clean_text(enc, txt)
-        if txt.strip() == "": continue
-        log.append(user_delim + txt)
+        prev_text = txt
+      log.append(user_delim + txt)
 
       # Generate with llama
       with Timing("llama generation: "):
