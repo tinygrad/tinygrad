@@ -16,12 +16,9 @@ def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   t, json_len, metadata = safe_load_metadata(fn)
-  for k,v in metadata.items() if metadata is not None:
-    if k != "__metadata__":
-      if v["dtype"] == "BF16":
-        return {k:t[8+json_len+v['data_offsets'][0]:].cast(dtypes.bfloat16)[:prod(v['shape'])].reshape(v['shape']).bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half() for k,v in metadata.items() if k != "__metadata__"}
-      else:
-        return {k:t[8+json_len+v['data_offsets'][0]:].cast(safe_dtypes[v['dtype']])[:prod(v['shape'])].reshape(v['shape']) for k,v in metadata.items() if k != "__metadata__"}
+  if next((kv for i, kv in enumerate(metadata.items()) if i == 1 and kv[0] != "__metadata__" and kv[1]['dtype'] == "BF16"), (None, None)): # check dtype of first layer
+    return {k:t[8+json_len+v['data_offsets'][0]:].cast(dtypes.bfloat16)[:prod(v['shape'])].reshape(v['shape']).bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half() for k,v in metadata.items() if k != "__metadata__"}
+  return {k:t[8+json_len+v['data_offsets'][0]:].cast(safe_dtypes[v['dtype']])[:prod(v['shape'])].reshape(v['shape']) for k,v in metadata.items() if k != "__metadata__"}
 
 def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any]]=None):
   headers, offset = {}, 0
