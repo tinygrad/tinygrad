@@ -89,7 +89,7 @@ class Transformer:
 
   # TODO: fix empty token
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
-    return (self.forward_jit if tokens.shape[1] == 1 and getenv("JIT", int(not CI)) else self.forward)(tokens, start_pos, temperature)
+    return (self.forward_jit if tokens.shape[1] == 1 and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257
 MODEL_PARAMS = {

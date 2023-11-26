@@ -86,7 +86,7 @@ class TestInferenceMinKernels(unittest.TestCase):
   def test_llama(self):
     from examples.llama import Transformer
     from tinygrad.shape.symbolic import Variable
-    args_tiny = {"dim": 512, "multiple_of": 256, "n_heads": 8, "n_layers": 4, "norm_eps": 1e-05, "vocab_size": 1000}
+    args_tiny = {"dim": 512, "hidden_dim": 1024, "n_heads": 8, "n_layers": 4, "norm_eps": 1e-05, "vocab_size": 1000}
     model = Transformer(**args_tiny)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
     with CLCache(100):
