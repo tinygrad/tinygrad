@@ -72,7 +72,7 @@ def tts(
   estimate_max_y_length: bool,
   text_mapper: TextMapper,
   model_has_multiple_speakers: bool,
-  batch_size = 800
+  batch_size = 1000
 ):
   if model_to_use == "mmts-tts": text_to_synthesize = text_mapper.filter_oov(text_to_synthesize.lower())
 
@@ -173,7 +173,19 @@ def listener(q: mp.Queue, event: mp.Event):
     p.terminate()
 
 
+def mp_output_stream(q: mp.Queue, counter: mp.Value, num_channels: int, sample_rate: int):
+  with output_stream(num_channels, sample_rate) as stream:
+    while True:
+      stream.write(q.get())
+      counter.value += 1
+
+#########################################################################################
+# INSTALLATION
+# pip install nltk
+#########################################################################################
 if __name__ == "__main__":
+  import nltk
+  nltk.download("punkt")
   Tensor.no_grad = True
   # Parse CLI arguments
   parser = argparse.ArgumentParser("Have a tiny conversation with tinygrad")
@@ -225,6 +237,12 @@ if __name__ == "__main__":
   p.daemon = True
   p.start()
 
+  out_q = mp.Queue()
+  out_counter = mp.Value("i", 0)
+  out_p = mp.Process(target=mp_output_stream, args=(out_q, out_counter, args.vits_num_channels, hps.data.sampling_rate,))
+  out_p.daemon = True
+  out_p.start()
+
   # JIT tts
   for i in ["Hello, I'm a chat bot", "I am capable of doing a lot of things"]:
     tts(
@@ -235,7 +253,7 @@ if __name__ == "__main__":
     )
 
   # Start the pipeline
-  with output_stream(args.vits_num_channels, hps.data.sampling_rate) as stream, log_writer() as log:
+  with log_writer() as log:
     while True:
       tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
       total = np.array([])
@@ -262,11 +280,17 @@ if __name__ == "__main__":
 
       # Convert to voice
       with Timing("tts: "):
-        audio_data = tts(
-          response, synth, hps, emotion_embedding,
-          args.vits_speaker_id, args.vits_model_to_use, args.vits_noise_scale,
-          args.vits_noise_scale_w, args.vits_length_scale,
-          args.vits_estimate_max_y_length, text_mapper, model_has_multiple_speakers
-        )
-      with Timing("audio play: "): stream.write(audio_data.tobytes())
+        sentences = nltk.sent_tokenize(response)
+        for i in sentences:
+          audio_data = tts(
+            i, synth, hps, emotion_embedding,
+            args.vits_speaker_id, args.vits_model_to_use, args.vits_noise_scale,
+            args.vits_noise_scale_w, args.vits_length_scale,
+            args.vits_estimate_max_y_length, text_mapper, model_has_multiple_speakers
+          )
+          out_q.put_nowait(audio_data.tobytes())
+      while out_counter.value != len(sentences):
+        time.sleep(1)
+        continue
+      out_counter.value = 0
       log.append(f"Total: {time.perf_counter() - s}")
