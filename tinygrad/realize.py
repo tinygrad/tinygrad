@@ -21,8 +21,21 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
       LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out, *si.inputs)
     else:
       assert all(si.out.device == x.device for x in si.inputs), f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
-      # TODO: allocate_output should be at the top of this function for global memory management
-      Device[si.out.device].allocate_output(si.ast, si.out, si.inputs)
+      # check if we can reuse the output buffer
+      # if it's aliased, don't use it
+      # TODO: this is pretty wrong actually, who knows where else this buffer is used?
+      # TODO: what if an assign is required? this silently is wrong
+      # TODO: this logic just doesn't belong here
+      if si.out.output_buffer is not None:
+        for i,a in enumerate(si.inputs):
+          # TODO: if this is contiguous it's fine
+          if a.realized == si.out.output_buffer:
+            if any(not x.arg.st.contiguous for x in si.ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
+              si.out.output_buffer = None
+              break
+      # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
+      si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
+        Device[si.out.device].buffer(prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype, **si.out._device_extra_args())
       # TODO: should this be handled here? it probably just shouldn't be in the schedule
       if not hasattr(si.out.realized, 'size') or si.out.realized.size != 0:
         rawbuffers = [si.out.realized] + [x.realized for x in si.inputs]
