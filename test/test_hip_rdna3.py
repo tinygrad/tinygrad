@@ -16,8 +16,8 @@ class TestHIPCompilationRDNA(unittest.TestCase):
 
     model = Model()
 
-    input = Tensor.rand(512,1,28,28, device="CPU").numpy()
-    result = model(Tensor(input))
+    input = Tensor.rand(512,1,28,28)
+    result = model(input)
     sched = result.lazydata.schedule()
 
     for item in sched:
