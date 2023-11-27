@@ -310,11 +310,11 @@ jobs:
         sudo apt update
         sudo apt install --allow-unauthenticated -y rocm-hip-libraries hip-dev
     - name: Install Python Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[testing]'
     - name: Test HIP compilation on RDNA3 [gfx1100]
       run: |
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
-        DEBUG=1 HIP=1 python -m pytest -n=auto test/test_hip_rdna3.py
+        DEBUG=1 HIP=1 python -m pytest -s test/test_hip_rdna3.py
 
 
   tests:
