@@ -290,7 +290,7 @@ class SumNode(RedNode):
       if muls:
         # NOTE: gcd in python 3.8 takes exactly 2 args
         mul_gcd = b
-        for x in muls: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell x.b is int here
+        for x in muls: mul_gcd = gcd(mul_gcd, x.b) if isinstance(x.b, int) else 1
         all_others = Variable.sum(others)
         if all_others.min >= 0 and all_others.max < mul_gcd:
           lhs, b = Variable.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
