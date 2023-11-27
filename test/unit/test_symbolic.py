@@ -402,6 +402,12 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     with self.assertRaises(AssertionError):
       lt3 = (x < 3)
 
+  def test_nested_variable_mod(self):
+    i = Variable("i", 1, 5)
+    idx0 = Variable("idx0", 0, i)
+    with self.assertRaises(AssertionError):
+      assert idx0 % 2 == idx0
+
   def test_num_node_mul_node(self):
     a = Variable("a", 1, 5)
     b = NumNode(2) * a
