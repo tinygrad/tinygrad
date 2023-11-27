@@ -1,10 +1,10 @@
 import argparse
 import multiprocessing as mp
 import os
+import re
 import sys
 import time
 from contextlib import contextmanager
-from itertools import cycle
 from pathlib import Path
 
 import numpy as np
@@ -260,7 +260,7 @@ if __name__ == "__main__":
         for _ in range(RATE // CHUNK): total = np.concatenate([total, q.get()])
         txt = transcribe_waveform(model, enc, [total], truncate=True)
         print(txt, end="\r")
-        if txt == "[BLANK_AUDIO]": continue
+        if txt == "[BLANK_AUDIO]" or re.match(r"^\([\w+ ]+\)$", txt.strip()): continue
         if prev_text is not None and prev_text == txt:
           is_listening_event.clear()
           break
