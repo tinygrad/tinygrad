@@ -1,7 +1,7 @@
 import unittest
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import Opt, OptOps
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.helpers import OSX, CI
 from test.external.fuzz_linearizer import run_linearizer
 

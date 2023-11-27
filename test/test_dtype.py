@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
 

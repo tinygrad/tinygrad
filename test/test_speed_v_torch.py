@@ -9,7 +9,7 @@ torch.set_num_threads(1)
 import time
 import numpy as np
 np.set_printoptions(linewidth=160)
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.helpers import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d

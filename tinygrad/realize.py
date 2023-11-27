@@ -1,6 +1,7 @@
 from typing import List, cast, Dict, Callable
 import numpy as np
-from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps
+from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, BufferOps
+from tinygrad.device import Device
 from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import DEBUG, prod, all_int, IMAGE
