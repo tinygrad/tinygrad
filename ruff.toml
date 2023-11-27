@@ -28,7 +28,3 @@ exclude = [
   "openpilot/",
 ]
 
-[per-file-ignores]
-"test/*" = [
-  "F821",
-]
