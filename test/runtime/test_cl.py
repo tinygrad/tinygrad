@@ -1,6 +1,5 @@
 import numpy as np
-import ctypes
-from tinygrad.runtime.ops_opencl import CLDevice
+from tinygrad.runtime.ops_cl import CLDevice
 
 if __name__ == "__main__":
   dev = CLDevice()

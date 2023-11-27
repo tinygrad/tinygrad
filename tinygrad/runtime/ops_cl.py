@@ -5,6 +5,7 @@ import gpuctypes.opencl as cl
 from tinygrad.helpers import to_char_p_p, from_mv
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.opencl import OpenCLRenderer
+from tinygrad.ops import Compiled
 
 def check(status, info:Optional[str]=None):
   if status != 0: raise RuntimeError(f"OpenCL Error {status}" + (("\n\n"+info) if info else ""))
@@ -59,7 +60,7 @@ class CLProgram:
     for i,b in enumerate(bufs): cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b._buf), ctypes.byref(b._buf))
     check(cl.clEnqueueNDRangeKernel(self.device.queue, self.kernel, len(global_size), None, (ctypes.c_size_t * len(global_size))(*global_size), (ctypes.c_size_t * len(local_size))(*local_size) if local_size else None, 0, None, None))
 
-class CLDevice:
+class CLDevice(Compiled):
   linearizer_opts, renderer, compiler = LinearizerOptions(), staticmethod(OpenCLRenderer), staticmethod(compile_cl)    # these are the same for all instantiations of the device
 
   device_ids = None                 # this is global and only initted once

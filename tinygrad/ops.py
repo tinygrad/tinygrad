@@ -90,8 +90,14 @@ class _Device:
   def canonicalize(self, device:Optional[str]) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "") if device is not None else self.DEFAULT
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __getitem__(self, x:str) -> Union[Interpreted, Compiled]:
-    x = x.split(":")[0].upper()
-    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "buffer") and x in self._buffers][0]
+    assert x == Device.canonicalize(x), "only fetch canonicalize Device"
+    xp = x.split(":")[0].upper()
+    try:
+      # new style
+      return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{xp.lower()}')) if (cname.lower() == xp.lower() + "device") and x in self._buffers][0](x)
+    except IndexError:
+      # old style
+      return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{xp.lower()}')) if (cname.lower() == xp.lower() + "buffer") and x in self._buffers][0]
   @functools.cached_property
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None)   # type: ignore

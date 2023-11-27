@@ -2,7 +2,7 @@ from typing import List, cast, Dict, Callable, Any
 import numpy as np
 import weakref
 from collections import defaultdict
-from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps
+from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, Device, BufferOps, Interpreted
 from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import DEBUG, prod, all_int, IMAGE, DType
@@ -11,8 +11,9 @@ from tinygrad.runtime.lib import RawBuffer
 
 class BufferView:
   # TODO: size/offset/dtype should go in here, only one size should go to the runtime (except for images)
-  def __init__(self, device_key, buf): self.device_key, self.buf = device_key, buf
-  def __del__(self): LRUAlloc.reclaim(self.device_key, self.buf)
+  def __init__(self, size, dtype, buf):
+    self.size, self.dtype, self.buf = size, dtype, buf
+  #def __del__(self): LRUAlloc.reclaim(self.device_key, self.buf)
   def __getattr__(self, name): return getattr(self.buf, name)
 
 class _LRUAlloc:
@@ -27,17 +28,21 @@ class _LRUAlloc:
   #  pass
 
   def alloc(self, device:str, sz:int, dtype:DType, extra_args:Dict[str, str]):
-    device_key = (device, tuple(extra_args.items()))
+    #device_key = (device, tuple(extra_args.items()))
     # from the cache
-    if len(mk := self.cache[device_key][(sz, dtype)]): return BufferView(device_key, mk.pop())
+    #if len(mk := self.cache[device_key][(sz, dtype)]): return BufferView(sz, dtype, mk.pop())
     # try the allocation once, if it fails for any reason, clear the device cache and try again
     if DEBUG >= 5: print(f"** allocating {device=} {sz=} {dtype=} {extra_args=}")
-    try:
-      ret = Device[device].buffer(sz, dtype, **extra_args)
-    except Exception:
-      self.cache[device_key].clear()
-      ret = Device[device].buffer(sz, dtype, **extra_args)
-    return BufferView(device_key, ret)
+    if isinstance(Device[device], Interpreted):
+      ret = Device[device].buffer(sz, dtype) #, **extra_args)
+    else:
+      ret = Device[device].buffer(sz*dtype.sz) #, **extra_args)
+    #try:
+    #  ret = Device[device].buffer(sz, dtype) #, **extra_args)
+    #except Exception:
+    #  self.cache[device_key].clear()
+    #  ret = Device[device].buffer(sz, dtype, **extra_args)
+    return BufferView(sz, dtype, ret)
 
 LRUAlloc = _LRUAlloc()
 
@@ -76,10 +81,10 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
         LRUAlloc.alloc(si.out.device, prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype, si.out._device_extra_args())
       # TODO: should this be handled here? it probably just shouldn't be in the schedule
       if not hasattr(si.out.realized, 'size') or si.out.realized.size != 0:
-        Device[si.out.device].get_runner(si.ast).exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)
+        Device[si.out.device].get_runner(si.ast).exec([si.out.realized.buf] + [x.realized.buf for x in si.inputs], si.var_vals)
     del si.out.op
     for v in si.out.views: del v.op
-    assert si.out.realized and isinstance(si.out.realized.buf, Device[si.out.device].buffer), f"device mismatch on realized got {type(si.out.realized)} expected {si.out.device}"
+    #assert si.out.realized and isinstance(si.out.realized.buf, Device[si.out.device].buffer), f"device mismatch on realized got {type(si.out.realized)} expected {si.out.device}"
     assert si.out.realized.dtype == si.out.dtype, f"realized dtype is incorrect, {si.out.realized.dtype} != {si.out.dtype}"
 
 # *** zero op LoadOps ***
@@ -94,7 +99,9 @@ def _realize_rand(buffer: LazyBuffer) -> RawBuffer:
   assert all_int(buffer.shape), "does not support symbolic shape"
   if DEBUG >= 2: print(f"***      rand {buffer.device}    seed {buffer.op.arg:<10d}  shape {str(buffer.shape):23s} dtype {buffer.dtype}")
   rng = np.random.default_rng(buffer.op.arg)
-  return Device[buffer.device].buffer.fromCPU(rng.random(size=prod(buffer.shape), dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args())
+  ret = LRUAlloc.alloc(buffer.device, prod(buffer.shape), buffer.dtype, buffer._device_extra_args())
+  return ret
+  #return Device[buffer.device].buffer.fromCPU(rng.random(size=prod(buffer.shape), dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args())
 
 # *** one op LoadOps ***
 
@@ -102,8 +109,10 @@ def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> RawBuffer:
   assert src.realized.size == buffer.st.size(), f"size mismatch on FROM {src.realized.size} != {buffer.st.size()}"
   assert src.st.contiguous and buffer.st.contiguous, "all must be contiguous for from"
   if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.realized.size:<16d} shape {str(buffer.shape):23s} dtype {src.realized.dtype}")
+  ret = LRUAlloc.alloc(buffer.device, prod(buffer.shape), buffer.dtype, buffer._device_extra_args())
+  return ret
   # TODO: this needs to use LRUAlloc
-  return Device[buffer.device].buffer.fromBuffer(src.realized, buffer.shape, buffer.dtype, **buffer._device_extra_args())
+  #return Device[buffer.device].buffer.fromBuffer(src.realized, buffer.shape, buffer.dtype, **buffer._device_extra_args())
 
 # *** n op LoadOps ***
 
