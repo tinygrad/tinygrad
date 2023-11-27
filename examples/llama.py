@@ -7,145 +7,14 @@ from pathlib import Path
 import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
-from typing import Optional, Tuple, Union
-
-from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes, CI
+from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes
 from tinygrad.ops import Device
 from tinygrad.tensor import Tensor
-from tinygrad.nn import Embedding, Linear
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad.helpers import GlobalCounters
-from tinygrad.jit import TinyJit
-from tinygrad.shape.symbolic import Variable
+from extra.models.llama import Transformer, convert_from_huggingface
 
-MAX_CONTEXT = 1024
-JIT = getenv("JIT", 0 if CI else 1)
-
-# https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
-  freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
-  freqs = Tensor.arange(end).unsqueeze(dim=1)*freqs.unsqueeze(dim=0)
-  return Tensor.stack([Tensor.cos(freqs), Tensor.sin(freqs)], dim=-1).reshape(1, end, 1, dim//2, 2)
-
-# (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
-def complex_mult(A, c, d):
-  a,b = A[:, :, :, :, 0:1], A[:, :, :, :, 1:2]
-  ro = a*c - b*d
-  co = a*d + b*c
-  return ro.cat(co, dim=-1)
-
-def apply_rotary_emb(xq, xk, freqs_cis) -> Tuple[Tensor, Tensor]:
-  assert freqs_cis.shape[1] == xq.shape[1] and freqs_cis.shape[1] == xk.shape[1], f"freqs_cis shape mismatch {freqs_cis.shape} xq:{xq.shape} xk:{xk.shape}"
-  xq = xq.reshape(*xq.shape[0:-1], -1, 2)
-  xk = xk.reshape(*xk.shape[0:-1], -1, 2)
-  assert len(xq.shape) == 5 and len(xk.shape) == 5 and len(freqs_cis.shape) == 5
-  c, d = freqs_cis[:, :xq.shape[1], :, :, 0:1], freqs_cis[:, :xq.shape[1], :, :, 1:2]
-  xq_out = complex_mult(xq, c, d)
-  xk_out = complex_mult(xk, c, d)
-  return xq_out.flatten(3), xk_out.flatten(3)
-
-def repeat_kv(x:Tensor, n_rep:int) -> Tensor:
-  bs, seqlen, n_kv_heads, head_dim = x.shape
-  if n_rep == 1: return x
-  return x.reshape(bs, seqlen, n_kv_heads, 1, head_dim).expand(bs, seqlen, n_kv_heads, n_rep, head_dim).reshape(bs, seqlen, n_kv_heads * n_rep, head_dim)
-
-class RMSNorm:
-  def __init__(self, dim, eps=1e-6):
-    self.eps = eps
-    self.weight = Tensor.ones(dim)
-
-  def __call__(self, x:Tensor):
-    # TODO: convert to float?
-    return (x * (x.pow(2).mean(-1, keepdim=True) + self.eps).rsqrt()) * self.weight
-
-class Attention:
-  def __init__(self, dim, n_heads, n_kv_heads, linear=Linear):
-    self.n_heads = n_heads
-    self.n_kv_heads = n_kv_heads if n_kv_heads is not None else n_heads
-    self.head_dim = dim // n_heads
-    self.n_rep = self.n_heads // self.n_kv_heads
-
-    self.wq = linear(dim, self.n_heads * self.head_dim, bias=False)
-    self.wk = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
-    self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
-    self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
-
-  def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
-    xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-    xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
-    xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
-    xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
-    xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
-    bsz, seqlen, n_heads, head_dim = xq.shape
-
-    # create kv cache
-    if not hasattr(self, "cache_k"):
-      self.cache_k, self.cache_v = Tensor.zeros(bsz, MAX_CONTEXT, self.n_kv_heads, self.head_dim), Tensor.zeros(bsz, MAX_CONTEXT, self.n_kv_heads, self.head_dim)
-
-    keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
-    values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
-
-    # update the cache
-    self.cache_k.assign(keys.pad((None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()).realize()
-    self.cache_v.assign(values.pad((None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()).realize()
-
-    keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
-
-    xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
-    attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1)
-    return self.wo(attn)
-
-class FeedForward:
-  def __init__(self, dim, hidden_dim, multiple_of, linear=Linear, ffn_dim_multiplier=None):
-    # TODO: what is this?
-    hidden_dim = int(2 * hidden_dim / 3)
-    # custom dim factor multiplier
-    if ffn_dim_multiplier is not None:
-      hidden_dim = int(ffn_dim_multiplier * hidden_dim)
-    hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
-    self.w1 = linear(dim, hidden_dim, bias=False)
-    self.w2 = linear(hidden_dim, dim, bias=False)
-    self.w3 = linear(dim, hidden_dim, bias=False)
-
-  def __call__(self, x:Tensor) -> Tensor:
-    return self.w2(self.w1(x).silu() * self.w3(x))
-
-class TransformerBlock:
-  def __init__(self, dim, multiple_of, n_heads, n_kv_heads, norm_eps, linear=Linear, ffn_dim_multiplier=None):
-    self.attention = Attention(dim, n_heads, n_kv_heads, linear)
-    self.feed_forward = FeedForward(dim, 4*dim, multiple_of, linear, ffn_dim_multiplier)
-    self.attention_norm = RMSNorm(dim, norm_eps)
-    self.ffn_norm = RMSNorm(dim, norm_eps)
-
-  def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
-    h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
-    return (h + self.feed_forward(self.ffn_norm(h))).realize()
-
-class Transformer:
-  def __init__(self, dim, multiple_of, n_heads, n_layers, norm_eps, vocab_size, linear=Linear, max_batch_size=32, max_seq_len=1024, ffn_dim_multiplier=None, n_kv_heads=None, rope_theta=10000):
-    self.layers = [TransformerBlock(dim, multiple_of, n_heads, n_kv_heads, norm_eps, linear, ffn_dim_multiplier) for _ in range(n_layers)]
-    self.norm = RMSNorm(dim, norm_eps)
-    self.tok_embeddings = Embedding(vocab_size, dim)
-    self.output = linear(dim, vocab_size, bias=False)
-    self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_seq_len * 2, rope_theta)
-    self.forward_jit = TinyJit(self.forward)
-
-  def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float=0.0):
-    _bsz, seqlen = tokens.shape
-    freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
-    mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=dtypes.float32).triu(start_pos+1).realize() if seqlen > 1 else None
-
-    h = self.tok_embeddings(tokens)
-    for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
-    logits = self.output(self.norm(h))
-    return (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
-
-  def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
-    # TODO: better way to handle the first call v.s. the rest?
-    if tokens.shape[0:2] == (1,1) and JIT:
-      assert start_pos > 0
-      return self.forward_jit(tokens, Variable("start_pos", 1, MAX_CONTEXT).bind(start_pos), temperature)
-    return self.forward(tokens, start_pos, temperature)
+MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
 
 # **** files and arguments ****
 MODEL_PARAMS = {
@@ -227,6 +96,23 @@ MODEL_PARAMS = {
   }
 }
 
+# fix up MODEL_PARAMS to have hidden_dim
+for model_gen in MODEL_PARAMS.values():
+  for model_type in model_gen.values():
+    model_args = model_type['args']
+    hidden_dim = model_args['dim'] * 4
+    multiple_of = model_args['multiple_of']
+    # TODO: what is this?
+    hidden_dim = int(2 * hidden_dim / 3)
+    # custom dim factor multiplier
+    ffn_dim_multiplier = getattr(model_args, 'ffn_dim_multiplier', None)
+    if ffn_dim_multiplier is not None:
+      hidden_dim = int(ffn_dim_multiplier * hidden_dim)
+      del model_args['ffn_dim_multiplier']
+    hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
+    model_args['hidden_dim'] = hidden_dim
+    del model_args['multiple_of']
+
 # **** helper functions ****
 def concat_weights(models):
   def convert(name) -> Tensor:
@@ -247,31 +133,6 @@ def load(fn:str):
     return safe_load(fn)
   else:
     return torch_load(fn)
-
-def convert_from_huggingface(weights, model: Transformer, n_heads: int, n_kv_heads: int):
-  def permute(v: Tensor, n_heads: int):
-    return v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1]).transpose(1, 2).reshape(*v.shape[:2])
-
-  keymap = {
-    "model.embed_tokens.weight": "tok_embeddings.weight",
-    **{f"model.layers.{l}.input_layernorm.weight": f"layers.{l}.attention_norm.weight" for l in range(len(model.layers))},
-    **{f"model.layers.{l}.self_attn.{x}_proj.weight": f"layers.{l}.attention.w{x}.weight" for x in ["q", "k", "v", "o"] for l in range(len(model.layers))},
-    **{f"model.layers.{l}.post_attention_layernorm.weight": f"layers.{l}.ffn_norm.weight" for l in range(len(model.layers))},
-    **{f"model.layers.{l}.mlp.{x}_proj.weight": f"layers.{l}.feed_forward.w{y}.weight" for x, y in {"gate": "1", "down": "2", "up": "3"}.items() for l in range(len(model.layers))},
-    "model.norm.weight": "norm.weight",
-    "lm_head.weight": "output.weight",
-  }
-  sd = {}
-  for k, v in weights.items():
-    if ".rotary_emb." in k: continue
-    v = v.to(Device.DEFAULT)
-    if "model.layers" in k:
-      if "q_proj" in k:
-        v = permute(v, n_heads)
-      elif "k_proj" in k:
-        v = permute(v, n_kv_heads)
-    sd[keymap[k]] = v
-  return sd
 
 class AbsmaxQuantizedLinear:
   def __init__(self, in_features, out_features, bias=False):
@@ -303,15 +164,14 @@ class LLaMa:
     assert sp_model.vocab_size() == MODEL_PARAMS[model_gen][model_size]["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {MODEL_PARAMS[model_gen][model_size]['args']['vocab_size']}"
 
     params = MODEL_PARAMS[model_gen][model_size]
-    model_args = params["args"]
-    model = Transformer(**model_args, linear=AbsmaxQuantizedLinear) if quantize else Transformer(**params["args"])
+    model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT)
 
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
     else:
       weights = load(str(model_path))
     if "model.embed_tokens.weight" in weights:
-      weights = convert_from_huggingface(weights, model, model_args["n_heads"], model_args["n_kv_heads"])
+      weights = convert_from_huggingface(weights, model, model_args["n_heads"], model_args.get("n_kv_heads", model_args["n_heads"]))
 
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)

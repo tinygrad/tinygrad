@@ -61,7 +61,7 @@ def schedule_to_thneed(schedule, output_fn):
   used_ops = 0
   cl_cache = []
   for si in schedule:
-    prg = Device["GPU"].method_cache[si.ast]
+    prg = Device["GPU"].get_runner(si.ast)
     args = (si.out,) + si.inputs
 
     # pass these to thneed
