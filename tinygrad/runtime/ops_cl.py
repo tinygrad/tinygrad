@@ -7,19 +7,21 @@ from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.opencl import OpenCLRenderer
 from tinygrad.ops import Compiled
 
-def check(status, info:Optional[str]=None):
-  if status != 0: raise RuntimeError(f"OpenCL Error {status}" + (("\n\n"+info) if info else ""))
+def check(status):
+  if status != 0: raise RuntimeError(f"OpenCL Error {status}")
+def checked(ret, status):
+  check(status.value)
+  return ret
 
 def compile_cl(prg:str) -> bytes:
   assert CLDevice.compiler_context is not None, 'OpenCL requires a "compiler_context" to compile, init a device before you call this'
   prg = prg.encode()
-  program = cl.clCreateProgramWithSource(CLDevice.compiler_context.context, 1, to_char_p_p([prg]), (ctypes.c_size_t * 1)(len(prg)), ctypes.byref(status := ctypes.c_int32()))
-  check(status.value)
+  program = checked(cl.clCreateProgramWithSource(CLDevice.compiler_context.context, 1, to_char_p_p([prg]), (ctypes.c_size_t * 1)(len(prg)), ctypes.byref(status := ctypes.c_int32())), status)
   status = cl.clBuildProgram(program, 1, ctypes.byref(CLDevice.compiler_context.device_id), None, ctypes.cast(None, cl.clBuildProgram.argtypes[4]), None)
   if status != 0:
     cl.clGetProgramBuildInfo(program, CLDevice.compiler_context.device_id, cl.CL_PROGRAM_BUILD_LOG, 0, None, ctypes.byref(log_size := ctypes.c_size_t()))
     cl.clGetProgramBuildInfo(program, CLDevice.compiler_context.device_id, cl.CL_PROGRAM_BUILD_LOG, log_size.value, mstr := ctypes.create_string_buffer(log_size.value), None)
-    check(status, ctypes.string_at(mstr, size=log_size.value).decode())
+    raise RuntimeError(f"OpenCL Compile Error\n\n{ctypes.string_at(mstr, size=log_size.value).decode()}")
   binary_sizes = (ctypes.c_size_t * 1)()
   check(cl.clGetProgramInfo(program, cl.CL_PROGRAM_BINARY_SIZES, ctypes.sizeof(binary_sizes), ctypes.byref(binary_sizes), None))
   binary = (ctypes.c_char * binary_sizes[0])()
@@ -28,10 +30,10 @@ def compile_cl(prg:str) -> bytes:
   check(cl.clReleaseProgram(program))
   return bytes(binary)
 
+"""
 class CLBuffer:
   def __init__(self, device:CLDevice, size:int):
-    self.device, self.size, self._buf = device, size, cl.clCreateBuffer(device.context, cl.CL_MEM_READ_WRITE, size, None, ctypes.byref(status := ctypes.c_int32()))
-    check(status.value)
+    self.device, self.size, self._buf = device, size, checked(cl.clCreateBuffer(device.context, cl.CL_MEM_READ_WRITE, size, None, ctypes.byref(status := ctypes.c_int32())), status)
   def __del__(self): check(cl.clReleaseMemObject(self._buf))
   def _copyin(self, x:memoryview):
     assert self.size == len(x)*x.itemsize, f"_copyin size mismatch, {self.size=} {len(x)=} {x.itemsize=}"
@@ -39,6 +41,7 @@ class CLBuffer:
   def _copyout(self, x:memoryview):
     assert self.size == len(x)*x.itemsize, f"_copyout size mismatch, {self.size=} {len(x)=} {x.itemsize=}"
     check(cl.clEnqueueReadBuffer(self.device.queue, self._buf, cl.CL_TRUE, 0, self.size, from_mv(x), 0, None, None))
+"""
 
 class CLProgram:
   def __init__(self, device:CLDevice, name:str, prg:bytes):
@@ -49,15 +52,14 @@ class CLProgram:
     check(binary_status.value)
     check(errcode_ret.value)
     check(cl.clBuildProgram(self.program, 1, ctypes.byref(device.device_id), None, ctypes.cast(None, cl.clBuildProgram.argtypes[4]), None)) # NOTE: OSX requires this
-    self.kernel = cl.clCreateKernel(self.program, name.encode(), ctypes.byref(status := ctypes.c_int32()))
-    check(status.value)
+    self.kernel = checked(cl.clCreateKernel(self.program, name.encode(), ctypes.byref(status := ctypes.c_int32())), status)
 
   def __del__(self):
     check(cl.clReleaseKernel(self.kernel))
     check(cl.clReleaseProgram(self.program))
 
-  def __call__(self, *bufs:Union[CLBuffer, int], global_size:Tuple[int,...], local_size:Optional[Tuple[int,...]]=None, wait=False) -> Optional[float]:
-    for i,b in enumerate(bufs): cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b._buf), ctypes.byref(b._buf))
+  def __call__(self, *bufs:Union[cl.cl_mem, int], global_size:Tuple[int,...], local_size:Optional[Tuple[int,...]]=None, wait=False) -> Optional[float]:
+    for i,b in enumerate(bufs): cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b), ctypes.byref(b))
     check(cl.clEnqueueNDRangeKernel(self.device.queue, self.kernel, len(global_size), None, (ctypes.c_size_t * len(global_size))(*global_size), (ctypes.c_size_t * len(local_size))(*local_size) if local_size else None, 0, None, None))
 
 class CLDevice(Compiled):
@@ -76,8 +78,14 @@ class CLDevice(Compiled):
     self.context = cl.clCreateContext(None, 1, ctypes.byref(self.device_id), ctypes.cast(None, cl.clCreateContext.argtypes[3]), None, ctypes.byref(status := ctypes.c_int32()))
     if CLDevice.compiler_context is None: CLDevice.compiler_context = self
     check(status.value)
-    self.queue = cl.clCreateCommandQueue(self.context, self.device_id, 0, ctypes.byref(status))
-    check(status.value)
+    self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, 0, ctypes.byref(status)), status)
+    self.runtime = functools.partial(CLProgram, self)
 
     # these both require a specific device
-    self.buffer, self.runtime = functools.partial(CLBuffer, self), functools.partial(CLProgram, self)
+    #self.buffer, self.runtime = functools.partial(CLBuffer, self), functools.partial(CLProgram, self)
+
+  # low level buffer api (not checked!)
+  def alloc(self, size:int) -> cl.cl_mem: return checked(cl.clCreateBuffer(self.context, cl.CL_MEM_READ_WRITE, size, None, ctypes.byref(status := ctypes.c_int32())), status)
+  def free(self, buf:cl.cl_mem): check(cl.clReleaseMemObject(buf))
+  def copyin(self, dest:cl.cl_mem, src:memoryview): check(cl.clEnqueueWriteBuffer(self.queue, dest, False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
+  def copyout(self, dest:memoryview, src:cl.cl_mem, block=True): check(cl.clEnqueueReadBuffer(self.queue, src, block, 0, len(dest)*dest.itemsize, from_mv(dest), 0, None, None))

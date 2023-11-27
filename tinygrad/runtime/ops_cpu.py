@@ -1,6 +1,6 @@
 import numpy as np
 from typing import Callable, Dict, Tuple, Optional
-from tinygrad.helpers import dtypes, DType
+from tinygrad.helpers import dtypes, DType, from_mv
 from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, MovementOps, ReduceOps, TernaryOps, Op, Interpreted
 from tinygrad.runtime.lib import RawBuffer
 
@@ -46,3 +46,18 @@ numpy_fxn_for_op: Dict[Op, Callable] = {
 }
 
 CPUBuffer = Interpreted(RawNumpyBuffer, numpy_fxn_for_op)
+
+import ctypes, ctypes.util
+libc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("c"))
+libc.memcpy.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+libc.malloc.argtypes = [ctypes.c_size_t]
+libc.malloc.restype = ctypes.c_void_p
+libc.free.argtypes = [ctypes.c_void_p]
+
+class CPUDevice:
+  def __init__(self, device:str=""): pass
+  # malloc
+  def alloc(self, size:int) -> ctypes.c_void_p: return libc.malloc(size)
+  def free(self, buf:ctypes.c_void_p): return libc.free(buf)
+  def copyin(self, dest:ctypes.c_void_p, src:memoryview): libc.memcpy(dest, from_mv(src), len(src)*src.itemsize)
+  def copyout(self, dest:memoryview, src:ctypes.c_void_p): libc.memcpy(from_mv(dest), src, len(dest)*dest.itemsize)
