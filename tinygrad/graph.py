@@ -103,15 +103,17 @@ def _tree(lazydata, prefix=""):
 
 def print_tree(lazydata:LazyOp): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(lazydata))]))
 
-def graph_uops(uops:List[UOp]):
-  colors = {UOps.ALU: "#ffffc0", UOps.LOAD: "#ffc0c0", UOps.STORE: "#c0ffc0", UOps.SPECIAL: "#c0c0ff", UOps.CONST: "#e0e0e0",
-            UOps.DEFINE_GLOBAL: "#ffe0b0", UOps.DEFINE_LOCAL: "#ffe0d0", UOps.DEFINE_ACC: "#f0ffe0",
-            UOps.LOOP: "#c8a0e0", UOps.PHI: "#e0ffc0", UOps.BARRIER: "#ff8080", UOps.IF: "#c8b0c0"}
-  G = nx.DiGraph()
-  for u in uops:
-    if u.uop == UOps.END: continue
-    G.add_node(uops.index(u), label=f"{str(u.uop)[5:]}{(' '+str(u.arg)) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.uop, "#ffffff"))
-    for v in u.vin: G.add_edge(uops.index(v), uops.index(u))
-  GRAPHPATH = "/tmp/uops"
-  nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
-  os.system(f'dot -Grankdir=LR -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
+if getenv("GRAPHUOPS"):
+  import networkx as nx
+  def graph_uops(uops:List[UOp]):
+    colors = {UOps.ALU: "#ffffc0", UOps.LOAD: "#ffc0c0", UOps.STORE: "#c0ffc0", UOps.SPECIAL: "#c0c0ff", UOps.CONST: "#e0e0e0",
+              UOps.DEFINE_GLOBAL: "#ffe0b0", UOps.DEFINE_LOCAL: "#ffe0d0", UOps.DEFINE_ACC: "#f0ffe0",
+              UOps.LOOP: "#c8a0e0", UOps.PHI: "#e0ffc0", UOps.BARRIER: "#ff8080", UOps.IF: "#c8b0c0"}
+    G = nx.DiGraph()
+    for u in uops:
+      if u.uop == UOps.END: continue
+      G.add_node(uops.index(u), label=f"{str(u.uop)[5:]}{(' '+str(u.arg)) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.uop, "#ffffff"))
+      for v in u.vin: G.add_edge(uops.index(v), uops.index(u))
+    GRAPHPATH = "/tmp/uops"
+    nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
+    os.system(f'dot -Grankdir=LR -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
