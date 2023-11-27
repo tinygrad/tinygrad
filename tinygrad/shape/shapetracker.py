@@ -144,7 +144,7 @@ class ShapeTracker:
     return self
 
   def expr_idxs(self, idxs:Optional[Iterable[Node]]=None):
-    if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1 if isinstance(s, int) else s.max - 1) for i,s in enumerate(self.shape)]
+    if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx = expr_idxs(self.views[-1], tuple(idxs))
     valid = expr_node_mask(self.views[-1], idxs_to_idx(self.views[-1].shape, tuple(idxs)))
     return self._expr_idx(idx, valid)

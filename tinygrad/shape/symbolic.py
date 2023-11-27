@@ -199,11 +199,11 @@ class MulNode(OpNode):
     return Node.__mod__(a, b)
   def get_bounds(self) -> Tuple[int, int]:  
     if isinstance(self.b, int):
-      bounds = [self.a.min * self.b, self.a.max * self.b]
+      return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
     else:
       bounds = [self.a.min * self.b.min, self.a.min * self.b.max, self.a.max * self.b.min, self.a.max * self.b.max]
-    bounds.sort()
-    return (bounds[0], bounds[-1])
+      bounds.sort()
+      return (bounds[0], bounds[-1])
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return self.a.substitute(var_vals) * (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
 class DivNode(OpNode):
