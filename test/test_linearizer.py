@@ -2,8 +2,10 @@ import numpy as np
 import unittest, os
 
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
-from tinygrad.codegen.linearizer import Linearizer, UOps
-from tinygrad.ops import Compiled, Device, LoadOps
+from tinygrad.codegen.linearizer import Linearizer, UOp, UOps
+from tinygrad.ops import BufferOps, Compiled, ConstBuffer, Device, LazyOp, LoadOps, TernaryOps
+from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
@@ -116,6 +118,19 @@ class TestLinearizer(unittest.TestCase):
     assert len(sched) == 1
     lin = Linearizer(sched[0].ast)
     assert not any(u.uop == UOps.LOOP for u in lin.linearize().uops), "found loop in sum collapse"
+
+  def test_simplify_uop(self):
+    def helper_test_simplify(uop, dtype, vin, arg=None):
+      lin = Linearizer(ast=LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=42, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))) # this is a dummy ast
+      lin.uops = []
+      return lin.uop(uop, dtype, vin, arg, cachable=False)
+
+    c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
+    assert helper_test_simplify(UOps.ALU, dtypes.bool, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c0), arg=TernaryOps.WHERE) == c0
+
+    c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
+    c1 = UOp(UOps.CONST, dtypes.float, vin=(), arg=1.0)
+    assert helper_test_simplify(UOps.ALU, dtypes.bool, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c1), arg=TernaryOps.WHERE).uop == UOps.ALU
 
 def helper_realized_ast(r:Tensor):
   s = r.lazydata.schedule()
