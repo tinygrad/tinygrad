@@ -1,7 +1,8 @@
 import torch
 import numpy as np
 from typing import Dict, Callable, Optional
-from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, MovementOps, TernaryOps, ReduceOps, Op, Interpreted
+from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, MovementOps, TernaryOps, ReduceOps, Op
+from tinygrad.device import Interpreted
 from tinygrad.helpers import getenv, dtypes, prod, DType
 from tinygrad.runtime.ops_cpu import einsum_mulacc, shape_to_axis
 from tinygrad.runtime.lib import RawBuffer

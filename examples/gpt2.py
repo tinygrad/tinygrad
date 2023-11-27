@@ -2,7 +2,7 @@
 import argparse
 from tqdm import trange
 import numpy as np
-from tinygrad.ops import Device
+from tinygrad import Device
 from typing import Optional
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear, LayerNorm
