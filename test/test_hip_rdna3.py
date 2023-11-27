@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad import Tensor, nn
+from tinygrad import Tensor
 from tinygrad.helpers import getenv
 from tinygrad.ops import LoadOps
 from tinygrad.codegen.kernel import LinearizerOptions
