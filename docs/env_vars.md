@@ -44,6 +44,7 @@ LLVMOPT             | [1]        | enable slightly more expensive LLVM optimizat
 OPT                 | [1-3]      | optimization level
 BEAM                | [#]        | number of beams in kernel beam search
 GRAPH               | [1]        | create a graph of all operations (requires graphviz)
+GRAPHUOPS           | [1]        | create a graph of uops (requires graphviz and saves at /tmp/uops.{svg,dot})
 GRAPHPATH           | [/path/to] | where to put the generated graph
 IMAGE               | [1]        | enable 2d specific optimizations
 FLOAT16             | [1]        | use float16 for images instead of float32
