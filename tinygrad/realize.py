@@ -16,7 +16,7 @@ class Buffer:
   def __del__(self): LRUAlloc.reclaim(self.device, self.size, self.dtype, self.buf)
   def toCPU(self):
     ret = np.empty((self.size,), dtype=self.dtype.np)
-    Device[self.device].copyout(ret.data, self.buf)
+    if self.size > 0: Device[self.device].copyout(ret.data, self.buf)
     return ret
 
 class _LRUAlloc:
@@ -34,21 +34,9 @@ class _LRUAlloc:
   #  pass
 
   def alloc(self, device:str, sz:int, dtype:DType, extra_args:Dict[str, str]):
-    #device_key = (device, tuple(extra_args.items()))
-    # from the cache
-    #if len(mk := self.cache[device_key][(sz, dtype)]): return BufferView(sz, dtype, mk.pop())
-    # try the allocation once, if it fails for any reason, clear the device cache and try again
-    if DEBUG >= 5: print(f"** allocating {device=} {sz=} {dtype=} {extra_args=}")
-    #if isinstance(Device[device], Interpreted):
-    #  ret = Device[device].buffer(sz, dtype) #, **extra_args)
-    #else:
-    #  ret = Device[device].buffer(sz*dtype.sz) #, **extra_args)
-    ret = Device[device].alloc((sz*dtype.itemsize) if sz != 0 else 1)
-    #try:
-    #  ret = Device[device].buffer(sz, dtype) #, **extra_args)
-    #except Exception:
-    #  self.cache[device_key].clear()
-    #  ret = Device[device].buffer(sz, dtype, **extra_args)
+    alloc_sz = (sz*dtype.itemsize) if sz != 0 else 1
+    if DEBUG >= 5: print(f"** allocating {device=} {sz=} {dtype=} {extra_args=} {alloc_sz=}")
+    ret = Device[device].alloc(alloc_sz)
     return Buffer(device, sz, dtype, ret)
 
 LRUAlloc = _LRUAlloc()
@@ -114,14 +102,12 @@ def _realize_rand(buffer: LazyBuffer):
 
 # *** one op LoadOps ***
 
-intermediate_dont_free = []
 def _realize_from(buffer: LazyBuffer, src: LazyBuffer):
   assert src.realized.size == buffer.realized.size, f"size mismatch on FROM {src.realized.size=} != {buffer.realized.size=}"
   assert src.st.contiguous and buffer.st.contiguous, "all must be contiguous for from"
   if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.realized.size:<16d} shape {str(buffer.shape):23s} dtype {src.realized.dtype}")
   if buffer.realized.size == 0: return
   intermediate = (ctypes.c_char * (src.realized.size * src.realized.dtype.itemsize))()
-  intermediate_dont_free.append(intermediate)
   Device[src.device].copyout(memoryview(intermediate), src.realized.buf)
   Device[buffer.device].copyin(buffer.realized.buf, memoryview(intermediate))
 
