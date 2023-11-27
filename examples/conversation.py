@@ -207,7 +207,6 @@ if __name__ == "__main__":
 
   # LLAMA args
   parser.add_argument("--llama_pre_prompt_path", type=Path, default=Path(__file__).parent / "conversation_data" / "pre_prompt_stacy.yaml", help="Path to yaml file which contains all pre-prompt data needed. ")
-  parser.add_argument("--llama_personality", type=str, default="Stacy", help="Personality, can be Stacy, George, Gary, or Lexie")
   parser.add_argument("--llama_temperature", type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument("--llama_quantize", action="store_true", help="Quantize the weights to int8 in memory")
   parser.add_argument("--llama_model", type=Path, default=None, required=True, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
