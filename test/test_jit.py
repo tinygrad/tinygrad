@@ -239,6 +239,19 @@ class TestJit(unittest.TestCase):
 
     assert len(cache.good_jitted.jit_cache) == 1
     assert len(cache.bad_jitted.jit_cache) == 1
+    
+  @unittest.skip("Will fail as undefined JIT behavior")
+  def test_jit_delayed_cpu(self):
+    @TinyJit
+    def foo(x) -> Tensor: return x.sum().realize()
+
+    result_1 = foo(Tensor([1] * 2))
+    result_2 = foo(Tensor([2] * 2))
+    result_3 = foo(Tensor([3] * 2))
+    
+    np.testing.assert_allclose(result_1.numpy(), [2], atol=1e-4, rtol=1e-5)
+    np.testing.assert_allclose(result_2.numpy(), [4], atol=1e-4, rtol=1e-5)
+    np.testing.assert_allclose(result_3.numpy(), [6], atol=1e-4, rtol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()
