@@ -45,7 +45,7 @@ numpy_fxn_for_op: Dict[Op, Callable] = {
   TernaryOps.WHERE: np.where,
 }
 
-CPUBuffer = Interpreted(RawNumpyBuffer, numpy_fxn_for_op)
+#CPUBuffer = Interpreted(RawNumpyBuffer, numpy_fxn_for_op)
 
 import ctypes, ctypes.util
 libc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("c"))
@@ -61,3 +61,13 @@ class CPUDevice:
   def free(self, buf:ctypes.c_void_p): return libc.free(buf)
   def copyin(self, dest:ctypes.c_void_p, src:memoryview): libc.memcpy(dest, from_mv(src), len(src)*src.itemsize)
   def copyout(self, dest:memoryview, src:ctypes.c_void_p): libc.memcpy(from_mv(dest), src, len(dest)*dest.itemsize)
+
+  """
+  def alloc(self, size:int): return None
+  def free(self, buf): pass
+  def copyin(self, dest, src):
+    print("copyin", dest, src)
+  def copyout(self, dest, src):
+    print("copyout", dest, src)
+  """
+

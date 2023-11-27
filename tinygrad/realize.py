@@ -117,7 +117,7 @@ def _realize_from(buffer: LazyBuffer, src: LazyBuffer):
   assert src.st.contiguous and buffer.st.contiguous, "all must be contiguous for from"
   if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.realized.size:<16d} shape {str(buffer.shape):23s} dtype {src.realized.dtype}")
   intermediate = (ctypes.c_char * src.realized.size)()
-  #Device[src.device].copyout(intermediate, src.realized.buf)
+  Device[src.device].copyout(memoryview(intermediate), src.realized.buf)
   Device[buffer.device].copyin(buffer.realized.buf, memoryview(intermediate))
 
 # *** n op LoadOps ***

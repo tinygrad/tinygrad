@@ -196,7 +196,15 @@ class LazyBuffer:
 
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:
-    return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, None, dtypes.from_np(x.dtype), RawNumpyBuffer.fromCPU(x))
+    from tinygrad.ops import Device
+    print(x.shape, x.size, x.itemsize)
+    buf = Device["CPU"].alloc(x.size * x.itemsize)
+    Device["CPU"].copyin(buf, x.data)
+    from tinygrad.realize import Buffer
+    buf = Buffer("CPU", x.size, dtypes.from_np(x.dtype), buf)
+    return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, None, dtypes.from_np(x.dtype), buf)
+
+    #return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, None, dtypes.from_np(x.dtype), RawNumpyBuffer.fromCPU(x))
 
   def cast(self, dtype:DType, bitcast:bool=False):
     return self.e(UnaryOps.CAST, arg=(dtype, bitcast))
