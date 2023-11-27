@@ -285,6 +285,15 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (1, 1)
 
+class TestFloat64(unittest.TestCase):
+  def setUp(self):
+    if not isinstance(Device[Device.DEFAULT], Compiled):
+      self.skipTest("Device does not use linearizer")
+
+  @unittest.skipIf(Device.DEFAULT != "GPU", "GPU only test")
+  def test_double_basic(self):
+    np.testing.assert_equal((Tensor.uniform((2,), dtype=dtypes.float64) @ Tensor.zeros(2, dtype=dtypes.float64)).numpy(), np.zeros(1))
+
 class TestHandCodedOpts(unittest.TestCase):
   def setUp(self):
     if not isinstance(Device[Device.DEFAULT], Compiled):

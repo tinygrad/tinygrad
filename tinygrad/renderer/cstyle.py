@@ -49,10 +49,10 @@ class CStyleLanguage(NamedTuple):
     return f"{self.float4.replace('float4', var_dtype.name)}({','.join(x)})"
 
   # returns a str expression of the const with the given type
-  def render_const(self, x:Union[float,int], var_dtype) -> str:
+  def render_const(self, x:Union[float,int], var_dtype:DType) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    else: val = f"{x}f" if dtypes.is_float(var_dtype) and isinstance(x, float) else f"{int(x)}"
+    else: val = f"{x}{'l' if var_dtype == dtypes.float64 else 'f'}" if dtypes.is_float(var_dtype) and isinstance(x, float) else f"{int(x)}"
     return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
 
   # returns a str expression of the loaded value with the output type
@@ -176,6 +176,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       if args[1].startswith("l"): local_size.append(args[2])
       r[u] = args[1]
     elif uop == UOps.CONST:
+      assert dtype is not None
       r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
     elif uop == UOps.LOAD:
       assert dtype is not None

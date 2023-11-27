@@ -75,7 +75,7 @@ class Linearizer(Kernel):
         (g_idx, g_valid), amt, dim = self.sts[i].expr_idxs(fake_idxs), 1, None
     else:
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
-    localtype = dtypes.float32 if amt == 1 else dtypes.float.vec(amt)
+    localtype = (dtypes.float64 if isinstance(buf, (ConstBuffer, MemBuffer)) and buf.dtype == dtypes.float64 else dtypes.float32) if amt == 1 else dtypes.float.vec(amt)
 
     e_idxs, e_valids = g_idx.expand(expand_vars), g_valid.expand(expand_vars)
 
