@@ -10,7 +10,7 @@ sampler_prefix = {dtypes.float64: "d", dtypes.float: "", dtypes.int32: "i", dtyp
 fragment_center_offset = 0.5
 
 class GLSLLanguage(CStyleLanguage):
-  xid = ["int(gl_FragCoord.y-0.5) * w + int(gl_FragCoord.x-0.5)"]
+  xid = [f"int(gl_FragCoord.y-{fragment_center_offset}) * w + int(gl_FragCoord.x-{fragment_center_offset})"]
   code_for_op: Dict = {
     UnaryOps.NEG: lambda x: f"(-{x})",
     UnaryOps.EXP2: lambda x: f"exp2({x})",
@@ -48,7 +48,7 @@ class GLSLLanguage(CStyleLanguage):
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
     x_calc = f"float(int({idx})%textureSize({buf_name}, 0).x)"
     y_calc = f"float(int({idx})/textureSize({buf_name}, 0).x)"
-    out_val = f"texture({buf_name}, vec2(float({x_calc} + 0.5)/float(textureSize({buf_name}, 0).x), float({y_calc} + 0.5)/float(textureSize({buf_name}, 0).y))).r"
+    out_val = f"texture({buf_name}, vec2(float({x_calc} + {fragment_center_offset})/float(textureSize({buf_name}, 0).x), float({y_calc} + {fragment_center_offset})/float(textureSize({buf_name}, 0).y))).r"
     return f"{self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val}"
 
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:

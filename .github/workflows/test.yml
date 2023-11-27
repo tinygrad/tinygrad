@@ -214,7 +214,7 @@ jobs:
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
 
   testmetalwebgpu:
-    name: Metal and WebGPU Tests
+    name: Metal, WebGPU and WebGL Tests
     runs-on: macos-13
     timeout-minutes: 20
 
@@ -231,7 +231,7 @@ jobs:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
         key: metal-webgpu-testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
-      run: pip install -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install -e '.[webgpu,webgl,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Cache model weights
       uses: actions/cache@v3
       with:
@@ -276,6 +276,10 @@ jobs:
       run: npm install puppeteer
     - name: Run WEBGPU Efficientnet
       run: node test/test_webgpu.js
+    - name: Run selected webgl tests
+      run: WEBGL=1 python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_jit.py
+    - name: Build WebGL Efficientnet
+      run: WEBGL=1 python -m examples.compile_efficientnet
 
   tests:
     strategy:

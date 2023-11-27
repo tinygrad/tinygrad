@@ -42,7 +42,6 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
 
   # hack to put the inputs back
   for (j,i),idx in run.input_replace.items():
-    print(f"j={j},i={i}, idx={idx}")
     realized_input = args[idx].lazydata.realized
     run.jit_cache[j].rawbufs[i] = realized_input
     special_names[id(realized_input)] = f'input{idx}'
@@ -68,42 +67,87 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
   return '\n'.join(cprog)
 
 def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names) -> str:
-  kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main').replace('version 330', 'version 300 es')}`;" for key, code in functions.items()])
-  kernel_names = ', '.join([name for (name, _args, _global_size, _local_size) in statements])
-  init_shader = """
-  function createShaderProgram(gl, code) {
-    const vertexShader = loadShader(gl, gl.VERTEX_SHADER, '#version 300 es\\nin vec2 in_position;in vec2 in_uv;out vec2 uv;void main(){gl_Position=vec4(in_position,0.0,1.0);uv=in_uv;}');
-    const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, code);
-    const shaderProgram = gl.createProgram();
-    gl.attachShader(shaderProgram, vertexShader);
-    gl.attachShader(shaderProgram, fragmentShader);
-    gl.linkProgram(shaderProgram);
-
-    if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
-      console.log(`Unable to initialize the shader program: ${gl.getProgramInfoLog(shaderProgram)}`);
-      return null;
-    }
-
-    return shaderProgram;
-  }
-
-  function loadShader(gl, type, source) {
-    const shader = gl.createShader(type);
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      console.log(`An error occurred compiling the shaders: ${gl.getShaderInfoLog(shader)}`);
-      gl.deleteShader(shader);
-      return null;
-    }
-
-    return shader;
-  }
-  """
-  textures = '\n    '.join([f"const {name} = " + (f"createTexture(gl, {size/4});" if _key not in weight_names else f"createTexture(gl, {size/4}, getTensorBuffer(safetensor, metadata['{weight_names[_key]}']))") + ";"  for name,(size,dtype,_key) in bufs.items()])
   header = """
   function setupNet(gl, safetensor) {\n
+    function createShaderProgram(gl, code) {
+      const vertexShader = loadShader(gl, gl.VERTEX_SHADER, '#version 300 es\\nin vec2 in_position;in vec2 in_uv;out vec2 uv;void main(){gl_Position=vec4(in_position,0.0,1.0);uv=in_uv;}');
+      const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, code);
+      const shaderProgram = gl.createProgram();
+      gl.attachShader(shaderProgram, vertexShader);
+      gl.attachShader(shaderProgram, fragmentShader);
+      gl.linkProgram(shaderProgram);
+
+      if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+        console.log(`Unable to initialize the shader program: ${gl.getProgramInfoLog(shaderProgram)}`);
+        return null;
+      }
+
+      return shaderProgram;
+    }
+
+    function loadShader(gl, type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.log(`An error occurred compiling the shaders: ${gl.getShaderInfoLog(shader)}`);
+        gl.deleteShader(shader);
+        return null;
+      }
+
+      return shader;
+    }
+
+    function setupVertexData(gl, program, vertices) {
+      let vao = gl.createVertexArray();
+      gl.bindVertexArray(vao);
+
+      let vertexBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+      const positionLocation = gl.getAttribLocation(program, 'in_position');
+      const uvLocation = gl.getAttribLocation(program, 'in_uv');
+      
+      gl.enableVertexAttribArray(positionLocation);
+      gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 4 * 4, 0);
+
+      gl.enableVertexAttribArray(uvLocation);
+      gl.vertexAttribPointer(uvLocation, 2, gl.FLOAT, false, 4 * 4, 2 * 4);
+
+      gl.bindVertexArray(null);
+
+      return vao;
+    }
+
+    function runProgram(gl, kernelName, program, textures) {
+      let framebuffer = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures[0].tex, 0);
+      gl.useProgram(program);
+      gl.uniform1i(gl.getUniformLocation(program, "w"), textures[0].width);  
+
+      const vao = setupVertexData(gl, program, [-1, 1, 0, 1, -1, -1, 0, 0, 1, 1, 1, 1, 1, -1, 1, 0]);
+      gl.bindVertexArray(vao);
+      // Texture 0 is the framebuffer texture, so we skip that
+      for (let i = 1; i < textures.length; i++) {
+        gl.activeTexture(gl.TEXTURE0 + i-1);
+        gl.bindTexture(gl.TEXTURE_2D, textures[i].tex);
+        gl.uniform1i(gl.getUniformLocation(program, 'data' + i), i-1);
+      }
+
+      gl.viewport(0, 0, textures[0].width, textures[0].height);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+      for (let i = 1; i < textures.length; i++) {
+        gl.activeTexture(gl.TEXTURE0 + i-1);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+      }
+
+      console.log("Finished running: " + kernelName);
+    }
     function limitTextureDims(size, threshold) {
       if (size <= threshold) { return [size, 1] };
       
@@ -179,69 +223,22 @@ def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, 
     const metadata = getTensorMetadata(safetensor);
   """
 
-  run_program = """
-  function setupVertexData(gl, program, vertices) {
-    let vao = gl.createVertexArray();
-    gl.bindVertexArray(vao);
-
-    let vertexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
-
-    const positionLocation = gl.getAttribLocation(program, 'in_position');
-    const uvLocation = gl.getAttribLocation(program, 'in_uv');
-    
-    gl.enableVertexAttribArray(positionLocation);
-    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 4 * 4, 0);
-
-    gl.enableVertexAttribArray(uvLocation);
-    gl.vertexAttribPointer(uvLocation, 2, gl.FLOAT, false, 4 * 4, 2 * 4);
-
-    gl.bindVertexArray(null);
-
-    return vao;
-  }
-
-  function runProgram(gl, kernelName, program, textures) {
-    let framebuffer = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures[0].tex, 0);
-    gl.useProgram(program);
-    gl.uniform1i(gl.getUniformLocation(program, "w"), textures[0].width);  
-
-    const vao = setupVertexData(gl, program, [-1, 1, 0, 1, -1, -1, 0, 0, 1, 1, 1, 1, 1, -1, 1, 0]);
-    gl.bindVertexArray(vao);
-    // Texture 0 is the framebuffer texture, so we skip that
-    for (let i = 1; i < textures.length; i++) {
-      gl.activeTexture(gl.TEXTURE0 + i-1);
-      gl.bindTexture(gl.TEXTURE_2D, textures[i].tex);
-      gl.uniform1i(gl.getUniformLocation(program, 'data' + i), i-1);
-    }
-
-    gl.viewport(0, 0, textures[0].width, textures[0].height);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-    for (let i = 1; i < textures.length; i++) {
-      gl.activeTexture(gl.TEXTURE0 + i-1);
-      gl.bindTexture(gl.TEXTURE_2D, null);
-    }
-
-    console.log("Finished running: " + kernelName);
-  }
-  """
+  textures = '\n    '.join([f"const {name} = " + (f"createTexture(gl, {size/4});" if _key not in weight_names else f"createTexture(gl, {size/4}, getTensorBuffer(safetensor, metadata['{weight_names[_key]}']))") + ";"  for name,(size,dtype,_key) in bufs.items()])
+  kernels = '\n\n'.join([f"const {key} = `{code.replace(key, 'main').replace('version 330', 'version 300 es')}`;" for key, code in functions.items()])
+  kernel_names = ', '.join([name for (name, _args, _global_size, _local_size) in statements])
   kernel_calls = '\n        '.join([f"runProgram(gl, '{name}', programs[{i}], [{', '.join(args)}]);" for i, (name, args, _global_size, _local_size) in enumerate(statements) ])
+  copy_inputs = "\n".join([f'updateTextureData(gl, {name}, _{name});' for name,(size,dtype,_key) in bufs.items() if "input" in name])
   entry_point = f"""
-    return function(input) {{
-      const ext= gl.getExtension('EXT_color_buffer_float');
-      updateTextureData(gl, input0, input);
+    return function({",".join([f"_{name}" for name,(size,dtype,_key) in bufs.items() if "input" in name])}) {{
+      const ext = gl.getExtension('EXT_color_buffer_float');
+      {copy_inputs}
       {kernel_calls}
 
       return readTextureData(gl, output0);
     }}
   """
   programs = f"let programs = [{kernel_names}].map((code) => createShaderProgram(gl, code));"
-  return f"{header}\n{run_program}\n{init_shader}\n{kernel_code}\n{textures}\n{programs}\n{entry_point}}}"
+  return f"{header}\n{kernels}\n{textures}\n{programs}\n{entry_point}}}"
 
 def export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names) -> Tuple[str,int,int]:
   kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
