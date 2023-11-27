@@ -22,11 +22,21 @@ from tinygrad.tensor import Tensor
 RATE = 16000
 CHUNK = 1600
 
+# LLaMa constants
+IM_START = 32001
+IM_END = 32002
+
+
+# Functions for encoding prompts to chatml md
+def encode_prompt(spp, k, v): return [IM_START]+spp.encode(f"{k}\n{v}")+[IM_END]+spp.encode("\n")
+def start_prompt(spp, k): return [IM_START]+spp.encode(f"{k}\n")
+
 def create_fixed_tokenizer(output_file):
+  """Function needed for extending tokenizer with additional chat tokens"""
   print("creating fixed tokenizer")
   import extra.junk.sentencepiece_model_pb2 as spb2
   mp = spb2.ModelProto()
-  mp.ParseFromString(fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.5/resolve/main/tokenizer.model?download=true").read_bytes())
+  mp.ParseFromString(fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.4/resolve/main/tokenizer.model?download=true").read_bytes())
   mp.pieces.append(spb2.ModelProto.SentencePiece(piece="[PAD]", score=0))
   mp.pieces.append(spb2.ModelProto.SentencePiece(piece="<|im_start|>", score=0))
   mp.pieces.append(spb2.ModelProto.SentencePiece(piece="<|im_end|>", score=0))
@@ -34,28 +44,31 @@ def create_fixed_tokenizer(output_file):
     f.write(mp.SerializeToString())
 
 def llama_prepare(llama: LLaMa, temperature: float, pre_prompt_path: Path) -> tuple[list[int], str, str, str]:
-  config = yaml.safe_load(open(str(pre_prompt_path)).read())
-  pre_prompt, user_delim, resp_delim, end_delim = config["pre_prompt"], config["user_delim"], config["resp_delim"], config["end_delim"]
-  pre_prompt += ''.join(f"{user_delim}{i['user_prompt']}\n{resp_delim}{i['resp_prompt']}{end_delim}" for i in config["examples"])
-
-  toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(pre_prompt)
+  """Prepares a llama model from a specified pre-prompt file"""
+  with open(str(pre_prompt_path)) as f:
+    config = yaml.safe_load(f.read())
+  toks = [llama.tokenizer.bos_id()] + encode_prompt(llama.tokenizer, "system", config["pre_prompt"].replace("\n", " "))
+  for i in config["examples"]:
+    toks += encode_prompt(llama.tokenizer, config["user_delim"], i["user_prompt"])
+    toks += encode_prompt(llama.tokenizer, config["resp_delim"], i["resp_prompt"])
   llama.model(Tensor([toks]), 0, temperature).realize()  # NOTE: outputs are not used
-  return toks, user_delim, resp_delim, end_delim, len(toks), llama.tokenizer.decode(toks)
+  return toks, config["user_delim"], config["resp_delim"], len(toks), llama.tokenizer.decode(toks)
 
 def llama_generate(
   llama: LLaMa,
+  toks: list[int],
+  outputted: str,
   prompt: str,
   start_pos: int,
-  outputted: str,
+  user_delim: str,
+  resp_delim: str,
   temperature=0.7,
-  user_delim="\nUser: ",
-  end_delim=" [EOS]",
 ):
-  # Add tokens from user
-  outputted += f"{user_delim}{prompt}\n"
-  toks = [llama.tokenizer.bos_id()] + llama.tokenizer.encode(outputted)
+  """Generates an output for the specified prompt"""
+  toks += encode_prompt(llama.tokenizer, user_delim, prompt)
+  toks += start_prompt(llama.tokenizer, resp_delim)
 
-  while not outputted.endswith(end_delim):
+  while toks[-1] != IM_END:
     probs_np = llama.model(Tensor([toks[start_pos:]]), start_pos, temperature).numpy()
     token = int(np.random.choice(len(probs_np), p=probs_np))
     start_pos = len(toks)
@@ -168,29 +181,23 @@ def listener(q: mp.Queue, event: mp.Event):
   try:
     p = pyaudio.PyAudio()
     stream = p.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
+    did_print = False
     while True:
       data = stream.read(CHUNK) # read data to avoid overflow
       if event.is_set():
+        if not did_print:
+          print("listening")
+          did_print = True
         q.put(((np.frombuffer(data, np.int16)/32768).astype(np.float32)*3))
+      else:
+        did_print = False
   finally:
     stream.stop_stream()
     stream.close()
     p.terminate()
 
 
-def mp_output_stream(q: mp.Queue, counter: mp.Value, num_channels: int, sample_rate: int):
-  with output_stream(num_channels, sample_rate) as stream:
-    while True:
-      stream.write(q.get())
-      counter.value += 1
-
-#########################################################################################
-# INSTALLATION
-# pip install nltk
-#########################################################################################
 if __name__ == "__main__":
-  import nltk
-  nltk.download("punkt")
   Tensor.no_grad = True
   # Parse CLI arguments
   parser = argparse.ArgumentParser("Have a tiny conversation with tinygrad")
@@ -233,9 +240,9 @@ if __name__ == "__main__":
 
   # Prepare personality
   tokenizer_path = args.llama_tokenizer or args.llama_model.parent / "tokenizer.model"
-  if args.llama_gen == "tiny" and args.llama_size.endswith("Chat"): create_fixed_tinyllama_tokenizer(tokenizer_path)
+  # if args.llama_gen == "tiny" and args.llama_size.endswith("Chat"): create_fixed_tokenizer(tokenizer_path)
   llama = LLaMa.build(args.llama_model, tokenizer_path, args.llama_gen, args.llama_size, args.llama_quantize)
-  toks, user_delim, resp_delim, end_delim, start_pos, outputted = llama_prepare(llama, args.llama_temperature, args.llama_pre_prompt_path)
+  toks, user_delim, resp_delim, start_pos, outputted = llama_prepare(llama, args.llama_temperature, args.llama_pre_prompt_path)
 
   # Start child process for mic input
   q = mp.Queue()
@@ -243,12 +250,6 @@ if __name__ == "__main__":
   p = mp.Process(target=listener, args=(q, is_listening_event,))
   p.daemon = True
   p.start()
-
-  out_q = mp.Queue()
-  out_counter = mp.Value("i", 0)
-  out_p = mp.Process(target=mp_output_stream, args=(out_q, out_counter, args.vits_num_channels, hps.data.sampling_rate,))
-  out_p.daemon = True
-  out_p.start()
 
   # JIT tts
   for i in ["Hello, I'm a chat bot", "I am capable of doing a lot of things"]:
@@ -260,7 +261,7 @@ if __name__ == "__main__":
     )
 
   # Start the pipeline
-  with log_writer() as log:
+  with output_stream(args.vits_num_channels, hps.data.sampling_rate) as stream, log_writer() as log:
     while True:
       tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
       total = np.array([])
@@ -268,7 +269,6 @@ if __name__ == "__main__":
       s = time.perf_counter()
       is_listening_event.set()
       prev_text = None
-      print("listening")
       while True:
         for _ in range(RATE // CHUNK): total = np.concatenate([total, q.get()])
         txt = transcribe_waveform(model, enc, [total], truncate=True)
@@ -279,27 +279,21 @@ if __name__ == "__main__":
           break
         prev_text = txt
       print() # to avoid llama printing on the same line
-      log.append(user_delim + txt)
+      log.append(txt)
 
       # Generate with llama
       with Timing("llama generation: "):
-        outputted, start_pos = llama_generate(llama, txt, start_pos, outputted, args.llama_temperature, user_delim, end_delim)
-        response = outputted.splitlines()[-1].replace(resp_delim.strip(), "").replace(end_delim.strip(), "")
+        outputted, start_pos = llama_generate(llama, toks, outputted, txt, start_pos, user_delim=user_delim, resp_delim=resp_delim, temperature=args.llama_temperature)
+        response = outputted.splitlines()[-1].replace("<|im_end|>", "")
         log.append(resp_delim + response)
 
       # Convert to voice
       with Timing("tts: "):
-        sentences = nltk.sent_tokenize(response)
-        for i in sentences:
-          audio_data = tts(
-            i, synth, hps, emotion_embedding,
-            args.vits_speaker_id, args.vits_model_to_use, args.vits_noise_scale,
-            args.vits_noise_scale_w, args.vits_length_scale,
-            args.vits_estimate_max_y_length, text_mapper, model_has_multiple_speakers
-          )
-          out_q.put_nowait(audio_data.tobytes())
-      while out_counter.value != len(sentences):
-        time.sleep(1)
-        continue
-      out_counter.value = 0
+        audio_data = tts(
+          response, synth, hps, emotion_embedding,
+          args.vits_speaker_id, args.vits_model_to_use, args.vits_noise_scale,
+          args.vits_noise_scale_w, args.vits_length_scale,
+          args.vits_estimate_max_y_length, text_mapper, model_has_multiple_speakers
+        )
+        stream.write(audio_data.tobytes())
       log.append(f"Total: {time.perf_counter() - s}")

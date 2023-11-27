@@ -13,6 +13,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad.helpers import GlobalCounters
 from extra.models.llama import Transformer, convert_from_huggingface
+from sentencepiece import SentencePieceProcessor
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
 
@@ -163,7 +164,6 @@ class AbsmaxQuantizedLinear:
 class LLaMa:
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
-    from sentencepiece import SentencePieceProcessor
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == MODEL_PARAMS[model_gen][model_size]["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {MODEL_PARAMS[model_gen][model_size]['args']['vocab_size']}"
 
@@ -186,7 +186,7 @@ class LLaMa:
 
   def __init__(self, model, tokenizer):
     self.model = model
-    self.tokenizer = tokenizer
+    self.tokenizer: SentencePieceProcessor = tokenizer
 
   def greedy_until(self, prompt:str, until, max_length, temperature):
     toks = [self.tokenizer.bos_id()] + self.tokenizer.encode(prompt)
