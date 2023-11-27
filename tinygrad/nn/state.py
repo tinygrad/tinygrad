@@ -15,15 +15,15 @@ def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
   return (t, json_len, json.loads(t[8:8+json_len].numpy().tobytes()))
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
-    ts, json_len, metadata = safe_load_metadata(fn)
-    def build_tensor(t, v, dtype) -> Union[str, Tensor]:
-        return t[8+json_len+v['data_offsets'][0]:].cast(dtype)[:prod(v['shape'])].reshape(v['shape'])
-    def cast_bf16(t):
-        return t.bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half()
-    def process_weights(v):
-          t = build_tensor(ts, v, safe_dtypes[v['dtype']])
-          return cast_bf16(t) if v['dtype'] == "BF16" else t
-    return {k: process_weights(v) for k, v in metadata.items() if k != "__metadata__"}
+  ts, json_len, metadata = safe_load_metadata(fn)
+  def build_tensor(t, v, dtype) -> Union[str, Tensor]:
+    return t[8+json_len+v['data_offsets'][0]:].cast(dtype)[:prod(v['shape'])].reshape(v['shape'])
+  def cast_bf16(t):
+    return t.bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half()
+  def process_weights(v):
+    t = build_tensor(ts, v, safe_dtypes[v['dtype']])
+    return cast_bf16(t) if v['dtype'] == "BF16" else t
+  return {k: process_weights(v) for k, v in metadata.items() if k != "__metadata__"}
 
 def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any]]=None):
   headers, offset = {}, 0
