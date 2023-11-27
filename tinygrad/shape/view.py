@@ -39,11 +39,12 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
   while len(new_mask) < len(new_shape):
     if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape), tuple(), False
     if old_dim >= new_dim: # split the mask if reshape doesn't cut across mask.
-      if not (simple_split := (old_dim == new_dim * stride)) and ((mask[0] % (new_dim * stride) != 0 or mask[1] % (new_dim * stride) != 0) and mask[0] // (new_dim * stride) != (mask[1] - 1) // (new_dim * stride)): return view.mask, tuple(), True
+      simple_split = (old_dim == (next_stride := new_dim * stride))
+      if not simple_split and ((mask[0] % next_stride != 0 or mask[1] % next_stride != 0) and mask[0] // next_stride != (mask[1] - 1) // next_stride): return view.mask, tuple(), True
       offsets.append(off)
-      new_mask.append((mask[0] // stride, (mask[1] - 1) // stride + 1) if simple_split else (mask[0] % (new_dim * stride) // stride, (mask[1] - 1) % (new_dim * stride) // stride + 1))
+      new_mask.append((mask[0] // stride, (mask[1] - 1) // stride + 1) if simple_split else (mask[0] % next_stride // stride, (mask[1] - 1) % next_stride // stride + 1))
       if simple_split:  stride, off, old_dim, new_dim, mask = 1, 0, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
-      else: stride, new_dim = (new_dim * stride), next(r_new_shape, 1)
+      else: stride, new_dim = next_stride, next(r_new_shape, 1)
     elif old_dim < new_dim * stride: # combine if the mask can unfold continuously
       next_mask = next(r_masks, (0, 1)) 
       if (mask[0] != 0 or mask[1] != old_dim) and next_mask[1] - next_mask[0] != 1: return view.mask, tuple(), True
@@ -153,12 +154,11 @@ class View:
     for d, s, real_dim in reversed(to_shape_strides(self.shape, self.strides, self.mask)):
       acc, new_stride, equal = 1, s, False
       while acc <= d and not equal:
-        try: new_dim = next(reverse_shape)
+        try: new_dim = next(reverse_shape) 
         except StopIteration: break
-        strides.append(new_stride) if new_dim != 1 else strides.append(0)
+        strides.append(new_stride if new_dim !=1 else 0)
         if new_dim == 1: continue
-        acc *= new_dim
-        new_stride = new_stride * new_dim if acc < real_dim else 0
+        new_stride = new_stride * new_dim if (acc :=  acc * new_dim) < real_dim else 0
         if acc == d: equal = True
       if not equal and d != 1: break
     else:
