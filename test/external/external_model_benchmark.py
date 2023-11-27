@@ -31,7 +31,6 @@ MODELS = {
 
 CSV = {}
 open_csv = None
-torch.manual_seed(1)
 
 def benchmark(mnm, nm, fxn):
   tms = []
@@ -46,6 +45,7 @@ def benchmark(mnm, nm, fxn):
 #BASE = pathlib.Path(__file__).parents[2] / "weights" / "onnx"
 BASE = pathlib.Path("/tmp/onnx")
 def benchmark_model(m, validate_outs=False):
+  torch.manual_seed(1)
   global open_csv, CSV
   CSV = {"model": m}
 
