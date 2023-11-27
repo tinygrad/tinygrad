@@ -26,6 +26,7 @@ class TestHIPCompilationRDNA(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_compile_hip_speedyresnet_hf(self):
+    if not getenv("HIP"): raise unittest.SkipTest("testing HIP->rdna3 compilation needs HIP=1")
     Tensor.default_type = dtypes.float16
 
     W = Tensor.rand(12,3,2,2)
