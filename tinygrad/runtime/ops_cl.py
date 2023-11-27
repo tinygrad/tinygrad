@@ -83,7 +83,7 @@ class CLDevice(Compiled):
   def free(self, buf:cl.cl_mem): check(cl.clReleaseMemObject(buf))
   def copyin(self, dest:cl.cl_mem, src:memoryview):
     check(cl.clEnqueueWriteBuffer(self.queue, dest, False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
-    self.pending_copyin.append(src)
+    self.pending_copyin.append(src)    # NOTE: these can't be freed until the GPU actually executes this command
   def copyout(self, dest:memoryview, src:cl.cl_mem, block=True):
     check(cl.clEnqueueReadBuffer(self.queue, src, block, 0, len(dest)*dest.itemsize, from_mv(dest), 0, None, None))
     if block: self.pending_copyin = []

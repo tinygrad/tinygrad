@@ -48,9 +48,8 @@ class RawMetalBuffer(RawBufferMapped):
     return self._buf.contents().as_buffer(self._buf.length())
 
 def unwrap(x):
-  ret, err = x
-  assert err is None, str(err)
-  return ret
+  assert x[1] is None, str(x[1])
+  return x[0]
 
 @diskcache
 def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
