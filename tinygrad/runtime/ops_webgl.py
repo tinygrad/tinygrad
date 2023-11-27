@@ -20,10 +20,11 @@ class WebGLProgram:
 
     for i, x in enumerate(bufs):
       if (i == 0): continue
-      self.prg[f"data{i}"] = i
-      x._buf.use(i)
+      if f"data{i}" in self.prg: 
+        self.prg[f"data{i}"] = i
+        x._buf.use(i)
     
-    self.prg["w"].value = self.fbo.size[0]
+    if ("w" in self.prg): self.prg["w"].value = self.fbo.size[0]
     self.fbo.use()
     self.quad.render(mode=moderngl.TRIANGLE_STRIP)
   

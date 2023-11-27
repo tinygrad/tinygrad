@@ -42,6 +42,7 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
 
   # hack to put the inputs back
   for (j,i),idx in run.input_replace.items():
+    print(f"j={j},i={i}, idx={idx}")
     realized_input = args[idx].lazydata.realized
     run.jit_cache[j].rawbufs[i] = realized_input
     special_names[id(realized_input)] = f'input{idx}'
@@ -100,35 +101,82 @@ def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, 
     return shader;
   }
   """
-  create_texture = """
-  function limitTextureDims(size, threshold) {
-    if (size <= threshold) { return [size, 1] };
-    
-    for (let i = 2; i < threshold + 1; i++) {
-      if ((size % i == 0) && (Math.floor(size / i) <= threshold)) {
-        return [Math.floor(size / i), i];
-      }
-    }
-    
-    return [size, 1];
-  }
-
-  function createEmptyTexture(gl, size) {
-    const texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    const internalFormat = gl.RGBA;
-    const texSize = limitTextureDims(size, gl.getParameter(gl.MAX_TEXTURE_SIZE));
-    console.log(texSize);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, texSize[0], texSize[1], 0, gl.RED, gl.FLOAT, new Float32Array(size).fill(0.0));
-    return texture;
-  }
-  """
-  textures = "\n".join([f"let {name} = createEmptyTexture(gl, {size});" for name,(size,dtype,_key) in bufs.items()])
+  textures = '\n    '.join([f"const {name} = " + (f"createTexture(gl, {size/4});" if _key not in weight_names else f"createTexture(gl, {size/4}, getTensorBuffer(safetensor, metadata['{weight_names[_key]}']))") + ";"  for name,(size,dtype,_key) in bufs.items()])
   header = """
-    window.addEventListener("load", setupWebGL, false);\n
-    function setupWebGL(evt) {\n
-    window.removeEventListener(evt.type, setupWebGL, false);\n
-    let gl = canvas.getContext('webgl2');\n
+  function setupNet(gl, safetensor) {\n
+    function limitTextureDims(size, threshold) {
+      if (size <= threshold) { return [size, 1] };
+      
+      for (let i = 2; i < threshold + 1; i++) {
+        if ((size % i == 0) && (Math.floor(size / i) <= threshold)) {
+          return [Math.floor(size / i), i];
+        }
+      }
+      
+      return [size, 1];
+    }
+
+    function updateTextureData(gl, texture, data) {
+      gl.bindTexture(gl.TEXTURE_2D, texture.tex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, texture.width, texture.height, gl.RED, gl.FLOAT, data);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    }
+
+    function readTextureData(gl, texture) {
+      const framebuffer = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture.tex, 0);
+
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        throw new Error('Framebuffer not complete');
+      }
+
+      let data = new Float32Array(texture.width * texture.height);
+      gl.readPixels(0, 0, texture.width, texture.height, gl.RED, gl.FLOAT, data);
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(framebuffer);
+
+      console.log("Output: " + data);
+      return data;
+    }
+
+    function createTexture(gl, size, tensorBuffer) {
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      const internalFormat = gl.RGBA;
+      const texSize = limitTextureDims(size, gl.getParameter(gl.MAX_TEXTURE_SIZE));
+      let weights;
+      
+      if (tensorBuffer != null) {
+        weights = new Float32Array(tensorBuffer.buffer, tensorBuffer.byteOffset, tensorBuffer.byteLength / Float32Array.BYTES_PER_ELEMENT);
+      } else {
+        weights = new Float32Array(size).fill(0.0);
+      }
+
+      if (size != weights.length)
+        console.log("Weights length: " + weights.length + ", texsize: " + texSize[0]*texSize[1]);
+
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, texSize[0], texSize[1], 0, gl.RED, gl.FLOAT, weights);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      return { tex: texture, width: texSize[0], height: texSize[1] };
+    } 
+
+    const getTensorBuffer = (safetensorBuffer, tensorMetadata) => {
+      return safetensorBuffer.subarray(...tensorMetadata.data_offsets);
+    }
+
+    const getTensorMetadata = (safetensorBuffer) => {
+      const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
+      const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
+      return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}]));
+    };
+
+    const metadata = getTensorMetadata(safetensor);
   """
 
   run_program = """
@@ -157,23 +205,25 @@ def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, 
   function runProgram(gl, kernelName, program, textures) {
     let framebuffer = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures[0], 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures[0].tex, 0);
     gl.useProgram(program);
+    gl.uniform1i(gl.getUniformLocation(program, "w"), textures[0].width);  
 
-    setupVertexData(gl, program, [-1, 1, 0, 1, -1, -1, 0, 0, 1, 1, 1, 1, 1, -1, 1, 0]);
-
+    const vao = setupVertexData(gl, program, [-1, 1, 0, 1, -1, -1, 0, 0, 1, 1, 1, 1, 1, -1, 1, 0]);
+    gl.bindVertexArray(vao);
     // Texture 0 is the framebuffer texture, so we skip that
-    for (let i = 0; i < textures.length-1; i++) {
-      gl.activeTexture(gl.TEXTURE0 + i);
-      gl.bindTexture(gl.TEXTURE_2D, textures[i]);
-      gl.uniform1i(gl.getUniformLocation(program, 'data' + (i + 1)), i);
+    for (let i = 1; i < textures.length; i++) {
+      gl.activeTexture(gl.TEXTURE0 + i-1);
+      gl.bindTexture(gl.TEXTURE_2D, textures[i].tex);
+      gl.uniform1i(gl.getUniformLocation(program, 'data' + i), i-1);
     }
 
+    gl.viewport(0, 0, textures[0].width, textures[0].height);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    for (let i = 0; i < textures.length; i++) {
-      gl.activeTexture(gl.TEXTURE0 + i);
+
+    for (let i = 1; i < textures.length; i++) {
+      gl.activeTexture(gl.TEXTURE0 + i-1);
       gl.bindTexture(gl.TEXTURE_2D, null);
     }
 
@@ -181,8 +231,17 @@ def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, 
   }
   """
   kernel_calls = '\n        '.join([f"runProgram(gl, '{name}', programs[{i}], [{', '.join(args)}]);" for i, (name, args, _global_size, _local_size) in enumerate(statements) ])
+  entry_point = f"""
+    return function(input) {{
+      const ext= gl.getExtension('EXT_color_buffer_float');
+      updateTextureData(gl, input0, input);
+      {kernel_calls}
+
+      return readTextureData(gl, output0);
+    }}
+  """
   programs = f"let programs = [{kernel_names}].map((code) => createShaderProgram(gl, code));"
-  return f"{header}\n{run_program}\n{init_shader}\n{create_texture}\n{kernel_code}\n{textures}\n{programs}\n{kernel_calls}}}"
+  return f"{header}\n{run_program}\n{init_shader}\n{kernel_code}\n{textures}\n{programs}\n{entry_point}}}"
 
 def export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names) -> Tuple[str,int,int]:
   kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])

@@ -37,10 +37,8 @@ class GLSLLanguage(CStyleLanguage):
     local_size = local_size[::-1] if local_size else [1]
     prg = "#version 330\nprecision highp float;\nin vec2 uv;\nuniform int w;\n"
     prg += "\n".join([f"uniform {sampler_prefix[dtype]}sampler2D {name};" for name,dtype in bufs if name != "data0"])
-    dummy_line = "float dummy = float(texture(data1, vec2(0.0f,0.0f)).r);\n" if ("sampler2D data1" in prg) else ""
-    dummy_line += "\nint xyz = w;\n"
-    prg += f"\nout {sampler_prefix[bufs[0][1]]}vec4 out_data;\n"
-    return prg + f"\nvoid main() {{\n{dummy_line}" + "\n".join(kernel) + "\n}"
+    prg += f"\nout {'int' if bufs[0][1] == dtypes.bool else type_map[bufs[0][1]]} out_data;\n"
+    return prg + f"\nvoid main() {{\n" + "\n".join(kernel) + "\n}"
 
   def render_cast(self, x:List[str], var_dtype:DType) -> str:
     if type_map[var_dtype]: 
@@ -54,5 +52,5 @@ class GLSLLanguage(CStyleLanguage):
     return f"{self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val}"
 
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
-    return f"out_data = {sampler_prefix[buf_dtype]}vec4({var_name}, 0.0, 0.0, 0.0);"
+    return f"out_data = {'int' if buf_dtype == dtypes.bool else type_map[buf_dtype]}({var_name});"
   
