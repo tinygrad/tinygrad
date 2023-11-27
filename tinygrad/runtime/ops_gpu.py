@@ -81,8 +81,8 @@ class CLProgram:
       elif CL.cl_ctxs[0].devices[0].name.startswith('gfx'):
         asm = early_exec(([ROCM_LLVM_PATH / "llvm-objdump", '-d', '-'], prg))
         print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
-      else:
-        # print the PTX for NVIDIA. TODO: probably broken for everything else
+      elif "NVIDIA" in CL.cl_ctxs[0].devices[0].name:
+        # print the PTX for NVIDIA.
         print(prg.decode('utf-8'))
     if argdtypes is not None: self.set_argdtypes(argdtypes)
 

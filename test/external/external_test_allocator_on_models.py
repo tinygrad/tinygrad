@@ -69,10 +69,10 @@ def helper_test_alloc_count(mm, gen, train):
   backup_buffer = Device[Device.DEFAULT].buffer
   Device[Device.DEFAULT].runtime = FakeProgram
   Device[Device.DEFAULT].buffer = FakeBuffer
-  Device[Device.DEFAULT].method_cache.clear()
+  Device[Device.DEFAULT].get_runner.cache_clear()
   FAKE_GLOBAL_ALLOCATOR = FakeAllocator(16<<30)
   new_allocs = __helper_test_alloc_count(gen, train)
-  Device[Device.DEFAULT].method_cache.clear()
+  Device[Device.DEFAULT].get_runner.cache_clear()
   FAKE_GLOBAL_ALLOCATOR = FakeAllocator(0)
   old_allocs = __helper_test_alloc_count(gen, train)
   print(f"{mm}: llama: old allocs count {old_allocs}, new allocs count {new_allocs}")
@@ -93,7 +93,7 @@ class TestAllocators(unittest.TestCase):
     old_type = Tensor.default_type
     Tensor.default_type = dtypes.float16
 
-    args_tiny = {"dim": 1024, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
+    args_tiny = {"dim": 1024, "hidden_dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
     def __test():
       model = Transformer(**args_tiny)
       derandomize_model(model)
@@ -105,7 +105,7 @@ class TestAllocators(unittest.TestCase):
 
   @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
   def test_lru_allocator_tiny_llama_alloc_counts(self):
-    args_tiny = {"dim": 1024, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
+    args_tiny = {"dim": 1024, "hidden_dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
     def test_alloc_count(t):
       model = Transformer(**args_tiny)
       for v in get_state_dict(model).values(): v.assign(Tensor.empty(*v.shape, dtype=v.dtype))
