@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 
