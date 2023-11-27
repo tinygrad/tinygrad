@@ -3,11 +3,12 @@ import unittest, os
 
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOps
-from tinygrad.ops import Compiled, Device, LoadOps
+from tinygrad.device import Compiled, Device
+from tinygrad.ops import LoadOps
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
-from tinygrad.helpers import dtypes, prod, getenv, CI
+from tinygrad.helpers import dtypes, prod
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
