@@ -6,7 +6,7 @@ import numpy as np
 import pyopencl as cl
 from typing import Optional, List, Tuple
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport, diskcache
-from tinygrad.ops import Compiled
+from tinygrad.device import Compiled
 from tinygrad.renderer.opencl import OpenCLRenderer
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions

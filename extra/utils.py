@@ -10,7 +10,7 @@ from tinygrad.helpers import prod, getenv, DEBUG, dtypes, get_child
 from tinygrad.helpers import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.shape.view import strides_for_shape
 OSX = platform.system() == "Darwin"
 WINDOWS = platform.system() == "Windows"
