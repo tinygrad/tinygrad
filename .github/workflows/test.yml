@@ -276,6 +276,47 @@ jobs:
     - name: Run WEBGPU Efficientnet
       run: node test/test_webgpu.js
 
+  testhipcompilation:
+    name: HIP Compilation Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+    - name: Cache python packages
+      uses: actions/cache@v3
+      with:
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+        key: testing-packages-${{ hashFiles('**/setup.py') }}
+    - name: Cache downloads
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/tinygrad/downloads/
+        key: downloads-cache-hipcompilation-${{ env.DOWNLOAD_CACHE_VERSION }}
+    - name: Install HIP tools
+      run: |
+        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+        # ROCm repository for jammy
+        sudo tee /etc/apt/sources.list.d/rocm.list <<'EOF'
+        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian jammy main
+        EOF
+        # Prefer packages from the rocm repository over system packages
+        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
+        sudo apt update
+        sudo apt install --allow-unauthenticated -y rocm-hip-libraries hip-dev
+    - name: Install Python Dependencies
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Test HIP compilation on RDNA3 [gfx1100]
+      run: |
+        export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
+        DEBUG=1 HIP=1 python -m pytest -n=auto test/test_hip_rdna3.py
+
+
   tests:
     strategy:
       fail-fast: false
