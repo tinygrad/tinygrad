@@ -57,10 +57,18 @@ libc.free.argtypes = [ctypes.c_void_p]
 class CPUDevice:
   def __init__(self, device:str=""): pass
   # malloc
-  def alloc(self, size:int) -> ctypes.c_void_p: return libc.malloc(size)
-  def free(self, buf:ctypes.c_void_p): return libc.free(buf)
-  def copyin(self, dest:ctypes.c_void_p, src:memoryview): libc.memcpy(dest, from_mv(src), len(src)*src.itemsize)
-  def copyout(self, dest:memoryview, src:ctypes.c_void_p): libc.memcpy(from_mv(dest), src, len(dest)*dest.itemsize)
+  def alloc(self, size:int) -> ctypes.c_void_p:
+    print(f"malloc {size=}")
+    return libc.malloc(size)
+  def free(self, buf:ctypes.c_void_p):
+    print("FREEEE")
+    libc.free(buf)
+  def copyin(self, dest:ctypes.c_void_p, src:memoryview):
+    print(f"CPU copyin {len(src)*src.itemsize} {len(src)} {src.itemsize}")
+    libc.memcpy(dest, from_mv(src), len(src)*src.itemsize)
+  def copyout(self, dest:memoryview, src:ctypes.c_void_p):
+    print(f"CPU copyout {len(dest)*dest.itemsize}")
+    libc.memcpy(from_mv(dest), src, len(dest)*dest.itemsize)
 
   """
   def alloc(self, size:int): return None

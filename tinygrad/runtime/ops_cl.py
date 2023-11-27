@@ -60,7 +60,10 @@ class CLProgram:
 
   def __call__(self, *bufs:Union[cl.cl_mem, int], global_size:Tuple[int,...], local_size:Optional[Tuple[int,...]]=None, wait=False) -> Optional[float]:
     for i,b in enumerate(bufs): cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b), ctypes.byref(b))
+    if local_size is not None: global_size = tuple(int(g*l) for g,l in zip(global_size, local_size))
+    print(global_size, local_size)
     check(cl.clEnqueueNDRangeKernel(self.device.queue, self.kernel, len(global_size), None, (ctypes.c_size_t * len(global_size))(*global_size), (ctypes.c_size_t * len(local_size))(*local_size) if local_size else None, 0, None, None))
+    #check(cl.clFinish(self.device.queue))
 
 class CLDevice(Compiled):
   linearizer_opts, renderer, compiler = LinearizerOptions(), staticmethod(OpenCLRenderer), staticmethod(compile_cl)    # these are the same for all instantiations of the device
@@ -85,7 +88,13 @@ class CLDevice(Compiled):
     #self.buffer, self.runtime = functools.partial(CLBuffer, self), functools.partial(CLProgram, self)
 
   # low level buffer api (not checked!)
-  def alloc(self, size:int) -> cl.cl_mem: return checked(cl.clCreateBuffer(self.context, cl.CL_MEM_READ_WRITE, size, None, ctypes.byref(status := ctypes.c_int32())), status)
+  def alloc(self, size:int) -> cl.cl_mem:
+    print(f"GPU malloc {size=}")
+    return checked(cl.clCreateBuffer(self.context, cl.CL_MEM_READ_WRITE, size, None, ctypes.byref(status := ctypes.c_int32())), status)
   def free(self, buf:cl.cl_mem): check(cl.clReleaseMemObject(buf))
-  def copyin(self, dest:cl.cl_mem, src:memoryview): check(cl.clEnqueueWriteBuffer(self.queue, dest, False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
-  def copyout(self, dest:memoryview, src:cl.cl_mem, block=True): check(cl.clEnqueueReadBuffer(self.queue, src, block, 0, len(dest)*dest.itemsize, from_mv(dest), 0, None, None))
+  def copyin(self, dest:cl.cl_mem, src:memoryview):
+    print(f"GPU copyin {len(src)*src.itemsize}")
+    check(cl.clEnqueueWriteBuffer(self.queue, dest, False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
+  def copyout(self, dest:memoryview, src:cl.cl_mem, block=True):
+    print(f"GPU copyout {len(dest)*dest.itemsize}")
+    check(cl.clEnqueueReadBuffer(self.queue, src, block, 0, len(dest)*dest.itemsize, from_mv(dest), 0, None, None))
