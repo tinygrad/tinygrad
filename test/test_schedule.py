@@ -5,7 +5,8 @@
 import unittest
 from typing import List, Optional
 from tinygrad.tensor import Tensor
-from tinygrad.ops import LoadOps, Device, Compiled
+from tinygrad.ops import LoadOps
+from tinygrad.device import Device, Compiled
 from tinygrad.helpers import DEBUG, dtypes
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.graph import log_schedule_item, print_tree

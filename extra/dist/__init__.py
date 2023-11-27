@@ -40,7 +40,7 @@ def _process_wrap(rank:int, device:str, oob:_OOB, fn:Callable, args=()):
   OOB = oob
 
   # do specific runtime initialization for distributed
-  from tinygrad.ops import Device
+  from tinygrad import Device
   device, device_num = Device.canonicalize(device), 0 if ":" not in device else int(device.split(":")[-1])
   if "GPU" in device:
     from tinygrad.runtime.ops_gpu import CL

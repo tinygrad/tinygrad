@@ -3,7 +3,7 @@ import ctypes
 import extra.hip_wrapper as hip
 from typing import Tuple, List, Any, Dict, cast, Optional, Callable
 from tinygrad.helpers import DEBUG, getenv, diskcache
-from tinygrad.ops import Compiled, CompiledASTRunner, update_stats
+from tinygrad.device import Compiled, CompiledASTRunner, update_stats
 from tinygrad.renderer.hip import HIPRenderer
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer, RawBuffer
 from tinygrad.codegen.kernel import LinearizerOptions

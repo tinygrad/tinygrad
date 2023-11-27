@@ -1,4 +1,4 @@
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.tensor import Tensor
 import numpy as np
 import pickle

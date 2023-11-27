@@ -3,7 +3,7 @@ import functools
 from wgpu.utils.device import get_default_device
 from tinygrad.runtime.lib import RawBufferCopyIn, LRUAllocator
 from tinygrad.helpers import dtypes, DType
-from tinygrad.ops import Compiled
+from tinygrad.device import Compiled
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle
 from tinygrad.renderer.wgsl import WGSLLanguage

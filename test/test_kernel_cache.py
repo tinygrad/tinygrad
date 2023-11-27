@@ -3,7 +3,7 @@ import unittest
 import secrets
 import string
 from tinygrad.tensor import Tensor
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.helpers import diskcache
 
 def generate_random_string(length=16):
