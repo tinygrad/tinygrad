@@ -85,6 +85,10 @@ def pretrain():
   optimizer = optim.LAMB(get_parameters(model), 1 / WARMUP_STEPS, eps=1e-6, wd=0.01, adam=True) # TODO: Exclude LayerNorm, and bias from weight decay
   lr_scheduler = OneCycleLR(optimizer, MAX_LR, MAX_LR * WARMUP_STEPS, MAX_LR * 1e12, STEPS, WARMUP_STEPS / STEPS)
 
+  from extra.dist import OOB, collectives
+  assert OOB is not None or not getenv("DIST"), "OOB should be initialized"
+  rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
+
   @TinyJit
   def train_step_jitted(model, embedding_table, optimizer, lr_scheduler, input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels):
     output = model(input_ids=input_ids, attention_mask=input_mask, token_type_ids=segment_ids)
@@ -98,6 +102,17 @@ def pretrain():
     if not getenv('DISABLE_BACKWARD', 0):
       optimizer.zero_grad()
       loss.backward()
+
+      if getenv("DIST"):
+        bucket, offset = [], 0
+        for v in get_parameters(model):
+          if v.grad is not None: bucket.append(v.grad.flatten())
+        grads = collectives.allreduce(Tensor.cat(*bucket), cache_id="grads")
+        for v in get_parameters(model):
+          if v.grad is not None:
+            v.grad.assign(grads[offset:offset+v.grad.numel()].reshape(*v.grad.shape))
+            offset += v.grad.numel()
+      
       optimizer.step()
       lr_scheduler.step()
     return loss.realize()
@@ -107,7 +122,10 @@ def pretrain():
     while i <= STEPS:
       st = time.monotonic()
       for X, _ in iterate(bs=BS, val=False):
+        # if getenv("DIST"):
+        #   X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank] # change
         GlobalCounters.reset()
+
         input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels = Tensor(X["input_ids"]), Tensor(X["input_mask"]), Tensor(X["segment_ids"]), Tensor(X["masked_lm_ids"]), Tensor(X["masked_lm_positions"]), Tensor(X["next_sentence_labels"])
         loss = train_step_jitted(model, embedding_table, optimizer, lr_scheduler, input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels)
         et = time.monotonic()
@@ -115,6 +133,31 @@ def pretrain():
         loss_cpu = loss.numpy()
         cl = time.monotonic()
 
-        print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+        if not getenv("DIST"):
+          print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+        else:
+          print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {world_size*GlobalCounters.mem_used/1e9:.2f} GB used, {world_size*GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
         st = cl
         i += 1
+
+def train():
+  if not getenv("DIST"):
+    pretrain()
+  else:
+    if getenv("HIP"):
+      from tinygrad.runtime.ops_hip import HIP
+      devices = [f"hip:{i}" for i in range(HIP.device_count)]
+    else:
+      from tinygrad.runtime.ops_gpu import CL
+      devices = [f"gpu:{i}" for i in range(len(CL.devices))]
+    world_size = len(devices)
+
+    assert BS % world_size == 0, f"batch size {BS} is not divisible by world size {world_size}"
+    assert EVAL_BS % min(world_size, 5) == 0, f"evaluation batch size {EVAL_BS} is not divisible by world size {min(world_size, 5)}"
+
+    dist.init_oob(world_size)
+
+    processes = []
+    for rank, device in enumerate(devices):
+       processes.append(dist.spawn(rank, device, fn=pretrain, args=()))
+    for p in processes: p.join()
