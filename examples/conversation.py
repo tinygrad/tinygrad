@@ -157,16 +157,10 @@ def listener(q: mp.Queue, event: mp.Event):
   try:
     p = pyaudio.PyAudio()
     stream = p.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK)
-    spinner = cycle(['-', '/', '|', '\\'])
-    n = 0
     while True:
       data = stream.read(CHUNK) # read data to avoid overflow
       if event.is_set():
-        if n % 4 == 0:
-          sys.stdout.write(f"listening {next(spinner)}\r")
-          sys.stdout.flush()
         q.put(((np.frombuffer(data, np.int16)/32768).astype(np.float32)*3))
-        n += 1
   finally:
     stream.stop_stream()
     stream.close()
@@ -261,15 +255,17 @@ if __name__ == "__main__":
       s = time.perf_counter()
       is_listening_event.set()
       prev_text = None
+      print("listening")
       while True:
         for _ in range(RATE // CHUNK): total = np.concatenate([total, q.get()])
         txt = transcribe_waveform(model, enc, [total], truncate=True)
-        print(txt)
+        print(txt, end="\r")
         if txt == "[BLANK_AUDIO]": continue
         if prev_text is not None and prev_text == txt:
           is_listening_event.clear()
           break
         prev_text = txt
+      print() # to avoid llama printing on the same line
       log.append(user_delim + txt)
 
       # Generate with llama
