@@ -13,7 +13,7 @@ class RawBuffer:  # pylint: disable=abstract-method
     self.offset: int = 0    # TODO: this is very unsupported, only in disk
     self._buf = buf if buf is not None else (allocator(size, dtype, **kwargs) if allocator else None) # If buf is provided, use it. Otherwise try to allocate from the allocator.
     self._memsz: int = size*dtype.itemsize
-    self._allocator = allocator if allocator and hasattr(allocator, 'free') else None
+    self._allocator = allocator
     self._device = kwargs.get('device', None)
     GlobalCounters.mem_used += self._memsz
   def __del__(self):  # NOTE: if it fails on init (bad dtype), it won't have a _memsz
@@ -41,7 +41,7 @@ class RawBufferMapped(RawBufferCopyIn):
   def _buffer(self) -> memoryview: raise NotImplementedError("must be implemented")
   # NOTE: this metadata prevents the backing buffer from being freed. hack can be removed with PEP688
   def buffer_view(self) -> np.ndarray: return np.frombuffer(self._buffer(), dtype=np.dtype(self.dtype.np, metadata={"backing": self}), count=self.size)  # type: ignore
-  def toCPU(self) -> np.ndarray: return self.buffer_view().copy() # Need a copy, since jit will write to the same buffer.
+  def toCPU(self) -> np.ndarray: return self.buffer_view().astype(self.dtype.np, copy=True) # Need a copy (for now), since jit will write to the same buffer.
   def _copyin(self, x:np.ndarray) -> None: np.copyto(self.buffer_view(), x.reshape(-1))
 
   @classmethod
