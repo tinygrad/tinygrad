@@ -12,9 +12,6 @@ if __name__ == "__main__":
   mode = "clang" if getenv("CLANG", "") != "" else "webgpu" if getenv("WEBGPU", "") != "" else "webgl" if getenv("WEBGL", "") != "" else ""
   prg, inp_sizes, out_sizes, state = export_model(model, mode, Tensor.randn(1,3,224,224))
   dirname = Path(__file__).parent
-  with open(dirname / f"net.js", "w") as text_file:
-      text_file.write(prg)
-
   if getenv("CLANG", "") == "":
     safe_save(state, (dirname / "net.safetensors").as_posix())
     ext = "js" if getenv("WEBGPU", "") != "" else "json"

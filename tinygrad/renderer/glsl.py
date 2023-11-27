@@ -11,6 +11,7 @@ fragment_center_offset = 0.5
 
 class GLSLLanguage(CStyleLanguage):
   xid = [f"int(gl_FragCoord.y-{fragment_center_offset}) * w + int(gl_FragCoord.x-{fragment_center_offset})"]
+  explicit_cast_alu = True
   code_for_op: Dict = {
     UnaryOps.NEG: lambda x: f"(-{x})",
     UnaryOps.EXP2: lambda x: f"exp2({x})",
