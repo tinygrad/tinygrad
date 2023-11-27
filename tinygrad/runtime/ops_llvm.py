@@ -1,6 +1,6 @@
 import time, ctypes
 from typing import ClassVar
-from tinygrad.ops import Compiled
+from tinygrad.device import Compiled
 from tinygrad.helpers import getenv, DEBUG, diskcache
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.kernel import LinearizerOptions

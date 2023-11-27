@@ -1,6 +1,6 @@
 import time, ctypes, subprocess, platform, functools, pathlib, tempfile
 from typing import Any
-from tinygrad.ops import Compiled
+from tinygrad.device import Compiled
 from tinygrad.helpers import diskcache
 from tinygrad.runtime.lib import RawMallocBuffer
 from tinygrad.codegen.kernel import LinearizerOptions

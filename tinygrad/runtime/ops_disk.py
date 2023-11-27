@@ -5,7 +5,8 @@ from typing import Optional
 from typing import Callable, Dict, Tuple
 from tinygrad.helpers import prod, all_int, DType, OSX
 from tinygrad.runtime.lib import RawBufferMapped
-from tinygrad.ops import Interpreted, Op, MovementOps, UnaryOps, BufferOps
+from tinygrad.device import Interpreted
+from tinygrad.ops import Op, MovementOps, UnaryOps, BufferOps
 from tinygrad.shape.view import strides_for_shape
 MAP_LOCKED, MAP_POPULATE = 0x2000, 0x008000
 

@@ -2,7 +2,8 @@ import unittest
 
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import time_linearizer
-from tinygrad.ops import Compiled, Device, LoadOps
+from tinygrad.device import Compiled, Device
+from tinygrad.ops import LoadOps
 from tinygrad.tensor import Tensor
 
 class TestTimeLinearizer(unittest.TestCase):

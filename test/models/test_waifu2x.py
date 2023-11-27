@@ -3,7 +3,7 @@ import pathlib
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.ops import Device
+from tinygrad import Device
 
 class TestVGG7(unittest.TestCase):
   def test_vgg7(self):
