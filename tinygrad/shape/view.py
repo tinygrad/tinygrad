@@ -153,9 +153,7 @@ class View:
     strides, reverse_shape = [], reversed(new_shape)
     for d, s, real_dim in reversed(to_shape_strides(self.shape, self.strides, self.mask)):
       acc, new_stride, equal = 1, s, False
-      while acc <= d and not equal:
-        try: new_dim = next(reverse_shape) 
-        except StopIteration: break
+      while acc <= d and not equal and (new_dim := next(reverse_shape, None)):
         strides.append(new_stride if new_dim !=1 else 0)
         if new_dim == 1: continue
         new_stride = new_stride * new_dim if (acc :=  acc * new_dim) < real_dim else 0
