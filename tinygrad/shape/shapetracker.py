@@ -65,7 +65,12 @@ class ShapeTracker:
   @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
 
-  def size(self): return 0 if (0 in self.shape) else self.expr_idxs()[0].max+1
+  def size(self) -> int:
+    if 0 in self.shape: return 0
+    ret = self.expr_idxs()[0].max
+    while not isinstance(ret, int): ret = ret.max    # TODO: this is a while loop?!? it should be more clear what max does
+    assert isinstance(ret, int), f"ret must be integer, {ret=} isn't"
+    return ret+1
 
   def vars(self) -> Set[Variable]: return set.union(*[v.vars() for v in self.views], set())
 
