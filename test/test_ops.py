@@ -4,7 +4,7 @@ import math
 import numpy as np
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, dtypes, Context, NOOPT
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, dtypes
 from tinygrad.ops import Device
 
 if CI:
@@ -137,6 +137,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.arange(10), lambda: Tensor.arange(10), forward_only=True)
   def test_arange_big(self):
     helper_test_op([], lambda: torch.arange(256), lambda: Tensor.arange(256), forward_only=True)
+
+  def test_sum_fake(self):
+    helper_test_op([(256, 1)], lambda x: x.sum(axis=1))
 
   def test_sum_collapse(self):
     helper_test_op([], lambda: torch.ones(256,256).sum(axis=1), lambda: Tensor.ones(256,256).sum(axis=1), forward_only=True)
@@ -701,7 +704,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,)], lambda x: torch.reshape(x, []), lambda x: x.reshape([]))
     helper_test_op([()], lambda x: torch.reshape(x, [1]), lambda x: x.reshape([1]))
 
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(ValueError):
       x = Tensor.ones((4,3,6,6))
       x.reshape([])
 
@@ -785,11 +788,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(1,4,9,9), (4,4,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w).relu(),
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
-
-  def test_simple_conv2d_noopt(self):
-    # useful with IMAGE enabled
-    with Context(NOOPT=1):
-      self.test_simple_conv2d()
 
   @unittest.skipIf(IMAGE>0, "no conv3d on images")
   def test_simple_conv3d(self):
@@ -1168,7 +1166,7 @@ class TestOps(unittest.TestCase):
       helper_test_op([(4, 6, 3)], lambda x: x.repeat(*repeats), lambda x: x.repeat(repeats))
       helper_test_op([()], lambda x: x.repeat(*repeats), lambda x: x.repeat(repeats))
 
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(ValueError):
       x.repeat((2, 4))
 
     np.testing.assert_allclose(x.repeat((2, 0, 4)).numpy(), Tensor.zeros(8, 0, 12).numpy())

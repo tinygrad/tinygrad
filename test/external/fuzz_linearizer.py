@@ -6,7 +6,7 @@ from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import get_linearizer_actions, bufs_from_lin, tuplize_uops
 from tinygrad.graph import print_tree
 from tinygrad.helpers import getenv
-from tinygrad.ops import Device, Compiled, Interpreted, get_interpreted_fxn
+from tinygrad.ops import Device, Compiled, Interpreted
 from tinygrad.lazy import vars_from_ast
 
 device = Device[Device.DEFAULT]
@@ -21,7 +21,7 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
     if isinstance(device, Compiled):
       prg = device.to_program(lin)
     else:
-      prg = get_interpreted_fxn(device.fxn_for_op, device.from_underlying, lin.ast)
+      prg = device.get_runner(lin.ast)
   except:
     print(lin.ast)
     traceback.print_exc()
@@ -29,7 +29,7 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
     return "COMPILE_ERROR"
 
   try:
-    prg.exec(rawbufs, var_vals, force_wait=True)
+    prg.exec(rawbufs, var_vals)
   except:
     print(lin.ast)
     traceback.print_exc()

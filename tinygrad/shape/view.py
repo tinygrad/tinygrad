@@ -12,8 +12,8 @@ def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int,
 @functools.lru_cache(maxsize=None)
 def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   strides = [1] if shape else []
-  for d in shape[::-1][:-1]: strides = [d*strides[0]] + strides
-  return filter_strides(shape, tuple(strides))
+  for d in reversed(shape[1:]): strides.append(d*strides[-1])
+  return filter_strides(shape, tuple(reversed(strides)))
 
 @dataclass(frozen=True)
 class View:
@@ -27,7 +27,7 @@ class View:
   @functools.lru_cache(maxsize=None)
   def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
     strides = filter_strides(shape, strides) if strides else strides_for_shape(shape)
-    contiguous = offset == 0 and mask is None and all(s1 == s2 for s1,s2 in zip(strides, strides_for_shape(shape)))
+    contiguous = offset == 0 and mask is None and strides == strides_for_shape(shape)
     return View(shape, strides, offset, mask, contiguous)
 
   def vars(self) -> Set[Variable]:
@@ -70,7 +70,7 @@ class View:
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def expand(self, new_shape: Tuple[sint, ...]) -> View:
-    assert len(new_shape) == len(self.shape)
+    if len(new_shape) != len(self.shape): raise ValueError(f"expand arg {new_shape=} must have same number of dimensions as shape {self.shape=}")
     if 0 in self.shape:
       assert all((s == x == 0) or (s > 0 and (x % s) == 0) for s,x in zip(self.shape, new_shape)), f"can't expand {self.shape} into {new_shape}"
       return View.create(new_shape)
@@ -106,7 +106,7 @@ class View:
     # check for the same size
     if all_int(self.shape):
       assert all(isinstance(s, (int, Variable)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
-      assert prod(self.shape) == prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape]), f"size mismatched, can't reshape {self.shape=} -> {new_shape=}"
+      if prod(self.shape) != prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape]): raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
 
     # after the asserts, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)

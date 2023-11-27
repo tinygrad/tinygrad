@@ -1,11 +1,11 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, math
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set
 from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set
 
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int, round_up
 from tinygrad.lazy import LazyBuffer
@@ -13,7 +13,6 @@ from tinygrad.ops import Device, LoadOps
 from tinygrad.shape.symbolic import sint
 from tinygrad.realize import run_schedule
 
-# An instantiation of the Function is the Context
 class Function:
   def __init__(self, device:str, *tensors:Tensor):
     self.device = device
@@ -72,9 +71,9 @@ class Tensor:
         data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
       else:
         data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
-    else: raise RuntimeError(f"can't create Tensor from {data}")
 
     # data is a LazyBuffer, but it might be on the wrong device
+    if not isinstance(data, LazyBuffer): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
     self.lazydata = data if data.device == device else data.copy_to_device(device)
 
   def __repr__(self):
@@ -230,6 +229,7 @@ class Tensor:
     return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
   # ***** toposort and backward pass *****
+
   def deepwalk(self):
     def _deepwalk(node, visited, nodes):
       visited.add(node)
@@ -260,6 +260,7 @@ class Tensor:
     return self
 
   # ***** movement mlops *****
+
   def reshape(self, shape, *args) -> Tensor:
     new_shape = argfix(shape, *args)
     return mlops.Reshape.apply(self, shape=tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)]))
@@ -591,9 +592,18 @@ class Tensor:
     def fix(x:Tensor): return x.reshape(*ret.shape[0:-2], ret.shape[-2] * ret.shape[-1])[..., -self.shape[axis]:].transpose(axis,-1)
     return fix(ret) + fix(base_add)
 
+  @staticmethod
+  def _tri(r:int, c:int, k:int=0, **kwargs) -> Tensor: return Tensor.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= Tensor.arange(-k, c-k, **kwargs).unsqueeze(0).expand(r,c)
+  def triu(self, k:int=0) -> Tensor:
+    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+    return Tensor._tri(self.shape[-2], self.shape[-1], k=k, dtype=self.dtype, device=self.device).where(self, Tensor.zeros_like(self))
+  def tril(self, k:int=0) -> Tensor:
+    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+    return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, dtype=self.dtype, device=self.device).where(Tensor.zeros_like(self), self)
+
   # ***** mlops (unary) *****
 
-  def __neg__(self): return mlops.Neg.apply(self)
+  def neg(self): return mlops.Neg.apply(self)
   def contiguous(self): return mlops.Contiguous.apply(self)
   def contiguous_backward(self): return mlops.ContiguousBackward.apply(self)
   def log(self): return mlops.Log.apply(self)
@@ -608,16 +618,8 @@ class Tensor:
   def cos(self): return ((math.pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
 
-  @staticmethod
-  def _tri(r:int, c:int, k:int=0, **kwargs) -> Tensor: return Tensor.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= Tensor.arange(-k, c-k, **kwargs).unsqueeze(0).expand(r,c)
-  def triu(self, k:int=0) -> Tensor:
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
-    return Tensor._tri(self.shape[-2], self.shape[-1], k=k, dtype=self.dtype, device=self.device).where(self, Tensor.zeros_like(self))
-  def tril(self, k:int=0) -> Tensor:
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
-    return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, dtype=self.dtype, device=self.device).where(Tensor.zeros_like(self), self)
-
   # ***** math functions (unary) *****
+
   def trunc(self: Tensor) -> Tensor: return self.cast(dtypes.int32).contiguous().cast(self.dtype)
   def ceil(self: Tensor) -> Tensor: return (self > (b := self.trunc())).where(b+1, b)
   def floor(self: Tensor) -> Tensor: return (self < (b := self.trunc())).where(b-1, b)
@@ -629,6 +631,7 @@ class Tensor:
   def reciprocal(self): return 1.0/self
 
   # ***** activation functions (unary) *****
+
   def elu(self, alpha=1.0): return self.relu() - alpha*(1-self.exp()).relu()
   def celu(self, alpha=1.0): return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
   def swish(self): return self * self.sigmoid()
@@ -636,6 +639,11 @@ class Tensor:
   def relu6(self): return self.relu() - (self-6).relu()
   def hardswish(self): return self * (self+3).relu6() * (1/6)
   def tanh(self): return 2.0 * ((2.0 * self).sigmoid()) - 1.0
+  def sinh(self): return (self.exp() - self.neg().exp()) / 2
+  def cosh(self): return (self.exp() + self.neg().exp()) / 2
+  def atanh(self): return ((1 + self)/(1 - self)).log() / 2
+  def asinh(self): return (self + (self.square() + 1).sqrt()).log()
+  def acosh(self): return (self + (self.square() - 1).sqrt()).log()
   def hardtanh(self, min_val=-1, max_val=1): return self.clip(min_val, max_val)
   def gelu(self): return 0.5 * self * (1 + (self * 0.7978845608 * (1 + 0.044715 * self * self)).tanh())
   def quick_gelu(self): return self * (self * 1.702).sigmoid()
@@ -665,8 +673,8 @@ class Tensor:
     return (x, y)
 
   def _to_float(self, x:Union[Tensor, float]):
-    return x.lazydata.op.arg if isinstance(x, Tensor) and not x.lazydata.realized and x.lazydata.op.op == LoadOps.CONST and not x.requires_grad \
-      and x.lazydata.st.contiguous and self._broadcasted(x)[0].shape == self.shape else x
+    return x.lazydata.base.op.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
+      and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     x = self._to_float(x)
@@ -713,9 +721,10 @@ class Tensor:
     x,z = x_._broadcasted(other)
     return mlops.Where.apply(x, *y._broadcasted(z))
 
-  # ***** binary op wrappers (18 wasted lines to make the typechecker happy) *****
+  # ***** op wrappers (wasted lines to make the typechecker happy) *****
 
-  # NOTE: __pow__ and friends are broken in mypyc with the ** operator
+  def __neg__(self) -> Tensor: return self.neg()
+
   def __add__(self, x) -> Tensor: return self.add(x)
   def __sub__(self, x) -> Tensor: return self.sub(x)
   def __mul__(self, x) -> Tensor: return self.mul(x)
@@ -741,8 +750,8 @@ class Tensor:
   def __gt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, True))
   def __ge__(self, x) -> Tensor: return 1.0-(self<x)
   def __le__(self, x) -> Tensor: return 1.0-(self>x)
-  def __ne__(self, x) -> Tensor: return (self<x) + (self>x)   # type: ignore
-  def __eq__(self, x) -> Tensor: return 1.0-(self != x)       # type: ignore
+  def __ne__(self, x) -> Tensor: return (self<x) + (self>x)   # type: ignore[override]
+  def __eq__(self, x) -> Tensor: return 1.0-(self != x)       # type: ignore[override]
 
   # ***** functional nn ops *****
 
@@ -771,7 +780,7 @@ class Tensor:
     # NOTE: it works if key, value have symbolic shape
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     if is_causal: attn_mask = Tensor.ones(self.shape[-2], key.shape[-2], requires_grad=False, device=self.device).tril(0).cast(dtypes.bool)
-    if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), attn_mask)
+    if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), 0)
     return (self @ key.transpose(-2,-1) / math.sqrt(self.shape[-1]) + attn_mask).softmax(-1).dropout(dropout_p) @ value
 
   def binary_crossentropy(self, y:Tensor) -> Tensor:

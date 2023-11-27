@@ -34,7 +34,7 @@ class TestLLaMASpeed(unittest.TestCase):
     print("assigned empty tensors, doing warmup")
 
     def run_llama(st, empty_method_cache=True):
-      if empty_method_cache: Device[Device.DEFAULT].method_cache.clear()
+      if empty_method_cache: Device[Device.DEFAULT].get_runner.cache_clear()
       tms = [time.perf_counter()]
       for i in range(10):
         model(Tensor([[1,2,3,4]]), i).realize()
