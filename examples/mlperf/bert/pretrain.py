@@ -1,10 +1,11 @@
-import json, math, time, os
+import json, math, time
 from pathlib import Path
 import numpy as np
 from tinygrad.helpers import GlobalCounters, getenv
 from tinygrad.jit import TinyJit
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
+from tinygrad.ops import Device
 from tinygrad.tensor import Tensor, dtypes
 from extra.lr_scheduler import OneCycleLR
 from extra.models.bert import Bert
@@ -39,8 +40,6 @@ def get_model_and_config(path:str):
     config["attention_probs_dropout_prob"], 
     config["hidden_dropout_prob"]
   )
-  os.environ['VOCAB_SIZE'] = str(config["vocab_size"])
-
   embedding_table = model.embeddings.word_embeddings.weight
   s_weights = Tensor.uniform(*(2, config["hidden_size"]), low=-0.1, high=0.1) #TODO: change init range
   s_bias = Tensor.zeros(2)
@@ -71,18 +70,16 @@ def get_masked_lm_output(input_tensor:Tensor, output_weights:Tensor, transform_w
   input_tensor = gather_indexes(input_tensor, positions)
   input_tensor = Tensor.gelu(input_tensor.matmul(transform_weights))
   input_tensor = Tensor.layernorm(input_tensor)
-  logits = input_tensor.matmul(output_weights.transpose()).add(transform_bias)
-  return logits.sparse_categorical_crossentropy(label_ids.flatten())
+  output = input_tensor.matmul(output_weights.transpose()).add(transform_bias)
+  return output.sparse_categorical_crossentropy(label_ids.flatten())
 
 def get_next_sentence_output(input_tensor:Tensor, labels: Tensor, weights:Tensor, bias:Tensor):
-  logits = input_tensor.matmul(weights.transpose()).add(bias)
-  print('logits: ', logits.softmax().numpy())
-  print('labels: ', labels.numpy())
-  return logits.softmax().binary_crossentropy(labels)
+  output = input_tensor.matmul(weights.transpose()).add(bias)
+  return output.log_softmax().binary_crossentropy_logits(labels)
 
 def pretrain():
   model, embedding_table, s_weights, s_bias, m_weights, m_bias, p_weights = get_model_and_config(Path(__file__).parent.parents[2] / "extra" / "datasets" / "wiki" / "bert_config.json")
-  optimizer = optim.LAMB(get_parameters(model), 1 / WARMUP_STEPS, eps=1e-6, wd=0.01, adam=True) # TODO: Exclude LayerNorm, and bias from weight decay
+  optimizer = optim.LAMB(get_parameters(model), 1 / WARMUP_STEPS, eps=1e-6, wd=0.01, adam=True) # TODO: Keep in FP32?, Exclude LayerNorm, and bias from weight decay
   lr_scheduler = OneCycleLR(optimizer, MAX_LR, MAX_LR * WARMUP_STEPS, MAX_LR * 1e12, STEPS, WARMUP_STEPS / STEPS)
 
   from extra.dist import OOB, collectives
@@ -96,7 +93,6 @@ def pretrain():
 
     masked_lm_loss = get_masked_lm_output(output, embedding_table, m_weights, m_bias, masked_lm_positions, masked_lm_ids)
     next_sentence_loss = get_next_sentence_output(pooled_output, next_sentence_labels, s_weights, s_bias)
-    print('next_sentence_loss: ', next_sentence_loss.numpy())
     loss = masked_lm_loss + next_sentence_loss
 
     if not getenv('DISABLE_BACKWARD', 0):
@@ -117,16 +113,31 @@ def pretrain():
       lr_scheduler.step()
     return loss.realize()
   
+  def get_data(X, rank=0):
+    device = f"{Device.DEFAULT}:{rank}"
+    input_ids = Tensor(X["input_ids"])
+    input_mask = Tensor(X["input_mask"])
+    segment_ids = Tensor(X["segment_ids"])
+    masked_lm_ids = Tensor(X["masked_lm_ids"], dtype=dtypes.int32)
+    masked_lm_positions = Tensor(X["masked_lm_positions"], dtype=dtypes.int32)
+    next_sentence_labels = Tensor(X["next_sentence_labels"], dtype=dtypes.int32)
+    if getenv('DIST'):
+      input_ids = input_ids.chunk(world_size, 0)[rank]
+      input_mask = input_mask.chunk(world_size, 0)[rank]
+      segment_ids = segment_ids.chunk(world_size, 0)[rank]
+      masked_lm_ids = masked_lm_ids.chunk(world_size, 0)[rank]
+      masked_lm_positions = masked_lm_positions.chunk(world_size, 0)[rank]
+      next_sentence_labels = next_sentence_labels.chunk(world_size, 0)[rank]
+    return input_ids.to(device).realize(), input_mask.to(device).realize(), segment_ids.to(device).realize(), masked_lm_ids.to(device).realize(), masked_lm_positions.to(device).realize(), next_sentence_labels.to(device).realize()
+  
   for _ in range(EPOCH):
     i = 0
     while i <= STEPS:
       st = time.monotonic()
       for X, _ in iterate(bs=BS, val=False):
-        # if getenv("DIST"):
-        #   X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank] # change
+        input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels = get_data(X, rank)
         GlobalCounters.reset()
 
-        input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels = Tensor(X["input_ids"]), Tensor(X["input_mask"]), Tensor(X["segment_ids"]), Tensor(X["masked_lm_ids"]), Tensor(X["masked_lm_positions"]), Tensor(X["next_sentence_labels"])
         loss = train_step_jitted(model, embedding_table, optimizer, lr_scheduler, input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels)
         et = time.monotonic()
 
@@ -161,3 +172,6 @@ def train():
     for rank, device in enumerate(devices):
        processes.append(dist.spawn(rank, device, fn=pretrain, args=()))
     for p in processes: p.join()
+
+if __name__ == "__main__":
+  with Tensor.train(): train()
