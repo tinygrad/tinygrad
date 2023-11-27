@@ -1,4 +1,4 @@
-import unittest, io
+import unittest
 import numpy as np
 from PIL import Image
 from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch

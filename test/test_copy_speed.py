@@ -60,7 +60,7 @@ class TestCopySpeed(unittest.TestCase):
         with Timing("queue: "):
           for g in range(6):
             t.to(f"gpu:{g}").realize()
-        Device[f"gpu"].synchronize()
+        Device["gpu"].synchronize()
 
 if __name__ == '__main__':
   unittest.main()

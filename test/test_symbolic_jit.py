@@ -157,7 +157,7 @@ class TestSymbolicJit(unittest.TestCase):
       vi = Variable("i", 1, 10).bind(i)
       a = Tensor.rand(3, i).reshape(3, vi)
       b = Tensor.rand(3, i).reshape(3, vi)
-      c = add(a, b)
+      add(a, b)
     vi2 = Variable("i", 1, 10).bind(7)
     a = Tensor.rand(3, 7).reshape(3, vi2)
     bad = Tensor.rand(4, 7).reshape(4, vi2)

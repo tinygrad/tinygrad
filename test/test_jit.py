@@ -35,7 +35,7 @@ class TestJit(unittest.TestCase):
       for _ in range(5):
         a = Tensor.randn(10, 10)
         b = Tensor.randn(10, 10)
-        c = add(a, b)
+        add(a, b)
 
   def test_jit_shape_mismatch(self):
     @TinyJit
@@ -43,7 +43,7 @@ class TestJit(unittest.TestCase):
     for _ in range(5):
       a = Tensor.randn(10, 10)
       b = Tensor.randn(10, 10)
-      c = add(a, b)
+      add(a, b)
     bad = Tensor.randn(20, 20)
     with self.assertRaises(AssertionError):
       add(a, bad)
