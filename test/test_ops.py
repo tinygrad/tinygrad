@@ -5,7 +5,7 @@ import numpy as np
 import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, dtypes
-from tinygrad.ops import Device
+from tinygrad import Device
 
 if CI:
   import warnings
@@ -910,7 +910,7 @@ class TestOps(unittest.TestCase):
   @unittest.skipIf(IMAGE>0, "no conv1d on images")
   def test_asymmetric_padding_conv1d(self):
     for p in [(0,1), (2,1), (2,0)]:
-      with self.subTest(padding := p):
+      with self.subTest(p):
         for n in [3,4]:
           for k in [2]:
             helper_test_op([(1,1,n), (1,1,k)],
@@ -1026,7 +1026,7 @@ class TestOps(unittest.TestCase):
 
   def test_asymmetric_padding_conv2d(self):
     for p in [(0,1,0,1), (2,1,2,1), (2,0,2,1)]:
-      with self.subTest(padding := p):
+      with self.subTest(p):
         for n in [3,4]:
           for k in [2]:
             helper_test_op([(1,1,n,n), (1,1,k,k)],

@@ -3,7 +3,7 @@ from extra.export_model import compile_net, jit_model
 from examples.stable_diffusion import StableDiffusion
 from tinygrad.nn.state import get_state_dict, safe_save, safe_load_metadata, torch_load, load_state_dict
 from tinygrad.tensor import Tensor
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.helpers import fetch
 from typing import NamedTuple, Any, List
 from pathlib import Path

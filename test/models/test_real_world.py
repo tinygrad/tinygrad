@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.jit import TinyJit
-from tinygrad.ops import Device, GlobalCounters
+from tinygrad import Device, GlobalCounters
 from tinygrad.helpers import CI, dtypes
 from test.helpers import derandomize_model
 
