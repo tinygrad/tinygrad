@@ -2,7 +2,7 @@ import numpy as np
 import ctypes
 import extra.hip_wrapper as hip
 from typing import Tuple, List, Any, Dict, cast, Optional, Callable
-from tinygrad.helpers import DEBUG, getenv, diskcache
+from tinygrad.helpers import CI, DEBUG, getenv, diskcache
 from tinygrad.device import Compiled, CompiledASTRunner, update_stats
 from tinygrad.renderer.hip import HIPRenderer
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer, RawBuffer, RawMallocBuffer
@@ -27,9 +27,9 @@ class HIPAllocator(LRUAllocator):
 class _HIP:
   def __init__(self, device=None):
     self.default_device = device or getenv("HIP_DEFAULT_DEVICE")
-    self.device_count = 0 if getenv("CI") else hip.hipGetDeviceCount()
-    if not getenv("CI"): hip.hipSetDevice(self.default_device)
-    self.allocator = None if getenv("CI") else HIPAllocator(hip.hipGetDeviceProperties(self.default_device).totalGlobalMem)
+    self.device_count = 0 if CI else hip.hipGetDeviceCount()
+    if not CI: hip.hipSetDevice(self.default_device)
+    self.allocator = None if CI else HIPAllocator(hip.hipGetDeviceProperties(self.default_device).totalGlobalMem)
 HIP = _HIP()
 
 class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
@@ -47,7 +47,7 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
 @diskcache
 def compile_hip(prg) -> bytes:
   prog = hip.hiprtcCreateProgram(prg, "<null>", [], [])
-  arch = "gfx1100" if getenv("CI") else hip.hipGetDeviceProperties(HIP.default_device).gcnArchName 
+  arch = "gfx1100" if CI else hip.hipGetDeviceProperties(HIP.default_device).gcnArchName 
   hip.hiprtcCompileProgram(prog, [f'--offload-arch={arch}'])
   return hip.hiprtcGetCode(prog)
 
@@ -78,7 +78,7 @@ class HIPProgram:
       self.prgs.append(hip.hipModuleGetFunction(self.modules[-1], name))
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
-    if getenv("CI"): return
+    if CI: return
     hip.hipSetDevice(args[0]._device)
     if self.c_struct_t is None: self.c_struct_t = hip.getCStructForType([(ctypes.c_void_p if not isinstance(x, int) else ctypes.c_int) for x in args])
     c_params = cast(Callable, self.c_struct_t)(*[x._buf if not isinstance(x, int) else x for x in args])
@@ -139,4 +139,4 @@ class HIPGraph:
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=jit, num_kernels=len(self.jit_cache))
     return et
 
-HIPBuffer = Compiled(RawHIPBuffer if not getenv("CI") else RawMallocBuffer, LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, HIPProgram, hip.hipDeviceSynchronize, graph=HIPGraph)
+HIPBuffer = Compiled(RawHIPBuffer if not CI else RawMallocBuffer, LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, HIPProgram, hip.hipDeviceSynchronize, graph=HIPGraph)

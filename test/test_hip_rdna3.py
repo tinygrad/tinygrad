@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad import Tensor
-from tinygrad.helpers import dtypes, getenv
+from tinygrad import Tensor, Device
+from tinygrad.helpers import CI, dtypes
 from examples.beautiful_mnist import Model as MNIST
 from examples.hlb_cifar10 import SpeedyResNet
 
+Device.DEFAULT = "HIP"
 
 class TestHIPCompilationRDNA(unittest.TestCase):
   def test_compile_hip_mnist(self):
-    if not getenv("HIP"): raise unittest.SkipTest("testing HIP->rdna3 compilation needs HIP=1")
     model = MNIST()
 
     input = Tensor.rand(512,1,28,28)
@@ -16,7 +16,6 @@ class TestHIPCompilationRDNA(unittest.TestCase):
     output.numpy()
 
   def test_compile_hip_speedyresnet(self):
-    if not getenv("HIP"): raise unittest.SkipTest("testing HIP->rdna3 compilation needs HIP=1")
     W = Tensor.rand(12,3,2,2)
     model = SpeedyResNet(W)
 
@@ -26,7 +25,6 @@ class TestHIPCompilationRDNA(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_compile_hip_speedyresnet_hf(self):
-    if not getenv("HIP"): raise unittest.SkipTest("testing HIP->rdna3 compilation needs HIP=1")
     Tensor.default_type = dtypes.float16
 
     W = Tensor.rand(12,3,2,2)
