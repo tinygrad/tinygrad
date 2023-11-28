@@ -123,7 +123,7 @@ class MetalGraph:
       icb_command.setBarrier()
     self.read_resources, self.write_resources = dedup(read_resources), dedup(write_resources)
     self.command_buffer: Any = None
-    self.int_buf_view = self.int_buf.buffer_view()    # TODO: this is metal syncing when it doesn't need to
+    self.int_buf_view = self.int_buf.toCPU()    # TODO: this is metal syncing when it doesn't need to
 
   def __call__(self, input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # NOTE: you at least can't update the ints if this is running
@@ -152,4 +152,4 @@ class MetalGraph:
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=jit, num_kernels=len(self.jit_cache))
     return et
 
-MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, METAL.synchronize, graph=MetalGraph)
+MetalDevice = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, METAL.synchronize, graph=MetalGraph)
