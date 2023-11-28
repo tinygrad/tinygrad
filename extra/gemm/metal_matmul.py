@@ -28,7 +28,9 @@ kernel void test(device float *a, device const float *data1, device const float 
   data2 += (gid.y * {LID} + lid.y) * 32;
 
   simdgroup_float8x8 acc[4][4];
+  #pragma unroll(4)
   for (uint i = 0; i < 4; i++) {{
+    #pragma unroll(4)
     for (uint j = 0; j < 4; j++) {{
       acc[i][j] = simdgroup_float8x8(0);
     }}
@@ -38,48 +40,27 @@ kernel void test(device float *a, device const float *data1, device const float 
   simdgroup_float8x8 B[4];
   for (uint k = 0; k < {N}; k+=8) {{
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    simdgroup_load(A[0], data1+k+{0*N}, {N}, ulong2(0, 0));
-    simdgroup_load(A[1], data1+k+{8*N}, {N}, ulong2(0, 0));
-    simdgroup_load(A[2], data1+k+{16*N}, {N}, ulong2(0, 0));
-    simdgroup_load(A[3], data1+k+{24*N}, {N}, ulong2(0, 0));
-    simdgroup_load(B[0], data2+0+k*{N}, {N}, ulong2(0, 0));
-    simdgroup_load(B[1], data2+8+k*{N}, {N}, ulong2(0, 0));
-    simdgroup_load(B[2], data2+16+k*{N}, {N}, ulong2(0, 0));
-    simdgroup_load(B[3], data2+24+k*{N}, {N}, ulong2(0, 0));
+    #pragma unroll(4)
+    for (int i = 0; i < 4; ++i) {{
+      simdgroup_load(A[i], data1+k+i*8*{N}, {N}, ulong2(0, 0));
+      simdgroup_load(B[i], data2+i*8+k*{N}, {N}, ulong2(0, 0));
+    }}
 
-    simdgroup_multiply_accumulate(acc[0][0], A[0], B[0], acc[0][0]);
-    simdgroup_multiply_accumulate(acc[0][1], A[1], B[0], acc[0][1]);
-    simdgroup_multiply_accumulate(acc[0][2], A[2], B[0], acc[0][2]);
-    simdgroup_multiply_accumulate(acc[0][3], A[3], B[0], acc[0][3]);
-    simdgroup_multiply_accumulate(acc[1][0], A[0], B[1], acc[1][0]);
-    simdgroup_multiply_accumulate(acc[1][1], A[1], B[1], acc[1][1]);
-    simdgroup_multiply_accumulate(acc[1][2], A[2], B[1], acc[1][2]);
-    simdgroup_multiply_accumulate(acc[1][3], A[3], B[1], acc[1][3]);
-    simdgroup_multiply_accumulate(acc[2][0], A[0], B[2], acc[2][0]);
-    simdgroup_multiply_accumulate(acc[2][1], A[1], B[2], acc[2][1]);
-    simdgroup_multiply_accumulate(acc[2][2], A[2], B[2], acc[2][2]);
-    simdgroup_multiply_accumulate(acc[2][3], A[3], B[2], acc[2][3]);
-    simdgroup_multiply_accumulate(acc[3][0], A[0], B[3], acc[3][0]);
-    simdgroup_multiply_accumulate(acc[3][1], A[1], B[3], acc[3][1]);
-    simdgroup_multiply_accumulate(acc[3][2], A[2], B[3], acc[3][2]);
-    simdgroup_multiply_accumulate(acc[3][3], A[3], B[3], acc[3][3]);
+    #pragma unroll(4)
+    for (int i = 0; i < 4; ++i) {{
+      #pragma unroll(4)
+      for (int j = 0; j < 4; ++j) {{
+          simdgroup_multiply_accumulate(acc[i][j], A[j], B[i], acc[i][j]);
+      }}
+    }}
   }}
-  simdgroup_store(acc[0][0], a+{0+0*N}, {N}, ulong2(0, 0));
-  simdgroup_store(acc[1][0], a+{8+0*N}, {N}, ulong2(0, 0));
-  simdgroup_store(acc[2][0], a+{16+0*N}, {N}, ulong2(0, 0));
-  simdgroup_store(acc[3][0], a+{24+0*N}, {N}, ulong2(0, 0));
-  simdgroup_store(acc[0][1], a+{0+8*N}, {N}, ulong2(0, 0));
-  simdgroup_store(acc[1][1], a+{8+8*N}, {N}, ulong2(0, 0));
-  simdgroup_store(acc[2][1], a+{16+8*N}, {N}, ulong2(0, 0));
-  simdgroup_store(acc[3][1], a+{24+8*N}, {N}, ulong2(0, 0));
-  simdgroup_store(acc[0][2], a+{0+16*N}, {N}, ulong2(0, 0));
-  simdgroup_store(acc[1][2], a+{8+16*N}, {N}, ulong2(0, 0));
-  simdgroup_store(acc[2][2], a+{16+16*N}, {N}, ulong2(0, 0));
-  simdgroup_store(acc[3][2], a+{24+16*N}, {N}, ulong2(0, 0));
-  simdgroup_store(acc[0][3], a+{0+24*N}, {N}, ulong2(0, 0));
-  simdgroup_store(acc[1][3], a+{8+24*N}, {N}, ulong2(0, 0));
-  simdgroup_store(acc[2][3], a+{16+24*N}, {N}, ulong2(0, 0));
-  simdgroup_store(acc[3][3], a+{24+24*N}, {N}, ulong2(0, 0));
+  #pragma unroll(4)
+  for (int i = 0; i < 4; ++i) {{
+    #pragma unroll(4)
+    for (int j = 0; j < 4; ++j) {{
+      simdgroup_store(acc[j][i], a+j*8+i*8*{N}, {N}, ulong2(0, 0));
+    }}
+  }}
 }}"""))
 def timeit(fxn):
   st = time.perf_counter()
