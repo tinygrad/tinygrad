@@ -241,6 +241,5 @@ class TestJit(unittest.TestCase):
     assert_jit_cache_len(cache.good_jitted, 1)
     assert_jit_cache_len(cache.bad_jitted, 1)
 
-
 if __name__ == '__main__':
   unittest.main()
