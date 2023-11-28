@@ -70,12 +70,15 @@ def llama_generate(
   user_delim: str,
   resp_delim: str,
   temperature=0.7,
+  max_tokens=1000
 ):
   """Generates an output for the specified prompt"""
   toks += encode_prompt(llama.tokenizer, user_delim, prompt)
   toks += start_prompt(llama.tokenizer, resp_delim)
 
-  while toks[-1] != IM_END:
+  outputted = llama.tokenizer.decode(toks)
+  init_length = len(outputted)
+  for _ in range(max_tokens):
     probs_np = llama.model(Tensor([toks[start_pos:]]), start_pos, temperature).numpy()
     token = int(np.random.choice(len(probs_np), p=probs_np))
     start_pos = len(toks)
@@ -87,8 +90,11 @@ def llama_generate(
     sys.stdout.write(cur[len(outputted):])
     sys.stdout.flush()
     outputted = cur
+    if toks[-1] == IM_END: break
+  else:
+    toks.append(IM_END)
   print() # because the output is flushed
-  return outputted, start_pos
+  return outputted, start_pos, outputted[init_length:]
 
 def tts(
   text_to_synthesize: str,
@@ -225,6 +231,7 @@ if __name__ == "__main__":
 
   # LLAMA args
   parser.add_argument("--llama_pre_prompt_path", type=Path, default=Path(__file__).parent / "conversation_data" / "pre_prompt_stacy.yaml", help="Path to yaml file which contains all pre-prompt data needed. ")
+  parser.add_argument("--llama_count", type=int, default=1000, help="Max number of tokens to generate")
   parser.add_argument("--llama_temperature", type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument("--llama_quantize", action="store_true", help="Quantize the weights to int8 in memory")
   parser.add_argument("--llama_model", type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
@@ -312,8 +319,12 @@ if __name__ == "__main__":
 
       # Generate with llama
       with Timing("llama generation: "):
-        outputted, start_pos = llama_generate(llama, toks, outputted, txt, start_pos, user_delim=user_delim, resp_delim=resp_delim, temperature=args.llama_temperature)
-        response = outputted.splitlines()[-1].replace("<|im_end|>", "")
+        outputted, start_pos, response = llama_generate(
+          llama, toks, outputted, txt, start_pos,
+          user_delim=user_delim, resp_delim=resp_delim, temperature=args.llama_temperature,
+          max_tokens=args.llama_count
+        )
+        response = response.replace("<|im_end|>", "")
         log.append(resp_delim + response)
 
       # Convert to voice
