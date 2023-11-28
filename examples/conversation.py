@@ -14,6 +14,7 @@ from llama import LLaMa
 from vits import MODELS as VITS_MODELS
 from vits import Y_LENGTH_ESTIMATE_SCALARS, HParams, Synthesizer, TextMapper, get_hparams_from_file, load_model
 from whisper import init_whisper, transcribe_waveform
+from sentencepiece import SentencePieceProcessor
 
 from tinygrad.helpers import Timing, dtypes, fetch
 from tinygrad.tensor import Tensor
@@ -31,17 +32,20 @@ IM_END = 32002
 def encode_prompt(spp, k, v): return [IM_START]+spp.encode(f"{k}\n{v}")+[IM_END]+spp.encode("\n")
 def start_prompt(spp, k): return [IM_START]+spp.encode(f"{k}\n")
 
-def create_fixed_tokenizer(output_file):
+def create_fixed_tokenizer():
   """Function needed for extending tokenizer with additional chat tokens"""
-  print("creating fixed tokenizer")
   import extra.junk.sentencepiece_model_pb2 as spb2
-  mp = spb2.ModelProto()
-  mp.ParseFromString(fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.4/resolve/main/tokenizer.model?download=true").read_bytes())
-  mp.pieces.append(spb2.ModelProto.SentencePiece(piece="[PAD]", score=0))
-  mp.pieces.append(spb2.ModelProto.SentencePiece(piece="<|im_start|>", score=0))
-  mp.pieces.append(spb2.ModelProto.SentencePiece(piece="<|im_end|>", score=0))
-  with open(output_file, "wb") as f:
-    f.write(mp.SerializeToString())
+  tokenizer_path = fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.4/resolve/main/tokenizer.model")
+  if SentencePieceProcessor(model_file=str(tokenizer_path)).vocab_size() != 32003:
+    print("creating fixed tokenizer")
+    mp = spb2.ModelProto()
+    mp.ParseFromString(tokenizer_path.read_bytes())
+    # https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.4/blob/main/added_tokens.json
+    mp.pieces.append(spb2.ModelProto.SentencePiece(piece="[PAD]", score=0))
+    mp.pieces.append(spb2.ModelProto.SentencePiece(piece="<|im_start|>", score=0))
+    mp.pieces.append(spb2.ModelProto.SentencePiece(piece="<|im_end|>", score=0))
+    tokenizer_path.write_bytes(mp.SerializeToString())
+  return tokenizer_path
 
 def llama_prepare(llama: LLaMa, temperature: float, pre_prompt_path: Path) -> tuple[list[int], str, str, str]:
   """Prepares a llama model from a specified pre-prompt file"""
@@ -209,7 +213,7 @@ if __name__ == "__main__":
   parser.add_argument("--llama_pre_prompt_path", type=Path, default=Path(__file__).parent / "conversation_data" / "pre_prompt_stacy.yaml", help="Path to yaml file which contains all pre-prompt data needed. ")
   parser.add_argument("--llama_temperature", type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument("--llama_quantize", action="store_true", help="Quantize the weights to int8 in memory")
-  parser.add_argument("--llama_model", type=Path, default=None, required=True, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
+  parser.add_argument("--llama_model", type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
   parser.add_argument("--llama_gen", type=str, default="tiny", required=False, help="Generation of the model to use")
   parser.add_argument("--llama_size", type=str, default="1B-Chat", required=False, help="Size of model to use")
   parser.add_argument("--llama_tokenizer", type=Path, default=None, required=False, help="Path to llama tokenizer.model")
@@ -237,9 +241,14 @@ if __name__ == "__main__":
   model, enc = init_whisper(args.whisper_model_name)
   synth, emotion_embedding, text_mapper, hps, model_has_multiple_speakers = init_vits(args.vits_model_to_use, args.vits_emotion_path, args.vits_speaker_id, args.vits_seed)
 
-  # Prepare personality
+  # Download tinyllama chat as a default model
+  if args.llama_model is None:
+    args.llama_model = fetch("https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v0.4/resolve/main/model.safetensors", "tinyllamachat.safetensors")
+    args.llama_gen = "tiny"
+    args.llama_size = "1B-Chat"
+  # Add 3 more tokens to the tokenizer
+  if args.llama_gen == "tiny" and args.llama_size.endswith("Chat"): args.llama_tokenizer = create_fixed_tokenizer()
   tokenizer_path = args.llama_tokenizer or args.llama_model.parent / "tokenizer.model"
-  # if args.llama_gen == "tiny" and args.llama_size.endswith("Chat"): create_fixed_tokenizer(tokenizer_path)
   llama = LLaMa.build(args.llama_model, tokenizer_path, args.llama_gen, args.llama_size, args.llama_quantize)
   toks, user_delim, resp_delim, start_pos, outputted = llama_prepare(llama, args.llama_temperature, args.llama_pre_prompt_path)
 
