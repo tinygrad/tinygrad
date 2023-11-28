@@ -253,7 +253,7 @@ if __name__ == "__main__":
   parser.add_argument("--vits_vocab_path", type=Path, default=None, help="Path to the TTS vocabulary.")
 
   # conversation args
-  parser.add_argument("--max_sentence_length", type=int, default=30, help="Max words in one sentence to pass to vits")
+  parser.add_argument("--max_sentence_length", type=int, default=20, help="Max words in one sentence to pass to vits")
 
   args = parser.parse_args()
 
