@@ -3,13 +3,12 @@ from tqdm import tqdm
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, dtypes
 from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict
-from tinygrad.ops import Device
 from tinygrad.shape.symbolic import Node
 from extra.lr_scheduler import MultiStepLR
 from extra.datasets.kits19 import get_batch, get_val_files, sliding_window_inference
 from extra import dist
 
-from examples.mlperf.metrics import get_dice_score
+from examples.mlperf.metrics import get_dice_score, get_dice_score_np
 from examples.mlperf.conf import Conf
 
 def train_resnet():
@@ -21,16 +20,17 @@ def train_retinanet():
   pass
 
 def train_unet3d():
+  import pycuda.autoinit
 
   def train_single_unet3d(conf):
     is_successful, diverged = False, False
     next_eval_at = conf.start_eval_at
 
-    def evaluate(conf, model, loader, score_fn, epoch=0):
+    def evaluate(conf, model, loader, score_fn=get_dice_score_np, epoch=0):
       s, i = 0, 0
       for i, batch in enumerate(tqdm(loader, disable=not conf.verbose)):
         vol, label = batch
-        out, label = sliding_window_inference(model, vol.numpy(), label.numpy())
+        out, label = sliding_window_inference(model, vol, label)
         label = label.squeeze(axis=1)
         score = score_fn(out, label).mean()
         s += score
@@ -65,10 +65,10 @@ def train_unet3d():
         raise ValueError("Optimizer {} unknown.".format(conf.optimizer))
       return optim
 
-    # def lr_warmup(optimizer, init_lr, lr, current_epoch, warmup_epochs):
-    #   scale = current_epoch / warmup_epochs
-    #   for param_group in optimizer.param_groups:
-    #       param_group['lr'] = init_lr + (lr - init_lr) * scale
+    def print_memory_usage(pre=""):
+      import pycuda.driver
+      free, total = pycuda.driver.mem_get_info()
+      print(f"{pre} Free memory: {(free / 1024**3):.1f} GB, Total memory: {(total / 1024**3):.1f} GB")
 
     from extra.models.unet3d import UNet3D
     mdl = UNet3D()
@@ -90,7 +90,8 @@ def train_unet3d():
       scheduler = MultiStepLR(optim, milestones=conf.lr_decay_epochs, gamma=conf.lr_decay_factor)
 
     if getenv("MOCKTRAIN", 0):
-      train_loader = [(Tensor.rand((1,1,128,128,128), dtype=dtypes.half), Tensor.rand((1,128,128,128), dtype=dtypes.uint8)) for i in range(3)]
+      # train_loader = [(Tensor.rand((1,1,128,128,128), dtype=dtypes.half), Tensor.rand((1,128,128,128), dtype=dtypes.uint8)) for i in range(3)]
+      train_loader = [(Tensor.rand((1,1,64,64,64), dtype=dtypes.half), Tensor.rand((1,64,64,64), dtype=dtypes.uint8)) for i in range(3)]
       total_batches = 1
     else:
       def get_train_val_split(files): return files[:-int(len(files)*conf.val_split)], files[-int(len(files)*conf.val_split):]
@@ -103,16 +104,21 @@ def train_unet3d():
 
     @TinyJit
     def train_step(out, y):
-      loss = dice_ce_loss(out, y)
-      optim.zero_grad()
-      loss.backward()
-      # if noloss: del loss
-      optim.step()
-      # if noloss: return None
-      return loss.realize()
+      with Tensor.train():
+        optim.zero_grad()
+        print_memory_usage("(optim zero_grad)")
+        loss = dice_ce_loss(out, y)
+        print_memory_usage("(loss)")
+        # del out
+        loss.backward()
+        # if noloss: del loss
+        print_memory_usage("(loss backward)")
+        optim.step()
+        print_memory_usage("(optim step)")
+        # if noloss: return None
+        return loss.realize()
 
-    # with Tensor.train():
-    for epoch in range(1, conf.epochs + 1):
+    for epoch in range(0, conf.epochs):
       cumulative_loss = []
       # if epoch <= conf.lr_warmup_epochs:
       #   lr_warmup(optim, conf.init_lr, conf.lr, epoch, conf.lr_warmup_epochs)
@@ -122,31 +128,39 @@ def train_unet3d():
       for i, batch in enumerate(tqdm(train_loader, total=total_batches)):
         im, label = batch
 
+        print_memory_usage("(input)")
         dtype_im = dtypes.half if getenv("FP16") else dtypes.float
         im, label = Tensor(im, dtype=dtype_im), Tensor(label, dtype=dtypes.uint8)
-        print("im, label", im.shape, label.shape, im.dtype, label.dtype)
+        # print("im, label", im.shape, label.shape, im.dtype, label.dtype)
 
         out = mdl_run(im)
-        del im
+        print(out.shape)
+        print_memory_usage("(out)")
+        # out = mdl(im)
+        # del im
 
         loss_value = train_step(out, label)
-        cumulative_loss.append(loss_value)
+        print(loss_value.cpu().numpy())
+        cumulative_loss.append(loss_value.detach())
+        print("cumulative_loss", len(cumulative_loss))
 
       # if conf.lr_decay_epochs:
       #   scheduler.step()
-      print(f'loss for epoch {epoch}: {sum(cumulative_loss) / len(cumulative_loss)}')
+
+      if len(cumulative_loss):
+        print(f'loss for epoch {epoch}: {sum(cumulative_loss) / len(cumulative_loss)}')
 
       if epoch == next_eval_at:
         next_eval_at += conf.eval_every
         dtype_im = dtypes.half if getenv("FP16") else dtypes.float
 
-        eval_model = lambda x : mdl_run(Tensor(x, dtype=dtype_im)).numpy()
-        eval_metrics = evaluate(conf, eval_model, val_loader, epoch=epoch)
+        #eval_model = lambda x : mdl_run(Tensor(x, dtype=dtype_im)).numpy()
+        eval_metrics = evaluate(conf, mdl, val_loader, epoch=epoch)
         eval_metrics["train_loss"] = sum(cumulative_loss) / len(cumulative_loss)
         print(eval_metrics)
 
         Tensor.training = True
-        print('eval_metrics', [(k, f"{m:.7f}") for k,m in eval_metrics.items()])
+        print('eval_metrics', [(k, f"{m}") for k,m in eval_metrics.items()])
         if eval_metrics["mean_dice"] >= conf.quality_threshold:
           print("success", eval_metrics["mean_dice"], ">", conf.quality_threshold)
           is_successful = True
@@ -171,10 +185,8 @@ def train_unet3d():
 
     # ensure that the batch size is divisible by the number of devices
     assert conf.batch_size % world_size == 0, f"batch size {conf.batch_size} is not divisible by world size {world_size}"
-
     # init out-of-band communication
     dist.init_oob(world_size)
-
     # start the processes
     processes = []
     for rank, device in enumerate(devices):

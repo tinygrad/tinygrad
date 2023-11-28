@@ -12,13 +12,14 @@ class Conf:
     load_ckpt_path: str = ""
     val_split: float = 0.1
 
-    epochs: int = 1
+    epochs: int = 2
+    quality_threshold: float = 0.908
     ga_steps: int = 1
     warmup_step: int = 4
     batch_size: int = 2
     layout: str = "NDHWC"
-    input_shape: Tuple[int, int, int] = (128, 128, 128)
-    # input_shape: Tuple[int, int, int] = (64, 64, 64)
+    # input_shape: Tuple[int, int, int] = (128, 128, 128)
+    input_shape: Tuple[int, int, int] = (64, 64, 64)
     val_input_shape: Tuple[int, int, int] = (64, 64, 64)
     seed: int = 0
     num_workers: int = 8
