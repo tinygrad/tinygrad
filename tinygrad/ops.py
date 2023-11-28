@@ -255,7 +255,7 @@ class CompiledASTRunner(JITRunner):
     if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
       from tinygrad.features.search import optimize_local_size
-      local_size = self.local_size = (1,1,1) if Device.DEFAULT == "WEBGL" else optimize_local_size(self.clprg, global_size, rawbufs)
+      local_size = self.local_size = [1,1,1] if Device.DEFAULT == "WEBGL" else optimize_local_size(self.clprg, global_size, rawbufs)
       global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
     lra = self.runtime_args.copy()
     if global_size: lra['global_size'] = global_size
