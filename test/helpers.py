@@ -1,4 +1,3 @@
-from tinygrad import Device
 from tinygrad.device import JITRunner
 from tinygrad.ops import LazyOp, LoadOps
 from tinygrad.nn.state import get_parameters
