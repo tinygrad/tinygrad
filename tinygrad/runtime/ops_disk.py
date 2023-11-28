@@ -56,4 +56,4 @@ class RawDiskBuffer(RawBufferMapped):
     return instance
 
 disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.MEM: lambda x: x, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
-DiskBuffer = Interpreted(RawDiskBuffer, disk_fxn_for_op)
+DiskDevice = Interpreted(RawDiskBuffer, disk_fxn_for_op)

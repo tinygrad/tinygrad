@@ -46,4 +46,4 @@ numpy_fxn_for_op: Dict[Op, Callable] = {
   TernaryOps.WHERE: np.where,
 }
 
-CPUBuffer = Interpreted(RawNumpyBuffer, numpy_fxn_for_op)
+CPUDevice = Interpreted(RawNumpyBuffer, numpy_fxn_for_op)
