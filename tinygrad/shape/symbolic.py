@@ -96,9 +96,10 @@ class Node:
       raise RuntimeError(f"not supported: {self} % {b}")
     assert b > 0
     if b == 1: return NumNode(0)
-    if self.min >= 0 and self.max < b: return self
-    if (self.min//b) == (self.max//b): return self - (b*(self.min//b))
-    if self.min < 0: return (self - ((self.min//b)*b)) % b
+    if isinstance(self.max, int) and isinstance(self.min, int):
+      if self.min >= 0 and self.max < b: return self
+      if (self.min//b) == (self.max//b): return self - (b*(self.min//b))
+      if self.min < 0: return (self - ((self.min//b)*b)) % b
     return create_node(ModNode(self, b))
 
   @staticmethod
@@ -286,11 +287,12 @@ class SumNode(RedNode):
         else: new_sum.append(x)
       lhs = Node.sum(new_sum)
       nodes = lhs.nodes if isinstance(lhs, SumNode) else [lhs]
+      assert all(not isinstance(node, MulNode) or isinstance(node.b, int) for node in nodes), "not supported"
       muls, others = partition(nodes, lambda x: isinstance(x, MulNode) and x.b > 0 and x.max >= b)
       if muls:
         # NOTE: gcd in python 3.8 takes exactly 2 args
         mul_gcd = b
-        for x in muls: mul_gcd = gcd(mul_gcd, x.b) if isinstance(x.b, int) else 1
+        for x in muls: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell that x.b is int here due to assert above
         all_others = Variable.sum(others)
         if all_others.min >= 0 and all_others.max < mul_gcd:
           lhs, b = Variable.sum([mul//mul_gcd for mul in muls]), b//mul_gcd

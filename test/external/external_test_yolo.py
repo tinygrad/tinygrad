@@ -1,12 +1,8 @@
-import io
 import unittest
 from pathlib import Path
 
 import cv2
-import requests  # type: ignore
-import numpy as np
 
-from tinygrad.tensor import Tensor
 from examples.yolov3 import Darknet, infer, show_labels
 from extra.utils import fetch
 

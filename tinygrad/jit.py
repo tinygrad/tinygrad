@@ -2,7 +2,8 @@ from __future__ import annotations
 from typing import Callable, List, Tuple, Dict, cast, Union, Optional, TypeVar, Generic
 import functools, itertools, operator
 from tinygrad.helpers import DEBUG, DType, merge_dicts, getenv, all_int
-from tinygrad.ops import RawBuffer, Device, JITRunner, CompiledASTRunner
+from tinygrad.device import Device, JITRunner, CompiledASTRunner
+from tinygrad.runtime.lib import RawBuffer
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node
@@ -11,7 +12,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class JitItem:
-  prg: JITRunner
+  prg: JITRunner  # or a graph executor like MetalGraph
   rawbufs: List[Optional[RawBuffer]]
 
 def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[Node, Node]:

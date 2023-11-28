@@ -33,7 +33,7 @@ except RuntimeError:
 
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
-from tinygrad.ops import Device
+from tinygrad import Device
 b = Tensor(nb)
 c = Tensor(nc)
 # TODO: slowness without the JIT I suspect comes from a lack of a caching allocator

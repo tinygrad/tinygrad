@@ -9,7 +9,7 @@ torch.set_num_threads(1)
 import time
 import numpy as np
 np.set_printoptions(linewidth=160)
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.helpers import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
@@ -25,12 +25,12 @@ torch_dt = torch.float16 if getenv("HALF", 0) else torch.float32
 torch_device = torch.device('mps' if getenv("MPS", 0) else ('cuda' if getenv("TORCHCUDA", 0) else 'cpu'))
 if str(torch_device) == "mps":
   import torch.mps
-  sync = lambda: torch.mps.synchronize()
+  def sync(): torch.mps.synchronize()
 elif str(torch_device) == "cuda":
   import torch.cuda
-  sync = lambda: torch.cuda.synchronize()
+  def sync(): torch.cuda.synchronize()
 else:
-  sync = lambda: None
+  def sync(): pass
 
 def colorize_float(x):
   ret = f"{x:7.2f}x"
