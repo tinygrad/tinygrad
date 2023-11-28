@@ -1,12 +1,11 @@
 #!/usr/bin/env python
 import unittest
 from tinygrad import Tensor, Device
-from tinygrad.helpers import CI, dtypes
+from tinygrad.helpers import dtypes
 from examples.beautiful_mnist import Model as MNIST
 from examples.hlb_cifar10 import SpeedyResNet
 
-Device.DEFAULT = "HIP"
-
+@unittest.skipIf(Device.DEFAULT != "HIP", reason="testing HIP->rdna3 compilation needs HIP=1")
 class TestHIPCompilationRDNA(unittest.TestCase):
   def test_compile_hip_mnist(self):
     model = MNIST()
