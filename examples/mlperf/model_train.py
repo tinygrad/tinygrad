@@ -90,7 +90,7 @@ def train_unet3d():
       scheduler = MultiStepLR(optim, milestones=conf.lr_decay_epochs, gamma=conf.lr_decay_factor)
 
     if getenv("MOCKTRAIN", 0):
-      train_loader = [(Tensor.rand(1,1,128,128,128), Tensor.rand(1,1,128,128,128)) for i in range(3)]
+      train_loader = [(Tensor.rand((1,1,128,128,128), dtype=dtypes.half), Tensor.rand((1,128,128,128), dtype=dtypes.uint8)) for i in range(3)]
       total_batches = 1
     else:
       def get_train_val_split(files): return files[:-int(len(files)*conf.val_split)], files[-int(len(files)*conf.val_split):]
@@ -118,11 +118,13 @@ def train_unet3d():
       #   lr_warmup(optim, conf.init_lr, conf.lr, epoch, conf.lr_warmup_epochs)
       start_time_epoch = time.time()
 
-      for i, batch in enumerate(tqdm(train_loader, total=total_batches, disable=(rank != 0) or not conf.verbose)):
+      # for i, batch in enumerate(tqdm(train_loader, total=total_batches, disable=(rank != 0) or not conf.verbose)):
+      for i, batch in enumerate(tqdm(train_loader, total=total_batches)):
         im, label = batch
 
         dtype_im = dtypes.half if getenv("FP16") else dtypes.float
-        im, label = Tensor(im, dtype=dtype_im), Tensor(label, dtype=dtype_im)
+        im, label = Tensor(im, dtype=dtype_im), Tensor(label, dtype=dtypes.uint8)
+        print("im, label", im.shape, label.shape, im.dtype, label.dtype)
 
         out = mdl_run(im)
         del im

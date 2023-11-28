@@ -54,7 +54,6 @@ def get_dice_score_np(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth
   return result[0]
 
 def get_dice_score(prediction: Tensor, target: Tensor, channel_axis=1, prediction_argmax=False, smooth_nr=1e-6, smooth_dr=1e-6):
-  prediction, target = prediction.float(), target.float()
   reduce_axis = list(range(2, len(prediction.shape)))
   if prediction_argmax:
     assert not prediction.requires_grad
