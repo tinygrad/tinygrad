@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.nn.state import get_parameters
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 from tinygrad.nn import optim, BatchNorm2d
 from extra.training import train, evaluate
 from extra.datasets import fetch_mnist

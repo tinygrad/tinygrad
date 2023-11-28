@@ -76,7 +76,7 @@ def helper_test_alloc_count(mm, gen, train):
   FAKE_GLOBAL_ALLOCATOR = FakeAllocator(0)
   old_allocs = __helper_test_alloc_count(gen, train)
   print(f"{mm}: llama: old allocs count {old_allocs}, new allocs count {new_allocs}")
-  assert new_allocs < old_allocs, f"Hmm, doesn't cache work any more?"
+  assert new_allocs < old_allocs, "Hmm, doesn't cache work any more?"
   Device[Device.DEFAULT].runtime = backup_program
   Device[Device.DEFAULT].buffer = backup_buffer
   FAKE_GLOBAL_ALLOCATOR = None

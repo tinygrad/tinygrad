@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class JitItem:
-  prg: JITRunner
+  prg: JITRunner  # or a graph executor like MetalGraph
   rawbufs: List[Optional[RawBuffer]]
 
 def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[Node, Node]:
