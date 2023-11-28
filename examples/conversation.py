@@ -94,7 +94,7 @@ def llama_generate(
   else:
     toks.append(IM_END)
   print() # because the output is flushed
-  return outputted, start_pos, outputted[init_length:]
+  return outputted, start_pos, outputted[init_length:].replace("<|im_end|>", "")
 
 def tts(
   text_to_synthesize: str,
@@ -315,7 +315,7 @@ if __name__ == "__main__":
           break
         prev_text = txt
       print() # to avoid llama printing on the same line
-      log.append(txt)
+      log.append(f"{user_delim.capitalize()}: {txt}")
 
       # Generate with llama
       with Timing("llama generation: "):
@@ -324,8 +324,7 @@ if __name__ == "__main__":
           user_delim=user_delim, resp_delim=resp_delim, temperature=args.llama_temperature,
           max_tokens=args.llama_count
         )
-        response = response.replace("<|im_end|>", "")
-        log.append(resp_delim + response)
+        log.append(f"{resp_delim.capitalize()}: {response}")
 
       # Convert to voice
       with Timing("tts: "):
