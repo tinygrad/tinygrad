@@ -8,7 +8,10 @@ from tinygrad.ops import Device
 
 safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64, "BF16": dtypes.bfloat16}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
+<<<<<<< HEAD
 def cast_bfloat16(t:Union[Tensor, Any]) -> Union[Tensor, Any]: return t.bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half()
+=======
+>>>>>>> parent of f1198c66 (abstracted cast bf16 for loading f$)
 
 def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
   t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
@@ -16,6 +19,7 @@ def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
   return (t, json_len, json.loads(t[8:8+json_len].numpy().tobytes()))
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
+<<<<<<< HEAD
   t, json_len, metadata = safe_load_metadata(fn)
   ret = {}
   for k,v in metadata.items():
@@ -24,6 +28,17 @@ def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
       if v['dtype'] == "BF16":
         ret[k] = cast_bfloat16(ret[k])
   return ret
+=======
+  ts, json_len, metadata = safe_load_metadata(fn)
+  def build_tensor(t, v, dtype) -> Union[str, Tensor]:
+    return t[8+json_len+v['data_offsets'][0]:].cast(dtype)[:prod(v['shape'])].reshape(v['shape'])
+  def cast_bf16(t):
+    return t.bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half()
+  def process_weights(v):
+    t = build_tensor(ts, v, safe_dtypes[v['dtype']])
+    return cast_bf16(t) if v['dtype'] == "BF16" else t
+  return {k: process_weights(v) for k, v in metadata.items() if k != "__metadata__"}
+>>>>>>> parent of f1198c66 (abstracted cast bf16 for loading f$)
 
 def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any]]=None):
   headers, offset = {}, 0
@@ -83,7 +98,8 @@ def torch_load(fn:str):
     # upstream LLaMA also does this conversion:
     # https://github.com/facebookresearch/llama/blob/6c7fe276574e78057f917549435a2554000a876d/llama/generation.py#L95
     # TODO: should this be done in the example instead? or maybe we don't need this anymore with better bfloat16 support
-    if storage[1] == dtypes.bfloat16: ret = cast_bfloat16(ret)
+    if storage[1] == dtypes.bfloat16:
+      ret = ret.bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half()
       #ret = ret.to("LLVM").half().to(Device.DEFAULT)
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
