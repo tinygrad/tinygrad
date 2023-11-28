@@ -34,7 +34,7 @@ def atan2_cpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
 # NOTE: The derivative of atan2 doesn't need a custom op! https://www.liquisearch.com/atan2/derivative
 # In general, it is also optional to write a backward function, just your backward pass won't work without it
 
-from tinygrad.ops import LazyOp, LoadOps, BinaryOps, UnaryOps
+from tinygrad.ops import LazyOp, LoadOps, BinaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.tensor import Function
 

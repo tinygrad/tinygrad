@@ -6,11 +6,10 @@ from tinygrad.helpers import OSX, CI
 from test.external.fuzz_linearizer import run_linearizer
 
 # stuff needed to unpack a kernel
-from tinygrad.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer
+from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer
 from tinygrad.helpers import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.shape.symbolic import Variable
 inf, nan = float('inf'), float('nan')
 
 def helper_test_lin(lin: Linearizer, opts, failed_platforms):
