@@ -87,7 +87,6 @@ These classes do not need to inherit from any base class, in fact if they don't 
 An example of this would be the `nn.Linear` class which represents a linear layer in a neural network.
 
 ```python
-# from tinygrad.nn import Linear
 class Linear:
   def __init__(self, in_features, out_features, bias=True, initialization: str='kaiming_uniform'):
     self.weight = getattr(Tensor, initialization)(out_features, in_features)
@@ -104,8 +103,6 @@ Our classifier will be a simple 2 layer neural network with a Leaky ReLU activat
 It will use a hidden layer size of 128 and an output layer size of 10 (one for each digit) with no bias on either Linear layer.
 
 ```python
-from tinygrad.nn import Linear
-
 class TinyNet:
   def __init__(self):
     self.l1 = Linear(784, 128, bias=False)
@@ -134,7 +131,6 @@ They can then be used to update the parameters of our neural network using one o
 For our loss function we will be using sparse categorical cross entropy loss.
 
 ```python
-# from tinygrad.tensor import sparse_categorical_crossentropy
 def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
     loss_mask = Y != ignore_index
     y_counter = Tensor.arange(self.shape[-1], dtype=dtypes.int32, requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])

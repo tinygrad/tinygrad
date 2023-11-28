@@ -5,7 +5,7 @@ import onnx.backend.test
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, CI
-from tinygrad.ops import Device
+from tinygrad import Device
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',

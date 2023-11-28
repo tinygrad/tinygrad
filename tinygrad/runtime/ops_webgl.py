@@ -2,7 +2,7 @@ import numpy as np
 import functools
 from tinygrad.runtime.lib import RawBufferCopyIn, LRUAllocator
 from tinygrad.helpers import dtypes, DType
-from tinygrad.ops import Compiled
+from tinygrad.device import Compiled
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle
 from tinygrad.renderer.glsl import GLSLLanguage
@@ -61,4 +61,4 @@ class RawWebGLBuffer(RawBufferCopyIn):
     return np.frombuffer(backing, dtype=self.dtype.np)
 
 renderer = functools.partial(uops_to_cstyle, GLSLLanguage())
-WebGlBuffer = Compiled(RawWebGLBuffer, LinearizerOptions(device="WEBGL", supports_float4=False,supports_float4_alu=False, has_local=False), renderer, lambda x: x, WebGLProgram)
+WebGlDevice = Compiled(RawWebGLBuffer, LinearizerOptions(device="WEBGL", supports_float4=False,supports_float4_alu=False, has_local=False), renderer, lambda x: x, WebGLProgram)

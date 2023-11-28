@@ -5,7 +5,8 @@ from typing import Optional
 from typing import Callable, Dict, Tuple
 from tinygrad.helpers import prod, all_int, DType, OSX
 from tinygrad.runtime.lib import RawBufferMapped
-from tinygrad.ops import Interpreted, Op, MovementOps, UnaryOps, BufferOps
+from tinygrad.device import Interpreted
+from tinygrad.ops import Op, MovementOps, UnaryOps, BufferOps
 from tinygrad.shape.view import strides_for_shape
 MAP_LOCKED, MAP_POPULATE = 0x2000, 0x008000
 
@@ -55,4 +56,4 @@ class RawDiskBuffer(RawBufferMapped):
     return instance
 
 disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.MEM: lambda x: x, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
-DiskBuffer = Interpreted(RawDiskBuffer, disk_fxn_for_op)
+DiskDevice = Interpreted(RawDiskBuffer, disk_fxn_for_op)

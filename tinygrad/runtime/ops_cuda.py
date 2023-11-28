@@ -4,7 +4,7 @@ from typing import Optional, Tuple
 import numpy as np
 from pycuda.compiler import compile as cuda_compile
 from tinygrad.helpers import DEBUG, getenv, colored, diskcache
-from tinygrad.ops import Compiled
+from tinygrad.device import Compiled
 from tinygrad.runtime.lib import RawBufferCopyInOut, RawMallocBuffer, LRUAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cuda import CUDARenderer
@@ -86,5 +86,5 @@ class CUDAProgram:
       end.synchronize()
       return start.time_till(end)*1e-3
 
-CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False if getenv("PTX") else True, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]),
+CUDADevice = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False if getenv("PTX") else True, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]),
                       CUDARenderer, compile_cuda, CUDAProgram, cuda.Context.synchronize)

@@ -3,7 +3,7 @@ import functools
 from wgpu.utils.device import get_default_device
 from tinygrad.runtime.lib import RawBufferCopyIn, LRUAllocator
 from tinygrad.helpers import dtypes, DType
-from tinygrad.ops import Compiled
+from tinygrad.device import Compiled
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle
 from tinygrad.renderer.wgsl import WGSLLanguage
@@ -42,4 +42,4 @@ class RawWebGPUBuffer(RawBufferCopyIn):
   def toCPU(self) -> np.ndarray: return np.frombuffer(wgpu_device.queue.read_buffer(self._buf, 0), dtype=np.dtype(self.dtype.np, metadata={"backing": self})) # type: ignore
 
 renderer = functools.partial(uops_to_cstyle, WGSLLanguage())
-WebGpuBuffer = Compiled(RawWebGPUBuffer, LinearizerOptions(device="WEBGPU", supports_float4=False, local_max=[256, 256, 64], global_max=[65535, 65535, 65535]), renderer, lambda x: x, WebGPUProgram)
+WebGpuDevice = Compiled(RawWebGPUBuffer, LinearizerOptions(device="WEBGPU", supports_float4=False, local_max=[256, 256, 64], global_max=[65535, 65535, 65535]), renderer, lambda x: x, WebGPUProgram)

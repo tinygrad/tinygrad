@@ -3,9 +3,9 @@ import unittest, time
 import numpy as np
 from examples.llama import Transformer, MODEL_PARAMS
 from tinygrad.tensor import Tensor
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.nn.state import get_state_dict
-from tinygrad.ops import Compiled
+from tinygrad.device import Compiled
 from tinygrad.helpers import dtypes, prod, Profiling
 from tinygrad.runtime.lib import RawBuffer
 

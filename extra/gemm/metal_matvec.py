@@ -6,7 +6,7 @@ import time, torch, torch.mps
 from tinygrad.helpers import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.helpers import colored, getenv, CI
 
 import os

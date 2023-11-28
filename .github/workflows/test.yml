@@ -245,7 +245,7 @@ jobs:
     # dtype test has issues on test_half_to_int8
     - name: Check Device.DEFAULT (METAL) and print some source
       run: |
-        METAL=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
+        METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
         METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run metal ops test
       run: DEBUG=2 METAL=1 python -m pytest -n=auto test/test_ops.py
@@ -263,7 +263,7 @@ jobs:
       run: METAL=1 TC=2 python -m pytest -n=auto test/test_ops.py
     - name: Check Device.DEFAULT (WEBGPU) and print some source
       run: |
-        WEBGPU=1 python -c "from tinygrad.ops import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
+        WEBGPU=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
         WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     #- name: Run webgpu pytest
     #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
@@ -276,6 +276,46 @@ jobs:
     - name: Run WEBGPU Efficientnet
       run: node test/test_webgpu.js
 
+  testhipcompilation:
+    name: HIP Compilation Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+    - name: Cache python packages
+      uses: actions/cache@v3
+      with:
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+        key: testing-packages-${{ hashFiles('**/setup.py') }}
+    - name: Cache downloads
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/tinygrad/downloads/
+        key: downloads-cache-hipcompilation-${{ env.DOWNLOAD_CACHE_VERSION }}
+    - name: Install HIP tools
+      run: |
+        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+        # ROCm repository for jammy
+        sudo tee /etc/apt/sources.list.d/rocm.list <<'EOF'
+        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian jammy main
+        EOF
+        # Prefer packages from the rocm repository over system packages
+        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
+        sudo apt update
+        sudo apt install --allow-unauthenticated -y rocm-hip-libraries hip-dev
+    - name: Install Python Dependencies
+      run: pip install -e '.[testing]'
+    - name: Test HIP compilation on RDNA3 [gfx1100]
+      run: |
+        export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
+        MOCKHIP=1 HIP=1 python -m pytest -s test/test_hip_rdna3.py test/test_symbolic_ops.py
+    
   testwebgl:
     name: WebGL Tests
     runs-on: ubuntu-latest
@@ -382,7 +422,7 @@ jobs:
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT and print some source
         run: |
-          python -c "from tinygrad.ops import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (not cuda)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'

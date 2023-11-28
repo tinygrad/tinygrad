@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.shape.symbolic import Node, MulNode, SumNode, Variable, NumNode, LtNode, sym_render, sym_infer, create_rednode
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, sym_render, sym_infer, create_rednode
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -399,8 +399,14 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     b = Variable("b", 1, 2)
     c = Variable("c", 1, 2)
     x = SumNode([MulNode(a, b), c])
-    assert isinstance((x < 3), Node) and (x < 3) == 0
-    assert isinstance((x < 4), LtNode) and (x < 4).min == 0 and (x < 4).max == 1
+    with self.assertRaises(AssertionError):
+      (x < 3)
+
+  def test_nested_variable_mod(self):
+    i = Variable("i", 1, 5)
+    idx0 = Variable("idx0", 0, i)
+    with self.assertRaises(AssertionError):
+      assert idx0 % 2 == idx0
 
   def test_num_node_mul_node(self):
     a = Variable("a", 1, 5)
