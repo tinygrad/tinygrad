@@ -4,7 +4,6 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.helpers import dtypes, CI
-from tinygrad import Device
 from test.helpers import derandomize_model
 
 from examples.llama import Transformer

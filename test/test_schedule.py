@@ -238,7 +238,7 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.empty(10)
     c = Tensor.empty(10)
     keep_me = a+b
-    e = keep_me.sum() # give keep_me a child (NOTE: BinaryOps won't be a child since it will instant fuse)
+    e = keep_me.sum() # noqa: F841 give keep_me a child (NOTE: BinaryOps won't be a child since it will instant fuse)
     d = keep_me+c
     check_schedule(d, 2)
     check_schedule(keep_me, 0, [d])

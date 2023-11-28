@@ -4,7 +4,6 @@ import unittest
 from tinygrad.lazy import LazyBuffer
 from tinygrad import Device
 from tinygrad.tensor import Tensor
-from tinygrad.shape.symbolic import Variable
 from tinygrad.jit import CacheCollector
 
 class TestLazyBuffer(unittest.TestCase):
@@ -50,7 +49,7 @@ class TestLazyBuffer(unittest.TestCase):
   def test_children_count(self):
     a = Tensor.ones(8,8,8)
     d1 = a.sum((0))
-    d2 = a.sum((0)).reshape(32,2)
+    d2 = a.sum((0)).reshape(32,2) # noqa: F841
     assert len(d1.lazydata.op.src[0].children) == 1
     in1 = d1.reshape(16,4)
     d3 = in1.reshape(8,8)

@@ -36,7 +36,7 @@ class TestCopySpeed(unittest.TestCase):
     print("fresh copy")
     for _ in range(3):
       t = Tensor.rand(N, N, device="cpu").realize()
-      with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
+      with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"): # noqa: F821
         with Timing("queue: "):
           t.to(Device.DEFAULT).realize()
         Device[Device.DEFAULT].synchronize()
@@ -60,7 +60,7 @@ class TestCopySpeed(unittest.TestCase):
         with Timing("queue: "):
           for g in range(6):
             t.to(f"gpu:{g}").realize()
-        Device[f"gpu"].synchronize()
+        Device["gpu"].synchronize()
 
 if __name__ == '__main__':
   unittest.main()
