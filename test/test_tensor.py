@@ -112,12 +112,12 @@ class TestTinygrad(unittest.TestCase):
 
     torch_x = torch.tensor(x, requires_grad=True)
     torch_W = torch.tensor(W, requires_grad=True)
-    torch_func = lambda x: torch.nn.functional.log_softmax(x.matmul(torch_W).relu(), dim=1)
+    def torch_func(x): return torch.nn.functional.log_softmax(x.matmul(torch_W).relu(), dim=1)
     PJ = torch.autograd.functional.jacobian(torch_func, torch_x).squeeze().numpy()
 
     tiny_x = Tensor(x, requires_grad=True)
     tiny_W = Tensor(W, requires_grad=True)
-    tiny_func = lambda x: x.dot(tiny_W).relu().log_softmax()
+    def tiny_func(x): return x.dot(tiny_W).relu().log_softmax()
     J = jacobian(tiny_func, tiny_x)
     NJ = numerical_jacobian(tiny_func, tiny_x)
 
@@ -130,7 +130,7 @@ class TestTinygrad(unittest.TestCase):
 
     tiny_x = Tensor(x, requires_grad=True)
     tiny_W = Tensor(W, requires_grad=True)
-    tiny_func = lambda x: x.dot(tiny_W).relu().log_softmax()
+    def tiny_func(x): return x.dot(tiny_W).relu().log_softmax()
 
     self.assertTrue(gradcheck(tiny_func, tiny_x, eps = 1e-3))
 

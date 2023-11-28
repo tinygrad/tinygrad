@@ -8,7 +8,7 @@ from collections import namedtuple
 
 from tqdm import tqdm
 from tinygrad.tensor import Tensor
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.helpers import dtypes, GlobalCounters, Timing, Context, getenv, fetch
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict

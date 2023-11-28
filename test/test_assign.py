@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.helpers import dtypes
 
 N = 200  # has to be bigger than the cache to fail
@@ -42,11 +42,11 @@ class TestAssign(unittest.TestCase):
     a.realize()
     b.realize()
     #GlobalCounters.cache = []
-    ba1 = a.lazydata.realized
-    bb1 = b.lazydata.realized
+    ba1 = a.lazydata.realized # noqa: F841
+    bb1 = b.lazydata.realized # noqa: F841
     a.assign(a.permute(1,0) + b)   # this should not work!
     a.realize()
-    ba2 = a.lazydata.realized
+    ba2 = a.lazydata.realized # noqa: F841
     # NOTE: don't test that it's assigned
     #assert ba1 == ba2 and ba1 != bb1
     np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
