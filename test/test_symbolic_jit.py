@@ -4,7 +4,7 @@ from test.helpers import assert_jit_cache_len
 from tinygrad.jit import TinyJit
 from tinygrad.helpers import getenv
 from tinygrad.shape.symbolic import Variable
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 import numpy as np
 
 @unittest.skipIf(getenv("ARM64") or getenv("PTX"), "ARM64 and PTX are not supported")
