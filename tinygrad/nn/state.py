@@ -8,8 +8,7 @@ from tinygrad.ops import Device
 
 safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64, "BF16": dtypes.bfloat16}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
-def cast_bfloat16(t:Union[Tensor, str]) -> Union[Tensor, str]:
-    return t.bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half()
+def cast_bfloat16(t:Union[Tensor, str]) -> Union[Tensor, str]: return t.bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half()
 
 def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
   t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
@@ -18,7 +17,13 @@ def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   t, json_len, metadata = safe_load_metadata(fn)
-  return {k: cast_bfloat16(t[8+json_len+v['data_offsets'][0]:].cast(safe_dtypes[v['dtype']])[:prod(v['shape'])].reshape(v['shape'])) if v['dtype'] == "BF16" else t[8+json_len+v['data_offsets'][0]:].cast(safe_dtypes[v['dtype']]) [:prod(v['shape'])].reshape(v['shape']) for k,v in metadata.items() if k != "__metadata__"}
+  ret = {}
+  for k,v in metadata.items():
+    if k != "__metadata__":
+      ret[k] = t[8+json_len+v['data_offsets'][0]:].cast(safe_dtypes[v['dtype']])[:prod(v['shape'])].reshape(v['shape'])
+      if v['dtype'] == "BF16":
+        ret[k] = cast_bfloat16(ret[k])
+  return ret
 
 def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any]]=None):
   headers, offset = {}, 0
