@@ -86,5 +86,5 @@ class CUDAProgram:
       end.synchronize()
       return start.time_till(end)*1e-3
 
-CUDABuffer = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False if getenv("PTX") else True, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]),
+CUDADevice = Compiled(RawCUDABuffer, LinearizerOptions(supports_float4=False if getenv("PTX") else True, supports_float4_alu=False, global_max = [65535, 65535, 2147483647], local_max = [64, 1024, 1024]),
                       CUDARenderer, compile_cuda, CUDAProgram, cuda.Context.synchronize)

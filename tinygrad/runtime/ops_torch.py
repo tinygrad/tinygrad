@@ -52,4 +52,4 @@ torch_fxn_for_op: Dict[Op, Callable] = {
   TernaryOps.WHERE: lambda x, y, z: torch.where(x != 0, y, z),
 }
 
-TorchBuffer = Interpreted(RawTorchBuffer, torch_fxn_for_op)
+TorchDevice = Interpreted(RawTorchBuffer, torch_fxn_for_op)
