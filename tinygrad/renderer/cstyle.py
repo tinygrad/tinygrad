@@ -123,14 +123,6 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
     for v in ru.vin:
       child_count[v] += 1
 
-  def _mulacc_propagate_float64(mulacc_vin):
-    if any(x for x in mulacc_vin if x.dtype == dtypes.float64):
-      for x in mulacc_vin:
-        x.dtype = dtypes.float64
-        if x.arg == TernaryOps.MULACC: _mulacc_propagate_float64(x.vin)
-  for u in uops:
-    if u.arg == TernaryOps.MULACC: _mulacc_propagate_float64(u.vin)
-
   for u in uops:
     uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
     if uop == UOps.LOOP:
@@ -168,6 +160,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
         val = lang.code_for_op[args](strip_parens(r[vin[0]]), *[r[x] for x in vin[1:]])
       elif args == BinaryOps.MAX:
         val = lang.code_for_op[args](*[lang.render_cast([r[x]], dtype) if x.dtype != dtype else r[x] for x in vin])
+      elif args == TernaryOps.MULACC and any(x.dtype == dtypes.float64 for x in vin):
+        val = lang.code_for_op[args](*[f"(double){r[x]}" for x in vin])
       else:
         val = lang.code_for_op[args](*[r[x] for x in vin])
       assert child_count[u] != 0, f"childless ALU op found {u}"
