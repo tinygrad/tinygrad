@@ -328,7 +328,7 @@ if __name__ == "__main__":
 
       # Convert to voice
       with Timing("tts: "):
-        sentences = nltk.sent_tokenize(response)
+        sentences = nltk.sent_tokenize(response.replace('"', ""))
         for i in sentences:
           total = np.array([], dtype=np.int16)
           for j in chunks(i.split(), args.max_sentence_length):
