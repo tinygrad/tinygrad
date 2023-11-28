@@ -32,6 +32,9 @@ IM_END = 32002
 def encode_prompt(spp, k, v): return [IM_START]+spp.encode(f"{k}\n{v}")+[IM_END]+spp.encode("\n")
 def start_prompt(spp, k): return [IM_START]+spp.encode(f"{k}\n")
 
+def chunks(lst, n):
+  for i in range(0, len(lst), n): yield lst[i:i + n]
+
 def create_fixed_tokenizer():
   """Function needed for extending tokenizer with additional chat tokens"""
   import extra.junk.sentencepiece_model_pb2 as spb2
@@ -100,7 +103,8 @@ def tts(
   estimate_max_y_length: bool,
   text_mapper: TextMapper,
   model_has_multiple_speakers: bool,
-  batch_size = 1000
+  batch_size=600,
+  vits_batch_size=1000
 ):
   if model_to_use == "mmts-tts": text_to_synthesize = text_mapper.filter_oov(text_to_synthesize.lower())
 
@@ -113,7 +117,7 @@ def tts(
 
   # Perform inference.
   audio_tensor = synth.infer(x_tst, x_tst_lengths, sid, noise_scale, length_scale, noise_scale_w, emotion_embedding=emotion_embedding,
-                             max_y_length_estimate_scale=Y_LENGTH_ESTIMATE_SCALARS[model_to_use] if estimate_max_y_length else None, batch_size=batch_size)[0, 0]
+                             max_y_length_estimate_scale=Y_LENGTH_ESTIMATE_SCALARS[model_to_use] if estimate_max_y_length else None, batch_size=vits_batch_size)[0, 0]
   # Save the audio output.
   audio_data = (np.clip(audio_tensor.numpy(), -1.0, 1.0) * 32767).astype(np.int16)
   return audio_data
@@ -200,8 +204,18 @@ def listener(q: mp.Queue, event: mp.Event):
     stream.close()
     p.terminate()
 
+def mp_output_stream(q: mp.Queue, counter: mp.Value, num_channels: int, sample_rate: int):
+  with output_stream(num_channels, sample_rate) as stream:
+    while True:
+      try:
+        stream.write(q.get())
+        counter.value += 1
+      except KeyboardInterrupt:
+        break
 
 if __name__ == "__main__":
+  import nltk
+  nltk.download("punkt")
   Tensor.no_grad = True
   # Parse CLI arguments
   parser = argparse.ArgumentParser("Have a tiny conversation with tinygrad")
@@ -232,8 +246,7 @@ if __name__ == "__main__":
   parser.add_argument("--vits_vocab_path", type=Path, default=None, help="Path to the TTS vocabulary.")
 
   # conversation args
-  parser.add_argument("--silence_timeout", type=int, default=1, help="Specify the max seconds of silence in a phrase")
-  parser.add_argument("--threshold", type=int, default=30, help="Specify the lower bound of your voices' rms from mic")
+  parser.add_argument("--max_sentence_length", type=int, default=30, help="Max words in one sentence to pass to vits")
 
   args = parser.parse_args()
 
@@ -259,6 +272,13 @@ if __name__ == "__main__":
   p.daemon = True
   p.start()
 
+  # Start child process for speaker output
+  out_q = mp.Queue()
+  out_counter = mp.Value("i", 0)
+  out_p = mp.Process(target=mp_output_stream, args=(out_q, out_counter, args.vits_num_channels, hps.data.sampling_rate,))
+  out_p.daemon = True
+  out_p.start()
+
   # JIT tts
   for i in ["Hello, I'm a chat bot", "I am capable of doing a lot of things"]:
     tts(
@@ -269,10 +289,11 @@ if __name__ == "__main__":
     )
 
   # Start the pipeline
-  with output_stream(args.vits_num_channels, hps.data.sampling_rate) as stream, log_writer() as log:
+  with log_writer() as log:
     while True:
       tokens = [enc._special_tokens["<|startoftranscript|>"], enc._special_tokens["<|notimestamps|>"]]
       total = np.array([])
+      out_counter.value = 0
 
       s = time.perf_counter()
       is_listening_event.set()
@@ -297,11 +318,17 @@ if __name__ == "__main__":
 
       # Convert to voice
       with Timing("tts: "):
-        audio_data = tts(
-          response, synth, hps, emotion_embedding,
-          args.vits_speaker_id, args.vits_model_to_use, args.vits_noise_scale,
-          args.vits_noise_scale_w, args.vits_length_scale,
-          args.vits_estimate_max_y_length, text_mapper, model_has_multiple_speakers
-        )
-        stream.write(audio_data.tobytes())
+        sentences = nltk.sent_tokenize(response)
+        for i in sentences:
+          total = np.array([], dtype=np.int16)
+          for j in chunks(i.split(), args.max_sentence_length):
+            audio_data = tts(
+              " ".join(j), synth, hps, emotion_embedding,
+              args.vits_speaker_id, args.vits_model_to_use, args.vits_noise_scale,
+              args.vits_noise_scale_w, args.vits_length_scale,
+              args.vits_estimate_max_y_length, text_mapper, model_has_multiple_speakers
+            )
+            total = np.concatenate([total, audio_data])
+          out_q.put(total.tobytes())
+      while out_counter.value < len(sentences): continue
       log.append(f"Total: {time.perf_counter() - s}")

@@ -40,7 +40,8 @@ class Synthesizer:
     z_p = m_p_2 + Tensor.randn(*m_p_2.shape, dtype=m_p_2.dtype) * logs_p_2.exp() * noise_scale
     # Pad flow forward inputs to enable JIT
     row_len = y_mask.shape[2]
-    y_mask = y_mask.pad(((0, 0), (0, 0), (0, batch_size - y_mask.shape[2])), 0).cast(z_p.dtype)
+    assert batch_size > row_len, "batch size is too small"
+    y_mask = y_mask.pad(((0, 0), (0, 0), (0, batch_size - row_len)), 0).cast(z_p.dtype)
     # New y_mask tensor to remove sts mask
     y_mask = Tensor(y_mask.numpy(), device=y_mask.device, dtype=y_mask.dtype, requires_grad=y_mask.requires_grad)
     z_p = z_p.squeeze(0).pad(((0, 0), (0, batch_size - z_p.shape[2])), 1).unsqueeze(0)
