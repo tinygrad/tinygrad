@@ -8,7 +8,7 @@ from tinygrad.ops import Device
 
 safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64, "BF16": dtypes.bfloat16}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
-def cast_bfloat16(t:Tensor) -> Tensor: return t.bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half()
+def cast_bfloat16(t:Union[Tensor, Any]) -> Union[Tensor, Any]: return t.bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half()
 
 def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
   t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
