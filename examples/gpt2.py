@@ -34,6 +34,9 @@ class Attention:
     # create kv cache
     if not hasattr(self, "cache_k"):
       self.cache_k, self.cache_v = Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim), Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim)
+      if args.fp16:
+        self.cache_k = self.cache_k.half()
+        self.cache_v = self.cache_v.half()
 
     keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
     values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
@@ -77,14 +80,21 @@ class Transformer:
     if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
     _bsz, seqlen = tokens.shape
 
+    # NOTE: cannot convert token indices into float16 due to precision
     tok_emb = self.wte(tokens)
     pos_emb = self.wpe(self.allpos.shrink((None, (start_pos, start_pos+seqlen))))
     h = tok_emb + pos_emb
 
     mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf")).triu(start_pos.val+1).realize() if seqlen > 1 else None
+
+    if args.fp16:
+      h = h.half()
+      if mask is not None: mask = mask.half()
+
     for hi in self.h: h = hi(h, start_pos=start_pos, mask=mask)
 
     logits = self.lm_head(self.ln_f(h))
+    # NOTE: temperature=0 with fp16 breaks due to precision, should use argmax instead
     return (logits[:, -1, :] / (temperature+1e-10)).softmax().realize()
 
   # TODO: fix empty token
