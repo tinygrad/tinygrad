@@ -314,7 +314,7 @@ jobs:
     - name: Test HIP compilation on RDNA3 [gfx1100]
       run: |
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
-        MOCKHIP=1 HIP=1 python -m pytest -s test/test_hip_rdna3.py
+        MOCKHIP=1 HIP=1 python -m pytest -s test/test_hip_rdna3.py test/test_symbolic_ops.py
 
 
   tests:
