@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Union, Type, Any, List, Optional, Dict, Callable
-import importlib, inspect, functools, pathlib, time, re
-from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name
+import importlib, inspect, functools, pathlib, time, re, ctypes, ctypes.util
+from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, from_mv
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, Op
@@ -200,3 +200,16 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
   else:
     k.required_optimizations()
   return k
+
+# *** if your device using malloc
+
+libc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("c"))
+libc.memcpy.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+libc.malloc.argtypes = [ctypes.c_size_t]
+libc.malloc.restype = ctypes.c_void_p
+libc.free.argtypes = [ctypes.c_void_p]
+class CompiledMalloc(Compiled):
+  def alloc(self, size:int) -> ctypes.c_void_p: return libc.malloc(size)
+  def free(self, buf:ctypes.c_void_p): libc.free(buf)
+  def copyin(self, dest:ctypes.c_void_p, src:memoryview): libc.memcpy(dest, from_mv(src), len(src)*src.itemsize)
+  def copyout(self, dest:memoryview, src:ctypes.c_void_p): libc.memcpy(from_mv(dest), src, len(dest)*dest.itemsize)
