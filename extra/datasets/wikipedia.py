@@ -319,7 +319,7 @@ def process_iterate(tokenizer, val=False, part=0): # Convert raw text to masked 
   rng = random.Random(getenv('SEED', 12345))
 
   if val:
-    documents = get_documents(rng, tokenizer, "eval.txt")
+    documents = get_documents(rng, tokenizer, "results4/eval.txt")
     instances = get_instances(rng, tokenizer, documents)
     print(f"there are {len(instances)} samples in the dataset")
 

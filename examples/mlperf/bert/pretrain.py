@@ -23,7 +23,7 @@ else:
   Tensor.default_type = dtypes.float32
   np_dtype = np.float32
 
-BS, EVAL_BS, STEPS, WARMUP_STEPS, EPOCH, MAX_LR  = getenv("BS", 32), getenv('EVAL_BS', 8), getenv("STEPS", 100000), getenv("WARMUP_STEPS", 10000), getenv("EPOCHS", 30), getenv('MAX_LR', 2.0)
+BS, EVAL_BS, STEPS, MAX_EVAL_STEPS, WARMUP_STEPS, EPOCH, MAX_LR  = getenv("BS", 32), getenv('EVAL_BS', 8), getenv("STEPS", 100000), getenv("MAX_EVAL_STEPS", 100), getenv("WARMUP_STEPS", 10000), getenv("EPOCHS", 30), getenv('MAX_LR', 2.0)
 EVAL_FREQ = math.floor(min(0.05*(230.23 * BS + 3000000), 25000))
 
 def get_model_and_config(path:str):
@@ -73,6 +73,16 @@ def get_masked_lm_output(input_tensor:Tensor, output_weights:Tensor, transform_w
   output = input_tensor.matmul(output_weights.transpose()).add(transform_bias)
   return output.sparse_categorical_crossentropy(label_ids.flatten())
 
+def get_masked_lm_accuracy(input_tensor:Tensor, output_weights:Tensor, transform_weights:Tensor, transform_bias:Tensor, positions:Tensor, label_ids:Tensor):
+  input_tensor = gather_indexes(input_tensor, positions)
+  input_tensor = Tensor.gelu(input_tensor.matmul(transform_weights))
+  input_tensor = Tensor.layernorm(input_tensor)
+  logits = input_tensor.matmul(output_weights.transpose()).add(transform_bias)
+  log_probs = logits.log_softmax()
+  predictions = log_probs.argmax(axis=-1)
+  correct_predictions = predictions == label_ids.flatten()
+  return correct_predictions.float().mean()
+
 def get_next_sentence_output(input_tensor:Tensor, labels: Tensor, weights:Tensor, bias:Tensor):
   output = input_tensor.matmul(weights.transpose()).add(bias)
   return output.log_softmax().binary_crossentropy_logits(labels)
@@ -84,7 +94,15 @@ def pretrain():
 
   from extra.dist import OOB, collectives
   assert OOB is not None or not getenv("DIST"), "OOB should be initialized"
-  rank, world_size = getenv("RANK"), getenv("WORLD_SIZE", 1)
+  rank, world_size = getenv("RANK", 0), getenv("WORLD_SIZE", 1)
+
+  @TinyJit
+  def eval_step_jitted(model, embedding_table, input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions):
+    Tensor.training = False
+    output = model(input_ids=input_ids, attention_mask=input_mask, token_type_ids=segment_ids)
+    acc = get_masked_lm_accuracy(output, embedding_table, m_weights, m_bias, masked_lm_positions, masked_lm_ids)
+    Tensor.training = True
+    return acc.realize()
 
   @TinyJit
   def train_step_jitted(model, embedding_table, optimizer, lr_scheduler, input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels):
@@ -130,26 +148,44 @@ def pretrain():
       next_sentence_labels = next_sentence_labels.chunk(world_size, 0)[rank]
     return input_ids.to(device).realize(), input_mask.to(device).realize(), segment_ids.to(device).realize(), masked_lm_ids.to(device).realize(), masked_lm_positions.to(device).realize(), next_sentence_labels.to(device).realize()
   
+  train_batcher = iterate(bs=BS, val=False)
+  eval_batcher = iterate(bs=EVAL_BS, val=True)
   for _ in range(EPOCH):
     i = 0
     while i <= STEPS:
+      if i % EVAL_FREQ == 0 and i != 0:
+        e = 0
+        while e <= MAX_EVAL_STEPS:
+          st = time.monotonic()
+          X, _ = next(eval_batcher)
+          input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels = get_data(X, rank)
+          acc = eval_step_jitted(model, embedding_table, input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions)
+          et = time.monotonic()
+          acc = acc.numpy()
+          cl = time.monotonic()
+          print(f"eval     MLM accuarcy: {acc:.2f}%, val_loss STEP={i} (in {(time.monotonic()-st)*1e3:.2f} ms)")
+
+          #TODO: IF mlm acc > 0.72 break, DIST support, check multiple step eval
+          e += 1
+          st = cl
+      if STEPS == 0 or i==STEPS: break
+
       st = time.monotonic()
-      for X, _ in iterate(bs=BS, val=False):
-        input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels = get_data(X, rank)
-        GlobalCounters.reset()
+      X, _ = next(train_batcher)
+      input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels = get_data(X, rank)
+      GlobalCounters.reset()
+      loss = train_step_jitted(model, embedding_table, optimizer, lr_scheduler, input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels)
 
-        loss = train_step_jitted(model, embedding_table, optimizer, lr_scheduler, input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels)
-        et = time.monotonic()
+      et = time.monotonic()
+      loss_cpu = loss.numpy()
+      cl = time.monotonic()
 
-        loss_cpu = loss.numpy()
-        cl = time.monotonic()
-
-        if not getenv("DIST"):
-          print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
-        else:
-          print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {world_size*GlobalCounters.mem_used/1e9:.2f} GB used, {world_size*GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
-        st = cl
-        i += 1
+      if not getenv("DIST"):
+        print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      else:
+        print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {world_size*GlobalCounters.mem_used/1e9:.2f} GB used, {world_size*GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      st = cl
+      i += 1
 
 def train():
   if not getenv("DIST"):
@@ -165,6 +201,7 @@ def train():
 
     assert BS % world_size == 0, f"batch size {BS} is not divisible by world size {world_size}"
     assert EVAL_BS % min(world_size, 5) == 0, f"evaluation batch size {EVAL_BS} is not divisible by world size {min(world_size, 5)}"
+    assert EVAL_BS < 10000, "EVAL_BS exceeds eval sample (10000) count"
 
     dist.init_oob(world_size)
 
