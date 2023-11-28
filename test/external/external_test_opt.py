@@ -147,7 +147,7 @@ class TestOptWChild(unittest.TestCase):
     with CLCache():
       c = (a*b).sum()
       d = c+1
-      _ = c+2
+      e = c+2 # noqa: F841
       d.realize()
       assert len(CacheCollector.cache) == 2, "don't fuse if you have children"
 
