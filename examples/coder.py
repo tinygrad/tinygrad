@@ -22,6 +22,12 @@ def create_fixed_tokenizer(output_file):
 # TODO: make loading bf16 fast so we can remove this
 def create_model_cache(output_file, model):
   print(f"creating model cache at {output_file}")
+
+  # load from disk
+  # with Timing("load weights from disk: "):
+  #  part1 = nn.state.torch_load("path/to/pytorch_model-00001-of-00002.bin")
+  #  part2 = nn.state.torch_load("path/to/pytorch_model-00002-of-00002.bin")
+  
   # TODO: add read only Tensors
   with Timing("download weights: "):
     part1 = nn.state.torch_load(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/pytorch_model-00001-of-00002.bin?download=true"))
