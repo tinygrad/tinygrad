@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad import Device
+
+from test.helpers import assert_jit_cache_len
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 
@@ -14,7 +15,7 @@ class TestJit(unittest.TestCase):
       b = Tensor.randn(10, 10)
       c = add(a, b)
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
-    assert len(add.jit_cache) == 1
+    assert_jit_cache_len(add, 1)
 
   def test_jit_multiple_outputs(self):
     @TinyJit
@@ -26,7 +27,7 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
       np.testing.assert_allclose(d.numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
       np.testing.assert_allclose(e.numpy(), a.numpy()*b.numpy(), atol=1e-4, rtol=1e-5)
-    assert len(f.jit_cache) == 3 or (len(f.jit_cache) == 1 and getattr(Device[Device.DEFAULT], "graph", None))
+    assert_jit_cache_len(f, 3)
 
   def test_nothing_jitted(self):
     @TinyJit
@@ -73,7 +74,7 @@ class TestJit(unittest.TestCase):
       b = Tensor.randn(10, 10)
       c = add_kwargs(first=a, second=b)
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
-    assert len(add_kwargs.jit_cache) == 1
+    assert_jit_cache_len(add_kwargs, 1)
 
   def test_array_jit(self):
     @TinyJit
@@ -88,7 +89,7 @@ class TestJit(unittest.TestCase):
         np.testing.assert_allclose(np.any(np.not_equal(c.numpy(),a.numpy()+b.numpy())), True, atol=1e-4, rtol=1e-5)
       else:
         np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
-    assert len(add_array.jit_cache) == 1
+    assert_jit_cache_len(add_array, 1)
 
   def test_method_jit(self):
     class Fun:
@@ -102,7 +103,7 @@ class TestJit(unittest.TestCase):
       b = Tensor.randn(10, 10)
       c = fun(b)
       np.testing.assert_allclose(c.numpy(), fun.a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
-    assert len(fun.__call__.func.__self__.jit_cache) == 1
+    assert_jit_cache_len(fun.__call__.func.__self__, 1)
 
   def test_jit_size1_input(self):
     @TinyJit
@@ -110,7 +111,7 @@ class TestJit(unittest.TestCase):
     a = Tensor([1, 2, 3])
     for i in range(5):
       np.testing.assert_allclose(f(a, Tensor([i])).numpy(), (a+i).numpy(), atol=1e-4, rtol=1e-5)
-    assert len(f.jit_cache) == 1
+    assert_jit_cache_len(f, 1)
 
   def test_jit_output_non_tensor_fail(self):
     @TinyJit
@@ -128,7 +129,7 @@ class TestJit(unittest.TestCase):
     np.testing.assert_allclose(output1, expect1, atol=1e-4, rtol=1e-5)
     # the jit only works with Tensor outputs
     assert output2 != expect2
-    assert len(f.jit_cache) == 1
+    assert_jit_cache_len(f, 1)
 
   @unittest.skip("random isn't working in JIT")
   def test_jit_random_regen(self):
@@ -237,8 +238,8 @@ class TestJit(unittest.TestCase):
     # but the bad_jitted doesn't!
     np.testing.assert_equal([1], cache.bad_jitted(zero).numpy())
 
-    assert len(cache.good_jitted.jit_cache) == 1
-    assert len(cache.bad_jitted.jit_cache) == 1
+    assert_jit_cache_len(cache.good_jitted, 1)
+    assert_jit_cache_len(cache.bad_jitted, 1)
 
   def test_jit_buffer_behavior(self):
     @TinyJit
