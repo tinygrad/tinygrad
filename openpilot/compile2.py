@@ -14,10 +14,10 @@ from typing import Tuple, List
 from extra.utils import fetch
 from extra.onnx import get_run_onnx
 from tinygrad.graph import print_tree, log_schedule_item
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor, Device
 from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, DEBUG, getenv, ImageDType, GRAPH
 from tinygrad.realize import run_schedule
-from tinygrad.ops import LoadOps, Device, ScheduleItem
+from tinygrad.ops import LoadOps, ScheduleItem
 from tinygrad.features.image import fix_schedule_for_images
 Device.DEFAULT = "GPU"
 

@@ -1,7 +1,8 @@
 import numpy as np
 from typing import Callable, Dict, Tuple, Optional
 from tinygrad.helpers import dtypes, DType
-from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, MovementOps, ReduceOps, TernaryOps, Op, Interpreted
+from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, MovementOps, ReduceOps, TernaryOps, Op
+from tinygrad.device import Interpreted
 from tinygrad.runtime.lib import RawBuffer
 
 class RawNumpyBuffer(RawBuffer):

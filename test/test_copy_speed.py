@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.helpers import Timing, CI
 import multiprocessing.shared_memory as shared_memory
 

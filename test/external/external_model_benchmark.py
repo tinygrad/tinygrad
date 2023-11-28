@@ -10,7 +10,7 @@ from extra.utils import download_file
 from extra.onnx import get_run_onnx
 from tinygrad.helpers import OSX, DEBUG
 from tinygrad.tensor import Tensor
-from tinygrad.ops import Device
+from tinygrad import Device
 
 MODELS = {
   "resnet50": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
@@ -31,7 +31,6 @@ MODELS = {
 
 CSV = {}
 open_csv = None
-torch.manual_seed(1)
 
 def benchmark(mnm, nm, fxn):
   tms = []
@@ -46,6 +45,7 @@ def benchmark(mnm, nm, fxn):
 #BASE = pathlib.Path(__file__).parents[2] / "weights" / "onnx"
 BASE = pathlib.Path("/tmp/onnx")
 def benchmark_model(m, validate_outs=False):
+  torch.manual_seed(1)
   global open_csv, CSV
   CSV = {"model": m}
 

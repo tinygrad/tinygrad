@@ -7,7 +7,7 @@ from weakref import ref
 from tinygrad.helpers import GlobalCounters
 from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, prod
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.tensor import Tensor
 
 def check_gc():
