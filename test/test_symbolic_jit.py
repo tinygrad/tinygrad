@@ -1,8 +1,10 @@
 import unittest
+
+from test.helpers import assert_jit_cache_len
 from tinygrad.jit import TinyJit
 from tinygrad.helpers import getenv
 from tinygrad.shape.symbolic import Variable
-from tinygrad.tensor import Tensor, Device
+from tinygrad.tensor import Tensor
 import numpy as np
 
 @unittest.skipIf(getenv("ARM64") or getenv("PTX"), "ARM64 and PTX are not supported")
@@ -16,7 +18,7 @@ class TestSymbolicJit(unittest.TestCase):
       symbolic = jf(a.reshape(3, vi)).reshape(3, i).numpy()
       expected = f(a).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 1
+    assert_jit_cache_len(jf, 1)
 
   def test_add(self):
     def f(a, b): return (a+b).realize()
@@ -28,7 +30,7 @@ class TestSymbolicJit(unittest.TestCase):
       symbolic = jf(a.reshape(3, vi), b.reshape(3, vi)).reshape(3, i).numpy()
       expected = f(a, b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 1
+    assert_jit_cache_len(jf, 1)
 
   def test_matmul(self):
     def f(a, b): return (a@b).realize()
@@ -40,7 +42,7 @@ class TestSymbolicJit(unittest.TestCase):
       symbolic = jf(a.reshape(3, vi), b.reshape(vi, 5)).numpy()
       expected = f(a, b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 1
+    assert_jit_cache_len(jf, 1)
 
   def test_mixed_with_no_symbol_kernel(self):
     def f(a, b):
@@ -55,7 +57,7 @@ class TestSymbolicJit(unittest.TestCase):
       symbolic = jf(a.reshape(3, vi), b.reshape(vi, 5)).numpy()
       expected = f(a, b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 2 or (len(jf.jit_cache) == 1 and getattr(Device[Device.DEFAULT], "graph", None))
+    assert_jit_cache_len(jf, 2)
 
   def test_attention(self):
     def f(q, k, v): return Tensor.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)).realize()
@@ -68,7 +70,7 @@ class TestSymbolicJit(unittest.TestCase):
       symbolic = jf(q, k.reshape(2, vi, 4, 8), v.reshape(2, vi, 4, 8)).reshape(2, 4, 1, 8).numpy()
       expected = f(q, k, v).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 6 or (len(jf.jit_cache) == 1 and getattr(Device[Device.DEFAULT], "graph", None))
+    assert_jit_cache_len(jf, 6)
 
   def test_cat_dim0(self):
     def f(a, b): return a.cat(b, dim=0).realize()
@@ -80,7 +82,7 @@ class TestSymbolicJit(unittest.TestCase):
       symbolic = jf(a.reshape(vi, 3), b).reshape(i+2, 3).numpy()
       expected = f(a, b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 1
+    assert_jit_cache_len(jf, 1)
 
   def test_cat_dim1(self):
     def f(a, b): return a.cat(b, dim=1).realize()
@@ -92,7 +94,7 @@ class TestSymbolicJit(unittest.TestCase):
       symbolic = jf(a.reshape(3, vi), b).reshape(3, i+2).numpy()
       expected = f(a, b).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 1
+    assert_jit_cache_len(jf, 1)
 
   def test_cat_dim0_two_vars(self):
     def f(a, b): return a.cat(b, dim=0).realize()
@@ -106,7 +108,7 @@ class TestSymbolicJit(unittest.TestCase):
         symbolic = jf(a.reshape(vi, 3), b.reshape(vj, 3)).reshape(i+j, 3).numpy()
         expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 1
+    assert_jit_cache_len(jf, 1)
 
   def test_cat_dim1_two_vars(self):
     def f(a, b): return a.cat(b, dim=1).realize()
@@ -120,7 +122,7 @@ class TestSymbolicJit(unittest.TestCase):
         symbolic = jf(a.reshape(3, vi), b.reshape(3, vj)).reshape(3, i+j).numpy()
         expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 1
+    assert_jit_cache_len(jf, 1)
 
   def test_two_vars_plus1_ij(self):
     def f(a, b): return (a@b+1).realize()
@@ -134,7 +136,7 @@ class TestSymbolicJit(unittest.TestCase):
         symbolic = jf(a.reshape(vi, 3), b.reshape(3, vj)).reshape(i, j).numpy()
         expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 1
+    assert_jit_cache_len(jf, 1)
 
   def test_two_vars_plus1_ji(self):
     def f(a, b): return (a@b+1).realize()
@@ -148,7 +150,7 @@ class TestSymbolicJit(unittest.TestCase):
         symbolic = jf(a.reshape(vj, 3), b.reshape(3, vi)).reshape(j, i).numpy()
         expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 1
+    assert_jit_cache_len(jf, 1)
 
   def test_jit_symbolic_shape_mismatch(self):
     @TinyJit
@@ -175,7 +177,7 @@ class TestSymbolicJit(unittest.TestCase):
       symbolic = jf(symbolic).numpy()
       expected = f(a.shrink(((3,5),(i,i+2)))).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert len(jf.jit_cache) == 1
+    assert_jit_cache_len(jf, 1)
 
 if __name__ == '__main__':
   unittest.main()
