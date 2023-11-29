@@ -7,6 +7,7 @@ async function timeout(time) {
 }
 
 function cleanup(err) {
+    console.log("cleaning up")
     res.kill();
     if(err != null) {
         console.error(err);
@@ -49,8 +50,7 @@ async function runTest() {
     const done = await waitForText(textSelector, "hen");
     if (!done) throw new Error("failed to get hen");
 
-    await browser.close();
     cleanup(null);
 }
 
-runTest().catch(err => console.error(err));
+runTest().catch(err => cleanup(err));
