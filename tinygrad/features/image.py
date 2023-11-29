@@ -108,7 +108,7 @@ def fix_schedule_for_images(schedule:List[ScheduleItem]):
       if DEBUG >= 1: print(f"{i:3d}: rewrite output, output shape {prod(si.out.shape)}, image dtype {si.out.dtype} prod {prod(si.out.dtype.shape)}")
       si.out.dtype = dtypes.float32
     for b in si.ast.get_lazyops():
-      if b.op != BufferOps.MEM: continue
+      if b.op != BufferOps.LOAD: continue
       if isinstance(si.inputs[b.arg.idx-1].dtype, ImageDType) and not any(b.arg.st.shape[x]%4 == 0 for x in b.arg.st.unit_stride_axes()):
         if DEBUG >= 1: print(f"{i:3d}: rewrite input, image dtype {si.inputs[b.arg.idx-1].dtype}, {b.arg.st.views}")
         if si.inputs[b.arg.idx-1].realized:
@@ -132,9 +132,9 @@ def fix_schedule_for_images(schedule:List[ScheduleItem]):
     # fix input dtypes to match what they actually are
     replacements = {}
     for b in si.ast.get_lazyops():
-      if b.op != BufferOps.MEM: continue
+      if b.op != BufferOps.LOAD: continue
       if b.arg.dtype != inputs[b.arg.idx-1].dtype:
-        replacements[b] = LazyOp(BufferOps.MEM, (), MemBuffer(b.arg.idx, inputs[b.arg.idx-1].dtype, b.arg.st))
+        replacements[b] = LazyOp(BufferOps.LOAD, (), MemBuffer(b.arg.idx, inputs[b.arg.idx-1].dtype, b.arg.st))
     if replacements: ast = ast.map_buffers(replacements)
 
     # fix the ops to create the output dtype

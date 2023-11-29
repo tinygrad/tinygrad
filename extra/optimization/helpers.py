@@ -6,6 +6,9 @@ from tinygrad.shape.view import View
 from tinygrad.shape.symbolic import Variable
 inf, nan = float('inf'), float('nan')
 
+# HACK: it used to be called MEM
+setattr(BufferOps, "MEM", BufferOps.LOAD)
+
 # kernel unpacker
 from tinygrad.codegen.linearizer import Linearizer
 def ast_str_to_ast(ast_str:str) -> LazyOp: return eval(ast_str)
