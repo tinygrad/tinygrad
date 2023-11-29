@@ -2,12 +2,13 @@ import os, subprocess, pathlib, ctypes, tempfile
 import Metal, libdispatch
 from typing import List, Any, Tuple, Dict, cast, Optional
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup
+from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup, OSX
 from tinygrad.device import Compiled, CompiledASTRunner, update_stats
 from tinygrad.renderer.metal import MetalRenderer
 from tinygrad.runtime.lib import RawBufferMapped, RawBuffer, LRUAllocator
 from tinygrad.shape.symbolic import Variable
 from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, GraphException
+from tinygrad.runtime.ops_disk import RawDiskBuffer
 
 class MetalAllocator(LRUAllocator):
   def _do_alloc(self, size, dtype, device, **kwargs):
@@ -38,6 +39,19 @@ class RawMetalBuffer(RawBufferMapped):
   def _buffer(self):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
+  @classmethod
+  def fromBuffer(cls, src:RawBuffer, shape: Tuple, dtype:DType, **kwargs):
+    if isinstance(src, RawDiskBuffer):
+      assert OSX and src.fn is not None, f"OSX: {OSX}, Filename: {src.fn}"
+      from Foundation import NSURL
+      hdl, err = METAL.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(src.fn), None)
+      assert err is None, f"Error creating io handle - {err}"
+      command_buffer = METAL.mtl_io_queue.commandBuffer()
+      rawbuf = cls(src.size, src.dtype)
+      command_buffer.loadBuffer_offset_size_sourceHandle_sourceHandleOffset_(rawbuf._buf, 0, rawbuf._memsz, hdl, src.offset)
+      command_buffer.commit()
+      return rawbuf
+    return super().fromCPU(src.toCPU(), **kwargs)
 
 def unwrap(x):
   ret, err = x

@@ -18,10 +18,12 @@ class UnderlyingDiskBuffer:
 class RawDiskBuffer(RawBufferMapped):
   def __init__(self, size, dtype:DType, buf=None, device:Optional[str]=None, offset:int=0):  # pylint: disable=super-init-not-called
     assert device is not None or buf is not None, "disk tensor needs a path or a buf"
+    self.fn = None
     if device is not None:
       if str(device).startswith("shm:"):
         if OSX:
           with open(f"/tmp/shm_{device[4:]}", "w+b") as f:
+            self.fn = f.name
             f.truncate(size * dtype.itemsize)
             shm = mmap.mmap(f.fileno(), size * dtype.itemsize, flags=mmap.MAP_SHARED)
         else:
@@ -32,6 +34,7 @@ class RawDiskBuffer(RawBufferMapped):
           os.close(fd)
         buf = UnderlyingDiskBuffer(None, shm)
       else:
+        self.fn = device
         f = open(device, "a+b")
         if os.path.getsize(device) < size * dtype.itemsize: os.ftruncate(f.fileno(), size * dtype.itemsize)
         buf = UnderlyingDiskBuffer(f, mmap.mmap(f.fileno(), size * dtype.itemsize))
