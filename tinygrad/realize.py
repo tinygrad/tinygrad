@@ -48,13 +48,13 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
 # *** zero op LoadOps ***
 
 def _realize_empty(buffer: LazyBuffer) -> None:
-  assert all_int(buffer.shape), "does not support symbolic shape"
+  assert all_int(buffer.shape), "LoadOps do not support symbolic shape"
   if DEBUG >= 2: print(f"***     empty {buffer.device}                              shape {str(buffer.shape):23s} dtype {buffer.dtype}")
   buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
 
 # TODO: remove this and write the RNG in tinygrad
 def _realize_rand(buffer: LazyBuffer) -> None:
-  assert all_int(buffer.shape), "does not support symbolic shape"
+  assert all_int(buffer.shape), "LoadOps do not support symbolic shape"
   if DEBUG >= 2: print(f"***      rand {buffer.device}    seed {buffer.op.arg:<10d}  shape {str(buffer.shape):23s} dtype {buffer.dtype}")
   rng = np.random.default_rng(buffer.op.arg)
   buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=prod(buffer.shape), dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args())
@@ -64,16 +64,17 @@ def _realize_rand(buffer: LazyBuffer) -> None:
 from tinygrad.runtime.lib import RawBufferMapped, RawBufferTransfer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
+  assert all_int(buffer.shape), "LoadOps do not support symbolic shape"
   assert src.realized.size == buffer.st.size(), f"size mismatch on FROM {src.realized.size} != {buffer.st.size()}"
   assert src.st.contiguous and buffer.st.contiguous, "all must be contiguous for from"
   if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.realized.size:<16d} shape {str(buffer.shape):23s} dtype {src.realized.dtype}")
   # TODO: make this generic
   if isinstance(src.realized, RawDiskBuffer) and issubclass(Device[buffer.device].buffer, RawBufferMapped):
-    assert all_int(buffer.shape), "does not support symbolic shape"
     buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
     src.realized.readinto(cast(RawBufferMapped, buffer.realized)._buffer())
   elif isinstance(src.realized, RawBufferTransfer) and issubclass(Device[buffer.device].buffer, RawBufferTransfer) and getenv("P2P", 0) >= 1:
-    buffer.realized = cast(RawBufferTransfer, Device[buffer.device].buffer).transfer(src.realized, buffer.shape, buffer.dtype, **buffer._device_extra_args())
+    buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
+    cast(RawBufferTransfer, buffer.realized)._transfer(src.realized)
   else:
     # TODO: schedule this as FROM to go to CPU, and a FROM to go to device
     buffer.realized = Device[buffer.device].buffer.fromCPU(src.realized.toCPU(), **buffer._device_extra_args())

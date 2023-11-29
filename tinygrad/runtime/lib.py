@@ -58,12 +58,6 @@ class RawBufferCopyInOut(RawBufferCopyIn):
 class RawBufferTransfer(RawBuffer):
   def _transfer(self, x:RawBuffer) -> None: raise NotImplementedError("must be implemented")
 
-  @classmethod
-  def transfer(cls, x, shape, dtype, **kwargs):
-    ret = cls(prod(shape), dtype, **kwargs)
-    ret._transfer(x)
-    return ret
-
 class LRUAllocator:
   def __init__(self, dev_memsz=(4<<30)):
     self.epoch = 0
