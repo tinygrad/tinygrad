@@ -103,7 +103,9 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
     if TernaryOps.MULACC in fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
 
-    if ast.op in {BufferOps.LOAD, BufferOps.CONST}:
+    if ast.op is BufferOps.STORE:
+      tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({_interpret_ast(ast.src[0])})"
+    elif ast.op in BufferOps:
       tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"{gstr(fxn_for_op[ast.op], ast.op)}(inputs[{ast.arg.idx-1}])"
       for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(fxn_for_op[mop], mop)}({tmp}, {gstr(arg)})"
     else:
