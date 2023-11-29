@@ -142,7 +142,8 @@ def fix_schedule_for_images(schedule:List[ScheduleItem]):
       info = get_lazyop_info(ast)
       if info.dtype != si.out.dtype:
         if DEBUG >= 3: print(f"{i:3d}: info.dtype {info.dtype} != {si.out.dtype} -> {si.out.dtype}")
-        ast = LazyOp(UnaryOps.CAST, (ast,), (si.out.dtype, False))
+        ast_cast = LazyOp(UnaryOps.CAST, (ast.src[0],), (si.out.dtype, False))
+        ast = LazyOp(BufferOps.STORE, (ast_cast,), MemBuffer(0, si.out.dtype, ast.arg.st))
 
     # put this in the fixed schedule
     fixed_schedule.append(dataclasses.replace(si, ast=ast, inputs=inputs))
