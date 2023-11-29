@@ -1,4 +1,5 @@
 import functools
+from tinygrad.ops import BinaryOps, UnaryOps
 from tinygrad.renderer.cstyle import CStyleLanguage, uops_to_cstyle
 
 class HIPLanguage(CStyleLanguage):
@@ -21,6 +22,9 @@ class HIPLanguage(CStyleLanguage):
   uses_ptr_arithmetic=True
   arg_int_prefix = "const int"
   half_prekernel = "#include <hip/hip_fp16.h>\n" + """
+  __device__ half exp2(half x) {
+    return hexp(x);
+}
 typedef union { struct { half x, y, z, w; }; half data[4]; } half4; __device__ half4 make_half4(half x, half y, half z, half w) { return {x, y, z, w}; }
 typedef union { struct { half x, y, z, w, a, b, c, d; }; half data[8]; } half8; __device__ half8 make_half8(half x, half y, half z, half w, half a, half b, half c, half d) { return {x, y, z, w, a, b, c, d}; }
  typedef _Float16 half16 __attribute__((ext_vector_type(16))); __device__ half16 make_half16(half x, half y, half z, half w, half a, half b, half c, half d, half e, half f, half g, half h, half i, half j, half k, half l) { return {x, y, z, w, a, b, c, d, e, f, g, h, i, j, k, l}; }
@@ -34,5 +38,10 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
+  code_for_op = {
+      **CStyleLanguage().code_for_op, 
+      BinaryOps.MAX: lambda a, b: f"max((float){a}, (float){b})",
+      UnaryOps.SQRT: lambda a: f"sqrt((float){a})"
+  }
 
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
