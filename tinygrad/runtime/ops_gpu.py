@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os
 os.environ['PYOPENCL_NO_CACHE'] = '1'
-import pathlib
+import pathlib, functools
 import numpy as np
 import pyopencl as cl
 from typing import Optional, List, Tuple
@@ -71,8 +71,8 @@ def compile_gpu(prg:str) -> bytes:
   return clprg.get_info(cl.program_info.BINARIES)[0]
 
 class CLProgram:
-  def __init__(self, name:str, prg:bytes, argdtypes=None, options=None):
-    self.name, self.clprograms = name, [cl.Program(ctx, ctx.devices, [prg]*len(ctx.devices)) for ctx in CL.cl_ctxs]
+  def __init__(self, device:int, name:str, prg:bytes, argdtypes=None, options=None):
+    self.device, self.name, self.clprograms = device, name, [cl.Program(ctx, ctx.devices, [prg]*len(ctx.devices)) for ctx in CL.cl_ctxs]
     self._clprgs = [clprogram.build(options=options) for clprogram in self.clprograms]
     self.clprgs = [clprg.__getattr__(name) for clprg in self._clprgs]
     if DEBUG >= 5 and not OSX:
@@ -92,14 +92,15 @@ class CLProgram:
   def max_work_group_size(): return CL.cl_ctxs[0].devices[0].max_work_group_size
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int], local_size:Optional[Tuple[int,int,int]]=None, wait=False) -> Optional[float]:
-    if not hasattr(self, 'argdtypes'): self.set_argdtypes(tuple(None if x.__class__ is CLBuffer else np.int32 for x in bufs))
-    cl_bufs, wait_for = [], []
-    for x in bufs:
-      if x.__class__ is CLBuffer:
-        cl_bufs.append(x._buf)
-        if (event:=getattr(x, "event",None)): wait_for.append(event)
-      else: cl_bufs.append(x)
-    e = self.clprgs[cl_bufs[0].device](CL.cl_queue[cl_bufs[0].device], [int(g*l) for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *cl_bufs, wait_for=wait_for)
+    #if not hasattr(self, 'argdtypes'): self.set_argdtypes(tuple(None if x.__class__ is CLBuffer else np.int32 for x in bufs))
+    #cl_bufs, wait_for = [], []
+    #for x in bufs:
+    #  if x.__class__ is CLBuffer:
+    #    cl_bufs.append(x._buf)
+    #    if (event:=getattr(x, "event",None)): wait_for.append(event)
+    #  else: cl_bufs.append(x)
+    print(self.clprgs[self.device], CL.cl_queue[self.device], bufs)
+    e = self.clprgs[self.device](CL.cl_queue[self.device], [int(g*l) for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *bufs) #*cl_bufs, wait_for=wait_for)
     if wait:
       e.wait()
       try:
@@ -108,4 +109,19 @@ class CLProgram:
         return None
     return None
 
-GPUDevice = Compiled(CLBuffer, LinearizerOptions(), OpenCLRenderer, compile_gpu, CLProgram, CL.synchronize)
+#GPUDevice = Compiled(CLBuffer, LinearizerOptions(), OpenCLRenderer, compile_gpu, CLProgram, CL.synchronize)
+class GPUDevice(Compiled):
+  def __init__(self, device:str):
+    self.device = int(device.split(":")[1]) if ":" in device else 0
+    super().__init__(LinearizerOptions(), OpenCLRenderer, compile_gpu, functools.partial(CLProgram, self.device), CL.synchronize)
+  def alloc(self, size, dtype=None):
+    if isinstance(dtype, ImageDType):
+      # NOTE: the memory is a bit off here due to padding, it's buf.row_pitch * buf.height * 4 * dtype.itemsize
+      assert size == prod(dtype.shape), f"image size mismatch {size} != {dtype.shape}"
+      fmt = cl.ImageFormat(cl.channel_order.RGBA, {2: cl.channel_type.HALF_FLOAT, 4: cl.channel_type.FLOAT}[dtype.itemsize])
+      buf = cl.Image(CL.cl_ctxs[self.device], cl.mem_flags.READ_WRITE, fmt, shape=(dtype.shape[1], dtype.shape[0]))
+    else:
+      buf = cl.Buffer(CL.cl_ctxs[self.device], cl.mem_flags.READ_WRITE, size * dtype.itemsize)
+    return buf
+  def copyin(self, dest:cl.Buffer, src:np.ndarray): cl.enqueue_copy(CL.cl_queue[self.device], dest, src, is_blocking=False)
+  def copyout(self, dest:np.ndarray, src:cl.Buffer): cl.enqueue_copy(CL.cl_queue[self.device], dest, src, is_blocking=True)

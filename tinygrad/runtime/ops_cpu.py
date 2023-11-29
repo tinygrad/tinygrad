@@ -5,11 +5,6 @@ from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, MovementOps, ReduceOps,
 from tinygrad.device import Interpreted
 from tinygrad.runtime.lib import RawBuffer
 
-class RawNumpyBuffer(RawBuffer):
-  def __init__(self, size:int, dtype:DType, buf:Optional[np.ndarray]=None): super().__init__(size, dtype, buf)
-  def _copyin(self, x): self.size, self.dtype, self._buf = x.size, dtypes.from_np(x.dtype), x
-  def toCPU(self): return self._buf if self._buf is not None else np.empty([self.size], self.dtype.np)
-
 def shape_to_axis(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Tuple[int, ...]:
   assert len(old_shape) == len(new_shape), "reduce shapes must have same dimensions"
   return tuple(i for i,(a,b) in enumerate(zip(old_shape, new_shape)) if a != b)
@@ -31,7 +26,7 @@ def einsum_mulacc(einsum, get_strides, expand):
   return mulacc
 
 numpy_fxn_for_op: Dict[Op, Callable] = {
-  BufferOps.LOAD: lambda x: x, BufferOps.CONST: lambda val, dtype: np.array(val, dtype=dtype.np), BufferOps.STORE: lambda x: x,
+  BufferOps.CONST: lambda val, dtype: np.array(val, dtype=dtype.np),
   UnaryOps.NOOP: lambda x: np.require(x, requirements='C'), UnaryOps.EXP2: np.exp2, UnaryOps.LOG2: np.log2, UnaryOps.SIN: np.sin,
   UnaryOps.CAST: lambda x,y: x.view(y[0].np) if y[1] else x.astype(y[0].np, copy=False), UnaryOps.NEG: lambda x: np.logical_not(x) if x.dtype == np.bool_ else np.negative(x),
   BinaryOps.MAX: np.maximum, BinaryOps.CMPLT: lambda x,y: (x<y).astype(output_type(x,y)), BinaryOps.ADD: lambda x, y: np.add(*match_types(x, y)),
@@ -47,4 +42,6 @@ numpy_fxn_for_op: Dict[Op, Callable] = {
 
 class CPUDevice(Interpreted):
   def __init__(self, device): super().__init__(numpy_fxn_for_op)
-  def copyout(self, out:memoryview, opaque:np.ndarray): np.copyto(np.frombuffer(out, opaque.dtype), opaque.flatten())
+  def alloc(self, size:int, dtype:DType): return np.empty(size, dtype.np)
+  def copyin(self, dest:np.ndarray, src:memoryview): np.copyto(dest, np.frombuffer(src, dest.dtype))
+  def copyout(self, dest:memoryview, src:np.ndarray): np.copyto(np.frombuffer(dest, src.dtype), src.flatten())

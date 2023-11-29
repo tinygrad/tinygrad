@@ -35,11 +35,11 @@ class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype = device, size, dtype
-    self.opaque = opaque if opaque is not None else Device[device].alloc(size*dtype.itemsize, dtype)
+    self.opaque = opaque if opaque is not None else Device[device].alloc(size, dtype)
   def __free__(self): Device[self.device].free(self.opaque)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size}>"
   def toCPU(self) -> np.ndarray:
-    ret = np.zeros(self.size, self.dtype.np)
+    ret = np.empty(self.size, self.dtype.np)
     if self.size > 0: Device[self.device].copyout(ret.data, self.opaque)
     return ret
 
@@ -90,7 +90,6 @@ class Interpreted:
   def __init__(self, fxn_for_op:Dict[Op, Callable]):
     self.fxn_for_op = fxn_for_op
     self.synchronize, self.codegen, self.graph = lambda: None, None, None
-  def alloc(self, sz, dtype): return None
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def get_runner(self, ast:LazyOp) -> InterpretedASTRunner: return _get_interpreted_fxn(self.fxn_for_op, ast)
@@ -118,9 +117,9 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
 
     if ast.op is BufferOps.STORE:
-      tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({_interpret_ast(ast.src[0])})"
+      return _interpret_ast(ast.src[0])
     elif ast.op in BufferOps:
-      tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"{gstr(fxn_for_op[ast.op], ast.op)}(inputs[{ast.arg.idx-1}])"
+      tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"inputs[{ast.arg.idx-1}]"
       for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(fxn_for_op[mop], mop)}({tmp}, {gstr(arg)})"
     else:
       tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({', '.join([_interpret_ast(src) for src in ast.src] + ([gstr(ast.arg)] if ast.arg else []))})"
@@ -173,13 +172,13 @@ class CompiledASTRunner(JITRunner):
     lra = self.runtime_args.copy()
     if global_size: lra['global_size'] = global_size
     if local_size and 'local_size' not in lra: lra['local_size'] = local_size
-    et = self.clprg(*rawbufs, *[var_vals[k] for k in self.vars], **lra, wait=wait or DEBUG>=2)
+    et = self.clprg(*[x.opaque for x in rawbufs], *[var_vals[k] for k in self.vars], **lra, wait=wait or DEBUG>=2)
     update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra)
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], linearizer_opts:LinearizerOptions, renderer, compiler, runtime, synchronize=lambda: None, graph=None):
-    self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize, self.graph = buffer, linearizer_opts, renderer, compiler, runtime, synchronize, graph
+  def __init__(self, linearizer_opts:LinearizerOptions, renderer, compiler, runtime, synchronize=lambda: None, graph=None):
+    self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize, self.graph = linearizer_opts, renderer, compiler, runtime, synchronize, graph
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     k.linearize()
