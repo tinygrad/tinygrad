@@ -8,10 +8,10 @@ import numpy as np
 from PIL import Image
 from tinygrad.tensor import Tensor
 from tinygrad.nn import BatchNorm2d, Conv2d
-from extra.utils import fetch
+from tinygrad.helpers import fetch
 
 def show_labels(prediction, confidence=0.5, num_classes=80):
-  coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
+  coco_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names').read_bytes()
   coco_labels = coco_labels.decode('utf-8').split('\n')
   prediction = prediction.detach().numpy()
   conf_mask = (prediction[:,:,4] > confidence)

@@ -5,12 +5,10 @@ import numpy as np
 from pathlib import Path
 from tinygrad import nn
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes
-from extra.utils import get_child, download_file
+from tinygrad.helpers import dtypes, get_child, fetch
 from tinygrad.nn.state import torch_load
 from extra.models.resnet import ResNet
 from extra.models.retinanet import nms as _box_nms
-
 
 USE_NP_GATHER = os.getenv('FULL_TINYGRAD', '0') == '0'
 
@@ -1240,7 +1238,7 @@ class MaskRCNN:
 
   def load_from_pretrained(self):
     fn = Path('./') / "weights/maskrcnn.pt"
-    download_file("https://download.pytorch.org/models/maskrcnn/e2e_mask_rcnn_R_50_FPN_1x.pth", fn)
+    fetch("https://download.pytorch.org/models/maskrcnn/e2e_mask_rcnn_R_50_FPN_1x.pth", fn)
 
     state_dict = torch_load(fn)['model']
     loaded_keys = []
