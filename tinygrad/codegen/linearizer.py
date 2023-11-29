@@ -353,8 +353,8 @@ class Linearizer(Kernel):
     # load latebufs
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})
 
-    # run late AST
-    val = self.ast_parse(self.ast, acc, None, loaded_buffers)
+    # run late AST (without the store)
+    val = self.ast_parse(cast(LazyOp, self.ast.src[0]), acc, None, loaded_buffers)
 
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)

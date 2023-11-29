@@ -12,7 +12,10 @@ setattr(BufferOps, "MEM", BufferOps.LOAD)
 # kernel unpacker
 from tinygrad.codegen.linearizer import Linearizer
 def ast_str_to_ast(ast_str:str) -> LazyOp: return eval(ast_str)
-def ast_str_to_lin(ast_str:str): return Linearizer(ast_str_to_ast(ast_str))
+def ast_str_to_lin(ast_str:str):
+  # HACK: it used to not have stores
+  from test.test_linearizer_failures import helper_add_store
+  return Linearizer(helper_add_store(ast_str_to_ast(ast_str)))
 
 # load worlds, a dataset of about 12k kernels
 import gzip
