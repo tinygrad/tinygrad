@@ -16,9 +16,11 @@ class _Device:
   def __init__(self) -> None: self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
   def canonicalize(self, device:Optional[str]) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "") if device is not None else self.DEFAULT
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def __getitem__(self, x:str) -> Union[Interpreted, Compiled]:
-    x = x.split(":")[0].upper()
-    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._buffers][0]
+  def __getitem__(self, xin:str) -> Union[Interpreted, Compiled]:
+    x = xin.split(":")[0].upper()
+    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._buffers][0]
+    if isinstance(ret, type): ret = ret(xin)
+    return ret
   @functools.cached_property
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None)   # type: ignore
@@ -201,7 +203,7 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
     k.required_optimizations()
   return k
 
-# *** if your device using malloc
+# *** if your device uses malloc ***
 
 libc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("c"))
 libc.memcpy.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]

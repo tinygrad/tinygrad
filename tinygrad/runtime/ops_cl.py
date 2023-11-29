@@ -5,7 +5,7 @@ import gpuctypes.opencl as cl
 from tinygrad.helpers import to_char_p_p, from_mv, diskcache, OSX
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.opencl import OpenCLRenderer
-from tinygrad.ops import Compiled
+from tinygrad.device import Compiled
 
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
@@ -75,8 +75,9 @@ class CLDevice(Compiled):
     self.context = checked(cl.clCreateContext(None, 1, ctypes.byref(self.device_id), ctypes.cast(None, cl.clCreateContext.argtypes[3]), None, ctypes.byref(status := ctypes.c_int32())), status)
     if CLDevice.compiler_context is None: CLDevice.compiler_context = self
     self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, ctypes.byref(status)), status)
-    self.runtime = functools.partial(CLProgram, self)
     self.pending_copyin = []
+    super().__init__(None, LinearizerOptions(), OpenCLRenderer, compile_cl, CLProgram, self.synchronize)
+  def synchronize(self): check(cl.clFinish(self.queue))
 
   # low level buffer api (not checked!)
   def alloc(self, size:int) -> cl.cl_mem: return checked(cl.clCreateBuffer(self.context, cl.CL_MEM_READ_WRITE, size, None, ctypes.byref(status := ctypes.c_int32())), status)

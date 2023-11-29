@@ -65,7 +65,15 @@ def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
   assert src.realized.size == buffer.st.size(), f"size mismatch on FROM {src.realized.size} != {buffer.st.size()}"
   assert src.st.contiguous and buffer.st.contiguous, "all must be contiguous for from"
   if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.realized.size:<16d} shape {str(buffer.shape):23s} dtype {src.realized.dtype}")
-  buffer.realized = Device[buffer.device].buffer.fromBuffer(src.realized, buffer.shape, buffer.dtype, **buffer._device_extra_args())
+  if Device[buffer.device].buffer is None:
+    import ctypes
+    if buffer.realized.size == 0: return
+    intermediate = (ctypes.c_char * (src.realized.size * src.realized.dtype.itemsize))()
+    Device[src.device].copyout(memoryview(intermediate), src.realized.buf)
+    Device[buffer.device].copyin(buffer.realized.buf, memoryview(intermediate))
+    #buffer.realized = Device[buffer.device].buffer.fromBuffer(src.realized, buffer.shape, buffer.dtype, **buffer._device_extra_args())
+  else:
+    buffer.realized = Device[buffer.device].buffer.fromBuffer(src.realized, buffer.shape, buffer.dtype, **buffer._device_extra_args())
 
 # *** n op LoadOps ***
 
