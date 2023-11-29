@@ -47,7 +47,9 @@ class Linearizer(Kernel):
 
   # NOTE: the consts have to be cached for deduping of downstream uops to work
   def const(self, b:Union[int,float], dtype=dtypes.int32, insert_before=None) -> UOp: return self.uop(UOps.CONST, dtype, tuple(), b, insert_before=insert_before)
-  def cast(self, val: UOp, dtype) -> UOp: return self.uop(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
+  def cast(self, val: UOp, dtype) -> UOp:
+    should_i_cast_you = val.dtype != dtype if self.opts.device != "HIP" else (val.dtype != dtype) or (val.uop == UOps.GEP and val.dtype == dtypes.half and val.vin[0].uop == UOps.LOAD and val.vin[0].dtype == dtypes.half.vec(2) and dtype == dtypes.half)
+    return self.uop(UOps.CAST, dtype, (val,)) if should_i_cast_you else val
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: ctx.const(self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
