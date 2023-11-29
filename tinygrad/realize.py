@@ -65,13 +65,10 @@ def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
   if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.realized.size:<16d} shape {str(buffer.shape):23s} dtype {src.realized.dtype}")
   # TODO: make this generic
   if isinstance(src.realized, RawDiskBuffer) and issubclass(Device[buffer.device].buffer, RawBufferMapped):
-    buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
     src.realized.readinto(cast(RawBufferMapped, buffer.realized)._buffer())
-  elif isinstance(src.realized, RawBufferTransfer) and issubclass(Device[buffer.device].buffer, RawBufferTransfer) and getenv("P2P", 0) >= 1:
-    buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
-    cast(RawBufferTransfer, buffer.realized)._transfer(src.realized)
+  elif isinstance(src.realized, RawBufferTransfer) and isinstance(buffer.realized, RawBufferTransfer) and getenv("P2P", 0) >= 1:
+    buffer.realized._transfer(src.realized)
   else:
-    # TODO: schedule this as FROM to go to CPU, and a FROM to go to device
     buffer.realized._copyin(src.realized.toCPU())
 
 # *** n op LoadOps ***
