@@ -170,8 +170,9 @@ class LazyBuffer:
 
     # add the store
     if op.op not in LoadOps:
-      # TODO: why doesn't this match?
       info = get_lazyop_info(op)
+      assert info.dtype == self.dtype, f"dtype mismatch {info.dtype=} != {self.dtype=}"
+      # TODO: why doesn't this match?
       #assert info.shape == self.shape, f"shape mismatch {info.shape=} != {self.shape=}"
       op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, self.dtype, ShapeTracker.from_shape(info.shape)))
 
