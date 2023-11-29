@@ -167,6 +167,10 @@ class LazyBuffer:
 
     # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
+
+    # add the store
+    op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, self.dtype, self.st))
+
     return ret + [ScheduleItem(op, self, tuple(base_bufs), {k:var_vals[k] for k in vars_from_ast(op)})]
 
   # *** creation/special ops ***
