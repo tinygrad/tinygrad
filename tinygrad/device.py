@@ -114,7 +114,7 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
     return ret
 
   ret = _interpret_ast(ast)
-  src = '\n'.join(['def run(inputs, var_vals):'] + lines + [f"  return {gstr(fxn_for_op[BufferOps.STORE], BufferOps.STORE)}({ret})" if BufferOps.STORE in fxn_for_op else f"  return {ret}"])
+  src = '\n'.join(['def run(inputs, var_vals):'] + lines + [f"  return {ret}"])
   if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
   exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
   return InterpretedASTRunner(ast, tglob['run'])
