@@ -1,10 +1,10 @@
 from typing import List, cast, Dict, Callable
 import numpy as np
 from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, BufferOps
-from tinygrad.device import Device
+from tinygrad.device import Device, Buffer
 from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import DEBUG, prod, all_int, getenv
+from tinygrad.helpers import DEBUG, prod, all_int, getenv, DType
 
 def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
   # NOTE: if you for loop the schedule it's slow because nothing frees
@@ -27,7 +27,8 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
             break
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
     si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
-      Device[si.out.device].buffer(prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype, **si.out._device_extra_args())
+      Buffer(si.out.device, prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype)
+      #Device[si.out.device].buffer(prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype, **si.out._device_extra_args())
     if si.ast.op in LoadOps:
       # confirm the LoadOps are contiguous and in order
       for i,s in enumerate(si.ast.src): assert isinstance(s, LazyOp) and s.op == BufferOps.LOAD and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
@@ -38,7 +39,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
         Device[si.out.device].get_runner(si.ast).exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)
     del si.out.op
     for v in si.out.views: del v.op
-    assert si.out.realized and isinstance(si.out.realized, Device[si.out.device].buffer), f"device mismatch on realized got {type(si.out.realized)} expected {si.out.device}"
+    #assert si.out.realized and isinstance(si.out.realized, Device[si.out.device].buffer), f"device mismatch on realized got {type(si.out.realized)} expected {si.out.device}"
     assert si.out.realized.dtype == si.out.dtype, f"realized dtype is incorrect, {si.out.realized.dtype} != {si.out.dtype}"
 
 # *** zero op LoadOps ***
@@ -51,7 +52,8 @@ def _realize_rand(buffer: LazyBuffer) -> None:
   assert all_int(buffer.shape), "rand doesn't support symbolic shape"
   if DEBUG >= 2: print(f"***      rand {buffer.device}    seed {buffer.op.arg:<10d}  shape {str(buffer.shape):23s} dtype {buffer.dtype}")
   rng = np.random.default_rng(buffer.op.arg)
-  buffer.realized._copyin(rng.random(size=prod(buffer.shape), dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args())
+  rng_np_buffer = rng.random(size=prod(buffer.shape), dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False)
+  buffer.realized._copyin(rng_np_buffer)
 
 # *** one op LoadOps ***
 

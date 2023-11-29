@@ -8,9 +8,9 @@ from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, dedup, merge_
 from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
+from tinygrad.device import Buffer
 
 from tinygrad.runtime.lib import RawBuffer
-from tinygrad.runtime.ops_cpu import RawNumpyBuffer
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -211,7 +211,7 @@ class LazyBuffer:
 
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:
-    return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, None, dtypes.from_np(x.dtype), RawNumpyBuffer.fromCPU(x))
+    return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, None, dtypes.from_np(x.dtype), Buffer("CPU", prod(x.shape), dtypes.from_np(x.dtype), x))
 
   def cast(self, dtype:DType, bitcast:bool=False):
     return self.e(UnaryOps.CAST, arg=(dtype, bitcast))

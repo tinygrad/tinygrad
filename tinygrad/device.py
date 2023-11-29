@@ -1,7 +1,8 @@
 from __future__ import annotations
+import numpy as np
 from typing import TYPE_CHECKING, Union, Type, Any, List, Optional, Dict, Callable
 import importlib, inspect, functools, pathlib, time, re
-from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name
+from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, Op
@@ -16,9 +17,9 @@ class _Device:
   def __init__(self) -> None: self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
   def canonicalize(self, device:Optional[str]) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "") if device is not None else self.DEFAULT
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def __getitem__(self, x:str) -> Union[Interpreted, Compiled]:
-    x = x.split(":")[0].upper()
-    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._buffers][0]
+  def __getitem__(self, ix:str) -> Union[Interpreted, Compiled]:
+    x = ix.split(":")[0].upper()
+    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._buffers][0](ix)
   @functools.cached_property
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None)   # type: ignore
@@ -29,6 +30,18 @@ class _Device:
       except Exception: pass
     return "CPU"
 Device = _Device()
+
+class Buffer:
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
+    assert isinstance(dtype, DType)
+    self.device, self.size, self.dtype = device, size, dtype
+    self.opaque = opaque if opaque is not None else Device[device].alloc(size*dtype.itemsize, dtype)
+  def __free__(self): Device[self.device].free(self.opaque)
+  def __repr__(self): return f"<buf device:{self.device} size:{self.size}>"
+  def toCPU(self) -> np.ndarray:
+    ret = np.zeros(self.size, self.dtype.np)
+    if self.size > 0: Device[self.device].copyout(ret.data, self.opaque)
+    return ret
 
 # **************** shared device helpers ****************
 
@@ -64,19 +77,20 @@ class InterpretedASTRunner(JITRunner):
     info = get_lazyop_info(ast)
     self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
 
-  def __call__(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> float:
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> float:
     st = time.perf_counter()
-    ret: RawBuffer = self.fxn(rawbufs[1:], var_vals)
+    rawbufs[0].opaque = self.fxn([x.opaque for x in rawbufs[1:]], var_vals)
     et = time.perf_counter() - st
-    update_stats(f"<interpreted {ret.size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit)
-    assert rawbufs[0].dtype == ret.dtype, f"dtype mismatch in Interpreted, {rawbufs[0].dtype=} != {ret.dtype=}"
-    rawbufs[0].dtype, rawbufs[0].size, rawbufs[0]._buf, rawbufs[0].offset = ret.dtype, ret.size, ret._buf, ret.offset
+    update_stats(f"<interpreted {rawbufs[0].size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit)
+    #assert rawbufs[0].dtype == ret.dtype, f"dtype mismatch in Interpreted, {rawbufs[0].dtype=} != {ret.dtype=}"
+    #rawbufs[0].dtype, rawbufs[0].size, rawbufs[0]._buf, rawbufs[0].offset = ret.dtype, ret.size, ret._buf, ret.offset
     return et
 
 class Interpreted:
-  def __init__(self, buffer: Type[RawBuffer], fxn_for_op:Dict[Op, Callable]):
-    self.buffer, self.fxn_for_op = buffer, fxn_for_op
+  def __init__(self, fxn_for_op:Dict[Op, Callable]):
+    self.fxn_for_op = fxn_for_op
     self.synchronize, self.codegen, self.graph = lambda: None, None, None
+  def alloc(self, sz, dtype): return None
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def get_runner(self, ast:LazyOp) -> InterpretedASTRunner: return _get_interpreted_fxn(self.fxn_for_op, ast)

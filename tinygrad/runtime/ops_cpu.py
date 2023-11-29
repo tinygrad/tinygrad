@@ -31,7 +31,7 @@ def einsum_mulacc(einsum, get_strides, expand):
   return mulacc
 
 numpy_fxn_for_op: Dict[Op, Callable] = {
-  BufferOps.LOAD: lambda x: x.toCPU(), BufferOps.CONST: lambda val, dtype: np.array(val, dtype=dtype.np), BufferOps.STORE: RawNumpyBuffer.fromCPU,
+  BufferOps.LOAD: lambda x: x, BufferOps.CONST: lambda val, dtype: np.array(val, dtype=dtype.np), BufferOps.STORE: lambda x: x,
   UnaryOps.NOOP: lambda x: np.require(x, requirements='C'), UnaryOps.EXP2: np.exp2, UnaryOps.LOG2: np.log2, UnaryOps.SIN: np.sin,
   UnaryOps.CAST: lambda x,y: x.view(y[0].np) if y[1] else x.astype(y[0].np, copy=False), UnaryOps.NEG: lambda x: np.logical_not(x) if x.dtype == np.bool_ else np.negative(x),
   BinaryOps.MAX: np.maximum, BinaryOps.CMPLT: lambda x,y: (x<y).astype(output_type(x,y)), BinaryOps.ADD: lambda x, y: np.add(*match_types(x, y)),
@@ -45,4 +45,6 @@ numpy_fxn_for_op: Dict[Op, Callable] = {
   TernaryOps.WHERE: np.where,
 }
 
-CPUDevice = Interpreted(RawNumpyBuffer, numpy_fxn_for_op)
+class CPUDevice(Interpreted):
+  def __init__(self, device): super().__init__(numpy_fxn_for_op)
+  def copyout(self, out:memoryview, opaque:np.ndarray): np.copyto(np.frombuffer(out, opaque.dtype), opaque.flatten())
