@@ -73,7 +73,7 @@ def log_schedule_item(si: ScheduleItem):
     # get inputs for shapetrackers
     input_to_st = defaultdict(list)
     for lo in si.ast.get_lazyops():
-      if lo.op != BufferOps.MEM: continue
+      if lo.op != BufferOps.LOAD: continue
       input_to_st[si.inputs[lo.arg.idx-1]].append(lo.arg.st)
 
     # add them to the graph, potentially with a movement op separating them

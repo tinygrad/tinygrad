@@ -55,5 +55,5 @@ class RawDiskBuffer(RawBufferMapped):
     self.readinto(instance._buffer())
     return instance
 
-disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.MEM: lambda x: x, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
+disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.LOAD: lambda x: x, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
 DiskDevice = Interpreted(RawDiskBuffer, disk_fxn_for_op)
