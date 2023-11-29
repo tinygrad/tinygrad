@@ -20,7 +20,12 @@ def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
   return (t, json_len, json.loads(t[8:8+json_len].numpy().tobytes()))
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
-  xs, json_len, metadata = safe_load_metadata(fn)
+  t, json_len, metadata = safe_load_metadata(fn)
+  return {k: t[v['data_offsets'][0]:].cast(safe_dtypes[v['dtype']])[:prod(v['shape'])].reshape(v['shape']) 
+          if safe_dtypes[v['dtype']] != dtypes.bfloat16 
+          else cast_bfloat16(t[v['data_offsets'][0]:].cast(safe_dtypes[v['dtype']])[:prod(v['shape'])].reshape(v['shape'])) 
+          for k,v in metadata.items() if k != "__metadata__"}
+
   def rebuild_tensor(v):
     x = xs[8+json_len+v['data_offsets'][0]:].cast(safe_dtypes[v['dtype']])[:prod(v['shape'])].reshape(v['shape'])
     return cast_bfloat16(x) if safe_dtypes[v['dtype']] == dtypes.bfloat16 else x
