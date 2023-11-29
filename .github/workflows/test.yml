@@ -144,7 +144,7 @@ jobs:
       - name: Cache APT archives
         uses: actions/cache@v3
         with:
-          path: /var/cache/apt/archives
+          path: /var/cache/apt/archives/*.deb
           key: apt-archives-opencl
       - name: Install OpenCL
         run: |
@@ -374,7 +374,7 @@ jobs:
         if: matrix.backend == 'gpu'
         uses: actions/cache@v3
         with:
-          path: /var/cache/apt/archives
+          path: /var/cache/apt/archives/*.deb
           key: apt-archives-opencl
       - name: Install OpenCL
         if: matrix.backend == 'gpu'
