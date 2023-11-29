@@ -68,7 +68,7 @@ class Kernel:
   def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None):
     self.opts = opts if opts else (cast(Compiled, Device[Device.DEFAULT]).linearizer_opts if isinstance(Device[Device.DEFAULT], Compiled) else LinearizerOptions())
     self.ast = ast
-    assert ast.op == BufferOps.STORE, "kernels must have a store as the output"
+    assert ast.op == BufferOps.STORE, f"kernels must have a store as the output, got {ast.op}"
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(self.ast)
@@ -80,6 +80,7 @@ class Kernel:
 
     # create new shapetrackers inside this kernel, we will permute them
     self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = dedup([x.arg for x in self.ast.get_lazyops() if x.op in BufferOps])
+    assert isinstance(self.bufs[0], MemBuffer) and self.bufs[0].idx == 0, f"buffer 0 is not the store buffer {self.bufs[0]}"
 
     # get earlybufs, before the one reduce op
     self.earlybufs = [x.arg for x in self.reduceop.get_lazyops() if x.op in BufferOps] if self.reduceop else []

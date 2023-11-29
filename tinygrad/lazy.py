@@ -169,7 +169,11 @@ class LazyBuffer:
     op, base_bufs = _replace_bufferops(op)
 
     # add the store
-    op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, self.dtype, self.st))
+    if op.op not in LoadOps:
+      from tinygrad.ops import get_lazyop_info
+      info = get_lazyop_info(op)
+      #assert info.shape == self.shape, f"shape mismatch {info.shape=} != {self.shape=}"
+      op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, self.dtype, ShapeTracker.from_shape(info.shape)))
 
     return ret + [ScheduleItem(op, self, tuple(base_bufs), {k:var_vals[k] for k in vars_from_ast(op)})]
 
