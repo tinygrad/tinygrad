@@ -103,7 +103,9 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
     if TernaryOps.MULACC in fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
 
-    if ast.op in BufferOps:
+    if ast.op is BufferOps.STORE:
+      tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({_interpret_ast(ast.src[0])})"
+    elif ast.op in BufferOps:
       tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"{gstr(fxn_for_op[ast.op], ast.op)}(inputs[{ast.arg.idx-1}])"
       for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(fxn_for_op[mop], mop)}({tmp}, {gstr(arg)})"
     else:
@@ -114,7 +116,7 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
     return ret
 
   ret = _interpret_ast(ast)
-  src = '\n'.join(['def run(inputs, var_vals):'] + lines + [f"  return {gstr(fxn_for_op[BufferOps.FROM_UNDERLYING], BufferOps.FROM_UNDERLYING)}({ret})" if BufferOps.FROM_UNDERLYING in fxn_for_op else f"  return {ret}"])
+  src = '\n'.join(['def run(inputs, var_vals):'] + lines + [f"  return {ret}"])
   if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
   exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
   return InterpretedASTRunner(ast, tglob['run'])

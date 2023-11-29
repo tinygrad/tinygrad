@@ -49,7 +49,7 @@ class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
 @diskcache
 def compile_hip(prg) -> bytes:
   prog = hip.hiprtcCreateProgram(prg, "<null>", [], [])
-  arch = "gfx1100" if MOCKHIP else hip.hipGetDeviceProperties(HIP.default_device).gcnArchName 
+  arch = "gfx1100" if MOCKHIP else hip.hipGetDeviceProperties(HIP.default_device).gcnArchName
   hip.hiprtcCompileProgram(prog, [f'--offload-arch={arch}'])
   return hip.hiprtcGetCode(prog)
 

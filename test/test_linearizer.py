@@ -4,7 +4,7 @@ import unittest, os
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps
 from tinygrad.device import Compiled, Device
-from tinygrad.ops import BufferOps, ConstBuffer, LazyOp, LoadOps, TernaryOps
+from tinygrad.ops import BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
@@ -122,7 +122,10 @@ class TestLinearizer(unittest.TestCase):
 
   def test_simplify_uop(self):
     def helper_test_simplify(uop, dtype, vin, arg=None):
-      lin = Linearizer(ast=LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=42, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))) # this is a dummy ast
+      ast = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=42, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
+      ast = LazyOp(BufferOps.STORE, (ast,), MemBuffer(0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
+      lin = Linearizer(ast=ast) # this is a dummy ast
+
       lin.uops = []
       return lin.uop(uop, dtype, vin, arg, cachable=False)
 

@@ -94,11 +94,12 @@ class Node:
       if self == b: return NumNode(0)
       if (b - self).min > 0 and self.min >= 0: return self # b - self simplifies the node
       raise RuntimeError(f"not supported: {self} % {b}")
-    assert b > 0 and isinstance(self.max, int) and isinstance(self.min, int), 'not supported'
+    assert b > 0
     if b == 1: return NumNode(0)
-    if self.min >= 0 and self.max < b: return self
-    if (self.min//b) == (self.max//b): return self - (b*(self.min//b))
-    if self.min < 0: return (self - ((self.min//b)*b)) % b
+    if isinstance(self.max, int) and isinstance(self.min, int):
+      if self.min >= 0 and self.max < b: return self
+      if (self.min//b) == (self.max//b): return self - (b*(self.min//b))
+      if self.min < 0: return (self - ((self.min//b)*b)) % b
     return create_node(ModNode(self, b))
 
   @staticmethod

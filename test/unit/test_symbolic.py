@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, sym_render, sym_infer, create_rednode
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, ModNode, sym_render, sym_infer, create_rednode
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -376,6 +376,20 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     assert ((gidx0*128+i*128+ridx2*4+129)) % (i*128+128) == gidx0*128 + ridx2*4 + 1
     assert (ridx2*(i*4+4)+1+i+gidx0) // (i*128+128) == 0
     assert (ridx2*(i*4+4)+1+i+gidx0) % (i*128+128) == (ridx2*(i*4+4)+1+i+gidx0)
+
+  def test_mod_node_max(self):
+    i = Variable("i", 1, 128)
+    gidx0 = Variable("gidx0", 0, i)
+    mod = gidx0 % 8
+    assert isinstance(mod, ModNode) and mod.a == gidx0 and mod.b == 8
+    mod = gidx0 % 2
+    assert isinstance(mod, ModNode) and mod.a == gidx0 and mod.b == 2
+
+    gidx0 = Variable("gidx0", 0, i*8+7)
+    mod = gidx0 % 8
+    assert isinstance(mod, ModNode) and mod.a == gidx0 and mod.b == 8
+    mod = gidx0 % 2
+    assert isinstance(mod, ModNode) and mod.a == gidx0 and mod.b == 2
 
   def test_node_lt_node(self):
     a = Variable("a", 1, 5)

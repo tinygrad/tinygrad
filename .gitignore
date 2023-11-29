@@ -31,6 +31,7 @@ extra/datasets/open-images-v6-mlperf
 extra/datasets/kits/
 extra/datasets/COCO/
 extra/datasets/audio*
+extra/weights
 venv
 examples/**/net.*[js,json]
 examples/**/*.safetensors
