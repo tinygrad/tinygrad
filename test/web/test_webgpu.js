@@ -7,9 +7,9 @@ async function timeout(time) {
 }
 
 function cleanup(err) {
-    console.log("cleaning up")
+    console.log("cleaning up");
     res.kill();
-    if(err != null) {
+    if (err != null) {
         console.error(err);
         process.exit(1);
     }
