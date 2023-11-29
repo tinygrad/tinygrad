@@ -253,7 +253,7 @@ jobs:
     - name: Install Puppeteer
       run: npm install puppeteer
     - name: Run WEBGPU Efficientnet
-      run: node test/test_webgpu.js
+      run: node test/web/test_webgpu.js
 
   testmetalwebgpu:
     name: Metal Tests
