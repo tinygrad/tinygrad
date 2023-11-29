@@ -44,12 +44,11 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
 # *** zero op LoadOps ***
 
 def _realize_empty(buffer: LazyBuffer) -> None:
-  assert all_int(buffer.shape), "LoadOps do not support symbolic shape"
   if DEBUG >= 2: print(f"***     empty {buffer.device}                              shape {str(buffer.shape):23s} dtype {buffer.dtype}")
 
 # TODO: remove this and write the RNG in tinygrad
 def _realize_rand(buffer: LazyBuffer) -> None:
-  assert all_int(buffer.shape), "LoadOps do not support symbolic shape"
+  assert all_int(buffer.shape), "rand doesn't support symbolic shape"
   if DEBUG >= 2: print(f"***      rand {buffer.device}    seed {buffer.op.arg:<10d}  shape {str(buffer.shape):23s} dtype {buffer.dtype}")
   rng = np.random.default_rng(buffer.op.arg)
   buffer.realized._copyin(rng.random(size=prod(buffer.shape), dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args())
@@ -59,7 +58,6 @@ def _realize_rand(buffer: LazyBuffer) -> None:
 from tinygrad.runtime.lib import RawBufferMapped, RawBufferTransfer
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
-  assert all_int(buffer.shape), "LoadOps do not support symbolic shape"
   assert src.realized.size == buffer.realized.size, f"size mismatch on FROM {src.realized.size=} != {buffer.realized.size=}"
   assert src.st.contiguous and buffer.st.contiguous, "all must be contiguous for from"
   if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.realized.size:<16d} shape {str(buffer.shape):23s} dtype {src.realized.dtype}")
