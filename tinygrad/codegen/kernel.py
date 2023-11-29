@@ -336,8 +336,8 @@ class Kernel:
         mul_op = self.reduceop.src[0].src[0] if has_cast else self.reduceop.src[0]
 
         if not(isinstance(mul_op, LazyOp) and mul_op.op == BinaryOps.MUL): continue
-        if not(isinstance(mul_op.src[0], LazyOp) and mul_op.src[0].op == BufferOps.MEM and mul_op.src[0].arg.dtype == tc.dtype_in): continue
-        if not(isinstance(mul_op.src[1], LazyOp) and mul_op.src[1].op == BufferOps.MEM and mul_op.src[1].arg.dtype == tc.dtype_in): continue
+        if not(isinstance(mul_op.src[0], LazyOp) and mul_op.src[0].op == BufferOps.LOAD and mul_op.src[0].arg.dtype == tc.dtype_in): continue
+        if not(isinstance(mul_op.src[1], LazyOp) and mul_op.src[1].op == BufferOps.LOAD and mul_op.src[1].arg.dtype == tc.dtype_in): continue
         buf0, buf1 = self.bufs.index(cast(MemBuffer, mul_op.src[0].arg)), self.bufs.index(cast(MemBuffer, mul_op.src[1].arg))
         buf0_strides, buf1_strides = self.sts[buf0].real_strides(), self.sts[buf1].real_strides()
         axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides[:self.first_reduce]) if s == 0 and self.full_shape[i]%tc.dims[0] == 0]
@@ -486,7 +486,7 @@ class Kernel:
     if self.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
         self.reduceop and self.reduceop.op == ReduceOps.SUM and len(self.full_shape) >= 2 and self.opts.has_shared and \
         isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
-        self.reduceop.src[0].src[0].op == BufferOps.MEM and self.reduceop.src[0].src[1].op == BufferOps.MEM:
+        self.reduceop.src[0].src[0].op == BufferOps.LOAD and self.reduceop.src[0].src[1].op == BufferOps.LOAD:
       buf0 = self.bufs.index(self.reduceop.src[0].src[0].arg)
       buf1 = self.bufs.index(self.reduceop.src[0].src[1].arg)
       buf0_strides = self.sts[buf0].real_strides()

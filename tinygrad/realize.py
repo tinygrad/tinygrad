@@ -18,7 +18,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     assert all(x.realized for x in si.inputs), "can't run schedule, some inputs aren't realized"
     if si.ast.op in LoadOps:
       # confirm the LoadOps are contiguous and in order
-      for i,s in enumerate(si.ast.src): assert isinstance(s, LazyOp) and s.op == BufferOps.MEM and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
+      for i,s in enumerate(si.ast.src): assert isinstance(s, LazyOp) and s.op == BufferOps.LOAD and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
       LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out, *si.inputs)
     else:
       assert all(si.out.device == x.device for x in si.inputs), f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
@@ -31,7 +31,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
         for i,a in enumerate(si.inputs):
           # TODO: if this is contiguous it's fine
           if a.realized == si.out.output_buffer:
-            if any(not x.arg.st.contiguous for x in si.ast.get_lazyops() if x.op == BufferOps.MEM and x.arg.idx == i+1):
+            if any(not x.arg.st.contiguous for x in si.ast.get_lazyops() if x.op == BufferOps.LOAD and x.arg.idx == i+1):
               si.out.output_buffer = None
               break
       # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
