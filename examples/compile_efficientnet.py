@@ -14,7 +14,7 @@ if __name__ == "__main__":
   dirname = Path(__file__).parent
   if getenv("CLANG", "") == "":
     safe_save(state, (dirname / "net.safetensors").as_posix())
-    ext = "js" if getenv("WEBGPU", "") != "" else "json"
+    ext = "js" if getenv("WEBGPU", "") != "" or getenv("WEBGL", "") != "" else "json"
     with open(dirname / f"net.{ext}", "w") as text_file:
       text_file.write(prg)
   else:
