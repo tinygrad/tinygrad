@@ -2,10 +2,9 @@ from __future__ import annotations
 import ctypes
 import numpy as np
 from collections import defaultdict, deque
-from typing import TypeVar, Any, Dict, Deque, Tuple
+from typing import Any, Dict, Deque, Tuple
 from tinygrad.helpers import DType, dtypes, prod, GlobalCounters, ImageDType
 
-_T = TypeVar("_T")
 class RawBuffer:  # pylint: disable=abstract-method
   def __init__(self, size:int, dtype:DType, buf:Any=None, allocator:Any=None, **kwargs):
     self.size: int = size
