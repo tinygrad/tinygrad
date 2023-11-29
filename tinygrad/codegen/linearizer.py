@@ -92,20 +92,28 @@ class Linearizer(Kernel):
           if valid.min == 0 and valid.max == 1:
             valid_rendered = valid.render(self.render_ops, self)
             self.load_cache[key] = self.uop(UOps.ALU, localtype, (valid_rendered, self.load_cache[key], self.const(invalid_value, localtype)), TernaryOps.WHERE)
+        elif isinstance(buf.dtype, ImageDType):
+          buf_uop = self.buf_uops[i]
+          assert buf_uop is not None, f"buffer {i} wasn't UOped"
+          image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
+          rendered_idx = self.uop(UOps.CAST, dtypes.int.vec(2), (image_idx[0].render(self.render_ops, self), image_idx[1].render(self.render_ops, self)))
+          valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, dtypes.float32.vec(4))) if valid.min == 0 else tuple()
+          self.load_cache[key] = self.uop(UOps.LOAD, dtypes.float32.vec(4), (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
+          idx_small = idx%4
+          res = idx_small.render(self.render_ops, self)
+          if localtype == localtype.scalar():
+            out = self.uop(UOps.GEP, localtype, (self.load_cache[key],), idx_small.max)
+            for ix in range(idx_small.max, idx_small.min, -1):
+              rvv = self.uop(UOps.GEP, localtype, (self.load_cache[key],), ix-1)
+              sel = self.uop(UOps.ALU, res.dtype, (res, self.const(ix)), BinaryOps.CMPLT)
+              out = self.uop(UOps.ALU, localtype, (sel, rvv, out), TernaryOps.WHERE)
+            self.load_cache[key] = out
         else:
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
-          if isinstance(buf.dtype, ImageDType):
-            idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
-            rendered_idx = self.uop(UOps.CAST, dtypes.int.vec(2), (idx[0].render(self.render_ops, self), idx[1].render(self.render_ops, self)))
-          else:
-            rendered_idx = idx.render(self.render_ops, self)
-
-          if valid.min == 0:
-            valid_rendered = valid.render(self.render_ops, self)
-            self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx, valid_rendered, self.const(invalid_value, localtype)) + ((barrier,) if barrier else ()))
-          else:
-            self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx) + ((barrier,) if barrier else ()))
+          rendered_idx = idx.render(self.render_ops, self)
+          valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
+          self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
       ret.append(self.uop(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
     return ret
 
@@ -383,7 +391,7 @@ class Linearizer(Kernel):
     for u in self.uops:
       if not loop_stack[-1]: loop_stack[-1].append(u)
       elif u.uop == UOps.LOOP: loop_stack.append([u])
-      elif u.uop not in [UOps.CONST, UOps.ALU]: loop_stack[-1].append(u)
+      elif u.uop not in [UOps.CONST, UOps.ALU, UOps.CAST]: loop_stack[-1].append(u)
       else:
         parents = get_recursive_parents(u)
         for i in reversed(range(len(loop_stack))):
