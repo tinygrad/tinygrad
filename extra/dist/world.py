@@ -3,7 +3,7 @@ from extra import dist
 from multiprocessing import shared_memory
 from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.lazy import LazyBuffer
-from tinygrad.runtime.lib import RawBuffer, RawBufferCopyIn, RawBufferCopyInOut
+from tinygrad.runtime.lib import RawBuffer, RawBufferCopyInOut
 try: from tinygrad.runtime.ops_hip import RawHIPBuffer
 except: RawHIPBuffer = None
 from tinygrad.runtime.ops_disk import RawDiskBuffer
@@ -29,7 +29,7 @@ def __recv_rb(args, variables=None, wait=False, jit=False):
   dist.OOB.recv(target_rank)
   if RawHIPBuffer and x.__class__ is RawHIPBuffer:
     x._transfer(y)
-  elif isinstance(x, RawBufferCopyIn): x._copyin(y.toCPU())
+  elif isinstance(x, RawBuffer): x._copyin(y.toCPU())
   else: x.fromCPU(y.toCPU())
   if DEBUG >= 2: print(f"{colored('****', 'magenta' if jit else None)}  rank {getenv('RANK')} recv {x} from rank {target_rank}")
 
@@ -80,7 +80,7 @@ def _recv_rb(x:RawBuffer, target_rank:int):
     y = RawDiskBuffer(x.size, x.dtype, device="disk:shm:"+shm_name)
 
     # fast path when we can directly copyin
-    if isinstance(x, RawBufferCopyIn): x._copyin(y.toCPU())
+    if isinstance(x, RawBuffer): x._copyin(y.toCPU())
     else: x.fromCPU(y.toCPU())
 
     # jit support
