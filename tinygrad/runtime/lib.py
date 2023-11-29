@@ -2,10 +2,9 @@ from __future__ import annotations
 import ctypes
 import numpy as np
 from collections import defaultdict, deque
-from typing import TypeVar, Type, Any, Dict, Deque, Tuple
+from typing import Any, Dict, Deque, Tuple
 from tinygrad.helpers import DType, dtypes, prod, GlobalCounters, ImageDType
 
-_T = TypeVar("_T")
 class RawBuffer:  # pylint: disable=abstract-method
   def __init__(self, size:int, dtype:DType, buf:Any=None, allocator:Any=None, **kwargs):
     self.size: int = size
@@ -20,22 +19,15 @@ class RawBuffer:  # pylint: disable=abstract-method
     if hasattr(self, '_memsz'): GlobalCounters.mem_used -= self._memsz
     if hasattr(self, '_allocator') and self._allocator: self._allocator.free(self._buf)
   def __repr__(self): return f"buffer<{self.size}, {self.dtype}, {id(self)}>"
-
-  # NOTE: this interface allows for 0 copy
-  @classmethod
-  def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
-  def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
-
-class RawBufferCopyIn(RawBuffer):
-  def _copyin(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
-
   @classmethod
   def fromCPU(cls, x:np.ndarray, **kwargs):
     ret = cls(prod(x.shape), dtypes.from_np(x.dtype), **kwargs)
     if x.size > 0: ret._copyin(x)
     return ret
+  def _copyin(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
+  def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
 
-class RawBufferMapped(RawBufferCopyIn):
+class RawBufferMapped(RawBuffer):
   def _buffer(self) -> memoryview: raise NotImplementedError("must be implemented")
   # NOTE: this metadata prevents the backing buffer from being freed. hack can be removed with PEP688
   def toCPU(self) -> np.ndarray: return np.frombuffer(self._buffer(), dtype=np.dtype(self.dtype.np, metadata={"backing": self}), count=self.size)
@@ -47,7 +39,7 @@ class RawMallocBuffer(RawBufferMapped):
   def __init__(self, size, dtype: DType): super().__init__(size, dtype, (ctypes_map[dtype] * size)())
   def _buffer(self): return memoryview(self._buf)
 
-class RawBufferCopyInOut(RawBufferCopyIn):
+class RawBufferCopyInOut(RawBuffer):
   def _copyout(self, x:np.ndarray) -> None: raise NotImplementedError("must be implemented")
 
   def toCPU(self) -> np.ndarray:
