@@ -14,7 +14,7 @@ inverse_type_map = {v:k for k,v in type_map.items()}
 class RawTorchBuffer(RawBuffer):
   def __init__(self, size:int, dtype:DType, buf:Optional[torch.Tensor]=None): super().__init__(size, dtype, buf)
   def _copyin(self, x):
-    buf = torch.from_numpy(np.require(x, requirements='C')).requires_grad_(False).to(device)
+    buf = torch.from_numpy(x if all(s>=0 for s in x.strides) else x.copy()).requires_grad_(False).to(device)
     self.size, self.dtype, self._buf = prod(x.shape), type_map[buf.dtype], buf
   def _get_buf(self): return self._buf if self._buf is not None else torch.empty([self.size], device=device, dtype=inverse_type_map[self.dtype])
   def toCPU(self): return self._get_buf().cpu().numpy()
