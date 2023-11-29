@@ -1,7 +1,8 @@
 from typing import List
 from extra.models.resnet import ResNet50
 from tinygrad.tensor import Tensor
-from tinygrad.ops import LoadOps, Device, Compiled
+from tinygrad.ops import LoadOps
+from tinygrad.device import Device, Compiled
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import time_linearizer, beam_search
 from tinygrad.helpers import ansilen, DEBUG, getenv
