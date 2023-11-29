@@ -256,8 +256,6 @@ jobs:
       run: node test/web/test_webgpu.js
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
-    - name: Run whisper test
-      run: METAL=1 python -m pytest test/models/test_whisper.py
 
   testmetalwebgpu:
     name: Metal Tests
@@ -291,6 +289,8 @@ jobs:
       run: METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
+    - name: Run whisper test
+      run: METAL=1 python -m pytest test/models/test_whisper.py
     - name: Test tensor core reshape-only ops
       run: METAL=1 TC=2 python -m pytest -n=auto test/test_ops.py
 
