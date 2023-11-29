@@ -122,7 +122,7 @@ class Vgg7:
     Downloads a nagadomi/waifu2x JSON weight file and loads it.
     """
     import json
-    data = json.load(fetch("https://github.com/nagadomi/waifu2x/raw/master/models/vgg_7/" + intent + "/" + subtype + "_model.json"))
+    data = json.loads(fetch("https://github.com/nagadomi/waifu2x/raw/master/models/vgg_7/" + intent + "/" + subtype + "_model.json").read_bytes())
     self.load_waifu2x_json(data)
 
   def load_waifu2x_json(self, data: list):
