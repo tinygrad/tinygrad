@@ -14,7 +14,7 @@ from typing import Tuple, List
 from extra.onnx import get_run_onnx
 from tinygrad.graph import print_tree, log_schedule_item
 from tinygrad import Tensor, Device
-from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, fetch, getenv, ImageDType, GRAPH
+from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, fetch, getenv, ImageDType, GRAPH, DEBUG
 from tinygrad.realize import run_schedule
 from tinygrad.ops import LoadOps, ScheduleItem
 Device.DEFAULT = "GPU"
@@ -141,7 +141,7 @@ if __name__ == "__main__":
 
   run_schedule(schedule_independent, disable_logging=True)
   run_schedule(schedule_input)
-  with Context(DEBUG=2, BEAM=getenv("LATEBEAM")):
+  with Context(DEBUG=max(DEBUG.value, 2), BEAM=getenv("LATEBEAM")):
     image_count = sum(isinstance(si.out.dtype, ImageDType) for si in schedule)
     print(f"**** running real kernels {image_count}/{len(schedule)} images ****")
 

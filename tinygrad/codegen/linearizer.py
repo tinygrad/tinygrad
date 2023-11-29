@@ -391,7 +391,7 @@ class Linearizer(Kernel):
     for u in self.uops:
       if not loop_stack[-1]: loop_stack[-1].append(u)
       elif u.uop == UOps.LOOP: loop_stack.append([u])
-      elif u.uop not in [UOps.CONST, UOps.ALU]: loop_stack[-1].append(u)
+      elif u.uop not in [UOps.CONST, UOps.ALU, UOps.CAST]: loop_stack[-1].append(u)
       else:
         parents = get_recursive_parents(u)
         for i in reversed(range(len(loop_stack))):
