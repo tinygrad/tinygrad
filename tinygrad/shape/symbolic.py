@@ -132,7 +132,7 @@ class Node:
 
 class Variable(Node):
   def __new__(cls, expr:Optional[str], nmin:int, nmax:int):
-    assert nmin >= 0 and nmin <= nmax
+    assert nmin >= 0 and nmin <= nmax, f"invalid Variable {expr=} {nmin=} {nmax=}"
     if nmin == nmax: return NumNode(nmin)
     return super().__new__(cls)
 
