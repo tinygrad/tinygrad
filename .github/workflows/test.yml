@@ -179,6 +179,9 @@ jobs:
       - if: ${{ matrix.task == 'optimage'}}
         name: Test GPU IMAGE=2 ops
         run: GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
+      - if: ${{ matrix.task == 'optimage' }}
+        name: Test tensor core ops
+        run: GPU=1 TC=2 python -m pytest -n=auto test/test_ops.py
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model compile and size
         run: |
@@ -193,9 +196,6 @@ jobs:
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot fastvits model correctness (float32)
         run: FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile2.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
-      - if: ${{ matrix.task == 'openpilot' }}
-        name: Test tensor core ops
-        run: GPU=1 TC=2 python -m pytest -n=auto test/test_ops.py
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test multigpu
         run: |
@@ -232,9 +232,9 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-        key: webgpu-testing-packages-${{ hashFiles('**/setup.py') }}
+        key: webgpu-testing-user-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
-      run: pip install -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Cache downloads
       uses: actions/cache@v3
       with:
@@ -254,6 +254,10 @@ jobs:
       run: npm install puppeteer
     - name: Run WEBGPU Efficientnet
       run: node test/web/test_webgpu.js
+    - name: Test LLaMA compile speed
+      run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
+    - name: Run whisper test
+      run: METAL=1 python -m pytest test/models/test_whisper.py
 
   testmetalwebgpu:
     name: Metal Tests
@@ -271,16 +275,14 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-        key: metal-testing-packages-${{ hashFiles('**/setup.py') }}
+        key: metal-testing-user-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Cache downloads
       uses: actions/cache@v3
       with:
         path: ~/Library/Caches/tinygrad/downloads/
         key: downloads-cache-metal-only-${{ env.DOWNLOAD_CACHE_VERSION }}
-    - name: Test LLaMA compile speed
-      run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
     - name: Check Device.DEFAULT (METAL) and print some source
       run: |
         METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
@@ -289,8 +291,6 @@ jobs:
       run: METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
-    - name: Run whisper test
-      run: METAL=1 python -m pytest test/models/test_whisper.py
     - name: Test tensor core reshape-only ops
       run: METAL=1 TC=2 python -m pytest -n=auto test/test_ops.py
 
