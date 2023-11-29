@@ -133,8 +133,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [optimage, openpilot, onnx, optimization]
-    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests' || matrix.task=='openpilot'&&'openpilot (OpenCL) Tests' || matrix.task=='onnx'&&'ONNX Tests' || matrix.task=='optimization'&&'Optimization Tests' }}
+        task: [optimage, openpilot, onnx]
+    name: ${{ matrix.task=='optimage'&&'GPU OPT and IMAGE Tests' || matrix.task=='openpilot'&&'openpilot (OpenCL) Tests' || matrix.task=='onnx'&&'ONNX+Optimization Tests' }}
     runs-on: ubuntu-20.04
     timeout-minutes: 20
 
@@ -211,10 +211,10 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Test ONNX (CLANG)
         run: CLANG=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - if: ${{ matrix.task == 'optimization' }}
+      - if: ${{ matrix.task == 'onnx' }}
         name: Test Action Space
         run: PYTHONPATH="." GPU=1 python3 extra/optimization/get_action_space.py
-      - if: ${{ matrix.task == 'optimization' }}
+      - if: ${{ matrix.task == 'onnx' }}
         name: Test Beam Search
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
 
@@ -232,7 +232,7 @@ jobs:
     - name: Cache python packages
       uses: actions/cache@v3
       with:
-        path: ${{ env.HOME }}/.local/lib/python3.11/site-packages
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
         key: webgpu-testing-user2-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
@@ -273,7 +273,7 @@ jobs:
     - name: Cache python packages
       uses: actions/cache@v3
       with:
-        path: ${{ env.HOME }}/.local/lib/python3.11/site-packages
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
         key: metal-testing-user2-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
