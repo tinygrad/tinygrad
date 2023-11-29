@@ -3,7 +3,7 @@ try: import _posixshmem
 except Exception: pass
 from typing import Optional
 from typing import Callable, Dict, Tuple
-from tinygrad.helpers import prod, all_int, DType, OSX
+from tinygrad.helpers import prod, DType, OSX
 from tinygrad.runtime.lib import RawBufferMapped
 from tinygrad.device import Interpreted
 from tinygrad.ops import Op, MovementOps, UnaryOps, BufferOps
@@ -49,11 +49,6 @@ class RawDiskBuffer(RawBufferMapped):
       self._buf.fd.readinto(buf)
     else:
       buf.cast('B')[:] = self._buffer()
-  def transfer(self, cls, shape, dtype, **kwargs):
-    assert all_int(shape), "does not support symbolic shape"
-    instance = cls(prod(shape), dtype, **kwargs)
-    self.readinto(instance._buffer())
-    return instance
 
 disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.LOAD: lambda x: x, BufferOps.STORE: lambda x: x, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
 DiskDevice = Interpreted(RawDiskBuffer, disk_fxn_for_op)
