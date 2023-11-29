@@ -99,13 +99,13 @@ class Linearizer(Kernel):
           rendered_idx = self.uop(UOps.CAST, dtypes.int.vec(2), (image_idx[0].render(self.render_ops, self), image_idx[1].render(self.render_ops, self)))
           valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, dtypes.float32.vec(4))) if valid.min == 0 else tuple()
           self.load_cache[key] = self.uop(UOps.LOAD, dtypes.float32.vec(4), (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
-          res = (idx%4).render(self.render_ops, self)
+          idx_small = idx%4
+          res = idx_small.render(self.render_ops, self)
           if localtype == localtype.scalar():
-            out = self.const(0, localtype)
-            # TODO: you don't always have to check all of these
-            for ix in range(4, 0, -1):
-              sel = self.uop(UOps.ALU, res.dtype, (res, self.const(ix)), BinaryOps.CMPLT)
+            out = self.uop(UOps.GEP, localtype, (self.load_cache[key],), idx_small.max)
+            for ix in range(idx_small.max, idx_small.min, -1):
               rvv = self.uop(UOps.GEP, localtype, (self.load_cache[key],), ix-1)
+              sel = self.uop(UOps.ALU, res.dtype, (res, self.const(ix)), BinaryOps.CMPLT)
               out = self.uop(UOps.ALU, localtype, (sel, rvv, out), TernaryOps.WHERE)
             self.load_cache[key] = out
         else:
