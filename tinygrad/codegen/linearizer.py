@@ -95,9 +95,13 @@ class Linearizer(Kernel):
         else:
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
+          make_image_float = None
           if isinstance(buf.dtype, ImageDType):
-            idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
-            rendered_idx = self.uop(UOps.CAST, dtypes.int.vec(2), (idx[0].render(self.render_ops, self), idx[1].render(self.render_ops, self)))
+            image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
+            rendered_idx = self.uop(UOps.CAST, dtypes.int.vec(2), (image_idx[0].render(self.render_ops, self), image_idx[1].render(self.render_ops, self)))
+            if localtype == dtypes.float:
+              localtype = dtypes.float.vec(4)
+              make_image_float = idx%4
           else:
             rendered_idx = idx.render(self.render_ops, self)
 
@@ -106,6 +110,15 @@ class Linearizer(Kernel):
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx, valid_rendered, self.const(invalid_value, localtype)) + ((barrier,) if barrier else ()))
           else:
             self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx) + ((barrier,) if barrier else ()))
+          if make_image_float:
+            res = make_image_float.render(self.render_ops, self)
+            out = self.const(0, dtypes.float)
+            for ix in range(4, 0, -1):
+              sel = self.uop(UOps.ALU, res.dtype, (res, self.const(ix)), BinaryOps.CMPLT)
+              rvv = self.uop(UOps.GEP, dtypes.float, (self.load_cache[key],), ix-1)
+              out = self.uop(UOps.ALU, dtypes.float, (sel, rvv, out), TernaryOps.WHERE)
+            self.load_cache[key] = out
+
       ret.append(self.uop(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
     return ret
 

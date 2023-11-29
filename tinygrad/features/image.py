@@ -101,6 +101,8 @@ import dataclasses
 from tinygrad.ops import ScheduleItem, BufferOps, LazyOp, UnaryOps, LoadOps, MemBuffer, get_lazyop_info
 
 def fix_schedule_for_images(schedule:List[ScheduleItem]):
+  return schedule
+
   # this is the fundamental fix, find unwritable or unreadable images and convert them to normal float32 (TODO: should it be float16?)
   replace_inputs = {}
   for i, si in enumerate(schedule):

@@ -172,9 +172,16 @@ class LazyBuffer:
     if op.op not in LoadOps:
       info = get_lazyop_info(op)
       assert info.dtype == self.dtype or isinstance(self.dtype, ImageDType), f"dtype mismatch {info.dtype=} != {self.dtype=}"
+      #assert info.dtype == self.dtype, f"dtype mismatch {info.dtype=} != {self.dtype=}"
+
+      if isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
+        print("forcing image to float32")
+        self.dtype = dtypes.float32
+        op = LazyOp(UnaryOps.CAST, (op, ), (dtypes.float32, False))
+
       # TODO: why doesn't this match?
       #assert info.shape == self.shape, f"shape mismatch {info.shape=} != {self.shape=}"
-      op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, info.dtype, ShapeTracker.from_shape(info.shape)))
+      op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, self.dtype, ShapeTracker.from_shape(info.shape)))
 
     return ret + [ScheduleItem(op, self, tuple(base_bufs), {k:var_vals[k] for k in vars_from_ast(op)})]
 
