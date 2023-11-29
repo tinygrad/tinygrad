@@ -25,14 +25,14 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
           if any(not x.arg.st.contiguous for x in si.ast.get_lazyops() if x.op == BufferOps.LOAD and x.arg.idx == i+1):
             si.out.output_buffer = None
             break
+    # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
+    si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
+      Device[si.out.device].buffer(prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype, **si.out._device_extra_args())
     if si.ast.op in LoadOps:
       # confirm the LoadOps are contiguous and in order
       for i,s in enumerate(si.ast.src): assert isinstance(s, LazyOp) and s.op == BufferOps.LOAD and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
       LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out, *si.inputs)
     else:
-      # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-      si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
-        Device[si.out.device].buffer(prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype, **si.out._device_extra_args())
       # TODO: should this be handled here? it probably just shouldn't be in the schedule
       if not hasattr(si.out.realized, 'size') or si.out.realized.size != 0:
         Device[si.out.device].get_runner(si.ast).exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)
@@ -46,14 +46,13 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
 def _realize_empty(buffer: LazyBuffer) -> None:
   assert all_int(buffer.shape), "LoadOps do not support symbolic shape"
   if DEBUG >= 2: print(f"***     empty {buffer.device}                              shape {str(buffer.shape):23s} dtype {buffer.dtype}")
-  buffer.realized = Device[buffer.device].buffer(prod(buffer.shape), buffer.dtype, **buffer._device_extra_args())
 
 # TODO: remove this and write the RNG in tinygrad
 def _realize_rand(buffer: LazyBuffer) -> None:
   assert all_int(buffer.shape), "LoadOps do not support symbolic shape"
   if DEBUG >= 2: print(f"***      rand {buffer.device}    seed {buffer.op.arg:<10d}  shape {str(buffer.shape):23s} dtype {buffer.dtype}")
   rng = np.random.default_rng(buffer.op.arg)
-  buffer.realized = Device[buffer.device].buffer.fromCPU(rng.random(size=prod(buffer.shape), dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args())
+  buffer.realized._copyin(rng.random(size=prod(buffer.shape), dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False), **buffer._device_extra_args())
 
 # *** one op LoadOps ***
 
@@ -73,13 +72,13 @@ def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
     cast(RawBufferTransfer, buffer.realized)._transfer(src.realized)
   else:
     # TODO: schedule this as FROM to go to CPU, and a FROM to go to device
-    buffer.realized = Device[buffer.device].buffer.fromCPU(src.realized.toCPU(), **buffer._device_extra_args())
+    buffer.realized._copyin(src.realized.toCPU())
 
 # *** n op LoadOps ***
 
 def _realize_custom(buffer: LazyBuffer, *inputs: LazyBuffer) -> None:
   if DEBUG >= 2: print(f"***    custom {buffer.device}                              shape {str(buffer.shape):23s} dtype {buffer.dtype}")
-  buffer.realized = buffer.op.arg(buffer, *inputs)
+  buffer.op.arg(buffer, *inputs)
 
 LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {
   LoadOps.EMPTY: _realize_empty,

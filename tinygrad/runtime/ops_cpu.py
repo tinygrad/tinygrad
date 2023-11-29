@@ -7,8 +7,7 @@ from tinygrad.runtime.lib import RawBuffer
 
 class RawNumpyBuffer(RawBuffer):
   def __init__(self, size:int, dtype:DType, buf:Optional[np.ndarray]=None): super().__init__(size, dtype, buf)
-  @classmethod
-  def fromCPU(cls, x): return cls(x.size, dtypes.from_np(x.dtype), x)
+  def _copyin(self, x): self.size, self.dtype, self._buf = x.size, dtypes.from_np(x.dtype), x
   def toCPU(self): return self._buf if self._buf is not None else np.empty([self.size], self.dtype.np)
 
 def shape_to_axis(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Tuple[int, ...]:
