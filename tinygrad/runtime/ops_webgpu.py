@@ -1,7 +1,7 @@
 import numpy as np
 import functools
 from wgpu.utils.device import get_default_device
-from tinygrad.runtime.lib import RawBufferCopyIn, LRUAllocator
+from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, DType
 from tinygrad.device import Compiled
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -34,7 +34,7 @@ class RawWebGPUAllocator(LRUAllocator):
   def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
 WebGPUAlloc = RawWebGPUAllocator(wgpu_device.limits['max_buffer_size'])
 
-class RawWebGPUBuffer(RawBufferCopyIn):
+class RawWebGPUBuffer(RawBuffer):
   def __init__(self, size:int, dtype:DType):
     assert dtype not in [dtypes.int8,dtypes.uint8,dtypes.int64,dtypes.uint64,dtypes.double], f"dtype {dtype} not supported on WEBGPU"
     super().__init__(size, dtype, allocator=WebGPUAlloc)
