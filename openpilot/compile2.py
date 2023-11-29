@@ -66,10 +66,6 @@ def schedule_to_thneed(schedule, output_fn):
     setattr(prg.clprg, 'op_estimate', prg.op_estimate)
     setattr(prg.clprg, 'prg', prg.prg)
 
-    if getenv("VALIDTEST") == 1:
-      src = re.search(r"=.*\?.*?read_image", prg.prg)
-      if src is not None: raise Exception("Openpilot has valid checks!")
-
     global_size = prg.global_size + [1]*(3-len(prg.global_size))
     local_size = prg.local_size + [1]*(3-len(prg.local_size))
     cl_cache.append((prg.clprg, [[int(g*l) for g,l in zip(global_size, local_size)], local_size, *[x.realized._buf for x in args]]))
