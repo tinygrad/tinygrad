@@ -2,8 +2,8 @@ from __future__ import annotations
 import ctypes
 import numpy as np
 from collections import defaultdict, deque
-from typing import TypeVar, Type, Any, Dict, Deque, Tuple, cast
-from tinygrad.helpers import DType, dtypes, prod, getenv, GlobalCounters, ImageDType
+from typing import TypeVar, Type, Any, Dict, Deque, Tuple
+from tinygrad.helpers import DType, dtypes, prod, GlobalCounters, ImageDType
 
 _T = TypeVar("_T")
 class RawBuffer:  # pylint: disable=abstract-method
@@ -24,8 +24,6 @@ class RawBuffer:  # pylint: disable=abstract-method
   # NOTE: this interface allows for 0 copy
   @classmethod
   def fromCPU(cls:Type[_T], x:np.ndarray) -> _T: raise NotImplementedError("must be implemented")
-  @classmethod
-  def fromBuffer(cls, src:RawBuffer, shape: Tuple, dtype:DType, **kwargs): return cls.fromCPU(src.toCPU(), **kwargs)
   def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
 
 class RawBufferCopyIn(RawBuffer):
@@ -43,13 +41,6 @@ class RawBufferMapped(RawBufferCopyIn):
   def toCPU(self) -> np.ndarray: return np.frombuffer(self._buffer(), dtype=np.dtype(self.dtype.np, metadata={"backing": self}), count=self.size)
   def _copyin(self, x:np.ndarray) -> None: np.copyto(self.toCPU(), x.reshape(-1))
 
-  @classmethod
-  def fromBuffer(cls, src, shape, dtype, **kwargs):
-    from tinygrad.runtime.ops_disk import RawDiskBuffer
-    if isinstance(src, RawDiskBuffer):
-      return src.transfer(cls, shape, dtype, **kwargs)
-    return cast(RawBufferMapped, cls.fromCPU(src.toCPU(), **kwargs))
-
 # this one is simple enough that i moved it out of the runtimes
 ctypes_map = {dtypes.float64:ctypes.c_double, dtypes.float32: ctypes.c_float, dtypes.float16: ctypes.c_int16, dtypes.bfloat16: ctypes.c_int16, dtypes.int8: ctypes.c_int8, dtypes.uint8: ctypes.c_uint8, dtypes.bool: ctypes.c_uint8, dtypes.int32: ctypes.c_int32, dtypes.uint32: ctypes.c_uint32, dtypes.int64: ctypes.c_int64, dtypes.uint64: ctypes.c_uint64, dtypes.int16: ctypes.c_int16, dtypes.uint16: ctypes.c_uint16}
 class RawMallocBuffer(RawBufferMapped):
@@ -66,18 +57,6 @@ class RawBufferCopyInOut(RawBufferCopyIn):
 
 class RawBufferTransfer(RawBuffer):
   def _transfer(self, x:RawBuffer) -> None: raise NotImplementedError("must be implemented")
-
-  @classmethod
-  def transfer(cls, x, shape, dtype, **kwargs):
-    ret = cls(prod(shape), dtype, **kwargs)
-    ret._transfer(x)
-    return ret
-
-  @classmethod
-  def fromBuffer(cls, src, shape, dtype, **kwargs):
-    if isinstance(src, RawBufferTransfer) and getenv("P2P", 0) >= 1:
-      return cls.transfer(src, cls.size, cls.dtype, **kwargs)
-    return cls.fromCPU(src.toCPU(), **kwargs)
 
 class LRUAllocator:
   def __init__(self, dev_memsz=(4<<30)):
