@@ -4,13 +4,9 @@ from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, BufferOps
 from tinygrad.device import Device
 from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import DEBUG, prod, all_int, IMAGE, getenv
-from tinygrad.features.image import fix_schedule_for_images
+from tinygrad.helpers import DEBUG, prod, all_int, getenv
 
 def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
-  # HACK: images can be not usable due to shape
-  if IMAGE >= 2: schedule = fix_schedule_for_images(schedule)
-
   # NOTE: if you for loop the schedule it's slow because nothing frees
   while len(schedule):
     si = schedule.pop(0)

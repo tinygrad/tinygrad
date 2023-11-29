@@ -16,9 +16,14 @@ class TestImageDType(unittest.TestCase):
     assert isinstance(out.lazydata.realized.dtype, ImageDType)
 
   def test_shrink_max(self):
-    it = Tensor.randn(8).cast(dtypes.imagef((1,1,8))).realize()
+    it = Tensor.randn(8).cast(dtypes.imagef((1,2,4))).realize()
     imgv = it.numpy()
     np.testing.assert_equal(np.maximum(imgv[0:3], 0), it[0:3].relu().numpy())
+
+  def test_shrink_to_float(self):
+    it = Tensor.randn(4, 4).cast(dtypes.imagef((1,4,4))).realize()
+    imgv = it.numpy()
+    np.testing.assert_equal(np.maximum(imgv[:, 0], 0), it[:, 0].relu().realize())
 
 if __name__ == '__main__':
   unittest.main()

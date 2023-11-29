@@ -175,7 +175,8 @@ class LazyBuffer:
       #assert info.dtype == self.dtype, f"dtype mismatch {info.dtype=} != {self.dtype=}"
 
       if isinstance(self.dtype, ImageDType) and (prod(self.shape) != prod(self.dtype.shape) or not any(self.shape[x]%4 == 0 for x in self.st.unit_stride_axes())):
-        print("forcing image to float32")
+        # NOTE; this is what makes the dtype above not match
+        #print("forcing image to float32")
         self.dtype = dtypes.float32
         op = LazyOp(UnaryOps.CAST, (op, ), (dtypes.float32, False))
 
