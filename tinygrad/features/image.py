@@ -124,6 +124,7 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
 
     fakes = {}
     for cnt, (key_node, (mnn, mxn, multip)) in enumerate(val_dict.items()):
+      if mnn > mxn: return (idx, idy), valid  # TODO: why is this happening?
       fake_var = Variable("fake_" + str(cnt), mnn, mxn)
       fakes[fake_var] = key_node
       idxy += multip*(fake_var - key_node)
