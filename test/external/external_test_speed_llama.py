@@ -6,7 +6,7 @@ from tinygrad.tensor import Tensor
 from tinygrad import Device
 from tinygrad.nn.state import get_state_dict
 from tinygrad.device import Compiled
-from tinygrad.helpers import dtypes, prod, Profiling
+from tinygrad.helpers import Profiling
 from tinygrad.runtime.lib import RawBuffer
 
 class FakeProgram:
@@ -14,8 +14,7 @@ class FakeProgram:
   def __call__(self, *bufs, global_size, local_size, wait=False): pass
 
 class RawFakeBuffer(RawBuffer):
-  @classmethod
-  def fromCPU(cls, x:np.ndarray, **kwargs): return cls(prod(x.shape), dtypes.from_np(x.dtype), **kwargs)
+  def _copyin(self, x:np.ndarray): pass
   def toCPU(self): return np.empty(self.size, dtype=self.dtype.np)
 
 class TestLLaMASpeed(unittest.TestCase):

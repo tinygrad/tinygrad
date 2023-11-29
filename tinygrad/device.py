@@ -186,7 +186,6 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
     if BEAM >= 1:
       lins = [(("tc" if used_tensor_cores else "hc"), k)]
       kb = Linearizer(ast, linearizer_opts)
-      kb.required_optimizations()
       from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
       # TODO: this shouldn't use Device.DEFAULT, it should get the device from the LinearizerOptions
       test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
@@ -197,6 +196,4 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
       timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
       if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
       k = timed[0][1]
-  else:
-    k.required_optimizations()
   return k

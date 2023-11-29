@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad import Device
-from tinygrad.helpers import Timing, CI
+from tinygrad.helpers import Timing, CI, OSX
 import multiprocessing.shared_memory as shared_memory
 
 N = 4096 if CI else 16384
@@ -9,6 +9,7 @@ class TestCopySpeed(unittest.TestCase):
   @classmethod
   def setUpClass(cls): Device[Device.DEFAULT].synchronize()
 
+  @unittest.skipIf(OSX, "no shm on OSX")
   def testCopySHMtoDefault(self):
     s = shared_memory.SharedMemory(name="test_X", create=True, size=N*N*4)
     s.close()
