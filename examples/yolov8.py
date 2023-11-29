@@ -2,13 +2,12 @@ from tinygrad.nn import Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
 import numpy as np
 from itertools import chain
-from extra.utils import get_child, fetch, download_file
 from pathlib import Path
 import cv2
 from collections import defaultdict
-import time, io, sys
+import time, sys
+from tinygrad.helpers import fetch
 from tinygrad.nn.state import safe_load, load_state_dict
-
 
 #Model architecture from https://github.com/ultralytics/ultralytics/issues/189
 #The upsampling class has been taken from this pull request https://github.com/tinygrad/tinygrad/pull/784 by dc-dc-dc. Now 2(?) models use upsampling. (retinet and this)
@@ -400,7 +399,7 @@ if __name__ == '__main__':
   output_folder_path = Path('./outputs_yolov8')
   output_folder_path.mkdir(parents=True, exist_ok=True)
   #absolute image path or URL
-  image_location = [np.frombuffer(io.BytesIO(fetch(img_path)).read(), np.uint8)]
+  image_location = [np.frombuffer(fetch(img_path).read_bytes(), np.uint8)]
   image = [cv2.imdecode(image_location[0], 1)]
   out_paths = [(output_folder_path / f"{Path(img_path).stem}_output{Path(img_path).suffix}").as_posix()]
   if not isinstance(image[0], np.ndarray):
@@ -412,10 +411,7 @@ if __name__ == '__main__':
   depth, width, ratio = get_variant_multiples(yolo_variant)
   yolo_infer = YOLOv8(w=width, r=ratio, d=depth, num_classes=80)
 
-  weights_location = Path(__file__).parents[1] / "weights" / f'yolov8{yolo_variant}.safetensors'
-  download_file(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors', weights_location)
-
-  state_dict = safe_load(weights_location)
+  state_dict = safe_load(fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{yolo_variant}.safetensors'))
   load_state_dict(yolo_infer, state_dict)
 
   st = time.time()
@@ -425,8 +421,7 @@ if __name__ == '__main__':
   post_predictions = postprocess(preds=predictions, img=pre_processed_image, orig_imgs=image)
 
   #v8 and v3 have same 80 class names for Object Detection
-  class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names')
-  class_labels = class_labels.decode('utf-8').split('\n')
+  class_labels = fetch('https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names').read_text().split("\n")
 
   draw_bounding_boxes_and_save(orig_img_paths=image_location, output_img_paths=out_paths, all_predictions=post_predictions, class_labels=class_labels)
 

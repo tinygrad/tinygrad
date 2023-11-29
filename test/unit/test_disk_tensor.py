@@ -3,10 +3,9 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import dtypes, fetch
+from tinygrad.helpers import dtypes, fetch, temp
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.helpers import Timing
-from extra.utils import temp
 
 def compare_weights_both(url):
   import torch

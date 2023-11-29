@@ -4,10 +4,9 @@ import time
 import unittest
 import numpy as np
 import onnx
-from extra.utils import temp
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import CI, fetch
+from tinygrad.helpers import CI, fetch, temp
 import pytest
 
 pytestmark = [pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
