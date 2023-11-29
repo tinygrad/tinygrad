@@ -235,7 +235,9 @@ jobs:
         path: ${{ env.HOME }}/Library/Python/3.11/lib/python3.11/site-packages
         key: webgpu-testing-user3-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
-      run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+      run: |
+        python3 -c "import site; print(site.getsitepackages(), site.getusersitepackages())"
+        pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Cache downloads
       uses: actions/cache@v3
       with:
