@@ -61,7 +61,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
       if clear_l2:
         # TODO: this is too small for many L2 caches
         with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
-      tms.append(prg.clprg(*rawbufs, *var_vals.values(), **lra, wait=True)*factor)
+      tms.append(prg.clprg(*[x._buf for x in rawbufs], *var_vals.values(), **lra, wait=True)*factor)
   except Exception:
     if DEBUG >= 4:
       import traceback
