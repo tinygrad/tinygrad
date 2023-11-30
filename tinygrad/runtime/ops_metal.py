@@ -1,39 +1,22 @@
 import os, subprocess, pathlib, ctypes, tempfile
+import numpy as np
 import Metal, libdispatch
 from typing import List, Any, Tuple, Dict, cast, Optional
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup
-from tinygrad.device import Compiled, CompiledASTRunner, update_stats
+from tinygrad.device import Compiled, CompiledASTRunner, update_stats, Buffer, Device
 from tinygrad.renderer.metal import MetalRenderer
 from tinygrad.runtime.lib import RawBufferMapped, RawBuffer, LRUAllocator
 from tinygrad.shape.symbolic import Variable
 from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, GraphException
-
-class MetalAllocator(LRUAllocator):
-  def _do_alloc(self, size, dtype, device, **kwargs):
-    buf_len, max_buf_len = size*dtype.itemsize, METAL.device.maxBufferLength()
-    assert buf_len < max_buf_len, f"Buffer length of {buf_len/1e9:5.2f} GB exceeds Metal's max buffer length of {max_buf_len/1e9:5.2f} GB."
-    buf = METAL.device.newBufferWithLength_options_(buf_len, Metal.MTLResourceStorageModeShared)
-    assert buf, f"Metal buffer allocation failed with {buf}."
-    return buf
-  def _do_free(self, buf): buf.release()
-  def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
 
 class _METAL:
   def __init__(self):
     self.mtl_buffers_in_flight: List[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
-    self.allocator = MetalAllocator(self.device.dedicatedMemorySize() or self.device.sharedMemorySize())
+    #self.allocator = MetalAllocator(self.device.dedicatedMemorySize() or self.device.sharedMemorySize())
 METAL = _METAL()
-
-class RawMetalBuffer(RawBufferMapped):
-  def __init__(self, size:int, dtype:DType):
-    assert dtype != dtypes.double, f"METAL does not support {dtype.name}"
-    super().__init__(size, dtype, allocator=METAL.allocator)
-  def _buffer(self):
-    METAL.synchronize()
-    return self._buf.contents().as_buffer(self._buf.length())
 
 def unwrap(x):
   ret, err = x
@@ -80,7 +63,7 @@ class MetalProgram:
     METAL.mtl_buffers_in_flight.append(command_buffer)
 
 class MetalGraph:
-  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int]):
+  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
     self.op_estimate, self.mem_estimate = get_jit_stats(jit_cache)
@@ -95,7 +78,7 @@ class MetalGraph:
     self.icb = METAL.device.newIndirectCommandBufferWithDescriptor_maxCommandCount_options_(icb_descriptor, len(self.jit_cache), Metal.MTLResourceOptions(0))
     if self.icb is None: raise GraphException("create indirect command buffer failed, does your system support this?")
 
-    self.int_buf = RawMetalBuffer(len(var_vals), dtypes.int32)
+    self.int_buf = Device[input_rawbuffers[0].device].alloc(len(var_vals), dtypes.int32)
     read_resources, write_resources = [], []
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledASTRunner = cast(CompiledASTRunner, ji.prg)
@@ -107,26 +90,27 @@ class MetalGraph:
       icb_command.setComputePipelineState_(pipeline_state)
       for i,b in enumerate(ji.rawbufs):
         if b is not None:
-          icb_command.setKernelBuffer_offset_atIndex_(b._buf, 0, i)
-          if i == 0: write_resources.append(b._buf)
-          else: read_resources.append(b._buf)
+          icb_command.setKernelBuffer_offset_atIndex_(b.opaque, 0, i)
+          if i == 0: write_resources.append(b.opaque)
+          else: read_resources.append(b.opaque)
       var_vals_keys = list(var_vals.keys())
       for i,v in enumerate(prg.vars):
-        icb_command.setKernelBuffer_offset_atIndex_(self.int_buf._buf, var_vals_keys.index(v)*4, len(ji.rawbufs)+i)
+        icb_command.setKernelBuffer_offset_atIndex_(self.int_buf, var_vals_keys.index(v)*4, len(ji.rawbufs)+i)
       if j not in self.jc_idx_with_updatable_launch_dims:
         global_size, local_size = prg.launch_dims(var_vals)
         icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
       icb_command.setBarrier()
     self.read_resources, self.write_resources = dedup(read_resources), dedup(write_resources)
     self.command_buffer: Any = None
-    self.int_buf_view = self.int_buf.toCPU()    # TODO: this is metal syncing when it doesn't need to
+    self.int_buf_view = np.frombuffer(self.int_buf.contents().as_buffer(self.int_buf.length()), np.int32)
+    print(self.int_buf_view)
 
   def __call__(self, input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # NOTE: you at least can't update the ints if this is running
     if self.command_buffer is not None and self.command_buffer in METAL.mtl_buffers_in_flight: self.command_buffer.waitUntilCompleted()
-    all_read_resources = self.read_resources + [x._buf for x in input_rawbuffers]
+    all_read_resources = self.read_resources + [x.opaque for x in input_rawbuffers]
     for (j,i),input_idx in self.input_replace.items():
-      self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_idx]._buf, 0, i)
+      self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_idx].opaque, 0, i)
     for j in self.jc_idx_with_updatable_launch_dims:
       global_size, local_size = cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals)
       self.icb.indirectComputeCommandAtIndex_(j).concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
@@ -161,13 +145,12 @@ class MetalDevice(Compiled):
     encoder.endEncoding()
     command_buffer.commit()
     METAL.mtl_buffers_in_flight.append(command_buffer)
+  def _buffer(self, src): return METAL.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, len(src), Metal.MTLResourceStorageModeShared, None)
   def copyin(self, dest, src:memoryview):
     self.copies_in_flight.append(src)
-    msrc = METAL.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, len(src), Metal.MTLResourceStorageModeShared, None)
-    self._copy(dest, msrc)
+    self._copy(dest, self._buffer(src))
   def copyout(self, dest:memoryview, src):
-    mdest = METAL.device.newBufferWithBytesNoCopy_length_options_deallocator_(dest, len(dest), Metal.MTLResourceStorageModeShared, None)
-    self._copy(mdest, src)
+    self._copy(self._buffer(dest), src)
     self.synchronize()
   def synchronize(self):
     for cbuf in METAL.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
