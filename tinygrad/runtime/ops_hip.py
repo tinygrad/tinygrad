@@ -41,6 +41,7 @@ class HIPProgram:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
+    if MOCKHIP: return
     hip.hipSetDevice(self.device)
     self.module = hip.hipModuleLoadData(prg)
     self.prg = hip.hipModuleGetFunction(self.module, name)
@@ -53,6 +54,7 @@ class HIPProgram:
     return time_execution(lambda: hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, 0, c_params), enable=wait)
 
   def __del__(self):
+    if MOCKHIP: return
     hip.hipModuleUnload(self.module)
 
 T = TypeVar("T")
