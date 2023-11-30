@@ -17,7 +17,7 @@ from models.retinanet import decode_bbox
 from tinygrad.helpers import dtypes, Context
 import pickle as pkl
 from numba import njit
-
+from tinygrad.jit import TinyJit
 
 
 
@@ -166,9 +166,9 @@ class RetinaNetTrainer:
         self.coco_eval = COCOeval(self.dataset, iouType="bbox")
         self.debug = debug
         
-        self.image_size = IMAGE_SIZES["debug"] if debug else IMAGE_SIZES["mlperf"]
-        Warning("setting sizes to tiny")
         self.image_size = IMAGE_SIZES["debug"]
+        #Warning("setting sizes to tiny")
+        #self.image_size = IMAGE_SIZES["debug"]
         self.set_matcher_attributes()
         
     def freeze_spec_backbone_layers(self, layers_to_train = ["layer2", "layer3", "layer4"]):
@@ -280,31 +280,22 @@ class RetinaNetTrainer:
             images = self.input_fixup(Tensor(resized, requires_grad=False))
             reference_images = torch.permute(torch.from_numpy(np.array(resized)),(0,3,1,2))/255 
 
-
-            if sys.argv[1]=='m':
-                tensor_model_head_outputs = retina(images)
-                model_head_outputs = {'cls_logits' : tensor_model_head_outputs[:,:,4:], 
-                                    'bbox_regression' : tensor_model_head_outputs[:,:,:4]}
             reference_loss, model_loss = None, None
+            if sys.argv[1]=='m':
+                Tensor.training = True
+                tensor_model_head_outputs = self.train_step(retina, anchors_flattened_levels, optimizer, annotations, images)
+                Tensor.training = False
+                Tensor.no_grad = True
+                predictions = retina.postprocess_detections(tensor_model_head_outputs.numpy(),input_size=self.image_size,anchors=anchors_orig,orig_image_sizes=[t["image_size"] for t in annotations])
+                #TODO this should be done on validation split predictions (no grad)
+                self.mAP_compute(annotations, predictions)
+                Tensor.no_grad = False
+            
             if sys.argv[1]=='r':
+                ref_optimizer.zero_grad()
                 reference_loss = self.reference_forward(reference_images.double(),annotations=annotations)
                 reference_head_outputs = self.reference.last_head_outputs
-            Warning("reference outputs may be losses instead of head outputs if model is being trained")
-
-            
-            if sys.argv[1]=='m':
-                #self.dataset_annotations_to_tg(annotations)
-                model_loss = self.compute_loss(annotations, model_head_outputs, anchors_flattened_levels)
-            
-            
-
-            optimizer.zero_grad()
-            if sys.argv[1]=='m':
-                losses = model_loss["classification"]+model_loss["bbox_regression"]
-                losses.backward()
-                print(losses.numpy())
-                optimizer.step()
-            elif sys.argv[1]=='r':
+                Warning("reference outputs may be losses instead of head outputs if model is being trained")
                 losses = reference_loss["classification"]+reference_loss["bbox_regression"]
                 losses.backward()
                 print(losses)
@@ -315,16 +306,26 @@ class RetinaNetTrainer:
             
             #TODO input_size=self.image_size? WATCH OUT PARAMETERS AND USAGE
 
-            Tensor.no_grad = True
-            predictions = retina.postprocess_detections(tensor_model_head_outputs.numpy(),input_size=self.image_size,anchors=anchors_orig,orig_image_sizes=[t["image_size"] for t in annotations])
-            #TODO this should be done on validation split predictions (no grad)
-            self.mAP_compute(annotations, predictions)
-            Tensor.no_grad = False
+            
+
         self.coco_eval.params.imgIds = self.evaluated_imgs
         self.coco_eval._paramsEval.imgIds = self.evaluated_imgs
         self.coco_eval.evalImgs = list(np.concatenate(self.coco_evalimgs, -1).flatten())
         self.coco_eval.accumulate()
         self.coco_eval.summarize()
+        
+    @TinyJit
+    def train_step(self, retina, anchors_flattened_levels, optimizer, annotations, images):
+        optimizer.zero_grad()
+        tensor_model_head_outputs = retina(images)
+        model_head_outputs = {'cls_logits' : tensor_model_head_outputs[:,:,4:], 
+                                    'bbox_regression' : tensor_model_head_outputs[:,:,:4]}
+        model_loss = self.compute_loss(annotations, model_head_outputs, anchors_flattened_levels)
+        loss = model_loss["classification"]+model_loss["bbox_regression"]
+        loss.backward()
+        print(loss.numpy())
+        optimizer.step()
+        return tensor_model_head_outputs
 
     def tg_init_setup(self, mlperf_model = None):
         retina = self.model
@@ -392,16 +393,17 @@ class RetinaNetTrainer:
             img_annotations["labels"] = Tensor(img_annotations["labels"])
         return
     def mAP_compute(self, annotations, predictions):
-        breakpoint()
+
         img_ids = [t["image_id"] for t in annotations]
         coco_results  = [{"image_id": annotations[i]["image_id"], "category_id": label, "bbox": box, "score": score} 
             for i, prediction in enumerate(predictions)  for box, score, label in zip(*prediction.values())]
         for coco_result in coco_results:
             coco_result["bbox"] = coco_result["bbox"].tolist()
-        #with redirect_stdout(None):
-        if(len(coco_results)==0): coco_results.append({"bbox":[], "image_id":img_ids[0], "category_id":0, "score":0})
 
-        self.coco_eval.cocoDt = self.dataset.loadRes(coco_results)
+        print(f"{len(coco_results)} detections in batch" )
+        
+        
+        self.coco_eval.cocoDt = self.dataset.loadRes(coco_results) if coco_results else COCO()
         self.coco_eval.params.imgIds = img_ids
         self.coco_eval.evaluate()
         self.evaluated_imgs.extend(img_ids)
