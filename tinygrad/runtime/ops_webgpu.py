@@ -28,7 +28,7 @@ class WebGPUProgram:
     wgpu_device.queue.submit([command_encoder.finish()])
 
 class WebGpuAllocator(Allocator):
-  def alloc(self, size: int, dtype: DType):
+  def _alloc(self, size: int, dtype: DType):
     assert dtype not in [dtypes.int8,dtypes.uint8,dtypes.int64,dtypes.uint64,dtypes.double], f"dtype {dtype} not supported on WEBGPU"
     return wgpu_device.create_buffer(size=size*dtype.itemsize, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC)
   def copyin(self, dest, src: memoryview): wgpu_device.queue.write_buffer(dest, 0, src)

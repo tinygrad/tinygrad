@@ -49,9 +49,8 @@ class MetalProgram:
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
     for i,a in enumerate(bufs):
-      if isinstance(a, Metal.AGXG15XFamilyBuffer): encoder.setBuffer_offset_atIndex_(a, 0, i)
-      elif isinstance(a, int): encoder.setBytes_length_atIndex_((arg:=ctypes.c_int32(a)), ctypes.sizeof(arg), i)
-      else: raise RuntimeError(f"arg at index {i} has unsupported type {type(a)}")
+      if isinstance(a, int): encoder.setBytes_length_atIndex_((arg:=ctypes.c_int32(a)), ctypes.sizeof(arg), i)
+      else: encoder.setBuffer_offset_atIndex_(a, 0, i)
     encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.commit()

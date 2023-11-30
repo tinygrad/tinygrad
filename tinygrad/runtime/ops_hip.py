@@ -121,10 +121,10 @@ class HIPGraph:
 T = TypeVar("T")
 class HIPAllocator(Allocator):
   def __init__(self, device): self.device = device
-  def alloc(self, size: int, dtype: DType):
+  def _alloc(self, size: int, dtype: DType):
     hip.hipSetDevice(self.device)
     return hip.hipMalloc(size * dtype.itemsize)
-  def free(self, opaque:T, size, dtype): hip.hipFree(opaque)
+  def _free(self, opaque:T, size, dtype): hip.hipFree(opaque)
   def copyin(self, dest:T, src: memoryview):
     hip.hipSetDevice(self.device)
     hip.hipMemcpyAsync(dest, from_mv(src), len(src), hip.hipMemcpyHostToDevice, 0)
@@ -134,9 +134,9 @@ class HIPAllocator(Allocator):
   def transfer(self, dest:T, src:T, sz:int):
     hip.hipSetDevice(self.device)
     hip.hipMemcpy(dest, src, sz, hip.hipMemcpyDeviceToDevice)
-  def synchronize(self): hip.hipDeviceSynchronize()
 
 class HIPDevice(Compiled):
   def __init__(self, device:str):
     self.device = int(device.split(":")[1]) if ":" in device else 0
     super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self.device), LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, HIPProgram, graph=HIPGraph)
+  def synchronize(self): hip.hipDeviceSynchronize()
