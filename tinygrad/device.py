@@ -55,7 +55,7 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
   GlobalCounters.global_mem += mem_estimate
   if et is not None: GlobalCounters.time_sum_s += et
 
-# **************** for Interpreted Buffers ****************
+# **************** for Interpreted Devices ****************
 
 class InterpretedASTRunner(JITRunner):
   def __init__(self, ast:LazyOp, fxn:Callable):
@@ -121,7 +121,7 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
   exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
   return InterpretedASTRunner(ast, tglob['run'])
 
-# **************** for Compiled Buffers ****************
+# **************** for Compiled Devices ****************
 
 class CompiledASTRunner(JITRunner):
   def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None):
@@ -185,14 +185,14 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
     if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
     if BEAM >= 1:
       lins = [(("tc" if used_tensor_cores else "hc"), k)]
+      if used_tensor_cores:
+        lins.append(("hc", Linearizer(ast, linearizer_opts)))
+        lins[-1][1].hand_coded_optimizations()
       kb = Linearizer(ast, linearizer_opts)
       from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
       # TODO: this shouldn't use Device.DEFAULT, it should get the device from the LinearizerOptions
       test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
       lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
-      if used_tensor_cores:
-        lins.append(("hc", Linearizer(ast, linearizer_opts)))
-        lins[-1][1].hand_coded_optimizations()
       timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
       if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
       k = timed[0][1]

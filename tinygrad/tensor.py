@@ -300,18 +300,22 @@ class Tensor:
   #    - There's a special case where a permute is needed at the end:
   #        - if first Tensor passed in (expand dims) is not at dim 0
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
-  def __getitem__(self, val) -> Tensor: # val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
+  def __getitem__(self, indices) -> Tensor: # indices: Union[int, slice, Tensor, None, Ellipsis, List, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
     def normalize_int(e, i, dim_sz):
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
 
-    orig_slices = list(val) if isinstance(val, tuple) else [val]
+    # TODO: if indices is a tuple of any sequence, or if indices is a list, it's for advanced indexing
+    orig_slices = list(indices) if isinstance(indices, tuple) else [indices]
     count = defaultdict(list)
     for i,v in enumerate(orig_slices): count[type(v)].append(i)
 
-    if (num_slices := len(count[int]) + len(count[slice]) + len(count[Tensor])) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+    # TODO: boolean indices
+    if (num_slices := len(count[int]) + len(count[slice]) + len(count[Tensor]) + len(count[list])) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     if len(ellipsis_found := count[type(Ellipsis)]) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
 
+    # replace ellipsis with equivalent number of slice(None)
+    # TODO: move all slice(None) to the end and transpose non-None to the front
     ellipsis_idx = ellipsis_found[0] if ellipsis_found else len(orig_slices)
     orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
 
@@ -337,8 +341,8 @@ class Tensor:
       if s is None: final_shape.append(1)
       else: # s is int or slice or Tensor
         dim_shape = next(it_shape)
-        if isinstance(s, int):
-          dim_collapsed += 1
+        if isinstance(s, list): s = Tensor(s)
+        if isinstance(s, int): dim_collapsed += 1
         else:
           assert isinstance(dim_shape, int), f"does not support symbolic shape {dim_shape}"
           final_shape.append(dim_shape)

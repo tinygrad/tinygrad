@@ -169,7 +169,7 @@ class dtypes:
   def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod}
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and v.__class__ is not staticmethod}
 INVERSE_DTYPES_DICT = {v:k for k,v in DTYPES_DICT.items()}
 
 class GlobalCounters:
