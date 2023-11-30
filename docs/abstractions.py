@@ -187,16 +187,14 @@ class Buffer(ABC):
   # toCPU converts the RawBuffer to a numpy array with shape (size,)
   def toCPU(self) -> np.ndarray: pass
 
-
 # %%
 # == Example: 2+3 in raw clang ==
 
-from tinygrad.device import Device
-
-# RawMallocBuffer is the simplest concrete version of RawBuffer (in tinygrad/ops.py)
+# MallocAllocator is the simplest concrete version of Allocator (in tinygrad/device.py)
 # it's used for the CLANG and LLVM backends
 # it's just malloc(size * dtype.itemsize)
-from tinygrad.runtime.lib import RawMallocBuffer
+from tinygrad.device import MallocAllocator
+bm = MallocAllocator()
 
 # ClangProgram is the simplest runtime (in tinygrad/runtime/ops_clang.py, code 7/10)
 # __init__ calls clang, and __call__ calls the function in the *.so outputted by clang
@@ -208,16 +206,21 @@ from tinygrad.runtime.ops_clang import ClangProgram, compile_clang
 # then we copy the numpy in to RawMallocBuffers
 # last, we create an empty output buffer
 from tinygrad.helpers import dtypes
+input_a, input_b = bm.alloc(1, dtypes.float32), bm.alloc(1, dtypes.float32)
+output = bm.alloc(1, dtypes.float32)
+
+# now we copy in the values
 numpy_a, numpy_b = np.array([2], dtype=np.float32), np.array([3], dtype=np.float32)
-input_a, input_b = RawMallocBuffer.fromCPU(numpy_a), RawMallocBuffer.fromCPU(numpy_b)
-output = RawMallocBuffer(1, dtypes.float32)
+bm.copyin(input_a, numpy_a.data.cast("B"))
+bm.copyin(input_b, numpy_b.data.cast("B"))
 
 # compile the program, run it, and 2+3 does indeed equal 5
 program = ClangProgram("add", compile_clang(f"void add(float *a, float *b, float *c) {{ *a = *b + *c; }}"))
 program(output, input_a, input_b)
-print(output.toCPU())
-assert output.toCPU()[0] == 5, "it's still 5"
-np.testing.assert_allclose(output.toCPU(), numpy_a+numpy_b)
+numpy_out = np.empty(1, dtype=np.float32)
+bm.copyout(numpy_out.data.cast("B"), output)
+assert numpy_out[0] == 5, "it's still 5"
+np.testing.assert_allclose(numpy_out, numpy_a+numpy_b)
 
 # %%
 # == Linearizer (in tinygrad/codegen/linearizer.py, code 4/10) ==

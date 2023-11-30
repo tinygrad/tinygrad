@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np
 from collections import defaultdict
-from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple, TypeVar
+from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple
 import importlib, inspect, functools, pathlib, time, re
 from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType, from_mv
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -33,11 +33,10 @@ class _Device:
     return "CPU"
 Device = _Device()
 
-T = TypeVar("T")
 class _LRUAlloc:
   def __init__(self):
-    self.cache: Dict[Tuple[str, int, DType], T] = defaultdict(list)
-  def __call__(self, device:str, size:int, dtype:DType) -> T:
+    self.cache: Dict[Tuple[str, int, DType], Any] = defaultdict(list)
+  def __call__(self, device:str, size:int, dtype:DType) -> Any:
     if len(c := self.cache[(device, size, dtype)]): return c.pop()
     try:
       return Device[device].allocator.alloc(size, dtype)
@@ -46,8 +45,8 @@ class _LRUAlloc:
       return Device[device].allocator.alloc(size, dtype)
   def free_cache(self):
     for (device, _, _), opaque in self.cache.items():
-      Device[device].free(opaque)
-  def free(self, opaque:T, device, size, dtype):
+      Device[device].allocator.free(opaque)
+  def free(self, opaque:Any, device, size, dtype):
     if isinstance(Device[device], Interpreted):
       Device[device].allocator.free(opaque)
     else:
@@ -249,7 +248,7 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
   return k
 
 import ctypes
-class MallocAllocator:
+class MallocAllocator(Allocator):
   def alloc(self, size:int, dtype:DType): return (ctypes.c_uint8 * (size*dtype.itemsize))()
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))

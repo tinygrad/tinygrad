@@ -120,6 +120,7 @@ class HIPGraph:
 
 T = TypeVar("T")
 class HIPAllocator(Allocator):
+  def __init__(self, device): self.device = device
   def alloc(self, size: int, dtype: DType):
     hip.hipSetDevice(self.device)
     return hip.hipMalloc(size * dtype.itemsize)
@@ -138,4 +139,4 @@ class HIPAllocator(Allocator):
 class HIPDevice(Compiled):
   def __init__(self, device:str):
     self.device = int(device.split(":")[1]) if ":" in device else 0
-    super().__init__(MallocAllocator() if MOCKHIP else HIPAllocator(), LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, HIPProgram, graph=HIPGraph)
+    super().__init__(MallocAllocator() if MOCKHIP else HIPAllocator(self.device), LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, HIPProgram, graph=HIPGraph)
