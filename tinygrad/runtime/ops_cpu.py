@@ -42,5 +42,5 @@ numpy_fxn_for_op: Dict[Op, Callable] = {
 class CPUDevice(Interpreted):
   def __init__(self, device): super().__init__(numpy_fxn_for_op)
   def alloc(self, size:int, dtype:DType): return np.empty(size, dtype.np)
-  def copyin(self, dest:np.ndarray, src:memoryview): np.copyto(dest, np.frombuffer(src, dest.dtype))
+  def copyin(self, dest:np.ndarray, src:memoryview): np.copyto(dest, np.frombuffer(src, dest.dtype).reshape(dest.shape))
   def copyout(self, dest:memoryview, src:np.ndarray): np.copyto(np.frombuffer(dest, src.dtype), src.flatten())
