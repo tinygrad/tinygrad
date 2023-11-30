@@ -110,19 +110,17 @@ class TestIndexing(unittest.TestCase):
 
     # pick a random valid indexer type
     def ri(indices):
-      # choice = random.randint(0, 2)
-      # TODO: we only support Tensor index now
-      choice = 0
+      choice = random.randint(0, 1)
+      # TODO: we do not support tuple of list for index now
       if choice == 0: return Tensor(indices)
       if choice == 1: return list(indices)
       return tuple(indices)
 
     def validate_indexing(x):
-      # TODO: we only support Tensor index now
-      # numpy_testing_assert_equal_helper(x[[0]], consec((1,)))
+      numpy_testing_assert_equal_helper(x[[0]], consec((1,)))
       numpy_testing_assert_equal_helper(x[ri([0]),], consec((1,)))
       numpy_testing_assert_equal_helper(x[ri([3]),], consec((1,), 4))
-      # numpy_testing_assert_equal_helper(x[[2, 3, 4]], consec((3,), 3))
+      numpy_testing_assert_equal_helper(x[[2, 3, 4]], consec((3,), 3))
       numpy_testing_assert_equal_helper(x[ri([2, 3, 4]),], consec((3,), 3))
       numpy_testing_assert_equal_helper(x[ri([0, 2, 4]),], np.array([1, 3, 5]))
 
