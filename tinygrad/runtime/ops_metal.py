@@ -27,7 +27,7 @@ class _METAL:
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     (desc := Metal.MTLIOCommandQueueDescriptor.alloc().init()).setType_(Metal.MTLIOCommandQueueTypeConcurrent)
     desc.setPriority_(Metal.MTLIOPriorityHigh)
-    desc.setMaxCommandsInFlight_(2**64)
+    desc.setMaxCommandsInFlight_(2**64-1)
     self.mtl_io_queue, err = self.device.newIOCommandQueueWithDescriptor_error_(desc, None)
     assert err is None, err
     self.allocator = MetalAllocator(self.device.dedicatedMemorySize() or self.device.sharedMemorySize())
