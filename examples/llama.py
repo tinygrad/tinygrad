@@ -13,6 +13,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad.helpers import GlobalCounters
 from extra.models.llama import Transformer, convert_from_huggingface
+from sentencepiece import SentencePieceProcessor
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
 
@@ -146,11 +147,11 @@ class AbsmaxQuantizedLinear:
 class LLaMa:
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
-    from sentencepiece import SentencePieceProcessor
-    sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
-    assert sp_model.vocab_size() == MODEL_PARAMS[model_gen][model_size]["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {MODEL_PARAMS[model_gen][model_size]['args']['vocab_size']}"
-
     params = MODEL_PARAMS[model_gen][model_size]
+
+    sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
+    assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
+
     model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT)
 
     if model_path.is_dir():
@@ -158,7 +159,7 @@ class LLaMa:
     else:
       weights = load(str(model_path))
     if "model.embed_tokens.weight" in weights:
-      weights = convert_from_huggingface(weights, model, model_args["n_heads"], model_args.get("n_kv_heads", model_args["n_heads"]))
+      weights = convert_from_huggingface(weights, model, params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
 
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
