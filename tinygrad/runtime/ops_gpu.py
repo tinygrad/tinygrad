@@ -24,7 +24,7 @@ def compile_gpu(prg:str) -> bytes:
   return clprg.get_info(cl.program_info.BINARIES)[0]
 
 class CLProgram:
-  def __init__(self, device:GPUDevice, name:str, prg:bytes, bufs:int=0, vars:int=0):
+  def __init__(self, device:GPUDevice, name:str, prg:bytes, bufs:int, vars:int=0):
     self.device, self.name, self.clprogram = device, name, cl.Program(device.ctx, [device.ctx.devices[0]], [prg])
     self.clprogram.build()
     self.clprg = self.clprogram.__getattr__(name)

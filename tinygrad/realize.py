@@ -33,7 +33,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
       if si.ast.op in LoadOps:
         # confirm the LoadOps are contiguous and in order
         for i,s in enumerate(si.ast.src): assert isinstance(s, LazyOp) and s.op == BufferOps.LOAD and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
-        kwargs = {"arg": si.ast.arg} if si.ast.arg else {}
+        kwargs = {"arg": si.ast.arg} if si.ast.arg is not None else {}
         LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out.realized, *[x.realized for x in si.inputs], **kwargs)
       else:
         Device[si.out.device].get_runner(si.ast).exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)

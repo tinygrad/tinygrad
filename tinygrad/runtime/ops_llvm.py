@@ -54,7 +54,7 @@ def compile_llvm(prg, llvmopt=LLVMOPT) -> bytes:
   return LLVM.target_machine.emit_object(mod)
 
 class LLVMProgram:
-  def __init__(self, name:str, lib:bytes, bufs:int=0, vars:int=0):
+  def __init__(self, name:str, lib:bytes, bufs:int, vars:int=0):
     LLVM().engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(lib))
     self.fxn = LLVM.engine.get_function_address(name)
     self.cfunc = CFUNCTYPE(ctypes.c_int, *([ctypes.c_void_p]*bufs), *([ctypes.c_int]*vars))(self.fxn)

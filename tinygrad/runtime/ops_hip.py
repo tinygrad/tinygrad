@@ -34,7 +34,7 @@ def time_execution(cb, enable=False):
     return ret
 
 class HIPProgram:
-  def __init__(self, device:int, name:str, prg:bytes, bufs:int=0, vars:int=0):
+  def __init__(self, device:int, name:str, prg:bytes, bufs:int, vars:int=0):
     self.device, self.c_struct_t = device, None
 
     if DEBUG >= 6:
