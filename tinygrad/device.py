@@ -33,13 +33,6 @@ class _Device:
     return "CPU"
 Device = _Device()
 
-"""
-  def alloc
-
-  def __call__(self, size:int, dtype:DType) -> Any:
-LRUAlloc: Dict[str, Allocator] = {}
-"""
-
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
     assert isinstance(dtype, DType)
@@ -61,28 +54,27 @@ class Buffer:
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
-  def alloc(self, size:int, dtype:DType): raise NotImplementedError("need alloc")
-  def free(self, opaque, size:int, dtype:DType): pass # if you are returning a Python object, you don't need a free
-  #def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
-  #def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
+  def alloc(self, size:int, dtype:DType): return self._alloc(size, dtype)
+  def _alloc(self, size:int, dtype:DType): raise NotImplementedError("need alloc")
+  def free(self, opaque, size:int, dtype:DType): self._free(opaque) # if you are returning a Python object, you don't need a free
+  def _free(self, opaque): pass
+  def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
+  def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
 
-class LRUAlloc(Allocator):
-  def __init__(self, allocator:Allocator):
-    self.allocator = allocator
-    self.cache: Dict[Tuple[int, DType], Any] = defaultdict(list)
+class LRUAllocator(Allocator):
+  def __init__(self): self.cache: Dict[Tuple[int, DType], Any] = defaultdict(list)
   def alloc(self, size:int, dtype:DType):
     if len(c := self.cache[(size, dtype)]): return c.pop()
     try:
-      return self.allocator.alloc(size, dtype)
+      return self._alloc(size, dtype)
     except MemoryError:
       self.free_cache()
-      return self.allocator.alloc(size, dtype)
+      return self._alloc(size, dtype)
   def free_cache(self):
-    for (size, dtype), opaque in self.cache.items():
-      self.allocator.free(opaque, size, dtype)
-  def free(self, opaque:Any, size, dtype):
-    self.cache[(size, dtype)].append(opaque)
-  def __getattr__(self, attr): return getattr(self.allocator, attr)
+    for opaques in self.cache.values():
+      for opaque in opaques: self._free(opaque)
+      opaques.clear()
+  def free(self, opaque:Any, size:int, dtype:DType): self.cache[(size, dtype)].append(opaque)
 
 # **************** shared device helpers ****************
 
@@ -253,8 +245,8 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
   return k
 
 import ctypes
-class _MallocAllocator(Allocator):
-  def alloc(self, size:int, dtype:DType): return (ctypes.c_uint8 * (size*dtype.itemsize))()
+class _MallocAllocator(LRUAllocator):
+  def _alloc(self, size:int, dtype:DType): return (ctypes.c_uint8 * (size*dtype.itemsize))()
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
-MallocAllocator = LRUAlloc(_MallocAllocator())
+MallocAllocator = _MallocAllocator()

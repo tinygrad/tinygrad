@@ -26,7 +26,7 @@ disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.STORE: lambda x, arg: arg, Una
 MAP_LOCKED, MAP_POPULATE = 0x2000, 0x008000
 class DiskAllocator(Allocator):
   def __init__(self, device): self.device = device
-  def alloc(self, size, dtype):
+  def _alloc(self, size, dtype):
     if str(self.device).startswith("shm:"):
       if OSX:
         with open(f"/tmp/shm_{self.device[4:]}", "w+b") as f:
