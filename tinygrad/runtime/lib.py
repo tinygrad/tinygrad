@@ -32,7 +32,7 @@ class RawBufferMapped(RawBuffer):
   def _buffer(self) -> memoryview: raise NotImplementedError("must be implemented")
   # NOTE: this metadata prevents the backing buffer from being freed. hack can be removed with PEP688
   def toCPU(self) -> np.ndarray:
-    if hasattr(self, "cmd_buf") and not self.cmd_buf is None:
+    if hasattr(self, "cmd_buf") and self.cmd_buf is not None:
       self.cmd_buf.waitUntilCompleted()
       self.cmd_buf = None
     return np.frombuffer(self._buffer(), dtype=np.dtype(self.dtype.np, metadata={"backing": self}), count=self.size)
