@@ -1,6 +1,7 @@
 from __future__ import annotations
 import numpy as np
-from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable
+from collections import defaultdict
+from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple, TypeVar
 import importlib, inspect, functools, pathlib, time, re
 from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType, from_mv
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -32,11 +33,34 @@ class _Device:
     return "CPU"
 Device = _Device()
 
+T = TypeVar("T")
+class _LRUAlloc():
+  def __init__(self):
+    self.cache: Dict[Tuple[str, int, DType], T] = defaultdict(list)
+  def __call__(self, device:str, size:int, dtype:DType) -> T:
+    if len(c := self.cache[(device, size, dtype)]): return c.pop()
+    try:
+      return Device[device].alloc(size, dtype)
+    except MemoryError:
+      self.free_cache()
+      return Device[device].alloc(size, dtype)
+  def free_cache(self):
+    for (device, size, dtype), opaque in self.cache.items():
+      Device[device].free(opaque)
+  def free(self, opaque:T, device, size, dtype):
+    self.cache[(device, size, dtype)].append(opaque)
+    #Device[device].free(opaque)
+LRUAlloc = _LRUAlloc()
+
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype = device, size, dtype
-    self.opaque = opaque if opaque is not None or size==0 else Device[device].alloc(size, dtype)
+    self.opaque = opaque if opaque is not None or size==0 else LRUAlloc(device, size, dtype)
+    GlobalCounters.mem_used += self.size * self.dtype.itemsize
+  def __del__(self):
+    GlobalCounters.mem_used -= self.size * self.dtype.itemsize
+    LRUAlloc.free(self.opaque, self.device, self.size, self.dtype)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size}>"
   def toCPU(self) -> np.ndarray:
     ret = np.empty(self.size, self.dtype.np)
@@ -89,8 +113,6 @@ class InterpretedASTRunner(JITRunner):
     rawbufs[0].opaque = self.fxn([x.opaque for x in rawbufs[1:]], var_vals)
     et = time.perf_counter() - st
     update_stats(f"<interpreted {rawbufs[0].size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit)
-    #assert rawbufs[0].dtype == ret.dtype, f"dtype mismatch in Interpreted, {rawbufs[0].dtype=} != {ret.dtype=}"
-    #rawbufs[0].dtype, rawbufs[0].size, rawbufs[0]._buf, rawbufs[0].offset = ret.dtype, ret.size, ret._buf, ret.offset
     return et
 
 class Interpreted(DeviceImpl):

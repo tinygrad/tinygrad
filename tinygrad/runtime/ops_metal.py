@@ -76,7 +76,7 @@ class MetalGraph:
     self.icb = METAL.device.newIndirectCommandBufferWithDescriptor_maxCommandCount_options_(icb_descriptor, len(self.jit_cache), Metal.MTLResourceOptions(0))
     if self.icb is None: raise GraphException("create indirect command buffer failed, does your system support this?")
 
-    self.int_buf = Device[input_rawbuffers[0].device].alloc(len(var_vals), dtypes.int32)
+    if len(var_vals): self.int_buf = Device[input_rawbuffers[0].device].alloc(len(var_vals), dtypes.int32)
     read_resources, write_resources = [], []
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledASTRunner = cast(CompiledASTRunner, ji.prg)
@@ -100,8 +100,7 @@ class MetalGraph:
       icb_command.setBarrier()
     self.read_resources, self.write_resources = dedup(read_resources), dedup(write_resources)
     self.command_buffer: Any = None
-    self.int_buf_view = np.frombuffer(self.int_buf.contents().as_buffer(self.int_buf.length()), np.int32)
-    print(self.int_buf_view)
+    if len(var_vals): self.int_buf_view = np.frombuffer(self.int_buf.contents().as_buffer(self.int_buf.length()), np.int32)
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # NOTE: you at least can't update the ints if this is running
@@ -112,7 +111,7 @@ class MetalGraph:
     for j in self.jc_idx_with_updatable_launch_dims:
       global_size, local_size = cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals)
       self.icb.indirectComputeCommandAtIndex_(j).concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
-    self.int_buf_view[:] = list(var_vals.values())
+    if len(var_vals): self.int_buf_view[:] = list(var_vals.values())
     command_buffer = METAL.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
     encoder.executeCommandsInBuffer_withRange_(self.icb, Metal.MTLIndirectCommandBufferExecutionRangeMake(0,len(self.jit_cache)))
@@ -134,7 +133,11 @@ class MetalDevice(Compiled):
   def __init__(self, device:str):
     self.copies_in_flight: List[memoryview] = []
     super().__init__(LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, graph=MetalGraph)
-  def alloc(self, size:int, dtype:DType): return METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
+  def alloc(self, size:int, dtype:DType):
+    ret = METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
+    if ret is None: raise MemoryError(f"Metal OOM while allocating {size=} {dtype=}")
+    return ret
+  def free(self, opaque): opaque.release()
   def _copy(self, dest, src):
     assert src.length() == dest.length(), f"length mismatch {src.length()=} {dest.length()=}"
     command_buffer = METAL.mtl_queue.commandBuffer()
