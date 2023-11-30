@@ -1,13 +1,11 @@
-from typing import List, Any, Dict, cast, Optional, TYPE_CHECKING
+from typing import List, Any, Dict, cast, Optional
 import numpy as np
 import Metal
 from tinygrad.helpers import dtypes, dedup, unwrap2
 from tinygrad.device import Buffer, CompiledASTRunner, update_stats
 from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, GraphException
 from tinygrad.shape.symbolic import Variable
-
-if TYPE_CHECKING:
-  from tinygrad.runtime.ops_metal import MetalDevice
+from tinygrad.runtime.ops_metal import MetalDevice
 
 class MetalGraph:
   def __init__(self, device:MetalDevice, jit_cache: List[JitItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
