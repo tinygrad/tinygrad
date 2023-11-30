@@ -1,9 +1,9 @@
-import subprocess, time, re, hashlib, tempfile, ctypes, ctypes.util
+import subprocess, re, hashlib, tempfile, ctypes, ctypes.util
 from pathlib import Path
-from typing import Tuple, cast, Callable, Any, List, Dict, Optional
+from typing import Tuple, cast, Any, List, Dict, Optional
 import numpy as np
 import gpuctypes.cuda as cuda
-from tinygrad.helpers import DEBUG, getenv, colored, diskcache, to_char_p_p, get_bytes, create_c_struct, ARCWrapper, CI
+from tinygrad.helpers import DEBUG, getenv, colored, diskcache, to_char_p_p, create_c_struct, ARCWrapper, CI
 from tinygrad.device import Compiled, CompiledASTRunner, update_stats
 from tinygrad.runtime.lib import RawBuffer, RawBufferCopyInOut, RawMallocBuffer, LRUAllocator, cpu_time_execution
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -14,11 +14,16 @@ from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_
 def check(status):
   if status != 0: raise RuntimeError(f"CUDA Error {status}, {ctypes.string_at((cuda.cuGetErrorString(status, ctypes.byref(c_ptr := ctypes.c_char_p())), c_ptr)[1]).decode()}")
 
+def get_bytes(arg, get_sz, get_str, check) -> bytes:
+  check(get_sz(arg, ctypes.byref(sz := ctypes.c_size_t())))
+  check(get_str(arg, mstr := ctypes.create_string_buffer(sz.value)))
+  return ctypes.string_at(mstr, size=sz.value)
+
 def compile_cuda_style(prg, compile_options, prog_t, create_prog, compile_prog, get_code, get_code_size, get_log, get_log_size, check) -> bytes:
   check(create_prog(ctypes.byref(prog := prog_t()), prg.encode(), "<null>".encode(), 0, None, None))
-  status = compile_prog(prog, len(compile_options), to_char_p_p([ctypes.create_string_buffer(o.encode("utf-8")) for o in compile_options]))
+  status = compile_prog(prog, len(compile_options), to_char_p_p([ctypes.create_string_buffer(o.encode()) for o in compile_options]))
 
-  if status != 0: raise RuntimeError(f"compile failed: {get_bytes(prog, get_log_size, get_log, check)}")
+  if status != 0: raise RuntimeError(f"compile failed: {get_bytes(prog, get_log_size, get_log, check).decode()}")
   return get_bytes(prog, get_code_size, get_code, check)
 
 def encode_args_cuda_style(args, marks=(1,2,0)) -> Tuple[ctypes.Array, ctypes.Structure]:
@@ -50,7 +55,7 @@ class CUDAAllocator(LRUAllocator):
   def _do_alloc(self, size, dtype, device, **kwargs): return (check(cuda.cuMemAlloc_v2(ctypes.byref(buf := cuda.CUdeviceptr()), size * dtype.itemsize)), buf.value)[1]
   def _do_free(self, buf): cuda.cuMemFree(buf)
   def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
-  def _get_cur_free_space(self, device): return (check(cuda.cuMemGetInfo_v2(ctypes.byref(free := ctypes.c_size_t()), ctypes.byref(total := ctypes.c_size_t()))), free.value)[1]
+  def _get_cur_free_space(self, device): return (check(cuda.cuMemGetInfo_v2(ctypes.byref(free := ctypes.c_size_t()), ctypes.byref(_ := ctypes.c_size_t()))), free.value)[1]
 
 CUDACPU = getenv("CUDACPU", 0)
 
@@ -58,7 +63,7 @@ def cu_time_execution(cb, enable=False) -> Optional[float]: return time_executio
 
 class _CUDA:
   def __init__(self):
-    self.major, self.minor, self.allocator, self.gpuocelot = ctypes.c_int(3), ctypes.c_int(5), None, ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
+    self.major, self.minor, self.gpuocelot = ctypes.c_int(3), ctypes.c_int(5), ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
 
     # Check if we have libs to run CUDA backend.
     self.inited = (not CUDACPU and hasattr(cuda, 'cuInit')) or (CUDACPU and hasattr(self.gpuocelot, 'ptx_run'))
@@ -67,12 +72,12 @@ class _CUDA:
     if not CUDACPU:
       check(cuda.cuInit(0))
       check(cuda.cuDeviceGet(ctypes.byref(device := cuda.CUdevice()), 0))
-      check(cuda.cuCtxCreate_v2(ctypes.byref(context := cuda.CUcontext()), 0, device))
+      check(cuda.cuCtxCreate_v2(ctypes.byref(_ := cuda.CUcontext()), 0, device))
       check(cuda.cuDeviceComputeCapability(ctypes.byref(self.major), ctypes.byref(self.minor), 0))
-      self.allocator = CUDAAllocator()
     else:
       self.gpuocelot.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
       cuda.cuLaunchKernel = lambda src, gx, gy, gz, lx, ly, lz, shared, stream, unused_extra, args: self.gpuocelot.ptx_run(src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), lx, ly, lz, gx, gy, gz, shared)
+    self.allocator = CUDAAllocator() if not CUDACPU else None
     self.compile_opts = ["-I/usr/local/cuda/include", f'--gpu-architecture=sm_{self.major.value}{self.minor.value}']
 CUDA = _CUDA()
 
@@ -116,15 +121,16 @@ class CUDAGraph:
     self.jc_idxs_with_updatable_rawbufs = list(set([x[0] for x in self.input_replace.keys()]))
     self.updatable_nodes: Dict[int, Tuple[Any, Any, Any]] = {} # Dict[jc index] = tuple(graph_node, node_params)
 
-    self.graph, graph_node = self.graph_create(), None
+    self.graph = self.graph_create()
+    graph_node: Optional[Any] = None
 
     for (j,i),input_name in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name]
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledASTRunner = cast(CompiledASTRunner, ji.prg)
 
-      c_deps = (type(graph_node)*1)(*(graph_node,)) if graph_node else None
+      c_deps = (type(graph_node)*1)(*(graph_node,)) if graph_node is not None else None
       c_config, c_struct = encode_args_cuda_style(ji.rawbufs + [var_vals[x] for x in prg.vars], marks=self.launch_params_indicators())
-      c_params = self.build_kernel_node_params(ji, prg, *prg.launch_dims(var_vals), c_config)
+      c_params = self.build_kernel_node_params(ji, prg, *cast(Tuple[List[int], List[int]], prg.launch_dims(var_vals)), c_config)
       graph_node = self.graph_add_kernel_node(self.graph.obj, c_deps, c_params)
 
       if j in self.jc_idxs_with_updatable_launch_dims or j in self.jc_idxs_with_updatable_var_vals or j in self.jc_idxs_with_updatable_rawbufs:
@@ -155,14 +161,14 @@ class CUDAGraph:
     return et
 
   def launch_params_indicators(self): return (1,2,0)
-  def graph_create(self): return ARCWrapper((check(cuda.cuGraphCreate(ctypes.byref(graph := cuda.CUgraph()), 0)), graph)[1], cuda.cuGraphDestroy)
-  def graph_instantiate(self, graph): return ARCWrapper((check(cuda.cuGraphInstantiate_v2(ctypes.byref(instance := cuda.CUgraphExec()), graph, None, None, 0)), instance)[1], cuda.cuGraphExecDestroy)
-  def graph_add_kernel_node(self, graph, c_deps, c_params): return (check(cuda.cuGraphAddKernelNode(ctypes.byref(graph_node := cuda.CUgraphNode()), graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, ctypes.byref(c_params))), graph_node)[1]
+  def graph_create(self): return ARCWrapper((graph := cuda.CUgraph(), check(cuda.cuGraphCreate(ctypes.byref(graph), 0)))[0], cuda.cuGraphDestroy)
+  def graph_instantiate(self, graph): return ARCWrapper((instance := cuda.CUgraphExec(), check(cuda.cuGraphInstantiate_v2(ctypes.byref(instance), graph, None, None, 0)))[0], cuda.cuGraphExecDestroy)
+  def graph_add_kernel_node(self, graph, c_deps, c_params): return (graph_node := cuda.CUgraphNode(), check(cuda.cuGraphAddKernelNode(ctypes.byref(graph_node), graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, ctypes.byref(c_params))), graph_node)[0]
   def graph_launch(self, *args, wait=False): return cu_time_execution(lambda: check(cuda.cuGraphLaunch(*args)), enable=wait)
   def graph_exec_kernel_node_set_params(self, *args): return check(cuda.cuGraphExecKernelNodeSetParams(*args))
 
   def build_kernel_node_params(self, ji, prg, global_size, local_size, c_config): return cuda.CUDA_KERNEL_NODE_PARAMS(prg.clprg.prg, *global_size, *local_size, 0, None, c_config)
-  def set_kernel_node_launch_dims(self, node, global_size, local_size): node.blockDimX, node.blockDimY, node.blockDimZ, node.gridDimX, node.gridDimY, node.gridDimZ = *local_size, *global_size
+  def set_kernel_node_launch_dims(self, node, global_size: Tuple[int, int, int], local_size: Tuple[int, int, int]): node.blockDimX, node.blockDimY, node.blockDimZ, node.gridDimX, node.gridDimY, node.gridDimZ = *local_size, *global_size
 
 # Create CUDA device only if CUDA is initialized.
 if CUDA.inited:

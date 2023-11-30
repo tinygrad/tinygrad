@@ -1,4 +1,4 @@
-import time, ctypes, subprocess, platform, functools, pathlib, tempfile
+import ctypes, subprocess, platform, functools, pathlib, tempfile
 from typing import Any
 from tinygrad.device import Compiled
 from tinygrad.helpers import diskcache

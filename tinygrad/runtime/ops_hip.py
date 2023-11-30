@@ -1,9 +1,9 @@
 import numpy as np
 import ctypes
-from typing import Tuple, List, Any, Dict, cast, Optional, Callable
+from typing import Tuple
 import gpuctypes.hip as hip
 from tinygrad.runtime.ops_cuda import encode_args_cuda_style, time_execution_cuda_style, compile_cuda_style, CUDAGraph
-from tinygrad.helpers import DEBUG, getenv, diskcache, get_bytes, to_char_p_p, ARCWrapper
+from tinygrad.helpers import DEBUG, getenv, diskcache, ARCWrapper
 from tinygrad.device import Compiled
 from tinygrad.renderer.hip import HIPRenderer
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer, RawBuffer, RawMallocBuffer
@@ -41,7 +41,7 @@ class _HIP:
 
     self.device_count = dev_count.value if not MOCKHIP else 0
     self.allocator = HIPAllocator(self.device_properties.totalGlobalMem) if not MOCKHIP else None
-    self.compile_opts = [f'--offload-arch={self.device_properties.gcnArchName.decode("utf-8")}'] if not MOCKHIP else [f'--offload-arch=gfx1100']
+    self.compile_opts = [f'--offload-arch={self.device_properties.gcnArchName.decode("utf-8")}'] if not MOCKHIP else ['--offload-arch=gfx1100']
 HIP = _HIP()
 
 class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
@@ -85,6 +85,6 @@ class HIPGraph(CUDAGraph):
   def graph_exec_kernel_node_set_params(self, *args): return check(hip.hipGraphExecKernelNodeSetParams(*args))
 
   def build_kernel_node_params(self, ji, prg, global_size, local_size, c_config): return hip.hipKernelNodeParams(hip.dim3(*local_size), c_config, ctypes.cast(prg.clprg.prgs[ji.rawbufs[0]._device], ctypes.c_void_p), hip.dim3(*global_size), None, 0)
-  def set_kernel_node_launch_dims(self, node, global_size, local_size): node.blockDim.x, node.blockDim.y, node.blockDim.z, node.gridDim.x, node.gridDim.y, node.gridDim.z = *local_size, *global_size
+  def set_kernel_node_launch_dims(self, node, global_size: Tuple[int, int, int], local_size: Tuple[int, int, int]): node.blockDim.x, node.blockDim.y, node.blockDim.z, node.gridDim.x, node.gridDim.y, node.gridDim.z = *local_size, *global_size
 
 HIPDevice = Compiled(RawHIPBuffer if not MOCKHIP else RawMallocBuffer, LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, HIPProgram, hip.hipDeviceSynchronize, graph=HIPGraph)

@@ -1,4 +1,4 @@
-import time, ctypes
+import ctypes
 from typing import ClassVar
 from tinygrad.device import Compiled
 from tinygrad.helpers import getenv, DEBUG, diskcache

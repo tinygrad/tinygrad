@@ -52,12 +52,8 @@ def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+str
 @functools.lru_cache(maxsize=None)
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posix()
-def to_char_p_p(options: List[bytes], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(o, ctypes.POINTER(to_type)) for o in options])
+def to_char_p_p(options: List[ctypes._CData], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(o, ctypes.POINTER(to_type)) for o in options])
 def from_mv(mv, to_type=ctypes.c_char): return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type))
-def get_bytes(arg, get_sz, get_str, check) -> bytes:
-  check(get_sz(arg, ctypes.byref(sz := ctypes.c_size_t())))
-  check(get_str(arg, mstr := ctypes.create_string_buffer(sz.value)))
-  return ctypes.string_at(mstr, size=sz.value)
 
 @functools.lru_cache(maxsize=None)
 def create_c_struct(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
