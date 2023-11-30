@@ -112,7 +112,8 @@ class InterpretedASTRunner(JITRunner):
 
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> float:
     st = time.perf_counter()
-    rawbufs[0]._buf = self.fxn([x._buf for x in rawbufs[1:]], var_vals)
+    # NOTE: this is still stored here, in case the function changes it
+    rawbufs[0]._buf = self.fxn([x._buf for x in rawbufs], var_vals)
     et = time.perf_counter() - st
     update_stats(f"<interpreted {rawbufs[0].size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit)
     return et
@@ -130,7 +131,6 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
     from tinygrad.graph import print_tree
     print_tree(ast)
   tglob: Dict[str, Any] = {"Variable": Variable}
-  lines: List[str] = []
 
   @functools.lru_cache(None)
   def gstr(x:Any, nm=None) -> str:
@@ -142,15 +142,17 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
     tglob[ret] = x
     return ret
 
+  lines: List[str] = []
   @functools.lru_cache(None)
   def _interpret_ast(ast:LazyOp) -> str:
-    if ast.op is BufferOps.STORE: return _interpret_ast(ast.src[0])
     if TernaryOps.MULACC in fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
 
     if ast.op in BufferOps:
-      tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"inputs[{ast.arg.idx-1}]"
+      if ast.op == BufferOps.CONST: tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})"
+      elif ast.op in {BufferOps.LOAD, BufferOps.STORE}: tmp = f"inputs[{ast.arg.idx}]"
       for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(fxn_for_op[mop], mop)}({tmp}, {gstr(arg)})"
+      if ast.op == BufferOps.STORE: tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({tmp}, {_interpret_ast(ast.src[0])})"
     else:
       tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({', '.join([_interpret_ast(src) for src in ast.src] + ([gstr(ast.arg)] if ast.arg else []))})"
 

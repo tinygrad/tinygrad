@@ -4,7 +4,7 @@ except Exception: pass
 from typing import Callable, Dict, Tuple
 from tinygrad.helpers import prod, DType, OSX
 from tinygrad.device import Interpreted
-from tinygrad.ops import Op, MovementOps, UnaryOps
+from tinygrad.ops import Op, MovementOps, UnaryOps, BufferOps
 from tinygrad.shape.view import strides_for_shape
 
 class UnderlyingDiskBuffer:
@@ -14,13 +14,14 @@ class UnderlyingDiskBuffer:
 
 class DiskBuffer:
   def __init__(self, ud:UnderlyingDiskBuffer, size:int, dtype:DType, offset=0): self.ud, self.size, self.dtype, self.offset = ud, size, dtype, offset
+  def __repr__(self): return f"<DiskBuffer size={self.size} dtype={self.dtype} offset={self.offset}>"
   def cast(self, arg:Tuple[DType, bool]): return DiskBuffer(self.ud, self.size, arg[0], offset=self.offset)
   def as_strided(self, arg):
     assert strides_for_shape(arg[0]) == arg[1], "disk tensors don't support strides"
     return DiskBuffer(self.ud, prod(arg[0]), self.dtype, offset=self.offset+arg[2]*self.dtype.itemsize)
   def _buf(self) -> memoryview: return memoryview(self.ud.mem).cast("B")[self.offset:self.offset+self.size*self.dtype.itemsize]
 
-disk_fxn_for_op: Dict[Op, Callable] = { UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: DiskBuffer.cast, MovementOps.AS_STRIDED: DiskBuffer.as_strided }
+disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.STORE: lambda x, arg: arg, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: DiskBuffer.cast, MovementOps.AS_STRIDED: DiskBuffer.as_strided }
 
 MAP_LOCKED, MAP_POPULATE = 0x2000, 0x008000
 class DiskDevice(Interpreted):
