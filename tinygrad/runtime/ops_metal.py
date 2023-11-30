@@ -19,7 +19,7 @@ def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
   return library.libraryDataContents().bytes().tobytes()
 
 class MetalProgram:
-  def __init__(self, device:MetalDevice, name:str, lib:bytes):
+  def __init__(self, device:MetalDevice, name:str, lib:bytes, bufs:int, vars:int=0):
     self.device = device
     data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
     self.library = unwrap2(self.device.device.newLibraryWithData_error_(data, None))

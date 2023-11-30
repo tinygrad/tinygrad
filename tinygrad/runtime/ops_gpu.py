@@ -41,7 +41,7 @@ class CLProgram:
     self.clprg.set_scalar_arg_dtypes([None]*bufs + [np.int32]*vars)
 
   @staticmethod
-  def max_work_group_size(): return GPUDevice.compile_context.devices[0].max_work_group_size
+  def max_work_group_size(): return GPUDevice.compile_context.devices[0].max_work_group_size if GPUDevice.compile_context is not None else 1024
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int], local_size:Optional[Tuple[int,int,int]]=None, wait=False) -> Optional[float]:
     e = self.clprg(self.device.queue, [int(g*l) for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *bufs)
