@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Optional, Tuple, Dict, List, TypeVar, cast
 import gpuctypes.cuda as cuda
 from tinygrad.helpers import DEBUG, CI, DType, ARCWrapper, getenv, colored, diskcache, from_mv, to_char_p_p, create_c_struct
-from tinygrad.device import Compiled, CompiledASTRunner, update_stats, Buffer, CompiledMalloc
+from tinygrad.device import Compiled, CompiledASTRunner, update_stats, Buffer, CompiledMalloc, cpu_time_execution
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cuda import CUDARenderer
 from tinygrad.shape.symbolic import Variable
@@ -155,11 +155,8 @@ class CUDAGraph:
   def set_kernel_node_launch_dims(self, node, global_size: Tuple[int, int, int], local_size: Tuple[int, int, int]): node.blockDimX, node.blockDimY, node.blockDimZ, node.gridDimX, node.gridDimY, node.gridDimZ = *local_size, *global_size
 
 if CUDACPU:
-  pass
-  # class HIPDevice(CompiledMalloc):
-  #   def __init__(self, device:str):
-  #     self.device = int(device.split(":")[1]) if ":" in device else 0
-  #     super().__init__(LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, HIPProgram, graph=HIPGraph)
+  class CUDADevice(CompiledMalloc):
+    def __init__(self, device:str): super().__init__(LinearizerOptions(device="CUDA"), CUDARenderer, compile_cuda, CUDAProgram)
 else:
   T = TypeVar("T")
   class CUDADevice(Compiled):

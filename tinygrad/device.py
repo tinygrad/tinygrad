@@ -240,8 +240,13 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
       k = timed[0][1]
   return k
 
-import ctypes
+import ctypes, time
 class CompiledMalloc(Compiled):
   def alloc(self, size:int, dtype:DType): return (ctypes.c_uint8 * (size*dtype.itemsize))()
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
+
+def cpu_time_execution(cb, enable):
+  if enable: st = time.perf_counter()
+  cb()
+  if enable: return time.perf_counter()-st
