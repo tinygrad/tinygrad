@@ -5,7 +5,7 @@ import pathlib, functools
 import numpy as np
 import pyopencl as cl
 from typing import Optional, List, Tuple
-from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport, diskcache
+from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport, diskcache, DType
 from tinygrad.device import Compiled
 from tinygrad.renderer.opencl import OpenCLRenderer
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
@@ -92,14 +92,7 @@ class CLProgram:
   def max_work_group_size(): return CL.cl_ctxs[0].devices[0].max_work_group_size
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int], local_size:Optional[Tuple[int,int,int]]=None, wait=False) -> Optional[float]:
-    #if not hasattr(self, 'argdtypes'): self.set_argdtypes(tuple(None if x.__class__ is CLBuffer else np.int32 for x in bufs))
-    #cl_bufs, wait_for = [], []
-    #for x in bufs:
-    #  if x.__class__ is CLBuffer:
-    #    cl_bufs.append(x._buf)
-    #    if (event:=getattr(x, "event",None)): wait_for.append(event)
-    #  else: cl_bufs.append(x)
-    print(self.clprgs[self.device], CL.cl_queue[self.device], bufs)
+    if not hasattr(self, 'argdtypes'): self.set_argdtypes(tuple(np.int32 if isinstance(x, int) else None for x in bufs))
     e = self.clprgs[self.device](CL.cl_queue[self.device], [int(g*l) for g,l in zip(global_size, local_size)] if local_size is not None else global_size, local_size, *bufs) #*cl_bufs, wait_for=wait_for)
     if wait:
       e.wait()
@@ -113,8 +106,9 @@ class CLProgram:
 class GPUDevice(Compiled):
   def __init__(self, device:str):
     self.device = int(device.split(":")[1]) if ":" in device else 0
+    self.events = []
     super().__init__(LinearizerOptions(), OpenCLRenderer, compile_gpu, functools.partial(CLProgram, self.device), CL.synchronize)
-  def alloc(self, size, dtype=None):
+  def alloc(self, size, dtype:DType):
     if isinstance(dtype, ImageDType):
       # NOTE: the memory is a bit off here due to padding, it's buf.row_pitch * buf.height * 4 * dtype.itemsize
       assert size == prod(dtype.shape), f"image size mismatch {size} != {dtype.shape}"
@@ -123,5 +117,7 @@ class GPUDevice(Compiled):
     else:
       buf = cl.Buffer(CL.cl_ctxs[self.device], cl.mem_flags.READ_WRITE, size * dtype.itemsize)
     return buf
-  def copyin(self, dest:cl.Buffer, src:np.ndarray): cl.enqueue_copy(CL.cl_queue[self.device], dest, src, is_blocking=False)
-  def copyout(self, dest:np.ndarray, src:cl.Buffer): cl.enqueue_copy(CL.cl_queue[self.device], dest, src, is_blocking=True)
+  def copyin(self, dest:cl.Buffer, src:np.ndarray): self.events.append(cl.enqueue_copy(CL.cl_queue[self.device], dest, src, is_blocking=False))
+  def copyout(self, dest:np.ndarray, src:cl.Buffer):
+    self.events = []
+    cl.enqueue_copy(CL.cl_queue[self.device], dest, src, is_blocking=True)

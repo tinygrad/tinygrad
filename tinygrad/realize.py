@@ -29,13 +29,13 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
       Buffer(si.out.device, prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype)
       #Device[si.out.device].buffer(prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype, **si.out._device_extra_args())
-    if si.ast.op in LoadOps:
-      # confirm the LoadOps are contiguous and in order
-      for i,s in enumerate(si.ast.src): assert isinstance(s, LazyOp) and s.op == BufferOps.LOAD and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
-      LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out, *si.inputs)
-    else:
-      # TODO: should this be handled here? it probably just shouldn't be in the schedule
-      if not hasattr(si.out.realized, 'size') or si.out.realized.size != 0:
+    # TODO: size 0 should be removed from the schedule
+    if si.out.realized.size != 0:
+      if si.ast.op in LoadOps:
+        # confirm the LoadOps are contiguous and in order
+        for i,s in enumerate(si.ast.src): assert isinstance(s, LazyOp) and s.op == BufferOps.LOAD and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
+        LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out, *si.inputs)
+      else:
         Device[si.out.device].get_runner(si.ast).exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)
     del si.out.op
     for v in si.out.views: del v.op

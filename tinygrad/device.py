@@ -1,6 +1,6 @@
 from __future__ import annotations
 import numpy as np
-from typing import TYPE_CHECKING, Union, Type, Any, List, Optional, Dict, Callable
+from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, TypeVar
 import importlib, inspect, functools, pathlib, time, re
 from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType
 from tinygrad.runtime.lib import RawBuffer
@@ -35,26 +35,31 @@ class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype = device, size, dtype
-    self.opaque = opaque if opaque is not None else Device[device].alloc(size, dtype)
-  def __free__(self): Device[self.device].free(self.opaque)
+    self.opaque = opaque if opaque is not None or size==0 else Device[device].alloc(size, dtype)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size}>"
   def toCPU(self) -> np.ndarray:
     ret = np.empty(self.size, self.dtype.np)
     if self.size > 0: Device[self.device].copyout(ret.data, self.opaque)
     return ret
 
+T = TypeVar("T")
+class DeviceImpl:
+  def alloc(self, size:int, dtype:DType): raise NotImplementedError("need alloc")
+  def copyin(self, dest:T, src:memoryview): raise NotImplementedError("need copyin")
+  def copyout(self, dest:memoryview, src:T): raise NotImplementedError("need copyout")
+
 # **************** shared device helpers ****************
 
 class JITRunner:
   def __init__(self):
     self.op_estimate, self.mem_estimate = 0, 0
-  def exec(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
+  def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     var_vals = var_vals if var_vals is not None else {}
     from tinygrad.jit import CacheCollector
     et = self(rawbufs, var_vals)
     CacheCollector.add(self, rawbufs, var_vals)
     return et
-  def __call__(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
 def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count, jit=False, num_kernels=1, lra: Optional[Dict]=None):
@@ -86,7 +91,7 @@ class InterpretedASTRunner(JITRunner):
     #rawbufs[0].dtype, rawbufs[0].size, rawbufs[0]._buf, rawbufs[0].offset = ret.dtype, ret.size, ret._buf, ret.offset
     return et
 
-class Interpreted:
+class Interpreted(DeviceImpl):
   def __init__(self, fxn_for_op:Dict[Op, Callable]):
     self.fxn_for_op = fxn_for_op
     self.synchronize, self.codegen, self.graph = lambda: None, None, None
@@ -162,7 +167,7 @@ class CompiledASTRunner(JITRunner):
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else self.local_size
     return global_size, local_size
 
-  def __call__(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
@@ -176,7 +181,7 @@ class CompiledASTRunner(JITRunner):
     update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra)
     return et
 
-class Compiled:
+class Compiled(DeviceImpl):
   def __init__(self, linearizer_opts:LinearizerOptions, renderer, compiler, runtime, synchronize=lambda: None, graph=None):
     self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize, self.graph = linearizer_opts, renderer, compiler, runtime, synchronize, graph
 

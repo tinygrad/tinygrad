@@ -1,9 +1,8 @@
 import numpy as np
-from typing import Callable, Dict, Tuple, Optional
+from typing import Callable, Dict, Tuple
 from tinygrad.helpers import dtypes, DType
 from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, MovementOps, ReduceOps, TernaryOps, Op
 from tinygrad.device import Interpreted
-from tinygrad.runtime.lib import RawBuffer
 
 def shape_to_axis(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Tuple[int, ...]:
   assert len(old_shape) == len(new_shape), "reduce shapes must have same dimensions"
