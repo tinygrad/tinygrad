@@ -36,9 +36,18 @@ class RawDiskBuffer(RawBufferMapped):
         self.fn=device
         f = open(device, "a+b")
         if os.path.getsize(device) < size * dtype.itemsize: os.ftruncate(f.fileno(), size * dtype.itemsize)
-        buf = UnderlyingDiskBuffer(f, mmap.mmap(f.fileno(), size * dtype.itemsize))
+        buf = None #UnderlyingDiskBuffer(f, mmap.mmap(f.fileno(), size * dtype.itemsize))
     # NOTE: we don't call super since disk tensors don't use RAM
-    self.size, self.dtype, self._buf, self.offset = size, dtype, buf, offset
+    self.size, self.dtype, self.__buf, self.offset = size, dtype, buf, offset
+  @property
+  def _buf(self):
+    if self.__buf is None:
+      f = open(self.fn, "a+b")
+      if os.path.getsize(self.fn) < self.size * self.dtype.itemsize: os.ftruncate(f.fileno(), self.size * self.dtype.itemsize)
+      self.__buf = UnderlyingDiskBuffer(f, mmap.mmap(f.fileno(), self.size * self.dtype.itemsize))
+    return self.__buf
+  @_buf.setter
+  def _buf(self, val): self.__buf = val
   def cast(self, arg:Tuple[DType, bool]):
     return RawDiskBuffer(self.size, arg[0], self._buf, offset=self.offset)
   def as_strided(self, arg):

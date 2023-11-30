@@ -25,7 +25,8 @@ class _METAL:
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     (desc := Metal.MTLIOCommandQueueDescriptor.alloc().init()).setType_(Metal.MTLIOCommandQueueTypeConcurrent)
-    desc.setPriority_(0)
+    desc.setPriority_(Metal.MTLIOPriorityHigh)
+    desc.setMaxCommandsInFlight_(2**20)
     self.mtl_io_queue, err = self.device.newIOCommandQueueWithDescriptor_error_(desc, None)
     assert err is None, err
     self.allocator = MetalAllocator(self.device.dedicatedMemorySize() or self.device.sharedMemorySize())
