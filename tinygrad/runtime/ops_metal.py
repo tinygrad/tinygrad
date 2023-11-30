@@ -25,10 +25,6 @@ class _METAL:
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     self.allocator = MetalAllocator(self.device.dedicatedMemorySize() or self.device.sharedMemorySize())
-  # TODO: is there a better way to do this?
-  def synchronize(self):
-    for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
-    self.mtl_buffers_in_flight.clear()
 METAL = _METAL()
 
 class RawMetalBuffer(RawBufferMapped):
@@ -72,7 +68,7 @@ class MetalProgram:
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
     for i,a in enumerate(bufs):
-      if isinstance(a, RawMetalBuffer): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
+      if isinstance(a, Metal.AGXG15XFamilyBuffer): encoder.setBuffer_offset_atIndex_(a, 0, i)
       elif isinstance(a, int): encoder.setBytes_length_atIndex_((arg:=ctypes.c_int32(a)), ctypes.sizeof(arg), i)
       else: raise RuntimeError(f"arg at index {i} has unsupported type {type(a)}")
     encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
@@ -152,4 +148,28 @@ class MetalGraph:
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=jit, num_kernels=len(self.jit_cache))
     return et
 
-MetalDevice = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, METAL.synchronize, graph=MetalGraph)
+class MetalDevice(Compiled):
+  def __init__(self, device:str):
+    self.copies_in_flight = []
+    super().__init__(LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, graph=MetalGraph)
+  def alloc(self, size:int, dtype:DType): return METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
+  def _copy(self, dest, src):
+    assert src.length() == dest.length(), f"length mismatch {src.length()=} {dest.length()=}"
+    command_buffer = METAL.mtl_queue.commandBuffer()
+    encoder = command_buffer.blitCommandEncoder()
+    encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src, 0, dest, 0, src.length())
+    encoder.endEncoding()
+    command_buffer.commit()
+    METAL.mtl_buffers_in_flight.append(command_buffer)
+  def copyin(self, dest, src:memoryview):
+    self.copies_in_flight.append(src)
+    msrc = METAL.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, len(src), Metal.MTLResourceStorageModeShared, None)
+    self._copy(dest, msrc)
+  def copyout(self, dest:memoryview, src):
+    mdest = METAL.device.newBufferWithBytesNoCopy_length_options_deallocator_(dest, len(dest), Metal.MTLResourceStorageModeShared, None)
+    self._copy(mdest, src)
+    self.synchronize()
+  def synchronize(self):
+    for cbuf in METAL.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
+    self.copies_in_flight.clear()
+    METAL.mtl_buffers_in_flight.clear()

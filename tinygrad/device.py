@@ -39,12 +39,13 @@ class Buffer:
   def __repr__(self): return f"<buf device:{self.device} size:{self.size}>"
   def toCPU(self) -> np.ndarray:
     ret = np.empty(self.size, self.dtype.np)
-    if self.size > 0: Device[self.device].copyout(ret.data, self.opaque)
+    if self.size > 0: Device[self.device].copyout(ret.data.cast("B"), self.opaque)
     return ret
 
 T = TypeVar("T")
 class DeviceImpl:
   def alloc(self, size:int, dtype:DType): raise NotImplementedError("need alloc")
+  def free(self, opaque:T): pass
   def copyin(self, dest:T, src:memoryview): raise NotImplementedError("need copyin")
   def copyout(self, dest:memoryview, src:T): raise NotImplementedError("need copyout")
 
@@ -182,8 +183,8 @@ class CompiledASTRunner(JITRunner):
     return et
 
 class Compiled(DeviceImpl):
-  def __init__(self, linearizer_opts:LinearizerOptions, renderer, compiler, runtime, synchronize=lambda: None, graph=None):
-    self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize, self.graph = linearizer_opts, renderer, compiler, runtime, synchronize, graph
+  def __init__(self, linearizer_opts:LinearizerOptions, renderer, compiler, runtime, graph=None):
+    self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph = linearizer_opts, renderer, compiler, runtime, graph
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     k.linearize()
@@ -192,6 +193,7 @@ class Compiled(DeviceImpl):
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.to_program(_get_optimized_linearizer(self.linearizer_opts, ast))
+  def synchronize(self): pass
 
 def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> Linearizer:
   if DEBUG >= 3:

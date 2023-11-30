@@ -41,8 +41,6 @@ class _CL:
     if DEBUG >= 1: print(f"using devices: {[ctx.devices[0].hashable_model_and_version_identifier for ctx in self.cl_ctxs]}")
     self.cl_queue: List[cl.CommandQueue] = [cl.CommandQueue(ctx, device=ctx.devices[0], properties=cl.command_queue_properties.PROFILING_ENABLE) for ctx in self.cl_ctxs]
     self.cl_allocator = CLAllocator(CL.cl_ctxs[0].devices[0].get_info(cl.device_info.GLOBAL_MEM_SIZE))
-  def synchronize(self):
-    for q in self.cl_queue: q.finish()
 CL = _CL()
 if not getenv("DELAYED_RUNTIME_INIT", False): CL.post_init()
 
@@ -107,7 +105,7 @@ class GPUDevice(Compiled):
   def __init__(self, device:str):
     self.device = int(device.split(":")[1]) if ":" in device else 0
     self.events = []
-    super().__init__(LinearizerOptions(), OpenCLRenderer, compile_gpu, functools.partial(CLProgram, self.device), CL.synchronize)
+    super().__init__(LinearizerOptions(), OpenCLRenderer, compile_gpu, functools.partial(CLProgram, self.device))
   def alloc(self, size, dtype:DType):
     if isinstance(dtype, ImageDType):
       # NOTE: the memory is a bit off here due to padding, it's buf.row_pitch * buf.height * 4 * dtype.itemsize
@@ -121,3 +119,5 @@ class GPUDevice(Compiled):
   def copyout(self, dest:np.ndarray, src:cl.Buffer):
     self.events = []
     cl.enqueue_copy(CL.cl_queue[self.device], dest, src, is_blocking=True)
+  def synchronize(self):
+    for q in CL.cl_queue: q.finish()

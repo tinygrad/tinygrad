@@ -53,7 +53,7 @@ def _realize_rand(buffer: LazyBuffer) -> None:
   if DEBUG >= 2: print(f"***      rand {buffer.device}    seed {buffer.op.arg:<10d}  shape {str(buffer.shape):23s} dtype {buffer.dtype}")
   rng = np.random.default_rng(buffer.op.arg)
   rng_np_buffer = rng.random(size=prod(buffer.shape), dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False)
-  Device[buffer.device].copyin(buffer.realized.opaque, rng_np_buffer.data)
+  Device[buffer.device].copyin(buffer.realized.opaque, rng_np_buffer.data.cast('B'))
   #buffer.realized._copyin(rng_np_buffer)
 
 # *** one op LoadOps ***
@@ -70,7 +70,7 @@ def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
   elif isinstance(src.realized, RawBufferTransfer) and isinstance(buffer.realized, RawBufferTransfer) and getenv("P2P", 0) >= 1:
     buffer.realized._transfer(src.realized)
   else:
-    Device[buffer.device].copyin(buffer.realized.opaque, src.realized.toCPU().data)
+    Device[buffer.device].copyin(buffer.realized.opaque, src.realized.toCPU().data.cast('B'))
     #buffer.realized._copyin(src.realized.toCPU())
 
 # *** n op LoadOps ***
