@@ -1,4 +1,5 @@
 import functools
+from tinygrad.helpers import dtypes
 from tinygrad.ops import BinaryOps, UnaryOps
 from tinygrad.renderer.cstyle import CStyleLanguage, uops_to_cstyle
 
@@ -22,9 +23,6 @@ class HIPLanguage(CStyleLanguage):
   uses_ptr_arithmetic=True
   arg_int_prefix = "const int"
   half_prekernel = "#include <hip/hip_fp16.h>\n" + """
-  __device__ half exp2(half x) {
-    return hexp(x);
-}
 typedef union { struct { half x, y, z, w; } __attribute__((aligned(8))); half data[4]; } half4; __device__ half4 make_half4(half x, half y, half z, half w) { return {x, y, z, w}; }
 typedef union { struct { half x, y, z, w, a, b, c, d; } __attribute__((aligned(16))); half data[8]; } half8; __device__ half8 make_half8(half x, half y, half z, half w, half a, half b, half c, half d) { return {x, y, z, w, a, b, c, d}; }
  typedef _Float16 half16 __attribute__((ext_vector_type(16))); __device__ half16 make_half16(half x, half y, half z, half w, half a, half b, half c, half d, half e, half f, half g, half h, half i, half j, half k, half l) { return {x, y, z, w, a, b, c, d, e, f, g, h, i, j, k, l}; }
@@ -34,14 +32,16 @@ __device__ float4 vload_half4(size_t offset, const half *p) { return make_float4
 __device__ void vstore_half(float data, size_t offset, half *p) { *(p + offset) = (half)data; }
 __device__ void vstore_half2(float2 data, size_t offset, half *p) { *(p + offset*2) = (half)data.x; *(p + offset*2 + 1) = (half)data.y; }
 __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset*4) = (half)data.x; *(p + offset*4 + 1) = (half)data.y; *(p + offset*4 + 2) = (half)data.z; *(p + offset*4 + 3) = (half)data.w; }
+__device__ half exp2(half x) { return hexp2(x); }
+__device__ half log2(half x) { return hlog2(x); }
+__device__ half sin(half x) { return hsin(x); }
+__device__ half sqrt(half x) { return hsqrt(x); }
+__device__ half mod(half x, half b) { return __hsub(x, __hmul(b, __float2half(floorf(__half2float(x) / __half2float(b))))); }
+__device__ half hmax(half a, half b) { return __hgt(a, b) ? a : b; }
   """
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
-  code_for_op = {
-      **CStyleLanguage().code_for_op, 
-      BinaryOps.MAX: lambda a, b: f"max((float){a}, (float){b})",
-      UnaryOps.SQRT: lambda a: f"sqrt((float){a})"
-  }
+  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"hmax({a},{b})"}
 
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())

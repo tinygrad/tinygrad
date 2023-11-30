@@ -36,7 +36,7 @@ class CStyleLanguage(NamedTuple):
     UnaryOps.SQRT: lambda x: f"sqrt({x})",
     BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
     BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
-    BinaryOps.MAX: lambda a,b: f"max({a},{b})", BinaryOps.MOD: lambda a,b: f"({a}%{b})",
+    BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b: f"({a}%{b})",
     BinaryOps.CMPLT: lambda a,b: f"({a}<{b})", TernaryOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})",
     TernaryOps.WHERE: lambda a,b,c: f"({a}!=0?{b}:{c})"
   }
@@ -159,7 +159,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL}:
         val = lang.code_for_op[args](strip_parens(r[vin[0]]), *[r[x] for x in vin[1:]])
       else:
-        val = lang.code_for_op[args](*[r[x] for x in vin]) if not (args == UnaryOps.NEG and dtype == dtypes.bool) else f"!{r[vin[0]]}"
+        val = lang.code_for_op[args](*[r[x] for x in vin] + ([dtype] if args == BinaryOps.MAX else [])) if not (args == UnaryOps.NEG and dtype == dtypes.bool) else f"!{r[vin[0]]}"
       assert child_count[u] != 0, f"childless ALU op found {u}"
       if (child_count[u] <= 1 or dtypes.is_int(dtype)) and args != BinaryOps.MAX:  # fix index rendering issue. fix clang nested max macro issue
         r[u] = val

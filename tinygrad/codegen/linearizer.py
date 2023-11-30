@@ -46,9 +46,7 @@ class Linearizer(Kernel):
 
   # NOTE: the consts have to be cached for deduping of downstream uops to work
   def const(self, b:Union[int,float], dtype=dtypes.int32, insert_before=None) -> UOp: return self.uop(UOps.CONST, dtype, tuple(), b, insert_before=insert_before)
-  def cast(self, val: UOp, dtype) -> UOp:
-    should_i_cast_you = val.dtype != dtype if self.opts.device != "HIP" else (val.dtype != dtype) or (val.uop == UOps.GEP and val.dtype == dtypes.half and val.vin[0].uop == UOps.LOAD and val.vin[0].dtype == dtypes.half.vec(2) and dtype == dtypes.half)
-    return self.uop(UOps.CAST, dtype, (val,)) if should_i_cast_you else val
+  def cast(self, val: UOp, dtype) -> UOp: return self.uop(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: ctx.const(self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
@@ -117,7 +115,7 @@ class Linearizer(Kernel):
           rendered_idx = idx.render(self.render_ops, self)
           valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
           self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
-      ret.append(self.uop(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
+      ret.append(self.uop(UOps.GEP, localtype.scalar() if not (self.opts.device == "HIP" and localtype == dtypes.half.vec(2)) else dtypes.uint16, (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key]) # In HIP, the elements within half2 are uint16
     return ret
 
   def global_store(self, i:int, idxs:List[Node], store:List[UOp]) -> List[UOp]:
@@ -141,7 +139,7 @@ class Linearizer(Kernel):
         amt = len(out_tokens)
         idx, valid = self.sts[i].expr_idxs(k)
         assert idx.render() == ((idx//amt)*amt).render(), "float4 stores are always aligned"
-        store_offset_new[k] = self.uop(UOps.CAST, cast(DType, out_tokens[0].dtype).vec(amt), tuple(out_tokens))
+        store_offset_new[k] = self.uop(UOps.CAST, dtypes.float.vec(amt), tuple(out_tokens))
       store_offset = store_offset_new
 
     stores = []
@@ -464,7 +462,7 @@ class Linearizer(Kernel):
     if uop == UOps.DEFINE_ACC and not dtypes.is_float(cast(DType, dtype)) and arg == -math.inf: arg = False if dtype == dtypes.bool else -2**31
     if uop == UOps.PHI and vin[1].dtype != dtype: vin = (vin[0], self.cast(vin[1], dtype)) + vin[1:]
     if uop == UOps.ALU: # upcast vins to the same dtype
-      upcast_dtype = max(cast(DType, x.dtype) for x in vin) if arg != TernaryOps.MULACC else dtypes.float # MULACC is only supported in float
+      upcast_dtype = dtypes.float if arg == TernaryOps.MULACC else max(cast(DType, x.dtype) for x in vin) # MULACC is only supported in float
       if arg == TernaryOps.WHERE: vin = (vin[0],) + tuple(self.cast(x, upcast_dtype) for x in vin[1:]) # the first arg is always bool
       else: vin = tuple(self.cast(x, upcast_dtype) for x in vin)
       dtype = dtype or upcast_dtype # some ops like BinaryOps.CMPLT return bool
@@ -520,5 +518,5 @@ class Linearizer(Kernel):
         if input_acc[off] != acc[off]:
           acc[off] = self.uop(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]) + tuple(loop_ctx))
     else:
-      ret = [self.uop(UOps.ALU, vin=val, arg=x.op) for val in zip(*values)]
+      ret = [self.uop(UOps.ALU, dtype=dtypes.bool if x.op == BinaryOps.CMPLT else None, vin=val, arg=x.op) for val in zip(*values)]
     return ret
