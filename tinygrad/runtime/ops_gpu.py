@@ -6,7 +6,7 @@ import numpy as np
 import pyopencl as cl
 from typing import Optional, List, Tuple
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport, diskcache, DType
-from tinygrad.device import Compiled, Allocator
+from tinygrad.device import Compiled, Allocator, LRUAlloc
 from tinygrad.renderer.opencl import OpenCLRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 
@@ -89,6 +89,6 @@ class CLAllocator(Allocator):
 class GPUDevice(Compiled):
   def __init__(self, device:str):
     self.device = int(device.split(":")[1]) if ":" in device else 0
-    super().__init__(CLAllocator(self.device), LinearizerOptions(), OpenCLRenderer, compile_gpu, functools.partial(CLProgram, self.device))
+    super().__init__(LRUAlloc(CLAllocator(self.device)), LinearizerOptions(), OpenCLRenderer, compile_gpu, functools.partial(CLProgram, self.device))
   def synchronize(self):
     for q in CL.cl_queue: q.finish()
