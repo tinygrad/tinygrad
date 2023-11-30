@@ -68,7 +68,6 @@ class CLProgram:
         return None
     return None
 
-#GPUDevice = Compiled(CLBuffer, LinearizerOptions(), OpenCLRenderer, compile_gpu, CLProgram, CL.synchronize)
 class GPUDevice(Compiled):
   def __init__(self, device:str):
     self.device = int(device.split(":")[1]) if ":" in device else 0
