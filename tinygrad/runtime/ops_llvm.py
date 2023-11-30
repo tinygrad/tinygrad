@@ -59,7 +59,7 @@ class LLVMProgram:
     self.fxn = LLVM.engine.get_function_address(name)
 
   def __call__(self, *bufs, wait=False):
-    cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.c_void_p for _ in bufs])(self.fxn)
+    cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.c_int if isinstance(x, int) else ctypes.c_void_p for x in bufs])(self.fxn)
     if wait: st = time.perf_counter()
     cfunc(*bufs)
     if wait: return time.perf_counter()-st
