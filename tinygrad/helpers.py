@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes
 import numpy as np
 from urllib import request
 from tqdm import tqdm
@@ -52,6 +52,7 @@ def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+str
 @functools.lru_cache(maxsize=None)
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posix()
+def from_mv(mv, to_type=ctypes.c_char): return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type))
 
 class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]

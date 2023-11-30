@@ -2,7 +2,7 @@ from __future__ import annotations
 import numpy as np
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, TypeVar
 import importlib, inspect, functools, pathlib, time, re
-from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType
+from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType, from_mv
 from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, Op
@@ -19,7 +19,9 @@ class _Device:
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __getitem__(self, ix:str) -> Union[Interpreted, Compiled]:
     x = ix.split(":")[0].upper()
-    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._buffers][0](ix)
+    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._buffers][0]
+    if isinstance(ret, type): ret = ret(ix)
+    return ret
   @functools.cached_property
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None)   # type: ignore
@@ -217,3 +219,9 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
       if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
       k = timed[0][1]
   return k
+
+import ctypes
+class CompiledMalloc(Compiled):
+  def alloc(self, size:int, dtype:DType): return (ctypes.c_uint8 * (size*dtype.itemsize))()
+  def copyin(self, dest:T, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
+  def copyout(self, dest:memoryview, src:T): ctypes.memmove(from_mv(dest), src, len(dest))

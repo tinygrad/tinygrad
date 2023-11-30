@@ -1,11 +1,10 @@
 import time, ctypes
 from typing import ClassVar
-from tinygrad.device import Compiled
+from tinygrad.device import CompiledMalloc
 from tinygrad.helpers import getenv, DEBUG, diskcache
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
-from tinygrad.runtime.lib import RawMallocBuffer
 
 import llvmlite.binding as llvm
 
@@ -62,7 +61,7 @@ class LLVMProgram:
   def __call__(self, *bufs, wait=False):
     cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.c_void_p for _ in bufs])(self.fxn)
     if wait: st = time.perf_counter()
-    cfunc(*[x._buf if not isinstance(x, int) else x for x in bufs])
+    cfunc(*bufs)
     if wait: return time.perf_counter()-st
 
-LLVMDevice = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, compile_llvm, LLVMProgram)
+LLVMDevice = CompiledMalloc(LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, compile_llvm, LLVMProgram)
