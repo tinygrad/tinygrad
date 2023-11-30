@@ -88,7 +88,7 @@ class HIPGraph:
 
       args = [cast(Buffer, x)._buf for x in ji.rawbufs] + [var_vals[x] for x in prg.vars]
       types = [ctypes.c_void_p] * len(ji.rawbufs) + [ctypes.c_int] * len(prg.vars)
-      c_params = hip.buildKernelNodeParams(args, types, prg.clprg.prgs[ji.rawbufs[0]._device], *prg.launch_dims(var_vals))
+      c_params = hip.buildKernelNodeParams(args, types, prg.clprg.prgs[0], *prg.launch_dims(var_vals))
       graph_node = hip.hipGraphAddKernelNode(self.graph, [graph_node] if graph_node else [], c_params)
 
       if j in self.jc_idxs_with_updatable_launch_dims or j in self.jc_idxs_with_updatable_var_vals or j in self.jc_idxs_with_updatable_rawbufs:
@@ -131,9 +131,9 @@ class HIPAllocator(Allocator):
   def copyout(self, dest:memoryview, src:T):
     hip.hipSetDevice(self.device)
     hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost)
-  def transfer(self, dest:T, src:T):
+  def transfer(self, dest:T, src:T, sz:int):
     hip.hipSetDevice(self.device)
-    hip.hipMemcpy(dest, src, len(dest), hip.hipMemcpyDeviceToDevice)
+    hip.hipMemcpy(dest, src, sz, hip.hipMemcpyDeviceToDevice)
   def synchronize(self): hip.hipDeviceSynchronize()
 
 class HIPDevice(Compiled):

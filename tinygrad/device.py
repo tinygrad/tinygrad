@@ -43,10 +43,10 @@ class Buffer:
     GlobalCounters.mem_used -= self.size * self.dtype.itemsize
     Device[self.device].allocator.free(self._buf, self.size, self.dtype)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size}>"
-  def copyin(self, memoryview:memoryview):
-    memoryview = memoryview.cast("B")
-    assert len(memoryview) == self.size*self.dtype.itemsize, f"size mismatch, {len(memoryview)=} != {self.dtype=} {self.size=}"
-    Device[self.device].allocator.copyin(self._buf, memoryview)
+  def copyin(self, mv:memoryview):
+    mv = mv.cast("B")
+    assert len(mv) == self.size*self.dtype.itemsize, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
+    Device[self.device].allocator.copyin(self._buf, mv)
   def toCPU(self) -> np.ndarray:
     ret = np.empty(self.size, self.dtype.np)
     if self.size > 0: Device[self.device].allocator.copyout(ret.data.cast("B"), self._buf)
@@ -61,7 +61,7 @@ class Allocator:
   def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
   def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
 
-class LRUAllocator(Allocator):
+class LRUAllocator(Allocator):  # pylint: disable=abstract-method
   def __init__(self): self.cache: Dict[Tuple[int, DType], Any] = defaultdict(list)
   def alloc(self, size:int, dtype:DType):
     if len(c := self.cache[(size, dtype)]): return c.pop()
