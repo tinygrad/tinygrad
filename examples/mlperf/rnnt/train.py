@@ -1,3 +1,4 @@
+# %%
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops  import ConstBuffer
@@ -8,24 +9,47 @@ from tinygrad.tensor import Tensor, Function
 from tinygrad.jit import TinyJit
 from tinygrad.nn.optim import Adam
 from matplotlib import pyplot as plt
-from tinygrad.nn import Linear
+from tinygrad.nn import Linear, Embedding
+from tinygrad.nn.state import get_parameters
 import numpy as np
 
+# %%
 X = 20
 Y = 22
 B = 5
-c = 6
-d = Tensor.rand(B,X,Y,c+1,dtype=dtypes.float).softmax(-1)
-d.requires_grad = True
-opt = Adam([d])
-labels = Tensor(np.random.randint(0,c,size=(B,Y)))
+C = 6
+labels = Tensor(np.random.randint(0,C,size=(B,Y)))
 
+# %%
+def imshow(x):
+    if isinstance(x,Tensor): x = x.numpy()
+    while len(x.shape) > 2: x = x[:,:,0]
+    plt.imshow(x[:,:])
+    plt.show()
 
+# %%
+class Model:
+    def __init__(self, C:int,hdim = 10):
+        self.C = C
+        self.hdim = hdim
+        self.input_emb = Embedding(C,hdim)   
+        self.out_emb = Embedding(C,hdim)
+        self.lin = Linear(hdim*2, C+1)
+
+    def distribution(self, labels):
+        B,N = labels.shape
+        X = self.input_emb( labels)
+        Y = self.out_emb (labels.pad(((0,0),(1,0))))
+
+        d = Tensor.cat(X.unsqueeze(2).expand((-1,-1,N+1,-1)), Y.unsqueeze(1).expand((-1,N,-1,-1)),dim=-1)
+        d = self.lin(d)
+        return d
+
+# %%
 def logsumexp(a:Tensor, b:Tensor):
     mx = Tensor.maximum(a,b).maximum(-1e10)
     s = (a-mx).exp() + (b-mx).exp()
-    ret = s.log() + mx
-    return ret
+    return s.log() + mx
 inf = float('inf')
 
 def shear(d:Tensor,value = 0):
@@ -44,14 +68,13 @@ def unshear(x:Tensor):
     x = x.shrink(((0,B),(0,X),(0,Y+1-X)))
     return x
 
-class TransducerLoss(Function):
+class Loss(Function):
 
     def forward(self, d:Tensor, labels:Tensor):
         self.B,self.X,self.Y,self.C = d.shape
 
-        self.labels = Tensor(labels)        
+        self.labels = Tensor(labels).pad(((0,0),(0,1)))
         self.lattice = shear(Tensor(d))
-
         self.X = self.X+self.Y-1
         assert self.lattice.shape == (self.B,self.X,self.Y,self.C), f"{self.lattice.shape}"
 
@@ -116,27 +139,50 @@ class TransducerLoss(Function):
 
         return (-Tensor.cat(self.p_grad,self.skip_grad.unsqueeze(-1), dim=-1)).transpose(1,2).realize().lazydata,None
 
+# %%
+def setup():
+    global model,opt
+    model = Model(C)
+    opt = Adam(get_parameters(model))
+setup()
 
-L = TransducerLoss.apply(d,labels)
-self = L._ctx
-opt.zero_grad()
-L.backward()
+# %%
+def merge(x):
+    m = None
+    for e in x:
+        e = e.unsqueeze(1)
+        m = e if m is None else Tensor.cat(m,e,dim=1)
+    return unshear(m.transpose(1,2)).transpose(1,2)
 
+# %%
+def analyse():
+    d = model.distribution(labels)
+    imshow(d[0])
+    opt.zero_grad()
+    l = Loss.apply(d.softmax(-1),labels)
+    ctx = l._ctx
+    l.backward()
+    imshow(d.grad[0])
+    a = merge(ctx.a)
+    b = merge(ctx.b)
+    imshow((a[0]+b[0]-a[0].max()).exp())
 
-skip = self.skip[0].numpy()
-p = self.p[0].numpy()
-
+# %%
 @TinyJit
-def step(d:Tensor):
-    L = TransducerLoss.apply(d.softmax(-1),labels)
+def step(model,labels):
+    d = model.distribution(labels)
+    L = Loss.apply(d.softmax(-1),labels)
     opt.zero_grad()
     L.backward()
     opt.step()
     return L.realize(), d.realize()
 
+# %%
+for i in range(10):
+    for i in range(10):
+        labels = Tensor(np.random.randint(0,C,size=(B,Y)))
+        l,d = step(model,labels)
+    print(l.numpy())
 
-if __name__ == "__main__":
-    l,d = step(d)
-    print(l.numpy())
-    for i in range(100): l,d = step(d)
-    print(l.numpy())
+# %%
+analyse()
