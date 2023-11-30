@@ -8,7 +8,6 @@ from tinygrad.runtime.lib import RawBufferMapped
 from tinygrad.device import Interpreted
 from tinygrad.ops import Op, MovementOps, UnaryOps, BufferOps
 from tinygrad.shape.view import strides_for_shape
-
 MAP_LOCKED, MAP_POPULATE = 0x2000, 0x008000
 
 class UnderlyingDiskBuffer:
