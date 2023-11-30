@@ -310,6 +310,7 @@ class Tensor:
     count = defaultdict(list)
     for i,v in enumerate(orig_slices): count[type(v)].append(i)
 
+    # TODO: boolean indices
     if (num_slices := len(count[int]) + len(count[slice]) + len(count[Tensor]) + len(count[list])) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     if len(ellipsis_found := count[type(Ellipsis)]) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
 
