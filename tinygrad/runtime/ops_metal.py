@@ -24,6 +24,10 @@ class _METAL:
     self.mtl_buffers_in_flight: List[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
+    (desc := Metal.MTLIOCommandQueueDescriptor.alloc().init()).setType_(Metal.MTLIOCommandQueueTypeConcurrent)
+    desc.setPriority_(0)
+    self.mtl_io_queue, err = self.device.newIOCommandQueueWithDescriptor_error_(desc, None)
+    assert err is None, err
     self.allocator = MetalAllocator(self.device.dedicatedMemorySize() or self.device.sharedMemorySize())
   # TODO: is there a better way to do this?
   def synchronize(self):
@@ -32,13 +36,22 @@ class _METAL:
 METAL = _METAL()
 
 class RawMetalBuffer(RawBufferMapped):
+  def isMetal(self): return True
   def __init__(self, size:int, dtype:DType):
+    self.cmd_buf = None
     assert dtype != dtypes.double, f"METAL does not support {dtype.name}"
     super().__init__(size, dtype, allocator=METAL.allocator)
   def _buffer(self):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
-
+  def loadFromDisk(self, src:RawBuffer):
+    from Foundation import NSURL
+    assert src.fn is not None
+    hdl, err = METAL.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(src.fn), None)
+    assert err is None, f"Error creating io handle - {err}"
+    self.cmd_buf = METAL.mtl_io_queue.commandBuffer()
+    self.cmd_buf.loadBuffer_offset_size_sourceHandle_sourceHandleOffset_(self._buf, 0, self._memsz, hdl, src.offset)
+    self.cmd_buf.commit()
 def unwrap(x):
   ret, err = x
   assert err is None, str(err)
@@ -72,7 +85,10 @@ class MetalProgram:
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
     for i,a in enumerate(bufs):
-      if isinstance(a, RawMetalBuffer): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
+      if isinstance(a, RawMetalBuffer):
+        if a.cmd_buf:
+          a.cmd_buf = None
+        encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
       elif isinstance(a, int): encoder.setBytes_length_atIndex_((arg:=ctypes.c_int32(a)), ctypes.sizeof(arg), i)
       else: raise RuntimeError(f"arg at index {i} has unsupported type {type(a)}")
     encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))

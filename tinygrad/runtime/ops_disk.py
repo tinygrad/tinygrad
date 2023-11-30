@@ -32,6 +32,7 @@ class RawDiskBuffer(RawBufferMapped):
           os.close(fd)
         buf = UnderlyingDiskBuffer(None, shm)
       else:
+        self.fn=device
         f = open(device, "a+b")
         if os.path.getsize(device) < size * dtype.itemsize: os.ftruncate(f.fileno(), size * dtype.itemsize)
         buf = UnderlyingDiskBuffer(f, mmap.mmap(f.fileno(), size * dtype.itemsize))
@@ -43,12 +44,15 @@ class RawDiskBuffer(RawBufferMapped):
     assert strides_for_shape(arg[0]) == arg[1], "disk tensors don't support strides"
     return RawDiskBuffer(prod(arg[0]), self.dtype, self._buf, offset=self.offset+arg[2]*self.dtype.itemsize)
   def _buffer(self): return memoryview(self._buf.mem)[self.offset:self.offset+self.size*self.dtype.itemsize]
-  def readinto(self, buf:memoryview):
-    if self._buf.fd is not None:
-      self._buf.fd.seek(self.offset)
-      self._buf.fd.readinto(buf)
-    else:
-      buf.cast('B')[:] = self._buffer()
+  def readinto(self, rawbuf:memoryview):
+    if not rawbuf.isMetal():
+      buf = rawbuf._buffer()
+      if self._buf.fd is not None:
+        self._buf.fd.seek(self.offset)
+        self._buf.fd.readinto(buf)
+      else:
+        rawbuf.cast('B')[:] = self._buffer()
+    else: rawbuf.loadFromDisk(self)
 
 disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.LOAD: lambda x: x, BufferOps.STORE: lambda x: x, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
 DiskDevice = Interpreted(RawDiskBuffer, disk_fxn_for_op)
