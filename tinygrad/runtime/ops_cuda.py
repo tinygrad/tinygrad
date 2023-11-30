@@ -39,7 +39,9 @@ else:
   import pycuda.autoprimaryctx # pylint: disable=unused-import # noqa: F401
   import pycuda.driver as cuda # type: ignore
   class CUDAAllocator(LRUAllocator):
-    def _alloc(self, size, dtype): return cuda.mem_alloc(size * dtype.itemsize) # type: ignore
+    def _alloc(self, size, dtype):
+      if size == 0: return None
+      return cuda.mem_alloc(size * dtype.itemsize) # type: ignore
     def copyin(self, dest, src:memoryview): cuda.memcpy_htod_async(dest, src) # type: ignore
     def copyout(self, dest:memoryview, src): cuda.memcpy_dtoh(dest, src) # type: ignore
 

@@ -37,7 +37,7 @@ class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype = device, size, dtype
-    self._buf = opaque if opaque is not None or size==0 else Device[self.device].allocator.alloc(size, dtype)
+    self._buf = opaque if opaque is not None else Device[self.device].allocator.alloc(size, dtype)
     GlobalCounters.mem_used += self.size * self.dtype.itemsize
   def __del__(self):
     GlobalCounters.mem_used -= self.size * self.dtype.itemsize

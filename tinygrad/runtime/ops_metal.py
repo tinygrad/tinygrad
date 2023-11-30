@@ -52,6 +52,7 @@ class MetalAllocator(LRUAllocator):
     self.device:MetalDevice = device
     super().__init__()
   def _alloc(self, size:int, dtype:DType):
+    if size == 0: return None
     ret = self.device.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=} {dtype=}")
     return ret
