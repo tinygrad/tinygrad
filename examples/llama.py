@@ -49,7 +49,7 @@ MODEL_PARAMS = {
       "files": 2,
     },
     "70B": {
-      "args": {"dim": 8192, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": 32000, "hidden_dim": 24576},
+      "args": {"dim": 8192, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": 32000, "hidden_dim": 28672},
       "files": 8,
     },
   },
