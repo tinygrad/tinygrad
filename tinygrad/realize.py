@@ -64,7 +64,7 @@ def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
   # TODO: make this generic
   if isinstance(src.realized, RawDiskBuffer) and isinstance(buffer.realized, RawBufferMappedDisk):
     buffer.realized.loadFromDisk(src.realized)
-  if isinstance(src.realized, RawDiskBuffer) and isinstance(buffer.realized, RawBufferMapped):
+  elif isinstance(src.realized, RawDiskBuffer) and isinstance(buffer.realized, RawBufferMapped):
     src.realized.readinto(buffer.realized._buffer())
   elif isinstance(src.realized, RawBufferTransfer) and isinstance(buffer.realized, RawBufferTransfer) and getenv("P2P", 0) >= 1:
     buffer.realized._transfer(src.realized)
