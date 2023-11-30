@@ -34,7 +34,7 @@ class _Device:
 Device = _Device()
 
 T = TypeVar("T")
-class _LRUAlloc():
+class _LRUAlloc:
   def __init__(self):
     self.cache: Dict[Tuple[str, int, DType], T] = defaultdict(list)
   def __call__(self, device:str, size:int, dtype:DType) -> T:

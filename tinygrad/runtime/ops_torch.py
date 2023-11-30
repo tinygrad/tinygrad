@@ -41,8 +41,6 @@ torch_fxn_for_op: Dict[Op, Callable] = {
   TernaryOps.WHERE: lambda x, y, z: torch.where(x != 0, y, z),
 }
 
-#TorchDevice = Interpreted(RawTorchBuffer, torch_fxn_for_op)
-
 class TorchDevice(Interpreted):
   def __init__(self, device): super().__init__(torch_fxn_for_op)
   def alloc(self, size:int, dtype:DType): return torch.empty([size], device=device, dtype=inverse_type_map[dtype])
