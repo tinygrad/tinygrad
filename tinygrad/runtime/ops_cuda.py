@@ -47,7 +47,7 @@ else:
 def compile_cuda(prg) -> bytes: return cuda_compile(prg, target="ptx", no_extern_c=True, options=['-Wno-deprecated-gpu-targets'])
 
 class CUDAProgram:
-  def __init__(self, name:str, _prg:bytes):
+  def __init__(self, name:str, _prg:bytes, bufs:int=0, vars:int=0):
     prg = _prg.decode('utf-8')
     if DEBUG >= 5: print(pretty_ptx(prg))
     if DEBUG >= 6:

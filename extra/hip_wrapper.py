@@ -6,8 +6,8 @@ from typing import Any, Dict, List, Tuple
 from dataclasses import dataclass
 
 try:
-  _libhip = ctypes.cdll.LoadLibrary("libamdhip64.so")
-  _libhiprtc = ctypes.cdll.LoadLibrary("libhiprtc.so")
+  _libhip = ctypes.cdll.LoadLibrary("/opt/rocm/lib/libamdhip64.so")
+  _libhiprtc = ctypes.cdll.LoadLibrary("/opt/rocm/lib/libhiprtc.so")
 
   _libhip.hipGetErrorString.restype = ctypes.c_char_p
   _libhip.hipGetErrorString.argtypes = [ctypes.c_int]

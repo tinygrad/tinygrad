@@ -20,7 +20,7 @@ def compile_clang(prg:str, header:str=CLANG_PROGRAM_HEADER) -> bytes:
     return pathlib.Path(output_file.name).read_bytes()
 
 class ClangProgram:
-  def __init__(self, name:str, prg:bytes):
+  def __init__(self, name:str, prg:bytes, bufs:int=0, vars:int=0):
     # write to disk so we can load it
     with tempfile.NamedTemporaryFile(delete=True) as cached_file_path:
       pathlib.Path(cached_file_path.name).write_bytes(prg)

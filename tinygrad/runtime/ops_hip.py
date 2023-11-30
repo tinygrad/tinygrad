@@ -1,8 +1,8 @@
-import ctypes
+import ctypes, functools
 import extra.hip_wrapper as hip
 from typing import Tuple, cast, Callable, TypeVar
 from tinygrad.helpers import DEBUG, DType, getenv, diskcache, from_mv
-from tinygrad.device import Compiled, Allocator, MallocAllocator
+from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.renderer.hip import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 
@@ -14,18 +14,10 @@ if DEBUG >= 6:
 # The default HIP stream is used for everything.
 MOCKHIP = getenv("MOCKHIP") # for CI. don't run kernels, only check if they compile
 
-class _HIP:
-  def __init__(self, device=None):
-    self.default_device = device or getenv("HIP_DEFAULT_DEVICE")
-    self.device_count = 0 if MOCKHIP else hip.hipGetDeviceCount()
-    if not MOCKHIP: hip.hipSetDevice(self.default_device)
-HIP = _HIP()
-
 @diskcache
 def compile_hip(prg) -> bytes:
   prog = hip.hiprtcCreateProgram(prg, "<null>", [], [])
-  arch = "gfx1100" if MOCKHIP else hip.hipGetDeviceProperties(HIP.default_device).gcnArchName
-  hip.hiprtcCompileProgram(prog, [f'--offload-arch={arch}'])
+  hip.hiprtcCompileProgram(prog, [f'--offload-arch={HIPDevice.default_arch_name}'])
   return hip.hiprtcGetCode(prog)
 
 def time_execution(cb, enable=False):
@@ -42,31 +34,32 @@ def time_execution(cb, enable=False):
     return ret
 
 class HIPProgram:
-  def __init__(self, name:str, prg:bytes):
-    self.modules, self.prgs, self.c_struct_t = [], [], None
+  def __init__(self, device:int, name:str, prg:bytes, bufs:int=0, vars:int=0):
+    self.device, self.c_struct_t = device, None
 
     if DEBUG >= 6:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
-    for i in range(HIP.device_count):
-      hip.hipSetDevice(i)
-      self.modules.append(hip.hipModuleLoadData(prg))
-      self.prgs.append(hip.hipModuleGetFunction(self.modules[-1], name))
+    hip.hipSetDevice(self.device)
+    self.module = hip.hipModuleLoadData(prg)
+    self.prg = hip.hipModuleGetFunction(self.module, name)
+    self.c_struct_t = hip.getCStructForType([ctypes.c_void_p]*bufs + [ctypes.c_int]*vars)
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
     if MOCKHIP: return
-    hip.hipSetDevice(args[0]._device)
-    if self.c_struct_t is None: self.c_struct_t = hip.getCStructForType([(ctypes.c_void_p if not isinstance(x, int) else ctypes.c_int) for x in args])
-    c_params = cast(Callable, self.c_struct_t)(*[x._buf if not isinstance(x, int) else x for x in args])
-    return time_execution(lambda: hip.hipModuleLaunchKernel(self.prgs[args[0]._device], *global_size, *local_size, 0, 0, c_params), enable=wait)
+    hip.hipSetDevice(self.device)
+    c_params = cast(Callable, self.c_struct_t)(*args)
+    return time_execution(lambda: hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, 0, c_params), enable=wait)
 
   def __del__(self):
-    for module in self.modules: hip.hipModuleUnload(module)
+    hip.hipModuleUnload(self.module)
 
 T = TypeVar("T")
-class HIPAllocator(Allocator):
-  def __init__(self, device): self.device = device
+class HIPAllocator(LRUAllocator):
+  def __init__(self, device):
+    self.device = device
+    super().__init__()
   def _alloc(self, size: int, dtype: DType):
     hip.hipSetDevice(self.device)
     return hip.hipMalloc(size * dtype.itemsize)
@@ -82,7 +75,9 @@ class HIPAllocator(Allocator):
     hip.hipMemcpy(dest, src, sz, hip.hipMemcpyDeviceToDevice)
 
 class HIPDevice(Compiled):
+  default_arch_name = "gfx1100"
   def __init__(self, device:str):
     self.device = int(device.split(":")[1]) if ":" in device else 0
-    super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self.device), LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, HIPProgram)
+    if self.device == 0 and not MOCKHIP: HIPDevice.default_arch_name = hip.hipGetDeviceProperties(self.device).gcnArchName
+    super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self.device), LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, functools.partial(HIPProgram, self.device))
   def synchronize(self): hip.hipDeviceSynchronize()
