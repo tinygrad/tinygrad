@@ -8,6 +8,7 @@ from tinygrad.renderer.metal import MetalRenderer
 from tinygrad.runtime.lib import RawBufferMapped, RawBuffer, LRUAllocator
 from tinygrad.shape.symbolic import Variable
 from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, GraphException
+from Foundation import NSURL
 
 class MetalAllocator(LRUAllocator):
   def _do_alloc(self, size, dtype, device, **kwargs):
@@ -26,7 +27,7 @@ class _METAL:
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     (desc := Metal.MTLIOCommandQueueDescriptor.alloc().init()).setType_(Metal.MTLIOCommandQueueTypeConcurrent)
     desc.setPriority_(Metal.MTLIOPriorityHigh)
-    desc.setMaxCommandsInFlight_(2**20)
+    desc.setMaxCommandsInFlight_(2**64)
     self.mtl_io_queue, err = self.device.newIOCommandQueueWithDescriptor_error_(desc, None)
     assert err is None, err
     self.allocator = MetalAllocator(self.device.dedicatedMemorySize() or self.device.sharedMemorySize())
@@ -46,8 +47,6 @@ class RawMetalBuffer(RawBufferMapped):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
   def loadFromDisk(self, src:RawBuffer):
-    from Foundation import NSURL
-    assert src.fn is not None
     hdl, err = METAL.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(src.fn), None)
     assert err is None, f"Error creating io handle - {err}"
     self.cmd_buf = METAL.mtl_io_queue.commandBuffer()

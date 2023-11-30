@@ -33,12 +33,10 @@ class RawDiskBuffer(RawBufferMapped):
           os.close(fd)
         buf = UnderlyingDiskBuffer(None, shm)
       else:
-        self.fn=device
-        f = open(device, "a+b")
-        if os.path.getsize(device) < size * dtype.itemsize: os.ftruncate(f.fileno(), size * dtype.itemsize)
+        self.fn = device
         buf = None #UnderlyingDiskBuffer(f, mmap.mmap(f.fileno(), size * dtype.itemsize))
     # NOTE: we don't call super since disk tensors don't use RAM
-    self.size, self.dtype, self.__buf, self.offset = size, dtype, buf, offset
+    self.size, self.dtype, self._buf, self.offset = size, dtype, buf, offset
   @property
   def _buf(self):
     if self.__buf is None:
