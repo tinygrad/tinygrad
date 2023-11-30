@@ -2,8 +2,8 @@ import numpy as np
 import ctypes
 from typing import Tuple, List, Any, Dict, cast, Optional, Callable
 import gpuctypes.hip as hip
-from tinygrad.helpers import DEBUG, getenv, diskcache, get_bytes, to_char_p_p, ARCWrapper
 from tinygrad.runtime.ops_cuda import encode_args_cuda_style, time_execution_cuda_style, compile_cuda_style, CUDAGraph
+from tinygrad.helpers import DEBUG, getenv, diskcache, get_bytes, to_char_p_p, ARCWrapper
 from tinygrad.device import Compiled
 from tinygrad.renderer.hip import HIPRenderer
 from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer, RawBuffer, RawMallocBuffer
@@ -68,8 +68,8 @@ class HIPProgram:
     self.modules, self.prgs = [], []
     for i in range(HIP.device_count):
       check(hip.hipSetDevice(i))
-      self.modules.append(ARCWrapper((check(hip.hipModuleLoadData(ctypes.byref(module := hip.hipModule_t()), prg)), module)[1], hip.hipModuleUnload))
-      self.prgs.append((hip.hipModuleGetFunction(ctypes.byref(func := ctypes.POINTER(hip.struct_ihipModuleSymbol_t)()), self.modules[-1].obj, name.encode("utf-8")), func)[1])
+      self.modules.append(ARCWrapper((module := hip.hipModule_t(), check(hip.hipModuleLoadData(ctypes.byref(module), prg)))[0], hip.hipModuleUnload))
+      self.prgs.append((func := ctypes.POINTER(hip.struct_ihipModuleSymbol_t)(), check(hip.hipModuleGetFunction(ctypes.byref(func), self.modules[-1].obj, name.encode("utf-8"))))[0])
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
     if MOCKHIP: return float("inf")
@@ -78,8 +78,8 @@ class HIPProgram:
 
 class HIPGraph(CUDAGraph):
   def launch_params_indicators(self): return (1,2,3)
-  def graph_create(self) -> ARCWrapper: return ARCWrapper((graph := hip.hipGraph_t(), check(hip.hipGraphCreate(ctypes.byref(graph), 0)))[0], hip.hipGraphDestroy)
-  def graph_instantiate(self, graph) -> ARCWrapper: return ARCWrapper((instance := hip.hipGraphExec_t(), check(hip.hipGraphInstantiate(ctypes.byref(instance), graph, None, None, 0)))[0], hip.hipGraphExecDestroy)
+  def graph_create(self): return ARCWrapper((graph := hip.hipGraph_t(), check(hip.hipGraphCreate(ctypes.byref(graph), 0)))[0], hip.hipGraphDestroy)
+  def graph_instantiate(self, graph): return ARCWrapper((instance := hip.hipGraphExec_t(), check(hip.hipGraphInstantiate(ctypes.byref(instance), graph, None, None, 0)))[0], hip.hipGraphExecDestroy)
   def graph_add_kernel_node(self, graph, c_deps, c_params): return (graph_node := hip.hipGraphNode_t(), check(hip.hipGraphAddKernelNode(ctypes.byref(graph_node), graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, ctypes.byref(c_params))))[0]
   def graph_launch(self, *args, wait=False): return hip_time_execution(lambda: check(hip.hipGraphLaunch(*args)), enable=wait)
   def graph_exec_kernel_node_set_params(self, *args): return check(hip.hipGraphExecKernelNodeSetParams(*args))

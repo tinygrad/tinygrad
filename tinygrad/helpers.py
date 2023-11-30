@@ -66,7 +66,7 @@ def create_c_struct(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
     _fields_ = fields
   return CStruct
 
-# Simple ARCWrapper for some ctypes structs to destroy.
+# Simple ARCWrapper for some ctypes structs to destroy them at __del__.
 class ARCWrapper:
   def __init__(self, obj, destroy_cb): self.obj, self._destroy_cb = obj, destroy_cb
   def __del__(self): self._destroy_cb(self.obj)
