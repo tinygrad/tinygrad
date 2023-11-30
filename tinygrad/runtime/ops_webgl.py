@@ -1,6 +1,6 @@
 import numpy as np
 import functools
-from tinygrad.runtime.lib import RawBufferCopyIn, LRUAllocator
+from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, DType
 from tinygrad.device import Compiled
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -50,7 +50,7 @@ class RawWebGLAllocator(LRUAllocator):
     def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize)
 GLAlloc = RawWebGLAllocator()
 
-class RawWebGLBuffer(RawBufferCopyIn):
+class RawWebGLBuffer(RawBuffer):
   def __init__(self, size:int, dtype:DType):
     assert dtype not in [dtypes.int8,dtypes.uint8,dtypes.int64,dtypes.uint64], f"dtype {dtype} not supported on WebGL"
     super().__init__(size, dtype, allocator=GLAlloc)
