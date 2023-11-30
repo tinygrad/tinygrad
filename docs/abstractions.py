@@ -83,9 +83,9 @@ class LazyBuffer:
   # we'll come back to this later
   st: ShapeTracker
 
-  # if the LazyBuffer is realized, it has a RawBuffer
-  # we will come back to RawBuffers later
-  realized: Optional[RawBuffer]
+  # if the LazyBuffer is realized, it has a Buffer
+  # we will come back to Buffer later
+  realized: Optional[Buffer]
 
   # if the lazybuffer is unrealized, it has a LazyOp
   # this LazyOp describes the computation needed to realize this LazyBuffer
@@ -153,9 +153,6 @@ assert result.lazydata.realized.toCPU()[0] == 5, "when put in numpy with toCPU, 
 
 # Interpreted backends are very simple (example: CPU and TORCH)
 class Interpreted:
-  # they have a backing RawBuffer
-  buffer: Type[RawBuffer]
-
   # and they have a lookup table to functions for the Ops
   fxn_for_op: Dict[Op, Callable] = {
     UnaryOps.EXP2: lambda x: np.exp2(x),
@@ -163,9 +160,6 @@ class Interpreted:
 
 # Compiled backends take a little more (example: GPU and LLVM)
 class Compiled:
-  # they also have a backing RawBuffer
-  buffer: Type[RawBuffer]
-
   # a code generator, which compiles the AST
   codegen: Type[Linearizer]
 
@@ -178,36 +172,26 @@ class Runtime(ABC):
   # the constructor compiles the code
   def __init__(self, name:str, prg:str): pass
   # call runs the code on the bufs. NOTE: the output is always bufs[0], but this is just a convention
-  def __call__(self, global_size:Optional[List[int]], local_size:Optional[List[int]], *bufs:List[RawBuffer]): pass
+  def __call__(self, *bufs:List[Buffer], global_size:Optional[List[int]], local_size:Optional[List[int]]): pass
 
 # %%
-# == RawBuffer (in tinygrad/runtime/lib.py, code 5/10) ==
+# == Buffer (in tinygrad/device.py, code 6/10) ==
 import numpy as np
 
-# RawBuffer is where the data is actually held. it's pretty close to just memory
-class RawBuffer(ABC):
+# Buffer is where the data is actually held. it's pretty close to just memory
+class Buffer(ABC):
   # create an empty rawbuffer that holds `size` elements of type `dtype`
-  # `buf` is an opaque container class
-  def __init__(self, size:int, dtype:DType, buf:Any): raise NotImplementedError("must be implemented")
+  # `opaque` is an opaque container class
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None): pass
 
-  # fromCPU is classmethod that creates a RawBuffer, it's a classmethod since some runtimes are 0 copy
-  @classmethod
-  def fromCPU(cls:RawBuffer, x:np.ndarray) -> RawBuffer: raise NotImplementedError("must be implemented")
+  # toCPU converts the RawBuffer to a numpy array with shape (size,)
+  def toCPU(self) -> np.ndarray: pass
 
-  # toCPU converts the RawBuffer to a numpy array with shape (size,). many backends are 0 copy here
-  def toCPU(self) -> np.ndarray: raise NotImplementedError("must be implemented")
-
-# RawNumpyBuffer is a RawBuffer example for numpy. It's very simple
-class RawNumpyBuffer(RawBuffer):
-  # NOTE: the "np.ndarray" is stored in the opaque container
-  def __init__(self, buf:np.ndarray):
-    super().__init__(buf.size, dtypes.from_np(buf.dtype), buf)
-  @classmethod
-  def fromCPU(cls, x): return cls(x)
-  def toCPU(self): return self._buf
 
 # %%
 # == Example: 2+3 in raw clang ==
+
+from tinygrad.device import Device
 
 # RawMallocBuffer is the simplest concrete version of RawBuffer (in tinygrad/ops.py)
 # it's used for the CLANG and LLVM backends

@@ -1,6 +1,6 @@
 import time, ctypes
 from typing import ClassVar
-from tinygrad.device import CompiledMalloc
+from tinygrad.device import Compiled, MallocAllocator
 from tinygrad.helpers import getenv, DEBUG, diskcache
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -64,4 +64,4 @@ class LLVMProgram:
     cfunc(*bufs)
     if wait: return time.perf_counter()-st
 
-LLVMDevice = CompiledMalloc(LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, compile_llvm, LLVMProgram)
+LLVMDevice = Compiled(MallocAllocator(), LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, compile_llvm, LLVMProgram)

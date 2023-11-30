@@ -1,7 +1,7 @@
 import functools
 from wgpu.utils.device import get_default_device
 from tinygrad.helpers import dtypes, DType
-from tinygrad.device import Compiled
+from tinygrad.device import Compiled, Allocator
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle
 from tinygrad.renderer.wgsl import WGSLLanguage
@@ -27,12 +27,14 @@ class WebGPUProgram:
     compute_pass.end()
     wgpu_device.queue.submit([command_encoder.finish()])
 
-class WebGpuDevice(Compiled):
-  def __init__(self, device:str):
-    super().__init__(LinearizerOptions(device="WEBGPU", supports_float4=False, local_max=[256, 256, 64], global_max=[65535, 65535, 65535]),
-                     functools.partial(uops_to_cstyle, WGSLLanguage()), lambda x: x, WebGPUProgram)
+class WebGpuAllocator(Allocator):
   def alloc(self, size: int, dtype: DType):
     assert dtype not in [dtypes.int8,dtypes.uint8,dtypes.int64,dtypes.uint64,dtypes.double], f"dtype {dtype} not supported on WEBGPU"
     return wgpu_device.create_buffer(size=size*dtype.itemsize, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC)
   def copyin(self, dest, src: memoryview): wgpu_device.queue.write_buffer(dest, 0, src)
   def copyout(self, dest, src: memoryview): dest[:] = wgpu_device.queue.read_buffer(src, 0)    # TODO: remove this copy
+
+class WebGpuDevice(Compiled):
+  def __init__(self, device:str):
+    super().__init__(WebGpuAllocator(), LinearizerOptions(device="WEBGPU", supports_float4=False, local_max=[256, 256, 64], global_max=[65535, 65535, 65535]),
+                     functools.partial(uops_to_cstyle, WGSLLanguage()), lambda x: x, WebGPUProgram)

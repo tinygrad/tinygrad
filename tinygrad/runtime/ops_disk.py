@@ -3,7 +3,7 @@ try: import _posixshmem
 except Exception: pass
 from typing import Callable, Dict, Tuple
 from tinygrad.helpers import prod, DType, OSX
-from tinygrad.device import Interpreted
+from tinygrad.device import Interpreted, Allocator
 from tinygrad.ops import Op, MovementOps, UnaryOps, BufferOps
 from tinygrad.shape.view import strides_for_shape
 
@@ -24,10 +24,8 @@ class DiskBuffer:
 disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.STORE: lambda x, arg: arg, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: DiskBuffer.cast, MovementOps.AS_STRIDED: DiskBuffer.as_strided }
 
 MAP_LOCKED, MAP_POPULATE = 0x2000, 0x008000
-class DiskDevice(Interpreted):
-  def __init__(self, device):
-    self.device = device[5:]
-    super().__init__(disk_fxn_for_op)
+class DiskAllocator(Allocator):
+  def __init__(self, device): self.device = device
   def alloc(self, size, dtype):
     if str(self.device).startswith("shm:"):
       if OSX:
@@ -53,3 +51,6 @@ class DiskDevice(Interpreted):
       src.ud.fd.readinto(dest)
     else:
       dest[:] = src._buf()
+
+class DiskDevice(Interpreted):
+  def __init__(self, device): super().__init__(DiskAllocator(device[5:]), disk_fxn_for_op)

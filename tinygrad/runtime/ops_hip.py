@@ -2,7 +2,7 @@ import ctypes
 import extra.hip_wrapper as hip
 from typing import Tuple, List, Any, Dict, cast, Optional, Callable, TypeVar
 from tinygrad.helpers import DEBUG, DType, getenv, diskcache, from_mv
-from tinygrad.device import Compiled, CompiledASTRunner, update_stats, Buffer, CompiledMalloc
+from tinygrad.device import Compiled, CompiledASTRunner, update_stats, Buffer, Allocator, MallocAllocator
 from tinygrad.renderer.hip import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.shape.symbolic import Variable
@@ -118,28 +118,24 @@ class HIPGraph:
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=jit, num_kernels=len(self.jit_cache))
     return et
 
-if MOCKHIP:
-  class HIPDevice(CompiledMalloc):
-    def __init__(self, device:str):
-      self.device = int(device.split(":")[1]) if ":" in device else 0
-      super().__init__(LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, HIPProgram, graph=HIPGraph)
-else:
-  T = TypeVar("T")
-  class HIPDevice(Compiled):
-    def __init__(self, device:str):
-      self.device = int(device.split(":")[1]) if ":" in device else 0
-      super().__init__(LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, HIPProgram, graph=HIPGraph)
-    def alloc(self, size: int, dtype: DType):
-      hip.hipSetDevice(self.device)
-      return hip.hipMalloc(size * dtype.itemsize)
-    def free(self, opaque:T): hip.hipFree(opaque)
-    def copyin(self, dest:T, src: memoryview):
-      hip.hipSetDevice(self.device)
-      hip.hipMemcpyAsync(dest, from_mv(src), len(src), hip.hipMemcpyHostToDevice, 0)
-    def copyout(self, dest:memoryview, src:T):
-      hip.hipSetDevice(self.device)
-      hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost)
-    def transfer(self, dest:T, src:T):
-      hip.hipSetDevice(self.device)
-      hip.hipMemcpy(dest, src, len(dest), hip.hipMemcpyDeviceToDevice)
-    def synchronize(self): hip.hipDeviceSynchronize()
+T = TypeVar("T")
+class HIPAllocator(Allocator):
+  def alloc(self, size: int, dtype: DType):
+    hip.hipSetDevice(self.device)
+    return hip.hipMalloc(size * dtype.itemsize)
+  def free(self, opaque:T): hip.hipFree(opaque)
+  def copyin(self, dest:T, src: memoryview):
+    hip.hipSetDevice(self.device)
+    hip.hipMemcpyAsync(dest, from_mv(src), len(src), hip.hipMemcpyHostToDevice, 0)
+  def copyout(self, dest:memoryview, src:T):
+    hip.hipSetDevice(self.device)
+    hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost)
+  def transfer(self, dest:T, src:T):
+    hip.hipSetDevice(self.device)
+    hip.hipMemcpy(dest, src, len(dest), hip.hipMemcpyDeviceToDevice)
+  def synchronize(self): hip.hipDeviceSynchronize()
+
+class HIPDevice(Compiled):
+  def __init__(self, device:str):
+    self.device = int(device.split(":")[1]) if ":" in device else 0
+    super().__init__(MallocAllocator() if MOCKHIP else HIPAllocator(), LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, HIPProgram, graph=HIPGraph)

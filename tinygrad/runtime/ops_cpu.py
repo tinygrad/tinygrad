@@ -2,7 +2,7 @@ import numpy as np
 from typing import Callable, Dict, Tuple
 from tinygrad.helpers import dtypes, DType
 from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, MovementOps, ReduceOps, TernaryOps, Op
-from tinygrad.device import Interpreted
+from tinygrad.device import Interpreted, Allocator
 
 def shape_to_axis(old_shape:Tuple[int, ...], new_shape:Tuple[int, ...]) -> Tuple[int, ...]:
   assert len(old_shape) == len(new_shape), "reduce shapes must have same dimensions"
@@ -39,8 +39,9 @@ numpy_fxn_for_op: Dict[Op, Callable] = {
   TernaryOps.WHERE: np.where,
 }
 
-class CPUDevice(Interpreted):
-  def __init__(self, device): super().__init__(numpy_fxn_for_op)
+class NumpyAllocator(Allocator):
   def alloc(self, size:int, dtype:DType): return np.empty(size, dtype.np)
   def copyin(self, dest:np.ndarray, src:memoryview): np.copyto(dest, np.frombuffer(src, dest.dtype))
   def copyout(self, dest:memoryview, src:np.ndarray): np.copyto(np.frombuffer(dest, src.dtype), src.flatten())
+
+CPUDevice = Interpreted(NumpyAllocator(), numpy_fxn_for_op)

@@ -40,16 +40,16 @@ class _LRUAlloc:
   def __call__(self, device:str, size:int, dtype:DType) -> T:
     if len(c := self.cache[(device, size, dtype)]): return c.pop()
     try:
-      return Device[device].alloc(size, dtype)
+      return Device[device].allocator.alloc(size, dtype)
     except MemoryError:
       self.free_cache()
-      return Device[device].alloc(size, dtype)
+      return Device[device].allocator.alloc(size, dtype)
   def free_cache(self):
     for (device, _, _), opaque in self.cache.items():
       Device[device].free(opaque)
   def free(self, opaque:T, device, size, dtype):
     if isinstance(Device[device], Interpreted):
-      Device[device].free(opaque)
+      Device[device].allocator.free(opaque)
     else:
       self.cache[(device, size, dtype)].append(opaque)
 LRUAlloc = _LRUAlloc()
@@ -64,15 +64,19 @@ class Buffer:
     GlobalCounters.mem_used -= self.size * self.dtype.itemsize
     LRUAlloc.free(self._buf, self.device, self.size, self.dtype)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size}>"
+  def copyin(self, memoryview:memoryview):
+    memoryview = memoryview.cast("B")
+    assert len(memoryview) == self.size*self.dtype.itemsize, f"size mismatch, {len(memoryview)=} != {self.dtype=} {self.size=}"
+    Device[self.device].allocator.copyin(self._buf, memoryview)
   def toCPU(self) -> np.ndarray:
     ret = np.empty(self.size, self.dtype.np)
-    if self.size > 0: Device[self.device].copyout(ret.data.cast("B"), self._buf)
+    if self.size > 0: Device[self.device].allocator.copyout(ret.data.cast("B"), self._buf)
     return ret
 
 # TODO: size, dest, src are the same type. can we enforce this?
-class DeviceImpl:   # pylint: disable=abstract-method
+class Allocator:
   def alloc(self, size:int, dtype:DType): raise NotImplementedError("need alloc")
-  def free(self, opaque): pass
+  def free(self, opaque): pass # if you are returning a Python object, you don't need a free
   def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
   def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
 
@@ -118,9 +122,9 @@ class InterpretedASTRunner(JITRunner):
     update_stats(f"<interpreted {rawbufs[0].size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit)
     return et
 
-class Interpreted(DeviceImpl):
-  def __init__(self, fxn_for_op:Dict[Op, Callable]):
-    self.fxn_for_op = fxn_for_op
+class Interpreted:
+  def __init__(self, allocator: Allocator, fxn_for_op:Dict[Op, Callable]):
+    self.allocator, self.fxn_for_op = allocator, fxn_for_op
     self.synchronize, self.codegen, self.graph = lambda: None, None, None
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
@@ -208,9 +212,9 @@ class CompiledASTRunner(JITRunner):
     update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra)
     return et
 
-class Compiled(DeviceImpl):
-  def __init__(self, linearizer_opts:LinearizerOptions, renderer, compiler, runtime, graph=None):
-    self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph = linearizer_opts, renderer, compiler, runtime, graph
+class Compiled:
+  def __init__(self, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler, runtime, graph=None):
+    self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph = allocator, linearizer_opts, renderer, compiler, runtime, graph
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     k.linearize()
@@ -245,7 +249,7 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
   return k
 
 import ctypes
-class CompiledMalloc(Compiled):
+class MallocAllocator:
   def alloc(self, size:int, dtype:DType): return (ctypes.c_uint8 * (size*dtype.itemsize))()
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))

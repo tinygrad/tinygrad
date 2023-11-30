@@ -6,7 +6,7 @@ import numpy as np
 import pyopencl as cl
 from typing import Optional, List, Tuple
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport, diskcache, DType
-from tinygrad.device import Compiled
+from tinygrad.device import Compiled, Allocator
 from tinygrad.renderer.opencl import OpenCLRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 
@@ -68,11 +68,10 @@ class CLProgram:
         return None
     return None
 
-class GPUDevice(Compiled):
-  def __init__(self, device:str):
-    self.device = int(device.split(":")[1]) if ":" in device else 0
+class CLAllocator(Allocator):
+  def __init__(self, device):
     self.events: List[cl.Event] = []
-    super().__init__(LinearizerOptions(), OpenCLRenderer, compile_gpu, functools.partial(CLProgram, self.device))
+    self.device = device
   def alloc(self, size:int, dtype:DType):
     if isinstance(dtype, ImageDType):
       # NOTE: the memory is a bit off here due to padding, it's buf.row_pitch * buf.height * 4 * dtype.itemsize
@@ -86,5 +85,10 @@ class GPUDevice(Compiled):
   def copyout(self, dest:memoryview, src:cl.Buffer):
     self.events.clear()
     cl.enqueue_copy(CL.cl_queue[self.device], dest, src, is_blocking=True)
+
+class GPUDevice(Compiled):
+  def __init__(self, device:str):
+    self.device = int(device.split(":")[1]) if ":" in device else 0
+    super().__init__(CLAllocator(self.device), LinearizerOptions(), OpenCLRenderer, compile_gpu, functools.partial(CLProgram, self.device))
   def synchronize(self):
     for q in CL.cl_queue: q.finish()

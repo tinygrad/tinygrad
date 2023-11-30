@@ -53,7 +53,7 @@ def _realize_rand(buffer: LazyBuffer) -> None:
   if DEBUG >= 2: print(f"***      rand {buffer.device}    seed {buffer.op.arg:<10d}  shape {str(buffer.shape):23s} dtype {buffer.dtype}")
   rng = np.random.default_rng(buffer.op.arg)
   rng_np_buffer = rng.random(size=prod(buffer.shape), dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False)
-  Device[buffer.device].copyin(buffer.realized._buf, rng_np_buffer.data.cast('B'))
+  buffer.realized.copyin(rng_np_buffer.data.cast('B'))
   #buffer.realized._copyin(rng_np_buffer)
 
 # *** one op LoadOps ***
@@ -64,7 +64,7 @@ def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
   assert src.realized.size == buffer.realized.size, f"size mismatch on FROM {src.realized.size=} != {buffer.realized.size=}"
   assert src.st.contiguous and buffer.st.contiguous, "all must be contiguous for from"
   if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.realized.size:<16d} shape {str(buffer.shape):23s} dtype {src.realized.dtype}")
-  Device[buffer.device].copyin(buffer.realized._buf, src.realized.toCPU().data.cast('B'))
+  buffer.realized.copyin(src.realized.toCPU().data.cast('B'))
   # TODO: make this generic
   #if isinstance(src.realized, RawDiskBuffer) and isinstance(buffer.realized, RawBufferMapped):
   #  src.realized.readinto(buffer.realized._buffer())
