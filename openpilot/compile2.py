@@ -68,12 +68,12 @@ def schedule_to_thneed(schedule, output_fn):
 
     global_size = prg.global_size + [1]*(3-len(prg.global_size))
     local_size = prg.local_size + [1]*(3-len(prg.local_size))
-    cl_cache.append((prg.clprg, [[int(g*l) for g,l in zip(global_size, local_size)], local_size, *[x.realized._buf for x in args]]))
+    cl_cache.append((prg.clprg, [[int(g*l) for g,l in zip(global_size, local_size)], local_size, *[x.realized.opaque for x in args]]))
     used_ops += prg.op_estimate
 
   from extra.thneed import Thneed
   input_rawbuffers = {k:inputs[k].lazydata.realized for k in inputs.keys()}
-  t = Thneed(cl_cache, {k:v._buf for k,v in input_rawbuffers.items()})
+  t = Thneed(cl_cache, {k:v.opaque for k,v in input_rawbuffers.items()})
 
   # save thneed (before run)
   t.save(output_fn)

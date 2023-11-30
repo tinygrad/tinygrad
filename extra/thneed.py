@@ -5,6 +5,7 @@ import json
 import traceback
 import numpy as np
 from tinygrad.runtime.ops_gpu import CLProgram, compile_gpu
+from tinygrad.device import Device
 from tinygrad.helpers import DEBUG, getenv
 from collections import defaultdict
 import pyopencl as cl
@@ -108,7 +109,7 @@ class Thneed:
     prgs = {}
     for o in jdat['binaries']:
       nptr = ptr + o['length']
-      prgs[o['name']] = CLProgram(o['name'], weights[ptr:nptr])
+      prgs[o['name']] = CLProgram(0, o['name'], weights[ptr:nptr])
       ptr = nptr
 
     # populate the cl_cache
@@ -198,7 +199,7 @@ class Thneed:
               # zero out the buffer
               cl.enqueue_copy(CL.cl_queue[0], buf, b'\x00'*buf.size, is_blocking=True)
 
-              CLProgram("from_image_strided", compile_gpu("""
+              CLProgram(0, "from_image_strided", compile_gpu("""
                 __kernel void from_image_strided(read_only image2d_t in, __global float4 *out, int row_pitch) {
                   const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
                   int2 l;
@@ -265,7 +266,7 @@ class Thneed:
     for prg, args in self.cl_cache:
       events.append(prg.clprgs[0](CL.cl_queue[0], *args))
     mt = time.monotonic()
-    CL.synchronize()
+    Device["GPU"].synchronize()
     et = time.monotonic() - st
     print(f"submit in {(mt-st)*1000.0:.2f} ms, total runtime is {et*1000.0:.2f} ms")
 

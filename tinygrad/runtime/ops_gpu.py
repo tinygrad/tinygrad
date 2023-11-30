@@ -8,7 +8,6 @@ from typing import Optional, List, Tuple
 from tinygrad.helpers import DEBUG, getenv, prod, ImageDType, OSX, fromimport, diskcache, DType
 from tinygrad.device import Compiled
 from tinygrad.renderer.opencl import OpenCLRenderer
-from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer
 from tinygrad.codegen.kernel import LinearizerOptions
 
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
@@ -17,18 +16,6 @@ OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external/external_osx_pr
 ROCM_LLVM_PATH = pathlib.Path("/opt/rocm/llvm/bin")
 if DEBUG >= 5:
   early_exec = fromimport("extra.helpers", "enable_early_exec")()
-
-class CLAllocator(LRUAllocator):
-  def _do_alloc(self, size, dtype, device, **kwargs):
-    if isinstance(dtype, ImageDType):
-      # NOTE: the memory is a bit off here due to padding, it's buf.row_pitch * buf.height * 4 * dtype.itemsize
-      assert size == prod(dtype.shape), f"image size mismatch {size} != {dtype.shape}"
-      fmt = cl.ImageFormat(cl.channel_order.RGBA, {2: cl.channel_type.HALF_FLOAT, 4: cl.channel_type.FLOAT}[dtype.itemsize])
-      buf = cl.Image(CL.cl_ctxs[int(device)], cl.mem_flags.READ_WRITE, fmt, shape=(dtype.shape[1], dtype.shape[0]))
-    else:
-      buf = cl.Buffer(CL.cl_ctxs[int(device)], cl.mem_flags.READ_WRITE, size * dtype.itemsize)
-    setattr(buf, 'device', int(device)) # device is tracked on the underlying buffer
-    return buf
 
 class _CL:
   def __init__(self):
@@ -40,27 +27,8 @@ class _CL:
     self.cl_ctxs: List[cl.Context] = [cl.Context(devices=[x]) for x in self.devices] if device is None else [cl.Context(devices=[self.devices[device]])]
     if DEBUG >= 1: print(f"using devices: {[ctx.devices[0].hashable_model_and_version_identifier for ctx in self.cl_ctxs]}")
     self.cl_queue: List[cl.CommandQueue] = [cl.CommandQueue(ctx, device=ctx.devices[0], properties=cl.command_queue_properties.PROFILING_ENABLE) for ctx in self.cl_ctxs]
-    self.cl_allocator = CLAllocator(CL.cl_ctxs[0].devices[0].get_info(cl.device_info.GLOBAL_MEM_SIZE))
 CL = _CL()
 if not getenv("DELAYED_RUNTIME_INIT", False): CL.post_init()
-
-class CLBuffer(RawBufferCopyInOut, RawBufferTransfer):
-  def __init__(self, size, dtype, device='0'): super().__init__(size, dtype, allocator=CL.cl_allocator, **{'device': device})
-  def _clear_event(self, _): del self.event
-  def _copyin(self, x:np.ndarray):
-    assert not self.dtype.name.startswith("image"), f"can't copyin images {self.dtype}"
-    self.event = cl.enqueue_copy(CL.cl_queue[self._buf.device], self._buf, np.require(x, requirements=['C', 'A']), is_blocking=False)
-    self.event.set_callback(cl.command_execution_status.COMPLETE, self._clear_event)
-  def _copyout(self, x:np.ndarray):
-    assert not self.dtype.name.startswith("image"), f"can't copyout images {self.dtype}"
-    CL.cl_allocator.ensure_has_free_space(self.size*self.dtype.itemsize, self._device)
-    buf = cl.Buffer(CL.cl_ctxs[self._buf.device], cl.mem_flags.WRITE_ONLY | cl.mem_flags.USE_HOST_PTR, 0, hostbuf=x.data)
-    mapped, event = cl.enqueue_map_buffer(CL.cl_queue[self._buf.device], buf, cl.map_flags.WRITE, 0, self.size, dtype=self.dtype.np, is_blocking=False)
-    with mapped.base: cl.enqueue_copy(CL.cl_queue[self._buf.device], mapped, self._buf, is_blocking=True, wait_for=[event] + ([evt] if (evt:=getattr(self, "event", None)) else []))
-  def _transfer(self, x):
-    if "gfx" in CL.cl_ctxs[x._buf.device].devices[0].name:
-      cl.enqueue_copy_buffer_p2p_amd(CL.cl_platform, CL.cl_queue[x._buf.device], x._buf, self._buf, x.size * x.dtype.itemsize).wait()
-    else: raise NotImplementedError("p2p transfer between devices not implemented on non-amd")
 
 @diskcache
 def compile_gpu(prg:str) -> bytes:
@@ -106,7 +74,7 @@ class GPUDevice(Compiled):
     self.device = int(device.split(":")[1]) if ":" in device else 0
     self.events = []
     super().__init__(LinearizerOptions(), OpenCLRenderer, compile_gpu, functools.partial(CLProgram, self.device))
-  def alloc(self, size, dtype:DType):
+  def alloc(self, size:int, dtype:DType):
     if isinstance(dtype, ImageDType):
       # NOTE: the memory is a bit off here due to padding, it's buf.row_pitch * buf.height * 4 * dtype.itemsize
       assert size == prod(dtype.shape), f"image size mismatch {size} != {dtype.shape}"
