@@ -3,6 +3,7 @@ from tinygrad.helpers import DType
 from tinygrad.tensor import Device, Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
+from tinygrad.helpers import dtypes
 import json
 
 EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "WEBGL", "CLANG", "CUDA", "GPU"]
@@ -160,9 +161,9 @@ def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, 
       return [size, 1];
     }
 
-    function updateTextureData(gl, texture, data) {
+    function updateTextureData(gl, texture, data, isHalf) {
       gl.bindTexture(gl.TEXTURE_2D, texture.tex);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, texture.width, texture.height, gl.RED, gl.FLOAT, data);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, texture.width, texture.height, gl.RED, (isHalf) ? gl.HALF_FLOAT : gl.FLOAT, data);
       gl.bindTexture(gl.TEXTURE_2D, null);
     }
 
@@ -181,11 +182,10 @@ def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, 
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.deleteFramebuffer(framebuffer);
 
-      console.log("Output: " + data);
       return data;
     }
 
-    function createTexture(gl, size, tensorBuffer) {
+    function createTexture(gl, size, isHalf, tensorBuffer) {
       const texture = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, texture);
       const internalFormat = gl.RGBA;
@@ -193,15 +193,21 @@ def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, 
       let weights;
       
       if (tensorBuffer != null) {
-        weights = new Float32Array(tensorBuffer.buffer, tensorBuffer.byteOffset, tensorBuffer.byteLength / Float32Array.BYTES_PER_ELEMENT);
+        if (!isHalf)
+          weights = new Float32Array(tensorBuffer.buffer, tensorBuffer.byteOffset, tensorBuffer.byteLength / Float32Array.BYTES_PER_ELEMENT);
+        else 
+          weights = new Uint16Array(tensorBuffer.buffer, tensorBuffer.byteOffset, tensorBuffer.byteLength / Uint16Array.BYTES_PER_ELEMENT);
       } else {
-        weights = new Float32Array(size).fill(0.0);
+        if (!isHalf)
+          weights = new Float32Array(size).fill(0.0);
+        else
+          weights = new Uint16Array(size).fill(0.0);
       }
 
       if (size != weights.length)
         console.log("Weights length: " + weights.length + ", texsize: " + texSize[0]*texSize[1]);
 
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, texSize[0], texSize[1], 0, gl.RED, gl.FLOAT, weights);
+      gl.texImage2D(gl.TEXTURE_2D, 0, (isHalf) ? gl.R16F : gl.R32F, texSize[0], texSize[1], 0, gl.RED, (isHalf) ? gl.HALF_FLOAT : gl.FLOAT, weights);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -223,11 +229,11 @@ def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, 
     const metadata = getTensorMetadata(safetensor);
   """
 
-  textures = '\n    '.join([f"const {name} = " + (f"createTexture(gl, {size/4});" if _key not in weight_names else f"createTexture(gl, {size/4}, getTensorBuffer(safetensor, metadata['{weight_names[_key]}']))") + ";"  for name,(size,dtype,_key) in bufs.items()])
+  textures = '\n    '.join([f"const {name} = " + (f"createTexture(gl, {size/(2 if dtype == dtypes.half else 4)}, {'true' if dtype == dtypes.half else 'false'});" if _key not in weight_names else f"createTexture(gl, {size/(2 if dtype == dtypes.half else 4)}, {'true' if dtype == dtypes.half else 'false'}, getTensorBuffer(safetensor, metadata['{weight_names[_key]}']))") + ";"  for name,(size,dtype,_key) in bufs.items()])
   kernels = '\n\n'.join([f"const {key} = `{code.replace(key, 'main').replace('version 330', 'version 300 es')}`;" for key, code in functions.items()])
   kernel_names = ', '.join([name for (name, _args, _global_size, _local_size) in statements])
   kernel_calls = '\n        '.join([f"runProgram(gl, '{name}', programs[{i}], [{', '.join(args)}]);" for i, (name, args, _global_size, _local_size) in enumerate(statements) ])
-  copy_inputs = "\n".join([f'updateTextureData(gl, {name}, _{name});' for name,(size,dtype,_key) in bufs.items() if "input" in name])
+  copy_inputs = "\n".join([f'updateTextureData(gl, {name}, _{name}, {"true" if dtype == dtypes.half else "false"});' for name,(size,dtype,_key) in bufs.items() if "input" in name])
   entry_point = f"""
     return function({",".join([f"_{name}" for name,(size,dtype,_key) in bufs.items() if "input" in name])}) {{
       const ext = gl.getExtension('EXT_color_buffer_float');
