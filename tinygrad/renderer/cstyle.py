@@ -157,9 +157,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
         kk("nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::row_major> b_frag;")
         kk("nvcuda::wmma::fragment<nvcuda::wmma::accumulator, 16, 16, 16, float> c_frag;")
         kk("nvcuda::wmma::fill_fragment(c_frag, 0.0f);")
-        kk(f"__shared__ half a[16*16];")
-        kk(f"__shared__ half b[16*16];")
-        kk(f"__shared__ float c[16*16];")
+        kk("__shared__ half a[16*16];")
+        kk("__shared__ half b[16*16];")
+        kk("__shared__ float c[16*16];")
         for i in range(16*16):
           kk(f"a[lidx1*16+{i%16}] = {r[vin[(i%16)]]};")
         for i in range(16*16):
