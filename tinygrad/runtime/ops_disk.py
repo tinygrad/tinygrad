@@ -22,6 +22,7 @@ class RawDiskBuffer(RawBufferMapped):
       if str(device).startswith("shm:"):
         if OSX:
           with open(f"/tmp/shm_{device[4:]}", "w+b") as f:
+            self.fn = f.name
             f.truncate(size * dtype.itemsize)
             shm = mmap.mmap(f.fileno(), size * dtype.itemsize, flags=mmap.MAP_SHARED)
         else:

@@ -87,6 +87,7 @@ class MetalProgram:
     for i,a in enumerate(bufs):
       if isinstance(a, RawMetalBuffer):
         if a.cmd_buf:
+          a.cmd_buf.waitUntilCompleted() 
           a.cmd_buf = None
         encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
       elif isinstance(a, int): encoder.setBytes_length_atIndex_((arg:=ctypes.c_int32(a)), ctypes.sizeof(arg), i)
@@ -127,6 +128,9 @@ class MetalGraph:
       icb_command.setComputePipelineState_(pipeline_state)
       for i,b in enumerate(ji.rawbufs):
         if b is not None:
+          if isinstance(b, RawMetalBuffer) and b.cmd_buf is not None:
+            b.cmd_buf.waitUntilCompleted()
+            b.cmd_buf = None
           icb_command.setKernelBuffer_offset_atIndex_(b._buf, 0, i)
           if i == 0: write_resources.append(b._buf)
           else: read_resources.append(b._buf)
@@ -145,6 +149,10 @@ class MetalGraph:
     # NOTE: you at least can't update the ints if this is running
     if self.command_buffer is not None and self.command_buffer in METAL.mtl_buffers_in_flight: self.command_buffer.waitUntilCompleted()
     all_read_resources = self.read_resources + [x._buf for x in input_rawbuffers]
+    for b in input_rawbuffers:
+      if isinstance(b, RawMetalBuffer) and b.cmd_buf is not None:
+        b.cmd_buf.waitUntilCompleted() 
+        b.cmd_buf = None
     for (j,i),input_idx in self.input_replace.items():
       self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_idx]._buf, 0, i)
     for j in self.jc_idx_with_updatable_launch_dims:
