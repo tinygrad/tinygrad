@@ -152,6 +152,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
         assert dtype == dtypes.float.vec(8), "output dtype of HIP TC is _float8"
         kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
       elif args[0] == "CUDA":
+        output = ssa(u, "wmma")
+        kk("float wmma0[8];")
         kk("{")
         kk("nvcuda::wmma::fragment<nvcuda::wmma::matrix_a, 16, 16, 16, half, nvcuda::wmma::row_major> a_frag;")
         kk("nvcuda::wmma::fragment<nvcuda::wmma::matrix_b, 16, 16, 16, half, nvcuda::wmma::row_major> b_frag;")
@@ -170,7 +172,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
         kk("nvcuda::wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);")
         kk("nvcuda::wmma::store_matrix_sync(c, c_frag, 16, wmma::mem_row_major);")
         for i in range(8):
-          kk(f"{r[vin[32+i]]} = c[lidx1+(lidx0*16)+{i*32}];")
+          kk(f"{output}[{i}] = c[lidx1+(lidx0*16)+{i*32}];")
         kk("__syncthreads();")
         kk("}")
       else:
