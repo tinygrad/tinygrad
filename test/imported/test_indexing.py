@@ -182,9 +182,9 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(reference[ri([0]), ri([0])], consec((1,)))
     numpy_testing_assert_equal_helper(reference[ri([2]), ri([1])], consec((1,), 6))
     # # TODO: we don't support list of Tensors as index
-    # numpy_testing_assert_equal_helper(reference[[ri([0, 0]), ri([0, 1])]], np.array([1, 2]))
-    # numpy_testing_assert_equal_helper(reference[[ri([0, 1, 1, 0, 2]), ri([1])]], np.array([2, 4, 4, 2, 6]))
-    # numpy_testing_assert_equal_helper(reference[[ri([0, 0, 1, 1]), ri([0, 1, 0, 0])]], np.array([1, 2, 3, 3]))
+    numpy_testing_assert_equal_helper(reference[[ri([0, 0]), ri([0, 1])]], np.array([1, 2]))
+    numpy_testing_assert_equal_helper(reference[[ri([0, 1, 1, 0, 2]), ri([1])]], np.array([2, 4, 4, 2, 6]))
+    numpy_testing_assert_equal_helper(reference[[ri([0, 0, 1, 1]), ri([0, 1, 0, 0])]], np.array([1, 2, 3, 3]))
 
     # rows = ri([[0, 0],
     #            [1, 2]])
