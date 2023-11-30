@@ -52,7 +52,7 @@ class RawDiskBuffer(RawBufferMapped):
         self._buf.fd.seek(self.offset)
         self._buf.fd.readinto(buf)
       else:
-        rawbuf.cast('B')[:] = self._buffer()
+        buf.cast('B')[:] = self._buffer()
     else: rawbuf.loadFromDisk(self)
 
 disk_fxn_for_op: Dict[Op, Callable] = { BufferOps.LOAD: lambda x: x, BufferOps.STORE: lambda x: x, UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: RawDiskBuffer.cast, MovementOps.AS_STRIDED: RawDiskBuffer.as_strided }
