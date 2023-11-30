@@ -35,7 +35,7 @@ def _ast_reduceops(op:LazyOp) -> LazyOp:
   return LazyOp(op.op, (src,), op.arg)
 
 # this supports late merging an upstream Reduce op and even an Elementwise op above that
-def _ast_binaryops(op:LazyOp, shape: Tuple[sint, ...]) -> LazyOp:
+def _ast_binaryops(op:LazyOp, shape:Tuple[sint, ...]) -> LazyOp:
   real_srcs: Dict[LazyBuffer, Optional[Union[LazyOp, LazyBuffer]]] = {x:None for x in op.buffers}
   # NOTE: contiguous does not always mean the same size with SHRINK. this is still mergeable but requires more thought how
   # TODO: this can also support late fusion of BinaryOps, required for test_fold_conv_sgd
@@ -187,7 +187,7 @@ class LazyBuffer:
   # *** creation/special ops ***
 
   @staticmethod
-  def loadop(op, shape, dtype, device, arg=None, src=None) -> LazyBuffer:
+  def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None) -> LazyBuffer:
     return create_lazybuffer(device, ShapeTracker.from_shape(tuple(shape)), LoadOps, LazyOp(op, tuple() if src is None else (src,), arg), dtype)
 
   # create a constant with the shape and dtype of self
