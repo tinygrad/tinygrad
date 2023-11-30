@@ -25,10 +25,8 @@ def atan2_gpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
       int idx = get_global_id(0);
       c[idx] = atan2(a[idx], b[idx]);
     }""", global_size=[prod(ret.shape)]).build(Device[ret.device].compiler, Device[ret.device].runtime).exec([ret.realized, a.realized, b.realized])
-  return ret.realized
 
-def atan2_cpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
-  return Device[ret.device].buffer.fromCPU(np.arctan2(a.realized._buf, b.realized._buf))
+def atan2_cpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer): ret.realized._copyin(np.arctan2(a.realized._buf, b.realized._buf))
 
 # *** second, we write the ATan2 mlop ***
 # NOTE: The derivative of atan2 doesn't need a custom op! https://www.liquisearch.com/atan2/derivative

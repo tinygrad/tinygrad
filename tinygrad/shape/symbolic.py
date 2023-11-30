@@ -94,11 +94,12 @@ class Node:
       if self == b: return NumNode(0)
       if (b - self).min > 0 and self.min >= 0: return self # b - self simplifies the node
       raise RuntimeError(f"not supported: {self} % {b}")
-    assert b > 0 and isinstance(self.max, int) and isinstance(self.min, int), 'not supported'
+    assert b > 0
     if b == 1: return NumNode(0)
-    if self.min >= 0 and self.max < b: return self
-    if (self.min//b) == (self.max//b): return self - (b*(self.min//b))
-    if self.min < 0: return (self - ((self.min//b)*b)) % b
+    if isinstance(self.max, int) and isinstance(self.min, int):
+      if self.min >= 0 and self.max < b: return self
+      if (self.min//b) == (self.max//b): return self - (b*(self.min//b))
+      if self.min < 0: return (self - ((self.min//b)*b)) % b
     return create_node(ModNode(self, b))
 
   @staticmethod
@@ -131,7 +132,7 @@ class Node:
 
 class Variable(Node):
   def __new__(cls, expr:Optional[str], nmin:int, nmax:int):
-    assert nmin >= 0 and nmin <= nmax
+    assert nmin >= 0 and nmin <= nmax, f"invalid Variable {expr=} {nmin=} {nmax=}"
     if nmin == nmax: return NumNode(nmin)
     return super().__new__(cls)
 

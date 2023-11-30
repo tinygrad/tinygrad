@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX
+from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX, temp
 from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
@@ -112,7 +112,6 @@ class TestBFloat16DType(unittest.TestCase):
     assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
 
   def test_bf16_disk_write_read(self):
-    from extra.utils import temp
     t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.float32)
     t.to(f"disk:{temp('f32')}").realize()
 
