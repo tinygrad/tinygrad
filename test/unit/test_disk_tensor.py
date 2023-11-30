@@ -1,4 +1,5 @@
 import pathlib
+import struct
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
@@ -144,6 +145,13 @@ class TestDiskTensor(unittest.TestCase):
   def test_reshape(self):
     helper_test_disk_tensor("dt5", [1,2,3,4,5], lambda x: x.reshape((1,5)))
     helper_test_disk_tensor("dt6", [1,2,3,4], lambda x: x.reshape((2,2)))
+
+  @unittest.skipIf(Device.DEFAULT != "METAL", "only metal")
+  def test_metal(self):
+    pathlib.Path(temp("dt7")).write_bytes(struct.pack("<III", 1, 2, 3)) # metal is little-endian
+    t1 = Tensor.empty(3, device=f"disk:{temp('dt7')}", dtype=dtypes.uint32)
+    t2 = Tensor([4, 5, 6], dtype=dtypes.uint32)
+    np.testing.assert_allclose((t1 + t2).realize().numpy(), np.array([5, 7, 9], dtype=np.uint32))
 
 if __name__ == "__main__":
   unittest.main()

@@ -19,11 +19,17 @@ class MetalAllocator(LRUAllocator):
   def _do_free(self, buf): buf.release()
   def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
 
+def unwrap(x):
+  ret, err = x
+  assert err is None, str(err)
+  return ret
+
 class _METAL:
   def __init__(self):
     self.mtl_buffers_in_flight: List[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
+    self.mtl_io_queue = unwrap(self.device.newIOCommandQueueWithDescriptor_error_(Metal.MTLIOCommandQueueDescriptor.alloc().init(), None))
     self.allocator = MetalAllocator(self.device.dedicatedMemorySize() or self.device.sharedMemorySize())
   # TODO: is there a better way to do this?
   def synchronize(self):
@@ -32,17 +38,23 @@ class _METAL:
 METAL = _METAL()
 
 class RawMetalBuffer(RawBufferMapped):
-  def __init__(self, size:int, dtype:DType):
+  def __init__(self, size:int, dtype:DType, device:Optional[str]=None):
     assert dtype != dtypes.double, f"METAL does not support {dtype.name}"
+    self.from_file = device
     super().__init__(size, dtype, allocator=METAL.allocator)
   def _buffer(self):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
-
-def unwrap(x):
-  ret, err = x
-  assert err is None, str(err)
-  return ret
+  def try_from_file(self) -> "RawMetalBuffer":
+    if not self.from_file: return self
+    from Foundation import NSURL
+    handle = unwrap(METAL.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(self.from_file), None))
+    new_buffer = RawMetalBuffer(self.size, self.dtype) # TODO: cache this on self
+    io_command_buffer = METAL.mtl_io_queue.commandBuffer()
+    io_command_buffer.loadBuffer_offset_size_sourceHandle_sourceHandleOffset_(new_buffer._buf, 0, new_buffer._memsz, handle, self.offset)
+    io_command_buffer.commit()
+    io_command_buffer.waitUntilCompleted()
+    return new_buffer
 
 @diskcache
 def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
@@ -72,7 +84,7 @@ class MetalProgram:
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
     for i,a in enumerate(bufs):
-      if isinstance(a, RawMetalBuffer): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
+      if isinstance(a, RawMetalBuffer): encoder.setBuffer_offset_atIndex_(a.try_from_file()._buf if i > 0 else a._buf, 0, i) # out buffer at index 0 is never a file
       elif isinstance(a, int): encoder.setBytes_length_atIndex_((arg:=ctypes.c_int32(a)), ctypes.sizeof(arg), i)
       else: raise RuntimeError(f"arg at index {i} has unsupported type {type(a)}")
     encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
