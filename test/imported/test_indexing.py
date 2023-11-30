@@ -89,7 +89,8 @@ class TestIndexing(unittest.TestCase):
       numpy_testing_assert_equal_helper(tensor_indexed, np.array(lst_indexed))
 
     self.assertRaises(ValueError, lambda: reference[1:9:0])
-    self.assertRaises(ValueError, lambda: reference[1:9:-1])
+    # NOTE torch doesn't support this but numpy does so we should too
+    # self.assertRaises(ValueError, lambda: reference[1:9:-1])
 
     self.assertRaises(IndexError, lambda: reference[1, 1, 1, 1])
     self.assertRaises(IndexError, lambda: reference[1, 1, 1, 1:1])
@@ -229,9 +230,9 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(reference[ri([0]), ri([0])], np.array([0]))
     numpy_testing_assert_equal_helper(reference[ri([2]), ri([1])], np.array([6]))
     # # TODO: we don't support list of Tensors as index
-    # numpy_testing_assert_equal_helper(reference[[ri([0, 0]), ri([0, 1])]], np.array([0, 4]))
-    # numpy_testing_assert_equal_helper(reference[[ri([0, 1, 1, 0, 3]), ri([1])]], np.array([4, 5, 5, 4, 7]))
-    # numpy_testing_assert_equal_helper(reference[[ri([0, 0, 1, 1]), ri([0, 1, 0, 0])]], np.array([0, 4, 1, 1]))
+    numpy_testing_assert_equal_helper(reference[[ri([0, 0]), ri([0, 1])]], np.array([0, 4]))
+    numpy_testing_assert_equal_helper(reference[[ri([0, 1, 1, 0, 3]), ri([1])]], np.array([4, 5, 5, 4, 7]))
+    numpy_testing_assert_equal_helper(reference[[ri([0, 0, 1, 1]), ri([0, 1, 0, 0])]], np.array([0, 4, 1, 1]))
 
     # rows = ri([[0, 0],
     #            [1, 2]])

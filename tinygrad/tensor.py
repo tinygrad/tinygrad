@@ -310,6 +310,7 @@ class Tensor:
 
     # TODO: if indices is a tuple of any sequence, or if indices is a list, it's for advanced indexing
     orig_slices = list(indices) if isinstance(indices, tuple) else [indices]
+    if len(orig_slices) == 1 and type(orig_slices[0]) is list and all(type(sl) in [Tensor, list] for sl in orig_slices[0]): orig_slices = orig_slices[0]
     count = defaultdict(list)
     for i,v in enumerate(orig_slices): count[type(v)].append(i)
 
