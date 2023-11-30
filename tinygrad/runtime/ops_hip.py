@@ -86,7 +86,7 @@ class HIPGraph:
       prg: CompiledASTRunner = cast(CompiledASTRunner, ji.prg)
       assert all(x is not None for x in ji.rawbufs) and ji.rawbufs[0] is not None, "buffers could not be None" # for linters
 
-      args = [cast(Buffer, x).opaque for x in ji.rawbufs] + [var_vals[x] for x in prg.vars]
+      args = [cast(Buffer, x)._buf for x in ji.rawbufs] + [var_vals[x] for x in prg.vars]
       types = [ctypes.c_void_p] * len(ji.rawbufs) + [ctypes.c_int] * len(prg.vars)
       c_params = hip.buildKernelNodeParams(args, types, prg.clprg.prgs[ji.rawbufs[0]._device], *prg.launch_dims(var_vals))
       graph_node = hip.hipGraphAddKernelNode(self.graph, [graph_node] if graph_node else [], c_params)

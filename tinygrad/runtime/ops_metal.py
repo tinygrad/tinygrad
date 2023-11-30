@@ -88,9 +88,9 @@ class MetalGraph:
       icb_command.setComputePipelineState_(pipeline_state)
       for i,b in enumerate(ji.rawbufs):
         if b is not None:
-          icb_command.setKernelBuffer_offset_atIndex_(b.opaque, 0, i)
-          if i == 0: write_resources.append(b.opaque)
-          else: read_resources.append(b.opaque)
+          icb_command.setKernelBuffer_offset_atIndex_(b._buf, 0, i)
+          if i == 0: write_resources.append(b._buf)
+          else: read_resources.append(b._buf)
       var_vals_keys = list(var_vals.keys())
       for i,v in enumerate(prg.vars):
         icb_command.setKernelBuffer_offset_atIndex_(self.int_buf, var_vals_keys.index(v)*4, len(ji.rawbufs)+i)
@@ -105,9 +105,9 @@ class MetalGraph:
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # NOTE: you at least can't update the ints if this is running
     if self.command_buffer is not None and self.command_buffer in METAL.mtl_buffers_in_flight: self.command_buffer.waitUntilCompleted()
-    all_read_resources = self.read_resources + [x.opaque for x in input_rawbuffers]
+    all_read_resources = self.read_resources + [x._buf for x in input_rawbuffers]
     for (j,i),input_idx in self.input_replace.items():
-      self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_idx].opaque, 0, i)
+      self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_idx]._buf, 0, i)
     for j in self.jc_idx_with_updatable_launch_dims:
       global_size, local_size = cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals)
       self.icb.indirectComputeCommandAtIndex_(j).concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))

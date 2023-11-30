@@ -45,26 +45,28 @@ class _LRUAlloc:
       self.free_cache()
       return Device[device].alloc(size, dtype)
   def free_cache(self):
-    for (device, size, dtype), opaque in self.cache.items():
+    for (device, _, _), opaque in self.cache.items():
       Device[device].free(opaque)
   def free(self, opaque:T, device, size, dtype):
-    self.cache[(device, size, dtype)].append(opaque)
-    #Device[device].free(opaque)
+    if isinstance(Device[device], Interpreted):
+      Device[device].free(opaque)
+    else:
+      self.cache[(device, size, dtype)].append(opaque)
 LRUAlloc = _LRUAlloc()
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype = device, size, dtype
-    self.opaque = opaque if opaque is not None or size==0 else LRUAlloc(device, size, dtype)
+    self._buf = opaque if opaque is not None or size==0 else LRUAlloc(device, size, dtype)
     GlobalCounters.mem_used += self.size * self.dtype.itemsize
   def __del__(self):
     GlobalCounters.mem_used -= self.size * self.dtype.itemsize
-    LRUAlloc.free(self.opaque, self.device, self.size, self.dtype)
+    LRUAlloc.free(self._buf, self.device, self.size, self.dtype)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size}>"
   def toCPU(self) -> np.ndarray:
     ret = np.empty(self.size, self.dtype.np)
-    if self.size > 0: Device[self.device].copyout(ret.data.cast("B"), self.opaque)
+    if self.size > 0: Device[self.device].copyout(ret.data.cast("B"), self._buf)
     return ret
 
 # TODO: size, dest, src are the same type. can we enforce this?
@@ -110,7 +112,7 @@ class InterpretedASTRunner(JITRunner):
 
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> float:
     st = time.perf_counter()
-    rawbufs[0].opaque = self.fxn([x.opaque for x in rawbufs[1:]], var_vals)
+    rawbufs[0]._buf = self.fxn([x._buf for x in rawbufs[1:]], var_vals)
     et = time.perf_counter() - st
     update_stats(f"<interpreted {rawbufs[0].size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit)
     return et
@@ -200,7 +202,7 @@ class CompiledASTRunner(JITRunner):
     lra = self.runtime_args.copy()
     if global_size: lra['global_size'] = global_size
     if local_size and 'local_size' not in lra: lra['local_size'] = local_size
-    et = self.clprg(*[x.opaque for x in rawbufs], *[var_vals[k] for k in self.vars], **lra, wait=wait or DEBUG>=2)
+    et = self.clprg(*[x._buf for x in rawbufs], *[var_vals[k] for k in self.vars], **lra, wait=wait or DEBUG>=2)
     update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra)
     return et
 

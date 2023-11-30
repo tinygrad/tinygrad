@@ -95,7 +95,7 @@ class TinyJit(Generic[ReturnType]):
     return cast(ReturnType, self.ret)
 
 class PlaceHolder:
-  def __init__(self, buf:Buffer): self.size, self.dtype, self.device, self.ref, self.bufid = buf.size, buf.dtype, buf.device, ref(buf), id(buf.opaque)
+  def __init__(self, buf:Buffer): self.size, self.dtype, self.device, self.ref, self.bufid = buf.size, buf.dtype, buf.device, ref(buf), id(buf._buf)
   def to_tuple(self): return (self.size, self.dtype, self.device, self.bufid)
   def __hash__(self): return hash(self.to_tuple())
   def __eq__(self, x): return isinstance(x, PlaceHolder) and self.to_tuple() == x.to_tuple()
