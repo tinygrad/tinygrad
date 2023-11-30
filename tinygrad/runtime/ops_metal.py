@@ -5,10 +5,11 @@ from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup
 from tinygrad.device import Compiled, CompiledASTRunner, update_stats
 from tinygrad.renderer.metal import MetalRenderer
-from tinygrad.runtime.lib import RawBufferMapped, RawBuffer, LRUAllocator
+from tinygrad.runtime.lib import RawBufferMapped, RawBufferMappedDisk, RawBuffer, LRUAllocator
 from tinygrad.shape.symbolic import Variable
 from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, GraphException
 from Foundation import NSURL
+import numpy as np
 
 class MetalAllocator(LRUAllocator):
   def _do_alloc(self, size, dtype, device, **kwargs):
@@ -27,7 +28,7 @@ class _METAL:
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     (desc := Metal.MTLIOCommandQueueDescriptor.alloc().init()).setType_(Metal.MTLIOCommandQueueTypeConcurrent)
     desc.setPriority_(Metal.MTLIOPriorityHigh)
-    desc.setMaxCommandsInFlight_(2**64-1)
+    desc.maxCommandBufferCount_(2**16) # NOTE: heuristic
     self.mtl_io_queue, err = self.device.newIOCommandQueueWithDescriptor_error_(desc, None)
     assert err is None, err
     self.allocator = MetalAllocator(self.device.dedicatedMemorySize() or self.device.sharedMemorySize())
@@ -37,16 +38,21 @@ class _METAL:
     self.mtl_buffers_in_flight.clear()
 METAL = _METAL()
 
-class RawMetalBuffer(RawBufferMapped):
-  def isMetal(self): return True
+class RawMetalBuffer(RawBufferMappedDisk):
   def __init__(self, size:int, dtype:DType):
-    self.cmd_buf = None
+    self.cmd_buf: Any = None
     assert dtype != dtypes.double, f"METAL does not support {dtype.name}"
     super().__init__(size, dtype, allocator=METAL.allocator)
   def _buffer(self):
     METAL.synchronize()
     return self._buf.contents().as_buffer(self._buf.length())
-  def loadFromDisk(self, src:RawBuffer):
+  def toCPU(self) -> np.ndarray:
+    if self.cmd_buf is not None:
+      self.cmd_buf.waitUntilCompleted()
+      self.cmd_buf = None
+    return np.frombuffer(self._buffer(), dtype=np.dtype(self.dtype.np, metadata={"backing": self}), count=self.size)
+  def loadFromDisk(self, src:RawBufferMapped):
+    assert src.fn is not None
     hdl, err = METAL.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(src.fn), None)
     assert err is None, f"Error creating io handle - {err}"
     self.cmd_buf = METAL.mtl_io_queue.commandBuffer()

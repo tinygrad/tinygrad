@@ -55,15 +55,17 @@ def _realize_rand(buffer: LazyBuffer) -> None:
 
 # *** one op LoadOps ***
 
-from tinygrad.runtime.lib import RawBufferMapped, RawBufferTransfer
+from tinygrad.runtime.lib import RawBufferMapped, RawBufferTransfer, RawBufferMappedDisk
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
   assert src.realized.size == buffer.realized.size, f"size mismatch on FROM {src.realized.size=} != {buffer.realized.size=}"
   assert src.st.contiguous and buffer.st.contiguous, "all must be contiguous for from"
   if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.realized.size:<16d} shape {str(buffer.shape):23s} dtype {src.realized.dtype}")
   # TODO: make this generic
+  if isinstance(src.realized, RawDiskBuffer) and isinstance(buffer.realized, RawBufferMappedDisk):
+    buffer.realized.loadFromDisk(src.realized)
   if isinstance(src.realized, RawDiskBuffer) and isinstance(buffer.realized, RawBufferMapped):
-    src.realized.readinto(buffer.realized)
+    src.realized.readinto(buffer.realized._buffer())
   elif isinstance(src.realized, RawBufferTransfer) and isinstance(buffer.realized, RawBufferTransfer) and getenv("P2P", 0) >= 1:
     buffer.realized._transfer(src.realized)
   else:
