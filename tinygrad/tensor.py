@@ -303,7 +303,6 @@ class Tensor:
   def __getitem__(self, indices) -> Tensor: # indices: Union[int, slice, Tensor, None, Ellipsis, List, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
     def validate_slice(sl: slice):
       if sl.step == 0: raise ValueError('slice step cannot be 0')
-      elif None not in [sl.start, sl.stop, sl.step] and ((sl.start < sl.stop) == (sl.step < 0)): raise ValueError('slice step not in the right direction')
       else: return sl
     def normalize_int(e, i, dim_sz):
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
