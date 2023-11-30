@@ -3,8 +3,7 @@ import numpy as np
 from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, BufferOps
 from tinygrad.device import Device, Buffer
 from tinygrad.graph import log_schedule_item, print_tree
-from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import DEBUG, prod, all_int
+from tinygrad.helpers import DEBUG, prod
 
 def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
   # NOTE: if you for loop the schedule it's slow because nothing frees
@@ -34,7 +33,8 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
       if si.ast.op in LoadOps:
         # confirm the LoadOps are contiguous and in order
         for i,s in enumerate(si.ast.src): assert isinstance(s, LazyOp) and s.op == BufferOps.LOAD and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
-        LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out, *si.inputs)
+        kwargs = {"arg": si.ast.arg} if si.ast.arg else {}
+        LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out.realized, *[x.realized for x in si.inputs], **kwargs)
       else:
         Device[si.out.device].get_runner(si.ast).exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)
     del si.out.op
@@ -44,27 +44,24 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
 
 # *** zero op LoadOps ***
 
-def _realize_empty(buffer: LazyBuffer) -> None:
-  if DEBUG >= 2: print(f"***     empty {buffer.device}                              shape {str(buffer.shape):23s} dtype {buffer.dtype}")
+def _realize_empty(buffer: Buffer) -> None:
+  if DEBUG >= 2: print(f"***     empty {buffer.device}                              shape {buffer.size:5d} dtype {buffer.dtype}")
 
 # TODO: remove this and write the RNG in tinygrad
-def _realize_rand(buffer: LazyBuffer) -> None:
-  assert all_int(buffer.shape), "rand doesn't support symbolic shape"
-  if DEBUG >= 2: print(f"***      rand {buffer.device}    seed {buffer.op.arg:<10d}  shape {str(buffer.shape):23s} dtype {buffer.dtype}")
-  rng = np.random.default_rng(buffer.op.arg)
-  rng_np_buffer = rng.random(size=prod(buffer.shape), dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False)
-  buffer.realized.copyin(rng_np_buffer.data.cast('B'))
-  #buffer.realized._copyin(rng_np_buffer)
+def _realize_rand(buffer: Buffer, arg) -> None:
+  if DEBUG >= 2: print(f"***      rand {buffer.device}    seed {arg:<10d}  shape {buffer.size:5d} dtype {buffer.dtype}")
+  rng = np.random.default_rng(arg)
+  rng_np_buffer = rng.random(size=buffer.size, dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False)
+  buffer.copyin(rng_np_buffer.data)
 
 # *** one op LoadOps ***
 
 #from tinygrad.runtime.lib import RawBufferMapped, RawBufferTransfer
 #from tinygrad.runtime.ops_disk import RawDiskBuffer
-def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
-  assert src.realized.size == buffer.realized.size, f"size mismatch on FROM {src.realized.size=} != {buffer.realized.size=}"
-  assert src.st.contiguous and buffer.st.contiguous, "all must be contiguous for from"
-  if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.realized.size:<16d} shape {str(buffer.shape):23s} dtype {src.realized.dtype}")
-  buffer.realized.copyin(src.realized.toCPU().data.cast('B'))
+def _realize_from(buffer: Buffer, src: Buffer) -> None:
+  assert src.size == buffer.size, f"size mismatch on FROM {src.size=} != {buffer.size=}"
+  if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.size:<16d} shape {buffer.size:5d} dtype {src.dtype}")
+  buffer.copyin(src.toCPU().data)
   # TODO: make this generic
   #if isinstance(src.realized, RawDiskBuffer) and isinstance(buffer.realized, RawBufferMapped):
   #  src.realized.readinto(buffer.realized._buffer())
@@ -75,9 +72,9 @@ def _realize_from(buffer: LazyBuffer, src: LazyBuffer) -> None:
 
 # *** n op LoadOps ***
 
-def _realize_custom(buffer: LazyBuffer, *inputs: LazyBuffer) -> None:
-  if DEBUG >= 2: print(f"***    custom {buffer.device}                              shape {str(buffer.shape):23s} dtype {buffer.dtype}")
-  buffer.op.arg(buffer, *inputs)
+def _realize_custom(buffer: Buffer, *inputs: Buffer, arg) -> None:
+  if DEBUG >= 2: print(f"***    custom {buffer.device}                              shape {buffer.size:5d} dtype {buffer.dtype}")
+  arg(buffer, *inputs)
 
 LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {
   LoadOps.EMPTY: _realize_empty,
