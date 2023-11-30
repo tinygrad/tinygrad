@@ -31,8 +31,7 @@ class RawBuffer:  # pylint: disable=abstract-method
 class RawBufferMapped(RawBuffer):
   def _buffer(self) -> memoryview: raise NotImplementedError("must be implemented")
   # NOTE: this metadata prevents the backing buffer from being freed. hack can be removed with PEP688
-  def toCPU(self) -> np.ndarray: 
-    return np.frombuffer(self._buffer(), dtype=np.dtype(self.dtype.np, metadata={"backing": self}), count=self.size)
+  def toCPU(self) -> np.ndarray:  return np.frombuffer(self._buffer(), dtype=np.dtype(self.dtype.np, metadata={"backing": self}), count=self.size)
   def _copyin(self, x:np.ndarray) -> None: np.copyto(self.toCPU(), x.reshape(-1))
 
 class RawBufferMappedDisk(RawBufferMapped):
