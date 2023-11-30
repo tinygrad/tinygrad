@@ -26,11 +26,11 @@ class _METAL:
     self.mtl_buffers_in_flight: List[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
-    (desc := Metal.MTLIOCommandQueueDescriptor.alloc().init()).setType_(Metal.MTLIOCommandQueueTypeConcurrent)
+    desc = Metal.MTLIOCommandQueueDescriptor.alloc().init()
+    desc.setType_(Metal.MTLIOCommandQueueTypeConcurrent)
     desc.setPriority_(Metal.MTLIOPriorityHigh)
-    try: desc.maxCommandBufferCount_(2**16) # NOTE: heuristic
-    except:
-      if DEBUG.value >=2: print("METAL IO command queue property maxCommandBufferCount not supported")
+    desc.setMaxCommandBufferCount_(2**32-1)
+    desc.setMaxCommandsInFlight_(2**32-1)
     self.mtl_io_queue, err = self.device.newIOCommandQueueWithDescriptor_error_(desc, None)
     assert err is None, err
     self.allocator = MetalAllocator(self.device.dedicatedMemorySize() or self.device.sharedMemorySize())
