@@ -26,8 +26,8 @@ def compile_cuda_style(prg, compile_options, prog_t, create_prog, compile_prog, 
   if status != 0: raise RuntimeError(f"compile failed: {get_bytes(prog, get_log_size, get_log, check).decode()}")
   return get_bytes(prog, get_code_size, get_code, check)
 
-def encode_args_cuda_style(args, marks=(1,2,0)) -> Tuple[ctypes.Array, ctypes.Structure]:
-  c_args = create_c_struct(tuple([(f'f{i}', ctypes.c_void_p if isinstance(x, RawBuffer) else ctypes.c_int) for i,x in enumerate(args)]))(*[x._buf if isinstance(x, RawBuffer) else x for x in args])
+def encode_args_cuda_style(args, device_ptr_t, marks=(1,2,0)) -> Tuple[ctypes.Array, ctypes.Structure]:
+  c_args = create_c_struct(tuple([(f'f{i}', device_ptr_t if isinstance(x, RawBuffer) else ctypes.c_int) for i,x in enumerate(args)]))(*[x._buf if isinstance(x, RawBuffer) else x for x in args])
   return (ctypes.c_void_p * 5)(ctypes.c_void_p(marks[0]), ctypes.cast(ctypes.pointer(c_args), ctypes.c_void_p), ctypes.c_void_p(marks[1]),
                                ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(marks[2])), c_args
 
@@ -53,7 +53,7 @@ def pretty_ptx(s):
 class CUDAAllocator(LRUAllocator):
   def __init__(self): super().__init__(self._get_cur_free_space(None))
   def _do_alloc(self, size, dtype, device, **kwargs): return (check(cuda.cuMemAlloc_v2(ctypes.byref(buf := cuda.CUdeviceptr()), size * dtype.itemsize)), buf.value)[1]
-  def _do_free(self, buf): cuda.cuMemFree(buf)
+  def _do_free(self, buf): check(cuda.cuMemFree(buf))
   def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
   def _get_cur_free_space(self, device): return (check(cuda.cuMemGetInfo_v2(ctypes.byref(free := ctypes.c_size_t()), ctypes.byref(_ := ctypes.c_size_t()))), free.value)[1]
 
@@ -83,8 +83,8 @@ CUDA = _CUDA()
 
 class RawCUDABuffer(RawBufferCopyInOut):
   def __init__(self, size, dtype): super().__init__(size, dtype, allocator=CUDA.allocator)
-  def _copyin(self, x:np.ndarray): cuda.cuMemcpyHtoDAsync_v2(self._buf, np.require(x, requirements='C').ctypes.data_as(ctypes.c_void_p), self.size * self.dtype.itemsize, None)
-  def _copyout(self, x:np.ndarray): cuda.cuMemcpyDtoH_v2(np.require(x, requirements='C').ctypes.data_as(ctypes.c_void_p), self._buf, self.size * self.dtype.itemsize)
+  def _copyin(self, x:np.ndarray): check(cuda.cuMemcpyHtoDAsync_v2(self._buf, np.require(x, requirements='C').ctypes.data_as(ctypes.c_void_p), self.size * self.dtype.itemsize, None))
+  def _copyout(self, x:np.ndarray): check(cuda.cuMemcpyDtoH_v2(np.require(x, requirements='C').ctypes.data_as(ctypes.c_void_p), self._buf, self.size * self.dtype.itemsize))
 
 @diskcache
 def compile_cuda(prg) -> bytes: return compile_cuda_style(prg, CUDA.compile_opts, cuda.nvrtcProgram, cuda.nvrtcCreateProgram, cuda.nvrtcCompileProgram, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check)
@@ -106,7 +106,7 @@ class CUDAProgram:
     self.prg = prg
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
-    c_params = encode_args_cuda_style(args)[0] if not CUDACPU else [x._buf if not isinstance(x, int) else x for x in args]
+    c_params = encode_args_cuda_style(args, cuda.CUdeviceptr_v2)[0] if not CUDACPU else [x._buf if not isinstance(x, int) else x for x in args]
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, c_params)), enable=wait)
 
 class CUDAGraph:
@@ -129,7 +129,7 @@ class CUDAGraph:
       prg: CompiledASTRunner = cast(CompiledASTRunner, ji.prg)
 
       c_deps = (type(graph_node)*1)(*(graph_node,)) if graph_node is not None else None
-      c_config, c_struct = encode_args_cuda_style(ji.rawbufs + [var_vals[x] for x in prg.vars], marks=self.launch_params_indicators())
+      c_config, c_struct = encode_args_cuda_style(ji.rawbufs + [var_vals[x] for x in prg.vars], *self.encode_args_info())
       c_params = self.build_kernel_node_params(ji, prg, *cast(Tuple[List[int], List[int]], prg.launch_dims(var_vals)), c_config)
       graph_node = self.graph_add_kernel_node(self.graph.obj, c_deps, c_params)
 
@@ -160,7 +160,7 @@ class CUDAGraph:
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=jit, num_kernels=len(self.jit_cache))
     return et
 
-  def launch_params_indicators(self): return (1,2,0)
+  def encode_args_info(self): return (cuda.CUdeviceptr_v2, (1,2,0))
   def graph_create(self): return ARCWrapper((graph := cuda.CUgraph(), check(cuda.cuGraphCreate(ctypes.byref(graph), 0)))[0], cuda.cuGraphDestroy)
   def graph_instantiate(self, graph): return ARCWrapper((instance := cuda.CUgraphExec(), check(cuda.cuGraphInstantiate_v2(ctypes.byref(instance), graph, None, None, 0)))[0], cuda.cuGraphExecDestroy)
   def graph_add_kernel_node(self, graph, c_deps, c_params): return (graph_node := cuda.CUgraphNode(), check(cuda.cuGraphAddKernelNode(ctypes.byref(graph_node), graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, ctypes.byref(c_params))), graph_node)[0]

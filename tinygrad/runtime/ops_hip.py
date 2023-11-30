@@ -23,7 +23,7 @@ def hip_time_execution(cb, enable=False): return time_execution_cuda_style(cb, h
 class HIPAllocator(LRUAllocator):
   def _do_alloc(self, size, dtype, device, **kwargs):
     check(hip.hipSetDevice(device))
-    return (buf := ctypes.c_void_p(), check(hip.hipMalloc(ctypes.byref(buf), size * dtype.itemsize)))[0].value
+    return (buf := hip.hipDeviceptr_t(), check(hip.hipMalloc(ctypes.byref(buf), size * dtype.itemsize)))[0].value
   def _do_free(self, buf): check(hip.hipFree(buf))
   def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
 
@@ -74,10 +74,10 @@ class HIPProgram:
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
     if MOCKHIP: return float("inf")
     check(hip.hipSetDevice(args[0]._device))
-    return hip_time_execution(lambda: check(hip.hipModuleLaunchKernel(self.prgs[args[0]._device], *global_size, *local_size, 0, None, None, encode_args_cuda_style(args, marks=(1,2,3))[0])), enable=wait)
+    return hip_time_execution(lambda: check(hip.hipModuleLaunchKernel(self.prgs[args[0]._device], *global_size, *local_size, 0, None, None, encode_args_cuda_style(args, hip.hipDeviceptr_t, marks=(1,2,3))[0])), enable=wait)
 
 class HIPGraph(CUDAGraph):
-  def launch_params_indicators(self): return (1,2,3)
+  def encode_args_info(self): return (hip.hipDeviceptr_t, (1,2,3))
   def graph_create(self): return ARCWrapper((graph := hip.hipGraph_t(), check(hip.hipGraphCreate(ctypes.byref(graph), 0)))[0], hip.hipGraphDestroy)
   def graph_instantiate(self, graph): return ARCWrapper((instance := hip.hipGraphExec_t(), check(hip.hipGraphInstantiate(ctypes.byref(instance), graph, None, None, 0)))[0], hip.hipGraphExecDestroy)
   def graph_add_kernel_node(self, graph, c_deps, c_params): return (graph_node := hip.hipGraphNode_t(), check(hip.hipGraphAddKernelNode(ctypes.byref(graph_node), graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, ctypes.byref(c_params))))[0]
