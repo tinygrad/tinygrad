@@ -10,8 +10,6 @@ from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.device import Buffer
 
-from tinygrad.runtime.lib import RawBuffer
-
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
 
@@ -100,11 +98,11 @@ UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, 
 
 class LazyBuffer:
   __deletable__ = ('op',)
-  def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:Optional[LazyOp], dtype:DType, src:Optional[RawBuffer]=None, base:Optional[LazyBuffer]=None):
+  def __init__(self, device:str, st:ShapeTracker, optype:OpType, op:Optional[LazyOp], dtype:DType, src:Optional[Buffer]=None, base:Optional[LazyBuffer]=None):
     self.st: ShapeTracker = st
     self.device, self.shape, self.optype, self._dtype = device, self.st.shape, optype, dtype
-    self._realized: Optional[RawBuffer] = src
-    self.output_buffer: Optional[RawBuffer] = None   # TODO: do we really need this? or can we just use realized
+    self._realized: Optional[Buffer] = src
+    self.output_buffer: Optional[Buffer] = None   # TODO: do we really need this? or can we just use realized
     # TODO: does children have to be a ref count instead of a set? can a Buffer be a double child?
     self.children: WeakSet[LazyBuffer] = WeakSet()
     self.views: WeakSet[LazyBuffer] = WeakSet()

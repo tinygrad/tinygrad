@@ -6,7 +6,6 @@ from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup
 from tinygrad.device import Compiled, CompiledASTRunner, update_stats, Buffer, Device
 from tinygrad.renderer.metal import MetalRenderer
-from tinygrad.runtime.lib import RawBufferMapped, RawBuffer, LRUAllocator
 from tinygrad.shape.symbolic import Variable
 from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, GraphException
 
@@ -15,7 +14,6 @@ class _METAL:
     self.mtl_buffers_in_flight: List[Any] = []
     self.device = Metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
-    #self.allocator = MetalAllocator(self.device.dedicatedMemorySize() or self.device.sharedMemorySize())
 METAL = _METAL()
 
 def unwrap(x):
@@ -105,7 +103,7 @@ class MetalGraph:
     self.int_buf_view = np.frombuffer(self.int_buf.contents().as_buffer(self.int_buf.length()), np.int32)
     print(self.int_buf_view)
 
-  def __call__(self, input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # NOTE: you at least can't update the ints if this is running
     if self.command_buffer is not None and self.command_buffer in METAL.mtl_buffers_in_flight: self.command_buffer.waitUntilCompleted()
     all_read_resources = self.read_resources + [x.opaque for x in input_rawbuffers]
@@ -134,7 +132,7 @@ class MetalGraph:
 
 class MetalDevice(Compiled):
   def __init__(self, device:str):
-    self.copies_in_flight = []
+    self.copies_in_flight: List[memoryview] = []
     super().__init__(LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, graph=MetalGraph)
   def alloc(self, size:int, dtype:DType): return METAL.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
   def _copy(self, dest, src):

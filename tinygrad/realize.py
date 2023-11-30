@@ -4,7 +4,7 @@ from tinygrad.ops import ScheduleItem, LazyOp, LoadOps, BufferOps
 from tinygrad.device import Device, Buffer
 from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import DEBUG, prod, all_int, getenv, DType
+from tinygrad.helpers import DEBUG, prod, all_int
 
 def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
   # NOTE: if you for loop the schedule it's slow because nothing frees

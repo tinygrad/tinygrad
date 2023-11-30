@@ -1,9 +1,8 @@
 from __future__ import annotations
 import numpy as np
-from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, TypeVar
+from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable
 import importlib, inspect, functools, pathlib, time, re
 from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType, from_mv
-from tinygrad.runtime.lib import RawBuffer
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, Op
 
@@ -44,12 +43,12 @@ class Buffer:
     if self.size > 0: Device[self.device].copyout(ret.data.cast("B"), self.opaque)
     return ret
 
-T = TypeVar("T")
-class DeviceImpl:
+# TODO: size, dest, src are the same type. can we enforce this?
+class DeviceImpl:   # pylint: disable=abstract-method
   def alloc(self, size:int, dtype:DType): raise NotImplementedError("need alloc")
-  def free(self, opaque:T): pass
-  def copyin(self, dest:T, src:memoryview): raise NotImplementedError("need copyin")
-  def copyout(self, dest:memoryview, src:T): raise NotImplementedError("need copyout")
+  def free(self, opaque): pass
+  def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
+  def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
 
 # **************** shared device helpers ****************
 
@@ -121,12 +120,11 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 
   @functools.lru_cache(None)
   def _interpret_ast(ast:LazyOp) -> str:
+    if ast.op is BufferOps.STORE: return _interpret_ast(ast.src[0])
     if TernaryOps.MULACC in fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
 
-    if ast.op is BufferOps.STORE:
-      return _interpret_ast(ast.src[0])
-    elif ast.op in BufferOps:
+    if ast.op in BufferOps:
       tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"inputs[{ast.arg.idx-1}]"
       for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(fxn_for_op[mop], mop)}({tmp}, {gstr(arg)})"
     else:
@@ -223,5 +221,5 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
 import ctypes
 class CompiledMalloc(Compiled):
   def alloc(self, size:int, dtype:DType): return (ctypes.c_uint8 * (size*dtype.itemsize))()
-  def copyin(self, dest:T, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
-  def copyout(self, dest:memoryview, src:T): ctypes.memmove(from_mv(dest), src, len(dest))
+  def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
+  def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))

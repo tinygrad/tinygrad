@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import dtypes, fetch, temp
+from tinygrad.helpers import fetch, temp
 from tinygrad.helpers import Timing
 
 def compare_weights_both(url):

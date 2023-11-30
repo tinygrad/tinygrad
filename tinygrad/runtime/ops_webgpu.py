@@ -1,7 +1,5 @@
-import numpy as np
 import functools
 from wgpu.utils.device import get_default_device
-from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, DType
 from tinygrad.device import Compiled
 from tinygrad.codegen.kernel import LinearizerOptions

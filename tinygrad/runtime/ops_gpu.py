@@ -71,7 +71,7 @@ class CLProgram:
 class GPUDevice(Compiled):
   def __init__(self, device:str):
     self.device = int(device.split(":")[1]) if ":" in device else 0
-    self.events = []
+    self.events: List[cl.Event] = []
     super().__init__(LinearizerOptions(), OpenCLRenderer, compile_gpu, functools.partial(CLProgram, self.device))
   def alloc(self, size:int, dtype:DType):
     if isinstance(dtype, ImageDType):
@@ -82,9 +82,9 @@ class GPUDevice(Compiled):
     else:
       buf = cl.Buffer(CL.cl_ctxs[self.device], cl.mem_flags.READ_WRITE, size * dtype.itemsize)
     return buf
-  def copyin(self, dest:cl.Buffer, src:np.ndarray): self.events.append(cl.enqueue_copy(CL.cl_queue[self.device], dest, src, is_blocking=False))
-  def copyout(self, dest:np.ndarray, src:cl.Buffer):
-    self.events = []
+  def copyin(self, dest:cl.Buffer, src:memoryview): self.events.append(cl.enqueue_copy(CL.cl_queue[self.device], dest, src, is_blocking=False))
+  def copyout(self, dest:memoryview, src:cl.Buffer):
+    self.events.clear()
     cl.enqueue_copy(CL.cl_queue[self.device], dest, src, is_blocking=True)
   def synchronize(self):
     for q in CL.cl_queue: q.finish()
