@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Dict, Callable, Mapping, get_args
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Dict, Callable, Mapping
 import functools
 from enum import Enum, auto
 from tinygrad.helpers import prod, DType, dedup
