@@ -2,7 +2,7 @@ from __future__ import annotations
 import numpy as np
 from collections import defaultdict
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple
-import importlib, inspect, functools, pathlib, time, re
+import importlib, inspect, functools, pathlib, time, re, ctypes
 from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType, from_mv, dtypes, flat_mv
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, Op
@@ -33,6 +33,8 @@ class _Device:
     return "CPU"
 Device = _Device()
 
+# **************** Buffer / Allocator ****************
+
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
     assert isinstance(dtype, DType)
@@ -51,7 +53,7 @@ class Buffer:
       # fast path, used on HIP between GPUs
       self.allocator.transfer(self._buf, src._buf, self.size*self.dtype.itemsize)
       return
-    if hasattr(self.allocator, 'from_buffer') and hasattr(self.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
+    if getenv("METAL_FAST_LOAD") and hasattr(self.allocator, 'from_buffer') and hasattr(self.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
       # fast path, used on Metal in OS X Sonoma
       fb = self.allocator.from_buffer(src.allocator.as_buffer(src._buf))
       if fb:
@@ -81,7 +83,9 @@ class Buffer:
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
-  def alloc(self, size:int, dtype:DType): return self._alloc(size, dtype)
+  def alloc(self, size:int, dtype:DType):
+    assert size > 0, f"alloc size must be positve, getting {size}"
+    return self._alloc(size, dtype)
   def _alloc(self, size:int, dtype:DType): raise NotImplementedError("need alloc")
   def free(self, opaque, size:int, dtype:DType): self._free(opaque) # if you are returning a Python object, you don't need a free
   def _free(self, opaque): pass
@@ -103,7 +107,14 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
       opaques.clear()
   def free(self, opaque:Any, size:int, dtype:DType): self.cache[(size, dtype)].append(opaque)
 
-# **************** shared device helpers ****************
+class _MallocAllocator(LRUAllocator):
+  def _alloc(self, size:int, dtype:DType): return (ctypes.c_uint8 * (size*dtype.itemsize))()
+  def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
+  def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
+  def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
+MallocAllocator = _MallocAllocator()
+
+# **************** base Runner + helpers ****************
 
 class JITRunner:
   def __init__(self):
@@ -271,11 +282,3 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
       if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
       k = timed[0][1]
   return k
-
-import ctypes
-class _MallocAllocator(LRUAllocator):
-  def _alloc(self, size:int, dtype:DType): return (ctypes.c_uint8 * (size*dtype.itemsize))()
-  def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
-  def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
-  def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
-MallocAllocator = _MallocAllocator()

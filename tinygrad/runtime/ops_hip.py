@@ -49,7 +49,6 @@ class HIPAllocator(LRUAllocator):
     self.device = device
     super().__init__()
   def _alloc(self, size: int, dtype: DType):
-    if size == 0: return None
     check(hip.hipSetDevice(self.device))
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size * dtype.itemsize)))
   def _free(self, opaque:T): check(hip.hipFree(opaque))
