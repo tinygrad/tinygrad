@@ -1,23 +1,14 @@
 import torch
 import numpy as np
-from typing import Dict, Callable, Optional
+from typing import Dict, Callable
 from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, MovementOps, TernaryOps, ReduceOps, Op
-from tinygrad.device import Interpreted
-from tinygrad.helpers import getenv, dtypes, prod, DType
+from tinygrad.device import Interpreted, Allocator
+from tinygrad.helpers import getenv, dtypes, DType
 from tinygrad.runtime.ops_cpu import einsum_mulacc, shape_to_axis
-from tinygrad.runtime.lib import RawBuffer
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if getenv("MPS", 0) else "cpu"))
 type_map = {torch.float64: dtypes.float64, torch.float16: dtypes.float16, torch.float32: dtypes.float32, torch.int8: dtypes.int8, torch.int32: dtypes.int32, torch.int64: dtypes.int64, torch.uint8: dtypes.uint8, torch.bool: dtypes.bool, torch.int16: dtypes.int16}
 inverse_type_map = {v:k for k,v in type_map.items()}
-
-class RawTorchBuffer(RawBuffer):
-  def __init__(self, size:int, dtype:DType, buf:Optional[torch.Tensor]=None): super().__init__(size, dtype, buf)
-  def _copyin(self, x):
-    buf = torch.from_numpy(x if all(s>=0 for s in x.strides) else x.copy()).requires_grad_(False).to(device)
-    self.size, self.dtype, self._buf = prod(x.shape), type_map[buf.dtype], buf
-  def _get_buf(self): return self._buf if self._buf is not None else torch.empty([self.size], device=device, dtype=inverse_type_map[self.dtype])
-  def toCPU(self): return self._get_buf().cpu().numpy()
 
 def output_type(x, y): return x.dtype if type_map[x.dtype].priority > type_map[y.dtype].priority else y.dtype
 def match_types(x, y, disallow_bool=False):
@@ -35,7 +26,6 @@ torch_fxn_for_op: Dict[Op, Callable] = {
   # TODO: torch.tensor should work here. it doesn't due to "overflow" in uint8
   #BufferOps.CONST: lambda val, dtype: torch.tensor(val, device=device, dtype=inverse_type_map[dtype]),
   BufferOps.CONST: lambda val, dtype: torch.from_numpy(np.array(val, dtype=dtype.np)).to(device),
-  BufferOps.LOAD: lambda x: x._get_buf(), BufferOps.STORE: lambda x: RawTorchBuffer(prod(x.shape), type_map[x.dtype], x),
   UnaryOps.NOOP: lambda x: x.contiguous(), UnaryOps.SQRT: lambda x: x.sqrt(), UnaryOps.EXP2: lambda x: x.exp2(), UnaryOps.LOG2: lambda x: x.log2(), UnaryOps.SIN: torch.sin,
   UnaryOps.CAST: lambda x,y: (x.view if y[1] else x.type)(next(k for k,v in type_map.items() if v==y[0])), UnaryOps.NEG: lambda x: torch.logical_not(x) if x.dtype is torch.bool else torch.neg(x),
   BinaryOps.MAX: torch.maximum, BinaryOps.CMPLT: lambda x,y: (x<y).type(torch.promote_types(x.dtype, y.dtype)),
@@ -51,4 +41,9 @@ torch_fxn_for_op: Dict[Op, Callable] = {
   TernaryOps.WHERE: lambda x, y, z: torch.where(x != 0, y, z),
 }
 
-TorchDevice = Interpreted(RawTorchBuffer, torch_fxn_for_op)
+class TorchAllocator(Allocator):
+  def _alloc(self, size:int, dtype:DType): return torch.empty([size], device=device, dtype=inverse_type_map[dtype])
+  def copyin(self, dest:torch.Tensor, src:memoryview): dest.copy_(torch.frombuffer(src, dtype=dest.dtype))
+  def copyout(self, dest:memoryview, src:torch.Tensor): torch.frombuffer(dest, dtype=src.dtype).copy_(src.flatten())
+
+TorchDevice = Interpreted(TorchAllocator(), torch_fxn_for_op)

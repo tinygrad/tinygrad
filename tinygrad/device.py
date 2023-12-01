@@ -1,8 +1,9 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Union, Type, Any, List, Optional, Dict, Callable
+import numpy as np
+from collections import defaultdict
+from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple
 import importlib, inspect, functools, pathlib, time, re
-from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name
-from tinygrad.runtime.lib import RawBuffer
+from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType, from_mv, dtypes
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, Op
 
@@ -16,9 +17,11 @@ class _Device:
   def __init__(self) -> None: self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
   def canonicalize(self, device:Optional[str]) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "") if device is not None else self.DEFAULT
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def __getitem__(self, x:str) -> Union[Interpreted, Compiled]:
-    x = x.split(":")[0].upper()
-    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._buffers][0]
+  def __getitem__(self, ix:str) -> Union[Interpreted, Compiled]:
+    x = ix.split(":")[0].upper()
+    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._buffers][0]
+    if isinstance(ret, type): ret = ret(ix)
+    return ret
   @functools.cached_property
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None)   # type: ignore
@@ -30,18 +33,64 @@ class _Device:
     return "CPU"
 Device = _Device()
 
+class Buffer:
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
+    assert isinstance(dtype, DType)
+    self.device, self.size, self.dtype = device, size, dtype
+    self._buf = opaque if opaque is not None else Device[self.device].allocator.alloc(size, dtype)
+    GlobalCounters.mem_used += self.size * self.dtype.itemsize
+  def __del__(self):
+    GlobalCounters.mem_used -= self.size * self.dtype.itemsize
+    Device[self.device].allocator.free(self._buf, self.size, self.dtype)
+  def __repr__(self): return f"<buf device:{self.device} size:{self.size}>"
+  def copyin(self, mv:memoryview):
+    mv = mv.cast("B", shape=[self.size*self.dtype.itemsize])
+    assert len(mv) == self.size*self.dtype.itemsize, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
+    Device[self.device].allocator.copyin(self._buf, mv)
+    return self
+  @staticmethod
+  def fromCPU(device:str, x:np.ndarray): return Buffer(device, x.size, dtypes.from_np(x.dtype)).copyin(x.data)
+  def toCPU(self) -> np.ndarray:
+    ret = np.empty(self.size, self.dtype.np)
+    if self.size > 0: Device[self.device].allocator.copyout(ret.data.cast("B", shape=[self.size*self.dtype.itemsize]), self._buf)
+    return ret
+
+# TODO: size, dest, src are the same type. can we enforce this?
+class Allocator:
+  def alloc(self, size:int, dtype:DType): return self._alloc(size, dtype)
+  def _alloc(self, size:int, dtype:DType): raise NotImplementedError("need alloc")
+  def free(self, opaque, size:int, dtype:DType): self._free(opaque) # if you are returning a Python object, you don't need a free
+  def _free(self, opaque): pass
+  def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
+  def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
+
+class LRUAllocator(Allocator):  # pylint: disable=abstract-method
+  def __init__(self): self.cache: Dict[Tuple[int, DType], Any] = defaultdict(list)
+  def alloc(self, size:int, dtype:DType):
+    if len(c := self.cache[(size, dtype)]): return c.pop()
+    try:
+      return self._alloc(size, dtype)
+    except MemoryError:
+      self.free_cache()
+      return self._alloc(size, dtype)
+  def free_cache(self):
+    for opaques in self.cache.values():
+      for opaque in opaques: self._free(opaque)
+      opaques.clear()
+  def free(self, opaque:Any, size:int, dtype:DType): self.cache[(size, dtype)].append(opaque)
+
 # **************** shared device helpers ****************
 
 class JITRunner:
   def __init__(self):
     self.op_estimate, self.mem_estimate = 0, 0
-  def exec(self, rawbufs:List[RawBuffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
+  def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     var_vals = var_vals if var_vals is not None else {}
     from tinygrad.jit import CacheCollector
     et = self(rawbufs, var_vals)
     CacheCollector.add(self, rawbufs, var_vals)
     return et
-  def __call__(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
 def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count, jit=False, num_kernels=1, lra: Optional[Dict]=None):
@@ -64,18 +113,16 @@ class InterpretedASTRunner(JITRunner):
     info = get_lazyop_info(ast)
     self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
 
-  def __call__(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> float:
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> float:
     st = time.perf_counter()
-    ret: RawBuffer = self.fxn(rawbufs[1:], var_vals)
+    rawbufs[0]._buf = self.fxn([x._buf for x in rawbufs], var_vals)
     et = time.perf_counter() - st
-    update_stats(f"<interpreted {ret.size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit)
-    assert rawbufs[0].dtype == ret.dtype, f"dtype mismatch in Interpreted, {rawbufs[0].dtype=} != {ret.dtype=}"
-    rawbufs[0].dtype, rawbufs[0].size, rawbufs[0]._buf, rawbufs[0].offset = ret.dtype, ret.size, ret._buf, ret.offset
+    update_stats(f"<interpreted {rawbufs[0].size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit)
     return et
 
 class Interpreted:
-  def __init__(self, buffer: Type[RawBuffer], fxn_for_op:Dict[Op, Callable]):
-    self.buffer, self.fxn_for_op = buffer, fxn_for_op
+  def __init__(self, allocator: Allocator, fxn_for_op:Dict[Op, Callable]):
+    self.allocator, self.fxn_for_op = allocator, fxn_for_op
     self.synchronize, self.codegen, self.graph = lambda: None, None, None
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
@@ -86,7 +133,6 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
     from tinygrad.graph import print_tree
     print_tree(ast)
   tglob: Dict[str, Any] = {"Variable": Variable}
-  lines: List[str] = []
 
   @functools.lru_cache(None)
   def gstr(x:Any, nm=None) -> str:
@@ -98,15 +144,16 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
     tglob[ret] = x
     return ret
 
+  lines: List[str] = []
   @functools.lru_cache(None)
   def _interpret_ast(ast:LazyOp) -> str:
+    # TODO: shortcutted store won't work with strides
+    if ast.op == BufferOps.STORE: return _interpret_ast(ast.src[0])
     if TernaryOps.MULACC in fxn_for_op and ast.op == ReduceOps.SUM and isinstance(ast.src[0], LazyOp) and ast.src[0].op == BinaryOps.MUL:
       ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
 
-    if ast.op is BufferOps.STORE:
-      tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({_interpret_ast(ast.src[0])})"
-    elif ast.op in BufferOps:
-      tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"{gstr(fxn_for_op[ast.op], ast.op)}(inputs[{ast.arg.idx-1}])"
+    if ast.op in BufferOps:
+      tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})" if ast.op == BufferOps.CONST else f"inputs[{ast.arg.idx}]"
       for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(fxn_for_op[mop], mop)}({tmp}, {gstr(arg)})"
     else:
       tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({', '.join([_interpret_ast(src) for src in ast.src] + ([gstr(ast.arg)] if ast.arg else []))})"
@@ -124,16 +171,18 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 # **************** for Compiled Devices ****************
 
 class CompiledASTRunner(JITRunner):
-  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None):
+  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None, bufcount:int=0):
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
     self.name, self.display_name, self.prg, self.global_size, self.local_size, self.runtime_args = \
       to_function_name(name), name, prg, global_size, local_size, runtime_args if runtime_args is not None else {}
+    self.bufcount = bufcount
     self.vars: List[Variable] = []
     if ast:
       info = get_lazyop_info(ast)
+      self.bufcount = len(info.mem)
       self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
       from tinygrad.lazy import vars_from_ast
       self.vars = vars_from_ast(ast)
@@ -141,7 +190,7 @@ class CompiledASTRunner(JITRunner):
 
   def build(self, compiler, runtime):
     self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
-    self.clprg = runtime(self.name, self.lib)
+    self.clprg = runtime(self.name, self.lib, self.bufcount, len(self.vars))
     return self
 
   def launch_dims(self, var_vals):
@@ -149,7 +198,7 @@ class CompiledASTRunner(JITRunner):
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else self.local_size
     return global_size, local_size
 
-  def __call__(self, rawbufs:List[RawBuffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
@@ -159,13 +208,13 @@ class CompiledASTRunner(JITRunner):
     lra = self.runtime_args.copy()
     if global_size: lra['global_size'] = global_size
     if local_size and 'local_size' not in lra: lra['local_size'] = local_size
-    et = self.clprg(*rawbufs, *[var_vals[k] for k in self.vars], **lra, wait=wait or DEBUG>=2)
+    et = self.clprg(*[x._buf for x in rawbufs], *[var_vals[k] for k in self.vars], **lra, wait=wait or DEBUG>=2)
     update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra)
     return et
 
 class Compiled:
-  def __init__(self, buffer: Type[RawBuffer], linearizer_opts:LinearizerOptions, renderer, compiler, runtime, synchronize=lambda: None, graph=None):
-    self.buffer, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.synchronize, self.graph = buffer, linearizer_opts, renderer, compiler, runtime, synchronize, graph
+  def __init__(self, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler, runtime, graph=None):
+    self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph = allocator, linearizer_opts, renderer, compiler, runtime, graph
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     k.linearize()
@@ -174,6 +223,7 @@ class Compiled:
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.to_program(_get_optimized_linearizer(self.linearizer_opts, ast))
+  def synchronize(self): pass
 
 def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> Linearizer:
   if DEBUG >= 3:
@@ -197,3 +247,10 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
       if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
       k = timed[0][1]
   return k
+
+import ctypes
+class _MallocAllocator(LRUAllocator):
+  def _alloc(self, size:int, dtype:DType): return (ctypes.c_uint8 * (size*dtype.itemsize))()
+  def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
+  def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
+MallocAllocator = _MallocAllocator()
