@@ -3,7 +3,7 @@
 import math, unittest, random
 import numpy as np
 
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor, dtypes, Device
 
 random.seed(42)
 
@@ -14,6 +14,61 @@ def numpy_testing_assert_equal_helper(a, b):
 
 def consec(shape, start=1):
   return Tensor(np.arange(math.prod(shape)).reshape(shape)+start)
+
+# ======================
+# TODO CHECK IS THESE ARE ACTUALLY CORRECT
+def tensor_indices_to_np(tensor: Tensor, indices):
+ # convert the Tensor to a numpy array
+ npt = tensor.numpy()
+
+ # convert indices
+ idxs = tuple(i.numpy().tolist() if isinstance(i, Tensor) and i.dtype is dtypes.int64 else
+               i for i in indices)
+
+ return npt, idxs
+
+def get_numpy(tensor, indices):
+ npt, idxs = tensor_indices_to_np(tensor, indices)
+
+ # index and return as a Torch Tensor
+ return np.array(npt[idxs])
+
+def set_numpy(tensor, indices, value):
+ if not isinstance(value, int):
+     value = value.numpy()
+
+ npt, idxs = tensor_indices_to_np(tensor, indices)
+ npt[idxs] = value
+ return npt
+
+def assert_get_eq(tensor, indexer):
+  numpy_testing_assert_equal_helper(tensor[indexer], get_numpy(tensor, indexer))
+
+def assert_set_eq(tensor: Tensor, indexer, val):
+  pyt = tensor.detach()
+  numt = tensor.detach()
+  pyt[indexer] = val
+  numt = np.array(set_numpy(numt, indexer, val))
+  numpy_testing_assert_equal_helper(pyt, numt)
+
+# TODO THIS IS PROBABLY WRONG LOL
+def assert_backward_eq(tensor: Tensor, indexer):
+ cpu = tensor.float().detach()
+ cpu.requires_grad = True
+ outcpu = cpu[indexer].sum()
+ outcpu.backward()
+ dev = cpu.to(tensor.device).detach()
+ dev.requires_grad = True
+ outdev = dev[indexer].sum()
+ outdev.backward()
+ numpy_testing_assert_equal_helper(cpu.grad, dev.grad)
+
+def get_set_tensor(indexed: Tensor, indexer):
+ set_size = indexed[indexer].size()
+ set_count = indexed[indexer].numel()
+ # set_tensor = torch.randperm(set_count).view(set_size).double().to(device) # TODO thefk is randperm
+ # return set_tensor
+# ======================
 
 class TestIndexing(unittest.TestCase):
   def test_index(self):
@@ -421,184 +476,187 @@ class TestIndexing(unittest.TestCase):
   #         set_tensor = torch.randperm(set_count).view(set_size).double().to(device)
   #         return set_tensor
 
-  #     # Tensor is  0  1  2  3  4
-  #     #            5  6  7  8  9
-  #     #           10 11 12 13 14
-  #     #           15 16 17 18 19
-  #     reference = torch.arange(0., 20).view(4, 5)
+    # Tensor is  0  1  2  3  4
+    #            5  6  7  8  9
+    #           10 11 12 13 14
+    #           15 16 17 18 19
+    # reference = torch.arange(0., 20).view(4, 5)
+    reference = Tensor.arange(0., 20).reshape(4, 5)
 
-  #     indices_to_test = [
-  #         # grab the second, fourth columns
-  #         [slice(None), [1, 3]],
+    indices_to_test = [
+        # grab the second, fourth columns
+        [slice(None), [1, 3]],
 
-  #         # first, third rows,
-  #         [[0, 2], slice(None)],
+        # first, third rows,
+        [[0, 2], slice(None)],
 
-  #         # weird shape
-  #         [slice(None), [[0, 1],
-  #                         [2, 3]]],
-  #         # negatives
-  #         [[-1], [0]],
-  #         [[0, 2], [-1]],
-  #         [slice(None), [-1]],
-  #     ]
+        # weird shape
+        [slice(None), [[0, 1],
+                        [2, 3]]],
+        # negatives
+        [[-1], [0]],
+        [[0, 2], [-1]],
+        [slice(None), [-1]],
+    ]
 
-  #     # only test dupes on gets
-  #     get_indices_to_test = indices_to_test + [[slice(None), [0, 1, 1, 2, 2]]]
+    # only test dupes on gets
+    get_indices_to_test = indices_to_test + [[slice(None), [0, 1, 1, 2, 2]]]
 
-  #     for indexer in get_indices_to_test:
-  #         assert_get_eq(reference, indexer)
-  #         if self.device_type != 'cpu':
-  #             assert_backward_eq(reference, indexer)
+    for indexer in get_indices_to_test:
+      print(indexer, "FUCK")
+      assert_get_eq(reference, indexer)
+      if Device.DEFAULT != "CPU":
+        assert_backward_eq(reference, indexer)
 
-  #     for indexer in indices_to_test:
-  #         assert_set_eq(reference, indexer, 44)
-  #         assert_set_eq(reference,
-  #                       indexer,
-  #                       get_set_tensor(reference, indexer))
+    # TODO setitem
+    # for indexer in indices_to_test:
+    #   assert_set_eq(reference, indexer, 44)
+    #   assert_set_eq(reference,
+    #                 indexer,
+    #                 get_set_tensor(reference, indexer))
 
-  #     reference = torch.arange(0., 160).view(4, 8, 5)
+    reference = Tensor.arange(0., 160).reshape(4, 8, 5)
 
-  #     indices_to_test = [
-  #         [slice(None), slice(None), [0, 3, 4]],
-  #         [slice(None), [2, 4, 5, 7], slice(None)],
-  #         [[2, 3], slice(None), slice(None)],
-  #         [slice(None), [0, 2, 3], [1, 3, 4]],
-  #         [slice(None), [0], [1, 2, 4]],
-  #         [slice(None), [0, 1, 3], [4]],
-  #         [slice(None), [[0, 1], [1, 0]], [[2, 3]]],
-  #         [slice(None), [[0, 1], [2, 3]], [[0]]],
-  #         [slice(None), [[5, 6]], [[0, 3], [4, 4]]],
-  #         [[0, 2, 3], [1, 3, 4], slice(None)],
-  #         [[0], [1, 2, 4], slice(None)],
-  #         [[0, 1, 3], [4], slice(None)],
-  #         [[[0, 1], [1, 0]], [[2, 1], [3, 5]], slice(None)],
-  #         [[[0, 1], [1, 0]], [[2, 3]], slice(None)],
-  #         [[[0, 1], [2, 3]], [[0]], slice(None)],
-  #         [[[2, 1]], [[0, 3], [4, 4]], slice(None)],
-  #         [[[2]], [[0, 3], [4, 1]], slice(None)],
-  #         # non-contiguous indexing subspace
-  #         [[0, 2, 3], slice(None), [1, 3, 4]],
+    indices_to_test = [
+        [slice(None), slice(None), [0, 3, 4]],
+        [slice(None), [2, 4, 5, 7], slice(None)],
+        [[2, 3], slice(None), slice(None)],
+        [slice(None), [0, 2, 3], [1, 3, 4]],
+        [slice(None), [0], [1, 2, 4]],
+        [slice(None), [0, 1, 3], [4]],
+        [slice(None), [[0, 1], [1, 0]], [[2, 3]]],
+        [slice(None), [[0, 1], [2, 3]], [[0]]],
+        [slice(None), [[5, 6]], [[0, 3], [4, 4]]],
+        [[0, 2, 3], [1, 3, 4], slice(None)],
+        [[0], [1, 2, 4], slice(None)],
+        [[0, 1, 3], [4], slice(None)],
+        [[[0, 1], [1, 0]], [[2, 1], [3, 5]], slice(None)],
+        [[[0, 1], [1, 0]], [[2, 3]], slice(None)],
+        [[[0, 1], [2, 3]], [[0]], slice(None)],
+        [[[2, 1]], [[0, 3], [4, 4]], slice(None)],
+        [[[2]], [[0, 3], [4, 1]], slice(None)],
+        # non-contiguous indexing subspace
+        [[0, 2, 3], slice(None), [1, 3, 4]],
 
-  #         # less dim, ellipsis
-  #         [[0, 2], ],
-  #         [[0, 2], slice(None)],
-  #         [[0, 2], Ellipsis],
-  #         [[0, 2], slice(None), Ellipsis],
-  #         [[0, 2], Ellipsis, slice(None)],
-  #         [[0, 2], [1, 3]],
-  #         [[0, 2], [1, 3], Ellipsis],
-  #         [Ellipsis, [1, 3], [2, 3]],
-  #         [Ellipsis, [2, 3, 4]],
-  #         [Ellipsis, slice(None), [2, 3, 4]],
-  #         [slice(None), Ellipsis, [2, 3, 4]],
+        # less dim, ellipsis
+        [[0, 2], ],
+        [[0, 2], slice(None)],
+        [[0, 2], Ellipsis],
+        [[0, 2], slice(None), Ellipsis],
+        [[0, 2], Ellipsis, slice(None)],
+        [[0, 2], [1, 3]],
+        [[0, 2], [1, 3], Ellipsis],
+        [Ellipsis, [1, 3], [2, 3]],
+        [Ellipsis, [2, 3, 4]],
+        [Ellipsis, slice(None), [2, 3, 4]],
+        [slice(None), Ellipsis, [2, 3, 4]],
 
-  #         # ellipsis counts for nothing
-  #         [Ellipsis, slice(None), slice(None), [0, 3, 4]],
-  #         [slice(None), Ellipsis, slice(None), [0, 3, 4]],
-  #         [slice(None), slice(None), Ellipsis, [0, 3, 4]],
-  #         [slice(None), slice(None), [0, 3, 4], Ellipsis],
-  #         [Ellipsis, [[0, 1], [1, 0]], [[2, 1], [3, 5]], slice(None)],
-  #         [[[0, 1], [1, 0]], [[2, 1], [3, 5]], Ellipsis, slice(None)],
-  #         [[[0, 1], [1, 0]], [[2, 1], [3, 5]], slice(None), Ellipsis],
-  #     ]
+        # ellipsis counts for nothing
+        [Ellipsis, slice(None), slice(None), [0, 3, 4]],
+        [slice(None), Ellipsis, slice(None), [0, 3, 4]],
+        [slice(None), slice(None), Ellipsis, [0, 3, 4]],
+        [slice(None), slice(None), [0, 3, 4], Ellipsis],
+        [Ellipsis, [[0, 1], [1, 0]], [[2, 1], [3, 5]], slice(None)],
+        [[[0, 1], [1, 0]], [[2, 1], [3, 5]], Ellipsis, slice(None)],
+        [[[0, 1], [1, 0]], [[2, 1], [3, 5]], slice(None), Ellipsis],
+    ]
 
-  #     for indexer in indices_to_test:
-  #         assert_get_eq(reference, indexer)
-  #         assert_set_eq(reference, indexer, 212)
-  #         assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
-  #         if torch.cuda.is_available():
-  #             assert_backward_eq(reference, indexer)
+    for indexer in indices_to_test:
+        assert_get_eq(reference, indexer)
+        assert_backward_eq(reference, indexer)
+        # TODO setitem
+        # assert_set_eq(reference, indexer, 212)
+        # assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
 
-  #     reference = torch.arange(0., 1296).view(3, 9, 8, 6)
+    reference = Tensor.arange(0., 1296).reshape(3, 9, 8, 6)
 
-  #     indices_to_test = [
-  #         [slice(None), slice(None), slice(None), [0, 3, 4]],
-  #         [slice(None), slice(None), [2, 4, 5, 7], slice(None)],
-  #         [slice(None), [2, 3], slice(None), slice(None)],
-  #         [[1, 2], slice(None), slice(None), slice(None)],
-  #         [slice(None), slice(None), [0, 2, 3], [1, 3, 4]],
-  #         [slice(None), slice(None), [0], [1, 2, 4]],
-  #         [slice(None), slice(None), [0, 1, 3], [4]],
-  #         [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3]]],
-  #         [slice(None), slice(None), [[0, 1], [2, 3]], [[0]]],
-  #         [slice(None), slice(None), [[5, 6]], [[0, 3], [4, 4]]],
-  #         [slice(None), [0, 2, 3], [1, 3, 4], slice(None)],
-  #         [slice(None), [0], [1, 2, 4], slice(None)],
-  #         [slice(None), [0, 1, 3], [4], slice(None)],
-  #         [slice(None), [[0, 1], [3, 4]], [[2, 3], [0, 1]], slice(None)],
-  #         [slice(None), [[0, 1], [3, 4]], [[2, 3]], slice(None)],
-  #         [slice(None), [[0, 1], [3, 2]], [[0]], slice(None)],
-  #         [slice(None), [[2, 1]], [[0, 3], [6, 4]], slice(None)],
-  #         [slice(None), [[2]], [[0, 3], [4, 2]], slice(None)],
-  #         [[0, 1, 2], [1, 3, 4], slice(None), slice(None)],
-  #         [[0], [1, 2, 4], slice(None), slice(None)],
-  #         [[0, 1, 2], [4], slice(None), slice(None)],
-  #         [[[0, 1], [0, 2]], [[2, 4], [1, 5]], slice(None), slice(None)],
-  #         [[[0, 1], [1, 2]], [[2, 0]], slice(None), slice(None)],
-  #         [[[2, 2]], [[0, 3], [4, 5]], slice(None), slice(None)],
-  #         [[[2]], [[0, 3], [4, 5]], slice(None), slice(None)],
-  #         [slice(None), [3, 4, 6], [0, 2, 3], [1, 3, 4]],
-  #         [slice(None), [2, 3, 4], [1, 3, 4], [4]],
-  #         [slice(None), [0, 1, 3], [4], [1, 3, 4]],
-  #         [slice(None), [6], [0, 2, 3], [1, 3, 4]],
-  #         [slice(None), [2, 3, 5], [3], [4]],
-  #         [slice(None), [0], [4], [1, 3, 4]],
-  #         [slice(None), [6], [0, 2, 3], [1]],
-  #         [slice(None), [[0, 3], [3, 6]], [[0, 1], [1, 3]], [[5, 3], [1, 2]]],
-  #         [[2, 2, 1], [0, 2, 3], [1, 3, 4], slice(None)],
-  #         [[2, 0, 1], [1, 2, 3], [4], slice(None)],
-  #         [[0, 1, 2], [4], [1, 3, 4], slice(None)],
-  #         [[0], [0, 2, 3], [1, 3, 4], slice(None)],
-  #         [[0, 2, 1], [3], [4], slice(None)],
-  #         [[0], [4], [1, 3, 4], slice(None)],
-  #         [[1], [0, 2, 3], [1], slice(None)],
-  #         [[[1, 2], [1, 2]], [[0, 1], [2, 3]], [[2, 3], [3, 5]], slice(None)],
+    indices_to_test = [
+        [slice(None), slice(None), slice(None), [0, 3, 4]],
+        [slice(None), slice(None), [2, 4, 5, 7], slice(None)],
+        [slice(None), [2, 3], slice(None), slice(None)],
+        [[1, 2], slice(None), slice(None), slice(None)],
+        [slice(None), slice(None), [0, 2, 3], [1, 3, 4]],
+        [slice(None), slice(None), [0], [1, 2, 4]],
+        [slice(None), slice(None), [0, 1, 3], [4]],
+        [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3]]],
+        [slice(None), slice(None), [[0, 1], [2, 3]], [[0]]],
+        [slice(None), slice(None), [[5, 6]], [[0, 3], [4, 4]]],
+        [slice(None), [0, 2, 3], [1, 3, 4], slice(None)],
+        [slice(None), [0], [1, 2, 4], slice(None)],
+        [slice(None), [0, 1, 3], [4], slice(None)],
+        [slice(None), [[0, 1], [3, 4]], [[2, 3], [0, 1]], slice(None)],
+        [slice(None), [[0, 1], [3, 4]], [[2, 3]], slice(None)],
+        [slice(None), [[0, 1], [3, 2]], [[0]], slice(None)],
+        [slice(None), [[2, 1]], [[0, 3], [6, 4]], slice(None)],
+        [slice(None), [[2]], [[0, 3], [4, 2]], slice(None)],
+        [[0, 1, 2], [1, 3, 4], slice(None), slice(None)],
+        [[0], [1, 2, 4], slice(None), slice(None)],
+        [[0, 1, 2], [4], slice(None), slice(None)],
+        [[[0, 1], [0, 2]], [[2, 4], [1, 5]], slice(None), slice(None)],
+        [[[0, 1], [1, 2]], [[2, 0]], slice(None), slice(None)],
+        [[[2, 2]], [[0, 3], [4, 5]], slice(None), slice(None)],
+        [[[2]], [[0, 3], [4, 5]], slice(None), slice(None)],
+        [slice(None), [3, 4, 6], [0, 2, 3], [1, 3, 4]],
+        [slice(None), [2, 3, 4], [1, 3, 4], [4]],
+        [slice(None), [0, 1, 3], [4], [1, 3, 4]],
+        [slice(None), [6], [0, 2, 3], [1, 3, 4]],
+        [slice(None), [2, 3, 5], [3], [4]],
+        [slice(None), [0], [4], [1, 3, 4]],
+        [slice(None), [6], [0, 2, 3], [1]],
+        [slice(None), [[0, 3], [3, 6]], [[0, 1], [1, 3]], [[5, 3], [1, 2]]],
+        [[2, 2, 1], [0, 2, 3], [1, 3, 4], slice(None)],
+        [[2, 0, 1], [1, 2, 3], [4], slice(None)],
+        [[0, 1, 2], [4], [1, 3, 4], slice(None)],
+        [[0], [0, 2, 3], [1, 3, 4], slice(None)],
+        [[0, 2, 1], [3], [4], slice(None)],
+        [[0], [4], [1, 3, 4], slice(None)],
+        [[1], [0, 2, 3], [1], slice(None)],
+        [[[1, 2], [1, 2]], [[0, 1], [2, 3]], [[2, 3], [3, 5]], slice(None)],
 
-  #         # less dim, ellipsis
-  #         [Ellipsis, [0, 3, 4]],
-  #         [Ellipsis, slice(None), [0, 3, 4]],
-  #         [Ellipsis, slice(None), slice(None), [0, 3, 4]],
-  #         [slice(None), Ellipsis, [0, 3, 4]],
-  #         [slice(None), slice(None), Ellipsis, [0, 3, 4]],
-  #         [slice(None), [0, 2, 3], [1, 3, 4]],
-  #         [slice(None), [0, 2, 3], [1, 3, 4], Ellipsis],
-  #         [Ellipsis, [0, 2, 3], [1, 3, 4], slice(None)],
-  #         [[0], [1, 2, 4]],
-  #         [[0], [1, 2, 4], slice(None)],
-  #         [[0], [1, 2, 4], Ellipsis],
-  #         [[0], [1, 2, 4], Ellipsis, slice(None)],
-  #         [[1], ],
-  #         [[0, 2, 1], [3], [4]],
-  #         [[0, 2, 1], [3], [4], slice(None)],
-  #         [[0, 2, 1], [3], [4], Ellipsis],
-  #         [Ellipsis, [0, 2, 1], [3], [4]],
-  #     ]
+        # less dim, ellipsis
+        [Ellipsis, [0, 3, 4]],
+        [Ellipsis, slice(None), [0, 3, 4]],
+        [Ellipsis, slice(None), slice(None), [0, 3, 4]],
+        [slice(None), Ellipsis, [0, 3, 4]],
+        [slice(None), slice(None), Ellipsis, [0, 3, 4]],
+        [slice(None), [0, 2, 3], [1, 3, 4]],
+        [slice(None), [0, 2, 3], [1, 3, 4], Ellipsis],
+        [Ellipsis, [0, 2, 3], [1, 3, 4], slice(None)],
+        [[0], [1, 2, 4]],
+        [[0], [1, 2, 4], slice(None)],
+        [[0], [1, 2, 4], Ellipsis],
+        [[0], [1, 2, 4], Ellipsis, slice(None)],
+        [[1], ],
+        [[0, 2, 1], [3], [4]],
+        [[0, 2, 1], [3], [4], slice(None)],
+        [[0, 2, 1], [3], [4], Ellipsis],
+        [Ellipsis, [0, 2, 1], [3], [4]],
+    ]
 
-  #     for indexer in indices_to_test:
-  #         assert_get_eq(reference, indexer)
-  #         assert_set_eq(reference, indexer, 1333)
-  #         assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
-  #     indices_to_test += [
-  #         [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
-  #         [slice(None), slice(None), [[2]], [[0, 3], [4, 4]]],
-  #     ]
-  #     for indexer in indices_to_test:
-  #         assert_get_eq(reference, indexer)
-  #         assert_set_eq(reference, indexer, 1333)
-  #         if self.device_type != 'cpu':
-  #             assert_backward_eq(reference, indexer)
+    for indexer in indices_to_test:
+        assert_get_eq(reference, indexer)
+        # assert_set_eq(reference, indexer, 1333)
+        # assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
+    indices_to_test += [
+        [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
+        [slice(None), slice(None), [[2]], [[0, 3], [4, 4]]],
+    ]
+    for indexer in indices_to_test:
+        assert_get_eq(reference, indexer)
+        # assert_set_eq(reference, indexer, 1333)
+        assert_backward_eq(reference, indexer)
 
-  # def test_advancedindex_big(self):
-  #     reference = Tensor.arange(123344)
-  #     numpy_testing_assert_equal_helper(reference[[0, 123, 44488, 68807, 123343],], np.array([0, 123, 44488, 68807, 123343]))
+  def test_advancedindex_big(self):
+      reference = Tensor.arange(123344)
+      numpy_testing_assert_equal_helper(reference[[0, 123, 44488, 68807, 123343],], np.array([0, 123, 44488, 68807, 123343]))
 
+  # TODO setitem
   # def test_set_item_to_scalar_tensor(self):
   #     m = random.randint(1, 10)
   #     n = random.randint(1, 10)
-  #     z = torch.randn([m, n])
+  #     z = Tensor.randn(m, n)
   #     a = 1.0
-  #     w = np.array(a, requires_grad=True)
+  #     w = Tensor(a, requires_grad=True)
   #     z[:, 0] = w
   #     z.sum().backward()
   #     numpy_testing_assert_equal_helper(w.grad, m * a)

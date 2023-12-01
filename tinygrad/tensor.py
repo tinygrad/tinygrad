@@ -301,9 +301,6 @@ class Tensor:
   #        - if first Tensor passed in (expand dims) is not at dim 0
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
   def __getitem__(self, indices) -> Tensor: # indices: Union[int, slice, Tensor, None, Ellipsis, List, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
-    def unpack(iterable):
-      if all(type(i) is Tensor for i in iterable): return 
-
     def validate_slice(sl: slice):
       if sl.step == 0: raise ValueError('slice step cannot be 0')
       else: return sl
@@ -359,7 +356,7 @@ class Tensor:
       if s is None: final_shape.append(1)
       else: # s is int or slice or Tensor
         dim_shape = next(it_shape)
-        # if isinstance(s, list): 
+        # if isinstance(s, list):
           # s = Tensor(s)
         if isinstance(s, int): dim_collapsed += 1
         else:
