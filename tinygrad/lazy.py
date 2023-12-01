@@ -70,7 +70,7 @@ def _replace_bufferops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
       replacements[x] = LazyOp(BufferOps.CONST, (), ConstBuffer(float(x.base.op.arg), x.dtype, st))
     else:
       raise NotImplementedError(f"not handled {x}")
-  return (op.src[0] if op.op == MovementOps.RESHAPE else op).map_buffers(replacements), base_bufs
+  return (op.src[0] if op.op in {MovementOps.RESHAPE, LoadOps.CONTIGUOUS} else op).map_buffers(replacements), base_bufs
 
 # **** lazy operations ****
 
@@ -151,9 +151,7 @@ class LazyBuffer:
     seen.add(self)
     if self.base is not self: return self.base.schedule(seen)
 
-    # rewrite unbased CONTIGUOUS into UnaryOps.NOOP
-    op = self.op if self.op.op != LoadOps.CONTIGUOUS else LazyOp(UnaryOps.NOOP, self.op.src)
-
+    op = self.op
     if self.optype is BinaryOps: op = _ast_binaryops(op, self.shape)
     elif self.optype is ReduceOps: op = _ast_reduceops(op)
 
@@ -163,7 +161,6 @@ class LazyBuffer:
 
     var_vals = merge_dicts([self.st.var_vals] + [buf.st.var_vals for buf in op.buffers])
 
-    # run the ast and log the op
     op, base_bufs = _replace_bufferops(op)
 
     # add the store
@@ -204,7 +201,6 @@ class LazyBuffer:
       # this will turn into nothing, it's based and a copy
       # TODO: based lazybuffers shouldn't take dtype or var_vals, same issue in movementops
       return create_lazybuffer(self.device, ShapeTracker.from_shape(tuple(self.shape)), LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype, base=self.base)
-    # real contiguous, this will turn into a UnaryOps.NOOP
     return LazyBuffer.loadop(LoadOps.CONTIGUOUS, self.shape, self.dtype, self.device, src=self)
 
   @staticmethod

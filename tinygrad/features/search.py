@@ -48,7 +48,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
     # TODO: this is copied from prg.__call__
     global_size, local_size = prg.launch_dims(var_vals)
     prg.global_size = real_global_size
-    if global_size is not None and local_size is None and all_int(tuple(prg.global_size)): # type: ignore[arg-type]
+    if global_size is not None and prg.global_size is not None and local_size is None and all_int(tuple(prg.global_size)):
       local_size = optimize_local_size(prg.clprg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
 
