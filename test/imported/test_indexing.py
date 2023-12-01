@@ -973,33 +973,35 @@ class TestIndexing(unittest.TestCase):
       # numpy_testing_assert_equal_helper(res.shape, src.shape)
 
   def test_int_indices2d(self):
-      # From the NumPy indexing example
-      x = Tensor.arange(0, 12).reshape(4, 3)
-      rows = Tensor([[0, 0], [3, 3]])
-      columns = Tensor([[0, 2], [0, 2]])
-      numpy_testing_assert_equal_helper(x[rows, columns].numpy().tolist(), [[0, 2], [9, 11]])
+    # From the NumPy indexing example
+    x = Tensor.arange(0, 12).reshape(4, 3)
+    rows = Tensor([[0, 0], [3, 3]])
+    columns = Tensor([[0, 2], [0, 2]])
+    numpy_testing_assert_equal_helper(x[rows, columns].numpy().tolist(), [[0, 2], [9, 11]])
 
   def test_int_indices_broadcast(self):
-      # From the NumPy indexing example
-      x = Tensor.arange(0, 12).reshape(4, 3)
-      rows = Tensor([0, 3])
-      columns = Tensor([0, 2])
-      result = x[rows[:, None], columns]
-      numpy_testing_assert_equal_helper(result.numpy().tolist(), [[0, 2], [9, 11]])
+    # From the NumPy indexing example
+    x = Tensor.arange(0, 12).reshape(4, 3)
+    rows = Tensor([0, 3])
+    columns = Tensor([0, 2])
+    result = x[rows[:, None], columns]
+    numpy_testing_assert_equal_helper(result.numpy().tolist(), [[0, 2], [9, 11]])
 
+  # TODO support empty index
   # def test_empty_index(self):
-  #     x = torch.arange(0, 12).view(4, 3)
-  #     idx = np.array([], dtype=torch.long)
+  #     x = Tensor.arange(0, 12).reshape(4, 3)
+  #     idx = Tensor([], dtype=dtypes.int64)
   #     numpy_testing_assert_equal_helper(x[idx].numel(), 0)
 
-  #     # empty assignment should have no effect but not throw an exception
-  #     y = x.clone()
-  #     y[idx] = -1
-  #     numpy_testing_assert_equal_helper(x, y)
+      # TODO setitem
+      # # empty assignment should have no effect but not throw an exception
+      # y = x.clone()
+      # y[idx] = -1
+      # numpy_testing_assert_equal_helper(x, y)
 
-  #     mask = torch.zeros(4, 3).bool()
-  #     y[mask] = -1
-  #     numpy_testing_assert_equal_helper(x, y)
+      # mask = torch.zeros(4, 3).bool()
+      # y[mask] = -1
+      # numpy_testing_assert_equal_helper(x, y)
 
   # def test_empty_ndim_index(self):
   #     x = torch.randn(5)
@@ -1015,18 +1017,23 @@ class TestIndexing(unittest.TestCase):
   #     with self.assertRaisesRegex(IndexError, 'for dimension with size 0'):
   #         x[:, [0, 1]]
 
+  # NOTE see test_ops.py: 1195
   # def test_empty_ndim_index_bool(self):
   #     x = torch.randn(5)
   #     self.assertRaises(IndexError, lambda: x[torch.empty(0, 2, dtype=torch.uint8)])
 
-  # def test_empty_slice(self):
-  #     x = torch.randn(2, 3, 4, 5)
-  #     y = x[:, :, :, 1]
-  #     z = y[:, 1:1, :]
-  #     numpy_testing_assert_equal_helper((2, 0, 4), z.shape)
-  #     # this isn't technically necessary, but matches NumPy stride calculations.
-  #     numpy_testing_assert_equal_helper((60, 20, 5), z.stride())
-  #     self.assertTrue(z.is_contiguous())
+  def test_empty_slice(self):
+      x = Tensor.randn(2, 3, 4, 5)
+      y = x[:, :, :, 1]
+      z = y[:, 1:1, :]
+      numpy_testing_assert_equal_helper((2, 0, 4), z.shape)
+      # this isn't technically necessary, but matches NumPy stride calculations.
+
+      # TODO wtf stridese is wrong here why?
+      # numpy_testing_assert_equal_helper((60, 20, 5), z.lazydata.st.views[-1].strides)
+
+      # TODO should be contiguous...
+      # self.assertTrue(z.lazydata.st.contiguous)
 
   # def test_index_getitem_copy_bools_slices(self):
   #     true = np.array(1, dtype=torch.uint8)
@@ -1091,29 +1098,29 @@ class TestIndexing(unittest.TestCase):
   #     with self.assertRaises(RuntimeError):
   #         a[true] = a_expanded
 
-  # def test_getitem_scalars(self):
-  #     zero = np.array(0, dtype=torch.int64)
-  #     one = np.array(1, dtype=torch.int64)
+  def test_getitem_scalars(self):
+      zero = Tensor(0, dtype=dtypes.int64)
+      one = Tensor(1, dtype=dtypes.int64)
 
-  #     # non-scalar indexed with scalars
-  #     a = torch.randn(2, 3)
-  #     numpy_testing_assert_equal_helper(a[0], a[zero])
-  #     numpy_testing_assert_equal_helper(a[0][1], a[zero][one])
-  #     numpy_testing_assert_equal_helper(a[0, 1], a[zero, one])
-  #     numpy_testing_assert_equal_helper(a[0, one], a[zero, 1])
+      # non-scalar indexed with scalars
+      a = Tensor.randn(2, 3)
+      numpy_testing_assert_equal_helper(a[0], a[zero])
+      numpy_testing_assert_equal_helper(a[0][1], a[zero][one])
+      numpy_testing_assert_equal_helper(a[0, 1], a[zero, one])
+      numpy_testing_assert_equal_helper(a[0, one], a[zero, 1])
 
-  #     # indexing by a scalar should slice (not copy)
-  #     numpy_testing_assert_equal_helper(a[0, 1].data_ptr(), a[zero, one].data_ptr())
-  #     numpy_testing_assert_equal_helper(a[1].data_ptr(), a[one.int()].data_ptr())
-  #     numpy_testing_assert_equal_helper(a[1].data_ptr(), a[one.short()].data_ptr())
+      # # indexing by a scalar should slice (not copy)
+      # numpy_testing_assert_equal_helper(a[0, 1].data_ptr(), a[zero, one].data_ptr())
+      # numpy_testing_assert_equal_helper(a[1].data_ptr(), a[one.int()].data_ptr())
+      # numpy_testing_assert_equal_helper(a[1].data_ptr(), a[one.short()].data_ptr())
 
-  #     # scalar indexed with scalar
-  #     r = torch.randn(())
-  #     with self.assertRaises(IndexError):
-  #         r[:]
-  #     with self.assertRaises(IndexError):
-  #         r[zero]
-  #     numpy_testing_assert_equal_helper(r, r[...])
+      # # scalar indexed with scalar
+      # r = Tensor.randn(())
+      # with self.assertRaises(IndexError):
+      #     r[:]
+      # with self.assertRaises(IndexError):
+      #     r[zero]
+      # numpy_testing_assert_equal_helper(r, r[...])
 
   # def test_setitem_scalars(self):
   #     zero = np.array(0, dtype=torch.int64)
@@ -1382,31 +1389,31 @@ class TestIndexing(unittest.TestCase):
 
 
 class TestNumpy(unittest.TestCase):
-  # def test_index_no_floats(self):
-  #   a = Tensor([[[5.]]])
+  def test_index_no_floats(self):
+    a = Tensor([[[5.]]])
 
-  #   self.assertRaises(IndexError, lambda: a[0.0])
-  #   self.assertRaises(IndexError, lambda: a[0, 0.0])
-  #   self.assertRaises(IndexError, lambda: a[0.0, 0])
-  #   self.assertRaises(IndexError, lambda: a[0.0, :])
-  #   self.assertRaises(IndexError, lambda: a[:, 0.0])
-  #   self.assertRaises(IndexError, lambda: a[:, 0.0, :])
-  #   self.assertRaises(IndexError, lambda: a[0.0, :, :])
-  #   self.assertRaises(IndexError, lambda: a[0, 0, 0.0])
-  #   self.assertRaises(IndexError, lambda: a[0.0, 0, 0])
-  #   self.assertRaises(IndexError, lambda: a[0, 0.0, 0])
-  #   self.assertRaises(IndexError, lambda: a[-1.4])
-  #   self.assertRaises(IndexError, lambda: a[0, -1.4])
-  #   self.assertRaises(IndexError, lambda: a[-1.4, 0])
-  #   self.assertRaises(IndexError, lambda: a[-1.4, :])
-  #   self.assertRaises(IndexError, lambda: a[:, -1.4])
-  #   self.assertRaises(IndexError, lambda: a[:, -1.4, :])
-  #   self.assertRaises(IndexError, lambda: a[-1.4, :, :])
-  #   self.assertRaises(IndexError, lambda: a[0, 0, -1.4])
-  #   self.assertRaises(IndexError, lambda: a[-1.4, 0, 0])
-  #   self.assertRaises(IndexError, lambda: a[0, -1.4, 0])
-  #   # self.assertRaises(IndexError, lambda: a[0.0:, 0.0])
-  #   # self.assertRaises(IndexError, lambda: a[0.0:, 0.0,:])
+    self.assertRaises(IndexError, lambda: a[0.0])
+    self.assertRaises(IndexError, lambda: a[0, 0.0])
+    self.assertRaises(IndexError, lambda: a[0.0, 0])
+    self.assertRaises(IndexError, lambda: a[0.0, :])
+    self.assertRaises(IndexError, lambda: a[:, 0.0])
+    self.assertRaises(IndexError, lambda: a[:, 0.0, :])
+    self.assertRaises(IndexError, lambda: a[0.0, :, :])
+    self.assertRaises(IndexError, lambda: a[0, 0, 0.0])
+    self.assertRaises(IndexError, lambda: a[0.0, 0, 0])
+    self.assertRaises(IndexError, lambda: a[0, 0.0, 0])
+    self.assertRaises(IndexError, lambda: a[-1.4])
+    self.assertRaises(IndexError, lambda: a[0, -1.4])
+    self.assertRaises(IndexError, lambda: a[-1.4, 0])
+    self.assertRaises(IndexError, lambda: a[-1.4, :])
+    self.assertRaises(IndexError, lambda: a[:, -1.4])
+    self.assertRaises(IndexError, lambda: a[:, -1.4, :])
+    self.assertRaises(IndexError, lambda: a[-1.4, :, :])
+    self.assertRaises(IndexError, lambda: a[0, 0, -1.4])
+    self.assertRaises(IndexError, lambda: a[-1.4, 0, 0])
+    self.assertRaises(IndexError, lambda: a[0, -1.4, 0])
+    self.assertRaises(IndexError, lambda: a[0.0:, 0.0])
+    self.assertRaises(IndexError, lambda: a[0.0:, 0.0,:])
 
   def test_none_index(self):
     # `None` index adds newaxis
