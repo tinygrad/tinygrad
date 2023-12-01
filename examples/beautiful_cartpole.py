@@ -33,7 +33,7 @@ def evaluate(model:ActorCritic, test_env:gym.Env) -> float:
 if __name__ == "__main__":
   env = gym.make('CartPole-v1')
 
-  model = ActorCritic(env.observation_space.shape[0], int(env.action_space.n))    # type: ignore
+  model = ActorCritic(env.observation_space.shape[0], int(env.action_space.n))    
   opt = nn.optim.Adam(nn.state.get_parameters(model), lr=1e-2)
 
   @TinyJit

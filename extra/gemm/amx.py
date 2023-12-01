@@ -5,7 +5,7 @@ import sys
 np.set_printoptions(linewidth=160)
 np.set_printoptions(linewidth=1000, threshold=10000000000, suppress=False)
 from tinygrad.runtime.ops_llvm import LLVM, LLVMBuffer, int_const
-from llvmlite import ir  # type: ignore
+from llvmlite import ir  
 
 
 # https://github.com/corsix/amx/blob/main/Instructions.md
