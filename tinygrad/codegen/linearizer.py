@@ -457,6 +457,7 @@ class Linearizer(Kernel):
 
   def uop(self, uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None, cachable=True, insert_before=None, simplify=True) -> UOp:
     key = (uop, dtype, vin, arg)
+    if uop == UOps.DEFINE_ACC and not dtypes.is_float(cast(DType, dtype)) and arg == -math.inf: arg = False if dtype == dtypes.bool else -2**31
     if simplify:
       if uop == UOps.PHI and len(vin) == 2: return vin[1]   # a phi without loops is a noop
       if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype, insert_before)
