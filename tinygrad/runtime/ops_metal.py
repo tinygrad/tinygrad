@@ -70,8 +70,8 @@ class MetalAllocator(LRUAllocator):
     self.device.synchronize()
     return src.contents().as_buffer(src.length())
   def copyin(self, dest, src:memoryview):
-    src_from_buffer = self._from_buffer(src)
-    if src_from_buffer is None or getenv("SLOW_METAL_COPY"):
+    src_from_buffer = None if getenv("SLOW_METAL_COPY") else self._from_buffer(src)
+    if src_from_buffer is None:
       self.as_buffer(dest)[:] = src
     else:
       self.device.copies_in_flight.append(src)
