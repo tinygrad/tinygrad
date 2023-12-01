@@ -288,12 +288,10 @@ def instance_to_features(instance, tokenizer):
 
   masked_lm_positions = instance["masked_lm_positions"]
   masked_lm_ids = tokenizer.convert_tokens_to_ids(instance["masked_lm_labels"])
-  masked_lm_weights = [1.0] * len(masked_lm_ids)
 
   while len(masked_lm_positions) < getenv("MAX_PREDICTIONS_PER_SEQ", 20):
     masked_lm_positions.append(0)
     masked_lm_ids.append(0)
-    masked_lm_weights.append(0.0)
 
   next_sentence_label = 1 if instance["is_random_next"] else 0
 
@@ -303,7 +301,6 @@ def instance_to_features(instance, tokenizer):
     "segment_ids": np.expand_dims(np.array(segment_ids, dtype=np.float32), 0),
     "masked_lm_positions": np.expand_dims(np.array(masked_lm_positions, dtype=np.float32), 0),
     "masked_lm_ids": np.expand_dims(np.array(masked_lm_ids, dtype=np.float32), 0),
-    "masked_lm_weights": np.expand_dims(np.array(masked_lm_weights, dtype=np.float32), 0),
     "next_sentence_labels": np.expand_dims(np.array([next_sentence_label], dtype=np.float32), 0),
   }
 
@@ -348,7 +345,6 @@ def load_file(file):
       "segment_ids": features["segment_ids"],
       "masked_lm_positions": features["masked_lm_positions"],
       "masked_lm_ids": features["masked_lm_ids"],
-      "masked_lm_weights": features["masked_lm_weights"],
       "next_sentence_labels": features["next_sentence_labels"],
     }, instance
 
@@ -369,7 +365,6 @@ def iterate(bs=1, start=0, val=False):
       "segment_ids": np.concatenate([f["segment_ids"] for f in features], axis=0),
       "masked_lm_positions": np.concatenate([f["masked_lm_positions"] for f in features], axis=0),
       "masked_lm_ids": np.concatenate([f["masked_lm_ids"] for f in features], axis=0),
-      "masked_lm_weights": np.concatenate([f["masked_lm_ids"] for f in features], axis=0),
       "next_sentence_labels": np.concatenate([f["next_sentence_labels"] for f in features], axis=0),
     }, instances
   p.close()
