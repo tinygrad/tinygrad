@@ -1,6 +1,6 @@
 import functools
 from tinygrad.helpers import dtypes
-from tinygrad.ops import BinaryOps, UnaryOps
+from tinygrad.ops import BinaryOps
 from tinygrad.renderer.cstyle import CStyleLanguage, uops_to_cstyle
 
 class HIPLanguage(CStyleLanguage):
@@ -36,8 +36,9 @@ __device__ half exp2(half x) { return hexp2(x); }
 __device__ half log2(half x) { return hlog2(x); }
 __device__ half sin(half x) { return hsin(x); }
 __device__ half sqrt(half x) { return hsqrt(x); }
-__device__ half mod(half x, half b) { return __hsub(x, __hmul(b, __float2half(floorf(__half2float(x) / __half2float(b))))); }
 __device__ half hmax(half a, half b) { return __hgt(a, b) ? a : b; }
+__device__ half operator%(const half &a, const half &b) { return __hsub(a, __hmul(b, __float2half(floorf(__half2float(a) / __half2float(b))))); }
+__device__ bool operator!=(const half &a, const int &b) { return (float)a != b; }
   """
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]

@@ -26,7 +26,6 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   tinygrad_fp = time.monotonic() - st
 
   def compare(s, x,y,atol,rtol):
-    if getenv("MOCKHIP") == 1: return
     if PRINT_TENSORS: print(s, x, y)
     assert x.shape == y.shape, f"shape mismatch: tinygrad={x.shape} | torch={y.shape}"
     try:
@@ -629,7 +628,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(7,5,10)], lambda x: x[1:5:2, 3, ::4], lambda x: x[1:5:2, 3, ::4])
     helper_test_op([(7,5,10)], lambda x: x[1:5:2, None, None, 3, None, ::4], lambda x: x[1:5:2, None, None, 3, None, ::4])
 
-  @unittest.skipIf(getenv("MOCKHIP") == 1, "mock hip doesnt run")
   def test_slice_negative_strides(self):
     # Torch doesn't support slicing with negative steps
     a = np.random.randn(10, 10, 10).astype(np.float32)
@@ -1150,7 +1148,7 @@ class TestOps(unittest.TestCase):
       Tensor.stack([x], dim=77)
 
     a = Tensor(3.14)
-    if not getenv("MOCKHIP"): np.testing.assert_allclose(Tensor.stack([a, a]).numpy(), Tensor([3.14, 3.14]).numpy())
+    np.testing.assert_allclose(Tensor.stack([a, a]).numpy(), Tensor([3.14, 3.14]).numpy())
 
   def test_repeat(self):
     x = Tensor.randn(4, 6, 3)
@@ -1190,7 +1188,7 @@ class TestOps(unittest.TestCase):
   def test_inf_where(self):
     x = Tensor.full((3, 3), float("inf"))
     n = (x < 0).where(x, 1).numpy()
-    if getenv("MOCKHIP") != 1: assert np.all(n == 1.)
+    assert np.all(n == 1.)
 
   def _get_index_randoms(self):
     # indices cannot have gradient
