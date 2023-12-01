@@ -1,4 +1,4 @@
-import subprocess, hashlib, tempfile, ctypes
+import subprocess, hashlib, tempfile, ctypes, functools
 from pathlib import Path
 from typing import Tuple, Optional
 import numpy as np
@@ -62,7 +62,8 @@ class CUDADevice(Compiled):
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), self.device))
       if self.device == 0: CUDADevice.default_arch_name = f"sm_{major.value}{minor.value}"
 
+    from tinygrad.runtime.graph.cuda import CUDAGraph
     super().__init__(CUDAAllocator() if not CUDACPU else MallocAllocator,
                      LinearizerOptions(supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
-                     CUDARenderer, compile_cuda, CUDAProgram)
+                     CUDARenderer, compile_cuda, CUDAProgram, graph=CUDAGraph if not CUDACPU else None)
   def synchronize(self): return check(cuda.cuCtxSynchronize()) if not CUDACPU else None
