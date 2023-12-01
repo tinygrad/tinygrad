@@ -307,16 +307,6 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: 3.11
-    - name: Cache python packages
-      uses: actions/cache@v3
-      with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-        key: testing-packages-${{ hashFiles('**/setup.py') }}
-    - name: Cache downloads
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/tinygrad/downloads/
-        key: downloads-cache-hipcompilation-${{ env.DOWNLOAD_CACHE_VERSION }}
     - name: Install HIP tools
       run: |
         echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
@@ -329,8 +319,19 @@ jobs:
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
         sudo apt update
         sudo apt install --allow-unauthenticated -y rocm-hip-libraries hip-dev
+        sudo apt clean
+    - name: Cache python packages
+      uses: actions/cache@v3
+      with:
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+        key: testing-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Python Dependencies
       run: pip install -e '.[testing]'
+    - name: Cache downloads
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/tinygrad/downloads/
+        key: downloads-cache-hipcompilation-${{ env.DOWNLOAD_CACHE_VERSION }}
     - name: Test HIP compilation on RDNA3 [gfx1100]
       run: |
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
