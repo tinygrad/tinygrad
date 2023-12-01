@@ -63,7 +63,10 @@ class MetalAllocator(LRUAllocator):
     encoder.endEncoding()
     command_buffer.commit()
     self.device.mtl_buffers_in_flight.append(command_buffer)
-  def from_buffer(self, src:memoryview) -> Optional[Any]: return self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, len(src), Metal.MTLResourceStorageModeShared, None)
+  def from_buffer(self, src:memoryview) -> Optional[Any]:
+    ret = self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, len(src), Metal.MTLResourceStorageModeShared, None)
+    if ret: self.device.mv_in_metal.append(src)
+    return ret
   def _free(self, opaque:Any): opaque.release()
   def as_buffer(self, src:Any) -> memoryview:
     self.device.synchronize()
@@ -78,10 +81,10 @@ class MetalDevice(Compiled):
     if MetalDevice.compiler_device is None: MetalDevice.compiler_device = self.device
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     self.mtl_buffers_in_flight: List[Any] = []
-    self.copies_in_flight: List[memoryview] = []
+    self.mv_in_metal: List[memoryview] = []
     from tinygrad.runtime.graph.metal import MetalGraph
     super().__init__(MetalAllocator(self), LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
-    self.copies_in_flight.clear()
+    self.mv_in_metal.clear()
     self.mtl_buffers_in_flight.clear()
