@@ -1,9 +1,9 @@
 # test cases are modified from pytorch test_indexing.py https://github.com/pytorch/pytorch/blob/597d3fb86a2f3b8d6d8ee067e769624dcca31cdb/test/test_indexing.py
 
-import math, unittest, random
+import math, unittest, random, warnings
 import numpy as np
 
-from tinygrad import Tensor, dtypes, Device
+from tinygrad import Tensor, dtypes, Device, TinyJit
 
 random.seed(42)
 
@@ -30,8 +30,8 @@ def tensor_indices_to_np(tensor: Tensor, indices):
 def get_numpy(tensor, indices):
  npt, idxs = tensor_indices_to_np(tensor, indices)
 
- # index and return as a Torch Tensor
- return np.array(npt[idxs])
+ # index and return as a Tensor
+ return Tensor(npt[idxs])
 
 def set_numpy(tensor, indices, value):
  if not isinstance(value, int):
@@ -505,8 +505,7 @@ class TestIndexing(unittest.TestCase):
     for indexer in get_indices_to_test:
       print(indexer, "FUCK")
       assert_get_eq(reference, indexer)
-      if Device.DEFAULT != "CPU":
-        assert_backward_eq(reference, indexer)
+      assert_backward_eq(reference, indexer)
 
     # TODO setitem
     # for indexer in indices_to_test:
@@ -685,12 +684,14 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(v[::11], [0])
     numpy_testing_assert_equal_helper(v[1:6:2], [1, 3, 5])
 
+  # TODO setitem
   # def test_step_assignment(self):
   #     v = torch.zeros(4, 4)
   #     v[0, 1::2] = np.array([3., 4.])
   #     numpy_testing_assert_equal_helper(v[0].tolist(), [0, 3, 0, 4])
   #     numpy_testing_assert_equal_helper(v[1:].sum(), 0)
 
+  # TODO bool indexing
   # def test_bool_indices(self):
   #     v = Tensor.randn(5, 7, 3)
   #     boolIndices = np.array([True, False, True, True, False], dtype=bool)
@@ -739,40 +740,41 @@ class TestIndexing(unittest.TestCase):
   #         numpy_testing_assert_equal_helper(y, torch.ones(size=(10, 10)))
   #         numpy_testing_assert_equal_helper(len(w), 2)
 
+  # TODO setitem
   # def test_index_put_accumulate_large_tensor(self):
-  #     # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
-  #     N = (1 << 31) + 5
-  #     dt = torch.int8
-  #     a = torch.ones(N, dtype=dt)
-  #     indices = np.array([-2, 0, -2, -1, 0, -1, 1], dtype=torch.long)
-  #     values = np.array([6, 5, 6, 6, 5, 7, 11], dtype=dt)
+  #   # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
+  #   N = (1 << 31) + 5
+  #   dt = dtypes.int8
+  #   a = Tensor.ones(N, dtype=dt)
+  #   indices = Tensor([-2, 0, -2, -1, 0, -1, 1], dtype=dtypes.int64)
+  #   values = Tensor([6, 5, 6, 6, 5, 7, 11], dtype=dt)
 
-  #     a.index_put_((indices, ), values, accumulate=True)
+  #   a.index_put_((indices, ), values, accumulate=True)
 
-  #     numpy_testing_assert_equal_helper(a[0], 11)
-  #     numpy_testing_assert_equal_helper(a[1], 12)
-  #     numpy_testing_assert_equal_helper(a[2], 1)
-  #     numpy_testing_assert_equal_helper(a[-3], 1)
-  #     numpy_testing_assert_equal_helper(a[-2], 13)
-  #     numpy_testing_assert_equal_helper(a[-1], 14)
+  #   numpy_testing_assert_equal_helper(a[0], 11)
+  #   numpy_testing_assert_equal_helper(a[1], 12)
+  #   numpy_testing_assert_equal_helper(a[2], 1)
+  #   numpy_testing_assert_equal_helper(a[-3], 1)
+  #   numpy_testing_assert_equal_helper(a[-2], 13)
+  #   numpy_testing_assert_equal_helper(a[-1], 14)
 
-  #     a = torch.ones((2, N), dtype=dt)
-  #     indices0 = np.array([0, -1, 0, 1], dtype=torch.long)
-  #     indices1 = np.array([-2, -1, 0, 1], dtype=torch.long)
-  #     values = np.array([12, 13, 10, 11], dtype=dt)
+  #   a = torch.ones((2, N), dtype=dt)
+  #   indices0 = np.array([0, -1, 0, 1], dtype=torch.long)
+  #   indices1 = np.array([-2, -1, 0, 1], dtype=torch.long)
+  #   values = np.array([12, 13, 10, 11], dtype=dt)
 
-  #     a.index_put_((indices0, indices1), values, accumulate=True)
+  #   a.index_put_((indices0, indices1), values, accumulate=True)
 
-  #     numpy_testing_assert_equal_helper(a[0, 0], 11)
-  #     numpy_testing_assert_equal_helper(a[0, 1], 1)
-  #     numpy_testing_assert_equal_helper(a[1, 0], 1)
-  #     numpy_testing_assert_equal_helper(a[1, 1], 12)
-  #     numpy_testing_assert_equal_helper(a[:, 2], torch.ones(2, dtype=torch.int8))
-  #     numpy_testing_assert_equal_helper(a[:, -3], torch.ones(2, dtype=torch.int8))
-  #     numpy_testing_assert_equal_helper(a[0, -2], 13)
-  #     numpy_testing_assert_equal_helper(a[1, -2], 1)
-  #     numpy_testing_assert_equal_helper(a[-1, -1], 14)
-  #     numpy_testing_assert_equal_helper(a[0, -1], 1)
+  #   numpy_testing_assert_equal_helper(a[0, 0], 11)
+  #   numpy_testing_assert_equal_helper(a[0, 1], 1)
+  #   numpy_testing_assert_equal_helper(a[1, 0], 1)
+  #   numpy_testing_assert_equal_helper(a[1, 1], 12)
+  #   numpy_testing_assert_equal_helper(a[:, 2], torch.ones(2, dtype=torch.int8))
+  #   numpy_testing_assert_equal_helper(a[:, -3], torch.ones(2, dtype=torch.int8))
+  #   numpy_testing_assert_equal_helper(a[0, -2], 13)
+  #   numpy_testing_assert_equal_helper(a[1, -2], 1)
+  #   numpy_testing_assert_equal_helper(a[-1, -1], 14)
+  #   numpy_testing_assert_equal_helper(a[0, -1], 1)
 
   # def test_index_put_accumulate_expanded_values(self):
   #     # checks the issue with cuda: https://github.com/pytorch/pytorch/issues/39227
@@ -879,29 +881,30 @@ class TestIndexing(unittest.TestCase):
 
   #         numpy_testing_assert_equal_helper(output, input_list)
 
-  # def test_index_ind_dtype(self):
-  #     x = torch.randn(4, 4)
-  #     ind_long = torch.randint(4, (4,), dtype=torch.long)
-  #     ind_int = ind_long.int()
-  #     src = torch.randn(4)
-  #     ref = x[ind_long, ind_long]
-  #     res = x[ind_int, ind_int]
-  #     numpy_testing_assert_equal_helper(ref, res)
-  #     ref = x[ind_long, :]
-  #     res = x[ind_int, :]
-  #     numpy_testing_assert_equal_helper(ref, res)
-  #     ref = x[:, ind_long]
-  #     res = x[:, ind_int]
-  #     numpy_testing_assert_equal_helper(ref, res)
-  #     # no repeating indices for index_put
-  #     ind_long = torch.arange(4, dtype=torch.long)
-  #     ind_int = ind_long.int()
-  #     for accum in (True, False):
-  #         inp_ref = x.clone()
-  #         inp_res = x.clone()
-  #         torch.index_put_(inp_ref, (ind_long, ind_long), src, accum)
-  #         torch.index_put_(inp_res, (ind_int, ind_int), src, accum)
-  #         numpy_testing_assert_equal_helper(inp_ref, inp_res)
+  def test_index_ind_dtype(self):
+      x = Tensor.randn(4, 4)
+      ind_long = Tensor.randint(high=4, dtype=dtypes.int32)
+      ind_int = ind_long
+      src = Tensor.randn(4)
+      ref = x[ind_long, ind_long]
+      res = x[ind_int, ind_int]
+      numpy_testing_assert_equal_helper(ref, res)
+      ref = x[ind_long, :]
+      res = x[ind_int, :]
+      numpy_testing_assert_equal_helper(ref, res)
+      ref = x[:, ind_long]
+      res = x[:, ind_int]
+      numpy_testing_assert_equal_helper(ref, res)
+      # TODO setitem
+      # # no repeating indices for index_put
+      # ind_long = Tensor.arange(4, dtype=dtypes.int64)
+      # ind_int = ind_long.int()
+      # for accum in (True, False):
+      #     inp_ref = x.clone()
+      #     inp_res = x.clone()
+      #     torch.index_put_(inp_ref, (ind_long, ind_long), src, accum)
+      #     torch.index_put_(inp_res, (ind_int, ind_int), src, accum)
+      #     numpy_testing_assert_equal_helper(inp_ref, inp_res)
 
   # def test_index_put_accumulate_empty(self):
   #     # Regression test for https://github.com/pytorch/pytorch/issues/94667
@@ -926,6 +929,7 @@ class TestIndexing(unittest.TestCase):
   #     r = v[c > 0]
   #     numpy_testing_assert_equal_helper(r.shape, (num_ones, 3))
 
+  # TODO setitem
   # def test_jit_indexing(self):
   #     def fn1(x):
   #         x[x < 50] = 1.0
@@ -935,21 +939,22 @@ class TestIndexing(unittest.TestCase):
   #         x[0:50] = 1.0
   #         return x
 
-  #     scripted_fn1 = torch.jit.script(fn1)
-  #     scripted_fn2 = torch.jit.script(fn2)
-  #     data = torch.arange(100, dtype=torch.float)
-  #     out = scripted_fn1(data.detach().clone())
-  #     ref = np.array(np.concatenate((np.ones(50), np.arange(50, 100))), dtype=torch.float)
+  #     scripted_fn1 = TinyJit(fn1)
+  #     scripted_fn2 = TinyJit(fn2)
+  #     data = Tensor.arange(100, dtype=dtypes.int64)
+  #     out = scripted_fn1(data.detach())
+  #     ref = Tensor(np.concatenate((np.ones(50), np.arange(50, 100))), dtype=dtypes.int64)
   #     numpy_testing_assert_equal_helper(out, ref)
-  #     out = scripted_fn2(data.detach().clone())
+  #     out = scripted_fn2(data.detach())
   #     numpy_testing_assert_equal_helper(out, ref)
 
-  # def test_int_indices(self):
-  #     v = torch.randn(5, 7, 3)
-  #     numpy_testing_assert_equal_helper(v[[0, 4, 2]].shape, (3, 7, 3))
-  #     numpy_testing_assert_equal_helper(v[:, [0, 4, 2]].shape, (5, 3, 3))
-  #     numpy_testing_assert_equal_helper(v[:, [[0, 1], [4, 3]]].shape, (5, 2, 2, 3))
+  def test_int_indices(self):
+      v = Tensor.randn(5, 7, 3)
+      numpy_testing_assert_equal_helper(v[[0, 4, 2]].shape, (3, 7, 3))
+      numpy_testing_assert_equal_helper(v[:, [0, 4, 2]].shape, (5, 3, 3))
+      numpy_testing_assert_equal_helper(v[:, [[0, 1], [4, 3]]].shape, (5, 2, 2, 3))
 
+  # TODO setitem
   # def test_index_put_src_datatype(self, dtype):
   #     src = torch.ones(3, 2, 4, dtype=dtype)
   #     vals = torch.ones(3, 2, 4, dtype=dtype)
@@ -957,29 +962,30 @@ class TestIndexing(unittest.TestCase):
   #     res = src.index_put_(indices, vals, accumulate=True)
   #     numpy_testing_assert_equal_helper(res.shape, src.shape)
 
-  # def test_index_src_datatype(self, dtype):
-  #     src = torch.ones(3, 2, 4, dtype=dtype)
-  #     # test index
-  #     res = src[[0, 2, 1], :, :]
-  #     numpy_testing_assert_equal_helper(res.shape, src.shape)
-  #     # test index_put, no accum
-  #     src[[0, 2, 1], :, :] = res
-  #     numpy_testing_assert_equal_helper(res.shape, src.shape)
+  def test_index_src_datatype(self):
+      src = Tensor.ones(3, 2, 4)
+      # test index
+      res = src[[0, 2, 1], :, :]
+      numpy_testing_assert_equal_helper(res.shape, src.shape)
+      # TODO setitem
+      # test index_put, no accum
+      # src[[0, 2, 1], :, :] = res
+      # numpy_testing_assert_equal_helper(res.shape, src.shape)
 
-  # def test_int_indices2d(self):
-  #     # From the NumPy indexing example
-  #     x = torch.arange(0, 12).view(4, 3)
-  #     rows = np.array([[0, 0], [3, 3]])
-  #     columns = np.array([[0, 2], [0, 2]])
-  #     numpy_testing_assert_equal_helper(x[rows, columns].tolist(), [[0, 2], [9, 11]])
+  def test_int_indices2d(self):
+      # From the NumPy indexing example
+      x = Tensor.arange(0, 12).reshape(4, 3)
+      rows = Tensor([[0, 0], [3, 3]])
+      columns = Tensor([[0, 2], [0, 2]])
+      numpy_testing_assert_equal_helper(x[rows, columns].numpy().tolist(), [[0, 2], [9, 11]])
 
-  # def test_int_indices_broadcast(self):
-  #     # From the NumPy indexing example
-  #     x = torch.arange(0, 12).view(4, 3)
-  #     rows = np.array([0, 3])
-  #     columns = np.array([0, 2])
-  #     result = x[rows[:, None], columns]
-  #     numpy_testing_assert_equal_helper(result.tolist(), [[0, 2], [9, 11]])
+  def test_int_indices_broadcast(self):
+      # From the NumPy indexing example
+      x = Tensor.arange(0, 12).reshape(4, 3)
+      rows = Tensor([0, 3])
+      columns = Tensor([0, 2])
+      result = x[rows[:, None], columns]
+      numpy_testing_assert_equal_helper(result.numpy().tolist(), [[0, 2], [9, 11]])
 
   # def test_empty_index(self):
   #     x = torch.arange(0, 12).view(4, 3)

@@ -310,13 +310,10 @@ class Tensor:
 
     # TODO: if indices is a tuple of any sequence, or if indices is a list, it's for advanced indexing
     print(indices)
-    if isinstance(indices, (tuple)):
-      indices = tuple([Tensor(list(i)) if isinstance(i, (list, tuple)) else i for i in indices])
+    if isinstance(indices, (tuple)): indices = tuple([Tensor(list(i)) if isinstance(i, (list, tuple)) else i for i in indices])
     elif isinstance(indices, (list)):
       if all(isinstance(i, int) for i in indices): indices = Tensor(indices)
-      else:
-        indices = [Tensor(i) if isinstance(i, (list, tuple)) else i for i in indices]
-        indices = tuple(indices)
+      else: indices = tuple([Tensor(i) if isinstance(i, (list, tuple)) else i for i in indices])
     print(indices, "after")
 
     orig_slices = list(indices) if isinstance(indices, tuple) else [indices]
@@ -325,6 +322,7 @@ class Tensor:
     for i,v in enumerate(orig_slices): count[type(v)].append(i)
 
     # TODO: boolean indices
+    # NOTE I think bool indexing is impossible with current tricks, basically https://pytorch.org/docs/stable/generated/torch.masked_select.html 
     if float in count: raise IndexError("float type is not valid index")
     if (num_slices := len(count[int]) + len(count[slice]) + len(count[Tensor]) + len(count[list])) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     if len(ellipsis_found := count[type(Ellipsis)]) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
