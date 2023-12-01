@@ -6,7 +6,7 @@ from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, diskcache, unwrap2
 from tinygrad.device import Compiled, LRUAllocator
 from tinygrad.renderer.metal import MetalRenderer
-from tinygrad.device import Buffer, Device
+from tinygrad.device import Buffer
 from Foundation import NSURL
 
 @diskcache
