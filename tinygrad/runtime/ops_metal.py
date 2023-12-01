@@ -57,11 +57,11 @@ class MetalAllocator(LRUAllocator):
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=} {dtype=}")
     return ret
   def _free(self, opaque): opaque.release()
-  def _buffer(self, src):
+  def as_buffer(self, src):
     self.device.synchronize()
     return src.contents().as_buffer(src.length())
-  def copyin(self, dest, src:memoryview): self._buffer(dest)[:] = src
-  def copyout(self, dest:memoryview, src): dest[:] = self._buffer(src)
+  def copyin(self, dest, src:memoryview): self.as_buffer(dest)[:] = src
+  def copyout(self, dest:memoryview, src): dest[:] = self.as_buffer(src)
 
 class MetalDevice(Compiled):
   compiler_device = None

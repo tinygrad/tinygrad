@@ -44,6 +44,7 @@ class DiskAllocator(Allocator):
       if os.path.getsize(self.device) < size * dtype.itemsize: os.ftruncate(f.fileno(), size * dtype.itemsize)
       buf = UnderlyingDiskBuffer(f, mmap.mmap(f.fileno(), size * dtype.itemsize))
     return DiskBuffer(buf, size, dtype)
+  def as_buffer(self, src:DiskBuffer): return src._buf()
   def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def copyout(self, dest:memoryview, src:DiskBuffer):
     if src.ud.fd is not None:
