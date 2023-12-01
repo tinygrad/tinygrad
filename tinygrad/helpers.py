@@ -40,7 +40,7 @@ def partition(lst:List[T], fxn:Callable[[T],bool]):
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
   return x
-def unwrap2(x):
+def unwrap2(x:Tuple[T,Any]) -> T:
   ret, err = x
   assert err is None, str(err)
   return ret
@@ -57,6 +57,7 @@ def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+str
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posix()
 def from_mv(mv, to_type=ctypes.c_char): return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type))
+def to_char_p_p(options: List[bytes], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(o, ctypes.POINTER(to_type)) for o in options])
 
 class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
