@@ -44,7 +44,7 @@ class Buffer:
     Device[self.device].allocator.free(self._buf, self.size, self.dtype)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size}>"
   def copyin(self, mv:memoryview):
-    mv = mv.cast("B")
+    mv = mv.cast("B", shape=[self.size*self.dtype.itemsize])
     assert len(mv) == self.size*self.dtype.itemsize, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
     Device[self.device].allocator.copyin(self._buf, mv)
     return self
@@ -52,7 +52,7 @@ class Buffer:
   def fromCPU(device:str, x:np.ndarray): return Buffer(device, x.size, dtypes.from_np(x.dtype)).copyin(x.data)
   def toCPU(self) -> np.ndarray:
     ret = np.empty(self.size, self.dtype.np)
-    if self.size > 0: Device[self.device].allocator.copyout(ret.data.cast("B"), self._buf)
+    if self.size > 0: Device[self.device].allocator.copyout(ret.data.cast("B", shape=[self.size*self.dtype.itemsize]), self._buf)
     return ret
 
 # TODO: size, dest, src are the same type. can we enforce this?
