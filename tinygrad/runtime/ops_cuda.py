@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 import numpy as np
 import gpuctypes.cuda as cuda
-from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, create_arc_ctypes_var, pretty_ptx, cpu_time_execution, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
+from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_ctypes_var, init_arc_ctypes_var, pretty_ptx, cpu_time_execution, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cuda import CUDARenderer
@@ -16,7 +16,7 @@ if CUDACPU:
   cuda.cuLaunchKernel = lambda src, gx, gy, gz, lx, ly, lz, shared, stream, unused_extra, args: gpuocelot_lib.ptx_run(src, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]), lx, ly, lz, gx, gy, gz, shared)
 
 def check(status):
-  if status != 0: raise RuntimeError(f"CUDA Error {status}, {ctypes.string_at((cuda.cuGetErrorString(status, ctypes.byref(c_ptr := ctypes.POINTER(ctypes.c_char)())), c_ptr)[1]).decode()}")
+  if status != 0: raise RuntimeError(f"CUDA Error {status}, {ctypes.string_at(init_ctypes_var(ctypes.POINTER(ctypes.c_char)(), lambda x: cuda.cuGetErrorString(status, ctypes.byref(x)))).decode()}")
 
 def cu_time_execution(cb, enable=False) -> Optional[float]: return time_execution_cuda_style(cb, cuda.CUevent, cuda.cuEventCreate, cuda.cuEventRecord, cuda.cuEventSynchronize, cuda.cuEventDestroy_v2, cuda.cuEventElapsedTime, enable=enable) if not CUDACPU else cpu_time_execution(cb, enable=enable)
 
@@ -35,7 +35,7 @@ class CUDAProgram:
       except Exception as e: print("failed to generate SASS", str(e))
     
     if not CUDACPU:
-      self.module = create_arc_ctypes_var(cuda.CUmodule(), lambda x: check(cuda.cuModuleLoadData(ctypes.byref(x), prg)), cuda.cuModuleUnload)
+      self.module = init_arc_ctypes_var(cuda.CUmodule(), lambda x: check(cuda.cuModuleLoadData(ctypes.byref(x), prg)), cuda.cuModuleUnload)
       check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
     self.prg = prg
 
@@ -46,7 +46,7 @@ class CUDAProgram:
 class CUDAAllocator(LRUAllocator):
   def _alloc(self, size, dtype):
     if size == 0: return None
-    return (check(cuda.cuMemAlloc_v2(ctypes.byref(buf := cuda.CUdeviceptr()), size * dtype.itemsize)), buf)[1]
+    return init_ctypes_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size * dtype.itemsize)))
   def _free(self, opaque): check(cuda.cuMemFree(opaque)) # TODO: Use ARC here?
   def copyin(self, dest, src:memoryview): check(cuda.cuMemcpyHtoD_v2(dest, from_mv(src), len(src), None))
   def copyout(self, dest:memoryview, src): check(cuda.cuMemcpyDtoH_v2(from_mv(dest), src, len(dest)))

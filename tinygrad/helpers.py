@@ -277,7 +277,8 @@ def cpu_time_execution(cb, enable):
 
 # *** Helpers for CUDA-like APIs.
 
-def create_arc_ctypes_var(ctypes_var, creat_cb, destroy_cb): return (creat_cb(ctypes_var), weakref.finalize(ctypes_var, destroy_cb, ctypes_var), ctypes_var)[2]
+def init_ctypes_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
+def init_arc_ctypes_var(ctypes_var, creat_cb, destroy_cb): return (creat_cb(ctypes_var), weakref.finalize(ctypes_var, destroy_cb, ctypes_var), ctypes_var)[2]
 
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
@@ -304,7 +305,7 @@ def encode_args_cuda_style(args, device_ptr_t, marks) -> Tuple[ctypes.Array, cty
 def time_execution_cuda_style(cb, ev_t, evcreate, evrecord, evsync, evdestroy, evtime, enable=False) -> Optional[float]:
   if not enable: return cb()
   # evs = [(evcreate(ctypes.byref(ev := ev_t()), 0), weakref.finalize(ev, evdestroy, ev), ev)[2], evdestroy for _ in range(2)]
-  evs = [create_arc_ctypes_var(ev_t(), lambda x: evcreate(ctypes.byref(x), 0), evdestroy) for _ in range(2)]
+  evs = [init_arc_ctypes_var(ev_t(), lambda x: evcreate(ctypes.byref(x), 0), evdestroy) for _ in range(2)]
   evrecord(evs[0], None)
   cb()
   evrecord(evs[1], None)
