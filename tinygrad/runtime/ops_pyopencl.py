@@ -88,3 +88,5 @@ class GPUDevice(Compiled):
     self.queue = cl.CommandQueue(self.ctx, device=self.ctx.devices[0], properties=cl.command_queue_properties.PROFILING_ENABLE)
     super().__init__(CLAllocator(self), LinearizerOptions(), OpenCLRenderer, compile_gpu, functools.partial(CLProgram, self))
   def synchronize(self): self.queue.finish()
+
+PyOpenCLDevice = GPUDevice

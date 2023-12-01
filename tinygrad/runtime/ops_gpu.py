@@ -63,7 +63,9 @@ class CLAllocator(LRUAllocator):
   def __init__(self, device:CLDevice):
     self.device = device
     super().__init__()
-  def _alloc(self, size:int, dtype:DType) -> cl.cl_mem: return checked(cl.clCreateBuffer(self.device.context, cl.CL_MEM_READ_WRITE, size*dtype.itemsize, None, ctypes.byref(status := ctypes.c_int32())), status)
+  def _alloc(self, size:int, dtype:DType) -> cl.cl_mem:
+    if size == 0: return None
+    return checked(cl.clCreateBuffer(self.device.context, cl.CL_MEM_READ_WRITE, size*dtype.itemsize, None, ctypes.byref(status := ctypes.c_int32())), status)
   def _free(self, buf:cl.cl_mem): check(cl.clReleaseMemObject(buf))
   def copyin(self, dest:cl.cl_mem, src:memoryview):
     check(cl.clEnqueueWriteBuffer(self.device.queue, dest, False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
