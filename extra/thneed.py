@@ -110,7 +110,7 @@ class Thneed:
     prgs = {}
     for o in jdat['binaries']:
       nptr = ptr + o['length']
-      prgs[o['name']] = CLProgram(0, o['name'], weights[ptr:nptr])
+      prgs[o['name']] = CLProgram(Device["GPU"], o['name'], weights[ptr:nptr])
       ptr = nptr
 
     # populate the cl_cache

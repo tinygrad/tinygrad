@@ -24,7 +24,7 @@ def atan2_gpu(ret:Buffer, a:Buffer, b:Buffer):
       c[idx] = atan2(a[idx], b[idx]);
     }""", global_size=[ret.size], bufcount=3).build(Device[ret.device].compiler, Device[ret.device].runtime).exec([ret, a, b])
 
-def atan2_cpu(ret:Buffer, a:Buffer, b:Buffer): ret.copyin(np.arctan2(a._buf, b._buf).data)
+def atan2_cpu(ret:Buffer, a:Buffer, b:Buffer): ret.copyin(np.require(np.arctan2(a._buf, b._buf), requirements='C').data)
 
 # *** second, we write the ATan2 mlop ***
 # NOTE: The derivative of atan2 doesn't need a custom op! https://www.liquisearch.com/atan2/derivative

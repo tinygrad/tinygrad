@@ -24,7 +24,7 @@ def compile_gpu(prg:str) -> bytes:
   return clprg.get_info(cl.program_info.BINARIES)[0]
 
 class CLProgram:
-  def __init__(self, device:GPUDevice, name:str, prg:bytes, bufs:int, vars:int=0):
+  def __init__(self, device:GPUDevice, name:str, prg:bytes, bufs:int=0, vars:int=0):
     self.device, self.name, self.clprogram = device, name, cl.Program(device.ctx, [device.ctx.devices[0]], [prg])
     self.clprogram.build()
     self.clprg = self.clprogram.__getattr__(name)
@@ -38,7 +38,7 @@ class CLProgram:
       elif "NVIDIA" in device_name:
         # print the PTX for NVIDIA.
         print(prg.decode('utf-8'))
-    self.clprg.set_scalar_arg_dtypes([None]*bufs + [np.int32]*vars)
+    if vars > 0: self.clprg.set_scalar_arg_dtypes([None]*bufs + [np.int32]*vars)
 
   @staticmethod
   def max_work_group_size(): return GPUDevice.compile_context.devices[0].max_work_group_size if GPUDevice.compile_context is not None else 1024
