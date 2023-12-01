@@ -406,7 +406,7 @@ if __name__ == "__main__":
     elif sys.argv[1] == "pre-train":
       os.makedirs(BASEDIR / "train", exist_ok=True)
       if sys.argv[2] == "all":
-        with Pool(4) as p:
+        with Pool(getenv('NUM_WORKERS', os.cpu_count())) as p:
           p.map(process_part, [part for part in range(500)])
       else:
         part = int(sys.argv[2])

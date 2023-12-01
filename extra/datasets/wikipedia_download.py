@@ -30,6 +30,7 @@ def verify_checksum(folder_path:str, checksum_path:str):
       if hasher.hexdigest() != expected_checksum:
         print(f"Checksum does not match for file: {folder_path}")
         return False
+    print("Checksum matches!")
   return True
 
 def download_wikipedia(path:str):
