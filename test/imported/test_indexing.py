@@ -68,6 +68,42 @@ def get_set_tensor(indexed: Tensor, indexer):
   set_count = indexed[indexer].numel()
   # set_tensor = torch.randperm(set_count).view(set_size).double().to(device) # TODO thefk is randperm
   # return set_tensor
+
+def make_tensor(shape, dtype:dtypes, noncontiguous):
+  r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
+  values uniformly drawn from ``[low, high)``.
+
+  If :attr:`low` or :attr:`high` are specified and are outside the range of the :attr:`dtype`'s representable
+  finite values then they are clamped to the lowest or highest representable finite value, respectively.
+  If ``None``, then the following table describes the default values for :attr:`low` and :attr:`high`,
+  which depend on :attr:`dtype`.
+
+  +---------------------------+------------+----------+
+  | ``dtype``                 | ``low``    | ``high`` |
+  +===========================+============+==========+
+  | boolean type              | ``0``      | ``2``    |
+  +---------------------------+------------+----------+
+  | unsigned integral type    | ``0``      | ``10``   |
+  +---------------------------+------------+----------+
+  | signed integral types     | ``-9``     | ``10``   |
+  +---------------------------+------------+----------+
+  | floating types            | ``-9``     | ``9``    |
+  +---------------------------+------------+----------+
+  | complex types             | ``-9``     | ``9``    |
+  +---------------------------+------------+----------+
+  """
+  contiguous = not noncontiguous
+  if dtype is dtypes.bool:
+    return Tensor.randint(shape=shape, low=0, high=2, dtype=dtype, contiguous=contiguous)
+  elif dtype.is_int():
+    if dtype.is_unsigned():
+      return Tensor.randint(shape=shape, low=0, high=10, dtype=dtype, contiguous=contiguous)
+    else:
+      return Tensor.randint(shape=shape, low=-9, high=10, dtype=dtype, contiguous=contiguous)
+  elif dtype.is_float():
+    return Tensor.rand(shape=shape, low=-9, high=9, dtype=dtype, contiguous=contiguous)
+  else:
+    raise NotImplementedError(f"{dtype} not implemented")
 # ======================
 
 class TestIndexing(unittest.TestCase):
@@ -1146,21 +1182,22 @@ class TestIndexing(unittest.TestCase):
   #     r[...] = 9.9
   #     numpy_testing_assert_equal_helper(9.9, r)
 
-  # def test_basic_advanced_combined(self):
-  #     # From the NumPy indexing example
-  #     x = torch.arange(0, 12).view(4, 3)
-  #     numpy_testing_assert_equal_helper(x[1:2, 1:3], x[1:2, [1, 2]])
-  #     numpy_testing_assert_equal_helper(x[1:2, 1:3].tolist(), [[4, 5]])
+  def test_basic_advanced_combined(self):
+    # From the NumPy indexing example
+    x = Tensor.arange(0, 12).reshape(4, 3)
+    numpy_testing_assert_equal_helper(x[1:2, 1:3], x[1:2, [1, 2]])
+    numpy_testing_assert_equal_helper(x[1:2, 1:3].numpy().tolist(), [[4, 5]])
 
-  #     # Check that it is a copy
-  #     unmodified = x.clone()
-  #     x[1:2, [1, 2]].zero_()
-  #     numpy_testing_assert_equal_helper(x, unmodified)
+    # TODO no copy
+    # # Check that it is a copy
+    # unmodified = x.detach()
+    # x[1:2, [1, 2]].zero_()
+    # numpy_testing_assert_equal_helper(x, unmodified)
 
-  #     # But assignment should modify the original
-  #     unmodified = x.clone()
-  #     x[1:2, [1, 2]] = 0
-  #     self.assertNotEqual(x, unmodified)
+    # # But assignment should modify the original
+    # unmodified = x.clone()
+    # x[1:2, [1, 2]] = 0
+    # self.assertNotEqual(x, unmodified)
 
   # def test_int_assignment(self):
   #     x = torch.arange(0, 4).view(2, 2)
@@ -1185,21 +1222,23 @@ class TestIndexing(unittest.TestCase):
   #     numpy_testing_assert_equal_helper(x[2], value)
   #     numpy_testing_assert_equal_helper(x[3], torch.arange(12., 16))
 
+  # TODO unpacking a Tensor....? indices is a torch.IntTensor
   # def test_variable_slicing(self):
-  #     x = torch.arange(0, 16).view(4, 4)
-  #     indices = torch.IntTensor([0, 1]).to(device)
-  #     i, j = indices
-  #     numpy_testing_assert_equal_helper(x[i:j], x[0:1])
+      # x = Tensor.arange(0, 16).reshape(4, 4)
+      # indices = Tensor([0, 1], dtype=dtypes.int64)
+      # i, j = indices
+      # numpy_testing_assert_equal_helper(x[i:j], x[0:1])
 
-  # def test_ellipsis_tensor(self):
-  #     x = torch.arange(0, 9).view(3, 3)
-  #     idx = np.array([0, 2])
-  #     numpy_testing_assert_equal_helper(x[..., idx].tolist(), [[0, 2],
-  #                                             [3, 5],
-  #                                             [6, 8]])
-  #     numpy_testing_assert_equal_helper(x[idx, ...].tolist(), [[0, 1, 2],
-  #                                             [6, 7, 8]])
+  def test_ellipsis_tensor(self):
+      x = Tensor.arange(0, 9).reshape(3, 3)
+      idx = Tensor([0, 2])
+      numpy_testing_assert_equal_helper(x[..., idx].numpy().tolist(), [[0, 2],
+                                              [3, 5],
+                                              [6, 8]])
+      numpy_testing_assert_equal_helper(x[idx, ...].numpy().tolist(), [[0, 1, 2],
+                                              [6, 7, 8]])
 
+  # TODO wtf is unravel_index
   # def test_unravel_index_errors(self):
   #     with self.assertRaisesRegex(TypeError, r"expected 'indices' to be integer"):
   #         torch.unravel_index(
@@ -1226,28 +1265,27 @@ class TestIndexing(unittest.TestCase):
   #             np.array(0),
   #             (2, -3))
 
-  # def test_invalid_index(self):
-  #     x = torch.arange(0, 16).view(4, 4)
-  #     self.assertRaisesRegex(TypeError, 'slice indices', lambda: x["0":"1"])
+  def test_invalid_index(self):
+    x = Tensor.arange(0, 16).reshape(4, 4)
+    self.assertRaisesRegex(TypeError, 'slice indices', lambda: x["0":"1"])
 
-  # def test_out_of_bound_index(self):
-  #     x = torch.arange(0, 100).view(2, 5, 10)
-  #     self.assertRaisesRegex(IndexError, 'index 5 is out of bounds for dimension 1 with size 5', lambda: x[0, 5])
-  #     self.assertRaisesRegex(IndexError, 'index 4 is out of bounds for dimension 0 with size 2', lambda: x[4, 5])
-  #     self.assertRaisesRegex(IndexError, 'index 15 is out of bounds for dimension 2 with size 10',
-  #                             lambda: x[0, 1, 15])
-  #     self.assertRaisesRegex(IndexError, 'index 12 is out of bounds for dimension 2 with size 10',
-  #                             lambda: x[:, :, 12])
+  def test_out_of_bound_index(self):
+    x = Tensor.arange(0, 100).reshape(2, 5, 10)
+    self.assertRaisesRegex(IndexError, 'index 5 is out of bounds for dimension 1 with size 5', lambda: x[0, 5])
+    self.assertRaisesRegex(IndexError, 'index 4 is out of bounds for dimension 0 with size 2', lambda: x[4, 5])
+    self.assertRaisesRegex(IndexError, 'index 15 is out of bounds for dimension 2 with size 10',lambda: x[0, 1, 15])
+    self.assertRaisesRegex(IndexError, 'index 12 is out of bounds for dimension 2 with size 10', lambda: x[:, :, 12])
 
+  # TODO I don't get this test
   # def test_zero_dim_index(self):
-  #     x = np.array(10)
-  #     numpy_testing_assert_equal_helper(x, x.item())
+  #   x = Tensor(10)
+  #   numpy_testing_assert_equal_helper(x, x.item())
 
-  #     def runner():
-  #         print(x[0])
-  #         return x[0]
+  #   def runner():
+  #     print(x[0])
+  #     return x[0]
 
-  #     self.assertRaisesRegex(IndexError, 'invalid index', runner)
+  #   self.assertRaisesRegex(IndexError, 'invalid index', runner)
 
   # def test_invalid_device(self):
   #     idx = np.array([0, 1])
@@ -1268,36 +1306,40 @@ class TestIndexing(unittest.TestCase):
   #     out = x[idx]  # index
   #     numpy_testing_assert_equal_helper(out, torch.zeros(2))
 
-  # def test_take_along_dim(self, dtype):
-  #     def _test_against_numpy(t, indices, dim):
-  #         actual = torch.take_along_dim(t, indices, dim=dim)
-  #         t_np = t.cpu().numpy()
-  #         indices_np = indices.cpu().numpy()
-  #         expected = np.take_along_axis(t_np, indices_np, axis=dim)
-  #         numpy_testing_assert_equal_helper(actual, expected)
 
-  #     for shape in [(3, 2), (2, 3, 5), (2, 4, 0), (2, 3, 1, 4)]:
-  #         for noncontiguous in [True, False]:
-  #             t = make_tensor(shape, dtype=dtype, noncontiguous=noncontiguous)
-  #             for dim in list(range(t.ndim)) + [None]:
-  #                 if dim is None:
-  #                     indices = torch.argsort(t.view(-1))
-  #                 else:
-  #                     indices = torch.argsort(t, dim=dim)
 
-  #             _test_against_numpy(t, indices, dim)
+  def test_take_along_dim(self):
+    def _test_against_numpy(t: Tensor, indices: Tensor, dim):
+      actual = t.gather(indices, dim=dim) # tensor.take_along_dim(t, indices, dim=dim) TODO not entirely sure it's gather or __getiem__
+      t_np = t.numpy()
+      indices_np = indices.numpy()
+      expected = np.take_along_axis(t_np, indices_np, axis=dim)
+      numpy_testing_assert_equal_helper(actual, expected)
 
-  #     # test broadcasting
-  #     t = torch.ones((3, 4, 1))
-  #     indices = torch.ones((1, 2, 5), dtype=torch.long)
+    # for shape in [(3, 2), (2, 3, 5), (2, 4, 0), (2, 3, 1, 4)]:
+    #   for noncontiguous in [True, False]:
+    #     t = make_tensor(shape, dtype=dtype, noncontiguous=noncontiguous)
+    #     for dim in list(range(t.ndim)) + [None]:
+    #       if dim is None:
+    #         indices = torch.argsort(t.view(-1))
+    #       else:
+    #         indices = torch.argsort(t, dim=dim)
 
-  #     _test_against_numpy(t, indices, 1)
+    #     _test_against_numpy(t, indices, dim)
 
-  #     # test empty indices
-  #     t = torch.ones((3, 4, 5))
-  #     indices = torch.ones((3, 0, 5), dtype=torch.long)
+    # TODO wtf broadcasting?!
+    # # test broadcasting
+    # t = Tensor.ones((3, 4, 1))
+    # indices = Tensor.ones((1, 2, 5), dtype=dtypes.int64)
 
-  #     _test_against_numpy(t, indices, 1)
+    # _test_against_numpy(t, indices, 1)
+
+    # TODO empty indices support
+    # # test empty indices
+    # t = Tensor.ones((3, 4, 5))
+    # indices = Tensor.ones((3, 0, 5), dtype=dtypes.int64)
+
+    # _test_against_numpy(t, indices, 1)
 
   # def test_take_along_dim_invalid(self, dtype):
   #     shape = (2, 3, 1, 4)
@@ -1582,10 +1624,11 @@ class TestNumpy(unittest.TestCase):
 #       self.assertIsNot(a, a[...])
 #       self.assertIsNot(a, a[:])
 
-#   def test_broaderrors_indexing(self):
-#       a = torch.zeros(5, 5)
-#       self.assertRaisesRegex(IndexError, 'shape mismatch', a.__getitem__, ([0, 1], [0, 1, 2]))
-#       self.assertRaisesRegex(IndexError, 'shape mismatch', a.__setitem__, ([0, 1], [0, 1, 2]), 0)
+  # TODO 
+  # def test_broaderrors_indexing(self):
+  #   a = Tensor.zeros(5, 5)
+  #   self.assertRaisesRegex(IndexError, 'shape mismatch', a.__getitem__, ([0, 1], [0, 1, 2]))
+  #   self.assertRaisesRegex(IndexError, 'shape mismatch', a.__setitem__, ([0, 1], [0, 1, 2]), 0)
 
 #   def test_trivial_fancy_out_of_bounds(self):
 #       a = torch.zeros(5)

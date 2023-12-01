@@ -354,8 +354,6 @@ class Tensor:
       if s is None: final_shape.append(1)
       else: # s is int or slice or Tensor
         dim_shape = next(it_shape)
-        # if isinstance(s, list):
-          # s = Tensor(s)
         if isinstance(s, int): dim_collapsed += 1
         else:
           assert isinstance(dim_shape, int), f"does not support symbolic shape {dim_shape}"
@@ -377,6 +375,7 @@ class Tensor:
       rest_idx = [i.reshape(*[1]*dim[0], *[1]*(max_dim - i.ndim), *i.shape, *[1]*(ret.ndim - dim[0] - n)) for n,i in enumerate(idx[1:], 1)]
       idx = first_idx + rest_idx
       ret = ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*max_dim, *ret.shape[sum_dim[0]+1:])
+      # TODO handle shape mismatch
       # iteratively fancy index
       for a,i,sd in zip(arange, idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
       # special permute case
