@@ -6,6 +6,7 @@ from tinygrad.nn.state import get_parameters
 from tinygrad.jit import TinyJit
 from tinygrad import Device, GlobalCounters
 from tinygrad.helpers import CI, dtypes
+from tinygrad.shape.symbolic import Variable
 from test.helpers import derandomize_model
 
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
@@ -67,8 +68,8 @@ class TestRealWorld(unittest.TestCase):
     model = GPT2Transformer(**(args_tiny if CI else GPT2_MODEL_PARAMS["gpt2-medium"]))
     derandomize_model(model)
     @TinyJit
-    def test(t): return model(t, 0).realize()
-    helper_test("test_gpt2", lambda: (Tensor([[1,]]),), test, 0.21 if CI else 0.9, 140 if CI else 396, all_jitted=True)
+    def test(t, v): return model(t, v).realize()
+    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.21 if CI else 0.9, 180 if CI else 516, all_jitted=True)
 
   @unittest.skipUnless((Device.DEFAULT not in ["LLVM", "CLANG", "CPU"] or not CI), "needs JIT, too long on CI LLVM and CLANG")
   def test_train_cifar(self):
