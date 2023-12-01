@@ -82,6 +82,9 @@ def vars_from_ast(ast:LazyOp) -> List[Variable]: return sorted(set.union(*[x.arg
 
 lazycache: WeakValueDictionary = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType, base:Optional[LazyBuffer]=None):
+  # rewrite 0 size into a CONST
+  if 0 in st.shape: return LazyBuffer(device, ShapeTracker.from_shape(st.shape), LoadOps, LazyOp(LoadOps.CONST, tuple(), 0.0), dtype)
+
   # fromcpu aren't cached
   if not LAZYCACHE or (optype is LoadOps and op.op in {LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}): return LazyBuffer(device, st, optype, op, dtype, base=base)
 
@@ -183,7 +186,7 @@ class LazyBuffer:
 
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None) -> LazyBuffer:
-    return create_lazybuffer(device, ShapeTracker.from_shape(tuple(shape)), LoadOps, LazyOp(op, tuple() if src is None else (src,), arg), dtype)
+    return create_lazybuffer(device, ShapeTracker.from_shape(shape), LoadOps, LazyOp(op, tuple() if src is None else (src,), arg), dtype)
 
   # create a constant with the shape and dtype of self
   def const(self, val:Union[float, int]) -> LazyBuffer:
