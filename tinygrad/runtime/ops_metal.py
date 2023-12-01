@@ -72,7 +72,7 @@ class MetalAllocator(LRUAllocator):
     return src.contents().as_buffer(src.length())
   def copyin(self, dest:Any, src:memoryview): self.as_buffer(dest)[:] = src
   def copyout(self, dest:memoryview, src:Any): dest[:] = self.as_buffer(src)
-  def _move(self, dest: Buffer, src: Buffer):
+  def from_disk(self, dest: Buffer, src: Buffer):
     assert (dest_device := dest.device.split(':')[0] == 'METAL') and (src_device := src.device.split(':')[0] == 'DISK'), f"{dest_device=}, {src_device=}"
     hdl, err = self.device.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(src.device.split(':')[1]), None)
     assert err is None, f"Error creating io handle - {err}"

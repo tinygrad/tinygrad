@@ -50,15 +50,6 @@ def _realize_rand(buffer: Buffer, arg) -> None:
   rng_np_buffer = rng.random(size=buffer.size, dtype=np.float32).astype(dtype=buffer.dtype.np, copy=False)
   buffer.copyin(rng_np_buffer.data)
 
-# *** one op LoadOps ***
-
-def _realize_from(buffer: Buffer, src: Buffer) -> None:
-  assert src.size == buffer.size, f"size mismatch on FROM {src.size=} != {buffer.size=}"
-  if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.size:<16d} shape {buffer.size:5d} dtype {src.dtype}")
-  Buffer.move(buffer, src)
-
-# *** n op LoadOps ***
-
 def _realize_custom(*buffers: Buffer, arg) -> None: arg(*buffers)
 
 LOAD_OPS_DISPATCHER: Dict[LoadOps, Callable] = {
