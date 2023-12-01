@@ -332,5 +332,10 @@ class TestSchedule(unittest.TestCase):
     out = x ** Tensor(2)
     check_schedule(out, 1)
 
+  def test_zero_size(self):
+    x = Tensor.rand(2, 3, 0)
+    out = x + 1
+    check_schedule(out, 0, filter_loadops=False)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

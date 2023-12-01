@@ -59,7 +59,6 @@ class CLAllocator(LRUAllocator):
     self.device = device
     super().__init__()
   def _alloc(self, size:int, dtype:DType):
-    if size == 0: return None
     if isinstance(dtype, ImageDType):
       # NOTE: the memory is a bit off here due to padding, it's buf.row_pitch * buf.height * 4 * dtype.itemsize
       assert size == prod(dtype.shape), f"image size mismatch {size} != {dtype.shape}"
