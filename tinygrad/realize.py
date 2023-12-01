@@ -27,7 +27,6 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
     si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
       Buffer(si.out.device, prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype)
-      #Device[si.out.device].buffer(prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype, **si.out._device_extra_args())
     # TODO: size 0 should be removed from the schedule
     if si.out.realized.size != 0:
       if si.ast.op in LoadOps:
