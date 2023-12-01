@@ -328,9 +328,9 @@ jobs:
         # Prefer packages from the rocm repository over system packages
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
         sudo apt update
-        sudo apt install --allow-unauthenticated -y rocm-hip-libraries hip-dev
+        sudo apt install --no-install-recommends --allow-unauthenticated -y rocm-hip-libraries hip-dev
     - name: Install Python Dependencies
-      run: pip install -e '.[testing]'
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test HIP compilation on RDNA3 [gfx1100]
       run: |
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
