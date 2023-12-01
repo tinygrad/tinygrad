@@ -37,22 +37,26 @@ class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
     assert isinstance(dtype, DType)
     self.device, self.size, self.dtype = device, size, dtype
-    self._buf = opaque if opaque is not None else Device[self.device].allocator.alloc(size, dtype)
-    GlobalCounters.mem_used += self.size * self.dtype.itemsize
+    self.allocator = Device[self.device].allocator
+    self._buf = opaque if opaque is not None else self.allocator.alloc(size, dtype)
+    # TODO: mem_used for all devices
+    if self.device == Device.DEFAULT: GlobalCounters.mem_used += self.size * self.dtype.itemsize
   def __del__(self):
-    GlobalCounters.mem_used -= self.size * self.dtype.itemsize
-    Device[self.device].allocator.free(self._buf, self.size, self.dtype)
+    if self.device == Device.DEFAULT: GlobalCounters.mem_used -= self.size * self.dtype.itemsize
+    self.allocator.free(self._buf, self.size, self.dtype)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size}>"
   def copyin(self, mv:memoryview):
     mv = mv.cast("B", shape=[self.size*self.dtype.itemsize])
     assert len(mv) == self.size*self.dtype.itemsize, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
-    Device[self.device].allocator.copyin(self._buf, mv)
+    self.allocator.copyin(self._buf, mv)
     return self
   @staticmethod
   def fromCPU(device:str, x:np.ndarray): return Buffer(device, x.size, dtypes.from_np(x.dtype)).copyin(x.data)
   def toCPU(self) -> np.ndarray:
+    # zero copy with as_buffer
+    if hasattr(self.allocator, 'as_buffer'): return np.frombuffer(self.allocator.as_buffer(self._buf), dtype=np.dtype(self.dtype.np, metadata={"backing": self._buf}))
     ret = np.empty(self.size, self.dtype.np)
-    if self.size > 0: Device[self.device].allocator.copyout(ret.data.cast("B", shape=[self.size*self.dtype.itemsize]), self._buf)
+    if self.size > 0: self.allocator.copyout(ret.data.cast("B", shape=[self.size*self.dtype.itemsize]), self._buf)
     return ret
 
 # TODO: size, dest, src are the same type. can we enforce this?
@@ -251,6 +255,7 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
 import ctypes
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int, dtype:DType): return (ctypes.c_uint8 * (size*dtype.itemsize))()
+  def as_buffer(self, src) -> memoryview: return memoryview(src)
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
 MallocAllocator = _MallocAllocator()

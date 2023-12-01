@@ -27,7 +27,6 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
     si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
       Buffer(si.out.device, prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype)
-      #Device[si.out.device].buffer(prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype, **si.out._device_extra_args())
     # TODO: size 0 should be removed from the schedule
     if si.out.realized.size != 0:
       if si.ast.op in LoadOps:
@@ -56,19 +55,10 @@ def _realize_rand(buffer: Buffer, arg) -> None:
 
 # *** one op LoadOps ***
 
-#from tinygrad.runtime.lib import RawBufferMapped, RawBufferTransfer
-#from tinygrad.runtime.ops_disk import RawDiskBuffer
 def _realize_from(buffer: Buffer, src: Buffer) -> None:
   assert src.size == buffer.size, f"size mismatch on FROM {src.size=} != {buffer.size=}"
   if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.size:<16d} shape {buffer.size:5d} dtype {src.dtype}")
   buffer.copyin(src.toCPU().data)
-  # TODO: make this generic
-  #if isinstance(src.realized, RawDiskBuffer) and isinstance(buffer.realized, RawBufferMapped):
-  #  src.realized.readinto(buffer.realized._buffer())
-  #elif isinstance(src.realized, RawBufferTransfer) and isinstance(buffer.realized, RawBufferTransfer) and getenv("P2P", 0) >= 1:
-  #  buffer.realized._transfer(src.realized)
-  #else:
-    #buffer.realized._copyin(src.realized.toCPU())
 
 # *** n op LoadOps ***
 
