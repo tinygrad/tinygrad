@@ -1,23 +1,24 @@
-from typing import Optional
+import ctypes
 from extra import dist
 from multiprocessing import shared_memory
 from tinygrad.helpers import DEBUG, colored, getenv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.runtime.lib import RawBuffer, RawBufferCopyInOut
-try: from tinygrad.runtime.ops_hip import RawHIPBuffer
+try:
+  import gpuctypes.hip as hip
+  from tinygrad.runtime.ops_hip import RawHIPBuffer, check
 except: RawHIPBuffer = None
 from tinygrad.runtime.ops_disk import RawDiskBuffer
 from tinygrad.jit import CacheCollector
 from tinygrad.tensor import Tensor, Function
-import extra.hip_wrapper as hip
 import numpy as np
 
 # match the function signature of JITRunner so we can put it in the cache
 def __send_rb(args, variables=None, wait=False, jit=False):
   x, target_rank, y = args[:3]
   if RawHIPBuffer and x.__class__ is RawHIPBuffer:
-    hip.hipSetDevice(x._device)
-    hip.hipDeviceSynchronize()
+    check(hip.hipSetDevice(x._device))
+    check(hip.hipDeviceSynchronize())
   else:
     if isinstance(x, RawBufferCopyInOut): x._copyout(np.frombuffer(y._buffer(), dtype=x.dtype.np))
     else: y.fromCPU(x.toCPU())
@@ -37,9 +38,9 @@ def __recv_rb(args, variables=None, wait=False, jit=False):
 def _send_rb(x:RawBuffer, target_rank:int):
   if RawHIPBuffer and x.__class__ is RawHIPBuffer:
     # send ipc handle
-    hip.hipSetDevice(x._device)
-    hip.hipDeviceSynchronize()
-    handle = hip.hipIpcGetMemHandle(x._buf)
+    check(hip.hipSetDevice(x._device))
+    check(hip.hipDeviceSynchronize())
+    check(hip.hipIpcGetMemHandle(ctypes.byval(handle := hip.hipIpcMemHandle_t()), x._buf))
     dist.OOB.send((handle, x._device), target_rank)
 
     # jit support
@@ -67,8 +68,8 @@ def _recv_rb(x:RawBuffer, target_rank:int):
   if RawHIPBuffer and isinstance(x, RawHIPBuffer):
     # open ipc handle
     handle, y_device = dist.OOB.recv(target_rank)
-    hip.hipSetDevice(y_device)
-    ptr = hip.hipIpcOpenMemHandle(handle, 0)
+    check(hip.hipSetDevice(y_device))
+    check(hip.hipIpcOpenMemHandle(ctypes.byval(ptr := ctypes.c_void_p()), handle, 0))
 
     # build a new buffer
     y = RawHIPBuffer(x.size, x.dtype, device=str(y_device), buf=ptr, allocator=None)

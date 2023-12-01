@@ -19,9 +19,9 @@ class DiskBuffer:
   def as_strided(self, arg):
     assert strides_for_shape(arg[0]) == arg[1], "disk tensors don't support strides"
     return DiskBuffer(self.ud, prod(arg[0]), self.dtype, offset=self.offset+arg[2]*self.dtype.itemsize)
-  def _buf(self) -> memoryview: return memoryview(self.ud.mem).cast("B")[self.offset:self.offset+self.size*self.dtype.itemsize]
+  def _buf(self) -> memoryview: return memoryview(self.ud.mem)[self.offset:self.offset+self.size*self.dtype.itemsize]
 
-disk_fxn_for_op: Dict[Op, Callable] = { UnaryOps.NOOP: lambda x: x, UnaryOps.CAST: DiskBuffer.cast, MovementOps.AS_STRIDED: DiskBuffer.as_strided }
+disk_fxn_for_op: Dict[Op, Callable] = { UnaryOps.CAST: DiskBuffer.cast, MovementOps.AS_STRIDED: DiskBuffer.as_strided }
 
 MAP_LOCKED, MAP_POPULATE = 0x2000, 0x008000
 class DiskAllocator(Allocator):

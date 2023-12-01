@@ -67,8 +67,7 @@ class CLAllocator(LRUAllocator):
   def __init__(self, device:CLDevice):
     self.device = device
     super().__init__()
-  def _alloc(self, size:int, dtype:DType) -> cl.cl_mem:
-    if size == 0: return None
+  def _alloc(self, size:int, dtype:DType):
     if isinstance(dtype, ImageDType):
       return checked(cl.clCreateImage2D(self.device.context, cl.CL_MEM_READ_WRITE,
                                         cl.cl_image_format(cl.CL_RGBA, {2: cl.CL_HALF_FLOAT, 4: cl.CL_FLOAT}[dtype.itemsize]), dtype.shape[1], dtype.shape[0],
