@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
 import Metal, libdispatch
-from typing import List, Any, Tuple
+from typing import List, Any, Tuple, Optional
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, diskcache, unwrap2
 from tinygrad.device import Compiled, LRUAllocator
@@ -51,32 +51,25 @@ class MetalAllocator(LRUAllocator):
   def __init__(self, device:MetalDevice):
     self.device:MetalDevice = device
     super().__init__()
-  def _alloc(self, size:int, dtype:DType):
+  def _alloc(self, size:int, dtype:DType) -> Any:
     if size == 0: return None
     ret = self.device.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=} {dtype=}")
     return ret
-  def _async_copy(self, dest, src):
-    assert src.length() == dest.length(), f"length mismatch {src.length()=} {dest.length()=}"
+  def transfer(self, dest:Any, src:Any, sz:int):
     command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.blitCommandEncoder()
-    encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src, 0, dest, 0, src.length())
+    encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src, 0, dest, 0, sz)
     encoder.endEncoding()
     command_buffer.commit()
     self.device.mtl_buffers_in_flight.append(command_buffer)
-  def _from_buffer(self, src:memoryview): return self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, len(src), Metal.MTLResourceStorageModeShared, None)
-  def _free(self, opaque): opaque.release()
-  def as_buffer(self, src) -> memoryview:
+  def from_buffer(self, src:memoryview) -> Optional[Any]: return self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, len(src), Metal.MTLResourceStorageModeShared, None)
+  def _free(self, opaque:Any): opaque.release()
+  def as_buffer(self, src:Any) -> memoryview:
     self.device.synchronize()
     return src.contents().as_buffer(src.length())
-  def copyin(self, dest, src:memoryview):
-    src_from_buffer = None if getenv("SLOW_METAL_COPY") else self._from_buffer(src)
-    if src_from_buffer is None:
-      self.as_buffer(dest)[:] = src
-    else:
-      self.device.copies_in_flight.append(src)
-      self._async_copy(dest, src_from_buffer)
-  def copyout(self, dest:memoryview, src): dest[:] = self.as_buffer(src)
+  def copyin(self, dest:Any, src:memoryview): self.as_buffer(dest)[:] = src
+  def copyout(self, dest:memoryview, src:Any): dest[:] = self.as_buffer(src)
 
 class MetalDevice(Compiled):
   compiler_device = None
