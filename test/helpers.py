@@ -6,7 +6,7 @@ from tinygrad.nn.state import get_parameters
 def derandomize(x):
   if isinstance(x, LazyOp):
     new_op = LoadOps.EMPTY if x.op == LoadOps.RAND else x.op
-    return LazyOp(new_op, tuple([derandomize(s) for s in x.src]), x.arg)
+    return LazyOp(new_op, tuple([derandomize(s) for s in x.src]), None if x.op == LoadOps.RAND else x.arg)
   x.op = derandomize(x.op)
   return x
 
