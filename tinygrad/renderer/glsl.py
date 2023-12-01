@@ -18,10 +18,10 @@ class GLSLLanguage(CStyleLanguage):
     UnaryOps.LOG2: lambda x: f"log2({x})",
     UnaryOps.SIN: lambda x: f"sin({x})",
     UnaryOps.SQRT: lambda x: f"sqrt({x})",
-    BinaryOps.ADD: lambda a,b: f"(float({a})+float({b}))", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
-    BinaryOps.MUL: lambda a,b: f"(float({a})*float({b}))", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
+    BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
+    BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
     BinaryOps.MAX: lambda a,b: f"max({a},{b})", BinaryOps.MOD: lambda a,b: f"(int({a})%int({b}))",
-    BinaryOps.CMPLT: lambda a,b: f"float(float({a})<float({b}))", TernaryOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})",
+    BinaryOps.CMPLT: lambda a,b: f"({a}<{b})", TernaryOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})",
     TernaryOps.WHERE: lambda a,b,c: f"(float({a})!=0.0?{b}:{c})"
   }
 
