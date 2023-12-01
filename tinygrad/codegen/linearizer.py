@@ -239,7 +239,8 @@ class Linearizer(Kernel):
       fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
       # define accumulator
-      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+      reduce_acc = { ReduceOps.SUM: lambda dtype: 0.0 if dtypes.is_float(dtype) else 0, ReduceOps.MAX: lambda dtype: -math.inf if dtypes.is_float(dtype) else -2**31 if dtypes.is_int(dtype) else False }
+      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, reduce_acc[cast(ReduceOps, self.reduceop.op)](self.bufs[0].dtype))
 
       if self.tensor_core:
         def calc_tc_idxs(local_size: int, aliases: List[List[int]]):
@@ -345,7 +346,7 @@ class Linearizer(Kernel):
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[cast(ReduceOps, self.reduceop.op)])
+        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, reduce_acc[cast(ReduceOps, self.reduceop.op)](self.bufs[-1].dtype))
 
         # late reduce loop
         loop_ctx = render_loop(end_local_idxs)
@@ -459,7 +460,6 @@ class Linearizer(Kernel):
 
   def uop(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None, simplify=True) -> UOp:
     key = (uop, dtype, vin, arg)
-    if uop == UOps.DEFINE_ACC and not dtypes.is_float(cast(DType, dtype)) and arg == -math.inf: arg = False if dtype == dtypes.bool else -2**31
     if uop == UOps.PHI and vin[1].dtype != dtype: vin = (vin[0], self.cast(vin[1], dtype)) + vin[1:]
     if uop == UOps.ALU: # upcast vins to the same dtype
       upcast_dtype = dtypes.float if arg == TernaryOps.MULACC else max(cast(DType, x.dtype) for x in vin) # MULACC is only supported in float
