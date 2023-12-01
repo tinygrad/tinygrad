@@ -58,7 +58,7 @@ def _realize_rand(buffer: Buffer, arg) -> None:
 def _realize_from(buffer: Buffer, src: Buffer) -> None:
   assert src.size == buffer.size, f"size mismatch on FROM {src.size=} != {buffer.size=}"
   if DEBUG >= 2: print(f"***      copy {buffer.device} <- {src.device} size {src.size:<16d} shape {buffer.size:5d} dtype {src.dtype}")
-  buffer.copyin(src.toCPU().data)
+  Buffer.move(buffer, src)
 
 # *** n op LoadOps ***
 

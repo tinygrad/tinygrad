@@ -6,6 +6,8 @@ from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, diskcache, unwrap2
 from tinygrad.device import Compiled, LRUAllocator
 from tinygrad.renderer.metal import MetalRenderer
+from tinygrad.device import Buffer, Device
+from Foundation import NSURL
 
 @diskcache
 def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
@@ -77,6 +79,13 @@ class MetalAllocator(LRUAllocator):
       self.device.copies_in_flight.append(src)
       self._async_copy(dest, src_from_buffer)
   def copyout(self, dest:memoryview, src): dest[:] = self.as_buffer(src)
+  def _move(self, dest: Buffer, src: Buffer):
+    assert (dest_device := dest.device.split(':')[0] == 'METAL') and (src_device := src.device.split(':')[0] == 'DISK'), f"{dest_device=}, {src_device=}"
+    hdl, err = self.device.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(src.device.split(':')[1]), None)
+    assert err is None, f"Error creating io handle - {err}"
+    self.device.mtl_buffers_in_flight.append((cbuf := self.device.mtl_io_queue.commandBuffer()))
+    cbuf.loadBuffer_offset_size_sourceHandle_sourceHandleOffset_(dest._buf, 0, dest.size*dest.dtype.itemsize, hdl, src._buf.offset)
+    cbuf.commit()
 
 class MetalDevice(Compiled):
   compiler_device = None
@@ -86,6 +95,8 @@ class MetalDevice(Compiled):
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     self.mtl_buffers_in_flight: List[Any] = []
     self.copies_in_flight: List[memoryview] = []
+    self.mtl_io_queue, err = self.device.newIOCommandQueueWithDescriptor_error_(Metal.MTLIOCommandQueueDescriptor.alloc().init(), None)
+    assert err is None, err
     from tinygrad.runtime.graph.metal import MetalGraph
     super().__init__(MetalAllocator(self), LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
   def synchronize(self):

@@ -14,7 +14,9 @@ if TYPE_CHECKING:
 # **************** Device ****************
 
 class _Device:
-  def __init__(self) -> None: self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
+  def __init__(self) -> None:
+    self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
+    self.valid_moves = frozenset([('METAL','DISK')]) # add ('HIP', 'HIP') and implement HIPAllocator._move() for p2p
   def canonicalize(self, device:Optional[str]) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "") if device is not None else self.DEFAULT
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __getitem__(self, ix:str) -> Union[Interpreted, Compiled]:
@@ -58,7 +60,10 @@ class Buffer:
     ret = np.empty(self.size, self.dtype.np)
     if self.size > 0: self.allocator.copyout(ret.data.cast("B", shape=[self.size*self.dtype.itemsize]), self._buf)
     return ret
-
+  @staticmethod
+  def move(dest: Buffer, src: Buffer):
+    if (dest.device.split(":")[0].upper(), src.device.split(":")[0].upper()) in Device.valid_moves: Device[dest.device].allocator.move(dest, src)
+    else: dest.copyin(src.toCPU().data)
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
   def alloc(self, size:int, dtype:DType): return self._alloc(size, dtype)
@@ -67,6 +72,8 @@ class Allocator:
   def _free(self, opaque): pass
   def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
   def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
+  def move(self, dest: Buffer, src: Buffer): self._move(dest, src)
+  def _move(self, dest: Buffer, src: Buffer): raise NotImplementedError("_move called but not implemented")
 
 class LRUAllocator(Allocator):  # pylint: disable=abstract-method
   def __init__(self): self.cache: Dict[Tuple[int, DType], Any] = defaultdict(list)
