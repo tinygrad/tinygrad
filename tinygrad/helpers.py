@@ -57,6 +57,14 @@ def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+str
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posix()
 def from_mv(mv, to_type=ctypes.c_char): return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type))
+def to_char_p_p(options: List[ctypes._CData], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(o, ctypes.POINTER(to_type)) for o in options])
+@functools.lru_cache(maxsize=None)
+def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
+  class CStruct(ctypes.Structure):
+    _pack_, _fields_ = 1, fields
+  return CStruct
+def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
+def get_bytes(arg, get_sz, get_str, check) -> bytes: return (sz := init_c_var(ctypes.c_size_t(), lambda x: check(get_sz(arg, ctypes.byref(x)))), ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value))[1]
 
 class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
@@ -257,7 +265,14 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=n
         pathlib.Path(f.name).rename(fp)
   return fp
 
-# *** pretty PTX printer
+# *** Exec helpers
+
+def cpu_time_execution(cb, enable):
+  if enable: st = time.perf_counter()
+  cb()
+  if enable: return time.perf_counter()-st
+
+# *** Helpers for CUDA-like APIs.
 
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
@@ -268,3 +283,25 @@ def pretty_ptx(s):
   s = re.sub(r'(\.)(param|reg|global)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # space
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
+
+def compile_cuda_style(prg, compile_options, prog_t, create_prog, compile_prog, get_code, get_code_size, get_log, get_log_size, check) -> bytes:
+  check(create_prog(ctypes.byref(prog := prog_t()), prg.encode(), "<null>".encode(), 0, None, None))
+  status = compile_prog(prog, len(compile_options), to_char_p_p([ctypes.create_string_buffer(o.encode()) for o in compile_options]))
+
+  if status != 0: raise RuntimeError(f"compile failed: {get_bytes(prog, get_log_size, get_log, check).decode()}")
+  return get_bytes(prog, get_code_size, get_code, check)
+
+def encode_args_cuda_style(args, device_ptr_t, marks) -> Tuple[ctypes.Array, ctypes.Structure]:
+  c_args = init_c_struct_t(tuple([(f'f{i}', device_ptr_t if not isinstance(x, int) else ctypes.c_int) for i,x in enumerate(args)]))(*args)
+  return (ctypes.c_void_p * 5)(ctypes.c_void_p(marks[0]), ctypes.cast(ctypes.pointer(c_args), ctypes.c_void_p), ctypes.c_void_p(marks[1]), ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(marks[2])), c_args
+
+def time_execution_cuda_style(cb, ev_t, evcreate, evrecord, evsync, evdestroy, evtime, enable=False) -> Optional[float]:
+  if not enable: return cb()
+  evs = [init_c_var(ev_t(), lambda x: evcreate(ctypes.byref(x), 0)) for _ in range(2)]
+  evrecord(evs[0], None)
+  cb()
+  evrecord(evs[1], None)
+  evsync(evs[1])
+  evtime(ctypes.byref(ret := ctypes.c_float()), evs[0], evs[1])
+  for ev in evs: evdestroy(ev)
+  return ret.value * 1e-3
