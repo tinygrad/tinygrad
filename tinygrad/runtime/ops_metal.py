@@ -56,12 +56,27 @@ class MetalAllocator(LRUAllocator):
     ret = self.device.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=} {dtype=}")
     return ret
+  def _async_copy(self, dest, src):
+    assert src.length() == dest.length(), f"length mismatch {src.length()=} {dest.length()=}"
+    command_buffer = self.device.mtl_queue.commandBuffer()
+    encoder = command_buffer.blitCommandEncoder()
+    encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src, 0, dest, 0, src.length())
+    encoder.endEncoding()
+    command_buffer.commit()
+    self.device.mtl_buffers_in_flight.append(command_buffer)
+  def _from_buffer(self, src:memoryview): return self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, len(src), Metal.MTLResourceStorageModeShared, None)
   def _free(self, opaque): opaque.release()
-  def _buffer(self, src):
+  def as_buffer(self, src) -> memoryview:
     self.device.synchronize()
     return src.contents().as_buffer(src.length())
-  def copyin(self, dest, src:memoryview): self._buffer(dest)[:] = src
-  def copyout(self, dest:memoryview, src): dest[:] = self._buffer(src)
+  def copyin(self, dest, src:memoryview):
+    src_from_buffer = None if getenv("SLOW_METAL_COPY") else self._from_buffer(src)
+    if src_from_buffer is None:
+      self.as_buffer(dest)[:] = src
+    else:
+      self.device.copies_in_flight.append(src)
+      self._async_copy(dest, src_from_buffer)
+  def copyout(self, dest:memoryview, src): dest[:] = self.as_buffer(src)
 
 class MetalDevice(Compiled):
   compiler_device = None
@@ -70,8 +85,10 @@ class MetalDevice(Compiled):
     if MetalDevice.compiler_device is None: MetalDevice.compiler_device = self.device
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     self.mtl_buffers_in_flight: List[Any] = []
+    self.copies_in_flight: List[memoryview] = []
     from tinygrad.runtime.graph.metal import MetalGraph
     super().__init__(MetalAllocator(self), LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
+    self.copies_in_flight.clear()
     self.mtl_buffers_in_flight.clear()
