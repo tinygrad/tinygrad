@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, weakref
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes
 import numpy as np
 from urllib import request
 from tqdm import tqdm
@@ -58,18 +58,13 @@ def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posix()
 def from_mv(mv, to_type=ctypes.c_char): return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type))
 def to_char_p_p(options: List[ctypes._CData], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(o, ctypes.POINTER(to_type)) for o in options])
-def get_bytes(arg, get_sz, get_str, check) -> bytes:
-  check(get_sz(arg, ctypes.byref(sz := ctypes.c_size_t())))
-  check(get_str(arg, mstr := ctypes.create_string_buffer(sz.value)))
-  return ctypes.string_at(mstr, size=sz.value)
 @functools.lru_cache(maxsize=None)
 def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
   class CStruct(ctypes.Structure):
-    _pack_ = 1
-    _fields_ = fields
+    _pack_, _fields_ = 1, fields
   return CStruct
 def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
-def init_arc_c_var(ctypes_var, creat_cb, destroy_cb): return (creat_cb(ctypes_var), weakref.finalize(ctypes_var, destroy_cb, ctypes_var), ctypes_var)[2]
+def get_bytes(arg, get_sz, get_str, check) -> bytes: return (sz := init_c_var(ctypes.c_size_t(), lambda x: check(get_sz(arg, ctypes.byref(x)))), ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value))[1]
 
 class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
@@ -303,9 +298,11 @@ def encode_args_cuda_style(args, device_ptr_t, marks) -> Tuple[ctypes.Array, cty
 
 def time_execution_cuda_style(cb, ev_t, evcreate, evrecord, evsync, evdestroy, evtime, enable=False) -> Optional[float]:
   if not enable: return cb()
-  evs = [init_arc_c_var(ev_t(), lambda x: evcreate(ctypes.byref(x), 0), evdestroy) for _ in range(2)]
+  evs = [init_c_var(ev_t(), lambda x: evcreate(ctypes.byref(x), 0)) for _ in range(2)]
   evrecord(evs[0], None)
   cb()
   evrecord(evs[1], None)
   evsync(evs[1])
-  return (ret := ctypes.c_float(), evtime(ctypes.byref(ret), evs[0], evs[1]))[0].value
+  tm = (ret := ctypes.c_float(), evtime(ctypes.byref(ret), evs[0], evs[1]))[0].value
+  for ev in evs: evdestroy(ev)
+  return tm

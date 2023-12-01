@@ -1,7 +1,7 @@
 import ctypes
 from typing import Any, Optional, Tuple, Dict, List, cast
 import gpuctypes.cuda as cuda
-from tinygrad.helpers import init_c_var, init_arc_c_var, encode_args_cuda_style
+from tinygrad.helpers import init_c_var, encode_args_cuda_style
 from tinygrad.device import CompiledASTRunner, update_stats, Buffer
 from tinygrad.runtime.ops_cuda import check, cu_time_execution
 from tinygrad.shape.symbolic import Variable
@@ -58,9 +58,13 @@ class CUDAGraph:
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=jit, num_kernels=len(self.jit_cache))
     return et
 
+  def __del__(self):
+    check(cuda.cuGraphDestroy(self.graph))
+    check(cuda.cuGraphExecDestroy(self.instance))
+
   def encode_args_info(self): return (cuda.CUdeviceptr_v2, (1,2,0))
-  def graph_create(self): return init_arc_c_var(cuda.CUgraph(), lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)), cuda.cuGraphDestroy)
-  def graph_instantiate(self, graph): return init_arc_c_var(cuda.CUgraphExec(), lambda x: check(cuda.cuGraphInstantiate_v2(ctypes.byref(x), graph, None, None, 0)), cuda.cuGraphExecDestroy)
+  def graph_create(self): return init_c_var(cuda.CUgraph(), lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))
+  def graph_instantiate(self, graph): return init_c_var(cuda.CUgraphExec(), lambda x: check(cuda.cuGraphInstantiate_v2(ctypes.byref(x), graph, None, None, 0)))
   def graph_add_kernel_node(self, graph, c_deps, c_params): return init_c_var(cuda.CUgraphNode(), lambda x: check(cuda.cuGraphAddKernelNode(ctypes.byref(x), graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, ctypes.byref(c_params))))
   def graph_launch(self, *args, wait=False): return cu_time_execution(lambda: check(cuda.cuGraphLaunch(*args)), enable=wait)
   def graph_exec_kernel_node_set_params(self, *args): return check(cuda.cuGraphExecKernelNodeSetParams(*args))

@@ -2,7 +2,7 @@ import subprocess, hashlib, tempfile, ctypes, ctypes.util
 from pathlib import Path
 from typing import Tuple, Optional
 import gpuctypes.cuda as cuda
-from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_c_var, init_arc_c_var, pretty_ptx, cpu_time_execution, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
+from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_c_var, pretty_ptx, cpu_time_execution, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cuda import CUDARenderer
@@ -34,9 +34,11 @@ class CUDAProgram:
       except Exception as e: print("failed to generate SASS", str(e))
     
     if not CUDACPU:
-      self.module = init_arc_c_var(cuda.CUmodule(), lambda x: check(cuda.cuModuleLoadData(ctypes.byref(x), prg)), cuda.cuModuleUnload)
+      self.module = init_c_var(cuda.CUmodule(), lambda x: check(cuda.cuModuleLoadData(ctypes.byref(x), prg)))
       check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
     self.prg = prg
+
+  def __del__(self): check(cuda.cuModuleUnload(self.module))
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
     c_params = encode_args_cuda_style(args, cuda.CUdeviceptr_v2, (1,2,0))[0] if not CUDACPU else args
@@ -46,7 +48,7 @@ class CUDAAllocator(LRUAllocator):
   def _alloc(self, size, dtype):
     if size == 0: return None
     return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size * dtype.itemsize)))
-  def _free(self, opaque): check(cuda.cuMemFree(opaque)) # TODO: Use ARC here?
+  def _free(self, opaque): check(cuda.cuMemFree_v2(opaque))
   def copyin(self, dest, src:memoryview): check(cuda.cuMemcpyHtoD_v2(dest, from_mv(src), len(src), None))
   def copyout(self, dest:memoryview, src): check(cuda.cuMemcpyDtoH_v2(from_mv(dest), src, len(dest)))
 

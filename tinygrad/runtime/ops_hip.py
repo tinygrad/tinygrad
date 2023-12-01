@@ -1,7 +1,7 @@
 import ctypes, functools
 from typing import Tuple, TypeVar
 import gpuctypes.hip as hip
-from tinygrad.helpers import DEBUG, DType, getenv, diskcache, from_mv, init_c_var, init_arc_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
+from tinygrad.helpers import DEBUG, DType, getenv, diskcache, from_mv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.renderer.hip import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -24,7 +24,7 @@ def compile_hip(prg) -> bytes: return compile_cuda_style(prg, [f'--offload-arch=
 
 class HIPProgram:
   def __init__(self, device:int, name:str, prg:bytes, bufs:int, vars:int=0):
-    self.device, self.c_struct_t = device, None
+    self.device = device
 
     if DEBUG >= 6:
       asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
@@ -32,8 +32,10 @@ class HIPProgram:
 
     if MOCKHIP: return
     check(hip.hipSetDevice(self.device))
-    self.module = init_arc_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), prg)), hip.hipModuleUnload)
+    self.module = init_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), prg)))
     self.prg = init_c_var(hip.hipFunction_t(), lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
+
+  def __del__(self): check(hip.hipModuleUnload(self.module))
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
     if MOCKHIP: return float("inf")
