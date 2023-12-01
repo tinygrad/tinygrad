@@ -53,8 +53,9 @@ class Buffer:
       # fast path, used on HIP between GPUs
       self.allocator.transfer(self._buf, src._buf, self.size*self.dtype.itemsize)
       return
-    if getenv("METAL_FAST_LOAD") and hasattr(self.allocator, 'from_buffer') and hasattr(self.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
+    if getenv("FROM_BUFFER") and hasattr(self.allocator, 'from_buffer') and hasattr(self.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
       # fast path, used on Metal in OS X Sonoma
+      # NOTE: this is *only* faster if the pages from disk are already loaded into memory
       fb = self.allocator.from_buffer(src.allocator.as_buffer(src._buf))
       if fb:
         self.allocator.transfer(self._buf, fb, self.size*self.dtype.itemsize)
