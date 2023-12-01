@@ -83,7 +83,9 @@ class Buffer:
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
-  def alloc(self, size:int, dtype:DType): return self._alloc(size, dtype)
+  def alloc(self, size:int, dtype:DType):
+    assert size > 0, f"alloc size must be positve, getting {size}"
+    return self._alloc(size, dtype)
   def _alloc(self, size:int, dtype:DType): raise NotImplementedError("need alloc")
   def free(self, opaque, size:int, dtype:DType): self._free(opaque) # if you are returning a Python object, you don't need a free
   def _free(self, opaque): pass

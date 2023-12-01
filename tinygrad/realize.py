@@ -27,16 +27,14 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
     si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
       Buffer(si.out.device, prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype)
-    # TODO: size 0 should be removed from the schedule
-    if si.out.realized.size != 0:
-      if si.ast.op in LoadOps:
-        if DEBUG >= 2: print(f"***   {si.ast.op:>15s}    {f'{si.out.device} <- {si.inputs[0].device}' if si.ast.op is LoadOps.FROM else si.out.device:25s}     sz {si.out.realized.size:5d}    shape {si.out.shape}    dtype {si.out.dtype}    arg {si.ast.arg}")
-        # confirm the LoadOps are contiguous and in order
-        for i,s in enumerate(si.ast.src): assert isinstance(s, LazyOp) and s.op == BufferOps.LOAD and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
-        kwargs = {"arg": si.ast.arg} if si.ast.arg is not None else {}
-        LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out.realized, *[x.realized for x in si.inputs], **kwargs)
-      else:
-        Device[si.out.device].get_runner(si.ast).exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)
+    if si.ast.op in LoadOps:
+      if DEBUG >= 2: print(f"***   {si.ast.op:>15s}    {f'{si.out.device} <- {si.inputs[0].device}' if si.ast.op is LoadOps.FROM else si.out.device:25s}     sz {si.out.realized.size:5d}    shape {si.out.shape}    dtype {si.out.dtype}    arg {si.ast.arg}")
+      # confirm the LoadOps are contiguous and in order
+      for i,s in enumerate(si.ast.src): assert isinstance(s, LazyOp) and s.op == BufferOps.LOAD and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
+      kwargs = {"arg": si.ast.arg} if si.ast.arg is not None else {}
+      LOAD_OPS_DISPATCHER[cast(LoadOps, si.ast.op)](si.out.realized, *[x.realized for x in si.inputs], **kwargs)
+    else:
+      Device[si.out.device].get_runner(si.ast).exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)
     del si.out.op
     for v in si.out.views: del v.op
     #assert si.out.realized and isinstance(si.out.realized, Device[si.out.device].buffer), f"device mismatch on realized got {type(si.out.realized)} expected {si.out.device}"
