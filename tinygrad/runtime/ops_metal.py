@@ -77,8 +77,7 @@ class MetalAllocator(LRUAllocator):
     hdl, err = self.device.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(src.device.split(':')[1]), None)
     assert err is None, f"Error creating io handle - {err}"
     self.device.mtl_buffers_in_flight.append((cbuf := self.device.mtl_io_queue.commandBuffer()))
-    cbuf.loadBuffer_offset_size_sourceHandle_sourceHandleOffset_(dest._buf, 0, dest.size*dest.dtype.itemsize, hdl, src._buf.offset)
-    cbuf.commit()
+    cbuf.loadBuffer_offset_size_sourceHandle_sourceHandleOffset_(dest._buf, 0, dest.size*dest.dtype.itemsize, hdl, src._buf.offset).commit()
 
 class MetalDevice(Compiled):
   compiler_device = None
