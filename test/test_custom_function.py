@@ -8,7 +8,7 @@ from tinygrad.helpers import prod, dtypes
 
 # *** first, we implement the atan2 op at the lowest level ***
 # `atan2_gpu` for GPUBuffers and `atan2_cpu` for CPUBuffers
-from tinygrad.lazy import LazyBuffer, create_lazybuffer
+from tinygrad.lazy import Buffer, create_lazybuffer
 from tinygrad.device import CompiledASTRunner, Device
 from tinygrad.shape.shapetracker import ShapeTracker
 import pytest
@@ -16,17 +16,15 @@ import pytest
 pytestmark = pytest.mark.webgpu
 
 # we don't always have GPU support, so the type signature is the abstract CompiledBuffer instead of GPUBuffer
-def atan2_gpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer):
-  assert a.device == "GPU" and b.device == "GPU", "gpu function requires GPUBuffers"
+def atan2_gpu(ret:Buffer, a:Buffer, b:Buffer):
   assert a.dtype == b.dtype and a.dtype == dtypes.float32, "gpu function only supports float32"
-  ret.realized = Device[ret.device].buffer(prod(ret.shape), ret.dtype)
   CompiledASTRunner(None, "atan2_gpu", """
     __kernel void atan2_gpu(global float *c, global float *a, global float *b) {
       int idx = get_global_id(0);
       c[idx] = atan2(a[idx], b[idx]);
-    }""", global_size=[prod(ret.shape)]).build(Device[ret.device].compiler, Device[ret.device].runtime).exec([ret.realized, a.realized, b.realized])
+    }""", global_size=[ret.size], bufcount=3).build(Device[ret.device].compiler, Device[ret.device].runtime).exec([ret, a, b])
 
-def atan2_cpu(ret:LazyBuffer, a:LazyBuffer, b:LazyBuffer): ret.realized._copyin(np.arctan2(a.realized._buf, b.realized._buf))
+def atan2_cpu(ret:Buffer, a:Buffer, b:Buffer): ret.copyin(np.require(np.arctan2(a._buf, b._buf), requirements='C').data)
 
 # *** second, we write the ATan2 mlop ***
 # NOTE: The derivative of atan2 doesn't need a custom op! https://www.liquisearch.com/atan2/derivative

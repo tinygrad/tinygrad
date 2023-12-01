@@ -169,7 +169,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
         val = lang.code_for_op[args](*[lang.render_cast([r[x]], dtype) if x.dtype != dtype else r[x] for x in vin])
       else:
         val = lang.code_for_op[args](*[r[x] for x in vin])
-        # TODO: move after code_for_op dtype support 
+        # TODO: move after code_for_op dtype support
         if Device.DEFAULT == "WEBGL" and args == BinaryOps.CMPLT and dtype == dtypes.float:
           val = lang.render_cast([val], dtypes.float)
 
