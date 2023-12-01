@@ -9,7 +9,8 @@ import numpy as np
 
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int, round_up
 from tinygrad.lazy import LazyBuffer
-from tinygrad.ops import Device, LoadOps
+from tinygrad.ops import LoadOps
+from tinygrad.device import Device
 from tinygrad.shape.symbolic import sint
 from tinygrad.realize import run_schedule
 
@@ -105,10 +106,10 @@ class Tensor:
     return self
 
   def assign(self, x) -> Tensor:
-    # TODO: this is a hack for writing to DISK
+    # TODO: this is a hack for writing to DISK. remove with working assign
     if self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
-      self.contiguous().realize().lazydata.realized._copyin(x.numpy())
+      self.contiguous().realize().lazydata.realized.copyin(x.numpy().data)
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
@@ -122,7 +123,8 @@ class Tensor:
   def numpy(self) -> np.ndarray:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
-    return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().reshape(self.shape)
+    if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.np)
+    return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
   def item(self) -> Union[float, int]: return self.numpy().item()
 
   def to(self, device:Optional[str]) -> Tensor:
@@ -268,7 +270,7 @@ class Tensor:
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
   def shrink(self, arg:Tuple[Optional[Tuple[sint, sint]], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=tuple(x if x is not None else (0,s) for x,s in zip(arg, self.shape))) if any(x is not None and x != (0,s) for x,s in zip(arg, self.shape)) else self
-  def pad(self, arg:Tuple[Optional[Tuple[int, int]], ...], value:float=0.0) -> Tensor:
+  def pad(self, arg:Tuple[Optional[Tuple[sint, sint]], ...], value:float=0.0) -> Tensor:
     if all(x is None or x == (0,0) for x in arg): return self
     ret = mlops.Pad.apply(self, arg=(narg:=tuple(x if x is not None else (0,0) for x in arg)))
     return ret if 0 == value else ret + mlops.Pad.apply(Tensor.ones_like(self), arg=narg).where(0, value)
@@ -299,18 +301,22 @@ class Tensor:
   #    - There's a special case where a permute is needed at the end:
   #        - if first Tensor passed in (expand dims) is not at dim 0
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
-  def __getitem__(self, val) -> Tensor: # val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
+  def __getitem__(self, indices) -> Tensor: # indices: Union[int, slice, Tensor, None, Ellipsis, List, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
     def normalize_int(e, i, dim_sz):
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
 
-    orig_slices = list(val) if isinstance(val, tuple) else [val]
+    # TODO: if indices is a tuple of any sequence, or if indices is a list, it's for advanced indexing
+    orig_slices = list(indices) if isinstance(indices, tuple) else [indices]
     count = defaultdict(list)
     for i,v in enumerate(orig_slices): count[type(v)].append(i)
 
-    if (num_slices := len(count[int]) + len(count[slice]) + len(count[Tensor])) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+    # TODO: boolean indices
+    if (num_slices := len(count[int]) + len(count[slice]) + len(count[Tensor]) + len(count[list])) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     if len(ellipsis_found := count[type(Ellipsis)]) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
 
+    # replace ellipsis with equivalent number of slice(None)
+    # TODO: move all slice(None) to the end and transpose non-None to the front
     ellipsis_idx = ellipsis_found[0] if ellipsis_found else len(orig_slices)
     orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
 
@@ -336,8 +342,8 @@ class Tensor:
       if s is None: final_shape.append(1)
       else: # s is int or slice or Tensor
         dim_shape = next(it_shape)
-        if isinstance(s, int):
-          dim_collapsed += 1
+        if isinstance(s, list): s = Tensor(s)
+        if isinstance(s, int): dim_collapsed += 1
         else:
           assert isinstance(dim_shape, int), f"does not support symbolic shape {dim_shape}"
           final_shape.append(dim_shape)
@@ -366,7 +372,7 @@ class Tensor:
         ret = ret.permute(ret_dims[dim[0]:dim[0]+max_dim] + ret_dims[:dim[0]] + ret_dims[dim[0]+max_dim:])
     return ret
 
-  def __setitem__(self,s,v): return self.__getitem__(s).assign(v)
+  def __setitem__(self,indices,v): return self.__getitem__(indices).assign(v)
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
   def slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
@@ -374,7 +380,7 @@ class Tensor:
     padding = tuple([(max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg_)])
     return self.pad(padding, value=value).shrink(tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)]))
 
-  def gather(self: Tensor, idx: Tensor, dim: int) -> Tensor:
+  def gather(self:Tensor, idx:Tensor, dim:int) -> Tensor:
     assert idx.ndim == self.ndim, "self.ndim must equal idx.ndim"
     assert all(s >= i for s,i in zip(self.shape, idx.shape)), "all dim of idx.shape must be smaller than self.shape"
     if dim < 0: dim += self.ndim
@@ -383,25 +389,25 @@ class Tensor:
     permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
     return ((idx == Tensor.arange(self.shape[dim], dtype=dtypes.int32, requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])).unsqueeze(0)).sum(-1).transpose(ax1=0, ax2=dim)
 
-  def cat(self, *args, dim=0) -> Tensor:
+  def cat(self, *args:Tensor, dim:int=0) -> Tensor:
     dim = (dim + len(self.shape)) if dim < 0 else dim
     assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args)
     catargs = [self, *args]
     assert all(t.shape for t in catargs), "zero-dimensional tensor cannot be concatenated"
     shapes = [s.shape[dim] for s in catargs]
     shape_cumsum = [0, *accumulate(shapes)]
-    slc = [[(0, 0) for _ in self.shape] for _ in catargs]
+    slc:List[List[Tuple[sint, sint]]] = [[(0, 0) for _ in self.shape] for _ in catargs]
     for shp,k,s in zip(shapes, shape_cumsum[:-1], slc): s[dim] = (k, shape_cumsum[-1] - k - shp)
     return reduce(Tensor.__add__, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
 
   @staticmethod
-  def stack(tensors, dim=0) -> Tensor:
+  def stack(tensors:Sequence[Tensor], dim:int=0) -> Tensor:
     first = tensors[0].unsqueeze(dim)
     unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors[1:]]
     # checks for shapes and number of dimensions delegated to cat
     return first.cat(*unsqueezed_tensors, dim=dim)
 
-  def repeat(self, repeats) -> Tensor:
+  def repeat(self, repeats:Sequence[int]) -> Tensor:
     base_shape = (1,) * (len(repeats) - self.ndim) + self.shape
     new_shape = [x for b in base_shape for x in [1, b]]
     expand_shape = [x for rs in zip(repeats, base_shape) for x in rs]
@@ -414,14 +420,14 @@ class Tensor:
     slice_params = [[slice(None)]*dim + [slice(k, k + step)] for k in range(0, self.shape[dim], step)]
     return [self[tuple(sl)] for sl in slice_params]
 
-  def squeeze(self, dim=None) -> Tensor:
+  def squeeze(self, dim:Optional[int]=None) -> Tensor:
     if dim is None: return self if 1 not in self.shape else self.reshape(*[size for size in self.shape if size != 1])
     if dim <= 0 and self.ndim == 0: return self # This is to match PyTorch behavior
     if not -self.ndim <= dim < self.ndim: raise IndexError(f"Dimension out of range (expected to be in range of [{-self.ndim if self.ndim > 0 else self.ndim-1}, {self.ndim-1 if self.ndim > 0 else self.ndim}], but got {dim})")
     if dim < 0: dim += self.ndim
     return self if self.shape[dim] != 1 else self.reshape(*[size for idx, size in enumerate(self.shape) if idx != dim])
 
-  def unsqueeze(self, dim) -> Tensor:
+  def unsqueeze(self, dim:int) -> Tensor:
     if dim < 0: dim = len(self.shape) + dim + 1
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
@@ -750,8 +756,8 @@ class Tensor:
   def __gt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, True))
   def __ge__(self, x) -> Tensor: return 1.0-(self<x)
   def __le__(self, x) -> Tensor: return 1.0-(self>x)
-  def __ne__(self, x) -> Tensor: return (self<x) + (self>x)   # type: ignore
-  def __eq__(self, x) -> Tensor: return 1.0-(self != x)       # type: ignore
+  def __ne__(self, x) -> Tensor: return (self<x) + (self>x)   # type: ignore[override]
+  def __eq__(self, x) -> Tensor: return 1.0-(self != x)       # type: ignore[override]
 
   # ***** functional nn ops *****
 

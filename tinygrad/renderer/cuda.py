@@ -2,11 +2,11 @@ import functools
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
 class CUDALanguage(CStyleLanguage):
-  kernel_prefix = "__global__ "
+  kernel_prefix = "#define INFINITY (__int_as_float(0x7f800000))\n#define NAN (__int_as_float(0x7fffffff))\nextern \"C\" __global__ "
   smem_prefix = "__shared__ "
   smem_prefix_for_cast = False
   arg_int_prefix = "const int"
-  barrier = "__syncthreads();" 
+  barrier = "__syncthreads();"
   float4 = "make_float4"
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]

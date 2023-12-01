@@ -73,7 +73,7 @@ def log_schedule_item(si: ScheduleItem):
     # get inputs for shapetrackers
     input_to_st = defaultdict(list)
     for lo in si.ast.get_lazyops():
-      if lo.op != BufferOps.MEM: continue
+      if lo.op != BufferOps.LOAD: continue
       input_to_st[si.inputs[lo.arg.idx-1]].append(lo.arg.st)
 
     # add them to the graph, potentially with a movement op separating them
@@ -104,6 +104,7 @@ def _tree(lazydata, prefix=""):
 def print_tree(lazydata:LazyOp): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(lazydata))]))
 
 def graph_uops(uops:List[UOp]):
+  import networkx as nx
   colors = {UOps.ALU: "#ffffc0", UOps.LOAD: "#ffc0c0", UOps.STORE: "#c0ffc0", UOps.SPECIAL: "#c0c0ff", UOps.CONST: "#e0e0e0",
             UOps.DEFINE_GLOBAL: "#ffe0b0", UOps.DEFINE_LOCAL: "#ffe0d0", UOps.DEFINE_ACC: "#f0ffe0",
             UOps.LOOP: "#c8a0e0", UOps.PHI: "#e0ffc0", UOps.BARRIER: "#ff8080", UOps.IF: "#c8b0c0"}

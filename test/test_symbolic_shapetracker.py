@@ -116,9 +116,9 @@ class TestSymbolicReshape(unittest.TestCase):
   def test_reshape_into_symbols_bad_shape(self):
     vi = Variable("i", 1, 10).bind(4)
     with self.assertRaises(ValueError):
-      t = Tensor.rand(4, 6).reshape(vi, 6).reshape(1, 77) # reshape to a different size new shape through symbolic shape
+      Tensor.rand(4, 6).reshape(vi, 6).reshape(1, 77) # reshape to a different size new shape through symbolic shape
     with self.assertRaises(AssertionError):
-      t = Tensor.rand(3, 4).reshape(3, (vi+1)) # reshape into non-Variable Node
+      Tensor.rand(3, 4).reshape(3, (vi+1)) # reshape into non-Variable Node
 
   def test_two_symbol_reshape(self):
     for i in range(1, 6):
@@ -165,7 +165,7 @@ class TestSymbolicShapeExpr(unittest.TestCase):
     shape = (i+1, 8, 4)
     strides = (1, (i*4)+4, i+1)
     st = ShapeTracker((View.create(shape, strides), ))
-    idx, valid = st.expr_idxs(idx)
+    idx, _valid = st.expr_idxs(idx)
     assert idx.render() == "((lidx1*((i*4)+4))+1+gidx0+i)"
 
 if __name__ == '__main__':

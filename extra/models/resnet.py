@@ -1,8 +1,7 @@
 import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import torch_load
-from tinygrad.helpers import fetch
-from extra.utils import get_child
+from tinygrad.helpers import fetch, get_child
 
 class BasicBlock:
   expansion = 1

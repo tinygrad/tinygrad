@@ -87,7 +87,6 @@ These classes do not need to inherit from any base class, in fact if they don't 
 An example of this would be the `nn.Linear` class which represents a linear layer in a neural network.
 
 ```python
-# from tinygrad.nn import Linear
 class Linear:
   def __init__(self, in_features, out_features, bias=True, initialization: str='kaiming_uniform'):
     self.weight = getattr(Tensor, initialization)(out_features, in_features)
@@ -104,8 +103,6 @@ Our classifier will be a simple 2 layer neural network with a Leaky ReLU activat
 It will use a hidden layer size of 128 and an output layer size of 10 (one for each digit) with no bias on either Linear layer.
 
 ```python
-from tinygrad.nn import Linear
-
 class TinyNet:
   def __init__(self):
     self.l1 = Linear(784, 128, bias=False)
@@ -131,10 +128,9 @@ Training neural networks in tinygrad is super simple.
 All we need to do is define our neural network, define our loss function, and then call `.backward()` on the loss function to compute the gradients.
 They can then be used to update the parameters of our neural network using one of the many optimizers in [optim.py](/tinygrad/nn/optim.py).
 
-For our loss function we will be using sparse categorical cross entropy loss.
+For our loss function we will be using sparse categorical cross entropy loss. The implementation below is taken from [tensor.py](/tinygrad/tensor.py), it's copied below to highlight an important detail of tinygrad.
 
 ```python
-# from tinygrad.tensor import sparse_categorical_crossentropy
 def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
     loss_mask = Y != ignore_index
     y_counter = Tensor.arange(self.shape[-1], dtype=dtypes.int32, requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
@@ -142,9 +138,9 @@ def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
     return self.log_softmax().mul(y).sum() / loss_mask.sum()
 ```
 
-As we can see in this implementation of cross entropy loss, there are certain operations that tinygrad does not support.
+As we can see in this implementation of cross entropy loss, there are certain operations that tinygrad does not support natively.
 Namely, operations that are load/store or assigning a value to a tensor at a certain index.
-Load/store ops are not supported in tinygrad because they add complexity when trying to port to different backends and 90% of the models out there don't use/need them.
+Load/store ops are not supported in tinygrad natively because they add complexity when trying to port to different backends, 90% of the models out there don't use/need them, and they can be implemented like it's done above with an `arange` mask.
 
 For our optimizer we will be using the traditional stochastic gradient descent optimizer with a learning rate of 3e-4.
 

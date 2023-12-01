@@ -2,7 +2,7 @@ from pathlib import Path
 import torch
 from tinygrad import nn
 from tinygrad.tensor import Tensor
-from extra.utils import download_file, get_child
+from tinygrad.helpers import fetch, get_child
 
 class DownsampleBlock:
   def __init__(self, c0, c1, stride=2):
@@ -47,7 +47,7 @@ class UNet3D:
 
   def load_from_pretrained(self):
     fn = Path(__file__).parents[1] / "weights" / "unet-3d.ckpt"
-    download_file("https://zenodo.org/record/5597155/files/3dunet_kits19_pytorch.ptc?download=1", fn)
+    fetch("https://zenodo.org/record/5597155/files/3dunet_kits19_pytorch.ptc?download=1", fn)
     state_dict = torch.jit.load(fn, map_location=torch.device("cpu")).state_dict()
     for k, v in state_dict.items():
       obj = get_child(self, k)

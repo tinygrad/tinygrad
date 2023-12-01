@@ -32,6 +32,7 @@ extra/datasets/open-images-v6-mlperf
 extra/datasets/kits/
 extra/datasets/COCO/
 extra/datasets/audio*
+extra/weights
 venv
 examples/**/net.*[js,json]
 examples/**/*.safetensors
@@ -45,3 +46,5 @@ coverage.xml
 htmlcov
 outputs_yolov8
 wandb
+model.safetensors
+quickstart.py

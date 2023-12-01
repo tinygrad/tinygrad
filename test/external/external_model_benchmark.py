@@ -6,11 +6,10 @@ import onnx
 from onnx.helper import tensor_dtype_to_np_dtype
 import onnxruntime as ort
 from onnx2torch import convert
-from extra.utils import download_file
 from extra.onnx import get_run_onnx
-from tinygrad.helpers import OSX, DEBUG
+from tinygrad.helpers import OSX, DEBUG, fetch
 from tinygrad.tensor import Tensor
-from tinygrad.ops import Device
+from tinygrad import Device
 
 MODELS = {
   "resnet50": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
@@ -31,7 +30,6 @@ MODELS = {
 
 CSV = {}
 open_csv = None
-torch.manual_seed(1)
 
 def benchmark(mnm, nm, fxn):
   tms = []
@@ -46,11 +44,11 @@ def benchmark(mnm, nm, fxn):
 #BASE = pathlib.Path(__file__).parents[2] / "weights" / "onnx"
 BASE = pathlib.Path("/tmp/onnx")
 def benchmark_model(m, validate_outs=False):
+  torch.manual_seed(1)
   global open_csv, CSV
   CSV = {"model": m}
 
-  fn = BASE / MODELS[m].split("/")[-1]
-  download_file(MODELS[m], fn)
+  fn = fetch(MODELS[m])
   onnx_model = onnx.load(fn)
   output_names = [out.name for out in onnx_model.graph.output]
   excluded = {inp.name for inp in onnx_model.graph.initializer}
@@ -72,7 +70,7 @@ def benchmark_model(m, validate_outs=False):
     from tinygrad.jit import TinyJit
     tinygrad_jitted_model = TinyJit(lambda **kwargs: {k:v.realize() for k,v in tinygrad_model(kwargs).items()})
     for _ in range(3): {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}
-    benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()})
+    benchmark(m, f"tinygrad_{device.lower()}_jit", lambda: {k:v.numpy() for k,v in tinygrad_jitted_model(**inputs).items()}) # noqa: F821
     del inputs, tinygrad_model, tinygrad_jitted_model
 
   try:

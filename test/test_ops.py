@@ -5,7 +5,7 @@ import numpy as np
 import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, dtypes
-from tinygrad.ops import Device
+from tinygrad import Device
 
 if CI:
   import warnings
@@ -865,7 +865,6 @@ class TestOps(unittest.TestCase):
         lambda x,w: torch.nn.functional.conv_transpose2d(x,w, stride=stride).relu(),
         lambda x,w: Tensor.conv_transpose2d(x,w,stride=stride).relu(), atol=1e-4, grad_rtol=1e-5)
 
-  @unittest.skipIf(Device.DEFAULT == "METAL" and CI, "broken in METAL CI")
   def test_output_padded_conv_transpose2d(self):
     for output_padding, stride in [((1,1), (2,3)), ((2,1), (3,2))]:
       helper_test_op([(2,4,6,5), (4,4,3,3),(4,)],
@@ -910,7 +909,7 @@ class TestOps(unittest.TestCase):
   @unittest.skipIf(IMAGE>0, "no conv1d on images")
   def test_asymmetric_padding_conv1d(self):
     for p in [(0,1), (2,1), (2,0)]:
-      with self.subTest(padding := p):
+      with self.subTest(p):
         for n in [3,4]:
           for k in [2]:
             helper_test_op([(1,1,n), (1,1,k)],
@@ -1026,7 +1025,7 @@ class TestOps(unittest.TestCase):
 
   def test_asymmetric_padding_conv2d(self):
     for p in [(0,1,0,1), (2,1,2,1), (2,0,2,1)]:
-      with self.subTest(padding := p):
+      with self.subTest(p):
         for n in [3,4]:
           for k in [2]:
             helper_test_op([(1,1,n,n), (1,1,k,k)],
@@ -1036,14 +1035,12 @@ class TestOps(unittest.TestCase):
               lambda x,w: torch.nn.functional.conv2d(torch.nn.functional.pad(x, p),w).relu(),
               lambda x,w: Tensor.conv2d(x,w,padding=p).relu(), atol=1e-4)
 
-  @unittest.skipIf(Device.DEFAULT == "METAL" and CI, "broken in METAL CI")
   def test_padded_conv2d_p21(self):
     bs,cin,H,W,padding = 4, 3, 3, 3, (2,1)
     helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
       lambda x,w: torch.nn.functional.conv2d(x,w,padding=padding).relu(),
       lambda x,w: Tensor.conv2d(x,w,padding=padding).relu(), atol=1e-4)
 
-  @unittest.skipIf(Device.DEFAULT == "METAL" and CI, "broken in METAL CI")
   def test_padded_conv2d_p22(self):
     bs,cin,H,W,padding = 4, 3, 3, 3, (2,2)
     helper_test_op([(bs,cin,11,28), (4,cin,H,W)],
@@ -1232,7 +1229,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,:,None,d,e], lambda x: x[i,:,None,o,p])
 
   def test_slice_fancy_indexing_dim_inject_and_collapse(self):
-    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
+    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()  # noqa
     # dim injection and collapse
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,b,None,d,1], lambda x: x[1,j,None,o,1])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,b,2,d,None], lambda x: x[None,j,2,o,None])
@@ -1242,6 +1239,14 @@ class TestOps(unittest.TestCase):
     # indexing using idx with different dim
     helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor(1)], lambda x: x[Tensor([[0,0,0],[0,0,0]]), Tensor(1)])
     helper_test_op([(2,3)], lambda x: x[torch.tensor([1]), torch.tensor([[0,0,0],[0,0,0]])], lambda x: x[Tensor([1]), Tensor([[0,0,0],[0,0,0]])])
+
+  def test_slice_fancy_indexing_list_indices(self):
+    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[0],b,c,d,:], lambda x: x[[0],j,k,o,:])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[1],b,c,d,:], lambda x: x[[1],j,k,o,:])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[1,0],b,c,d,:], lambda x: x[[1,0],j,k,o,:])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,[1,2,3],...], lambda x: x[i,j,k,[1,2,3],...])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,[2,1,0],c,[2,1,0],e], lambda x: x[i,[2,1,0],k,[2,1,0],p])
 
   def test_gather(self):
     # indices cannot have gradient

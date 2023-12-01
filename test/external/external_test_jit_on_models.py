@@ -4,7 +4,6 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.helpers import dtypes, CI
-from tinygrad.ops import Device
 from test.helpers import derandomize_model
 
 from examples.llama import Transformer
@@ -19,7 +18,7 @@ class TestJittedModels(unittest.TestCase):
     old_type = Tensor.default_type
     Tensor.default_type = dtypes.float16
 
-    args_tiny = {"dim": 1024, "multiple_of": 256, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
+    args_tiny = {"dim": 1024, "hidden_dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
     model = Transformer(**args_tiny)
     derandomize_model(model)
     def test(t): return model(t, 0).realize()

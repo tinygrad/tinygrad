@@ -2,12 +2,15 @@ import numpy as np
 import unittest, os
 
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
-from tinygrad.codegen.linearizer import Linearizer, UOps
-from tinygrad.ops import Compiled, Device, LoadOps
+from tinygrad.codegen.linearizer import Linearizer, UOp, UOps
+from tinygrad.device import Compiled, Device, Buffer
+from tinygrad.ops import BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
+from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
-from tinygrad.helpers import dtypes, prod, getenv, CI
+from tinygrad.helpers import dtypes, prod
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -117,11 +120,27 @@ class TestLinearizer(unittest.TestCase):
     lin = Linearizer(sched[0].ast)
     assert not any(u.uop == UOps.LOOP for u in lin.linearize().uops), "found loop in sum collapse"
 
+  def test_simplify_uop(self):
+    def helper_test_simplify(uop, dtype, vin, arg=None):
+      ast = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=42, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
+      ast = LazyOp(BufferOps.STORE, (ast,), MemBuffer(0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
+      lin = Linearizer(ast=ast) # this is a dummy ast
+
+      lin.uops = []
+      return lin.uop(uop, dtype, vin, arg, cachable=False)
+
+    c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
+    assert helper_test_simplify(UOps.ALU, dtypes.bool, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c0), arg=TernaryOps.WHERE) == c0
+
+    c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
+    c1 = UOp(UOps.CONST, dtypes.float, vin=(), arg=1.0)
+    assert helper_test_simplify(UOps.ALU, dtypes.bool, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c1), arg=TernaryOps.WHERE).uop == UOps.ALU
+
 def helper_realized_ast(r:Tensor):
   s = r.lazydata.schedule()
   run_schedule(s[:-1])  # run all kernels except the last one
   # now all input LazyBuffers buffers in s[-1] should be realized
-  output_buffer = Device[s[-1].out.device].buffer(prod((s if isinstance(s, int) else s.max for s in s[-1].out.shape)), s[-1].out.dtype, **s[-1].out._device_extra_args())  # allocate an output buffer
+  output_buffer = Buffer(s[-1].out.device, prod((s if isinstance(s, int) else s.max for s in s[-1].out.shape)), s[-1].out.dtype, **s[-1].out._device_extra_args())  # allocate an output buffer
   return s[-1].ast, [output_buffer] + [l.realized for l in s[-1].inputs]
 
 class TestFloat4(unittest.TestCase):
@@ -348,7 +367,7 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
       for opt in opts:
         k.apply_opt(opt)
     prg = to_prg(k)
-    real_bufs[0] = real_bufs[0].fromCPU(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np)) # Zero to check that all values are filled
+    real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
     prg.exec(real_bufs)
     np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
 
@@ -362,7 +381,7 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
   k = Linearizer(realized_ast)
   k.hand_coded_optimizations()
   prg = Device[Device.DEFAULT].to_program(k)
-  real_bufs[0] = real_bufs[0].fromCPU(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np)) # Zero to check that all values are filled
+  real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
   prg.exec(real_bufs)
   np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
   for x in opts: # Check custom transformations if any.

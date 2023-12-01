@@ -5,6 +5,7 @@ from tinygrad.helpers import getenv, dtypes
 if __name__ == "__main__":
   if getenv("DIST"):
     dist.preinit()
+    from extra.dist import collectives
 
 # tinygrad implementation of https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
@@ -16,13 +17,12 @@ from extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from tinygrad import nn
 from tinygrad.nn.state import get_state_dict
 from tinygrad.nn import optim
-from tinygrad.ops import Device
+from tinygrad import Device
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import GlobalCounters
 from tinygrad.shape.symbolic import Node
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
-from extra.dist import collectives
 
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 
