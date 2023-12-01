@@ -28,7 +28,7 @@ class CUDAGraph:
 
       c_deps = (type(graph_node)*1)(*(graph_node,)) if graph_node is not None else None
       c_config, c_struct = encode_args_cuda_style([cast(Buffer, x)._buf for x in ji.rawbufs] + [var_vals[x] for x in prg.vars], *self.encode_args_info())
-      c_params = self.build_kernel_node_params(ji, prg, *cast(Tuple[List[int], List[int]], prg.launch_dims(var_vals)), c_config)
+      c_params = self.build_kernel_node_params(prg, *cast(Tuple[List[int], List[int]], prg.launch_dims(var_vals)), c_config)
       graph_node = self.graph_add_kernel_node(self.graph, c_deps, c_params)
 
       if j in self.jc_idxs_with_updatable_launch_dims or j in self.jc_idxs_with_updatable_var_vals or j in self.jc_idxs_with_updatable_rawbufs:
@@ -65,5 +65,5 @@ class CUDAGraph:
   def graph_launch(self, *args, wait=False): return cu_time_execution(lambda: check(cuda.cuGraphLaunch(*args)), enable=wait)
   def graph_exec_kernel_node_set_params(self, *args): return check(cuda.cuGraphExecKernelNodeSetParams(*args))
 
-  def build_kernel_node_params(self, ji, prg, global_size, local_size, c_config): return cuda.CUDA_KERNEL_NODE_PARAMS(prg.clprg.prg, *global_size, *local_size, 0, None, c_config)
+  def build_kernel_node_params(self, prg, global_size, local_size, c_config): return cuda.CUDA_KERNEL_NODE_PARAMS(prg.clprg.prg, *global_size, *local_size, 0, None, c_config)
   def set_kernel_node_launch_dims(self, node, global_size: Tuple[int, int, int], local_size: Tuple[int, int, int]): node.blockDimX, node.blockDimY, node.blockDimZ, node.gridDimX, node.gridDimY, node.gridDimZ = *local_size, *global_size
