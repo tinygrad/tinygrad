@@ -1,9 +1,7 @@
-import numpy as np
 import functools
 from wgpu.utils.device import get_default_device
-from tinygrad.runtime.lib import RawBuffer, LRUAllocator
 from tinygrad.helpers import dtypes, DType
-from tinygrad.device import Compiled
+from tinygrad.device import Compiled, Allocator
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle
 from tinygrad.renderer.wgsl import WGSLLanguage
@@ -12,11 +10,11 @@ import wgpu
 wgpu_device = get_default_device()
 
 class WebGPUProgram:
-  def __init__(self, name: str, prg: str): self.name,self.prg = name,wgpu_device.create_shader_module(code=prg)
+  def __init__(self, name: str, prg: str, bufs:int=0, vars:int=0): self.name,self.prg = name,wgpu_device.create_shader_module(code=prg)
   def __call__(self, *bufs, global_size, local_size, wait=False):
     assert len(bufs) <= 8, "WEBGPU only supports 8 buffers"
     binding_layouts = [{"binding": i, "visibility": wgpu.ShaderStage.COMPUTE, "buffer": {"type": wgpu.BufferBindingType.storage}} for i in range(len(bufs))]
-    bindings = [{"binding": i, "resource": {"buffer": x._buf, "offset": 0, "size": x._buf.size}} for i, x in enumerate(bufs)]
+    bindings = [{"binding": i, "resource": {"buffer": x, "offset": 0, "size": x.size}} for i, x in enumerate(bufs)]
     bind_group_layout = wgpu_device.create_bind_group_layout(entries=binding_layouts)
     pipeline_layout = wgpu_device.create_pipeline_layout(bind_group_layouts=[bind_group_layout])
     bind_group = wgpu_device.create_bind_group(layout=bind_group_layout, entries=bindings)
@@ -29,17 +27,14 @@ class WebGPUProgram:
     compute_pass.end()
     wgpu_device.queue.submit([command_encoder.finish()])
 
-class RawWebGPUAllocator(LRUAllocator):
-  def _do_alloc(self, size, dtype, device, **kwargs): return wgpu_device.create_buffer(size=size*dtype.itemsize, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC)
-  def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
-WebGPUAlloc = RawWebGPUAllocator(wgpu_device.limits['max_buffer_size'])
-
-class RawWebGPUBuffer(RawBuffer):
-  def __init__(self, size:int, dtype:DType):
+class WebGpuAllocator(Allocator):
+  def _alloc(self, size: int, dtype: DType):
     assert dtype not in [dtypes.int8,dtypes.uint8,dtypes.int64,dtypes.uint64,dtypes.double], f"dtype {dtype} not supported on WEBGPU"
-    super().__init__(size, dtype, allocator=WebGPUAlloc)
-  def _copyin(self, x:np.ndarray): wgpu_device.queue.write_buffer(self._buf, 0, np.ascontiguousarray(x))
-  def toCPU(self) -> np.ndarray: return np.frombuffer(wgpu_device.queue.read_buffer(self._buf, 0), dtype=np.dtype(self.dtype.np, metadata={"backing": self})) # type: ignore
+    return wgpu_device.create_buffer(size=size*dtype.itemsize, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST | wgpu.BufferUsage.COPY_SRC)
+  def copyin(self, dest, src: memoryview): wgpu_device.queue.write_buffer(dest, 0, src)
+  def copyout(self, dest, src: memoryview): dest[:] = wgpu_device.queue.read_buffer(src, 0)    # TODO: remove this copy
 
-renderer = functools.partial(uops_to_cstyle, WGSLLanguage())
-WebGpuDevice = Compiled(RawWebGPUBuffer, LinearizerOptions(device="WEBGPU", supports_float4=False, local_max=[256, 256, 64], global_max=[65535, 65535, 65535]), renderer, lambda x: x, WebGPUProgram)
+class WebGpuDevice(Compiled):
+  def __init__(self, device:str):
+    super().__init__(WebGpuAllocator(), LinearizerOptions(device="WEBGPU", supports_float4=False, local_max=[256, 256, 64], global_max=[65535, 65535, 65535]),
+                     functools.partial(uops_to_cstyle, WGSLLanguage()), lambda x: x, WebGPUProgram)
