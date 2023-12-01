@@ -72,6 +72,9 @@ class CUDAProgram:
       end.synchronize()
       return start.time_till(end)*1e-3
 
-CUDADevice = Compiled(MallocAllocator if CUDACPU else CUDAAllocator(),
-                      LinearizerOptions(supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
-                      CUDARenderer, compile_cuda, CUDAProgram, cuda.Context.synchronize)
+class CUDADevice(Compiled):
+  def __init__(self, device:str):
+    super().__init__(MallocAllocator if CUDACPU else CUDAAllocator(),
+                     LinearizerOptions(supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
+                     CUDARenderer, compile_cuda, CUDAProgram)
+  def synchronize(self): return cuda.Context.synchronize()
