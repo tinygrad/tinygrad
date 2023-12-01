@@ -98,7 +98,7 @@ MODEL_PARAMS = {
       "files": 1,
     },
     "1B-Chat": {
-      "args": {"dim": 2048, "n_layers": 22, "n_heads": 32, "n_kv_heads": 4, "multiple_of": 256, "norm_eps": 1e-05, "vocab_size": 32003},
+      "args": {"dim": 2048, "n_layers": 22, "n_heads": 32, "n_kv_heads": 4, "norm_eps": 1e-05, "vocab_size": 32003, "hidden_dim": 5632},
       "files": 1,
     }
   }
