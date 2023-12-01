@@ -63,11 +63,13 @@ def get_bytes(arg, get_sz, get_str, check) -> bytes:
   check(get_str(arg, mstr := ctypes.create_string_buffer(sz.value)))
   return ctypes.string_at(mstr, size=sz.value)
 @functools.lru_cache(maxsize=None)
-def create_c_struct(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
+def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
   class CStruct(ctypes.Structure):
     _pack_ = 1
     _fields_ = fields
   return CStruct
+def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
+def init_arc_c_var(ctypes_var, creat_cb, destroy_cb): return (creat_cb(ctypes_var), weakref.finalize(ctypes_var, destroy_cb, ctypes_var), ctypes_var)[2]
 
 class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
@@ -277,9 +279,6 @@ def cpu_time_execution(cb, enable):
 
 # *** Helpers for CUDA-like APIs.
 
-def init_ctypes_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
-def init_arc_ctypes_var(ctypes_var, creat_cb, destroy_cb): return (creat_cb(ctypes_var), weakref.finalize(ctypes_var, destroy_cb, ctypes_var), ctypes_var)[2]
-
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
   s = re.sub(r'([!@<\[\s,\+\-;\n])((?:[_%$][\w%\$_]+(?:\.[xyz])?\:?)|(?:buf\d+))([<>\]\s,\+\-;\n\)])', lambda m:m[1]+colored(m[2], "blue")+m[3], s, flags=re.M) # identifiers
@@ -298,14 +297,13 @@ def compile_cuda_style(prg, compile_options, prog_t, create_prog, compile_prog, 
   return get_bytes(prog, get_code_size, get_code, check)
 
 def encode_args_cuda_style(args, device_ptr_t, marks) -> Tuple[ctypes.Array, ctypes.Structure]:
-  c_args = create_c_struct(tuple([(f'f{i}', device_ptr_t if not isinstance(x, int) else ctypes.c_int) for i,x in enumerate(args)]))(*args)
+  c_args = init_c_struct_t(tuple([(f'f{i}', device_ptr_t if not isinstance(x, int) else ctypes.c_int) for i,x in enumerate(args)]))(*args)
   return (ctypes.c_void_p * 5)(ctypes.c_void_p(marks[0]), ctypes.cast(ctypes.pointer(c_args), ctypes.c_void_p), ctypes.c_void_p(marks[1]),
                                ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(marks[2])), c_args
 
 def time_execution_cuda_style(cb, ev_t, evcreate, evrecord, evsync, evdestroy, evtime, enable=False) -> Optional[float]:
   if not enable: return cb()
-  # evs = [(evcreate(ctypes.byref(ev := ev_t()), 0), weakref.finalize(ev, evdestroy, ev), ev)[2], evdestroy for _ in range(2)]
-  evs = [init_arc_ctypes_var(ev_t(), lambda x: evcreate(ctypes.byref(x), 0), evdestroy) for _ in range(2)]
+  evs = [init_arc_c_var(ev_t(), lambda x: evcreate(ctypes.byref(x), 0), evdestroy) for _ in range(2)]
   evrecord(evs[0], None)
   cb()
   evrecord(evs[1], None)

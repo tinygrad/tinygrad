@@ -1,7 +1,7 @@
 import ctypes, functools
-from typing import Tuple, cast, Callable, TypeVar
+from typing import Tuple, TypeVar
 import gpuctypes.hip as hip
-from tinygrad.helpers import DEBUG, DType, getenv, diskcache, from_mv, init_ctypes_var, init_arc_ctypes_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
+from tinygrad.helpers import DEBUG, DType, getenv, diskcache, from_mv, init_c_var, init_arc_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.renderer.hip import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -32,8 +32,8 @@ class HIPProgram:
 
     if MOCKHIP: return
     check(hip.hipSetDevice(self.device))
-    self.module = init_arc_ctypes_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), prg)), hip.hipModuleUnload)
-    self.prg = init_ctypes_var(hip.hipFunction_t(), lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
+    self.module = init_arc_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), prg)), hip.hipModuleUnload)
+    self.prg = init_c_var(hip.hipFunction_t(), lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
     if MOCKHIP: return float("inf")
@@ -48,7 +48,7 @@ class HIPAllocator(LRUAllocator):
   def _alloc(self, size: int, dtype: DType):
     if size == 0: return None
     check(hip.hipSetDevice(self.device))
-    return init_ctypes_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size * dtype.itemsize)))
+    return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size * dtype.itemsize)))
   def _free(self, opaque:T): check(hip.hipFree(opaque))
   def copyin(self, dest:T, src: memoryview):
     check(hip.hipSetDevice(self.device))
@@ -58,13 +58,13 @@ class HIPAllocator(LRUAllocator):
     check(hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
   def transfer(self, dest:T, src:T, sz:int):
     check(hip.hipSetDevice(self.device))
-    check(hip.hipMemcpy(dest, src, len(dest), hip.hipMemcpyDeviceToDevice))
+    check(hip.hipMemcpy(dest, src, sz, hip.hipMemcpyDeviceToDevice))
 
 class HIPDevice(Compiled):
   default_arch_name = "gfx1100"
   def __init__(self, device:str):
     self.device = int(device.split(":")[1]) if ":" in device else 0
-    if self.device == 0 and not MOCKHIP: HIPDevice.default_arch_name = init_ctypes_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName
+    if self.device == 0 and not MOCKHIP: HIPDevice.default_arch_name = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName
     
     from tinygrad.runtime.graph.hip import HIPGraph
     super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self.device), LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, functools.partial(HIPProgram, self.device), HIPGraph)
