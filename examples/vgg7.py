@@ -92,7 +92,7 @@ elif cmd == "import_kinne":
 
   index = 0
   for t in vgg7.get_parameters():
-    fn = src + "/snoop_bin_" + str(index) + ".bin"
+    fn = f"{src}/snoop_bin_{str(index)}.bin"
     t.assign(Tensor(numpy.fromfile(fn, "<f4")).reshape(shape=t.shape))
     index += 1
 
@@ -163,8 +163,8 @@ elif cmd == "train":
       print("exception occurred (PROBABLY value-probabilities-dont-sum-to-1)")
       sample_idx = random.randint(0, samples_count - 1)
 
-    x_img = image_load(samples_base + "/" + str(sample_idx) + "a.png")
-    y_img = image_load(samples_base + "/" + str(sample_idx) + "b.png")
+    x_img = image_load(f"{samples_base}/{str(sample_idx)}a.png")
+    y_img = image_load(f"{samples_base}/{str(sample_idx)}b.png")
 
     sample_x = Tensor(x_img, requires_grad = False)
     sample_y = Tensor(y_img, requires_grad = False)
@@ -192,7 +192,7 @@ elif cmd == "train":
 
     # warning: used by sample probability adjuster
     loss_indicator = loss.max().numpy()
-    print("Round " + str(rnum) + " : " + str(loss_indicator))
+    print(f"Round {str(rnum)} : {str(loss_indicator)}")
 
     if (rnum % rounds_per_save) == 0:
       print("Saving")
