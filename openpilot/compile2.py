@@ -85,7 +85,6 @@ def schedule_to_thneed(schedule, output_fn):
 def thneed_test_onnx(onnx_data, output_fn):
   import onnx
   import pyopencl as cl
-  from tinygrad.runtime.ops_gpu import CL
   import numpy as np
   from extra.thneed import Thneed
   onnx_model = onnx.load(io.BytesIO(onnx_data))
@@ -118,11 +117,11 @@ def thneed_test_onnx(onnx_data, output_fn):
 
     # inputs
     for k,v in nt.inputs.items():
-      cl.enqueue_copy(CL.cl_queue[0], v, new_np_inputs[k], is_blocking=True)
+      cl.enqueue_copy(Device["GPU"].queue, v, new_np_inputs[k], is_blocking=True)
 
     nt.run()
     new_thneed_out = np.empty((nt.outputs[0].size//4,), dtype=np.float32).reshape(new_torch_out.shape)
-    cl.enqueue_copy(CL.cl_queue[0], new_thneed_out, nt.outputs[0], is_blocking=True)
+    cl.enqueue_copy(Device["GPU"].queue, new_thneed_out, nt.outputs[0], is_blocking=True)
 
     # compare torch to thneed
     np.testing.assert_allclose(new_torch_out, new_thneed_out, atol=1e-4, rtol=1e-2)

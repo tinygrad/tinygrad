@@ -1,29 +1,27 @@
 # NOTE: this only tests the speed of the LLaMA codegen, it doesn't actually run the net
 import unittest, time
-import numpy as np
 from examples.llama import Transformer, MODEL_PARAMS
 from tinygrad.tensor import Tensor
 from tinygrad import Device
 from tinygrad.nn.state import get_state_dict
-from tinygrad.device import Compiled
+from tinygrad.device import Compiled, Allocator
 from tinygrad.helpers import Profiling
-from tinygrad.runtime.lib import RawBuffer
 
 class FakeProgram:
-  def __init__(self, name:str, prg:str): pass
+  def __init__(self, name:str, prg:bytes, bufs:int, vars:int=0): pass
   def __call__(self, *bufs, global_size, local_size, wait=False): pass
 
-class RawFakeBuffer(RawBuffer):
-  def _copyin(self, x:np.ndarray): pass
-  def toCPU(self): return np.empty(self.size, dtype=self.dtype.np)
+class FakeAllocator(Allocator):
+  def _alloc(self, sz, dtype): return None
+  def copyin(self, dest, src:memoryview): pass
 
 class TestLLaMASpeed(unittest.TestCase):
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only test for compiled backends")
   def test_llama_compile(self):
     backup_program = Device[Device.DEFAULT].runtime
-    backup_buffer = Device[Device.DEFAULT].buffer
+    backup_allocator = Device[Device.DEFAULT].allocator
     Device[Device.DEFAULT].runtime = FakeProgram
-    Device[Device.DEFAULT].buffer = RawFakeBuffer
+    Device[Device.DEFAULT].allocator = FakeAllocator()
 
     print("testing llama python run time")
     model = Transformer(**MODEL_PARAMS["1"]["7B"]["args"])
@@ -48,7 +46,7 @@ class TestLLaMASpeed(unittest.TestCase):
       run_llama("profile")
 
     Device[Device.DEFAULT].runtime = backup_program
-    Device[Device.DEFAULT].buffer = backup_buffer
+    Device[Device.DEFAULT].allocator = backup_allocator
 
 if __name__ == '__main__':
   unittest.main()
