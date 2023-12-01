@@ -157,13 +157,8 @@ class ShapeTracker:
   def stride(self, mul: Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].stride(mul), ))
 
   def reshape(self, new_shape: Tuple[sint, ...]) -> ShapeTracker:
-    if (new_view := self.views[-1].reshape(new_shape)) is None:
-      extra_view = View.create(new_shape)
-      # last chance to merge. TODO: move into View
-      if (merged_view := merge_views(self.views[-1], extra_view)) is not None:
-        return ShapeTracker(self.views[0:-1] + (merged_view,))
-      return ShapeTracker(self.views + (extra_view, ))
-    return ShapeTracker(self.views[0:-1] + (new_view,))
+    if (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
+    return ShapeTracker(self.views + (View.create(new_shape), ))
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 # TODO: if we remove movementops from lazy.py we can delete this
