@@ -9,7 +9,7 @@ inf, nan = float('inf'), float('nan')
 # HACK: it used to be called MEM
 setattr(BufferOps, "MEM", BufferOps.LOAD)
 # HACK: no more NOOP
-setattr(UnaryOps, "NOOP", UnaryOps.SIN)
+setattr(UnaryOps, "NOOP", UnaryOps.NEG)
 
 # kernel unpacker
 from tinygrad.codegen.linearizer import Linearizer
