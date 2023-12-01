@@ -41,6 +41,7 @@ numpy_fxn_for_op: Dict[Op, Callable] = {
 
 class NumpyAllocator(Allocator):
   def _alloc(self, size:int, dtype:DType): return np.empty(size, dtype.np)
+  def as_buffer(self, src:np.ndarray) -> memoryview: return np.require(src, requirements='C').data
   def copyin(self, dest:np.ndarray, src:memoryview): np.copyto(dest, np.frombuffer(src, dest.dtype).reshape(dest.shape))
   def copyout(self, dest:memoryview, src:np.ndarray): np.copyto(np.frombuffer(dest, src.dtype).reshape(src.shape), src)
 

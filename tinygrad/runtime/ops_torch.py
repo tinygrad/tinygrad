@@ -43,6 +43,7 @@ torch_fxn_for_op: Dict[Op, Callable] = {
 
 class TorchAllocator(Allocator):
   def _alloc(self, size:int, dtype:DType): return torch.empty([size], device=device, dtype=inverse_type_map[dtype])
+  def as_buffer(self, src:torch.Tensor) -> memoryview: return np.require(src.numpy(), requirements='C').data
   def copyin(self, dest:torch.Tensor, src:memoryview): dest.copy_(torch.frombuffer(src, dtype=dest.dtype))
   def copyout(self, dest:memoryview, src:torch.Tensor): torch.frombuffer(dest, dtype=src.dtype).copy_(src.flatten())
 
