@@ -7,7 +7,7 @@ from tinygrad.ops import MovementOps
 
 from tinygrad.helpers import prod, DEBUG, merge_dicts
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
-from tinygrad.shape.view import View, to_shape_strides
+from tinygrad.shape.view import View, _merge_dims
 
 def expr_node_mask(view:View, idx:Node, valid:Optional[Node]=None) -> Node:
   expr = [valid] if valid is not None else []
@@ -25,7 +25,7 @@ def expr_node(view:View, idx:Optional[Node]=None) -> Node:
   if idx is None: idx = Variable('idx', 0, prod(view.shape)-1)
   ret: List[Node] = [NumNode(view.offset) if isinstance(view.offset, int) else view.offset] if view.offset else []
   acc = 1
-  for d,s,_ in reversed(to_shape_strides(view.shape, view.strides)):
+  for d,s,_ in reversed(_merge_dims(view.shape, view.strides)):
     ret.append(((idx//acc)%d)*s)
     acc *= d
   return Variable.sum(ret)
