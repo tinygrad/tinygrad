@@ -1,11 +1,10 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, random, math, time
 from tinygrad.lazy import vars_from_ast
-from tinygrad.device import Device, Compiled
+from tinygrad.device import Device, Compiled, Buffer
 from tinygrad.ops import MemBuffer
 from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, all_int, colored, Timing
 from tinygrad.codegen.linearizer import Linearizer, UOp
-from tinygrad.runtime.lib import RawBuffer
 from collections import defaultdict
 from tinygrad.tensor import Tensor
 
@@ -23,7 +22,7 @@ actions += [
 if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
 
 # returns time in seconds
-def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=True, max_global_size=65536, cnt=3, disable_cache=False, clear_l2=False) -> float:
+def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, max_global_size=65536, cnt=3, disable_cache=False, clear_l2=False) -> float:
   key = {"ast": str(lin.ast), "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size, "clear_l2": clear_l2, "device": Device.DEFAULT}
   if not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
 
@@ -62,7 +61,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
       if clear_l2:
         # TODO: this is too small for many L2 caches
         with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
-      tms.append(prg.clprg(*rawbufs, *var_vals.values(), **lra, wait=True)*factor)
+      tms.append(prg.clprg(*[x._buf for x in rawbufs], *var_vals.values(), **lra, wait=True)*factor)
   except Exception:
     if DEBUG >= 4:
       import traceback
@@ -75,14 +74,14 @@ def time_linearizer(lin:Linearizer, rawbufs:List[RawBuffer], allow_test_size=Tru
   return min(tms)
 
 # get (scrap) buffers for timing the linearizer
-def bufs_from_lin(lin:Linearizer) -> List[RawBuffer]:
+def bufs_from_lin(lin:Linearizer) -> List[Buffer]:
   bufsts:DefaultDict[int, List[MemBuffer]] = defaultdict(list)
   for x in lin.membufs: bufsts[x.idx].append(x)
-  rawbufs:List[Optional[RawBuffer]] = [None]*len(bufsts)
+  rawbufs:List[Optional[Buffer]] = [None]*len(bufsts)
   for k,lx in bufsts.items():
-    rawbufs[k] = cast(Compiled, Device[Device.DEFAULT]).buffer(prod(lx[0].dtype.shape) if isinstance(lx[0].dtype, ImageDType) else max(y.st.size() for y in lx), lx[0].dtype)
+    rawbufs[k] = Buffer(Device.DEFAULT, prod(lx[0].dtype.shape) if isinstance(lx[0].dtype, ImageDType) else max(y.st.size() for y in lx), lx[0].dtype)
   assert all(r is not None for r in rawbufs)
-  return cast(List[RawBuffer], rawbufs)
+  return cast(List[Buffer], rawbufs)
 
 # get dictionary of all possible actions
 def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Linearizer]:
@@ -148,14 +147,14 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   if DEBUG >= 3: print(beam[0][0].applied_opts)
   return beam[0][0]
 
-def optimize_local_size(clprg:Callable, global_size:List[int], rawbufs:List[RawBuffer]) -> List[int]:
-  test_rawbuffers = [type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
+def optimize_local_size(clprg:Callable, global_size:List[int], rawbufs:List[Buffer]) -> List[int]:
+  test_rawbuffers = [Buffer(rawbufs[0].device, rawbufs[0].size, rawbufs[0].dtype), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
   MAX_WORKGROUP = clprg.max_work_group_size() if hasattr(clprg, 'max_work_group_size') else 1024
   local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in global_size]
   local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
   def try_exec(local_size):
     try:
-      return clprg(*test_rawbuffers, global_size=[g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)], local_size=local_size, wait=True)
+      return clprg(*[x._buf for x in test_rawbuffers], global_size=[g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)], local_size=local_size, wait=True)
     except Exception:
       return float('inf')
   ret = min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])

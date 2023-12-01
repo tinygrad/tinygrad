@@ -55,7 +55,7 @@ def compare_tiny_torch(model, model_torch, X, Y):
       np.testing.assert_allclose(model_state_dict[k].numpy(), v.detach().numpy(), atol=1e-3, err_msg=f'weight mismatch {k}')
 
 def get_mnist_data():
-  X_train, Y_train, X_test, Y_test = fetch_mnist()
+  _X_train, _Y_train, X_test, Y_test = fetch_mnist()
   BS = 32
   num_classes = 10
   X = Tensor(X_test[0:BS].astype(np.float32))

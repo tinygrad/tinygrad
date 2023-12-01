@@ -1,11 +1,10 @@
 import time, ctypes
 from typing import ClassVar
-from tinygrad.device import Compiled
+from tinygrad.device import Compiled, MallocAllocator
 from tinygrad.helpers import getenv, DEBUG, diskcache
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
-from tinygrad.runtime.lib import RawMallocBuffer
 
 import llvmlite.binding as llvm
 
@@ -55,14 +54,14 @@ def compile_llvm(prg, llvmopt=LLVMOPT) -> bytes:
   return LLVM.target_machine.emit_object(mod)
 
 class LLVMProgram:
-  def __init__(self, name:str, lib:bytes):
+  def __init__(self, name:str, lib:bytes, bufs:int, vars:int=0):
     LLVM().engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(lib))
     self.fxn = LLVM.engine.get_function_address(name)
+    self.cfunc = CFUNCTYPE(ctypes.c_int, *([ctypes.c_void_p]*bufs), *([ctypes.c_int]*vars))(self.fxn)
 
   def __call__(self, *bufs, wait=False):
-    cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.c_void_p for _ in bufs])(self.fxn)
     if wait: st = time.perf_counter()
-    cfunc(*[x._buf if not isinstance(x, int) else x for x in bufs])
+    self.cfunc(*bufs)
     if wait: return time.perf_counter()-st
 
-LLVMDevice = Compiled(RawMallocBuffer, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, compile_llvm, LLVMProgram)
+LLVMDevice = Compiled(MallocAllocator, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, compile_llvm, LLVMProgram)
