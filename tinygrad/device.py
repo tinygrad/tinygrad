@@ -39,9 +39,10 @@ class Buffer:
     self.device, self.size, self.dtype = device, size, dtype
     self.allocator = Device[self.device].allocator
     self._buf = opaque if opaque is not None else self.allocator.alloc(size, dtype)
-    GlobalCounters.mem_used += self.size * self.dtype.itemsize
+    # TODO: mem_used for all devices
+    if self.device == Device.DEFAULT: GlobalCounters.mem_used += self.size * self.dtype.itemsize
   def __del__(self):
-    GlobalCounters.mem_used -= self.size * self.dtype.itemsize
+    if self.device == Device.DEFAULT: GlobalCounters.mem_used -= self.size * self.dtype.itemsize
     self.allocator.free(self._buf, self.size, self.dtype)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size}>"
   def copyin(self, mv:memoryview):
