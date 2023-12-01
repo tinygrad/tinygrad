@@ -293,8 +293,7 @@ def compile_cuda_style(prg, compile_options, prog_t, create_prog, compile_prog, 
 
 def encode_args_cuda_style(args, device_ptr_t, marks) -> Tuple[ctypes.Array, ctypes.Structure]:
   c_args = init_c_struct_t(tuple([(f'f{i}', device_ptr_t if not isinstance(x, int) else ctypes.c_int) for i,x in enumerate(args)]))(*args)
-  return (ctypes.c_void_p * 5)(ctypes.c_void_p(marks[0]), ctypes.cast(ctypes.pointer(c_args), ctypes.c_void_p), ctypes.c_void_p(marks[1]),
-                               ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(marks[2])), c_args
+  return (ctypes.c_void_p * 5)(ctypes.c_void_p(marks[0]), ctypes.cast(ctypes.pointer(c_args), ctypes.c_void_p), ctypes.c_void_p(marks[1]), ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(marks[2])), c_args
 
 def time_execution_cuda_style(cb, ev_t, evcreate, evrecord, evsync, evdestroy, evtime, enable=False) -> Optional[float]:
   if not enable: return cb()
@@ -303,6 +302,6 @@ def time_execution_cuda_style(cb, ev_t, evcreate, evrecord, evsync, evdestroy, e
   cb()
   evrecord(evs[1], None)
   evsync(evs[1])
-  tm = (ret := ctypes.c_float(), evtime(ctypes.byref(ret), evs[0], evs[1]))[0].value
+  evtime(ctypes.byref(ret := ctypes.c_float()), evs[0], evs[1])
   for ev in evs: evdestroy(ev)
-  return tm
+  return ret.value * 1e-3
