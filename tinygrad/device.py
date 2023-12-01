@@ -275,7 +275,7 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
 import ctypes
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int, dtype:DType): return (ctypes.c_uint8 * (size*dtype.itemsize))()
-  def as_buffer(self, src) -> memoryview: return memoryview(src)
+  def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
 MallocAllocator = _MallocAllocator()
