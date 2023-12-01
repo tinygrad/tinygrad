@@ -38,7 +38,8 @@ class CUDAProgram:
       check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
     self.prg = prg
 
-  def __del__(self): check(cuda.cuModuleUnload(self.module))
+  def __del__(self):
+    if not CUDACPU: check(cuda.cuModuleUnload(self.module))
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
     c_kernel_input_config = encode_args_cuda_style(args, cuda.CUdeviceptr_v2, (1,2,0))[0] if not CUDACPU else args
