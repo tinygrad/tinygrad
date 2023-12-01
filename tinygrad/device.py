@@ -3,7 +3,7 @@ import numpy as np
 from collections import defaultdict
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple
 import importlib, inspect, functools, pathlib, time, re
-from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType, from_mv, dtypes
+from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType, from_mv, dtypes, flat_mv
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, Op
 
@@ -45,8 +45,28 @@ class Buffer:
     if self.device == Device.DEFAULT: GlobalCounters.mem_used -= self.size * self.dtype.itemsize
     self.allocator.free(self._buf, self.size, self.dtype)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size}>"
+  def copy_(self, src:Buffer):
+    assert self.size == src.size and self.dtype == src.dtype, "buffer copy size/dtype mismatch"
+    if hasattr(self.allocator, 'transfer') and type(self.allocator) is type(src.allocator):
+      # fast path, used on HIP between GPUs
+      self.allocator.transfer(self._buf, src._buf, self.size*self.dtype.itemsize)
+      return
+    if hasattr(self.allocator, 'from_buffer') and hasattr(self.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
+      # fast path, used on Metal in OS X Sonoma
+      fb = self.allocator.from_buffer(src.allocator.as_buffer(src._buf))
+      if fb:
+        self.allocator.transfer(self._buf, fb, self.size*self.dtype.itemsize)
+        return
+    if hasattr(self.allocator, 'as_buffer'):
+      # fast(ish) path, uses readinto in diskbuffers
+      src.allocator.copyout(self.allocator.as_buffer(self._buf), src._buf)
+    elif hasattr(src.allocator, 'as_buffer'):
+      self.allocator.copyin(self._buf, src.allocator.as_buffer(src._buf))
+    else:
+      # slow path, allocates a CPU buffer
+      self.copyin(src.toCPU().data)
   def copyin(self, mv:memoryview):
-    mv = mv.cast("B", shape=[self.size*self.dtype.itemsize])
+    mv = flat_mv(mv)
     assert len(mv) == self.size*self.dtype.itemsize, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
     self.allocator.copyin(self._buf, mv)
     return self
@@ -56,7 +76,7 @@ class Buffer:
     # zero copy with as_buffer
     if hasattr(self.allocator, 'as_buffer'): return np.frombuffer(self.allocator.as_buffer(self._buf), dtype=np.dtype(self.dtype.np, metadata={"backing": self._buf}))
     ret = np.empty(self.size, self.dtype.np)
-    if self.size > 0: self.allocator.copyout(ret.data.cast("B", shape=[self.size*self.dtype.itemsize]), self._buf)
+    if self.size > 0: self.allocator.copyout(flat_mv(ret.data), self._buf)
     return ret
 
 # TODO: size, dest, src are the same type. can we enforce this?
@@ -255,7 +275,7 @@ def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> 
 import ctypes
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int, dtype:DType): return (ctypes.c_uint8 * (size*dtype.itemsize))()
-  def as_buffer(self, src) -> memoryview: return memoryview(src)
+  def as_buffer(self, src) -> memoryview: return flat_mv(memoryview(src))
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
 MallocAllocator = _MallocAllocator()
