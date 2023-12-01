@@ -8,7 +8,7 @@ with open(directory / 'README.md', encoding='utf-8') as f:
   long_description = f.read()
 
 setup(name='tinygrad',
-      version='0.7.0',
+      version='0.8.0',
       description='You like pytorch? You like micrograd? You love tinygrad! <3',
       author='George Hotz',
       license='MIT',
@@ -35,7 +35,6 @@ setup(name='tinygrad',
             "pre-commit",
             "ruff",
             "types-tqdm",
-            "types-requests",
         ],
         'testing': [
             "torch",
@@ -52,7 +51,6 @@ setup(name='tinygrad',
             "sentencepiece",
             "tiktoken",
             "librosa",
-            "requests",
             "networkx",
         ]
       },

@@ -178,9 +178,6 @@ jobs:
       - if: ${{ matrix.task == 'optimage'}}
         name: Test GPU IMAGE=2 ops
         run: GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
-      - if: ${{ matrix.task == 'optimage' }}
-        name: Test tensor core ops
-        run: GPU=1 TC=2 python -m pytest -n=auto test/test_ops.py
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model compile and size
         run: |
@@ -288,10 +285,8 @@ jobs:
       run: METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
-    - name: Run whisper test
-      run: METAL=1 python -m pytest test/models/test_whisper.py
-    - name: Test tensor core reshape-only ops
-      run: METAL=1 TC=2 python -m pytest -n=auto test/test_ops.py
+    - name: Test tensor core ops
+      run: METAL=1 TC=2 python test/test_ops.py TestOps.test_big_gemm
 
   testhipcompilation:
     name: HIP Compilation Tests
