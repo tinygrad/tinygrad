@@ -4,7 +4,7 @@ import torch, json, argparse
 
 from examples.llama import LLaMa
 from tinygrad.tensor import Tensor
-from tinygrad.ops import Device
+from tinygrad import Device
 
 class LLaMaAdaptor(BaseLM):
   def __init__(

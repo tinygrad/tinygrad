@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from extra.utils import WINDOWS
 from tinygrad.helpers import CI
 from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor, Device
@@ -167,7 +166,7 @@ class TestNN(unittest.TestCase):
 
     Tensor.wino = old_wino
 
-  @unittest.skipIf(CI and (WINDOWS or Device.DEFAULT == "WEBGPU"), "runs out of memory in CI")
+  @unittest.skipIf(CI and Device.DEFAULT == "WEBGPU", "runs out of memory in CI")
   def test_conv_transpose1d(self):
     BS, C1, W = 4, 16, 224//4
     C2, K, S, P = 64, 7, 2, 1
@@ -188,7 +187,7 @@ class TestNN(unittest.TestCase):
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
-  @unittest.skipIf(CI and (WINDOWS or Device.DEFAULT == "WEBGPU"), "runs out of memory in CI")
+  @unittest.skipIf(CI and Device.DEFAULT == "WEBGPU", "runs out of memory in CI")
   def test_conv_transpose2d(self):
     BS, C1, H, W = 4, 16, 224//4, 224//4
     C2, K, S, P = 64, 7, 2, 1
@@ -264,6 +263,7 @@ class TestNN(unittest.TestCase):
     z = layer(x)
     torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x.permute(0,2,3,1)).permute(0,3,1,2)
+    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
   def test_instancenorm_2d(self):
     N, C, H, W = 20, 5, 10, 10
@@ -283,7 +283,6 @@ class TestNN(unittest.TestCase):
     torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
   def test_instancenorm_3d(self):
     N, C, D, H, W = 20, 5, 3, 10, 10
@@ -302,7 +301,6 @@ class TestNN(unittest.TestCase):
     z = layer(x)
     torch_x = torch.tensor(x.numpy())
     torch_z = torch_layer(torch_x)
-    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
   def test_embedding(self):

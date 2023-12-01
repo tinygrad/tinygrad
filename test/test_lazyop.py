@@ -2,6 +2,7 @@ import unittest
 from tinygrad.tensor import Tensor
 
 # stuff needed to unpack a kernel
+# ruff: noqa: F401
 from tinygrad.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer
 from tinygrad.lazy import LazyBuffer
 from tinygrad.helpers import dtypes

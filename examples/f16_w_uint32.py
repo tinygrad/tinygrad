@@ -1,7 +1,7 @@
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes
-from tinygrad.ops import Device
+from tinygrad import Device
 
 # TODO: will be better when tinygrad does math in the target dtype, can remove the floor and use a mul
 def bit_extract(x, s, e) -> Tensor:
