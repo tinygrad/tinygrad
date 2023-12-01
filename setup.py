@@ -19,15 +19,14 @@ setup(name='tinygrad',
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
       ],
-      install_requires=["numpy", "tqdm", "pyopencl",
+      install_requires=["numpy", "tqdm", "pyopencl", "gpuctypes",
                         "pyobjc-framework-Metal; platform_system=='Darwin'",
                         "pyobjc-framework-libdispatch; platform_system=='Darwin'"],
       python_requires='>=3.8',
       extras_require={
         'llvm': ["llvmlite"],
-        'cuda': ["pycuda"],
         'arm': ["unicorn"],
-        'triton': ["triton-nightly>=2.1.0.dev20231014192330", "pycuda"],
+        'triton': ["triton-nightly>=2.1.0.dev20231014192330"],
         'webgpu': ["wgpu>=v0.12.0"],
         'linting': [
             "flake8",
