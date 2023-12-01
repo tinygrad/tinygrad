@@ -270,7 +270,7 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=n
         pathlib.Path(f.name).rename(fp)
   return fp
 
-# *** Helpers TODO: MOVE THIS
+# *** Exec helpers
 
 def cpu_time_execution(cb, enable):
   if enable: st = time.perf_counter()
