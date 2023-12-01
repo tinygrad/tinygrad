@@ -186,11 +186,11 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(reference[[ri([0, 1, 1, 0, 2]), ri([1])]], np.array([2, 4, 4, 2, 6]))
     numpy_testing_assert_equal_helper(reference[[ri([0, 0, 1, 1]), ri([0, 1, 0, 0])]], np.array([1, 2, 3, 3]))
 
-    # rows = ri([[0, 0],
-    #            [1, 2]])
-    # columns = [0],
-    # numpy_testing_assert_equal_helper(reference[rows, columns], np.array([[1, 1],
-    #                                                                       [3, 5]]))
+    rows = ri([[0, 0],
+               [1, 2]])
+    columns = [0],
+    numpy_testing_assert_equal_helper(reference[rows, columns], np.array([[1, 1],
+                                                                          [3, 5]]))
 
     rows = ri([[0, 0],
                [1, 2]])
@@ -234,10 +234,10 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(reference[[ri([0, 1, 1, 0, 3]), ri([1])]], np.array([4, 5, 5, 4, 7]))
     numpy_testing_assert_equal_helper(reference[[ri([0, 0, 1, 1]), ri([0, 1, 0, 0])]], np.array([0, 4, 1, 1]))
 
-    # rows = ri([[0, 0],
-    #            [1, 2]])
-    # columns = [0],
-    # numpy_testing_assert_equal_helper(reference[rows, columns], np.array([[0, 0], [1, 2]]))
+    rows = ri([[0, 0],
+               [1, 2]])
+    columns = [0],
+    numpy_testing_assert_equal_helper(reference[rows, columns], np.array([[0, 0], [1, 2]]))
 
     rows = ri([[0, 0],
                [1, 2]])

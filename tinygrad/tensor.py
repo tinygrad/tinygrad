@@ -314,7 +314,7 @@ class Tensor:
     # TODO: if indices is a tuple of any sequence, or if indices is a list, it's for advanced indexing
     print(indices)
     if isinstance(indices, (tuple)):
-      indices = tuple([Tensor(i) if isinstance(i, (list, tuple)) else i for i in indices])
+      indices = tuple([Tensor(list(i)) if isinstance(i, (list, tuple)) else i for i in indices])
     elif isinstance(indices, (list)):
       if all(isinstance(i, int) for i in indices): indices = Tensor(indices)
       else:
