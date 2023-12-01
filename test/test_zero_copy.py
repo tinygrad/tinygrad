@@ -14,12 +14,8 @@ def time_tensor_numpy(out:Tensor):
 
 N = 4096
 class TestZeroCopy(unittest.TestCase):
-  @unittest.skipIf(Device.DEFAULT not in {"CLANG", "LLVM", "CPU", "TORCH", "METAL"}, "device isn't zero copy")
+  @unittest.skipIf(Device.DEFAULT not in {"CLANG", "LLVM", "CPU", "METAL"}, "device isn't zero copy")
   def test_zero_copy_from_default_to_cpu(self):
-    if Device.DEFAULT == "TORCH":
-      import torch
-      from tinygrad.runtime.ops_torch import device
-      if device != torch.device("cpu"): self.skipTest("torch on non-cpu isn't zero copy")
     demo = Tensor.rand(1).realize()
     t1 = time_tensor_numpy(demo)
     out = Tensor.rand(N, N).realize()
