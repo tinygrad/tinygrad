@@ -13,7 +13,7 @@ class WGSLLanguage(CStyleLanguage):
   barrier="workgroupBarrier();"
   generic_var_prefix = "var "
   external_local_bufs = True
-  code_for_op = { **CStyleLanguage().code_for_op, BinaryOps.CMPLT: lambda x,y: f"f32({x}<{y})", TernaryOps.MULACC: lambda x,y,z: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c: f"select({c},{b},{a}!=0.)" }
+  code_for_op = { **CStyleLanguage().code_for_op, BinaryOps.CMPLT: lambda x,y,dtype: f"f32({x}<{y})", TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a}!=0.)" }
 
   def render_local(self, name: str, size: int):
     return f"var<workgroup> {name}: array<f32,{size}>;"
