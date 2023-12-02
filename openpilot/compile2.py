@@ -10,12 +10,13 @@ if "OPT" not in os.environ: os.environ["OPT"] = "99"
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
 import onnx
-from typing import Tuple, List
+from tqdm import tqdm
+from typing import Tuple, List, Optional, Dict
 from extra.onnx import get_run_onnx
-from tinygrad.graph import print_tree, log_schedule_item
+from tinygrad.graph import log_schedule_item
 from tinygrad import Tensor, Device
 from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, fetch, getenv, ImageDType, GRAPH, DEBUG
-from tinygrad.realize import run_schedule
+from tinygrad.realize import run_schedule, lower_schedule_item
 from tinygrad.ops import LoadOps, ScheduleItem
 Device.DEFAULT = "GPU"
 
@@ -49,50 +50,17 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   assert all(si.ast.op not in LoadOps or si.out in input_lb for si in schedule), "has loadops, can't compile to Thneed"
   return schedule, schedule_independent, inputs
 
-def schedule_to_thneed(schedule, output_fn):
-  from extra.thneed import Thneed
-
-  print("kernel count:", len(schedule))
-  assert len(schedule) <= getenv("ALLOWED_KERNEL_COUNT", 0) or getenv("ALLOWED_KERNEL_COUNT", 0) == 0, "too many kernels!"
-
-  # transform to CL.CACHE
-  used_ops = 0
-  cl_cache = []
-  for si in schedule:
-    prg = Device["GPU"].get_runner(si.ast)
-    args = (si.out,) + si.inputs
-
-    # pass these to thneed
-    setattr(prg.clprg, 'op_estimate', prg.op_estimate)
-    setattr(prg.clprg, 'prg', prg.prg)
-
-    global_size = prg.global_size + [1]*(3-len(prg.global_size))
-    local_size = prg.local_size + [1]*(3-len(prg.local_size))
-    cl_cache.append((prg.clprg, [[int(g*l) for g,l in zip(global_size, local_size)], local_size, *[x.realized._buf for x in args]]))
-    used_ops += prg.op_estimate
-
-  from extra.thneed import Thneed
-  input_rawbuffers = {k:inputs[k].lazydata.realized for k in inputs.keys()}
-  t = Thneed(cl_cache, {k:v._buf for k,v in input_rawbuffers.items()})
-
-  # save thneed (before run)
-  t.save(output_fn)
-
-  print(f"buffers to save: {len(t.buffers_to_save)}, inputs: {list(t.inputs.keys())}, outputs: {t.outputs}")
-  runtime = t.run()
-  print(f"network using {used_ops/1e9:.2f} GOPS with runtime {runtime*1e3:.2f} ms that's {used_ops/runtime*1e-9:.2f} GFLOPS")
-
-def thneed_test_onnx(onnx_data, output_fn):
+def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[str, Tensor]):
   import onnx
-  import pyopencl as cl
+  #import pyopencl as cl
+  #from extra.thneed import Thneed
   import numpy as np
-  from extra.thneed import Thneed
   onnx_model = onnx.load(io.BytesIO(onnx_data))
 
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
   Tensor.manual_seed(1337)
-  inputs = {k:Tensor.randn(*shp, requires_grad=False)*8 for k,shp in input_shapes.items()}
-  new_np_inputs = {k:v.realize().numpy() for k,v in inputs.items()}
+  new_inputs = {k:Tensor.randn(*shp, requires_grad=False)*8 for k,shp in input_shapes.items()}
+  new_np_inputs = {k:v.realize().numpy() for k,v in new_inputs.items()}
 
   if getenv("ORT"):
     # test with onnxruntime
@@ -100,33 +68,31 @@ def thneed_test_onnx(onnx_data, output_fn):
     onnx_session = ort.InferenceSession(onnx_data)
     onnx_output = onnx_session.run([onnx_model.graph.output[0].name], {k:v.astype(np.float16) for k,v in new_np_inputs.items()})
     new_torch_out = onnx_output[0]
+    print("got ort outputs")
   else:
     # test with torch
     from test.models.test_onnx import run_onnx_torch
     new_torch_out = run_onnx_torch(onnx_model, new_np_inputs).numpy()
+    print("got torch outputs")
 
-  if output_fn is None:
-    # non thneed
+  # if you don't have a schedule
+  if schedule is None:
     run_onnx = get_run_onnx(onnx_model)
-    new_tinygrad_out = next(iter(run_onnx(inputs).values())).cast(dtypes.float32).numpy()
+    new_tinygrad_out = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
     np.testing.assert_allclose(new_torch_out, new_tinygrad_out, atol=1e-4, rtol=1e-2)
     print("classic self-test passed!")
-  else:
-    # load thneed and try that
-    nt = Thneed()
-    nt.load(output_fn)
+    return
 
-    # inputs
-    for k,v in nt.inputs.items():
-      cl.enqueue_copy(Device["GPU"].queue, v, new_np_inputs[k], is_blocking=True)
+  # set inputs
+  for k,v in inputs.items(): v.lazydata.realized.copyin(new_np_inputs[k].data)
 
-    nt.run()
-    new_thneed_out = np.empty((nt.outputs[0].size//4,), dtype=np.float32).reshape(new_torch_out.shape)
-    cl.enqueue_copy(Device["GPU"].queue, new_thneed_out, nt.outputs[0], is_blocking=True)
+  # run code (all buffers have been allocated)
+  GlobalCounters.reset()
+  for si in schedule: lower_schedule_item(si)([si.out.realized] + [x.realized for x in si.inputs], {})
 
-    # compare torch to thneed
-    np.testing.assert_allclose(new_torch_out, new_thneed_out, atol=1e-4, rtol=1e-2)
-    print("thneed self-test passed!")
+  new_tinygrad_out = schedule[-1].out.realized.toCPU()
+  np.testing.assert_allclose(new_torch_out.flatten(), new_tinygrad_out, atol=1e-4, rtol=1e-2)
+  print("semi-thneed self-test passed!")
 
 if __name__ == "__main__":
   onnx_data = fetch(sys.argv[1] if len(sys.argv) > 1 else OPENPILOT_MODEL).read_bytes()
@@ -152,13 +118,17 @@ if __name__ == "__main__":
     GlobalCounters.reset()
     run_schedule(schedule[:])
 
-  output_fn = sys.argv[2] if len(sys.argv) >= 3 else "/tmp/output.thneed"
-  schedule_to_thneed(schedule, output_fn)
+  print("kernel count:", len(schedule))
+  assert len(schedule) <= getenv("ALLOWED_KERNEL_COUNT", 0) or getenv("ALLOWED_KERNEL_COUNT", 0) == 0, "too many kernels!"
+
+  # TODO: thneed is broken
+  #output_fn = sys.argv[2] if len(sys.argv) >= 3 else "/tmp/output.thneed"
+  #schedule_to_thneed(schedule, output_fn)
 
   FLOAT16 = getenv("FLOAT16", 0)
   if FLOAT16 == 0:
     try:
-      thneed_test_onnx(onnx_data, output_fn)
+      test_vs_onnx(onnx_data, schedule, inputs)
     except ModuleNotFoundError as e:
       print(f"TEST NOT HAPPENING {e}")
 

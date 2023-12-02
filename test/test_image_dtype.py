@@ -5,6 +5,20 @@ from tinygrad.helpers import ImageDType
 
 @unittest.skipIf(Device.DEFAULT != "GPU", "only images on GPU")
 class TestImageDType(unittest.TestCase):
+  def test_image_and_back(self):
+    data = Tensor.randn(9*27*4).realize()
+    tst = data.numpy()
+    it = data.cast(dtypes.imagef((9,27,4))).realize()
+    assert isinstance(it.lazydata.realized.dtype, ImageDType)
+    np.testing.assert_equal(tst, it.numpy())
+
+  def test_image_and_back_wrong_shape(self):
+    data = Tensor.randn(9*27*4).realize()
+    tst = data.numpy()
+    it = data.cast(dtypes.imagef((9,12,4))).realize()
+    assert not isinstance(it.lazydata.realized.dtype, ImageDType)
+    np.testing.assert_equal(tst, it.numpy())
+
   def test_shrink_load_float(self):
     it = Tensor.randn(4).cast(dtypes.imagef((1,1,4))).realize()
     imgv = it.numpy()
