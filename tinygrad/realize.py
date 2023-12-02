@@ -11,21 +11,23 @@ class CustomOp(JITRunner):
     super().__init__()
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False): self.fxn(*rawbufs)
 
-def lower_scheduleitem(si:ScheduleItem) -> Optional[JITRunner]:
+def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   assert all(si.out.device == x.device for x in si.inputs) or si.ast.op is LoadOps.FROM, f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
-  if si.ast.op is LoadOps.EMPTY: prg: Optional[JITRunner] = None
-  elif si.ast.op is LoadOps.FROM: prg = BufferCopy
-  elif si.ast.op is LoadOps.CUSTOM: prg = CustomOp(si.ast.arg)
-  else: prg = Device[si.out.device].get_runner(si.ast)
-  del si.out.op
-  for v in si.out.views: del v.op
-  return prg
+  if si.ast.op is LoadOps.EMPTY: return None
+  if si.ast.op is LoadOps.FROM: return BufferCopy
+  if si.ast.op is LoadOps.CUSTOM: return CustomOp(si.ast.arg)
+  return Device[si.out.device].get_runner(si.ast)
 
 def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
   while len(schedule):
     si = schedule.pop(0)
     if not disable_logging: log_schedule_item(si)
     assert all(x.realized for x in si.inputs), "can't run schedule, some inputs aren't realized"
+
+    # get the program
+    prg = lower_schedule_item(si)
+    del si.out.op
+    for v in si.out.views: del v.op
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
     si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
@@ -34,6 +36,6 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     # get all the buffers
     rawbufs = [si.out.realized] + [x.realized for x in si.inputs]
 
-    # run the function and put in JIT
-    if prg := lower_scheduleitem(si): prg.exec(rawbufs, si.var_vals)
+    # run the function (put it in JIT)
+    if prg: prg.exec(rawbufs, si.var_vals)
 
