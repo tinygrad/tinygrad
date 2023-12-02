@@ -305,10 +305,6 @@ class Tensor:
   def __getitem__(self, indices) -> Tensor: # indices: Union[int, slice, Tensor, None, Ellipsis, List, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
     # TODO: boolean indices
     # TODO: move all slice(None) to the end and transpose non-None to the front 
-    # I'm guessing this is to make `(3) advanced indexing, where we return a copy.` faster?
-    # or make it easier to reason about?
-    # If this works, I think transposing all advanced indexing dims into the front should work as well?
-    # will try this.
     # TODO: update docs
     # (1) input normalization and validation 
     # (2) basic indexing, where we return a tensor with the same base as input (like a torch view), 
@@ -323,13 +319,13 @@ class Tensor:
     # use Dict[type, List[dimension]] to track elements in indices
     type_idx = defaultdict(list)
 
-    # fill indices with slice(None)
+    # filter ellipsis and fill indices with slice(None)
     ellipsis_idx = [dim for dim, i in enumerate(indices) if i is Ellipsis]
     fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
     num_slices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
     indices[fill_idx:fill_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
 
-    # update and filter None
+    # filter None
     type_idx[type(None)] = [dim for dim, i in enumerate(indices) if i is None]
     valid_slices = [v for v in indices if v is not None]
 
