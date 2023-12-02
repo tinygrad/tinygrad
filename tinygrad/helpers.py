@@ -40,7 +40,7 @@ def partition(lst:List[T], fxn:Callable[[T],bool]):
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
   return x
-def unwrap2(x):
+def unwrap2(x:Tuple[T,Any]) -> T:
   ret, err = x
   assert err is None, str(err)
   return ret
@@ -57,7 +57,7 @@ def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+str
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posix()
 def from_mv(mv, to_type=ctypes.c_char): return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type))
-def to_char_p_p(options: List[ctypes._CData], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(o, ctypes.POINTER(to_type)) for o in options])
+def to_char_p_p(options: List[bytes], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])
 @functools.lru_cache(maxsize=None)
 def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
   class CStruct(ctypes.Structure):
@@ -288,7 +288,7 @@ def pretty_ptx(s):
 
 def compile_cuda_style(prg, compile_options, prog_t, create_prog, compile_prog, get_code, get_code_size, get_log, get_log_size, check) -> bytes:
   check(create_prog(ctypes.byref(prog := prog_t()), prg.encode(), "<null>".encode(), 0, None, None))
-  status = compile_prog(prog, len(compile_options), to_char_p_p([ctypes.create_string_buffer(o.encode()) for o in compile_options]))
+  status = compile_prog(prog, len(compile_options), to_char_p_p([o.encode() for o in compile_options]))
 
   if status != 0: raise RuntimeError(f"compile failed: {get_bytes(prog, get_log_size, get_log, check).decode()}")
   return get_bytes(prog, get_code_size, get_code, check)
