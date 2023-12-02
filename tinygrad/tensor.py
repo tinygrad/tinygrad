@@ -308,31 +308,28 @@ class Tensor:
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
 
-    # TODO: if indices is a tuple of any sequence, or if indices is a list, it's for advanced indexing
-    print(indices)
-    if isinstance(indices, (tuple)): indices = tuple([Tensor(list(i)) if isinstance(i, (list, tuple)) else i for i in indices])
-    elif isinstance(indices, (list)):
-      if all(isinstance(i, int) for i in indices): indices = Tensor(indices)
-      else: indices = tuple([Tensor(i) if isinstance(i, (list, tuple)) else i for i in indices])
-    print(indices, "after")
+    # === indices normalization and validation ===
+    # standardize indices to list type and treat internal tuples as lists
+    if isinstance(indices, (tuple, list)) and not (isinstance(indices, list) and all(isinstance(i, int) for i in indices)): # HACK special case <indices: List[int]>
+      indices = [list(i) if isinstance(i, tuple) else i for i in indices]
+    else: indices = [indices]
 
-    orig_slices = list(indices) if isinstance(indices, tuple) else [indices]
-
-    count = defaultdict(list)
-    for i,v in enumerate(orig_slices): count[type(v)].append(i)
+    # parse and record indices using Dict[type, List[idx]]
+    type_idx = defaultdict(list)
+    for i,v in enumerate(indices): type_idx[type(v)].append(i)
 
     # TODO: boolean indices
     # NOTE I think bool indexing is impossible with current tricks, basically https://pytorch.org/docs/stable/generated/torch.masked_select.html 
-    if float in count: raise IndexError("float type is not valid index")
-    if (num_slices := len(count[int]) + len(count[slice]) + len(count[Tensor]) + len(count[list])) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
-    if len(ellipsis_found := count[type(Ellipsis)]) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
+    if float in type_idx: raise IndexError("float type is not valid index")
+    if (num_slices := len(type_idx[int]) + len(type_idx[slice]) + len(type_idx[Tensor]) + len(type_idx[list])) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+    if len(ellipsis_found := type_idx[type(Ellipsis)]) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
 
     # replace ellipsis with equivalent number of slice(None)
     # TODO: move all slice(None) to the end and transpose non-None to the front
-    ellipsis_idx = ellipsis_found[0] if ellipsis_found else len(orig_slices)
-    orig_slices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
+    ellipsis_idx = ellipsis_found[0] if ellipsis_found else len(indices)
+    indices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
 
-    valid_slices = [v for v in orig_slices if v is not None]
+    valid_slices = [v for v in indices if v is not None]
     valid_slices = [validate_slice(v) if isinstance(v, slice) else slice(y_ := normalize_int(v, i, dim_sz), y_+1) if isinstance(v, int) else slice(None) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
 
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
@@ -350,7 +347,7 @@ class Tensor:
       sliced_tensor = reshaped_tensor.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
 
     final_shape, it_shape, dim, tensors, dim_collapsed = [], iter(new_shape), [], [], 0
-    for i,s in enumerate(orig_slices):
+    for i,s in enumerate(indices):
       if s is None: final_shape.append(1)
       else: # s is int or slice or Tensor
         dim_shape = next(it_shape)
