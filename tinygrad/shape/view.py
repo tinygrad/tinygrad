@@ -108,7 +108,7 @@ class View:
       assert all(isinstance(s, (int, Variable)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
       if prod(self.shape) != prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape]): raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
 
-    if new_shape == () and self.mask and any(mx==my for (mx,my) in self.mask): return None
+    if new_shape == () or (self.mask and any(mx==my for (mx,my) in self.mask)): return None
 
     # after the asserts, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)
