@@ -10,8 +10,7 @@ import wgpu
 wgpu_device = get_default_device()
 
 class WebGPUProgram:
-  def __init__(self, k:CompiledKernel):
-    self.k, self.prg = k, wgpu_device.create_shader_module(code=k.lib)   # NOTE: this is the compiler
+  def __init__(self, k:CompiledKernel): self.k, self.prg = k, wgpu_device.create_shader_module(code=k.lib)   # NOTE: this is the compiler
   def __call__(self, *bufs, global_size, local_size, wait=False):
     assert len(bufs) <= 8, "WEBGPU only supports 8 buffers"
     binding_layouts = [{"binding": i, "visibility": wgpu.ShaderStage.COMPUTE, "buffer": {"type": wgpu.BufferBindingType.storage}} for i in range(len(bufs))]

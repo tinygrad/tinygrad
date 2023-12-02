@@ -35,8 +35,7 @@ def compile_cl(prg:str) -> bytes:
 
 class CLProgram:
   def __init__(self, device:CLDevice, k:CompiledKernel):
-    self.k = k
-    self.device = device
+    self.device, self.k = device, k
     self.program = checked(cl.clCreateProgramWithBinary(device.context, 1, ctypes.byref(device.device_id), (ctypes.c_size_t * 1)(len(k.lib)),
                                                         to_char_p_p([k.lib], ctypes.c_ubyte),
                                                         ctypes.byref(binary_status := ctypes.c_int32()), ctypes.byref(errcode_ret := ctypes.c_int32())), errcode_ret)
