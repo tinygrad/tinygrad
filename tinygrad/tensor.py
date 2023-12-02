@@ -300,38 +300,52 @@ class Tensor:
   #    - There's a special case where a permute is needed at the end:
   #        - if first Tensor passed in (expand dims) is not at dim 0
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
+
+
   def __getitem__(self, indices) -> Tensor: # indices: Union[int, slice, Tensor, None, Ellipsis, List, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
     # TODO: boolean indices
-    # TODO: move all slice(None) to the end and transpose non-None to the front
+    # TODO: move all slice(None) to the end and transpose non-None to the front 
+    # I'm guessing this is to make `(3) advanced indexing, where we return a copy.` faster?
+    # or make it easier to reason about?
+    # If this works, I think transposing all advanced indexing dims into the front should work as well?
+    # will try this.
     # TODO: update docs
     # (1) input normalization and validation 
     # (2) basic indexing, where we return a tensor with the same base as input (like a torch view), 
     # (3) advanced indexing, where we return a copy. 
-    def normalize_int(e, i, dim_sz):
-      if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
-      raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
 
     # ====== indices normalization and validation =======
     # standardize indices to list type and treat internal tuples as lists
-    if isinstance(indices, (tuple, list)) and not (isinstance(indices, list) and all(isinstance(i, int) for i in indices)): # HACK special case <indices: List[int]>
+    if isinstance(indices, (tuple, list)) and not (isinstance(indices, list) and all(isinstance(i, int) for i in indices)): # HACK special case <indices: List[int]>, a lil ugly
       indices = [list(i) if isinstance(i, tuple) else i for i in indices]
     else: indices = [indices]
 
-    # track elements in indices using Dict[type, List[dimension]]
+    # use Dict[type, List[dimension]] to track elements in indices
     type_idx = defaultdict(list)
-    for dim,i in enumerate(indices): type_idx[type(i)].append(dim)
+
+    # fill indices with slice(None)
+    ellipsis_idx = [dim for dim, i in enumerate(indices) if i is Ellipsis]
+    fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
+    num_slices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
+    indices[fill_idx:fill_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
+
+    # update and filter None
+    type_idx[type(None)] = [dim for dim, i in enumerate(indices) if i is None]
+    valid_slices = [v for v in indices if v is not None]
+
+    # update rest of type_idx
+    for dim,i in enumerate(valid_slices): type_idx[type(i)].append(dim)
 
     # validation
     if float in type_idx: raise IndexError("float type is not valid index")
-    if (num_slices := sum(len(type_idx[t]) for t in (int, slice, Tensor, list))) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
-    if len(ellipsis_found := type_idx[type(Ellipsis)]) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
+    if len(type_idx[type(Ellipsis)]) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
+    if num_slices > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+    if any(isinstance(i, slice) and i.step == 0 for i in indices): raise ValueError('slice step cannot be 0')
+    for dim in type_idx[int]:
+      if valid_slices[dim] >= self.shape[dim] or valid_slices[dim] < -self.shape[dim]: raise IndexError(f"index {valid_slices[dim]} is out of bounds for dimension {dim} with size {self.shape[dim]}")
 
-    # replace ellipsis with equivalent number of slice(None)
-    ellipsis_idx = ellipsis_found[0] if ellipsis_found else len(indices)
-    indices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
-
-    valid_slices = [v for v in indices if v is not None]
-    valid_slices = [v if isinstance(v, slice) else slice(y_ := normalize_int(v, i, dim_sz), y_+1) if isinstance(v, int) else slice(None) for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))]
+    normalize_int = lambda e, dim_sz: e if e != -1 else dim_sz-1
+    valid_slices = [v if isinstance(v, slice) else slice(y_ := normalize_int(v, dim_sz), y_+1) if isinstance(v, int) else slice(None) for v, dim_sz in zip(valid_slices, self.shape)]
 
     start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     new_slice = tuple(((0, 0) if e < s else (s, e)) if st > 0 else ((0, 0) if e > s else (e+1, s+1)) for s, e, st in zip(start, stop, strides))
@@ -347,6 +361,7 @@ class Tensor:
       # Shrink: do [:, 0]
       sliced_tensor = reshaped_tensor.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
 
+    # TODO UPDATE THIS USING type_idx
     final_shape, it_shape, dim, tensors, dim_collapsed = [], iter(new_shape), [], [], 0
     for i,s in enumerate(indices):
       if s is None: final_shape.append(1)
