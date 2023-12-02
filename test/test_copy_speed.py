@@ -63,6 +63,5 @@ class TestCopySpeed(unittest.TestCase):
             t.to(f"{Device.DEFAULT}:{g}").realize()
         Device[Device.DEFAULT].synchronize()
 
-
 if __name__ == '__main__':
   unittest.main()
