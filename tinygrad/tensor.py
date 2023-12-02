@@ -276,7 +276,6 @@ class Tensor:
 
   # ***** movement hlops *****
 
-  # TODO update docs
   # - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
   # - A slice i:j returns the elements with indices in [i, j)
   #    - If omitted, i and j will default to 0 and N, respectively, where N is the length of the sequence
@@ -302,26 +301,32 @@ class Tensor:
   #        - if first Tensor passed in (expand dims) is not at dim 0
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
   def __getitem__(self, indices) -> Tensor: # indices: Union[int, slice, Tensor, None, Ellipsis, List, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
+    # TODO: boolean indices
+    # TODO: move all slice(None) to the end and transpose non-None to the front
+    # TODO: update docs
+    # (1) input normalization and validation 
+    # (2) basic indexing, where we return a tensor with the same base as input (like a torch view), 
+    # (3) advanced indexing, where we return a copy. 
     def normalize_int(e, i, dim_sz):
       if -dim_sz <= e < dim_sz: return e if e != -1 else dim_sz-1
       raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
 
-    # === indices normalization and validation ===
+    # ====== indices normalization and validation =======
     # standardize indices to list type and treat internal tuples as lists
     if isinstance(indices, (tuple, list)) and not (isinstance(indices, list) and all(isinstance(i, int) for i in indices)): # HACK special case <indices: List[int]>
       indices = [list(i) if isinstance(i, tuple) else i for i in indices]
     else: indices = [indices]
 
-    # parse and record indices using Dict[type, List[idx]]
+    # track elements in indices using Dict[type, List[dimension]]
     type_idx = defaultdict(list)
-    for i,v in enumerate(indices): type_idx[type(v)].append(i)
+    for dim,i in enumerate(indices): type_idx[type(i)].append(dim)
 
-    # TODO: boolean indices
-    if (num_slices := len(type_idx[int]) + len(type_idx[slice]) + len(type_idx[Tensor]) + len(type_idx[list])) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+    # validation
+    if float in type_idx: raise IndexError("float type is not valid index")
+    if (num_slices := sum(len(type_idx[t]) for t in (int, slice, Tensor, list))) > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     if len(ellipsis_found := type_idx[type(Ellipsis)]) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
 
     # replace ellipsis with equivalent number of slice(None)
-    # TODO: move all slice(None) to the end and transpose non-None to the front
     ellipsis_idx = ellipsis_found[0] if ellipsis_found else len(indices)
     indices[ellipsis_idx:ellipsis_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
 
