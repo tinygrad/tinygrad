@@ -22,7 +22,7 @@ def atan2_gpu(ret:Buffer, a:Buffer, b:Buffer):
     __kernel void atan2_gpu(global float *c, global float *a, global float *b) {
       int idx = get_global_id(0);
       c[idx] = atan2(a[idx], b[idx]);
-    }""", global_size=[ret.size], bufcount=3).build(Device[ret.device].compiler, Device[ret.device].runtime).exec([ret, a, b])
+    }""", global_size=[ret.size]).build(Device[ret.device].compiler, Device[ret.device].runtime).exec([ret, a, b])
 
 def atan2_cpu(ret:Buffer, a:Buffer, b:Buffer): ret.copyin(np.require(np.arctan2(a._buf, b._buf), requirements='C').data)
 

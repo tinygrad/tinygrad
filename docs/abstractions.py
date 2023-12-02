@@ -214,7 +214,7 @@ MallocAllocator.copyin(input_a, numpy_a.data.cast("B"))
 MallocAllocator.copyin(input_b, numpy_b.data.cast("B"))
 
 # compile the program, run it, and 2+3 does indeed equal 5
-program = ClangProgram("add", compile_clang(f"void add(float *a, float *b, float *c) {{ *a = *b + *c; }}"), bufs=3)
+program = ClangProgram("add", compile_clang(f"void add(float *a, float *b, float *c) {{ *a = *b + *c; }}"))
 program(output, input_a, input_b)
 numpy_out = np.empty(1, dtype=np.float32)
 MallocAllocator.copyout(numpy_out.data.cast("B"), output)

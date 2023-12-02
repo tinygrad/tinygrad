@@ -213,18 +213,16 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 # **************** for Compiled Devices ****************
 
 class CompiledASTRunner(JITRunner):
-  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None, bufcount:int=0):
+  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None):
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
     self.name, self.display_name, self.prg, self.global_size, self.local_size, self.runtime_args = \
       to_function_name(name), name, prg, global_size, local_size, runtime_args if runtime_args is not None else {}
-    self.bufcount = bufcount
     self.vars: List[Variable] = []
     if ast:
       info = get_lazyop_info(ast)
-      self.bufcount = len(info.mem)
       self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
       from tinygrad.lazy import vars_from_ast
       self.vars = vars_from_ast(ast)
@@ -232,7 +230,7 @@ class CompiledASTRunner(JITRunner):
 
   def build(self, compiler, runtime):
     self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
-    self.clprg = runtime(self.name, self.lib, self.bufcount, len(self.vars))
+    self.clprg = runtime(self.name, self.lib)
     return self
 
   def launch_dims(self, var_vals):

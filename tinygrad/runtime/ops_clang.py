@@ -20,10 +20,11 @@ def compile_clang(prg:str, header:str=CLANG_PROGRAM_HEADER) -> bytes:
     return pathlib.Path(output_file.name).read_bytes()
 
 class ClangProgram:
-  def __init__(self, name:str, prg:bytes, bufs:int, vars:int=0):
+  def __init__(self, name:str, lib:bytes):
+    self.name, self.lib = name, lib
     # write to disk so we can load it
     with tempfile.NamedTemporaryFile(delete=True) as cached_file_path:
-      pathlib.Path(cached_file_path.name).write_bytes(prg)
+      pathlib.Path(cached_file_path.name).write_bytes(lib)
       self.fxn: Any = ctypes.CDLL(str(cached_file_path.name))[name]
 
   def __call__(self, *args, wait=False): return cpu_time_execution(lambda: self.fxn(*args), enable=wait)

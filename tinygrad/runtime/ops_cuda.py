@@ -23,20 +23,21 @@ def cu_time_execution(cb, enable=False) -> Optional[float]: return time_executio
 def compile_cuda(prg) -> bytes: return compile_cuda_style(prg, [f'--gpu-architecture={CUDADevice.default_arch_name}', CUDA_INCLUDE_PATH], cuda.nvrtcProgram, cuda.nvrtcCreateProgram, cuda.nvrtcCompileProgram, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check)
 
 class CUDAProgram:
-  def __init__(self, name:str, prg:bytes, bufs:int, vars:int=0):
-    if DEBUG >= 5: print(pretty_ptx(prg.decode('utf-8')))
+  def __init__(self, name:str, lib:bytes):
+    self.name, self.lib = name, lib
+    if DEBUG >= 5: print(pretty_ptx(lib.decode('utf-8')))
     if DEBUG >= 6:
       try:
-        fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(prg).hexdigest()}").as_posix()
-        with open(fn + ".ptx", "wb") as f: f.write(prg)
+        fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
+        with open(fn + ".ptx", "wb") as f: f.write(lib)
         subprocess.run(["ptxas", f"-arch={CUDADevice.default_arch_name}", "-o", fn, fn+".ptx"], check=True)
         print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
       except Exception as e: print("failed to generate SASS", str(e))
 
     if not CUDACPU:
-      self.module = init_c_var(cuda.CUmodule(), lambda x: check(cuda.cuModuleLoadData(ctypes.byref(x), prg)))
+      self.module = init_c_var(cuda.CUmodule(), lambda x: check(cuda.cuModuleLoadData(ctypes.byref(x), lib)))
       check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
-    self.prg = prg
+    self.prg = prg if not CUDACPU else lib
 
   def __del__(self):
     if not CUDACPU: check(cuda.cuModuleUnload(self.module))
