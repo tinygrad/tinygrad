@@ -1,11 +1,12 @@
 import os, atexit, functools
 from collections import defaultdict
 from typing import Dict, List
-from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, OpType, LazyOp
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, OpType, LazyOp
 from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters, getenv, dedup
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import NumNode
+from tinygrad.lazy import ScheduleItem
 
 # **** debugging and graphing ****
 

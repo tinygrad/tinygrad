@@ -5,10 +5,18 @@ from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
 from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, dedup, merge_dicts, all_int, ImageDType, DEBUG
-from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps, get_lazyop_info
+from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.device import Buffer
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class ScheduleItem:
+  ast: LazyOp
+  out: LazyBuffer
+  inputs: Tuple[LazyBuffer, ...]
+  var_vals: Dict[Variable, int]
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -165,6 +173,19 @@ class LazyBuffer:
     var_vals = merge_dicts([self.st.var_vals] + [buf.st.var_vals for buf in op.buffers])
 
     op, base_bufs = _replace_bufferops(op)
+
+    # check if we can reuse the output buffer
+    # if it's aliased, don't use it
+    # TODO: this is pretty wrong actually, who knows where else this buffer is used?
+    # TODO: what if an assign is required? this silently is wrong
+    # NOTE: this has been moved to schedule, as this is only an issue if buffers are already realized
+    if self.output_buffer is not None:
+      for i,a in enumerate(base_bufs):
+        # TODO: if this is contiguous it's fine
+        if a.realized == self.output_buffer:
+          if any(not x.arg.st.contiguous for x in op.get_lazyops() if x.op == BufferOps.LOAD and x.arg.idx == i+1):
+            self.output_buffer = None
+            break
 
     if op.op not in LoadOps:
       # add the store

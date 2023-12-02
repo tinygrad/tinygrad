@@ -16,7 +16,8 @@ from tinygrad.graph import print_tree, log_schedule_item
 from tinygrad import Tensor, Device
 from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, fetch, getenv, ImageDType, GRAPH, DEBUG
 from tinygrad.realize import run_schedule
-from tinygrad.ops import LoadOps, ScheduleItem
+from tinygrad.lazy import ScheduleItem
+from tinygrad.ops import LoadOps
 Device.DEFAULT = "GPU"
 
 def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
