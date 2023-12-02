@@ -155,13 +155,13 @@ class View:
 
     strides, r_new_shape = [], reversed(new_shape)
     for merged_dim, s, real_dim in reversed(_merge_dims(self.shape, self.strides, self.mask)):
-      acc, new_stride, equal = 1, s, False
-      while acc <= merged_dim and not equal and (new_dim := next(r_new_shape, None)):
+      acc, new_stride = 1, s
+      while acc <= merged_dim and (new_dim := next(r_new_shape, None)):
         strides.append(new_stride if new_dim !=1 else 0)
         if new_dim == 1: continue
         new_stride *= (new_dim if (acc :=  acc * new_dim) < real_dim else 0)
-        if acc == merged_dim: equal = True
-      if not equal and merged_dim != 1: break
+        if acc == merged_dim: break
+      if acc != merged_dim: break
     else:
       strides += [0,] * (len(new_shape) - len(strides))
       mask, off_mask, extra = _reshape_mask(self, new_shape)
