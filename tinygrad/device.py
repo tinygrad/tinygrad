@@ -268,35 +268,35 @@ class CompiledASTRunner(JITRunner):
 class Compiled:
   def __init__(self, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler, runtime, graph=None):
     self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph = allocator, linearizer_opts, renderer, compiler, runtime, graph
+  def synchronize(self): pass  # override this in your device
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     k.linearize()
     src, runtime_args = self.renderer(to_function_name(k.name), k.uops)
     return CompiledASTRunner(k.ast, k.name, src, k.global_size, k.local_size, runtime_args).build(self.compiler, self.runtime)
 
-  @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.to_program(_get_optimized_linearizer(self.linearizer_opts, ast))
-  def synchronize(self): pass
+  def get_linearizer(self, ast:LazyOp) -> Linearizer:
+    if DEBUG >= 3:
+      from tinygrad.graph import print_tree
+      print_tree(ast)
+    from tinygrad.codegen.linearizer import Linearizer
+    k = Linearizer(ast, self.linearizer_opts)
+    if not NOOPT:
+      if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
+      if BEAM >= 1:
+        lins = [(("tc" if used_tensor_cores else "hc"), k)]
+        if used_tensor_cores:
+          lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
+          lins[-1][1].hand_coded_optimizations()
+        kb = Linearizer(ast, self.linearizer_opts)
+        from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
+        # TODO: this shouldn't use Device.DEFAULT, it should get the device from the LinearizerOptions
+        test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
+        lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
+        timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
+        if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
+        k = timed[0][1]
+    return k
 
-def _get_optimized_linearizer(linearizer_opts:LinearizerOptions, ast:LazyOp) -> Linearizer:
-  if DEBUG >= 3:
-    from tinygrad.graph import print_tree
-    print_tree(ast)
-  from tinygrad.codegen.linearizer import Linearizer
-  k = Linearizer(ast, linearizer_opts)
-  if not NOOPT:
-    if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
-    if BEAM >= 1:
-      lins = [(("tc" if used_tensor_cores else "hc"), k)]
-      if used_tensor_cores:
-        lins.append(("hc", Linearizer(ast, linearizer_opts)))
-        lins[-1][1].hand_coded_optimizations()
-      kb = Linearizer(ast, linearizer_opts)
-      from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
-      # TODO: this shouldn't use Device.DEFAULT, it should get the device from the LinearizerOptions
-      test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
-      lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
-      timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
-      if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
-      k = timed[0][1]
-  return k
+  @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
+  def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.to_program(self.get_linearizer(ast))

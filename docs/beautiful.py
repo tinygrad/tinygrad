@@ -1,6 +1,8 @@
-# in tinygrad, things are easy
-# because if things were hard, tinygrad would not be tiny
-# come on a journey where we add 2+3 in CLANG
+# tinygrad is a tensor library, and as a tensor library it has multiple parts
+# 1. a "runtime". this allows buffer management, compilation, and running programs
+# 2. a "Device" that uses the runtime but specifies compute in an abstract way for all
+# 3. a "LazyBuffer" that fuses the compute into kernels, using memory only when needed
+# 4. a "Tensor" that provides an easy to use frontend with autograd ".backward()"
 
 
 print("******** first, the runtime ***********")
@@ -12,37 +14,39 @@ out = MallocAllocator.alloc(4)
 a = MallocAllocator.alloc(4)
 b = MallocAllocator.alloc(4)
 
-# load in some values
+# load in some values (little endian)
 MallocAllocator.copyin(a, bytearray([2,0,0,0]))
 MallocAllocator.copyin(b, bytearray([3,0,0,0]))
 
-# compile a program
+# compile a program to a binary
 lib = compile_clang("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
 
-# create a runtime for the program
+# create a runtime for the program (ctypes.CDLL)
 fxn = ClangProgram("add", lib)
 
 # run the program
 fxn(out, a, b)
 
-# get the data out
-outb = bytearray(MallocAllocator.as_buffer(out))
-assert outb == bytearray([5,0,0,0])
-print(outb)
+# check the data out
+print(val := MallocAllocator.as_buffer(out).cast("I").tolist()[0])
+assert val == 5
 
 
 print("******** second, the Device ***********")
 
-import numpy as np
+DEVICE = "CLANG"   # NOTE: you can change this!
+
+import struct
 from tinygrad.helpers import dtypes
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import LazyOp, BufferOps, MemBuffer, BinaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # allocate some buffers + load in values
-out = Buffer("CLANG", 1, dtypes.int32)
-a = Buffer("CLANG", 1, dtypes.int32).copyin(np.array([2], np.int32).data)
-b = Buffer("CLANG", 1, dtypes.int32).copyin(np.array([3], np.int32).data)
+out = Buffer(DEVICE, 1, dtypes.int32)
+a = Buffer(DEVICE, 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 2))))
+b = Buffer(DEVICE, 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 3))))
+# NOTE: a._buf is the same as the return from MallocAllocator.alloc
 
 # describe the computation
 ld_1 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.int32, ShapeTracker.from_shape((1,))))
@@ -50,45 +54,62 @@ ld_2 = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.int32, ShapeTracker.from_s
 alu = LazyOp(BinaryOps.ADD, (ld_1, ld_2))
 st_0 = LazyOp(BufferOps.STORE, (alu,), MemBuffer(0, dtypes.int32, ShapeTracker.from_shape((1,))))
 
-# compile a program (and print the code)
-fxn = Device["CLANG"].get_runner(st_0)
+# convert the computation to a "linearized" format (print the format)
+lin = Device[DEVICE].get_linearizer(st_0).linearize()
+for u in lin.uops: print(u)
+
+# compile a program (and print the source)
+fxn = Device[DEVICE].to_program(lin)
 print(fxn.prg)
+# NOTE: fxn.clprg is the ClangProgram
 
 # run the program
 fxn.exec([out, a, b])
-assert out.toCPU().item() == 5
-print(out.toCPU())
+
+# check the data out
+print(val:=out.toCPU().item())
+assert val == 5
 
 
 print("******** third, the LazyBuffer ***********")
 
 from tinygrad.lazy import LazyBuffer
-from tinygrad.graph import print_tree
 from tinygrad.realize import run_schedule
 
 # allocate some values + load in values
-a = LazyBuffer.fromCPU(np.array([2], np.int32)).copy_to_device("CLANG")
-b = LazyBuffer.fromCPU(np.array([3], np.int32)).copy_to_device("CLANG")
+# TODO: remove numpy here
+import numpy as np
+a = LazyBuffer.fromCPU(np.array([2], np.int32)).copy_to_device(DEVICE)
+b = LazyBuffer.fromCPU(np.array([3], np.int32)).copy_to_device(DEVICE)
 
 # describe the computation
 out = a.e(BinaryOps.ADD, b)
 
-# schedule the computation (print it)
+# schedule the computation as a list of kernels
 sched = out.schedule()
-print_tree(sched[0].ast)
+for si in sched: print(si.ast.op)  # NOTE: the first two convert it to CLANG
+
+# DEBUGGING: print the compute ast as a tree
+from tinygrad.graph import print_tree
+print_tree(sched[-1].ast)
+# NOTE: sched[-1].ast is the same as st_0 above
 
 # run that schedule
 run_schedule(sched)
-assert out.realized.toCPU().item() == 5
-print(out.realized.toCPU())
+
+# check the data out
+print(val:=out.realized.toCPU().item())
+assert val == 5
 
 
 print("******** fourth, the Tensor ***********")
 
 from tinygrad import Tensor
 
-a = Tensor([2], dtype=dtypes.int32, device="CLANG")
-b = Tensor([3], dtype=dtypes.int32, device="CLANG")
-out = (a+b).item()
-assert out == 5
-print(out)
+a = Tensor([2], dtype=dtypes.int32, device=DEVICE)
+b = Tensor([3], dtype=dtypes.int32, device=DEVICE)
+out = a + b
+
+# check the data out
+print(val:=out.item())
+assert val == 5
