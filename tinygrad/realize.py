@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple, Generator
+from typing import List, Dict, Tuple, Generator, Optional
 from dataclasses import dataclass
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer, BufferCopy, JITRunner
@@ -9,7 +9,7 @@ from tinygrad.lazy import ScheduleItem, LazyBuffer
 
 @dataclass(frozen=True)
 class LoweredItem:
-  prg: JITRunner
+  prg: Optional[JITRunner]
   out: LazyBuffer
   inputs: Tuple[LazyBuffer, ...]
   var_vals: Dict[Variable, int]
@@ -25,9 +25,9 @@ def lower_schedule(schedule:List[ScheduleItem], disable_logging=False) -> Genera
     si = schedule.pop(0)
     assert all(si.out.device == x.device for x in si.inputs) or si.ast.op is LoadOps.FROM, f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
     if not disable_logging: log_schedule_item(si)
-    if si.ast.op is LoadOps.FROM: prg = BufferCopy
+    if si.ast.op is LoadOps.EMPTY: prg: Optional[JITRunner] = None
+    elif si.ast.op is LoadOps.FROM: prg = BufferCopy
     elif si.ast.op is LoadOps.CUSTOM: prg = CustomOp(si.ast.arg)
-    elif si.ast.op is LoadOps.EMPTY: prg = None
     else: prg = Device[si.out.device].get_runner(si.ast)
     del si.out.op
     for v in si.out.views: del v.op
