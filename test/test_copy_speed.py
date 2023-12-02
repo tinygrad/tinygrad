@@ -51,7 +51,6 @@ class TestCopySpeed(unittest.TestCase):
         t.to('cpu').realize()
 
   def testCopyCPUto6GPUs(self):
-    from tinygrad.device import Device
     if not hasattr(Device[Device.DEFAULT], "device_ids"): raise unittest.SkipTest("computer doesn't have multiple devices of the same type")
     if len(Device[Device.DEFAULT].device_ids) != 6: raise unittest.SkipTest("computer doesn't have 6 GPUs")
     t = Tensor.rand(N, N, device="cpu").realize()
