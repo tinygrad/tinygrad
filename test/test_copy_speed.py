@@ -50,18 +50,19 @@ class TestCopySpeed(unittest.TestCase):
       with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
         t.to('cpu').realize()
 
-  @unittest.skipIf(CI, "CI doesn't have 6 GPUs")
   def testCopyCPUto6GPUs(self):
-    from tinygrad.runtime.ops_gpu import CL
-    if len(CL.devices) != 6: raise unittest.SkipTest("computer doesn't have 6 GPUs")
+    from tinygrad.device import Device
+    if not hasattr(Device[Device.DEFAULT], "device_ids"): raise unittest.SkipTest("computer doesn't have multiple devices of the same type")
+    if len(Device[Device.DEFAULT].device_ids) != 6: raise unittest.SkipTest("computer doesn't have 6 GPUs")
     t = Tensor.rand(N, N, device="cpu").realize()
     print(f"buffer: {t.nbytes()*1e-9:.2f} GB")
     for _ in range(3):
       with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s ({t.nbytes()*6/ns:.2f} GB/s total)"):
         with Timing("queue: "):
           for g in range(6):
-            t.to(f"gpu:{g}").realize()
-        Device["gpu"].synchronize()
+            t.to(f"{Device.DEFAULT}:{g}").realize()
+        Device[Device.DEFAULT].synchronize()
+
 
 if __name__ == '__main__':
   unittest.main()
