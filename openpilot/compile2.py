@@ -10,12 +10,13 @@ if "OPT" not in os.environ: os.environ["OPT"] = "99"
 OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx"
 
 import onnx
-from typing import Tuple, List
+from tqdm import tqdm
+from typing import Tuple, List, Optional, Dict
 from extra.onnx import get_run_onnx
 from tinygrad.graph import log_schedule_item
 from tinygrad import Tensor, Device
 from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, fetch, getenv, ImageDType, GRAPH, DEBUG
-from tinygrad.realize import run_schedule
+from tinygrad.realize import run_schedule, lower_schedule_item
 from tinygrad.ops import LoadOps, ScheduleItem
 Device.DEFAULT = "GPU"
 
@@ -49,7 +50,7 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   assert all(si.ast.op not in LoadOps or si.out in input_lb for si in schedule), "has loadops, can't compile to Thneed"
   return schedule, schedule_independent, inputs
 
-def test_vs_onnx(onnx_data):
+def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[str, Tensor]):
   import onnx
   #import pyopencl as cl
   #from extra.thneed import Thneed
@@ -67,15 +68,31 @@ def test_vs_onnx(onnx_data):
     onnx_session = ort.InferenceSession(onnx_data)
     onnx_output = onnx_session.run([onnx_model.graph.output[0].name], {k:v.astype(np.float16) for k,v in new_np_inputs.items()})
     new_torch_out = onnx_output[0]
+    print("got ort outputs")
   else:
     # test with torch
     from test.models.test_onnx import run_onnx_torch
     new_torch_out = run_onnx_torch(onnx_model, new_np_inputs).numpy()
+    print("got torch outputs")
 
-  run_onnx = get_run_onnx(onnx_model)
-  new_tinygrad_out = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
-  np.testing.assert_allclose(new_torch_out, new_tinygrad_out, atol=1e-4, rtol=1e-2)
-  print("classic self-test passed!")
+  # if you don't have a schedule
+  if schedule is None:
+    run_onnx = get_run_onnx(onnx_model)
+    new_tinygrad_out = next(iter(run_onnx(new_inputs).values())).cast(dtypes.float32).numpy()
+    np.testing.assert_allclose(new_torch_out, new_tinygrad_out, atol=1e-4, rtol=1e-2)
+    print("classic self-test passed!")
+    return
+
+  # set inputs
+  for k,v in inputs.items(): v.lazydata.realized.copyin(new_np_inputs[k].data)
+
+  # run code (all buffers have been allocated)
+  GlobalCounters.reset()
+  for si in schedule: lower_schedule_item(si)([si.out.realized] + [x.realized for x in si.inputs], {})
+
+  new_tinygrad_out = schedule[-1].out.realized.toCPU()
+  np.testing.assert_allclose(new_torch_out.flatten(), new_tinygrad_out, atol=1e-4, rtol=1e-2)
+  print("semi-thneed self-test passed!")
 
 if __name__ == "__main__":
   onnx_data = fetch(sys.argv[1] if len(sys.argv) > 1 else OPENPILOT_MODEL).read_bytes()
@@ -112,7 +129,7 @@ if __name__ == "__main__":
   if FLOAT16 == 0:
     try:
       # TODO: this test is super limited, it doesn't test the schedule
-      test_vs_onnx(onnx_data)
+      test_vs_onnx(onnx_data, schedule, inputs)
     except ModuleNotFoundError as e:
       print(f"TEST NOT HAPPENING {e}")
 
