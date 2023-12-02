@@ -60,7 +60,7 @@ def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[s
   input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
   Tensor.manual_seed(1337)
   new_inputs = {k:Tensor.randn(*shp, requires_grad=False)*8 for k,shp in input_shapes.items()}
-  new_np_inputs = {k:v.realize().numpy() for k,v in inputs.items()}
+  new_np_inputs = {k:v.realize().numpy() for k,v in new_inputs.items()}
 
   if getenv("ORT"):
     # test with onnxruntime
