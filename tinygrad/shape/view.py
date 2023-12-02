@@ -44,7 +44,9 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
       if not old_dim == ns and ((l % ns != 0 or r % ns != 0) and l // ns != (r - 1) // ns): return view.mask, tuple(), True
       new_mask.append((l // s, (r - 1) // s + 1) if old_dim == ns else (l % ns // s, (r - 1) % ns // s + 1))
       off.append(o)
-      if old_dim == ns: s, o, old_dim, new_dim, mask = 1, 0, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
+      if old_dim == ns:
+        s, o, old_dim, new_dim, mask = 1, 0, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
+        if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape), tuple(), False
       else: s, new_dim = ns, next(r_new_shape, 1)
     elif old_dim < new_dim * s: # combine if the mask can unfold continuously
       next_mask = next(r_masks, (0, 1))
