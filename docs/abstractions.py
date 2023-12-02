@@ -205,8 +205,8 @@ from tinygrad.runtime.ops_clang import ClangProgram, compile_clang
 # then we copy the numpy in to RawMallocBuffers
 # last, we create an empty output buffer
 from tinygrad.helpers import dtypes
-input_a, input_b = MallocAllocator.alloc(1, dtypes.float32), MallocAllocator.alloc(1, dtypes.float32)
-output = MallocAllocator.alloc(1, dtypes.float32)
+input_a, input_b = MallocAllocator.alloc(4), MallocAllocator.alloc(4)
+output = MallocAllocator.alloc(4)
 
 # now we copy in the values
 numpy_a, numpy_b = np.array([2], dtype=np.float32), np.array([3], dtype=np.float32)
