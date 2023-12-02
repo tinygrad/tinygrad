@@ -599,19 +599,19 @@ class TestGetContraction(unittest.TestCase):
     self.assertEqual(r, [[0], [1, 2], [3]])
 
     r = get_contraction((1,2,3,1,4), (1,2,3,4))
-    self.assertEqual(r, [[0], [1], [2], [3, 4]])
+    self.assertEqual(r, [[], [0, 1], [2], [3, 4]])
 
     r = get_contraction((1,2,3,1,4,1,1), (2,3,4))
     self.assertEqual(r, [[0, 1], [2], [3, 4, 5, 6]])
 
     r = get_contraction((1,2,3,4), (1,2,3*4))
-    self.assertEqual(r, [[0], [1], [2, 3]])
+    self.assertEqual(r, [[], [0, 1], [2, 3]])
 
     r = get_contraction((1,2,3,4), (2,1,3,4))
     self.assertEqual(r, [[0, 1], [], [2], [3]])
 
     r = get_contraction((1,2,3,4), (1,1,2*3*4,1))
-    self.assertEqual(r, [[0], [], [1,2,3], []])
+    self.assertEqual(r, [[], [], [0,1,2,3], []])
 
     r = get_contraction((2,1,3,4), (1,2,3,4))
     self.assertEqual(r, [[], [0], [1, 2], [3]])
@@ -626,7 +626,7 @@ class TestGetContraction(unittest.TestCase):
     self.assertEqual(r, [[0, 1], [2], [3, 4, 5, 6]])
 
     r = get_contraction((1,2,3,4), (1,2,3,4,1))
-    self.assertEqual(r, [[0], [1], [2], [3], []])
+    self.assertEqual(r, [[], [0, 1], [2], [3], []])
 
     r = get_contraction((14,1,384,14,1,1,1,1), (1,14,384,14))
     self.assertEqual(r, [[], [0], [1,2], [3,4,5,6,7]])
@@ -642,22 +642,22 @@ class TestGetContraction(unittest.TestCase):
 
   def test_contraction_ones(self):
     r = get_contraction((1,), (1,1,1))
-    self.assertEqual(r, [[0], [], []])
+    self.assertEqual(r, [[], [], [0]])
 
     r = get_contraction((1,1), (1,1,1))
-    self.assertEqual(r, [[0], [1], []])
+    self.assertEqual(r, [[], [], [0, 1]])
 
     r = get_contraction((1,1,1,1), (1,))
     self.assertEqual(r, [[0,1,2,3]])
 
     r = get_contraction((1,1,1,1), (1,1))
-    self.assertEqual(r, [[0], [1,2,3]])
+    self.assertEqual(r, [[], [0,1,2,3]])
 
     r = get_contraction((1,1,1,1), (1,1,1))
-    self.assertEqual(r, [[0], [1], [2,3]])
+    self.assertEqual(r, [[], [], [0,1,2,3]])
 
     r = get_contraction((1,1,1,1), (1,1,1,1))
-    self.assertEqual(r, [[0], [1], [2], [3]])
+    self.assertEqual(r, [[], [], [], [0,1,2,3]])
 
 class TestShapeTrackerSize(unittest.TestCase):
   def test_simple_size(self):
