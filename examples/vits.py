@@ -1,4 +1,7 @@
 import json, logging, math, re, sys, time, wave, argparse, numpy as np
+from phonemizer.phonemize import default_separator, _phonemize
+from phonemizer.backend import EspeakBackend
+from phonemizer.punctuation import Punctuation
 from functools import reduce
 from pathlib import Path
 from typing import List
@@ -6,6 +9,7 @@ from tinygrad import nn
 from tinygrad.helpers import dtypes, fetch
 from tinygrad.nn.state import torch_load
 from tinygrad.tensor import Tensor
+from tinygrad.jit import TinyJit
 from unidecode import unidecode
 
 LRELU_SLOPE = 0.1
@@ -19,14 +23,14 @@ class Synthesizer:
     self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, 4, gin_channels=gin_channels)
     self.dp = StochasticDurationPredictor(hidden_channels, 192, 3, 0.5, 4, gin_channels=gin_channels) if use_sdp else DurationPredictor(hidden_channels, 256, 3, 0.5, gin_channels=gin_channels)
     if n_speakers > 1: self.emb_g = nn.Embedding(n_speakers, gin_channels)
-  def infer(self, x, x_lengths, sid=None, noise_scale=1.0, length_scale=1, noise_scale_w=1., max_len=None, emotion_embedding=None, max_y_length_estimate_scale=None):
-    x, m_p, logs_p, x_mask = self.enc_p.forward(x, x_lengths, emotion_embedding)
+  def infer(self, x, x_lengths, sid=None, noise_scale=1.0, length_scale=1, noise_scale_w=1., max_len=None, emotion_embedding=None, max_y_length_estimate_scale=None, batch_size=500):
+    x, m_p, logs_p, x_mask = self.enc_p.forward(x.realize(), x_lengths.realize(), emotion_embedding.realize() if emotion_embedding is not None else emotion_embedding)
     g = self.emb_g(sid.reshape(1, 1)).squeeze(1).unsqueeze(-1) if self.n_speakers > 0 else None
-    logw = self.dp.forward(x, x_mask, g=g, reverse=self.use_sdp, noise_scale=noise_scale_w if self.use_sdp else 1.0)
+    logw = self.dp.forward(x, x_mask.realize(), g=g.realize(), reverse=self.use_sdp, noise_scale=noise_scale_w if self.use_sdp else 1.0)
     w_ceil = Tensor.ceil(logw.exp() * x_mask * length_scale)
     y_lengths = Tensor.maximum(w_ceil.sum([1, 2]), 1).cast(dtypes.int64)
-    return self.generate(g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths)
-  def generate(self, g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths):
+    return self.generate(g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths, batch_size)
+  def generate(self, g, logs_p, m_p, max_len, max_y_length_estimate_scale, noise_scale, w_ceil, x, x_mask, y_lengths, batch_size):
     max_y_length = y_lengths.max().numpy() if max_y_length_estimate_scale is None else max(15, x.shape[-1]) * max_y_length_estimate_scale
     y_mask = sequence_mask(y_lengths, max_y_length).unsqueeze(1).cast(x_mask.dtype)
     attn_mask = x_mask.unsqueeze(2) * y_mask.unsqueeze(-1)
@@ -34,9 +38,16 @@ class Synthesizer:
     m_p_2 = attn.squeeze(1).matmul(m_p.transpose(1, 2)).transpose(1, 2)        # [b, t', t], [b, t, d] -> [b, d, t']
     logs_p_2 = attn.squeeze(1).matmul(logs_p.transpose(1, 2)).transpose(1, 2)  # [b, t', t], [b, t, d] -> [b, d, t']
     z_p = m_p_2 + Tensor.randn(*m_p_2.shape, dtype=m_p_2.dtype) * logs_p_2.exp() * noise_scale
-    y_mask = y_mask.cast(z_p.dtype)
-    z = self.flow.forward(z_p, y_mask, g=g, reverse=True)
-    o = self.dec.forward((z * y_mask)[:, :, :max_len], g=g)
+    # Pad flow forward inputs to enable JIT
+    row_len = y_mask.shape[2]
+    assert batch_size > row_len, "batch size is too small"
+    y_mask = y_mask.pad(((0, 0), (0, 0), (0, batch_size - row_len)), 0).cast(z_p.dtype)
+    # New y_mask tensor to remove sts mask
+    y_mask = Tensor(y_mask.numpy(), device=y_mask.device, dtype=y_mask.dtype, requires_grad=y_mask.requires_grad)
+    z_p = z_p.squeeze(0).pad(((0, 0), (0, batch_size - z_p.shape[2])), 1).unsqueeze(0)
+    z = self.flow.forward(z_p.realize(), y_mask.realize(), g=g.realize(), reverse=True)
+    result_length = reduce(lambda x, y: x * y, self.dec.upsample_rates, row_len)
+    o = self.dec.forward((z * y_mask)[:, :, :max_len], g=g)[:, :, :result_length]
     if max_y_length_estimate_scale is not None:
       length_scaler = o.shape[-1] / max_y_length
       o.realize()
@@ -68,6 +79,7 @@ class StochasticDurationPredictor:
     self.pre, self.proj = nn.Conv1d(in_channels, filter_channels, 1), nn.Conv1d(filter_channels, filter_channels, 1)
     self.convs = DDSConv(filter_channels, kernel_size, n_layers=3, p_dropout=p_dropout)
     if gin_channels != 0: self.cond = nn.Conv1d(gin_channels, filter_channels, 1)
+  @TinyJit
   def forward(self, x: Tensor, x_mask, w=None, g=None, reverse=False, noise_scale=1.0):
     x = self.pre(x.detach())
     if g is not None: x = x + self.cond(g.detach())
@@ -96,13 +108,13 @@ class StochasticDurationPredictor:
         z, log_det = flow.forward(z, x_mask, g=x, reverse=reverse)
         log_det_tot = log_det_tot + log_det
       nll = Tensor.sum(0.5 * (math.log(2*math.pi) + (z**2)) * x_mask, [1,2]) - log_det_tot
-      return nll + log_q # [b]
+      return (nll + log_q).realize() # [b]
     flows = list(reversed(self.flows))
     flows = flows[:-2] + [flows[-1]] # remove a useless vflow
     z = Tensor.randn(x.shape[0], 2, x.shape[2], dtype=x.dtype).to(device=x.device) * noise_scale
     for flow in flows: z = flow.forward(z, x_mask, g=x, reverse=reverse)
     z0, z1 = split(z, [1, 1], 1)
-    return z0
+    return z0.realize()
 
 class DurationPredictor:
   def __init__(self, in_channels, filter_channels, kernel_size, p_dropout, gin_channels=0):
@@ -127,6 +139,7 @@ class TextEncoder:
     if emotion_embedding: self.emo_proj = nn.Linear(1024, hidden_channels)
     self.encoder = Encoder(hidden_channels, filter_channels, n_heads, n_layers, kernel_size, p_dropout)
     self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
+  @TinyJit
   def forward(self, x: Tensor, x_lengths: Tensor, emotion_embedding=None):
     if self.n_vocab!=0: x = (self.emb(x) * math.sqrt(self.hidden_channels))
     if emotion_embedding: x = x + self.emo_proj(emotion_embedding).unsqueeze(1)
@@ -134,7 +147,7 @@ class TextEncoder:
     x_mask = sequence_mask(x_lengths, x.shape[2]).unsqueeze(1).cast(x.dtype)
     x = self.encoder.forward(x * x_mask, x_mask)
     m, logs = split(self.proj(x) * x_mask, self.out_channels, dim=1)
-    return x, m, logs, x_mask
+    return x.realize(), m.realize(), logs.realize(), x_mask.realize()
 
 class ResidualCouplingBlock:
   def __init__(self, channels, hidden_channels, kernel_size, dilation_rate, n_layers, n_flows=4, gin_channels=0):
@@ -143,9 +156,10 @@ class ResidualCouplingBlock:
     for _ in range(n_flows):
       self.flows.append(ResidualCouplingLayer(channels, hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels=gin_channels, mean_only=True))
       self.flows.append(Flip())
+  @TinyJit
   def forward(self, x, x_mask, g=None, reverse=False):
     for flow in reversed(self.flows) if reverse else self.flows: x = flow.forward(x, x_mask, g=g, reverse=reverse)
-    return x
+    return x.realize()
 
 class PosteriorEncoder:
   def __init__(self, in_channels, out_channels, hidden_channels, kernel_size, dilation_rate, n_layers, gin_channels=0):
@@ -166,22 +180,23 @@ class Generator:
     resblock = ResBlock1 if resblock == '1' else ResBlock2
     self.ups = [nn.ConvTranspose1d(upsample_initial_channel//(2**i), upsample_initial_channel//(2**(i+1)), k, u, padding=(k-u)//2) for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes))]
     self.resblocks = []
+    self.upsample_rates = upsample_rates
     for i in range(len(self.ups)):
       ch = upsample_initial_channel // (2 ** (i + 1))
       for _, (k, d) in enumerate(zip(resblock_kernel_sizes, resblock_dilation_sizes)):
         self.resblocks.append(resblock(ch, k, d))
     self.conv_post = nn.Conv1d(ch, 1, 7, 1, padding=3, bias=False)
     if gin_channels != 0: self.cond = nn.Conv1d(gin_channels, upsample_initial_channel, 1)
+  @TinyJit
   def forward(self, x: Tensor, g=None):
     x = self.conv_pre(x)
     if g is not None:  x = x + self.cond(g)
     for i in range(self.num_upsamples):
-      x, xs = self.ups[i](x.leakyrelu(LRELU_SLOPE)), None
-      for j in range(self.num_kernels):
-        if xs is None: xs = self.resblocks[i * self.num_kernels + j].forward(x)
-        else: xs += self.resblocks[i * self.num_kernels + j].forward(x)
-      x = xs / self.num_kernels
-    return self.conv_post(x.leakyrelu()).tanh()
+      x = self.ups[i](x.leakyrelu(LRELU_SLOPE))
+      xs = sum(self.resblocks[i * self.num_kernels + j].forward(x) for j in range(self.num_kernels))
+      x = (xs / self.num_kernels).realize()
+    res = self.conv_post(x.leakyrelu()).tanh().realize()
+    return res
 
 class LayerNorm(nn.LayerNorm):
   def __init__(self, channels, eps=1e-5): super().__init__(channels, eps, elementwise_affine=True)
@@ -445,7 +460,7 @@ def rational_quadratic_spline(inputs: Tensor, unnormalized_widths: Tensor, unnor
   derivative_numerator = input_delta.pow(2) * (input_derivatives_plus_one * theta.pow(2) + 2 * input_delta * theta_one_minus_theta + input_derivatives * (1 - theta).pow(2))
   return input_cum_heights + numerator / denominator, derivative_numerator.log() - 2 * denominator.log()
 
-def sequence_mask(length: Tensor, max_length): return Tensor.arange(max_length, dtype=length.dtype, device=length.device).unsqueeze(0).__lt__(length.unsqueeze(1))
+def sequence_mask(length: Tensor, max_length): return Tensor.arange(max_length, dtype=length.dtype, device=length.device).unsqueeze(0) < length.unsqueeze(1)
 def generate_path(duration: Tensor, mask: Tensor):  # duration: [b, 1, t_x], mask: [b, 1, t_y, t_x]
   b, _, t_y, t_x = mask.shape
   path = sequence_mask(duration.cumsum(axis=2).reshape(b * t_x), t_y).cast(mask.dtype).reshape(b, t_x, t_y)
@@ -558,6 +573,9 @@ class TextMapper: # Based on https://github.com/keithito/tacotron
     self.apply_cleaners, self.symbols, self._inflect = apply_cleaners, symbols, None
     self._symbol_to_id, _id_to_symbol = {s: i for i, s in enumerate(symbols)}, {i: s for i, s in enumerate(symbols)}
     self._whitespace_re, self._abbreviations = re.compile(r'\s+'), [(re.compile('\\b%s\\.' % x[0], re.IGNORECASE), x[1]) for x in [('mrs', 'misess'), ('mr', 'mister'), ('dr', 'doctor'), ('st', 'saint'), ('co', 'company'), ('jr', 'junior'), ('maj', 'major'), ('gen', 'general'), ('drs', 'doctors'), ('rev', 'reverend'), ('lt', 'lieutenant'), ('hon', 'honorable'), ('sgt', 'sergeant'), ('capt', 'captain'), ('esq', 'esquire'), ('ltd', 'limited'), ('col', 'colonel'), ('ft', 'fort'), ]]
+    self.phonemizer = EspeakBackend(
+        language="en-us", punctuation_marks=Punctuation.default_marks(), preserve_punctuation=True, with_stress=True,
+    )
   def text_to_sequence(self, text, cleaner_names):
     if self.apply_cleaners:
       for name in cleaner_names:
@@ -566,18 +584,16 @@ class TextMapper: # Based on https://github.com/keithito/tacotron
         text = cleaner(text)
     else: text = text.strip()
     return [self._symbol_to_id[symbol] for symbol in text]
-  def get_text(self, text, add_blank=False, cleaners=('english_cleaners',)):
+  def get_text(self, text, add_blank=False, cleaners=('english_cleaners2',)):
     text_norm = self.text_to_sequence(text, cleaners)
     return Tensor(self.intersperse(text_norm, 0) if add_blank else text_norm, dtype=dtypes.int64)
   def intersperse(self, lst, item):
     (result := [item] * (len(lst) * 2 + 1))[1::2] = lst
     return result
+  def phonemize(self, text, strip=True): return _phonemize(self.phonemizer, text, default_separator, strip, 1, False, False)
   def filter_oov(self, text): return "".join(list(filter(lambda x: x in self._symbol_to_id, text)))
-  def base_english_cleaners(self, text, preserve_punctuation=False, with_stress=False):
-    from phonemizer import phonemize
-    return self.collapse_whitespace(phonemize(self.expand_abbreviations(unidecode(text.lower())), language='en-us', backend='espeak', strip=True, preserve_punctuation=preserve_punctuation, with_stress=with_stress))
-  def english_cleaners(self, text): return self.base_english_cleaners(text)
-  def english_cleaners2(self, text): return self.base_english_cleaners(text, preserve_punctuation=True, with_stress=True)
+  def base_english_cleaners(self, text): return self.collapse_whitespace(self.phonemize(self.expand_abbreviations(unidecode(text.lower()))))
+  def english_cleaners2(self, text): return self.base_english_cleaners(text)
   def transliteration_cleaners(self, text): return self.collapse_whitespace(unidecode(text.lower()))
   def cjke_cleaners(self, text): return re.sub(r'([^\.,!\?\-…~])$', r'\1.', re.sub(r'\s+$', '', self.english_to_ipa2(text).replace('ɑ', 'a').replace('ɔ', 'o').replace('ɛ', 'e').replace('ɪ', 'i').replace('ʊ', 'u')))
   def cjke_cleaners2(self, text): return re.sub(r'([^\.,!\?\-…~])$', r'\1.', re.sub(r'\s+$', '', self.english_to_ipa2(text)))
