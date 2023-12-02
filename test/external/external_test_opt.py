@@ -365,6 +365,7 @@ class TestOpt(unittest.TestCase):
       a.realize()
       cache_len = len(CacheCollector.cache)
     np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
+    # TODO: what does these `return cache_len`` do?
     return cache_len
 
   def test_expand_reduce_is_folded_on_same_axis(self):
