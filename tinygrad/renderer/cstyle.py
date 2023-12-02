@@ -30,16 +30,16 @@ class CStyleLanguage(NamedTuple):
   uses_ptr_arithmetic: bool = False
   launch_bounds: bool = False
   code_for_op: Dict = {
-    UnaryOps.NEG: lambda x: f"(-{x})",
-    UnaryOps.EXP2: lambda x: f"exp2({x})",
-    UnaryOps.LOG2: lambda x: f"log2({x})",
-    UnaryOps.SIN: lambda x: f"sin({x})",
-    UnaryOps.SQRT: lambda x: f"sqrt({x})",
-    BinaryOps.ADD: lambda a,b: f"({a}+{b})", BinaryOps.SUB: lambda a,b: f"({a}-{b})",
-    BinaryOps.MUL: lambda a,b: f"({a}*{b})", BinaryOps.DIV: lambda a,b: f"({a}/{b})",
-    BinaryOps.MAX: lambda a,b: f"max({a},{b})", BinaryOps.MOD: lambda a,b: f"({a}%{b})",
-    BinaryOps.CMPLT: lambda a,b: f"({a}<{b})", TernaryOps.MULACC: lambda a,b,c: f"(({a}*{b})+{c})",
-    TernaryOps.WHERE: lambda a,b,c: f"({a}!=0?{b}:{c})"
+    UnaryOps.NEG: lambda x,dtype: f"(-{x})" if dtype != dtypes.bool else f"(!{x})",
+    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})",
+    UnaryOps.LOG2: lambda x,dtype: f"log2({x})",
+    UnaryOps.SIN: lambda x,dtype: f"sin({x})",
+    UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
+    BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})",
+    BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})",
+    BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
+    BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})",
+    TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}!=0?{b}:{c})"
   }
 
   # returns a str expression of the casted xs with the given type
@@ -156,23 +156,13 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
         raise NotImplementedError(f"WMMA not implemented for {args}")
     elif uop == UOps.ALU:
       assert dtype is not None
-      # TODO: This should be moved to glsl.py after code_for_op dtype support (https://github.com/tinygrad/tinygrad/pull/2555/files)
-      from tinygrad.device import Device
-      # GLSL can't do bool * bool
-      if Device.DEFAULT == "WEBGL" and args == BinaryOps.MUL and (vin[0].dtype,vin[1].dtype) == (dtypes.bool,dtypes.bool):
-        r[vin[0]], r[vin[1]] = lang.render_cast([r[vin[0]]], dtypes.int), lang.render_cast([r[vin[1]]], dtypes.int)
-
       # remove parens if ALU types are the same. TODO: can do more here
       if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL}:
-        val = lang.code_for_op[args](strip_parens(r[vin[0]]), *[r[x] for x in vin[1:]])
+        val = lang.code_for_op[args](strip_parens(r[vin[0]]), *[r[x] for x in vin[1:]], dtype)
       elif args == BinaryOps.MAX:
-        val = lang.code_for_op[args](*[lang.render_cast([r[x]], dtype) if x.dtype != dtype else r[x] for x in vin])
+        val = lang.code_for_op[args](*[lang.render_cast([r[x]], dtype) if x.dtype != dtype else r[x] for x in vin] + [dtype])
       else:
-        val = lang.code_for_op[args](*[r[x] for x in vin])
-        # TODO: move after code_for_op dtype support
-        if Device.DEFAULT == "WEBGL" and args == BinaryOps.CMPLT and dtype == dtypes.float:
-          val = lang.render_cast([val], dtypes.float)
-
+        val = lang.code_for_op[args](*[r[x] for x in vin] + [dtype])
       assert child_count[u] != 0, f"childless ALU op found {u}"
       if (child_count[u] <= 1 or dtypes.is_int(dtype)) and args != BinaryOps.MAX:  # fix index rendering issue. fix clang nested max macro issue
         r[u] = val

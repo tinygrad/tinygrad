@@ -19,8 +19,8 @@ def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
   return library.libraryDataContents().bytes().tobytes()
 
 class MetalProgram:
-  def __init__(self, device:MetalDevice, name:str, lib:bytes, bufs:int, vars:int=0):
-    self.device = device
+  def __init__(self, device:MetalDevice, name:str, lib:bytes):
+    self.device, self.name, self.lib = device, name, lib
     data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
     self.library = unwrap2(self.device.device.newLibraryWithData_error_(data, None))
     self.fxn = self.library.newFunctionWithName_(name)
@@ -52,7 +52,6 @@ class MetalAllocator(LRUAllocator):
     self.device:MetalDevice = device
     super().__init__()
   def _alloc(self, size:int, dtype:DType) -> Any:
-    if size == 0: return None
     ret = self.device.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=} {dtype=}")
     return ret

@@ -12,7 +12,9 @@ fragment_center_offset = 0.5
 class GLSLLanguage(CStyleLanguage):
   xid = [f"int(gl_FragCoord.y-{fragment_center_offset}) * w + int(gl_FragCoord.x-{fragment_center_offset})"]
   explicit_cast_alu = True
-  code_for_op = { **CStyleLanguage().code_for_op, BinaryOps.MOD: lambda a,b: f"(int({a})%int({b}))", TernaryOps.WHERE: lambda a,b,c: f"(float({a})!=0.0?{b}:{c})" }
+  code_for_op = { **CStyleLanguage().code_for_op, BinaryOps.MUL: lambda a,b,dtype: f"(int({a})*int({b}))" if dtype == dtypes.bool else f"({a}*{b})",
+    BinaryOps.CMPLT: lambda a,b,dtype: f"{'float' if dtype == dtypes.float else ''}({a}<{b})", BinaryOps.MOD: lambda a,b,dtype: f"(int({a})%int({b}))",
+    TernaryOps.WHERE: lambda a,b,c,dtype: f"(float({a})!=0.0?{b}:{c})" }
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): val = "(0.0 / 0.0)"

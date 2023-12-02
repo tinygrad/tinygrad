@@ -7,11 +7,11 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.device import CompiledASTRunner, Compiled
 from tinygrad.codegen.linearizer import UOps, UOp
 
-def _uops_to_prg(uops, bufcount):
+def _uops_to_prg(uops):
   src, runtime_args = Device[Device.DEFAULT].renderer("test", uops)
   return CompiledASTRunner(None, "test", src,
                            [1] if Device[Device.DEFAULT].linearizer_opts.has_local else None, [1] if Device[Device.DEFAULT].linearizer_opts.has_local else None,
-                           runtime_args=runtime_args, bufcount=bufcount).build(Device[Device.DEFAULT].compiler, Device[Device.DEFAULT].runtime)
+                           runtime_args=runtime_args).build(Device[Device.DEFAULT].compiler, Device[Device.DEFAULT].runtime)
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(vin), arg))
@@ -26,7 +26,7 @@ def _test_single_value(vals, op, dtype):
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, dtype)
   buf2 = [Buffer.fromCPU(Device.DEFAULT, np.array([a], dtype=dtype.np)) for a in vals]
-  prg = _uops_to_prg(uops, 1+len(buf2))
+  prg = _uops_to_prg(uops)
   prg.exec([buf]+buf2)
   return buf.toCPU()[0]
 
@@ -37,7 +37,7 @@ def _test_single_value_const(vals, op, dtype):
   alu = uop(uops, UOps.ALU, dtype, loads, op)
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, dtype)
-  prg = _uops_to_prg(uops, 1)
+  prg = _uops_to_prg(uops)
   prg.exec([buf])
   return buf.toCPU()[0]
 

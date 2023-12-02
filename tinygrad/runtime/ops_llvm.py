@@ -54,11 +54,13 @@ def compile_llvm(prg, llvmopt=LLVMOPT) -> bytes:
   return LLVM.target_machine.emit_object(mod)
 
 class LLVMProgram:
-  def __init__(self, name:str, lib:bytes, bufs:int, vars:int=0):
+  def __init__(self, name:str, lib:bytes):
+    self.name, self.lib = name, lib
     LLVM().engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(lib))
     self.fxn = LLVM.engine.get_function_address(name)
-    self.cfunc = CFUNCTYPE(ctypes.c_int, *([ctypes.c_void_p]*bufs), *([ctypes.c_int]*vars))(self.fxn)
 
-  def __call__(self, *bufs, wait=False): return cpu_time_execution(lambda: self.cfunc(*bufs), enable=wait)
+  def __call__(self, *bufs, wait=False):
+    self.cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.c_int32 if isinstance(b, int) else ctypes.c_void_p for b in bufs])(self.fxn)
+    return cpu_time_execution(lambda: self.cfunc(*bufs), enable=wait)
 
 LLVMDevice = Compiled(MallocAllocator, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, compile_llvm, LLVMProgram)
