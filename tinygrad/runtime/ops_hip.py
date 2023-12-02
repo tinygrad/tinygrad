@@ -23,16 +23,16 @@ def hip_time_execution(cb, enable=False): return time_execution_cuda_style(cb, h
 def compile_hip(prg) -> bytes: return compile_cuda_style(prg, [f'--offload-arch={HIPDevice.default_arch_name}'], hip.hiprtcProgram, hip.hiprtcCreateProgram, hip.hiprtcCompileProgram, hip.hiprtcGetCode, hip.hiprtcGetCodeSize, hip.hiprtcGetProgramLog, hip.hiprtcGetProgramLogSize, check)
 
 class HIPProgram:
-  def __init__(self, device:int, name:str, prg:bytes, bufs:int, vars:int=0):
-    self.device = device
+  def __init__(self, device:int, name:str, lib:bytes):
+    self.device, self.name, self.lib = device, name, lib
 
     if DEBUG >= 6:
-      asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
+      asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], lib))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
     if MOCKHIP: return
     check(hip.hipSetDevice(self.device))
-    self.module = init_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), prg)))
+    self.module = init_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))
     self.prg = init_c_var(hip.hipFunction_t(), lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
 
   def __del__(self):
