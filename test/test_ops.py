@@ -645,7 +645,6 @@ class TestOps(unittest.TestCase):
       np.testing.assert_allclose(a[:, 2:5:-1, :], t[:, 2:5:-1, :].numpy())  # shape = (0, 10, 10)
       np.testing.assert_allclose(a[:, :, 2:5:-1], t[:, :, 2:5:-1].numpy())  # shape = (0, 10, 10)
 
-  @unittest.skipIf(Device.DEFAULT in ["WEBGL"], "_moderngl.Error: the buffer is too small")
   def test_slice_both_endpoints_out_of_bounds(self):
     helper_test_op([(3,3,3)], lambda x: x[5:10], lambda x: x[5:10], forward_only=True)
     helper_test_op([(3,3,3)], lambda x: x[-15:-7], lambda x: x[-15:-7], forward_only=True)
@@ -655,11 +654,9 @@ class TestOps(unittest.TestCase):
     if Device.DEFAULT != "WEBGL":
       helper_test_op([(3,3,3)], lambda x: x[-2:-5], lambda x: x[-2:-5], forward_only=True)
 
-  @unittest.skipIf(Device.DEFAULT in ["WEBGL"], "_moderngl.Error: the buffer is too small")
   def test_slice_empty(self):
     helper_test_op([(10,10)], lambda x: x[1:1], lambda x: x[1:1], forward_only=True)
 
-  @unittest.skipIf(Device.DEFAULT in ["WEBGL"], "_moderngl.Error: the buffer is too small")
   def test_slice_zero_in_shape(self):
     helper_test_op([(10,10)], lambda x: x[1:1], lambda x: x[1:1], forward_only=True)  # x.shape = (0, 10)
     helper_test_op([(3,3,3)], lambda x: x[-2:-5], lambda x: x[-2:-5], forward_only=True)  # x.shape = (0, 3, 3)
@@ -1183,7 +1180,6 @@ class TestOps(unittest.TestCase):
     a = Tensor(3.14)
     np.testing.assert_allclose(Tensor.stack([a, a]).numpy(), Tensor([3.14, 3.14]).numpy())
 
-  @unittest.skipIf(Device.DEFAULT in ["WEBGL"], "_moderngl.Error: the buffer is too small")
   def test_repeat(self):
     x = Tensor.randn(4, 6, 3)
     base_repeats = [2, 4, 3]
