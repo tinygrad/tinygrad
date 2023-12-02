@@ -28,8 +28,8 @@ repos:
         always_run: true
         pass_filenames: false
       - id: devicetests
-        name: select device tests
-        entry: env PYTHONPATH="." pytest test/test_uops.py
+        name: select GPU tests
+        entry: env GPU=1 PYTHONPATH="." pytest test/test_uops.py test/test_custom_function.py
         language: system
         always_run: true
         pass_filenames: false
