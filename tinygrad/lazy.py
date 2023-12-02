@@ -166,6 +166,19 @@ class LazyBuffer:
 
     op, base_bufs = _replace_bufferops(op)
 
+    # check if we can reuse the output buffer
+    # if it's aliased, don't use it
+    # TODO: this is pretty wrong actually, who knows where else this buffer is used?
+    # TODO: what if an assign is required? this silently is wrong
+    # NOTE: this has been moved to schedule, as this is only an issue if buffers are already realized
+    if self.output_buffer is not None:
+      for i,a in enumerate(base_bufs):
+        # TODO: if this is contiguous it's fine
+        if a.realized == self.output_buffer:
+          if any(not x.arg.st.contiguous for x in op.get_lazyops() if x.op == BufferOps.LOAD and x.arg.idx == i+1):
+            self.output_buffer = None
+            break
+
     if op.op not in LoadOps:
       # add the store
       info = get_lazyop_info(op)
