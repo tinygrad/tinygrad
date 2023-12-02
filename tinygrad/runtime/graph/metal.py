@@ -9,6 +9,8 @@ from tinygrad.runtime.ops_metal import MetalDevice
 
 class MetalGraph:
   def __init__(self, device:MetalDevice, jit_cache: List[JitItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+    if not all(isinstance(ji.prg, CompiledASTRunner) for ji in jit_cache): raise GraphException
+
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
     self.op_estimate, self.mem_estimate = get_jit_stats(jit_cache)

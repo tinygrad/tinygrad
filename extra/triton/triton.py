@@ -59,18 +59,18 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
 
   def kk(s): kernel.append("  "*depth+s)
   code_for_op: Final[Dict[Op, Callable]] = {
-    UnaryOps.EXP2: lambda x,: f"tl.math.exp2({x})",
-    UnaryOps.LOG2: lambda x,: f"tl.math.log2({x})",
-    UnaryOps.SIN: lambda x,: f"tl.sin({x})",
-    UnaryOps.SQRT: lambda x,: f"tl.sqrt({x})",
-    UnaryOps.NEG: lambda x,: f"-{x}",
-    BinaryOps.ADD: lambda x,y,: f"({x}+{y})", BinaryOps.SUB: lambda x,y,: f"({x}-{y})",
-    BinaryOps.MUL: lambda x,y,: f"({x}*{y})", BinaryOps.DIV: lambda x,y,: f"({x}/{y})" if y != '0.0' else f"{x}*tl.where({x}==0.0, float('nan'), float('inf'))",
-    BinaryOps.MAX: lambda x,y,: f"tl.maximum({x},{y})",
-    BinaryOps.CMPLT: lambda x,y,: f"({x}<{y})",
-    BinaryOps.MOD: lambda x,y,: f"tl.abs({x})%tl.abs({y})*tl.where({x}<0,-1,1)",
-    TernaryOps.MULACC: lambda x,y,z,: f"(({x}*{y})+{z})",
-    TernaryOps.WHERE: lambda x,y,z,: f"tl.where({x},{y},{z})",
+    UnaryOps.EXP2: lambda x,dtype,: f"tl.math.exp2({x})",
+    UnaryOps.LOG2: lambda x,dtype,: f"tl.math.log2({x})",
+    UnaryOps.SIN: lambda x,dtype: f"tl.sin({x})",
+    UnaryOps.SQRT: lambda x,dtype: f"tl.sqrt({x})",
+    UnaryOps.NEG: lambda x,dtype: f"-{x}" if dtype != dtypes.bool else f"tl.where({x}, 0, 1)",
+    BinaryOps.ADD: lambda x,y,dtype: f"({x}+{y})", BinaryOps.SUB: lambda x,y,: f"({x}-{y})",
+    BinaryOps.MUL: lambda x,y,dtype: f"({x}*{y})", BinaryOps.DIV: lambda x,y,: f"({x}/{y})" if y != '0.0' else f"{x}*tl.where({x}==0.0, float('nan'), float('inf'))",
+    BinaryOps.MAX: lambda x,y,dtype: f"tl.maximum({x},{y})",
+    BinaryOps.CMPLT: lambda x,y,dtype: f"({x}<{y})",
+    BinaryOps.MOD: lambda x,y,dtype: f"tl.abs({x})%tl.abs({y})*tl.where({x}<0,-1,1)",
+    TernaryOps.MULACC: lambda x,y,z,dtype: f"(({x}*{y})+{z})",
+    TernaryOps.WHERE: lambda x,y,z,dtype: f"tl.where({x},{y},{z})",
   }
   def int_div(x,y): return f"({x}//{y})" if y != '0' else f"{x}*tl.where({x}==0, float('nan'), float('inf'))"
   for u in uops:

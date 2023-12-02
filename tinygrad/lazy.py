@@ -82,8 +82,11 @@ def vars_from_ast(ast:LazyOp) -> List[Variable]: return sorted(set.union(*[x.arg
 
 lazycache: WeakValueDictionary = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, optype:OpType, op:LazyOp, dtype:DType, base:Optional[LazyBuffer]=None):
+  # rewrite 0 size into a CONST
+  if 0 in st.shape: return LazyBuffer(device, ShapeTracker.from_shape(st.shape), LoadOps, LazyOp(LoadOps.CONST, tuple(), 0.0), dtype)
+
   # fromcpu aren't cached
-  if not LAZYCACHE or (optype is LoadOps and op.op in {LoadOps.EMPTY, LoadOps.RAND, LoadOps.CONST}): return LazyBuffer(device, st, optype, op, dtype, base=base)
+  if not LAZYCACHE or (optype is LoadOps and op.op in {LoadOps.EMPTY, LoadOps.CUSTOM, LoadOps.CONST}): return LazyBuffer(device, st, optype, op, dtype, base=base)
 
   # wop is the deduping key. i feel this used to compare more deeply
   wop = (device, dtype, optype, ref(op), ref(base) if base else None)
@@ -163,8 +166,21 @@ class LazyBuffer:
 
     op, base_bufs = _replace_bufferops(op)
 
-    # add the store
+    # check if we can reuse the output buffer
+    # if it's aliased, don't use it
+    # TODO: this is pretty wrong actually, who knows where else this buffer is used?
+    # TODO: what if an assign is required? this silently is wrong
+    # NOTE: this has been moved to schedule, as this is only an issue if buffers are already realized
+    if self.output_buffer is not None:
+      for i,a in enumerate(base_bufs):
+        # TODO: if this is contiguous it's fine
+        if a.realized == self.output_buffer:
+          if any(not x.arg.st.contiguous for x in op.get_lazyops() if x.op == BufferOps.LOAD and x.arg.idx == i+1):
+            self.output_buffer = None
+            break
+
     if op.op not in LoadOps:
+      # add the store
       info = get_lazyop_info(op)
       assert info.dtype == self.dtype or isinstance(self.dtype, ImageDType), f"dtype mismatch {info.dtype=} != {self.dtype=}"
 
@@ -176,6 +192,9 @@ class LazyBuffer:
       # TODO: why doesn't this match?
       #assert info.shape == self.shape, f"shape mismatch {info.shape=} != {self.shape=}"
       op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, self.dtype, ShapeTracker.from_shape(info.shape)))
+    else:
+      # check loadop validity of bufferops
+      for i,s in enumerate(op.src): assert isinstance(s, LazyOp) and s.op == BufferOps.LOAD and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
 
     return ret + [ScheduleItem(op, self, tuple(base_bufs), {k:var_vals[k] for k in vars_from_ast(op)})]
 
@@ -183,7 +202,7 @@ class LazyBuffer:
 
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None) -> LazyBuffer:
-    return create_lazybuffer(device, ShapeTracker.from_shape(tuple(shape)), LoadOps, LazyOp(op, tuple() if src is None else (src,), arg), dtype)
+    return create_lazybuffer(device, ShapeTracker.from_shape(shape), LoadOps, LazyOp(op, tuple() if src is None else (src,), arg), dtype)
 
   # create a constant with the shape and dtype of self
   def const(self, val:Union[float, int]) -> LazyBuffer:

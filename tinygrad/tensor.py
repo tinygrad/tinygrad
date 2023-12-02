@@ -10,7 +10,7 @@ import numpy as np
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int, round_up
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LoadOps
-from tinygrad.device import Device
+from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import sint
 from tinygrad.realize import run_schedule
 
@@ -123,6 +123,7 @@ class Tensor:
   def numpy(self) -> np.ndarray:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
+    if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.np)
     return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
   def item(self) -> Union[float, int]: return self.numpy().item()
 
@@ -155,8 +156,7 @@ class Tensor:
 
   @staticmethod
   def rand(*shape, **kwargs):
-    Tensor._seed += 1
-    return Tensor._loadop(LoadOps.RAND, prod((shape:=argfix(*shape))), arg=Tensor._seed, **kwargs).reshape(shape)
+    return Tensor._loadop(LoadOps.CUSTOM, prod((shape:=argfix(*shape))), arg=custom_random, **kwargs).reshape(shape)
 
   # ***** creation helper functions *****
 
@@ -827,3 +827,11 @@ if IMAGE:
   from tinygrad.features.image import image_conv2d, image_dot
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)
+
+# TODO: remove the custom op and replace with threefry
+def custom_random(out:Buffer):
+  Tensor._seed += 1
+  if DEBUG >= 2: print(f"***      rand {out.device} seed {Tensor._seed} size {out.size:<16d} dtype {out.dtype}")
+  rng = np.random.default_rng(Tensor._seed)
+  rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=out.dtype.np, copy=False)
+  out.copyin(rng_np_buffer.data)
