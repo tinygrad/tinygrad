@@ -3,7 +3,7 @@ import os, subprocess, pathlib, ctypes, tempfile, functools
 import Metal, libdispatch
 from typing import List, Any, Tuple, Optional
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.helpers import prod, getenv, DEBUG, DType, diskcache, unwrap2
+from tinygrad.helpers import prod, getenv, DEBUG, diskcache, unwrap2
 from tinygrad.device import Compiled, LRUAllocator
 from tinygrad.renderer.metal import MetalRenderer
 
@@ -51,9 +51,9 @@ class MetalAllocator(LRUAllocator):
   def __init__(self, device:MetalDevice):
     self.device:MetalDevice = device
     super().__init__()
-  def _alloc(self, size:int, dtype:DType) -> Any:
-    ret = self.device.device.newBufferWithLength_options_(size*dtype.itemsize, Metal.MTLResourceStorageModeShared)
-    if ret is None: raise MemoryError(f"Metal OOM while allocating {size=} {dtype=}")
+  def _alloc(self, size:int) -> Any:
+    ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
+    if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return ret
   def transfer(self, dest:Any, src:Any, sz:int):
     command_buffer = self.device.mtl_queue.commandBuffer()
