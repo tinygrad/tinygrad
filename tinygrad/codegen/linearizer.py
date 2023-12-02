@@ -119,7 +119,7 @@ class Linearizer(Kernel):
           rendered_idx = idx.render(self.render_ops, self)
           valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
           self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
-      ret.append(self.uop(UOps.GEP, localtype.scalar() if not (self.opts.device == "HIP" and localtype == dtypes.half.vec(2)) else dtypes.uint16, (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key]) # In HIP, the elements within half2 are uint16
+      ret.append(self.uop(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
     return ret
 
   def global_store(self, i:int, idxs:List[Node], store:List[UOp]) -> List[UOp]:

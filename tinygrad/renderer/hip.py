@@ -1,6 +1,6 @@
 import functools
 from tinygrad.helpers import dtypes
-from tinygrad.ops import BinaryOps
+from tinygrad.ops import BinaryOps, TernaryOps
 from tinygrad.renderer.cstyle import CStyleLanguage, uops_to_cstyle
 
 class HIPLanguage(CStyleLanguage):
@@ -39,10 +39,22 @@ __device__ half sqrt(half x) { return hsqrt(x); }
 __device__ half hmax(half a, half b) { return __hgt(a, b) ? a : b; }
 __device__ half operator%(const half &a, const half &b) { return __hsub(a, __hmul(b, __float2half(floorf(__half2float(a) / __half2float(b))))); }
 __device__ bool operator!=(const half &a, const int &b) { return (float)a != b; }
+
+// HACKS for ALU ops on half and result of half2 GEP
+__device__ half operator+(const half &a, const unsigned short &b) { return __hadd(a, (half)(b)); }
+__device__ half operator-(const half &a, const unsigned short &b) { return __hsub(a, (half)(b)); }
+__device__ half operator*(const half &a, const unsigned short &b) { return __hmul(a, (half)(b)); }
+__device__ half operator/(const half &a, const unsigned short &b) { return __hdiv(a, (half)(b)); }
+__device__ bool operator<(const half &a, const unsigned short &b) { return __hlt(a, (half)(b)); }
+// now the other way
+__device__ half operator+(const unsigned short &a, const half &b) { return __hadd((half)(a), b); }
+__device__ half operator-(const unsigned short &a, const half &b) { return __hsub((half)(a), b); }
+__device__ half operator*(const unsigned short &a, const half &b) { return __hmul((half)(a), b); }
+__device__ half operator/(const unsigned short &a, const half &b) { return __hdiv((half)(a), b); }
+__device__ bool operator<(const unsigned short &a, const half &b) { return __hlt((half)(a), b); }
   """
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
-  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"hmax({a},{b})"}
-
+  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"hmax({a},{b})", TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}!=0?{b}:{c})" if dtype != dtypes.half else f"(half)({a}!=0?{b}:{c})"}
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
