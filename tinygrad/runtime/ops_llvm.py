@@ -1,7 +1,7 @@
 import ctypes
 from typing import ClassVar
-from tinygrad.device import Compiled, MallocAllocator, CompiledKernel
-from tinygrad.helpers import getenv, DEBUG, diskcache, cpu_time_execution, dtypes
+from tinygrad.device import Compiled, MallocAllocator
+from tinygrad.helpers import getenv, DEBUG, diskcache, cpu_time_execution
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
@@ -54,12 +54,13 @@ def compile_llvm(prg, llvmopt=LLVMOPT) -> bytes:
   return LLVM.target_machine.emit_object(mod)
 
 class LLVMProgram:
-  def __init__(self, k:CompiledKernel):
-    self.k = k
-    LLVM().engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(k.lib))
-    self.fxn = LLVM.engine.get_function_address(k.name)
-    self.cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.c_int32 if d == dtypes._arg_int32 else ctypes.c_void_p for d in k.typesig])(self.fxn)
+  def __init__(self, name:str, lib:bytes):
+    self.name, self.lib = name, lib
+    LLVM().engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(lib))
+    self.fxn = LLVM.engine.get_function_address(name)
 
-  def __call__(self, *bufs, wait=False): return cpu_time_execution(lambda: self.cfunc(*bufs), enable=wait)
+  def __call__(self, *bufs, wait=False):
+    self.cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.c_int32 if isinstance(b, int) else ctypes.c_void_p for b in bufs])(self.fxn)
+    return cpu_time_execution(lambda: self.cfunc(*bufs), enable=wait)
 
 LLVMDevice = Compiled(MallocAllocator, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, compile_llvm, LLVMProgram)

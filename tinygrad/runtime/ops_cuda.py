@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 import gpuctypes.cuda as cuda
 from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_c_var, pretty_ptx, cpu_time_execution, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
-from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, CompiledKernel
+from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cuda import CUDARenderer
 
@@ -23,21 +23,21 @@ def cu_time_execution(cb, enable=False) -> Optional[float]: return time_executio
 def compile_cuda(prg) -> bytes: return compile_cuda_style(prg, [f'--gpu-architecture={CUDADevice.default_arch_name}', CUDA_INCLUDE_PATH], cuda.nvrtcProgram, cuda.nvrtcCreateProgram, cuda.nvrtcCompileProgram, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check)
 
 class CUDAProgram:
-  def __init__(self, k:CompiledKernel):
-    self.k = k
-    if DEBUG >= 5: print(pretty_ptx(k.lib.decode('utf-8')))
+  def __init__(self, name:str, lib:bytes):
+    self.name, self.lib = name, lib
+    if DEBUG >= 5: print(pretty_ptx(lib.decode('utf-8')))
     if DEBUG >= 6:
       try:
-        fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(k.lib).hexdigest()}").as_posix()
-        with open(fn + ".ptx", "wb") as f: f.write(k.lib)
+        fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
+        with open(fn + ".ptx", "wb") as f: f.write(lib)
         subprocess.run(["ptxas", f"-arch={CUDADevice.default_arch_name}", "-o", fn, fn+".ptx"], check=True)
         print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
       except Exception as e: print("failed to generate SASS", str(e))
 
     if not CUDACPU:
-      self.module = init_c_var(cuda.CUmodule(), lambda x: check(cuda.cuModuleLoadData(ctypes.byref(x), k.lib)))
-      check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, k.name.encode("utf-8")))
-    self.prg = prg if not CUDACPU else k.lib
+      self.module = init_c_var(cuda.CUmodule(), lambda x: check(cuda.cuModuleLoadData(ctypes.byref(x), lib)))
+      check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
+    self.prg = prg if not CUDACPU else lib
 
   def __del__(self):
     if not CUDACPU: check(cuda.cuModuleUnload(self.module))

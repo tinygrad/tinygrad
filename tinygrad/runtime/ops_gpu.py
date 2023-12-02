@@ -2,10 +2,10 @@ from __future__ import annotations
 from typing import Tuple, Optional, Union, List, cast
 import ctypes, functools
 import gpuctypes.opencl as cl
-from tinygrad.helpers import to_char_p_p, from_mv, diskcache, OSX, DType, ImageDType, dtypes
+from tinygrad.helpers import to_char_p_p, from_mv, diskcache, OSX, DType, ImageDType
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.opencl import OpenCLRenderer
-from tinygrad.device import Compiled, LRUAllocator, CompiledKernel
+from tinygrad.device import Compiled, LRUAllocator
 
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
@@ -34,14 +34,14 @@ def compile_cl(prg:str) -> bytes:
   return bytes(binary)
 
 class CLProgram:
-  def __init__(self, device:CLDevice, k:CompiledKernel):
-    self.device, self.k = device, k
-    self.program = checked(cl.clCreateProgramWithBinary(device.context, 1, ctypes.byref(device.device_id), (ctypes.c_size_t * 1)(len(k.lib)),
-                                                        to_char_p_p([k.lib], ctypes.c_ubyte),
+  def __init__(self, device:CLDevice, name:str, lib:bytes):
+    self.device, self.name, self.lib = device, name, lib
+    self.program = checked(cl.clCreateProgramWithBinary(device.context, 1, ctypes.byref(device.device_id), (ctypes.c_size_t * 1)(len(lib)),
+                                                        to_char_p_p([lib], ctypes.c_ubyte),
                                                         ctypes.byref(binary_status := ctypes.c_int32()), ctypes.byref(errcode_ret := ctypes.c_int32())), errcode_ret)
     check(binary_status.value)
     check(cl.clBuildProgram(self.program, 1, ctypes.byref(device.device_id), None, cl.clBuildProgram.argtypes[4](), None)) # NOTE: OSX requires this
-    self.kernel = checked(cl.clCreateKernel(self.program, k.name.encode(), ctypes.byref(status := ctypes.c_int32())), status)
+    self.kernel = checked(cl.clCreateKernel(self.program, name.encode(), ctypes.byref(status := ctypes.c_int32())), status)
 
   def __del__(self):
     check(cl.clReleaseKernel(self.kernel))
@@ -49,7 +49,7 @@ class CLProgram:
 
   def __call__(self, *bufs:Union[cl.cl_mem, int], global_size:Tuple[int,...], local_size:Optional[Tuple[int,...]]=None, wait=False) -> Optional[float]:
     for i,b in enumerate(bufs):
-      bc = ctypes.c_int32(b) if self.k.typesig[i] == dtypes._arg_int32 else cast(cl.cl_mem, b)
+      bc = ctypes.c_int32(b) if isinstance(b, int) else cast(cl.cl_mem, b)
       cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(bc), ctypes.byref(bc))
     if local_size is not None: global_size = tuple(int(g*l) for g,l in zip(global_size, local_size))
     event = cl.cl_event() if wait else None

@@ -1,7 +1,6 @@
 from __future__ import annotations
 import numpy as np
 from collections import defaultdict
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple
 import importlib, inspect, functools, pathlib, time, re, ctypes
 from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType, from_mv, dtypes, flat_mv
@@ -213,14 +212,8 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 
 # **************** for Compiled Devices ****************
 
-@dataclass(frozen=True)
-class CompiledKernel:
-  name: str
-  lib: bytes
-  typesig: Tuple[DType, ...]
-
 class CompiledASTRunner(JITRunner):
-  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None, typesig:Optional[Tuple[DType]]=None):
+  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None):
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
@@ -234,14 +227,10 @@ class CompiledASTRunner(JITRunner):
       from tinygrad.lazy import vars_from_ast
       self.vars = vars_from_ast(ast)
       assert all(v._val is None for v in self.vars), f"ASTRunner contains bound Variable {self.vars}"
-      self.typesig = tuple(dtype for _,(dtype,_) in sorted(info.mem.items())) + (dtypes._arg_int32,)*len(self.vars)
-    else:
-      assert typesig is not None, "typesig is needed"
-      self.typesig = typesig
 
   def build(self, compiler, runtime):
     self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
-    self.clprg = runtime(CompiledKernel(self.name, self.lib, self.typesig))
+    self.clprg = runtime(self.name, self.lib)
     return self
 
   def launch_dims(self, var_vals):

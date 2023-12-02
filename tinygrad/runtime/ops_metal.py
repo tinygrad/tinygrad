@@ -4,7 +4,7 @@ import Metal, libdispatch
 from typing import List, Any, Tuple, Optional
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, diskcache, unwrap2
-from tinygrad.device import Compiled, LRUAllocator, CompiledKernel
+from tinygrad.device import Compiled, LRUAllocator
 from tinygrad.renderer.metal import MetalRenderer
 
 @diskcache
@@ -19,14 +19,14 @@ def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
   return library.libraryDataContents().bytes().tobytes()
 
 class MetalProgram:
-  def __init__(self, device:MetalDevice, k:CompiledKernel):
-    self.device, self.k = device, k
-    data = libdispatch.dispatch_data_create(k.lib, len(k.lib), None, None)
+  def __init__(self, device:MetalDevice, name:str, lib:bytes):
+    self.device, self.name, self.lib = device, name, lib
+    data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
     self.library = unwrap2(self.device.device.newLibraryWithData_error_(data, None))
-    self.fxn = self.library.newFunctionWithName_(k.name)
+    self.fxn = self.library.newFunctionWithName_(name)
     if DEBUG >= 6:
       with tempfile.NamedTemporaryFile(delete=True) as shader:
-        shader.write(k.lib)
+        shader.write(lib)
         shader.flush()
         os.system(f"cd {pathlib.Path(__file__).parents[2]}/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
     self.pipeline_state = unwrap2(self.device.device.newComputePipelineStateWithFunction_error_(self.fxn, None))

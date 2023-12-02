@@ -7,7 +7,6 @@
 
 from tinygrad import dtypes
 from tinygrad.device import MallocAllocator
-from tinygrad.device import CompiledKernel
 from tinygrad.runtime.ops_clang import ClangProgram, compile_clang
 
 # allocate some buffers
@@ -21,7 +20,7 @@ MallocAllocator.copyin(a, bytearray([2,0,0,0]))
 MallocAllocator.copyin(b, bytearray([3,0,0,0]))
 
 # compile a program
-fxn = ClangProgram(CompiledKernel("add", compile_clang("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }"), [dtypes.int32, dtypes.int32, dtypes.int32]))
+fxn = ClangProgram("add", compile_clang("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }"))
 
 # run the program
 fxn(out, a, b)

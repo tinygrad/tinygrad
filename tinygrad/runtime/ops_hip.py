@@ -2,7 +2,7 @@ import ctypes, functools
 from typing import Tuple, TypeVar
 import gpuctypes.hip as hip
 from tinygrad.helpers import DEBUG, DType, getenv, diskcache, from_mv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
-from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, CompiledKernel
+from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.renderer.hip import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 
@@ -23,17 +23,17 @@ def hip_time_execution(cb, enable=False): return time_execution_cuda_style(cb, h
 def compile_hip(prg) -> bytes: return compile_cuda_style(prg, [f'--offload-arch={HIPDevice.default_arch_name}'], hip.hiprtcProgram, hip.hiprtcCreateProgram, hip.hiprtcCompileProgram, hip.hiprtcGetCode, hip.hiprtcGetCodeSize, hip.hiprtcGetProgramLog, hip.hiprtcGetProgramLogSize, check)
 
 class HIPProgram:
-  def __init__(self, device:int, k:CompiledKernel):
-    self.device, self.k = device, k
+  def __init__(self, device:int, name:str, lib:bytes):
+    self.device, self.name, self.lib = device, name, lib
 
     if DEBUG >= 6:
-      asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], k.lib))
+      asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], lib))
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
     if MOCKHIP: return
     check(hip.hipSetDevice(self.device))
-    self.module = init_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), k.lib)))
-    self.prg = init_c_var(hip.hipFunction_t(), lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, k.name.encode("utf-8"))))
+    self.module = init_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))
+    self.prg = init_c_var(hip.hipFunction_t(), lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
 
   def __del__(self):
     if not MOCKHIP: check(hip.hipModuleUnload(self.module))
