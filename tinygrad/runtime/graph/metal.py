@@ -26,7 +26,7 @@ class MetalGraph:
     self.icb = self.device.device.newIndirectCommandBufferWithDescriptor_maxCommandCount_options_(icb_descriptor, len(self.jit_cache), Metal.MTLResourceOptions(0))
     if self.icb is None: raise GraphException("create indirect command buffer failed, does your system support this?")
 
-    if len(var_vals): self.int_buf = self.device.allocator.alloc(len(var_vals), dtypes.int32)
+    if len(var_vals): self.int_buf = self.device.allocator.alloc(len(var_vals)*dtypes.int32.itemsize)
     read_resources, write_resources = [], []
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledASTRunner = cast(CompiledASTRunner, ji.prg)
