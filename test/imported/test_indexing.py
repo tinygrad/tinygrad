@@ -1658,6 +1658,7 @@ class TestNumpy(unittest.TestCase):
 #       expected = b.float().unsqueeze(1).expand(100, 100)
 #       numpy_testing_assert_equal_helper(a, expected)
 
+# TODO setitem
 #   def test_truncate_leading_1s(self):
 #       col_max = torch.randn(1, 4)
 #       kernel = col_max.T * col_max  # [4, 4] tensor
