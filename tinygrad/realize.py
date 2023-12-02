@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple, Generator, Optional
+from typing import List, Dict, Tuple, Generator, Optional, Callable
 from tinygrad.ops import ScheduleItem, LoadOps, BufferOps
 from tinygrad.device import Device, Buffer, BufferCopy, JITRunner
 from tinygrad.graph import log_schedule_item, print_tree
@@ -11,14 +11,15 @@ class CustomOp(JITRunner):
     super().__init__()
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False): self.fxn(*rawbufs)
 
-def lower_schedule(schedule:List[ScheduleItem]) -> Generator[Tuple[ScheduleItem, Optional[JITRunner]], None, None]:
+def lower_schedule(schedule:List[ScheduleItem]) -> Generator[Tuple[ScheduleItem, Optional[Callable]], None, None]:
   while len(schedule):
     si = schedule.pop(0)
     assert all(si.out.device == x.device for x in si.inputs) or si.ast.op is LoadOps.FROM, f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
+    # TODO: this can return a JITRunner once we put copies in the JIT
     if si.ast.op is LoadOps.EMPTY: yield si, None
     elif si.ast.op is LoadOps.FROM: yield si, BufferCopy
     elif si.ast.op is LoadOps.CUSTOM: yield si, CustomOp(si.ast.arg)
-    else: yield si, Device[si.out.device].get_runner(si.ast)
+    else: yield si, Device[si.out.device].get_runner(si.ast).exec
     del si.out.op
     for v in si.out.views: del v.op
 
@@ -48,6 +49,6 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     rawbufs = [si.out.realized] + [x.realized for x in si.inputs]
 
     # run the function
-    if fxn: fxn.exec(rawbufs, si.var_vals)
+    if fxn: fxn(rawbufs, si.var_vals)
     assert si.out.realized.device == si.out.device, f"realized device is incorrect, {si.out.realized.device=} != {si.out.device=}"
     assert si.out.realized.dtype == si.out.dtype, f"realized dtype is incorrect, {si.out.realized.dtype=} != {si.out.dtype=}"
