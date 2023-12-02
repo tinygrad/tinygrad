@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Dict, Callable,
 import functools
 from enum import Enum, auto
 from tinygrad.helpers import prod, DType, dedup
+from tinygrad.shape.symbolic import Variable
 from dataclasses import dataclass
 
 # these are the llops your accelerator must implement, along with toCpu
@@ -36,6 +37,13 @@ class ConstBuffer:
   val: Union[int, float]
   dtype: DType
   st: ShapeTracker
+
+@dataclass(frozen=True)
+class ScheduleItem:
+  ast: LazyOp
+  out: LazyBuffer
+  inputs: Tuple[LazyBuffer, ...]
+  var_vals: Dict[Variable, int]
 
 @dataclass(frozen=True)
 class LazyOp:

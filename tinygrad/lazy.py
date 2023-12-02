@@ -5,18 +5,10 @@ from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
 from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, dedup, merge_dicts, all_int, ImageDType, DEBUG
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps, get_lazyop_info
+from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.device import Buffer
-from dataclasses import dataclass
-
-@dataclass(frozen=True)
-class ScheduleItem:
-  ast: LazyOp
-  out: LazyBuffer
-  inputs: Tuple[LazyBuffer, ...]
-  var_vals: Dict[Variable, int]
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
