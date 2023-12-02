@@ -89,7 +89,12 @@ class MetalDevice(Compiled):
     if MetalDevice.compiler_device is None: MetalDevice.compiler_device = self.device
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     self.mtl_buffers_in_flight: List[Any] = []
-    self.mtl_io_queue, err = self.device.newIOCommandQueueWithDescriptor_error_(Metal.MTLIOCommandQueueDescriptor.alloc().init(), None)
+    desc = Metal.MTLIOCommandQueueDescriptor.alloc().init()
+    desc.setType_(Metal.MTLIOCommandQueueTypeConcurrent)
+    desc.setPriority_(Metal.MTLIOPriorityHigh)
+    desc.setMaxCommandBufferCount_(2**16)
+    desc.setMaxCommandsInFlight_(2**16)
+    self.mtl_io_queue, err = self.device.newIOCommandQueueWithDescriptor_error_(desc, None)
     assert err is None, err
     self.mv_in_metal: List[memoryview] = []
     from tinygrad.runtime.graph.metal import MetalGraph
