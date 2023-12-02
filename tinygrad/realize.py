@@ -26,16 +26,12 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
 
     # get the program
     prg = lower_schedule_item(si)
-    del si.out.op
-    for v in si.out.views: del v.op
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
     si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
       Buffer(si.out.device, prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype)
-
-    # get all the buffers
-    rawbufs = [si.out.realized] + [x.realized for x in si.inputs]
+    del si.out.op
+    for v in si.out.views: del v.op
 
     # run the function (put it in JIT)
-    if prg: prg.exec(rawbufs, si.var_vals)
-
+    if prg: prg.exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)

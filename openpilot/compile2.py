@@ -128,7 +128,6 @@ if __name__ == "__main__":
   FLOAT16 = getenv("FLOAT16", 0)
   if FLOAT16 == 0:
     try:
-      # TODO: this test is super limited, it doesn't test the schedule
       test_vs_onnx(onnx_data, schedule, inputs)
     except ModuleNotFoundError as e:
       print(f"TEST NOT HAPPENING {e}")
