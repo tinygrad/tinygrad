@@ -61,7 +61,7 @@ def benchmark_model(m, validate_outs=False):
   # print input names
   if DEBUG >= 2: print([inp.name for inp in onnx_model.graph.input if inp.name not in excluded])
 
-  for device in ["METAL" if OSX else "GPU", "CLANG"]: # + (["CUDA"] if torch.cuda.is_available() else []):
+  for device in [Device.DEFAULT, "CLANG"]: # + (["CUDA"] if torch.cuda.is_available() else []):
     Device.DEFAULT = device
     inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
     tinygrad_model = get_run_onnx(onnx_model)
