@@ -14,7 +14,6 @@ class CStyleLanguage(NamedTuple):
   smem_align: str = ""
   smem_prefix: str = ""
   smem_prefix_for_cast: bool = True
-  explicit_cast_alu: bool = False # hack for glsl
   arg_int_prefix: str = ""
   barrier: str = ""
   xid: List[str] = []
@@ -167,7 +166,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       if (child_count[u] <= 1 or dtypes.is_int(dtype)) and args != BinaryOps.MAX:  # fix index rendering issue. fix clang nested max macro issue
         r[u] = val
       else:
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'alu')} = {lang.render_cast([val], dtype) if lang.explicit_cast_alu else val};")
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'alu')} = {val};")
     elif uop == UOps.DEFINE_ACC:
       assert dtype is not None
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
