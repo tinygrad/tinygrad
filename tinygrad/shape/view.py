@@ -43,7 +43,7 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
   while len(new_mask) < len(new_shape):
     (l, r), next_stride = (mask[0], mask[1]), new_dim * curr_stride
 
-    if old_dim >= new_dim: # need to split mask. 
+    if old_dim >= new_dim: # need to split mask.
       offsets.append(off)
 
       if old_dim == next_stride: # simply copy the mask
@@ -51,7 +51,7 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
         # get next batch for merging
         curr_stride, off, old_dim, new_dim, mask = 1, 0, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
         if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape), tuple(), False # invalid mask
-        
+
       else: # mask can only be splitted if reshape doesn't cut across the mask.
         if ((l % (ns := next_stride) != 0 or r % ns != 0) and l // ns != (r - 1) // ns): return view.mask, tuple(), True
         new_mask.append((l % ns // curr_stride, (r - 1) % ns // curr_stride + 1))
@@ -67,7 +67,7 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
 
   for mask in r_masks:
     if mask != (0, 1): return ((0, 0),) * len(new_shape), tuple(), False
-    
+
   return tuple(reversed(new_mask)), tuple(offsets), False
 
 @dataclass(frozen=True)
