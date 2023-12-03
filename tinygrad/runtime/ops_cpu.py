@@ -1,6 +1,6 @@
 import numpy as np
 from typing import Callable, Dict, Tuple
-from tinygrad.helpers import dtypes, DType, flat_mv
+from tinygrad.helpers import dtypes, flat_mv
 from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, MovementOps, ReduceOps, TernaryOps, Op
 from tinygrad.device import Interpreted, Allocator
 
@@ -40,7 +40,7 @@ numpy_fxn_for_op: Dict[Op, Callable] = {
 }
 
 class NumpyAllocator(Allocator):
-  def _alloc(self, size:int, dtype:DType): return np.empty(size, dtype.np)
+  def _alloc(self, size:int): return np.empty(size, dtype=np.uint8)
   def as_buffer(self, src:np.ndarray) -> memoryview: return flat_mv(np.require(src, requirements='C').data)
   def copyin(self, dest:np.ndarray, src:memoryview): np.copyto(dest, np.frombuffer(src, dest.dtype).reshape(dest.shape))
   def copyout(self, dest:memoryview, src:np.ndarray): np.copyto(np.frombuffer(dest, src.dtype).reshape(src.shape), src)

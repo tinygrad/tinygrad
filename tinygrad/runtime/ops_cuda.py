@@ -5,7 +5,7 @@ import gpuctypes.cuda as cuda
 from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_c_var, pretty_ptx, cpu_time_execution, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.renderer.cuda import CUDARenderer
+from tinygrad.renderer.cstyle import CUDARenderer
 
 CUDA_INCLUDE_PATH = getenv("CUDA_INCLUDE_PATH", default="-I/usr/local/cuda/include")
 CUDACPU = getenv("CUDACPU") == 1
@@ -47,7 +47,7 @@ class CUDAProgram:
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, c_kernel_input_config)), enable=wait)
 
 class CUDAAllocator(LRUAllocator):
-  def _alloc(self, size, dtype): return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size * dtype.itemsize)))
+  def _alloc(self, size): return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
   def _free(self, opaque): check(cuda.cuMemFree_v2(opaque))
   def copyin(self, dest, src:memoryview): check(cuda.cuMemcpyHtoD_v2(dest, from_mv(src), len(src), None))
   def copyout(self, dest:memoryview, src): check(cuda.cuMemcpyDtoH_v2(from_mv(dest), src, len(dest)))
@@ -63,7 +63,7 @@ class CUDADevice(Compiled):
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), self.device))
       if self.device == 0: CUDADevice.default_arch_name = f"sm_{major.value}{minor.value}"
 
-    from tinygrad.runtime.graph.cuda import CUDAGraph
+    from tinygrad.features.graph.cuda import CUDAGraph
     super().__init__(CUDAAllocator() if not CUDACPU else MallocAllocator,
                      LinearizerOptions(supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
                      CUDARenderer, compile_cuda, CUDAProgram, graph=CUDAGraph if not CUDACPU else None)
