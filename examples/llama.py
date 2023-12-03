@@ -162,7 +162,7 @@ class LLaMa:
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
     if model_gen == "tiny":
-      model_path = LLaMa._prepare_model(model_path, tokenizer_path, model_gen, model_size, "safetensors")
+      model_path = LLaMa._download(model_path, tokenizer_path, model_gen, model_size, "safetensors")
 
     from sentencepiece import SentencePieceProcessor
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
@@ -206,7 +206,7 @@ class LLaMa:
     return output
 
   @staticmethod
-  def _prepare_model(model_path:Path, tokenizer_path:Path, model_gen, model_size:str, fmt:str):
+  def _download(model_path:Path, tokenizer_path:Path, model_gen, model_size:str, fmt:str):
     assert fmt == "safetensors" or fmt == "torch", "invalid weights file format to load"
     os.makedirs(model_path, exist_ok=True)
     if fmt == "safetensors":
