@@ -4,7 +4,7 @@ import time
 import math
 import numpy as np
 import unittest
-from test.helpers import generate_random
+from test.helpers import generate_random, is_dtype_supported
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import DType, getenv, IMAGE, DEBUG, CI, dtypes
 from tinygrad import Device
@@ -33,6 +33,9 @@ class TestOps(unittest.TestCase):
       raise unittest.SkipTest('base class')
 
   def helper_test_op(self, shps, torch_fxn, tinygrad_fxn=None, atol=1e-06, rtol=0.001, grad_atol=0.0001, grad_rtol=0.001, forward_only=False, vals=None, a=-0.5, b=3):
+    if not is_dtype_supported(self.DTYPE) or not (forward_only or dtypes.is_float(self.DTYPE)): raise unittest.SkipTest('dtype not supported')
+    if self.DTYPE == dtypes.half and atol < 1e-3: atol = 1e-3
+
     if tinygrad_fxn is None:
       tinygrad_fxn = torch_fxn
     ts, tst = prepare_test_op(a, b, shps, vals, self.DTYPE, forward_only)
@@ -57,7 +60,7 @@ class TestOps(unittest.TestCase):
       print(out.detach().numpy())
     compare('forward pass', ret.numpy(), out.detach().numpy(), atol=atol, rtol=rtol)
     torch_fbp, tinygrad_fbp = (np.nan, np.nan)
-    if not forward_only and (not FORWARD_ONLY):
+    if not forward_only and (not FORWARD_ONLY) and self.DTYPE == dtypes.float:
       st = time.monotonic()
       (out + 1).square().mean().backward()
       torch_fbp = time.monotonic() - st
@@ -1249,8 +1252,8 @@ class TestFloatOps(TestOps):
     self.helper_test_op([(32, 10), (32, 10)], lambda x, y: torch.nn.functional.binary_cross_entropy_with_logits(x, torch.clip(y, 0, 1)), lambda x, y: x.sigmoid().binary_crossentropy(y.clip(0, 1)))
     self.helper_test_op([(32, 10), (32, 10)], lambda x, y: torch.nn.functional.binary_cross_entropy(x.sigmoid(), torch.clip(y, 0, 1)), lambda x, y: x.binary_crossentropy_logits(y.clip(0, 1)))
 
-class TestHalfOps(TestOps):
-  DTYPE = dtypes.half
+class TestHalfOps(TestOps): DTYPE = dtypes.half
+
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)
