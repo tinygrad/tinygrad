@@ -5,7 +5,7 @@ from tinygrad.helpers import GlobalCounters, getenv
 from tinygrad.jit import TinyJit
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
-from tinygrad.ops import Device
+from tinygrad.device import Device
 from tinygrad.tensor import Tensor, dtypes
 from extra.lr_scheduler import OneCycleLR
 from extra.models.bert import Bert
@@ -15,6 +15,7 @@ from extra import dist
 if __name__ == "__main__":
   if getenv("DIST"):
     dist.preinit()
+    from extra.dist import OOB, collectives
 
 if getenv('HALF', 0):
   Tensor.default_type = dtypes.float16
@@ -92,8 +93,6 @@ def pretrain():
   optimizer = optim.LAMB(get_parameters(model), 1 / WARMUP_STEPS, eps=1e-6, wd=0.01, adam=True) # TODO: Keep in FP32?, Exclude LayerNorm, and bias from weight decay
   lr_scheduler = OneCycleLR(optimizer, MAX_LR, MAX_LR * WARMUP_STEPS, MAX_LR * 1e12, STEPS, WARMUP_STEPS / STEPS)
 
-  from extra.dist import OOB, collectives
-  assert OOB is not None or not getenv("DIST"), "OOB should be initialized"
   rank, world_size = getenv("RANK", 0), getenv("WORLD_SIZE", 1)
 
   @TinyJit
@@ -202,6 +201,7 @@ def train():
     assert BS % world_size == 0, f"batch size {BS} is not divisible by world size {world_size}"
     assert EVAL_BS % min(world_size, 5) == 0, f"evaluation batch size {EVAL_BS} is not divisible by world size {min(world_size, 5)}"
     assert EVAL_BS < 10000, "EVAL_BS exceeds eval sample (10000) count"
+    assert OOB is not None or not getenv("DIST"), "OOB should be initialized"
 
     dist.init_oob(world_size)
 
