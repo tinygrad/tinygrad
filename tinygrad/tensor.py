@@ -361,10 +361,7 @@ class Tensor:
     
     # inject dim=1 for None and collapse dim for int
     for dim in type_idx[None]: new_shape.insert(dim, 1)
-    for dim in reversed(type_idx[int]): 
-      injected_dims = sum(1 for d in type_idx[None] if dim > d)
-      new_shape.pop(dim+injected_dims)
-    print(f"{new_shape=} after")
+    for dim in reversed(type_idx[int]): new_shape.pop(dim + sum(1 for d in type_idx[None] if dim > d))
 
     ret = sliced_tensor.reshape(tuple(new_shape))
     return ret
