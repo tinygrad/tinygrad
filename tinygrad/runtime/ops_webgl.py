@@ -42,13 +42,14 @@ def reshape_texture(num, threshold):
   return (num, 1)
 
 class RawWebGLAllocator(Allocator):
-  def _alloc(self, size: int, dtype: DType):
-    assert dtype not in [dtypes.int8,dtypes.uint8,dtypes.int64,dtypes.uint64], f"dtype {dtype} not supported on WebGL"
+  def _alloc(self, size: int): return ctx.buffer(reserve=size)
+  def _cast_image(self, buf:moderngl.Buffer, dtype:DType, size:int) -> moderngl.Texture:
     tex = ctx.texture(reshape_texture(size, 4096), 1, dtype=dtype_map[dtype])
+    tex.write(buf)
     tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
     return tex
-  def copyin(self, dest:moderngl.Texture, src: memoryview): dest.write(src)
-  def copyout(self, dest:memoryview, src: moderngl.Texture):
+  def copyin(self, dest:moderngl.Buffer, src: memoryview): dest.write(src)
+  def copyout(self, dest:memoryview, src: moderngl.Buffer):
     src.read_into(dest)
     return dest
 

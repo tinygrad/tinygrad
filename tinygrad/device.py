@@ -72,6 +72,9 @@ class Buffer:
       self.size = row_pitch_items * dtype.shape[0]  # adjust the size to include the image padding
       self._real_buf = self.allocator.alloc(self.size * dtype.itemsize)
       self._buf = self.allocator._cast_image(self._real_buf, dtype, row_pitch_items * dtype.itemsize)
+    elif device == "WEBGL" and hasattr(self.allocator, "_cast_image"): # we need to convert the gl buffer to texture
+      self._real_buf = self.allocator.alloc(self.size * dtype.itemsize)
+      self._buf = self.allocator._cast_image(self._real_buf, dtype, self.size)
     else:
       self._buf = opaque if opaque is not None else self.allocator.alloc(size * dtype.itemsize)
     # TODO: mem_used for all devices
