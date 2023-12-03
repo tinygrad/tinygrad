@@ -358,7 +358,5 @@ class WGSLLanguage(CStyleLanguage):
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
-    if buf_dtype != var_dtype:
-      var_name = f"{self.type_map[buf_dtype]}({var_name})"
-    return f"{buf_name}[{idx}] = {var_name};"
+    return f"{buf_name}[{idx}] = {self.render_cast([var_name], buf_dtype) if var_dtype != buf_dtype else var_name};"
 WGSLRenderer = functools.partial(uops_to_cstyle, WGSLLanguage())
