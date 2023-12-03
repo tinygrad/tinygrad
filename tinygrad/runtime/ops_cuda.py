@@ -5,7 +5,7 @@ import gpuctypes.cuda as cuda
 from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_c_var, pretty_ptx, cpu_time_execution, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.renderer.cuda import CUDARenderer
+from tinygrad.renderer.cstyle import CUDARenderer
 
 CUDA_INCLUDE_PATH = getenv("CUDA_INCLUDE_PATH", default="-I/usr/local/cuda/include")
 CUDACPU = getenv("CUDACPU") == 1
@@ -63,7 +63,7 @@ class CUDADevice(Compiled):
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), self.device))
       if self.device == 0: CUDADevice.default_arch_name = f"sm_{major.value}{minor.value}"
 
-    from tinygrad.runtime.graph.cuda import CUDAGraph
+    from tinygrad.features.graph.cuda import CUDAGraph
     super().__init__(CUDAAllocator() if not CUDACPU else MallocAllocator,
                      LinearizerOptions(supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
                      CUDARenderer, compile_cuda, CUDAProgram, graph=CUDAGraph if not CUDACPU else None)
