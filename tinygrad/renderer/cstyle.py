@@ -313,10 +313,9 @@ class WGSLLanguage(CStyleLanguage):
     return f"var<workgroup> {name}: array<f32,{size}>;"
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
-    if math.isnan(x): val = "nan()"
-    elif math.isinf(x): val = ("-" if x < 0 else "") + "0x1.fffffep+127f"
-    else: val = f"({x}" + ("" if dtypes.is_int(var_dtype) else "f") + ")"
-    return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
+    if math.isnan(x): return "nan()"
+    elif math.isinf(x): return ("-" if x < 0 else "") + "0x1.fffffep+127f"
+    return f"({super().render_const(x, var_dtype)})"
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     local_size = local_size[::-1] if local_size else [1]
@@ -343,7 +342,5 @@ class WGSLLanguage(CStyleLanguage):
     return f"f32({super().render_load(output_dtype, buf_name, buf_dtype, idx, local)})"
 
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
-    if buf_dtype != var_dtype:
-      var_name = f"{self.type_map[buf_dtype]}({var_name})"
-    return f"{buf_name}[{idx}] = {var_name};"
+    return f"{buf_name}[{idx}] = {self.render_cast([var_name], buf_dtype) if var_dtype != buf_dtype else var_name};"
 WGSLRenderer = functools.partial(uops_to_cstyle, WGSLLanguage())
