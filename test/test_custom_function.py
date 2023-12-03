@@ -11,9 +11,6 @@ from tinygrad.helpers import prod, dtypes
 from tinygrad.lazy import Buffer, create_lazybuffer
 from tinygrad.device import CompiledASTRunner, Device
 from tinygrad.shape.shapetracker import ShapeTracker
-import pytest
-
-pytestmark = pytest.mark.webgpu
 
 # we don't always have GPU support, so the type signature is the abstract CompiledBuffer instead of GPUBuffer
 def atan2_gpu(ret:Buffer, a:Buffer, b:Buffer):
