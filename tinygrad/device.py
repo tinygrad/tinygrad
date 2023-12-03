@@ -141,15 +141,17 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
   def alloc(self, size:int):
     if len(c := self.cache[size]): return c.pop()
     try:
-      return self._alloc(size)
+      return super().alloc(size)
     except MemoryError:
       self.free_cache()
-      return self._alloc(size)
+      return super().alloc(size)
   def free_cache(self):
     for opaques in self.cache.values():
       for opaque in opaques: self._free(opaque)
       opaques.clear()
-  def free(self, opaque:Any, size:int): self.cache[size].append(opaque)
+  def free(self, opaque:Any, size:int):
+    if getenv("LRU", 1): self.cache[size].append(opaque)
+    else: self._free(opaque)
 
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int): return (ctypes.c_uint8 * size)()
