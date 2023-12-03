@@ -46,9 +46,8 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
     if old_dim >= new_dim: # need to split mask.
       offsets.append(off)
 
-      if old_dim == next_stride: # simply copy the mask
+      if old_dim == next_stride: # simply copy the mask and get next batch for merging
         new_mask.append((l // curr_stride, (r - 1) // curr_stride + 1))
-        # get next batch for merging
         curr_stride, off, old_dim, new_dim, mask = 1, 0, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
         if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape), tuple(), False # invalid mask
 
@@ -61,11 +60,10 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
       next_mask = next(r_masks, (0, 1))
       # combine if the mask can unfold continuously
       if (l != 0 or r != old_dim) and next_mask[1] - next_mask[0] != 1: return view.mask, tuple(), True
-      # offset due to combining dims with zero stride & range one mask.
       if next_mask != (0, 1) and mask != (0, 1) and (next_mask[1] - next_mask[0] == 1): off += next_mask[0] * old_dim
       mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), old_dim * next(r_shape, 1)
 
-  for mask in r_masks:
+  for mask in r_masks: # if the old shape has leading 1s, need to make sure their mask is (0,1)
     if mask != (0, 1): return ((0, 0),) * len(new_shape), tuple(), False
 
   return tuple(reversed(new_mask)), tuple(offsets), False
