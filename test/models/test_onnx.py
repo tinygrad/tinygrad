@@ -7,6 +7,9 @@ import onnx
 from extra.onnx import get_run_onnx
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import CI, fetch, temp
+import pytest
+
+pytestmark = [pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
 
 def run_onnx_torch(onnx_model, inputs):
   import torch
