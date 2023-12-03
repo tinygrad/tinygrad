@@ -43,7 +43,7 @@ def benchmark(mnm, nm, fxn):
 
 #BASE = pathlib.Path(__file__).parents[2] / "weights" / "onnx"
 BASE = pathlib.Path("/tmp/onnx")
-def benchmark_model(m, validate_outs=False):
+def benchmark_model(m, devices, validate_outs=False):
   torch.manual_seed(1)
   global open_csv, CSV
   CSV = {"model": m}
@@ -61,7 +61,7 @@ def benchmark_model(m, validate_outs=False):
   # print input names
   if DEBUG >= 2: print([inp.name for inp in onnx_model.graph.input if inp.name not in excluded])
 
-  for device in [Device.DEFAULT, "CLANG"]: # + (["CUDA"] if torch.cuda.is_available() else []):
+  for device in devices:
     Device.DEFAULT = device
     inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
     tinygrad_model = get_run_onnx(onnx_model)
@@ -121,6 +121,7 @@ def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
     else: np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
 
 if __name__ == "__main__":
-  if getenv("MODEL", "") != "": benchmark_model(getenv("MODEL", ""), True)
+  devices = [Device.DEFAULT, "CLANG"]
+  if getenv("MODEL", "") != "": benchmark_model(getenv("MODEL", ""), devices, True)
   else:
-    for m in MODELS: benchmark_model(m, True)
+    for m in MODELS: benchmark_model(m, devices, True)
