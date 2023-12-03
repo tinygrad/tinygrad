@@ -30,7 +30,7 @@ def remove_single_scalar_curly_braces(ptx_code):
   return '\n'.join([re.sub(r'\{\s*(%\w+)\s*\}', r'\1', line) for line in ptx_code.split('\n')])
 
 def render_const(args,dtype:DType):
-  return (('-' if args<0 else '') + 'tl.where(1,float("inf"),0)') if math.isinf(args) else ('tl.where(1,float("nan"),0)' if math.isnan(args) else f"{int(args)}" if dtypes.is_int(dtype) else f"{args}")
+  return (('-' if args<0 else '') + 'tl.where(1,float("inf"),0)') if math.isinf(args) else ('tl.where(1,float("nan"),0)' if math.isnan(args) else f"{int(args)}" if dtypes.is_int(dtype) else str(args))
 
 def render_cast(x:str, dtype:DType):
   return f"{x}.to({triton_dtypes[dtype]})"
