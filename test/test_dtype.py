@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from extra.helpers import generate_random, is_dtype_supported
+from test.helpers import generate_random, is_dtype_supported
 from tinygrad.helpers import DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, temp
 from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes

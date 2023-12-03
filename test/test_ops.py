@@ -4,6 +4,7 @@ import time
 import math
 import numpy as np
 import unittest
+from test.helpers import generate_random
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import DType, getenv, IMAGE, DEBUG, CI, dtypes
 from tinygrad import Device
@@ -15,16 +16,19 @@ if CI:
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
 
+dtypes_to_torch = { dtypes.bool: torch.bool, dtypes.int8: torch.int8, dtypes.int16: torch.int16, dtypes.int32: torch.int32, dtypes.int64: torch.int64, dtypes.uint8: torch.uint8, dtypes.float16: torch.float16, dtypes.float32: torch.float32, dtypes.float64: torch.float64}
 def prepare_test_op(a, b, shps, vals, dtype:DType, forward_only=False):
   torch.manual_seed(0)
   np.random.seed(0)
-  if shps is None: ts = [torch.tensor(x, requires_grad=(not forward_only)) for x in vals]
-  else: ts = [torch.tensor((np.random.random(size=x) + a) * b, requires_grad=(not forward_only), dtype=torch.float32) for x in shps]
+  if shps is None: ts = [torch.tensor(x, requires_grad=(not forward_only), dtype=dtypes_to_torch[dtype]) for x in vals]
+  else: ts = [torch.tensor((generate_random(dtype, size=x) + a) * b, requires_grad=(not forward_only), dtype=dtypes_to_torch[dtype]) for x in shps]
   tst = [Tensor(x.detach().numpy(), requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
   return ts, tst
 
 class TestOps(unittest.TestCase):
   DTYPE: Any = None
+  def setUp(self):
+    if self.DTYPE is None: raise unittest.SkipTest("base class")
   def helper_test_op(self, shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=3):
     if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
     ts, tst = prepare_test_op(a, b, shps, vals, self.DTYPE, forward_only)
