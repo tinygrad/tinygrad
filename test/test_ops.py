@@ -1,3 +1,4 @@
+from typing import Any
 import torch
 import time
 import math
@@ -23,9 +24,14 @@ def prepare_test_op(a, b, shps, vals, dtype, forward_only=False):
   return ts, tst
 
 class TestOps(unittest.TestCase):
+  DTYPE: Any = None
+  @classmethod
+  def setUpClass(cls):
+    if cls.DTYPE is None: raise unittest.SkipTest("Base class")
+
   def helper_test_op(self, shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3, forward_only=False, vals=None, a=-0.5, b=3):
     if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
-    ts, tst = prepare_test_op(a, b, shps, vals, forward_only)
+    ts, tst = prepare_test_op(a, b, shps, vals, self.DTYPE, forward_only)
 
     st = time.monotonic()
     out = torch_fxn(*ts)
@@ -67,7 +73,7 @@ class TestOps(unittest.TestCase):
 
   def helper_test_exception(self, shps, torch_fxn, tinygrad_fxn, expected, exact=False, vals=None, a=-0.5, b=3):
     if getenv("CUDACPU"): self.skipTest('helper_test_exception fails in CUDACPU')
-    ts, tst = prepare_test_op(a, b, shps, vals)
+    ts, tst = prepare_test_op(a, b, shps, vals, self.DTYPE)
     with self.assertRaises(expected) as torch_cm:
       torch_fxn(*ts)
     with self.assertRaises(expected) as tinygrad_cm:
@@ -1297,6 +1303,9 @@ class TestOps(unittest.TestCase):
     self.helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy_with_logits(x,torch.clip(y,0,1)), lambda x,y: x.binary_crossentropy_logits(y.clip(0,1)))
     self.helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy_with_logits(x,torch.clip(y,0,1)), lambda x,y: x.sigmoid().binary_crossentropy(y.clip(0,1)))
     self.helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy(x.sigmoid(),torch.clip(y,0,1)), lambda x,y: x.binary_crossentropy_logits(y.clip(0,1)))
+
+class TestFloatOps(TestOps):
+  DTYPE = dtypes.float
 
 if __name__ == '__main__':
   np.random.seed(1337)
