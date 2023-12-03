@@ -131,13 +131,12 @@ class TestJit(unittest.TestCase):
     assert output2 != expect2
     assert_jit_cache_len(f, 1)
 
-  @unittest.skip("random isn't working in JIT")
   def test_jit_random_regen(self):
     def f(a, b):
       rn = Tensor.randn(*a.shape)
       return ((a+b)*rn).realize()
-    a = Tensor.randn(10, 10)
-    b = Tensor.randn(10, 10)
+    a = Tensor.randn(10, 10).realize()  # realize these before resetting the random seed
+    b = Tensor.randn(10, 10).realize()
 
     Tensor._seed = 1234
     jf = TinyJit(f)
