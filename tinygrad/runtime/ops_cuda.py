@@ -44,7 +44,7 @@ class CUDAProgram:
     if not CUDACPU: check(cuda.cuModuleUnload(self.module))
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
-    check(cuda.cuCtxSetCurrent(self.device.context))
+    if not CUDACPU: check(cuda.cuCtxSetCurrent(self.device.context))
     c_kernel_input_config = encode_args_cuda_style(args, cuda.CUdeviceptr_v2, (1,2,0))[0] if not CUDACPU else args
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, c_kernel_input_config)), enable=wait)
 
