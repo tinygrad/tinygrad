@@ -3,7 +3,7 @@ from typing import Tuple
 import gpuctypes.hip as hip
 from tinygrad.helpers import init_c_var
 from tinygrad.runtime.ops_hip import check, hip_time_execution
-from tinygrad.runtime.graph.cuda import CUDAGraph
+from tinygrad.features.graph.cuda import CUDAGraph
 
 class HIPGraph(CUDAGraph):
   def __del__(self):
