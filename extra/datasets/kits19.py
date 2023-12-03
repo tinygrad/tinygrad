@@ -1,13 +1,13 @@
 import random
 import functools
 from pathlib import Path
-import requests
 import numpy as np
 import nibabel as nib
 from scipy import signal
 import torch
 import torch.nn.functional as F
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import fetch
 
 BASEDIR = Path(__file__).parent / "kits19" / "data"
 
@@ -25,8 +25,8 @@ mv kits extra/datasets
 
 @functools.lru_cache(None)
 def get_val_files():
-  data = requests.get("https://raw.githubusercontent.com/mlcommons/training/master/image_segmentation/pytorch/evaluation_cases.txt")
-  return sorted([x for x in BASEDIR.iterdir() if x.stem.split("_")[-1] in data.text.split("\n")])
+  data = fetch("https://raw.githubusercontent.com/mlcommons/training/master/image_segmentation/pytorch/evaluation_cases.txt").read_text()
+  return sorted([x for x in BASEDIR.iterdir() if x.stem.split("_")[-1] in data.split("\n")])
 
 def load_pair(file_path):
   image, label = nib.load(file_path / "imaging.nii.gz"), nib.load(file_path / "segmentation.nii.gz")

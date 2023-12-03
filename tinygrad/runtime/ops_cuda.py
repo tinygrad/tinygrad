@@ -5,7 +5,7 @@ import gpuctypes.cuda as cuda
 from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_c_var, pretty_ptx, cpu_time_execution, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.renderer.cuda import CUDARenderer
+from tinygrad.renderer.cstyle import CUDARenderer
 
 CUDA_INCLUDE_PATH = getenv("CUDA_INCLUDE_PATH", default="-I/usr/local/cuda/include")
 CUDACPU = getenv("CUDACPU") == 1
@@ -23,20 +23,21 @@ def cu_time_execution(cb, enable=False) -> Optional[float]: return time_executio
 def compile_cuda(prg) -> bytes: return compile_cuda_style(prg, [f'--gpu-architecture={CUDADevice.default_arch_name}', CUDA_INCLUDE_PATH], cuda.nvrtcProgram, cuda.nvrtcCreateProgram, cuda.nvrtcCompileProgram, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check)
 
 class CUDAProgram:
-  def __init__(self, name:str, prg:bytes, bufs:int, vars:int=0):
-    if DEBUG >= 5: print(pretty_ptx(prg.decode('utf-8')))
+  def __init__(self, name:str, lib:bytes):
+    self.name, self.lib = name, lib
+    if DEBUG >= 5: print(pretty_ptx(lib.decode('utf-8')))
     if DEBUG >= 6:
       try:
-        fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(prg).hexdigest()}").as_posix()
-        with open(fn + ".ptx", "wb") as f: f.write(prg)
+        fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
+        with open(fn + ".ptx", "wb") as f: f.write(lib)
         subprocess.run(["ptxas", f"-arch={CUDADevice.default_arch_name}", "-o", fn, fn+".ptx"], check=True)
         print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
       except Exception as e: print("failed to generate SASS", str(e))
 
     if not CUDACPU:
-      self.module = init_c_var(cuda.CUmodule(), lambda x: check(cuda.cuModuleLoadData(ctypes.byref(x), prg)))
+      self.module = init_c_var(cuda.CUmodule(), lambda x: check(cuda.cuModuleLoadData(ctypes.byref(x), lib)))
       check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
-    self.prg = prg
+    self.prg = prg if not CUDACPU else lib
 
   def __del__(self):
     if not CUDACPU: check(cuda.cuModuleUnload(self.module))
@@ -46,9 +47,7 @@ class CUDAProgram:
     return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, c_kernel_input_config)), enable=wait)
 
 class CUDAAllocator(LRUAllocator):
-  def _alloc(self, size, dtype):
-    if size == 0: return None
-    return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size * dtype.itemsize)))
+  def _alloc(self, size): return init_c_var(cuda.CUdeviceptr(), lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
   def _free(self, opaque): check(cuda.cuMemFree_v2(opaque))
   def copyin(self, dest, src:memoryview): check(cuda.cuMemcpyHtoD_v2(dest, from_mv(src), len(src), None))
   def copyout(self, dest:memoryview, src): check(cuda.cuMemcpyDtoH_v2(from_mv(dest), src, len(dest)))
@@ -64,7 +63,7 @@ class CUDADevice(Compiled):
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), self.device))
       if self.device == 0: CUDADevice.default_arch_name = f"sm_{major.value}{minor.value}"
 
-    from tinygrad.runtime.graph.cuda import CUDAGraph
+    from tinygrad.features.graph.cuda import CUDAGraph
     super().__init__(CUDAAllocator() if not CUDACPU else MallocAllocator,
                      LinearizerOptions(supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
                      CUDARenderer, compile_cuda, CUDAProgram, graph=CUDAGraph if not CUDACPU else None)

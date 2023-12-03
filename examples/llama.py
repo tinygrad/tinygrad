@@ -96,6 +96,10 @@ MODEL_PARAMS = {
     "1B": {
       "args": {"dim": 2048, "n_layers": 22, "n_heads": 32, "n_kv_heads": 4, "norm_eps": 1e-05, "vocab_size": 32000, "hidden_dim": 5632},
       "files": 1,
+    },
+    "1B-Chat": {
+      "args": {"dim": 2048, "n_layers": 22, "n_heads": 32, "n_kv_heads": 4, "norm_eps": 1e-05, "vocab_size": 32003, "hidden_dim": 5632},
+      "files": 1,
     }
   }
 }
@@ -148,7 +152,6 @@ class LLaMa:
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
     params = MODEL_PARAMS[model_gen][model_size]
-
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
 
@@ -170,7 +173,7 @@ class LLaMa:
 
   def __init__(self, model, tokenizer):
     self.model = model
-    self.tokenizer = tokenizer
+    self.tokenizer: SentencePieceProcessor = tokenizer
 
   def greedy_until(self, prompt:str, until, max_length, temperature):
     toks = [self.tokenizer.bos_id()] + self.tokenizer.encode(prompt)

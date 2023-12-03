@@ -9,6 +9,8 @@ from tinygrad.runtime.ops_metal import MetalDevice
 
 class MetalGraph:
   def __init__(self, device:MetalDevice, jit_cache: List[JitItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
+    if not all(isinstance(ji.prg, CompiledASTRunner) for ji in jit_cache): raise GraphException
+
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
     self.op_estimate, self.mem_estimate = get_jit_stats(jit_cache)
@@ -24,7 +26,7 @@ class MetalGraph:
     self.icb = self.device.device.newIndirectCommandBufferWithDescriptor_maxCommandCount_options_(icb_descriptor, len(self.jit_cache), Metal.MTLResourceOptions(0))
     if self.icb is None: raise GraphException("create indirect command buffer failed, does your system support this?")
 
-    if len(var_vals): self.int_buf = self.device.allocator.alloc(len(var_vals), dtypes.int32)
+    if len(var_vals): self.int_buf = self.device.allocator.alloc(len(var_vals)*dtypes.int32.itemsize)
     read_resources, write_resources = [], []
     for j,ji in enumerate(self.jit_cache):
       prg: CompiledASTRunner = cast(CompiledASTRunner, ji.prg)

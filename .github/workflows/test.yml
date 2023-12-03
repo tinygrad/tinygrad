@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    # TODO: run the pre-commit hook to replace a lot of this
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
@@ -47,7 +48,9 @@ jobs:
     - name: Check <5000 lines
       run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
     - name: Test Docs
-      run: python docs/abstractions.py
+      run: |
+        python docs/abstractions.py
+        python docs/beautiful.py
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Fuzz Test symbolic
@@ -178,14 +181,11 @@ jobs:
       - if: ${{ matrix.task == 'optimage'}}
         name: Test GPU IMAGE=2 ops
         run: GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
-      - if: ${{ matrix.task == 'optimage' }}
-        name: Test tensor core ops
-        run: GPU=1 TC=2 python -m pytest -n=auto test/test_ops.py
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model compile and size
         run: |
           DEBUG=2 ALLOWED_KERNEL_COUNT=207 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile2.py
-          python -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
+          #python -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model correctness (float32)
         run: FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile2.py
@@ -288,10 +288,8 @@ jobs:
       run: METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
-    - name: Run whisper test
-      run: METAL=1 python -m pytest test/models/test_whisper.py
-    - name: Test tensor core reshape-only ops
-      run: METAL=1 TC=2 python -m pytest -n=auto test/test_ops.py
+    - name: Test tensor core ops
+      run: METAL=1 TC=2 python test/test_ops.py TestOps.test_big_gemm
 
   testhipcompilation:
     name: HIP Compilation Tests

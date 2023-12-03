@@ -8,7 +8,7 @@ with open(directory / 'README.md', encoding='utf-8') as f:
   long_description = f.read()
 
 setup(name='tinygrad',
-      version='0.7.0',
+      version='0.8.0',
       description='You like pytorch? You like micrograd? You love tinygrad! <3',
       author='George Hotz',
       license='MIT',
@@ -19,7 +19,7 @@ setup(name='tinygrad',
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
       ],
-      install_requires=["numpy", "tqdm", "pyopencl", "gpuctypes",
+      install_requires=["numpy", "tqdm", "gpuctypes",
                         "pyobjc-framework-Metal; platform_system=='Darwin'",
                         "pyobjc-framework-libdispatch; platform_system=='Darwin'"],
       python_requires='>=3.8',
@@ -35,7 +35,6 @@ setup(name='tinygrad',
             "pre-commit",
             "ruff",
             "types-tqdm",
-            "types-requests",
         ],
         'testing': [
             "torch",
@@ -52,7 +51,6 @@ setup(name='tinygrad',
             "sentencepiece",
             "tiktoken",
             "librosa",
-            "requests",
             "networkx",
         ]
       },
