@@ -1,24 +1,10 @@
 import unittest
 import numpy as np
-from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX, temp
+from extra.helpers import generate_random, is_dtype_supported
+from tinygrad.helpers import DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, temp
 from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
-
-def is_dtype_supported(dtype: DType):
-  # for GPU, cl_khr_fp16 isn't supported (except now we don't need it!)
-  # for LLVM, it segfaults because it can't link to the casting function
-  if dtype == dtypes.half: return not (CI and Device.DEFAULT in ["GPU", "LLVM"]) and Device.DEFAULT != "WEBGPU" and getenv("CUDACPU") != 1
-  if dtype == dtypes.bfloat16: return False # numpy doesn't support bf16, tested separately in TestBFloat16DType
-  if dtype == dtypes.float64: return Device.DEFAULT not in ["WEBGPU", "METAL"] and (not OSX and Device.DEFAULT == "GPU")
-  if dtype in [dtypes.int8, dtypes.uint8]: return Device.DEFAULT not in ["WEBGPU"]
-  if dtype in [dtypes.int16, dtypes.uint16]: return Device.DEFAULT not in ["WEBGPU", "TORCH"]
-  if dtype == dtypes.uint32: return Device.DEFAULT not in ["TORCH"]
-  if dtype in [dtypes.int64, dtypes.uint64]: return Device.DEFAULT not in ["WEBGPU", "TORCH"]
-  if dtype == dtypes.bool:
-   # host-shareablity is a requirement for storage buffers, but 'bool' type is not host-shareable
-    if Device.DEFAULT == "WEBGPU": return False
-  return True
 
 def get_available_cast_dtypes(dtype: DType) -> List[DType]: return [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_")] # dont cast internal dtypes
 
@@ -50,7 +36,7 @@ class TestDType(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     if not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
-    cls.DATA = np.random.randint(0, 100, size=10, dtype=cls.DTYPE.np).tolist() if dtypes.is_int(cls.DTYPE) else np.random.choice([True, False], size=10).tolist() if cls.DTYPE == dtypes.bool else np.random.uniform(0, 1, size=10).tolist()
+    cls.DATA = generate_random(cls.DTYPE)
   def setUp(self):
     if self.DTYPE is None: raise unittest.SkipTest("base class")
 
