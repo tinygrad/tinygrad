@@ -5,7 +5,7 @@ import gpuctypes.cuda as cuda
 from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_c_var, pretty_ptx, cpu_time_execution, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.renderer.cuda import CUDARenderer
+from tinygrad.renderer.cstyle import CUDARenderer
 
 CUDA_INCLUDE_PATH = getenv("CUDA_INCLUDE_PATH", default="-I/usr/local/cuda/include")
 CUDACPU = getenv("CUDACPU") == 1
