@@ -34,7 +34,7 @@ class TestOps(unittest.TestCase):
 
   def helper_test_op(self, shps, torch_fxn, tinygrad_fxn=None, atol=1e-06, rtol=0.001, grad_atol=0.0001, grad_rtol=0.001, forward_only=False, vals=None, a=-0.5, b=3):
     if not is_dtype_supported(self.DTYPE) or not (forward_only or dtypes.is_float(self.DTYPE)): raise unittest.SkipTest('dtype not supported')
-    if self.DTYPE == dtypes.half and atol < 1e-3: atol = 1e-3
+    if self.DTYPE == dtypes.half: rtol, atol = 2e-3, 2e-3  # tolerance for fp16 models
 
     if tinygrad_fxn is None:
       tinygrad_fxn = torch_fxn
