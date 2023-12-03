@@ -181,6 +181,31 @@ def rand_crop(image, label, patch_size, oversampling):
     image, label, cords = _rand_crop(image, label, patch_size)
   return image, label
 
+def rand_flip(image, label, axis=[1,2,3]):
+  prob = 1/len(axis)
+  def _flip(image, label, axis):
+    return np.flip(image, axis=axis).copy(), np.flip(label, axis=axis).copy()
+  for ax in axis:
+    if random.random() < prob:
+      image, label = _flip(image, label, ax)
+  return image, label
+
+def cast(image, label, types=(np.float32, np.uint8)):
+  return image.astype(types[0]), label.astype(types[1])
+
+def rand_brightness(image, label, factor=0.3, prob=0.1):
+  if random.random() < prob:
+    fac = np.random.uniform(low=1.0-factor, high=1.0+factor, size=1)
+    image = (image * (1 + fac)).astype(image.dtype)
+  return image, label
+
+def gaussian_noise(image, label, mean=0.0, std=0.1, prob=0.1):
+  if random.random() < prob:
+    scale = np.random.uniform(low=0.0, high=std)
+    noise = np.random.normal(loc=mean, scale=scale, size=image.shape).astype(image.dtype)
+    image += noise
+  return image, label
+
 def get_batch(files, batch_size=32, patch_size=(128, 128, 128), oversampling=0.25, shuffle=True):
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
@@ -188,6 +213,9 @@ def get_batch(files, batch_size=32, patch_size=(128, 128, 128), oversampling=0.2
     bX, bY = [], []
     for _ in range(batch_size):
       X,Y = preprocess(file)
+      X,Y = rand_flip(X,Y)
+      X,Y = rand_brightness(X,Y)
+      X,Y = gaussian_noise(X,Y)
       X,Y = rand_crop(X, Y, patch_size, oversampling)
       bX.append(X)
       bY.append(Y)

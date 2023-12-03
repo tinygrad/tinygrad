@@ -74,7 +74,7 @@ def train_unet3d():
       for k, v in weights.items():
         weights[k] = v.cpu().half()
       load_state_dict(mdl, weights)
-    print("Model params: {:,.0f}".format(sum([p.numel() for p in get_parameters(mdl)])))
+    print("UNet3D params: {:,.0f}".format(sum([p.numel() for p in get_parameters(mdl)])))
 
     from tinygrad.jit import TinyJit
     mdl_run = TinyJit(lambda x: mdl(x).realize())
@@ -130,7 +130,7 @@ def train_unet3d():
         scheduler.step()
 
       if len(cumulative_loss):
-        print(f'  epoch {epoch} | loss: {sum(cumulative_loss).numpy() / len(cumulative_loss)}')
+        print(f'  epoch {epoch} | loss: {(sum(cumulative_loss).numpy() / len(cumulative_loss)):.6f}')
 
       if epoch == next_eval_at:
         next_eval_at += conf.eval_every
