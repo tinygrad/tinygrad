@@ -51,6 +51,7 @@ class TestCopySpeed(unittest.TestCase):
         t.to('cpu').realize()
 
   @unittest.skipIf(CI, "CI doesn't have 6 GPUs")
+  @unittest.skipIf(Device.DEFAULT != "GPU", "only test this on GPU")
   def testCopyCPUto6GPUs(self):
     from tinygrad.runtime.ops_gpu import CLDevice
     if len(CLDevice.device_ids) != 6: raise unittest.SkipTest("computer doesn't have 6 GPUs")
