@@ -4,7 +4,6 @@ import unittest
 import torch
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import Profiling
-import pytest
 
 class TestConvSpeed(unittest.TestCase):
 
