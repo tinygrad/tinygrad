@@ -6,8 +6,8 @@ from tinygrad.helpers import dtypes
 
 class TestFlopCounter(unittest.TestCase):
   def setUp(self):
-    self.buf0 = LazyOp(BufferOps.MEM, (), MemBuffer(1, dtypes.float32, ShapeTracker.from_shape((4,))))
-    self.buf1 = LazyOp(BufferOps.MEM, (), MemBuffer(2, dtypes.float32, ShapeTracker.from_shape((4,))))
+    self.buf0 = LazyOp(BufferOps.LOAD, (), MemBuffer(1, dtypes.float32, ShapeTracker.from_shape((4,))))
+    self.buf1 = LazyOp(BufferOps.LOAD, (), MemBuffer(2, dtypes.float32, ShapeTracker.from_shape((4,))))
 
   def test_flops_add(self):
     op0 = LazyOp(BinaryOps.ADD, (self.buf0,self.buf1,), None)

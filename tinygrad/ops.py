@@ -10,14 +10,14 @@ from dataclasses import dataclass
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
 # NOTE: MOD, CMPLT don't have to be implemented on vectors, just scalars
 # NOTE: rdna3 only has RECIP and not DIV. DIV and POW are on the chopping block
-class UnaryOps(Enum): NOOP = auto(); EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
+class UnaryOps(Enum): EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
 class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto() # noqa: E702
 class TernaryOps(Enum): MULACC = auto(); WHERE = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
-class BufferOps(Enum): MEM = auto(); CONST = auto(); FROM_UNDERLYING = auto() # noqa: E702
+class BufferOps(Enum): LOAD = auto(); CONST = auto(); STORE = auto() # noqa: E702
 # Ops below this line are not allowed in ASTs
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
-class LoadOps(Enum): EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(); CONTIGUOUS = auto(); CUSTOM = auto() # noqa: E702
+class LoadOps(Enum): EMPTY = auto(); CONST = auto(); FROM = auto(); CONTIGUOUS = auto(); CUSTOM = auto() # noqa: E702
 
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps, BufferOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[TernaryOps], Type[BufferOps]]
@@ -61,9 +61,9 @@ class LazyOp:
   def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
 
   def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
-    assert self.op in BinaryOps or self.op in UnaryOps or self.op in TernaryOps
+    assert isinstance(self.op, (UnaryOps, BinaryOps, TernaryOps))
     srcs = [z.replace_with_movement_ops(ops) for z in self.src]
-    return srcs[0].e(self.op, *srcs[1:], arg=self.arg)   # type: ignore
+    return srcs[0].e(self.op, *srcs[1:], arg=self.arg)
 
   @property
   def st(self): raise NotImplementedError
@@ -89,18 +89,18 @@ class FlopCounter:
   flops: int
   mem: Dict[int, int]
   @property
-  def mem_estimate(self): return sum(self.mem.values()) + self.dtype.itemsize*prod(self.shape)
+  def mem_estimate(self): return sum(self.mem.values())
   def consume_flops(self):
     self.flops, ret = 0, self.flops
     return ret
 
 InterpretedFlopCounter: Dict[Op, Callable] = {
-  BufferOps.MEM: lambda arg: FlopCounter(arg.st.shape, arg.dtype, 0, {arg.idx: arg.dtype.itemsize*arg.st.size()}), BufferOps.CONST: lambda arg: FlopCounter(arg.st.shape, arg.dtype, 0, {}),
-  UnaryOps.CAST: lambda self,arg: FlopCounter(self.shape, arg[0], self.consume_flops(), self.mem),   # cast uses no flops
+  BufferOps.LOAD: lambda arg: FlopCounter(arg.st.shape, arg.dtype, 0, {arg.idx: arg.dtype.itemsize*arg.st.size()}), BufferOps.CONST: lambda arg: FlopCounter(arg.st.shape, arg.dtype, 0, {}),
+  BufferOps.STORE: lambda self,arg: FlopCounter(arg.st.shape, arg.dtype, self.consume_flops(), {**self.mem, arg.idx: arg.dtype.itemsize*arg.st.size()}), UnaryOps.CAST: lambda self,arg: FlopCounter(self.shape, arg[0], self.consume_flops(), self.mem),   # cast uses no flops
   **{op:lambda self: FlopCounter(self.shape, self.dtype, self.consume_flops() + prod(self.shape), self.mem) for op in UnaryOps if op != UnaryOps.CAST},
   **{op:lambda self,y: FlopCounter(self.shape, max(self.dtype, y.dtype), self.consume_flops() + y.consume_flops() + prod(self.shape), {**self.mem, **y.mem}) for op in BinaryOps},
   **{op:lambda self,new_shape: FlopCounter(new_shape, self.dtype, self.consume_flops() + prod(self.shape), self.mem) for op in ReduceOps},
-  TernaryOps.WHERE: lambda self,y,z: FlopCounter(self.shape, y.dtype, self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape), {**self.mem, **y.mem, **z.mem})}
+  TernaryOps.WHERE: lambda self,y,z: FlopCounter(self.shape, max(y.dtype, z.dtype), self.consume_flops() + y.consume_flops() + z.consume_flops() + prod(self.shape), {**self.mem, **y.mem, **z.mem})}
 
 @functools.lru_cache(None)
 def get_lazyop_info(ast:LazyOp) -> FlopCounter:

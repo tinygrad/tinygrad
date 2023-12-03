@@ -48,7 +48,7 @@ class View:
     offset = sum([s * x[0] for s, x in zip(self.strides,arg)])
     if self.mask:
       # move the old mask
-      nmask = tuple([(max(mx-ax, 0), min(my-ax, ay-ax)) for (mx,my),(ax,ay) in zip(self.mask, arg)])
+      nmask = tuple([(max(0, min(mx-ax,ay-ax)), max(0, min(my-ax,ay-ax))) for (mx,my),(ax,ay) in zip(self.mask, arg)])
       # merge the masks if we have two
       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
     shape = [y-x for x,y in arg]
@@ -107,6 +107,8 @@ class View:
     if all_int(self.shape):
       assert all(isinstance(s, (int, Variable)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
       if prod(self.shape) != prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape]): raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
+
+    if new_shape == () and self.mask and any(mx==my for (mx,my) in self.mask): return None
 
     # after the asserts, it's okay to check contiguous
     if self.contiguous: return View.create(new_shape)

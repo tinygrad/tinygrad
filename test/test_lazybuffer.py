@@ -7,6 +7,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 
 class TestLazyBuffer(unittest.TestCase):
+  @unittest.skip("it doesn't work like this anymore")
   def test_fromcpu_buffer_sharing(self):
     a = np.arange(8)
     assert LazyBuffer.fromCPU(a).realized._buf is a

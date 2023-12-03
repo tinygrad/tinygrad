@@ -3,14 +3,12 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import dtypes
-from tinygrad.runtime.ops_disk import RawDiskBuffer
+from tinygrad.helpers import fetch, temp
 from tinygrad.helpers import Timing
-from extra.utils import fetch_as_file, temp
 
 def compare_weights_both(url):
   import torch
-  fn = fetch_as_file(url)
+  fn = fetch(url)
   tg_weights = get_state_dict(torch_load(fn))
   torch_weights = get_state_dict(torch.load(fn), tensor_type=torch.Tensor)
   assert list(tg_weights.keys()) == list(torch_weights.keys())
@@ -41,11 +39,6 @@ class TestRawDiskBuffer(unittest.TestCase):
       with Timing("copy in ", lambda et_ns: f" {test_size/et_ns:.2f} GB/s"):
         f.readinto(tst)
 
-  def test_mmap_read_speed(self):
-    db = RawDiskBuffer(test_size, dtype=dtypes.uint8, device=test_fn)
-    tst = np.empty(test_size, np.uint8)
-    with Timing("copy in ", lambda et_ns: f" {test_size/et_ns:.2f} GB/s"):
-      np.copyto(tst, db.toCPU())
 @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu doesn't support uint8 datatype")
 class TestSafetensors(unittest.TestCase):
   def test_real_safetensors(self):
@@ -88,7 +81,7 @@ class TestSafetensors(unittest.TestCase):
 
   def test_huggingface_enet_safetensors(self):
     # test a real file
-    fn = fetch_as_file("https://huggingface.co/timm/mobilenetv3_small_075.lamb_in1k/resolve/main/model.safetensors")
+    fn = fetch("https://huggingface.co/timm/mobilenetv3_small_075.lamb_in1k/resolve/main/model.safetensors")
     state_dict = safe_load(fn)
     assert len(state_dict.keys()) == 244
     assert 'blocks.2.2.se.conv_reduce.weight' in state_dict
