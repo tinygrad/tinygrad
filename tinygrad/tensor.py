@@ -1,7 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, math
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set, NamedTuple
 from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
@@ -310,60 +310,79 @@ class Tensor:
     # (2) basic indexing, where we return a tensor with the same base as input (like a torch view), 
     # (3) advanced indexing, where we return a copy. 
 
-    # ====== indices normalization and validation =======
-    # standardize indices to list type and treat internal tuples as lists
-    if isinstance(indices, (tuple, list)) and not (isinstance(indices, list) and all(isinstance(i, int) for i in indices)): # HACK special case <indices: List[int]>, a lil ugly
-      indices = [list(i) if isinstance(i, tuple) else i for i in indices]
+    # ========= indices normalization and validation =========
+    # treat internal tuples as Tensors and standardize indices to list type
+    if isinstance(indices, (tuple, list)):
+      if isinstance(indices, list) and all(isinstance(i, int) for i in indices): indices = [Tensor(indices)] # HACK special case <indices: List[int]>, a lil ugly
+      else: indices = [Tensor(list(i)) if isinstance(i, (tuple, list)) else i for i in indices]
     else: indices = [indices]
+
+    # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
+    ellipsis_idx = [dim for dim, i in enumerate(indices) if i is Ellipsis]
+    fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
+    num_slices = len(indices) - 1 - sum(1 for i in indices if i is None)
+    indices[fill_idx:fill_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
 
     # use Dict[type, List[dimension]] to track elements in indices
     type_idx = defaultdict(list)
 
-    # filter ellipsis and fill indices with slice(None)
-    ellipsis_idx = [dim for dim, i in enumerate(indices) if i is Ellipsis]
-    fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
-    num_slices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
-    indices[fill_idx:fill_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
+    # record None for dimension injection later
+    type_idx[None] = [dim for dim, i in enumerate(indices) if i is None]
 
-    # filter None
-    type_idx[type(None)] = [dim for dim, i in enumerate(indices) if i is None]
-    valid_slices = [v for v in indices if v is not None]
+    # filter None and record rest of indices
+    indices_filtered = [v for v in indices if v is not None]
+    for dim,i in enumerate(indices_filtered): type_idx[type(i)].append(dim)
 
-    # update rest of type_idx
-    for dim,i in enumerate(valid_slices): type_idx[type(i)].append(dim)
-
-    # validation
+    # validation!
     if float in type_idx: raise IndexError("float type is not valid index")
     if len(type_idx[type(Ellipsis)]) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
     if num_slices > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     if any(isinstance(i, slice) and i.step == 0 for i in indices): raise ValueError('slice step cannot be 0')
     for dim in type_idx[int]:
-      if valid_slices[dim] >= self.shape[dim] or valid_slices[dim] < -self.shape[dim]: raise IndexError(f"index {valid_slices[dim]} is out of bounds for dimension {dim} with size {self.shape[dim]}")
+      if indices_filtered[dim] >= self.shape[dim] or indices_filtered[dim] < -self.shape[dim]: raise IndexError(f"index {indices_filtered[dim]} is out of bounds for dimension {dim} with size {self.shape[dim]}")
 
+    # normalization!
     normalize_int = lambda e, dim_sz: e if e != -1 else dim_sz-1
-    valid_slices = [v if isinstance(v, slice) else slice(y_ := normalize_int(v, dim_sz), y_+1) if isinstance(v, int) else slice(None) for v, dim_sz in zip(valid_slices, self.shape)]
+    start, stop, strides = zip(*y) if (y := [i.indices(sh) if isinstance(i, slice) else slice(normalize_int(i,sh), normalize_int(i,sh)+1, 1).indices(sh) if isinstance(i, int) else (0, sh, 1) for i, sh in zip(indices_filtered, self.shape)]) else ((), (), ())
 
-    start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
+    # ========= basic indexing (no copy) =========
     new_slice = tuple(((0, 0) if e < s else (s, e)) if st > 0 else ((0, 0) if e > s else (e+1, s+1)) for s, e, st in zip(start, stop, strides))
     sliced_tensor = self.shrink(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
-    new_shape = sliced_tensor.shape
+    new_shape = list(sliced_tensor.shape)
     if any(abs(s) != 1 for s in strides):
       strides = tuple(abs(s) for s in strides)
       # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
       padded_tensor = sliced_tensor.pad(tuple((0, s-(dim_sz % s) if dim_sz % s != 0 else 0) for s, dim_sz in zip(strides, sliced_tensor.shape)))
       # Reshape: [dim_sz_padded] -> [dim_sz_padded // s, s]
       reshaped_tensor = padded_tensor.reshape(flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides)))
-      new_shape = reshaped_tensor.shape[::2]
+      new_shape = list(reshaped_tensor.shape[::2])
       # Shrink: do [:, 0]
       sliced_tensor = reshaped_tensor.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
+    
+    # inject dim=1 for None and collapse dim for int
+    for dim in type_idx[None]: new_shape.insert(dim, 1)
+    for dim in reversed(type_idx[int]): 
+      injected_dims = sum(1 for d in type_idx[None] if dim > d)
+      new_shape.pop(dim+injected_dims)
+    print(f"{new_shape=} after")
 
-    # TODO UPDATE THIS USING type_idx
+    ret = sliced_tensor.reshape(tuple(new_shape))
+    return ret
+
+    # ========= advanced indexing (copy) =========
+
+    # final_shape = []
+    # for dim, i in zip(reversed(range(len(indices))), reversed(indices)):
+      # if i is None: 
+      # elif isinstance(i, int):
+
+    print(indices_filtered)
+
     final_shape, it_shape, dim, tensors, dim_collapsed = [], iter(new_shape), [], [], 0
     for i,s in enumerate(indices):
       if s is None: final_shape.append(1)
       else: # s is int or slice or Tensor
         dim_shape = next(it_shape)
-        if isinstance(s, list): s = Tensor(s)
         if isinstance(s, int): dim_collapsed += 1
         else:
           assert isinstance(dim_shape, int), f"does not support symbolic shape {dim_shape}"
@@ -373,7 +392,7 @@ class Tensor:
             dim.append(i-dim_collapsed)
     ret = sliced_tensor.reshape(tuple(final_shape))
 
-    if tensors: # Fancy/tensor indexing
+    if type_idx[type(Tensor)]: # Fancy/tensor indexing
       # normalize idx
       # TODO: first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
       idx = [t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[d] + t for d,t in zip(dim, tensors)]
