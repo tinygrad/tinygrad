@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict, cast
-import math
+import math, functools
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
@@ -30,10 +30,8 @@ class CStyleLanguage(NamedTuple):
   launch_bounds: bool = False
   code_for_op: Dict = {
     UnaryOps.NEG: lambda x,dtype: f"(-{x})" if dtype != dtypes.bool else f"(!{x})",
-    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})",
-    UnaryOps.LOG2: lambda x,dtype: f"log2({x})",
-    UnaryOps.SIN: lambda x,dtype: f"sin({x})",
-    UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
+    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})",
+    UnaryOps.SIN: lambda x,dtype: f"sin({x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})",
     BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})",
     BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
@@ -212,3 +210,140 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       raise RuntimeError(f"failed to render {uop}")
 
   return lang.render_kernel(function_name, kernel, bufs, local_size, prekernel), {}
+
+class OpenCLLanguage(CStyleLanguage):
+  kernel_prefix = "__kernel "
+  buffer_prefix = "__global "
+  smem_align = "__attribute__ ((aligned (16))) "
+  smem_prefix = "__local "
+  arg_int_prefix = "const int"
+  half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable"
+  barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
+  float4 = "(float4)"
+  gid = [f'get_group_id({i})' for i in range(3)]
+  lid = [f'get_local_id({i})' for i in range(3)]
+  xid = [f'get_global_id({i})' for i in range(3)]
+  uses_vload = True
+  # NOTE: mad is used so the loads aren't reordered into the math on 845
+  code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda a,b,c,dtype: f"mad({a},{b},{c})"}
+OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
+
+class MetalLanguage(CStyleLanguage):
+  kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel "
+  buffer_prefix = "device "
+  smem_prefix = "threadgroup "
+  arg_int_prefix = "constant int&"
+  barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
+  float4 = "float4"
+  uses_ptr_arithmetic=True
+  gid = [f"gid.{chr(120+i)}" for i in range(3)]
+  lid = [f"lid.{chr(120+i)}" for i in range(3)]
+  extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
+MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
+
+class CUDALanguage(CStyleLanguage):
+  kernel_prefix = "#define INFINITY (__int_as_float(0x7f800000))\n#define NAN (__int_as_float(0x7fffffff))\nextern \"C\" __global__ "
+  smem_prefix = "__shared__ "
+  smem_prefix_for_cast = False
+  arg_int_prefix = "const int"
+  barrier = "__syncthreads();"
+  float4 = "make_float4"
+  gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
+  lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
+  xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
+  half_prekernel = """
+    #include <cuda_fp16.h>
+    #include <mma.h>
+    using namespace nvcuda;
+    struct __align__(8) half4 {
+      half2 x, y;
+      __device__ __forceinline__ explicit half4(const float4& a): x(make_half2(__float2half(a.x), __float2half(a.y))), y(make_half2(__float2half(a.z),__float2half(a.w))) {}
+      __device__ __forceinline__ explicit operator float4() const {return make_float4(__half2float(x.x), __half2float(x.y), __half2float(y.x), __half2float(y.y)); }
+    };
+    """
+CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
+
+class HIPLanguage(CStyleLanguage):
+  kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
+  __device__ float4 max(float4 x, float4 y) { return float4(max(x.x, y.x), max(x.y, y.y), max(x.z, y.z), max(x.w, y.w)); }
+  __device__ float4 pow(float x, float4 y) { return float4(pow(x, y.x), pow(x, y.y), pow(x, y.z), pow(x, y.w)); }
+  __device__ float4 pow(float4 x, float4 y) { return float4(pow(x.x, y.x), pow(x.y, y.y), pow(x.z, y.z), pow(x.w, y.w)); }
+  __device__ float4 log2(float4 x) { return float4(log2(x.x), log2(x.y), log2(x.z), log2(x.w)); }
+  __device__ float4 exp2(float4 x) { return float4(exp2(x.x), exp2(x.y), exp2(x.z), exp2(x.w)); }
+  __device__ float4 sin(float4 x) { return float4(sin(x.x), sin(x.y), sin(x.z), sin(x.w)); }
+  typedef float float8 __attribute__((ext_vector_type(8))); __device__ float8 make_float8(float x, float y, float z, float w, float a, float b, float c, float d) { return {x, y, z, w, a, b, c, d}; }
+  extern "C" __global__
+  """
+  launch_bounds = True
+  smem_prefix = "__shared__ "
+  smem_prefix_for_cast=False
+  barrier = "__syncthreads();"
+  float4 = "make_float4"
+  uses_vload=True
+  uses_ptr_arithmetic=True
+  arg_int_prefix = "const int"
+  half_prekernel = "#include <hip/hip_fp16.h>\n" + """
+typedef union { struct { half x, y, z, w; } __attribute__((aligned(8))); half data[4]; } half4; __device__ half4 make_half4(half x, half y, half z, half w) { return {x, y, z, w}; }
+typedef union { struct { half x, y, z, w, a, b, c, d; } __attribute__((aligned(16))); half data[8]; } half8; __device__ half8 make_half8(half x, half y, half z, half w, half a, half b, half c, half d) { return {x, y, z, w, a, b, c, d}; }
+ typedef _Float16 half16 __attribute__((ext_vector_type(16))); __device__ half16 make_half16(half x, half y, half z, half w, half a, half b, half c, half d, half e, half f, half g, half h, half i, half j, half k, half l) { return {x, y, z, w, a, b, c, d, e, f, g, h, i, j, k, l}; }
+__device__ float vload_half(size_t offset, const half *p) { return (float)*(p + offset); }
+__device__ float2 vload_half2(size_t offset, const half *p) { return make_float2((float)*(p + offset*2), (float)*(p + offset*2 + 1)); }
+__device__ float4 vload_half4(size_t offset, const half *p) { return make_float4((float)*(p + offset*4), (float)*(p + offset*4 + 1), (float)*(p + offset*4 + 2), (float)*(p + offset*4 + 3)); }
+__device__ void vstore_half(float data, size_t offset, half *p) { *(p + offset) = (half)data; }
+__device__ void vstore_half2(float2 data, size_t offset, half *p) { *(p + offset*2) = (half)data.x; *(p + offset*2 + 1) = (half)data.y; }
+__device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset*4) = (half)data.x; *(p + offset*4 + 1) = (half)data.y; *(p + offset*4 + 2) = (half)data.z; *(p + offset*4 + 3) = (half)data.w; }
+  """
+  gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
+  lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
+  xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
+HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
+
+# TODO: how much of this can be merged with above?
+class WGSLLanguage(CStyleLanguage):
+  gid = [f"i32(gindex.{'xyz'[x]})" for x in range(3)]
+  lid = [f"i32(lindex.{'xyz'[x]})" for x in range(3)]
+  size_prefix = "let"
+  barrier="workgroupBarrier();"
+  generic_var_prefix = "var "
+  external_local_bufs = True
+  code_for_op = { **CStyleLanguage().code_for_op, BinaryOps.CMPLT: lambda x,y,dtype: f"f32({x}<{y})", TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a}!=0.)" }
+  type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"}
+
+  def render_local(self, name: str, size: int):
+    return f"var<workgroup> {name}: array<f32,{size}>;"
+
+  def render_const(self, x:Union[float,int], var_dtype) -> str:
+    if math.isnan(x): val = "nan()"
+    elif math.isinf(x): val = ("-" if x < 0 else "") + "0x1.fffffep+127f"
+    else: val = f"({x}" + ("" if dtypes.is_int(var_dtype) else "f") + ")"
+    return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
+
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
+    local_size = local_size[::-1] if local_size else [1]
+    bind_it = iter(range(len(bufs)))
+    prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
+    prg += "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) var<storage,read_write> {name}: array<{self.type_map[dtype]}>;" for name,dtype in bufs])
+    prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
+    return prg
+
+  def render_for(self, expr:str, _min:Union[int,str], _max:Union[int,str]) -> str:
+    return f"for(var {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
+
+  def render_if(self, cond: str):
+    return f"if (bool({cond})) {{"
+
+  def render_conditional(self, cond:str, x:str, y:str) -> str:
+    return f"select(f32({y}), {x}, bool({cond}))"
+
+  def render_cast(self, x:List[str], var_dtype:DType) -> str:
+    if self.type_map[var_dtype]: return f"{self.type_map[var_dtype]}({x[0]})"
+    raise NotImplementedError(f"no cast for {var_dtype}")
+
+  def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
+    return f"f32({super().render_load(output_dtype, buf_name, buf_dtype, idx, local)})"
+
+  def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
+    if buf_dtype != var_dtype:
+      var_name = f"{self.type_map[buf_dtype]}({var_name})"
+    return f"{buf_name}[{idx}] = {var_name};"
+WGSLRenderer = functools.partial(uops_to_cstyle, WGSLLanguage())
