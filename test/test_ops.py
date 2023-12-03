@@ -55,11 +55,12 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
 
   if not CI: print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
 
-def prepare_test_op(a, b, shps, vals, forward_only=False):
+dtypes_to_torch = { dtypes.float: torch.float32, dtypes.half: torch.float16 }
+def prepare_test_op(a, b, shps, vals, dtype, forward_only=False):
   torch.manual_seed(0)
   np.random.seed(0)
-  if shps is None: ts = [torch.tensor(x, requires_grad=(not forward_only)) for x in vals]
-  else: ts = [torch.tensor((np.random.random(size=x) + a) * b, requires_grad=(not forward_only), dtype=torch.float32) for x in shps]
+  if shps is None: ts = [torch.tensor(x, requires_grad=(not forward_only), dtype=dtypes_to_torch[dtype]) for x in vals]
+  else: ts = [torch.tensor((np.random.random(size=x) + a) * b, requires_grad=(not forward_only), dtype=dtypes_to_torch[dtype]) for x in shps]
   tst = [Tensor(x.detach().numpy(), requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
   return ts, tst
 
