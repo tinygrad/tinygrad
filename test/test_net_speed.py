@@ -6,8 +6,6 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import Profiling
 import pytest
 
-pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
-
 class TestConvSpeed(unittest.TestCase):
 
   def test_mnist(self):
