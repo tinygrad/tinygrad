@@ -65,11 +65,6 @@ def train_unet3d():
         raise ValueError("Optimizer {} unknown.".format(conf.optimizer))
       return optim
 
-    def print_memory_usage(pre=""):
-      import pycuda.driver
-      free, total = pycuda.driver.mem_get_info()
-      print(f"{pre} Free memory: {(free / 1024**3):.1f} GB, Total memory: {(total / 1024**3):.1f} GB")
-
     from extra.models.unet3d import UNet3D
     mdl = UNet3D()
     if getenv("PRETRAINED"):
@@ -86,12 +81,12 @@ def train_unet3d():
 
     is_successful, diverged = False, False
     optim = get_optimizer(get_parameters(mdl), conf)
+
     if conf.lr_decay_epochs:
       scheduler = MultiStepLR(optim, milestones=conf.lr_decay_epochs, gamma=conf.lr_decay_factor)
 
     if getenv("MOCKTRAIN", 0):
-      # train_loader = [(Tensor.rand((1,1,128,128,128), dtype=dtypes.half), Tensor.rand((1,128,128,128), dtype=dtypes.uint8)) for i in range(3)]
-      train_loader = [(Tensor.rand((1,1,64,64,64), dtype=dtypes.half), Tensor.rand((1,64,64,64), dtype=dtypes.uint8)) for i in range(3)]
+      train_loader = [(Tensor.rand((1,1,128,128,128), dtype=dtypes.half), Tensor.rand((1,128,128,128), dtype=dtypes.uint8)) for i in range(3)]
       total_batches = 1
     else:
       def get_train_val_split(files): return files[:-int(len(files)*conf.val_split)], files[-int(len(files)*conf.val_split):]
@@ -99,78 +94,63 @@ def train_unet3d():
       train_files, val_files = get_train_val_split(files)
       total_files = len(train_files)
       total_batches = (total_files + conf.batch_size - 1) // conf.batch_size
-      train_loader = get_batch(train_files, conf.batch_size, conf.input_shape, conf.oversampling)
-      val_loader = get_batch(val_files, 1, conf.val_input_shape, conf.oversampling)
+      # train_loader = get_batch(train_files, conf.batch_size, conf.input_shape, conf.oversampling)
+      # val_loader = get_batch(val_files, 1, conf.val_input_shape, conf.oversampling)
 
     @TinyJit
     def train_step(out, y):
       with Tensor.train():
         optim.zero_grad()
-        print_memory_usage("(optim zero_grad)")
         loss = dice_ce_loss(out, y)
-        print_memory_usage("(loss)")
-        # del out
         loss.backward()
         # if noloss: del loss
-        print_memory_usage("(loss backward)")
         optim.step()
-        print_memory_usage("(optim step)")
         # if noloss: return None
         return loss.realize()
 
     for epoch in range(0, conf.epochs):
       cumulative_loss = []
-      # if epoch <= conf.lr_warmup_epochs:
-      #   lr_warmup(optim, conf.init_lr, conf.lr, epoch, conf.lr_warmup_epochs)
-      start_time_epoch = time.time()
 
-      # for i, batch in enumerate(tqdm(train_loader, total=total_batches, disable=(rank != 0) or not conf.verbose)):
+      epoch_st = time.monotonic()
+      train_loader = get_batch(train_files, conf.batch_size, conf.input_shape, conf.oversampling)
+      val_loader = get_batch(val_files, 1, conf.val_input_shape, conf.oversampling, shuffle=False)
       for i, batch in enumerate(tqdm(train_loader, total=total_batches)):
         im, label = batch
 
-        print_memory_usage("(input)")
         dtype_im = dtypes.half if getenv("FP16") else dtypes.float
         im, label = Tensor(im, dtype=dtype_im), Tensor(label, dtype=dtypes.uint8)
-        # print("im, label", im.shape, label.shape, im.dtype, label.dtype)
 
         out = mdl_run(im)
-        print(out.shape)
-        print_memory_usage("(out)")
-        # out = mdl(im)
-        # del im
+        del im
 
         loss_value = train_step(out, label)
-        print(loss_value.cpu().numpy())
         cumulative_loss.append(loss_value.detach())
-        print("cumulative_loss", len(cumulative_loss))
 
-      # if conf.lr_decay_epochs:
-      #   scheduler.step()
+      if conf.lr_decay_epochs:
+        scheduler.step()
 
       if len(cumulative_loss):
-        print(f'loss for epoch {epoch}: {sum(cumulative_loss) / len(cumulative_loss)}')
+        print(f'  epoch {epoch} | loss: {sum(cumulative_loss).numpy() / len(cumulative_loss)}')
 
       if epoch == next_eval_at:
         next_eval_at += conf.eval_every
         dtype_im = dtypes.half if getenv("FP16") else dtypes.float
 
-        #eval_model = lambda x : mdl_run(Tensor(x, dtype=dtype_im)).numpy()
         eval_metrics = evaluate(conf, mdl, val_loader, epoch=epoch)
-        eval_metrics["train_loss"] = sum(cumulative_loss) / len(cumulative_loss)
-        print(eval_metrics)
+        eval_metrics["train_loss"] = sum(cumulative_loss).numpy() / len(cumulative_loss)
+        print("  eval:", eval_metrics)
 
         Tensor.training = True
-        print('eval_metrics', [(k, f"{m}") for k,m in eval_metrics.items()])
         if eval_metrics["mean_dice"] >= conf.quality_threshold:
-          print("success", eval_metrics["mean_dice"], ">", conf.quality_threshold)
+          print("\nsuccess", eval_metrics["mean_dice"], ">", conf.quality_threshold)
           is_successful = True
         elif eval_metrics["mean_dice"] < 1e-6:
-          print("model diverged. exit.", eval_metrics["mean_dice"], "<", 1e-6)
+          print("\nmodel diverged. exit.", eval_metrics["mean_dice"], "<", 1e-6)
           diverged = True
 
       if is_successful or diverged:
         break
-      print('epoch time', time.time()-start_time_epoch)
+      print(f'  epoch time {time.monotonic()-epoch_st:.2f}s', )
 
   conf = Conf()
   if not getenv("DIST"):
