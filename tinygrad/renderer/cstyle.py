@@ -250,7 +250,10 @@ class CUDALanguage(CStyleLanguage):
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"__hmax({a},{b})"}
-  half_prekernel = "#include <cuda_fp16.h>"
+  half_prekernel = """
+    #include <cuda_fp16.h>
+    struct half4 { half x, y, z, w; };
+  """
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 class HIPLanguage(CStyleLanguage):
