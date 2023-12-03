@@ -102,6 +102,9 @@ class Transformer:
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
     return (self.forward_jit if tokens.shape[1] == 1 and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
 
+@TinyJit
+def sample_token(probs): return probs.multinomial().flatten().realize()
+
 VOCAB_SIZE = 50257
 MODEL_PARAMS = {
   'gpt2':         dict(n_layers=12, n_heads=12, dim=768, norm_eps=1e-5, vocab_size=VOCAB_SIZE),   # 124M params
@@ -145,8 +148,9 @@ class GPT2:
                     f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                     (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
           probs = self.model(Tensor([x[start_pos:] for x in toks]), Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature)
-        # TODO: fix JIT rand so we can put this in the JIT
-        tok = probs.multinomial().flatten().numpy().tolist()
+
+        # NOTE: Put sample_token in a seperate jit, so graph can work for the main part.
+        tok = sample_token(probs).numpy().tolist()
       start_pos = len(toks[0])
       for i,t in enumerate(tok): toks[i].append(t)
       output = [self.tokenizer.decode(x) for x in toks]
