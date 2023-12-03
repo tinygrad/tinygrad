@@ -5,7 +5,7 @@ from typing import List, Any, Tuple, Optional
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, diskcache, unwrap2
 from tinygrad.device import Compiled, LRUAllocator
-from tinygrad.renderer.metal import MetalRenderer
+from tinygrad.renderer.cstyle import MetalRenderer
 
 @diskcache
 def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:

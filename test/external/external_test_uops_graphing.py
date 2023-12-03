@@ -2,7 +2,7 @@
 import unittest
 from tinygrad.tensor import Tensor
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.renderer.opencl import OpenCLRenderer
+from tinygrad.renderer.cstyle import OpenCLRenderer
 from tinygrad.graph import graph_uops
 from tinygrad.nn import Conv2d
 

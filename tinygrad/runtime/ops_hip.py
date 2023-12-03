@@ -3,7 +3,7 @@ from typing import Tuple, TypeVar
 import gpuctypes.hip as hip
 from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
-from tinygrad.renderer.hip import HIPRenderer
+from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 
 # TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
