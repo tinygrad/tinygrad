@@ -1,3 +1,4 @@
+import os
 import random
 import functools
 from pathlib import Path
@@ -23,10 +24,24 @@ mv kits extra/datasets
 ```
 """
 
+EXCLUDED_CASES = []  # [23, 68, 125, 133, 15, 37]
+MAX_ID = 210
+MEAN_VAL = 101.0
+STDDEV_VAL = 76.9
+MIN_CLIP_VAL = -79.0
+MAX_CLIP_VAL = 304.0
+TARGET_SPACING = [1.6, 1.2, 1.2]
+
+
 @functools.lru_cache(None)
 def get_val_files():
   data = fetch("https://raw.githubusercontent.com/mlcommons/training/master/image_segmentation/pytorch/evaluation_cases.txt").read_text()
   return sorted([x for x in BASEDIR.iterdir() if x.stem.split("_")[-1] in data.split("\n")])
+
+def save_kits19(image, label, case: str):
+  image = image.astype(np.float32)
+  label = label.astype(np.uint8)
+  mean, std = np.round(np.mean(image, (1, 2, 3)), 2), np.round(np.std(image, (1, 2, 3)), 2)
 
 def load_pair(file_path):
   image, label = nib.load(file_path / "imaging.nii.gz"), nib.load(file_path / "segmentation.nii.gz")
@@ -64,6 +79,16 @@ def preprocess(file_path):
   image = normal_intensity(image.copy())
   image, label = pad_to_min_shape(image, label)
   return image, label
+
+def preprocess_save(results_dir="kits19/processed", data_dir="kits19/data"):
+  os.makedirs(results_dir, exist_ok=True)
+  for case in sorted([f for f in os.listdir(data_dir) if "case" in f]):
+    case_id = int(case.split("_")[1])
+    if case_id in EXCLUDED_CASES or case_id >= MAX_ID:
+      print("Case {}. Skipped.".format(case_id))
+      continue
+    image, label = preprocess(case)
+    save_kits19(image, label, case)
 
 def iterate(val=True, shuffle=False):
   if not val: raise NotImplementedError
@@ -209,7 +234,7 @@ def gaussian_noise(image, label, mean=0.0, std=0.1, prob=0.1):
 def get_batch(files, batch_size=32, patch_size=(128, 128, 128), oversampling=0.25, shuffle=True):
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
-  for file in files:
+  for file in [files[i] for i in order]:
     bX, bY = [], []
     for _ in range(batch_size):
       X,Y = preprocess(file)
@@ -217,6 +242,15 @@ def get_batch(files, batch_size=32, patch_size=(128, 128, 128), oversampling=0.2
       X,Y = rand_brightness(X,Y)
       X,Y = gaussian_noise(X,Y)
       X,Y = rand_crop(X, Y, patch_size, oversampling)
+      bX.append(X)
+      bY.append(Y)
+    yield (np.stack(bX, axis=0), np.stack(bY, axis=0))
+
+def get_val_batch(files, batch_size=1):
+  for file in files:
+    bX, bY = [], []
+    for _ in range(batch_size):
+      X,Y = preprocess(file)
       bX.append(X)
       bY.append(Y)
     yield (np.stack(bX, axis=0), np.stack(bY, axis=0))

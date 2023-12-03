@@ -5,7 +5,7 @@ from tinygrad.helpers import getenv, dtypes
 from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict
 from tinygrad.shape.symbolic import Node
 from extra.lr_scheduler import MultiStepLR
-from extra.datasets.kits19 import get_batch, get_val_files, sliding_window_inference
+from extra.datasets.kits19 import get_batch, get_val_batch, get_val_files, sliding_window_inference
 from extra import dist
 
 from examples.mlperf.metrics import get_dice_score, get_dice_score_np
@@ -94,8 +94,6 @@ def train_unet3d():
       train_files, val_files = get_train_val_split(files)
       total_files = len(train_files)
       total_batches = (total_files + conf.batch_size - 1) // conf.batch_size
-      # train_loader = get_batch(train_files, conf.batch_size, conf.input_shape, conf.oversampling)
-      # val_loader = get_batch(val_files, 1, conf.val_input_shape, conf.oversampling)
 
     @TinyJit
     def train_step(out, y):
@@ -111,9 +109,9 @@ def train_unet3d():
     for epoch in range(0, conf.epochs):
       cumulative_loss = []
 
-      epoch_st = time.monotonic()
       train_loader = get_batch(train_files, conf.batch_size, conf.input_shape, conf.oversampling)
-      val_loader = get_batch(val_files, 1, conf.val_input_shape, conf.oversampling, shuffle=False)
+      val_loader = get_val_batch(val_files)
+      epoch_st = time.monotonic()
       for i, batch in enumerate(tqdm(train_loader, total=total_batches)):
         im, label = batch
 
@@ -130,15 +128,14 @@ def train_unet3d():
         scheduler.step()
 
       if len(cumulative_loss):
-        print(f'  epoch {epoch} | loss: {(sum(cumulative_loss).numpy() / len(cumulative_loss)):.6f}')
+        print(f'  (train) epoch {epoch} | loss: {(sum(cumulative_loss).numpy() / len(cumulative_loss)):.6f}')
 
       if epoch == next_eval_at:
         next_eval_at += conf.eval_every
         dtype_im = dtypes.half if getenv("FP16") else dtypes.float
 
         eval_metrics = evaluate(conf, mdl, val_loader, epoch=epoch)
-        eval_metrics["train_loss"] = sum(cumulative_loss).numpy() / len(cumulative_loss)
-        print("  eval:", eval_metrics)
+        print("  (eval):", eval_metrics)
 
         Tensor.training = True
         if eval_metrics["mean_dice"] >= conf.quality_threshold:

@@ -12,7 +12,7 @@ class Conf:
     load_ckpt_path: str = ""
     val_split: float = 0.1
 
-    epochs: int = 10
+    epochs: int = 15
     quality_threshold: float = 0.908
     ga_steps: int = 1
     warmup_step: int = 4
