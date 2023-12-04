@@ -27,7 +27,7 @@ class CUDAGraph:
       prg: CompiledASTRunner = cast(CompiledASTRunner, ji.prg)
 
       c_deps = (type(graph_node)*1)(*(graph_node,)) if graph_node is not None else None
-      c_kernel_input_config, c_input_params = encode_args_cuda_style([cast(Buffer, x)._buf for x in ji.rawbufs] + [var_vals[x] for x in prg.vars], *self.encode_args_info())
+      c_kernel_input_config, c_input_params = encode_args_cuda_style([cast(Buffer, x)._buf for x in ji.rawbufs], [var_vals[x] for x in prg.vars], *self.encode_args_info())
       c_node_params = self.build_kernel_node_params(prg, *cast(Tuple[List[int], List[int]], prg.launch_dims(var_vals)), c_kernel_input_config)
       graph_node = self.graph_add_kernel_node(self.graph, c_deps, c_node_params)
 

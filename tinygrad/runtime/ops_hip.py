@@ -38,10 +38,10 @@ class HIPProgram:
   def __del__(self):
     if not MOCKHIP: check(hip.hipModuleUnload(self.module))
 
-  def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
+  def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], vals:Tuple[int, ...]=(), wait=False):
     if MOCKHIP: return float("inf")
     check(hip.hipSetDevice(self.device))
-    return hip_time_execution(lambda: check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, encode_args_cuda_style(args, hip.hipDeviceptr_t, marks=(1,2,3))[0])), enable=wait)
+    return hip_time_execution(lambda: check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, encode_args_cuda_style(args, vals, hip.hipDeviceptr_t, marks=(1,2,3))[0])), enable=wait)
 
 T = TypeVar("T")
 class HIPAllocator(LRUAllocator):

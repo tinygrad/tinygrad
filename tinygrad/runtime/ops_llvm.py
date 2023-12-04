@@ -1,5 +1,5 @@
 import ctypes
-from typing import ClassVar
+from typing import ClassVar, Tuple
 from tinygrad.device import Compiled, MallocAllocator
 from tinygrad.helpers import getenv, DEBUG, diskcache, cpu_time_execution
 from ctypes import CFUNCTYPE
@@ -59,8 +59,8 @@ class LLVMProgram:
     LLVM().engine.add_object_file(llvm.object_file.ObjectFileRef.from_data(lib))
     self.fxn = LLVM.engine.get_function_address(name)
 
-  def __call__(self, *bufs, wait=False):
-    self.cfunc = CFUNCTYPE(ctypes.c_int, *[ctypes.c_int32 if isinstance(b, int) else ctypes.c_void_p for b in bufs])(self.fxn)
-    return cpu_time_execution(lambda: self.cfunc(*bufs), enable=wait)
+  def __call__(self, *bufs, vals:Tuple[int, ...]=(), wait=False):
+    self.cfunc = CFUNCTYPE(ctypes.c_int, *([ctypes.c_void_p]*len(bufs)), *([ctypes.c_int32]*len(vals)))(self.fxn)
+    return cpu_time_execution(lambda: self.cfunc(*bufs, *vals), enable=wait)
 
 LLVMDevice = Compiled(MallocAllocator, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, compile_llvm, LLVMProgram)
