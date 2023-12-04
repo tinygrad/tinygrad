@@ -2,6 +2,7 @@ from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes
 import numpy as np
 from urllib import request
+from threading import Thread
 from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -269,10 +270,11 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=n
 
 # *** Exec helpers
 
-def cpu_time_execution(cb, enable):
-  if enable: st = time.perf_counter()
-  cb()
-  if enable: return time.perf_counter()-st
+def cpu_execute(cb: Callable, time_execution: bool) -> Optional[float]:
+  if time_execution: st = time.perf_counter()
+  (thread := Thread(target=cb)).start()
+  thread.join()
+  if time_execution: return time.perf_counter()-st
 
 # *** Helpers for CUDA-like APIs.
 
