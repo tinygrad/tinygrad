@@ -171,7 +171,7 @@ class Tensor:
     for i in range(5):
       for r in rotations[0]:
         x[0] = x[0] + x[1]
-        x[1] = x[0] ^ (x[1] * (2 ** r))
+        x[1] = x[0] ^ ((x[1] * (2 ** r)) + (x[1] / (2 ** (32 - r))))
       x = [(x[0] + ks[0]).realize(), (x[1] + ks[1] + i + 1).realize()]
       rotations = rotations[1:] + rotations[:1]
       ks = ks[1:] + ks[:1]
