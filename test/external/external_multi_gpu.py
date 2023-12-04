@@ -3,7 +3,7 @@
 # LD_PRELOAD=$PWD/disassemblers/cuda_ioctl_sniffer/out/sniff.so GPU=1 python3 test/external/external_multi_gpu.py
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import colored, Timing
+from tinygrad.helpers import colored, Timing, getenv
 from tinygrad.device import Device
 
 d0, d1 = f'{Device.DEFAULT}:0', f'{Device.DEFAULT}:1'
@@ -14,12 +14,15 @@ def sync():
 
 if __name__ == "__main__":
   print("GPU devices", d0, d1)
-  sz = 1024*1024*256  # 1 GB
-  #sz = 1024*64
+  sz = getenv("N", 1024*1024*256)  # 1 GB
+
+  with Timing("GPU initial sync: "): sync()
 
   with Timing("CPU creation: ", on_exit=lambda x: f", {(sz*4*2)/x:.2f} GB/sec"):
-    c0 = Tensor.ones(sz, device="cpu").realize()
-    c1 = (Tensor.ones(sz, device="cpu")/2).realize()
+    c0 = (Tensor.ones(sz, device="clang")/2).realize()
+    c1 = (Tensor.ones(sz, device="clang")/4).realize()
+    print(c0.lazydata.realized)
+    print(c1.lazydata.realized)
 
   with Timing("CPU -> 0: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
     a0 = c0.to(d0).realize()

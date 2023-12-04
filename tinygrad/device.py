@@ -16,8 +16,9 @@ if TYPE_CHECKING:
 class _Device:
   def __init__(self) -> None: self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
   def canonicalize(self, device:Optional[str]) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "") if device is not None else self.DEFAULT
+  def __getitem__(self, ix:str) -> Union[Interpreted, Compiled]: return self.__get_canonicalized_item(self.canonicalize(ix))
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def __getitem__(self, ix:str) -> Union[Interpreted, Compiled]:
+  def __get_canonicalized_item(self, ix:str) -> Union[Interpreted, Compiled]:
     x = ix.split(":")[0].upper()
     ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._buffers][0]
     if isinstance(ret, type): ret = ret(ix)
@@ -83,7 +84,7 @@ class Buffer:
       self.allocator.free(self._real_buf, self.size * self.dtype.itemsize)
     else:
       self.allocator.free(self._buf, self.size * self.dtype.itemsize)
-  def __repr__(self): return f"<buf device:{self.device} size:{self.size}>"
+  def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}>"
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
     assert len(mv) == self.size*self.dtype.itemsize, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
@@ -106,6 +107,7 @@ class _BufferCopy(JITRunner):
     if DEBUG >= 2: print(f"***      copy {dest.device} <- {src.device} size {dest.size:<16d} dtype {dest.dtype}")
     if hasattr(dest.allocator, 'transfer') and type(dest.allocator) is type(src.allocator):
       # fast path, used on HIP between GPUs
+      # NOTE: it's important we use the dest device here to ensure the transfer is ready
       dest.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
       return
     if getenv("FROM_BUFFER") and hasattr(dest.allocator, 'from_buffer') and hasattr(dest.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
