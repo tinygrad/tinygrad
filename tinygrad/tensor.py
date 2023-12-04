@@ -311,6 +311,7 @@ class Tensor:
     # (3) advanced indexing, where we return a copy.
 
     # ========= indices normalization and validation =========
+
     # treat internal tuples as Tensors and standardize indices to list type
     if isinstance(indices, (tuple, list)):
       if isinstance(indices, list) and all(isinstance(i, int) for i in indices): indices = [Tensor(indices)] # special case <indices: List[int]>, a lil ugly
@@ -346,48 +347,37 @@ class Tensor:
     start, stop, strides = zip(*y) if (y := [i.indices(sh) if isinstance(i, slice) else slice(normalize_int(i,sh), normalize_int(i,sh)+1, 1).indices(sh) if isinstance(i, int) else (0, sh, 1) for i, sh in zip(indices_filtered, self.shape)]) else ((), (), ())
 
     # ========= basic indexing (no copy) =========
+
+    # apply slices and flip where strides are negative
     new_slice = tuple(((0, 0) if e < s else (s, e)) if st > 0 else ((0, 0) if e > s else (e+1, s+1)) for s, e, st in zip(start, stop, strides))
     sliced_tensor = self.shrink(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
     new_shape = list(sliced_tensor.shape)
+
+    # add strides by pad -> reshape -> shrink
     if any(abs(s) != 1 for s in strides):
       strides = tuple(abs(s) for s in strides)
-      # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
       padded_tensor = sliced_tensor.pad(tuple((0, s-(dim_sz % s) if dim_sz % s != 0 else 0) for s, dim_sz in zip(strides, sliced_tensor.shape)))
-      # Reshape: [dim_sz_padded] -> [dim_sz_padded // s, s]
       reshaped_tensor = padded_tensor.reshape(flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides)))
       new_shape = list(reshaped_tensor.shape[::2])
-      # Shrink: do [:, 0]
       sliced_tensor = reshaped_tensor.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
 
     # inject dim=1 for None and collapse dim for int
     for dim in type_idx[None]: new_shape.insert(dim, 1)
-    dims_collapsed = [dim + sum(1 for d in type_idx[None] if dim > d) for dim in reversed(type_idx[int])]
-    for dim in dims_collapsed: new_shape.pop(dim)
-    # for dim in reversed(type_idx[int]): new_shape.pop(dim + sum(1 for d in type_idx[None] if dim > d))
+    for dim in (dims_collapsed := [dim + sum(1 for d in type_idx[None] if dim > d) for dim in reversed(type_idx[int])]): new_shape.pop(dim)
     for dim_sh in new_shape: assert isinstance(dim_sh, int), f"does not support symbolic shape {dim_sh}"
 
     ret = sliced_tensor.reshape(tuple(new_shape))
 
     # ========= advanced indexing (copy) =========
-    # TODO CLEAN THIS UP OH GOD
+
     if type_idx[Tensor]:
-      idx = []
-      dim = []
-      # print(f"{type_idx[Tensor]=}")
-      # print(f"{type_idx[None]=}")
-      # print(f"{dims_collapsed=}")
-      # print(f"{indices=}")
-      # print(f"{new_shape=}")
+      idx, dim = [], []
       for tensor_dim in type_idx[Tensor]:
         t = indices[tensor_dim + sum(1 for d in type_idx[None] if tensor_dim >= d)]
         td = tensor_dim - sum(1 for d in dims_collapsed if tensor_dim >= d) + sum(1 for d in type_idx[None] if tensor_dim >= d)
-        idx.append(t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[td] + t)
-        dim.append(td)
-      # print(f"{idx=}")
-      # print(f"{dim=}")
+        dim.append(td), idx.append(t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[td] + t)
       # normalize idx
       # TODO: first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
-      # idx = [t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[d] + t for d,t in zip(dim, tensors)]
       max_dim = max(i.ndim for i in idx)
       # compute sum_dim, arange, and idx
       sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(dim)]
