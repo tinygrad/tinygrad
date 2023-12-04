@@ -336,7 +336,7 @@ class Tensor:
     indices_filtered = tuple(v for v in indices if v is not None)
     for dim,i in enumerate(indices_filtered): type_idx[type(i)].append(dim)
 
-    # validation!
+    # validation! (raise them Errors)
     if len(ellipsis_idx) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
     if float in type_idx: raise IndexError("float type is not valid index")
     if num_slices > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
@@ -344,9 +344,8 @@ class Tensor:
     for dim in type_idx[int]:
       if indices_filtered[dim] >= self.shape[dim] or indices_filtered[dim] < -self.shape[dim]: raise IndexError(f"index {indices_filtered[dim]} is out of bounds for dimension {dim} with size {self.shape[dim]}")
 
-    # normalization!
-    def normalize_int(i, sh): return i if i != -1 else sh-1
-    start, stop, strides = zip(*y) if (y := [i.indices(sh) if isinstance(i, slice) else slice(normalize_int(i,sh), normalize_int(i,sh)+1, 1).indices(sh) if isinstance(i, int) else (0, sh, 1) for i, sh in zip(indices_filtered, self.shape)]) else ((), (), ())
+    # normalize indices into start, stop and strides!
+    start, stop, strides = zip(*y) if (y := [i.indices(sh) if isinstance(i, slice) else slice(normalized:= i if i != -1 else sh-1, normalized+1, 1).indices(sh) if isinstance(i, int) else (0, sh, 1) for i, sh in zip(indices_filtered, self.shape)]) else ((), (), ()) # type: ignore[arg-type]
 
     # ========= basic indexing (no copy) =========
 
