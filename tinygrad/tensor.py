@@ -175,10 +175,9 @@ class Tensor:
         x[0] = x[0] + x[1]
         x[1] = x[0] ^ ((x[1] * (2 ** r)) + (x[1] / (2 ** (32 - r))))
       x = [(x[0] + ks[0]).realize(), (x[1] + ks[1] + i + 1).realize()]
-      rotations = rotations[1:] + rotations[:1]
-      ks = ks[1:] + ks[:1]
-    out = x[0].cat(x[1])
-    return out[odd_counts:].reshape(shape).cast(Tensor.default_type if kwargs.get("dtype") is None else kwargs.get("dtype")) / (2**32 - 1)
+      rotations, ks = rotations[1:] + rotations[:1], ks[1:] + ks[:1]
+    out = x[0].cat(x[1]).cast(dtypes.float32) / (2**32 - 1)
+    return out[odd_counts:].reshape(shape).cast(Tensor.default_type if kwargs.get("dtype") is None else kwargs.get("dtype"))
 
   # ***** creation helper functions *****
 
