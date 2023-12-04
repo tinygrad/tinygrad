@@ -15,6 +15,7 @@ class CStyleLanguage(NamedTuple):
   smem_prefix: str = ""
   smem_prefix_for_cast: bool = True
   arg_int_prefix: str = ""
+  type_map: Dict[DType, str] = {}
   barrier: str = ""
   xid: List[str] = []
   gid: List[str] = []
@@ -162,10 +163,10 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       if (child_count[u] <= 1 or dtypes.is_int(dtype)) and args != BinaryOps.MAX:  # fix index rendering issue. fix clang nested max macro issue
         r[u] = val
       else:
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_map[dtype] if hasattr(lang, 'type_map') else dtype.name} {ssa(u,'alu')} = {val};")
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_map[dtype] if dtype in lang.type_map else dtype.name} {ssa(u,'alu')} = {val};")
     elif uop == UOps.DEFINE_ACC:
       assert dtype is not None
-      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_map[dtype] if hasattr(lang, 'type_map') else dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
+      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_map[dtype] if dtype in lang.type_map else dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
     elif uop == UOps.SPECIAL:
       xid = lang.gid if args[1].startswith("g") else (lang.xid if args[1].startswith("i") else lang.lid)
       kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]}; /* {args[2]} */")
@@ -177,7 +178,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       assert dtype is not None
       val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
       if len(vin) > 3: val = lang.render_conditional(r[vin[2]], val, r[vin[3]])
-      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_map[dtype] if hasattr(lang, 'type_map') else dtype.name} {ssa(u,'val')} = {val};")
+      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_map[dtype] if dtype in lang.type_map else dtype.name} {ssa(u,'val')} = {val};")
     elif uop == UOps.PHI:
       kk(f"{r[vin[0]]} = {r[vin[1]]};")
       r[u] = r[vin[0]]
