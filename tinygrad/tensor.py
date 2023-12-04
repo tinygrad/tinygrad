@@ -302,15 +302,10 @@ class Tensor:
   #    - There's a special case where a permute is needed at the end:
   #        - if first Tensor passed in (expand dims) is not at dim 0
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
-
-
-  def __getitem__(self, indices: Union[int, slice, Tensor, None, List, Tuple]) -> Tensor: # NO TYPE ELLIPSIS...
     # TODO: boolean indices
     # TODO: move all slice(None) to the end and transpose non-None to the front
     # TODO: update docs
-    # (1) input normalization and validation
-    # (2) basic indexing, where we return a tensor with the same base as input (like a torch view),
-    # (3) advanced indexing, where we return a copy.
+  def __getitem__(self, indices: Union[int, slice, Tensor, None, List, Tuple]) -> Tensor: # NO TYPE ELLIPSIS...
 
     # ========= indices normalization and validation =========
 
@@ -336,7 +331,7 @@ class Tensor:
     indices_filtered = tuple(v for v in indices if v is not None)
     for dim,i in enumerate(indices_filtered): type_idx[type(i)].append(dim)
 
-    # validation! (raise them Errors)
+    # validation! raise Errors
     if len(ellipsis_idx) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
     if float in type_idx: raise IndexError("float type is not valid index")
     if num_slices > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
@@ -344,7 +339,7 @@ class Tensor:
     for dim in type_idx[int]:
       if indices_filtered[dim] >= self.shape[dim] or indices_filtered[dim] < -self.shape[dim]: raise IndexError(f"index {indices_filtered[dim]} is out of bounds for dimension {dim} with size {self.shape[dim]}")
 
-    # normalize indices into start, stop and strides!
+    # normalize! indices -> start, stop, strides
     start, stop, strides = zip(*y) if (y := [i.indices(sh) if isinstance(i, slice) else slice(normalized:= i if i != -1 else sh-1, normalized+1, 1).indices(sh) if isinstance(i, int) else (0, sh, 1) for i, sh in zip(indices_filtered, self.shape)]) else ((), (), ()) # type: ignore[arg-type]
 
     # ========= basic indexing (no copy) =========

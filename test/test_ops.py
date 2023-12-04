@@ -662,9 +662,25 @@ class TestOps(unittest.TestCase):
     a = Tensor.ones(4, 3)
     with self.assertRaises(IndexError):
       a[1, 77, 77, 77]  # IndexError: (finds too many indices before the out of bounds)
-      a[1, 77]  # IndexError: (out of bounds).
       a[0, -77]
       a[..., ...] # IndexError: only single ellipsis
+    with self.assertRaises(IndexError): # no floats
+      a[1.1]
+      a[0, 1.1]
+    with self.assertRaisesRegex(IndexError, r'index 77 is out of bounds for dimension 1 with size 3'):
+      a[1, 77]
+      a[1, None, 77]
+    with self.assertRaisesRegex(IndexError, r'index 77 is out of bounds for dimension 0 with size 4'):
+      a[77, 1]
+      a[None, 77, 1]
+    with self.assertRaisesRegex(IndexError, r'index -77 is out of bounds for dimension 1 with size 3'):
+      a[1, -77]
+      a[..., -77]
+    with self.assertRaisesRegex(IndexError, r'index -77 is out of bounds for dimension 0 with size 4'):
+      a[-77]
+    with self.assertRaises(ValueError):
+      a[::0]
+      a[2, ::0]
 
   def test_slice_ellipsis(self):
     helper_test_op([(3,3,3,3)], lambda x: x[..., 0], lambda x: x[..., 0])
@@ -1275,10 +1291,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,[1,2,3],...], lambda x: x[i,j,k,[1,2,3],...])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,[2,1,0],c,[2,1,0],e], lambda x: x[i,[2,1,0],k,[2,1,0],p])
 
-  # def test_slice_fancy_indexing_list_of_tensors(self):
-    # a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
-    # helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a]], lambda x: x[[i]])
-    # helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a, b]], lambda x: x[[i, j]])
+  def test_slice_fancy_indexing_list_of_tensors(self):
+    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a]], lambda x: x[[i]])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a,b,c,d,e]], lambda x: x[[i,j,k,o,p]])
 
   def test_slice_fancy_indexing_tuple_of_tensors(self):
     # uhhhh bruh TypeError: only integer tensors of a single element can be converted to an index
