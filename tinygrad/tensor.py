@@ -153,16 +153,18 @@ class Tensor:
     return Tensor._loadop(LoadOps.EMPTY, prod((shape:=argfix(*shape))), **kwargs).reshape(shape)
 
   _seed: int = int(time.time())
+  _rng_counter: Optional[Tensor] = None
   @staticmethod
-  def manual_seed(seed=0): Tensor._seed = seed
+  def manual_seed(seed=0): Tensor._seed, Tensor._rng_counter = seed, Tensor([0], dtype=dtypes.uint32, requires_grad=False)
 
-  _rng_counter: int = 0
   @staticmethod
   def rand(*shape, **kwargs):
+    if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
     num = prod((shape:=argfix(*shape)))
+    if num == 0: return Tensor.zeros(shape, **kwargs)
     if (odd_counts := num % 2): num += 1
-    counts = Tensor.arange(num, dtype=dtypes.uint32) + Tensor._rng_counter
-    Tensor._rng_counter += num
+    counts = Tensor.arange(num, dtype=dtypes.uint32, requires_grad=False) + Tensor._rng_counter
+    Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
 
     rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
     ks = [0x0, Tensor._seed ^ 0x0 ^ 0x1BD11BDA, Tensor._seed]
