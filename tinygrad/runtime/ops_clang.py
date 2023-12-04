@@ -22,7 +22,7 @@ class ClangProgram:
       pathlib.Path(cached_file_path.name).write_bytes(lib)
       self.fxn: Any = ctypes.CDLL(str(cached_file_path.name))[name]
 
-  def __call__(self, *args, wait=False): return cpu_time_execution(lambda: self.fxn(*args), enable=wait)
+  def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
 
 renderer = functools.partial(uops_to_cstyle, CStyleLanguage(buffer_suffix=" restrict", arg_int_prefix="const int"))
 ClangDevice = Compiled(MallocAllocator, LinearizerOptions(supports_float4=False, has_local=False), renderer, compile_clang, ClangProgram)
