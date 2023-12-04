@@ -156,9 +156,27 @@ class Tensor:
   @staticmethod
   def manual_seed(seed=0): Tensor._seed = seed
 
+  _rng_counter: int = 0
   @staticmethod
   def rand(*shape, **kwargs):
-    return Tensor._loadop(LoadOps.CUSTOM, prod((shape:=argfix(*shape))), arg=custom_random, **kwargs).reshape(shape)
+    num = prod((shape:=argfix(*shape)))
+    if (odd_counts := num % 2): num += 1
+    counts = Tensor.arange(num, dtype=dtypes.uint32) + Tensor._rng_counter
+    Tensor._rng_counter += num
+
+    x = counts.chunk(2)
+    rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
+    ks = [0x0, Tensor._seed ^ 0x0 ^ 0x1BD11BDA, Tensor._seed]
+
+    for i in range(5):
+      for r in rotations[0]:
+        x[0] = x[0] + x[1]
+        x[1] = x[0] ^ (x[1] * (2 ** r))
+      x = [(x[0] + ks[0]).realize(), (x[1] + ks[1] + i + 1).realize()]
+      rotations = rotations[1:] + rotations[:1]
+      ks = ks[1:] + ks[:1]
+    out = x[0].cat(x[1])
+    return out[odd_counts:].reshape(shape).cast(Tensor.default_type if kwargs.get("dtype") is None else kwargs.get("dtype")) / (2**32 - 1)
 
   # ***** creation helper functions *****
 
@@ -719,6 +737,9 @@ class Tensor:
     inject_nan = ((((-to_nan) * 2) + 1)).log().add(1) if isinstance(to_nan, Tensor) else 1 if not to_nan else float("nan")
     return ar.mul(sign * base_sign + (1 - base_sign)).mul(inject_nan)
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
+  def xor(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+    x = self._to_float(x)
+    return mlops.Xor.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else self
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return (self<x).detach().where(x, (self>x).detach().where(self, (self+x)/2))
   def minimum(self, x:Union[Tensor, float]) -> Tensor: return -((-self).maximum(-x))
@@ -738,6 +759,7 @@ class Tensor:
   def __pow__(self, x) -> Tensor: return self.pow(x)
   def __truediv__(self, x) -> Tensor: return self.div(x)
   def __matmul__(self, x) -> Tensor: return self.matmul(x)
+  def __xor__(self, x) -> Tensor: return self.xor(x)
 
   def __radd__(self, x) -> Tensor: return self.add(x, True)
   def __rsub__(self, x) -> Tensor: return self.sub(x, True)
@@ -745,6 +767,7 @@ class Tensor:
   def __rpow__(self, x) -> Tensor: return self.pow(x, True)
   def __rtruediv__(self, x) -> Tensor: return self.div(x, True)
   def __rmatmul__(self, x) -> Tensor: return self.matmul(x, True)
+  def __rxor__(self, x) -> Tensor: return self.xor(x, True)
 
   def __iadd__(self, x) -> Tensor: return self.assign(self.add(x))
   def __isub__(self, x) -> Tensor: return self.assign(self.sub(x))
@@ -752,6 +775,7 @@ class Tensor:
   def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x))
   def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x))
   def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
+  def __ixor__(self, x) -> Tensor: return self.assign(self.xor(x))
 
   def __lt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, False))
   def __gt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, True))
