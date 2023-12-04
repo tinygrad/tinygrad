@@ -16,9 +16,13 @@ if __name__ == "__main__":
   print("GPU devices", d0, d1)
   sz = getenv("N", 1024*1024*256)  # 1 GB
 
+  with Timing("GPU initial sync: "): sync()
+
   with Timing("CPU creation: ", on_exit=lambda x: f", {(sz*4*2)/x:.2f} GB/sec"):
-    c0 = Tensor.ones(sz, device="cpu").realize()
-    c1 = (Tensor.ones(sz, device="cpu")/2).realize()
+    c0 = (Tensor.ones(sz, device="clang")/2).realize()
+    c1 = (Tensor.ones(sz, device="clang")/4).realize()
+    print(c0.lazydata.realized)
+    print(c1.lazydata.realized)
 
   with Timing("CPU -> 0: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
     a0 = c0.to(d0).realize()

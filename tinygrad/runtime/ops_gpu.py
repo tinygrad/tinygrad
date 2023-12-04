@@ -82,8 +82,9 @@ class CLDevice(Compiled):
       num_platforms = init_c_var(ctypes.c_uint32(), lambda x: check(cl.clGetPlatformIDs(0, None, ctypes.byref(x))))
       platform_ids = init_c_var((cl.cl_platform_id * num_platforms.value)(), lambda x: check(cl.clGetPlatformIDs(num_platforms.value, x, None)))
       for device_type in [cl.CL_DEVICE_TYPE_GPU, cl.CL_DEVICE_TYPE_DEFAULT]:
-        num_devices = init_c_var(ctypes.c_uint32(), lambda x: check(cl.clGetDeviceIDs(platform_ids[0], device_type, 0, None, ctypes.byref(x))))
-        if num_devices.value: break
+        num_devices = ctypes.c_uint32()
+        err = cl.clGetDeviceIDs(platform_ids[0], device_type, 0, None, ctypes.byref(num_devices))
+        if err == 0 and num_devices.value != 0: break
       if DEBUG >= 1: print(f"CLDevice: got {num_platforms.value} platforms and {num_devices.value} devices")
       CLDevice.device_ids = init_c_var((cl.cl_device_id * num_devices.value)(), lambda x: check(cl.clGetDeviceIDs(platform_ids[0], device_type, num_devices, x, None)))
 
