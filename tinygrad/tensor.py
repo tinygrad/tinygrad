@@ -303,7 +303,8 @@ class Tensor:
   #        - if first Tensor passed in (expand dims) is not at dim 0
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
     # TODO: boolean indices
-    # TODO: move all slice(None) to the end and transpose non-None to the front
+    # TODO: figure out the exact acceptable types for indices, especially for internal list/tuple types
+    # TODO: move all slice(None) to the end and transpose non-None to the front...... maybe for fancy indexing?
     # TODO: update docs
   def __getitem__(self, indices: Union[int, slice, Tensor, None, List, Tuple]) -> Tensor: # no ellipsis type...
     # 1. indices normalization and validation
@@ -362,25 +363,27 @@ class Tensor:
     ret = sliced_tensor.reshape(tuple(new_shape))
 
     # 3. advanced indexing (copy)
-    # TODO this is still really unreadable
     if type_dim[Tensor]:
+
+      # extract tensors and tensor dimensions
       idx, tdim = [], []
       for tensor_dim in type_dim[Tensor]:
         dims_collapsed_, dims_injected = sum(1 for d in dims_collapsed if tensor_dim >= d), sum(1 for d in type_dim[None] if tensor_dim >= d)
         tdim.append(td := tensor_dim - dims_collapsed_ + dims_injected)
-        # TODO: first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
         idx.append((t := indices[tensor_dim + dims_injected]).sign().__neg__().relu() * ret.shape[td] + t)
-      # normalize idx
-      max_dim = max(i.ndim for i in idx)
+
       # compute sum_dim, arange, and idx
+      max_dim = max(i.ndim for i in idx)
       sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(tdim)]
       arange = [Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, tdim))]
       first_idx = [idx[0].reshape(*[1]*tdim[0], *[1]*(1 + max_dim - idx[0].ndim), *idx[0].shape, *[1]*(ret.ndim - tdim[0] - 1))]
       rest_idx = [i.reshape(*[1]*tdim[0], *[1]*(max_dim - i.ndim), *i.shape, *[1]*(ret.ndim - tdim[0] - n)) for n,i in enumerate(idx[1:], 1)]
       idx = first_idx + rest_idx
       ret = ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*max_dim, *ret.shape[sum_dim[0]+1:])
-      # iteratively fancy index
+
+      # iteratively eq -> mul -> sum fancy index
       for a,i,sd in zip(arange, idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
+
       # special permute case
       if tdim[0] != 0 and len(tdim) != 1 and tdim != list(range(tdim[0], tdim[-1]+1)):
         ret_dims = list(range(ret.ndim))
