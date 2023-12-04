@@ -106,6 +106,7 @@ class _BufferCopy(JITRunner):
     if DEBUG >= 2: print(f"***      copy {dest.device} <- {src.device} size {dest.size:<16d} dtype {dest.dtype}")
     if hasattr(dest.allocator, 'transfer') and type(dest.allocator) is type(src.allocator):
       # fast path, used on HIP between GPUs
+      # NOTE: it's important we use the dest device here to ensure the transfer is ready
       dest.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
       return
     if getenv("FROM_BUFFER") and hasattr(dest.allocator, 'from_buffer') and hasattr(dest.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
