@@ -20,7 +20,7 @@ class TestSpecific(unittest.TestCase):
     w = Tensor.randn(2048, 512)
     (x @ w).reshape(1, 128, 4).contiguous().realize()
 
-  @unittest.skipIf(Device.DEFAULT in ["LLVM", "WEBGPU", "CUDA"], "Broken on LLVM, WEBGPU and CUDA")
+  @unittest.skipIf(Device.DEFAULT in ["LLVM", "WEBGPU", "GPU", "CUDA"], "Broken on LLVM and webgpu, GPU requires cl_khr_fp16")
   def test_big_vec_mul(self):
     # from LLaMA
     #   0 buffer<4096, dtypes.float>                      [View((1024, 1, 1, 4), (4, 0, 0, 1), 0, None)]

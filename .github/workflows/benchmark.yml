@@ -27,7 +27,7 @@ jobs:
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
     - name: Run model inference benchmark
-      run: python3 test/external/external_model_benchmark.py
+      run: METAL=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Run Tensor Core GEMM
@@ -109,7 +109,7 @@ jobs:
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
     - name: Run model inference benchmark
-      run: python3 test/external/external_model_benchmark.py
+      run: GPU=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Run Tensor Core GEMM
@@ -128,8 +128,8 @@ jobs:
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w winograd
       run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
-    #- name: Run 10 CIFAR training steps w WINO/HALF/HIP
-    #  run: HALF=1 HIP=1 WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
+    - name: Run 10 CIFAR training steps w WINO/HALF/HIP
+      run: HALF=1 HIP=1 WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
     - uses: actions/upload-artifact@v3
       with:
         name: Speed (AMD)

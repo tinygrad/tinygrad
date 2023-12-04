@@ -29,15 +29,15 @@ def get_max(var):
 def remove_single_scalar_curly_braces(ptx_code):
   return '\n'.join([re.sub(r'\{\s*(%\w+)\s*\}', r'\1', line) for line in ptx_code.split('\n')])
 
-def render_const(args):
-  return (('-' if args<0 else '') + 'tl.where(1,float("inf"),0)') if math.isinf(args) else ('tl.where(1,float("nan"),0)' if math.isnan(args) else str(args))
+def render_const(args,dtype:DType):
+  return (('-' if args<0 else '') + 'tl.where(1,float("inf"),0)') if math.isinf(args) else ('tl.where(1,float("nan"),0)' if math.isnan(args) else f"{int(args)}" if dtypes.is_int(dtype) else str(args))
 
 def render_cast(x:str, dtype:DType):
   return f"{x}.to({triton_dtypes[dtype]})"
 
 def define_scalar(local_size, dtype, args):
-  if len(local_size) > 0: return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{render_const(args)}, dtype={triton_dtypes[dtype]})"
-  return render_const(args)
+  if len(local_size) > 0: return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{render_const(args,dtype)}, dtype={triton_dtypes[dtype]})"
+  return render_const(args,dtype)
 
 def uops_to_triton(function_name:str, uops:List[UOp]):
   local_size: List[int] = []

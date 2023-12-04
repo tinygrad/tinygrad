@@ -22,7 +22,6 @@ class TestHIPCompilationRDNA(unittest.TestCase):
     output = model(input)
     output.numpy()
 
-  @unittest.expectedFailure
   def test_compile_hip_speedyresnet_hf(self):
     Tensor.default_type = dtypes.float16
 
