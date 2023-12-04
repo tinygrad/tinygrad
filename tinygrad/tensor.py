@@ -10,7 +10,7 @@ import numpy as np
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int, round_up
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LoadOps
-from tinygrad.device import Device, Buffer
+from tinygrad.device import Device
 from tinygrad.shape.symbolic import sint
 from tinygrad.realize import run_schedule
 
