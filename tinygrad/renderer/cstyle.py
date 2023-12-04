@@ -312,6 +312,42 @@ __device__ bool operator<(const unsigned short &a, const half &b) { return __hlt
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"hmax({a},{b})", TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}!=0?{b}:{c})" if dtype != dtypes.half else f"(half)({a}!=0?{b}:{c})"}
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 
+class GLSLLanguage(CStyleLanguage):
+  type_map = {dtypes.float64: ("double", "d"), dtypes.float: ("float", ""), dtypes.half: ("float", ""), dtypes.int32: ("int", "i"), dtypes.uint32: ("uint", "u"), dtypes.bool: ("bool", "i")}
+  fragment_center_offset = 0.5
+  xid = [f"int(gl_FragCoord.y-{fragment_center_offset}) * w + int(gl_FragCoord.x-{fragment_center_offset})"]
+  code_for_op = { **CStyleLanguage().code_for_op, BinaryOps.MUL: lambda a,b,dtype: f"bool(int({a})*int({b}))" if dtype == dtypes.bool else f"({a}*{b})",
+    BinaryOps.ADD: lambda a,b,dtype: f"bool(int({a})+int({b}))" if dtype == dtypes.bool else f"({a}+{b})", BinaryOps.CMPLT: lambda a,b,dtype: f"(float({a})<float({b}))" if dtype == dtypes.bool else f"({a}<{b})",
+    BinaryOps.MOD: lambda a,b,dtype: f"(int({a})%int({b}))", TernaryOps.WHERE: lambda a,b,c,dtype: f"(float({a})!=0.0?{b}:{c})" }
+
+  def render_const(self, x:Union[float,int], var_dtype) -> str:
+    if math.isnan(x): val = "(0.0 / 0.0)"
+    elif math.isinf(x): val = ("-" if x < 0 else "") + "(1./0.)"
+    else: val = "({:.1f})".format(x) if x == int(x) and dtypes.is_float(var_dtype) else f"({x})"
+    return self.render_cast([val]*var_dtype.sz, var_dtype)
+
+  def render_conditional(self, cond: str, x:str, y:str) -> str:
+    return f"bool({cond})?({x}):{y}"
+
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
+    prg = "#version 330\nprecision highp float;\nprecision highp int;\nin vec2 uv;\nuniform int w;\n"
+    prg += "\n".join([f"uniform {self.type_map[dtype][1]}sampler2D {name};" for name,dtype in bufs if name != "data0"])
+    prg += f"\nout {'int' if bufs[0][1] == dtypes.bool else self.type_map[bufs[0][1]][0]} out_data;\n"
+    return prg + "\nvoid main() {\n" + "\n".join(kernel) + "\n}"
+
+  def render_cast(self, x:List[str], var_dtype:DType) -> str:
+    if self.type_map[var_dtype]: return f"{self.type_map[var_dtype][0]}({x[0]})"
+    raise NotImplementedError(f"no cast for {var_dtype}")
+
+  def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
+    x_calc = f"float(int({idx})%textureSize({buf_name}, 0).x)"
+    y_calc = f"float(int({idx})/textureSize({buf_name}, 0).x)"
+    out_val = f"texture({buf_name}, vec2(float({x_calc} + {self.fragment_center_offset}f)/float(textureSize({buf_name}, 0).x), float({y_calc} + {self.fragment_center_offset}f)/float(textureSize({buf_name}, 0).y))).r"
+    return f"{self.render_cast([out_val], output_dtype)}"
+
+  def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
+    return f"out_data = {'int' if buf_dtype == dtypes.bool else self.type_map[buf_dtype][0]}({var_name});"
+
 # TODO: how much of this can be merged with above?
 class WGSLLanguage(CStyleLanguage):
   gid = [f"i32(gindex.{'xyz'[x]})" for x in range(3)]
