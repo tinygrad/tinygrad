@@ -11,6 +11,7 @@ from tinygrad.jit import TinyJit
 import tiktoken
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
 from tinygrad.helpers import GlobalCounters, Timing, DEBUG, getenv, fetch, colored, dtypes
+from tinygrad.device import Compiled, Device
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 HALF = getenv("HALF")
@@ -35,16 +36,22 @@ class Attention:
 
     # create kv cache
     if not hasattr(self, "cache_kv"):
-      self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim)
-      if HALF:
-        self.cache_kv = self.cache_kv.half()
+      self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim, dtype=dtypes.half if HALF else dtypes.float).contiguous().realize()
 
-    keys = self.cache_kv[0].shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
-    values = self.cache_kv[1].shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
+    if isinstance(Device[Device.DEFAULT], Compiled):
+      # update the cache
+      st = self.cache_kv.lazydata.st
+      st = st.shrink(((0, st.shape[0]), (0, st.shape[1]), (start_pos, start_pos+seqlen), (0, st.shape[3]), (0, st.shape[4])))
+      self.cache_kv.copy_with_st(Tensor.stack([xk, xv]), st).realize()
 
-    # update the cache
-    new_cache = Tensor.stack([keys, values]).pad((None, None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()
-    self.cache_kv.assign(new_cache).realize()
+      keys = self.cache_kv[0].shrink((None, (0, start_pos+seqlen), None, None))
+      values = self.cache_kv[1].shrink((None, (0, start_pos+seqlen), None, None))
+    else:
+      keys = self.cache_kv[0].shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
+      values = self.cache_kv[1].shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
+      # update the cache
+      new_cache = Tensor.stack([keys, values]).pad((None, None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()
+      self.cache_kv.assign(new_cache).realize()
 
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).cast(dtypes.float32).transpose(1, 2).reshape(bsz, seqlen, -1))

@@ -175,7 +175,7 @@ class LazyBuffer:
             self.output_buffer = None
             break
 
-    if op.op not in LoadOps:
+    if op.op not in LoadOps and op.op is not BufferOps.STORE:
       # add the store
       info = get_lazyop_info(op)
       assert info.dtype == self.dtype or isinstance(self.dtype, ImageDType), f"dtype mismatch {info.dtype=} != {self.dtype=}"
@@ -188,6 +188,10 @@ class LazyBuffer:
       # TODO: why doesn't this match?
       #assert info.shape == self.shape, f"shape mismatch {info.shape=} != {self.shape=}"
       op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, self.dtype, ShapeTracker.from_shape(info.shape)))
+    elif op.op is BufferOps.STORE:
+      assert isinstance(op.arg, ShapeTracker)
+      var_vals.update(op.arg.var_vals)
+      op = LazyOp(BufferOps.STORE, op.src, MemBuffer(0, self.dtype, op.arg.unbind()))
     else:
       # check loadop validity of bufferops
       for i,s in enumerate(op.src): assert isinstance(s, LazyOp) and s.op == BufferOps.LOAD and s.arg.idx == i+1 and s.arg.st.contiguous, f"bad LoadOps src {i}: {s}"
@@ -217,6 +221,12 @@ class LazyBuffer:
       # TODO: based lazybuffers shouldn't take dtype or var_vals, same issue in movementops
       return create_lazybuffer(self.device, ShapeTracker.from_shape(tuple(self.shape)), LoadOps, LazyOp(LoadOps.CONTIGUOUS, (self,), None), self.dtype, base=self.base)
     return LazyBuffer.loadop(LoadOps.CONTIGUOUS, self.shape, self.dtype, self.device, src=self)
+
+  def copy_with_st(self:LazyBuffer, other:LazyBuffer, st:ShapeTracker):
+    assert self.st.contiguous and self.realized, "can only copy to contiguous and realized buffer"
+    self.output_buffer = self.realized
+    self.realized = None
+    self.op = LazyOp(BufferOps.STORE, (other,), st)
 
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:

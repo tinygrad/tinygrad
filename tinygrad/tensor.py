@@ -118,6 +118,12 @@ class Tensor:
     if self.dtype == x.dtype and self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized
     self.lazydata = x.lazydata
     return self
+
+  def copy_with_st(self, other:Tensor, st) -> Tensor:
+    # TODO: do we call a contiguous().realize() on self implicitly?
+    self.lazydata.copy_with_st(other.lazydata, st)
+    return self
+
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
 
   # TODO: these are good places to start removing numpy
