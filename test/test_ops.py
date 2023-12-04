@@ -327,6 +327,10 @@ class TestOps(unittest.TestCase):
   def test_rsqrt(self):
     helper_test_op([(45,65)], lambda x: torch.rsqrt(x), Tensor.rsqrt, a=0)
     helper_test_op([()], lambda x: torch.rsqrt(x), Tensor.rsqrt, a=0)
+  def test_xor(self):
+    tor = torch.tensor([[1,-8,1],[32,1,6]], dtype=torch.int)
+    ten = Tensor([[1,-8,1],[32,1,6]], dtype=dtypes.int32)
+    helper_test_op([], lambda: tor^tor, lambda: ten^ten, forward_only=True)
 
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin(), Tensor.sin, a=0)
