@@ -318,7 +318,7 @@ class Tensor:
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
     ellipsis_idx = [dim for dim, i in enumerate(indices) if i is Ellipsis]
     fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
-    num_slices = len(indices) - 1 - sum(1 for i in indices if i is None)
+    num_slices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
     indices[fill_idx:fill_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
 
     # use Dict[type, List[dimension]] to track elements in indices
@@ -334,8 +334,8 @@ class Tensor:
     # validation! raise Errors
     if len(ellipsis_idx) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
     if float in type_idx: raise IndexError("float type is not valid index")
-    if num_slices > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     if any(isinstance(i, slice) and i.step == 0 for i in indices): raise ValueError('slice step cannot be 0')
+    if num_slices > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     for dim in type_idx[int]:
       if indices_filtered[dim] >= self.shape[dim] or indices_filtered[dim] < -self.shape[dim]: raise IndexError(f"index {indices_filtered[dim]} is out of bounds for dimension {dim} with size {self.shape[dim]}")
 
