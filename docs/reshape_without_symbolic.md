@@ -1,5 +1,3 @@
-# Logic of core tinygrad algorithms
-
 ## ["View.reshape without symbolic"](https://github.com/tinygrad/tinygrad/pull/2218)
 
 This section contains the sketch proof of "Complete, Fast and Correct View.reshapes without using Symbolic". The goal is to reduce multi-views which cost runtime.
