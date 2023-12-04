@@ -1,15 +1,10 @@
-import ctypes, functools
+import ctypes, functools, subprocess
 from typing import Tuple, TypeVar
 import gpuctypes.hip as hip
 from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
-
-# TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
-if DEBUG >= 6:
-  from extra.helpers import enable_early_exec
-  early_exec = enable_early_exec()
 
 # The default HIP stream is used for everything.
 MOCKHIP = getenv("MOCKHIP") # for CI. don't run kernels, only check if they compile
@@ -27,7 +22,7 @@ class HIPProgram:
     self.device, self.name, self.lib = device, name, lib
 
     if DEBUG >= 6:
-      asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], lib))
+      asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
     if MOCKHIP: return
