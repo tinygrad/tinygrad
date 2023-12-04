@@ -64,7 +64,7 @@ class HIPAllocator(LRUAllocator):
 
 class HIPDevice(Compiled):
   default_arch_name = "gfx1100"
-  def __init__(self, device:str):
+  def __init__(self, device:str=""):
     self.device = int(device.split(":")[1]) if ":" in device else 0
     if self.device == 0 and not MOCKHIP: HIPDevice.default_arch_name = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode()
 
