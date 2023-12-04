@@ -59,6 +59,7 @@ class LinearizerOptions(NamedTuple):
   supports_float4: bool = True
   supports_float4_alu: bool = True
   has_local: bool = True
+  dont_use_locals: bool = False
   has_shared: bool = True
   # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
   global_max: Optional[List[int]] = None
@@ -101,7 +102,7 @@ class Kernel:
     self.local_dims: int = 0
     self.local_alias: Dict[int, LocalBuffer] = {}
     self.tensor_core: Optional[TensorCore] = None
-    self.dont_use_locals: bool = not self.opts.has_local
+    self.dont_use_locals: bool = self.opts.dont_use_locals
 
     # group simplifies
     self.simplify_ones()

@@ -55,5 +55,5 @@ class RawWebGLAllocator(Allocator):
 
 class WebGlDevice(Compiled):
   def __init__(self, device:str):
-    super().__init__(RawWebGLAllocator(), LinearizerOptions(device="WEBGL", supports_float4=False, supports_float4_alu=False, has_local=False, has_shared=False),
+    super().__init__(RawWebGLAllocator(), LinearizerOptions(device="WEBGL", supports_float4=False, supports_float4_alu=False, has_local=False, has_shared=False, dont_use_locals=True),
                      functools.partial(uops_to_cstyle, GLSLLanguage()), lambda x: x, WebGLProgram)
