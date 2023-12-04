@@ -274,7 +274,7 @@ def cpu_execute(cb: Callable, time_execution: bool) -> Optional[float]:
   if time_execution: st = time.perf_counter()
   (thread := Thread(target=cb)).start()
   thread.join()
-  if time_execution: return time.perf_counter()-st
+  return time.perf_counter()-st if time_execution else None
 
 # *** Helpers for CUDA-like APIs.
 
