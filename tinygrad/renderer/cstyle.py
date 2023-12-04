@@ -253,6 +253,7 @@ class CUDALanguage(CStyleLanguage):
   half_prekernel = """
     #include <cuda_fp16.h>
     struct half4 { half x, y, z, w; };
+    __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
   """
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 

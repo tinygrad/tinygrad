@@ -4,19 +4,10 @@ import functools, itertools, operator
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast, Union, Iterable
 from tinygrad.ops import MovementOps
+
 from tinygrad.helpers import prod, DEBUG, merge_dicts
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
-from tinygrad.shape.view import View
-
-@functools.lru_cache(maxsize=None)
-def to_shape_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[Tuple[int, int], ...]:
-  assert len(shape) == len(strides)
-  ret = [(shape[0], strides[0])] if shape else []
-  for s,st in zip(shape[1:], strides[1:]):
-    ps,pst = ret[-1]
-    if pst == s*st or ps == 1: ret[-1] = (ps*s, st)
-    elif s != 1: ret.append((s, st))
-  return tuple(ret)
+from tinygrad.shape.view import View, _merge_dims
 
 def expr_node_mask(view:View, idx:Node, valid:Optional[Node]=None) -> Node:
   expr = [valid] if valid is not None else []
@@ -34,7 +25,7 @@ def expr_node(view:View, idx:Optional[Node]=None) -> Node:
   if idx is None: idx = Variable('idx', 0, prod(view.shape)-1)
   ret: List[Node] = [NumNode(view.offset) if isinstance(view.offset, int) else view.offset] if view.offset else []
   acc = 1
-  for d,s in reversed(to_shape_strides(view.shape, view.strides)):
+  for d,s,_ in reversed(_merge_dims(view.shape, view.strides)):
     ret.append(((idx//acc)%d)*s)
     acc *= d
   return Variable.sum(ret)
@@ -166,13 +157,8 @@ class ShapeTracker:
   def stride(self, mul: Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].stride(mul), ))
 
   def reshape(self, new_shape: Tuple[sint, ...]) -> ShapeTracker:
-    if (new_view := self.views[-1].reshape(new_shape)) is None:
-      extra_view = View.create(new_shape)
-      # last chance to merge. TODO: move into View
-      if (merged_view := merge_views(self.views[-1], extra_view)) is not None:
-        return ShapeTracker(self.views[0:-1] + (merged_view,))
-      return ShapeTracker(self.views + (extra_view, ))
-    return ShapeTracker(self.views[0:-1] + (new_view,))
+    if (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
+    return ShapeTracker(self.views + (View.create(new_shape), ))
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 # TODO: if we remove movementops from lazy.py we can delete this

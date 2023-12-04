@@ -94,7 +94,7 @@ class Buffer:
   def fromCPU(device:str, x:np.ndarray): return Buffer(device, x.size, dtypes.from_np(x.dtype)).copyin(x.data)
   def toCPU(self) -> np.ndarray:
     # zero copy with as_buffer
-    if hasattr(self.allocator, 'as_buffer'): return np.frombuffer(self.allocator.as_buffer(self._buf), dtype=np.dtype(self.dtype.np, metadata={"backing": self._buf}))
+    if hasattr(self.allocator, 'as_buffer'): return np.frombuffer(self.allocator.as_buffer(self._buf), dtype=np.dtype(self.dtype.np, metadata={"backing": self._buf}))  # type: ignore
     ret = np.empty(self.size, self.dtype.np)
     if self.size > 0: self.allocator.copyout(flat_mv(ret.data), self._buf)
     return ret
@@ -265,7 +265,7 @@ class CompiledASTRunner(JITRunner):
     lra = self.runtime_args.copy()
     if global_size: lra['global_size'] = global_size
     if local_size and 'local_size' not in lra: lra['local_size'] = local_size
-    et = self.clprg(*[x._buf for x in rawbufs], *[var_vals[k] for k in self.vars], **lra, wait=wait or DEBUG>=2)
+    et = self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.vars), wait=wait or DEBUG>=2)
     update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra)
     return et
 
