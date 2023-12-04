@@ -369,7 +369,7 @@ class Tensor:
         dims_collapsed_, dims_injected = sum(1 for d in dims_collapsed if tensor_dim >= d), sum(1 for d in type_dim[None] if tensor_dim >= d)
         tdim.append(td := tensor_dim - dims_collapsed_ + dims_injected)
         # TODO: first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
-        idx.append((t := indices[tensor_dim + dims_injected]).sign().contiguous().__neg__().contiguous().relu() * ret.shape[td] + t)
+        idx.append((t := indices[tensor_dim + dims_injected]).sign().__neg__().relu() * ret.shape[td] + t)
       # normalize idx
       max_dim = max(i.ndim for i in idx)
       # compute sum_dim, arange, and idx
