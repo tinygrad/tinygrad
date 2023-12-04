@@ -25,15 +25,13 @@ class GLSLLanguage(CStyleLanguage):
     return f"bool({cond})?({x}):{y}"
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
-    local_size = local_size[::-1] if local_size else [1]
     prg = "#version 330\nprecision highp float;\nprecision highp int;\nin vec2 uv;\nuniform int w;\n"
     prg += "\n".join([f"uniform {sampler_prefix[dtype]}sampler2D {name};" for name,dtype in bufs if name != "data0"])
     prg += f"\nout {'int' if bufs[0][1] == dtypes.bool else type_map[bufs[0][1]]} out_data;\n"
     return prg + "\nvoid main() {\n" + "\n".join(kernel) + "\n}"
 
   def render_cast(self, x:List[str], var_dtype:DType) -> str:
-    if type_map[var_dtype]:
-      return f"{type_map[var_dtype]}({x[0]})"
+    if type_map[var_dtype]: return f"{type_map[var_dtype]}({x[0]})"
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:

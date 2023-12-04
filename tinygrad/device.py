@@ -229,13 +229,13 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 # **************** for Compiled Devices ****************
 
 class CompiledASTRunner(JITRunner):
-  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None):
+  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, has_local:bool=True, runtime_args:Optional[dict]=None):
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
-    self.name, self.display_name, self.prg, self.global_size, self.local_size, self.runtime_args = \
-      to_function_name(name), name, prg, global_size, local_size, runtime_args if runtime_args is not None else {}
+    self.name, self.display_name, self.prg, self.global_size, self.local_size, self.has_local, self.runtime_args = \
+      to_function_name(name), name, prg, global_size, local_size, has_local, runtime_args if runtime_args is not None else {}
     self.vars: List[Variable] = []
     if ast:
       info = get_lazyop_info(ast)
@@ -256,10 +256,10 @@ class CompiledASTRunner(JITRunner):
 
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     global_size, local_size = self.launch_dims(var_vals)
-    if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
+    if global_size is not None and local_size is None and self.has_local and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
       from tinygrad.features.search import optimize_local_size
-      local_size = self.local_size = [1,1,1] if Device.DEFAULT == "WEBGL" else optimize_local_size(self.clprg, global_size, rawbufs)
+      local_size = self.local_size = optimize_local_size(self.clprg, global_size, rawbufs)
       global_size = self.global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
     lra = self.runtime_args.copy()
     if global_size: lra['global_size'] = global_size
@@ -276,7 +276,7 @@ class Compiled:
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     k.linearize()
     src, runtime_args = self.renderer(to_function_name(k.name), k.uops)
-    return CompiledASTRunner(k.ast, k.name, src, k.global_size, k.local_size, runtime_args).build(self.compiler, self.runtime)
+    return CompiledASTRunner(k.ast, k.name, src, k.global_size, k.local_size, k.opts.has_local, runtime_args).build(self.compiler, self.runtime)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:

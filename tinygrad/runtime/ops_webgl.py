@@ -13,7 +13,7 @@ ctx = moderngl.create_standalone_context()
 dtype_map = { dtypes.float64: "f8", dtypes.float: "f4", dtypes.half: "f2", dtypes.int32: "i4", dtypes.uint32: "u4", dtypes.bool: "i1"}
 class WebGLProgram:
   def __init__(self, name: str, prg: str, bufs:int=0, vars:int=0): self.name, self.prg = name, ctx.program(vertex_shader="#version 330\nprecision highp float;\nin vec2 in_position;in vec2 in_uv;out vec2 uv;void main(){gl_Position=vec4(in_position,0.0,1.0);uv=in_uv;}", fragment_shader=prg)
-  def __call__(self, *bufs, global_size, local_size, wait=False):
+  def __call__(self, *bufs, global_size, wait=False):
     vert, uv =ctx.buffer(np.asarray([-1, 1, -1, -1, 1, 1, 1, -1], dtype='f4').tobytes()), ctx.buffer(np.asarray([0, 1, 0, 0, 1, 1, 1, 0], dtype='f4').tobytes())
     self.vao = ctx.vertex_array(self.prg, [])
     self.vao.bind(0 if CI else self.prg["in_position"].location, buffer=vert, cls='f', fmt='2f4')
@@ -55,5 +55,5 @@ class RawWebGLAllocator(Allocator):
 
 class WebGlDevice(Compiled):
   def __init__(self, device:str):
-    super().__init__(RawWebGLAllocator(), LinearizerOptions(device="WEBGL", supports_float4=False,supports_float4_alu=False, has_local=False),
+    super().__init__(RawWebGLAllocator(), LinearizerOptions(device="WEBGL", supports_float4=False, supports_float4_alu=False, has_local=False, has_shared=False),
                      functools.partial(uops_to_cstyle, GLSLLanguage()), lambda x: x, WebGLProgram)

@@ -101,7 +101,7 @@ class Kernel:
     self.local_dims: int = 0
     self.local_alias: Dict[int, LocalBuffer] = {}
     self.tensor_core: Optional[TensorCore] = None
-    self.dont_use_locals: bool = self.opts.device == "WEBGL"
+    self.dont_use_locals: bool = not self.opts.has_local
 
     # group simplifies
     self.simplify_ones()
