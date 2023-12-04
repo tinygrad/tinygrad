@@ -397,7 +397,6 @@ class Kernel:
     return False
 
   def apply_opt(self, opt:Opt):
-    if self.opts.device == "WEBGL": return self.simplify_ones()
     assert not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.LASTLOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals"
     self.applied_opts.append(opt)
     if opt.axis is not None:

@@ -162,10 +162,10 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       if (child_count[u] <= 1 or dtypes.is_int(dtype)) and args != BinaryOps.MAX:  # fix index rendering issue. fix clang nested max macro issue
         r[u] = val
       else:
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'alu')} = {val};")
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_map[dtype] if hasattr(lang, 'type_map') else dtype.name} {ssa(u,'alu')} = {val};")
     elif uop == UOps.DEFINE_ACC:
       assert dtype is not None
-      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
+      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_map[dtype] if hasattr(lang, 'type_map') else dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
     elif uop == UOps.SPECIAL:
       xid = lang.gid if args[1].startswith("g") else (lang.xid if args[1].startswith("i") else lang.lid)
       kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]}; /* {args[2]} */")
@@ -177,7 +177,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       assert dtype is not None
       val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
       if len(vin) > 3: val = lang.render_conditional(r[vin[2]], val, r[vin[3]])
-      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'val')} = {val};")
+      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_map[dtype] if hasattr(lang, 'type_map') else dtype.name} {ssa(u,'val')} = {val};")
     elif uop == UOps.PHI:
       kk(f"{r[vin[0]]} = {r[vin[1]]};")
       r[u] = r[vin[0]]
@@ -313,7 +313,8 @@ __device__ bool operator<(const unsigned short &a, const half &b) { return __hlt
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 
 class GLSLLanguage(CStyleLanguage):
-  type_map = {dtypes.float64: ("double", "d"), dtypes.float: ("float", ""), dtypes.half: ("float", ""), dtypes.int32: ("int", "i"), dtypes.uint32: ("uint", "u"), dtypes.bool: ("bool", "i")}
+  type_map = {dtypes.float64: "double", dtypes.float: "float", dtypes.half: "float", dtypes.int32: "int", dtypes.uint32: "uint", dtypes.bool: "bool"}
+  sampler_prefix = {dtypes.float64: "d", dtypes.float: "", dtypes.half: "", dtypes.int32: "i", dtypes.uint32: "u", dtypes.bool: "i"}
   fragment_center_offset = 0.5
   xid = [f"int(gl_FragCoord.y-{fragment_center_offset}) * w + int(gl_FragCoord.x-{fragment_center_offset})"]
   code_for_op = { **CStyleLanguage().code_for_op, BinaryOps.MUL: lambda a,b,dtype: f"bool(int({a})*int({b}))" if dtype == dtypes.bool else f"({a}*{b})",
@@ -331,12 +332,12 @@ class GLSLLanguage(CStyleLanguage):
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     prg = "#version 330\nprecision highp float;\nprecision highp int;\nin vec2 uv;\nuniform int w;\n"
-    prg += "\n".join([f"uniform {self.type_map[dtype][1]}sampler2D {name};" for name,dtype in bufs if name != "data0"])
-    prg += f"\nout {'int' if bufs[0][1] == dtypes.bool else self.type_map[bufs[0][1]][0]} out_data;\n"
+    prg += "\n".join([f"uniform {self.sampler_prefix[dtype]}sampler2D {name};" for name,dtype in bufs if name != "data0"])
+    prg += f"\nout {'int' if bufs[0][1] == dtypes.bool else self.type_map[bufs[0][1]]} out_data;\n"
     return prg + "\nvoid main() {\n" + "\n".join(kernel) + "\n}"
 
   def render_cast(self, x:List[str], var_dtype:DType) -> str:
-    if self.type_map[var_dtype]: return f"{self.type_map[var_dtype][0]}({x[0]})"
+    if self.type_map[var_dtype]: return f"{self.type_map[var_dtype]}({x[0]})"
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
@@ -346,7 +347,7 @@ class GLSLLanguage(CStyleLanguage):
     return f"{self.render_cast([out_val], output_dtype)}"
 
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
-    return f"out_data = {'int' if buf_dtype == dtypes.bool else self.type_map[buf_dtype][0]}({var_name});"
+    return f"out_data = {'int' if buf_dtype == dtypes.bool else self.type_map[buf_dtype]}({var_name});"
 
 # TODO: how much of this can be merged with above?
 class WGSLLanguage(CStyleLanguage):
