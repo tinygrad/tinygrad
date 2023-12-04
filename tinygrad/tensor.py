@@ -304,7 +304,6 @@ class Tensor:
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
   # TODO: boolean indices
   # TODO: figure out the exact acceptable types for indices, especially for internal list/tuple types
-  # TODO: move all slice(None) to the end and transpose non-None to the front...... maybe transpose all tensors to front for fancy indexing?
   # TODO: update docs
   def __getitem__(self, indices: Union[int, slice, Tensor, None, List, Tuple]) -> Tensor: # no ellipsis type...
     # 1. indices normalization and validation
@@ -317,7 +316,7 @@ class Tensor:
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
     ellipsis_idx = [dim for dim, i in enumerate(indices) if i is Ellipsis]
     fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
-    num_slices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
+    num_slices = len(indices) - len(ellipsis_idx) - indices.count(None)
     indices[fill_idx:fill_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
 
     # use Dict[type, List[dimension]] to track elements in indices
