@@ -164,10 +164,10 @@ class Tensor:
     counts = Tensor.arange(num, dtype=dtypes.uint32) + Tensor._rng_counter
     Tensor._rng_counter += num
 
-    x = counts.chunk(2)
     rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
     ks = [0x0, Tensor._seed ^ 0x0 ^ 0x1BD11BDA, Tensor._seed]
 
+    x = counts.chunk(2)
     for i in range(5):
       for r in rotations[0]:
         x[0] = x[0] + x[1]
