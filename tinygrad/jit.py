@@ -74,14 +74,16 @@ class TinyJit(Generic[ReturnType]):
       self.ret = self.fxn(*args, **kwargs)
       self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
-      if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
       # if your Device supports it, condense the items into a graph executor
       if (make_graph := Device[Device.DEFAULT].graph) and getenv("JIT") != 2:
         try:
+          if DEBUG >= 1: print(f"JIT GRAPHing {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
           self.jit_cache = [JitItem(make_graph(self.jit_cache, input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers))]
         except GraphException as e:
           if DEBUG >= 1: print(f"graph create failed {e}")
+      else:
+        if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
       self.input_replace = get_input_replace(self.jit_cache, input_rawbuffers)
     elif self.cnt == 0:

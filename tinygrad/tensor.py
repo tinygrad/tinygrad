@@ -125,7 +125,9 @@ class Tensor:
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
     if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.np)
     return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
-  def item(self) -> Union[float, int]: return self.numpy().item()
+  def item(self) -> Union[float, int]:
+    assert self.numel() == 1, "must have one element for item"
+    return self.realize().lazydata.realized.toCPU().item()
 
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self
@@ -656,7 +658,7 @@ class Tensor:
   def square(self): return self*self
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
   def abs(self): return self.relu() + (-self).relu()
-  def sign(self): return self / (self.abs() + 1e-10)
+  def sign(self): return ((self.float()) / (self.float().abs() + 1e-12)).cast(self.dtype)
   def reciprocal(self): return 1.0/self
 
   # ***** activation functions (unary) *****
