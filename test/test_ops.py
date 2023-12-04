@@ -615,6 +615,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3)], lambda x: x[1:2, None], lambda x: x[1:2, None])
     helper_test_op([(3,3,3)], lambda x: x[1:2, None, 1:2], lambda x: x[1:2, None, 1:2])
     helper_test_op([(3,3,3)], lambda x: x[1:2, 1:2, None, -1], lambda x: x[1:2, 1:2, None, -1])
+    helper_test_op([(3,3,3)], lambda x: x[None, None, 1, None, 2, 0:2], lambda x: x[None, None, 1, None, 2, 0:2])
 
   def test_slice_one_endpoint_out_of_bounds(self):
     helper_test_op([(3,3,3)], lambda x: x[0:4], lambda x: x[0:4])
@@ -1309,10 +1310,10 @@ class TestOps(unittest.TestCase):
 
   def test_slice_fancy_indexing_tuple_with_tensors(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a)], lambda x: x[(i)])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,1)], lambda x: x[(i,1)])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a,[1,1]]], lambda x: x[[i,[1,1]]])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a,(1,1)]], lambda x: x[[i,(1,1)]])
+    # helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,),], lambda x: x[(i,),]) TypeError: only integer tensors of a single element can be converted to an index
+    # helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,1),], lambda x: x[(i,1),]) TypeError: only integer tensors of a single element can be converted to an index
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,[1,1])], lambda x: x[(i,[1,1])])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,(1,1))], lambda x: x[(i,(1,1))])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,b,c,d,e)], lambda x: x[(i,j,k,o,p)])
 
   def test_slice_fancy_indexing_errors(self): ...
@@ -1322,6 +1323,8 @@ class TestOps(unittest.TestCase):
     # TODO: currently we do not support tensor indexing for list of list tensor
     # ex: torch.tensor([1,2])[[[[torch.tensor(1)]]]] -> tensor([[2]])
     # currently we return ValueError: setting an array element with a sequence.
+    # E   TypeError: only integer tensors of a single element can be converted to an index
+
 
   def test_gather(self):
     # indices cannot have gradient

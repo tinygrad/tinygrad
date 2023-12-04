@@ -305,10 +305,8 @@ class Tensor:
     # TODO: boolean indices
     # TODO: move all slice(None) to the end and transpose non-None to the front
     # TODO: update docs
-  def __getitem__(self, indices: Union[int, slice, Tensor, None, List, Tuple]) -> Tensor: # NO TYPE ELLIPSIS...
-
-    # ========= indices normalization and validation =========
-
+  def __getitem__(self, indices: Union[int, slice, Tensor, None, List, Tuple]) -> Tensor: # no ellipsis type...
+    # 1. indices normalization and validation
     # treat internal tuples as Tensors and standardize indices to list type
     if isinstance(indices, (tuple, list)):
       if isinstance(indices, list) and all(isinstance(i, int) for i in indices): indices = [Tensor(indices)] # special case <indices: List[int]>, a lil ugly
@@ -322,28 +320,27 @@ class Tensor:
     indices[fill_idx:fill_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
 
     # use Dict[type, List[dimension]] to track elements in indices
-    type_idx: DefaultDict[Union[type, None], List[int]] = defaultdict(list)
+    type_dim: DefaultDict[Union[type, None], List[int]] = defaultdict(list)
 
     # record None for dimension injection later
-    type_idx[None] = [dim for dim, i in enumerate(indices) if i is None]
+    type_dim[None] = [dim for dim, i in enumerate(indices) if i is None]
 
     # filter None and record rest of indices
     indices_filtered = tuple(v for v in indices if v is not None)
-    for dim,i in enumerate(indices_filtered): type_idx[type(i)].append(dim)
+    for dim,i in enumerate(indices_filtered): type_dim[type(i)].append(dim)
 
     # validation! raise Errors
     if len(ellipsis_idx) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
-    if float in type_idx: raise IndexError("float type is not valid index")
+    if float in type_dim: raise IndexError("float type is not valid index")
     if any(isinstance(i, slice) and i.step == 0 for i in indices): raise ValueError('slice step cannot be 0')
     if num_slices > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
-    for dim in type_idx[int]:
+    for dim in type_dim[int]:
       if indices_filtered[dim] >= self.shape[dim] or indices_filtered[dim] < -self.shape[dim]: raise IndexError(f"index {indices_filtered[dim]} is out of bounds for dimension {dim} with size {self.shape[dim]}")
 
     # normalize! indices -> start, stop, strides
     start, stop, strides = zip(*y) if (y := [i.indices(sh) if isinstance(i, slice) else slice(normalized:= i if i != -1 else sh-1, normalized+1, 1).indices(sh) if isinstance(i, int) else (0, sh, 1) for i, sh in zip(indices_filtered, self.shape)]) else ((), (), ()) # type: ignore[arg-type]
 
-    # ========= basic indexing (no copy) =========
-
+    # 2. basic indexing (no copy)
     # apply slices and flip where strides are negative
     new_slice = tuple(((0, 0) if e < s else (s, e)) if st > 0 else ((0, 0) if e > s else (e+1, s+1)) for s, e, st in zip(start, stop, strides))
     sliced_tensor = self.shrink(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
@@ -358,24 +355,22 @@ class Tensor:
       sliced_tensor = reshaped_tensor.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
 
     # inject dim=1 for None and collapse dim for int
-    for dim in type_idx[None]: new_shape.insert(dim, 1)
-    for dim in (dims_collapsed := [dim + sum(1 for d in type_idx[None] if dim > d) for dim in reversed(type_idx[int])]): new_shape.pop(dim)
+    for dim in type_dim[None]: new_shape.insert(dim, 1)
+    for dim in (dims_collapsed := [dim + sum(1 for d in type_dim[None] if dim >= d) for dim in reversed(type_dim[int])]): new_shape.pop(dim)
     for dim_sh in new_shape: assert isinstance(dim_sh, int), f"does not support symbolic shape {dim_sh}"
 
     ret = sliced_tensor.reshape(tuple(new_shape))
 
-    # ========= advanced indexing (copy) =========
-
+    # 3. advanced indexing (copy)
     # TODO this is still really unreadable
-    if type_idx[Tensor]:
+    if type_dim[Tensor]:
       idx, tdim = [], []
-      for tensor_dim in type_idx[Tensor]:
-        t = indices[tensor_dim + sum(1 for d in type_idx[None] if tensor_dim >= d)]
-        td = tensor_dim - sum(1 for d in dims_collapsed if tensor_dim >= d) + sum(1 for d in type_idx[None] if tensor_dim >= d)
-        tdim.append(td)
-        idx.append(t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[td] + t)
+      for tensor_dim in type_dim[Tensor]:
+        dims_collapsed_, dims_injected = sum(1 for d in dims_collapsed if tensor_dim >= d), sum(1 for d in type_dim[None] if tensor_dim >= d)
+        tdim.append(td := tensor_dim - dims_collapsed_ + dims_injected)
+        # TODO: first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
+        idx.append((t := indices[tensor_dim + dims_injected]).sign().contiguous().__neg__().contiguous().relu() * ret.shape[td] + t)
       # normalize idx
-      # TODO: first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
       max_dim = max(i.ndim for i in idx)
       # compute sum_dim, arange, and idx
       sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(tdim)]
@@ -390,7 +385,6 @@ class Tensor:
       if tdim[0] != 0 and len(tdim) != 1 and tdim != list(range(tdim[0], tdim[-1]+1)):
         ret_dims = list(range(ret.ndim))
         ret = ret.permute(ret_dims[tdim[0]:tdim[0]+max_dim] + ret_dims[:tdim[0]] + ret_dims[tdim[0]+max_dim:])
-
     return ret
 
   def __setitem__(self,indices,v): return self.__getitem__(indices).assign(v)
