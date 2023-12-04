@@ -1,7 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, math
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set, NamedTuple
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set
 from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
@@ -343,7 +343,7 @@ class Tensor:
       if indices_filtered[dim] >= self.shape[dim] or indices_filtered[dim] < -self.shape[dim]: raise IndexError(f"index {indices_filtered[dim]} is out of bounds for dimension {dim} with size {self.shape[dim]}")
 
     # normalization!
-    normalize_int = lambda e, dim_sz: e if e != -1 else dim_sz-1
+    def normalize_int(i, sh): return i if i != -1 else sh-1
     start, stop, strides = zip(*y) if (y := [i.indices(sh) if isinstance(i, slice) else slice(normalize_int(i,sh), normalize_int(i,sh)+1, 1).indices(sh) if isinstance(i, int) else (0, sh, 1) for i, sh in zip(indices_filtered, self.shape)]) else ((), (), ())
 
     # ========= basic indexing (no copy) =========
