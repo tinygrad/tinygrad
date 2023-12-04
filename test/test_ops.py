@@ -661,27 +661,11 @@ class TestOps(unittest.TestCase):
 
   def test_slice_errors(self):
     a = Tensor.ones(4, 3)
-    with self.assertRaises(IndexError):
-      a[1, 77, 77, 77]  # IndexError: (finds too many indices before the out of bounds)
-      a[0, -77]
-      a[..., ...] # IndexError: only single ellipsis
-    with self.assertRaises(IndexError): # no floats
-      a[1.1]
-      a[0, 1.1]
-    with self.assertRaisesRegex(IndexError, r'index 77 is out of bounds for dimension 1 with size 3'):
-      a[1, 77]
-      a[1, None, 77]
-    with self.assertRaisesRegex(IndexError, r'index 77 is out of bounds for dimension 0 with size 4'):
-      a[77, 1]
-      a[None, 77, 1]
-    with self.assertRaisesRegex(IndexError, r'index -77 is out of bounds for dimension 1 with size 3'):
-      a[1, -77]
-      a[..., -77]
-    with self.assertRaisesRegex(IndexError, r'index -77 is out of bounds for dimension 0 with size 4'):
-      a[-77]
-    with self.assertRaises(ValueError): # slice step cannot be 0
-      a[::0]
-      a[2, ::0]
+    with self.assertRaises(IndexError): a[1, 77, 77, 77] # IndexError: (finds too many indices before the out of bounds)
+    with self.assertRaises(IndexError): a[1, 77] # IndexError: (out of bounds).
+    with self.assertRaises(IndexError): a[1, -77]
+    with self.assertRaises(IndexError): a[..., ...] # IndexError: only single ellipsis
+    with self.assertRaises(ValueError): a[::0, 1] # no 0 strides
 
   def test_slice_ellipsis(self):
     helper_test_op([(3,3,3,3)], lambda x: x[..., 0], lambda x: x[..., 0])

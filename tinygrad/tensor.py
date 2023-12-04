@@ -302,10 +302,10 @@ class Tensor:
   #    - There's a special case where a permute is needed at the end:
   #        - if first Tensor passed in (expand dims) is not at dim 0
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
-    # TODO: boolean indices
-    # TODO: figure out the exact acceptable types for indices, especially for internal list/tuple types
-    # TODO: move all slice(None) to the end and transpose non-None to the front...... maybe for fancy indexing?
-    # TODO: update docs
+  # TODO: boolean indices
+  # TODO: figure out the exact acceptable types for indices, especially for internal list/tuple types
+  # TODO: move all slice(None) to the end and transpose non-None to the front...... maybe transpose all tensors to front for fancy indexing?
+  # TODO: update docs
   def __getitem__(self, indices: Union[int, slice, Tensor, None, List, Tuple]) -> Tensor: # no ellipsis type...
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
