@@ -127,7 +127,7 @@ class Tensor:
     return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
   def item(self) -> Union[float, int]:
     assert self.numel() == 1, "must have one element for item"
-    return self.realize().lazydata.realized.toCPU().item()
+    return self.realize().numpy().item()
 
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self
@@ -153,12 +153,39 @@ class Tensor:
     return Tensor._loadop(LoadOps.EMPTY, prod((shape:=argfix(*shape))), **kwargs).reshape(shape)
 
   _seed: int = int(time.time())
+  _rng_counter: int = 0 # TODO: this has to be per device
   @staticmethod
   def manual_seed(seed=0): Tensor._seed = seed
 
   @staticmethod
+  def _rand(): # threefry algo
+    key = [Tensor._seed, 0x0] # TODO: replace 0x0 with the CPU/GPU device this is running on 
+    x = Tensor([Tensor._rng_counter, 0x0], dtype=dtypes.uint32)
+    Tensor._rng_counter += 1
+
+    ks = [key[0], key[1], key[0] ^ key[1] ^ np.uint32(0x1BD11BDA)]
+    x += Tensor([ks[0], ks[1]], dtype=dtypes.uint32)
+
+    rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
+    for r in rotations[0]: x += Tensor([x[1].item(), ((x[0] + x[1]) ^ (x[1] << r)).item()], dtype=dtypes.uint32)
+    x += Tensor([ks[1], ks[2] + 1], dtype=dtypes.uint32)
+    for r in rotations[1]: x += Tensor([x[1].item(), ((x[0] + x[1]) ^ (x[1] << r)).item()], dtype=dtypes.uint32)
+    x += Tensor([ks[2], ks[0] + 2], dtype=dtypes.uint32)
+    for r in rotations[0]: x += Tensor([x[1].item(), ((x[0] + x[1]) ^ (x[1] << r)).item()], dtype=dtypes.uint32)
+    x += Tensor([ks[0], ks[1] + 3], dtype=dtypes.uint32)
+    for r in rotations[1]: x += Tensor([x[1].item(), ((x[0] + x[1]) ^ (x[1] << r)).item()], dtype=dtypes.uint32)
+    x += Tensor([ks[1], ks[2] + 4], dtype=dtypes.uint32)
+    for r in rotations[0]: x += Tensor([x[1].item(), ((x[0] + x[1]) ^ (x[1] << r)).item()], dtype=dtypes.uint32)
+    x += Tensor([ks[2], ks[0] + 5], dtype=dtypes.uint32)
+    return (x.cast(dtypes.float) / 2**32)
+
+  @staticmethod
   def rand(*shape, **kwargs):
-    return Tensor._loadop(LoadOps.CUSTOM, prod((shape:=argfix(*shape))), arg=custom_random, **kwargs).reshape(shape)
+    # TODO: better to create empty and fill it?
+    # i wasn't able to get `x[0] = ...` to work
+    x = Tensor([])
+    for _ in range(num_random_elements:=prod((shape:=argfix(*shape))) // 2): x = x.cat(Tensor._rand())
+    return x.reshape(shape)
 
   # ***** creation helper functions *****
 
@@ -683,6 +710,9 @@ class Tensor:
     return x.lazydata.base.op.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
+  def xor(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+    x = self._to_float(x)
+    return mlops.Xor.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else self
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     x = self._to_float(x)
     return mlops.Add.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else self
@@ -731,6 +761,8 @@ class Tensor:
   # ***** op wrappers (wasted lines to make the typechecker happy) *****
 
   def __neg__(self) -> Tensor: return self.neg()
+  def __lshift__(self, x) -> Tensor: return self.mul(2**x)
+  def __xor__(self, x) -> Tensor: return self.xor(x)
 
   def __add__(self, x) -> Tensor: return self.add(x)
   def __sub__(self, x) -> Tensor: return self.sub(x)
@@ -829,11 +861,3 @@ if IMAGE:
   from tinygrad.features.image import image_conv2d, image_dot
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)
-
-# TODO: remove the custom op and replace with threefry
-def custom_random(out:Buffer):
-  Tensor._seed += 1
-  if DEBUG >= 2: print(f"***      rand {out.device} seed {Tensor._seed} size {out.size:<16d} dtype {out.dtype}")
-  rng = np.random.default_rng(Tensor._seed)
-  rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=out.dtype.np, copy=False)
-  out.copyin(rng_np_buffer.data)
