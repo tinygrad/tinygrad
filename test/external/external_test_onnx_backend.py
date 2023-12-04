@@ -177,8 +177,8 @@ if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
   backend_test.exclude('test_eyelike_with_dtype_cpu') # backend does not support dtype: Double
 
-# Segfaults in CI
-if Device.DEFAULT in ['LLVM', 'CUDA'] and CI:
+# Segfaults in CI, GPU requires cl_khr_fp16
+if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
   backend_test.exclude('test_max_float16_cpu')
   backend_test.exclude('test_min_float16_cpu')
 

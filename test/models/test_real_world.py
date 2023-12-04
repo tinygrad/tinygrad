@@ -51,7 +51,7 @@ class TestRealWorld(unittest.TestCase):
     helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 953)
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
-  @unittest.skipIf(Device.DEFAULT == "LLVM" and CI, "too long on CI LLVM")
+  @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp1")
   def test_llama(self):
     Tensor.default_type = dtypes.float16
 
@@ -63,7 +63,7 @@ class TestRealWorld(unittest.TestCase):
     # TODO: test first token vs rest properly, also memory test is broken with CacheCollector
     helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.22 if CI else 13.5, 181 if CI else 685, all_jitted=True)
 
-  @unittest.skipIf(Device.DEFAULT == "LLVM" and CI, "too long on CI LLVM")
+  @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp16")
   def test_gpt2(self):
     Tensor.default_type = dtypes.float16
 
