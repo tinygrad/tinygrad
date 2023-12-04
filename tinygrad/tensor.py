@@ -1,7 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, math
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set, DefaultDict
 from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
@@ -304,7 +304,7 @@ class Tensor:
   #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
 
 
-  def __getitem__(self, indices) -> Tensor: # indices: Union[int, slice, Tensor, None, Ellipsis, List, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
+  def __getitem__(self, indices: Union[int, slice, Tensor, None, List, Tuple]) -> Tensor: # NO TYPE ELLIPSIS...
     # TODO: boolean indices
     # TODO: move all slice(None) to the end and transpose non-None to the front
     # TODO: update docs
@@ -327,13 +327,13 @@ class Tensor:
     indices[fill_idx:fill_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
 
     # use Dict[type, List[dimension]] to track elements in indices
-    type_idx = defaultdict(list)
+    type_idx: DefaultDict[Union[type, None], List[int]] = defaultdict(list)
 
     # record None for dimension injection later
     type_idx[None] = [dim for dim, i in enumerate(indices) if i is None]
 
     # filter None and record rest of indices
-    indices_filtered = [v for v in indices if v is not None]
+    indices_filtered = tuple(v for v in indices if v is not None)
     for dim,i in enumerate(indices_filtered): type_idx[type(i)].append(dim)
 
     # validation!
@@ -372,28 +372,30 @@ class Tensor:
 
     # ========= advanced indexing (copy) =========
 
+    # TODO this is still really unreadable
     if type_idx[Tensor]:
-      idx, dim = [], []
+      idx, tdim = [], []
       for tensor_dim in type_idx[Tensor]:
         t = indices[tensor_dim + sum(1 for d in type_idx[None] if tensor_dim >= d)]
         td = tensor_dim - sum(1 for d in dims_collapsed if tensor_dim >= d) + sum(1 for d in type_idx[None] if tensor_dim >= d)
-        dim.append(td), idx.append(t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[td] + t)
+        tdim.append(td)
+        idx.append(t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[td] + t)
       # normalize idx
       # TODO: first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
       max_dim = max(i.ndim for i in idx)
       # compute sum_dim, arange, and idx
-      sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(dim)]
-      arange = [Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, dim))]
-      first_idx = [idx[0].reshape(*[1]*dim[0], *[1]*(1 + max_dim - idx[0].ndim), *idx[0].shape, *[1]*(ret.ndim - dim[0] - 1))]
-      rest_idx = [i.reshape(*[1]*dim[0], *[1]*(max_dim - i.ndim), *i.shape, *[1]*(ret.ndim - dim[0] - n)) for n,i in enumerate(idx[1:], 1)]
+      sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(tdim)]
+      arange = [Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, tdim))]
+      first_idx = [idx[0].reshape(*[1]*tdim[0], *[1]*(1 + max_dim - idx[0].ndim), *idx[0].shape, *[1]*(ret.ndim - tdim[0] - 1))]
+      rest_idx = [i.reshape(*[1]*tdim[0], *[1]*(max_dim - i.ndim), *i.shape, *[1]*(ret.ndim - tdim[0] - n)) for n,i in enumerate(idx[1:], 1)]
       idx = first_idx + rest_idx
       ret = ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*max_dim, *ret.shape[sum_dim[0]+1:])
       # iteratively fancy index
       for a,i,sd in zip(arange, idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
       # special permute case
-      if dim[0] != 0 and len(dim) != 1 and dim != list(range(dim[0], dim[-1]+1)):
+      if tdim[0] != 0 and len(tdim) != 1 and tdim != list(range(tdim[0], tdim[-1]+1)):
         ret_dims = list(range(ret.ndim))
-        ret = ret.permute(ret_dims[dim[0]:dim[0]+max_dim] + ret_dims[:dim[0]] + ret_dims[dim[0]+max_dim:])
+        ret = ret.permute(ret_dims[tdim[0]:tdim[0]+max_dim] + ret_dims[:tdim[0]] + ret_dims[tdim[0]+max_dim:])
 
     return ret
 
