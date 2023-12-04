@@ -308,7 +308,7 @@ class Tensor:
     # TODO: update docs
   def __getitem__(self, indices: Union[int, slice, Tensor, None, List, Tuple]) -> Tensor: # no ellipsis type...
     # 1. indices normalization and validation
-    # treat internal tuples as Tensors and standardize indices to list type
+    # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, (tuple, list)):
       if isinstance(indices, list) and all(isinstance(i, int) for i in indices): indices = [Tensor(indices)] # special case <indices: List[int]>, a lil ugly
       else: indices = [Tensor(list(i)) if isinstance(i, (tuple, list)) else i for i in indices]
@@ -370,7 +370,7 @@ class Tensor:
       for tensor_dim in type_dim[Tensor]:
         dims_collapsed_, dims_injected = sum(1 for d in dims_collapsed if tensor_dim >= d), sum(1 for d in type_dim[None] if tensor_dim >= d)
         tdim.append(td := tensor_dim - dims_collapsed_ + dims_injected)
-        idx.append((t := indices[tensor_dim + dims_injected]).sign().__neg__().relu() * ret.shape[td] + t)
+        idx.append((t := indices[tensor_dim + dims_injected]).sign().__neg__().relu() * ret.shape[td] + t) # normalize the negative tensor indices
 
       # compute sum_dim, arange, and idx
       max_dim = max(i.ndim for i in idx)
