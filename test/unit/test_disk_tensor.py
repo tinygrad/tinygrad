@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import fetch, temp
+from tinygrad.helpers import CI, fetch, temp
 from tinygrad.helpers import Timing
 
 def compare_weights_both(url):
@@ -25,7 +25,8 @@ class TestTorchLoad(unittest.TestCase):
   # pytorch zip format
   def test_load_convnext(self): compare_weights_both('https://dl.fbaipublicfiles.com/convnext/convnext_tiny_1k_224_ema.pth')
 
-  def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/TinyPixel/Llama-2-7B-bf16-sharded/resolve/main/pytorch_model-00001-of-00014.bin?download=true")
+  @unittest.skipIf(Device.DEFAULT == "GPU" and CI, "GPU requires cl_khr_fp16")
+  def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/qazalin/bf16-lightweight/resolve/main/consolidated.00.pth?download=true")
   # TODO: support pytorch tar format with minimal lines
   #def test_load_resnet(self): compare_weights_both('https://download.pytorch.org/models/resnet50-19c8e357.pth')
 
