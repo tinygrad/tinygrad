@@ -30,8 +30,7 @@ jobs:
     - name: Install dependencies
       run: |
         pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-        pip install --upgrade --force-reinstall ruff
-        pip install pre-commit
+        pip install --upgrade --force-reinstall pre-commit ruff
     - name: Run pre-commit hook
       run: python -m pre-commit run --all-files
     - name: Use as an external package
