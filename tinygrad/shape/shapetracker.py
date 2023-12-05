@@ -3,7 +3,7 @@ from __future__ import annotations
 import functools, itertools, operator
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast, Union, Iterable
-from tinygrad.ops import MovementOps  
+from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, DEBUG, merge_dicts
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
 from tinygrad.shape.view import View, _merge_dims
