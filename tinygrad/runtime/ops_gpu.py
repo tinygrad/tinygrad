@@ -1,8 +1,8 @@
 from __future__ import annotations
-from typing import Tuple, Optional, List, Union
+from typing import Tuple, Optional, List
 import ctypes, functools
 import gpuctypes.opencl as cl
-from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, diskcache, OSX, ImageDType, DEBUG, DType
+from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, diskcache, OSX, ImageDType, DEBUG
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import OpenCLRenderer
 from tinygrad.device import Compiled, LRUAllocator
@@ -57,7 +57,7 @@ class CLAllocator(LRUAllocator):
   def __init__(self, device:CLDevice):
     self.device = device
     super().__init__()
-  def _alloc(self, size:Union[DType, int]) -> cl.cl_mem:
+  def _alloc(self, size:int) -> cl.cl_mem:
     return checked(cl.clCreateBuffer(self.device.context, cl.CL_MEM_READ_WRITE, size, None, ctypes.byref(status := ctypes.c_int32())), status)
   def _alloc_image(self, dtype:ImageDType) -> cl.cl_mem:
     return checked(cl.clCreateImage2D(self.device.context, cl.CL_MEM_READ_WRITE,
