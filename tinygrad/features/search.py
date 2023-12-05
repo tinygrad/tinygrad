@@ -4,7 +4,7 @@ from tinygrad.lazy import vars_from_ast
 from tinygrad.device import Device, Compiled, Buffer
 from tinygrad.ops import MemBuffer
 from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored
-from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.codegen.linearizer import Linearizer, UOp
 from tinygrad.shape.symbolic import sym_infer
 from collections import defaultdict
 from tinygrad.tensor import Tensor
@@ -21,6 +21,8 @@ actions += [
   Opt(op=OptOps.UPCASTMID, axis=1, amt=4),
 ]
 if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
+
+def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
 
 def get_test_global_size(global_size, max_global_size):
   test_global_size = global_size[:]
@@ -74,7 +76,7 @@ def compile_linearizer(dev:str, lin:Linearizer) -> Tuple[bytes, Optional[List[in
   src, _ = rdev.renderer("test", lin.uops)   # NOTE: these all have the same name for deduping
   return rdev.compiler(src), lin.global_size, lin.local_size
 
-def time_program(dev:str, lib:bytes, global_size, local_size, var_vals, rawbufs, early_stop=None, max_global_size=65536, clear_l2=False):
+def time_program(dev:str, lib:bytes, global_size, local_size, var_vals, rawbufs, early_stop=None, max_global_size=65536, clear_l2=False, cnt=3):
   rdev = Device[dev]
   assert isinstance(rdev, Compiled)
   clprg = rdev.runtime("test", lib)
@@ -90,7 +92,7 @@ def time_program(dev:str, lib:bytes, global_size, local_size, var_vals, rawbufs,
     else:
       factor = 1
   tms = []
-  for _ in range(3):
+  for _ in range(cnt):
     if clear_l2:
       with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
     tms.append(clprg(*[x._buf for x in rawbufs], global_size=global_size, local_size=local_size, vals=var_vals.values(), wait=True)*factor)
@@ -151,13 +153,13 @@ def optimize_local_size(clprg:Callable, global_size:List[int], rawbufs:List[Buff
   assert not math.isinf(ret[0]), "all optimize_local_size exec failed"
   return ret[1]
 
-def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, max_global_size=65536, disable_cache=False, clear_l2=False) -> float:
+def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, max_global_size=65536, cnt=3, disable_cache=False, clear_l2=False) -> float:
   key = {"ast": str(lin.ast), "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size, "clear_l2": clear_l2, "device": Device.DEFAULT}
   if not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
 
   var_vals = {k:(k.max+k.min)//2 for k in vars_from_ast(lin.ast)}
   lib, global_size, local_size = compile_linearizer(Device.DEFAULT, lin)
-  tms = time_program(Device.DEFAULT, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2)
+  tms = time_program(Device.DEFAULT, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt)
 
   if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)
   return min(tms)
