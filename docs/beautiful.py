@@ -73,14 +73,13 @@ assert val == 5
 
 print("******** third, the LazyBuffer ***********")
 
+from tinygrad.ops import LoadOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.realize import run_schedule
 
 # allocate some values + load in values
-# TODO: remove numpy here
-import numpy as np
-a = LazyBuffer.fromCPU(np.array([2], np.int32)).copy_to_device(DEVICE)
-b = LazyBuffer.fromCPU(np.array([3], np.int32)).copy_to_device(DEVICE)
+a = LazyBuffer(DEVICE, ShapeTracker.from_shape((1,)), LoadOps, None, dtypes.int32, Buffer(DEVICE, 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 2)))))
+b = LazyBuffer(DEVICE, ShapeTracker.from_shape((1,)), LoadOps, None, dtypes.int32, Buffer(DEVICE, 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 3)))))
 
 # describe the computation
 out = a.e(BinaryOps.ADD, b)
