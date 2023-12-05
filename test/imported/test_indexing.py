@@ -15,60 +15,6 @@ def numpy_testing_assert_equal_helper(a, b):
 def consec(shape, start=1):
   return Tensor(np.arange(math.prod(shape)).reshape(shape)+start)
 
-# ======================
-# TODO CHECK IS THESE ARE ACTUALLY CORRECT
-def tensor_indices_to_np(tensor: Tensor, indices):
- # convert the Tensor to a numpy array
-  npt = tensor.numpy()
-
- # convert indices
-  idxs = tuple(i.numpy().tolist() if isinstance(i, Tensor) and i.dtype is dtypes.int64 else
-               i for i in indices)
-
-  return npt, idxs
-
-def get_numpy(tensor, indices):
-  npt, idxs = tensor_indices_to_np(tensor, indices)
-
-  # index and return as a Tensor
-  return Tensor(npt[idxs])
-
-def set_numpy(tensor, indices, value):
-  if not isinstance(value, int):
-    value = value.numpy()
-
-  npt, idxs = tensor_indices_to_np(tensor, indices)
-  npt[idxs] = value
-  return npt
-
-def assert_get_eq(tensor, indexer):
-  numpy_testing_assert_equal_helper(tensor[indexer], get_numpy(tensor, indexer))
-
-def assert_set_eq(tensor: Tensor, indexer, val):
-  pyt = tensor.detach()
-  numt = tensor.detach()
-  pyt[indexer] = val
-  numt = np.array(set_numpy(numt, indexer, val))
-  numpy_testing_assert_equal_helper(pyt, numt)
-
-# TODO THIS IS PROBABLY WRONG LOL
-def assert_backward_eq(tensor: Tensor, indexer):
-  cpu = tensor.float().detach()
-  cpu.requires_grad = True
-  outcpu = cpu[indexer].sum()
-  outcpu.backward()
-  dev = cpu.to(tensor.device).detach()
-  dev.requires_grad = True
-  outdev = dev[indexer].sum()
-  outdev.backward()
-  numpy_testing_assert_equal_helper(cpu.grad, dev.grad)
-
-def get_set_tensor(indexed: Tensor, indexer):
-  set_size = indexed[indexer].size()
-  set_count = indexed[indexer].numel()
-  # set_tensor = torch.randperm(set_count).view(set_size).double().to(device) # TODO thefk is randperm
-  # return set_tensor
-
 def make_tensor(shape, dtype:dtypes, noncontiguous):
   r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
   values uniformly drawn from ``[low, high)``.
@@ -92,18 +38,12 @@ def make_tensor(shape, dtype:dtypes, noncontiguous):
   | complex types             | ``-9``     | ``9``    |
   +---------------------------+------------+----------+
   """
-  contiguous = not noncontiguous
-  if dtype is dtypes.bool:
-    return Tensor.randint(shape=shape, low=0, high=2, dtype=dtype, contiguous=contiguous)
-  elif dtype.is_int():
-    if dtype.is_unsigned():
-      return Tensor.randint(shape=shape, low=0, high=10, dtype=dtype, contiguous=contiguous)
-    else:
-      return Tensor.randint(shape=shape, low=-9, high=10, dtype=dtype, contiguous=contiguous)
-  elif dtype.is_float():
-    return Tensor.rand(shape=shape, low=-9, high=9, dtype=dtype, contiguous=contiguous)
-  else:
-    raise NotImplementedError(f"{dtype} not implemented")
+  contiguous = not noncontiguous # lol
+  if dtype is dtypes.bool: return Tensor.randint(shape=shape, low=0, high=2, dtype=dtype, contiguous=contiguous)
+  elif dtype.is_unsigned(): return Tensor.randint(shape=shape, low=0, high=10, dtype=dtype, contiguous=contiguous)
+  elif dtype.is_int(): return Tensor.randint(shape=shape, low=-9, high=10, dtype=dtype, contiguous=contiguous) # signed int
+  elif dtype.is_float(): return Tensor.rand(shape=shape, low=-9, high=9, dtype=dtype, contiguous=contiguous)
+  else: raise NotImplementedError(f"{dtype} not implemented")    
 # ======================
 
 class TestIndexing(unittest.TestCase):
