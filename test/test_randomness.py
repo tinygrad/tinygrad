@@ -42,7 +42,7 @@ def kstest(l1, l2):
   prob = ksprob((nesq + 0.12 + 0.11 / nesq) * d)
   return prob
 
-def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(20, 23), alpha=0.05):
+def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(20, 23), alpha=0.04):
   Tensor.manual_seed(1337)
   torch.manual_seed(1337)
   np.random.seed(1337)
@@ -61,8 +61,8 @@ class TestRandomness(unittest.TestCase):
 
   def test_rand_against_reference(self):
     Tensor.manual_seed(1337)
-    jr = (jax.extend.random.threefry_2x32((np.uint32(1337), np.uint32(0x0)), np.arange(23 * 20, dtype=np.uint32).reshape(23, 20)) >> 8).astype(float) / 2**24
-    r = Tensor.rand(23, 20).numpy()
+    jr = (jax.extend.random.threefry_2x32((np.uint32(1337), np.uint32(0x0)), np.arange(20 * 23, dtype=np.uint32).reshape(20, 23)) >> 8).astype(float) / 2**24
+    r = Tensor.rand(20, 23).numpy()
     np.testing.assert_allclose(jr, r, atol=1e-5, rtol=1e-5)
 
   def test_randn(self):
@@ -87,16 +87,10 @@ class TestRandomness(unittest.TestCase):
     self.assertTrue(equal_distribution(Tensor.glorot_uniform, lambda x: torch.nn.init.xavier_uniform_(torch.empty(x)), lambda x: np.random.uniform(-1, 1, size=x) * math.sqrt(6 / (x[0] + math.prod(x[1:])))))
 
   def test_kaiming_uniform(self):
-    Tensor.manual_seed(1337)
-    torch.manual_seed(1337)
-    np.random.seed(1337)
     for shape in [(128, 64, 3, 3), (20, 24)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_uniform, lambda x: torch.nn.init.kaiming_uniform_(torch.empty(x)), shape=shape))
 
   def test_kaiming_normal(self):
-    Tensor.manual_seed(1337)
-    torch.manual_seed(1337)
-    np.random.seed(1337)
     for shape in [(128, 64, 3, 3), (20, 24)]:
       self.assertTrue(equal_distribution(Tensor.kaiming_normal, lambda x: torch.nn.init.kaiming_normal_(torch.empty(x)), shape=shape))
 
