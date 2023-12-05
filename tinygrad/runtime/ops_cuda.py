@@ -19,8 +19,10 @@ def check(status):
 
 def cu_time_execution(cb, enable=False) -> Optional[float]: return time_execution_cuda_style(cb, cuda.CUevent, cuda.cuEventCreate, cuda.cuEventRecord, cuda.cuEventSynchronize, cuda.cuEventDestroy_v2, cuda.cuEventElapsedTime, enable=enable) if not CUDACPU else cpu_time_execution(cb, enable=enable)
 
-@diskcache
-def compile_cuda(prg, version_tag) -> bytes: return compile_cuda_style(prg, [f'--gpu-architecture={CUDADevice.default_arch_name}', "-I/usr/local/cuda/include", "-I/usr/include"], cuda.nvrtcProgram, cuda.nvrtcCreateProgram, cuda.nvrtcCompileProgram, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check)
+def compile_cuda(device:CUDADevice, prg:str) -> bytes:
+  @diskcache
+  def __compile(prg, arch, *args): return compile_cuda_style(prg, [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include"], cuda.nvrtcProgram, cuda.nvrtcCreateProgram, cuda.nvrtcCompileProgram, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check)
+  return __compile(prg, device.arch_name, rtc_version_cuda_style(cuda.nvrtcVersion))
 
 class CUDAProgram:
   def __init__(self, device:CUDADevice, name:str, lib:bytes):
@@ -64,7 +66,6 @@ class CUDAAllocator(LRUAllocator):
     check(cuda.cuMemcpyDtoH_v2(from_mv(dest), src, len(dest)))
 
 class CUDADevice(Compiled):
-  default_arch_name = "sm_35"
   def __init__(self, device:str):
     device_id = int(device.split(":")[1]) if ":" in device else 0
     if not CUDACPU:
@@ -73,7 +74,7 @@ class CUDADevice(Compiled):
       check(cuda.cuCtxCreate_v2(ctypes.byref(context := cuda.CUcontext()), 0, device))
       self.context = context
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
-      if device_id == 0: CUDADevice.default_arch_name = f"sm_{major.value}{minor.value}"
+    self.arch_name = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
 
     from tinygrad.features.graph.cuda import CUDAGraph
     super().__init__(CUDAAllocator(self) if not CUDACPU else MallocAllocator,
