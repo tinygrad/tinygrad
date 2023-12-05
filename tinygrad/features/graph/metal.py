@@ -1,5 +1,5 @@
 from typing import List, Any, Dict, cast, Optional
-import numpy as np
+from sys import byteorder
 import Metal
 from tinygrad.helpers import dtypes, dedup, unwrap2
 from tinygrad.device import Buffer, CompiledASTRunner, update_stats
@@ -49,7 +49,8 @@ class MetalGraph:
       icb_command.setBarrier()
     self.all_resources = dedup(all_resources)
     self.command_buffer: Any = None
-    if len(var_vals): self.int_buf_view = np.frombuffer(self.int_buf.contents().as_buffer(self.int_buf.length()), np.int32)
+    if len(var_vals): 
+      self.int_buf_view = self.int_buf.contents().as_buffer(self.int_buf.length()) 
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # NOTE: you at least can't update the ints if this is running
@@ -60,7 +61,10 @@ class MetalGraph:
     for j in self.jc_idx_with_updatable_launch_dims:
       global_size, local_size = cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals)
       self.icb.indirectComputeCommandAtIndex_(j).concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
-    if len(var_vals): self.int_buf_view[:] = list(var_vals.values())
+    if len(var_vals): 
+      # TODO: Set the underlying bytes in int_buf to values from var_vals  
+      for i, value in enumerate(list(var_vals.values())):
+        self.int_buf_view[i*4:i*4 + 4] = value.to_bytes(4, byteorder)
     command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
     encoder.useResources_count_usage_(all_resources, len(all_resources), Metal.MTLResourceUsageRead | Metal.MTLResourceUsageWrite)

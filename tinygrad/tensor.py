@@ -124,11 +124,13 @@ class Tensor:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
     if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.np)
-    return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
+    cpu_buffer = self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU()
+    return np.frombuffer(cpu_buffer, dtype=self.dtype.np).astype(self.dtype.np, copy=True).reshape(self.shape)
   def item(self) -> Union[float, int]:
     assert self.numel() == 1, "must have one element for item"
-    return self.realize().lazydata.realized.toCPU().item()
-
+    cpu_buffer = self.realize().lazydata.realized.toCPU()
+    return np.frombuffer(cpu_buffer, dtype=self.dtype.np).item()
+  
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self
     ret = Tensor(self.lazydata, device)

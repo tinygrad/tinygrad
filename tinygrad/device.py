@@ -1,5 +1,4 @@
 from __future__ import annotations
-import numpy as np
 from collections import defaultdict
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable
 import importlib, inspect, functools, pathlib, time, re, ctypes
@@ -10,6 +9,7 @@ from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferO
 if TYPE_CHECKING:
   from tinygrad.codegen.linearizer import Linearizer
   from tinygrad.codegen.kernel import LinearizerOptions
+  import numpy as np
 
 # **************** Device ****************
 
@@ -82,11 +82,11 @@ class Buffer:
     return self
   @staticmethod
   def fromCPU(device:str, x:np.ndarray): return Buffer(device, x.size, dtypes.from_np(x.dtype)).copyin(x.data)
-  def toCPU(self) -> np.ndarray:
+  def toCPU(self) -> np._SupportsBuffer:
     # zero copy with as_buffer
-    if hasattr(self.allocator, 'as_buffer'): return np.frombuffer(self.allocator.as_buffer(self._buf), dtype=np.dtype(self.dtype.np, metadata={"backing": self._buf}))  # type: ignore
-    ret = np.empty(self.size, self.dtype.np)
-    if self.size > 0: self.allocator.copyout(flat_mv(ret.data), self._buf)
+    if hasattr(self.allocator, 'as_buffer'): return self.allocator.as_buffer(self._buf)
+    ret = bytearray(self.size * self.dtype.itemsize)
+    if self.size > 0: self.allocator.copyout(flat_mv(ret), self._buf)
     return ret
 
 class _BufferCopy(JITRunner):

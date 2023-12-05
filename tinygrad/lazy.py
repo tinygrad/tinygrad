@@ -1,14 +1,16 @@
 from __future__ import annotations
 import sys, math
-from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapping, Set
+from typing import TYPE_CHECKING, Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapping, Set
 from weakref import ref, WeakSet, WeakValueDictionary
 
-import numpy as np
 from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, dedup, merge_dicts, all_int, ImageDType, DEBUG
 from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import Variable, sint
 from tinygrad.device import Buffer
+
+if TYPE_CHECKING:
+  import numpy as np
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -202,8 +204,7 @@ class LazyBuffer:
 
   # create a constant with the shape and dtype of self
   def const(self, val:Union[float, int]) -> LazyBuffer:
-    # NOTE: dtypes.from_np(self.dtype.np) to deal with image types
-    return LazyBuffer.loadop(LoadOps.CONST, tuple(), dtypes.from_np(self.dtype.np), self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
+    return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype.base if isinstance(self.dtype, ImageDType) else self.dtype, self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
 
   def copy_to_device(self, device:str) -> LazyBuffer:
     # back off a FROM if it's a double FROM
