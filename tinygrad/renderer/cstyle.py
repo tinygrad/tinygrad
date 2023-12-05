@@ -93,7 +93,7 @@ class CStyleLanguage(NamedTuple):
   # returns a str statement that does the store
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx:str, local=False) -> str:
     if isinstance(buf_dtype, ImageDType):
-      assert var_dtype == dtypes.float.vec(4), "images must be float4"
+      assert var_dtype == dtypes.float.vec(4), f"images must be float4, getting {var_dtype}"
       return f"write_imagef({buf_name}, {idx}, {var_name});"
     if self.uses_vload and buf_dtype.scalar() == dtypes.float16 and var_dtype.scalar() != dtypes.float16:
       return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx});"

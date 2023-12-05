@@ -117,11 +117,14 @@ class DType(NamedTuple):
 
 # dependent typing?
 class ImageDType(DType):
-  def __new__(cls, priority, itemsize, name, np, shape):
+  def __new__(cls, priority, itemsize, name, np, shape, base):
     return super().__new__(cls, priority, itemsize, name, np)
-  def __init__(self, priority, itemsize, name, np, shape):
+  def __init__(self, priority, itemsize, name, np, shape, base):
     self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
+    self.base: DType = base
     super().__init__()
+  def scalar(self): return self.base
+  def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
   # TODO: fix this to not need these
   def __hash__(self): return hash((super().__hash__(), self.shape))
@@ -168,9 +171,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shp)
+  def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shp, dtypes.float32)
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp)
+  def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp, dtypes.float32)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and v.__class__ is not staticmethod}
