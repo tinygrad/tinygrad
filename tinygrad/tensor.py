@@ -179,7 +179,7 @@ class Tensor:
     out = x[0].cat(x[1]).cast(dtypes.float32) / (2 ** 32 - 1)
     out = out[:out.shape[0]-odd_counts].reshape(shape).cast(Tensor.default_type if dtype is None else dtype)
     out.requires_grad = kwargs.get("requires_grad")
-    return out
+    return out.realize()
 
   # ***** creation helper functions *****
 
