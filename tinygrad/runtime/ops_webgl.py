@@ -2,7 +2,7 @@ import numpy as np
 import functools
 from tinygrad.helpers import dtypes, DType
 from tinygrad.device import Compiled, Allocator
-from tinygrad.codegen.kernel import LinearizerOptions
+from tinygrad.codegen.kernel import LinearizerOptions, OptOps
 from tinygrad.renderer.cstyle import uops_to_cstyle
 from tinygrad.renderer.cstyle import GLSLLanguage
 import moderngl
@@ -44,5 +44,5 @@ class RawWebGLAllocator(Allocator):
 
 class WebGlDevice(Compiled):
   def __init__(self, device:str):
-    super().__init__(RawWebGLAllocator(), LinearizerOptions(device="WEBGL", supports_float4=False, supports_float4_alu=False, has_local=False, has_shared=False, dont_use_locals=True),
+    super().__init__(RawWebGLAllocator(), LinearizerOptions(device="WEBGL", unsupported_opts=[OptOps.UPCAST, OptOps.UPCASTMID], supports_float4=False, supports_float4_alu=False, has_local=False, has_shared=False, dont_use_locals=True),
                      functools.partial(uops_to_cstyle, GLSLLanguage()), lambda x: x, WebGLProgram)

@@ -288,7 +288,7 @@ class Compiled:
       print_tree(ast)
     from tinygrad.codegen.linearizer import Linearizer
     k = Linearizer(ast, self.linearizer_opts)
-    if not NOOPT and not self.linearizer_opts.device == "WEBGL":
+    if not NOOPT:
       if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
       if BEAM >= 1:
         lins = [(("tc" if used_tensor_cores else "hc"), k)]

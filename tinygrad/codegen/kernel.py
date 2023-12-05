@@ -60,6 +60,7 @@ class LinearizerOptions(NamedTuple):
   supports_float4_alu: bool = True
   has_local: bool = True
   dont_use_locals: bool = False
+  unsupported_opts: List[OptOps] = []
   has_shared: bool = True
   # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
   global_max: Optional[List[int]] = None
@@ -397,6 +398,7 @@ class Kernel:
     return False
 
   def apply_opt(self, opt:Opt):
+    if opt.op in self.opts.unsupported_opts: return
     assert not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.LASTLOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals"
     self.applied_opts.append(opt)
     if opt.axis is not None:
