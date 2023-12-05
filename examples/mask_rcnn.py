@@ -43,10 +43,11 @@ class Resize:
 
       return (oh, ow)
 
-  def __call__(self, image):
+  def __call__(self, image, target=None):
     size = self.get_size(image.size)
     image = Ft.resize(image, size)
-    return image
+    if target is not None: target = target.resize(image.size)
+    return image, target
 
 
 class Normalize:
@@ -55,13 +56,16 @@ class Normalize:
     self.std = std
     self.to_bgr255 = to_bgr255
 
-  def __call__(self, image):
+  def __call__(self, image, target=None):
     if self.to_bgr255:
       image = image[[2, 1, 0]] * 255
     else:
       image = image[[0, 1, 2]] * 255
     image = Ft.normalize(image, mean=self.mean, std=self.std)
-    return image
+    return image, target
+  
+class ToTensor:
+  def __call__(self, image, target=None): return Ft.to_tensor(image), target
 
 transforms = lambda size_scale: T.Compose(
   [

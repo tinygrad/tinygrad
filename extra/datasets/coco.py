@@ -1,10 +1,14 @@
 import json
 import pathlib
+import random
 import zipfile
 import numpy as np
 from tinygrad.helpers import fetch
+from tinygrad.tensor import Tensor
+from typing import List
 import pycocotools._mask as _mask
-from examples.mask_rcnn import Masker
+from examples.mask_rcnn import Masker, Resize, ToTensor, Normalize, BoxList
+from PIL import Image
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
@@ -17,16 +21,22 @@ BASEDIR.mkdir(exist_ok=True)
 
 def create_dict(key_row, val_row, rows): return {row[key_row]:row[val_row] for row in rows}
 
+if not pathlib.Path(BASEDIR/'train2017').is_dir():
+  fn = fetch('http://images.cocodataset.org/zips/train2017.zip', name=BASEDIR/"annotations"/"train2017.zip")
+  with zipfile.ZipFile(fn, 'r') as zip_ref:
+    zip_ref.extractall(BASEDIR)
+  fn.unlink()
+
 
 if not pathlib.Path(BASEDIR/'val2017').is_dir():
-  fn = fetch('http://images.cocodataset.org/zips/val2017.zip')
+  fn = fetch('http://images.cocodataset.org/zips/val2017.zip', name=BASEDIR/"annotations"/"val2017.zip")
   with zipfile.ZipFile(fn, 'r') as zip_ref:
     zip_ref.extractall(BASEDIR)
   fn.unlink()
 
 
 if not pathlib.Path(BASEDIR/'annotations').is_dir():
-  fn = fetch('http://images.cocodataset.org/annotations/annotations_trainval2017.zip')
+  fn = fetch('http://images.cocodataset.org/annotations/annotations_trainval2017.zip', name=BASEDIR/"annotations"/"annotations_trainval2017.zip")
   with zipfile.ZipFile(fn, 'r') as zip_ref:
     zip_ref.extractall(BASEDIR)
   fn.unlink()
@@ -191,9 +201,82 @@ def evaluate_predictions_on_coco(json_result_file, iou_type="bbox"):
   coco_eval.summarize()
   return coco_eval
 
-def iterate(files, bs=1):
-  batch = []
-  for file in files:
-    batch.append(file)
-    if len(batch) >= bs: yield batch; batch = []
-  if len(batch) > 0: yield batch; batch = []
+min_keypoints_per_image = 10
+
+def _count_visible_keypoints(anno):
+  return sum(sum(1 for v in ann["keypoints"][2::3] if v > 0) for ann in anno)
+
+def _has_only_empty_bbox(anno):
+  return all(any(o <= 1 for o in obj["bbox"][2:]) for obj in anno)
+
+def has_valid_annotation(anno):
+  # if it's empty, there is no annotation
+  if len(anno) == 0: return False
+  # if all boxes have close to zero area, there is no annotation
+  if _has_only_empty_bbox(anno): return False
+  # keypoints task have a slight different critera for considering
+  # if an annotation is valid
+  if "keypoints" not in anno[0]: return True
+  # for keypoint detection tasks, only consider valid images those
+  # containing at least min_keypoints_per_image
+  if _count_visible_keypoints(anno) >= min_keypoints_per_image: return True
+  return False  
+
+def filter_ids(ids:List[str], coco:COCO, is_val:bool = False) -> List[str]:
+  if is_val: return ids
+  filtered_ids = []
+  for id in ids:
+    ann_ids = coco.getAnnIds(imgIds=id)
+    anno = coco.loadAnns(ids=ann_ids)
+    if has_valid_annotation(anno): filtered_ids.append(id)
+  return filtered_ids
+
+def load_sample(coco:COCO, img_ids:List[str], idx:int, transforms=None, is_val:bool = False):
+  _json_category_id_to_contiguous_id = {v: i + 1 for i, v in enumerate(coco.getCatIds())}
+  try:
+    img_id = img_ids[idx]
+    filename = coco.loadImgs(ids=img_id)[0]["file_name"]
+    img = Image.open(BASEDIR/f"{'val2017' if is_val else 'train2017'}"/filename).convert("RGB")
+    anno = coco.loadAnns(coco.getAnnIds(imgIds=img_id))
+    anno = [obj for obj in anno if obj["iscrowd"] == 0]
+    boxes = [obj["bbox"] for obj in anno]
+    boxes = Tensor(boxes).reshape(-1, 4)
+    target = BoxList(boxes, img.size, mode="xywh").convert("xyxy")
+
+    classes = [obj["category_id"] for obj in anno]
+    classes = [_json_category_id_to_contiguous_id[c] for c in classes]
+    classes = Tensor(classes)
+    target.add_field("labels", classes)
+
+    target = target.clip_to_image()
+
+    if transforms is not None:
+      for transform in transforms: img, target = transform(img, target=target)
+    return img, target
+  except IndexError:
+    print(f"img_ids is {len(img_ids)} with index {idx}")
+
+def iterate(bs:int = 1, shuffle:bool = True, transforms=None, is_val:bool = False):
+  coco = COCO(BASEDIR/"annotations"/f"instances_{'val2017' if is_val else 'train2017'}.json")
+  img_ids = filter_ids(list(sorted(coco.imgs.keys())), coco, is_val=is_val)
+  img_inds = list(range(0, len(img_ids)))
+  if shuffle: random.shuffle(img_inds)
+  for i in range(0, len(coco.imgs), bs):
+    imgs, targets = [], []
+    for ind in img_inds[i:i+bs]:
+      img, target = load_sample(coco, img_ids, ind, transforms=transforms, is_val=is_val)
+      imgs.append(img)
+      targets.append(target)
+    yield imgs, targets
+
+
+if __name__ == "__main__":
+  transforms =  [
+    Resize(int(800), int(1333)),
+    ToTensor(),
+    Normalize(
+      mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
+    )
+  ]
+  kwargs = {"bs": 64, "shuffle": True, "transforms": transforms, "is_val": False}
+  for batch in iterate(**kwargs): print(len(batch[0]))

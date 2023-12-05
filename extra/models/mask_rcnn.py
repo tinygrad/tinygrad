@@ -192,8 +192,8 @@ class BoxList:
       return (
         xmin,
         ymin,
-        xmin + (w - TO_REMOVE).clamp(min=0),
-        ymin + (h - TO_REMOVE).clamp(min=0),
+        xmin + (w - TO_REMOVE).maximum(0),
+        ymin + (h - TO_REMOVE).maximum(0),
       )
 
   def resize(self, size, *args, **kwargs):
@@ -257,10 +257,11 @@ class BoxList:
     bb3 = self.bbox.clip(min_=0, max_=self.size[0] - TO_REMOVE)[:, 2]
     bb4 = self.bbox.clip(min_=0, max_=self.size[1] - TO_REMOVE)[:, 3]
     self.bbox = Tensor.stack((bb1, bb2, bb3, bb4), dim=1)
+    # TODO: avoid using np
     if remove_empty:
-      box = self.bbox
+      box = self.bbox.numpy()
       keep = (box[:, 3] > box[:, 1]) & (box[:, 2] > box[:, 0])
-      return self[keep]
+      return self[keep.tolist()]
     return self
 
   def __getitem__(self, item):
