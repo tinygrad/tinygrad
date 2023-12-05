@@ -3,8 +3,8 @@ import itertools, random, math, time, multiprocessing, traceback
 from tinygrad.lazy import vars_from_ast
 from tinygrad.device import Device, Compiled, Buffer
 from tinygrad.ops import MemBuffer
-from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, all_int, colored
-from tinygrad.codegen.linearizer import Linearizer, UOp
+from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored
+from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.shape.symbolic import sym_infer
 from collections import defaultdict
 from tinygrad.tensor import Tensor
@@ -31,49 +31,6 @@ def get_test_global_size(global_size, max_global_size):
         break
   factor = prod(global_size) / prod(test_global_size)
   return test_global_size, factor
-
-# returns time in seconds
-def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, max_global_size=65536, cnt=3, disable_cache=False, clear_l2=False) -> float:
-  key = {"ast": str(lin.ast), "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size, "clear_l2": clear_l2, "device": Device.DEFAULT}
-  if not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
-
-  # Set the midpoint value value for var_vals to optimize shapes.
-  var_vals = {k:(k.max+k.min)//2 for k in vars_from_ast(lin.ast)}
-  try:
-    lin.linearize()
-    prg = cast(Compiled, Device[Device.DEFAULT]).to_program(lin)
-    real_global_size = prg.global_size
-    if allow_test_size and prg.global_size and all_int(tuple(prg.global_size)):
-      prg.global_size, factor = get_test_global_size(prg.global_size, max_global_size)
-    else:
-      factor = 1
-
-    # TODO: this is copied from prg.__call__
-    global_size, local_size = prg.launch_dims(var_vals)
-    prg.global_size = real_global_size
-    if global_size is not None and prg.global_size is not None and local_size is None and all_int(tuple(prg.global_size)):
-      local_size = optimize_local_size(prg.clprg, global_size, rawbufs)
-      global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
-
-    lra = prg.runtime_args.copy()
-    if global_size: lra['global_size'] = global_size
-    if local_size: lra['local_size'] = local_size
-
-    tms = []
-    for _ in range(cnt):
-      if clear_l2:
-        # TODO: this is too small for many L2 caches
-        with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
-      tms.append(prg.clprg(*[x._buf for x in rawbufs], vals=var_vals.values(), **lra, wait=True)*factor)
-  except Exception:
-    if DEBUG >= 4:
-      traceback.print_exc()
-      print("FAILED")
-      print(lin.ast)
-      print(lin.applied_opts)
-    tms = [float('inf')]
-  if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)
-  return min(tms)
 
 # get (scrap) buffers for timing the linearizer
 def bufs_from_lin(lin:Linearizer) -> List[Buffer]:
@@ -104,20 +61,41 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       pass
   return acted_lins
 
-def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
-
 def compile_linearized_idx(x):
-  try: return (x[0], compile_linearizer(x[1]))
+  try: return (x[0], compile_linearizer(Device.DEFAULT, x[1]))
   except Exception:
-    #traceback.print_exc()
+    if DEBUG >= 4: traceback.print_exc()
     return (x[0], None)
-def compile_linearizer(lin:Linearizer) -> Tuple[bytes, List[int], List[int]]:
+
+def compile_linearizer(dev:str, lin:Linearizer) -> Tuple[bytes, Optional[List[int]], Optional[List[int]]]:
   lin.linearize()
-  dev = Device[Device.DEFAULT]
-  assert isinstance(dev, Compiled)
-  assert lin.global_size is not None and lin.local_size is not None
-  src, _ = dev.renderer("test", lin.uops)   # NOTE: these all have the same name for deduping
-  return dev.compiler(src), lin.global_size + [1]*(3-len(lin.global_size)), lin.local_size + [1]*(3-len(lin.local_size))
+  rdev = Device[dev]
+  assert isinstance(rdev, Compiled)
+  src, _ = rdev.renderer("test", lin.uops)   # NOTE: these all have the same name for deduping
+  return rdev.compiler(src), lin.global_size, lin.local_size
+
+def time_program(dev:str, lib:bytes, global_size, local_size, var_vals, rawbufs, early_stop=None, max_global_size=65536, clear_l2=False):
+  rdev = Device[dev]
+  assert isinstance(rdev, Compiled)
+  clprg = rdev.runtime("test", lib)
+  if global_size is not None:
+    global_size = [sym_infer(sz, var_vals) for sz in global_size] + [1]*(3-len(global_size))
+    if local_size is None:
+      local_size = optimize_local_size(clprg, global_size, rawbufs)
+      global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
+    else:
+      local_size = [sym_infer(sz, var_vals) for sz in local_size] + [1]*(3-len(local_size))
+    if max_global_size is not None:
+      global_size, factor = get_test_global_size(global_size, max_global_size=max_global_size)
+    else:
+      factor = 1
+  tms = []
+  for _ in range(3):
+    if clear_l2:
+      with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
+    tms.append(clprg(*[x._buf for x in rawbufs], global_size=global_size, local_size=local_size, vals=var_vals.values(), wait=True)*factor)
+    if early_stop is not None and early_stop < tms[-1]: break
+  return tms
 
 def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linearizer:
   key = {"ast": str(lin.ast), "amt": amt, "allow_test_size": allow_test_size, "device": Device.DEFAULT}
@@ -128,9 +106,8 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
 
   beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
-  opaque_bufs = [x._buf for x in rawbufs]
 
-  pool = multiprocessing.Pool(multiprocessing.cpu_count()) if getenv("PARALLEL") else None
+  pool = multiprocessing.Pool(multiprocessing.cpu_count()) if getenv("PARALLEL", 1) else None
 
   var_vals = {k:(k.max+k.min)//2 for k in vars_from_ast(lin.ast)}
   exiting, st = False, time.perf_counter()
@@ -144,23 +121,15 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
       lib, global_size, local_size = proc
       if lib in seen_libs: continue
       seen_libs.add(lib)
-
-      global_size = [sym_infer(sz, var_vals) for sz in global_size]
-      local_size = [sym_infer(sz, var_vals) for sz in local_size]
-
-      clprg = dev.runtime("test", lib)
-      global_size, factor = get_test_global_size(global_size, max_global_size=65536)
-      tms = []
-      for _ in range(3):
-        tms.append(clprg(*opaque_bufs, global_size=global_size, local_size=local_size, vals=var_vals.values(), wait=True)*factor)
-        if len(beam) and beam[0][1]*3 < tms[-1]: break
+      tms = time_program(Device.DEFAULT, lib, global_size, local_size, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else None)
       timed_lins.append((acted_lins[i], min(tms)))
-      if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")
+      if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us        {len(timed_lins):4d}/{len(acted_lins):4d}        {timed_lins[-1][0].colored_shape()}\033[K", end="")
 
     # done
     opts = sorted(timed_lins, key=lambda x: x[1])
     exiting = len(opts) == 0 or (len(beam) > 0 and beam[0][1] <= opts[0][1])
     if not exiting: beam = opts[:amt]
+    assert len(beam) > 0, "no BEAM items succeeded?!?"
     if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s:", colored(f"{beam[0][1]*1e6:12.2f} us", "green" if exiting else None), f"from {len(acted_lins):3d} -> {len(opts):3d} actions\033[K", beam[0][0].colored_shape())
 
   if pool is not None: pool.close()    # the pool is closed
@@ -181,3 +150,14 @@ def optimize_local_size(clprg:Callable, global_size:List[int], rawbufs:List[Buff
   ret = min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])
   assert not math.isinf(ret[0]), "all optimize_local_size exec failed"
   return ret[1]
+
+def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, max_global_size=65536, disable_cache=False, clear_l2=False) -> float:
+  key = {"ast": str(lin.ast), "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size, "clear_l2": clear_l2, "device": Device.DEFAULT}
+  if not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
+
+  var_vals = {k:(k.max+k.min)//2 for k in vars_from_ast(lin.ast)}
+  lib, global_size, local_size = compile_linearizer(Device.DEFAULT, lin)
+  tms = time_program(Device.DEFAULT, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2)
+
+  if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)
+  return min(tms)

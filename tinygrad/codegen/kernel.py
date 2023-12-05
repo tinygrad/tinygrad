@@ -110,6 +110,9 @@ class Kernel:
     # cache
     self.applied_opts_cache: Optional[List[Opt]] = None
 
+    # do required opt here
+    self.required_optimizations()
+
   def copy(self):
     ret = type(self).__new__(type(self))
 
@@ -467,6 +470,13 @@ class Kernel:
             padded = True
       assert padded, "nothing was padded"
     return self.simplify_ones()
+
+  def required_optimizations(self):
+    if self.bufs[0].dtype.__class__ is ImageDType:
+      unit_stride_axes_mul_4 = [i for i in self.sts[0].unit_stride_axes(ignore_valid=True) if self.sts[0].shape[i]%4 == 0]
+      assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[0]}"
+      if len(unit_stride_axes_mul_4) and all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
+        self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
 
   def hand_coded_optimizations(self):
     # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
