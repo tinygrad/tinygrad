@@ -97,7 +97,8 @@ class Transformer:
 
     logits = self.lm_head(self.ln_f(h))
     # NOTE: temperature=0 with HALF breaks due to precision, should use argmax instead
-    return (logits[:, -1, :] / (temperature+1e-10)).softmax().realize()
+    ret = (logits[:, -1, :] / (temperature+1e-10)).softmax()
+    return ret.half().realize() if HALF else ret.realize()
 
   # TODO: fix empty token
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
