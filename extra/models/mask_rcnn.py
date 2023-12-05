@@ -914,9 +914,9 @@ def _roi_align(input, rois, spatial_scale, pooled_height, pooled_width, sampling
 
   output = val.sum((-1, -2))
   if isinstance(count, Tensor):
-    output /= count[:, None, None, None]
+    output = output / count[:, None, None, None]
   else:
-    output /= count
+    output = output / count
 
   output = output.cast(orig_dtype)
   return output
@@ -1127,6 +1127,8 @@ class RoIBoxHead:
     if not Tensor.training:
       result = self.post_processor((class_logits, box_regression), proposals)
       return x, result, {}
+    # TODO: implement this
+    return x, proposals, {}
 
 
 class MaskPostProcessor:
@@ -1255,11 +1257,14 @@ class MaskRCNN:
       get_child(self, k).assign(v.numpy()).realize()
     return loaded_keys
 
-  def __call__(self, images):
+  def __call__(self, images, targets=None):
+    if Tensor.training and targets is None:
+      raise ValueError("In training mode, targets should be passed")
+
     images = to_image_list(images)
     features = self.backbone(images.tensors)
-    proposals, _ = self.rpn(images, features)
-    x, result, _ = self.roi_heads(features, proposals)
+    proposals, _ = self.rpn(images, features, targets=targets)
+    x, result, _ = self.roi_heads(features, proposals, targets=targets)
     return result
 
 

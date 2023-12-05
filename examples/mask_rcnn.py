@@ -43,6 +43,7 @@ class Resize:
 
       return (oh, ow)
 
+  # TODO: update to work with example
   def __call__(self, image, target=None):
     size = self.get_size(image.size)
     image = Ft.resize(image, size)
@@ -56,6 +57,7 @@ class Normalize:
     self.std = std
     self.to_bgr255 = to_bgr255
 
+  # TODO: update to work with example
   def __call__(self, image, target=None):
     if self.to_bgr255:
       image = image[[2, 1, 0]] * 255
@@ -65,12 +67,13 @@ class Normalize:
     return image, target
   
 class ToTensor:
+  # TODO: update to work with example
   def __call__(self, image, target=None): return Ft.to_tensor(image), target
 
 transforms = lambda size_scale: T.Compose(
   [
     Resize(int(800*size_scale), int(1333*size_scale)),
-    T.ToTensor(),
+    ToTensor(),
     Normalize(
       mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
     ),
