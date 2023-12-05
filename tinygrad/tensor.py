@@ -119,7 +119,8 @@ class Tensor:
     self.lazydata = x.lazydata
     return self
 
-  def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
+  def clone(self) -> Tensor: return self  # TODO: is this always okay?
+  def detach(self) -> Tensor: return Tensor(self.lazydata, requires_grad=False)
   def numpy(self) -> np.ndarray:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
