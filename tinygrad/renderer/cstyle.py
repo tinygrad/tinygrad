@@ -324,13 +324,9 @@ class GLSLLanguage(CStyleLanguage):
     BinaryOps.MOD: lambda a,b,dtype: f"(int({a})%int({b}))", TernaryOps.WHERE: lambda a,b,c,dtype: f"(float({a})!=0.0?{b}:{c})" }
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
-    if math.isnan(x): val = "(0.0 / 0.0)"
-    elif math.isinf(x): val = ("-" if x < 0 else "") + "(1./0.)"
-    else: val = "({:.1f})".format(x) if x == int(x) and dtypes.is_float(var_dtype) else f"({x})"
-    return self.render_cast([val]*var_dtype.sz, var_dtype)
-
-  def render_conditional(self, cond: str, x:str, y:str) -> str:
-    return f"bool({cond})?({x}):{y}"
+    if math.isnan(x): return "(0.0 / 0.0)"
+    elif math.isinf(x): return ("-" if x < 0 else "") + "(1./0.)"
+    return self.render_cast(["({:.1f})".format(x) if x == int(x) and dtypes.is_float(var_dtype) else f"({x})"]*var_dtype.sz, var_dtype)
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     prg = "#version 330\nprecision highp float;\nprecision highp int;\nin vec2 uv;\nuniform int width;\n"
