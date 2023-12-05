@@ -7,6 +7,7 @@
 
 print("******** first, the runtime ***********")
 
+from tinygrad.device import Device
 from tinygrad.runtime.ops_clang import ClangProgram, compile_clang, MallocAllocator
 
 # allocate some buffers
@@ -18,8 +19,8 @@ b = MallocAllocator.alloc(4)
 MallocAllocator.copyin(a, bytearray([2,0,0,0]))
 MallocAllocator.copyin(b, bytearray([3,0,0,0]))
 
-# compile a program to a binary
-lib = compile_clang("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
+# compile a program to a binary for a current device
+lib = compile_clang(Device["CLANG"], "void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
 
 # create a runtime for the program (ctypes.CDLL)
 fxn = ClangProgram("add", lib)
@@ -38,7 +39,7 @@ DEVICE = "CLANG"   # NOTE: you can change this!
 
 import struct
 from tinygrad.helpers import dtypes
-from tinygrad.device import Buffer, Device
+from tinygrad.device import Buffer
 from tinygrad.ops import LazyOp, BufferOps, MemBuffer, BinaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 
