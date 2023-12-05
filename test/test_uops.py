@@ -9,9 +9,9 @@ from tinygrad.codegen.linearizer import UOps, UOp
 
 def _uops_to_prg(uops):
   src, runtime_args = Device[Device.DEFAULT].renderer("test", uops)
-  return CompiledASTRunner(Device[Device.DEFAULT], None, "test", src,
+  return CompiledASTRunner(None, "test", src,
                            [1] if Device[Device.DEFAULT].linearizer_opts.has_local else None, [1] if Device[Device.DEFAULT].linearizer_opts.has_local else None,
-                           runtime_args=runtime_args)
+                           runtime_args=runtime_args).build(Device[Device.DEFAULT].compiler, Device[Device.DEFAULT].runtime)
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype if arg != BinaryOps.CMPLT else dtypes.bool, tuple(vin), arg))

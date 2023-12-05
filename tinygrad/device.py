@@ -230,13 +230,13 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 # **************** for Compiled Devices ****************
 
 class CompiledASTRunner(JITRunner):
-  def __init__(self, device:Compiled, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None):
+  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None):
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
-    self.device, self.name, self.display_name, self.prg, self.global_size, self.local_size, self.runtime_args = \
-      device, to_function_name(name), name, prg, global_size, local_size, runtime_args if runtime_args is not None else {}
+    self.name, self.display_name, self.prg, self.global_size, self.local_size, self.runtime_args = \
+      to_function_name(name), name, prg, global_size, local_size, runtime_args if runtime_args is not None else {}
     self.vars: List[Variable] = []
     if ast:
       info = get_lazyop_info(ast)
@@ -245,9 +245,10 @@ class CompiledASTRunner(JITRunner):
       self.vars = vars_from_ast(ast)
       assert all(v._val is None for v in self.vars), f"ASTRunner contains bound Variable {self.vars}"
 
-    # Building runner for a given device.
-    self.lib = self.device.compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else self.device.compiler(self.prg)
-    self.clprg = self.device.runtime(self.name, self.lib)
+  def build(self, compiler, runtime):
+    self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
+    self.clprg = runtime(self.name, self.lib)
+    return self
 
   def launch_dims(self, var_vals):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else self.global_size
@@ -276,7 +277,7 @@ class Compiled:
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     k.linearize()
     src, runtime_args = self.renderer(to_function_name(k.name), k.uops)
-    return CompiledASTRunner(self, k.ast, k.name, src, k.global_size, k.local_size, runtime_args)
+    return CompiledASTRunner(k.ast, k.name, src, k.global_size, k.local_size, runtime_args).build(self.compiler, self.runtime)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:
