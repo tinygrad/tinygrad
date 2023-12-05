@@ -121,7 +121,7 @@ class GPT2:
     transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
     for k in weights.keys():
       if any(k.endswith(w) for w in transposed):
-        weights[k] = Tensor(weights[k].numpy().T)
+        weights[k] = weights[k].to(Device.DEFAULT).T
     # lm head and wte are tied
     weights['lm_head.weight'] = Tensor(weights['wte.weight'].numpy())
 
