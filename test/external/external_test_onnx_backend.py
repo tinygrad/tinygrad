@@ -47,14 +47,16 @@ backend_test.exclude('test_reduce_prod_*')
 backend_test.exclude('test_adam_multiple_cpu')
 backend_test.exclude('test_nesterov_momentum_cpu')
 
-# we only support float32
-backend_test.exclude('uint8')
-backend_test.exclude('uint16')
-backend_test.exclude('uint32')
-backend_test.exclude('uint64')
-backend_test.exclude('int8')
-backend_test.exclude('int16')
-backend_test.exclude('float64')
+# about different dtypes
+backend_test.exclude('int8')  #  OverflowError: cannot convert float infinity to integer
+
+if Device.DEFAULT in ["TORCH"]:
+  backend_test.exclude('uint16')
+  backend_test.exclude('uint32')
+  backend_test.exclude('uint64')
+if Device.DEFAULT in ["METAL"]:
+  backend_test.exclude('float64')
+
 backend_test.exclude('string')
 
 backend_test.exclude('test_pow_types_int*')
