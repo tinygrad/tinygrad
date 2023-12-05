@@ -89,7 +89,8 @@ class Transformer:
     mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf")).triu(start_pos.val+1).realize() if seqlen > 1 else None
 
     if HALF:
-      h = h.half()
+      # NOTE: converting this to half breaks GPT-2
+      #h = h.half()
       if mask is not None: mask = mask.half()
 
     for hi in self.h: h = hi(h, start_pos=start_pos, mask=mask)
