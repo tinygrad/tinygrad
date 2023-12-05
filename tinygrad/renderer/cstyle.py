@@ -319,9 +319,8 @@ class GLSLLanguage(CStyleLanguage):
   sampler_prefix = {dtypes.float64: "d", dtypes.float: "", dtypes.half: "", dtypes.int32: "i", dtypes.uint32: "u", dtypes.bool: "i"}
   fragment_center_offset = 0.5
   xid = [f"int(gl_FragCoord.y-{fragment_center_offset}) * width + int(gl_FragCoord.x-{fragment_center_offset})"]
-  code_for_op = { **CStyleLanguage().code_for_op, BinaryOps.MUL: lambda a,b,dtype: f"bool(int({a})*int({b}))" if dtype == dtypes.bool else f"({a}*{b})",
-    BinaryOps.ADD: lambda a,b,dtype: f"bool(int({a})+int({b}))" if dtype == dtypes.bool else f"({a}+{b})", BinaryOps.CMPLT: lambda a,b,dtype: f"(float({a})<float({b}))" if dtype == dtypes.bool else f"({a}<{b})",
-    BinaryOps.MOD: lambda a,b,dtype: f"(int({a})%int({b}))", TernaryOps.WHERE: lambda a,b,c,dtype: f"(float({a})!=0.0?{b}:{c})" }
+  code_for_op = {**CStyleLanguage().code_for_op, **{op: lambda a,b,dtype,charforop=charforop: f"bool(int({a}){charforop}int({b}))" if dtype == dtypes.bool else f"({a}{charforop}{b})" for op,charforop in [(BinaryOps.MUL,"*"),(BinaryOps.ADD,"+"),(BinaryOps.SUB,"-"),(BinaryOps.DIV,"/")]},
+    BinaryOps.CMPLT: lambda a,b,dtype: f"(float({a})<float({b}))" if dtype == dtypes.bool else f"({a}<{b})", BinaryOps.MOD: lambda a,b,dtype: f"(int({a})%int({b}))", TernaryOps.WHERE: lambda a,b,c,dtype: f"(float({a})!=0.0?{b}:{c})" }
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): return "(0.0 / 0.0)"

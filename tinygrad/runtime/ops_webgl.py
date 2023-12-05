@@ -8,6 +8,7 @@ from tinygrad.renderer.cstyle import GLSLLanguage
 import moderngl
 
 ctx = moderngl.create_standalone_context()
+max_dims = 4096
 dtype_map = { dtypes.float64: "f8", dtypes.float: "f4", dtypes.half: "f2", dtypes.int32: "i4", dtypes.uint32: "u4", dtypes.bool: "i1"}
 class WebGLProgram:
   def __init__(self, name: str, prg: str, bufs:int=0, vars:int=0): self.name, self.prg = name, ctx.program(vertex_shader="#version 330\nprecision highp float;\nin vec2 in_position;in vec2 in_uv;out vec2 uv;void main(){gl_Position=vec4(in_position,0.0,1.0);uv=in_uv;}", fragment_shader=prg)
@@ -29,19 +30,10 @@ class WebGLProgram:
     self.fbo.use()
     self.vao.render(mode=moderngl.TRIANGLE_STRIP)
 
-def reshape_texture(num, threshold):
-  if num <= threshold: return (num, 1)
-
-  for i in range(2, threshold + 1):
-    if num % i == 0 and (num // i) <= threshold:
-      return (num // i, i)
-
-  return (num, 1)
-
 class RawWebGLAllocator(Allocator):
   def _alloc(self, size: int): return ctx.buffer(reserve=size)
   def _cast_image(self, buf:moderngl.Buffer, dtype:DType, size:int) -> moderngl.Texture:
-    tex = ctx.texture(reshape_texture(size, 4096), 1, dtype=dtype_map[dtype])
+    tex = ctx.texture(next(((size//i, i) for i in range(1, max_dims+1) if size%i == 0 and size//i <= max_dims), (size, 1)), 1, dtype=dtype_map[dtype])
     tex.write(buf)
     tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
     return tex
