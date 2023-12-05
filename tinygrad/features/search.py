@@ -114,7 +114,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
 
-  default_parallel = 1 if Device.DEFAULT == "HIP" else 0
+  default_parallel = 1 if Device.DEFAULT in {"CUDA", "HIP"} else 0
   pool = multiprocessing.Pool(multiprocessing.cpu_count(), init_worker) if getenv("PARALLEL", default_parallel) else None
 
   try:
