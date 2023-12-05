@@ -340,6 +340,7 @@ class TestIndexExpressions2d(unittest.TestCase):
     v = self.st.views[-1]
     assert v.strides == (0, 0, 0, 1, 0, 0) and v.mask == ((0, 1), (0, 1), (0, 1), (30, 75), (0, 1), (0, 1)) and v.offset == -30
     self.st.assert_same()
+
 class TestSimplifyingShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = CheckingShapeTracker((1, 10))
@@ -474,6 +475,12 @@ class TestComplexShapeTracker(unittest.TestCase):
     self.st.reshape((64, 1024, 4))
     print(self.st.views)
     assert self.st.contiguous
+
+  def test_reshape_stable_diffusion(self):
+    # regression test for https://github.com/tinygrad/tinygrad/pull/2616
+    st = ShapeTracker((View((2, 1920, 32, 32), (1310720, 1024, 32, 1), 0, ((0, 2), (0, 1280), (0, 32), (0, 32)), False),))
+    st = st.reshape((2, 32, 240, 256))
+    assert len(st.views) == 2
 
 class TestSingleShapeTracker(unittest.TestCase):
   def setUp(self):
