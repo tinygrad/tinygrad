@@ -1,10 +1,11 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
-import itertools, random, math, time, multiprocessing
+import itertools, random, math, time, multiprocessing, traceback
 from tinygrad.lazy import vars_from_ast
 from tinygrad.device import Device, Compiled, Buffer
 from tinygrad.ops import MemBuffer
 from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, all_int, colored
 from tinygrad.codegen.linearizer import Linearizer, UOp
+from tinygrad.shape.symbolic import sym_infer
 from collections import defaultdict
 from tinygrad.tensor import Tensor
 
@@ -63,10 +64,9 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
       if clear_l2:
         # TODO: this is too small for many L2 caches
         with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
-      tms.append(prg.clprg(*[x._buf for x in rawbufs], *var_vals.values(), **lra, wait=True)*factor)
+      tms.append(prg.clprg(*[x._buf for x in rawbufs], vals=var_vals.values(), **lra, wait=True)*factor)
   except Exception:
     if DEBUG >= 4:
-      import traceback
       traceback.print_exc()
       print("FAILED")
       print(lin.ast)
@@ -108,12 +108,14 @@ def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple([(x.uop, x.dtype, tuple(
 
 def compile_linearized_idx(x):
   try: return (x[0], compile_linearizer(x[1]))
-  except Exception: return (x[0], None)
+  except Exception:
+    #traceback.print_exc()
+    return (x[0], None)
 def compile_linearizer(lin:Linearizer) -> Tuple[bytes, List[int], List[int]]:
   lin.linearize()
   dev = Device[Device.DEFAULT]
   assert isinstance(dev, Compiled)
-  assert lin.global_size and lin.local_size
+  assert lin.global_size is not None and lin.local_size is not None
   src, _ = dev.renderer("test", lin.uops)   # NOTE: these all have the same name for deduping
   return dev.compiler(src), lin.global_size + [1]*(3-len(lin.global_size)), lin.local_size + [1]*(3-len(lin.local_size))
 
@@ -124,39 +126,42 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
     for o in val[len(lin.applied_opts):]: ret.apply_opt(o)
     return ret
 
-  # init the BEAM with the base linearizer
-  beam: List[Tuple[Linearizer, float]] = [(lin, time_linearizer(lin, rawbufs, allow_test_size=allow_test_size))]
+  beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
   opaque_bufs = [x._buf for x in rawbufs]
 
   pool = multiprocessing.Pool(multiprocessing.cpu_count()) if getenv("PARALLEL") else None
 
+  var_vals = {k:(k.max+k.min)//2 for k in vars_from_ast(lin.ast)}
   exiting, st = False, time.perf_counter()
   dev = Device[Device.DEFAULT]
   assert isinstance(dev, Compiled)
   while not exiting:
-    acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam])
+    acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam]) if len(beam) else [lin]
     timed_lins: List[Tuple[Linearizer, float]] = []
     for i,proc in (pool.imap_unordered(compile_linearized_idx, enumerate(acted_lins)) if pool is not None else map(compile_linearized_idx, enumerate(acted_lins))):
       if proc is None: continue
-      lib,global_size,local_size = proc
+      lib, global_size, local_size = proc
       if lib in seen_libs: continue
       seen_libs.add(lib)
+
+      global_size = [sym_infer(sz, var_vals) for sz in global_size]
+      local_size = [sym_infer(sz, var_vals) for sz in local_size]
 
       clprg = dev.runtime("test", lib)
       global_size, factor = get_test_global_size(global_size, max_global_size=65536)
       tms = []
       for _ in range(3):
-        tms.append(clprg(*opaque_bufs, global_size=global_size, local_size=local_size, wait=True)*factor)
-        if beam[0][1]*3 < tms[-1]: break
+        tms.append(clprg(*opaque_bufs, global_size=global_size, local_size=local_size, vals=var_vals.values(), wait=True)*factor)
+        if len(beam) and beam[0][1]*3 < tms[-1]: break
       timed_lins.append((acted_lins[i], min(tms)))
-      if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}", end="")
+      if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")
 
     # done
     opts = sorted(timed_lins, key=lambda x: x[1])
-    exiting = len(opts) == 0 or beam[0][1] <= opts[0][1]
+    exiting = len(opts) == 0 or (len(beam) > 0 and beam[0][1] <= opts[0][1])
     if not exiting: beam = opts[:amt]
-    if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s:", colored(f"{beam[0][1]*1e6:12.2f} us", "green" if exiting else None), f"from {len(acted_lins):3d} -> {len(opts):3d} actions", beam[0][0].colored_shape())
+    if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s:", colored(f"{beam[0][1]*1e6:12.2f} us", "green" if exiting else None), f"from {len(acted_lins):3d} -> {len(opts):3d} actions\033[K", beam[0][0].colored_shape())
 
   if pool is not None: pool.close()    # the pool is closed
   if CACHELEVEL >= 1: diskcache_put("beam_search", key, beam[0][0].applied_opts)
