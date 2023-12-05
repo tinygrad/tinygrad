@@ -3,7 +3,7 @@ import functools, struct
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
-from tinygrad.helpers import dtypes, DType, PtrDType
+from tinygrad.helpers import dtypes, DType
 
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 def double_to_hex(x): return "%02X%02X%02X%02X%02X%02X%02X%02X" % tuple(struct.pack("d",x)[::-1])
@@ -50,6 +50,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       labels.append(label_count)
       label_count += 1
     elif uop == UOps.IF:
+      assert vin[0].dtype is not None
       kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[0].dtype]} {(pred:=ssa(u,'p','pred'))}, {r[vin[0]]}, {lang.render_const(0, vin[0].dtype)};")
       kernel.append(f"@!{pred} bra $if_{label_count};")
       labels.append(label_count)
@@ -63,6 +64,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
         kernel.append(f"$if_{labels.pop()}:")
     elif uop == UOps.BARRIER: kernel.append(lang.barrier)
     elif uop == UOps.ALU:
+      assert dtype is not None and vin[0].dtype is not None
       if args == BinaryOps.CMPLT:
         pred = ssa(None, "lt", "pred")
         kernel.append(lang.asm_for_op[args](pred, *[r[x] for x in vin], lang.dtype_to_asmtype[vin[0].dtype]))
@@ -72,7 +74,9 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
         kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[0].dtype]} {pred}, {r[vin[0]]}, {lang.render_const(0, vin[0].dtype)};")
         kernel.append(lang.asm_for_op[args](ssa(u, "alu"), pred, r[vin[1]], r[vin[2]], lang.dtype_to_asmtype[dtype]))
       else: kernel.append(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], lang.dtype_to_asmtype[dtype]))
-    elif uop == UOps.DEFINE_ACC: kernel.append(f"mov.{lang.dtype_to_asmtype[dtype]} {ssa(u, 'acc')}, {lang.render_const(args, dtype)};")
+    elif uop == UOps.DEFINE_ACC:
+      assert dtype is not None
+      kernel.append(f"mov.{lang.dtype_to_asmtype[dtype]} {ssa(u, 'acc')}, {lang.render_const(args, dtype)};")
     elif uop == UOps.SPECIAL:
       assert not args[1].startswith("i"), "no xid in ptx"
       xid = lang.gid if args[1].startswith("g") else lang.lid
@@ -83,6 +87,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
     elif uop == UOps.CONST:
       r[u] = lang.render_const(args, dtype)
     elif uop == UOps.LOAD:
+      assert dtype is not None and vin[1].dtype is not None
       if vin[0].uop == UOps.DEFINE_LOCAL:
         index = ssa(None, "index", "u64")
         kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {index}, {r[vin[1]]}, {dtype.itemsize};")
@@ -96,15 +101,18 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       else: loc = f"[{r[vin[0]]}{f'+{int(vin[1].arg * dtype.itemsize)}' if vin[1] else ''}]"
       val = ssa(u, 'val')
       if dtype == dtypes.bool: b = ssa(None, 'b', 's8')
-      if len(vin) > 3: kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[2].dtype]} {(pred:=ssa(None,'ld','pred'))}, {r[vin[2]]}, {lang.render_const(0, vin[2].dtype)};")
+      if len(vin) > 3:
+        assert vin[2].dtype is not None
+        kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[2].dtype]} {(pred:=ssa(None,'ld','pred'))}, {r[vin[2]]}, {lang.render_const(0, vin[2].dtype)};")
       kernel.append(f"{f'@{pred} ' if len(vin) > 3 else ''}ld.{'s8' if dtype == dtypes.bool else lang.dtype_to_asmtype[dtype]} {b if dtype == dtypes.bool else val}, {loc};")
       if len(vin) > 3: kernel.append(f"@!{pred} mov.{'s8' if dtype == dtypes.bool else lang.dtype_to_asmtype[dtype]} {b if dtype == dtypes.bool else val}, {r[vin[3]]};")
       if dtype == dtypes.bool: kernel.append(f"cvt.u32.s8 {val}, {b};")
     elif uop == UOps.PHI:
+      assert dtype is not None
       kernel.append(f"mov.{lang.dtype_to_asmtype[dtype]} {r[vin[0]]}, {r[vin[1]]};")
       r[u] = r[vin[0]]
     elif uop == UOps.STORE:
-      assert len(vin) <= 3, "no conditional store"
+      assert vin[0].dtype is not None and vin[1].dtype is not None and vin[2].dtype is not None
       if vin[0].uop == UOps.DEFINE_LOCAL:
         index = ssa(None, "index", "u64")
         kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {index}, {r[vin[1]]}, {vin[0].dtype.itemsize};")
@@ -120,13 +128,14 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       if vin[0].dtype != vin[2].dtype:
         kernel.append(lang.render_cast(cast := ssa(None, "cast", lang.dtype_to_asmtype[vin[0].dtype]), r[vin[2]], vin[0].dtype, vin[2].dtype))
       if len(vin) > 3:
+        assert vin[3].dtype is not None
         kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[3].dtype]} {(pred:=ssa(None, 'st', 'pred'))}, {r[vin[3]]} {lang.render_const(0, vin[3].dtype)};")
       kernel.append(f"{f'@{pred} ' if len(vin) > 3 else ''}st.{'s8' if vin[0].dtype == dtypes.bool else lang.dtype_to_asmtype[vin[0].dtype]} {loc}, {r[vin[2]] if vin[0].dtype == vin[2].dtype else cast};")
     elif uop == UOps.CAST and dtype is not None:
-      assert len(vin) == 1, "one cast input"
-      # if vin[0].dtype == dtypes.bool: kernel.append(f"selp.{lang.dtype_to_asmtype[dtype]} {ssa(u, 'cvt')}, {lang.render_const(1, dtype)}, {lang.render_const(0, dtype)}, {r[vin[0]]};")
+      assert vin[0].dtype is not None
       kernel.append(lang.render_cast(ssa(u, 'cast'), r[vin[0]], dtype, vin[0].dtype))
     elif uop == UOps.DEFINE_LOCAL:
+      assert dtype is not None
       kernel.append(f".shared .align 4 .b8 {args[0]}[{args[1]*dtype.itemsize}];")
       r[u] = args[0]
     elif uop == UOps.DEFINE_GLOBAL:
@@ -167,7 +176,7 @@ class PTXLanguage(AssemblyLanguage):
     dtypes.int8: "s8", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
     dtypes.uint8: "u8", dtypes.uint16: "u16", dtypes.uint32: "u32", dtypes.uint64: "u64",
     dtypes.float16: "f16", dtypes.float32: "f32", dtypes.float64: "f64",
-    dtypes.bool: "u32", PtrDType: "u64"
+    dtypes.bool: "u32"
   }
 PTXRenderer = functools.partial(uops_to_asm, PTXLanguage())
 
