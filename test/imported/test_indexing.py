@@ -38,18 +38,12 @@ def make_tensor(shape, dtype:dtypes, noncontiguous):
   | complex types             | ``-9``     | ``9``    |
   +---------------------------+------------+----------+
   """
-  contiguous = not noncontiguous
-  if dtype is dtypes.bool:
-    return Tensor.randint(shape=shape, low=0, high=2, dtype=dtype, contiguous=contiguous)
-  elif dtype.is_int():
-    if dtype.is_unsigned():
-      return Tensor.randint(shape=shape, low=0, high=10, dtype=dtype, contiguous=contiguous)
-    else:
-      return Tensor.randint(shape=shape, low=-9, high=10, dtype=dtype, contiguous=contiguous)
-  elif dtype.is_float():
-    return Tensor.rand(shape=shape, low=-9, high=9, dtype=dtype, contiguous=contiguous)
-  else:
-    raise NotImplementedError(f"{dtype} not implemented")
+  contiguous = not noncontiguous # lol
+  if dtype is dtypes.bool: return Tensor.randint(shape=shape, low=0, high=2, dtype=dtype, contiguous=contiguous)
+  elif dtype.is_unsigned(): return Tensor.randint(shape=shape, low=0, high=10, dtype=dtype, contiguous=contiguous)
+  elif dtype.is_int(): return Tensor.randint(shape=shape, low=-9, high=10, dtype=dtype, contiguous=contiguous) # signed int
+  elif dtype.is_float(): return Tensor.rand(shape=shape, low=-9, high=9, dtype=dtype, contiguous=contiguous)
+  else: raise NotImplementedError(f"{dtype} not implemented")
 
 class TestIndexing(unittest.TestCase):
   def test_index(self):
