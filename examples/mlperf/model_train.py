@@ -89,10 +89,6 @@ def train_unet3d():
       train_loader = [(Tensor.rand((1,1,128,128,128), dtype=dtypes.half), Tensor.rand((1,128,128,128), dtype=dtypes.uint8)) for i in range(3)]
       total_batches = 1
     else:
-      # def get_train_val_split(files): return files[:-int(len(files)*conf.val_split)], files[-int(len(files)*conf.val_split):]
-      # files = get_val_files()
-      # train_files, val_files = get_train_val_split(files)
-      # total_files = len(train_files)
       train_x, train_y, val_x, val_y = get_data_split()
       total_files = len(train_x)
       total_batches = (total_files + conf.batch_size - 1) // conf.batch_size

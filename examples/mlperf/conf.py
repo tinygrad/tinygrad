@@ -12,7 +12,7 @@ class Conf:
     load_ckpt_path: str = ""
     val_split: float = 0.1
 
-    epochs: int = 15
+    epochs: int = 32
     quality_threshold: float = 0.908
     ga_steps: int = 1
     warmup_step: int = 4
@@ -36,7 +36,7 @@ class Conf:
     lr_decay_factor: float = 0.1
     momentum: float = 0.9
     weight_decay: float = 0.0
-    eval_every: int = 2
+    eval_every: int = 10
     start_eval_at: int = 0
     verbose: bool = True
     normalization: str = "instancenorm"
