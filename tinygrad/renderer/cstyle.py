@@ -3,7 +3,7 @@ import math, functools
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import ImageDType, dtypes, prod, DType, strip_parens
+from tinygrad.helpers import ImageDType, dtypes, prod, DType, strip_parens, getenv
 
 class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"
@@ -159,7 +159,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       else:
         val = lang.code_for_op[args](*[r[x] for x in vin] + [dtype])
       assert child_count[u] != 0, f"childless ALU op found {u}"
-      if (child_count[u] <= 1 or dtypes.is_int(dtype)) and args != BinaryOps.MAX:  # fix index rendering issue. fix clang nested max macro issue
+      if (child_count[u] <= 1 or dtypes.is_int(dtype)) and args != BinaryOps.MAX and not getenv("EXPAND_SSA"):  # fix index rendering issue. fix clang nested max macro issue
         r[u] = val
       else:
         kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'alu')} = {val};")
@@ -249,7 +249,8 @@ class CUDALanguage(CStyleLanguage):
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
-  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"__hmax({a},{b})"}
+  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"__hmax({a},{b})",
+                 UnaryOps.EXP2: lambda x,dtype: f"exp2({x})" if dtype != dtypes.half else f"hexp2({x})"}
   half_prekernel = """
     #include <cuda_fp16.h>
     struct half4 { half x, y, z, w; };
