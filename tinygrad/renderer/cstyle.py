@@ -242,7 +242,7 @@ class MetalLanguage(CStyleLanguage):
   lid = [f"lid.{chr(120+i)}" for i in range(3)]
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
-      return f"as_type<{var_dtype.name}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
+    return f"as_type<{var_dtype.name}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 
 class CUDALanguage(CStyleLanguage):
