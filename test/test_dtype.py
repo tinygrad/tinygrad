@@ -170,6 +170,14 @@ class TestUint64Dtype(TestDType): DTYPE = dtypes.uint64
 
 class TestBoolDtype(TestDType): DTYPE = dtypes.bool
 
+class TestImageDType(unittest.TestCase):
+  def test_image_scalar(self):
+    assert dtypes.imagef((10,10)).scalar() == dtypes.float32
+    assert dtypes.imageh((10,10)).scalar() == dtypes.float32
+  def test_image_vec(self):
+    assert dtypes.imagef((10,10)).vec(4) == dtypes.float32.vec(4)
+    assert dtypes.imageh((10,10)).vec(4) == dtypes.float32.vec(4)
+
 class TestEqStrDType(unittest.TestCase):
   def test_image_ne(self):
     if ImageDType is None: raise unittest.SkipTest("no ImageDType support")

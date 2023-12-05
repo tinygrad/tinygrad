@@ -1,4 +1,5 @@
-// clang -O2 -march=native gemm.c -lpthread
+// single:  clang -O2 -march=native gemm.c
+// multi:   clang -O2 -march=native gemm.c -DNTHREADS=32 -lpthread
 #define _GNU_SOURCE
 
 // https://en.wikichip.org/wiki/amd/microarchitectures/zen_2
@@ -18,11 +19,15 @@
 
 #ifdef DEBUG
   #define N 8
-#else
-  //#define N 4096
-  // L1 cache is 32 kB
-  #define N 2048 // 2048*2048*4*2 = 32 MB
-  // 8*768*4 = 24 kB
+#endif
+
+#ifndef N
+  // NOTE: if you change this you have to rerun gemm.py
+  #define N 512
+#endif
+
+#ifndef NTHREADS
+  #define NTHREADS 1
 #endif
 
 // aligned?
@@ -81,7 +86,6 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 atomic_int nready = 0;
 atomic_int ndone = 0;
 
-#define NTHREADS 8
 void *matmul_thread(void *n) {
   int k = (int)(int64_t)n;
   int sy = (N/NTHREADS) * k;
@@ -132,10 +136,10 @@ int main() {
     }
   }
 
-  for (int i = 0; i < 4000; i++) {
+  for (int i = 0; i < 10; i++) {
     memset(C, 0, N*N*sizeof(float));
 
-#if NTHREADS != 1 
+#if NTHREADS != 1
     nready = 0;
     ndone = 0;
     pthread_mutex_lock(&lock);
@@ -147,7 +151,7 @@ int main() {
 #endif
 
     uint64_t start = nanos();
-#if NTHREADS == 1 
+#if NTHREADS == 1
     matmul(0, N);
 #else
     // unlocking mutex starts threads
@@ -156,7 +160,7 @@ int main() {
 #endif
     uint64_t end = nanos();
 
-#if NTHREADS != 1 
+#if NTHREADS != 1
     for (int j = 0; j < NTHREADS; j++) {
       pthread_join(threads[j], NULL);
     }

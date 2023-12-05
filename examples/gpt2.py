@@ -89,7 +89,8 @@ class Transformer:
     mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf")).triu(start_pos.val+1).realize() if seqlen > 1 else None
 
     if HALF:
-      h = h.half()
+      # NOTE: converting this to half breaks GPT-2
+      #h = h.half()
       if mask is not None: mask = mask.half()
 
     for hi in self.h: h = hi(h, start_pos=start_pos, mask=mask)
@@ -121,7 +122,7 @@ class GPT2:
     transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
     for k in weights.keys():
       if any(k.endswith(w) for w in transposed):
-        weights[k] = Tensor(weights[k].numpy().T)
+        weights[k] = weights[k].to(Device.DEFAULT).T
     # lm head and wte are tied
     weights['lm_head.weight'] = Tensor(weights['wte.weight'].numpy())
 
