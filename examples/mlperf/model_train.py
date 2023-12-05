@@ -5,7 +5,7 @@ from tinygrad.helpers import getenv, dtypes
 from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict
 from tinygrad.shape.symbolic import Node
 from extra.lr_scheduler import MultiStepLR
-from extra.datasets.kits19 import get_batch, get_val_batch, get_val_files, sliding_window_inference
+from extra.datasets.kits19 import get_batch, sliding_window_inference, get_data_split
 from extra import dist
 
 from examples.mlperf.metrics import get_dice_score, get_dice_score_np
@@ -89,10 +89,12 @@ def train_unet3d():
       train_loader = [(Tensor.rand((1,1,128,128,128), dtype=dtypes.half), Tensor.rand((1,128,128,128), dtype=dtypes.uint8)) for i in range(3)]
       total_batches = 1
     else:
-      def get_train_val_split(files): return files[:-int(len(files)*conf.val_split)], files[-int(len(files)*conf.val_split):]
-      files = get_val_files()
-      train_files, val_files = get_train_val_split(files)
-      total_files = len(train_files)
+      # def get_train_val_split(files): return files[:-int(len(files)*conf.val_split)], files[-int(len(files)*conf.val_split):]
+      # files = get_val_files()
+      # train_files, val_files = get_train_val_split(files)
+      # total_files = len(train_files)
+      train_x, train_y, val_x, val_y = get_data_split()
+      total_files = len(train_x)
       total_batches = (total_files + conf.batch_size - 1) // conf.batch_size
 
     @TinyJit
@@ -109,8 +111,8 @@ def train_unet3d():
     for epoch in range(0, conf.epochs):
       cumulative_loss = []
 
-      train_loader = get_batch(train_files, conf.batch_size, conf.input_shape, conf.oversampling)
-      val_loader = get_val_batch(val_files)
+      train_loader = get_batch(train_x, train_y, conf.batch_size, conf.input_shape, conf.oversampling)
+      val_loader = get_batch(val_x, val_y, batch_size=1, shuffle=False, augment=False)
       epoch_st = time.monotonic()
       for i, batch in enumerate(tqdm(train_loader, total=total_batches)):
         im, label = batch
