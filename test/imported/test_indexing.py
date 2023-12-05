@@ -1274,7 +1274,7 @@ class TestIndexing(unittest.TestCase):
   #     out = x[idx]  # index
   #     numpy_testing_assert_equal_helper(out, torch.zeros(2))
 
-  def test_take_along_dim(self, dtype):
+  def test_take_along_dim(self):
     '''
     def _test_against_numpy(t, indices, dim):
         actual = torch.take_along_dim(t, indices, dim=dim)
