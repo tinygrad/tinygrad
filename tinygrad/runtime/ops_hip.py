@@ -65,5 +65,5 @@ class HIPDevice(Compiled):
     self.arch_name = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode() if not MOCKHIP else "gfx1100"
 
     from tinygrad.features.graph.hip import HIPGraph
-    super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self.device), LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, functools.partial(HIPProgram, self.device), HIPGraph)
+    super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self.device), LinearizerOptions(device="HIP"), HIPRenderer, functools.partial(compile_hip, self), functools.partial(HIPProgram, self.device), HIPGraph)
   def synchronize(self): hip.hipDeviceSynchronize()

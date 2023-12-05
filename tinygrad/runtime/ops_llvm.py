@@ -45,15 +45,13 @@ class LLVM:
     backing_mod.triple = llvm.get_process_triple()
     LLVM.engine = llvm.create_mcjit_compiler(backing_mod, LLVM.target_machine)
 
-def compile_llvm(device, prg) -> bytes:
-  @diskcache
-  def __compile(prg, llvmopt):
-    mod = llvm.parse_assembly(prg)
-    mod.verify()
-    LLVM().optimizer.run(mod)
-    if DEBUG >= 5: print(LLVM.target_machine.emit_assembly(mod))
-    return LLVM.target_machine.emit_object(mod)
-  return __compile(prg, LLVMOPT)
+@diskcache
+def compile_llvm(prg, llvmopt=LLVMOPT) -> bytes:
+  mod = llvm.parse_assembly(prg)
+  mod.verify()
+  LLVM().optimizer.run(mod)
+  if DEBUG >= 5: print(LLVM.target_machine.emit_assembly(mod))
+  return LLVM.target_machine.emit_object(mod)
 
 class LLVMProgram:
   def __init__(self, name:str, lib:bytes):

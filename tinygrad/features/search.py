@@ -74,7 +74,7 @@ def compile_linearizer(dev:str, lin:Linearizer, name:Optional[str]=None) -> Tupl
   rdev = Device[dev]
   assert isinstance(rdev, Compiled)
   src, _ = rdev.renderer(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
-  return rdev.compiler(rdev, src), lin.global_size, lin.local_size
+  return rdev.compiler(src), lin.global_size, lin.local_size
 
 def time_program(dev:str, lib:bytes, global_size, local_size, var_vals, rawbufs, early_stop=None, max_global_size=65536, clear_l2=False, cnt=3, name="test"):
   rdev = Device[dev]

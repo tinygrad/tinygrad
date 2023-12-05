@@ -246,7 +246,7 @@ class CompiledASTRunner(JITRunner):
       assert all(v._val is None for v in self.vars), f"ASTRunner contains bound Variable {self.vars}"
 
     # Building runner for a given device.
-    self.lib = self.device.compiler.__wrapped__(self.device, self.prg) if getenv("DISABLE_COMPILER_CACHE") else self.device.compiler(self.device, self.prg)
+    self.lib = self.device.compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else self.device.compiler(self.prg)
     self.clprg = self.device.runtime(self.name, self.lib)
 
   def launch_dims(self, var_vals):

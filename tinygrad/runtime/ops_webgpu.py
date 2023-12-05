@@ -32,4 +32,4 @@ class WebGpuAllocator(Allocator):
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
     super().__init__(WebGpuAllocator(), LinearizerOptions(device="WEBGPU", supports_float4=False, local_max=[256, 256, 64], global_max=[65535, 65535, 65535]),
-                     WGSLRenderer, lambda _, x: x, WebGPUProgram)
+                     WGSLRenderer, lambda x: x, WebGPUProgram)
