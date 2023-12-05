@@ -118,21 +118,21 @@ class TestIndexing(unittest.TestCase):
         tensor_indexed = tensor[idx1]
       numpy_testing_assert_equal_helper(tensor_indexed, np.array(lst_indexed))
 
-    # self.assertRaises(ValueError, lambda: reference[1:9:0])
-    # self.assertRaises(ValueError, lambda: reference[1:9:-1])
+    self.assertRaises(ValueError, lambda: reference[1:9:0])
+    self.assertRaises(ValueError, lambda: reference[1:9:-1])
 
-    # self.assertRaises(IndexError, lambda: reference[1, 1, 1, 1])
-    # self.assertRaises(IndexError, lambda: reference[1, 1, 1, 1:1])
-    # self.assertRaises(IndexError, lambda: reference[3, 3, 3, 3, 3, 3, 3, 3])
+    self.assertRaises(IndexError, lambda: reference[1, 1, 1, 1])
+    self.assertRaises(IndexError, lambda: reference[1, 1, 1, 1:1])
+    self.assertRaises(IndexError, lambda: reference[3, 3, 3, 3, 3, 3, 3, 3])
 
-    # self.assertRaises(IndexError, lambda: reference[0.0])
-    # self.assertRaises(TypeError, lambda: reference[0.0:2.0])
-    # self.assertRaises(IndexError, lambda: reference[0.0, 0.0:2.0])
-    # self.assertRaises(IndexError, lambda: reference[0.0, :, 0.0:2.0])
-    # self.assertRaises(IndexError, lambda: reference[0.0, ..., 0.0:2.0])
-    # self.assertRaises(IndexError, lambda: reference[0.0, :, 0.0])
+    self.assertRaises(IndexError, lambda: reference[0.0])
+    self.assertRaises(TypeError, lambda: reference[0.0:2.0])
+    self.assertRaises(IndexError, lambda: reference[0.0, 0.0:2.0])
+    self.assertRaises(IndexError, lambda: reference[0.0, :, 0.0:2.0])
+    self.assertRaises(IndexError, lambda: reference[0.0, ..., 0.0:2.0])
+    self.assertRaises(IndexError, lambda: reference[0.0, :, 0.0])
 
-    # def delitem(): del reference[0]
+    # def delitem(): del reference[0] 
     # self.assertRaises(TypeError, delitem)
 
   def test_advancedindex(self):
