@@ -162,7 +162,7 @@ class Tensor:
     if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
     num = prod((shape:=argfix(*shape)))
     if num == 0: return Tensor.zeros(shape, **kwargs)
-    counts = (Tensor.arange(num, dtype=dtypes.uint32, requires_grad=False) + Tensor._rng_counter).realize()
+    counts = (Tensor.arange(num, dtype=dtypes.uint32, requires_grad=None if kwargs.get("requires_grad") is None else kwargs.get("requires_grad")) + Tensor._rng_counter).realize()
     if (odd_counts := num % 2): counts = counts.cat(Tensor([0], dtype=dtypes.uint32, requires_grad=False))
     Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
 
