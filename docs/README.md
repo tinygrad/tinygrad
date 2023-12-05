@@ -29,9 +29,3 @@ This is currently a big work in progress.
 ### Community
 
 [![tinygrad discord](https://discordapp.com/api/guilds/1068976834382925865/widget.png?style=banner2)](https://discord.gg/ZjZadyC7PK)
-
-## Contributing
-
-The documentation mainly follows the core contributing guidelines in the [README.md](/README.md#contributing).
-
-Additionally, we always welcome documentation contributions, especially for features that are currently under documented.
