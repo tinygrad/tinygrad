@@ -65,25 +65,25 @@ repos:
         pass_filenames: false
       - id: quickstart
         name: Test Quickstart
-        entry: awk '/```python3/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
+        entry: awk '/```python3/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py && env PYTHONPATH="." python quickstart.py
         language: system
         always_run: true
         pass_filenames: false
       - id: fuzztest
         name: Fuzz Test symbolic
-        entry: python3 test/external/fuzz_symbolic.py
+        entry: env PYTHONPATH="." python3 test/external/fuzz_symbolic.py
         language: system
         always_run: true
         pass_filenames: false
       - id: fuzztest_shapetracker
         name: Fuzz Test shapetracker
-        entry: PYTHONPATH="." python3 test/external/fuzz_shapetracker.py
+        entry: env PYTHONPATH="." python3 test/external/fuzz_shapetracker.py
         language: system
         always_run: true
         pass_filenames: false
       - id: fuzztest_shapetracker_to_move_ops
         name: Test shapetracker to_movement_ops
-        entry: PYTHONPATH="." python3 extra/to_movement_ops.py
+        entry: env PYTHONPATH="." python3 extra/to_movement_ops.py
         language: system
         always_run: true
         pass_filenames: false      

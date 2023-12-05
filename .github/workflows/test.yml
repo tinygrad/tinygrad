@@ -28,11 +28,12 @@ jobs:
         path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
         key: linting-packages-${{ hashFiles('**/setup.py') }}-3.8
     - name: Install dependencies
-      run: |
+      run: |      
+        sudo apt install sloccount
         pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
         pip install --upgrade --force-reinstall pre-commit ruff
     - name: Run pre-commit hook
-      run: | 
+      run: |        
         pre-commit install
         pre-commit run --all-files
     - name: Use as an external package
