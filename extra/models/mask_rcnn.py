@@ -7,6 +7,7 @@ from tinygrad import nn
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, get_child, fetch
 from tinygrad.nn.state import torch_load
+from examples.mask_rcnn.losses import FastRCNNLossComputation
 from extra.models.resnet import ResNet
 from extra.models.retinanet import nms as _box_nms
 
@@ -1120,15 +1121,23 @@ class RoIBoxHead:
         box_coder=BoxCoder(weights=(10., 10., 5., 5.)),
         cls_agnostic_bbox_reg=False
     )
+    # TODO: implement required properties
+    self.loss_evaluator = FastRCNNLossComputation()
 
   def __call__(self, features, proposals, targets=None):
+    if Tensor.training:
+      with Tensor.train(val=False):
+        proposals = self.loss_evaluator.subsample(proposals, targets)
+
     x = self.feature_extractor(features, proposals)
     class_logits, box_regression = self.predictor(x)
+
     if not Tensor.training:
       result = self.post_processor((class_logits, box_regression), proposals)
       return x, result, {}
-    # TODO: implement this
-    return x, proposals, {}
+    
+    loss_classifier, loss_box_reg = self.loss_evaluator([class_logits], [box_regression])
+    return x, proposals, dict(loss_classifier=loss_classifier, loss_box_reg=loss_box_reg)
 
 
 class MaskPostProcessor:

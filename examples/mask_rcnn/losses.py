@@ -5,6 +5,100 @@ from typing import Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes
 
+class FastRCNNLossComputation:
+  def __init__(self, proposal_matcher, fg_bg_sampler, box_coder, cls_agnostic_bbox_reg=False):
+    self.proposal_matcher = proposal_matcher
+    self.fg_bg_sampler = fg_bg_sampler
+    self.box_coder = box_coder
+    self.cls_agnostic_bbox_reg = cls_agnostic_bbox_reg
+
+  def match_targets_to_proposals(self, proposal, target):
+    match_quality_matrix = boxlist_iou(target, proposal)
+    matched_idxs = self.proposal_matcher(match_quality_matrix)
+    # Fast RCNN only need "labels" field for selecting the targets
+    target = target.copy_with_fields("labels")
+    # get the targets corresponding GT for each proposal
+    # NB: need to clamp the indices because we can have a single
+    # GT in the image, and matched_idxs can be -2, which goes
+    # out of bounds
+    matched_targets = target[matched_idxs.maximum(0)]
+    return matched_targets, matched_idxs
+  
+  def prepare_targets(self, proposals, targets):
+    labels, regression_targets = [], []
+    for proposals_per_image, targets_per_image in zip(proposals, targets):
+      matched_targets, matched_idxs = self.match_targets_to_proposals(proposals_per_image, targets_per_image)
+
+      labels_per_images = matched_targets.get_field("labels").cast(dtypes.int64)
+
+      # Label background (below the low threshold)
+      labels_per_images = (matched_idxs == -1).where(0, labels_per_images)
+
+      # Label ignore proposals (between low and high thresholds)
+      labels_per_images = (matched_idxs == -2).where(-1, labels_per_images)
+
+      # compute regression targets
+      regression_targets_per_image = self.box_coder.encode(matched_targets.bbox, proposals_per_image.bbox)
+
+      labels.append(labels_per_images)
+      regression_targets.append(regression_targets_per_image)
+
+    return labels, regression_targets
+  
+  def subsample(self, proposals, targets):
+    labels, regression_targets = self.prepare_targets(proposals, targets)
+    sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
+
+    proposals = list(proposals)
+    # add corresponding label and regression_targets information to the bounding boxes
+    for labels_per_image, regression_targets_per_image, proposals_per_image in zip(labels, regression_targets, proposals):
+      proposals_per_image.add_field("labels", labels_per_image)
+      proposals_per_image.add_field("regression_targets", regression_targets_per_image)
+
+    # distributed sampled proposals, that were obtained on all feature maps
+    # concatenated via the fg_bg_sampler, into individual feature map levels
+    for img_idx, (pos_inds_img, neg_inds_img) in enumerate(zip(sampled_pos_inds, sampled_neg_inds)):
+      img_sampled_inds = nonzero(pos_inds_img | neg_inds_img).squeeze(1) # does | operator work?
+      proposals_per_image = proposals[img_idx][img_sampled_inds]
+      proposals[img_idx] = proposals_per_image
+
+    self._proposals = proposals
+    return proposals
+  
+  def __call__(self, class_logits, box_regression):
+    class_logits = Tensor.cat(class_logits)
+    box_regression = Tensor.cat(box_regression)
+    device = class_logits.device
+
+    if not hasattr(self, "_proposals"):
+      raise RuntimeError("subsample needs to be called before")
+    
+    proposals = self._proposals
+
+    labels = Tensor.cat([proposal.get_field("labels") for proposal in proposals])
+    regression_targets = Tensor.cat([proposal.get_field("regression-targets") for proposal in proposals])
+
+    classification_loss = Tensor.binary_crossentropy(class_logits, labels)
+
+    # get indices that correspond to the regression targets for
+    # the corresponding ground truth labels, to be used with
+    # advanced indexing
+    sampled_pos_inds_subset = nonzero(Tensor(labels > 0)).squeeze(1)
+    labels_pos = labels[sampled_pos_inds_subset]
+    if self.cls_agnostic_bbox_reg:
+      map_inds = Tensor([4, 5, 6, 7], device=device)
+    else:
+      map_inds = 4 * labels_pos[:, None] + Tensor([0, 1, 2, 3], device=device)
+
+    box_loss = smooth_l1_loss(
+      box_regression[sampled_pos_inds_subset[:, None], map_inds],
+      regression_targets[sampled_pos_inds_subset],
+      beta=1,
+      size_average=False
+    )
+    box_loss = box_loss / labels.numel()
+    return classification_loss, box_loss
+
 class RPNLossComputation:
   def __init__(self, proposal_matcher, fg_bg_sampler, box_coder, generate_labels_func):
     self.proposal_matcher = proposal_matcher
