@@ -12,7 +12,8 @@ dtypes_float = (dtypes.float32, dtypes.float16)
 dtypes_int = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
 dtypes_bool = (dtypes.bool,)
 # TODO: truediv is broken
-binary_operations = (operator.add, operator.sub, operator.mul) #, operator.truediv)
+# TODO: lt and eq should cast in tensor
+binary_operations = (operator.add, operator.sub, operator.mul) #, operator.lt, operator.eq) #, operator.truediv)
 
 def universal_test(a, b, dtype, op):
   tensor_value = (op(Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
