@@ -80,6 +80,7 @@ def time_program(dev:str, lib:bytes, global_size, local_size, var_vals, rawbufs,
   rdev = Device[dev]
   assert isinstance(rdev, Compiled)
   clprg = rdev.runtime("test", lib)
+  factor = 1
   if global_size is not None:
     global_size = [sym_infer(sz, var_vals) for sz in global_size] + [1]*(3-len(global_size))
     if local_size is None:
@@ -89,13 +90,14 @@ def time_program(dev:str, lib:bytes, global_size, local_size, var_vals, rawbufs,
       local_size = [sym_infer(sz, var_vals) for sz in local_size] + [1]*(3-len(local_size))
     if max_global_size is not None:
       global_size, factor = get_test_global_size(global_size, max_global_size=max_global_size)
-    else:
-      factor = 1
+  lra = {}
+  if global_size: lra['global_size'] = global_size
+  if local_size: lra['local_size'] = local_size
   tms = []
   for _ in range(cnt):
     if clear_l2:
       with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
-    tms.append(clprg(*[x._buf for x in rawbufs], global_size=global_size, local_size=local_size, vals=var_vals.values(), wait=True)*factor)
+    tms.append(clprg(*[x._buf for x in rawbufs], **lra, vals=var_vals.values(), wait=True)*factor)
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
 
@@ -109,7 +111,8 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
 
-  pool = multiprocessing.Pool(multiprocessing.cpu_count()) if getenv("PARALLEL", 0) else None
+  default_parallel = 1 if Device.DEFAULT == "HIP" else 0
+  pool = multiprocessing.Pool(multiprocessing.cpu_count()) if getenv("PARALLEL", default_parallel) else None
 
   var_vals = {k:(k.max+k.min)//2 for k in vars_from_ast(lin.ast)}
   exiting, st = False, time.perf_counter()
