@@ -31,7 +31,8 @@ jobs:
       run: |      
         sudo apt install sloccount
         pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-        pip install --upgrade --force-reinstall pre-commit ruff
+        pip install --upgrade --force-reinstall ruff
+        pip install pre-commit pytest
     - name: Run pre-commit hook
       run: |        
         pre-commit install
