@@ -420,7 +420,6 @@ class TestIndexing(unittest.TestCase):
 
   #  def get_numpy(tensor, indices):
   #      npt, idxs = tensor_indices_to_np(tensor, indices)
-
   #      # index and return as a Torch Tensor
   #      return np.array(npt[idxs])
     def get_numpy(tensor, indices):
@@ -432,11 +431,10 @@ class TestIndexing(unittest.TestCase):
   #          if self.device_type != 'cpu':
   #              value = value.cpu()
   #          value = value.numpy()
-
   #      npt, idxs = tensor_indices_to_np(tensor, indices)
   #      npt[idxs] = value
   #      return npt
-    def set_numpy(tensor, indices, value:Union[int, Tensor]):
+    def set_numpy(tensor:Tensor, indices, value:Union[int, Tensor]):
       if not isinstance(value, int):
         value = value.numpy()
       npt, idxs = tensor_indices_to_np(tensor, indices)
@@ -458,7 +456,7 @@ class TestIndexing(unittest.TestCase):
       pyt = tensor.detach()
       numt = tensor.detach()
       pyt[indexer] = val
-      numt = np.array(set_numpy(numt, indexer, val))
+      numt = np.array(set_numpy(numt, indexer, val)) #TODO: shouldn't this already be a numpy array? Why wrap numpy array again???
       numpy_testing_assert_equal_helper(pyt, numt)
 
   # def assert_backward_eq(tensor, indexer):
@@ -470,12 +468,13 @@ class TestIndexing(unittest.TestCase):
   #     outdev = dev[indexer]
   #     outdev.backward(gOcpu.to(device))
   #     numpy_testing_assert_equal_helper(cpu.grad, dev.grad)
+    # NOTE: torch initiates the gradients using g0cpu (rand as gradients)
     def assert_backward_eq(tensor: Tensor, indexer):
       cpu = tensor.float().detach()
       cpu.requires_grad = True
       outcpu = cpu[indexer].sum()
       outcpu.backward()
-      dev = cpu.to(tensor.device).detach()
+      dev = cpu.detach()
       dev.requires_grad = True
       outdev = dev[indexer].sum()
       outdev.backward()
@@ -489,8 +488,8 @@ class TestIndexing(unittest.TestCase):
     def get_set_tensor(indexed: Tensor, indexer):
       set_size = indexed[indexer].size()
       set_count = indexed[indexer].numel()
-      # set_tensor = torch.randperm(set_count).view(set_size).double().to(device) # TODO thefk is randperm
-      # return set_tensor
+      set_tensor = Tensor.randint(set_count).reshape(set_size).cast(dtypes.float64) # TODO: is randperm just randint?
+      return set_tensor
 
 
 
