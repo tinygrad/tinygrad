@@ -476,6 +476,12 @@ class TestComplexShapeTracker(unittest.TestCase):
     print(self.st.views)
     assert self.st.contiguous
 
+  def test_reshape_stable_diffusion(self):
+    # regression test for https://github.com/tinygrad/tinygrad/pull/2616
+    st = ShapeTracker((View((2, 1920, 32, 32), (1310720, 1024, 32, 1), 0, ((0, 2), (0, 1280), (0, 32), (0, 32)), False),))
+    st = st.reshape((2, 32, 240, 256))
+    assert len(st.views) == 2
+
 class TestSingleShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = CheckingShapeTracker((7,4))
