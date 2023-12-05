@@ -154,7 +154,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
 
 class PTXLanguage(AssemblyLanguage):
   kernel_prefix = """.version 7.8
-.target sm_86
+.target TARGET
 .address_size 64
 .visible .entry"""
   barrier = "bar.sync\t0;"
