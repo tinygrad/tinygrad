@@ -2,8 +2,9 @@
 
 import math, unittest, random
 import numpy as np
+from typing import Union
 
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, dtypes
 
 random.seed(42)
 
@@ -14,6 +15,42 @@ def numpy_testing_assert_equal_helper(a, b):
 
 def consec(shape, start=1):
   return Tensor(np.arange(math.prod(shape)).reshape(shape)+start)
+
+def make_tensor(shape, dtype:dtypes, noncontiguous):
+  r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
+  values uniformly drawn from ``[low, high)``.
+
+  If :attr:`low` or :attr:`high` are specified and are outside the range of the :attr:`dtype`'s representable
+  finite values then they are clamped to the lowest or highest representable finite value, respectively.
+  If ``None``, then the following table describes the default values for :attr:`low` and :attr:`high`,
+  which depend on :attr:`dtype`.
+
+  +---------------------------+------------+----------+
+  | ``dtype``                 | ``low``    | ``high`` |
+  +===========================+============+==========+
+  | boolean type              | ``0``      | ``2``    |
+  +---------------------------+------------+----------+
+  | unsigned integral type    | ``0``      | ``10``   |
+  +---------------------------+------------+----------+
+  | signed integral types     | ``-9``     | ``10``   |
+  +---------------------------+------------+----------+
+  | floating types            | ``-9``     | ``9``    |
+  +---------------------------+------------+----------+
+  | complex types             | ``-9``     | ``9``    |
+  +---------------------------+------------+----------+
+  """
+  contiguous = not noncontiguous
+  if dtype is dtypes.bool:
+    return Tensor.randint(shape=shape, low=0, high=2, dtype=dtype, contiguous=contiguous)
+  elif dtype.is_int():
+    if dtype.is_unsigned():
+      return Tensor.randint(shape=shape, low=0, high=10, dtype=dtype, contiguous=contiguous)
+    else:
+      return Tensor.randint(shape=shape, low=-9, high=10, dtype=dtype, contiguous=contiguous)
+  elif dtype.is_float():
+    return Tensor.rand(shape=shape, low=-9, high=9, dtype=dtype, contiguous=contiguous)
+  else:
+    raise NotImplementedError(f"{dtype} not implemented")
 
 class TestIndexing(unittest.TestCase):
   def test_index(self):
@@ -367,58 +404,100 @@ class TestIndexing(unittest.TestCase):
   #             with self.assertRaisesRegex(IndexError, r'out of'):
   #                 reference[[err_idx]]
 
-  #     def tensor_indices_to_np(tensor, indices):
-  #         # convert the Torch Tensor to a numpy array
-  #         tensor = tensor.to(device='cpu')
-  #         npt = tensor.numpy()
+    # def tensor_indices_to_np(tensor, indices):
+    #     # convert the Torch Tensor to a numpy array
+    #     tensor = tensor.to(device='cpu')
+    #     npt = tensor.numpy()
+    #     # convert indices
+    #     idxs = tuple(i.tolist() if isinstance(i, torch.LongTensor) else
+    #                   i for i in indices)
+    #     return npt, idxs
+    def tensor_indices_to_np(tensor: Tensor, indices):
+      npt = tensor.numpy()
+      idxs = tuple(i.numpy().tolist() if isinstance(i, Tensor) and i.dtype is dtypes.int64 else
+                  i for i in indices)
+      return npt, idxs
 
-  #         # convert indices
-  #         idxs = tuple(i.tolist() if isinstance(i, torch.LongTensor) else
-  #                       i for i in indices)
+  #  def get_numpy(tensor, indices):
+  #      npt, idxs = tensor_indices_to_np(tensor, indices)
 
-  #         return npt, idxs
+  #      # index and return as a Torch Tensor
+  #      return np.array(npt[idxs])
+    def get_numpy(tensor, indices):
+      npt, idxs = tensor_indices_to_np(tensor, indices)
+      return Tensor(npt[idxs])
 
-  #     def get_numpy(tensor, indices):
-  #         npt, idxs = tensor_indices_to_np(tensor, indices)
+  #  def set_numpy(tensor, indices, value):
+  #      if not isinstance(value, int):
+  #          if self.device_type != 'cpu':
+  #              value = value.cpu()
+  #          value = value.numpy()
 
-  #         # index and return as a Torch Tensor
-  #         return np.array(npt[idxs])
+  #      npt, idxs = tensor_indices_to_np(tensor, indices)
+  #      npt[idxs] = value
+  #      return npt
+    def set_numpy(tensor, indices, value:Union[int, Tensor]):
+      if not isinstance(value, int):
+        value = value.numpy()
+      npt, idxs = tensor_indices_to_np(tensor, indices)
+      npt[idxs] = value
+      return npt
 
-  #     def set_numpy(tensor, indices, value):
-  #         if not isinstance(value, int):
-  #             if self.device_type != 'cpu':
-  #                 value = value.cpu()
-  #             value = value.numpy()
+  # def assert_get_eq(tensor, indexer):
+  #     numpy_testing_assert_equal_helper(tensor[indexer], get_numpy(tensor, indexer))
+    def assert_get_eq(tensor, indexer):
+      numpy_testing_assert_equal_helper(tensor[indexer], get_numpy(tensor, indexer))
 
-  #         npt, idxs = tensor_indices_to_np(tensor, indices)
-  #         npt[idxs] = value
-  #         return npt
+  # def assert_set_eq(tensor, indexer, val):
+  #     pyt = tensor.clone()
+  #     numt = tensor.clone()
+  #     pyt[indexer] = val
+  #     numt = np.array(set_numpy(numt, indexer, val))
+  #     numpy_testing_assert_equal_helper(pyt, numt)
+    def assert_set_eq(tensor: Tensor, indexer, val):
+      pyt = tensor.detach()
+      numt = tensor.detach()
+      pyt[indexer] = val
+      numt = np.array(set_numpy(numt, indexer, val))
+      numpy_testing_assert_equal_helper(pyt, numt)
 
-  #     def assert_get_eq(tensor, indexer):
-  #         numpy_testing_assert_equal_helper(tensor[indexer], get_numpy(tensor, indexer))
+  # def assert_backward_eq(tensor, indexer):
+  #     cpu = tensor.float().clone().detach().requires_grad_(True)
+  #     outcpu = cpu[indexer]
+  #     gOcpu = torch.rand_like(outcpu)
+  #     outcpu.backward(gOcpu)
+  #     dev = cpu.to(device).detach().requires_grad_(True)
+  #     outdev = dev[indexer]
+  #     outdev.backward(gOcpu.to(device))
+  #     numpy_testing_assert_equal_helper(cpu.grad, dev.grad)
+    def assert_backward_eq(tensor: Tensor, indexer):
+      cpu = tensor.float().detach()
+      cpu.requires_grad = True
+      outcpu = cpu[indexer].sum()
+      outcpu.backward()
+      dev = cpu.to(tensor.device).detach()
+      dev.requires_grad = True
+      outdev = dev[indexer].sum()
+      outdev.backward()
+      numpy_testing_assert_equal_helper(cpu.grad, dev.grad)
 
-  #     def assert_set_eq(tensor, indexer, val):
-  #         pyt = tensor.clone()
-  #         numt = tensor.clone()
-  #         pyt[indexer] = val
-  #         numt = np.array(set_numpy(numt, indexer, val))
-  #         numpy_testing_assert_equal_helper(pyt, numt)
+  # def get_set_tensor(indexed, indexer):
+  #     set_size = indexed[indexer].size()
+  #     set_count = indexed[indexer].numel()
+  #     set_tensor = torch.randperm(set_count).view(set_size).double().to(device)
+  #     return set_tensor
+    def get_set_tensor(indexed: Tensor, indexer):
+      set_size = indexed[indexer].size()
+      set_count = indexed[indexer].numel()
+      # set_tensor = torch.randperm(set_count).view(set_size).double().to(device) # TODO thefk is randperm
+      # return set_tensor
 
-  #     def assert_backward_eq(tensor, indexer):
-  #         cpu = tensor.float().clone().detach().requires_grad_(True)
-  #         outcpu = cpu[indexer]
-  #         gOcpu = torch.rand_like(outcpu)
-  #         outcpu.backward(gOcpu)
-  #         dev = cpu.to(device).detach().requires_grad_(True)
-  #         outdev = dev[indexer]
-  #         outdev.backward(gOcpu.to(device))
-  #         numpy_testing_assert_equal_helper(cpu.grad, dev.grad)
 
-  #     def get_set_tensor(indexed, indexer):
-  #         set_size = indexed[indexer].size()
-  #         set_count = indexed[indexer].numel()
-  #         set_tensor = torch.randperm(set_count).view(set_size).double().to(device)
-  #         return set_tensor
+
+
+
+
+
 
   #     # Tensor is  0  1  2  3  4
   #     #            5  6  7  8  9
