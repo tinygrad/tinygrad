@@ -14,7 +14,7 @@ def check(status):
 def checked(ret, status): return (check(status.value), ret)[1]
 
 @diskcache
-def compile_cl(prg:str) -> bytes:
+def compile_cl(prg:str, version_tag) -> bytes:
   assert CLDevice.compiler_context is not None, 'OpenCL requires a "compiler_context" to compile, init a device before you call this'
   program = checked(cl.clCreateProgramWithSource(CLDevice.compiler_context.context, 1, to_char_p_p([prg_bytes := prg.encode()]), ctypes.byref(ctypes.c_size_t(len(prg_bytes))), ctypes.byref(status := ctypes.c_int32())), status)
   status = cl.clBuildProgram(program, 1, ctypes.byref(CLDevice.compiler_context.device_id), None, cl.clBuildProgram.argtypes[4](), None)
@@ -88,11 +88,12 @@ class CLDevice(Compiled):
       CLDevice.device_ids = init_c_var((cl.cl_device_id * num_devices.value)(), lambda x: check(cl.clGetDeviceIDs(platform_ids[0], device_type, num_devices, x, None)))
 
     self.device_id = CLDevice.device_ids[0 if ":" not in device else int(device.split(":")[1])]
+    self.driver_version = (cl.clGetDeviceInfo(self.device_id, cl.CL_DRIVER_VERSION, 64, ctypes.byref(buf := ctypes.create_string_buffer(64)), ctypes.byref(total := ctypes.c_size_t())), ctypes.string_at(buf, size=total.value).decode())[1]
     self.context = checked(cl.clCreateContext(None, 1, ctypes.byref(self.device_id), cl.clCreateContext.argtypes[3](), None, ctypes.byref(status := ctypes.c_int32())), status)
     if CLDevice.compiler_context is None: CLDevice.compiler_context = self
     self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, ctypes.byref(status)), status)
     self.pending_copyin: List[memoryview] = []
-    super().__init__(CLAllocator(self), LinearizerOptions(), OpenCLRenderer, compile_cl, functools.partial(CLProgram, self))
+    super().__init__(CLAllocator(self), LinearizerOptions(), OpenCLRenderer, lambda prg: compile_cl(prg, version_tag=CLDevice.compiler_context.driver_version), functools.partial(CLProgram, self))
   def synchronize(self):
     check(cl.clFinish(self.queue))
     self.pending_copyin.clear()

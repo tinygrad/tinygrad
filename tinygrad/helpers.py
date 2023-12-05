@@ -311,3 +311,5 @@ def time_execution_cuda_style(cb, ev_t, evcreate, evrecord, evsync, evdestroy, e
   evtime(ctypes.byref(ret := ctypes.c_float()), evs[0], evs[1])
   for ev in evs: evdestroy(ev)
   return ret.value * 1e-3
+
+def rtc_version_cuda_style(cb): return (cb(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int())), (major.value, minor.value))[1]
