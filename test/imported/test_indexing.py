@@ -486,9 +486,9 @@ class TestIndexing(unittest.TestCase):
   #     set_tensor = torch.randperm(set_count).view(set_size).double().to(device)
   #     return set_tensor
     def get_set_tensor(indexed: Tensor, indexer):
-      set_size = indexed[indexer].size()
+      set_size = indexed[indexer].shape
       set_count = indexed[indexer].numel()
-      set_tensor = Tensor.randint(set_count).reshape(set_size).cast(dtypes.float64) # TODO: is randperm just randint?
+      set_tensor = Tensor.randint(set_count, high=set_count).reshape(set_size).cast(dtypes.float64)
       return set_tensor
 
 
