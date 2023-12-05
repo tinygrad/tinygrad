@@ -63,7 +63,7 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       pass
   return acted_lins
 
-def compile_linearized_idx(x):
+def try_compile_linearized_w_idx(x):
   try: return (x[0], compile_linearizer(Device.DEFAULT, x[1], "test"))
   except Exception:
     if DEBUG >= 4: traceback.print_exc()
@@ -121,7 +121,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   while not exiting:
     acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam]) if len(beam) else [lin]
     timed_lins: List[Tuple[Linearizer, float]] = []
-    for i,proc in (pool.imap_unordered(compile_linearized_idx, enumerate(acted_lins)) if pool is not None else map(compile_linearized_idx, enumerate(acted_lins))):
+    for i,proc in (pool.imap_unordered(try_compile_linearized_w_idx, enumerate(acted_lins)) if pool is not None else map(try_compile_linearized_w_idx, enumerate(acted_lins))):
       if proc is None: continue
       lib, global_size, local_size = proc
       if lib in seen_libs: continue
