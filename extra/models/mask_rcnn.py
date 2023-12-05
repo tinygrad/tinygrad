@@ -329,7 +329,6 @@ class FPN:
 
     return tuple(results)
 
-
 class ResNetFPN:
   def __init__(self, resnet, out_channels=256):
     self.out_channels = out_channels
@@ -346,7 +345,6 @@ class ResNetFPN:
   def __call__(self, x):
     x = self.body(x)
     return self.fpn(x)
-
 
 class AnchorGenerator:
   def __init__(
@@ -502,7 +500,6 @@ class RPNHead:
       logits.append(self.cls_logits(t))
       bbox_reg.append(self.bbox_pred(t))
     return logits, bbox_reg
-
 
 class BoxCoder(object):
   def __init__(self, weights, bbox_xform_clip=math.log(1000. / 16)):
@@ -1219,7 +1216,7 @@ def to_image_list(tensors, size_divisible=32):
       max_size = tuple(max_size)
 
     batch_shape = (len(tensors),) + max_size
-    batched_imgs = np.zeros(batch_shape, dtype=tensors[0].dtype.np)
+    batched_imgs = np.zeros(batch_shape, dtype=tensors[0].numpy().dtype)
     for img, pad_img in zip(tensors, batched_imgs):
       pad_img[: img.shape[0], : img.shape[1], : img.shape[2]] += img.numpy()
 

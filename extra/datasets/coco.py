@@ -16,6 +16,14 @@ iou         = _mask.iou
 merge       = _mask.merge
 frPyObjects = _mask.frPyObjects
 
+# TODO: add horizontal flip transformation
+TRAIN_TRANSFORMS = [
+  Resize(int(800), int(1333)),
+  ToTensor(),
+  Normalize(
+    mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
+  )
+]
 BASEDIR = pathlib.Path(__file__).parent / "COCO"
 BASEDIR.mkdir(exist_ok=True)
 
@@ -271,12 +279,5 @@ def iterate(bs:int = 1, shuffle:bool = True, transforms=None, is_val:bool = Fals
 
 
 if __name__ == "__main__":
-  transforms =  [
-    Resize(int(800), int(1333)),
-    ToTensor(),
-    Normalize(
-      mean=[102.9801, 115.9465, 122.7717], std=[1., 1., 1.], to_bgr255=True
-    )
-  ]
-  kwargs = {"bs": 64, "shuffle": True, "transforms": transforms, "is_val": False}
+  kwargs = {"bs": 64, "shuffle": True, "transforms": TRAIN_TRANSFORMS, "is_val": False}
   for batch in iterate(**kwargs): print(len(batch[0]))

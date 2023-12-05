@@ -22,17 +22,29 @@ def train_bert():
   pass
 
 def train_maskrcnn():
-  # TODO: Mask RCNN
-  from extra.datasets import iterate
-  from extra.models.mask_rcnn import MaskRCNN
+  from extra.datasets.coco import iterate, TRAIN_TRANSFORMS
+  from extra.models.mask_rcnn import MaskRCNN, to_image_list
   from extra.models.resnet import ResNet
+  from tinygrad.nn.optim import SGD
+  from tinygrad.nn.state import get_parameters
+  from tqdm import tqdm
 
-  batch_size = getenv("BS", default=2)
-  # iterate()
+  bs = getenv("BS", default=2)
 
+  backbone = ResNet(50)
+  backbone.load_from_pretrained()
+  model = MaskRCNN(backbone)
 
-  # backbone = ResNet(50)
-  # mask_rcnn = MaskRCNN(backbone)
+  params = get_parameters(model.backbone) + get_parameters(model.rpn)
+  # TODO: need to implement LR scheduler
+  optim = SGD(params, lr=0.02, momentum=0.9, weight_decay=0.0001)
+
+  for imgs, tgts in tqdm(iterate(bs=bs, transforms=TRAIN_TRANSFORMS), desc="Training MASK-RCNN"):
+    imgs = to_image_list(imgs)
+    features = model.backbone(imgs.tensors)
+    proposals, _ = model.rpn(imgs, features, tgts)
+    print(f"--proposals: {proposals}")
+
 
   # NOTE: mask_rcnn accepts a List[Tensor] as its input.
   # To load it, we can open a list of images and load it to a Tensor.
