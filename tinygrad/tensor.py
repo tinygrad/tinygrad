@@ -176,7 +176,7 @@ class Tensor:
         x[1] = x[0] ^ ((x[1] * (2 ** r)) + (x[1] / (2 ** (32 - r))))
       x = [(x[0] + ks[0]).realize(), (x[1] + ks[1] + i + 1).realize()]
       rotations, ks = rotations[1:] + rotations[:1], ks[1:] + ks[:1]
-    out = ((x[0].cat(x[1])) / (2 ** 8)).float() * (1 / (2 ** 24))
+    out = ((x[0].cat(x[1])) / (2 ** 8)).cast(dtypes.float32) / (2 ** 24)
     return out[:out.shape[0]-odd_counts].reshape(shape).cast(Tensor.default_type if kwargs.get("dtype") is None else kwargs.get("dtype"))
 
   # ***** creation helper functions *****
@@ -193,7 +193,7 @@ class Tensor:
   @staticmethod
   def arange(start, stop=None, step=1, **kwargs):
     if stop is None: stop, start = start, 0
-    return Tensor.full((math.ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
+    return Tensor.full((math.ceil((stop-start)/step) if step != 1 else (stop-start),), step, **kwargs).cumsum() + (start - step)
 
   @staticmethod
   def eye(dim:int, **kwargs): return Tensor.full((dim,1),1,**kwargs).pad(((0,0),(0,dim))).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
