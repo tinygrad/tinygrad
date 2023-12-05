@@ -33,7 +33,7 @@ jobs:
         pip install --upgrade --force-reinstall pre-commit ruff
     - name: Run pre-commit hook
       run: | 
-        pre-commit install .
+        pre-commit install
         pre-commit run --all-files
     - name: Use as an external package
       run: |
