@@ -10,6 +10,7 @@ from tinygrad.device import Compiled, LRUAllocator
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
 def check(status):
+  if status == cl.CL_INVALID_VALUE: raise RuntimeError(f"OpenCL Error {status} -- check for stale cache with DISABLE_COMPILER_CACHE=1")
   if status != 0: raise RuntimeError(f"OpenCL Error {status}")
 def checked(ret, status): return (check(status.value), ret)[1]
 
