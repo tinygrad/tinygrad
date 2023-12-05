@@ -498,13 +498,6 @@ class TestIndexing(unittest.TestCase):
       set_tensor = Tensor.randint(set_count, high=set_count).reshape(set_size).cast(dtypes.float64)
       return set_tensor
 
-
-
-
-
-
-
-
   #     # Tensor is  0  1  2  3  4
   #     #            5  6  7  8  9
   #     #           10 11 12 13 14
