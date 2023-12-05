@@ -58,6 +58,7 @@ class TestSymbolic(unittest.TestCase):
     assert idx1+idx2 == idx1+idx2
     assert idx1+idx2 == idx2+idx1
     assert idx1+idx2 != idx2
+    assert idx1*idx2 == idx2*idx1
 
   def test_factorize(self):
     a = Variable("a", 0, 8)
