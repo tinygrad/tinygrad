@@ -2,7 +2,6 @@
 
 import math, unittest, random
 import numpy as np
-from typing import Union
 
 from tinygrad.tensor import Tensor, dtypes
 
@@ -440,7 +439,7 @@ class TestIndexing(unittest.TestCase):
         npt[idxs] = value
         return npt
     '''
-    def set_numpy(tensor:Tensor, indices, value:Union[int, Tensor]):
+    def set_numpy(tensor:Tensor, indices, value):
       if not isinstance(value, int):
         value = value.numpy()
       npt, idxs = tensor_indices_to_np(tensor, indices)
