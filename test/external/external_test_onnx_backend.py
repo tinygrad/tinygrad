@@ -5,7 +5,7 @@ import onnx.backend.test
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, CI
-from tinygrad import Device
+from tinygrad.device import Device, Compiled
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
@@ -188,7 +188,7 @@ if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
 backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 
 # TODO: this somehow passes in CI but does not pass if run locally
-if Device.DEFAULT in ['GPU', 'METAL', 'LLVM', 'CLANG']:
+if isinstance(Device[Device.DEFAULT], Compiled):
   backend_test.exclude('test_MaxPool3d_stride_padding_cpu')
 
 # disable model tests for now since they are slow
