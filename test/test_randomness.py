@@ -6,6 +6,7 @@ from tinygrad.tensor import Tensor
 import tinygrad.nn as nn
 from tinygrad.helpers import dtypes
 from functools import partial
+import jax.extend
 
 # https://gist.github.com/devries/11405101
 def ksprob(a):
@@ -57,6 +58,12 @@ class TestRandomness(unittest.TestCase):
   def test_rand(self):
     self.assertFalse(normal_test(Tensor.rand))
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
+
+  def test_rand_against_reference(self):
+    Tensor.manual_seed(1337)
+    jr = (jax.extend.random.threefry_2x32((np.uint32(1337), np.uint32(0x0)), np.arange(23 * 20, dtype=np.uint32).reshape(23, 20)) >> 8).astype(float) / 2**24
+    r = Tensor.rand(23, 20).numpy()
+    np.testing.assert_allclose(jr, r, atol=1e-5, rtol=1e-5)
 
   def test_randn(self):
     self.assertTrue(normal_test(Tensor.randn))
