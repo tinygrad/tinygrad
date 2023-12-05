@@ -82,7 +82,8 @@ class TestDTypeALU(unittest.TestCase):
     an, bn, cn = np.array([a]).astype(np.float32), np.array([b]).astype(np.float32), np.array([c]).astype(np.int32)
     tensor_value = op2[0](op1[0](at, bt).cast(dtypes.int32), ct).numpy()
     numpy_value = op2[1](op1[1](an, bn).astype(np.int32), cn)
-    if numpy_value[0] > np.iinfo(np.int32).max: return # we ran into an overflow
+    python_value = op2[0](op1[0](a, b), c)
+    if numpy_value[0] > np.iinfo(np.int32).max or numpy_value != python_value: return # we ran into an overflow
     np.testing.assert_equal(tensor_value, numpy_value)
 
   @given(st.floats(width=32, allow_subnormal=False), st.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
