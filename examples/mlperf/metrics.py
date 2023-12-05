@@ -40,7 +40,7 @@ def one_hot_np(arr: np.array, num_classes=3):
 def one_hot(arr: Tensor, layout="NCDHW", channel_axis=1, num_classes=3):
   arr = arr.squeeze(dim=channel_axis)
   arr= Tensor.eye(num_classes, dtype=dtypes.int32, device=arr.device)[arr]
-  arr= arr.permute(0, 4, 1, 2, 3)
+  if layout == "NCDHW": arr= arr.permute(0, 4, 1, 2, 3)
   return arr
 
 def get_dice_score_np(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-6):
@@ -53,18 +53,22 @@ def get_dice_score_np(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth
   result = (2.0 * intersection + smooth_nr) / (target_sum + prediction_sum + smooth_dr)
   return result[0]
 
-def get_dice_score(prediction: Tensor, target: Tensor, channel_axis=1, prediction_argmax=False, smooth_nr=1e-6, smooth_dr=1e-6):
-  reduce_axis = list(range(2, len(prediction.shape)))
+def get_dice_score(prediction: Tensor, target: Tensor, prediction_argmax=True, to_onehot_x=True, to_onehot_y=True, layout="NCDHW", smooth_nr=1e-6, smooth_dr=1e-6):
+  if layout == "NCDHW":
+    channel_axis = 1
+    reduce_axis = list(range(2, len(prediction.shape)))
+  else:
+    channel_axis = -1
+    reduce_axis = list(range(1, len(prediction.shape) - 1))
   if prediction_argmax:
-    assert not prediction.requires_grad
     prediction = prediction.argmax(axis=channel_axis)
-    prediction = one_hot(prediction, channel_axis=channel_axis)
   else:
     prediction = prediction.softmax(axis=channel_axis)
-  target = one_hot(target, channel_axis=channel_axis)
 
-  prediction, target = prediction[:, 1:], target[:, 1:]
-  assert target.shape == prediction.shape, f"Shapes do not match. prediction: ({prediction.shape}), target: ({target.shape})."
+  if to_onehot_x: prediction = one_hot(prediction, layout=layout, channel_axis=channel_axis)
+  if to_onehot_y: target = one_hot(target, layout=layout, channel_axis=channel_axis)
+
+  assert target.shape == prediction.shape, f"Shapes do not match. prediction: {prediction.shape}, target: {target.shape}."
   intersection = (target * prediction).sum(axis=reduce_axis)
   target_sum = target.sum(axis=reduce_axis)
   prediction_sum = prediction.sum(axis=reduce_axis)

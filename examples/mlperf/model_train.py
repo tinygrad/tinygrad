@@ -49,7 +49,8 @@ def train_unet3d():
 
     def dice_ce_loss(out, label):
       ce = cross_entropy_loss(out, label)
-      dice_score = get_dice_score(out, label)
+      dice_score = get_dice_score(out, label).mean(axis=0)
+      print("dice_score", dice_score)
       dice = (1. - dice_score).mean()
       return (ce + dice) / 2
 
