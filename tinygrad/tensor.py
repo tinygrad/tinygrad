@@ -158,11 +158,11 @@ class Tensor:
   def manual_seed(seed=0): Tensor._seed, Tensor._rng_counter = seed, Tensor([0], dtype=dtypes.uint32, requires_grad=False)
 
   @staticmethod
-  def rand(*shape, **kwargs):
+  def rand(*shape, dtype:Optional[DType]=None, **kwargs):
     if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
     num = prod((shape:=argfix(*shape)))
     if num == 0: return Tensor.zeros(shape, **kwargs)
-    counts = (Tensor.arange(num, dtype=dtypes.uint32, requires_grad=None if kwargs.get("requires_grad") is None else kwargs.get("requires_grad")) + Tensor._rng_counter).realize()
+    counts = (Tensor.arange(num, dtype=dtypes.uint32, requires_grad=False) + Tensor._rng_counter).realize()
     if (odd_counts := num % 2): counts = counts.pad(((0,1),))
     Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
 
@@ -177,7 +177,9 @@ class Tensor:
       x = [(x[0] + ks[0]).realize(), (x[1] + ks[1] + i + 1).realize()]
       rotations, ks = rotations[1:] + rotations[:1], ks[1:] + ks[:1]
     out = ((x[0].cat(x[1])) / (2 ** 8)).cast(dtypes.float32) / (2 ** 24)
-    return out[:out.shape[0]-odd_counts].reshape(shape).cast(Tensor.default_type if kwargs.get("dtype") is None else kwargs.get("dtype"))
+    out = out[:out.shape[0]-odd_counts].reshape(shape).cast(Tensor.default_type if dtype is None else dtype)
+    out.requires_grad = kwargs.get("requires_grad")
+    return out
 
   # ***** creation helper functions *****
 
