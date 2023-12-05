@@ -107,7 +107,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
 
-  pool = multiprocessing.Pool(multiprocessing.cpu_count()) if getenv("PARALLEL", 1) else None
+  pool = multiprocessing.Pool(multiprocessing.cpu_count()) if getenv("PARALLEL", 0) else None
 
   var_vals = {k:(k.max+k.min)//2 for k in vars_from_ast(lin.ast)}
   exiting, st = False, time.perf_counter()
@@ -123,7 +123,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
       seen_libs.add(lib)
       tms = time_program(Device.DEFAULT, lib, global_size, local_size, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else None)
       timed_lins.append((acted_lins[i], min(tms)))
-      if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us        {len(timed_lins):4d}/{len(acted_lins):4d}        {timed_lins[-1][0].colored_shape()}\033[K", end="")
+      if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")
 
     # done
     opts = sorted(timed_lins, key=lambda x: x[1])
