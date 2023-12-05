@@ -131,7 +131,9 @@ class Node:
 # 4 basic node types
 
 class Variable(Node):
-  def __new__(cls, expr:Optional[str], nmin:int, nmax:int):
+  def __new__(cls, *args):
+    if len(args) == 0: return super().__new__(cls)   # fix pickle
+    expr, nmin, nmax = args
     assert nmin >= 0 and nmin <= nmax, f"invalid Variable {expr=} {nmin=} {nmax=}"
     if nmin == nmax: return NumNode(nmin)
     return super().__new__(cls)
