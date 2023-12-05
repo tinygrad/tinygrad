@@ -4,6 +4,8 @@ import operator
 import numpy as np
 from hypothesis import given, strategies as st, settings
 
+from tinygrad.helpers import CI
+
 settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
 print(settings.default)
@@ -32,12 +34,14 @@ class TestDTypeALU(unittest.TestCase):
   @given(st.floats(width=32, allow_subnormal=False), st.floats(width=32, allow_subnormal=False), st.sampled_from(binary_operations))
   def test_float32(self, a, b, op): universal_test(a, b, dtypes.float32, op)
 
+  @unittest.skipIf(Device.DEFAULT == "GPU" and CI, "GPU float16 requires cl_khr_fp16")
   @given(st.floats(width=16, allow_subnormal=False), st.floats(width=16, allow_subnormal=False), st.sampled_from(binary_operations))
   def test_float16(self, a, b, op): universal_test(a, b, dtypes.float16, op)
 
   @given(st.floats(width=32, allow_subnormal=False), st.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
 
+  @unittest.skipIf(Device.DEFAULT == "GPU" and CI, "GPU float16 requires cl_khr_fp16")
   @given(st.floats(width=32, allow_subnormal=False), st.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
 
