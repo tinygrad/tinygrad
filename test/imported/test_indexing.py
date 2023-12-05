@@ -5,7 +5,6 @@ import numpy as np
 from typing import Union
 
 from tinygrad.tensor import Tensor, dtypes
-from torch.testing import make_tensor
 
 random.seed(42)
 
