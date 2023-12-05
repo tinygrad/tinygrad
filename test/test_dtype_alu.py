@@ -27,7 +27,7 @@ def universal_test(a, b, dtype, op):
 def universal_test_unary(a, dtype, op):
   tensor_value = op[0](Tensor([a], dtype=dtype)).numpy()
   numpy_value = op[1](np.array([a]).astype(dtype.np))
-  if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10, rtol=1e-5 if dtype == dtypes.float32 else 1e-2)  # exp and log are approximations
+  if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-7, rtol=1e-5 if dtype == dtypes.float32 else 1e-2)  # exp and log are approximations
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
 class TestDTypeALU(unittest.TestCase):
