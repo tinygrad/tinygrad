@@ -14,7 +14,7 @@ def check(status):
 
 def hip_time_execution(cb, enable=False): return time_execution_cuda_style(cb, hip.hipEvent_t, hip.hipEventCreate, hip.hipEventRecord, hip.hipEventSynchronize, hip.hipEventDestroy, hip.hipEventElapsedTime, enable=enable)
 
-def compile_hip(device:HIPDevice, prg:str) -> bytes:
+def compile_hip(device, prg:str) -> bytes:
   @diskcache
   def __compile(prg, arch, *args): return compile_cuda_style(prg, [f'--offload-arch={arch}'], hip.hiprtcProgram, hip.hiprtcCreateProgram, hip.hiprtcCompileProgram, hip.hiprtcGetCode, hip.hiprtcGetCodeSize, hip.hiprtcGetProgramLog, hip.hiprtcGetProgramLogSize, check)
   return __compile(prg, device.arch_name, rtc_version_cuda_style(hip.hiprtcVersion))
