@@ -3,7 +3,7 @@ import itertools, random, math, time, multiprocessing, traceback
 from tinygrad.lazy import vars_from_ast
 from tinygrad.device import Device, Compiled, Buffer
 from tinygrad.ops import MemBuffer
-from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored
+from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.codegen.linearizer import Linearizer, UOp
 from tinygrad.shape.symbolic import sym_infer
 from collections import defaultdict
@@ -64,22 +64,22 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
   return acted_lins
 
 def compile_linearized_idx(x):
-  try: return (x[0], compile_linearizer(Device.DEFAULT, x[1]))
+  try: return (x[0], compile_linearizer(Device.DEFAULT, x[1], "test"))
   except Exception:
     if DEBUG >= 4: traceback.print_exc()
     return (x[0], None)
 
-def compile_linearizer(dev:str, lin:Linearizer) -> Tuple[bytes, Optional[List[int]], Optional[List[int]]]:
+def compile_linearizer(dev:str, lin:Linearizer, name:Optional[str]=None) -> Tuple[bytes, Optional[List[int]], Optional[List[int]]]:
   lin.linearize()
   rdev = Device[dev]
   assert isinstance(rdev, Compiled)
-  src, _ = rdev.renderer("test", lin.uops)   # NOTE: these all have the same name for deduping
+  src, _ = rdev.renderer(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
   return rdev.compiler(src), lin.global_size, lin.local_size
 
-def time_program(dev:str, lib:bytes, global_size, local_size, var_vals, rawbufs, early_stop=None, max_global_size=65536, clear_l2=False, cnt=3):
+def time_program(dev:str, lib:bytes, global_size, local_size, var_vals, rawbufs, early_stop=None, max_global_size=65536, clear_l2=False, cnt=3, name="test"):
   rdev = Device[dev]
   assert isinstance(rdev, Compiled)
-  clprg = rdev.runtime("test", lib)
+  clprg = rdev.runtime(name, lib)
   factor = 1
   if global_size is not None:
     global_size = [sym_infer(sz, var_vals) for sz in global_size] + [1]*(3-len(global_size))
@@ -162,7 +162,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
 
   var_vals = {k:(k.max+k.min)//2 for k in vars_from_ast(lin.ast)}
   lib, global_size, local_size = compile_linearizer(Device.DEFAULT, lin)
-  tms = time_program(Device.DEFAULT, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt)
+  tms = time_program(Device.DEFAULT, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))
 
   if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)
   return min(tms)

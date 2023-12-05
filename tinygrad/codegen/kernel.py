@@ -110,9 +110,6 @@ class Kernel:
     # cache
     self.applied_opts_cache: Optional[List[Opt]] = None
 
-    # do required opt here
-    self.required_optimizations()
-
   def copy(self):
     ret = type(self).__new__(type(self))
 
@@ -479,6 +476,8 @@ class Kernel:
         self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
 
   def hand_coded_optimizations(self):
+    self.required_optimizations()
+
     # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
     MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
     if self.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
