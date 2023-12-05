@@ -52,6 +52,14 @@ setup(name='tinygrad',
             "tiktoken",
             "librosa",
             "networkx",
+        ],
+        'doc': [
+          'sphinx',
+          'furo',
+          'nbsphinx',
+          'sphinx_copybutton',
+          'sphinx_inline_tabs',
+          'myst_parser',
         ]
       },
       include_package_data=True)
