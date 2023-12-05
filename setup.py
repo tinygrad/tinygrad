@@ -39,6 +39,7 @@ setup(name='tinygrad',
         'testing': [
             "torch",
             "jax",
+            "jaxlib",
             "pillow",
             "pytest",
             "pytest-xdist",
