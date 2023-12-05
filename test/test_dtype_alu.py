@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
 from hypothesis import given, strategies as st, settings
@@ -31,10 +31,12 @@ class TestDTypeALU(unittest.TestCase):
   @given(st.integers(0, 255), st.integers(0, 255), st.sampled_from(binary_operations))
   def test_uint8(self, a, b, op): universal_test(a, b, dtypes.uint8, op)
 
+  @unittest.skipIf(Device.DEFAULT == "TORCH", "no uint16 in torch")
   @settings(max_examples=MAX_EXAMPLES, deadline=None)
   @given(st.integers(0, 65535), st.integers(0, 65535), st.sampled_from(binary_operations))
   def test_uint16(self, a, b, op): universal_test(a, b, dtypes.uint16, op)
 
+  @unittest.skipIf(Device.DEFAULT == "TORCH", "no uint32 in torch")
   @settings(max_examples=MAX_EXAMPLES, deadline=None)
   @given(st.integers(0, 4294967295), st.integers(0, 4294967295), st.sampled_from(binary_operations))
   def test_uint32(self, a, b, op): universal_test(a, b, dtypes.uint32, op)
