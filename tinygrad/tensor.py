@@ -162,22 +162,22 @@ class Tensor:
     if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
     num = prod((shape:=argfix(*shape)))
     if num == 0: return Tensor.zeros(shape, **kwargs)
-    if (odd_counts := num % 2): num += 1
-    counts = Tensor.arange(num, dtype=dtypes.uint32, requires_grad=False) + Tensor._rng_counter
+    counts = (Tensor.arange(num, dtype=dtypes.uint32, requires_grad=False) + Tensor._rng_counter).realize()
+    if (odd_counts := num % 2): counts = counts.cat(Tensor([0], dtype=dtypes.uint32, requires_grad=False))
     Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
 
     rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
     ks = [0x0, Tensor._seed ^ 0x0 ^ 0x1BD11BDA, Tensor._seed]
 
-    x = counts.chunk(2)
+    x = [(c := counts.chunk(2))[0] + ks[-1], c[1] + ks[0]]
     for i in range(5):
       for r in rotations[0]:
         x[0] = x[0] + x[1]
         x[1] = x[0] ^ ((x[1] * (2 ** r)) + (x[1] / (2 ** (32 - r))))
       x = [(x[0] + ks[0]).realize(), (x[1] + ks[1] + i + 1).realize()]
       rotations, ks = rotations[1:] + rotations[:1], ks[1:] + ks[:1]
-    out = x[0].cat(x[1]).cast(dtypes.float32) / (2**32 - 1)
-    return out[odd_counts:].reshape(shape).cast(Tensor.default_type if kwargs.get("dtype") is None else kwargs.get("dtype"))
+    out = ((x[0].cat(x[1])) / (2 ** 8)).float() * (1 / (2 ** 24))
+    return out[:out.shape[0]-odd_counts].reshape(shape).cast(Tensor.default_type if kwargs.get("dtype") is None else kwargs.get("dtype"))
 
   # ***** creation helper functions *****
 
