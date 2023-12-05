@@ -59,7 +59,6 @@
             navigator.mediaDevices.getUserMedia({ audio: false, video: true }).then(function (stream) {
                 video.srcObject = stream;
                 video.onloadedmetadata = function() {
-                    console.log("Width=" + video.width + ", height=" + video.height);
                     canvas.width = video.clientWidth;
                     canvas.height = video.clientHeight;
                 }
@@ -70,7 +69,7 @@
             offscreenContext.drawImage(video, 0, 0, 640, 640);
             const boxes = await detectObjectsOnFrame(offscreenContext);
             drawBoxes(offscreenCanvas, boxes);
-            setTimeout(() => processFrame(), 600);
+            requestAnimationFrame(processFrame);
         }
 
         requestAnimationFrame(processFrame);
@@ -87,6 +86,7 @@
             boxes.forEach(([x1, y1, x2, y2, label]) => {
                 const classIndex = yolo_classes.indexOf(label);
                 const color = classColors[classIndex];
+                const textWidth = ctx.measureText(label).width;
                 ctx.strokeStyle = color;
                 ctx.fillStyle = color;
 
@@ -98,10 +98,7 @@
                 let boxHeight = adjustedY2 - adjustedY1;
 
                 ctx.strokeRect(adjustedX1, adjustedY1, boxWidth, boxHeight);
-
-                const textWidth = ctx.measureText(label).width;
                 ctx.fillRect(adjustedX1, adjustedY1 - 25, textWidth + 10, 25);
-
                 ctx.fillStyle = "#000000";
                 ctx.fillText(label, adjustedX1, adjustedY1 - 7);
             });
@@ -110,26 +107,24 @@
         async function detectObjectsOnFrame(offscreenContext) {
             if (!net) net = await loadNet();
             let start = performance.now();
-            const [input,img_width,img_height] = await prepare_input(offscreenContext);
+            const [input,img_width,img_height] = await prepareInput(offscreenContext);
             console.log("Preprocess took: " + (performance.now() - start) + " ms");
             start = performance.now();
-            const output = await run_model(input);
+            const output = net(new Float32Array(input));
             console.log("Inference took: " + (performance.now() - start) + " ms");
             start = performance.now();
-            let out = process_output(output,img_width,img_height);
+            let out = processOutput(output,img_width,img_height);
             console.log("Postprocess took: " + (performance.now() - start) + " ms");
             return out;
         }
 
-	    const getSavetensorBuffer = async () => new Uint8Array(await (await fetch("./net.safetensors")).arrayBuffer());
-
-        async function prepare_input(offscreenContext) {
+        async function prepareInput(offscreenContext) {
             return new Promise(resolve => {
                 const [img_width,img_height] = [640, 640]
                 const imgData = offscreenContext.getImageData(0,0,640,640);
                 const pixels = imgData.data;
-
                 const red = [], green = [], blue = [];
+
                 for (let index=0; index<pixels.length; index+=4) {
                     red.push(pixels[index]/255.0);
                     green.push(pixels[index+1]/255.0);
@@ -137,18 +132,13 @@
                 }
                 const input = [...red, ...green, ...blue];
                 resolve([input, img_width, img_height])
-                
             })
         }
         
-        const getGlContext = () => {
-            return document.createElement("canvas").getContext("webgl2");
-	    }
-        
         const loadNet = async () => {
             try {
-                const safetensor = await getSavetensorBuffer();
-                const gl = getGlContext();
+                const safetensor = await (new Uint8Array(await (await fetch("./net.safetensors")).arrayBuffer()));
+                const gl = document.createElement("canvas").getContext("webgl2");
                 return setupNet(gl, safetensor);
             } catch (e) {
                 console.log(e);
@@ -156,11 +146,7 @@
             }
         }
 
-        async function run_model(input) {
-            return Promise.resolve(net(new Float32Array(input)));
-        }
-
-        function process_output(output, img_width, img_height) {
+        function processOutput(output, img_width, img_height) {
             let boxes = [];
             for (let index=0;index<8400;index++) {
                 const [class_id,prob] = [...Array(80).keys()]

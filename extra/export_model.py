@@ -7,6 +7,17 @@ from tinygrad.helpers import dtypes
 import json
 
 EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "WEBGL", "CLANG", "CUDA", "GPU"]
+web_utils = {
+  "getTensorBuffer":
+  """const getTensorBuffer = (safetensorBuffer, tensorMetadata) => {
+    return safetensorBuffer.subarray(...tensorMetadata.data_offsets);
+  }""",
+  "getTensorMetadata": """const getTensorMetadata = (safetensorBuffer) => {
+    const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
+    const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
+    return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}]));
+  };"""
+}
 
 def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
@@ -68,141 +79,136 @@ def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,in
   return '\n'.join(cprog)
 
 def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, input_names, output_names) -> str:
-  header = """
-  function setupNet(gl, safetensor) {\n
-    function createShaderProgram(gl, code) {
-      const vertexShader = loadShader(gl, gl.VERTEX_SHADER, '#version 300 es\\nin vec2 in_position;in vec2 in_uv;out vec2 uv;void main(){gl_Position=vec4(in_position,0.0,1.0);uv=in_uv;}');
+  header = f"""
+  function setupNet(gl, safetensor) {{
+    function createShaderProgram(gl, code) {{
+      const vertexShader = loadShader(gl, gl.VERTEX_SHADER, '#version 300 es\\nin vec2 in_position;in vec2 in_uv;out vec2 uv;void main(){{gl_Position=vec4(in_position,0.0,1.0);uv=in_uv;}}');
       const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, code);
       const shaderProgram = gl.createProgram();
       gl.attachShader(shaderProgram, vertexShader);
       gl.attachShader(shaderProgram, fragmentShader);
       gl.linkProgram(shaderProgram);
 
-      if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
-        console.log(`Unable to initialize the shader program: ${gl.getProgramInfoLog(shaderProgram)}`);
+      if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {{
+        console.log(`Unable to initialize the shader program: ${{gl.getProgramInfoLog(shaderProgram)}}`);
         return null;
-      }
+      }}
 
       return shaderProgram;
-    }
+    }}
 
-    function loadShader(gl, type, source) {
+    function loadShader(gl, type, source) {{
       const shader = gl.createShader(type);
       gl.shaderSource(shader, source);
       gl.compileShader(shader);
 
-      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.log(`An error occurred compiling the shaders: ${gl.getShaderInfoLog(shader)}`);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {{
+        console.log(`An error occurred compiling the shaders: ${{gl.getShaderInfoLog(shader)}}`);
         gl.deleteShader(shader);
         return null;
-      }
+      }}
 
       return shader;
-    }
+    }}
 
-    function setupVertexData(gl, program, vertices) {
+    function setupVertexData(gl, program, vertices) {{
       let vao = gl.createVertexArray();
       gl.bindVertexArray(vao);
-
       let vertexBuffer = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
-
       const positionLocation = gl.getAttribLocation(program, 'in_position');
       const uvLocation = gl.getAttribLocation(program, 'in_uv');
-      
       gl.enableVertexAttribArray(positionLocation);
       gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 4 * 4, 0);
-
       gl.enableVertexAttribArray(uvLocation);
       gl.vertexAttribPointer(uvLocation, 2, gl.FLOAT, false, 4 * 4, 2 * 4);
-
       gl.bindVertexArray(null);
 
       return vao;
-    }
+    }}
 
-    function runProgram(gl, kernelName, program, textures) {
+    function runProgram(gl, kernelName, program, textures) {{
       let framebuffer = gl.createFramebuffer();
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures[0].tex, 0);
       gl.useProgram(program);
-      gl.uniform1i(gl.getUniformLocation(program, "w"), textures[0].width);  
+      gl.uniform1i(gl.getUniformLocation(program, "width"), textures[0].width);  
 
       const vao = setupVertexData(gl, program, [-1, 1, 0, 1, -1, -1, 0, 0, 1, 1, 1, 1, 1, -1, 1, 0]);
       gl.bindVertexArray(vao);
       // Texture 0 is the framebuffer texture, so we skip that
-      for (let i = 1; i < textures.length; i++) {
+      for (let i = 1; i < textures.length; i++) {{
         gl.activeTexture(gl.TEXTURE0 + i-1);
         gl.bindTexture(gl.TEXTURE_2D, textures[i].tex);
         gl.uniform1i(gl.getUniformLocation(program, 'data' + i), i-1);
-      }
+      }}
 
       gl.viewport(0, 0, textures[0].width, textures[0].height);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
-      for (let i = 1; i < textures.length; i++) {
+      for (let i = 1; i < textures.length; i++) {{
         gl.activeTexture(gl.TEXTURE0 + i-1);
         gl.bindTexture(gl.TEXTURE_2D, null);
-      }
+      }}
 
       console.log("Finished running: " + kernelName);
-    }
-    function limitTextureDims(size, threshold) {
-      if (size <= threshold) { return [size, 1] };
+    }}
+
+    function limitTextureDims(size, threshold) {{
+      if (size <= threshold) {{ return [size, 1] }};
       
-      for (let i = 2; i < threshold + 1; i++) {
-        if ((size % i == 0) && (Math.floor(size / i) <= threshold)) {
+      for (let i = 2; i < threshold + 1; i++) {{
+        if ((size % i == 0) && (Math.floor(size / i) <= threshold)) {{
           return [Math.floor(size / i), i];
-        }
-      }
+        }}
+      }}
       
       return [size, 1];
-    }
+    }}
 
-    function updateTextureData(gl, texture, data, isHalf) {
+    function updateTextureData(gl, texture, data, isHalf) {{
       gl.bindTexture(gl.TEXTURE_2D, texture.tex);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, texture.width, texture.height, gl.RED, (isHalf) ? gl.HALF_FLOAT : gl.FLOAT, data);
       gl.bindTexture(gl.TEXTURE_2D, null);
-    }
+    }}
 
-    function readTextureData(gl, texture) {
+    function readTextureData(gl, texture) {{
       const framebuffer = gl.createFramebuffer();
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture.tex, 0);
 
-      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {{
         throw new Error('Framebuffer not complete');
-      }
+      }}
 
       let data = new Float32Array(texture.width * texture.height);
       gl.readPixels(0, 0, texture.width, texture.height, gl.RED, gl.FLOAT, data);
-
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.deleteFramebuffer(framebuffer);
 
       return data;
-    }
+    }}
 
-    function createTexture(gl, size, isHalf, tensorBuffer) {
+    function createTexture(gl, size, isHalf, tensorBuffer) {{
       const texture = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, texture);
       const internalFormat = gl.RGBA;
       const texSize = limitTextureDims(size, gl.getParameter(gl.MAX_TEXTURE_SIZE));
       let weights;
       
-      if (tensorBuffer != null) {
+      if (tensorBuffer != null) {{
         if (!isHalf)
           weights = new Float32Array(tensorBuffer.buffer, tensorBuffer.byteOffset, tensorBuffer.byteLength / Float32Array.BYTES_PER_ELEMENT);
         else 
           weights = new Uint16Array(tensorBuffer.buffer, tensorBuffer.byteOffset, tensorBuffer.byteLength / Uint16Array.BYTES_PER_ELEMENT);
-      } else {
+      }} else {{
         if (!isHalf)
           weights = new Float32Array(size).fill(0.0);
         else
           weights = new Uint16Array(size).fill(0.0);
-      }
+      }}
 
       if (size != weights.length)
         console.log("Weights length: " + weights.length + ", texsize: " + texSize[0]*texSize[1]);
@@ -213,18 +219,11 @@ def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, 
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.bindTexture(gl.TEXTURE_2D, null);
-      return { tex: texture, width: texSize[0], height: texSize[1] };
-    } 
+      return {{ tex: texture, width: texSize[0], height: texSize[1] }};
+    }}
 
-    const getTensorBuffer = (safetensorBuffer, tensorMetadata) => {
-      return safetensorBuffer.subarray(...tensorMetadata.data_offsets);
-    }
-
-    const getTensorMetadata = (safetensorBuffer) => {
-      const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
-      const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
-      return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}]));
-    };
+    {web_utils["getTensorBuffer"]}
+    {web_utils["getTensorMetadata"]}
 
     const metadata = getTensorMetadata(safetensor);
   """
@@ -258,15 +257,9 @@ def export_model_webgpu(functions, statements, bufs, bufs_to_save, weight_names,
   output_readers = '\n        '.join([f"await gpuReadBuffer{i}.mapAsync(GPUMapMode.READ);\n        const resultBuffer{i} = new Float32Array(gpuReadBuffer{i}.size);\n        resultBuffer{i}.set(new Float32Array(gpuReadBuffer{i}.getMappedRange()));\n        gpuReadBuffer{i}.unmap();" for i in range(len(output_names))])
   output_return = '[{}]'.format(",".join([f'resultBuffer{i}' for i in range(len(output_names))]))
   return f"""
-const getTensorMetadata = (safetensorBuffer) => {{
-  const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
-  const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
-  return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
-}};
+{web_utils["getTensorBuffer"]}
 
-const getTensorBuffer = (safetensorBuffer, tensorMetadata) => {{
-  return safetensorBuffer.subarray(...tensorMetadata.data_offsets);
-}}
+{web_utils["getTensorMetadata"]}
 
 const createEmptyBuf = (device, size) => {{
     return device.createBuffer({{size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }});

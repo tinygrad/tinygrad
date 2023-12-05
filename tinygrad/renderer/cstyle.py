@@ -317,7 +317,7 @@ class GLSLLanguage(CStyleLanguage):
   type_map = {dtypes.float64: "double", dtypes.float: "float", dtypes.half: "float", dtypes.int32: "int", dtypes.uint32: "uint", dtypes.bool: "bool"}
   sampler_prefix = {dtypes.float64: "d", dtypes.float: "", dtypes.half: "", dtypes.int32: "i", dtypes.uint32: "u", dtypes.bool: "i"}
   fragment_center_offset = 0.5
-  xid = [f"int(gl_FragCoord.y-{fragment_center_offset}) * w + int(gl_FragCoord.x-{fragment_center_offset})"]
+  xid = [f"int(gl_FragCoord.y-{fragment_center_offset}) * width + int(gl_FragCoord.x-{fragment_center_offset})"]
   code_for_op = { **CStyleLanguage().code_for_op, BinaryOps.MUL: lambda a,b,dtype: f"bool(int({a})*int({b}))" if dtype == dtypes.bool else f"({a}*{b})",
     BinaryOps.ADD: lambda a,b,dtype: f"bool(int({a})+int({b}))" if dtype == dtypes.bool else f"({a}+{b})", BinaryOps.CMPLT: lambda a,b,dtype: f"(float({a})<float({b}))" if dtype == dtypes.bool else f"({a}<{b})",
     BinaryOps.MOD: lambda a,b,dtype: f"(int({a})%int({b}))", TernaryOps.WHERE: lambda a,b,c,dtype: f"(float({a})!=0.0?{b}:{c})" }
@@ -332,7 +332,7 @@ class GLSLLanguage(CStyleLanguage):
     return f"bool({cond})?({x}):{y}"
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
-    prg = "#version 330\nprecision highp float;\nprecision highp int;\nin vec2 uv;\nuniform int w;\n"
+    prg = "#version 330\nprecision highp float;\nprecision highp int;\nin vec2 uv;\nuniform int width;\n"
     prg += "\n".join([f"uniform {self.sampler_prefix[dtype]}sampler2D {name};" for name,dtype in bufs if name != "data0"])
     prg += f"\nout {'int' if bufs[0][1] == dtypes.bool else self.type_map[bufs[0][1]]} out_data;\n"
     return prg + "\nvoid main() {\n" + "\n".join(kernel) + "\n}"
