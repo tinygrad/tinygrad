@@ -64,7 +64,6 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
     assert isinstance(dtype, DType)
-    assert size > 0, f"alloc size must be positve, getting {size}"
     self.device, self.size, self.dtype = device, size, dtype
     self.allocator = Device[self.device].allocator
     # TODO: image hack shouldn't be here. where should it be?
@@ -121,7 +120,9 @@ BufferCopy = _BufferCopy()
 # TODO: size, dest, src are the same type. can we enforce this?
 sz_type = Union[ImageDType, int]
 class Allocator:
-  def alloc(self, size:sz_type): return self._alloc_image(size) if isinstance(size, ImageDType) else self._alloc(size)
+  def alloc(self, size:sz_type):
+    assert not isinstance(size, int) or size > 0, f"alloc size must be positve, getting {size}"
+    return self._alloc_image(size) if isinstance(size, ImageDType) else self._alloc(size)
   def _alloc(self, size:int): raise NotImplementedError("need alloc")
   def _alloc_image(self, dtype:ImageDType): raise RuntimeError("need alloc image")
   def free(self, opaque, size:sz_type): self._free(opaque) # if you are returning a Python object, you don't need a free
