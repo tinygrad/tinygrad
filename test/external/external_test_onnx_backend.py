@@ -47,14 +47,16 @@ backend_test.exclude('test_reduce_prod_*')
 backend_test.exclude('test_adam_multiple_cpu')
 backend_test.exclude('test_nesterov_momentum_cpu')
 
-# we only support float32
-backend_test.exclude('uint8')
-backend_test.exclude('uint16')
-backend_test.exclude('uint32')
-backend_test.exclude('uint64')
-backend_test.exclude('int8')
-backend_test.exclude('int16')
-backend_test.exclude('float64')
+# about different dtypes
+backend_test.exclude('int8')  #  OverflowError: cannot convert float infinity to integer
+
+if Device.DEFAULT in ["TORCH"]:
+  backend_test.exclude('uint16')
+  backend_test.exclude('uint32')
+  backend_test.exclude('uint64')
+if Device.DEFAULT in ["METAL"]:
+  backend_test.exclude('float64')
+
 backend_test.exclude('string')
 
 backend_test.exclude('test_pow_types_int*')
@@ -177,8 +179,8 @@ if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
   backend_test.exclude('test_eyelike_with_dtype_cpu') # backend does not support dtype: Double
 
-# Segfaults in CI
-if Device.DEFAULT in ['LLVM', 'CUDA'] and CI:
+# Segfaults in CI, GPU requires cl_khr_fp16
+if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
   backend_test.exclude('test_max_float16_cpu')
   backend_test.exclude('test_min_float16_cpu')
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
-from typing import Tuple, Optional, Union, List, cast
+from typing import Tuple, Optional, List
 import ctypes, functools
 import gpuctypes.opencl as cl
-from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, diskcache, OSX, ImageDType
+from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, diskcache, OSX, ImageDType, DEBUG
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import OpenCLRenderer
 from tinygrad.device import Compiled, LRUAllocator
@@ -40,10 +40,9 @@ class CLProgram:
     check(cl.clReleaseKernel(self.kernel))
     check(cl.clReleaseProgram(self.program))
 
-  def __call__(self, *bufs:Union[cl.cl_mem, int], global_size:Tuple[int,...], local_size:Optional[Tuple[int,...]]=None, wait=False) -> Optional[float]:
-    for i,b in enumerate(bufs):
-      bc = ctypes.c_int32(b) if isinstance(b, int) else cast(cl.cl_mem, b)
-      cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(bc), ctypes.byref(bc))
+  def __call__(self, *bufs:cl.cl_mem, global_size:Tuple[int,...], local_size:Optional[Tuple[int,...]]=None, vals:Tuple[int, ...]=(), wait=False) -> Optional[float]:
+    for i,b in enumerate(bufs): cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b), ctypes.byref(b))
+    for i,b in enumerate(vals,start=len(bufs)): cl.clSetKernelArg(self.kernel, i, 4, ctypes.byref(ctypes.c_int32(b)))
     if local_size is not None: global_size = tuple(int(g*l) for g,l in zip(global_size, local_size))
     event = cl.cl_event() if wait else None
     check(cl.clEnqueueNDRangeKernel(self.device.queue, self.kernel, len(global_size), None, (ctypes.c_size_t * len(global_size))(*global_size), (ctypes.c_size_t * len(local_size))(*local_size) if local_size else None, 0, None, event))
@@ -81,8 +80,12 @@ class CLDevice(Compiled):
     if CLDevice.device_ids is None:
       num_platforms = init_c_var(ctypes.c_uint32(), lambda x: check(cl.clGetPlatformIDs(0, None, ctypes.byref(x))))
       platform_ids = init_c_var((cl.cl_platform_id * num_platforms.value)(), lambda x: check(cl.clGetPlatformIDs(num_platforms.value, x, None)))
-      num_devices = init_c_var(ctypes.c_uint32(), lambda x: check(cl.clGetDeviceIDs(platform_ids[0], cl.CL_DEVICE_TYPE_DEFAULT, 0, None, ctypes.byref(x))))
-      CLDevice.device_ids = init_c_var((cl.cl_device_id * num_devices.value)(), lambda x: check(cl.clGetDeviceIDs(platform_ids[0], cl.CL_DEVICE_TYPE_DEFAULT, num_devices, x, None)))
+      for device_type in [cl.CL_DEVICE_TYPE_GPU, cl.CL_DEVICE_TYPE_DEFAULT]:
+        num_devices = ctypes.c_uint32()
+        err = cl.clGetDeviceIDs(platform_ids[0], device_type, 0, None, ctypes.byref(num_devices))
+        if err == 0 and num_devices.value != 0: break
+      if DEBUG >= 1: print(f"CLDevice: got {num_platforms.value} platforms and {num_devices.value} devices")
+      CLDevice.device_ids = init_c_var((cl.cl_device_id * num_devices.value)(), lambda x: check(cl.clGetDeviceIDs(platform_ids[0], device_type, num_devices, x, None)))
 
     self.device_id = CLDevice.device_ids[0 if ":" not in device else int(device.split(":")[1])]
     self.context = checked(cl.clCreateContext(None, 1, ctypes.byref(self.device_id), cl.clCreateContext.argtypes[3](), None, ctypes.byref(status := ctypes.c_int32())), status)
