@@ -59,13 +59,11 @@ class CLAllocator(LRUAllocator):
     super().__init__()
   def _alloc(self, size:int) -> cl.cl_mem:
     return checked(cl.clCreateBuffer(self.device.context, cl.CL_MEM_READ_WRITE, size, None, ctypes.byref(status := ctypes.c_int32())), status)
+  def _alloc_image(self, dtype:ImageDType) -> cl.cl_mem:
+    return checked(cl.clCreateImage2D(self.device.context, cl.CL_MEM_READ_WRITE,
+                                      cl.cl_image_format(cl.CL_RGBA, {2: cl.CL_HALF_FLOAT, 4: cl.CL_FLOAT}[dtype.itemsize]),
+                                      dtype.shape[1], dtype.shape[0], 0, None, ctypes.byref(status := ctypes.c_int32())), status)
   def _free(self, buf:cl.cl_mem): check(cl.clReleaseMemObject(buf))
-  def _cast_image(self, buf:cl.cl_mem, dtype:ImageDType, row_pitch:int) -> cl.cl_mem:
-    desc = cl.cl_image_desc(image_type=cl.CL_MEM_OBJECT_IMAGE2D, image_width=dtype.shape[1], image_height=dtype.shape[0], image_row_pitch=row_pitch)
-    desc._0.mem_object = buf
-    return checked(cl.clCreateImage(self.device.context, cl.CL_MEM_READ_WRITE,
-                                    cl.cl_image_format(cl.CL_RGBA, {2: cl.CL_HALF_FLOAT, 4: cl.CL_FLOAT}[dtype.itemsize]),
-                                    desc, None, ctypes.byref(status := ctypes.c_int32())), status)
   def copyin(self, dest:cl.cl_mem, src:memoryview):
     check(cl.clEnqueueWriteBuffer(self.device.queue, dest, False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
     self.device.pending_copyin.append(src)    # NOTE: these can't be freed until the GPU actually executes this command

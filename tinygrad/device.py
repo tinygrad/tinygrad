@@ -3,7 +3,7 @@ import numpy as np
 from collections import defaultdict
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable
 import importlib, inspect, functools, pathlib, time, re, ctypes
-from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType, from_mv, dtypes, flat_mv, ImageDType, round_up
+from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType, from_mv, dtypes, flat_mv, ImageDType
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op
 
@@ -67,23 +67,13 @@ class Buffer:
     self.device, self.size, self.dtype = device, size, dtype
     self.allocator = Device[self.device].allocator
     # TODO: image hack shouldn't be here. where should it be?
-    if isinstance(dtype, ImageDType) and hasattr(self.allocator, "_cast_image"):
-      assert opaque is None
-      row_pitch_items = round_up(dtype.shape[1], 256) * 4
-      self.size = row_pitch_items * dtype.shape[0]  # adjust the size to include the image padding
-      self._real_buf = self.allocator.alloc(self.size * dtype.itemsize)
-      self._buf = self.allocator._cast_image(self._real_buf, dtype, row_pitch_items * dtype.itemsize)
-    else:
-      self._buf = opaque if opaque is not None else self.allocator.alloc(size * dtype.itemsize)
+    self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else size * dtype.itemsize)
     # TODO: mem_used for all devices
     if self.device == Device.DEFAULT: GlobalCounters.mem_used += self.size * self.dtype.itemsize
   def __del__(self):
     if self.device == Device.DEFAULT: GlobalCounters.mem_used -= self.size * self.dtype.itemsize
-    if isinstance(self.dtype, ImageDType):
-      self.allocator._free(self._buf)
-      self.allocator.free(self._real_buf, self.size * self.dtype.itemsize)
-    else:
-      self.allocator.free(self._buf, self.size * self.dtype.itemsize)
+    if isinstance(self.dtype, ImageDType): self.allocator.free(self._buf, self.dtype)
+    else: self.allocator.free(self._buf, self.size * self.dtype.itemsize)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}>"
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
@@ -128,19 +118,21 @@ class _BufferCopy(JITRunner):
 BufferCopy = _BufferCopy()
 
 # TODO: size, dest, src are the same type. can we enforce this?
+sz_type = Union[ImageDType, int]
 class Allocator:
-  def alloc(self, size:int):
-    assert size > 0, f"alloc size must be positve, getting {size}"
-    return self._alloc(size)
+  def alloc(self, size:sz_type):
+    assert not isinstance(size, int) or size > 0, f"alloc size must be positve, getting {size}"
+    return self._alloc_image(size) if isinstance(size, ImageDType) else self._alloc(size)
   def _alloc(self, size:int): raise NotImplementedError("need alloc")
-  def free(self, opaque, size:int): self._free(opaque) # if you are returning a Python object, you don't need a free
+  def _alloc_image(self, dtype:ImageDType): raise RuntimeError("need alloc image")
+  def free(self, opaque, size:sz_type): self._free(opaque) # if you are returning a Python object, you don't need a free
   def _free(self, opaque): pass
   def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
   def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
 
 class LRUAllocator(Allocator):  # pylint: disable=abstract-method
-  def __init__(self): self.cache: Dict[int, Any] = defaultdict(list)
-  def alloc(self, size:int):
+  def __init__(self): self.cache: Dict[sz_type, Any] = defaultdict(list)
+  def alloc(self, size:sz_type):
     if len(c := self.cache[size]): return c.pop()
     try:
       return super().alloc(size)
@@ -151,7 +143,7 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
     for opaques in self.cache.values():
       for opaque in opaques: self._free(opaque)
       opaques.clear()
-  def free(self, opaque:Any, size:int):
+  def free(self, opaque:Any, size:sz_type):
     if getenv("LRU", 1): self.cache[size].append(opaque)
     else: self._free(opaque)
 
