@@ -51,3 +51,39 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
+      - id: linecount
+        name: Repo line count
+        entry: python3 sz.py
+        language: system
+        always_run: true
+        pass_filenames: false
+      - id: less5000
+        name: Check <5000 lines
+        entry: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
+        language: system
+        always_run: true
+        pass_filenames: false
+      - id: quickstart
+        name: Test Quickstart
+        entry: awk '/```python3/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
+        language: system
+        always_run: true
+        pass_filenames: false
+      - id: fuzztest
+        name: Fuzz Test symbolic
+        entry: python3 test/external/fuzz_symbolic.py
+        language: system
+        always_run: true
+        pass_filenames: false
+      - id: fuzztest_shapetracker
+        name: Fuzz Test shapetracker
+        entry: PYTHONPATH="." python3 test/external/fuzz_shapetracker.py
+        language: system
+        always_run: true
+        pass_filenames: false
+      - id: fuzztest_shapetracker_to_move_ops
+        name: Test shapetracker to_movement_ops
+        entry: PYTHONPATH="." python3 extra/to_movement_ops.py
+        language: system
+        always_run: true
+        pass_filenames: false      
