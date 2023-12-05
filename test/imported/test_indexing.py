@@ -397,7 +397,7 @@ class TestIndexing(unittest.TestCase):
   #             with self.assertRaisesRegex(IndexError, r'out of'):
   #                 reference[[err_idx]]
 
-    '''  
+    '''
     def tensor_indices_to_np(tensor, indices):
         # convert the Torch Tensor to a numpy array
         tensor = tensor.to(device='cpu')
