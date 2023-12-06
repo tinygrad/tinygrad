@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from PIL import Image
-from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch
+from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch, get_shape, _Scalars
 from tinygrad.shape.symbolic import Variable, NumNode
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -159,6 +159,30 @@ class TestFetch(unittest.TestCase):
     img = fetch("https://media.istockphoto.com/photos/hen-picture-id831791190", allow_caching=False)
     with Image.open(img) as pimg:
       assert pimg.size == (705, 1024)
+
+class TetsGetShape(unittest.TestCase):
+
+  def test_get_shape(self): # TODO: should probably fuzz this
+    def test(l, err_info=None):
+      if err_info:
+        with self.assertRaises(err_info[0]) as ctx: get_shape(l)
+        self.assertEqual(str(ctx.exception), err_info[1])
+      else: self.assertEqual(get_shape(l),np.array(l).shape)
+    test([])
+    test([[], [], []])
+    test(None)
+    test([None])
+    test([[None], [None], [None]])
+    test([i for i in range(10)])
+    test([[[i for i in range(10)] for _ in range(10)] for _ in range(10)])
+    test([[1], [2]])
+    test([[1,2,3], [1,2,3], [1,2,3]])
+    test([[[1],[2],[3.0]], [[1],[2],[3]], [[1],[None],[np.float32(1)]]])
+    test(1.0)
+    test('one', (ValueError, f"Sequence must consist of scalar types - {_Scalars} - {str}"))
+    test([1, 2, 'three'], (ValueError, f"Sequence must consist of scalar types - {_Scalars} - {str}"))
+    test([[1,2,3], [4,5,6], [7,8,'nine']], (ValueError, f"Sequence must consist of scalar types - {_Scalars} - {str}"))
+    test([[[1],[2],[3]], [[1],[2,4],[3]], [[1],[2],[3]]], (ValueError, "Inconsistent dimensions"))
 
 if __name__ == '__main__':
   unittest.main()
