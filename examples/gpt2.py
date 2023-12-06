@@ -159,9 +159,10 @@ class GPT2:
 if __name__ == "__main__":
   Tensor.no_grad = True
   print(f"using {Device.DEFAULT} backend")
+  default_prompt = "What is the answer to life, the universe, and everything?"
 
   parser = argparse.ArgumentParser(description='Run GPT2 in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument('--prompt', type=str, default="What is the answer to life, the universe, and everything?", help="Phrase to start with")
+  parser.add_argument('--prompt', type=str, default=default_prompt, help="Phrase to start with")
   parser.add_argument('--count', type=int, default=100, help="Max number of tokens to generate")
   parser.add_argument('--temperature', type=float, default=0.8, help="Temperature in the softmax")
   parser.add_argument('--model_size', type=str, default="gpt2-medium", help="Size of model to use [gpt2, gpt2-medium, gpt2-large, gpt2-xl]")
@@ -192,3 +193,15 @@ if __name__ == "__main__":
       if len(texts) == 1: print(texts[0])
       else:
         for i,text in enumerate(texts): print(colored(f"Response {i}:", "green"), text)
+
+    # validate output!
+    if args.temperature == 0 and args.model_size == "gpt2-medium" and args.count == 10:
+      expected = {
+        default_prompt: "What is the answer to life, the universe, and everything?\n\nThe answer is that we are all one",
+        "Hello.": "Hello. I'm a little late to the party, but",
+      }
+      try:
+        assert texts[0] == expected[args.prompt]
+        print(colored("output validated", "green"))
+      except KeyError:
+        pass
