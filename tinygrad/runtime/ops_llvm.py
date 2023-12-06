@@ -46,7 +46,7 @@ class LLVM:
     LLVM.engine = llvm.create_mcjit_compiler(backing_mod, LLVM.target_machine)
 
 class LLVMCompiler(CachedCompiler):
-  def _compile(self, prg:str, **kwargs) -> bytes:
+  def _compile(self, prg:str, **compiler_args) -> bytes:
     mod = llvm.parse_assembly(prg)
     mod.verify()
     LLVM().optimizer.run(mod)

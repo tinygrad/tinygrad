@@ -10,11 +10,11 @@ from tinygrad.renderer.cstyle import MetalRenderer
 METAL_XCODE = bool(getenv("METAL_XCODE"))
 
 class MetalCompiler(CachedCompiler):
-  def __init__(self, device):
+  def __init__(self, device, **kwargs):
+    super().__init__(**kwargs)
     self.device = device
-    super().__init__()
-  def _compile(self, prg:str, **kwargs):
-    if METAL_XCODE:
+  def _compile(self, prg:str, **compiler_args):
+    if compiler_args['use_xcode']:
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
       return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
@@ -83,7 +83,7 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
     from tinygrad.features.graph.metal import MetalGraph
-    super().__init__(MetalAllocator(self), LinearizerOptions(device="METAL"), MetalRenderer, MetalCompiler(self), functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
+    super().__init__(MetalAllocator(self), LinearizerOptions(device="METAL"), MetalRenderer, MetalCompiler(self, use_xcode=METAL_XCODE), functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
     self.mv_in_metal.clear()

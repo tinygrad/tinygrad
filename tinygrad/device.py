@@ -225,10 +225,9 @@ class Compiler:
   def compile(self, prg:str) -> bytes: raise NotImplementedError("must be implemeted")
 
 class CachedCompiler(Compiler):
-  def __init__(self): self.cache_key = self._cache_key()
-  def compile(self, prg:str) -> bytes: return self._compile(prg) if getenv("DISABLE_COMPILER_CACHE") else diskcache(self._compile)(prg, cache_key=self.cache_key)
+  def __init__(self, **kwargs): self.compiler_args = kwargs
+  def compile(self, prg:str) -> bytes: return self._compile(prg, **self.compiler_args) if getenv("DISABLE_COMPILER_CACHE") else diskcache(self._compile)(prg, **self.compiler_args)
   def _compile(self, prg:str, **kwargs) -> bytes: raise NotImplementedError("must be implemeted")
-  def _cache_key(self) -> Any: return None
 
 class CompiledASTRunner(JITRunner):
   def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None):
