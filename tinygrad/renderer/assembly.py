@@ -66,12 +66,10 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
     elif uop == UOps.ALU:
       assert dtype is not None and vin[0].dtype is not None
       if args == BinaryOps.CMPLT:
-        pred = ssa(None, "lt", "pred")
-        kernel.append(lang.asm_for_op[args](pred, *[r[x] for x in vin], lang.dtype_to_asmtype[vin[0].dtype]))
+        kernel.append(lang.asm_for_op[args](pred:=ssa(None,'lt','pred'), *[r[x] for x in vin], lang.dtype_to_asmtype[vin[0].dtype]))
         kernel.append(f"selp.{lang.dtype_to_asmtype[dtype]} {ssa(u, 'alu')}, {lang.render_const(1, dtype)}, {lang.render_const(0, dtype)}, {pred};")
       elif args == TernaryOps.WHERE:
-        pred = ssa(None, "wh", "pred")
-        kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[0].dtype]} {pred}, {r[vin[0]]}, {lang.render_const(0, vin[0].dtype)};")
+        kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[0].dtype]} {(pred:=ssa(None,'wh','pred'))}, {r[vin[0]]}, {lang.render_const(0, vin[0].dtype)};")
         kernel.append(lang.asm_for_op[args](ssa(u, "alu"), pred, r[vin[1]], r[vin[2]], lang.dtype_to_asmtype[dtype]))
       else: kernel.append(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], lang.dtype_to_asmtype[dtype]))
     elif uop == UOps.DEFINE_ACC:
@@ -89,14 +87,11 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
     elif uop == UOps.LOAD:
       assert dtype is not None and vin[1].dtype is not None
       if vin[0].uop == UOps.DEFINE_LOCAL:
-        index = ssa(None, "index", "u64")
-        kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {index}, {r[vin[1]]}, {dtype.itemsize};")
+        kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {(index:=ssa(None,'index','u64'))}, {r[vin[1]]}, {dtype.itemsize};")
         loc = f"{r[vin[0]]}[{index}]"
       elif vin[1] and vin[1].uop != UOps.CONST:
-        loc = ssa(None, "loc", "u64")
-        offset = ssa(None, "off", "u64")
-        kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {offset}, {r[vin[1]]}, {dtype.itemsize};")
-        kernel.append(f"add.s64 {loc}, {r[vin[0]]}, {offset};")
+        kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {(offset:=ssa(None,'off','u64'))}, {r[vin[1]]}, {dtype.itemsize};")
+        kernel.append(f"add.s64 {(loc:=ssa(None,'loc','u64'))}, {r[vin[0]]}, {offset};")
         loc = f"[{loc}]"
       else: loc = f"[{r[vin[0]]}{f'+{int(vin[1].arg * dtype.itemsize)}' if vin[1] else ''}]"
       val = ssa(u, 'val')
@@ -114,19 +109,15 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
     elif uop == UOps.STORE:
       assert vin[0].dtype is not None and vin[1].dtype is not None and vin[2].dtype is not None
       if vin[0].uop == UOps.DEFINE_LOCAL:
-        index = ssa(None, "index", "u64")
-        kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {index}, {r[vin[1]]}, {vin[0].dtype.itemsize};")
+        kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {(index:=ssa(None,'index','u64'))}, {r[vin[1]]}, {vin[0].dtype.itemsize};")
         loc = f"{r[vin[0]]}[{index}]"
       elif vin[1].uop != UOps.CONST:
-        loc = ssa(None, "loc", "u64")
-        offset = ssa(None, "off", "u64")
-        print(vin[0].dtype)
-        kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {offset}, {r[vin[1]]}, {vin[0].dtype.itemsize};")
-        kernel.append(f"add.s64 {loc}, {r[vin[0]]}, {offset};")
+        kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {(offset:=ssa(None,'off','u64'))}, {r[vin[1]]}, {vin[0].dtype.itemsize};")
+        kernel.append(f"add.s64 {(loc:=ssa(None,'loc','u64'))}, {r[vin[0]]}, {offset};")
         loc = f"[{loc}]"
       else: loc = f"[{r[vin[0]]}{f'+{int(vin[1].arg * vin[0].dtype.itemsize)}' if vin[1] else ''}]"
       if vin[0].dtype != vin[2].dtype:
-        kernel.append(lang.render_cast(cast := ssa(None, "cast", lang.dtype_to_asmtype[vin[0].dtype]), r[vin[2]], vin[0].dtype, vin[2].dtype))
+        kernel.append(lang.render_cast(cast:=ssa(None, "cast", lang.dtype_to_asmtype[vin[0].dtype]), r[vin[2]], vin[0].dtype, vin[2].dtype))
       if len(vin) > 3:
         assert vin[3].dtype is not None
         kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[3].dtype]} {(pred:=ssa(None, 'st', 'pred'))}, {r[vin[3]]} {lang.render_const(0, vin[3].dtype)};")
