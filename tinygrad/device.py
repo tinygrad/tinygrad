@@ -48,7 +48,7 @@ class JITRunner:
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
-def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count, jit=False, num_kernels=1, lra: Optional[Dict]=None):
+def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count:int, jit=False, num_kernels=1, lra: Optional[Dict]=None):
   if var_vals is None: var_vals = {}
   op_estimate, mem_estimate = sym_infer(op_estimate, var_vals), sym_infer(mem_estimate, var_vals)
   GlobalCounters.kernel_count += num_kernels
@@ -89,32 +89,37 @@ class Buffer:
     if self.size > 0: self.allocator.copyout(flat_mv(ret.data), self._buf)
     return ret
 
+def _internal_buffer_copy(dest, src):
+  if hasattr(dest.allocator, 'transfer') and type(dest.allocator) is type(src.allocator):
+    # fast path, used on HIP between GPUs
+    # NOTE: it's important we use the dest device here to ensure the transfer is ready
+    dest.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
+    return
+  if getenv("FROM_BUFFER") and hasattr(dest.allocator, 'from_buffer') and hasattr(dest.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
+    # fast path, used on Metal in OS X Sonoma
+    # NOTE: this is *only* faster if the pages from disk are already loaded into memory
+    fb = dest.allocator.from_buffer(src.allocator.as_buffer(src._buf))
+    if fb:
+      dest.allocator.transfer(dest._buf, fb, dest.size*dest.dtype.itemsize)
+      return
+  if hasattr(dest.allocator, 'as_buffer'):
+    # fast(ish) path, uses readinto in diskbuffers
+    src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
+  elif hasattr(src.allocator, 'as_buffer'):
+    dest.allocator.copyin(dest._buf, src.allocator.as_buffer(src._buf))
+  else:
+    # slow path, allocates a CPU buffer
+    dest.copyin(src.toCPU().data)
+
 class _BufferCopy(JITRunner):
   # TODO: make wait work
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
     dest, src = rawbufs
     assert dest.size == src.size and dest.dtype == src.dtype, "buffer copy size/dtype mismatch"
-    if DEBUG >= 2: print(f"***      copy {dest.device} <- {src.device} size {dest.size:<16d} dtype {dest.dtype}")
-    if hasattr(dest.allocator, 'transfer') and type(dest.allocator) is type(src.allocator):
-      # fast path, used on HIP between GPUs
-      # NOTE: it's important we use the dest device here to ensure the transfer is ready
-      dest.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
-      return
-    if getenv("FROM_BUFFER") and hasattr(dest.allocator, 'from_buffer') and hasattr(dest.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
-      # fast path, used on Metal in OS X Sonoma
-      # NOTE: this is *only* faster if the pages from disk are already loaded into memory
-      fb = dest.allocator.from_buffer(src.allocator.as_buffer(src._buf))
-      if fb:
-        dest.allocator.transfer(dest._buf, fb, dest.size*dest.dtype.itemsize)
-        return
-    if hasattr(dest.allocator, 'as_buffer'):
-      # fast(ish) path, uses readinto in diskbuffers
-      src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
-    elif hasattr(src.allocator, 'as_buffer'):
-      dest.allocator.copyin(dest._buf, src.allocator.as_buffer(src._buf))
-    else:
-      # slow path, allocates a CPU buffer
-      dest.copyin(src.toCPU().data)
+    st = time.perf_counter()
+    _internal_buffer_copy(dest, src)
+    et = time.perf_counter() - st
+    update_stats(colored(f"copy {dest.device:8s} <- {src.device:8s}", "yellow"), 0, dest.size*dest.dtype.itemsize, {}, et, 2, jit, lra={"global_size": dest.size})
 BufferCopy = _BufferCopy()
 
 # TODO: size, dest, src are the same type. can we enforce this?
