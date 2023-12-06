@@ -176,7 +176,7 @@ class TestSchedule(unittest.TestCase):
     c1 = nn.Conv2d(3,16,3)
 
     # run
-    img = Tensor.rand(2,3,64,64)
+    img = Tensor.empty(2,3,64,64)
     out = c1(img).elu()
     check_schedule(out, 1, [c1.weight, c1.bias])
 

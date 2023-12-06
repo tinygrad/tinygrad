@@ -294,8 +294,8 @@ class TestHandCodedOpts(unittest.TestCase):
       self.skipTest("Device does not use linearizer")
 
   def test_masked_upcast(self):
-    layer_1 = Tensor.cat(*[Tensor.rand(5) for _ in range(4)])
-    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 20))
+    layer_1 = Tensor.cat(*[Tensor.empty(5) for _ in range(4)])
+    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.empty(6, 20))
 
     s = layer_2.lazydata.schedule()[-1]
     k = Linearizer(s.ast)
@@ -307,7 +307,7 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.upcasted == 1 and k.full_shape[-1] == 7
 
   def test_masked_upcast_wino(self):
-    monster = Tensor.stack([Tensor.stack([Tensor.rand(16) for _ in range(6)]) for _ in range(6)])
+    monster = Tensor.stack([Tensor.stack([Tensor.empty(16) for _ in range(6)]) for _ in range(6)])
 
     s = monster.lazydata.schedule()[-1]
     k = Linearizer(s.ast)
@@ -319,7 +319,7 @@ class TestHandCodedOpts(unittest.TestCase):
   def test_masked_upcast_wino_full(self):
     old_wino = Tensor.wino
     Tensor.wino = True
-    x,w = Tensor.rand(1,4,9,9, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
+    x,w = Tensor.empty(1,4,9,9, requires_grad=True).realize(), Tensor.empty(4,4,3,3, requires_grad=True).realize()
     out = Tensor.conv2d(x,w, padding=1)
     upcasts = []
     # collect upcasts of tile transform kernels
@@ -344,9 +344,9 @@ class TestHandCodedOpts(unittest.TestCase):
     Tensor.wino = old_wino
 
   def test_masked_upcast_many(self):
-    layer_1 = Tensor.cat(Tensor.rand(3, 4), Tensor.rand(4, 4))
-    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 7, 4))
-    layer_3 = Tensor.cat(layer_2.unsqueeze(0), Tensor.rand(6, 7, 7, 4))
+    layer_1 = Tensor.cat(Tensor.empty(3, 4), Tensor.empty(4, 4))
+    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.empty(6, 7, 4))
+    layer_3 = Tensor.cat(layer_2.unsqueeze(0), Tensor.empty(6, 7, 7, 4))
 
     s = layer_3.lazydata.schedule()[-1]
     k = Linearizer(s.ast)
