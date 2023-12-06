@@ -93,8 +93,10 @@ def _internal_buffer_copy(dest, src):
   if hasattr(dest.allocator, 'transfer') and type(dest.allocator) is type(src.allocator):
     # fast path, used on HIP between GPUs
     # NOTE: it's important we use the dest device here to ensure the transfer is ready
-    Device[src.device].synchronize()   # TODO: async this
-    Device[src.device].buffers_in_flight.append(src)
+    rdev = Device[src.device]
+    assert isinstance(rdev, Compiled)
+    rdev.synchronize()   # TODO: async this
+    rdev.buffers_in_flight.append(src)    # this is needed to prevent the LRU from reusing this buffer
     dest.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
     return
   if getenv("FROM_BUFFER") and hasattr(dest.allocator, 'from_buffer') and hasattr(dest.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
@@ -274,7 +276,7 @@ class CompiledASTRunner(JITRunner):
 class Compiled:
   def __init__(self, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler, runtime, graph=None):
     self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph = allocator, linearizer_opts, renderer, compiler, runtime, graph
-    self.buffers_in_flight = []
+    self.buffers_in_flight: List[Buffer] = []
   def synchronize(self): self.buffers_in_flight.clear()
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
