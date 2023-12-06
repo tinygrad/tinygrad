@@ -109,21 +109,21 @@ def tts(
   estimate_max_y_length: bool,
   text_mapper: TextMapper,
   model_has_multiple_speakers: bool,
-  batch_size=600,
-  vits_batch_size=1000
+  pad_length=600,
+  vits_pad_length=1000
 ):
   if model_to_use == "mmts-tts": text_to_synthesize = text_mapper.filter_oov(text_to_synthesize.lower())
 
   # Convert the input text to a tensor.
   stn_tst = text_mapper.get_text(text_to_synthesize, hps.data.add_blank, hps.data.text_cleaners)
   init_shape = stn_tst.shape
-  assert init_shape[0] < batch_size, "text is too long"
-  x_tst, x_tst_lengths = stn_tst.pad(((0, batch_size - init_shape[0]),), 1).unsqueeze(0), Tensor([init_shape[0]], dtype=dtypes.int64)
+  assert init_shape[0] < pad_length, "text is too long"
+  x_tst, x_tst_lengths = stn_tst.pad(((0, pad_length - init_shape[0]),), 1).unsqueeze(0), Tensor([init_shape[0]], dtype=dtypes.int64)
   sid = Tensor([speaker_id], dtype=dtypes.int64) if model_has_multiple_speakers else None
 
   # Perform inference.
   audio_tensor = synth.infer(x_tst, x_tst_lengths, sid, noise_scale, length_scale, noise_scale_w, emotion_embedding=emotion_embedding,
-                             max_y_length_estimate_scale=Y_LENGTH_ESTIMATE_SCALARS[model_to_use] if estimate_max_y_length else None, batch_size=vits_batch_size)[0, 0]
+                             max_y_length_estimate_scale=Y_LENGTH_ESTIMATE_SCALARS[model_to_use] if estimate_max_y_length else None, pad_length=vits_pad_length)[0, 0]
   # Save the audio output.
   audio_data = (np.clip(audio_tensor.numpy(), -1.0, 1.0) * 32767).astype(np.int16)
   return audio_data
