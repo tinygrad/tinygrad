@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
-from hypothesis import given, reproduce_failure, strategies as st, settings
+from hypothesis import given, strategies as st, settings
 from tinygrad.helpers import CI, getenv, DType, OSX
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
@@ -124,7 +124,6 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, ht.int32, ht.float32, st.sampled_from(integer_binary_operations), st.sampled_from(binary_operations))
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 
-  @reproduce_failure('6.91.0', b'AXicY2BAB/X//x9gYGAEswEhwwM/')
   @given(ht.float32, ht.float32, ht.int32, st.sampled_from(binary_operations), st.sampled_from(integer_binary_operations))
   def test_float_midcast_int32(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.float32, dtypes.int32)
 
