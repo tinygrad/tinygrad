@@ -6,6 +6,7 @@ from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Option
 from ctypes import _SimpleCData
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
+  import numpy as np
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -132,7 +133,7 @@ class DType(NamedTuple):
     if dtypes.is_float(self): x = float(x)
     if self is dtypes.bool: x = bool(x)
     if self.ctype is not None: return self.ctype(x)
-    import numpy # TODO: needed for float16 (for now)
+    import numpy as np# TODO: needed for float16 (for now)
     return np.float16(x)
 
 # dependent typing?
