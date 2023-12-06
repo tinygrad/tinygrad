@@ -7,7 +7,7 @@ def derandomize(x):
   if isinstance(x, LazyOp):
     new_op = LoadOps.EMPTY if x.op == LoadOps.CUSTOM else x.op
     return LazyOp(new_op, tuple([derandomize(s) for s in x.src]), None if x.op == LoadOps.CUSTOM else x.arg)
-  x.op = derandomize(x.op)
+  if hasattr(x, "op"): x.op = derandomize(x.op)
   return x
 
 def derandomize_model(model):
