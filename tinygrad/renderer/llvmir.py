@@ -28,8 +28,9 @@ code_for_op: Final[Dict[Op, Callable]] = {
 
 dtype_to_llvm_dtype = {dtypes.float64:ir.DoubleType(), dtypes.float16:ir.HalfType(), dtypes.bfloat16:ir.IntType(16), dtypes.float32:ir.FloatType(), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64), dtypes.int32: ir.IntType(32), dtypes._arg_int32: ir.IntType(32), dtypes.int16:ir.IntType(16), dtypes.uint16:ir.IntType(16), dtypes.uint32:ir.IntType(32), dtypes.uint64:ir.IntType(64)}
 
-def cast(bb, val, input_type, output_type):
+def cast(bb, val, input_type, output_type, bitcast=False):
   if input_type == output_type: return val
+  if bitcast: return bb[-1].bitcast(val, dtype_to_llvm_dtype[output_type])
 
   if dtypes.is_float(input_type):
     if dtypes.is_float(output_type):
@@ -149,7 +150,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
       else: store_op()
     if uop == UOps.ALU:
       lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin])
-    if uop == UOps.CAST: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype)
+    if uop == UOps.CAST: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=isinstance(args, tuple) and args[1])
 
   bb[-1].ret_void()
   return str(module), {}
