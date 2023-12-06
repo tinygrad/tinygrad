@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Callable, List, Tuple, Dict, cast, Union, Optional, TypeVar, Generic
-import functools, itertools, operator, collection
+import functools, itertools, operator
 from tinygrad.helpers import DEBUG, DType, merge_dicts, getenv, all_int
 from tinygrad.device import Device, JITRunner, CompiledASTRunner, Buffer
 from tinygrad.tensor import Tensor
@@ -74,25 +74,25 @@ class TinyJit(Generic[ReturnType]):
       self.ret = self.fxn(*args, **kwargs)
       self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
+      if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
+      # Split JIT cache into batches for execution. This allows the accelerator to run some batches while subsequent graphs are still being updated.
       jit_batches: List[List[JitItem]] = [list()]
       for ji in self.jit_cache:
-        if len(jit_batches[-1]) > 64 or not isinstance(ji, CompiledASTRunner): jit_batches.append(list())
+        if len(jit_batches[-1]) >= getenv("JIT_MAX_BATCH_SIZE", 32) or not isinstance(ji.prg, CompiledASTRunner): jit_batches.append(list())
         jit_batches[-1].append(ji)
 
       self.jit_cache = []
-      for jb in jit_batches:
-        # if your Device supports it, condense the items into a graph executor
+      for i,jb in enumerate(jit_batches):
+        # if your Device supports it, condense the items into a graph executor.
         if (make_graph := Device[Device.DEFAULT].graph) and getenv("JIT") != 2:
           try:
-            if DEBUG >= 1: print(f"JIT GRAPHing {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
-            self.jit_cache.append(JitItem(make_graph(self.jit_cache, input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers)))
+            jb = [JitItem(make_graph(jb, input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers))]
+            if DEBUG >= 2: print(f"JIT GRAPHing batch {i} with {len(jb)} kernels")
           except GraphException as e:
-            if DEBUG >= 1: print(f"graph create failed {e}")
-            self.jit_cache.extend(jb)
-        else:
-          if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
-          self.jit_cache.extend(jb)
+            if DEBUG >= 2: print(f"JIT GRAPHing failed batch {i} with {len(jb)} kernels: {e}")
+        elif DEBUG >= 2: print(f"JIT regular batch {i} with {len(jb)} kernels")
+        self.jit_cache.extend(jb)
 
       self.input_replace = get_input_replace(self.jit_cache, input_rawbuffers)
     elif self.cnt == 0:
