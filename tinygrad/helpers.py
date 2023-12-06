@@ -9,6 +9,7 @@ if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once min
 
 T = TypeVar("T")
 U = TypeVar("U")
+Scalar = Union[int, float, bool, bytes, type(None)]
 # NOTE: it returns int 1 if x is empty regardless of the type of x
 def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.__mul__, x, 1)
 
@@ -50,6 +51,18 @@ def get_child(obj, key):
     elif isinstance(obj, dict): obj = obj[k]
     else: obj = getattr(obj, k)
   return obj
+def get_shape(x: Union[List, Scalar], _shape=tuple()) -> Tuple[int, ...]:
+  while isinstance(x, List):
+    _shape += (len(x), )
+    shapes = tuple([get_shape(y) for y in x])
+    if not all(shapes[0] == s for s in shapes): raise ValueError("Inconsistent dimensions")
+    if len(x) > 0: x = x[0]
+    else: return _shape
+  if isinstance(x, Scalar): return _shape
+  # TODO: onnx embedds numpy elements in Lists. I can't think of a way to avoid the import
+  import numpy as np
+  if isinstance(x, np.generic): return _shape
+  raise ValueError(f"Sequence must consist of scalar types - {Scalar} - {type(x)}")
 
 @functools.lru_cache(maxsize=None)
 def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])
