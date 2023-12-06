@@ -3,7 +3,6 @@ import os, functools, platform, time, re, contextlib, operator, hashlib, pickle,
 from urllib import request
 from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
-import ctypes
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
   import numpy as np
@@ -129,6 +128,7 @@ class DType(NamedTuple):
     return DType(self.priority, self.itemsize*sz, self.name+str(sz), None, None, sz)
   def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
   def to_ctype(self, x: Union[int, float, bool]):
+    assert not isinstance(self, dtypes.float16)
     if dtypes.is_int(self): x = int(x)
     if dtypes.is_float(self): x = float(x)
     if self is dtypes.bool: x = bool(x)
