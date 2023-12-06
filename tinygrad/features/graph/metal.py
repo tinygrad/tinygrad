@@ -1,5 +1,4 @@
 from typing import List, Any, Dict, cast, Optional
-import numpy as np
 import Metal
 from tinygrad.helpers import dtypes, dedup, unwrap2
 from tinygrad.device import Buffer, CompiledASTRunner, update_stats
@@ -49,7 +48,7 @@ class MetalGraph:
       icb_command.setBarrier()
     self.all_resources = dedup(all_resources)
     self.command_buffer: Any = None
-    if len(var_vals): self.int_buf_view = np.frombuffer(self.int_buf.contents().as_buffer(self.int_buf.length()), np.int32)
+    if len(var_vals): self.int_buf_view = self.int_buf.contents().as_buffer(self.int_buf.length())
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # NOTE: you at least can't update the ints if this is running

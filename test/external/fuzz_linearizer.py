@@ -67,7 +67,7 @@ def fuzz_linearizer(lin: Linearizer):
       print(f"{lin.applied_opts=}")
       return msg
 
-    result = rawbufs[0].toCPU()
+    result = np.frombuffer(rawbufs[0].toCPU(), rawbufs[0].dtype.np)
     if ground_truth is None:
       ground_truth = result
     else:
