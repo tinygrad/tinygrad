@@ -354,7 +354,7 @@ class WGSLLanguage(CStyleLanguage):
     return f"if (bool({cond})) {{"
 
   def render_conditional(self, cond:str, x:str, y:str) -> str:
-    return f"select(f32({y}), {x}, bool({cond}))"
+    return f"select({y}, {x}, bool({cond}))"
 
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
     if self.type_map[var_dtype]: return f"bitcast<{self.type_map[var_dtype]}>({x[0]})" if bitcast else f"{self.type_map[var_dtype]}({x[0]})"
