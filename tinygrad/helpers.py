@@ -128,7 +128,7 @@ class DType(NamedTuple):
     return DType(self.priority, self.itemsize*sz, self.name+str(sz), None, None, sz)
   def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
   def to_ctype(self, x: Union[int, float, bool]):
-    assert not isinstance(self, dtypes.float16)
+    assert not dtypes.is_float(self) and self.sz == 2, "float16 not yet"
     if dtypes.is_int(self): x = int(x)
     if dtypes.is_float(self): x = float(x)
     if self is dtypes.bool: x = bool(x)
