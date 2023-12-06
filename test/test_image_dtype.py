@@ -39,5 +39,29 @@ class TestImageDType(unittest.TestCase):
     imgv = it.numpy()
     np.testing.assert_equal(np.maximum(imgv[:, 0], 0), it[:, 0].relu().realize())
 
+  def test_lru_alloc(self):
+    data = Tensor.randn(9*27*4).realize()
+    it = data.cast(dtypes.imagef((9,27,4))).realize()
+    b1 = it.lazydata.realized._buf
+    del it
+    it = data.cast(dtypes.imagef((9,27,4))).realize()
+    assert it.lazydata.realized._buf == b1
+
+  def test_no_lru_alloc(self):
+    data = Tensor.randn(9*27*4).realize()
+    it = data.cast(dtypes.imagef((9,27,4))).realize()
+    b1 = it.lazydata.realized._buf
+    del it
+    it = data.cast(dtypes.imagef((10,27,4))).realize()
+    assert it.lazydata.realized._buf != b1
+
+  def test_no_lru_alloc_dtype(self):
+    data = Tensor.randn(9*27*4).realize()
+    it = data.cast(dtypes.imagef((9,27,4))).realize()
+    b1 = it.lazydata.realized._buf
+    del it
+    it = data.cast(dtypes.imageh((9,27,4))).realize()
+    assert it.lazydata.realized._buf != b1
+
 if __name__ == '__main__':
   unittest.main()
