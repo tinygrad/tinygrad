@@ -160,6 +160,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       else:
         val = lang.code_for_op[args](*[r[x] for x in vin] + [dtype])
       assert child_count[u] != 0, f"childless ALU op found {u}"
+      print(child_count[u])
       if (child_count[u] <= 1 or dtypes.is_int(dtype)) and args != BinaryOps.MAX and not getenv("EXPAND_SSA"):  # fix index rendering issue. fix clang nested max macro issue
         r[u] = val
       else:
@@ -188,6 +189,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
       if len(vin) > 3: kk("}")
     elif uop == UOps.CAST and dtype is not None:
+      if isinstance(args, tuple) and args[1]:
+        for x in vin:
+          name = f"{ssa(u,'bitcast')}"
+          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else x.dtype.name} {name} = {r[x]};")
+          r[x] = name
       val = lang.render_cast([r[x] for x in vin], dtype, bitcast=isinstance(args, tuple) and args[1])
       if child_count[u] <= 1: r[u] = val
       else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
