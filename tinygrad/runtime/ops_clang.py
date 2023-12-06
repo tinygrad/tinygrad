@@ -11,7 +11,7 @@ CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define
 def compile_clang(prg:str, header:str=CLANG_PROGRAM_HEADER) -> bytes:
   # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
   with tempfile.NamedTemporaryFile(delete=True) as output_file:
-    subprocess.check_output(args=('clang -shared -O2 -Wall -Werror -x c -lm -fPIC --rtlib=compiler-rt - -o '+str(output_file.name)).split(), input=(header+prg).encode('utf-8'))
+    subprocess.check_output(args=('clang -shared -march=native -O2 -Wall -Werror -x c -fPIC - -o '+str(output_file.name)).split(), input=(header+prg).encode('utf-8'))
     return pathlib.Path(output_file.name).read_bytes()
 
 class ClangProgram:

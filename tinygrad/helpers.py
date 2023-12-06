@@ -56,18 +56,7 @@ def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+str
 @functools.lru_cache(maxsize=None)
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posix()
-def from_mv(mv, to_type=ctypes.c_char): return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type))
-def to_char_p_p(options: List[bytes], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])
-@functools.lru_cache(maxsize=None)
-def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
-  class CStruct(ctypes.Structure):
-    _pack_, _fields_ = 1, fields
-  return CStruct
-def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
-def get_bytes(arg, get_sz, get_str, check) -> bytes: return (sz := init_c_var(ctypes.c_size_t(), lambda x: check(get_sz(arg, ctypes.byref(x)))), ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value))[1]
-def flat_mv(mv:memoryview):
-  if len(mv) == 0: return mv
-  return mv.cast("B", shape=(mv.nbytes,))
+
 class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
   def __init__(self, **kwargs): self.kwargs = kwargs
@@ -128,11 +117,14 @@ class DType(NamedTuple):
 
 # dependent typing?
 class ImageDType(DType):
-  def __new__(cls, priority, itemsize, name, np, shape):
+  def __new__(cls, priority, itemsize, name, np, shape, base):
     return super().__new__(cls, priority, itemsize, name, np)
-  def __init__(self, priority, itemsize, name, np, shape):
+  def __init__(self, priority, itemsize, name, np, shape, base):
     self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
+    self.base: DType = base
     super().__init__()
+  def scalar(self): return self.base
+  def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
   # TODO: fix this to not need these
   def __hash__(self): return hash((super().__hash__(), self.shape))
@@ -179,9 +171,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shp)
+  def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shp, dtypes.float32)
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp)
+  def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp, dtypes.float32)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and v.__class__ is not staticmethod}
@@ -273,6 +265,21 @@ def cpu_time_execution(cb, enable):
   if enable: st = time.perf_counter()
   cb()
   if enable: return time.perf_counter()-st
+
+# *** ctypes helpers
+
+def from_mv(mv, to_type=ctypes.c_char): return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type))
+def to_char_p_p(options: List[bytes], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])
+@functools.lru_cache(maxsize=None)
+def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
+  class CStruct(ctypes.Structure):
+    _pack_, _fields_ = 1, fields
+  return CStruct
+def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
+def get_bytes(arg, get_sz, get_str, check) -> bytes: return (sz := init_c_var(ctypes.c_size_t(), lambda x: check(get_sz(arg, ctypes.byref(x)))), ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value))[1]
+def flat_mv(mv:memoryview):
+  if len(mv) == 0: return mv
+  return mv.cast("B", shape=(mv.nbytes,))
 
 # *** Helpers for CUDA-like APIs.
 

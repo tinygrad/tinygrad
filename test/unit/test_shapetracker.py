@@ -227,6 +227,121 @@ class TestIndexExpressions2d(unittest.TestCase):
       new_st.append(st)
     self.sts = new_st
 
+  def test_reshaping_splitting(self):
+    self.st = CheckingShapeTracker((5,10,5,10))
+    self.st.permute((1, 0, 3, 2))
+    self.st.pad(((0,0), (0,5), (0,0), (0,5)))
+    self.st.reshape((10,2,5,10,2,5))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+
+  def test_reshape_splitting_1(self):
+    self.st = CheckingShapeTracker((1,10,1))
+    self.st.pad(((0,4),(0,0),(1,0)))
+    self.st.reshape((5,5,2,2))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+
+  def test_reshape_combining_1(self):
+    self.st = CheckingShapeTracker((2,1,10))
+    self.st.pad(((2,6), (0,0), (0,0)))
+    self.st.reshape((100,))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+
+  def test_reshape_combining_2(self):
+    self.st = CheckingShapeTracker((1,1,5))
+    self.st.pad(((3,6), (0,0), (0,5)))
+    self.st.reshape((100,))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+
+  def test_reshape_combining_3(self):
+    self.st = CheckingShapeTracker((1,1,4))
+    self.st.pad(((3,6), (0,0), (1,5)))
+    self.st.reshape((100,))
+    assert len(self.st.views) == 1
+    assert self.st.views[0].mask[0] == (31, 35)
+    self.st.assert_same()
+
+  def test_reshape_combining_4(self):
+    # interestingly this one is quite slow
+    self.st = CheckingShapeTracker((1,1,5,5,1,1,5))
+    self.st.pad(((3,6), (0,0), (0,5), (0,0), (3,6), (0,0), (0,5)))
+    self.st.reshape((100,5,100))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+
+  def test_reshape_splitting_combining(self):
+    self.st = CheckingShapeTracker((1,5,5))
+    self.st.pad(((0,4), (0,5), (0,0)))
+    self.st.reshape((10,25))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+
+  def test_reshape_only_1s(self):
+    self.st = CheckingShapeTracker((1, 1, 1, 4, 1, 3, 5, 1))
+    self.st.pad(((0,4), (0,0), (0,0), (1,1), (0,0), (0,0), (0,0), (0,0)))
+    self.st.reshape((5, 6, 3, 5))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+    self.st.reshape((1, 1, 5, 6, 3, 5, 1, 1))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+    self.st.reshape((1, 5, 6, 1, 3, 1, 5, 1))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+
+  def test_zero_mask_1(self):
+    self.st = CheckingShapeTracker((1, 3, 2))
+    self.st.pad(((0,0), (0,3), (0,0)))
+    self.st.shrink(((0,1), (3,6), (0,2)))
+    self.st.reshape((3,2))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+    self.st.reshape((1, 3, 1, 2, 1))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+
+  def test_zero_mask_2(self):
+    self.st = CheckingShapeTracker((1, 3, 2))
+    self.st.pad(((0,2), (0,3), (0,0)))
+    self.st.shrink(((2,3), (3,6), (0,2)))
+    self.st.reshape((3,2))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+    self.st.reshape((1, 3, 1, 2, 1))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+
+  def test_expanded_reshaped(self):
+    self.st = CheckingShapeTracker((1, 3, 2, 1))
+    self.st.expand((5, 3, 2, 2))
+    self.st.pad(((0,0), (0,3), (0,0), (0, 0)))
+    self.st.reshape((5, 2, 3, 2, 2))
+    assert len(self.st.views) == 1
+    self.st.assert_same()
+
+  def test_splitting_big(self):
+    self.st = CheckingShapeTracker((1, 5, 1, 15, 1))
+    self.st.pad(((0,0), (0,5), (0,0), (0,15), (0,0)))
+    self.st.reshape((10, 1, 30))
+    self.st.permute((2,1,0))
+    self.st.reshape((2,3,5,2,5))
+    assert len(self.st.views) == 1
+    v = self.st.views[-1]
+    assert v.strides == (15, 5, 1, 75, 15) and v.mask == ((0, 1), (0, 3), (0, 5), (0, 1), (0, 5))
+    self.st.assert_same()
+
+  def test_combining_big(self):
+    self.st = CheckingShapeTracker((1,3,1,5,3,1))
+    self.st.pad(((0,0),(2,2),(0,0),(0,0),(0,0),(0,0)))
+    self.st.reshape((1,1,1,105,1,1))
+    assert len(self.st.views) == 1
+    v = self.st.views[-1]
+    assert v.strides == (0, 0, 0, 1, 0, 0) and v.mask == ((0, 1), (0, 1), (0, 1), (30, 75), (0, 1), (0, 1)) and v.offset == -30
+    self.st.assert_same()
+
 class TestSimplifyingShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = CheckingShapeTracker((1, 10))
@@ -362,6 +477,18 @@ class TestComplexShapeTracker(unittest.TestCase):
     print(self.st.views)
     assert self.st.contiguous
 
+  def test_reshape_stable_diffusion(self):
+    # regression test for https://github.com/tinygrad/tinygrad/pull/2616
+    st = ShapeTracker((View((2, 1920, 32, 32), (1310720, 1024, 32, 1), 0, ((0, 2), (0, 1280), (0, 32), (0, 32)), False),))
+    st = st.reshape((2, 32, 240, 256))
+    assert len(st.views) == 2
+
+  def test_reshape_trailing_invalid_ones(self):
+    st = ShapeTracker((View(shape=(1, 1, 5), strides=(0, 0, 1), offset=-5, mask=((1, 1), (0, 1), (0, 5)), contiguous=False),))
+    st = st.reshape((5,))
+    assert len(st.views) == 1
+    assert st.views[0].mask == ((0,0),)
+
 class TestSingleShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = CheckingShapeTracker((7,4))
@@ -406,7 +533,6 @@ class TestShapeTrackerFuzzFailures(unittest.TestCase):
     self.st = CheckingShapeTracker((3,3,3))
   def tearDown(self):
     self.st.assert_same()
-  @unittest.skip("simplify doesn't work in this case")
   def test_case_1(self):
     self.st.shrink(((1, 2), (1, 3), (1, 3)))
     self.st.reshape((1, 4))
