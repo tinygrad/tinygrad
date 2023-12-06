@@ -319,7 +319,7 @@ class TestIndexing(unittest.TestCase):
     '''
     # TODO: ????????
     # TODO: idk
-    # HACK: I just tried random stuff for 2 days... this passes.. I think it makes sense?
+    # HACK: I just tried random stuff for 2 days... this passes.. it kinda makes sense?
     reference = Tensor.arange(0., 24).realize().reshape(3, 8)
     strided = Tensor(LazyBuffer(device=reference.device, 
                                 st=ShapeTracker((View(shape=(2, 4), strides=(8, 2), offset=1, mask=None, contiguous=True), )), 
@@ -624,8 +624,8 @@ class TestIndexing(unittest.TestCase):
       '''
       assert_set_eq(reference, indexer, 212)
       assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
-      assert_backward_eq(reference, indexer)
       '''
+      assert_backward_eq(reference, indexer)
 
     reference = Tensor.arange(0., 1296).reshape(3, 9, 8, 6)
 
