@@ -150,6 +150,7 @@ def pretrain():
   train_batcher = iterate(bs=BS, val=False)
   eval_batcher = iterate(bs=EVAL_BS, val=True)
   accuracy_achieved = False
+  wallclock_start = time.monotonic()
   for _ in range(EPOCH):
     i = 0
     while i <= STEPS:
@@ -175,7 +176,10 @@ def pretrain():
             acc = (sum(acc) / len(acc))*100.0 if getenv('DIST') else acc
             print(f"MLM accuarcy: {acc:.2f}%, val_loss STEP={i} (in {(time.monotonic()-st)*1e3:.2f} ms)")
             if acc > 72.0:
-              print(f"MLM accuracy achieved.")
+              wallclock_end = time.monotonic()
+              hours, remainder = divmod(wallclock_end - wallclock_start, 3600)
+              minutes, seconds = divmod(remainder, 60)
+              print(f"MLM accuracy achieved in {int(hours)} hours, {int(minutes)} minutes, and {int(seconds)} seconds.")
               accuracy_achieved = True
               break
           e += 1
