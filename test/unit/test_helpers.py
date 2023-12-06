@@ -189,7 +189,6 @@ class TetsToMv(unittest.TestCase):
   def test_to_mv(self):
 
     def test(l: list, dtype: DType):
-      import struct
       mv, shape = to_mv(l, dtype)
       assert np.array_equal(np.frombuffer(mv, dtype=dtype.np).reshape(shape), np.array(l, dtype=dtype.np))
 
