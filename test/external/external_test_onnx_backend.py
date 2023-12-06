@@ -5,7 +5,7 @@ import onnx.backend.test
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, CI
-from tinygrad import Device
+from tinygrad.device import Device, Compiled
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
@@ -47,14 +47,16 @@ backend_test.exclude('test_reduce_prod_*')
 backend_test.exclude('test_adam_multiple_cpu')
 backend_test.exclude('test_nesterov_momentum_cpu')
 
-# we only support float32
-backend_test.exclude('uint8')
-backend_test.exclude('uint16')
-backend_test.exclude('uint32')
-backend_test.exclude('uint64')
-backend_test.exclude('int8')
-backend_test.exclude('int16')
-backend_test.exclude('float64')
+# about different dtypes
+backend_test.exclude('int8')  #  OverflowError: cannot convert float infinity to integer
+
+if Device.DEFAULT in ["TORCH"]:
+  backend_test.exclude('uint16')
+  backend_test.exclude('uint32')
+  backend_test.exclude('uint64')
+if Device.DEFAULT in ["METAL"]:
+  backend_test.exclude('float64')
+
 backend_test.exclude('string')
 
 backend_test.exclude('test_pow_types_int*')
@@ -186,7 +188,7 @@ if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
 backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 
 # TODO: this somehow passes in CI but does not pass if run locally
-if Device.DEFAULT in ['GPU', 'METAL', 'LLVM', 'CLANG']:
+if isinstance(Device[Device.DEFAULT], Compiled):
   backend_test.exclude('test_MaxPool3d_stride_padding_cpu')
 
 # disable model tests for now since they are slow

@@ -90,6 +90,10 @@ class Less(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     return x.e(BinaryOps.CMPLT, y)
 
+class Xor(Function):
+  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
+    return x.e(BinaryOps.XOR, y)
+
 class Add(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     return x.e(BinaryOps.ADD, y)
