@@ -542,7 +542,7 @@ class TestIndexing(unittest.TestCase):
       pyt = tensor.detach()
       numt = tensor.detach()
       pyt[indexer] = val
-      numt = np.array(set_numpy(numt, indexer, val)) #TODO: shouldn't this already be a numpy array? Why wrap numpy array again???
+      numt = set_numpy(numt, indexer, val)
       numpy_testing_assert_equal_helper(pyt, numt)
 
     '''
@@ -597,7 +597,6 @@ class TestIndexing(unittest.TestCase):
       # weird shape
       [slice(None), [[0, 1],
                       [2, 3]]],
-
       # negatives
       [[-1], [0]],
       [[0, 2], [-1]],
