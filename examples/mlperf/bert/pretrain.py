@@ -149,6 +149,7 @@ def pretrain():
   
   train_batcher = iterate(bs=BS, val=False)
   eval_batcher = iterate(bs=EVAL_BS, val=True)
+  accuracy_achieved = False
   for _ in range(EPOCH):
     i = 0
     while i <= STEPS:
@@ -162,12 +163,26 @@ def pretrain():
           et = time.monotonic()
           acc = acc.numpy()
           cl = time.monotonic()
-          print(f"eval     MLM accuarcy: {acc:.2f}%, val_loss STEP={i} (in {(time.monotonic()-st)*1e3:.2f} ms)")
-
-          #TODO: IF mlm acc > 0.72 break, DIST support, check multiple step eval
+          if getenv('DIST'):
+            if rank == 0:
+              accs = []
+              for j in range(1, min(world_size, 8)):
+                accs.append(OOB.recv(j))
+            elif rank < min(world_size, 8):
+              OOB.send(acc, 0)
+          
+          if rank == 0:
+            acc = (sum(acc) / len(acc))*100.0 if getenv('DIST') else acc
+            print(f"MLM accuarcy: {acc:.2f}%, val_loss STEP={i} (in {(time.monotonic()-st)*1e3:.2f} ms)")
+            if acc > 72.0:
+              print(f"MLM accuracy achieved.")
+              accuracy_achieved = True
+              break
           e += 1
           st = cl
-      if STEPS == 0 or i==STEPS: break
+      if accuracy_achieved or STEPS == 0 or i==STEPS: break
+
+      if accuracy_achieved: break
 
       st = time.monotonic()
       X, _ = next(train_batcher)
