@@ -121,7 +121,7 @@ class DType(NamedTuple):
   itemsize: int
   name: str
   np: Optional[str]  # TODO: someday this will be removed with the "remove numpy" project
-  ctype: Type[_SimpleCData] = None
+  ctype: Optional[Any] = None
   sz: int = 1
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
   def vec(self, sz:int):
@@ -165,10 +165,10 @@ class dtypes:
   def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
   def from_np(x) -> DType:
-    if isinstance(x, DType): return DTYPES_DICT[x.np]
+    if isinstance(x, DType): return DTYPES_DICT[x.np if x.np is not None else "float64"]
     if isinstance(x, str): return DTYPES_DICT[x]
-    x: np.dtype = x
-    return DTYPES_DICT[x.name]
+    y: np.dtype = x
+    return DTYPES_DICT[y.name]
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", "bool", ctypes.c_byte)
