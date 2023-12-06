@@ -26,7 +26,9 @@ class TestTorchLoad(unittest.TestCase):
   def test_load_convnext(self): compare_weights_both('https://dl.fbaipublicfiles.com/convnext/convnext_tiny_1k_224_ema.pth')
 
   @unittest.skipIf(Device.DEFAULT == "GPU" and CI, "GPU requires cl_khr_fp16")
+  @unittest.skipIf(Device.DEFAULT == "TORCH", "torch doesn't support the way we load bfloat (cast to uint32)")
   def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/qazalin/bf16-lightweight/resolve/main/consolidated.00.pth?download=true")
+
   # TODO: support pytorch tar format with minimal lines
   #def test_load_resnet(self): compare_weights_both('https://download.pytorch.org/models/resnet50-19c8e357.pth')
 

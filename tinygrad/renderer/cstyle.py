@@ -192,7 +192,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       if isinstance(args, tuple) and args[1]:
         for x in vin:
           name = f"{ssa(u,'bitcast')}"
-          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else x.dtype.name} {name} = {r[x]};")
+          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else cast(DType, x.dtype).name} {name} = {r[x]};")
           r[x] = name
       val = lang.render_cast([r[x] for x in vin], dtype, bitcast=isinstance(args, tuple) and args[1])
       if child_count[u] <= 1: r[u] = val
