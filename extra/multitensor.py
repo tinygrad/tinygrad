@@ -26,8 +26,8 @@ def explicit_shard_W_axis_1(X, W):
     assert m.lazydata.st.views[0].mask is not None
     ret = m.sum(2)
     return ret
-  Os = [lm(Xs[0], Ws[0]), lm(Xs[1], Ws[1])]
-  #Os = [Xs[0] @ Ws[0], Xs[1] @ Ws[1]]
+  #Os = [lm(Xs[0], Ws[0]), lm(Xs[1], Ws[1])]
+  Os = [Xs[0] @ Ws[0], Xs[1] @ Ws[1]]
   for x in Os: x.realize()
   return Os[0].to(Device.DEFAULT) + Os[1].to(Device.DEFAULT)
 
