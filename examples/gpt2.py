@@ -159,9 +159,10 @@ class GPT2:
 if __name__ == "__main__":
   Tensor.no_grad = True
   print(f"using {Device.DEFAULT} backend")
+  default_prompt = "What is the answer to life, the universe, and everything?"
 
   parser = argparse.ArgumentParser(description='Run GPT2 in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument('--prompt', type=str, default="What is the answer to life, the universe, and everything?", help="Phrase to start with")
+  parser.add_argument('--prompt', type=str, default=default_prompt, help="Phrase to start with")
   parser.add_argument('--count', type=int, default=100, help="Max number of tokens to generate")
   parser.add_argument('--temperature', type=float, default=0.8, help="Temperature in the softmax")
   parser.add_argument('--model_size', type=str, default="gpt2-medium", help="Size of model to use [gpt2, gpt2-medium, gpt2-large, gpt2-xl]")
@@ -170,6 +171,7 @@ if __name__ == "__main__":
   parser.add_argument('--batch_size', type=int, default=1, help="Set the input batch size")
   parser.add_argument('--benchmark', type=int, default=-1, help="Benchmark GPT with the given number of tokens")
   parser.add_argument('--noshow', action='store_true', help="Don't show the output")
+  parser.add_argument('--validate', action='store_true', help="Validate the generated output")
   args = parser.parse_args()
 
   if args.seed is not None:
@@ -192,3 +194,7 @@ if __name__ == "__main__":
       if len(texts) == 1: print(texts[0])
       else:
         for i,text in enumerate(texts): print(colored(f"Response {i}:", "green"), text)
+
+    if args.validate:
+      assert args.prompt == default_prompt and args.temperature == 0 and args.model_size == "gpt2-medium" and args.count == 10, "input does not match"
+      assert texts[0] == "What is the answer to life, the universe, and everything?\n\nThe answer is that we are all one"
