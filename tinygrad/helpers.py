@@ -124,7 +124,6 @@ class DType(NamedTuple):
   structf: Optional[str] = None
   sz: int = 1
   def __repr__(self):
-    print(self.name)
     return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
   def vec(self, sz:int):
     assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
