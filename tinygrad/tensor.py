@@ -176,10 +176,9 @@ class Tensor:
         x[1] = x[0] ^ ((x[1] * (2 ** r)) + (x[1] / (2 ** (32 - r))))
       x = [(x[0] + ks[0]).realize(), (x[1] + ks[1] + i + 1).realize()]
       rotations, ks = rotations[1:] + rotations[:1], ks[1:] + ks[:1]
-    out = x[0].cat(x[1]).cast(dtypes.float32) / (2 ** 32 - 1)
-    out = out[:out.shape[0]-odd_counts].reshape(shape).cast(Tensor.default_type if dtype is None else dtype)
+    out = x[0].cat(x[1])[:num].realize().cast(dtypes.float32) / (2 ** 32 - 1)
     out.requires_grad = kwargs.get("requires_grad")
-    return out.realize()
+    return out.reshape(shape).cast(Tensor.default_type if dtype is None else dtype)
 
   # ***** creation helper functions *****
 
