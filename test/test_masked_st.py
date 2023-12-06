@@ -11,12 +11,20 @@ class TestMaskedShapeTracker(unittest.TestCase):
     ret = c.data()
     assert ret.tolist() == [1.0, 1.0, 0.0, 0.0, 0.0]
 
+  def test_mul_both_masked(self):
+    a = Tensor([1,1]).pad(((0,3),))
+    b = Tensor([1,1]).pad(((0,3),))
+    c = a*b
+    assert c.shape == a.shape
+    assert c.lazydata.st.views[0].mask is not None
+    ret = c.data()
+    assert ret.tolist() == [1.0, 1.0, 0.0, 0.0, 0.0]
+
   def test_add_masked(self):
     a = Tensor([1,1]).pad(((0,2),))
     b = Tensor([1,1]).pad(((0,2),))
     c = a+b
-    # TODO: make this true
-    #assert c.lazydata.st.views[0].mask is not None
+    assert c.lazydata.st.views[0].mask is not None
     ret = c.data()
     assert ret.tolist() == [2.0, 2.0, 0.0, 0.0]
 

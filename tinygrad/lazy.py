@@ -206,9 +206,9 @@ class LazyBuffer:
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), dtypes.from_np(self.dtype.np), self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
 
   def copy_to_device(self, device:str) -> LazyBuffer:
-    # back off a FROM if it's a double FROM
-    if not self.realized and self.op.op == LoadOps.FROM and cast(LazyBuffer, self.op.src[0]).device == device: return cast(LazyBuffer, self.op.src[0])
-    return LazyBuffer.loadop(LoadOps.FROM, self.shape, self.dtype, device, src=self.contiguous())
+    # back off a COPY if it's a double COPY
+    if not self.realized and self.op.op == LoadOps.COPY and cast(LazyBuffer, self.op.src[0]).device == device: return cast(LazyBuffer, self.op.src[0])
+    return LazyBuffer.loadop(LoadOps.COPY, self.shape, self.dtype, device, src=self.contiguous())
 
   def contiguous(self:LazyBuffer) -> LazyBuffer:
     if not self.realized and self.op.op in LoadOps and self.op.op != LoadOps.CONST: return self  # all LoadOps are already contiguous (except CONST)
@@ -247,12 +247,15 @@ class LazyBuffer:
         new_srcs.append(x)
       return new_srcs[0].e(op, *new_srcs[1:], arg=arg).contiguous()
 
-    # do shapetracker math
-    if op == BinaryOps.MUL and len(srcs[0].st.views) == 1 and len(srcs[1].st.views) == 1:
+    # do shapetracker padding math (TODO: merging?)
+    if op in {BinaryOps.MUL, BinaryOps.ADD} and len(srcs[0].st.views) == 1 and len(srcs[1].st.views) == 1:
       m0, m1 = srcs[0].st.views[0].mask, srcs[1].st.views[0].mask
       out_mask = None
-      if m0 is None and m1 is not None: out_mask = m1
-      elif m0 is not None and m1 is None: out_mask = m0
+      if m0 is not None and m0 == m1:  # if they match, it works for both MUL and ADD
+        out_mask = m0
+      if op == BinaryOps.MUL:
+        if m0 is None and m1 is not None: out_mask = m1
+        elif m0 is not None and m1 is None: out_mask = m0
       if out_mask is not None:
         shrink_srcs = tuple(x.shrink(out_mask) for x in srcs)  # remove the mask from the inputs
         ret = create_lazybuffer(out_device, ShapeTracker.from_shape(shrink_srcs[0].shape), BinaryOps, LazyOp(op, shrink_srcs, arg), out_dtype)
@@ -270,6 +273,12 @@ class LazyBuffer:
 
   def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
+    if self.op.op is MovementOps.PAD:
+      # check if PAD is 0 on all the reduce axis
+      if all(p == (0,0) for p,s,ns in zip(self.op.arg, self.shape, new_shape) if s != ns):
+        new_new_shape = tuple(ns if s != ns else os for s,os,ns in zip(self.shape, self.op.src[0].shape, new_shape))
+        return self.op.src[0].r(op, new_new_shape).pad(self.op.arg)
+
     srcs = _push_movement_ops((self,)) if SHUFFLE_MOVEMENT_OPS else (self,)
     unbound_new_shape = tuple(s.unbind()[0] if not isinstance(s, int) else s for s in new_shape)
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), ReduceOps, LazyOp(op, srcs, unbound_new_shape), self.dtype)

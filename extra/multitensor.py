@@ -3,7 +3,7 @@ from tinygrad import Tensor, Device, GlobalCounters
 from tinygrad.helpers import Timing
 
 d0, d1 = f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2"
-N = 4096
+N = 256
 FLOPS = N*N*N*2
 
 # LazyBuffer should make three fields lists: self.st (all must have the same shape), self.realized, and self.device
@@ -22,12 +22,11 @@ def explicit_shard_W_axis_1(X, W):
     # these are movement ops on the local device
     x = x.reshape(N, 1, N).expand(N, N, N)
     w = w.T.reshape(1, N, N).expand(N, N, N)
-    print(x.lazydata.st, w.lazydata.st)
     m = x*w
-    print("TODO: output should be masked", m.lazydata.st)
-    return m.sum(2)
+    assert m.lazydata.st.views[0].mask is not None
+    ret = m.sum(2)
+    return ret
   Os = [lm(Xs[0], Ws[0]), lm(Xs[1], Ws[1])]
-  print(Os[0].shape, Os[1].shape)
   #Os = [Xs[0] @ Ws[0], Xs[1] @ Ws[1]]
   for x in Os: x.realize()
   return Os[0].to(Device.DEFAULT) + Os[1].to(Device.DEFAULT)
