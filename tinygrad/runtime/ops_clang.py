@@ -1,7 +1,7 @@
 import ctypes, subprocess, functools, pathlib, tempfile
 from typing import Any
 from tinygrad.device import Compiled, MallocAllocator, CachedCompiler
-from tinygrad.helpers import diskcache, cpu_time_execution
+from tinygrad.helpers import cpu_time_execution
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 

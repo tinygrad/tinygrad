@@ -1,7 +1,7 @@
 import ctypes
 from typing import ClassVar, Tuple
 from tinygrad.device import Compiled, MallocAllocator, CachedCompiler
-from tinygrad.helpers import getenv, DEBUG, diskcache, cpu_time_execution
+from tinygrad.helpers import getenv, DEBUG, cpu_time_execution
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir

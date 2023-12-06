@@ -1,10 +1,13 @@
 from wgpu.utils.device import get_default_device
-from tinygrad.device import Compiled, Allocator
+from tinygrad.device import Compiled, Allocator, Compiler
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import WGSLRenderer
 import wgpu
 
 wgpu_device = get_default_device()
+
+class WebGPUCompiler(Compiler):
+  def compile(self, prg): return prg
 
 class WebGPUProgram:
   def __init__(self, name:str, lib:bytes): self.name, self.lib, self.prg = name, lib, wgpu_device.create_shader_module(code=lib)   # NOTE: this is the compiler
@@ -32,4 +35,4 @@ class WebGpuAllocator(Allocator):
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
     super().__init__(WebGpuAllocator(), LinearizerOptions(device="WEBGPU", supports_float4=False, local_max=[256, 256, 64], global_max=[65535, 65535, 65535]),
-                     WGSLRenderer, lambda x: x, WebGPUProgram)
+                     WGSLRenderer, WebGPUCompiler(), WebGPUProgram)
