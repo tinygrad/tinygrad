@@ -73,29 +73,24 @@ class TinyJit(Generic[ReturnType]):
       self.ret = self.fxn(*args, **kwargs)
       self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
+      assert len(set([a for ji in self.jit_cache for i,a in enumerate(ji.rawbufs) if a in input_rawbuffers])) == len(input_rawbuffers), "some input tensors not found"
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
       # if your Device supports it, condense the items into a graph executor.
       if (make_graph := Device[Device.DEFAULT].graph) and getenv("JIT") != 2:
         # Split JIT cache into batches for faster graph execution. This allows the accelerator to run some batches while subsequent graphs are still being updated.
-        jit_batches: List[List[JitItem]] = []
-        for i,ji in enumerate(self.jit_cache):
-          # Decide if we need to allocate a new batch before this jit item. Always put non-CompiledASTRunner into their own batches.
-          if i==0 or len(jit_batches[-1]) >= getenv("JIT_MAX_BATCH_SIZE", 64) or not isinstance(ji.prg, CompiledASTRunner) or not isinstance(self.jit_cache[i-1].prg, CompiledASTRunner):
-            jit_batches.append(list())
-          jit_batches[-1].append(ji)
-
-        self.jit_cache = []
-        for i,jb in enumerate(jit_batches):
+        graphed_jit_cache, batch_size = [], getenv("JIT_BATCH_SIZE", 64)
+        for start in range(0, len(self.jit_cache), batch_size):
+          current_batch = self.jit_cache[start:start+batch_size]
           try:
-            jb = [JitItem(make_graph(jb, input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers))]
-            if DEBUG >= 2: print(f"JIT GRAPHing batch {i} with {len(jb)} kernels")
+            graphed_jit_cache.append(JitItem(make_graph(current_batch, input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers)))
+            if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels")
           except GraphException as e:
-            if DEBUG >= 2: print(f"JIT GRAPHing failed batch {i} with {len(jb)} kernels: {e}")
-          self.jit_cache.extend(jb)
+            graphed_jit_cache.extend(current_batch)
+            if DEBUG >= 2: print(f"JIT GRAPHing failed batch with {len(current_batch)} kernels: {e}")
+        self.jit_cache = graphed_jit_cache
 
       self.input_replace = get_input_replace(self.jit_cache, input_rawbuffers)
-      assert len(set(self.input_replace.values())) == len(input_rawbuffers), "some input tensors not found"
     elif self.cnt == 0:
       # jit ignore
       self.ret = self.fxn(*args, **kwargs)

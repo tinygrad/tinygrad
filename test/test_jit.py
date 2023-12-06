@@ -259,11 +259,12 @@ class TestJit(unittest.TestCase):
   def test_jit_batch_split(self):
     if Device[Device.DEFAULT].graph is None: raise unittest.SkipTest("only test graphs")
 
+    # Create long jit with 83 kernels.
     def f(a, b, c, d):
-      x = (a+b).realize()
-      y = (x*c).realize()
-      rn = Tensor.randn(*a.shape)
-      z = (y*rn).realize()
+      for _ in range(80):
+        a = (a+b).realize()
+      y = (a*c).realize()
+      z = (y*d).realize()
       w = (z*d)
       return w.realize()
 
@@ -273,13 +274,16 @@ class TestJit(unittest.TestCase):
     d = Tensor.randn(10, 10).realize()
 
     jf = TinyJit(f)
-    for _ in range(5): jf(a, b, c, d).numpy()
+    prev = None
+    for _ in range(5):
+      o = jf(a, b, c, d).numpy()
+      if prev is not None: np.testing.assert_allclose(o, prev, atol=1e-4, rtol=1e-5)
+      prev = o
 
     graph_t = Device[Device.DEFAULT].graph.func if isinstance(Device[Device.DEFAULT].graph, functools.partial) else Device[Device.DEFAULT].graph
-    assert len(jf.jit_cache) == 3, "2 graphs and rand op"
+    # Checking that 2 graphs are inited.
     assert isinstance(jf.jit_cache[0].prg, graph_t)
-    assert not isinstance(jf.jit_cache[1].prg, graph_t)
-    assert isinstance(jf.jit_cache[2].prg, graph_t)
+    assert isinstance(jf.jit_cache[1].prg, graph_t)
 
 if __name__ == '__main__':
   unittest.main()
