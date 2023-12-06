@@ -46,12 +46,12 @@ setup(name='tinygrad',
             "opencv-python",
             "tabulate",
             "safetensors",
-            "cloudpickle",
             "transformers",
             "sentencepiece",
             "tiktoken",
             "librosa",
             "networkx",
+            "hypothesis",
         ]
       },
       include_package_data=True)
