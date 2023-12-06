@@ -1,9 +1,13 @@
 repos:
+  - repo: meta
+    hooks:
+    -   id: check-hooks-apply
+    -   id: check-useless-excludes
   - repo: local
     hooks:
       - id: whitespace
         name: strip whitespace
-        entry: ./strip_whitespace.sh
+        entry: .pre-commit-hooks-scripts/strip_whitespace.sh
         language: system
         always_run: true
         pass_filenames: false
@@ -19,6 +23,42 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
+      - id: linecount
+        name: Repo line count
+        entry: |
+          python3 ./sz.py
+        language: system
+        always_run: true
+      - id: sloccount
+        name: Check <5000 lines
+        entry: .pre-commit-hooks-scripts/check_lines.sh
+        language: system
+        always_run: true
+      - id: testquickstart
+        name: Test Quickstart
+        entry: .pre-commit-hooks-scripts/test_quickstart.sh 
+        language: system
+        always_run: true
+      - id: fuzztestsymbolic
+        name: Fuzz Test symbolic
+        entry: python3 test/external/fuzz_symbolic.py
+        language: system
+        always_run: true
+      - id: fuzztestshapetracker
+        name: Fuzz Test shapetracker
+        entry: env PYTHONPATH="." python3 test/external/fuzz_shapetracker.py
+        language: system
+        always_run: true
+      - id: testshapetrackertomovementops
+        name: Test shapetracker to_movement_ops
+        entry: python3 extra/to_movement_ops.py
+        language: system
+        always_run: true
+      - id: useasexternalpackage
+        name: Use as an external package
+        entry: .pre-commit-hooks-scripts/use_as_external_package.sh
+        language: system
+        always_run: true
       - id: docs
         name: docs
         entry: |
