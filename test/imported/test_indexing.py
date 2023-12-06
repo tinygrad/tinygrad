@@ -138,7 +138,7 @@ class TestIndexing(unittest.TestCase):
     self.assertRaises(IndexError, lambda: reference[0.0, :, 0.0])
 
     # TODO: delitem
-    # def delitem(): del reference[0] 
+    # def delitem(): del reference[0]
     # self.assertRaises(TypeError, delitem)
 
   def test_advancedindex(self):
@@ -194,12 +194,12 @@ class TestIndexing(unittest.TestCase):
                   size=torch.Size([4]), stride=[2])
     '''
     reference.realize()
-    strided = Tensor(LazyBuffer(device=reference.device, 
-                                st=ShapeTracker((View.create(shape=(4,), strides=(2,), offset=0),)), 
-                                optype=None, 
+    strided = Tensor(LazyBuffer(device=reference.device,
+                                st=ShapeTracker((View.create(shape=(4,), strides=(2,), offset=0),)),
+                                optype=None,
                                 op=None,
-                                dtype=reference.dtype, 
-                                src=None, 
+                                dtype=reference.dtype,
+                                src=None,
                                 base=reference.lazydata.base)).contiguous()
 
     numpy_testing_assert_equal_helper(strided[[0]], np.array([1]))
@@ -218,12 +218,12 @@ class TestIndexing(unittest.TestCase):
     strided.set_(reference.storage(), storage_offset=4,
                   size=torch.Size([2]), stride=[4])
     '''
-    strided = Tensor(LazyBuffer(device=reference.device, 
-                                st=ShapeTracker((View.create(shape=(2,), strides=(4,), offset=4),)), 
-                                optype=None, 
-                                op=None, 
-                                dtype=reference.dtype, 
-                                src=None, 
+    strided = Tensor(LazyBuffer(device=reference.device,
+                                st=ShapeTracker((View.create(shape=(2,), strides=(4,), offset=4),)),
+                                optype=None,
+                                op=None,
+                                dtype=reference.dtype,
+                                src=None,
                                 base=reference.lazydata.base)).contiguous()
 
     numpy_testing_assert_equal_helper(strided[[0]], np.array([5]))
@@ -338,12 +338,12 @@ class TestIndexing(unittest.TestCase):
                   stride=[8, 2])
     '''
     reference = Tensor.arange(0., 24).realize().reshape(3, 8)
-    strided = Tensor(LazyBuffer(device=reference.device, 
-                                st=ShapeTracker((View.create(shape=(2, 4), strides=(8, 2), offset=1),)), 
-                                optype=None, 
-                                op=None, 
-                                dtype=reference.dtype, 
-                                src=None, 
+    strided = Tensor(LazyBuffer(device=reference.device,
+                                st=ShapeTracker((View.create(shape=(2, 4), strides=(8, 2), offset=1),)),
+                                optype=None,
+                                op=None,
+                                dtype=reference.dtype,
+                                src=None,
                                 base=reference.lazydata.base))
     strided = strided.contiguous()
 
@@ -390,12 +390,12 @@ class TestIndexing(unittest.TestCase):
     # TODO review required
     # strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
                   # stride=[7, 1])
-    strided = Tensor(LazyBuffer(device=reference.device, 
-                                st=ShapeTracker((View.create(shape=(2, 2), strides=(7, 1), offset=10),)), 
-                                optype=None, 
-                                op=None, 
-                                dtype=reference.dtype, 
-                                src=None, 
+    strided = Tensor(LazyBuffer(device=reference.device,
+                                st=ShapeTracker((View.create(shape=(2, 2), strides=(7, 1), offset=10),)),
+                                optype=None,
+                                op=None,
+                                dtype=reference.dtype,
+                                src=None,
                                 base=reference.lazydata.base))
 
     numpy_testing_assert_equal_helper(strided[ri([0]), ri([1])],
@@ -411,16 +411,16 @@ class TestIndexing(unittest.TestCase):
     # TODO review required
     # strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
                   # stride=[7, 1])
-    strided = Tensor(LazyBuffer(device=reference.device, 
-                                st=ShapeTracker((View.create(shape=(2, 2), strides=(7, 1), offset=10),)), 
-                                optype=None, 
-                                op=None, 
-                                dtype=reference.dtype, 
-                                src=None, 
+    strided = Tensor(LazyBuffer(device=reference.device,
+                                st=ShapeTracker((View.create(shape=(2, 2), strides=(7, 1), offset=10),)),
+                                optype=None,
+                                op=None,
+                                dtype=reference.dtype,
+                                src=None,
                                 base=reference.lazydata.base))
     numpy_testing_assert_equal_helper(strided[ri([0, 1]), ri([1, 0])],
                       np.array([11, 17]))
-    # TODO setitem 
+    # TODO setitem
     '''
     strided[ri([0, 1]), ri([1, 0])] = np.array([-1, 2])
     numpy_testing_assert_equal_helper(strided[ri([0, 1]), ri([1, 0])],
@@ -431,12 +431,12 @@ class TestIndexing(unittest.TestCase):
     # TODO review required
     # strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
                   # stride=[7, 1])
-    strided = Tensor(LazyBuffer(device=reference.device, 
-                                st=ShapeTracker((View.create(shape=(2, 2), strides=(7, 1), offset=10),)), 
-                                optype=None, 
-                                op=None, 
-                                dtype=reference.dtype, 
-                                src=None, 
+    strided = Tensor(LazyBuffer(device=reference.device,
+                                st=ShapeTracker((View.create(shape=(2, 2), strides=(7, 1), offset=10),)),
+                                optype=None,
+                                op=None,
+                                dtype=reference.dtype,
+                                src=None,
                                 base=reference.lazydata.base))
 
     rows = ri([[0],
