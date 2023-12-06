@@ -22,7 +22,8 @@ class AssemblyLanguage(NamedTuple):
     if dtypes.is_int(var_dtype): return str(int(x)) + ("U" if dtypes.is_unsigned(var_dtype) else "")
     return "1" if x else "0"
 
-  def render_cast(self, d:str, a:str, dtype:DType, atype:DType) -> str:
+  def render_cast(self, d:str, a:str, dtype:DType, atype:DType, bitcast=False) -> str:
+    if bitcast: return f"mov.b{self.dtype_to_asmtype[dtype][1:]} {d}, {a};"
     no_round = ((dtypes.is_int(dtype) or dtype == dtypes.bool) and (dtypes.is_int(atype) or atype == dtypes.bool)) or ((dtypes.is_float(dtype) and dtypes.is_float(atype)) and dtype.itemsize >= atype.itemsize)
     return f"cvt{'' if no_round else '.rz' if dtypes.is_float(dtype) else '.rzi'}.{self.dtype_to_asmtype[dtype]}.{self.dtype_to_asmtype[atype]} {d}, {a};"
 
@@ -131,7 +132,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       if dtype == dtypes.bool:
         kernel.append(f"setp.ne.{'b16' if vin[0].dtype == dtypes.half else lang.dtype_to_asmtype[vin[0].dtype]} {(pred:=ssa(None, 'bool', 'pred'))}, {r[vin[0]]}, {'0' if vin[0].dtype == dtypes.half else lang.render_const(0, vin[0].dtype)};")
         kernel.append(f"selp.{lang.dtype_to_asmtype[dtype]} {ssa(u, 'cast')}, {lang.render_const(1, dtype)}, {lang.render_const(0, dtype)}, {(pred)};")
-      else: kernel.append(lang.render_cast(ssa(u, 'cast'), r[vin[0]], dtype, vin[0].dtype))
+      else: kernel.append(lang.render_cast(ssa(u, 'cast'), r[vin[0]], dtype, vin[0].dtype, bitcast=isinstance(args, tuple) and args[1]))
     elif uop == UOps.DEFINE_LOCAL:
       assert dtype is not None
       kernel.append(f".shared .align 4 .b8 {args[0]}[{args[1]*dtype.itemsize}];")
