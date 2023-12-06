@@ -1,6 +1,6 @@
 import ctypes
 from typing import ClassVar, Tuple
-from tinygrad.device import Compiled, MallocAllocator
+from tinygrad.device import Compiled, MallocAllocator, CachedCompiler
 from tinygrad.helpers import getenv, DEBUG, diskcache, cpu_time_execution
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -45,13 +45,13 @@ class LLVM:
     backing_mod.triple = llvm.get_process_triple()
     LLVM.engine = llvm.create_mcjit_compiler(backing_mod, LLVM.target_machine)
 
-@diskcache
-def compile_llvm(prg, llvmopt=LLVMOPT) -> bytes:
-  mod = llvm.parse_assembly(prg)
-  mod.verify()
-  LLVM().optimizer.run(mod)
-  if DEBUG >= 5: print(LLVM.target_machine.emit_assembly(mod))
-  return LLVM.target_machine.emit_object(mod)
+class LLVMCompiler(CachedCompiler):
+  def _compile(self, prg:str) -> bytes:
+    mod = llvm.parse_assembly(prg)
+    mod.verify()
+    LLVM().optimizer.run(mod)
+    if DEBUG >= 5: print(LLVM.target_machine.emit_assembly(mod))
+    return LLVM.target_machine.emit_object(mod)
 
 class LLVMProgram:
   def __init__(self, name:str, lib:bytes):
@@ -63,4 +63,4 @@ class LLVMProgram:
     self.cfunc = CFUNCTYPE(ctypes.c_int, *([ctypes.c_void_p]*len(bufs)), *([ctypes.c_int32]*len(vals)))(self.fxn)
     return cpu_time_execution(lambda: self.cfunc(*bufs, *vals), enable=wait)
 
-LLVMDevice = Compiled(MallocAllocator, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, compile_llvm, LLVMProgram)
+LLVMDevice = Compiled(MallocAllocator, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False), uops_to_llvm_ir, LLVMCompiler(), LLVMProgram)

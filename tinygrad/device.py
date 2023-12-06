@@ -3,7 +3,7 @@ import numpy as np
 from collections import defaultdict
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable
 import importlib, inspect, functools, pathlib, time, re, ctypes
-from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType, from_mv, dtypes, flat_mv, ImageDType, round_up
+from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType, from_mv, dtypes, flat_mv, ImageDType, round_up, diskcache
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op
 
@@ -229,6 +229,14 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 
 # **************** for Compiled Devices ****************
 
+class Compiler:
+  def compile(self, prg:str) -> bytes: raise NotImplementedError("must be implemeted")
+
+class CachedCompiler(Compiler):
+  def __init__(self, **kwargs): self.compiler_args = kwargs
+  def compile(self, prg:str) -> bytes: return self._compile(prg, **self.compiler_args) if getenv("DISABLE_COMPILER_CACHE") else diskcache(self._compile)(prg, **self.compiler_args)
+  def _compile(self, prg:str, **kwargs) -> bytes: raise NotImplementedError("must be implemeted")
+
 class CompiledASTRunner(JITRunner):
   def __init__(self, ast:Optional[LazyOp], name:str, prg:str, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, runtime_args:Optional[dict]=None):
     super().__init__()
@@ -245,8 +253,8 @@ class CompiledASTRunner(JITRunner):
       self.vars = vars_from_ast(ast)
       assert all(v._val is None for v in self.vars), f"ASTRunner contains bound Variable {self.vars}"
 
-  def build(self, compiler, runtime):
-    self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
+  def build(self, compiler:Compiler, runtime):
+    self.lib = compiler.compile(self.prg)
     self.clprg = runtime(self.name, self.lib)
     return self
 
@@ -270,7 +278,7 @@ class CompiledASTRunner(JITRunner):
     return et
 
 class Compiled:
-  def __init__(self, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler, runtime, graph=None):
+  def __init__(self, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler:Compiler, runtime, graph=None):
     self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph = allocator, linearizer_opts, renderer, compiler, runtime, graph
   def synchronize(self): pass  # override this in your device
 

@@ -2,31 +2,16 @@ from __future__ import annotations
 from typing import Tuple, Optional, List
 import ctypes, functools
 import gpuctypes.opencl as cl
-from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, diskcache, OSX, ImageDType, DEBUG
+from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, ImageDType, DEBUG
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import OpenCLRenderer
-from tinygrad.device import Compiled, LRUAllocator
+from tinygrad.device import Compiled, LRUAllocator, CachedCompiler
 
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0   # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 
 def check(status):
   if status != 0: raise RuntimeError(f"OpenCL Error {status}")
 def checked(ret, status): return (check(status.value), ret)[1]
-
-def compile_cl(device:CLDevice, prg:str) -> bytes:
-  @diskcache
-  def __compile(prg, *args):
-    program = checked(cl.clCreateProgramWithSource(device.context, 1, to_char_p_p([prg_bytes := prg.encode()]), ctypes.byref(ctypes.c_size_t(len(prg_bytes))), ctypes.byref(status := ctypes.c_int32())), status)
-    status = cl.clBuildProgram(program, 1, ctypes.byref(device.device_id), None, cl.clBuildProgram.argtypes[4](), None)
-    if status != 0:
-      cl.clGetProgramBuildInfo(program, device.device_id, cl.CL_PROGRAM_BUILD_LOG, 0, None, ctypes.byref(log_size := ctypes.c_size_t()))
-      cl.clGetProgramBuildInfo(program, device.device_id, cl.CL_PROGRAM_BUILD_LOG, log_size.value, mstr := ctypes.create_string_buffer(log_size.value), None)
-      raise RuntimeError(f"OpenCL Compile Error\n\n{ctypes.string_at(mstr, size=log_size.value).decode()}")
-    binary_sizes = init_c_var((ctypes.c_size_t * 1)(), lambda x: check(cl.clGetProgramInfo(program, cl.CL_PROGRAM_BINARY_SIZES, ctypes.sizeof(x), ctypes.byref(x), None)))
-    binary = init_c_var(ctypes.create_string_buffer(binary_sizes[0]), lambda x: check(cl.clGetProgramInfo(program, cl.CL_PROGRAM_BINARIES, ctypes.sizeof(ctypes.c_void_p), ctypes.byref((ctypes.c_void_p * 1)(ctypes.addressof(x))), None)))
-    check(cl.clReleaseProgram(program))
-    return bytes(binary)
-  return __compile(prg, device.device_name, device.driver_version) # Keep additional args, since they are used to get the cache_key.
 
 class CLProgram:
   def __init__(self, device:CLDevice, name:str, lib:bytes):
@@ -74,6 +59,22 @@ class CLAllocator(LRUAllocator):
     check(cl.clEnqueueReadBuffer(self.device.queue, src, False, 0, len(dest)*dest.itemsize, from_mv(dest), 0, None, None))
     self.device.synchronize()
 
+class CLCompiler(CachedCompiler):
+  def __init__(self, device, **kwargs):
+    super().__init__(**kwargs)
+    self.device = device
+  def _compile(self, prg:str, **kwargs): # ignore kwargs, take all data from device
+    program = checked(cl.clCreateProgramWithSource(self.device.context, 1, to_char_p_p([prg_bytes := prg.encode()]), ctypes.byref(ctypes.c_size_t(len(prg_bytes))), ctypes.byref(status := ctypes.c_int32())), status)
+    status = cl.clBuildProgram(program, 1, ctypes.byref(self.device.device_id), None, cl.clBuildProgram.argtypes[4](), None)
+    if status != 0:
+      cl.clGetProgramBuildInfo(program, self.device.device_id, cl.CL_PROGRAM_BUILD_LOG, 0, None, ctypes.byref(log_size := ctypes.c_size_t()))
+      cl.clGetProgramBuildInfo(program, self.device.device_id, cl.CL_PROGRAM_BUILD_LOG, log_size.value, mstr := ctypes.create_string_buffer(log_size.value), None)
+      raise RuntimeError(f"OpenCL Compile Error\n\n{ctypes.string_at(mstr, size=log_size.value).decode()}")
+    binary_sizes = init_c_var((ctypes.c_size_t * 1)(), lambda x: check(cl.clGetProgramInfo(program, cl.CL_PROGRAM_BINARY_SIZES, ctypes.sizeof(x), ctypes.byref(x), None)))
+    binary = init_c_var(ctypes.create_string_buffer(binary_sizes[0]), lambda x: check(cl.clGetProgramInfo(program, cl.CL_PROGRAM_BINARIES, ctypes.sizeof(ctypes.c_void_p), ctypes.byref((ctypes.c_void_p * 1)(ctypes.addressof(x))), None)))
+    check(cl.clReleaseProgram(program))
+    return bytes(binary)
+
 class CLDevice(Compiled):
   device_ids = None                 # this is global and only initted once
   def __init__(self, device:str=""):
@@ -93,7 +94,7 @@ class CLDevice(Compiled):
     self.context = checked(cl.clCreateContext(None, 1, ctypes.byref(self.device_id), cl.clCreateContext.argtypes[3](), None, ctypes.byref(status := ctypes.c_int32())), status)
     self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, ctypes.byref(status)), status)
     self.pending_copyin: List[memoryview] = []
-    super().__init__(CLAllocator(self), LinearizerOptions(), OpenCLRenderer, functools.partial(compile_cl, self), functools.partial(CLProgram, self))
+    super().__init__(CLAllocator(self), LinearizerOptions(), OpenCLRenderer, CLCompiler(self, device_name=self.device_name, driver_version=self.driver_version), functools.partial(CLProgram, self))
   def synchronize(self):
     check(cl.clFinish(self.queue))
     self.pending_copyin.clear()

@@ -2,7 +2,7 @@ import ctypes, functools, subprocess
 from typing import Tuple, TypeVar
 import gpuctypes.hip as hip
 from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_c_var, rtc_version_cuda_style, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
-from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
+from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, CachedCompiler
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 
@@ -14,10 +14,8 @@ def check(status):
 
 def hip_time_execution(cb, enable=False): return time_execution_cuda_style(cb, hip.hipEvent_t, hip.hipEventCreate, hip.hipEventRecord, hip.hipEventSynchronize, hip.hipEventDestroy, hip.hipEventElapsedTime, enable=enable)
 
-def compile_hip(device, prg:str) -> bytes:
-  @diskcache
-  def __compile(prg, arch, *args): return compile_cuda_style(prg, [f'--offload-arch={arch}'], hip.hiprtcProgram, hip.hiprtcCreateProgram, hip.hiprtcCompileProgram, hip.hiprtcGetCode, hip.hiprtcGetCodeSize, hip.hiprtcGetProgramLog, hip.hiprtcGetProgramLogSize, check)
-  return __compile(prg, device.arch_name, rtc_version_cuda_style(hip.hiprtcVersion))
+class HIPCompiler(CachedCompiler):
+  def _compile(self, prg:str, arch:str, **kwargs) -> bytes: return compile_cuda_style(prg, [f'--offload-arch={arch}'], hip.hiprtcProgram, hip.hiprtcCreateProgram, hip.hiprtcCompileProgram, hip.hiprtcGetCode, hip.hiprtcGetCodeSize, hip.hiprtcGetProgramLog, hip.hiprtcGetProgramLogSize, check)
 
 class HIPProgram:
   def __init__(self, device:int, name:str, lib:bytes):
@@ -65,5 +63,5 @@ class HIPDevice(Compiled):
     self.arch_name = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode() if not MOCKHIP else "gfx1100"
 
     from tinygrad.features.graph.hip import HIPGraph
-    super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self.device), LinearizerOptions(device="HIP"), HIPRenderer, functools.partial(compile_hip, self), functools.partial(HIPProgram, self.device), HIPGraph)
+    super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self.device), LinearizerOptions(device="HIP"), HIPRenderer, HIPCompiler(arch=self.arch_name, hip_version=rtc_version_cuda_style(hip.hiprtcVersion)), functools.partial(HIPProgram, self.device), HIPGraph)
   def synchronize(self): hip.hipDeviceSynchronize()

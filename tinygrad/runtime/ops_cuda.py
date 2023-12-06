@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 import gpuctypes.cuda as cuda
 from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_c_var, pretty_ptx, cpu_time_execution, rtc_version_cuda_style, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
-from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
+from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, CachedCompiler
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import CUDARenderer
 
@@ -19,10 +19,8 @@ def check(status):
 
 def cu_time_execution(cb, enable=False) -> Optional[float]: return time_execution_cuda_style(cb, cuda.CUevent, cuda.cuEventCreate, cuda.cuEventRecord, cuda.cuEventSynchronize, cuda.cuEventDestroy_v2, cuda.cuEventElapsedTime, enable=enable) if not CUDACPU else cpu_time_execution(cb, enable=enable)
 
-def compile_cuda(device:CUDADevice, prg:str) -> bytes:
-  @diskcache
-  def __compile(prg, arch, *args): return compile_cuda_style(prg, [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include"], cuda.nvrtcProgram, cuda.nvrtcCreateProgram, cuda.nvrtcCompileProgram, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check)
-  return __compile(prg, device.arch_name, rtc_version_cuda_style(cuda.nvrtcVersion))
+class CUDACompiler(CachedCompiler):
+  def _compile(self, prg: str, arch:str, **kwargs) -> bytes: return compile_cuda_style(prg, [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include"], cuda.nvrtcProgram, cuda.nvrtcCreateProgram, cuda.nvrtcCompileProgram, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check)
 
 class CUDAProgram:
   def __init__(self, device:CUDADevice, name:str, lib:bytes):
@@ -79,5 +77,5 @@ class CUDADevice(Compiled):
     from tinygrad.features.graph.cuda import CUDAGraph
     super().__init__(CUDAAllocator(self) if not CUDACPU else MallocAllocator,
                      LinearizerOptions(supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
-                     CUDARenderer, functools.partial(compile_cuda, self), functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
+                     CUDARenderer, CUDACompiler(arch=self.arch_name, cuda_version=rtc_version_cuda_style(cuda.nvrtcVersion)), functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
   def synchronize(self): return check(cuda.cuCtxSynchronize()) if not CUDACPU else None

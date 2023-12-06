@@ -3,21 +3,24 @@ import os, subprocess, pathlib, ctypes, tempfile, functools
 import Metal, libdispatch
 from typing import List, Any, Tuple, Optional
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.helpers import prod, getenv, DEBUG, diskcache, unwrap2
-from tinygrad.device import Compiled, LRUAllocator
+from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
+from tinygrad.device import Compiled, LRUAllocator, CachedCompiler
 from tinygrad.renderer.cstyle import MetalRenderer
 
-def compile_metal(device:MetalDevice, prg:str) -> bytes:
-  @diskcache
-  def __compile(prg, use_xcode):
+METAL_XCODE = bool(getenv("METAL_XCODE"))
+
+class MetalCompiler(CachedCompiler):
+  def __init__(self, device, **kwargs):
+    super().__init__(**kwargs)
+    self.device = device
+  def _compile(self, prg:str, use_xcode:bool):
     if use_xcode:
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
       return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
     options = Metal.MTLCompileOptions.new()
-    library = unwrap2(device.device.newLibraryWithSource_options_error_(prg, options, None))
+    library = unwrap2(self.device.device.newLibraryWithSource_options_error_(prg, options, None))
     return library.libraryDataContents().bytes().tobytes()
-  return __compile(prg, bool(getenv("METAL_XCODE")))
 
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
@@ -80,7 +83,7 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
     from tinygrad.features.graph.metal import MetalGraph
-    super().__init__(MetalAllocator(self), LinearizerOptions(device="METAL"), MetalRenderer, functools.partial(compile_metal, self), functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
+    super().__init__(MetalAllocator(self), LinearizerOptions(device="METAL"), MetalRenderer, MetalCompiler(self, use_metal=METAL_XCODE)), functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
     self.mv_in_metal.clear()
