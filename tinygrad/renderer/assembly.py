@@ -125,7 +125,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
     elif uop == UOps.CAST and dtype is not None:
       assert vin[0].dtype is not None
       if dtype == dtypes.bool:
-        kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[0].dtype]} {(pred:=ssa(None, 'bool', 'pred'))}, {r[vin[0]]}, {lang.render_const(0, vin[0].dtype)};")
+        kernel.append(f"setp.ne.{'b16' if vin[0].dtype == dtypes.half else lang.dtype_to_asmtype[vin[0].dtype]} {(pred:=ssa(None, 'bool', 'pred'))}, {r[vin[0]]}, {'0' if vin[0].dtype == dtypes.half else lang.render_const(0, vin[0].dtype)};")
         kernel.append(f"selp.{lang.dtype_to_asmtype[dtype]} {ssa(u, 'cast')}, {lang.render_const(1, dtype)}, {lang.render_const(0, dtype)}, {(pred)};")
       else: kernel.append(lang.render_cast(ssa(u, 'cast'), r[vin[0]], dtype, vin[0].dtype))
     elif uop == UOps.DEFINE_LOCAL:
