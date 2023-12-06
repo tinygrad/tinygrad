@@ -25,8 +25,7 @@ repos:
         pass_filenames: false
       - id: linecount
         name: Repo line count
-        entry: |
-          python3 ./sz.py
+        entry: python3 ./sz.py
         language: system
         always_run: true
       - id: sloccount
