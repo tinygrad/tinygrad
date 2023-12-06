@@ -15,7 +15,7 @@ def check(status):
 def hip_time_execution(cb, enable=False): return time_execution_cuda_style(cb, hip.hipEvent_t, hip.hipEventCreate, hip.hipEventRecord, hip.hipEventSynchronize, hip.hipEventDestroy, hip.hipEventElapsedTime, enable=enable)
 
 class HIPCompiler(CachedCompiler):
-  def _compile(self, prg:str, arch:str, **kwargs) -> bytes: return compile_cuda_style(prg, [f'--offload-arch={arch}'], hip.hiprtcProgram, hip.hiprtcCreateProgram, hip.hiprtcCompileProgram, hip.hiprtcGetCode, hip.hiprtcGetCodeSize, hip.hiprtcGetProgramLog, hip.hiprtcGetProgramLogSize, check)
+  def _compile(self, prg:str, **compiler_args) -> bytes: return compile_cuda_style(prg, [f"--offload-arch={compiler_args['arch']}"], hip.hiprtcProgram, hip.hiprtcCreateProgram, hip.hiprtcCompileProgram, hip.hiprtcGetCode, hip.hiprtcGetCodeSize, hip.hiprtcGetProgramLog, hip.hiprtcGetProgramLogSize, check)
 
 class HIPProgram:
   def __init__(self, device:int, name:str, lib:bytes):

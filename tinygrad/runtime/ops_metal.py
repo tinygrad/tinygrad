@@ -13,8 +13,8 @@ class MetalCompiler(CachedCompiler):
   def __init__(self, device, **kwargs):
     super().__init__(**kwargs)
     self.device = device
-  def _compile(self, prg:str, use_xcode:bool):
-    if use_xcode:
+  def _compile(self, prg:str, **compiler_args):
+    if compiler_args['use_xcode']:
       # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
       air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
       return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
