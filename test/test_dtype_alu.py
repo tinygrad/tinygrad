@@ -3,8 +3,7 @@ from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
 from hypothesis import given, strategies as st, settings
-
-from tinygrad.helpers import CI, getenv, DType
+from tinygrad.helpers import CI, getenv, DType, OSX
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
@@ -29,14 +28,17 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (T
 #binary_operations += [operator.lt, operator.eq]
 
 class ht:
+  float64 = st.floats(width=64, allow_subnormal=False)
   float32 = st.floats(width=32, allow_subnormal=False)
   float16 = st.floats(width=16, allow_subnormal=False)
   uint8 = st.integers(0, 255)
   uint16 = st.integers(0, 65535)
-  uint32 = st.integers(0, 4294967295)
+  uint32 = st.integers(0, 2**32-1)
+  uint64 = st.integers(0, 2**64-1)
   int8 = st.integers(-128, 127)
   int16 = st.integers(-32768, 32767)
   int32 = st.integers(-2147483648, 2147483647)
+  int64 = st.integers(-9223372036854775808, 9223372036854775807)
   bool = st.booleans()
 
 def universal_test(a, b, dtype, op):
@@ -68,6 +70,10 @@ def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   np.testing.assert_almost_equal(tensor_value, numpy_value)
 
 class TestDTypeALU(unittest.TestCase):
+  @unittest.skipIf(OSX and Device.DEFAULT in {"GPU", "METAL"}, "no float64 on OSX GPU")
+  @given(ht.float64, ht.float64, st.sampled_from(binary_operations))
+  def test_float64(self, a, b, op): universal_test(a, b, dtypes.float64, op)
+
   @given(ht.float32, ht.float32, st.sampled_from(binary_operations))
   def test_float32(self, a, b, op): universal_test(a, b, dtypes.float32, op)
 
@@ -93,6 +99,10 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.uint32, ht.uint32, st.sampled_from(integer_binary_operations))
   def test_uint32(self, a, b, op): universal_test(a, b, dtypes.uint32, op)
 
+  @unittest.skipIf(Device.DEFAULT == "TORCH", "no uint64 in torch")
+  @given(ht.uint64, ht.uint64, st.sampled_from(integer_binary_operations))
+  def test_uint64(self, a, b, op): universal_test(a, b, dtypes.uint64, op)
+
   @given(ht.int8, ht.int8, st.sampled_from(integer_binary_operations))
   def test_int8(self, a, b, op): universal_test(a, b, dtypes.int8, op)
 
@@ -101,6 +111,9 @@ class TestDTypeALU(unittest.TestCase):
 
   @given(ht.int32, ht.int32, st.sampled_from(integer_binary_operations))
   def test_int32(self, a, b, op): universal_test(a, b, dtypes.int32, op)
+
+  @given(ht.int64, ht.int64, st.sampled_from(integer_binary_operations))
+  def test_int64(self, a, b, op): universal_test(a, b, dtypes.int64, op)
 
   @given(ht.bool, ht.bool, st.sampled_from(((operator.add, operator.add), (operator.mul, operator.mul))))
   def test_bool(self, a, b, op): universal_test(a, b, dtypes.bool, op)
