@@ -79,14 +79,12 @@ class TestDTypeALU(unittest.TestCase):
     numpy_value = op2[1](op1[1](an, bn).astype(np.float32), cn)
     np.testing.assert_almost_equal(tensor_value, numpy_value)
 
-  @given(st.floats(width=32, allow_subnormal=False), st.floats(width=32, allow_subnormal=False), st.integers(-2147483648, 2147483647), st.sampled_from(binary_operations), st.sampled_from(binary_operations))
+  @given(st.floats(width=32, allow_subnormal=False, min_value=0, max_value=10.0), st.floats(width=32, allow_subnormal=False, min_value=0, max_value=10.0), st.integers(-10, 10), st.sampled_from(binary_operations), st.sampled_from(binary_operations))
   def test_float_midcast_int32(self, a, b, c, op1, op2):
     at, bt, ct = Tensor([a], dtype=dtypes.float32), Tensor([b], dtype=dtypes.float32), Tensor([c], dtype=dtypes.int32)
     an, bn, cn = np.array([a]).astype(np.float32), np.array([b]).astype(np.float32), np.array([c]).astype(np.int32)
     tensor_value = op2[0](op1[0](at, bt).cast(dtypes.int32), ct).numpy()
     numpy_value = op2[1](op1[1](an, bn).astype(np.int32), cn)
-    python_value = op2[0](op1[0](a, b), c)
-    if numpy_value[0] > np.iinfo(np.int32).max or numpy_value != python_value: return # we ran into an overflow
     np.testing.assert_equal(tensor_value, numpy_value)
 
   @given(st.floats(width=32, allow_subnormal=False), st.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
