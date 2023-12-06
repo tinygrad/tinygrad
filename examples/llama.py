@@ -13,7 +13,8 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad.helpers import GlobalCounters
 from extra.models.llama import Transformer, convert_from_huggingface
-from sentencepiece import SentencePieceProcessor
+from sentencepiece import SentencePieceProcessor, sentencepiece_model_pb2
+from gguf import GGUFReader, TokenType  # noqa: E402
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
 
@@ -126,6 +127,33 @@ def load(fn:str):
   else:
     return torch_load(fn)
 
+def load_tokens_from_gguf(gguf_model_path):
+  reader = GGUFReader(gguf_model_path, 'r')
+
+  # TODO: Make a diccionary of these
+  tokens = [str(bytes(reader.fields['tokenizer.ggml.tokens'].parts[idx]), encoding="utf-8") for idx in reader.fields['tokenizer.ggml.tokens'].data]
+  scores = [pv for idx in reader.fields['tokenizer.ggml.scores'].data for pv in reader.fields['tokenizer.ggml.scores'].parts[idx].tolist()]
+  types  = [pv for idx in reader.fields['tokenizer.ggml.token_type'].data for pv in reader.fields['tokenizer.ggml.token_type'].parts[idx].tolist()]
+
+  # Model tokens for Sentence Piece use Google's Protocol Buffer
+  token_model = sentencepiece_model_pb2.ModelProto()
+
+  for i in range(len(tokens)):
+      token = token_model.pieces.add()
+      token.piece = tokens[i]
+      token.score = scores[i]
+      token.type  = types[i]
+      if token.type == TokenType.BYTE:
+          token_model.trainer_spec.byte_fallback = 1
+
+  token_model.trainer_spec.unk_id = reader.fields['tokenizer.ggml.unknown_token_id'].parts[-1][0]
+  token_model.trainer_spec.bos_id = reader.fields['tokenizer.ggml.bos_token_id'].parts[-1][0]
+  token_model.trainer_spec.eos_id = reader.fields['tokenizer.ggml.eos_token_id'].parts[-1][0]
+  # Load the model from the Protocol Buffer created with the .gguf info
+  sp =  SentencePieceProcessor()
+  sp.load_from_serialized_proto(token_model.SerializeToString())
+  return sp 
+ 
 class AbsmaxQuantizedLinear:
   def __init__(self, in_features, out_features, bias=False):
     assert bias == False
@@ -152,7 +180,7 @@ class LLaMa:
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
     params = MODEL_PARAMS[model_gen][model_size]
-    sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
+    sp_model = SentencePieceProcessor(model_file=str(tokenizer_path)) if tokenizer_path != '' else load_tokens_from_gguf(model_path)
     assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
 
     model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT)
