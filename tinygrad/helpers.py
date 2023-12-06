@@ -123,8 +123,7 @@ class DType(NamedTuple):
   np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
   structf: Optional[str] = None
   sz: int = 1
-  def __repr__(self):
-    return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
+  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
   def vec(self, sz:int):
     assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
     return DType(self.priority, self.itemsize*sz, self.name+str(sz), None, None, sz)
