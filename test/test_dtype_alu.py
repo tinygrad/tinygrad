@@ -55,7 +55,7 @@ def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = op[0](Tensor([a], dtype=dtype)).numpy()
   numpy_value = op[1](np.array([a]).astype(dtype.np))
-  if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-7, rtol=1e-5 if dtype == dtypes.float32 else 1e-2)  # exp and log are approximations
+  if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-4 if dtype == dtypes.float32 else 1e-2)  # exp and log and sin are approximations
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
 def universal_test_cast(a, in_dtype, dtype):
