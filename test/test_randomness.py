@@ -61,7 +61,7 @@ class TestRandomness(unittest.TestCase):
 
   def test_rand_against_reference(self):
     Tensor.manual_seed(1337)
-    jr = (jax.extend.random.threefry_2x32((np.uint32(1337), np.uint32(0x0)), np.arange(20 * 23, dtype=np.uint32).reshape(20, 23)) >> 8).astype(float) / 2**24
+    jr = (jax.extend.random.threefry_2x32((np.uint32(1337), np.uint32(0x0)), np.arange(20 * 23, dtype=np.uint32).reshape(20, 23))).astype(float) / np.float32(2**32 - 1)
     r = Tensor.rand(20, 23).numpy()
     np.testing.assert_allclose(jr, r, atol=1e-5, rtol=1e-5)
 
