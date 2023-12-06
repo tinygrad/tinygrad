@@ -54,14 +54,11 @@ def get_child(obj, key):
   return obj
 def get_shape(x: Any, _shape=tuple()) -> Tuple[int, ...]:
   while isinstance(x, List):
-    _shape += (len(x), )
-    shapes = tuple([get_shape(y) for y in x])
+    _shape, shapes = _shape + (len(x), ), tuple([get_shape(y) for y in x])
     if not all(shapes[0] == s for s in shapes): raise ValueError("Inconsistent dimensions")
-    if len(x) > 0: x = x[0]
-    else: return _shape
-  if isinstance(x, _Scalars): return _shape
-  # NOTE: for list embedded np elements
-  if isinstance(x, np.generic): return _shape
+    x = x[0] if len(x) > 0 else 1 # fall through
+  # NOTE: for lists with np elements
+  if isinstance(x, _Scalars) or isinstance(x, np.generic): return _shape
   raise ValueError(f"Sequence must consist of scalar types - {_Scalars} - {type(x)}")
 
 @functools.lru_cache(maxsize=None)
@@ -297,10 +294,8 @@ def flat_mv(mv:memoryview):
   if len(mv) == 0: return mv
   return mv.cast("B", shape=(mv.nbytes,))
 def to_mv(l: List, dtype: DType) -> Tuple[memoryview, Tuple[int, ...]]:
-  assert dtype.structf is not None, dtype
   for _ in range(len(shape := get_shape(l)) - 1): l = flatten(l)
-  if dtypes.is_int(dtype): l = list(map(int, l))
-  return memoryview(struct.pack(f'{len(l)}{dtype.structf}', *l)), shape
+  return memoryview(struct.pack(f'{len(l)}{dtype.structf}', *l if not dtypes.is_int(dtype) else list(map(int, l)))), shape
 
 # *** Helpers for CUDA-like APIs.
 
