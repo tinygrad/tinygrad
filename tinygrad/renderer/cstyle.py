@@ -336,7 +336,7 @@ class WGSLLanguage(CStyleLanguage):
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): return "nan()"
-    elif math.isinf(x): return ("-" if x < 0 else "") + "0x1.fffffep+127f"
+    elif math.isinf(x): return ("-" if x < 0 else "") + "(1.0/0.0)"
     return f"({super().render_const(x, var_dtype)})"
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
@@ -359,7 +359,4 @@ class WGSLLanguage(CStyleLanguage):
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
     if self.type_map[var_dtype]: return f"bitcast<{self.type_map[var_dtype]}>({x[0]})" if bitcast else f"{self.type_map[var_dtype]}({x[0]})"
     raise NotImplementedError(f"no cast for {var_dtype}")
-
-  def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
-    return f"{buf_name}[{idx}] = {self.render_cast([var_name], buf_dtype) if var_dtype != buf_dtype else var_name};"
 WGSLRenderer = functools.partial(uops_to_cstyle, WGSLLanguage())
