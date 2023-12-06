@@ -305,21 +305,15 @@ class TestIndexing(unittest.TestCase):
     # strided is [[1 3 5 7],
     #             [9 11 13 15]]
 
-
-    from tinygrad.lazy import LazyBuffer
-    from tinygrad.shape.shapetracker import ShapeTracker
-    from tinygrad.shape.view import View
-    from tinygrad.ops import MovementOps, LazyOp
-
     '''
     reference = torch.arange(0., 24, dtype=dtype, device=device).view(3, 8)
     strided = torch.tensor((), dtype=dtype, device=device)
     strided.set_(reference.storage(), 1, size=torch.Size([2, 4]),
                   stride=[8, 2])
     '''
-    # TODO: ????????
-    # TODO: idk
-    # HACK: I just tried random stuff for 2 days... this passes.. it kinda makes sense?
+    from tinygrad.lazy import LazyBuffer
+    from tinygrad.shape.shapetracker import ShapeTracker
+    from tinygrad.shape.view import View
     reference = Tensor.arange(0., 24).realize().reshape(3, 8)
     strided = Tensor(LazyBuffer(device=reference.device, 
                                 st=ShapeTracker((View(shape=(2, 4), strides=(8, 2), offset=1, mask=None, contiguous=True), )), 
