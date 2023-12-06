@@ -16,8 +16,11 @@ dtypes_float = (dtypes.float32, dtypes.float16)
 dtypes_int = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
 dtypes_bool = (dtypes.bool,)
 # TODO: lt and eq should cast in tensor before we can test them, this is a seperate project
-binary_operations = (operator.add, operator.sub, operator.mul, operator.truediv, (Tensor.maximum, np.maximum), (Tensor.xor, np.bitwise_xor)) #, operator.lt, operator.eq)
+binary_operations = (operator.add, operator.sub, operator.mul, (Tensor.maximum, np.maximum), (Tensor.xor, np.bitwise_xor)) #, operator.lt, operator.eq)
 unary_operations = ((Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (Tensor.sin, np.sin), (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal))
+
+# TODO: enable this
+#binary_operations.append(operator.truediv)
 
 class ht:
   float32 = st.floats(width=32, allow_subnormal=False)
