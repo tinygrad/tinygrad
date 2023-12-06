@@ -27,7 +27,7 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (T
 # TODO: lt and eq should cast in tensor before we can test them, this is a separate project
 #binary_operations += [operator.lt, operator.eq]
 
-# TODO: the last ternary operation in tensor.py's maximum can overflow. This requires a new implementation of maximum that can be backpropagated
+# TODO: (a+b)/2 in tensor.py's maximum can overflow. This requires a new implementation of maximum that can be backpropagated
 #binary_operations += [(Tensor.maximum, np.maximum)]
 
 class ht:
