@@ -482,6 +482,12 @@ class TestComplexShapeTracker(unittest.TestCase):
     st = st.reshape((2, 32, 240, 256))
     assert len(st.views) == 2
 
+  def test_reshape_trailing_invalid_ones(self):
+    st = ShapeTracker((View(shape=(1, 1, 5), strides=(0, 0, 1), offset=-5, mask=((1, 1), (0, 1), (0, 5)), contiguous=False),))
+    st = st.reshape((5,))
+    assert len(st.views) == 1
+    assert st.views[0].mask == ((0,0),)
+
 class TestSingleShapeTracker(unittest.TestCase):
   def setUp(self):
     self.st = CheckingShapeTracker((7,4))
