@@ -99,7 +99,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       if len(vin) > 3:
         assert vin[2].dtype is not None
         kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[2].dtype]} {(pred:=ssa(None,'ld','pred'))}, {r[vin[2]]}, {lang.render_const(0, vin[2].dtype)};")
-      kernel.append(f"{f'@{pred} ' if len(vin) > 3 else ''}ld.{'s8' if dtype == dtypes.bool else lang.dtype_to_asmtype[dtype]} {b if dtype == dtypes.bool else val}, {loc};")
+      kernel.append(f"{f'@{pred} ' if len(vin) > 3 else ''}ld.{'s8' if dtype == dtypes.bool else 'b16' if dtype == dtypes.float16 else lang.dtype_to_asmtype[dtype]} {b if dtype == dtypes.bool else val}, {loc};")
       if len(vin) > 3: kernel.append(f"@!{pred} mov.{'s8' if dtype == dtypes.bool else lang.dtype_to_asmtype[dtype]} {b if dtype == dtypes.bool else val}, {r[vin[3]]};")
       if dtype == dtypes.bool: kernel.append(f"cvt.u32.s8 {val}, {b};")
     elif uop == UOps.PHI:
@@ -121,10 +121,13 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       if len(vin) > 3:
         assert vin[3].dtype is not None
         kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[3].dtype]} {(pred:=ssa(None, 'st', 'pred'))}, {r[vin[3]]} {lang.render_const(0, vin[3].dtype)};")
-      kernel.append(f"{f'@{pred} ' if len(vin) > 3 else ''}st.{'s8' if vin[0].dtype == dtypes.bool else lang.dtype_to_asmtype[vin[0].dtype]} {loc}, {r[vin[2]] if vin[0].dtype == vin[2].dtype else cast};")
+      kernel.append(f"{f'@{pred} ' if len(vin) > 3 else ''}st.{'s8' if vin[0].dtype == dtypes.bool else 'b16' if vin[0].dtype == dtypes.float16 else lang.dtype_to_asmtype[vin[0].dtype]} {loc}, {r[vin[2]] if vin[0].dtype == vin[2].dtype else cast};")
     elif uop == UOps.CAST and dtype is not None:
       assert vin[0].dtype is not None
-      kernel.append(lang.render_cast(ssa(u, 'cast'), r[vin[0]], dtype, vin[0].dtype))
+      if dtype == dtypes.bool:
+        kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[0].dtype]} {(pred:=ssa(None, 'bool', 'pred'))}, {r[vin[0]]}, {lang.render_const(0, vin[0].dtype)};")
+        kernel.append(f"selp.{lang.dtype_to_asmtype[dtype]} {ssa(u, 'cast')}, {lang.render_const(1, dtype)}, {lang.render_const(0, dtype)}, {(pred)};")
+      else: kernel.append(lang.render_cast(ssa(u, 'cast'), r[vin[0]], dtype, vin[0].dtype))
     elif uop == UOps.DEFINE_LOCAL:
       assert dtype is not None
       kernel.append(f".shared .align 4 .b8 {args[0]}[{args[1]*dtype.itemsize}];")
