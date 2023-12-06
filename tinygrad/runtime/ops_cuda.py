@@ -20,7 +20,9 @@ def check(status):
 def cu_time_execution(cb, enable=False) -> Optional[float]: return time_execution_cuda_style(cb, cuda.CUevent, cuda.cuEventCreate, cuda.cuEventRecord, cuda.cuEventSynchronize, cuda.cuEventDestroy_v2, cuda.cuEventElapsedTime, enable=enable) if not CUDACPU else cpu_time_execution(cb, enable=enable)
 
 class CUDACompiler(CachedCompiler):
-  def _compile(self, prg: str, **compiler_args) -> bytes: return compile_cuda_style(prg, [f"--gpu-architecture={compiler_args['arch']}", "-I/usr/local/cuda/include", "-I/usr/include"], cuda.nvrtcProgram, cuda.nvrtcCreateProgram, cuda.nvrtcCompileProgram, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check)
+  def __init__(self, device): self.device, self.api_version = device, rtc_version_cuda_style(cuda.nvrtcVersion)
+  def _compile(self, prg: str, **kwargs) -> bytes: return compile_cuda_style(prg, [f"--gpu-architecture={self.device.arch}", "-I/usr/local/cuda/include", "-I/usr/include"], cuda.nvrtcProgram, cuda.nvrtcCreateProgram, cuda.nvrtcCompileProgram, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check)
+  def _cache_key(self): return (self.device.arch, self.api_version)
 
 class CUDAProgram:
   def __init__(self, device:CUDADevice, name:str, lib:bytes):
@@ -30,7 +32,7 @@ class CUDAProgram:
       try:
         fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
         with open(fn + ".ptx", "wb") as f: f.write(lib)
-        subprocess.run(["ptxas", f"-arch={device.arch_name}", "-o", fn, fn+".ptx"], check=True)
+        subprocess.run(["ptxas", f"-arch={device.arch}", "-o", fn, fn+".ptx"], check=True)
         print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
       except Exception as e: print("failed to generate SASS", str(e))
 
@@ -72,10 +74,10 @@ class CUDADevice(Compiled):
       check(cuda.cuCtxCreate_v2(ctypes.byref(context := cuda.CUcontext()), 0, device))
       self.context = context
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
-    self.arch_name = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
+    self.arch = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
 
     from tinygrad.features.graph.cuda import CUDAGraph
     super().__init__(CUDAAllocator(self) if not CUDACPU else MallocAllocator,
                      LinearizerOptions(supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
-                     CUDARenderer, CUDACompiler(arch=self.arch_name, cuda_version=rtc_version_cuda_style(cuda.nvrtcVersion)), functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
+                     CUDARenderer, CUDACompiler(self), functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
   def synchronize(self): return check(cuda.cuCtxSynchronize()) if not CUDACPU else None
