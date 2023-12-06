@@ -3,7 +3,7 @@ import functools, struct
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
-from tinygrad.helpers import dtypes, DType
+from tinygrad.helpers import dtypes, DType, PtrDType
 
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 def double_to_hex(x): return "%02X%02X%02X%02X%02X%02X%02X%02X" % tuple(struct.pack("d",x)[::-1])
@@ -12,6 +12,7 @@ class AssemblyLanguage(NamedTuple):
   kernel_prefix: str = ""
   barrier: str = ""
   gid: List[str] = []
+  gdim: List[str] = []
   lid: List[str] = []
   asm_for_op: Dict[Op, Callable[...,str]] = {}
   dtype_to_asmtype: Dict[DType, str] = {}
@@ -76,9 +77,12 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       assert dtype is not None
       kernel.append(f"mov.{lang.dtype_to_asmtype[dtype]} {ssa(u, 'acc')}, {lang.render_const(args, dtype)};")
     elif uop == UOps.SPECIAL:
-      assert not args[1].startswith("i"), "no xid in ptx"
-      xid = lang.gid if args[1].startswith("g") else lang.lid
-      kernel.append(f"mov.u32 %{args[1]}, {xid[args[0]]};")
+      if args[1].startswith("i"):
+        kernel.append(f"mov.u32 %{args[1]}, {lang.gid[args[0]]};")
+        kernel.append(f"mov.u32 {(gdim:=ssa(None,'tmp','u32'))}, {lang.gdim[args[0]]};")
+        kernel.append(f"mov.u32 {(lid:=ssa(None,'tmp','u32'))}, {lang.lid[args[0]]};")
+        kernel.append(f"mad.lo.u32 %{args[1]}, %{args[1]}, {gdim}, {lid};")
+      else: kernel.append(f"mov.u32 %{args[1]}, {(lang.gid if args[1].startswith('g') else lang.lid)[args[0]]};")
       if args[1].startswith("l"): local_size.append(args[2])
       r[u] = "%" + args[1]
       kernel = [f".reg .u32 %{args[1]};"] + kernel
@@ -134,7 +138,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       r[u] = args[0]
     elif uop == UOps.DEFINE_GLOBAL:
       bufs.append(args[0])
-      kernel.append(f"ld.param.u64 {ssa(u, 'dat', dtype='u64')}, [{args[0]}];")
+      kernel.append(f"ld.param.{'u64' if dtype.__class__ == PtrDType else lang.dtype_to_asmtype[dtype]} {ssa(u, 'dat', dtype='u64' if dtype.__class__ == PtrDType else lang.dtype_to_asmtype[dtype])}, [{args[0]}];")
     else: raise NotImplementedError(f"no code for {uop}")
   kernel.append("ret;")
 
@@ -153,6 +157,7 @@ class PTXLanguage(AssemblyLanguage):
 .visible .entry"""
   barrier = "bar.sync\t0;"
   gid = [f'%ctaid.{chr(120+i)}' for i in range(3)]
+  gdim = [f'%nctaid.{chr(120+i)}' for i in range(3)]
   lid = [f'%tid.{chr(120+i)}' for i in range(3)]
   asm_for_op = {
     UnaryOps.NEG: lambda d,a,dtype: f"neg.{dtype} {d}, {a};",
