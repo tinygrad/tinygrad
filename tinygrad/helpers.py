@@ -301,6 +301,7 @@ def flat_mv(mv:memoryview):
 def to_mv(l: List, dtype: DType) -> Tuple[memoryview, Tuple[int, ...]]:
   assert dtype.structf is not None, dtype
   for _ in range(len(shape := get_shape(l)) - 1): l = flatten(l)
+  if dtypes.is_int(dtype): l = list(map(int, l))
   return memoryview(struct.pack(f'{len(l)}{dtype.structf}', *l)), shape
 
 # *** Helpers for CUDA-like APIs.
