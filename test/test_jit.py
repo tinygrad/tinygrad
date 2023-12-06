@@ -1,10 +1,12 @@
 #!/usr/bin/env python
-import unittest
+import unittest, functools
 import numpy as np
 
 from test.helpers import assert_jit_cache_len
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
+from tinygrad.device import Device
+from tinygrad.helpers import CI
 
 class TestJit(unittest.TestCase):
   def test_simple_jit(self):
@@ -252,6 +254,32 @@ class TestJit(unittest.TestCase):
     np.testing.assert_allclose(result_1.numpy(), [2], atol=1e-4, rtol=1e-5)
     np.testing.assert_allclose(result_2.numpy(), [6], atol=1e-4, rtol=1e-5)
     np.testing.assert_allclose(result_3.numpy(), [6], atol=1e-4, rtol=1e-5)
+
+  @unittest.skipIf(CI and Device.DEFAULT=="METAL", "no ICB in CI, creation of graph fails")
+  def test_jit_batch_split(self):
+    if Device[Device.DEFAULT].graph is None: raise unittest.SkipTest("only test graphs")
+
+    def f(a, b, c, d):
+      x = (a+b).realize()
+      y = (x*c).realize()
+      rn = Tensor.randn(*a.shape)
+      z = (y*rn).realize()
+      w = (z*d)
+      return w.realize()
+
+    a = Tensor.randn(10, 10).realize()
+    b = Tensor.randn(10, 10).realize()
+    c = Tensor.randn(10, 10).realize()
+    d = Tensor.randn(10, 10).realize()
+
+    jf = TinyJit(f)
+    for _ in range(5): jf(a, b, c, d).numpy()
+
+    graph_t = Device[Device.DEFAULT].graph.func if isinstance(Device[Device.DEFAULT].graph, functools.partial) else Device[Device.DEFAULT].graph
+    assert len(jf.jit_cache) == 3, "2 graphs and rand op"
+    assert isinstance(jf.jit_cache[0].prg, graph_t)
+    assert not isinstance(jf.jit_cache[1].prg, graph_t)
+    assert isinstance(jf.jit_cache[2].prg, graph_t)
 
 if __name__ == '__main__':
   unittest.main()
