@@ -4,7 +4,7 @@ import operator
 import numpy as np
 from hypothesis import given, strategies as st, settings
 
-from tinygrad.helpers import CI, getenv
+from tinygrad.helpers import CI, getenv, DType
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
@@ -15,12 +15,18 @@ def skipUnlessFP16Supported(): return unittest.skip("GPU requires cl_khr_fp16") 
 dtypes_float = (dtypes.float32, dtypes.float16)
 dtypes_int = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
 dtypes_bool = (dtypes.bool,)
-# TODO: lt and eq should cast in tensor before we can test them, this is a seperate project
-binary_operations = (operator.add, operator.sub, operator.mul, (Tensor.maximum, np.maximum), (Tensor.xor, np.bitwise_xor)) #, operator.lt, operator.eq)
-unary_operations = ((Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (Tensor.sin, np.sin), (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal))
+binary_operations = [operator.add, operator.sub, operator.mul, (Tensor.maximum, np.maximum)]
+integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor)]
+unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (Tensor.sin, np.sin), (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
 
-# TODO: enable this
+# TODO: enable this (this is a dtype issue)
 #binary_operations.append(operator.truediv)
+
+# TODO: enable mod on Tensor
+#binary_operations.append(operator.mod)
+
+# TODO: lt and eq should cast in tensor before we can test them, this is a separate project
+#binary_operations += [operator.lt, operator.eq]
 
 class ht:
   float32 = st.floats(width=32, allow_subnormal=False)
@@ -52,6 +58,15 @@ def universal_test_cast(a, in_dtype, dtype):
   numpy_value = np.array([a]).astype(dtype.np)
   np.testing.assert_equal(tensor_value, numpy_value)
 
+def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
+  if not isinstance(op1, tuple): op1 = (op1, op1)
+  if not isinstance(op2, tuple): op2 = (op2, op2)
+  at, bt, ct = Tensor([a], dtype=d1), Tensor([b], dtype=d1), Tensor([c], dtype=d2)
+  an, bn, cn = np.array([a]).astype(d1.np), np.array([b]).astype(d1.np), np.array([c]).astype(d2.np)
+  tensor_value = op2[0](op1[0](at, bt).cast(d2), ct).numpy()
+  numpy_value = op2[1](op1[1](an, bn).astype(d2.np), cn)
+  np.testing.assert_almost_equal(tensor_value, numpy_value)
+
 class TestDTypeALU(unittest.TestCase):
   @given(ht.float32, ht.float32, st.sampled_from(binary_operations))
   def test_float32(self, a, b, op): universal_test(a, b, dtypes.float32, op)
@@ -67,44 +82,34 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.float32, st.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
 
-  @given(ht.uint8, ht.uint8, st.sampled_from(binary_operations))
+  @given(ht.uint8, ht.uint8, st.sampled_from(integer_binary_operations))
   def test_uint8(self, a, b, op): universal_test(a, b, dtypes.uint8, op)
 
   @unittest.skipIf(Device.DEFAULT == "TORCH", "no uint16 in torch")
-  @given(ht.uint16, ht.uint16, st.sampled_from(binary_operations))
+  @given(ht.uint16, ht.uint16, st.sampled_from(integer_binary_operations))
   def test_uint16(self, a, b, op): universal_test(a, b, dtypes.uint16, op)
 
   @unittest.skipIf(Device.DEFAULT == "TORCH", "no uint32 in torch")
-  @given(ht.uint32, ht.uint32, st.sampled_from(binary_operations))
+  @given(ht.uint32, ht.uint32, st.sampled_from(integer_binary_operations))
   def test_uint32(self, a, b, op): universal_test(a, b, dtypes.uint32, op)
 
-  @given(ht.int8, ht.int8, st.sampled_from(binary_operations))
+  @given(ht.int8, ht.int8, st.sampled_from(integer_binary_operations))
   def test_int8(self, a, b, op): universal_test(a, b, dtypes.int8, op)
 
-  @given(ht.int16, ht.int16, st.sampled_from(binary_operations))
+  @given(ht.int16, ht.int16, st.sampled_from(integer_binary_operations))
   def test_int16(self, a, b, op): universal_test(a, b, dtypes.int16, op)
 
-  @given(ht.int32, ht.int32, st.sampled_from(binary_operations))
+  @given(ht.int32, ht.int32, st.sampled_from(integer_binary_operations))
   def test_int32(self, a, b, op): universal_test(a, b, dtypes.int32, op)
 
   @given(ht.bool, ht.bool, st.sampled_from(((operator.add, operator.add), (operator.mul, operator.mul))))
   def test_bool(self, a, b, op): universal_test(a, b, dtypes.bool, op)
 
-  @given(ht.int32, ht.int32, ht.float32, st.sampled_from(binary_operations), st.sampled_from(binary_operations))
-  def test_int32_midcast_float(self, a, b, c, op1, op2):
-    at, bt, ct = Tensor([a], dtype=dtypes.int32), Tensor([b], dtype=dtypes.int32), Tensor([c], dtype=dtypes.float32)
-    an, bn, cn = np.array([a]).astype(np.int32), np.array([b]).astype(np.int32), np.array([c]).astype(np.float32)
-    tensor_value = op2[0](op1[0](at, bt).cast(dtypes.float32), ct).numpy()
-    numpy_value = op2[1](op1[1](an, bn).astype(np.float32), cn)
-    np.testing.assert_almost_equal(tensor_value, numpy_value)
+  @given(ht.int32, ht.int32, ht.float32, st.sampled_from(integer_binary_operations), st.sampled_from(binary_operations))
+  def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 
-  @given(ht.float32, ht.float32, ht.int32, st.sampled_from(binary_operations), st.sampled_from(binary_operations))
-  def test_float_midcast_int32(self, a, b, c, op1, op2):
-    at, bt, ct = Tensor([a], dtype=dtypes.float32), Tensor([b], dtype=dtypes.float32), Tensor([c], dtype=dtypes.int32)
-    an, bn, cn = np.array([a]).astype(np.float32), np.array([b]).astype(np.float32), np.array([c]).astype(np.int32)
-    tensor_value = op2[0](op1[0](at, bt).cast(dtypes.int32), ct).numpy()
-    numpy_value = op2[1](op1[1](an, bn).astype(np.int32), cn)
-    np.testing.assert_equal(tensor_value, numpy_value)
+  @given(ht.float32, ht.float32, ht.int32, st.sampled_from(binary_operations), st.sampled_from(integer_binary_operations))
+  def test_float_midcast_int32(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.float32, dtypes.int32)
 
   @given(ht.float32, st.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
   def test_float_cast(self, a, dtype): universal_test_cast(a, dtypes.float32, dtype)
