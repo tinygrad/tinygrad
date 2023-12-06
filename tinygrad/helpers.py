@@ -4,6 +4,7 @@ import numpy as np
 from urllib import request
 from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
+import struct
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
 
@@ -162,20 +163,20 @@ class dtypes:
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", np.bool_, '?')
-  float16: Final[DType] = DType(9, 2, "half", np.float16)
+  float16: Final[DType] = DType(9, 2, "half", np.float16, 'e')
   half = float16
-  float32: Final[DType] = DType(10, 4, "float", np.float32, 'float')
+  float32: Final[DType] = DType(10, 4, "float", np.float32, 'f')
   float = float32
-  float64: Final[DType] = DType(11, 8, "double", np.float64, 'double')
+  float64: Final[DType] = DType(11, 8, "double", np.float64, 'd')
   double = float64
   int8: Final[DType] = DType(1, 1, "char", np.int8, 'b')
   int16: Final[DType] = DType(3, 2, "short", np.int16, 'h')
-  int32: Final[DType] = DType(5, 4, "int", np.int32, 'l')
+  int32: Final[DType] = DType(5, 4, "int", np.int32, 'i')
   int = int32
   int64: Final[DType] = DType(7, 8, "long", np.int64, 'q')
   uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8, 'B')
   uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16, 'H')
-  uint32: Final[DType] = DType(6, 4, "unsigned int", np.uint32, 'L')
+  uint32: Final[DType] = DType(6, 4, "unsigned int", np.uint32, 'I')
   uint64: Final[DType] = DType(8, 8, "unsigned long", np.uint64, 'Q')
 
   # NOTE: bfloat16 isn't supported in numpy
@@ -193,6 +194,8 @@ class dtypes:
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and v.__class__ is not staticmethod}
 INVERSE_DTYPES_DICT = {v:k for k,v in DTYPES_DICT.items()}
+if TYPE_CHECKING:
+  for dtype in DTYPES_DICT.values(): assert dtype.itemsize == struct.calcsize(dtype.structf)
 
 class GlobalCounters:
   global_ops: ClassVar[int] = 0
@@ -295,6 +298,10 @@ def get_bytes(arg, get_sz, get_str, check) -> bytes: return (sz := init_c_var(ct
 def flat_mv(mv:memoryview):
   if len(mv) == 0: return mv
   return mv.cast("B", shape=(mv.nbytes,))
+def to_mv(l: List, dtype: DType) -> Tuple[memoryview, Tuple[int, ...]]:
+  assert dtype.structf is not None, dtype
+  for _ in range(len(shape := get_shape(l)) - 1): l = flatten(l)
+  return memoryview(struct.pack(f'{len(l)}{dtype.structf}', *l)), shape
 
 # *** Helpers for CUDA-like APIs.
 
