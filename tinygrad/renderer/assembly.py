@@ -138,6 +138,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       kernel.append(f".shared .align 4 .b8 {args[0]}[{args[1]*dtype.itemsize}];")
       r[u] = args[0]
     elif uop == UOps.DEFINE_GLOBAL:
+      assert dtype is not None
       bufs.append((args[0], dtype))
       kernel.append(f"ld.param.{'u64' if dtype.__class__ == PtrDType else lang.dtype_to_asmtype[dtype]} {ssa(u, 'dat', dtype='u64' if dtype.__class__ == PtrDType else lang.dtype_to_asmtype[dtype])}, [{args[0]}];")
     else: raise NotImplementedError(f"no code for {uop}")
