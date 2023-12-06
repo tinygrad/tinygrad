@@ -128,7 +128,7 @@ class DType(NamedTuple):
     return DType(self.priority, self.itemsize*sz, self.name+str(sz), None, None, sz)
   def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
   def to_ctype(self, x: Union[int, float, bool]):
-    assert not dtypes.is_float(self) and self.sz == 2, "float16 not yet"
+    # assert not dtypes.is_float(self) and self.sz == 2, "float16 not yet"
     if dtypes.is_int(self): x = int(x)
     if dtypes.is_float(self): x = float(x)
     if self is dtypes.bool: x = bool(x)
@@ -306,13 +306,14 @@ def flat_mv(mv:memoryview):
   if len(mv) == 0: return mv
   return mv.cast("B", shape=(mv.nbytes,))
 def to_mv(l: Any, dtype: DType) -> Tuple[memoryview, Tuple[int, ...]]:
+  if dtype.ctype is None:
+    import numpy as np # for float16
+    arr = np.array(l).astype(dtype.np)
+    return memoryview(arr.data), arr.shape
   if isinstance(l, _Scalars): l = [l]
   shape = get_shape(l)
   for _ in range(len(shape) - 1): l = flatten(l)
   l = list(map(dtype.to_ctype, l))
-  if dtype.ctype is None:
-    import numpy as np # for float16
-    return memoryview(np.array(l).astype(dtype.np).data), shape
   buffer = (dtype.ctype * len(l))()
   buffer[:] = l[:]
   return memoryview(buffer), shape
