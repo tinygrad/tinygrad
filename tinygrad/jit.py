@@ -75,12 +75,10 @@ class TinyJit(Generic[ReturnType]):
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
-      # Split the JIT cache into batches for execution, enabling the accelerator to run some batches while later graphs are being updated.
-      # Batch sizes begin at 16, with each subsequent batch being twice the size of the previous one.
+      # Split JIT cache into batches for execution. This allows the accelerator to run some batches while subsequent graphs are still being updated.
       jit_batches: List[List[JitItem]] = [list()]
-      next_batch_size = getenv("JIT_START_BATCH_SIZE", 16)
       for ji in self.jit_cache:
-        if len(jit_batches[-1]) >= next_batch_size or not isinstance(ji.prg, CompiledASTRunner): jit_batches, next_batch_size = jit_batches + [list()], next_batch_size * 2
+        if len(jit_batches[-1]) >= getenv("JIT_MAX_BATCH_SIZE", 64) or not isinstance(ji.prg, CompiledASTRunner): jit_batches.append(list())
         jit_batches[-1].append(ji)
 
       self.jit_cache = []
