@@ -196,9 +196,12 @@ if __name__ == "__main__":
 
     # validate output!
     if args.temperature == 0 and args.model_size == "gpt2-medium" and args.count == 10:
-      if args.prompt == default_prompt:
-        assert texts[0] == "What is the answer to life, the universe, and everything?\n\nThe answer is that we are all one"
+      expected = {
+        default_prompt: "What is the answer to life, the universe, and everything?\n\nThe answer is that we are all one",
+        "Hello.": "Hello. I'm a little late to the party, but",
+      }
+      try:
+        assert texts[0] == expected[args.prompt]
         print(colored("output validated", "green"))
-      elif args.prompt == "Hello.":
-        assert texts[0] == "Hello. I'm a little late to the party, but"
-        print(colored("output validated", "green"))
+      except KeyError:
+        pass
