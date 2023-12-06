@@ -171,7 +171,6 @@ if __name__ == "__main__":
   parser.add_argument('--batch_size', type=int, default=1, help="Set the input batch size")
   parser.add_argument('--benchmark', type=int, default=-1, help="Benchmark GPT with the given number of tokens")
   parser.add_argument('--noshow', action='store_true', help="Don't show the output")
-  parser.add_argument('--validate', action='store_true', help="Validate the generated output")
   args = parser.parse_args()
 
   if args.seed is not None:
@@ -195,6 +194,9 @@ if __name__ == "__main__":
       else:
         for i,text in enumerate(texts): print(colored(f"Response {i}:", "green"), text)
 
-    if args.validate:
-      assert args.prompt == default_prompt and args.temperature == 0 and args.model_size == "gpt2-medium" and args.count == 10, "input does not match"
-      assert texts[0] == "What is the answer to life, the universe, and everything?\n\nThe answer is that we are all one"
+    # validate output!
+    if args.temperature == 0 and args.model_size == "gpt2-medium" and args.count == 10:
+      if args.prompt == default_prompt:
+        assert texts[0] == "What is the answer to life, the universe, and everything?\n\nThe answer is that we are all one"
+      elif args.prompt == "Hello.":
+        assert texts[0] == "Hello. I'm a little late to the party, but"
