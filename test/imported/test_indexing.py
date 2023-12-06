@@ -4,6 +4,9 @@ import math, unittest, random
 import numpy as np
 
 from tinygrad.tensor import Tensor, dtypes
+from tinygrad.lazy import LazyBuffer
+from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import View
 
 random.seed(42)
 
@@ -179,14 +182,25 @@ class TestIndexing(unittest.TestCase):
     # setting values
     validate_setting(reference)
 
-    # TODO: setitem
-    '''
     # Tensor with stride != 1
     # strided is [1, 3, 5, 7]
+
     reference = consec((10,))
+
+    # TODO review required
+    '''
     strided = np.array(())
     strided.set_(reference.storage(), storage_offset=0,
                   size=torch.Size([4]), stride=[2])
+    '''
+    reference.realize()
+    strided = Tensor(LazyBuffer(device=reference.device, 
+                                st=ShapeTracker((View(shape=(4,), strides=(2,), offset=0, mask=None, contiguous=True), )), 
+                                optype=None, 
+                                op=None,
+                                dtype=reference.dtype, 
+                                src=None, 
+                                base=reference.lazydata.base)).contiguous()
 
     numpy_testing_assert_equal_helper(strided[[0]], np.array([1]))
     numpy_testing_assert_equal_helper(strided[ri([0]), ], np.array([1]))
@@ -197,9 +211,21 @@ class TestIndexing(unittest.TestCase):
                       np.array([[5, 3], [1, 7]]))
 
     # stride is [4, 8]
+
+    # TODO: review required
+    '''
     strided = np.array(())
     strided.set_(reference.storage(), storage_offset=4,
                   size=torch.Size([2]), stride=[4])
+    '''
+    strided = Tensor(LazyBuffer(device=reference.device, 
+                                st=ShapeTracker((View(shape=(2,), strides=(4,), offset=4, mask=None, contiguous=True), )), 
+                                optype=None, 
+                                op=None, 
+                                dtype=reference.dtype, 
+                                src=None, 
+                                base=reference.lazydata.base)).contiguous()
+
     numpy_testing_assert_equal_helper(strided[[0]], np.array([5]))
     numpy_testing_assert_equal_helper(strided[ri([0]), ], np.array([5]))
     numpy_testing_assert_equal_helper(strided[ri([1]), ], np.array([9]))
@@ -207,7 +233,6 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(strided[ri([0, 1]), ], np.array([5, 9]))
     numpy_testing_assert_equal_helper(strided[ri([[0, 1], [1, 0]]), ],
                       np.array([[5, 9], [9, 5]]))
-    '''
 
     # reference is 1 2
     #              3 4
@@ -305,15 +330,13 @@ class TestIndexing(unittest.TestCase):
     # strided is [[1 3 5 7],
     #             [9 11 13 15]]
 
+    # TODO review required
     '''
     reference = torch.arange(0., 24, dtype=dtype, device=device).view(3, 8)
     strided = torch.tensor((), dtype=dtype, device=device)
     strided.set_(reference.storage(), 1, size=torch.Size([2, 4]),
                   stride=[8, 2])
     '''
-    from tinygrad.lazy import LazyBuffer
-    from tinygrad.shape.shapetracker import ShapeTracker
-    from tinygrad.shape.view import View
     reference = Tensor.arange(0., 24).realize().reshape(3, 8)
     strided = Tensor(LazyBuffer(device=reference.device, 
                                 st=ShapeTracker((View(shape=(2, 4), strides=(8, 2), offset=1, mask=None, contiguous=True), )), 
