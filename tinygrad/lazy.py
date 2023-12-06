@@ -247,6 +247,17 @@ class LazyBuffer:
         new_srcs.append(x)
       return new_srcs[0].e(op, *new_srcs[1:], arg=arg).contiguous()
 
+    # do shapetracker math
+    if op == BinaryOps.MUL and len(srcs[0].st.views) == 1 and len(srcs[1].st.views) == 1:
+      m0, m1 = srcs[0].st.views[0].mask, srcs[1].st.views[0].mask
+      out_mask = None
+      if m0 is None and m1 is not None: out_mask = m1
+      elif m0 is not None and m1 is None: out_mask = m0
+      if out_mask is not None:
+        shrink_srcs = tuple(x.shrink(out_mask) for x in srcs)  # remove the mask from the inputs
+        ret = create_lazybuffer(out_device, ShapeTracker.from_shape(shrink_srcs[0].shape), BinaryOps, LazyOp(op, shrink_srcs, arg), out_dtype)
+        return ret.pad(tuple([(p[0], s-p[1]) for s,p in zip(out_shape, out_mask)]))
+
     if MERGE_ELEMENTWISE_OPS:
       # remove the buffers from any (childless) BinaryOps that feed into this
       _srcs = tuple([x.op if x.optype == BinaryOps and not x.children and not x.realized else x for x in srcs])

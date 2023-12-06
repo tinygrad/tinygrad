@@ -3,13 +3,13 @@ from tinygrad.tensor import Tensor
 
 class TestMaskedShapeTracker(unittest.TestCase):
   def test_mul_masked(self):
-    a = Tensor([1,1,1,1])
-    b = Tensor([1,1]).pad(((0,2),))
+    a = Tensor([1,1,1,1,1])
+    b = Tensor([1,1]).pad(((0,3),))
     c = a*b
-    # TODO: make this true
-    #assert c.lazydata.st.views[0].mask is not None
+    assert c.shape == a.shape
+    assert c.lazydata.st.views[0].mask is not None
     ret = c.data()
-    assert ret.tolist() == [1.0, 1.0, 0.0, 0.0]
+    assert ret.tolist() == [1.0, 1.0, 0.0, 0.0, 0.0]
 
   def test_add_masked(self):
     a = Tensor([1,1]).pad(((0,2),))
