@@ -1,9 +1,9 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes
-import numpy as np
 from urllib import request
 from tqdm import tqdm
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Type
+from ctypes import _SimpleCData
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
 
@@ -119,13 +119,21 @@ class DType(NamedTuple):
   priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
-  np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
+  np: Optional[str]  # TODO: someday this will be removed with the "remove numpy" project
+  ctype: Type[_SimpleCData] = None
   sz: int = 1
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
   def vec(self, sz:int):
     assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
-    return DType(self.priority, self.itemsize*sz, self.name+str(sz), None, sz)
+    return DType(self.priority, self.itemsize*sz, self.name+str(sz), None, None, sz)
   def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
+  def to_ctype(self, x: Union[int, float, bool]):
+    if dtypes.is_int(self): x = int(x)
+    if dtypes.is_float(self): x = float(x)
+    if self is dtypes.bool: x = bool(x)
+    if self.ctype is not None: return self.ctype(x)
+    import numpy # TODO: needed for float16 (for now)
+    return np.float16(x)
 
 # dependent typing?
 class ImageDType(DType):
@@ -144,7 +152,7 @@ class ImageDType(DType):
   def __ne__(self, x): return super().__ne__(x) or self.shape != x.shape
 
 class PtrDType(DType):
-  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.np, dt.sz)
+  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.np, dt.ctype, dt.sz)
   def __repr__(self): return f"ptr.{super().__repr__()}"
 
 class dtypes:
@@ -155,25 +163,29 @@ class dtypes:
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
-  def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
+  def from_np(x) -> DType:
+    if isinstance(x, DType): return DTYPES_DICT[x.np]
+    if isinstance(x, str): return DTYPES_DICT[x]
+    x: np.dtype = x
+    return DTYPES_DICT[x.name]
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
-  bool: Final[DType] = DType(0, 1, "bool", np.bool_)
-  float16: Final[DType] = DType(9, 2, "half", np.float16)
+  bool: Final[DType] = DType(0, 1, "bool", "bool", ctypes.c_byte)
+  float16: Final[DType] = DType(9, 2, "half", "float16")
   half = float16
-  float32: Final[DType] = DType(10, 4, "float", np.float32)
+  float32: Final[DType] = DType(10, 4, "float", "float32", ctypes.c_float)
   float = float32
-  float64: Final[DType] = DType(11, 8, "double", np.float64)
+  float64: Final[DType] = DType(11, 8, "double", "float64", ctypes.c_double)
   double = float64
-  int8: Final[DType] = DType(1, 1, "char", np.int8)
-  int16: Final[DType] = DType(3, 2, "short", np.int16)
-  int32: Final[DType] = DType(5, 4, "int", np.int32)
+  int8: Final[DType] = DType(1, 1, "char", "int8", ctypes.c_byte)
+  int16: Final[DType] = DType(3, 2, "short", "int16", ctypes.c_short)
+  int32: Final[DType] = DType(5, 4, "int", "int32", ctypes.c_int)
   int = int32
-  int64: Final[DType] = DType(7, 8, "long", np.int64)
-  uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
-  uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
-  uint32: Final[DType] = DType(6, 4, "unsigned int", np.uint32)
-  uint64: Final[DType] = DType(8, 8, "unsigned long", np.uint64)
+  int64: Final[DType] = DType(7, 8, "long", "int64", ctypes.c_long)
+  uint8: Final[DType] = DType(2, 1, "unsigned char", "uint8", ctypes.c_ubyte)
+  uint16: Final[DType] = DType(4, 2, "unsigned short", "uint16", ctypes.c_ushort)
+  uint32: Final[DType] = DType(6, 4, "unsigned int", "uint32", ctypes.c_uint)
+  uint64: Final[DType] = DType(8, 8, "unsigned long", "uint64", ctypes.c_ulong)
 
   # NOTE: bfloat16 isn't supported in numpy
   bfloat16: Final[DType] = DType(9, 2, "__bf16", None)
@@ -183,9 +195,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shp, dtypes.float32)
+  def imageh(shp): return ImageDType(100, 2, "imageh", "float16", shp, dtypes.float32)
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp, dtypes.float32)
+  def imagef(shp): return ImageDType(100, 4, "imagef", "float32", shp, dtypes.float32)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and v.__class__ is not staticmethod}
@@ -292,6 +304,17 @@ def get_bytes(arg, get_sz, get_str, check) -> bytes: return (sz := init_c_var(ct
 def flat_mv(mv:memoryview):
   if len(mv) == 0: return mv
   return mv.cast("B", shape=(mv.nbytes,))
+def to_mv(l: Any, dtype: DType) -> Tuple[memoryview, Tuple[int, ...]]:
+  if isinstance(l, _Scalars): l = [l]
+  shape = get_shape(l)
+  for _ in range(len(shape) - 1): l = flatten(l)
+  l = list(map(dtype.to_ctype, l))
+  if dtype.ctype is None:
+    import numpy as np # for float16
+    return memoryview(np.array(l).astype(dtype.np).data), shape
+  buffer = (dtype.ctype * len(l))()
+  buffer[:] = l[:]
+  return memoryview(buffer), shape
 
 # *** Helpers for CUDA-like APIs.
 
