@@ -22,7 +22,7 @@ class AssemblyLanguage(NamedTuple):
     return "1" if x else "0"
 
   def render_cast(self, d:str, a:str, dtype:DType, atype:DType) -> str:
-    no_round = (((dtypes.is_int(dtype) or dtype == dtypes.bool) and (dtypes.is_int(atype) or atype == dtypes.bool)) or (dtypes.is_float(dtype) and dtypes.is_float(atype))) and dtype.itemsize >= atype.itemsize
+    no_round = ((dtypes.is_int(dtype) or dtype == dtypes.bool) and (dtypes.is_int(atype) or atype == dtypes.bool)) or ((dtypes.is_float(dtype) and dtypes.is_float(atype)) and dtype.itemsize >= atype.itemsize)
     return f"cvt{'' if no_round else '.rz' if dtypes.is_float(dtype) else '.rzi'}.{self.dtype_to_asmtype[dtype]}.{self.dtype_to_asmtype[atype]} {d}, {a};"
 
 def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
@@ -95,13 +95,13 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
         loc = f"[{loc}]"
       else: loc = f"[{r[vin[0]]}{f'+{int(vin[1].arg * dtype.itemsize)}' if vin[1] else ''}]"
       val = ssa(u, 'val')
-      if dtype == dtypes.bool: b = ssa(None, 'b', 's8')
+      if dtype.itemsize == 1: tmp = ssa(None, 'tmp', 's8')
       if len(vin) > 3:
         assert vin[2].dtype is not None
         kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[2].dtype]} {(pred:=ssa(None,'ld','pred'))}, {r[vin[2]]}, {lang.render_const(0, vin[2].dtype)};")
-      kernel.append(f"{f'@{pred} ' if len(vin) > 3 else ''}ld.{'s8' if dtype == dtypes.bool else 'b16' if dtype == dtypes.float16 else lang.dtype_to_asmtype[dtype]} {b if dtype == dtypes.bool else val}, {loc};")
-      if len(vin) > 3: kernel.append(f"@!{pred} mov.{'s8' if dtype == dtypes.bool else lang.dtype_to_asmtype[dtype]} {b if dtype == dtypes.bool else val}, {r[vin[3]]};")
-      if dtype == dtypes.bool: kernel.append(f"cvt.u32.s8 {val}, {b};")
+      kernel.append(f"{f'@{pred} ' if len(vin) > 3 else ''}ld.{'s8' if dtype.itemsize == 1 else 'b16' if dtype == dtypes.float16 else lang.dtype_to_asmtype[dtype]} {tmp if dtype.itemsize == 1 else val}, {loc};")
+      if len(vin) > 3: kernel.append(f"@!{pred} mov.{'s8' if dtype.itemsize == 1 else lang.dtype_to_asmtype[dtype]} {tmp if dtype.itemsize == 1 else val}, {r[vin[3]]};")
+      if dtype.itemsize == 1: kernel.append(f"cvt.{lang.dtype_to_asmtype[dtype]}.s8 {val}, {tmp};")
     elif uop == UOps.PHI:
       assert dtype is not None
       kernel.append(f"mov.{lang.dtype_to_asmtype[dtype]} {r[vin[0]]}, {r[vin[1]]};")
@@ -121,7 +121,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       if len(vin) > 3:
         assert vin[3].dtype is not None
         kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[3].dtype]} {(pred:=ssa(None, 'st', 'pred'))}, {r[vin[3]]} {lang.render_const(0, vin[3].dtype)};")
-      kernel.append(f"{f'@{pred} ' if len(vin) > 3 else ''}st.{'s8' if vin[0].dtype == dtypes.bool else 'b16' if vin[0].dtype == dtypes.float16 else lang.dtype_to_asmtype[vin[0].dtype]} {loc}, {r[vin[2]] if vin[0].dtype == vin[2].dtype else cast};")
+      kernel.append(f"{f'@{pred} ' if len(vin) > 3 else ''}st.{'s8' if vin[0].dtype.itemsize == 1 else 'b16' if vin[0].dtype == dtypes.float16 else lang.dtype_to_asmtype[vin[0].dtype]} {loc}, {r[vin[2]] if vin[0].dtype == vin[2].dtype else cast};")
     elif uop == UOps.CAST and dtype is not None:
       assert vin[0].dtype is not None
       if dtype == dtypes.bool:
@@ -167,8 +167,8 @@ class PTXLanguage(AssemblyLanguage):
     TernaryOps.WHERE: lambda d,a,b,c,dtype: f"selp.{dtype} {d}, {b}, {c}, {a};"
   }
   dtype_to_asmtype = {
-    dtypes.int8: "s8", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
-    dtypes.uint8: "u8", dtypes.uint16: "u16", dtypes.uint32: "u32", dtypes.uint64: "u64",
+    dtypes.int8: "s16", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
+    dtypes.uint8: "u16", dtypes.uint16: "u16", dtypes.uint32: "u32", dtypes.uint64: "u64",
     dtypes.float16: "f16", dtypes.float32: "f32", dtypes.float64: "f64",
     dtypes.bool: "u32"
   }
