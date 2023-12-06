@@ -40,7 +40,8 @@ class CStyleLanguage(NamedTuple):
   }
 
   # returns a str expression of the casted xs with the given type
-  def render_cast(self, x:List[str], var_dtype:DType) -> str:
+  def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
+    if bitcast: return f"(*(({self.buffer_prefix}{var_dtype.name}*)&{x[0]}))"
     if len(x) == 1: return f"({var_dtype.name})({x[0]})"
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.float4 is not None, "vectorized cast is not supported on this platform"
@@ -187,7 +188,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
       if len(vin) > 3: kk("}")
     elif uop == UOps.CAST and dtype is not None:
-      val = lang.render_cast([r[x] for x in vin], dtype)
+      val = lang.render_cast([r[x] for x in vin], dtype, bitcast=isinstance(args, tuple) and args[1])
       if child_count[u] <= 1: r[u] = val
       else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
     elif uop == UOps.DEFINE_LOCAL:
@@ -224,6 +225,9 @@ class OpenCLLanguage(CStyleLanguage):
   uses_vload = True
   # NOTE: mad is used so the loads aren't reordered into the math on 845
   code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda a,b,c,dtype: f"mad({a},{b},{c})"}
+  type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
+  def render_cast(self, x, var_dtype, bitcast=False) -> str:
+    return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
 class MetalLanguage(CStyleLanguage):
@@ -237,6 +241,8 @@ class MetalLanguage(CStyleLanguage):
   gid = [f"gid.{chr(120+i)}" for i in range(3)]
   lid = [f"lid.{chr(120+i)}" for i in range(3)]
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
+  def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
+    return f"as_type<{var_dtype.name}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 
 class CUDALanguage(CStyleLanguage):
@@ -350,8 +356,8 @@ class WGSLLanguage(CStyleLanguage):
   def render_conditional(self, cond:str, x:str, y:str) -> str:
     return f"select(f32({y}), {x}, bool({cond}))"
 
-  def render_cast(self, x:List[str], var_dtype:DType) -> str:
-    if self.type_map[var_dtype]: return f"{self.type_map[var_dtype]}({x[0]})"
+  def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
+    if self.type_map[var_dtype]: return f"bitcast<{self.type_map[var_dtype]}>({x[0]})" if bitcast else f"{self.type_map[var_dtype]}({x[0]})"
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
