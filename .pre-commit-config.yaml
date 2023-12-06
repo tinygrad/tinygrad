@@ -15,7 +15,7 @@ repos:
         pass_filenames: false
       - id: mypy
         name: mypy
-        entry: mypy tinygrad/ extra/helpers.py
+        entry: mypy tinygrad/
         language: system
         always_run: true
         pass_filenames: false
@@ -41,7 +41,7 @@ repos:
         pass_filenames: false
       - id: example
         name: multi device tests
-        entry: python3 test/external/test_example.py
+        entry: python3 test/external/external_test_example.py
         language: system
         always_run: true
         pass_filenames: false
