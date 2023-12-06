@@ -293,13 +293,6 @@ __device__ float4 vload_half4(size_t offset, const half *p) { return make_float4
 __device__ void vstore_half(float data, size_t offset, half *p) { *(p + offset) = (half)data; }
 __device__ void vstore_half2(float2 data, size_t offset, half *p) { *(p + offset*2) = (half)data.x; *(p + offset*2 + 1) = (half)data.y; }
 __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset*4) = (half)data.x; *(p + offset*4 + 1) = (half)data.y; *(p + offset*4 + 2) = (half)data.z; *(p + offset*4 + 3) = (half)data.w; }
-__device__ half exp2(half x) { return hexp2(x); }
-__device__ half log2(half x) { return hlog2(x); }
-__device__ half sin(half x) { return hsin(x); }
-__device__ half sqrt(half x) { return hsqrt(x); }
-__device__ half hmax(half a, half b) { return __hgt(a, b) ? a : b; }
-__device__ half operator%(const half &a, const half &b) { return __hsub(a, __hmul(b, __float2half(floorf(__half2float(a) / __half2float(b))))); }
-__device__ bool operator!=(const half &a, const int &b) { return (float)a != b; }
 
 // HACKS for ALU ops on half and result of half2 GEP
 __device__ half operator+(const half &a, const unsigned short &b) { return __hadd(a, (half)(b)); }
@@ -317,7 +310,8 @@ __device__ bool operator<(const unsigned short &a, const half &b) { return __hlt
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
-  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"hmax({a},{b})", TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}!=0?{b}:{c})" if dtype != dtypes.half else f"(half)({a}!=0?{b}:{c})"}
+  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"__hgt({a}, {b}) ? {a} : {b}", TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}!=0?{b}:{c})" if dtype != dtypes.half else f"(half)({a}!=0?{b}:{c})", UnaryOps.EXP2: lambda a,dtype: f"exp2({a})" if dtype != dtypes.half else f"hexp2({a})", UnaryOps.LOG2: lambda a,dtype: f"log2({a})" if dtype != dtypes.half else f"hlog2({a})", UnaryOps.SIN: lambda a,dtype: f"sin({a})" if dtype != dtypes.half else f"hsin({a})", UnaryOps.SQRT: lambda a,dtype: f"sqrt({a})" if dtype != dtypes.half else f"hsqrt({a})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})" if dtype != dtypes.half else f"__hsub({a}, __hmul({b}, __float2half(floorf(__half2float({a}) / __half2float({b})))))"}
+
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 
 # TODO: how much of this can be merged with above?
