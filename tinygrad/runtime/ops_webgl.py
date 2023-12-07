@@ -1,6 +1,6 @@
 import numpy as np
 import functools
-from tinygrad.helpers import dtypes, DType
+from tinygrad.helpers import dtypes, ImageDType
 from tinygrad.device import Compiled, Allocator
 from tinygrad.codegen.kernel import LinearizerOptions, OptOps
 from tinygrad.renderer.cstyle import uops_to_cstyle
@@ -31,14 +31,12 @@ class WebGLProgram:
     self.vao.render(mode=moderngl.TRIANGLE_STRIP)
 
 class RawWebGLAllocator(Allocator):
-  def _alloc(self, size: int): return ctx.buffer(reserve=size)
-  def _cast_image(self, buf:moderngl.Buffer, dtype:DType, size:int) -> moderngl.Texture:
-    tex = ctx.texture(next(((size//i, i) for i in range(1, max_dims+1) if size%i == 0 and size//i <= max_dims), (size, 1)), 1, dtype=dtype_map[dtype])
-    tex.write(buf)
+  def _alloc_image(self, dtype:ImageDType):
+    tex = ctx.texture(dtype.shape, 1, dtype=dtype_map[dtype.base])
     tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
     return tex
-  def copyin(self, dest:moderngl.Buffer, src: memoryview): dest.write(src)
-  def copyout(self, dest:memoryview, src: moderngl.Buffer):
+  def copyin(self, dest:moderngl.Texture, src: memoryview): dest.write(src)
+  def copyout(self, dest:memoryview, src: moderngl.Texture):
     src.read_into(dest)
     return dest
 

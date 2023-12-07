@@ -304,6 +304,9 @@ def encode_args_cuda_style(bufs, vals, device_ptr_t, marks) -> Tuple[ctypes.Arra
   c_args = init_c_struct_t(tuple([(f'f{i}', device_ptr_t) for i in range(len(bufs))] + [(f'f{i}', ctypes.c_int) for i in range(len(bufs), len(bufs)+len(vals))]))(*bufs, *vals)
   return (ctypes.c_void_p * 5)(ctypes.c_void_p(marks[0]), ctypes.cast(ctypes.pointer(c_args), ctypes.c_void_p), ctypes.c_void_p(marks[1]), ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(marks[2])), c_args
 
+def create_gl_tex_dims(max_dim, width) -> Tuple[int,int]:
+  return next(((width//i, i) for i in range(1, max_dim+1) if width%i == 0 and width//i <= max_dim), (width,1))
+
 def time_execution_cuda_style(cb, ev_t, evcreate, evrecord, evsync, evdestroy, evtime, enable=False) -> Optional[float]:
   if not enable: return cb()
   evs = [init_c_var(ev_t(), lambda x: evcreate(ctypes.byref(x), 0)) for _ in range(2)]

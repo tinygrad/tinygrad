@@ -3,7 +3,7 @@ import numpy as np
 from collections import defaultdict
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable
 import importlib, inspect, functools, pathlib, time, re, ctypes
-from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType, from_mv, dtypes, flat_mv, ImageDType
+from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, DType, from_mv, dtypes, flat_mv, ImageDType, create_gl_tex_dims
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op
 
@@ -67,12 +67,7 @@ class Buffer:
     self.device, self.size, self.dtype = device, size, dtype
     self.allocator = Device[self.device].allocator
     # TODO: image hack shouldn't be here. where should it be?
-
-    if device == "WEBGL" and hasattr(self.allocator, "_cast_image"): # we need to convert the gl buffer to texture
-      self._real_buf = self.allocator.alloc(self.size * dtype.itemsize)
-      self._buf = self.allocator._cast_image(self._real_buf, dtype, self.size)
-    else:
-      self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else size * dtype.itemsize)
+    self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else ImageDType(None, 1, None, None, create_gl_tex_dims(max_dim=4096, width=self.size), dtype) if device == "WEBGL" else size * dtype.itemsize)
 
     # TODO: mem_used for all devices
     if self.device == Device.DEFAULT: GlobalCounters.mem_used += self.size * self.dtype.itemsize
