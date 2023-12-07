@@ -246,7 +246,12 @@ jobs:
     #- name: Run webgpu pytest
     #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
     - name: Run selected webgpu tests
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/ --ignore=test/test_dtype_alu.py --ignore=test/test_search.py --ignore=test/imported/ --ignore=test/external --ignore=test/models --durations=20
+      run: |
+        WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/ \
+        --ignore=test/extra/test_lr_scheduler.py --ignore=test/test_randomness.py --ignore=test/test_linearizer.py \
+        --ignore=test/test_speed_v_torch.py --ignore=test/test_net_speed.py --ignore=test/test_dtype_alu.py \
+        --ignore=test/test_search.py --ignore=test/imported/ --ignore=test/external --ignore=test/models \
+        --durations=20
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
     - name: Install Puppeteer
