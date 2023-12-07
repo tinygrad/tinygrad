@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from PIL import Image
-from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch, get_shape, _Scalars, to_mv
+from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch, get_mv, _Scalars
 from tinygrad.shape.symbolic import Variable, NumNode
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -160,38 +160,28 @@ class TestFetch(unittest.TestCase):
     with Image.open(img) as pimg:
       assert pimg.size == (705, 1024)
 
-class TetsGetShape(unittest.TestCase):
+class TetsGetMv(unittest.TestCase):
 
-  def test_get_shape(self): # TODO: should probably fuzz this
-    def test(l, err_info=None):
+  def test_get_mv(self):
+    def test(l, dtype=dtypes.float, err_info=None):
       if err_info:
-        with self.assertRaises(err_info[0]) as ctx: get_shape(l)
+        with self.assertRaises(err_info[0]) as ctx: get_mv(l, dtype)
         self.assertEqual(str(ctx.exception), err_info[1])
-      else: self.assertEqual(get_shape(l),np.array(l).shape)
+      else:
+        shape, mv = get_mv(l, dtype)
+        assert np.array_equal(np.frombuffer(mv, dtype=dtype.np).reshape(shape), np.array(l, dtype=dtype.np))
+    
     test([])
     test([[], [], []])
-    test(None)
-    test([None])
-    test([[None], [None], [None]])
     test([i for i in range(10)])
     test([[[i for i in range(10)] for _ in range(10)] for _ in range(10)])
     test([[1], [2]])
     test([[1,2,3], [1,2,3], [1,2,3]])
-    test([[[1],[2],[3.0]], [[1],[2],[3]], [[1],[None],[np.float32(1)]]])
-    test(1.0)
-    test('one', (ValueError, f"Sequence must consist of scalar types - {_Scalars} - {str}"))
-    test([1, 2, 'three'], (ValueError, f"Sequence must consist of scalar types - {_Scalars} - {str}"))
-    test([[1,2,3], [4,5,6], [7,8,'nine']], (ValueError, f"Sequence must consist of scalar types - {_Scalars} - {str}"))
-    test([[[1],[2],[3]], [[1],[2,4],[3]], [[1],[2],[3]]], (ValueError, "Inconsistent dimensions"))
-
-class TetsToMv(unittest.TestCase):
-
-  def test_to_mv(self):
-
-    def test(l: list, dtype: DType):
-      mv, shape = to_mv(l, dtype)
-      assert np.array_equal(np.frombuffer(mv, dtype=dtype.np).reshape(shape), np.array(l, dtype=dtype.np))
-
+    test([[[1],[2],[3.0]], [[1],[2],[3]], [[1],[4],[np.float32(1)]]])
+    test('one', err_info=(ValueError, f"Sequence must consist of scalar types - {_Scalars} - {str}"))
+    test([1, 2, 'three'], err_info=(ValueError, f"Sequence must consist of scalar types - {_Scalars} - {str}"))
+    test([[1,2,3], [4,5,6], [7,8,'nine']], err_info=(ValueError, f"Sequence must consist of scalar types - {_Scalars} - {str}"))
+    test([[[1],[2],[3]], [[1],[2,4],[3]], [[1],[2],[3]]], err_info=(ValueError, "Inconsistent dimensions"))
     test([[[1],[2],[3]], [[1],[2],[3]], [[1],[2],[3]]], dtypes.float)
     test([[[1],[2],[3]], [[1],[2],[3]], [[1],[2],[3]]], dtypes.float64)
     test([[[1],[2],[3]], [[1],[2],[3]], [[1],[2],[3]]], dtypes.int)
