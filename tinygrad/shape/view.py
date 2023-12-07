@@ -35,6 +35,7 @@ def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tu
 @functools.lru_cache(maxsize=None)
 def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tuple[Tuple[sint, sint], ...]], Optional[Tuple[sint, ...]], bool]:
   if view.mask is None: return view.mask, None, False
+  if any(not isinstance(m[0], int) or not isinstance(m[1], int) for m in view.mask): return view.mask, None, True
   new_mask: List[Tuple[int, int]] = []
 
   r_masks, r_shape, r_new_shape = reversed(view.mask), reversed(view.shape), reversed(new_shape)
