@@ -14,6 +14,8 @@ import concurrent.futures
 BASEDIR = pathlib.Path(__file__).parent / "open-images-v6-mlperf"
 BUCKET_NAME = "open-images-dataset"
 BBOX_ANNOTATIONS_URL = "https://storage.googleapis.com/openimages/v5/validation-annotations-bbox.csv"
+BBOX_TRAIN_ANNOTATIONS_URL = "https://storage.googleapis.com/openimages/v6/oidv6-train-annotations-bbox.csv"
+
 MAP_CLASSES_URL = "https://storage.googleapis.com/openimages/v5/class-descriptions-boxable.csv"
 MLPERF_CLASSES = ['Airplane', 'Antelope', 'Apple', 'Backpack', 'Balloon', 'Banana',
   'Barrel', 'Baseball bat', 'Baseball glove', 'Bee', 'Beer', 'Bench', 'Bicycle',
@@ -55,12 +57,19 @@ MLPERF_CLASSES = ['Airplane', 'Antelope', 'Apple', 'Backpack', 'Balloon', 'Banan
   'Zebra', 'Zucchini',
 ]
 
-def openimages():
-  ann_file = BASEDIR / "validation/labels/openimages-mlperf.json"
+def openimages_val(set="validation"):
+  ann_file = BASEDIR / f"{set}/labels/openimages-mlperf.json"
+  #fetch_openimages(ann_file)
   if not ann_file.is_file():
     fetch_openimages(ann_file)
   return ann_file
 
+def openimages_train():
+  breakpoint()
+  ann_file = BASEDIR / "train/openimages-mlperf.json"
+  if not ann_file.is_file():
+    fetch_openimages(ann_file)
+  return ann_file
 # this slows down the conversion a lot!
 # maybe use https://raw.githubusercontent.com/scardine/image_size/master/get_image_size.py
 def extract_dims(path): return Image.open(path).size[::-1]
@@ -106,15 +115,15 @@ def download_image(bucket, image_id, data_dir):
   except botocore.exceptions.ClientError as exception:
     sys.exit(f"ERROR when downloading image `validation/{image_id}`: {str(exception)}")
 
-def fetch_openimages(output_fn):
+def fetch_openimages(output_fn, set = "validation"):
   bucket = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED)).Bucket(BUCKET_NAME)
 
-  annotations_dir, data_dir = BASEDIR / "annotations", BASEDIR / "validation/data"
+  annotations_dir, data_dir = BASEDIR / "annotations", BASEDIR / f"{set}/data"
   annotations_dir.mkdir(parents=True, exist_ok=True)
   data_dir.mkdir(parents=True, exist_ok=True)
-
-  annotations_fn = annotations_dir / BBOX_ANNOTATIONS_URL.split('/')[-1]
-  download_file(BBOX_ANNOTATIONS_URL, annotations_fn)
+  breakpoint()
+  annotations_fn = annotations_dir / BBOX_ANNOTATIONS_URL.split('/')[-1] if set == "validation" else annotations_dir / BBOX_TRAIN_ANNOTATIONS_URL.split('/')[-1]
+  download_file(BBOX_ANNOTATIONS_URL if set == "validation" else BBOX_TRAIN_ANNOTATIONS_URL, annotations_fn)
   annotations = pd.read_csv(annotations_fn)
 
   classmap_fn = annotations_dir / MAP_CLASSES_URL.split('/')[-1]
@@ -132,8 +141,8 @@ def fetch_openimages(output_fn):
   print("Converting annotations to COCO format...")
   export_to_coco(class_map, annotations, image_list, data_dir, output_fn)
 
-def image_load(fn):
-  img_folder = BASEDIR / "validation/data"
+def image_load(fn, set="validation"):
+  img_folder = BASEDIR / f"{set}/data"
   img = Image.open(img_folder / fn).convert('RGB')
   import torchvision.transforms.functional as F
   ret = F.resize(img, size=(800, 800))
@@ -153,12 +162,13 @@ def prepare_target(annotations, img_id, img_size):
   classes = classes[keep]
   return {"boxes": boxes, "labels": classes, "image_id": img_id, "image_size": img_size}
 
-def iterate(coco, bs=8):
-  image_ids = sorted(coco.imgs.keys())
+def iterate(coco, bs=8, shuffle=False, set="train"):
+  breakpoint()
+  image_ids = sorted(coco.imgs.keys()) if not shuffle else np.random.permutation(list(coco.imgs.keys()))  
   for i in range(0, len(image_ids), bs):
     X, targets  = [], []
     for img_id in image_ids[i:i+bs]:
-      x, original_size = image_load(coco.loadImgs(img_id)[0]["file_name"])
+      x, original_size = image_load(coco.loadImgs(img_id)[0]["file_name"], set)
       X.append(x)
       annotations = coco.loadAnns(coco.getAnnIds(img_id))
       targets.append(prepare_target(annotations, img_id, original_size))

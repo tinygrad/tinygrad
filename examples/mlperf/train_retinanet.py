@@ -1,7 +1,7 @@
 from typing import Any
 from extra.datasets import openimages
 from PIL import Image, ImageDraw
-from extra.datasets.openimages import openimages, iterate
+from extra.datasets.openimages import openimages_val, openimages_train, iterate
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from tinygrad.nn import optim
@@ -162,7 +162,7 @@ class RetinaNetTrainer:
         #self.model.backbone.load_from_pretrained()
         self.input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)
         self.input_std = Tensor([0.229, 0.224, 0.225]).reshape(1, -1, 1, 1)
-        self.dataset = COCO(openimages())
+        self.dataset = COCO(openimages_val())
         self.coco_eval = COCOeval(self.dataset, iouType="bbox")
         self.debug = debug
         
@@ -268,12 +268,17 @@ class RetinaNetTrainer:
         ref_optimizer = torch.optim.Adam([p for p in self.reference.parameters() if p.requires_grad], lr=0.0001)
         self.coco_evalimgs, self.evaluated_imgs, self.ncats, self.narea = [], [], len(self.coco_eval.params.catIds), len(self.coco_eval.params.areaRng)
 
-        for x, annotations in iterate(self.dataset, BS):
+        for x, annotations in iterate(self.dataset, BS, shuffle=True, split="validation"):
             Warning("Annotations not being resized for MLPERF reference model")
             
             resized = [Image.fromarray(image) for image in x]
             resized = [np.asarray(image.resize(self.image_size)) for image in resized]
-
+            #do np.fliplr with probability 0.5 on each resized image...
+            for i in range(len(resized)):
+                if np.random.rand() > 0.5:
+                    resized[i] = np.fliplr(resized[i])
+                    annotations[i]["boxes"][:,[0,2]] = self.image_size[0] - annotations[i]["boxes"][:,[2,0]]
+            
             orig_annotations = deepcopy(annotations)
             annotations = self.resize_bbox(annotations)
 
@@ -313,14 +318,14 @@ class RetinaNetTrainer:
         self.coco_eval.evalImgs = list(np.concatenate(self.coco_evalimgs, -1).flatten())
         self.coco_eval.accumulate()
         self.coco_eval.summarize()
-        
+
     @TinyJit
     def train_step(self, retina, anchors_flattened_levels, optimizer, annotations, images):
         optimizer.zero_grad()
         tensor_model_head_outputs = retina(images)
         model_head_outputs = {'cls_logits' : tensor_model_head_outputs[:,:,4:], 
                                     'bbox_regression' : tensor_model_head_outputs[:,:,:4]}
-        model_loss = self.compute_loss(annotations, model_head_outputs, anchors_flattened_levels)
+        model_loss = semalf.compute_loss(annotations, model_head_outputs, anchors_flattened_levels)
         loss = model_loss["classification"]+model_loss["bbox_regression"]
         loss.backward()
         print(loss.numpy())

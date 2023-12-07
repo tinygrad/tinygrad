@@ -97,7 +97,7 @@ def eval_retinanet():
   from tinygrad.jit import TinyJit
   mdlrun = TinyJit(lambda x: mdl(input_fixup(x)).realize())
 
-  n, bs = 0, 8
+  n, bs = 0, 2
   st = time.perf_counter()
   for x, targets in iterate(coco, bs):
     dat = Tensor(x.astype(np.float32))
@@ -115,10 +115,14 @@ def eval_retinanet():
     img_ids = [t["image_id"] for t in targets]
     coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box, "score": score}
       for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
-    with redirect_stdout(None):
-      coco_eval.cocoDt = coco.loadRes(coco_results)
-      coco_eval.params.imgIds = img_ids
-      coco_eval.evaluate()
+    #with redirect_stdout(None):
+    
+    for coco_result in coco_results:
+      coco_result["bbox"] = coco_result["bbox"].tolist()
+    breakpoint()
+    coco_eval.cocoDt = coco.loadRes(coco_results)
+    coco_eval.params.imgIds = img_ids
+    coco_eval.evaluate()
     evaluated_imgs.extend(img_ids)
     coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
     st = time.perf_counter()
