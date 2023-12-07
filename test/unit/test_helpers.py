@@ -170,7 +170,7 @@ class TetsGetMv(unittest.TestCase):
       else:
         shape, mv = get_mv(l, dtype)
         assert np.array_equal(np.frombuffer(mv, dtype=dtype.np).reshape(shape), np.array(l, dtype=dtype.np))
-    
+
     test([])
     test([[], [], []])
     test([i for i in range(10)])
