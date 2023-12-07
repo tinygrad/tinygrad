@@ -246,17 +246,15 @@ jobs:
     #- name: Run webgpu pytest
     #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
     - name: Run selected webgpu tests
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_jit.py
+      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/ --ignore=test/test_dtype_alu.py --ignore=test/test_search.py --ignore=test/imported/ --ignore=test/external --ignore=test/models --durations=20
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
     - name: Install Puppeteer
       run: npm install puppeteer
     - name: Run WEBGPU Efficientnet
       run: node test/web/test_webgpu.js
-    - name: Test LLaMA compile speed
-      run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
 
-  testmetalwebgpu:
+  testmetal:
     name: Metal Tests
     runs-on: macos-13
     timeout-minutes: 20
@@ -290,6 +288,8 @@ jobs:
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
     - name: Test tensor core ops
       run: METAL=1 TC=2 python test/test_ops.py TestOps.test_big_gemm
+    - name: Test LLaMA compile speed
+      run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
 
   testhipcompilation:
     name: HIP Compilation Tests
