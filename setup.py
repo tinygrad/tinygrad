@@ -52,6 +52,7 @@ setup(name='tinygrad',
             "tiktoken",
             "librosa",
             "networkx",
+            "hypothesis",
         ]
       },
       include_package_data=True)
