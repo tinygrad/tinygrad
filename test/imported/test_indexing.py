@@ -422,7 +422,6 @@ class TestIndexing(unittest.TestCase):
         reference[[err_idx]]
       '''
 
-
     def tensor_indices_to_np(tensor: Tensor, indices):
       npt = tensor.numpy()
       idxs = tuple(i.numpy().tolist() if isinstance(i, Tensor) and i.dtype is dtypes.int64 else
