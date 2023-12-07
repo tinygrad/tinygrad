@@ -63,7 +63,7 @@ def train_unet3d():
     print("UNet3D params: {:,.0f}".format(sum([p.numel() for p in get_parameters(mdl)])))
 
     from tinygrad.jit import TinyJit
-    mdl_run = TinyJit(lambda x: mdl(x).realize())
+    mdl_run = TinyJit(lambda x: mdl(x).realize()) if getenv("JIT") else mdl
 
     is_successful, diverged = False, False
     optim = get_optimizer(get_parameters(mdl), conf)
@@ -72,7 +72,8 @@ def train_unet3d():
       scheduler = MultiStepLR(optim, milestones=conf.lr_decay_epochs, gamma=conf.lr_decay_factor)
 
     if getenv("MOCKTRAIN", 0):
-      train_loader = [(Tensor.rand((1,1,128,128,128), dtype=dtypes.half), Tensor.rand((1,128,128,128), dtype=dtypes.uint8)) for i in range(3)]
+      import numpy as np
+      train_loader = [(np.random.rand(2,1,128,128,128), np.random.rand(2,1,128,128,128)) for i in range(3)]
       total_batches = 1
     else:
       train_x, train_y, val_x, val_y = get_data_split()
@@ -82,30 +83,28 @@ def train_unet3d():
     # @TinyJit
     def train_step(out, y):
       with Tensor.train():
-        loss = dice_ce_loss(out, y)
-        print("(step) loss", loss)
-        loss.backward()
-        # if noloss: del loss
-        optim.step()
         optim.zero_grad()
-        # if noloss: return None
+        loss = dice_ce_loss(out, y)
+        loss.backward()
+        optim.step()
         return loss.realize()
 
     t0_total = time.monotonic()
     for epoch in range(0, conf.epochs):
       cumulative_loss = []
 
-      train_loader = get_batch(train_x, train_y, conf.batch_size, conf.input_shape, conf.oversampling)
-      val_loader = get_batch(val_x, val_y, batch_size=1, shuffle=False, augment=False)
+      if not getenv("MOCKTRAIN"):
+        train_loader = get_batch(train_x, train_y, conf.batch_size, conf.input_shape, conf.oversampling)
+        val_loader = get_batch(val_x, val_y, batch_size=1, shuffle=False, augment=False)
+
       epoch_st = time.monotonic()
       for i, batch in enumerate(tqdm(train_loader, total=total_batches)):
         im, label = batch
         dtype_im = dtypes.half if getenv("FP16") else dtypes.float
         im, label = Tensor(im, dtype=dtype_im), Tensor(label, dtype=dtypes.uint8)
 
-        # out = mdl_run(im)
-        out = mdl(im)
-        # del im
+        out = mdl_run(im)
+        del im
 
         loss_value = train_step(out, label)
         cumulative_loss.append(loss_value.detach())
@@ -126,10 +125,11 @@ def train_unet3d():
         Tensor.training = True
         if eval_metrics["mean_dice"] >= conf.quality_threshold:
           print("\nsuccess", eval_metrics["mean_dice"], ">", conf.quality_threshold, "runtime", time.monotonic()-t0_total)
+          mdl.save(os.path.join(conf.save_ckpt_path, f"unet3d-ckpt-{conf.epochs}"))
           is_successful = True
-        # elif eval_metrics["mean_dice"] < 1e-6:
-        #   print("\nmodel diverged. exit.", eval_metrics["mean_dice"], "<", 1e-6)
-        #   diverged = True
+        elif eval_metrics["mean_dice"] < 1e-6:
+          print("\nmodel diverged. exit.", eval_metrics["mean_dice"], "<", 1e-6)
+          diverged = True
 
       if is_successful or diverged:
         break
