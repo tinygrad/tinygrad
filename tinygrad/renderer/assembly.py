@@ -30,73 +30,64 @@ class AssemblyLanguage(NamedTuple):
 def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
   local_size: List[int] = []
   kernel, bufs = [], []
-  label_count = 0
-  labels = []
 
   c: DefaultDict[str, int] = defaultdict(int)
   r: Dict[UOp, str] = {}
   def ssa(u, prefix="t", dtype=None):
     nonlocal c, r
-    if u and u.dtype not in lang.dtype_to_asmtype: print(u.dtype)
-    dtype = dtype if dtype else lang.dtype_to_asmtype[u.dtype]
-    prefix += f"_{dtype}_"
+    prefix += f"_{dtype if dtype else lang.dtype_to_asmtype[u.dtype]}_"
     c[prefix] += 1
     if u: r[u] = f"%{prefix}{c[prefix]-1}"
     return f"%{prefix}{c[prefix]-1}"
 
+  c_label: DefaultDict[str, int] = defaultdict(int)
+  r_label: Dict[UOp, str] = {}
+  def ssa_label(u, prefix):
+    nonlocal c_label, r_label
+    c_label[prefix] += 1
+    r_label[u] = f"${prefix}_{c_label[prefix]-1}"
+    return r_label[u]
+
   for u in uops:
     uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
-    if uop == UOps.LOOP:
-      kernel.append(f"mov.u32 {ssa(u, 'ridx')}, {r[vin[0]]};")
-      kernel.append(f"$loop_{label_count}:")
-      labels.append(label_count)
-      label_count += 1
+    if uop == UOps.LOOP: kernel.extend([f"mov.u32 {ssa(u, 'ridx')}, {r[vin[0]]};", f"{ssa_label(u, 'loop')}:"])
     elif uop == UOps.IF:
       assert vin[0].dtype is not None
-      kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[0].dtype]} {(pred:=ssa(u,'p','pred'))}, {r[vin[0]]}, {lang.render_const(0, vin[0].dtype)};")
-      kernel.append(f"@!{pred} bra $if_{label_count};")
-      labels.append(label_count)
-      label_count += 1
+      kernel.extend([f"setp.ne.{lang.dtype_to_asmtype[vin[0].dtype]} {(pred:=ssa(u,'p','pred'))}, {r[vin[0]]}, {lang.render_const(0, vin[0].dtype)};",
+                     f"@!{pred} bra {ssa_label(u, 'if')};"])
     elif uop == UOps.END:
-      if vin[0].uop == UOps.LOOP:
-        kernel.append(f"add.s32 {r[vin[0]]}, {r[vin[0]]}, 1;")
-        kernel.append(f"setp.ne.s32 {ssa(u, 'p', 'pred')}, {r[vin[0]]}, {r[vin[0].vin[1]]};")
-        kernel.append(f"@{r[u]} bra $loop_{labels.pop()};")
-      else:
-        kernel.append(f"$if_{labels.pop()}:")
+      if vin[0].uop == UOps.LOOP: kernel.extend([f"add.s32 {r[vin[0]]}, {r[vin[0]]}, 1;", f"setp.ne.s32 {ssa(u, 'p', 'pred')}, {r[vin[0]]}, {r[vin[0].vin[1]]};",
+                                                 f"@{r[u]} bra {r_label[vin[0]]};"])
+      else: kernel.append(f"{r_label[vin[0]]}:")
     elif uop == UOps.BARRIER: kernel.append(lang.barrier)
     elif uop == UOps.ALU:
       assert dtype is not None and vin[0].dtype is not None
       if args == BinaryOps.CMPLT:
-        kernel.append(lang.asm_for_op[args](pred:=ssa(None,'lt','pred'), *[r[x] for x in vin], lang.dtype_to_asmtype[vin[0].dtype]))
-        kernel.append(f"selp.{lang.dtype_to_asmtype[dtype]} {ssa(u, 'alu')}, {lang.render_const(1, dtype)}, {lang.render_const(0, dtype)}, {pred};")
+        kernel.extend([lang.asm_for_op[args](pred:=ssa(None,'lt','pred'), *[r[x] for x in vin], lang.dtype_to_asmtype[vin[0].dtype]),
+                       f"selp.{lang.dtype_to_asmtype[dtype]} {ssa(u, 'alu')}, {lang.render_const(1, dtype)}, {lang.render_const(0, dtype)}, {pred};"])
       elif args == TernaryOps.WHERE:
-        kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[0].dtype]} {(pred:=ssa(None,'wh','pred'))}, {r[vin[0]]}, {lang.render_const(0, vin[0].dtype)};")
-        kernel.append(lang.asm_for_op[args](ssa(u, "alu"), pred, r[vin[1]], r[vin[2]], lang.dtype_to_asmtype[dtype]))
+        kernel.extend([f"setp.ne.{lang.dtype_to_asmtype[vin[0].dtype]} {(pred:=ssa(None,'wh','pred'))}, {r[vin[0]]}, {lang.render_const(0, vin[0].dtype)};",
+                       lang.asm_for_op[args](ssa(u, "alu"), pred, r[vin[1]], r[vin[2]], lang.dtype_to_asmtype[dtype])])
       else: kernel.append(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], lang.dtype_to_asmtype[dtype]))
     elif uop == UOps.DEFINE_ACC:
       assert dtype is not None
       kernel.append(f"mov.{lang.dtype_to_asmtype[dtype]} {ssa(u, 'acc')}, {lang.render_const(args, dtype)};")
     elif uop == UOps.SPECIAL:
-      if args[1].startswith("i"):
-        kernel.append(f"mov.u32 %{args[1]}, {lang.gid[args[0]]};")
-        kernel.append(f"mov.u32 {(gdim:=ssa(None,'tmp','u32'))}, {lang.gdim[args[0]]};")
-        kernel.append(f"mov.u32 {(lid:=ssa(None,'tmp','u32'))}, {lang.lid[args[0]]};")
-        kernel.append(f"mad.lo.u32 %{args[1]}, %{args[1]}, {gdim}, {lid};")
+      if args[1].startswith("i"): kernel.extend([f"mov.u32 %{args[1]}, {lang.gid[args[0]]};", f"mov.u32 {(gdim:=ssa(None,'tmp','u32'))}, {lang.gdim[args[0]]};",
+                                                 f"mov.u32 {(lid:=ssa(None,'tmp','u32'))}, {lang.lid[args[0]]};", f"mad.lo.u32 %{args[1]}, %{args[1]}, {gdim}, {lid};"])
       else: kernel.append(f"mov.u32 %{args[1]}, {(lang.gid if args[1].startswith('g') else lang.lid)[args[0]]};")
       if args[1].startswith("l"): local_size.append(args[2])
       r[u] = "%" + args[1]
       kernel = [f".reg .u32 %{args[1]};"] + kernel
-    elif uop == UOps.CONST:
-      r[u] = lang.render_const(args, dtype)
+    elif uop == UOps.CONST: r[u] = lang.render_const(args, dtype)
     elif uop == UOps.LOAD:
       assert dtype is not None and vin[1].dtype is not None
       if vin[0].uop == UOps.DEFINE_LOCAL:
         kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {(index:=ssa(None,'index','u64'))}, {r[vin[1]]}, {dtype.itemsize};")
         loc = f"{r[vin[0]]}[{index}]"
       elif vin[1] and vin[1].uop != UOps.CONST:
-        kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {(offset:=ssa(None,'off','u64'))}, {r[vin[1]]}, {dtype.itemsize};")
-        kernel.append(f"add.s64 {(loc:=ssa(None,'loc','u64'))}, {r[vin[0]]}, {offset};")
+        kernel.extend([f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {(offset:=ssa(None,'off','u64'))}, {r[vin[1]]}, {dtype.itemsize};",
+                       f"add.s64 {(loc:=ssa(None,'loc','u64'))}, {r[vin[0]]}, {offset};"])
         loc = f"[{loc}]"
       else: loc = f"[{r[vin[0]]}{f'+{int(vin[1].arg * dtype.itemsize)}' if vin[1] else ''}]"
       val = ssa(u, 'val')
@@ -117,21 +108,19 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
         kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {(index:=ssa(None,'index','u64'))}, {r[vin[1]]}, {vin[0].dtype.itemsize};")
         loc = f"{r[vin[0]]}[{index}]"
       elif vin[1].uop != UOps.CONST:
-        kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {(offset:=ssa(None,'off','u64'))}, {r[vin[1]]}, {vin[0].dtype.itemsize};")
-        kernel.append(f"add.s64 {(loc:=ssa(None,'loc','u64'))}, {r[vin[0]]}, {offset};")
+        kernel.extend([f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {(offset:=ssa(None,'off','u64'))}, {r[vin[1]]}, {vin[0].dtype.itemsize};",
+                       f"add.s64 {(loc:=ssa(None,'loc','u64'))}, {r[vin[0]]}, {offset};"])
         loc = f"[{loc}]"
       else: loc = f"[{r[vin[0]]}{f'+{int(vin[1].arg * vin[0].dtype.itemsize)}' if vin[1] else ''}]"
-      if vin[0].dtype != vin[2].dtype:
-        kernel.append(lang.render_cast(cast:=ssa(None, "cast", lang.dtype_to_asmtype[vin[0].dtype]), r[vin[2]], vin[0].dtype, vin[2].dtype))
+      if vin[0].dtype != vin[2].dtype: kernel.append(lang.render_cast(cast:=ssa(None, "cast", lang.dtype_to_asmtype[vin[0].dtype]), r[vin[2]], vin[0].dtype, vin[2].dtype))
       if len(vin) > 3:
         assert vin[3].dtype is not None
         kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[3].dtype]} {(pred:=ssa(None, 'st', 'pred'))}, {r[vin[3]]} {lang.render_const(0, vin[3].dtype)};")
       kernel.append(f"{f'@{pred} ' if len(vin) > 3 else ''}st.{'s8' if vin[0].dtype.itemsize == 1 else 'b16' if vin[0].dtype == dtypes.float16 else lang.dtype_to_asmtype[vin[0].dtype]} {loc}, {r[vin[2]] if vin[0].dtype == vin[2].dtype else cast};")
     elif uop == UOps.CAST and dtype is not None:
       assert vin[0].dtype is not None
-      if dtype == dtypes.bool:
-        kernel.append(f"setp.ne.{'b16' if vin[0].dtype == dtypes.half else lang.dtype_to_asmtype[vin[0].dtype]} {(pred:=ssa(None, 'bool', 'pred'))}, {r[vin[0]]}, {'0' if vin[0].dtype == dtypes.half else lang.render_const(0, vin[0].dtype)};")
-        kernel.append(f"selp.{lang.dtype_to_asmtype[dtype]} {ssa(u, 'cast')}, {lang.render_const(1, dtype)}, {lang.render_const(0, dtype)}, {(pred)};")
+      if dtype == dtypes.bool: kernel.extend([f"setp.ne.{'b16' if vin[0].dtype == dtypes.half else lang.dtype_to_asmtype[vin[0].dtype]} {(pred:=ssa(None, 'bool', 'pred'))}, {r[vin[0]]}, {'0' if vin[0].dtype == dtypes.half else lang.render_const(0, vin[0].dtype)};",
+                                              f"selp.{lang.dtype_to_asmtype[dtype]} {ssa(u, 'cast')}, {lang.render_const(1, dtype)}, {lang.render_const(0, dtype)}, {(pred)};"])
       else: kernel.append(lang.render_cast(ssa(u, 'cast'), r[vin[0]], dtype, vin[0].dtype, bitcast=isinstance(args, tuple) and args[1]))
     elif uop == UOps.DEFINE_LOCAL:
       assert dtype is not None
@@ -142,6 +131,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       bufs.append((args[0], dtype))
       kernel.append(f"ld.param.{'u64' if dtype.__class__ == PtrDType else lang.dtype_to_asmtype[dtype]} {ssa(u, 'dat', dtype='u64' if dtype.__class__ == PtrDType else lang.dtype_to_asmtype[dtype])}, [{args[0]}];")
     else: raise NotImplementedError(f"no code for {uop}")
+
   kernel.append("ret;")
 
   kernel = [f".reg .{reg.split('_')[-2]} %{reg}<{cnt}>;" for reg,cnt in c.items()] + kernel
@@ -150,7 +140,6 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
   ret += ',\n\t'.join([f".param .{'u64' if dtype.__class__ == PtrDType else lang.dtype_to_asmtype[dtype]} {name}" for name,dtype in bufs])
   ret += "\n)\n{\n" + '\n'.join([line if line.startswith("$") else "\t" + line.replace(" ", "\t" if len(line.split(" ")[0]) > 7 else "\t\t", 1) for line in kernel]) + "\n}"
   return ret, {}
-
 
 class PTXLanguage(AssemblyLanguage):
   kernel_prefix = """.version 7.8
@@ -170,7 +159,7 @@ class PTXLanguage(AssemblyLanguage):
     BinaryOps.DIV: lambda d,a,b,dtype: f"div{'.approx' if dtype.startswith('f') else ''}.{dtype} {d}, {a}, {b};",
     BinaryOps.MAX: lambda d,a,b,dtype: f"max.{dtype} {d}, {a}, {b};", BinaryOps.MOD: lambda d,a,b,dtype: f"rem.{dtype} {d}, {a}, {b};",
     BinaryOps.CMPLT: lambda d,a,b,stype: f"setp.lt.{stype} {d}, {a}, {b};",
-    TernaryOps.MULACC: lambda d,a,b,c,dtype: f"{'fma.rn' if dtype.startswith('f') else 'mad.lo'}.{dtype} {d}, {a}, {b}, {c};", # TODO: fma on int is mad
+    TernaryOps.MULACC: lambda d,a,b,c,dtype: f"{'fma.rn' if dtype.startswith('f') else 'mad.lo'}.{dtype} {d}, {a}, {b}, {c};",
     TernaryOps.WHERE: lambda d,a,b,c,dtype: f"selp.{dtype} {d}, {b}, {c}, {a};"
   }
   dtype_to_asmtype = {
@@ -180,4 +169,3 @@ class PTXLanguage(AssemblyLanguage):
     dtypes.bool: "u32", dtypes._arg_int32: "u32"
   }
 PTXRenderer = functools.partial(uops_to_asm, PTXLanguage())
-
