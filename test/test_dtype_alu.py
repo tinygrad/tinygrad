@@ -11,8 +11,6 @@ settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
 print(settings.default)
 
-def skipUnlessFP16Supported(): return unittest.skip("GPU requires cl_khr_fp16") if Device.DEFAULT == "GPU" and CI else unittest.skip("CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs") if getenv("CUDACPU") else lambda _x: None
-
 dtypes_float = (dtypes.float32, dtypes.float16)
 dtypes_int = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
 dtypes_bool = (dtypes.bool,)
@@ -88,14 +86,14 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.float32, ht.float32, st.sampled_from(binary_operations))
   def test_float32(self, a, b, op): universal_test(a, b, dtypes.float32, op)
 
-  @skipUnlessFP16Supported()
+  @unittest.skipIf((Device.DEFAULT == "GPU" and CI) or getenv("CUDACPU"), "GPU requires cl_khr_fp16, CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs")
   @given(ht.float16, ht.float16, st.sampled_from(binary_operations))
   def test_float16(self, a, b, op): universal_test(a, b, dtypes.float16, op)
 
   @given(ht.float32, st.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
 
-  @skipUnlessFP16Supported()
+  @unittest.skipIf((Device.DEFAULT == "GPU" and CI) or getenv("CUDACPU"), "GPU requires cl_khr_fp16, CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs")
   @given(ht.float32, st.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
 
