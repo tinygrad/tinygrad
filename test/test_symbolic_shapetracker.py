@@ -138,7 +138,7 @@ class TestSymbolicReshape(unittest.TestCase):
     view = View(shape=(1, (NumNode(1)+Variable('start_pos', 1, 128).bind(3)), 16, 64), strides=(0, 1024, 64, 1), offset=131072, mask=((0, 1), (0, Variable('start_pos', 1, 128).bind(3)), (0, 16), (0, 64)), contiguous=False)
     new_shape = (1, 1, (NumNode(1)+Variable('start_pos', 1, 128).bind(3)), 16, 64)
     # this is mergeable, but need more tests to make sure the correctness
-    assert view.reshape(new_shape) == None
+    assert view.reshape(new_shape) is None
 
 class TestSymbolicExpand(unittest.TestCase):
   def test_expand_into_symbols(self):
