@@ -3,6 +3,7 @@ import string
 from collections import Counter
 import numpy as np
 from tinygrad.tensor import Tensor
+from tinygrad.shape.symbolic import Node
 from tinygrad.helpers import dtypes
 
 def levenshtein(a, b):
@@ -88,3 +89,17 @@ def f1_score(x, y):
   p = ns / len(xt)
   r = ns / len(yt)
   return 2 * p * r / (p + r)
+
+def cross_entropy_loss(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
+  divisor = y.shape[1]
+  assert not isinstance(divisor, Node), "sint not supported as divisor"
+  y = (1 - label_smoothing)*y + label_smoothing / divisor
+  if reduction=='none': return -x.log_softmax(axis=1).mul(y).sum(axis=1)
+  if reduction=='sum': return -x.log_softmax(axis=1).mul(y).sum(axis=1).sum()
+  return -x.log_softmax(axis=1).mul(y).sum(axis=1).mean()
+
+def dice_ce_loss(out, label):
+  ce = cross_entropy_loss(out, one_hot(label))
+  dice_score = get_dice_score(out, label)
+  dice = (1. - dice_score).mean()
+  return (ce + dice) / 2

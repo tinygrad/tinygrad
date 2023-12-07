@@ -1,14 +1,14 @@
+import os
 import time
 from tqdm import tqdm
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, dtypes
 from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict
-from tinygrad.shape.symbolic import Node
 from extra.lr_scheduler import MultiStepLR
 from extra.datasets.kits19 import get_batch, sliding_window_inference, get_data_split
 from extra import dist
 
-from examples.mlperf.metrics import get_dice_score, get_dice_score_np
+from examples.mlperf.metrics import dice_ce_loss, get_dice_score_np
 from examples.mlperf.conf import Conf
 
 def train_resnet():
@@ -25,20 +25,6 @@ def train_unet3d():
   def train_single_unet3d(conf):
     is_successful, diverged = False, False
     next_eval_at = conf.start_eval_at
-
-    def cross_entropy_loss(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
-      divisor = y.shape[1]
-      assert not isinstance(divisor, Node), "sint not supported as divisor"
-      y = (1 - label_smoothing)*y + label_smoothing / divisor
-      if reduction=='none': return -x.log_softmax(axis=1).mul(y).sum(axis=1)
-      if reduction=='sum': return -x.log_softmax(axis=1).mul(y).sum(axis=1).sum()
-      return -x.log_softmax(axis=1).mul(y).sum(axis=1).mean()
-
-    def dice_ce_loss(out, label):
-      ce = cross_entropy_loss(out, label)
-      dice_score = get_dice_score(out, label)
-      dice = (1. - dice_score).mean()
-      return (ce + dice) / 2
 
     def evaluate(conf, model, loader, score_fn=get_dice_score_np, epoch=0):
       s, i = 0, 0
@@ -93,17 +79,19 @@ def train_unet3d():
       total_files = len(train_x)
       total_batches = (total_files + conf.batch_size - 1) // conf.batch_size
 
-    @TinyJit
+    # @TinyJit
     def train_step(out, y):
       with Tensor.train():
-        optim.zero_grad()
         loss = dice_ce_loss(out, y)
+        print("(step) loss", loss)
         loss.backward()
         # if noloss: del loss
         optim.step()
+        optim.zero_grad()
         # if noloss: return None
         return loss.realize()
 
+    t0_total = time.monotonic()
     for epoch in range(0, conf.epochs):
       cumulative_loss = []
 
@@ -115,8 +103,9 @@ def train_unet3d():
         dtype_im = dtypes.half if getenv("FP16") else dtypes.float
         im, label = Tensor(im, dtype=dtype_im), Tensor(label, dtype=dtypes.uint8)
 
-        out = mdl_run(im)
-        del im
+        # out = mdl_run(im)
+        out = mdl(im)
+        # del im
 
         loss_value = train_step(out, label)
         cumulative_loss.append(loss_value.detach())
@@ -136,7 +125,7 @@ def train_unet3d():
 
         Tensor.training = True
         if eval_metrics["mean_dice"] >= conf.quality_threshold:
-          print("\nsuccess", eval_metrics["mean_dice"], ">", conf.quality_threshold)
+          print("\nsuccess", eval_metrics["mean_dice"], ">", conf.quality_threshold, "runtime", time.monotonic()-t0_total)
           is_successful = True
         # elif eval_metrics["mean_dice"] < 1e-6:
         #   print("\nmodel diverged. exit.", eval_metrics["mean_dice"], "<", 1e-6)
@@ -144,7 +133,9 @@ def train_unet3d():
 
       if is_successful or diverged:
         break
-      print(f'  epoch time {time.monotonic()-epoch_st:.2f}s', )
+      print(f'  epoch time {time.monotonic()-epoch_st:.2f}s')
+    mdl.save(os.path.join(conf.save_ckpt_path, f"unet3d-ckpt-{conf.epochs}"))
+    print(f"  total runtime {time.monotonic()-t0_total:.1f} | epochs {conf.epochs}")
 
   conf = Conf()
   if not getenv("DIST"):

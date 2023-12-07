@@ -1,7 +1,9 @@
 from pathlib import Path
+import numpy as np
 import torch
 from tinygrad import nn
 from tinygrad.tensor import Tensor
+from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import fetch, get_child
 
 class DownsampleBlock:
@@ -53,6 +55,11 @@ class UNet3D:
       obj = get_child(self, k)
       assert obj.shape == v.shape, (k, obj.shape, v.shape)
       obj.assign(v.numpy())
+
+  def save(self, filename):
+    with open(filename+'.npy', 'wb') as f:
+      for par in get_parameters(self):
+        np.save(f, par.numpy())
 
 if __name__ == "__main__":
   mdl = UNet3D()
