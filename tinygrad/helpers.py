@@ -52,14 +52,6 @@ def get_child(obj, key):
     elif isinstance(obj, dict): obj = obj[k]
     else: obj = getattr(obj, k)
   return obj
-def get_shape(x: Any, _shape=tuple()) -> Tuple[int, ...]:
-  while isinstance(x, List):
-    _shape, shapes = _shape + (len(x), ), tuple([get_shape(y) for y in x])
-    if not all(shapes[0] == s for s in shapes): raise ValueError("Inconsistent dimensions")
-    x = x[0] if len(x) > 0 else 1 # fall through
-  # NOTE: for lists with np elements
-  if isinstance(x, _Scalars) or isinstance(x, np.generic): return _shape
-  raise ValueError(f"Sequence must consist of scalar types - {_Scalars} - {type(x)}")
 
 @functools.lru_cache(maxsize=None)
 def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])
@@ -293,9 +285,13 @@ def get_bytes(arg, get_sz, get_str, check) -> bytes: return (sz := init_c_var(ct
 def flat_mv(mv:memoryview):
   if len(mv) == 0: return mv
   return mv.cast("B", shape=(mv.nbytes,))
-def to_mv(l: List, dtype: DType) -> Tuple[memoryview, Tuple[int, ...]]:
-  for _ in range(len(shape := get_shape(l)) - 1): l = flatten(l)
-  return memoryview(struct.pack(f'{len(l)}{dtype.structf}', *l if not dtypes.is_int(dtype) else list(map(int, l)))), shape
+def get_mv(x: Any, dtype: DType, _shape=tuple(), _base=True) -> Tuple[Tuple[int, ...], memoryview]:
+  l = x
+  while isinstance(x, List):
+    _shape, shapes, (x, l) = _shape + (len(x), ), {get_mv(y, dtype, _base=False)[0] for y in x}, (x[0], flatten(l) if isinstance(x[0], list) else l, ) if len(x) > 0 else (1, l, )
+    if len(shapes) > 1: raise ValueError("Inconsistent dimensions")
+  if isinstance(x, _Scalars) or isinstance(x, np.generic): return _shape, memoryview(b'lintpleaser') if not _base else memoryview(struct.pack(f'{prod(_shape)}{dtype.structf}', *l if not dtypes.is_int(dtype) else list(map(int, l))))
+  raise ValueError(f"Sequence must consist of scalar types - {_Scalars} - {type(x)}")
 
 # *** Helpers for CUDA-like APIs.
 
