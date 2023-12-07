@@ -26,19 +26,6 @@ def train_unet3d():
     is_successful, diverged = False, False
     next_eval_at = conf.start_eval_at
 
-    def evaluate(conf, model, loader, score_fn=get_dice_score_np, epoch=0):
-      s, i = 0, 0
-      for i, batch in enumerate(tqdm(loader, disable=not conf.verbose)):
-        vol, label = batch
-        out, label = sliding_window_inference(model, vol, label)
-        label = label.squeeze(axis=1)
-        score = score_fn(out, label).mean()
-        s += score
-        del out, label
-
-      val_dice_score = s / (i+1)
-      return {"epoch": epoch, "mean_dice": val_dice_score}
-
     def cross_entropy_loss(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
       divisor = y.shape[1]
       assert not isinstance(divisor, Node), "sint not supported as divisor"
@@ -49,10 +36,22 @@ def train_unet3d():
 
     def dice_ce_loss(out, label):
       ce = cross_entropy_loss(out, label)
-      dice_score = get_dice_score(out, label).mean(axis=0)
-      print("dice_score", dice_score)
+      dice_score = get_dice_score(out, label)
       dice = (1. - dice_score).mean()
       return (ce + dice) / 2
+
+    def evaluate(conf, model, loader, score_fn=get_dice_score_np, epoch=0):
+      s, i = 0, 0
+      for i, batch in enumerate(tqdm(loader, disable=not conf.verbose)):
+        vol, label = batch
+        out, label = sliding_window_inference(model, vol, label)
+        label = label.squeeze(axis=1)
+        score = score_fn(out, label).mean(axis=0)
+        s += score
+        del out, label
+
+      val_dice_score = s / (i+1)
+      return {"epoch": epoch, "mean_dice": val_dice_score}
 
     def get_optimizer(params, conf: dict):
       from tinygrad.nn.optim import Adam, SGD, LAMB
@@ -113,7 +112,6 @@ def train_unet3d():
       epoch_st = time.monotonic()
       for i, batch in enumerate(tqdm(train_loader, total=total_batches)):
         im, label = batch
-
         dtype_im = dtypes.half if getenv("FP16") else dtypes.float
         im, label = Tensor(im, dtype=dtype_im), Tensor(label, dtype=dtypes.uint8)
 
@@ -140,9 +138,9 @@ def train_unet3d():
         if eval_metrics["mean_dice"] >= conf.quality_threshold:
           print("\nsuccess", eval_metrics["mean_dice"], ">", conf.quality_threshold)
           is_successful = True
-        elif eval_metrics["mean_dice"] < 1e-6:
-          print("\nmodel diverged. exit.", eval_metrics["mean_dice"], "<", 1e-6)
-          diverged = True
+        # elif eval_metrics["mean_dice"] < 1e-6:
+        #   print("\nmodel diverged. exit.", eval_metrics["mean_dice"], "<", 1e-6)
+        #   diverged = True
 
       if is_successful or diverged:
         break
@@ -188,5 +186,3 @@ if __name__ == "__main__":
       if nm in globals():
         print(f"training {m}")
         globals()[nm]()
-
-

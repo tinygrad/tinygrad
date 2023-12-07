@@ -12,7 +12,7 @@ class Conf:
     load_ckpt_path: str = ""
     val_split: float = 0.1
 
-    epochs: int = 32
+    epochs: int = 50
     quality_threshold: float = 0.908
     ga_steps: int = 1
     warmup_step: int = 4
@@ -29,8 +29,8 @@ class Conf:
     benchmark: bool = False
     amp: bool = False
     optimizer: str = "sgd"
-    lr: float = 0.01
-    init_lr: float = 0.01
+    lr: float = 0.05 # 1e-3
+    init_lr: float = 1e-4
     lr_warmup_epochs: int = 1
     lr_decay_epochs: int = field(default_factory=lambda: [])
     lr_decay_factor: float = 0.1

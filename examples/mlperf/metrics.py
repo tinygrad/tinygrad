@@ -53,7 +53,7 @@ def get_dice_score_np(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth
   result = (2.0 * intersection + smooth_nr) / (target_sum + prediction_sum + smooth_dr)
   return result[0]
 
-def get_dice_score(prediction: Tensor, target: Tensor, prediction_argmax=True, to_onehot_x=True, to_onehot_y=True, layout="NCDHW", smooth_nr=1e-6, smooth_dr=1e-6):
+def get_dice_score(prediction: Tensor, target: Tensor, prediction_argmax=False, to_onehot_x=False, to_onehot_y=True, layout="NCDHW", smooth_nr=1e-6, smooth_dr=1e-6):
   if layout == "NCDHW":
     channel_axis = 1
     reduce_axis = list(range(2, len(prediction.shape)))
