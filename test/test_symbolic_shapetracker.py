@@ -135,9 +135,13 @@ class TestSymbolicReshape(unittest.TestCase):
 
   def test_symbolic_mask(self):
     # taken from gpt2 single kvcache
-    view = View(shape=(1, (NumNode(1)+Variable('start_pos', 1, 128).bind(3)), 16, 64), strides=(0, 1024, 64, 1), offset=131072, mask=((0, 1), (0, Variable('start_pos', 1, 128).bind(3)), (0, 16), (0, 64)), contiguous=False)
-    new_shape = (1, 1, (NumNode(1)+Variable('start_pos', 1, 128).bind(3)), 16, 64)
-    # this is mergeable, but need more tests to make sure the correctness
+    # these two caused problems in gpt2 if reshape merged views
+    view = View(shape=(1, (NumNode(1)+Variable('start_pos', 1, 128).bind(2)), 16, 64), strides=(0, 0, 64, 1), offset=NumNode(1024), mask=((0, 1), (Variable('start_pos', 1, 128).bind(2), (NumNode(1)+Variable('start_pos', 1, 128).bind(2))), (0, 16), (0, 64)), contiguous=False)
+    new_shape = (1, 1, (NumNode(1)+Variable('start_pos', 1, 128).bind(2)), 16, 64)
+    assert view.reshape(new_shape) is None
+
+    view = View(shape=(2, 1, (NumNode(1)+Variable('start_pos', 1, 128)), 16, 64), strides=(0, 0, 1024, 64, 1), offset=131072, mask=((1, 2), (0, 1), (0, (NumNode(1)+Variable('start_pos', 1, 128))), (0, 16), (0, 64)), contiguous=False)
+    new_shape = (2, (NumNode(1)+Variable('start_pos', 1, 128)), 16, 64)
     assert view.reshape(new_shape) is None
 
 class TestSymbolicExpand(unittest.TestCase):
