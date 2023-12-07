@@ -4,7 +4,7 @@ import functools, itertools, operator
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast, Union, Iterable
 from tinygrad.ops import MovementOps
-from tinygrad.helpers import prod, DEBUG, merge_dicts
+from tinygrad.helpers import prod, DEBUG, merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
 from tinygrad.shape.view import View, _merge_dims
 
@@ -12,11 +12,11 @@ def expr_node_mask(view:View, idx:Node, valid:Optional[Node]=None) -> Node:
   expr = [valid] if valid is not None else []
   if view.mask is not None:
     acc = 1
-    for ns,(x,y) in reversed(list(zip(view.shape, view.mask))):
-      if x != 0 or y != ns:
-        base = ((idx//acc) % ns)
+    for d,(x,y) in zip(reversed(view.shape), reversed(view.mask)):
+      if (x,y) != (0,d):
+        base = ((idx//acc)%d)
         expr += [base >= x, base < y]
-      acc *= ns
+      acc *= d
   return Variable.ands(expr)
 
 # generate an expression if you have a single idx variable
@@ -43,9 +43,8 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
 @functools.lru_cache(maxsize=None)
 def idxs_to_idx(shape:Tuple[int, ...], idxs:Tuple[Node, ...]) -> Node:
   assert len(idxs) == len(shape), "need an idx for all dimensions"
-  acc = 1
-  ret = []
-  for tidx,d in reversed(list(zip(idxs, shape))):
+  acc, ret = 1, []
+  for tidx,d in zip(reversed(idxs), reversed(shape)):
     ret.append(tidx * acc)
     acc *= d
   return Variable.sum(ret)
@@ -126,13 +125,6 @@ class ShapeTracker:
       idx = expr_node(v, idx)
     return idx, valid
 
-  def simplify(self) -> ShapeTracker:
-    if len(self.views) >= 2:
-      if (new_view := merge_views(self.views[-2], self.views[-1])) is not None:
-        if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
-        return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
-    return self
-
   def expr_idxs(self, idxs:Optional[Iterable[Node]]=None):
     if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx = expr_idxs(self.views[-1], tuple(idxs))
@@ -147,6 +139,12 @@ class ShapeTracker:
     _, valid = self.expr_idxs()
     return f'idx{axis}' in [v.expr for v in valid.vars()]
 
+  def simplify(self) -> ShapeTracker:
+    if len(self.views) >= 2 and (new_view := merge_views(self.views[-2], self.views[-1])) is not None:
+      if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
+      return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
+    return self
+
   # *** under this line are the movement ops ***
 
   def pad(self, arg: Tuple[Tuple[int, int], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].pad(arg), ))
@@ -156,7 +154,7 @@ class ShapeTracker:
   def stride(self, mul: Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].stride(mul), ))
 
   def reshape(self, new_shape: Tuple[sint, ...]) -> ShapeTracker:
-    if (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
+    if getenv("MERGE_VIEW", 1) and (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
     return ShapeTracker(self.views + (View.create(new_shape), ))
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
