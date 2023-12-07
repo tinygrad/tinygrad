@@ -98,13 +98,13 @@ class LazyOp:
   src: Tuple[Union[LazyOp, LazyBuffer], ...]   # the sources
   arg: Optional[Any] = None                    # and an optional static argument
 
-# there's currently 27 Ops you have to implement for an accelerator.
+# there's currently 26 Ops you have to implement for an accelerator.
 class UnaryOps(Enum):    EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto();   SQRT = auto()
 class BinaryOps(Enum):   ADD = auto();  SUB = auto();  MUL = auto();  DIV = auto();  CMPLT = auto(); MAX = auto()
 class ReduceOps(Enum):   SUM = auto();  MAX = auto()
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto()
 class TernaryOps(Enum):  MULACC = auto(); WHERE = auto()
-class LoadOps(Enum):     EMPTY = auto(); RAND = auto(); CONST = auto(); FROM = auto(); CONTIGUOUS = auto(); CUSTOM = auto()
+class LoadOps(Enum):     EMPTY = auto(); CONST = auto(); FROM = auto(); CONTIGUOUS = auto(); CUSTOM = auto()
 # NOTE: if you have a CompiledBuffer(DeviceBuffer)
 #       you do not need to implement the MovementOps
 #       as they are handled by the ShapeTracker(in tinygrad/shape/shapetracker.py, code 7/10)
@@ -205,8 +205,8 @@ from tinygrad.runtime.ops_clang import ClangProgram, compile_clang
 # then we copy the numpy in to RawMallocBuffers
 # last, we create an empty output buffer
 from tinygrad.helpers import dtypes
-input_a, input_b = MallocAllocator.alloc(1, dtypes.float32), MallocAllocator.alloc(1, dtypes.float32)
-output = MallocAllocator.alloc(1, dtypes.float32)
+input_a, input_b = MallocAllocator.alloc(4), MallocAllocator.alloc(4)
+output = MallocAllocator.alloc(4)
 
 # now we copy in the values
 numpy_a, numpy_b = np.array([2], dtype=np.float32), np.array([3], dtype=np.float32)
@@ -214,7 +214,7 @@ MallocAllocator.copyin(input_a, numpy_a.data.cast("B"))
 MallocAllocator.copyin(input_b, numpy_b.data.cast("B"))
 
 # compile the program, run it, and 2+3 does indeed equal 5
-program = ClangProgram("add", compile_clang(f"void add(float *a, float *b, float *c) {{ *a = *b + *c; }}"), bufs=3)
+program = ClangProgram("add", compile_clang(f"void add(float *a, float *b, float *c) {{ *a = *b + *c; }}"))
 program(output, input_a, input_b)
 numpy_out = np.empty(1, dtype=np.float32)
 MallocAllocator.copyout(numpy_out.data.cast("B"), output)

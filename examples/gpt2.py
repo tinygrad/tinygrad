@@ -3,7 +3,7 @@ import argparse
 from tqdm import trange
 import numpy as np
 from tinygrad import Device
-from typing import Optional
+from typing import Optional, Union
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Embedding, Linear, LayerNorm
 from tinygrad.shape.symbolic import Variable
@@ -28,26 +28,26 @@ class Attention:
       # no symbolic shape qkv when consuming prompts
       start_pos = start_pos.val
 
+    if HALF: x = x.half()
     xqkv = self.c_attn(x)
     xq, xk, xv = [xqkv.shrink((None, None, (i*self.dim, (i+1)*self.dim))).reshape(xqkv.shape[0], xqkv.shape[1], self.n_heads, self.head_dim) for i in range(3)]
     bsz, seqlen, n_heads, head_dim = xq.shape
 
     # create kv cache
-    if not hasattr(self, "cache_k"):
-      self.cache_k, self.cache_v = Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim), Tensor.zeros(bsz, MAX_CONTEXT, self.n_heads, self.head_dim)
+    if not hasattr(self, "cache_kv"):
+      self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim)
       if HALF:
-        self.cache_k = self.cache_k.half()
-        self.cache_v = self.cache_v.half()
+        self.cache_kv = self.cache_kv.half()
 
-    keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
-    values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
+    keys = self.cache_kv[0].shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
+    values = self.cache_kv[1].shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
 
     # update the cache
-    self.cache_k.assign(keys.pad((None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()).realize()
-    self.cache_v.assign(values.pad((None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()).realize()
+    new_cache = Tensor.stack([keys, values]).pad((None, None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()
+    self.cache_kv.assign(new_cache).realize()
 
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
-    return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1))
+    return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).cast(dtypes.float32).transpose(1, 2).reshape(bsz, seqlen, -1))
 
 class FeedForward:
   def __init__(self, dim, hidden_dim):
@@ -77,12 +77,15 @@ class Transformer:
     self.lm_head = Linear(dim, vocab_size, bias=False)
     self.forward_jit = TinyJit(self.forward)
 
-  def forward(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
+  def forward(self, tokens:Union[Tensor,Variable], start_pos:Variable, temperature:float=0.0):
     if not hasattr(self, 'allpos'): self.allpos = Tensor.arange(0, MAX_CONTEXT).reshape(1, -1).realize()
-    _bsz, seqlen = tokens.shape
+    if isinstance(tokens, Variable):
+      seqlen = 1
+      tok_emb = self.wte.weight.shrink(((tokens, tokens+1), None))
+    else:
+      seqlen = tokens.shape[1]
+      tok_emb = self.wte(tokens)
 
-    # NOTE: cannot convert token indices into half due to precision
-    tok_emb = self.wte(tokens)
     pos_emb = self.wpe(self.allpos.shrink((None, (start_pos, start_pos+seqlen))))
     h = tok_emb + pos_emb
 
@@ -96,11 +99,12 @@ class Transformer:
 
     logits = self.lm_head(self.ln_f(h))
     # NOTE: temperature=0 with HALF breaks due to precision, should use argmax instead
-    return (logits[:, -1, :] / (temperature+1e-10)).softmax().realize()
+    ret = (logits[:, -1, :] / (temperature+1e-10)).softmax()
+    return ret.half().realize() if HALF else ret.realize()
 
   # TODO: fix empty token
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
-    return (self.forward_jit if tokens.shape[1] == 1 and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
+    return (self.forward_jit if (isinstance(tokens, Variable) or tokens.shape[1] == 1) and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257
 MODEL_PARAMS = {
@@ -121,7 +125,7 @@ class GPT2:
     transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
     for k in weights.keys():
       if any(k.endswith(w) for w in transposed):
-        weights[k] = Tensor(weights[k].numpy().T)
+        weights[k] = weights[k].to(Device.DEFAULT).T
     # lm head and wte are tied
     weights['lm_head.weight'] = Tensor(weights['wte.weight'].numpy())
 
@@ -144,7 +148,11 @@ class GPT2:
         with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                     f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                     (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
-          probs = self.model(Tensor([x[start_pos:] for x in toks]), Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature)
+          if batch_size == 1 and len(toks[0][start_pos:]) == 1:
+            tokens = Variable("tokens", 0, VOCAB_SIZE).bind(toks[0][start_pos])
+          else:
+            tokens = Tensor([x[start_pos:] for x in toks])
+          probs = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature)
         # TODO: fix JIT rand so we can put this in the JIT
         tok = probs.multinomial().flatten().numpy().tolist()
       start_pos = len(toks[0])
@@ -157,9 +165,10 @@ class GPT2:
 if __name__ == "__main__":
   Tensor.no_grad = True
   print(f"using {Device.DEFAULT} backend")
+  default_prompt = "What is the answer to life, the universe, and everything?"
 
   parser = argparse.ArgumentParser(description='Run GPT2 in tinygrad', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument('--prompt', type=str, default="What is the answer to life, the universe, and everything?", help="Phrase to start with")
+  parser.add_argument('--prompt', type=str, default=default_prompt, help="Phrase to start with")
   parser.add_argument('--count', type=int, default=100, help="Max number of tokens to generate")
   parser.add_argument('--temperature', type=float, default=0.8, help="Temperature in the softmax")
   parser.add_argument('--model_size', type=str, default="gpt2-medium", help="Size of model to use [gpt2, gpt2-medium, gpt2-large, gpt2-xl]")
@@ -179,7 +188,7 @@ if __name__ == "__main__":
 
   if HALF:
     for l in get_state_dict(gpt2).values():
-      l.assign(l.cast(dtypes.float16).realize())
+      l.assign(l.half().realize())
 
   if args.benchmark != -1:
     gpt2.model(Tensor.rand(args.batch_size, args.benchmark), Variable("a", 0, MAX_CONTEXT).bind(0)).realize()
@@ -190,3 +199,15 @@ if __name__ == "__main__":
       if len(texts) == 1: print(texts[0])
       else:
         for i,text in enumerate(texts): print(colored(f"Response {i}:", "green"), text)
+
+    # validate output!
+    if args.temperature == 0 and args.model_size == "gpt2-medium" and args.count == 10:
+      expected = {
+        default_prompt: "What is the answer to life, the universe, and everything?\n\nThe answer is that we are all one",
+        "Hello.": "Hello. I'm a little late to the party, but",
+      }
+      try:
+        assert texts[0] == expected[args.prompt]
+        print(colored("output validated", "green"))
+      except KeyError:
+        pass

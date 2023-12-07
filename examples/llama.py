@@ -96,6 +96,10 @@ MODEL_PARAMS = {
     "1B": {
       "args": {"dim": 2048, "n_layers": 22, "n_heads": 32, "n_kv_heads": 4, "norm_eps": 1e-05, "vocab_size": 32000, "hidden_dim": 5632},
       "files": 1,
+    },
+    "1B-Chat": {
+      "args": {"dim": 2048, "n_layers": 22, "n_heads": 32, "n_kv_heads": 4, "norm_eps": 1e-05, "vocab_size": 32003, "hidden_dim": 5632},
+      "files": 1,
     }
   }
 }
@@ -148,11 +152,11 @@ class LLaMa:
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
     params = MODEL_PARAMS[model_gen][model_size]
-
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
 
-    model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT)
+    jit = bool(getenv("JIT", 1))
+    model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
 
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
@@ -170,7 +174,7 @@ class LLaMa:
 
   def __init__(self, model, tokenizer):
     self.model = model
-    self.tokenizer = tokenizer
+    self.tokenizer: SentencePieceProcessor = tokenizer
 
   def greedy_until(self, prompt:str, until, max_length, temperature):
     toks = [self.tokenizer.bos_id()] + self.tokenizer.encode(prompt)

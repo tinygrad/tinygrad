@@ -15,13 +15,21 @@ repos:
         pass_filenames: false
       - id: mypy
         name: mypy
-        entry: mypy tinygrad/ extra/helpers.py
+        entry: mypy tinygrad/
         language: system
         always_run: true
         pass_filenames: false
       - id: docs
         name: docs
-        entry: python3 docs/abstractions.py
+        entry: |
+          python3 docs/abstractions.py
+          python3 docs/beautiful.py
+        language: system
+        always_run: true
+        pass_filenames: false
+      - id: devicetests
+        name: select GPU tests
+        entry: env GPU=1 PYTHONPATH="." pytest test/test_uops.py test/test_custom_function.py test/test_search.py
         language: system
         always_run: true
         pass_filenames: false
@@ -33,7 +41,7 @@ repos:
         pass_filenames: false
       - id: example
         name: multi device tests
-        entry: python3 test/external/test_example.py
+        entry: python3 test/external/external_test_example.py
         language: system
         always_run: true
         pass_filenames: false
