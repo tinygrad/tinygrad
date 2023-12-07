@@ -43,7 +43,7 @@ def _test_single_value_const(vals, op, dtype):
 
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):
-    if not (math.isnan(v1) and math.isnan(v2)): self.assertAlmostEqual(v1, v2, places=5) if v1.dtype != np.bool_ else self.assertEqual(v1, v2)
+    if not (math.isnan(v1) and math.isnan(v2)): self.assertAlmostEqual(v1, v2, places=5) if v1.dtype != dtypes.bool else self.assertEqual(v1, v2)
 
   def _test_uop_fxn(self, bop, fxn, dt=dtypes.float32):
     for f in [_test_single_value, _test_single_value_const]:
