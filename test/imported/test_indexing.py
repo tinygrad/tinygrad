@@ -18,6 +18,15 @@ def numpy_testing_assert_equal_helper(a, b):
 def consec(shape, start=1):
   return Tensor(np.arange(math.prod(shape)).reshape(shape)+start)
 
+# creates strided tensor and sets the base to reference tensor's base, equivalent to torch.set_()
+def set_(reference: Tensor, shape, strides, offset):
+  if reference.lazydata.base.realized is None: reference.realize()
+  assert reference.lazydata.base.realized, "base has to be realized before setting it to strided's base"
+  strided = Tensor(LazyBuffer(device=reference.device, st=ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),)), optype=None, op=None, dtype=reference.dtype, src=None, base=reference.lazydata.base))
+  assert strided.lazydata.st.real_strides() == strides, "real_strides should equal strides for strided"
+  assert strided.lazydata in reference.lazydata.base.views, "base.views should contain strided.lazydata"
+  return strided
+
 def make_tensor(shape, dtype:dtypes, noncontiguous):
   r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
   values uniformly drawn from ``[low, high)``.
@@ -186,15 +195,7 @@ class TestIndexing(unittest.TestCase):
     # strided is [1, 3, 5, 7]
 
     reference = consec((10,))
-
-    # TODO review required
-    '''
-    strided = torch.tensor(())
-    strided.set_(reference.storage(), storage_offset=0,
-                  size=torch.Size([4]), stride=[2])
-    '''
-    reference.realize()
-    strided = Tensor(LazyBuffer(device=reference.device, st=ShapeTracker((View.create(shape=(4,), strides=(2,), offset=0),)), optype=None, op=None, dtype=reference.dtype, src=None, base=reference.lazydata.base))
+    strided = set_(reference, (4,), (2,), 0)
 
     numpy_testing_assert_equal_helper(strided[[0]], np.array([1]))
     numpy_testing_assert_equal_helper(strided[ri([0]), ], np.array([1]))
@@ -206,13 +207,7 @@ class TestIndexing(unittest.TestCase):
 
     # stride is [4, 8]
 
-    # TODO: review required
-    '''
-    strided = np.array(())
-    strided.set_(reference.storage(), storage_offset=4,
-                  size=torch.Size([2]), stride=[4])
-    '''
-    strided = Tensor(LazyBuffer(device=reference.device, st=ShapeTracker((View.create(shape=(2,), strides=(4,), offset=4),)), optype=None, op=None, dtype=reference.dtype, src=None, base=reference.lazydata.base))
+    strided = set_(reference, (2,), (4,), offset=4)
 
     numpy_testing_assert_equal_helper(strided[[0]], np.array([5]))
     numpy_testing_assert_equal_helper(strided[ri([0]), ], np.array([5]))
@@ -318,15 +313,8 @@ class TestIndexing(unittest.TestCase):
     # strided is [[1 3 5 7],
     #             [9 11 13 15]]
 
-    # TODO review required
-    '''
-    reference = torch.arange(0., 24, dtype=dtype, device=device).view(3, 8)
-    strided = torch.tensor((), dtype=dtype, device=device)
-    strided.set_(reference.storage(), 1, size=torch.Size([2, 4]),
-                  stride=[8, 2])
-    '''
-    reference = Tensor.arange(0., 24).realize().reshape(3, 8)
-    strided = Tensor(LazyBuffer(device=reference.device, st=ShapeTracker((View.create(shape=(2, 4), strides=(8, 2), offset=1),)), optype=None, op=None, dtype=reference.dtype, src=None, base=reference.lazydata.base))
+    reference = Tensor.arange(0., 24).reshape(3, 8)
+    strided = set_(reference, (2,4), (8,2), 1)
 
     numpy_testing_assert_equal_helper(strided[ri([0, 1]), ri([0])],
                       np.array([1, 9]))
@@ -367,11 +355,8 @@ class TestIndexing(unittest.TestCase):
     # strided is [[10, 11],
     #             [17, 18]]
 
-    reference = Tensor.arange(0., 24).realize().reshape(3, 8)
-    # TODO review required
-    # strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
-                  # stride=[7, 1])
-    strided = Tensor(LazyBuffer(device=reference.device, st=ShapeTracker((View.create(shape=(2, 2), strides=(7, 1), offset=10),)), optype=None, op=None, dtype=reference.dtype, src=None, base=reference.lazydata.base))
+    reference = Tensor.arange(0., 24).reshape(3, 8)
+    strided = set_(reference, (2,2), (7,1), 10)
 
     numpy_testing_assert_equal_helper(strided[ri([0]), ri([1])],
                       np.array([11]))
@@ -382,11 +367,8 @@ class TestIndexing(unittest.TestCase):
                       np.array([-1]))
     '''
 
-    reference = Tensor.arange(0., 24).realize().reshape(3, 8)
-    # TODO review required
-    # strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
-                  # stride=[7, 1])
-    strided = Tensor(LazyBuffer(device=reference.device, st=ShapeTracker((View.create(shape=(2, 2), strides=(7, 1), offset=10),)), optype=None, op=None, dtype=reference.dtype, src=None, base=reference.lazydata.base))
+    reference = Tensor.arange(0., 24).reshape(3, 8)
+    strided = set_(reference, (2,2), (7,1), 10)
 
     numpy_testing_assert_equal_helper(strided[ri([0, 1]), ri([1, 0])],
                       np.array([11, 17]))
@@ -398,10 +380,7 @@ class TestIndexing(unittest.TestCase):
     '''
 
     reference = Tensor.arange(0., 24).realize().reshape(3, 8)
-    # TODO review required
-    # strided.set_(reference.storage(), 10, size=torch.Size([2, 2]),
-                  # stride=[7, 1])
-    strided = Tensor(LazyBuffer(device=reference.device, st=ShapeTracker((View.create(shape=(2, 2), strides=(7, 1), offset=10),)), optype=None, op=None, dtype=reference.dtype, src=None, base=reference.lazydata.base))
+    strided = set_(reference, (2,2), (7,1), 10)
 
     rows = ri([[0],
                 [1]])
