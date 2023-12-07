@@ -1,6 +1,5 @@
 import unittest
 
-from numpy.lib import math
 from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
@@ -30,6 +29,9 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (T
 # TODO: (a+b)/2 in tensor.py's maximum can overflow. This requires a new implementation of maximum that can be backpropagated
 #binary_operations += [(Tensor.maximum, np.maximum)]
 
+# TODO: CUDACPU segfaults on sin
+if getenv("CUDACPU"): unary_operations.remove((Tensor.sin, np.sin))
+
 class ht:
   float64 = st.floats(width=64, allow_subnormal=False)
   float32 = st.floats(width=32, allow_subnormal=False)
@@ -52,7 +54,6 @@ def universal_test(a, b, dtype, op):
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
 def universal_test_unary(a, dtype, op):
-  if (op == unary_operations[4]) and getenv("CUDACPU") and a == math.nan: return # CUDACPU segfaults on nan of sin
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = op[0](Tensor([a], dtype=dtype)).numpy()
   numpy_value = op[1](np.array([a]).astype(dtype.np))
