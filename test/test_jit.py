@@ -260,23 +260,24 @@ class TestJit(unittest.TestCase):
     if Device[Device.DEFAULT].graph is None: raise unittest.SkipTest("only test graphs")
 
     # Create long jit with 83 kernels.
-    def f(a, b, c, d):
+    def f(a, b, c, d, e):
       for _ in range(80):
         a = (a+b).realize()
       y = (a*c).realize()
       z = (y*d).realize()
-      w = (z*d)
+      w = (z*e)
       return w.realize()
 
     a = Tensor.randn(10, 10).realize()
     b = Tensor.randn(10, 10).realize()
     c = Tensor.randn(10, 10).realize()
     d = Tensor.randn(10, 10).realize()
+    e = Tensor.randn(10, 10).realize()
 
     jf = TinyJit(f)
     prev = None
     for _ in range(5):
-      o = jf(a, b, c, d).numpy()
+      o = jf(a, b, c, d, e).numpy()
       if prev is not None: np.testing.assert_allclose(o, prev, atol=1e-4, rtol=1e-5)
       prev = o
 
@@ -284,6 +285,7 @@ class TestJit(unittest.TestCase):
     # Checking that 2 graphs are inited.
     assert isinstance(jf.jit_cache[0].prg, graph_t)
     assert isinstance(jf.jit_cache[1].prg, graph_t)
+
 
 if __name__ == '__main__':
   unittest.main()
