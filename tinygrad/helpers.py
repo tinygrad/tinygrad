@@ -146,7 +146,7 @@ class dtypes:
   def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
-  bool: Final[DType] = DType(0, 1, "bool", np.bool_)
+  bool: Final[DType] = DType(0, 1, "bool", bool)
   float16: Final[DType] = DType(9, 2, "half", np.float16)
   half = float16
   float32: Final[DType] = DType(10, 4, "float", np.float32)
