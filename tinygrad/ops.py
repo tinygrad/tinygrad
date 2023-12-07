@@ -107,3 +107,5 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter:
   @functools.lru_cache(None) # NOTE: this cache needs to be recreated for new ASTs
   def run_ast(ast): return InterpretedFlopCounter[ast.op](*([run_ast(x) for x in ast.src]+([ast.arg] if ast.arg is not None else [])))
   return run_ast(ast)
+
+def vars_from_ast(ast:LazyOp) -> List[Variable]: return sorted(set.union(*[x.arg.st.vars() for x in ast.get_lazyops() if x.op in BufferOps], set()), key=lambda x: str(x.expr))
