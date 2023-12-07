@@ -18,7 +18,7 @@ def numpy_testing_assert_equal_helper(a, b):
 def consec(shape, start=1):
   return Tensor(np.arange(math.prod(shape)).reshape(shape)+start)
 
-# creates strided tensor and sets the base to reference tensor's base, equivalent to torch.set_()
+# creates strided tensor with base set to reference tensor's base, equivalent to torch.set_()
 def set_(reference: Tensor, shape, strides, offset):
   if reference.lazydata.base.realized is None: reference.realize()
   assert reference.lazydata.base.realized, "base has to be realized before setting it to strided's base"
