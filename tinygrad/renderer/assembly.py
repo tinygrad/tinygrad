@@ -156,7 +156,7 @@ class PTXLanguage(AssemblyLanguage):
     UnaryOps.SIN: lambda d,a,dtype: f"sin.approx.{dtype} {d}, {a};", UnaryOps.SQRT: lambda d,a,dtype: f"sqrt.approx.{dtype} {d}, {a};",
     BinaryOps.ADD: lambda d,a,b,dtype: f"{'or' if dtype == 'pred' else 'add'}.{dtype} {d}, {a}, {b};", BinaryOps.SUB: lambda d,a,b,dtype: f"sub.{dtype} {d}, {a}, {b};",
     BinaryOps.MUL: lambda d,a,b,dtype: f"{'and' if dtype == 'pred' else 'mul'}{'' if dtype.startswith('f') or dtype == 'pred' else '.lo'}.{dtype} {d}, {a}, {b};",
-    BinaryOps.DIV: lambda d,a,b,dtype: f"div{'.approx' if dtype.startswith('f') else ''}.{dtype} {d}, {a}, {b};",
+    BinaryOps.XOR: lambda d,a,b,dtype: f"xor.b{dtype[1:]} {d}, {a}, {b};", BinaryOps.DIV: lambda d,a,b,dtype: f"div{'.approx' if dtype.startswith('f') else ''}.{dtype} {d}, {a}, {b};",
     BinaryOps.MAX: lambda d,a,b,dtype: f"max.{dtype} {d}, {a}, {b};", BinaryOps.MOD: lambda d,a,b,dtype: f"rem.{dtype} {d}, {a}, {b};",
     BinaryOps.CMPLT: lambda d,a,b,stype: f"setp.lt.{stype} {d}, {a}, {b};",
     TernaryOps.MULACC: lambda d,a,b,c,dtype: f"{'fma.rn' if dtype.startswith('f') else 'mad.lo'}.{dtype} {d}, {a}, {b}, {c};",
