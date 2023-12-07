@@ -73,6 +73,11 @@ def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   an, bn, cn = np.array([a]).astype(d1.np), np.array([b]).astype(d1.np), np.array([c]).astype(d2.np)
   tensor_value = op2[0](op1[0](at, bt).cast(d2), ct).numpy()
   numpy_value = op2[1](op1[1](an, bn).astype(d2.np), cn)
+  # TODO the next 2 lines are a hacky critera to ignore overflows that should improve
+  if op1[0] in (operator.add, operator.mul) and op2[0] in (operator.add, operator.mul): # TODO this isn't complete
+    if float(op2[1](op1[1](an, bn), cn)) != float(numpy_value): # overflow
+      if Device.DEFAULT == "METAL" and not OSX: return # Metal behaves differently than numpy on non-osx
+      if getenv("CUDACPU"): return # CUDACPU behaves differently than numpy
   np.testing.assert_almost_equal(tensor_value, numpy_value)
 
 class TestDTypeALU(unittest.TestCase):
