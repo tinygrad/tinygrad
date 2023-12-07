@@ -1,4 +1,6 @@
 import unittest
+
+from numpy.lib import math
 from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
@@ -52,6 +54,7 @@ def universal_test(a, b, dtype, op):
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
 def universal_test_unary(a, dtype, op):
+  if (op == unary_operations[4]) and getenv("CUDACPU") and a == math.nan: return # CUDACPU segfaults on nan of sin
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = op[0](Tensor([a], dtype=dtype)).numpy()
   numpy_value = op[1](np.array([a]).astype(dtype.np))
