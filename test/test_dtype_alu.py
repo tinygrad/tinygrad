@@ -86,14 +86,17 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.float32, ht.float32, st.sampled_from(binary_operations))
   def test_float32(self, a, b, op): universal_test(a, b, dtypes.float32, op)
 
-  @unittest.skipIf((Device.DEFAULT == "GPU" and CI) or getenv("CUDACPU"), "GPU requires cl_khr_fp16, CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs")
+  # GPU requires cl_khr_fp16
+  # for LLVM, it segfaults because it can't link to the casting function
+  # CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
+  @unittest.skipIf((Device.DEFAULT in ["GPU", "LLVM"] and CI) or getenv("CUDACPU"), "")
   @given(ht.float16, ht.float16, st.sampled_from(binary_operations))
   def test_float16(self, a, b, op): universal_test(a, b, dtypes.float16, op)
 
   @given(ht.float32, st.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
 
-  @unittest.skipIf((Device.DEFAULT == "GPU" and CI) or getenv("CUDACPU"), "GPU requires cl_khr_fp16, CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs")
+  @unittest.skipIf((Device.DEFAULT in ["GPU", "LLVM"] and CI) or getenv("CUDACPU"), "")
   @given(ht.float32, st.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
 
