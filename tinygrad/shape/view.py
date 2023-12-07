@@ -19,8 +19,9 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
 def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]] = None) -> Tuple[Tuple[int, int, int], ...]:
   # merge contiguous subparts or zero strided dims. ret = List[(merged_dims, stride, merged dims w/o zero stride), ...]
   if not shape: return tuple()
-  assert len(shape) == len(strides) # state (0, 1, 2) -> (none, in-progress, done). wrt merging zero strided dimensions.
+  assert len(shape) == len(strides)
   ret = [(shape[0], strides[0], shape[0] if strides[0] else 0)]
+  # state (0, 1, 2) -> (none, in-progress, done). wrt merging zero strided dimensions
   state = 1 if mask and strides[0] == 0 and shape[0] != 1 and mask[0][1] - mask[0][0] == 1 else 0
   for i, (sh, st) in enumerate(zip(shape[1:], strides[1:]), start=1):
     if sh == 1: continue
@@ -34,6 +35,7 @@ def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tu
 @functools.lru_cache(maxsize=None)
 def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tuple[Tuple[sint, sint], ...]], Optional[Tuple[sint, ...]], bool]:
   if view.mask is None: return view.mask, None, False
+  if any(not isinstance(m[0], int) or not isinstance(m[1], int) for m in view.mask): return view.mask, None, True
   new_mask: List[Tuple[int, int]] = []
 
   r_masks, r_shape, r_new_shape = reversed(view.mask), reversed(view.shape), reversed(new_shape)
@@ -64,7 +66,6 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
       if next_mask != (0, 1) and mask != (0, 1) and (next_mask[1] - next_mask[0] == 1): off += next_mask[0] * old_dim
       mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), old_dim * next(r_shape, 1)
 
-  # TODO: can this be removed?
   for mask in r_masks: # if the old shape has leading 1s, need to make sure their mask is (0,1)
     if mask != (0, 1): return ((0, 0),) * len(new_shape), None, False
 
