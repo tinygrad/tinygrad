@@ -3,7 +3,7 @@ import Metal, libdispatch
 from typing import List, Any, Tuple, Dict, cast, Optional
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup
-from tinygrad.device import Compiled, CompiledASTRunner, update_stats
+from tinygrad.ops import Compiled, CompiledASTRunner, update_stats
 from tinygrad.renderer.metal import MetalRenderer
 from tinygrad.runtime.lib import RawBufferMapped, RawBuffer, LRUAllocator
 from tinygrad.shape.symbolic import Variable
@@ -44,20 +44,28 @@ def unwrap(x):
   assert err is None, str(err)
   return ret
 
+metal_hack = True
+
 @diskcache
 def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
   if use_xcode:
     # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
     air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
     return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+  if metal_hack:
+    return prg.encode()
   options = Metal.MTLCompileOptions.new()
   library = unwrap(METAL.device.newLibraryWithSource_options_error_(prg, options, None))
   return library.libraryDataContents().bytes().tobytes()
 
 class MetalProgram:
   def __init__(self, name:str, lib:bytes):
-    data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
-    self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
+    if metal_hack:
+      options = Metal.MTLCompileOptions.alloc().init()
+      self.library = unwrap(METAL.device.newLibraryWithSource_options_error_(lib.decode(), options, None))
+    else:
+      data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
+      self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
     self.fxn = self.library.newFunctionWithName_(name)
     if DEBUG >= 6:
       with tempfile.NamedTemporaryFile(delete=True) as shader:
@@ -123,7 +131,7 @@ class MetalGraph:
       icb_command.setBarrier()
     self.read_resources, self.write_resources = dedup(read_resources), dedup(write_resources)
     self.command_buffer: Any = None
-    self.int_buf_view = self.int_buf.toCPU()    # TODO: this is metal syncing when it doesn't need to
+    self.int_buf_view = self.int_buf.buffer_view()    # TODO: this is metal syncing when it doesn't need to
 
   def __call__(self, input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # NOTE: you at least can't update the ints if this is running
@@ -152,4 +160,4 @@ class MetalGraph:
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=jit, num_kernels=len(self.jit_cache))
     return et
 
-MetalDevice = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, METAL.synchronize, graph=MetalGraph)
+MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, METAL.synchronize, graph=MetalGraph)
