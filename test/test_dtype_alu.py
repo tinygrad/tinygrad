@@ -77,7 +77,7 @@ class TestDTypeALU(unittest.TestCase):
     an, bn, cn = np.array([a]).astype(np.int32), np.array([b]).astype(np.int32), np.array([c]).astype(np.float32)
     tensor_value = op2[0](op1[0](at, bt).cast(dtypes.float32), ct).numpy()
     numpy_value = op2[1](op1[1](an, bn).astype(np.float32), cn)
-    np.testing.assert_almost_equal(tensor_value, numpy_value)
+    np.testing.assert_allclose(tensor_value, numpy_value, rtol=1e-6)
 
   @given(st.floats(width=32, allow_subnormal=False, min_value=0, max_value=10.0), st.floats(width=32, allow_subnormal=False, min_value=0, max_value=10.0), st.integers(-10, 10), st.sampled_from(binary_operations), st.sampled_from(binary_operations))
   def test_float_midcast_int32(self, a, b, c, op1, op2):
