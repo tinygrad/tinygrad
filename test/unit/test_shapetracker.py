@@ -265,6 +265,7 @@ class TestIndexExpressions2d(unittest.TestCase):
     self.st.assert_same()
 
   def test_reshape_combining_4(self):
+    # interestingly this one is quite slow
     self.st = CheckingShapeTracker((1,1,5,5,1,1,5))
     self.st.pad(((3,6), (0,0), (0,5), (0,0), (3,6), (0,0), (0,5)))
     self.st.reshape((100,5,100))
@@ -481,6 +482,12 @@ class TestComplexShapeTracker(unittest.TestCase):
     st = ShapeTracker((View((2, 1920, 32, 32), (1310720, 1024, 32, 1), 0, ((0, 2), (0, 1280), (0, 32), (0, 32)), False),))
     st = st.reshape((2, 32, 240, 256))
     assert len(st.views) == 2
+
+  def test_reshape_trailing_invalid_ones(self):
+    st = ShapeTracker((View(shape=(1, 1, 5), strides=(0, 0, 1), offset=-5, mask=((1, 1), (0, 1), (0, 5)), contiguous=False),))
+    st = st.reshape((5,))
+    assert len(st.views) == 1
+    assert st.views[0].mask == ((0,0),)
 
 class TestSingleShapeTracker(unittest.TestCase):
   def setUp(self):
