@@ -288,7 +288,7 @@ def get_mv(x: Any, dtype: DType, _shape=tuple(), _base=True) -> Tuple[Tuple[int,
   while isinstance(x, List):
     if len({get_mv(y, dtype, _base=False)[0] for y in x}) > 1: raise ValueError("Inconsistent dimensions")
     _shape, x, l = _shape + (len(x), ), x[0] if (xl := len(x)) > 0 else 1, flatten(l) if xl > 0 and isinstance(x[0], list) else l
-  if isinstance(x, _Scalars) or isinstance(x, np.generic): return _shape, memoryview(b'') if not _base else memoryview(struct.pack(f'{prod(_shape)}{dtype.structf}', *l if not dtypes.is_int(dtype) else list(map(int, l))))
+  if isinstance(x, _Scalars) or isinstance(x, np.generic): return _shape,  memoryview(struct.pack(f'{prod(_shape)}{dtype.structf}', *l if not dtypes.is_int(dtype) else list(map(int, l)))) if _base else memoryview(b'')
   raise ValueError(f"Sequence must consist of scalar types - {_Scalars} - {type(x)}")
 
 # *** Helpers for CUDA-like APIs.
