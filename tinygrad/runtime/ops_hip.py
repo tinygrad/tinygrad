@@ -55,6 +55,7 @@ class HIPAllocator(LRUAllocator):
     check(hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
   def transfer(self, dest:T, src:T, sz:int):
     check(hip.hipSetDevice(self.device))
+    # TODO: hipMemcpyAsync, but you have to track the "src" buffer to not free it
     check(hip.hipMemcpy(dest, src, sz, hip.hipMemcpyDeviceToDevice))
 
 class HIPDevice(Compiled):
@@ -65,4 +66,6 @@ class HIPDevice(Compiled):
 
     from tinygrad.features.graph.hip import HIPGraph
     super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self.device), LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, functools.partial(HIPProgram, self.device), HIPGraph)
-  def synchronize(self): hip.hipDeviceSynchronize()
+  def synchronize(self):
+    check(hip.hipSetDevice(self.device))
+    check(hip.hipDeviceSynchronize())

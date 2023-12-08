@@ -118,16 +118,20 @@ class Tensor:
     if self.dtype == x.dtype and self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized
     self.lazydata = x.lazydata
     return self
-
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
+
+  # TODO: these are good places to start removing numpy
+  def item(self) -> Union[float, int]:
+    assert self.numel() == 1, "must have one element for item"
+    return self.realize().lazydata.realized.toCPU().item()
+  def data(self) -> memoryview: return self.numpy().data
+
+  # TODO: this should import numpy and use .data() to construct the array
   def numpy(self) -> np.ndarray:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
     if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.np)
     return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
-  def item(self) -> Union[float, int]:
-    assert self.numel() == 1, "must have one element for item"
-    return self.realize().lazydata.realized.toCPU().item()
 
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self
@@ -735,6 +739,7 @@ class Tensor:
     inject_nan = ((((-to_nan) * 2) + 1)).log().add(1) if isinstance(to_nan, Tensor) else 1 if not to_nan else float("nan")
     return ar.mul(sign * base_sign + (1 - base_sign)).mul(inject_nan)
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
+  def xor(self, x:Tensor, reverse=False) -> Tensor: return mlops.Xor.apply(*self._broadcasted(x, reverse))
 
   def maximum(self, x:Union[Tensor, float]) -> Tensor: return (self<x).detach().where(x, (self>x).detach().where(self, (self+x)/2))
   def minimum(self, x:Union[Tensor, float]) -> Tensor: return -((-self).maximum(-x))
@@ -754,6 +759,7 @@ class Tensor:
   def __pow__(self, x) -> Tensor: return self.pow(x)
   def __truediv__(self, x) -> Tensor: return self.div(x)
   def __matmul__(self, x) -> Tensor: return self.matmul(x)
+  def __xor__(self, x) -> Tensor: return self.xor(x)
 
   def __radd__(self, x) -> Tensor: return self.add(x, True)
   def __rsub__(self, x) -> Tensor: return self.sub(x, True)
@@ -761,6 +767,7 @@ class Tensor:
   def __rpow__(self, x) -> Tensor: return self.pow(x, True)
   def __rtruediv__(self, x) -> Tensor: return self.div(x, True)
   def __rmatmul__(self, x) -> Tensor: return self.matmul(x, True)
+  def __rxor__(self, x) -> Tensor: return self.xor(x, True)
 
   def __iadd__(self, x) -> Tensor: return self.assign(self.add(x))
   def __isub__(self, x) -> Tensor: return self.assign(self.sub(x))
@@ -768,6 +775,7 @@ class Tensor:
   def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x))
   def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x))
   def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
+  def __ixor__(self, x) -> Tensor: return self.assign(self.xor(x))
 
   def __lt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, False))
   def __gt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, True))

@@ -22,7 +22,6 @@ def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[Buffer]) -
     for i,a in enumerate(ji.rawbufs):
       if a in input_rawbuffers:
         input_replace[(j,i)] = input_rawbuffers.index(a)
-  assert len(set(input_replace.values())) == len(input_rawbuffers), "some input tensors not found"
   return input_replace
 def get_jc_idxs_with_updatable_launch_dims(jit_cache: List[JitItem]) -> List[int]:
   return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledASTRunner) and ((ji.prg.global_size and not all_int(tuple(ji.prg.global_size))) or (ji.prg.local_size and not all_int(tuple(ji.prg.local_size))))]
@@ -74,16 +73,32 @@ class TinyJit(Generic[ReturnType]):
       self.ret = self.fxn(*args, **kwargs)
       self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
+      assert len(set(get_input_replace(self.jit_cache, input_rawbuffers).values())) == len(input_rawbuffers), "some input tensors not found" # Do this check on an unmodified jit cache.
+      if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
-      # if your Device supports it, condense the items into a graph executor
+      # if your Device supports it, condense the items into a graph executor.
       if (make_graph := Device[Device.DEFAULT].graph) and getenv("JIT") != 2:
-        try:
-          if DEBUG >= 1: print(f"JIT GRAPHing {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
-          self.jit_cache = [JitItem(make_graph(self.jit_cache, input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers))]
-        except GraphException as e:
-          if DEBUG >= 1: print(f"graph create failed {e}")
-      else:
-        if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
+        # Split JIT cache into batches for faster graph execution. This allows the accelerator to run some batches while subsequent graphs are still being updated.
+        # JitItems that cannot be jitted (not CompiledASTRunner) are moved to the final jit cache and do not participate in the process of graph building.
+        graphed_jit_cache, current_batch = [], []
+        for i,ji in enumerate(self.jit_cache):
+          # If the jit item can potentially be graphed, put it in a batch.
+          if isinstance(ji.prg, CompiledASTRunner): current_batch.append(ji)
+
+          # The flush is done when (1) ji is the last one, (2) the size of batch exceeds the maximum batch size or (3) the current jit item cannot be graphed, so the current batch is flushed before such a jit item is added.
+          if len(current_batch) > 0 and (i==len(self.jit_cache)-1 or len(current_batch) >= getenv("JIT_BATCH_SIZE", 64) or not isinstance(ji.prg, CompiledASTRunner)):
+            try:
+              graphed_jit_cache.append(JitItem(make_graph(current_batch, input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers)))
+              if DEBUG >= 2: print(f"\tJIT GRAPHing batch with {len(current_batch)} kernels")
+            except GraphException as e:
+              graphed_jit_cache.extend(current_batch)
+              if DEBUG >= 2: print(f"\tJIT GRAPHing failed batch with {len(current_batch)} kernels: {e}")
+            current_batch = []
+
+          # If the jit item cannot be graphed, put it right into the final cache after the flush.
+          if not isinstance(ji.prg, CompiledASTRunner): graphed_jit_cache.append(ji)
+
+        self.jit_cache = graphed_jit_cache
 
       self.input_replace = get_input_replace(self.jit_cache, input_rawbuffers)
     elif self.cnt == 0:

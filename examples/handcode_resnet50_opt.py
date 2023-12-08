@@ -1,14 +1,12 @@
 from typing import List
 from extra.models.resnet import ResNet50
 from tinygrad.tensor import Tensor
-from tinygrad.ops import LoadOps
+from tinygrad.ops import LoadOps, vars_from_ast
 from tinygrad.device import Device, Compiled
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import time_linearizer, beam_search, bufs_from_lin
 from tinygrad.helpers import ansilen, DEBUG, getenv
-from tinygrad.lazy import vars_from_ast
 from tinygrad.shape.symbolic import sym_infer
-
 
 if __name__ == "__main__":
   mdl = ResNet50()
