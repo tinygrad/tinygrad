@@ -469,6 +469,7 @@ class Linearizer(Kernel):
       else: vin = tuple(self.cast(x, upcast_dtype) for x in vin)
       dtype = dtype or upcast_dtype # some ops like BinaryOps.CMPLT return bool
     if simplify:
+      if uop == UOps.CAST and vin[0].dtype == dtype: return vin[0]
       if uop == UOps.PHI and len(vin) == 2: return vin[1]   # a phi without loops is a noop
       if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype, insert_before)
       if uop == UOps.CAST and all(x.uop == UOps.CONST for x in vin) and all_same([x.arg for x in vin]): return self.const(vin[0].arg, dtype, insert_before)
