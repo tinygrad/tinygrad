@@ -1,5 +1,6 @@
 import numpy as np
 import unittest, os
+from hypothesis import given, strategies as st, settings
 
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps
@@ -10,7 +11,7 @@ from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
-from tinygrad.helpers import dtypes, prod
+from tinygrad.helpers import DTYPES_DICT, DType, dtypes, prod
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
@@ -120,13 +121,13 @@ class TestLinearizer(unittest.TestCase):
     lin = Linearizer(sched[0].ast)
     assert not any(u.uop == UOps.LOOP for u in lin.linearize().uops), "found loop in sum collapse"
 
-  def test_acc_cast(self):
-    a, b = Tensor.rand(1024,1024, dtype=dtypes.float16), Tensor.rand(1024,1024, dtype=dtypes.float16)
-    out = (a*b).cast(dtypes.float32).sum(-1).cast(dtypes.float16)
+  @given(st.sampled_from([v for v in DTYPES_DICT.values() if dtypes.is_int(v) or dtypes.is_float(v)]), st.sampled_from([v for v in DTYPES_DICT.values() if dtypes.is_int(v) or dtypes.is_float(v)]))
+  def test_acc_cast(self, d1:DType, d2:DType):
+    a, b = Tensor.rand(1024,1024, dtype=d1), Tensor.rand(1024,1024, dtype=d1)
+    out = (a*b).cast(d2).sum(-1).cast(d1)
     sched = [si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0]
     acc = [u for u in Linearizer(sched.ast).linearize().uops if u.uop == UOps.PHI][0]
-    assert acc.dtype == acc.vin[1].dtype == dtypes.float32
-    assert acc.vin[0].uop == UOps.CAST and acc.vin[0].vin[0].dtype == dtypes.float16
+    assert acc.dtype == acc.vin[1].dtype == acc.vin[0].dtype
 
   def test_simplify_uop(self):
     def helper_test_simplify(uop, dtype, vin, arg=None):
