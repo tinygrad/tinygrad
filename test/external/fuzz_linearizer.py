@@ -61,7 +61,7 @@ def fuzz_linearizer(lin: Linearizer):
 
     print(lin.colored_shape())
     # get a new output buffer
-    rawbufs[0] = type(rawbufs[0])(rawbufs[0].size, rawbufs[0].dtype)
+    rawbufs[0] = type(rawbufs[0])(Device.DEFAULT, rawbufs[0].size, rawbufs[0].dtype)
     var_vals = {v: random.randint(v.min, v.max) for v in vars_from_ast(lin.ast)}
     if (msg := run_linearizer(lin, rawbufs, var_vals)) != "PASS":
       print(f"{lin.applied_opts=}")
