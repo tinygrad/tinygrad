@@ -8,7 +8,6 @@ from tinygrad.nn.state import load_state_dict, torch_load
 
 from extra.models.llama import RMSNorm
 from einops import rearrange, repeat
-from vits import split
 
 MODELS = {
   "130m": {
@@ -49,34 +48,40 @@ def fetch_weights(model_name: str):
   weights = torch_load(downloaded)
   return weights
 
-# def selective_scan_fn(ctx, u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,return_last_state=False):
-#   if u.stride(-1) != 1:
-#     u = u.contiguous()
-#   if delta.stride(-1) != 1:
-#     delta = delta.contiguous()
-#   if D is not None:
-#     D = D.contiguous()
-#   if B.stride(-1) != 1:
-#     B = B.contiguous()
-#   if C.stride(-1) != 1:
-#     C = C.contiguous()
-#   if z is not None and z.stride(-1) != 1:
-#     z = z.contiguous()
-#   if len(B.shape) == 3:
-#     B = rearrange(B, "b dstate l -> b 1 dstate l")
-#     ctx.squeeze_B = True
-#   if len(C.shape) == 3:
-#     C = rearrange(C, "b dstate l -> b 1 dstate l")
-#     ctx.squeeze_C = True
-#   out, x, *rest = selective_scan_cuda.fwd(u, delta, A, B, C, D, z, delta_bias, delta_softplus)
-#   ctx.delta_softplus = delta_softplus
-#   ctx.has_z = z is not None
-#   last_state = x[:, :, -1, 1::2]  # (batch, dim, dstate)
-#   if not ctx.has_z:
-#     return out if not return_last_state else (out, last_state)
-#   else:
-#     out_z = rest[0]
-#     return out_z if not return_last_state else (out_z, last_state)
+def selective_scan_fn(ctx, u, delta, A, B, C, D=None, z=None, delta_bias=None, delta_softplus=False,return_last_state=False):
+  if u.stride(-1) != 1:
+    u = u.contiguous()
+  if delta.stride(-1) != 1:
+    delta = delta.contiguous()
+  if D is not None:
+    D = D.contiguous()
+  if B.stride(-1) != 1:
+    B = B.contiguous()
+  if C.stride(-1) != 1:
+    C = C.contiguous()
+  if z is not None and z.stride(-1) != 1:
+    z = z.contiguous()
+  if len(B.shape) == 3:
+    B = rearrange(B, "b dstate l -> b 1 dstate l")
+    ctx.squeeze_B = True # used only for backward (gradient), which is unimplemented
+  if len(C.shape) == 3:
+    C = rearrange(C, "b dstate l -> b 1 dstate l")
+    ctx.squeeze_C = True # used only for backward (gradient), which is unimplemented
+    
+  # out, x, *rest = selective_scan_cuda.fwd(u, delta, A, B, C, D, z, delta_bias, delta_softplus)
+  
+  #
+  A_bar = (D * A).exp()
+  B_bar = None # "(b l) dstate -> b dstate l", l=seqlen
+  
+  ctx.delta_softplus = delta_softplus # used only for backward (gradient), which is unimplemented
+  ctx.has_z = z is not None
+  last_state = x[:, :, -1, 1::2]  # (batch, dim, dstate)
+  if not ctx.has_z:
+    return out if not return_last_state else (out, last_state)
+  else:
+    out_z = rest[0]
+    return out_z if not return_last_state else (out_z, last_state)
 
 class MambaMixer:
   def __init__(
@@ -137,7 +142,7 @@ class MambaMixer:
     self.dt_proj.bias.assign(inv_dt)
 
     # S4D real initialization
-    self.A_log = Tensor.arange(1, self.d_state + 1, dtype=dtypes.float32).repeat([self.d_inner, 1]).contiguous().log()
+    self.A_log = Tensor.arange(1, self.d_state + 1).repeat([self.d_inner, 1]).contiguous().log()
 
     # D "skip" parameter
     self.D = Tensor.ones(self.d_inner)  # Keep in fp32
@@ -263,8 +268,8 @@ class MambaBlock:
 class MambaBackbone:
   def __init__(self, dim: int, n_layers: int, vocab_size: int, rms_norm: bool = True, norm_eps: float = 1e-5):
     self.embedding = nn.Embedding(vocab_size, dim)
-    self.layers = [MambaBlock(dim, layer_idx=i) for i in range(n_layers)]
-    if rms_norm: self.norm = RMSNorm(dim, norm_eps)
+    self.layers = [MambaBlock(dim, rms_norm=rms_norm, layer_idx=i) for i in range(n_layers)]
+    if rms_norm: self.norm_f = RMSNorm(dim, norm_eps)
   
   def __call__(self, input_ids: Tensor, inference_params=None) -> Any:
     hidden_states = self.embedding(input_ids)
@@ -272,7 +277,7 @@ class MambaBackbone:
     for layer in self.layers: hidden_states, residual = layer(hidden_states, residual, inference_params=inference_params)
       
     residual = (hidden_states + residual) if residual is not None else hidden_states
-    hidden_states = self.norm(residual)
+    hidden_states = self.norm_f(residual)
     
     return hidden_states
 
@@ -282,7 +287,6 @@ class Mamba:
       vocab_size += pad_vocab_size_multiple - (vocab_size % pad_vocab_size_multiple)
 
     self.backbone = MambaBackbone(dim, n_layers, vocab_size)
-
     self.lm_head = nn.Linear(dim, vocab_size, bias=False)
   
   def __call__(self, input_ids, inference_params=None, num_last_tokens=0):
