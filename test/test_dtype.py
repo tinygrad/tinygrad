@@ -41,8 +41,8 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
     raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e
 
 def _test_op(fxn, target_dtype:DType, target): _assert_eq(fxn(), target_dtype, target)
-def _test_cast(a:Tensor, target_dtype:DType): _test_op(lambda: a.cast(target_dtype), target_dtype, a.numpy().astype(target_dtype.np).tolist())
-def _test_bitcast(a:Tensor, target_dtype:DType, target=None): _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(target_dtype.np).tolist())
+def _test_cast(a:Tensor, target_dtype:DType): _test_op(lambda: a.cast(target_dtype), target_dtype, a.numpy().astype(np.dtype(target_dtype.format)).tolist())
+def _test_bitcast(a:Tensor, target_dtype:DType, target=None): _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(np.dtype(target_dtype.format)).tolist())
 
 class TestDType(unittest.TestCase):
   DTYPE: Any = None
@@ -50,11 +50,11 @@ class TestDType(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     if not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
-    cls.DATA = np.random.randint(0, 100, size=10, dtype=cls.DTYPE.np).tolist() if dtypes.is_int(cls.DTYPE) else np.random.choice([True, False], size=10).tolist() if cls.DTYPE == dtypes.bool else np.random.uniform(0, 1, size=10).tolist()
+    cls.DATA = np.random.randint(0, 100, size=10, dtype=np.dtype(cls.DTYPE.format)).tolist() if dtypes.is_int(cls.DTYPE) else np.random.choice([True, False], size=10).tolist() if cls.DTYPE == dtypes.bool else np.random.uniform(0, 1, size=10).tolist()
   def setUp(self):
     if self.DTYPE is None: raise unittest.SkipTest("base class")
 
-  def test_to_np(self): _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), self.DTYPE.np, np.array(self.DATA, dtype=self.DTYPE.np))
+  def test_to_np(self): _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), np.dtype(self.DTYPE.format), np.array(self.DATA, dtype=np.dtype(self.DTYPE.format)))
 
   def test_casts_to(self): list(map(
     lambda dtype: _test_cast(Tensor(self.DATA, dtype=dtype), self.DTYPE),

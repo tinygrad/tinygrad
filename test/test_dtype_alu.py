@@ -49,29 +49,29 @@ class ht:
 def universal_test(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
-  numpy_value = op[1](np.array([a]).astype(dtype.np), np.array([b]).astype(dtype.np))
+  numpy_value = op[1](np.array([a]).astype(np.dtype(dtype.format)), np.array([b]).astype(np.dtype(dtype.format)))
   if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = op[0](Tensor([a], dtype=dtype)).numpy()
-  numpy_value = op[1](np.array([a]).astype(dtype.np))
+  numpy_value = op[1](np.array([a]).astype(np.dtype(dtype.format)))
   if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=5 if Device.DEFAULT == "METAL" and op[0] == Tensor.sin else 1e-3, rtol=2 if Device.DEFAULT == "METAL" and op[0] == Tensor.sin else 1e-4 if dtype == dtypes.float32 else 1e-2)  # exp and log and sin are approximations (in METAL, the default fast-math versions are less precise)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
 def universal_test_cast(a, in_dtype, dtype):
   tensor_value = Tensor([a], dtype=in_dtype).cast(dtype)
-  numpy_value = np.array([a]).astype(dtype.np)
+  numpy_value = np.array([a]).astype(np.dtype(dtype.format))
   np.testing.assert_equal(tensor_value, numpy_value)
 
 def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   if not isinstance(op1, tuple): op1 = (op1, op1)
   if not isinstance(op2, tuple): op2 = (op2, op2)
   at, bt, ct = Tensor([a], dtype=d1), Tensor([b], dtype=d1), Tensor([c], dtype=d2)
-  an, bn, cn = np.array([a]).astype(d1.np), np.array([b]).astype(d1.np), np.array([c]).astype(d2.np)
+  an, bn, cn = np.array([a]).astype(np.dtype(d1.format)), np.array([b]).astype(np.dtype(d1.format)), np.array([c]).astype(np.dtype(d2.format))
   tensor_value = op2[0](op1[0](at, bt).cast(d2), ct).numpy()
-  numpy_value = op2[1](op1[1](an, bn).astype(d2.np), cn)
+  numpy_value = op2[1](op1[1](an, bn).astype(np.dtype(d2.format)), cn)
   np.testing.assert_almost_equal(tensor_value, numpy_value)
 
 class TestDTypeALU(unittest.TestCase):
