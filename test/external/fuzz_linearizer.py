@@ -7,7 +7,7 @@ from tinygrad.features.search import get_linearizer_actions, bufs_from_lin, tupl
 from tinygrad.graph import print_tree
 from tinygrad.helpers import getenv
 from tinygrad.device import Device, Compiled, Interpreted
-from tinygrad.lazy import vars_from_ast
+from tinygrad.ops import vars_from_ast
 
 device = Device[Device.DEFAULT]
 
