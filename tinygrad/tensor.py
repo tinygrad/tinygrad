@@ -75,7 +75,7 @@ class Tensor:
 
     # data is a LazyBuffer, but it might be on the wrong device
     if not isinstance(data, LazyBuffer): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
-    self.lazydata = data if data.device == device else data.copy_to_device((device,))
+    self.lazydata = data if data.device == device else data.copy_to_device(device)
 
   def __repr__(self):
     return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
@@ -84,7 +84,7 @@ class Tensor:
   def __hash__(self): return id(self)
 
   @property
-  def device(self) -> Union[str, Tuple[str]]: return self.lazydata.device[0] if len(self.lazydata.device) == 1 else self.lazydata.device
+  def device(self) -> str: return self.lazydata.device
 
   @property
   def shape(self) -> Tuple[sint, ...]: return self.lazydata.shape
