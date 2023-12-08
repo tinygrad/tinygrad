@@ -120,6 +120,14 @@ class TestLinearizer(unittest.TestCase):
     lin = Linearizer(sched[0].ast)
     assert not any(u.uop == UOps.LOOP for u in lin.linearize().uops), "found loop in sum collapse"
 
+  def test_acc_cast(self):
+    a, b = Tensor.rand(1024,1024, dtype=dtypes.float16), Tensor.rand(1024,1024, dtype=dtypes.float16)
+    out = (a*b).cast(dtypes.float32).sum(-1).cast(dtypes.float16)
+    sched = [si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0]
+    acc = [u for u in Linearizer(sched.ast).linearize().uops if u.uop == UOps.PHI][0]
+    assert acc.dtype == acc.vin[1].dtype == dtypes.float32
+    assert acc.vin[0].uop == UOps.CAST and acc.vin[0].vin[0].dtype == dtypes.float16
+
   def test_simplify_uop(self):
     def helper_test_simplify(uop, dtype, vin, arg=None):
       ast = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=42, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
