@@ -149,19 +149,19 @@ class dtypes:
   bool: Final[DType] = DType(0, 1, "bool", bool)
   float16: Final[DType] = DType(9, 2, "half", np.float16)
   half = float16
-  float32: Final[DType] = DType(10, 4, "float", np.float32)
+  float32: Final[DType] = DType(10, 4, "float", ctypes.c_float)
+  float64: Final[DType] = DType(11, 8, "double", float)
   float = float32
-  float64: Final[DType] = DType(11, 8, "double", np.float64)
   double = float64
-  int8: Final[DType] = DType(1, 1, "char", np.int8)
-  int16: Final[DType] = DType(3, 2, "short", np.int16)
-  int32: Final[DType] = DType(5, 4, "int", np.int32)
+  int8: Final[DType] = DType(1, 1, "char", ctypes.c_int8)
+  int16: Final[DType] = DType(3, 2, "short", ctypes.c_int16)
+  int32: Final[DType] = DType(5, 4, "int", ctypes.c_int32)
+  int64: Final[DType] = DType(7, 8, "long", int)
   int = int32
-  int64: Final[DType] = DType(7, 8, "long", np.int64)
-  uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
-  uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
-  uint32: Final[DType] = DType(6, 4, "unsigned int", np.uint32)
-  uint64: Final[DType] = DType(8, 8, "unsigned long", np.uint64)
+  uint8: Final[DType] = DType(2, 1, "unsigned char", ctypes.c_uint8)
+  uint16: Final[DType] = DType(4, 2, "unsigned short", ctypes.c_uint16)
+  uint32: Final[DType] = DType(6, 4, "unsigned int", ctypes.c_uint32)
+  uint64: Final[DType] = DType(8, 8, "unsigned long", ctypes.c_uint64)
 
   # NOTE: bfloat16 isn't supported in numpy
   bfloat16: Final[DType] = DType(9, 2, "__bf16", None)
