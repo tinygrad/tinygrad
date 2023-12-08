@@ -24,8 +24,6 @@ def einsum_mulacc(einsum, get_strides, expand):
     return expand(ret.reshape([(1 if i not in a_axes and i not in b_axes else s) for i,s in enumerate(new_shape)]), new_shape)
   return mulacc
 
-
-
 numpy_fxn_for_op: Dict[Op, Callable] = {
   BufferOps.CONST: lambda val, dtype: np.array(val, dtype=np.dtype(dtype.format)),
   UnaryOps.EXP2: np.exp2, UnaryOps.LOG2: np.log2, UnaryOps.SIN: np.sin,
