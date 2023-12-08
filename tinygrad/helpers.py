@@ -117,8 +117,8 @@ class DType(NamedTuple):
 
 # dependent typing?
 class ImageDType(DType):
-  def __new__(cls, priority, itemsize, name, format, shape, base):
-    return super().__new__(cls, priority, itemsize, name, format)
+  def __new__(cls, priority, itemsize, name, format_str, shape, base):
+    return super().__new__(cls, priority, itemsize, name, format_str)
   def __init__(self, priority, itemsize, name, format, shape, base):
     self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
     self.base: DType = base
