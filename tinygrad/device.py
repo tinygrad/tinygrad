@@ -81,7 +81,7 @@ class Buffer:
     self.allocator.copyin(self._buf, mv)
     return self
   @staticmethod
-  def fromCPU(device:str, x:np.ndarray): return Buffer(device, x.size, dtypes.from_np(x.dtype)).copyin(x.data)
+  def fromCPU(device:str, x: memoryview, dtype: DType): return Buffer(device, x.nbytes//dtype.itemsize, dtype).copyin(x)
   def toCPU(self) -> np.ndarray:
     # zero copy with as_buffer
     if hasattr(self.allocator, 'as_buffer'): return np.frombuffer(self.allocator.as_buffer(self._buf), dtype=np.dtype(self.dtype.np, metadata={"backing": self._buf}))  # type: ignore
