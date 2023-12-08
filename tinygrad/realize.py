@@ -4,6 +4,7 @@ from tinygrad.device import Device, Buffer, BufferCopy, JITRunner
 from tinygrad.graph import log_schedule_item, print_tree
 from tinygrad.helpers import prod
 from tinygrad.shape.symbolic import Variable
+from tinygrad.lazy import LazyBuffer
 
 class CustomOp(JITRunner):
   def __init__(self, fxn):
@@ -35,3 +36,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
 
     # run the function (put it in JIT)
     if prg: prg.exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)
+
+def create_schedule(out:List[LazyBuffer]) -> List[ScheduleItem]:
+  print(out)
+  pass

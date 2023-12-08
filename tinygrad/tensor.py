@@ -12,7 +12,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import sint
-from tinygrad.realize import run_schedule
+from tinygrad.realize import run_schedule, create_schedule
 
 class Function:
   def __init__(self, device:str, *tensors:Tensor):
@@ -96,13 +96,10 @@ class Tensor:
 
   @staticmethod
   def corealize(lst:Iterable[Tensor]):
-    seen:Set[LazyBuffer] = set()
-    sched = []
-    for t in lst: sched += t.lazydata.schedule(seen)
-    run_schedule(sched)
+    run_schedule(create_schedule([x.lazydata for x in lst]))
 
   def realize(self) -> Tensor:
-    run_schedule(self.lazydata.schedule())
+    run_schedule(create_schedule([self.lazydata]))
     return self
 
   def assign(self, x) -> Tensor:
