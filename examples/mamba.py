@@ -173,7 +173,9 @@ class MambaMixer:
       x = self.conv1d(x)[..., :seqlen].swish()
       
     x_dbl = self.x_proj(rearrange(x, "b d l -> (b l) d"))
-    dt, B, C = split(x_dbl, [self.dt_rank, self.d_state, self.d_state], -1)
+    dt = x_dbl[:,:self.dt_rank]
+    B = x_dbl[:,self.dt_rank:self.d_state]
+    C = x_dbl[:,self.dt_rank:self.d_state]
     dt = self.dt_proj.weight @ dt.T
     dt = rearrange(dt, "d (b l) -> b d l", l=seqlen)
     B = rearrange(B, "(b l) dstate -> b dstate l", l=seqlen).contiguous()
