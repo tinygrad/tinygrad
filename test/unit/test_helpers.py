@@ -126,7 +126,7 @@ class TestDtypes(unittest.TestCase):
   def test_dtypes_fields(self):
     fields = dtypes.fields()
     self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
-    self.assertTrue(all(issubclass(np.dtype(value.format).type , np.generic) for value in fields.values() if value.format is not None))
+    self.assertTrue(all(issubclass(np.dtype(value.format).type, np.generic) for value in fields.values() if value.format is not None))
     self.assertTrue(all(struct.calcsize(value.format) == value.itemsize and np.dtype(value.format).itemsize == value.itemsize for value in fields.values() if value.format is not None))
 
 class TestStripParens(unittest.TestCase):
