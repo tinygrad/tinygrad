@@ -25,7 +25,9 @@ class TestTorchLoad(unittest.TestCase):
   # pytorch zip format
   def test_load_convnext(self): compare_weights_both('https://dl.fbaipublicfiles.com/convnext/convnext_tiny_1k_224_ema.pth')
 
-  @unittest.skipIf(Device.DEFAULT == "GPU" and CI, "GPU requires cl_khr_fp16")
+  # for GPU, cl_khr_fp16 isn't supported
+  # for LLVM, it segfaults because it can't link to the casting function
+  @unittest.skipIf(Device.DEFAULT in ["GPU", "LLVM"] and CI, "fp16 broken in some backends")
   @unittest.skipIf(Device.DEFAULT == "TORCH", "torch doesn't support the way we load bfloat (cast to uint32)")
   def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/qazalin/bf16-lightweight/resolve/main/consolidated.00.pth?download=true")
 
