@@ -198,6 +198,8 @@ class Tensor:
   @staticmethod
   def arange(start, stop=None, step=1, **kwargs):
     if stop is None: stop, start = start, 0
+    if isinstance(start, float): start = int(start)
+    if isinstance(stop, float): stop = int(stop)
     return Tensor.full((math.ceil((stop-start)/step) if step != 1 else (stop-start),), step, **kwargs).cumsum() + (start - step)
 
   @staticmethod
