@@ -22,7 +22,7 @@ if GRAPH:
   G = nx.DiGraph()
   def save_graph_exit():
     for k,v in cnts.items(): print(k, v)
-    print("saving", G)
+    print("saving", G, f"to {GRAPHPATH}.svg")
     nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
     # -Gnslimit=100 can make it finish, but you won't like results
     os.system(f'dot -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
