@@ -17,11 +17,12 @@ from examples.stable_diffusion import UNetModel
 def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed, all_jitted=False):
   tms = []
   for _ in range(4):
+    early_gen = [x.realize() if isinstance(x, Tensor) else x for x in gen()]
     GlobalCounters.reset()
     GlobalCounters.mem_used = 0
     Device[Device.DEFAULT].synchronize()
     st = time.perf_counter_ns()
-    train(*gen())
+    train(*early_gen)
     Device[Device.DEFAULT].synchronize()
     tms.append(time.perf_counter_ns() - st)
 

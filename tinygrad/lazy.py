@@ -32,7 +32,7 @@ class LazyBuffer:
 
   def copy_to_device(self, device:Tuple[str]) -> LazyBuffer:
     out = self.e(LoadOps.CONTIGUOUS)
-    return LazyBuffer(device, out.st, out.dtype, LoadOps.FROM, src=(out,))    # TODO: rename to LoadOps.COPY
+    return LazyBuffer(device, out.st, out.dtype, LoadOps.COPY, src=(out,))    # TODO: rename to LoadOps.COPY
 
   def e(self:LazyBuffer, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     srcs = (self,)+srcs
