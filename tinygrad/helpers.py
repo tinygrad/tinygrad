@@ -178,9 +178,6 @@ class dtypes:
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and v.__class__ is not staticmethod}
 INVERSE_DTYPES_DICT = {v:k for k,v in DTYPES_DICT.items()}
-import struct
-for dtype in DTYPES_DICT.values():
-  if dtype.format: assert struct.calcsize(dtype.format) == dtype.itemsize
 
 class GlobalCounters:
   global_ops: ClassVar[int] = 0
