@@ -1,6 +1,6 @@
 import numpy as np
 import unittest, os
-from hypothesis import given, strategies as st, settings
+from hypothesis import given, strategies as st
 
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps

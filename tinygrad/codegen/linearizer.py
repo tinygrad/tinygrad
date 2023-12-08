@@ -516,7 +516,7 @@ class Linearizer(Kernel):
         ret.append(acc[off])
       for off in range(len(acc)):
         if input_acc[off] != acc[off]:
-          acc[off] = self.uop(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]) + tuple(loop_ctx))
+          acc[off] = self.uop(UOps.PHI, acc[off].dtype, (self.cast(input_acc[off], acc[off].dtype), acc[off]) + tuple(loop_ctx))
     else:
       ret = [self.uop(UOps.ALU, dtype=dtypes.bool if x.op == BinaryOps.CMPLT else None, vin=val, arg=x.op) for val in zip(*values)]
     return ret
