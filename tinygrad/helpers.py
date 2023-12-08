@@ -10,7 +10,7 @@ if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once min
 
 T = TypeVar("T")
 U = TypeVar("U")
-_Scalars = (int, float, bool, )
+_Scalars = (int, float, bool, np.generic)
 # NOTE: it returns int 1 if x is empty regardless of the type of x
 def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.__mul__, x, 1)
 
@@ -283,13 +283,13 @@ def get_bytes(arg, get_sz, get_str, check) -> bytes: return (sz := init_c_var(ct
 def flat_mv(mv:memoryview):
   if len(mv) == 0: return mv
   return mv.cast("B", shape=(mv.nbytes,))
-def get_mv(x: Any, dtype: DType, _shape=tuple(), _base=True) -> memoryview:
-  l = x
-  while isinstance(x, List):
-    if len({len(y) if isinstance(y, list) else 0 for y in x}) > 1: raise ValueError("Inconsistent dimensions")
-    _shape, x, l = _shape + (len(x), ) if len(x) > 0 else _shape, x[0] if (xl := len(x)) > 0 else 1, flatten(l) if xl > 0 and isinstance(x[0], list) else l
-  if isinstance(x, _Scalars) or isinstance(x, np.generic): return memoryview(b'') if not _base or not _shape else memoryview(struct.pack(f'{prod(_shape)}{dtype.structf}', *l if not dtypes.is_int(dtype) else list(map(int, l)))).cast(dtype.structf if dtype.structf else 'i', _shape) if dtype != dtypes.float16 else np.array(l, dtype=dtype.np).reshape(_shape).data
-  raise ValueError(f"Sequence must consist of scalar types - {_Scalars} - {type(x)}")
+def get_mv(x: Any, dtype: DType, _shape=tuple()) -> memoryview:
+  def _validate(x):
+    if isinstance(x, list): assert len({len(y) if isinstance(y, list) else 0 for y in x}) <= 1 and [_validate(y) for y in x] is not None, "Inconsistent dimensions"
+    else: assert isinstance(x, _Scalars), f"Invalid element type {type(x)} - Valid types: {_Scalars}"
+  _validate(l := x)
+  while isinstance(x, list): _shape, x, l = _shape + (len(x), ), x[0] if (xl := len(x)) > 0 else 1, flatten(l) if xl > 0 and isinstance(x[0], list) else l
+  return memoryview(b'') if not l and len(_shape) == 1 else memoryview(struct.pack(f'{len(l)}{dtype.structf}', *l if not dtypes.is_int(dtype) else list(map(int, l)))).cast(dtype.structf if dtype.structf else 'badform', _shape) if dtype != dtypes.float16 else np.array(l, dtype=dtype.np).reshape(_shape).data
 
 # *** Helpers for CUDA-like APIs.
 
