@@ -3,6 +3,7 @@ import numpy as np
 from PIL import Image
 from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch
 from tinygrad.shape.symbolic import Variable, NumNode
+import struct
 
 VARIABLE = ContextVar("VARIABLE", 0)
 
@@ -125,7 +126,8 @@ class TestDtypes(unittest.TestCase):
   def test_dtypes_fields(self):
     fields = dtypes.fields()
     self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
-    self.assertTrue(all(issubclass(np.dtypes(value.format), np.generic) for value in fields.values() if value.format is not None))
+    self.assertTrue(all(issubclass(np.dtype(value.format).type , np.generic) for value in fields.values() if value.format is not None))
+    self.assertTrue(all(struct.calcsize(value.format) == value.itemsize and np.dtype(value.format).itemsize == value.itemsize for value in fields.values() if value.format is not None))
 
 class TestStripParens(unittest.TestCase):
   def test_simple(self): self.assertEqual("1+2", strip_parens("(1+2)"))
