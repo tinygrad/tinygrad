@@ -175,7 +175,7 @@ class MambaMixer:
     x_dbl = self.x_proj(rearrange(x, "b d l -> (b l) d"))
     dt = x_dbl[:,:self.dt_rank]
     B = x_dbl[:,self.dt_rank:self.d_state]
-    C = x_dbl[:,self.dt_rank:self.d_state]
+    C = x_dbl[:,(self.dt_rank + self.d_state):]
     dt = self.dt_proj.weight @ dt.T
     dt = rearrange(dt, "d (b l) -> b d l", l=seqlen)
     B = rearrange(B, "(b l) dstate -> b dstate l", l=seqlen).contiguous()
@@ -218,7 +218,7 @@ class MambaMixer:
     x_db = self.x_proj(x) # (B dt_rank+2*d_state)
     dt = x_db[:,:self.dt_rank]
     B = x_db[:,self.dt_rank:self.d_state]
-    C = x_db[:,self.dt_rank:self.d_state]
+    C = x_db[:,(self.dt_rank + self.d_state):]
     # Don't add dt_bias here
     dt = self.dt_proj.weight @ dt
     A = -self.A_log.exp()
