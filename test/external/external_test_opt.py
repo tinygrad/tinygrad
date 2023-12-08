@@ -53,21 +53,21 @@ class TestInferenceMinKernels(unittest.TestCase):
   @unittest.skipIf(not PUSH_PERMUTES, "this test requires PUSH_PERMUTES")
   def test_convnext(self):
     model = ConvNeXt()
-    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=np.dtype(p.dtype.format)))
     img = Tensor.randn(1, 3, 224, 224)
     with CLCache(129):
       model(img).realize()
 
   def test_enet(self):
     model = EfficientNet(getenv("ENET_NUM", 0), has_se=False)
-    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=np.dtype(p.dtype.format)))
     img = Tensor.randn(1, 3, 224, 224)
     with CLCache(51):
       model.forward(img).realize()
 
   def test_enet_se(self):
     model = EfficientNet(getenv("ENET_NUM", 0), has_se=True)
-    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=np.dtype(p.dtype.format)))
     img = Tensor.randn(1, 3, 224, 224)
     # TODO: this seems very high
     with CLCache(115):
@@ -75,14 +75,14 @@ class TestInferenceMinKernels(unittest.TestCase):
 
   def test_resnet(self):
     model = ResNet18()
-    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=np.dtype(p.dtype.format)))
     img = Tensor.randn(1, 3, 224, 224)
     with CLCache(26):
       model.forward(img).realize()
 
   def test_vit(self):
     model = ViT(embed_dim=192, num_heads=3)
-    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=np.dtype(p.dtype.format)))
     img = Tensor.randn(1, 3, 224, 224)
     with CLCache(222): # NOTE: this is way too high
       out = model.forward(img)
@@ -93,7 +93,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     from examples.llama import Transformer
     args_tiny = {"dim": 512, "hidden_dim": 1024, "n_heads": 8, "n_layers": 4, "norm_eps": 1e-05, "vocab_size": 1000}
     model = Transformer(**args_tiny)
-    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=np.dtype(p.dtype.format)))
     inp = Tensor([[1,2,3,4]])
     with CLCache(100):
       model(inp, 0).realize()
