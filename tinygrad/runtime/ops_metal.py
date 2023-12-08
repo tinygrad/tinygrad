@@ -74,9 +74,8 @@ class MetalAllocator(LRUAllocator):
   def copyout(self, dest:memoryview, src:Any): dest[:] = self.as_buffer(src)
   def load_buffer(self, dest:Any, src:Any, handles={}):
     if (path := src.device.split(":")[1]) not in handles:
-      src_handle, err = self.device.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(src.device.split(":")[1]), None)
+      handles[path], err = self.device.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(src.device.split(":")[1]), None)
       assert err is None, "failed to load from disk"
-      handles[path] = src_handle
     cbuf = self.device.mtl_io_queue.commandBuffer()
     cbuf.loadBuffer_offset_size_sourceHandle_sourceHandleOffset_(dest._buf, 0, dest.size*dest.dtype.itemsize, handles[path], src._buf.offset)
     self.device.mtl_io_buffers_in_flight.append(cbuf)
@@ -89,7 +88,6 @@ class MetalDevice(Compiled):
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     self.mtl_io_queue, e = self.device.newIOCommandQueueWithDescriptor_error_(Metal.MTLIOCommandQueueDescriptor.new(), None)
     self.mtl_io_command_buffer = self.mtl_io_queue.commandBuffer()
-    print(self.device.supportsFamily_(1006))
     assert e is None, "failed to create mtliocommandqueue"
     self.mtl_buffers_in_flight: List[Any] = []
     self.mtl_io_buffers_in_flight: List[Any] = []
