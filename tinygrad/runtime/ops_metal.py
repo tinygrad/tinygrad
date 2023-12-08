@@ -74,7 +74,7 @@ class MetalAllocator(LRUAllocator):
   def copyout(self, dest:memoryview, src:Any): dest[:] = self.as_buffer(src)
   def load_buffer(self, dest:Any, src:Any, handles={}):
     if (path := src.device.split(":")[1]) not in handles:
-      handles[path], err = self.device.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(src.device.split(":")[1]), None)
+      handles[path], err = self.device.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(path), None)
       assert err is None, "failed to load from disk"
     cbuf = self.device.mtl_io_queue.commandBuffer()
     cbuf.loadBuffer_offset_size_sourceHandle_sourceHandleOffset_(dest._buf, 0, dest.size*dest.dtype.itemsize, handles[path], src._buf.offset)
