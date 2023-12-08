@@ -104,7 +104,7 @@ class BinaryOps(Enum):   ADD = auto();  SUB = auto();  MUL = auto();  DIV = auto
 class ReduceOps(Enum):   SUM = auto();  MAX = auto()
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto()
 class TernaryOps(Enum):  MULACC = auto(); WHERE = auto()
-class LoadOps(Enum):     EMPTY = auto(); CONST = auto(); FROM = auto(); CONTIGUOUS = auto(); CUSTOM = auto()
+class LoadOps(Enum):     EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto()
 # NOTE: if you have a CompiledBuffer(DeviceBuffer)
 #       you do not need to implement the MovementOps
 #       as they are handled by the ShapeTracker(in tinygrad/shape/shapetracker.py, code 7/10)
@@ -133,9 +133,9 @@ assert len(lazyop.src) == 2
 # the first source is the 2, it comes from the CPU
 # the source is a LazyBuffer that is a "CPU" Tensor
 # again, a LazyOp AST is like a GPU kernel. you have to copy the data on the device first
-assert lazyop.src[0].op.op == LoadOps.FROM
+assert lazyop.src[0].op.op == LoadOps.COPY
 assert lazyop.src[0].op.src[0].device == "CPU"
-assert lazyop.src[0].op.src[0].op.src[0].realized._buf[0] == 2, "the src of the FROM LazyOP is a LazyBuffer on the CPU holding [2.]"
+assert lazyop.src[0].op.src[0].op.src[0].realized._buf[0] == 2, "the src of the COPY LazyOP is a LazyBuffer on the CPU holding [2.]"
 assert result.lazydata.realized is None, "the LazyBuffer is not realized yet"
 
 # now we realize the LazyBuffer
