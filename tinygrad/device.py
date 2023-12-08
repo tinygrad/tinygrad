@@ -84,8 +84,8 @@ class Buffer:
   def fromCPU(device:str, x:np.ndarray): return Buffer(device, x.size, dtypes.from_np(x.dtype)).copyin(x.data)
   def toCPU(self) -> np.ndarray:
     # zero copy with as_buffer
-    if hasattr(self.allocator, 'as_buffer'): return np.frombuffer(self.allocator.as_buffer(self._buf), dtype=np.dtype(self.dtype.np, metadata={"backing": self._buf}))  # type: ignore
-    ret = np.empty(self.size, self.dtype.np)
+    if hasattr(self.allocator, 'as_buffer'): return np.frombuffer(self.allocator.as_buffer(self._buf), dtype=np.dtype(self.dtype.format, metadata={"backing": self._buf}))  # type: ignore
+    ret = np.empty(self.size, np.dtype(self.dtype.format))
     if self.size > 0: self.allocator.copyout(flat_mv(ret.data), self._buf)
     return ret
 

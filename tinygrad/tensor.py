@@ -62,16 +62,16 @@ class Tensor:
     elif isinstance(data, (int, float)):
       data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
     elif data is None or data.__class__ is list:
-      assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
-      data = LazyBuffer.fromCPU(np.array([] if data is None else data, dtype=(dtype or Tensor.default_type).np))
+      assert dtype is None or dtype.format is not None, f"{dtype} doesn't have a format"
+      data = LazyBuffer.fromCPU(np.array([] if data is None else data, dtype=np.dtype((dtype or Tensor.default_type).format)))
     elif isinstance(data, bytes):
       data = LazyBuffer.fromCPU(np.frombuffer(data, np.uint8))
     elif isinstance(data, np.ndarray):
-      assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
+      assert dtype is None or dtype.format is not None, f"{dtype} doesn't have a format"
       if data.shape == ():
         data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
       else:
-        data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
+        data = LazyBuffer.fromCPU(data.astype(np.dtype(dtype.format)) if dtype is not None and dtype.format is not None else data)
 
     # data is a LazyBuffer, but it might be on the wrong device
     if not isinstance(data, LazyBuffer): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
@@ -129,9 +129,9 @@ class Tensor:
   # TODO: this should import numpy and use .data() to construct the array
   def numpy(self) -> np.ndarray:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
-    assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
-    if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.np)
-    return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
+    assert self.dtype.format is not None, f"no dtype format for {self.dtype}"
+    if 0 in self.shape: return np.zeros(self.shape, dtype=np.dtype(self.dtype.format))
+    return self.detach().cast(dtypes.from_np(npdt := np.dtype(self.dtype.format))).contiguous().to('CPU').realize().lazydata.realized.toCPU().astype(npdt, copy=True).reshape(self.shape)
 
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self
@@ -859,5 +859,5 @@ def custom_random(out:Buffer):
   Tensor._seed += 1
   if DEBUG >= 2: print(f"***      rand {out.device} seed {Tensor._seed} size {out.size:<16d} dtype {out.dtype}")
   rng = np.random.default_rng(Tensor._seed)
-  rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=out.dtype.np, copy=False)
+  rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=np.dtype(out.dtype.format), copy=False)
   out.copyin(rng_np_buffer.data)
