@@ -63,8 +63,7 @@ class Tensor:
       data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
     elif data is None or data.__class__ is list:
       assert dtype is None or (dtype.np is not None and dtype.structf is not None), f"{dtype} doesn't have a numpy dtype or struct format"
-      shape, data = get_mv([] if data is None else list(data), dt := (dtype or Tensor.default_type))
-      data = LazyBuffer.fromCPU(np.frombuffer(data, dtype=dt.np).reshape(shape))
+      data = LazyBuffer.fromCPU(np.frombuffer(data := get_mv([] if data is None else list(data), dt := (dtype or Tensor.default_type)), dtype=dt.np).reshape(data.shape if data.shape else data.nbytes//dt.itemsize))
     elif isinstance(data, bytes):
       data = LazyBuffer.fromCPU(np.frombuffer(data, np.uint8))
     elif isinstance(data, np.ndarray):

@@ -167,9 +167,7 @@ class TetsGetMv(unittest.TestCase):
       if err_info:
         with self.assertRaises(err_info[0]) as ctx: get_mv(l, dtype)
         self.assertEqual(str(ctx.exception), err_info[1])
-      else:
-        shape, mv = get_mv(l, dtype)
-        assert np.array_equal(np.frombuffer(mv, dtype=dtype.np).reshape(shape), np.array(l, dtype=dtype.np))
+      else: assert np.array_equal(np.frombuffer(mv := get_mv(l, dtype), dtype=dtype.np).reshape(mv.shape), np.array(l, dtype=dtype.np))
 
     test([])
     test([[], [], []])
