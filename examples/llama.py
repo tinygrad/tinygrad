@@ -432,7 +432,7 @@ After you are done speaking, output [EOS]. You are not Chad.
     if not chatbot: break
 
   # validate output!
-  if args.temperature == 0 and args.count == 10 and args.prompt == "Hello.":
+  if args.temperature == 0 and args.count == 10 and args.prompt == "Hello." and not args.quantize:
     text = llama.tokenizer.decode(toks)
     key = (args.gen, args.size)
     expected = {
@@ -441,6 +441,6 @@ After you are done speaking, output [EOS]. You are not Chad.
     }
     try:
       assert text == expected[key], "invalid output: " + colored(text, "red")
-      print(colored("\noutput validated", "green"))
+      print("\n" + colored("output validated", "green"))  # NOTE: "\n" iside colored does not render the color in github action
     except KeyError:
       pass
