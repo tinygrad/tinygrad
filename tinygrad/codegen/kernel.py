@@ -1,8 +1,7 @@
 from __future__ import annotations
 import os, math, itertools
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
-from tinygrad.lazy import vars_from_ast
-from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps
+from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, vars_from_ast
 from tinygrad.device import Device, Compiled
 from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, ansilen, getenv, prod, DEBUG, round_up
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
