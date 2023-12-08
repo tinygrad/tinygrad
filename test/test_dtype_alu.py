@@ -3,7 +3,7 @@ import unittest
 from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
-from hypothesis import given, reproduce_failure, strategies as st, settings
+from hypothesis import given, strategies as st, settings
 from tinygrad.helpers import CI, getenv, DType, OSX
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
@@ -72,11 +72,6 @@ def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   an, bn, cn = np.array([a]).astype(d1.np), np.array([b]).astype(d1.np), np.array([c]).astype(d2.np)
   tensor_value = op2[0](op1[0](at, bt).cast(d2), ct).numpy()
   numpy_value = op2[1](op1[1](an, bn).astype(d2.np), cn)
-  # TODO the next 2 lines are a hacky critera to ignore overflows that should improve
-  if op1[0] in (operator.add, operator.mul) and op2[0] in (operator.add, operator.mul): # TODO this isn't complete
-    if float(op2[1](op1[1](an, bn), cn)) != float(numpy_value): # overflow
-      if Device.DEFAULT == "METAL" and not OSX: return # Metal behaves differently than numpy on non-osx
-      if getenv("CUDACPU"): return # CUDACPU behaves differently than numpy
   np.testing.assert_almost_equal(tensor_value, numpy_value)
 
 class TestDTypeALU(unittest.TestCase):
@@ -134,6 +129,7 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, ht.int32, ht.float32, st.sampled_from(integer_binary_operations), st.sampled_from(binary_operations))
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 
+  # Metal and CUDACPU behave differently than numpy in CI for overflows
   @given(st.floats(width=32, min_value=0, max_value=10.0) if CI and (Device.DEFAULT == "METAL" or getenv("CUDACPU")) else ht.float32, st.floats(width=32, min_value=0, max_value=10.0) if CI and (Device.DEFAULT == "METAL" or getenv("CUDACPU")) else ht.float32, ht.int32, st.sampled_from(binary_operations), st.sampled_from(integer_binary_operations))
   def test_float_midcast_int32(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.float32, dtypes.int32)
 
