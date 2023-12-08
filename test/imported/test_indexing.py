@@ -27,9 +27,10 @@ def set_(reference: Tensor, shape, strides, offset):
   assert strided.lazydata in reference.lazydata.base.views, "base.views should contain strided.lazydata"
   return strided
 
-# tries to mimic torch.copy() behavior
+# tries to mimic .detach().copy() or just .copy() behavior
 # for torch.copy() the resulting tensor.storage().data_ptr() is different than the original
-# so maybe this is correct?
+# some random medium article says .clone() is a shallow copy, so maybe this is correct?
+# https://discuss.pytorch.org/t/clone-and-detach-in-v0-4-0/16861/4
 def clone(original:Tensor):
   ret = Tensor(copy.copy(original.lazydata), device=original.device, dtype=original.dtype, requires_grad=original.requires_grad)
   assert id(ret.lazydata) != id(original.lazydata), "clone should create a lazydata copy"
@@ -59,9 +60,9 @@ def make_tensor(shape, dtype:dtypes, noncontiguous):
   +---------------------------+------------+----------+
   """
   contiguous = not noncontiguous # lol
-  if dtype is dtypes.bool: return Tensor.randint(shape=shape, low=0, high=2, dtype=dtypes.bool, contiguous=contiguous)
-  elif dtype.is_unsigned(): return Tensor.randint(shape=shape, low=0, high=10, dtype=dtype, contiguous=contiguous)
-  elif dtype.is_int(): return Tensor.randint(shape=shape, low=-9, high=10, dtype=dtype, contiguous=contiguous) # signed int
+  if dtype is dtypes.bool: return Tensor.randint(shape=shape, low=0, high=2, contiguous=contiguous).cast(dtypes.bool)
+  elif dtype.is_unsigned(): return Tensor.randint(shape=shape, low=0, high=10, contiguous=contiguous).cast(dtype)
+  elif dtype.is_int(): return Tensor.randint(shape=shape, low=-9, high=10, contiguous=contiguous).cast(dtype) # signed int
   elif dtype.is_float(): return Tensor.rand(shape=shape, low=-9, high=9, dtype=dtype, contiguous=contiguous)
   else: raise NotImplementedError(f"{dtype} not implemented")
 
@@ -675,15 +676,18 @@ class TestIndexing(unittest.TestCase):
       '''
       assert_backward_eq(reference, indexer)
 
-  # def test_set_item_to_scalar_tensor(self):
-  #     m = random.randint(1, 10)
-  #     n = random.randint(1, 10)
-  #     z = torch.randn([m, n])
-  #     a = 1.0
-  #     w = np.array(a, requires_grad=True)
-  #     z[:, 0] = w
-  #     z.sum().backward()
-  #     numpy_testing_assert_equal_helper(w.grad, m * a)
+  # TODO setitem
+  '''
+  def test_set_item_to_scalar_tensor(self):
+      m = random.randint(1, 10)
+      n = random.randint(1, 10)
+      z = Tensor.randn([m, n])
+      a = 1.0
+      w = Tensor(a, requires_grad=True)
+      z[:, 0] = w
+      z.sum().backward()
+      numpy_testing_assert_equal_helper(w.grad, m * a)
+  '''
 
   def test_single_int(self):
     v = Tensor.randn(5, 7, 3)
@@ -709,59 +713,66 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(v[::11], [0])
     numpy_testing_assert_equal_helper(v[1:6:2], [1, 3, 5])
 
-  # def test_step_assignment(self):
-  #     v = torch.zeros(4, 4)
-  #     v[0, 1::2] = np.array([3., 4.])
-  #     numpy_testing_assert_equal_helper(v[0].tolist(), [0, 3, 0, 4])
-  #     numpy_testing_assert_equal_helper(v[1:].sum(), 0)
+  # TODO setitem
+  '''
+  def test_step_assignment(self):
+      v = Tensor.zeros(4, 4)
+      v[0, 1::2] = Tensor([3., 4.])
+      numpy_testing_assert_equal_helper(v[0].tolist(), [0, 3, 0, 4])
+      numpy_testing_assert_equal_helper(v[1:].sum(), 0)
+  '''
 
-  # def test_bool_indices(self):
-  #     v = Tensor.randn(5, 7, 3)
-  #     boolIndices = np.array([True, False, True, True, False], dtype=bool)
-  #     numpy_testing_assert_equal_helper(v[boolIndices].shape, (3, 7, 3))
-  #     numpy_testing_assert_equal_helper(v[boolIndices], Tensor.stack([v[0], v[2], v[3]]))
+  # TODO bool indexing
+  '''
+  def test_bool_indices(self):
+      v = Tensor.randn(5, 7, 3)
+      boolIndices = Tensor([True, False, True, True, False], dtype=dtypes.bool)
+      numpy_testing_assert_equal_helper(v[boolIndices].shape, (3, 7, 3))
+      numpy_testing_assert_equal_helper(v[boolIndices], Tensor.stack([v[0], v[2], v[3]]))
 
-  #     v = np.array([True, False, True], dtype=torch.bool)
-  #     boolIndices = np.array([True, False, False], dtype=torch.bool)
-  #     uint8Indices = np.array([1, 0, 0], dtype=torch.uint8)
-  #     with warnings.catch_warnings(record=True) as w:
-  #         numpy_testing_assert_equal_helper(v[boolIndices].shape, v[uint8Indices].shape)
-  #         numpy_testing_assert_equal_helper(v[boolIndices], v[uint8Indices])
-  #         numpy_testing_assert_equal_helper(v[boolIndices], tensor([True], dtype=torch.bool))
-  #         numpy_testing_assert_equal_helper(len(w), 2)
+      v = Tensor([True, False, True], dtype=dtypes.bool)
+      boolIndices = Tensor([True, False, False], dtype=dtypes.bool)
+      uint8Indices = Tensor([1, 0, 0], dtype=dtypes.uint8)
+      with warnings.catch_warnings(record=True) as w:
+          numpy_testing_assert_equal_helper(v[boolIndices].shape, v[uint8Indices].shape)
+          numpy_testing_assert_equal_helper(v[boolIndices], v[uint8Indices])
+          numpy_testing_assert_equal_helper(v[boolIndices], tensor([True], dtype=torch.bool))
+          numpy_testing_assert_equal_helper(len(w), 2)
 
-  # def test_bool_indices_accumulate(self):
-  #     mask = torch.zeros(size=(10, ), dtype=torch.bool)
-  #     y = torch.ones(size=(10, 10))
-  #     y.index_put_((mask, ), y[mask], accumulate=True)
-  #     numpy_testing_assert_equal_helper(y, torch.ones(size=(10, 10)))
+  def test_bool_indices_accumulate(self):
+      mask = Tensor.zeros(size=(10, ), dtype=dtypes.bool)
+      y = Tensor.ones(size=(10, 10))
+      y.index_put_((mask, ), y[mask], accumulate=True)
+      numpy_testing_assert_equal_helper(y, torch.ones(size=(10, 10)))
 
-  # def test_multiple_bool_indices(self):
-  #     v = torch.randn(5, 7, 3)
-  #     # note: these broadcast together and are transposed to the first dim
-  #     mask1 = np.array([1, 0, 1, 1, 0], dtype=torch.bool)
-  #     mask2 = np.array([1, 1, 1], dtype=torch.bool)
-  #     numpy_testing_assert_equal_helper(v[mask1, :, mask2].shape, (3, 7))
+  def test_multiple_bool_indices(self):
+      v = Tensor.randn(5, 7, 3)
+      # note: these broadcast together and are transposed to the first dim
+      mask1 = Tensor([1, 0, 1, 1, 0], dtype=torch.bool)
+      mask2 = Tensor([1, 1, 1], dtype=torch.bool)
+      numpy_testing_assert_equal_helper(v[mask1, :, mask2].shape, (3, 7))
 
-  # def test_byte_mask(self):
-  #     v = torch.randn(5, 7, 3)
-  #     mask = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
-  #     with warnings.catch_warnings(record=True) as w:
-  #         numpy_testing_assert_equal_helper(v[mask].shape, (3, 7, 3))
-  #         numpy_testing_assert_equal_helper(v[mask], torch.stack([v[0], v[2], v[3]]))
-  #         numpy_testing_assert_equal_helper(len(w), 2)
+  def test_byte_mask(self):
+      v = Tensor.randn(5, 7, 3)
+      # mask = torch.ByteTensor([1, 0, 1, 1, 0])
+      mask = Tensor([1, 0, 1, 1, 0], dtype=dtypes.bool)
+      with warnings.catch_warnings(record=True) as w:
+          numpy_testing_assert_equal_helper(v[mask].shape, (3, 7, 3))
+          numpy_testing_assert_equal_helper(v[mask], torch.stack([v[0], v[2], v[3]]))
+          numpy_testing_assert_equal_helper(len(w), 2)
 
-  #     v = np.array([1.])
-  #     numpy_testing_assert_equal_helper(v[v == 0], np.array([]))
+      v = np.array([1.])
+      numpy_testing_assert_equal_helper(v[v == 0], np.array([]))
 
-  # def test_byte_mask_accumulate(self):
-  #     mask = torch.zeros(size=(10, ), dtype=torch.uint8)
-  #     y = torch.ones(size=(10, 10))
-  #     with warnings.catch_warnings(record=True) as w:
-  #         warnings.simplefilter("always")
-  #         y.index_put_((mask, ), y[mask], accumulate=True)
-  #         numpy_testing_assert_equal_helper(y, torch.ones(size=(10, 10)))
-  #         numpy_testing_assert_equal_helper(len(w), 2)
+  def test_byte_mask_accumulate(self):
+      mask = Tensor.zeros(size=(10, ), dtype=dtypes.uint8)
+      y = Tensor.ones(size=(10, 10))
+      with warnings.catch_warnings(record=True) as w:
+          warnings.simplefilter("always")
+          y.index_put_((mask, ), y[mask], accumulate=True)
+          numpy_testing_assert_equal_helper(y, torch.ones(size=(10, 10)))
+          numpy_testing_assert_equal_helper(len(w), 2)
+  '''
 
   # def test_index_put_accumulate_large_tensor(self):
   #     # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
@@ -903,46 +914,58 @@ class TestIndexing(unittest.TestCase):
 
   #         numpy_testing_assert_equal_helper(output, input_list)
 
-  # def test_index_ind_dtype(self):
-  #     x = torch.randn(4, 4)
-  #     ind_long = torch.randint(4, (4,), dtype=torch.long)
-  #     ind_int = ind_long.int()
-  #     src = torch.randn(4)
-  #     ref = x[ind_long, ind_long]
-  #     res = x[ind_int, ind_int]
-  #     numpy_testing_assert_equal_helper(ref, res)
-  #     ref = x[ind_long, :]
-  #     res = x[ind_int, :]
-  #     numpy_testing_assert_equal_helper(ref, res)
-  #     ref = x[:, ind_long]
-  #     res = x[:, ind_int]
-  #     numpy_testing_assert_equal_helper(ref, res)
-  #     # no repeating indices for index_put
-  #     ind_long = torch.arange(4, dtype=torch.long)
-  #     ind_int = ind_long.int()
-  #     for accum in (True, False):
-  #         inp_ref = x.clone()
-  #         inp_res = x.clone()
-  #         torch.index_put_(inp_ref, (ind_long, ind_long), src, accum)
-  #         torch.index_put_(inp_res, (ind_int, ind_int), src, accum)
-  #         numpy_testing_assert_equal_helper(inp_ref, inp_res)
+  def test_index_ind_dtype(self):
+      x = Tensor.randn(4, 4)
+      # ind_long = torch.randint(4, (4,), dtype=torch.long)
+      # TODO should we spend an extra line to allow for randint other int dtypes?
+      # copied from randint
+      ind_long = (Tensor.rand((4,),)*(4-0)+0).cast(dtypes.int64)
+      # ind_int = ind_long.int()
+      ind_int = (ind_long).cast(dtypes.int32)
+      ref = x[ind_long, ind_long]
+      res = x[ind_int, ind_int]
+      numpy_testing_assert_equal_helper(ref, res)
+      ref = x[ind_long, :]
+      res = x[ind_int, :]
+      numpy_testing_assert_equal_helper(ref, res)
+      ref = x[:, ind_long]
+      res = x[:, ind_int]
+      numpy_testing_assert_equal_helper(ref, res)
+      # no repeating indices for index_put
+      # TODO setitem
+      '''
+      src = Tensor.randn(4)
+      ind_long = Tensor.arange(4, dtype=dtypes.int64)
+      ind_int = ind_long.cast(dtypes.int32)
+      for accum in (True, False):
+          inp_ref = clone(x)
+          inp_res = clone(x)
+          torch.index_put_(inp_ref, (ind_long, ind_long), src, accum)
+          torch.index_put_(inp_res, (ind_int, ind_int), src, accum)
+          numpy_testing_assert_equal_helper(inp_ref, inp_res)
+      '''
 
-  # def test_index_put_accumulate_empty(self):
-  #     # Regression test for https://github.com/pytorch/pytorch/issues/94667
-  #     input = torch.rand([], dtype=torch.float32)
-  #     with self.assertRaises(RuntimeError):
-  #         input.index_put([], np.array([1.0]), True)
+  # TODO setitem
+  '''
+  def test_index_put_accumulate_empty(self):
+      # Regression test for https://github.com/pytorch/pytorch/issues/94667
+      input = Tensor.rand([], dtype=dtypes.float32)
+      with self.assertRaises(RuntimeError):
+          input.index_put([], np.array([1.0]), True)
+  '''
 
-  # def test_multiple_byte_mask(self):
-  #     v = torch.randn(5, 7, 3)
-  #     # note: these broadcast together and are transposed to the first dim
-  #     mask1 = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
-  #     mask2 = torch.ByteTensor([1, 1, 1]).to(device)
-  #     with warnings.catch_warnings(record=True) as w:
-  #         warnings.simplefilter("always")
-  #         numpy_testing_assert_equal_helper(v[mask1, :, mask2].shape, (3, 7))
-  #         numpy_testing_assert_equal_helper(len(w), 2)
-
+  # TODO bool indexing
+  '''
+  def test_multiple_byte_mask(self):
+      v = torch.randn(5, 7, 3)
+      # note: these broadcast together and are transposed to the first dim
+      mask1 = torch.ByteTensor([1, 0, 1, 1, 0]).to(device)
+      mask2 = torch.ByteTensor([1, 1, 1]).to(device)
+      with warnings.catch_warnings(record=True) as w:
+          warnings.simplefilter("always")
+          numpy_testing_assert_equal_helper(v[mask1, :, mask2].shape, (3, 7))
+          numpy_testing_assert_equal_helper(len(w), 2)
+  '''
   # def test_byte_mask2d(self):
   #     v = torch.randn(5, 7, 3)
   #     c = torch.randn(5, 7)
