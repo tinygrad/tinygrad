@@ -285,7 +285,7 @@ def flat_mv(mv:memoryview):
   return mv.cast("B", shape=(mv.nbytes,))
 def get_mv(x: Any, dtype: DType, _shape=tuple()) -> memoryview:
   def _validate(x):
-    if isinstance(x, list): assert len({len(y) if isinstance(y, list) else 0 for y in x}) <= 1 and [_validate(y) for y in x] != None, "Inconsistent dimensions"
+    if isinstance(x, list): assert len({len(y) if isinstance(y, list) else 0 for y in x}) <= 1 and [_validate(y) for y in x] is not None, "Inconsistent dimensions"
     else: assert isinstance(x, _Scalars), f"Invalid element type {type(x)} - Valid types: {_Scalars}"
   _validate(l := x)
   while isinstance(x, list): _shape, x, l = _shape + (len(x), ), x[0] if (xl := len(x)) > 0 else 1, flatten(l) if xl > 0 and isinstance(x[0], list) else l
