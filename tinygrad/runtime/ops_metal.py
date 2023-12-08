@@ -77,11 +77,9 @@ class MetalAllocator(LRUAllocator):
       src_handle, err = self.device.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(src.device.split(":")[1]), None)
       assert err is None, "failed to load from disk"
       handles[path] = src_handle
-    src_handle = handles[path]
     cbuf = self.device.mtl_io_queue.commandBuffer()
-    cbuf.loadBuffer_offset_size_sourceHandle_sourceHandleOffset_(dest._buf, 0, dest.size*dest.dtype.itemsize, src_handle, src._buf.offset)
-    cbuf.commit()
-    self.device.mtl_buffers_in_flight.append(cbuf)
+    cbuf.loadBuffer_offset_size_sourceHandle_sourceHandleOffset_(dest._buf, 0, dest.size*dest.dtype.itemsize, handles[path], src._buf.offset)
+    self.device.mtl_io_buffers_in_flight.append(cbuf)
 
 class MetalDevice(Compiled):
   compiler_device = None
@@ -94,10 +92,13 @@ class MetalDevice(Compiled):
     print(self.device.supportsFamily_(1006))
     assert e is None, "failed to create mtliocommandqueue"
     self.mtl_buffers_in_flight: List[Any] = []
+    self.mtl_io_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
     from tinygrad.features.graph.metal import MetalGraph
     super().__init__(MetalAllocator(self), LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
+    for cbuf in self.mtl_io_buffers_in_flight: cbuf.commit()
     self.mv_in_metal.clear()
     self.mtl_buffers_in_flight.clear()
+    self.mtl_io_buffers_in_flight.clear()
