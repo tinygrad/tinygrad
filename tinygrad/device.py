@@ -103,6 +103,9 @@ def _internal_buffer_copy(dest, src):
     if fb:
       dest.allocator.transfer(dest._buf, fb, dest.size*dest.dtype.itemsize)
       return
+  if getenv("LOAD_BUFFER") and hasattr(dest.allocator, 'load_buffer') and src.device.split(":")[0] == "DISK":
+    dest.allocator.load_buffer(dest, src)
+    return
   if hasattr(dest.allocator, 'as_buffer'):
     # fast(ish) path, uses readinto in diskbuffers
     src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
