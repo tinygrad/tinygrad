@@ -1,6 +1,6 @@
 # test cases are modified from pytorch test_indexing.py https://github.com/pytorch/pytorch/blob/597d3fb86a2f3b8d6d8ee067e769624dcca31cdb/test/test_indexing.py
 
-import math, unittest, random
+import math, unittest, random, copy
 import numpy as np
 
 from tinygrad.tensor import Tensor, dtypes
@@ -26,6 +26,14 @@ def set_(reference: Tensor, shape, strides, offset):
   assert strided.lazydata.st.real_strides() == strides, "real_strides should equal strides for strided"
   assert strided.lazydata in reference.lazydata.base.views, "base.views should contain strided.lazydata"
   return strided
+
+# tries to mimic torch.copy() behavior
+# for torch.copy() the resulting tensor.storage().data_ptr() is different than the original
+# so maybe this is correct?
+def clone(original:Tensor):
+  ret = Tensor(copy.copy(original.lazydata), device=original.device, dtype=original.dtype, requires_grad=original.requires_grad)
+  assert id(ret.lazydata) != id(original.lazydata), "clone should create a lazydata copy"
+  return ret
 
 def make_tensor(shape, dtype:dtypes, noncontiguous):
   r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
@@ -461,15 +469,15 @@ class TestIndexing(unittest.TestCase):
         numpy_testing_assert_equal_helper(pyt, numt)
     '''
     def assert_set_eq(tensor: Tensor, indexer, val):
-      pyt = tensor.detach()
-      numt = tensor.detach()
+      pyt = clone(tensor)
+      numt = clone(tensor)
       pyt[indexer] = val
       numt = set_numpy(numt, indexer, val)
       numpy_testing_assert_equal_helper(pyt, numt)
 
     # NOTE: torch initiates the gradients using g0cpu (rand as gradients)
     def assert_backward_eq(tensor: Tensor, indexer):
-      cpu = tensor.float().detach()
+      cpu = clone(tensor.float())
       cpu.requires_grad = True
       outcpu = cpu[indexer].sum()
       outcpu.backward()
