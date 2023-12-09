@@ -2,8 +2,10 @@ import os, sys, math, argparse
 
 sys.path.append(os.getcwd())
 from typing import Any, Optional
+from dataclasses import dataclass, field
 
 from tinygrad import Tensor, dtypes, nn
+from tinygrad.jit import TinyJit
 from tinygrad.helpers import fetch
 from tinygrad.nn.state import get_state_dict, load_state_dict, torch_load
 
@@ -269,7 +271,7 @@ class MambaMixer:
   def step(self, hidden_states, conv_state, ssm_state):
     assert (
       hidden_states.shape[1] == 1
-    ), "Only support decoding with 1 token at a time for now"
+    ), f"Only support decoding with 1 token at a time for now, attempted {hidden_states.shape[1]}"
     xz = self.in_proj(hidden_states.squeeze(1))  # (B 2D)
     x, z = xz.chunk(2, dim=-1)  # (B D)
 
@@ -385,11 +387,35 @@ class Mamba:
     self.backbone = MambaBackbone(dim, n_layers, vocab_size)
     self.lm_head = nn.Linear(dim, vocab_size, bias=False)
 
-  def __call__(self, input_ids, inference_params=None, num_last_tokens=0):
+    self.forward_jit = TinyJit(self.forward)
+
+  def forward(self, input_ids, inference_params, num_last_tokens):
     hidden_states = self.backbone(input_ids, inference_params=inference_params)
     if num_last_tokens > 0:
       hidden_states = hidden_states[:, -num_last_tokens:]
-    return self.lm_head(hidden_states)
+    return self.lm_head(hidden_states).realize()
+
+  def __call__(self, input_ids, inference_params=None, num_last_tokens=0, jit=False):
+    return self.forward_jit(input_ids, inference_params, num_last_tokens) if jit else self.forward(input_ids, inference_params, num_last_tokens)
+
+@dataclass
+class InferenceParams:
+  """Inference parameters that are passed to the main model in order
+  to efficienly calculate and store the context during inference."""
+
+  max_seqlen: int
+  max_batch_size: int
+  seqlen_offset: int = 0
+  batch_size_offset: int = 0
+  key_value_memory_dict: dict = field(default_factory=dict)
+  lengths_per_sample: Optional[Tensor] = None
+
+  def reset(self, max_seqlen, max_batch_size):
+    self.max_seqlen = max_seqlen
+    self.max_batch_size = max_batch_size
+    self.seqlen_offset = 0
+    if self.lengths_per_sample is not None:
+      self.lengths_per_sample.zero_()
 
 
 if __name__ == "__main__":
@@ -414,15 +440,21 @@ if __name__ == "__main__":
   model = Mamba(**MODELS[args.size])
   load_state_dict(model, weights)
 
-  for k, v in get_state_dict(model).items():
-    print(f"{k}: {v.shape}")
+  #for k, v in get_state_dict(model).items():
+  #  print(f"{k}: {v.shape}")
 
-  tks = tokenizer("Hello, how are you ")["input_ids"]
-  print(f"\n{len(tks)} tokens")
+  prompt = "The capital of France is"
+  tks = tokenizer(prompt)["input_ids"]
+  print('\n' + prompt, end='', flush=True)
 
-  temperature = 0.0
-  logits = model(Tensor([tks]))
-  logits = (logits[:, -1, :] / (temperature + 1e-10)).softmax().flatten().realize()
-  probs_np = logits.numpy()
-  tok = int(np.random.choice(len(probs_np), p=probs_np))
-  print(tokenizer.decode(tok))
+  temperature = 0.2
+  start_pos = 0
+  inference_params = InferenceParams(max_seqlen=1, max_batch_size=1, seqlen_offset=0)
+  for i in range(20):
+    logits = model(Tensor([tks]), inference_params, start_pos)
+    #inference_params.seqlen_offset = len(tks)
+    tok = (logits[:, -1, :] / (temperature + 1e-10)).softmax().flatten().multinomial().item()
+    start_pos = len(tks)
+    tks.append(tok)
+    print(tokenizer.decode(tok), end='', flush=True)
+  print()
