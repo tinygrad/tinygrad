@@ -122,7 +122,8 @@ class TestLinearizer(unittest.TestCase):
     assert not any(u.uop == UOps.LOOP for u in lin.linearize().uops), "found loop in sum collapse"
 
   reduce_ops = (Tensor.max, Tensor.min, Tensor.sum)
-  numeric_dtypes = [v for v in DTYPES_DICT.values() if dtypes.is_int(v) or dtypes.is_float(v)]
+  float_dtypes = [v for v in DTYPES_DICT.values() if dtypes.is_float(v)]
+  numeric_dtypes = float_dtypes + [v for v in DTYPES_DICT.values() if dtypes.is_int(v)]
   @given(st.sampled_from(numeric_dtypes), st.sampled_from(reduce_ops))
   def test_reduce_acc(self, d:DType, op):
     a = Tensor.rand(1024,1024, dtype=d)
@@ -141,6 +142,15 @@ class TestLinearizer(unittest.TestCase):
     acc = [u for u in Linearizer(sched.ast).linearize().uops if u.uop == UOps.PHI][0]
     assert acc.dtype == acc.vin[1].dtype == acc.vin[0].dtype
     assert acc.vin[1].uop == UOps.ALU
+
+  @given(st.sampled_from(float_dtypes), st.sampled_from(float_dtypes))
+  def test_mulacc_midcast(self, d1:DType, d2:DType):
+    a = Tensor.rand(1024,1024, dtype=d1)
+    b = Tensor.rand(1024,1024, dtype=d1)
+    out = (a*b).cast(d2).sum(-1)
+    sched = [si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0]
+    mulacc = [u for u in Linearizer(sched.ast).linearize().uops if u.uop == UOps.ALU and u.arg == TernaryOps.MULACC][0]
+    assert mulacc.vin[0].dtype == mulacc.vin[1].dtype == d2
 
   def test_simplify_uop(self):
     def helper_test_simplify(uop, dtype, vin, arg=None):
