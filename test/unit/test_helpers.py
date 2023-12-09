@@ -128,6 +128,7 @@ class TestDtypes(unittest.TestCase):
     self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
     self.assertTrue(all(issubclass(np.dtype(value.format).type, np.generic) for value in fields.values() if value.format is not None))
     self.assertTrue(all(struct.calcsize(value.format) == value.itemsize and np.dtype(value.format).itemsize == value.itemsize for value in fields.values() if value.format is not None))
+    self.assertTrue(all(np.dtype(value.format).char == value.format for value in fields.values() if value.format is not None))
 
 class TestStripParens(unittest.TestCase):
   def test_simple(self): self.assertEqual("1+2", strip_parens("(1+2)"))
