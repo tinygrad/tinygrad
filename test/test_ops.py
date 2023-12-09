@@ -180,7 +180,8 @@ class TestOps(unittest.TestCase):
       helper_test_op(shps, fxn, fxn, forward_only=True)
     helper_test_op(None, fxn, fxn, forward_only=True, vals=[[0.,1,2], [2.,1,0]])
     helper_test_op(None, lambda x,y: fxn(x,2), lambda x,y: fxn(x,2), forward_only=True, vals=[[0.,1,2], [2.,1,0]])
-    helper_test_op(None, fxn, fxn, forward_only=True, vals=[[True, True, False], [False,True,False]])
+    if Device.DEFAULT != "WEBGPU": # bool is not HOST_SHARABLE, so it cannot be used as a storage buffer type
+      helper_test_op(None, fxn, fxn, forward_only=True, vals=[[True, True, False], [False,True,False]])
     if reverse: helper_test_op(None, lambda x,y: fxn(2,y), lambda x,y: fxn(2,y), forward_only=True, vals=[[0.,1,2], [2.,1,0]])
 
   def test_cmp_eq(self): self._test_cmp(lambda x,y: x==y, reverse=False)
@@ -236,7 +237,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], torch.maximum, Tensor.maximum)
     helper_test_op([(), ()], torch.maximum, Tensor.maximum)
     helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1., 0., 3., 4.], [1., 2., 3., 0.]])
-    helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1, 0, 3, 4], [1, 2, 3, 0]], forward_only=True)
+    helper_test_op(None, torch.maximum, Tensor.maximum, vals=np.array([[1, 0, 3, 4], [1, 2, 3, 0]], dtype=np.int32), forward_only=True)
   def test_minimum(self):
     helper_test_op([(45,65), (45,65)], torch.minimum, Tensor.minimum)
     helper_test_op([(), ()], torch.minimum, Tensor.minimum)
@@ -270,9 +271,9 @@ class TestOps(unittest.TestCase):
   def test_div(self):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y, Tensor.div)
     helper_test_op([(), ()], lambda x,y: x/y, Tensor.div)
-    helper_test_op(None, lambda x,y: x/y, Tensor.div, forward_only=True, vals=[[5],[1]])
+    helper_test_op(None, lambda x,y: x/y, Tensor.div, forward_only=True, vals=np.array([[5],[1]], dtype=np.int32))
   def test_div_int(self):
-    helper_test_op(None, lambda x: (x/2).to(torch.int), lambda x: x/2, forward_only=True, vals=[[3]])
+    helper_test_op(None, lambda x: (x/2).to(torch.int), lambda x: x/2, forward_only=True, vals=np.array([[3]], dtype=np.int32))
   def test_div_const(self):
     helper_test_op([(45,65)], lambda x: x/255, lambda x: x/255)
     helper_test_op([(45,65)], lambda x: x/1, lambda x: x/1)
@@ -281,12 +282,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: 2/x, lambda x: 2/x)
     helper_test_op([()], lambda x: x/2, lambda x: x/2)
     helper_test_op([()], lambda x: 2/x, lambda x: 2/x)
-  @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "WEBGPU does not have support for inf/nan, METAL has issues with -inf")
+  @unittest.skipIf(Device.DEFAULT == "METAL", "METAL has issues with -inf")
   def test_mul_const_naninf(self):
     helper_test_op([(45,65)], lambda x: x*float("inf"), lambda x: x*float("inf"))
     helper_test_op([(45,65)], lambda x: x*-float("inf"), lambda x: x*-float("inf"))
     helper_test_op([(45,65)], lambda x: x*float("nan"), lambda x: x*float("nan"))
-  @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "WEBGPU does not have support for inf/nan, METAL has issues with -inf")
+  @unittest.skipIf(Device.DEFAULT == "METAL", "METAL has issues with -inf")
   def test_div_const_naninf(self):
     helper_test_op([(45,65)], lambda x: x/float("inf"), lambda x: x/float("inf"))
     helper_test_op([(45,65)], lambda x: x/-float("inf"), lambda x: x/-float("inf"))
@@ -327,6 +328,12 @@ class TestOps(unittest.TestCase):
   def test_rsqrt(self):
     helper_test_op([(45,65)], lambda x: torch.rsqrt(x), Tensor.rsqrt, a=0)
     helper_test_op([()], lambda x: torch.rsqrt(x), Tensor.rsqrt, a=0)
+  def test_xor(self):
+    tor = torch.tensor([[1,-8,1],[32,1,6]], dtype=torch.int)
+    ten = Tensor([[1,-8,1],[32,1,6]], dtype=dtypes.int32)
+    helper_test_op([], lambda: tor^tor, lambda: ten^ten, forward_only=True)
+    helper_test_op([], lambda: tor^0x1337, lambda: ten^0x1337, forward_only=True)
+    helper_test_op([], lambda: 0x1337^tor, lambda: 0x1337^ten, forward_only=True)
 
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin(), Tensor.sin, a=0)
@@ -564,7 +571,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: (torch.eye(10)@torch.eye(10).flip(0)),
                        lambda: (Tensor.eye(10)@Tensor.eye(10).flip(0)), forward_only=True)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "this test uses more than 8 bufs passing the WEBGPU limit") #TODO: remove after #1461
   def test_broadcast_full(self):
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
                                   (torch.div, Tensor.div)]: #, (torch.pow, Tensor.pow)]:
@@ -576,7 +582,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,1)], lambda x,y: x/y, lambda x,y: x/y)
     helper_test_op([(45,65), ()], lambda x,y: x/y, lambda x,y: x/y)
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "this test uses more than 8 bufs passing the WEBGPU limit") #TODO: remove after #1461
   def test_broadcast_partial(self):
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
                                   (torch.div, Tensor.div)]: #, (torch.pow, Tensor.pow)]:
@@ -615,6 +620,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,3)], lambda x: x[1:2, None], lambda x: x[1:2, None])
     helper_test_op([(3,3,3)], lambda x: x[1:2, None, 1:2], lambda x: x[1:2, None, 1:2])
     helper_test_op([(3,3,3)], lambda x: x[1:2, 1:2, None, -1], lambda x: x[1:2, 1:2, None, -1])
+    helper_test_op([(3,3,3)], lambda x: x[None, None, 1, None, 2, 0:2], lambda x: x[None, None, 1, None, 2, 0:2])
 
   def test_slice_one_endpoint_out_of_bounds(self):
     helper_test_op([(3,3,3)], lambda x: x[0:4], lambda x: x[0:4])
@@ -660,11 +666,13 @@ class TestOps(unittest.TestCase):
 
   def test_slice_errors(self):
     a = Tensor.ones(4, 3)
-    with self.assertRaises(IndexError):
-      a[1, 77, 77, 77]  # IndexError: (finds too many indices before the out of bounds)
-      a[1, 77]  # IndexError: (out of bounds).
-      a[0, -77]
-      a[..., ...] # IndexError: only single ellipsis
+    b = Tensor(2)
+    with self.assertRaises(IndexError): a[1, 77, 77, 77] # IndexError: (finds too many indices before the out of bounds)
+    with self.assertRaises(IndexError): a[1, 77] # IndexError: (out of bounds).
+    with self.assertRaises(IndexError): a[1, -77]
+    with self.assertRaises(IndexError): a[..., ...] # IndexError: only single ellipsis
+    with self.assertRaises(ValueError): a[::0, 1] # no 0 strides
+    with self.assertRaises(IndexError): b[:] # slice cannot be applied to a 0-dim tensor
 
   def test_slice_ellipsis(self):
     helper_test_op([(3,3,3,3)], lambda x: x[..., 0], lambda x: x[..., 0])
@@ -1219,7 +1227,6 @@ class TestOps(unittest.TestCase):
 
   def _get_index_randoms(self):
     # indices cannot have gradient
-    # TODO currently does not support IndexError for out of bounds idx values
     a = torch.randint(low=-1, high=1, size=(2,1,1,1,1,1), dtype=torch.int64, requires_grad=False)
     b = torch.randint(high=1, size=(1,3,1,1,1,1), dtype=torch.int64, requires_grad=False)
     c = torch.randint(low=-5, high=5, size=(1,1,4,1,1,1), dtype=torch.int64, requires_grad=False)
@@ -1274,6 +1281,40 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[[1,0],b,c,d,:], lambda x: x[[1,0],j,k,o,:])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,[1,2,3],...], lambda x: x[i,j,k,[1,2,3],...])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,[2,1,0],c,[2,1,0],e], lambda x: x[i,[2,1,0],k,[2,1,0],p])
+
+  def test_slice_fancy_indexing_tuple_indices(self):
+    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(0),b,c,d,:], lambda x: x[(0),j,k,o,:])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(1),b,c,d,:], lambda x: x[(1),j,k,o,:])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(1,0),b,c,d,:], lambda x: x[(1,0),j,k,o,:])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,(1,2,3),...], lambda x: x[i,j,k,(1,2,3),...])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,(2,1,0),c,(2,1,0),e], lambda x: x[i,(2,1,0),k,(2,1,0),p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[1,(2,1,0),None,c,(2,1,0),e], lambda x: x[1,(2,1,0),None,k,(2,1,0),p])
+
+  def test_slice_fancy_indexing_list_with_tensors(self):
+    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a]], lambda x: x[[i]])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a,1]], lambda x: x[[i,1]])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a,[1,1]]], lambda x: x[[i,[1,1]]])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a,(1,1)]], lambda x: x[[i,(1,1)]])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a,b,c,d,e]], lambda x: x[[i,j,k,o,p]])
+
+  def test_slice_fancy_indexing_tuple_with_tensors(self):
+    a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
+    # helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,),], lambda x: x[(i,),]) TypeError: only integer tensors of a single element can be converted to an index
+    # helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,1),], lambda x: x[(i,1),]) TypeError: only integer tensors of a single element can be converted to an index
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,[1,1])], lambda x: x[(i,[1,1])])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,(1,1))], lambda x: x[(i,(1,1))])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,b,c,d,e)], lambda x: x[(i,j,k,o,p)])
+
+  def test_slice_fancy_indexing_errors(self): ...
+    # TODO: currently we not support IndexError for out of bounds idx values
+    # any out of bounds in fancy indexing returns 0
+    # ex: Tensor([1,2])[Tensor([1,2,55])].numpy() -> array([2., 0., 0.], dtype=float32)
+    # TODO: currently we do not support tensor indexing for list of list tensor
+    # ex: torch.tensor([1,2])[[[[torch.tensor(1)]]]] -> tensor([[2]])
+    # currently we return ValueError: setting an array element with a sequence.
+    # TypeError: only integer tensors of a single element can be converted to an index
 
   def test_gather(self):
     # indices cannot have gradient

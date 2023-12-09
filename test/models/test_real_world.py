@@ -17,11 +17,12 @@ from examples.stable_diffusion import UNetModel
 def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed, all_jitted=False):
   tms = []
   for _ in range(4):
+    early_gen = [x.realize() if isinstance(x, Tensor) else x for x in gen()]
     GlobalCounters.reset()
     GlobalCounters.mem_used = 0
     Device[Device.DEFAULT].synchronize()
     st = time.perf_counter_ns()
-    train(*gen())
+    train(*early_gen)
     Device[Device.DEFAULT].synchronize()
     tms.append(time.perf_counter_ns() - st)
 
@@ -51,7 +52,7 @@ class TestRealWorld(unittest.TestCase):
     helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 953)
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
-  @unittest.skipIf(Device.DEFAULT == "LLVM" and CI, "too long on CI LLVM")
+  @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp1")
   def test_llama(self):
     Tensor.default_type = dtypes.float16
 
@@ -63,7 +64,7 @@ class TestRealWorld(unittest.TestCase):
     # TODO: test first token vs rest properly, also memory test is broken with CacheCollector
     helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.22 if CI else 13.5, 181 if CI else 685, all_jitted=True)
 
-  @unittest.skipIf(Device.DEFAULT == "LLVM" and CI, "too long on CI LLVM")
+  @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp16")
   def test_gpt2(self):
     Tensor.default_type = dtypes.float16
 
@@ -72,7 +73,7 @@ class TestRealWorld(unittest.TestCase):
     derandomize_model(model)
     @TinyJit
     def test(t, v): return model(t, v).realize()
-    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.21 if CI else 0.9, 180 if CI else 516, all_jitted=True)
+    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.21 if CI else 0.9, 164 if CI else 468, all_jitted=True)
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(Device.DEFAULT in ["LLVM", "CLANG"] and CI, "too long on CI LLVM and CLANG")

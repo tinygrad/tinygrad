@@ -3,7 +3,7 @@ import math, functools
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import ImageDType, dtypes, prod, DType, strip_parens
+from tinygrad.helpers import ImageDType, dtypes, prod, DType, strip_parens, getenv
 
 class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"
@@ -35,30 +35,31 @@ class CStyleLanguage(NamedTuple):
     BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})",
     BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})",
     BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
-    BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})",
-    TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}!=0?{b}:{c})"
+    BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
+    TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})", TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}!=0?{b}:{c})"
   }
 
   # returns a str expression of the casted xs with the given type
-  def render_cast(self, x:List[str], var_dtype:DType) -> str:
+  def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
+    if bitcast: return f"(*(({self.buffer_prefix}{var_dtype.name}*)&{x[0]}))"
     if len(x) == 1: return f"({var_dtype.name})({x[0]})"
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.float4 is not None, "vectorized cast is not supported on this platform"
     return f"{self.float4.replace('float4', var_dtype.name)}({','.join(x)})"
 
   # returns a str expression of the const with the given type
-  def render_const(self, x:Union[float,int], var_dtype) -> str:
+  def render_const(self, x:Union[float,int,bool], var_dtype) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    else: val = f"{float(x)}f" if dtypes.is_float(var_dtype) else f"{int(x)}"
-    return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
+    else: val = f"{float(x)}f" if dtypes.is_float(var_dtype) else f"{int(x)}" if dtypes.is_int(var_dtype) else f"{bool(x)}".lower()
+    return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 or var_dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
     if isinstance(buf_dtype, ImageDType):
       assert output_dtype == dtypes.float.vec(4), f"images must be float4, getting {output_dtype}"
       return f"read_imagef({buf_name}, smp, {idx})"
-    if self.uses_vload and buf_dtype == dtypes.float16:
+    if self.uses_vload and buf_dtype.scalar() == dtypes.float16 and output_dtype.scalar() != dtypes.float16:
       return f"vload_half{'' if output_dtype.sz == 1 else str(output_dtype.sz)}(0, {buf_name}+{idx})"
     if output_dtype.sz > 1:
       out_val = f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx}))"
@@ -93,9 +94,9 @@ class CStyleLanguage(NamedTuple):
   # returns a str statement that does the store
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx:str, local=False) -> str:
     if isinstance(buf_dtype, ImageDType):
-      assert var_dtype == dtypes.float.vec(4), "images must be float4"
+      assert var_dtype == dtypes.float.vec(4), f"images must be float4, getting {var_dtype}"
       return f"write_imagef({buf_name}, {idx}, {var_name});"
-    if self.uses_vload and buf_dtype == dtypes.float16 and var_dtype != dtypes.float16:
+    if self.uses_vload and buf_dtype.scalar() == dtypes.float16 and var_dtype.scalar() != dtypes.float16:
       return f"vstore_half{'' if var_dtype.sz == 1 else str(var_dtype.sz)}({var_name}, 0, {buf_name}+{idx});"
     if var_dtype.sz > 1:
       return f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"
@@ -154,14 +155,12 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
     elif uop == UOps.ALU:
       assert dtype is not None
       # remove parens if ALU types are the same. TODO: can do more here
-      if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL}:
+      if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.XOR}:
         val = lang.code_for_op[args](strip_parens(r[vin[0]]), *[r[x] for x in vin[1:]], dtype)
-      elif args == BinaryOps.MAX:
-        val = lang.code_for_op[args](*[lang.render_cast([r[x]], dtype) if x.dtype != dtype else r[x] for x in vin] + [dtype])
       else:
         val = lang.code_for_op[args](*[r[x] for x in vin] + [dtype])
       assert child_count[u] != 0, f"childless ALU op found {u}"
-      if (child_count[u] <= 1 or dtypes.is_int(dtype)) and args != BinaryOps.MAX:  # fix index rendering issue. fix clang nested max macro issue
+      if (child_count[u] <= 1 or dtypes.is_int(dtype)) and args != BinaryOps.MAX and not getenv("EXPAND_SSA"):  # fix index rendering issue. fix clang nested max macro issue
         r[u] = val
       else:
         kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'alu')} = {val};")
@@ -189,7 +188,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
       if len(vin) > 3: kk("}")
     elif uop == UOps.CAST and dtype is not None:
-      val = lang.render_cast([r[x] for x in vin], dtype)
+      val = lang.render_cast([r[x] for x in vin], dtype, bitcast=isinstance(args, tuple) and args[1])
       if child_count[u] <= 1: r[u] = val
       else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
     elif uop == UOps.DEFINE_LOCAL:
@@ -226,6 +225,9 @@ class OpenCLLanguage(CStyleLanguage):
   uses_vload = True
   # NOTE: mad is used so the loads aren't reordered into the math on 845
   code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda a,b,c,dtype: f"mad({a},{b},{c})"}
+  type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
+  def render_cast(self, x, var_dtype, bitcast=False) -> str:
+    return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
 class MetalLanguage(CStyleLanguage):
@@ -239,6 +241,8 @@ class MetalLanguage(CStyleLanguage):
   gid = [f"gid.{chr(120+i)}" for i in range(3)]
   lid = [f"lid.{chr(120+i)}" for i in range(3)]
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
+  def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
+    return f"as_type<{var_dtype.name}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 
 class CUDALanguage(CStyleLanguage):
@@ -251,16 +255,13 @@ class CUDALanguage(CStyleLanguage):
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
+  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"__hmax({a},{b})",
+                 UnaryOps.EXP2: lambda x,dtype: f"exp2({x})" if dtype != dtypes.half else f"hexp2({x})"}
   half_prekernel = """
     #include <cuda_fp16.h>
-    #include <mma.h>
-    using namespace nvcuda;
-    struct __align__(8) half4 {
-      half2 x, y;
-      __device__ __forceinline__ explicit half4(const float4& a): x(make_half2(__float2half(a.x), __float2half(a.y))), y(make_half2(__float2half(a.z),__float2half(a.w))) {}
-      __device__ __forceinline__ explicit operator float4() const {return make_float4(__half2float(x.x), __half2float(x.y), __half2float(y.x), __half2float(y.y)); }
-    };
-    """
+    struct half4 { half x, y, z, w; };
+    __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
+  """
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 class HIPLanguage(CStyleLanguage):
@@ -292,10 +293,31 @@ __device__ float4 vload_half4(size_t offset, const half *p) { return make_float4
 __device__ void vstore_half(float data, size_t offset, half *p) { *(p + offset) = (half)data; }
 __device__ void vstore_half2(float2 data, size_t offset, half *p) { *(p + offset*2) = (half)data.x; *(p + offset*2 + 1) = (half)data.y; }
 __device__ void vstore_half4(float4 data, size_t offset, half *p) { *(p + offset*4) = (half)data.x; *(p + offset*4 + 1) = (half)data.y; *(p + offset*4 + 2) = (half)data.z; *(p + offset*4 + 3) = (half)data.w; }
+__device__ half exp2(half x) { return hexp2(x); }
+__device__ half log2(half x) { return hlog2(x); }
+__device__ half sin(half x) { return hsin(x); }
+__device__ half sqrt(half x) { return hsqrt(x); }
+__device__ half hmax(half a, half b) { return __hgt(a, b) ? a : b; }
+__device__ half operator%(const half &a, const half &b) { return __hsub(a, __hmul(b, __float2half(floorf(__half2float(a) / __half2float(b))))); }
+__device__ bool operator!=(const half &a, const int &b) { return (float)a != b; }
+
+// HACKS for ALU ops on half and result of half2 GEP
+__device__ half operator+(const half &a, const unsigned short &b) { return __hadd(a, (half)(b)); }
+__device__ half operator-(const half &a, const unsigned short &b) { return __hsub(a, (half)(b)); }
+__device__ half operator*(const half &a, const unsigned short &b) { return __hmul(a, (half)(b)); }
+__device__ half operator/(const half &a, const unsigned short &b) { return __hdiv(a, (half)(b)); }
+__device__ bool operator<(const half &a, const unsigned short &b) { return __hlt(a, (half)(b)); }
+// now the other way
+__device__ half operator+(const unsigned short &a, const half &b) { return __hadd((half)(a), b); }
+__device__ half operator-(const unsigned short &a, const half &b) { return __hsub((half)(a), b); }
+__device__ half operator*(const unsigned short &a, const half &b) { return __hmul((half)(a), b); }
+__device__ half operator/(const unsigned short &a, const half &b) { return __hdiv((half)(a), b); }
+__device__ bool operator<(const unsigned short &a, const half &b) { return __hlt((half)(a), b); }
   """
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
+  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"hmax({a},{b})", TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}!=0?{b}:{c})" if dtype != dtypes.half else f"(half)({a}!=0?{b}:{c})"}
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 
 # TODO: how much of this can be merged with above?
@@ -313,16 +335,15 @@ class WGSLLanguage(CStyleLanguage):
     return f"var<workgroup> {name}: array<f32,{size}>;"
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
-    if math.isnan(x): val = "nan()"
-    elif math.isinf(x): val = ("-" if x < 0 else "") + "0x1.fffffep+127f"
-    else: val = f"({x}" + ("" if dtypes.is_int(var_dtype) else "f") + ")"
-    return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 else val
+    if math.isnan(x): return "nan()"
+    elif math.isinf(x): return ("-" if x < 0 else "") + "(1.0/0.0)"
+    return f"({super().render_const(x, var_dtype)})"
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     local_size = local_size[::-1] if local_size else [1]
     bind_it = iter(range(len(bufs)))
     prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
-    prg += "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) var<storage,read_write> {name}: array<{self.type_map[dtype]}>;" for name,dtype in bufs])
+    prg += "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) {'var<uniform>' if dtype == dtypes._arg_int32 else 'var<storage,read_write>'} {name}: {'i32' if dtype == dtypes._arg_int32 else f'array<{self.type_map[dtype]}>'};" for name,dtype in bufs])
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
     return prg
 
@@ -335,15 +356,10 @@ class WGSLLanguage(CStyleLanguage):
   def render_conditional(self, cond:str, x:str, y:str) -> str:
     return f"select(f32({y}), {x}, bool({cond}))"
 
-  def render_cast(self, x:List[str], var_dtype:DType) -> str:
-    if self.type_map[var_dtype]: return f"{self.type_map[var_dtype]}({x[0]})"
+  def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
+    if self.type_map[var_dtype]: return f"bitcast<{self.type_map[var_dtype]}>({x[0]})" if bitcast else f"{self.type_map[var_dtype]}({x[0]})"
     raise NotImplementedError(f"no cast for {var_dtype}")
 
-  def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
-    return f"f32({super().render_load(output_dtype, buf_name, buf_dtype, idx, local)})"
-
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
-    if buf_dtype != var_dtype:
-      var_name = f"{self.type_map[buf_dtype]}({var_name})"
-    return f"{buf_name}[{idx}] = {var_name};"
+    return f"{buf_name}[{idx}] = {self.render_cast([var_name], buf_dtype) if var_dtype != buf_dtype else var_name};"
 WGSLRenderer = functools.partial(uops_to_cstyle, WGSLLanguage())

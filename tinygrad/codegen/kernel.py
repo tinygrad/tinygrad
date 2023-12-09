@@ -1,8 +1,7 @@
 from __future__ import annotations
 import os, math, itertools
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
-from tinygrad.lazy import vars_from_ast
-from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps
+from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, vars_from_ast
 from tinygrad.device import Device, Compiled
 from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, ansilen, getenv, prod, DEBUG, round_up
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
@@ -408,40 +407,34 @@ class Kernel:
       if opt.op != OptOps.PADTO: assert self.full_shape[axis] % amt == 0, "no longer valid shift"
     else:
       amt = -1
-    if opt.op == OptOps.LOCAL:        # cyan
+    if opt.op == OptOps.LOCAL:                        # cyan
       assert self.opts.has_local, "target does not support local"
       assert axis < self.first_reduce, "can't local a reduce"
       assert not(self.tensor_core), "can't local with tensor cores"
       self.shift_to(axis, amt, insert_before=self.first_reduce)
       self.local_dims += 1
-    elif opt.op == OptOps.LASTLOCAL:  # cyan
+    elif opt.op == OptOps.LASTLOCAL:                  # cyan
       assert self.opts.has_local, "target does not support local"
       assert axis < self.first_reduce, "can't local a reduce"
       self.shift_to(axis, amt, insert_before=self.first_reduce-self.local_dims)
       self.local_dims += 1
-    elif opt.op == OptOps.GROUP:      # green
+    elif opt.op in [OptOps.GROUP, OptOps.GROUPTOP]:   # green
       assert self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem"
       assert axis >= self.first_reduce + len(self.group_for_reduce) and axis < self.shape_len-self.upcasted, "must be reduce axis to group"
       assert not(self.tensor_core), "can't group with tensor cores"
-      self.shift_to(axis, amt, insert_before=self.first_reduce + len(self.group_for_reduce))
+      self.shift_to(axis, amt, top=(opt.op==OptOps.GROUPTOP), insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(amt)
-    elif opt.op == OptOps.GROUPTOP:   # green
-      assert self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem"
-      assert axis >= self.first_reduce + len(self.group_for_reduce) and axis < self.shape_len-self.upcasted, "must be reduce axis to group"
-      assert not(self.tensor_core), "can't group with tensor cores"
-      self.shift_to(axis, amt, top=True, insert_before=self.first_reduce + len(self.group_for_reduce))
-      self.group_for_reduce.append(amt)
-    elif opt.op == OptOps.UNROLL:     # purple
+    elif opt.op == OptOps.UNROLL:                     # purple
       assert axis < self.shape_len-self.upcasted, "can't upcasted already upcasted"
       assert amt <= 32, "don't unroll more than 32"
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
-    elif opt.op == OptOps.UPCAST:     # yellow
+    elif opt.op == OptOps.UPCAST:                     # yellow
       assert axis < self.first_reduce, "upcast is for non-reduce"
       assert amt <= 8, "don't upcast more than 8"
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
-    elif opt.op == OptOps.UPCASTMID:  # white
+    elif opt.op == OptOps.UPCASTMID:                  # white
       assert self.bufs[0].dtype.name.startswith('image') and not self.float4_axis(0) and self.group_for_reduce and self.first_reduce <= 2 and prod(self.sts[0].shape) > 1, "invalid upcast mid reduce"
       axes = self.sts[0].unit_stride_axes()
       assert len(axes) == 1, f"wrong number of stride 1 axis : {axes}"
@@ -468,7 +461,16 @@ class Kernel:
       assert padded, "nothing was padded"
     return self.simplify_ones()
 
+  def required_optimizations(self):
+    if self.bufs[0].dtype.__class__ is ImageDType:
+      unit_stride_axes_mul_4 = [i for i in self.sts[0].unit_stride_axes(ignore_valid=True) if self.sts[0].shape[i]%4 == 0]
+      assert len(unit_stride_axes_mul_4) >= 1, f"needs a unit stride axis in {self.bufs[0]}"
+      if len(unit_stride_axes_mul_4) and all(x < (self.shape_len-self.upcasted) for x in unit_stride_axes_mul_4) and unit_stride_axes_mul_4[0] not in self.upcast_in_mid_reduce_axes:
+        self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
+
   def hand_coded_optimizations(self):
+    self.required_optimizations()
+
     # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
     MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
     if self.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \

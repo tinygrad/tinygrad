@@ -50,7 +50,7 @@ jobs:
     - name: Test Docs
       run: |
         python docs/abstractions.py
-        python docs/beautiful.py
+        python docs/abstractions2.py
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Fuzz Test symbolic
@@ -246,7 +246,10 @@ jobs:
     #- name: Run webgpu pytest
     #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
     - name: Run selected webgpu tests
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_dtype.py test/test_jit.py
+      run: |
+        WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_ops.py test/test_dtype.py \
+        test/test_jit.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_linearizer.py \
+        test/test_linearizer_failures.py test/test_nn.py
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
     - name: Install Puppeteer
@@ -256,7 +259,7 @@ jobs:
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
 
-  testmetalwebgpu:
+  testmetal:
     name: Metal Tests
     runs-on: macos-13
     timeout-minutes: 20
@@ -378,7 +381,7 @@ jobs:
           echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           sudo apt update -y
           sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
-            flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+            flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc libzstd-dev
       - name: Cache gpuocelot
         if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         id: cache-build
@@ -411,13 +414,13 @@ jobs:
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (not cuda)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
-        run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}' --durations=20
+        run: python -m pytest -n=auto test/ -m 'not exclude_${{matrix.backend}}' --durations=20
       - name: Run ONNX (only LLVM)
         if: matrix.backend == 'llvm'
         run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
-        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models --durations=20
+        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models --durations=20
 
   #testunicorn:
   #  name: ARM64 unicorn Test

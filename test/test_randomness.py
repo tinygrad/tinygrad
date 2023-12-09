@@ -4,11 +4,8 @@ import numpy as np
 import torch
 from tinygrad.tensor import Tensor
 import tinygrad.nn as nn
-import pytest
 from tinygrad.helpers import dtypes
 from functools import partial
-
-pytestmark = pytest.mark.webgpu
 
 # https://gist.github.com/devries/11405101
 def ksprob(a):
