@@ -53,11 +53,13 @@ def eval_resnet():
 
 def eval_unet3d():
   # UNet3D
+  import os
+  from tinygrad.nn.state import safe_load, load_state_dict
   from extra.models.unet3d import UNet3D
   from extra.datasets.kits19 import iterate, sliding_window_inference
-  from examples.mlperf.metrics import get_dice_score
+  from examples.mlperf.metrics import get_dice_score_np
   mdl = UNet3D()
-  mdl.load_from_pretrained()
+  load_state_dict(mdl, safe_load(os.path.join(f"unet3d-ckpt-90.safetensors"))) if getenv("CUSTOM") else mdl.load_from_pretrained()
   s = 0
   st = time.perf_counter()
   for i, (image, label) in enumerate(iterate(), start=1):
@@ -65,7 +67,7 @@ def eval_unet3d():
     pred, label = sliding_window_inference(mdl, image, label)
     et = time.perf_counter()
     print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
-    s += get_dice_score(pred, label).mean()
+    s += get_dice_score_np(pred, label).mean()
     print(f"****** {s:.2f}/{i}  {s/i:.5f} Mean DICE score")
     st = time.perf_counter()
 

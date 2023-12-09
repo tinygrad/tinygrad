@@ -3,7 +3,7 @@ import time
 from tqdm import tqdm
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, dtypes
-from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict
+from tinygrad.nn.state import get_parameters, safe_load, safe_save, get_state_dict, load_state_dict
 from extra.lr_scheduler import MultiStepLR
 from extra.datasets.kits19 import get_batch, sliding_window_inference, get_data_split
 from extra import dist
@@ -55,6 +55,8 @@ def train_unet3d():
     mdl = UNet3D()
     if getenv("PRETRAINED"):
       mdl.load_from_pretrained()
+    if getenv("CONTINUE"):
+      load_state_dict(mdl, safe_load(os.path.join(conf.save_ckpt_path, f"unet3d-ckpt-{conf.start_epoch}.safetensors")))
     if getenv("FP16"):
       weights = get_state_dict(mdl)
       for k, v in weights.items():
@@ -90,7 +92,7 @@ def train_unet3d():
         return loss.realize()
 
     t0_total = time.monotonic()
-    for epoch in range(0, conf.epochs):
+    for epoch in range(conf.start_epoch, conf.epochs):
       cumulative_loss = []
 
       if not getenv("MOCKTRAIN"):
@@ -122,10 +124,12 @@ def train_unet3d():
         eval_metrics = evaluate(conf, mdl, val_loader, epoch=epoch)
         print("  (eval):", eval_metrics)
 
+        # safe_save(get_state_dict(mdl), os.path.join(conf.save_ckpt_path, f"unet3d-ckpt-{epoch}.safetensors"))
+
         Tensor.training = True
         if eval_metrics["mean_dice"] >= conf.quality_threshold:
           print("\nsuccess", eval_metrics["mean_dice"], ">", conf.quality_threshold, "runtime", time.monotonic()-t0_total)
-          mdl.save(os.path.join(conf.save_ckpt_path, f"unet3d-ckpt-{conf.epochs}"))
+          safe_save(get_state_dict(mdl), os.path.join(conf.save_ckpt_path, f"unet3d-ckpt-{conf.epochs}.safetensors"))
           is_successful = True
         elif eval_metrics["mean_dice"] < 1e-6:
           print("\nmodel diverged. exit.", eval_metrics["mean_dice"], "<", 1e-6)
@@ -134,7 +138,8 @@ def train_unet3d():
       if is_successful or diverged:
         break
       print(f'  epoch time {time.monotonic()-epoch_st:.2f}s')
-    mdl.save(os.path.join(conf.save_ckpt_path, f"unet3d-ckpt-{conf.epochs}"))
+
+    safe_save(get_state_dict(mdl), os.path.join(conf.save_ckpt_path, f"unet3d-ckpt-{conf.epochs}.safetensors"))
     print(f"  total runtime {time.monotonic()-t0_total:.1f} | epochs {conf.epochs}")
 
   conf = Conf()

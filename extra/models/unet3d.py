@@ -56,11 +56,6 @@ class UNet3D:
       assert obj.shape == v.shape, (k, obj.shape, v.shape)
       obj.assign(v.numpy())
 
-  def save(self, filename):
-    with open(filename+'.npy', 'wb') as f:
-      for par in get_parameters(self):
-        np.save(f, par.numpy())
-
 if __name__ == "__main__":
   mdl = UNet3D()
   mdl.load_from_pretrained()
