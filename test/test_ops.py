@@ -1312,8 +1312,7 @@ class TestOps(unittest.TestCase):
     # TODO: currently we do not support tensor indexing for list of list tensor
     # ex: torch.tensor([1,2])[[[[torch.tensor(1)]]]] -> tensor([[2]])
     # currently we return ValueError: setting an array element with a sequence.
-    # E   TypeError: only integer tensors of a single element can be converted to an index
-
+    # TypeError: only integer tensors of a single element can be converted to an index
 
   def test_gather(self):
     # indices cannot have gradient
