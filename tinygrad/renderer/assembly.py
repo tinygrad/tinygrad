@@ -28,7 +28,8 @@ class AssemblyLanguage(NamedTuple):
 
 def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
   local_size: List[int] = []
-  kernel, bufs = [], []
+  kernel:List[str] = []
+  bufs = []
 
   c: DefaultDict[str, int] = defaultdict(int)
   r: Dict[UOp, str] = {}
@@ -92,8 +93,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
         kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {(index:=ssa(None,'index','u64'))}, {r[vin[1]]}, {dtype.itemsize};")
         loc = f"{r[vin[0]]}[{index}]"
       elif vin[1] and vin[1].uop != UOps.CONST:
-        kernel.extend([f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {(offset:=ssa(None,'off','u64'))}, {r[vin[1]]}, {dtype.itemsize};",
-                       f"add.s64 {(loc:=ssa(None,'loc','u64'))}, {r[vin[0]]}, {offset};"])
+        kernel.append(f"mad.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {(loc:=ssa(None,'off','u64'))}, {r[vin[1]]}, {dtype.itemsize}, {r[vin[0]]};")
         loc = f"[{loc}]"
       else: loc = f"[{r[vin[0]]}{f'+{int(vin[1].arg * dtype.itemsize)}' if vin[1] else ''}]"
       val = ssa(u, 'val')
@@ -114,8 +114,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
         kernel.append(f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {(index:=ssa(None,'index','u64'))}, {r[vin[1]]}, {vin[0].dtype.itemsize};")
         loc = f"{r[vin[0]]}[{index}]"
       elif vin[1].uop != UOps.CONST:
-        kernel.extend([f"mul.wide.{lang.dtype_to_asmtype[vin[1].dtype]} {(offset:=ssa(None,'off','u64'))}, {r[vin[1]]}, {vin[0].dtype.itemsize};",
-                       f"add.s64 {(loc:=ssa(None,'loc','u64'))}, {r[vin[0]]}, {offset};"])
+        kernel.append(f"mad.wide.u{lang.dtype_to_asmtype[vin[1].dtype][1:]} {(loc:=ssa(None,'loc','u64'))}, {r[vin[1]]}, {vin[0].dtype.itemsize}, {r[vin[0]]};")
         loc = f"[{loc}]"
       else: loc = f"[{r[vin[0]]}{f'+{int(vin[1].arg * vin[0].dtype.itemsize)}' if vin[1] else ''}]"
       if vin[0].dtype != vin[2].dtype: kernel.append(lang.render_cast(cast:=ssa(None, "cast", lang.dtype_to_asmtype[vin[0].dtype]), r[vin[2]], vin[0].dtype, vin[2].dtype))
