@@ -512,7 +512,7 @@ class Tensor:
 
   @staticmethod
   def einsum(formula, *xs) -> Tensor:
-    if isinstance(xs[0], list): xs = tuple(xs[0])
+    xs = argfix(*xs)
     lhs, rhs = formula.split("->")
     lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in lhs.split(',')]
     rhs = sorted(enumerate(rhs), key=lambda e:e[1])
