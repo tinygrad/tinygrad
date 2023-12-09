@@ -59,13 +59,12 @@ class Tensor:
     # internal variables used for autograd graph construction
     self._ctx: Optional[Function] = None
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
-    elif isinstance(data, (int, float)):
-      data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
-    elif data is None or data.__class__ is list:
+    elif data is None or isinstance(data, list):
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
-      data = LazyBuffer.fromCPU(np.array([] if data is None else data, dtype=(dtype or Tensor.default_type).np))
-    elif isinstance(data, bytes):
-      data = LazyBuffer.fromCPU(np.frombuffer(data, np.uint8))
+      data = LazyBuffer.fromCPU(np.array([] if data is None else data, dtype=(dtype or dtypes.int32 if all(isinstance(i, int) for i in data) else Tensor.default_type).np))
+    elif isinstance(data, int): data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.int32, device, data)
+    elif isinstance(data, float): data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
+    elif isinstance(data, bytes): data = LazyBuffer.fromCPU(np.frombuffer(data, np.uint8))
     elif isinstance(data, np.ndarray):
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
       if data.shape == ():
