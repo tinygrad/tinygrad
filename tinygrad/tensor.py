@@ -517,14 +517,14 @@ class Tensor:
     lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in lhs.split(',')]
     rhs = sorted(enumerate(rhs), key=lambda e:e[1])
 
-    assert len(xs) == len(lhs), f"number of args doesn't match number of operands in formula, expected {len(lhs)}, got {len(xs)}"
+    assert len(xs) == len(lhs), f"number of inputs doesn't match number of operands in formula, expected {len(lhs)}, got {len(xs)}"
 
     lhs, rhs = [[list(zip(*l)) for l in lhs], list(zip(*rhs)) or [[], []]]
     dims = {}
     for i, l in enumerate(lhs):
       for order, letter in enumerate(l[1]):
         if letter not in dims: dims[letter] = xs[i].shape[l[0][order]]
-        else: assert dims[letter] == xs[i].shape[l[0][order]]
+        else: assert dims[letter] == xs[i].shape[l[0][order]], f"dims of the same index should all be equal in the inputs. expected {dims[letter]} for input #{i+1}, got {xs[i].shape[l[0][order]]}"
     xs_ = [None]*len(xs)
     for i,x in enumerate(xs):
       xs_[i] = x.permute(lhs[i][0]) \
