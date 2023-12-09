@@ -488,6 +488,24 @@ class TestOps(unittest.TestCase):
     # bilinear transformation
     helper_test_op([(2,3),(5,3,7),(2,7)], lambda a,b,c: torch.einsum('ik,jkl,il->ij', [a,b,c]), lambda a,b,c: Tensor.einsum('ik,jkl,il->ij', [a,b,c]))
 
+  @unittest.expectedFailure
+  def test_einsum_shape_check(self):
+    a = Tensor.zeros(3,8,10,5)
+    b = Tensor.zeros(11,5,13,16,8)
+    Tensor.einsum('pqrs,tuqvr->pstuv',a,b)
+
+  @unittest.expectedFailure
+  def test_einsum_arity_check1(self):
+    a = Tensor.zeros(10,15)
+    b = Tensor.zeros(15,20)
+    c = Tensor.zeros(20,10)
+    Tensor.einsum('ij,jk->ij', a,b,c)
+
+  @unittest.expectedFailure
+  def test_einsum_arity_check2(self):
+    a = Tensor.zeros(10,10)
+    Tensor.einsum('ij,jk->ij', a)
+
   def test_matmul_simple(self):
     helper_test_op([(4), (4,4)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_matmul(self):
