@@ -511,8 +511,8 @@ class Tensor:
   def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
 
   @staticmethod
-  def einsum(formula: str, *xs:Union[Tensor, List[Tensor]]) -> Tensor:
-    if isinstance(xs[0], list): xs = xs[0]
+  def einsum(formula, *xs) -> Tensor:
+    if isinstance(xs[0], list): xs = tuple(xs[0])
     lhs, rhs = formula.split("->")
     lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in lhs.split(',')]
     rhs = sorted(enumerate(rhs), key=lambda e:e[1])
