@@ -1,6 +1,6 @@
 import functools
 from tqdm import tqdm
-from tinygrad import Tensor, nn, Device, dtypes
+from tinygrad import Tensor, nn, Device, dtypes, GlobalCounters
 from tinygrad.nn.state import torch_load, get_state_dict
 from extra.models.llama import FeedForward, Transformer
 
@@ -53,6 +53,7 @@ if __name__ == "__main__":
   temperature = 0 #.7
 
   for i in range(30):
+    GlobalCounters.reset()
     tok = model(Tensor([toks[start_pos:]]), start_pos, temperature).multinomial().item()
     toks.append(tok)
     start_pos += 1
