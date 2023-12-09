@@ -217,7 +217,7 @@ class MambaMixer:
       conv_state, ssm_state = self._get_states_from_cache(inference_params, batch)
       if inference_params.seqlen_offset > 0:
         # The states are updated inplace
-        out, _, _ = self.step(hidden_states, conv_state, ssm_state)
+        out, _, _ = self.step(hidden_states[:, -1:, :], conv_state, ssm_state)
         return out
 
     xz = rearrange(
@@ -240,8 +240,12 @@ class MambaMixer:
     dt = x_dbl[:, : self.dt_rank]
     B = x_dbl[:, self.dt_rank : (self.dt_rank + self.d_state)]
     C = x_dbl[:, (self.dt_rank + self.d_state) :]
+    
+    #print(f"dt before: {dt.shape}")
     dt = self.dt_proj.weight @ dt.T
+    #print(f"dt mul: {dt.shape}")
     dt = rearrange(dt, "d (b l) -> b d l", l=seqlen)
+    #print(f"dt rearranged: {dt.shape}")
 
     B = rearrange(B, "(b l) dstate -> b dstate l", l=seqlen).contiguous()
     C = rearrange(C, "(b l) dstate -> b dstate l", l=seqlen).contiguous()
@@ -269,6 +273,7 @@ class MambaMixer:
     return out
 
   def step(self, hidden_states, conv_state, ssm_state):
+    #print(f"hidden_states is {hidden_states.shape}")
     assert (
       hidden_states.shape[1] == 1
     ), f"Only support decoding with 1 token at a time for now, attempted {hidden_states.shape[1]}"
@@ -284,17 +289,21 @@ class MambaMixer:
 
     x_db = self.x_proj(x)  # (B dt_rank+2*d_state)
     dt = x_db[:, : self.dt_rank]
-    B = x_db[:, self.dt_rank : self.d_state]
+    B = x_db[:, self.dt_rank : (self.dt_rank + self.d_state)]
     C = x_db[:, (self.dt_rank + self.d_state) :]
     # Don't add dt_bias here
-    dt = self.dt_proj.weight @ dt
+    #print(f"dt before: {dt.shape}")
+    dt = self.dt_proj.weight @ dt.T
     A = -self.A_log.exp()
 
+    #print(f"dt matmul: {dt.shape}")
+    #print(f"dt_proj.bias: {self.dt_proj.bias.shape}")
     # SSM step
-    dt = (dt + self.dt_proj.bias).softplus()
+    dt = (dt + self.dt_proj.bias.unsqueeze(-1)).softplus()
     # TODO: Tensor.einsum?
-    dA = Tensor.einsum("bdn,bn->bdn", dt, A).exp()
-    dB = Tensor.einsum("bd,bn->bdn", dt, B)
+    #print(f"dt: {dt.shape}, A: {A.shape}, B: {B.shape}")
+    dA = Tensor.einsum("db,dn->bdn", dt, A).exp()
+    dB = Tensor.einsum("db,bn->bdn", dt, B)
     ssm_state.assign(ssm_state * dA + rearrange(x, "b d -> b d 1") * dB)
     y = Tensor.einsum("bdn,bn->bd", ssm_state, C)
     y = y + self.D * x
@@ -395,8 +404,11 @@ class Mamba:
       hidden_states = hidden_states[:, -num_last_tokens:]
     return self.lm_head(hidden_states).realize()
 
-  def __call__(self, input_ids, inference_params=None, num_last_tokens=0, jit=False):
-    return self.forward_jit(input_ids, inference_params, num_last_tokens) if jit else self.forward(input_ids, inference_params, num_last_tokens)
+  def __call__(self, input_ids, inference_params=None, num_last_tokens=0, jit=True):
+    if jit and inference_params.seqlen_offset > 0:
+      return self.forward_jit(input_ids, inference_params, num_last_tokens)
+    else:
+      return self.forward(input_ids, inference_params, num_last_tokens)
 
 @dataclass
 class InferenceParams:
@@ -443,16 +455,16 @@ if __name__ == "__main__":
   #for k, v in get_state_dict(model).items():
   #  print(f"{k}: {v.shape}")
 
-  prompt = "The capital of France is"
+  prompt = "So here's what"
   tks = tokenizer(prompt)["input_ids"]
   print('\n' + prompt, end='', flush=True)
 
-  temperature = 0.2
+  temperature = 0.5
   start_pos = 0
   inference_params = InferenceParams(max_seqlen=1, max_batch_size=1, seqlen_offset=0)
-  for i in range(20):
-    logits = model(Tensor([tks]), inference_params, start_pos)
-    #inference_params.seqlen_offset = len(tks)
+  for i in range(200):
+    logits = model(Tensor([tks[start_pos:]]), inference_params, start_pos)
+    inference_params.seqlen_offset = len(tks)
     tok = (logits[:, -1, :] / (temperature + 1e-10)).softmax().flatten().multinomial().item()
     start_pos = len(tks)
     tks.append(tok)
