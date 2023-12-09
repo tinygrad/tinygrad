@@ -4,7 +4,6 @@ from typing import Dict, Union, List, Optional, Any, Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, prod, argsort, DEBUG, Timing, GlobalCounters, CI, unwrap
 from tinygrad.shape.view import strides_for_shape
-from tinygrad import Device
 
 safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
@@ -62,7 +61,7 @@ def load_state_dict(model, state_dict, strict=True, verbose=True):
 
 # torch support!
 
-def torch_load(fn:str):
+def torch_load(fn:str) -> Dict[str, Tensor]:
   t = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
 
   offsets: Dict[Union[str, int], int] = {}
@@ -77,7 +76,7 @@ def torch_load(fn:str):
     # upstream LLaMA also does this conversion:
     # https://github.com/facebookresearch/llama/blob/6c7fe276574e78057f917549435a2554000a876d/llama/generation.py#L95
     # TODO: should this be done in the example instead? or maybe we don't need this anymore with better bfloat16 support
-    if storage[1] == dtypes.bfloat16: ret = ret.cast(dtypes.uint16).to(Device.DEFAULT).cast(dtypes.uint32).mul(1<<16).contiguous().bitcast(dtypes.float32).half()
+    if storage[1] == dtypes.bfloat16: ret = ret.cast(dtypes.uint16) #.to(Device.DEFAULT).cast(dtypes.uint32).mul(1<<16).contiguous().bitcast(dtypes.float32).half()
     else: ret = ret.cast(storage[1])
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk

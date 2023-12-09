@@ -78,7 +78,7 @@ class Attention:
     return self.wo(attn)
 
 class FeedForward:
-  def __init__(self, dim, hidden_dim, linear=nn.Linear):
+  def __init__(self, dim:int, hidden_dim:int, linear=nn.Linear):
     self.w1 = linear(dim, hidden_dim, bias=False)
     self.w2 = linear(hidden_dim, dim, bias=False)
     self.w3 = linear(dim, hidden_dim, bias=False) # the gate in Gated Linear Unit
@@ -98,8 +98,8 @@ class TransformerBlock:
     return (h + self.feed_forward(self.ffn_norm(h))).realize()
 
 class Transformer:
-  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size, linear=nn.Linear, n_kv_heads=None, rope_theta=10000, max_context=1024, jit=True):
-    self.layers = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, max_context, linear) for _ in range(n_layers)]
+  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size, linear=nn.Linear, n_kv_heads=None, rope_theta=10000, max_context=1024, jit=True, tf_block=TransformerBlock):
+    self.layers = [tf_block(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, max_context, linear) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
     self.output = linear(dim, vocab_size, bias=False)
