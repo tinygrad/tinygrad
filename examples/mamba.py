@@ -9,6 +9,7 @@ from tinygrad.nn.state import get_state_dict, load_state_dict, torch_load
 from extra.models.llama import RMSNorm
 from transformers import AutoTokenizer
 from einops import rearrange, repeat
+import numpy as np
 
 MODELS = {
   "130m": {
@@ -81,8 +82,6 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
     #     if is_variable_C:
     #         C = torch.view_as_complex(rearrange(C.float(), "... (L two) -> ... L two", two=2))
     # else:
-    B = B.float()
-    C = C.float()
     
     x = Tensor.zeros(batch, dim, dstate)
     ys = []
@@ -116,7 +115,6 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
     out = y if D is None else y + u * rearrange(D, "d -> d 1")
     if z is not None:
         out = out * z.silu()
-    out = out.to(dtype=dtype_in)
     return out if not return_last_state else (out, last_state)
 
 
@@ -181,8 +179,6 @@ class MambaMixer:
     # S4D real initialization
     self.A_log = Tensor.arange(1, self.d_state + 1).repeat([self.d_inner, 1]).contiguous().log()
 
-    print(f"self.A_log: {self.A_log.shape}")
-
     # D "skip" parameter
     self.D = Tensor.ones(self.d_inner)  # Keep in fp32
 
@@ -210,7 +206,6 @@ class MambaMixer:
       xz = xz + rearrange(self.in_proj.bias, "d -> d 1")
     
     A = -self.A_log.exp()
-    print(f"A: {A.shape}")
     x, z = xz.chunk(2, dim=1)
     # Compute short convolution
     if conv_state is not None:
@@ -219,7 +214,7 @@ class MambaMixer:
       
     x_dbl = self.x_proj(rearrange(x, "b d l -> (b l) d"))
     dt = x_dbl[:,:self.dt_rank]
-    B = x_dbl[:,self.dt_rank:self.d_state]
+    B = x_dbl[:,self.dt_rank:(self.dt_rank + self.d_state)]
     C = x_dbl[:,(self.dt_rank + self.d_state):]
     dt = self.dt_proj.weight @ dt.T
     dt = rearrange(dt, "d (b l) -> b d l", l=seqlen)
@@ -350,7 +345,12 @@ if __name__ == "__main__":
   
   for k,v in get_state_dict(model).items(): print(f"{k}: {v.shape}")
   
-  tks = tokenizer("Hello world")["input_ids"]
+  tks = tokenizer("Hello, how are you ")["input_ids"]
   print(f"\n{len(tks)} tokens")
   
-  model(Tensor([tks]))
+  temperature = 0.0
+  logits = model(Tensor([tks]))
+  logits = (logits[:, -1, :] / (temperature+1e-10)).softmax().flatten().realize()
+  probs_np = logits.numpy()
+  tok = int(np.random.choice(len(probs_np), p=probs_np))
+  print(tokenizer.decode(tok))
