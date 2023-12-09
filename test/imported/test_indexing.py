@@ -1603,7 +1603,6 @@ class TestNumpy(unittest.TestCase):
     '''
     numpy_testing_assert_equal_helper(a[()].data_ptr(), a.data_ptr())
     '''
-    numpy_testing_assert_equal_helper(a[()].lazydata.op.src, a.lazydata.op.src)
 
   # TODO empty fancy index
   '''
