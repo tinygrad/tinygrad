@@ -334,7 +334,7 @@ class Tensor:
     for dim,i in enumerate(indices_filtered): type_dim[type(i)].append(dim)
 
     # validation! raise Errors
-    if slice in type_dim and self.ndim == 0: raise IndexError("slice() cannot be applied to a 0-dim tensor.")
+    if slice in type_dim and self.ndim == 0: raise IndexError("slice cannot be applied to a 0-dim tensor.")
     if len(ellipsis_idx) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
     if float in type_dim: raise IndexError("float type is not valid index")
     if any(isinstance(i, slice) and i.step == 0 for i in indices): raise ValueError('slice step cannot be 0')

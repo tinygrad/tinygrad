@@ -666,11 +666,13 @@ class TestOps(unittest.TestCase):
 
   def test_slice_errors(self):
     a = Tensor.ones(4, 3)
+    b = Tensor(2)
     with self.assertRaises(IndexError): a[1, 77, 77, 77] # IndexError: (finds too many indices before the out of bounds)
     with self.assertRaises(IndexError): a[1, 77] # IndexError: (out of bounds).
     with self.assertRaises(IndexError): a[1, -77]
     with self.assertRaises(IndexError): a[..., ...] # IndexError: only single ellipsis
     with self.assertRaises(ValueError): a[::0, 1] # no 0 strides
+    with self.assertRaises(IndexError): b[:] # slice cannot be applied to a 0-dim tensor
 
   def test_slice_ellipsis(self):
     helper_test_op([(3,3,3,3)], lambda x: x[..., 0], lambda x: x[..., 0])

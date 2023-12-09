@@ -61,6 +61,9 @@ def diagonal(tensor:Tensor) -> Tensor:
 def copy_(src:Tensor, other:Tensor) -> Tensor:
   ...
 
+def unravel_index(tensor, shape):
+  ...
+
 def make_tensor(shape, dtype:dtypes, noncontiguous) -> Tensor:
   r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
   values uniformly drawn from ``[low, high)``.
@@ -398,7 +401,7 @@ class TestIndexing(unittest.TestCase):
     '''
     strided[ri([0]), ri([1])] = -1
     numpy_testing_assert_equal_helper(strided[ri([0]), ri([1])],
-                      np.array([-1]))
+                      Tensor([-1]))
     '''
 
     reference = Tensor.arange(0., 24).reshape(3, 8)
@@ -408,9 +411,9 @@ class TestIndexing(unittest.TestCase):
                       np.array([11, 17]))
     # TODO setitem
     '''
-    strided[ri([0, 1]), ri([1, 0])] = np.array([-1, 2])
+    strided[ri([0, 1]), ri([1, 0])] = Tensor([-1, 2])
     numpy_testing_assert_equal_helper(strided[ri([0, 1]), ri([1, 0])],
-                      np.array([-1, 2]))
+                      Tensor([-1, 2]))
     '''
 
     reference = Tensor.arange(0., 24).realize().reshape(3, 8)
@@ -424,9 +427,9 @@ class TestIndexing(unittest.TestCase):
                       np.array([[10, 11], [17, 18]]))
     # TODO setitem
     '''
-    strided[rows, columns] = np.array([[4, 6], [2, 3]])
+    strided[rows, columns] = Tensor([[4, 6], [2, 3]])
     numpy_testing_assert_equal_helper(strided[rows, columns],
-                      np.array([[4, 6], [2, 3]]))
+                      Tensor([[4, 6], [2, 3]]))
     '''
 
     # Tests using less than the number of dims, and ellipsis
@@ -765,6 +768,7 @@ class TestIndexing(unittest.TestCase):
       numpy_testing_assert_equal_helper(len(w), 2)
   '''
 
+  # TODO setindex
   # TODO bool indexing
   '''
   def test_bool_indices_accumulate(self):
@@ -788,15 +792,14 @@ class TestIndexing(unittest.TestCase):
   '''
   def test_byte_mask(self):
     v = Tensor.randn(5, 7, 3)
-    # mask = torch.ByteTensor([1, 0, 1, 1, 0])
     mask = Tensor([1, 0, 1, 1, 0], dtype=dtypes.uint8)
     with warnings.catch_warnings(record=True) as w:
       numpy_testing_assert_equal_helper(v[mask].shape, (3, 7, 3))
       numpy_testing_assert_equal_helper(v[mask], Tensor.stack([v[0], v[2], v[3]]))
       numpy_testing_assert_equal_helper(len(w), 2)
 
-    v = np.array([1.])
-    numpy_testing_assert_equal_helper(v[v == 0], np.array([]))
+    v = Tensor([1.])
+    numpy_testing_assert_equal_helper(v[v == 0], Tensor([]))
   '''
 
   # TODO setitem
@@ -857,12 +860,12 @@ class TestIndexing(unittest.TestCase):
     t = Tensor.zeros((5, 2))
     t_dev = t.to(device)
     indices = [
-        np.array([0, 1, 2, 3]),
-        np.array([1, ]),
+      Tensor([0, 1, 2, 3]),
+      Tensor([1, ]),
     ]
     indices_dev = [i.to(device) for i in indices]
-    values0d = np.array(1.0)
-    values1d = np.array([1.0, ])
+    values0d = Tensor(1.0)
+    values1d = Tensor([1.0, ])
 
     out_cuda = t_dev.index_put_(indices_dev, values0d.to(device), accumulate=True)
     out_cpu = t.index_put_(indices, values0d, accumulate=True)
@@ -892,153 +895,163 @@ class TestIndexing(unittest.TestCase):
     out_cpu = t.index_put_(indices, values2d, accumulate=True)
     numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
 
-  # def test_index_put_accumulate_non_contiguous(self):
-  #     t = torch.zeros((5, 2, 2))
-  #     t_dev = t.to(device)
-  #     t1 = t_dev[:, 0, :]
-  #     t2 = t[:, 0, :]
-  #     self.assertTrue(not t1.is_contiguous())
-  #     self.assertTrue(not t2.is_contiguous())
+  # TODO setitem
+  @unittest.skip("pytorch device specific test")
+  def test_index_put_accumulate_non_contiguous(self, device):
+    t = Tensor.zeros((5, 2, 2))
+    t_dev = t.to(device)
+    t1 = t_dev[:, 0, :]
+    t2 = t[:, 0, :]
+    self.assertTrue(not t1.lazydata.st.contiguous)
+    self.assertTrue(not t2.lazydata.st.contiguous)
 
-  #     indices = [np.array([0, 1]), ]
-  #     indices_dev = [i.to(device) for i in indices]
-  #     value = torch.randn(2, 2)
-  #     out_cuda = t1.index_put_(indices_dev, value.to(device), accumulate=True)
-  #     out_cpu = t2.index_put_(indices, value, accumulate=True)
-  #     self.assertTrue(not t1.is_contiguous())
-  #     self.assertTrue(not t2.is_contiguous())
+    indices = [Tensor([0, 1]), ]
+    indices_dev = [i.to(device) for i in indices]
+    value = Tensor.randn(2, 2)
+    out_cuda = t1.index_put_(indices_dev, value.to(device), accumulate=True)
+    out_cpu = t2.index_put_(indices, value, accumulate=True)
+    self.assertTrue(not t1.lazydata.st.contiguous)
+    self.assertTrue(not t2.lazydata.st.contiguous)
 
-  #     numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
+    numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
 
-  # def test_index_put_accumulate_with_optional_tensors(self):
-  #     # TODO: replace with a better solution.
-  #     # Currently, here using torchscript to put None into indices.
-  #     # on C++ it gives indices as a list of 2 optional tensors: first is null and
-  #     # the second is a valid tensor.
-  #     @torch.jit.script
-  #     def func(x, i, v):
-  #         idx = [None, i]
-  #         x.index_put_(idx, v, accumulate=True)
-  #         return x
+  # TODO setitem
+  '''
+  def test_index_put_accumulate_with_optional_tensors(self):
+    # TODO: replace with a better solution.
+    # Currently, here using torchscript to put None into indices.
+    # on C++ it gives indices as a list of 2 optional tensors: first is null and
+    # the second is a valid tensor.
+    @TinyJit
+    def func(x, i, v):
+      idx = [None, i]
+      x.index_put_(idx, v, accumulate=True)
+      return x
 
-  #     n = 4
-  #     t = torch.arange(n * 2, dtype=torch.float32).reshape(n, 2)
-  #     t_dev = t.to(device)
-  #     indices = np.array([1, 0])
-  #     indices_dev = indices.to(device)
-  #     value0d = np.array(10.0)
-  #     value1d = np.array([1.0, 2.0])
+    n = 4
+    t = Tensor.arange(n * 2, dtype=dtypes.float32).reshape(n, 2)
+    t_dev = t.to(device)
+    indices = Tensor([1, 0])
+    indices_dev = indices.to(device)
+    value0d = Tensor(10.0)
+    value1d = Tensor([1.0, 2.0])
 
-  #     out_cuda = func(t_dev, indices_dev, value0d.cuda())
-  #     out_cpu = func(t, indices, value0d)
-  #     numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
+    out_cuda = func(t_dev, indices_dev, value0d.cuda())
+    out_cpu = func(t, indices, value0d)
+    numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
 
-  #     out_cuda = func(t_dev, indices_dev, value1d.cuda())
-  #     out_cpu = func(t, indices, value1d)
-  #     numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
+    out_cuda = func(t_dev, indices_dev, value1d.cuda())
+    out_cpu = func(t, indices, value1d)
+    numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
+  '''
 
-  # def test_index_put_accumulate_duplicate_indices(self):
-  #     for i in range(1, 512):
-  #         # generate indices by random walk, this will create indices with
-  #         # lots of duplicates interleaved with each other
-  #         delta = torch.empty(i, dtype=torch.double).uniform_(-1, 1)
-  #         indices = delta.cumsum(0).long()
+  # TODO setindex
+  '''
+  def test_index_put_accumulate_duplicate_indices(self):
+    for i in range(1, 512):
+      # generate indices by random walk, this will create indices with
+      # lots of duplicates interleaved with each other
+      delta = Tensor.uniform(low=-1, high=1, dtype=dtypes.double)
+      indices = delta.cumsum(0).cast(dtypes.int64)
 
-  #         input = torch.randn(indices.abs().max() + 1)
-  #         values = torch.randn(indices.size(0))
-  #         output = input.index_put((indices,), values, accumulate=True)
+      # input = torch.randn(indices.abs().max() + 1)
+      input = Tensor.randn(indices.abs().max().item() + 1)
+      # values = torch.randn(indices.size(0))
+      values = Tensor.randn(indices.shape(0))
+      output = input.index_put((indices,), values, accumulate=True)
 
-  #         input_list = input.tolist()
-  #         indices_list = indices.tolist()
-  #         values_list = values.tolist()
-  #         for i, v in zip(indices_list, values_list):
-  #             input_list[i] += v
+      input_list = input.numpy().tolist()
+      indices_list = indices.numpy().tolist()
+      values_list = values.numpy().tolist()
+      for i, v in zip(indices_list, values_list):
+        input_list[i] += v
 
-  #         numpy_testing_assert_equal_helper(output, input_list)
+      numpy_testing_assert_equal_helper(output, input_list)
+  '''
 
   def test_index_ind_dtype(self):
-      x = Tensor.randn(4, 4)
-      # ind_long = torch.randint(4, (4,), dtype=torch.long)
-      # TODO should we spend an extra line to allow for randint other dtypes?
-      # copied from randint
-      ind_long = (Tensor.rand((4,),)*(4-0)+0).cast(dtypes.int64)
-      # ind_int = ind_long.int()
-      ind_int = (ind_long).cast(dtypes.int32)
-      ref = x[ind_long, ind_long]
-      res = x[ind_int, ind_int]
-      numpy_testing_assert_equal_helper(ref, res)
-      ref = x[ind_long, :]
-      res = x[ind_int, :]
-      numpy_testing_assert_equal_helper(ref, res)
-      ref = x[:, ind_long]
-      res = x[:, ind_int]
-      numpy_testing_assert_equal_helper(ref, res)
-      # no repeating indices for index_put
-      # TODO setitem
-      '''
-      src = Tensor.randn(4)
-      ind_long = Tensor.arange(4, dtype=dtypes.int64)
-      ind_int = ind_long.cast(dtypes.int32)
-      for accum in (True, False):
-          inp_ref = clone(x)
-          inp_res = clone(x)
-          torch.index_put_(inp_ref, (ind_long, ind_long), src, accum)
-          torch.index_put_(inp_res, (ind_int, ind_int), src, accum)
-          numpy_testing_assert_equal_helper(inp_ref, inp_res)
-      '''
+    x = Tensor.randn(4, 4)
+    # ind_long = torch.randint(4, (4,), dtype=torch.long)
+    # TODO should we spend an extra line to allow for randint other dtypes?
+    # copied from randint
+    ind_long = (Tensor.rand((4,),)*(4-0)+0).cast(dtypes.int64)
+    # ind_int = ind_long.int()
+    ind_int = (ind_long).cast(dtypes.int32)
+    ref = x[ind_long, ind_long]
+    res = x[ind_int, ind_int]
+    numpy_testing_assert_equal_helper(ref, res)
+    ref = x[ind_long, :]
+    res = x[ind_int, :]
+    numpy_testing_assert_equal_helper(ref, res)
+    ref = x[:, ind_long]
+    res = x[:, ind_int]
+    numpy_testing_assert_equal_helper(ref, res)
+    # no repeating indices for index_put
+    # TODO setitem
+    '''
+    src = Tensor.randn(4)
+    ind_long = Tensor.arange(4, dtype=dtypes.int64)
+    ind_int = ind_long.cast(dtypes.int32)
+    for accum in (True, False):
+      inp_ref = clone(x)
+      inp_res = clone(x)
+      torch.index_put_(inp_ref, (ind_long, ind_long), src, accum)
+      torch.index_put_(inp_res, (ind_int, ind_int), src, accum)
+      numpy_testing_assert_equal_helper(inp_ref, inp_res)
+    '''
 
   # TODO setitem
   '''
   def test_index_put_accumulate_empty(self):
-      # Regression test for https://github.com/pytorch/pytorch/issues/94667
-      input = Tensor.rand([], dtype=dtypes.float32)
-      with self.assertRaises(RuntimeError):
-          input.index_put([], np.array([1.0]), True)
+    # Regression test for https://github.com/pytorch/pytorch/issues/94667
+    input = Tensor.rand([], dtype=dtypes.float32)
+    with self.assertRaises(RuntimeError):
+      input.index_put([], np.array([1.0]), True)
   '''
 
   # TODO bool indexing
   '''
   def test_multiple_byte_mask(self):
-      v = Tensor.randn(5, 7, 3)
-      # note: these broadcast together and are transposed to the first dim
-      mask1 = Tensor([1, 0, 1, 1, 0], dtype=dtypes.uint8)
-      mask2 = Tensor([1, 1, 1], dtype=dtypes.uint8)
-      with warnings.catch_warnings(record=True) as w:
-          warnings.simplefilter("always")
-          numpy_testing_assert_equal_helper(v[mask1, :, mask2].shape, (3, 7))
-          numpy_testing_assert_equal_helper(len(w), 2)
+    v = Tensor.randn(5, 7, 3)
+    # note: these broadcast together and are transposed to the first dim
+    mask1 = Tensor([1, 0, 1, 1, 0], dtype=dtypes.uint8)
+    mask2 = Tensor([1, 1, 1], dtype=dtypes.uint8)
+    with warnings.catch_warnings(record=True) as w:
+      warnings.simplefilter("always")
+      numpy_testing_assert_equal_helper(v[mask1, :, mask2].shape, (3, 7))
+      numpy_testing_assert_equal_helper(len(w), 2)
   '''
 
   # TODO bool indexing
   '''
   def test_byte_mask2d(self):
-      v = Tensor.randn(5, 7, 3)
-      c = Tensor.randn(5, 7)
-      num_ones = (c > 0).sum()
-      r = v[c > 0]
-      numpy_testing_assert_equal_helper(r.shape, (num_ones, 3))
+    v = Tensor.randn(5, 7, 3)
+    c = Tensor.randn(5, 7)
+    num_ones = (c > 0).sum()
+    r = v[c > 0]
+    numpy_testing_assert_equal_helper(r.shape, (num_ones, 3))
   '''
 
   # TODO setindex
   # TODO bool indexing
   '''
   def test_jit_indexing(self):
-      def fn1(x):
-          x[x < 50] = 1.0
-          return x
+    def fn1(x):
+      x[x < 50] = 1.0
+      return x
 
-      def fn2(x):
-          x[0:50] = 1.0
-          return x
+    def fn2(x):
+      x[0:50] = 1.0
+      return x
 
-      scripted_fn1 = TinyJit(fn1)
-      scripted_fn2 = TinyJit(fn2)
-      data = Tensor.arange(100, dtype=dtypes.float)
-      out = scripted_fn1(clone(data))
-      ref = Tensor(np.concatenate((np.ones(50), np.arange(50, 100))), dtype=dtypes.float)
-      numpy_testing_assert_equal_helper(out, ref)
-      out = scripted_fn2(clone(data))
-      numpy_testing_assert_equal_helper(out, ref)
+    scripted_fn1 = TinyJit(fn1)
+    scripted_fn2 = TinyJit(fn2)
+    data = Tensor.arange(100, dtype=dtypes.float)
+    out = scripted_fn1(clone(data))
+    ref = Tensor(np.concatenate((np.ones(50), np.arange(50, 100))), dtype=dtypes.float)
+    numpy_testing_assert_equal_helper(out, ref)
+    out = scripted_fn2(clone(data))
+    numpy_testing_assert_equal_helper(out, ref)
   '''
 
   def test_int_indices(self):
@@ -1050,39 +1063,39 @@ class TestIndexing(unittest.TestCase):
   # TODO setindex
   '''
   def test_index_put_src_datatype(self, dtype):
-      src = Tensor.ones(3, 2, 4, dtype=dtype)
-      vals = Tensor.ones(3, 2, 4, dtype=dtype)
-      indices = (np.array([0, 2, 1]),)
-      res = src.index_put_(indices, vals, accumulate=True)
-      numpy_testing_assert_equal_helper(res.shape, src.shape)
+    src = Tensor.ones(3, 2, 4, dtype=dtype)
+    vals = Tensor.ones(3, 2, 4, dtype=dtype)
+    indices = (np.array([0, 2, 1]),)
+    res = src.index_put_(indices, vals, accumulate=True)
+    numpy_testing_assert_equal_helper(res.shape, src.shape)
   '''
 
   def test_index_src_datatype(self):
-      src = Tensor.ones(3, 2, 4)
-      # test index
-      res = src[[0, 2, 1], :, :]
-      numpy_testing_assert_equal_helper(res.shape, src.shape)
-      # test index_put, no accum
-      # TODO setindex
-      '''
-      src[[0, 2, 1], :, :] = res
-      numpy_testing_assert_equal_helper(res.shape, src.shape)
-      '''
+    src = Tensor.ones(3, 2, 4)
+    # test index
+    res = src[[0, 2, 1], :, :]
+    numpy_testing_assert_equal_helper(res.shape, src.shape)
+    # test index_put, no accum
+    # TODO setindex
+    '''
+    src[[0, 2, 1], :, :] = res
+    numpy_testing_assert_equal_helper(res.shape, src.shape)
+    '''
 
   def test_int_indices2d(self):
-      # From the NumPy indexing example
-      x = Tensor.arange(0, 12).reshape(4, 3)
-      rows = Tensor([[0, 0], [3, 3]])
-      columns = Tensor([[0, 2], [0, 2]])
-      numpy_testing_assert_equal_helper(x[rows, columns].numpy().tolist(), [[0, 2], [9, 11]])
+    # From the NumPy indexing example
+    x = Tensor.arange(0, 12).reshape(4, 3)
+    rows = Tensor([[0, 0], [3, 3]])
+    columns = Tensor([[0, 2], [0, 2]])
+    numpy_testing_assert_equal_helper(x[rows, columns].numpy().tolist(), [[0, 2], [9, 11]])
 
   def test_int_indices_broadcast(self):
-      # From the NumPy indexing example
-      x = Tensor.arange(0, 12).reshape(4, 3)
-      rows = Tensor([0, 3])
-      columns = Tensor([0, 2])
-      result = x[rows[:, None], columns]
-      numpy_testing_assert_equal_helper(result.numpy().tolist(), [[0, 2], [9, 11]])
+    # From the NumPy indexing example
+    x = Tensor.arange(0, 12).reshape(4, 3)
+    rows = Tensor([0, 3])
+    columns = Tensor([0, 2])
+    result = x[rows[:, None], columns]
+    numpy_testing_assert_equal_helper(result.numpy().tolist(), [[0, 2], [9, 11]])
 
   # TODO setitem
   # TODO empty Tensor fancy index
@@ -1105,25 +1118,25 @@ class TestIndexing(unittest.TestCase):
   # TODO empty Tensor fancy index
   '''
   def test_empty_ndim_index(self):
-      x = Tensor.randn(5)
-      numpy_testing_assert_equal_helper(Tensor.empty(0, 2), x[Tensor.empty(0, 2, dtype=dtypes.int64)])
+    x = Tensor.randn(5)
+    numpy_testing_assert_equal_helper(Tensor.empty(0, 2), x[Tensor.empty(0, 2, dtype=dtypes.int64)])
 
-      x = Tensor.randn(2, 3, 4, 5)
-      numpy_testing_assert_equal_helper(Tensor.empty(2, 0, 6, 4, 5),
-                        x[:, Tensor.empty(0, 6, dtype=dtypes.int64)])
+    x = Tensor.randn(2, 3, 4, 5)
+    numpy_testing_assert_equal_helper(Tensor.empty(2, 0, 6, 4, 5),
+                      x[:, Tensor.empty(0, 6, dtype=dtypes.int64)])
 
-      x = Tensor.empty(10, 0)
-      numpy_testing_assert_equal_helper(x[[1, 2]].shape, (2, 0))
-      numpy_testing_assert_equal_helper(x[[], []].shape, (0,))
-      with self.assertRaisesRegex(IndexError, 'for dimension with size 0'):
-          x[:, [0, 1]]
+    x = Tensor.empty(10, 0)
+    numpy_testing_assert_equal_helper(x[[1, 2]].shape, (2, 0))
+    numpy_testing_assert_equal_helper(x[[], []].shape, (0,))
+    with self.assertRaisesRegex(IndexError, 'for dimension with size 0'):
+        x[:, [0, 1]]
   '''
 
   # TODO empty Tensor fancy index
   '''
   def test_empty_ndim_index_bool(self):
-      x = Tensor.randn(5)
-      self.assertRaises(IndexError, lambda: x[Tensor.empty(0, 2, dtype=dtypes.uint8)])
+    x = Tensor.randn(5)
+    self.assertRaises(IndexError, lambda: x[Tensor.empty(0, 2, dtype=dtypes.uint8)])
   '''
 
   def test_empty_slice(self):
@@ -1335,31 +1348,32 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(x[idx, ...].numpy().tolist(), [[0, 1, 2],
                                                                      [6, 7, 8]])
 
+  # TODO unravel_index
   # def test_unravel_index_errors(self):
-  #     with self.assertRaisesRegex(TypeError, r"expected 'indices' to be integer"):
-  #         torch.unravel_index(
-  #             np.array(0.5),
-  #             (2, 2))
+  #   with self.assertRaisesRegex(TypeError, r"expected 'indices' to be integer"):
+  #     unravel_index(
+  #       Tensor(0.5),
+  #       (2, 2))
 
-  #     with self.assertRaisesRegex(TypeError, r"expected 'indices' to be integer"):
-  #         torch.unravel_index(
-  #             np.array([]),
-  #             (10, 3, 5))
+  #   with self.assertRaisesRegex(TypeError, r"expected 'indices' to be integer"):
+  #     unravel_index(
+  #       Tensor([]),
+  #       (10, 3, 5))
 
-  #     with self.assertRaisesRegex(TypeError, r"expected 'shape' to be int or sequence"):
-  #         torch.unravel_index(
-  #             np.array([1], dtype=torch.int64),
-  #             np.array([1, 2, 3]))
+  #   with self.assertRaisesRegex(TypeError, r"expected 'shape' to be int or sequence"):
+  #     unravel_index(
+  #       Tensor([1], dtype=dtypes.int64),
+  #       Tensor([1, 2, 3]))
 
-  #     with self.assertRaisesRegex(TypeError, r"expected 'shape' sequence to only contain ints"):
-  #         torch.unravel_index(
-  #             np.array([1], dtype=torch.int64),
-  #             (1, 2, 2.0))
+  #   with self.assertRaisesRegex(TypeError, r"expected 'shape' sequence to only contain ints"):
+  #     unravel_index(
+  #       Tensor([1], dtype=dtypes.int64),
+  #       (1, 2, 2.0))
 
-  #     with self.assertRaisesRegex(ValueError, r"'shape' cannot have negative values, but got \(2, -3\)"):
-  #         torch.unravel_index(
-  #             np.array(0),
-  #             (2, -3))
+  #   with self.assertRaisesRegex(ValueError, r"'shape' cannot have negative values, but got \(2, -3\)"):
+  #     unravel_index(
+  #       Tensor(0),
+  #       (2, -3))
 
   def test_invalid_index(self):
     x = Tensor.arange(0, 16).reshape(4, 4)
@@ -1506,46 +1520,48 @@ class TestIndexing(unittest.TestCase):
       torch.take_along_dim(t.cpu(), indices, dim=0)
   '''
 
-  # def test_cuda_broadcast_index_use_deterministic_algorithms(self):
-  #     with DeterministicGuard(True):
-  #         idx1 = np.array([0])
-  #         idx2 = np.array([2, 6])
-  #         idx3 = np.array([1, 5, 7])
+  # TODO another torch specific test...
+  '''
+  def test_cuda_broadcast_index_use_deterministic_algorithms(self):
+    with DeterministicGuard(True):
+      idx1 = np.array([0])
+      idx2 = np.array([2, 6])
+      idx3 = np.array([1, 5, 7])
 
-  #         tensor_a = torch.rand(13, 11, 12, 13, 12).cpu()
-  #         tensor_b = tensor_a.to(device=device)
-  #         tensor_a[idx1] = 1.0
-  #         tensor_a[idx1, :, idx2, idx2, :] = 2.0
-  #         tensor_a[:, idx1, idx3, :, idx3] = 3.0
-  #         tensor_b[idx1] = 1.0
-  #         tensor_b[idx1, :, idx2, idx2, :] = 2.0
-  #         tensor_b[:, idx1, idx3, :, idx3] = 3.0
-  #         numpy_testing_assert_equal_helper(tensor_a, tensor_b.cpu())
+      tensor_a = torch.rand(13, 11, 12, 13, 12).cpu()
+      tensor_b = tensor_a.to(device=device)
+      tensor_a[idx1] = 1.0
+      tensor_a[idx1, :, idx2, idx2, :] = 2.0
+      tensor_a[:, idx1, idx3, :, idx3] = 3.0
+      tensor_b[idx1] = 1.0
+      tensor_b[idx1, :, idx2, idx2, :] = 2.0
+      tensor_b[:, idx1, idx3, :, idx3] = 3.0
+      numpy_testing_assert_equal_helper(tensor_a, tensor_b.cpu())
 
-  #         tensor_a = torch.rand(10, 11).cpu()
-  #         tensor_b = tensor_a.to(device=device)
-  #         tensor_a[idx3] = 1.0
-  #         tensor_a[idx2, :] = 2.0
-  #         tensor_a[:, idx2] = 3.0
-  #         tensor_a[:, idx1] = 4.0
-  #         tensor_b[idx3] = 1.0
-  #         tensor_b[idx2, :] = 2.0
-  #         tensor_b[:, idx2] = 3.0
-  #         tensor_b[:, idx1] = 4.0
-  #         numpy_testing_assert_equal_helper(tensor_a, tensor_b.cpu())
+      tensor_a = torch.rand(10, 11).cpu()
+      tensor_b = tensor_a.to(device=device)
+      tensor_a[idx3] = 1.0
+      tensor_a[idx2, :] = 2.0
+      tensor_a[:, idx2] = 3.0
+      tensor_a[:, idx1] = 4.0
+      tensor_b[idx3] = 1.0
+      tensor_b[idx2, :] = 2.0
+      tensor_b[:, idx2] = 3.0
+      tensor_b[:, idx1] = 4.0
+      numpy_testing_assert_equal_helper(tensor_a, tensor_b.cpu())
 
-  #         tensor_a = torch.rand(10, 10).cpu()
-  #         tensor_b = tensor_a.to(device=device)
-  #         tensor_a[[8]] = 1.0
-  #         tensor_b[[8]] = 1.0
-  #         numpy_testing_assert_equal_helper(tensor_a, tensor_b.cpu())
+      tensor_a = torch.rand(10, 10).cpu()
+      tensor_b = tensor_a.to(device=device)
+      tensor_a[[8]] = 1.0
+      tensor_b[[8]] = 1.0
+      numpy_testing_assert_equal_helper(tensor_a, tensor_b.cpu())
 
-  #         tensor_a = torch.rand(10).cpu()
-  #         tensor_b = tensor_a.to(device=device)
-  #         tensor_a[6] = 1.0
-  #         tensor_b[6] = 1.0
-  #         numpy_testing_assert_equal_helper(tensor_a, tensor_b.cpu())
-
+      tensor_a = torch.rand(10).cpu()
+      tensor_b = tensor_a.to(device=device)
+      tensor_a[6] = 1.0
+      tensor_b[6] = 1.0
+      numpy_testing_assert_equal_helper(tensor_a, tensor_b.cpu())
+  '''
 
 class TestNumpy(unittest.TestCase):
   def test_index_no_floats(self):
@@ -1672,33 +1688,34 @@ class TestNumpy(unittest.TestCase):
     self.assertRaisesRegex(IndexError, 'mask', lambda: arr[(slice(None), index)])
   '''
 
+  # TODO setitem
   # TODO bool indexing
   '''
   def test_boolean_indexing_onedim(self):
-      # Indexing a 2-dimensional array with
-      # boolean array of length one
-      a = Tensor([[0., 0., 0.]])
-      b = Tensor([True])
-      numpy_testing_assert_equal_helper(a[b], a)
-      # boolean assignment
-      a[b] = 1.
-      numpy_testing_assert_equal_helper(a, Tensor([[1., 1., 1.]]))
+    # Indexing a 2-dimensional array with
+    # boolean array of length one
+    a = Tensor([[0., 0., 0.]])
+    b = Tensor([True])
+    numpy_testing_assert_equal_helper(a[b], a)
+    # boolean assignment
+    a[b] = 1.
+    numpy_testing_assert_equal_helper(a, Tensor([[1., 1., 1.]]))
   '''
 
   # TODO setitem
   # TODO bool indexing
   '''
   def test_boolean_assignment_value_mismatch(self):
-      # A boolean assignment should fail when the shape of the values
-      # cannot be broadcast to the subscription. (see also gh-3458)
-      a = Tensor.arange(0, 4)
+    # A boolean assignment should fail when the shape of the values
+    # cannot be broadcast to the subscription. (see also gh-3458)
+    a = Tensor.arange(0, 4)
 
-      def f(a, v):
-          a[a > -1] = Tensor(v)
+    def f(a, v):
+      a[a > -1] = Tensor(v)
 
-      self.assertRaisesRegex(Exception, 'shape mismatch', f, a, [])
-      self.assertRaisesRegex(Exception, 'shape mismatch', f, a, [1, 2, 3])
-      self.assertRaisesRegex(Exception, 'shape mismatch', f, a[:1], [1, 2, 3])
+    self.assertRaisesRegex(Exception, 'shape mismatch', f, a, [])
+    self.assertRaisesRegex(Exception, 'shape mismatch', f, a, [1, 2, 3])
+    self.assertRaisesRegex(Exception, 'shape mismatch', f, a[:1], [1, 2, 3])
   '''
 
   # TODO setitem
