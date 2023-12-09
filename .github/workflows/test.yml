@@ -50,7 +50,7 @@ jobs:
     - name: Test Docs
       run: |
         python docs/abstractions.py
-        python docs/beautiful.py
+        python docs/abstractions2.py
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Fuzz Test symbolic
@@ -246,7 +246,10 @@ jobs:
     #- name: Run webgpu pytest
     #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
     - name: Run selected webgpu tests
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_jit.py
+      run: |
+        WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_ops.py test/test_dtype.py \
+        test/test_jit.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_linearizer.py \
+        test/test_linearizer_failures.py test/test_nn.py
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
     - name: Install Puppeteer
@@ -256,7 +259,7 @@ jobs:
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
 
-  testmetalwebgpu:
+  testmetal:
     name: Metal Tests
     runs-on: macos-13
     timeout-minutes: 20
