@@ -129,9 +129,8 @@ class TestLinearizer(unittest.TestCase):
     a = Tensor.rand(1024,1024, dtype=d)
     out = op(a)
     sched = [si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0]
-    acc = [u for u in Linearizer(sched.ast).linearize().uops if u.uop == UOps.PHI][0]
-    assert acc.dtype == acc.vin[1].dtype == acc.vin[0].dtype
-    assert acc.vin[1].uop == UOps.ALU
+    acc = [u for u in Linearizer(sched.ast).linearize().uops if u.uop == UOps.DEFINE_ACC][0]
+    assert acc.dtype == d
 
   @given(st.sampled_from(numeric_dtypes), st.sampled_from(numeric_dtypes), st.sampled_from(reduce_ops))
   def test_reduce_midcast_acc(self, d1:DType, d2:DType, op):
@@ -139,9 +138,8 @@ class TestLinearizer(unittest.TestCase):
     b = Tensor.rand(1024,1024, dtype=d1)
     out = op((a*b).cast(d2)).cast(d1)
     sched = [si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0]
-    acc = [u for u in Linearizer(sched.ast).linearize().uops if u.uop == UOps.PHI][0]
-    assert acc.dtype == acc.vin[1].dtype == acc.vin[0].dtype
-    assert acc.vin[1].uop == UOps.ALU
+    acc = [u for u in Linearizer(sched.ast).linearize().uops if u.uop == UOps.DEFINE_ACC][0]
+    assert acc.dtype == d2
 
   @given(st.sampled_from(float_dtypes), st.sampled_from(float_dtypes))
   def test_mulacc_midcast(self, d1:DType, d2:DType):

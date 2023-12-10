@@ -51,6 +51,8 @@ class Linearizer(Kernel):
     if op == ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
     elif op == ReduceOps.MAX: return -math.inf if dtypes.is_float(dtype) else -2**31 if dtypes.is_int(dtype) else False
 
+  def get_reduce_dtype(self, i:int, op): return op.src[0].arg[0] if op.src[0].op == UnaryOps.CAST else self.bufs[i].dtype
+
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: ctx.const(self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
                 DivNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.DIV),
@@ -78,8 +80,8 @@ class Linearizer(Kernel):
         (g_idx, g_valid), amt, dim = self.sts[i].expr_idxs(fake_idxs), 1, None
     else:
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
-    localtype = buf.dtype if amt == 1 else buf.dtype.vec(amt)
-    if isinstance(buf.dtype, ImageDType): localtype = dtypes.float if amt == 1 else dtypes.float.vec(amt)
+    localtype = dtypes.float if isinstance(buf.dtype, ImageDType) else self.get_reduce_dtype(i, self.reduceop) if acc is not None else buf.dtype
+    if amt > 1: localtype = buf.dtype.vec(amt)
 
     e_idxs, e_valids = g_idx.expand(expand_vars), g_valid.expand(expand_vars)
 
@@ -242,7 +244,7 @@ class Linearizer(Kernel):
       fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
       # define accumulator
-      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop.op, self.bufs[0].dtype))
+      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop.op, self.get_reduce_dtype(0, self.reduceop)))
 
       if self.tensor_core:
         def calc_tc_idxs(local_size: int, aliases: List[List[int]]):
@@ -348,7 +350,7 @@ class Linearizer(Kernel):
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop.op, self.bufs[-1].dtype))
+        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop.op, self.get_reduce_dtype(-1, self.reduceop)))
 
         # late reduce loop
         loop_ctx = render_loop(end_local_idxs)
@@ -520,7 +522,7 @@ class Linearizer(Kernel):
         ret.append(acc[off])
       for off in range(len(acc)):
         if input_acc[off] != acc[off]:
-          acc[off] = self.uop(UOps.PHI, acc[off].dtype, (self.cast(input_acc[off], acc[off].dtype), acc[off]) + tuple(loop_ctx))
+          acc[off] = self.uop(UOps.PHI, acc[off].dtype, (input_acc[off], acc[off]) + tuple(loop_ctx))
     else:
       ret = [self.uop(UOps.ALU, dtype=dtypes.bool if x.op == BinaryOps.CMPLT else None, vin=val, arg=x.op) for val in zip(*values)]
     return ret
