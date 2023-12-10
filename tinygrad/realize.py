@@ -12,9 +12,9 @@ class CustomOp(JITRunner):
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False): self.fxn(*rawbufs)
 
 def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
-  assert all(si.out.device == x.device for x in si.inputs) or si.ast.op is LoadOps.FROM, f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
+  assert all(si.out.device == x.device for x in si.inputs) or si.ast.op is LoadOps.COPY, f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
   if si.ast.op is LoadOps.EMPTY: return None
-  if si.ast.op is LoadOps.FROM: return BufferCopy
+  if si.ast.op is LoadOps.COPY: return BufferCopy
   if si.ast.op is LoadOps.CUSTOM: return CustomOp(si.ast.arg)
   return Device[si.out.device].get_runner(si.ast)
 

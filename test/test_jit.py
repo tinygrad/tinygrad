@@ -1,10 +1,12 @@
 #!/usr/bin/env python
-import unittest
+import unittest, functools
 import numpy as np
 
 from test.helpers import assert_jit_cache_len
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
+from tinygrad.device import Device
+from tinygrad.helpers import CI
 
 class TestJit(unittest.TestCase):
   def test_simple_jit(self):
@@ -252,6 +254,49 @@ class TestJit(unittest.TestCase):
     np.testing.assert_allclose(result_1.numpy(), [2], atol=1e-4, rtol=1e-5)
     np.testing.assert_allclose(result_2.numpy(), [6], atol=1e-4, rtol=1e-5)
     np.testing.assert_allclose(result_3.numpy(), [6], atol=1e-4, rtol=1e-5)
+
+  @unittest.skipIf(CI and Device.DEFAULT=="METAL", "no ICB in CI, creation of graph fails")
+  def test_jit_batch_split(self):
+    if Device[Device.DEFAULT].graph is None: raise unittest.SkipTest("only test graphs")
+
+    # Create long jit with 83 kernels.
+    def f(a, b, c, d, e):
+      for _ in range(80):
+        a = (a+b).realize()
+      y = (a*c).realize()
+      z = (y*d).realize()
+      w = (z*e)
+      return w.realize()
+
+    a = Tensor.randn(10, 10).realize()
+    b = Tensor.randn(10, 10).realize()
+    c = Tensor.randn(10, 10).realize()
+    d = Tensor.randn(10, 10).realize()
+    e = Tensor.randn(10, 10).realize()
+
+    jf = TinyJit(f)
+    prev = None
+    for _ in range(5):
+      o = jf(a, b, c, d, e).numpy()
+      if prev is not None: np.testing.assert_allclose(o, prev, atol=1e-4, rtol=1e-5)
+      prev = o
+
+    graph_t = Device[Device.DEFAULT].graph.func if isinstance(Device[Device.DEFAULT].graph, functools.partial) else Device[Device.DEFAULT].graph
+    # Checking that 2 graphs are inited.
+    assert isinstance(jf.jit_cache[0].prg, graph_t)
+    assert isinstance(jf.jit_cache[1].prg, graph_t)
+
+  def test_jit_const_inputs(self):
+    @TinyJit
+    def f(x,y): return (x+y).realize()
+    for _ in range(5):
+      np.testing.assert_equal(f(Tensor.ones(3), Tensor.zeros(3)).numpy(), np.ones(3))
+
+    @TinyJit
+    def g(x,y,z): return (x+y+z).realize()
+    for i in range(5):
+      np.testing.assert_equal(g(Tensor([i]*3), Tensor.ones(3), Tensor.zeros(3)).numpy(), np.array([i+1]*3))
+
 
 if __name__ == '__main__':
   unittest.main()
