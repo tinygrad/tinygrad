@@ -10,7 +10,7 @@ safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8,
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
 def cast_bfloat16(t:Union[Tensor, Any]) -> Union[Tensor, Any]: # is there a better way to support torch.Tensor instead of Any?
-  return t.cast(dtypes.uint16).to(Device.DEFAULT).cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).half()
+  return t.cast(dtypes.uint16).to(Device.DEFAULT).cast(dtypes.uint32).mul(1<<16).contiguous().bitcast(dtypes.float32).half()
 
 # safetensors support
 
@@ -85,7 +85,7 @@ def torch_load(fn:str):
     # upstream LLaMA also does this conversion:
     # https://github.com/facebookresearch/llama/blob/6c7fe276574e78057f917549435a2554000a876d/llama/generation.py#L95
     # TODO: should this be done in the example instead? or maybe we don't need this anymore with better bfloat16 support
-    if storage[1] == dtypes.bfloat16: ret = cast_bfloat16(ret)
+    if storage[1] == dtypes.bfloat16: ret = cast_bfloat16(ret) 
     else: ret = ret.cast(storage[1])
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
