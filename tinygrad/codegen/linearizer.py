@@ -6,7 +6,7 @@ from enum import Enum, auto
 from dataclasses import dataclass
 
 from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, getenv, all_same, to_function_name, flatten
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, vars_from_ast
+from tinygrad.ops import LazyOp, LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, vars_from_ast
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, VariableOrNum, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
@@ -51,7 +51,12 @@ class Linearizer(Kernel):
     if op == ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
     elif op == ReduceOps.MAX: return -math.inf if dtypes.is_float(dtype) else -2**31 if dtypes.is_int(dtype) else False
 
-  def get_reduce_dtype(self, i:int, op): return op.src[0].arg[0] if op.src[0].op == UnaryOps.CAST else op.src[0].arg.dtype if op.src[0].op == BufferOps.LOAD else self.bufs[i].dtype
+  # TODO less dumb implementation
+  def get_reduce_dtype(self, i:int, op):
+    if op.op == ReduceOps.MAX: return self.bufs[i].dtype # TODO wrong
+    sum_dtype = max([x.arg.dtype if not isinstance(x.arg.dtype, ImageDType) else dtypes.float for x in op.get_lazyops() if x.op in BufferOps])
+    if op.src[0].op == UnaryOps.CAST: sum_dtype = op.src[0].arg[0]
+    return sum_dtype if dtypes.is_float(sum_dtype) else dtypes.float # MULACC always upcasts to float (TODO should we just not fuse if it's not float?)
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: ctx.const(self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
