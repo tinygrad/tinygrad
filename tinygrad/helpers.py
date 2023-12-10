@@ -1,6 +1,5 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes
-import numpy as np
 from urllib import request
 from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
@@ -107,19 +106,18 @@ class DType(NamedTuple):
   priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
-  np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
   sz: int = 1
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
   def vec(self, sz:int):
     assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
-    return DType(self.priority, self.itemsize*sz, self.name+str(sz), None, sz)
+    return DType(self.priority, self.itemsize*sz, self.name+str(sz), sz)
   def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
 
 # dependent typing?
 class ImageDType(DType):
-  def __new__(cls, priority, itemsize, name, np, shape, base):
-    return super().__new__(cls, priority, itemsize, name, np)
-  def __init__(self, priority, itemsize, name, np, shape, base):
+  def __new__(cls, priority, itemsize, name, shape, base):
+    return super().__new__(cls, priority, itemsize, name)
+  def __init__(self, priority, itemsize, name, shape, base):
     self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
     self.base: DType = base
     super().__init__()
@@ -132,7 +130,7 @@ class ImageDType(DType):
   def __ne__(self, x): return super().__ne__(x) or self.shape != x.shape
 
 class PtrDType(DType):
-  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.np, dt.sz)
+  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.sz)
   def __repr__(self): return f"ptr.{super().__repr__()}"
 
 class dtypes:
@@ -143,37 +141,35 @@ class dtypes:
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
-  def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
-  @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
-  bool: Final[DType] = DType(0, 1, "bool", np.bool_)
-  float16: Final[DType] = DType(9, 2, "half", np.float16)
+  bool: Final[DType] = DType(0, 1, "bool")
+  float16: Final[DType] = DType(9, 2, "half")
   half = float16
-  float32: Final[DType] = DType(10, 4, "float", np.float32)
+  float32: Final[DType] = DType(10, 4, "float")
   float = float32
-  float64: Final[DType] = DType(11, 8, "double", np.float64)
+  float64: Final[DType] = DType(11, 8, "double")
   double = float64
-  int8: Final[DType] = DType(1, 1, "char", np.int8)
-  int16: Final[DType] = DType(3, 2, "short", np.int16)
-  int32: Final[DType] = DType(5, 4, "int", np.int32)
+  int8: Final[DType] = DType(1, 1, "char")
+  int16: Final[DType] = DType(3, 2, "short")
+  int32: Final[DType] = DType(5, 4, "int")
   int = int32
-  int64: Final[DType] = DType(7, 8, "long", np.int64)
-  uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
-  uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
-  uint32: Final[DType] = DType(6, 4, "unsigned int", np.uint32)
-  uint64: Final[DType] = DType(8, 8, "unsigned long", np.uint64)
+  int64: Final[DType] = DType(7, 8, "long")
+  uint8: Final[DType] = DType(2, 1, "unsigned char")
+  uint16: Final[DType] = DType(4, 2, "unsigned short")
+  uint32: Final[DType] = DType(6, 4, "unsigned int")
+  uint64: Final[DType] = DType(8, 8, "unsigned long")
 
   # NOTE: bfloat16 isn't supported in numpy
-  bfloat16: Final[DType] = DType(9, 2, "__bf16", None)
+  bfloat16: Final[DType] = DType(9, 2, "__bf16")
 
   # NOTE: these are internal dtypes, should probably check for that
-  _arg_int32: Final[DType] = DType(2, 4, "_arg_int32", None)
+  _arg_int32: Final[DType] = DType(2, 4, "_arg_int32")
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shp, dtypes.float32)
+  def imageh(shp): return ImageDType(100, 2, "imageh", shp, dtypes.float32) # was np.float16 but has dtypes.float32?
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp, dtypes.float32)
+  def imagef(shp): return ImageDType(100, 4, "imagef", shp, dtypes.float32)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and v.__class__ is not staticmethod}

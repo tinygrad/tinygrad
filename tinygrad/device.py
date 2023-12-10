@@ -1,5 +1,4 @@
 from __future__ import annotations
-import numpy as np
 from collections import defaultdict
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable
 import importlib, inspect, functools, pathlib, time, re, ctypes
@@ -80,14 +79,6 @@ class Buffer:
     assert len(mv) == self.size*self.dtype.itemsize, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
     self.allocator.copyin(self._buf, mv)
     return self
-  @staticmethod
-  def fromCPU(device:str, x:np.ndarray): return Buffer(device, x.size, dtypes.from_np(x.dtype)).copyin(x.data)
-  def toCPU(self) -> np.ndarray:
-    # zero copy with as_buffer
-    if hasattr(self.allocator, 'as_buffer'): return np.frombuffer(self.allocator.as_buffer(self._buf), dtype=np.dtype(self.dtype.np, metadata={"backing": self._buf}))  # type: ignore
-    ret = np.empty(self.size, self.dtype.np)
-    if self.size > 0: self.allocator.copyout(flat_mv(ret.data), self._buf)
-    return ret
 
 def _internal_buffer_copy(dest, src):
   if hasattr(dest.allocator, 'transfer') and type(dest.allocator) is type(src.allocator):

@@ -42,6 +42,14 @@ from tinygrad.device import Buffer, Device
 from tinygrad.ops import LazyOp, BufferOps, MemBuffer, BinaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 
+import numpy as np
+def toNumpy(buffer: Buffer) -> np.ndarray:
+  # zero copy with as_buffer
+  if hasattr(buffer.allocator, 'as_buffer'): return np.frombuffer(buffer.allocator.as_buffer(buffer._buf), dtype=np.dtype(np.int32, metadata={"backing": buffer._buf}))  # type: ignore
+  ret = np.empty(buffer.size, np.int32)
+  if buffer.size > 0: buffer.allocator.copyout(flat_mv(ret.data), buffer._buf)
+  return ret
+
 # allocate some buffers + load in values
 out = Buffer(DEVICE, 1, dtypes.int32)
 a = Buffer(DEVICE, 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 2))))
@@ -67,20 +75,25 @@ print(fxn.prg)
 fxn.exec([out, a, b])
 
 # check the data out
-print(val:=out.toCPU().item())
+print(val:=toNumpy(out).item())
 assert val == 5
 
 
 print("******** third, the LazyBuffer ***********")
 
-from tinygrad.lazy import LazyBuffer
+from tinygrad.helpers import prod
+from tinygrad.lazy import LazyBuffer, LoadOps
 from tinygrad.realize import run_schedule
+from tinygrad.tensor import native_shape, native_to_flat_memoryview
 
 # allocate some values + load in values
 # TODO: remove numpy here
-import numpy as np
-a = LazyBuffer.fromCPU(np.array([2], np.int32)).copy_to_device(DEVICE)
-b = LazyBuffer.fromCPU(np.array([3], np.int32)).copy_to_device(DEVICE)
+
+dtype = dtypes.int32
+n_a = [2]
+n_b = [3]
+a = LazyBuffer(DEVICE, ShapeTracker.from_shape((shape:=native_shape(n_a))), LoadOps, None, dtype, Buffer(DEVICE, prod(shape), dtype).copyin(native_to_flat_memoryview(n_a, dtype, shape=shape)))
+b = LazyBuffer(DEVICE, ShapeTracker.from_shape((shape:=native_shape(n_b))), LoadOps, None, dtype, Buffer(DEVICE, prod(shape), dtype).copyin(native_to_flat_memoryview(n_b, dtype, shape=shape)))
 
 # describe the computation
 out = a.e(BinaryOps.ADD, b)
@@ -98,7 +111,7 @@ print_tree(sched[-1].ast)
 run_schedule(sched)
 
 # check the data out
-print(val:=out.realized.toCPU().item())
+print(val:=toNumpy(out.realized).item())
 assert val == 5
 
 
@@ -111,5 +124,5 @@ b = Tensor([3], dtype=dtypes.int32, device=DEVICE)
 out = a + b
 
 # check the data out
-print(val:=out.item())
+print(val:=toNumpy(out.realize().lazydata.realized).item())
 assert val == 5

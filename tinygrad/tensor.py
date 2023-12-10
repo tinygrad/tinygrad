@@ -1,6 +1,6 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math
+import time, math, ctypes
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, Set, DefaultDict
 from collections import defaultdict
 from functools import partialmethod, reduce
@@ -8,7 +8,7 @@ from itertools import accumulate
 import numpy as np
 
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int, round_up
-from tinygrad.lazy import LazyBuffer
+from tinygrad.lazy import LazyBuffer, ShapeTracker
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import sint
@@ -35,6 +35,29 @@ import tinygrad.mlops as mlops
 
 # **** start with two base classes, Tensor and Function ****
 
+TYPE_MAP={dtypes.int32: ctypes.c_int32}
+# O(n) recursive
+def native_shape(d):
+  if not isinstance(d, list): return (1,)
+  assert len(set([(s := native_shape(r)) for r in d])) == 1, "Shape is not consistent across all dimensions."
+  return (len(d), *s)
+
+# O(n) recursive, O(n) memory
+def native_to_flat_memoryview(d, dtype, shape=None):
+  def _fill(dtype, arr, i, *args):
+    for j, a in enumerate(args): arr[i+j] = a
+
+  def _crawl(d, dtype, arr, i):
+    if not d: return arr
+    if not isinstance(d, list): _fill(dtype, arr, i, d)
+    if not isinstance(d[0], list): _fill(dtype, arr, i, *d)
+    # Handle multidimensional arrays
+    else:
+      for j, r in enumerate(d): _crawl(r, dtype, arr, i+(len(r)*j))
+    return arr
+
+  return memoryview(_crawl(d, dtype, (TYPE_MAP[dtype]*prod(shape if shape else native_shape(d)))(), 0))
+
 class Tensor:
   __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
   __deletable__ = ('_ctx',)
@@ -59,23 +82,13 @@ class Tensor:
     # internal variables used for autograd graph construction
     self._ctx: Optional[Function] = None
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
-    elif isinstance(data, (int, float)):
-      data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
-    elif data is None or data.__class__ is list:
-      assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
-      data = LazyBuffer.fromCPU(np.array([] if data is None else data, dtype=(dtype or Tensor.default_type).np))
-    elif isinstance(data, bytes):
-      data = LazyBuffer.fromCPU(np.frombuffer(data, np.uint8))
+    elif isinstance(data, (int, float)): data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
+    elif isinstance(data, bytes): data = LazyBuffer(device, ShapeTracker.from_shape((shape:=native_shape(data))), LoadOps, None, dtype, Buffer(device, prod(shape), dtype).copyin(memoryview(bytes)))
     elif isinstance(data, np.ndarray):
-      assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
-      if data.shape == ():
-        data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
-      else:
-        data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
-
-    # data is a LazyBuffer, but it might be on the wrong device
-    if not isinstance(data, LazyBuffer): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
-    self.lazydata = data if data.device == device else data.copy_to_device(device)
+      if data.shape == (): data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype, device, data.item())
+      else: data = LazyBuffer(device, ShapeTracker.from_shape(data.shape), LoadOps, None, dtype, Buffer(device, prod(x.shape), dtype).copyin(memoryview(x.flatten)))
+    else: data = LazyBuffer(device, ShapeTracker.from_shape((shape:=native_shape(data))), LoadOps, None, dtype, Buffer(device, prod(shape), dtype).copyin(native_to_flat_memoryview(data, dtype, shape=shape)))
+    self.lazydata = data if data.device == device else data.copy_to_device(device) # I think this is also always true
 
   def __repr__(self):
     return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
@@ -129,9 +142,8 @@ class Tensor:
   # TODO: this should import numpy and use .data() to construct the array
   def numpy(self) -> np.ndarray:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
-    assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
-    if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.np)
-    return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
+    if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype)
+    return self.detach().cast(self.dtype).contiguous().to('CPU').realize().lazydata.realized.toCPU().astype(self.dtype, copy=True).reshape(self.shape)
 
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self
@@ -860,5 +872,5 @@ def custom_random(out:Buffer):
   Tensor._seed += 1
   if DEBUG >= 2: print(f"***      rand {out.device} seed {Tensor._seed} size {out.size:<16d} dtype {out.dtype}")
   rng = np.random.default_rng(Tensor._seed)
-  rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=out.dtype.np, copy=False)
+  rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=out.dtype, copy=False)
   out.copyin(rng_np_buffer.data)
