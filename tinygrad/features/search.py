@@ -1,8 +1,7 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, random, math, time, multiprocessing, traceback, signal
-from tinygrad.lazy import vars_from_ast
 from tinygrad.device import Device, Compiled, Buffer
-from tinygrad.ops import MemBuffer
+from tinygrad.ops import MemBuffer, vars_from_ast
 from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.codegen.linearizer import Linearizer, UOp
 from tinygrad.shape.symbolic import sym_infer
