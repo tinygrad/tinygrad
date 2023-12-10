@@ -224,7 +224,8 @@ class OpenCLLanguage(CStyleLanguage):
   xid = [f'get_global_id({i})' for i in range(3)]
   uses_vload = True
   # NOTE: mad is used so the loads aren't reordered into the math on 845
-  code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda a,b,c,dtype: f"mad({a},{b},{c})"}
+  code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda a,b,c,dtype: f"mad({a},{b},{c})", UnaryOps.EXP2: lambda x,dtype: f"exp2({x})" if dtype != dtypes.half else f"half_exp2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})" if dtype != dtypes.half else f"half_sin({x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})" if dtype != dtypes.half else f"half_sqrt({x})"}
+
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
     return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
