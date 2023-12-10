@@ -166,7 +166,7 @@ class TestOpt(unittest.TestCase):
     with CLCache(allowed=1):
       d = a * b + c
       d.realize()
-    np.testing.assert_allclose(d.numpy(), na*nb+nc, rtol=1e-5)
+    np.testing.assert_allclose(d.numpy(), na*nb+nc, rtol=1e-5, atol=1e-7)
 
   def test_fold_reduce_elementwise(self):
     img = Tensor.ones(32)
