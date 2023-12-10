@@ -15,7 +15,7 @@ class CStyleLanguage(NamedTuple):
   smem_prefix: str = ""
   smem_prefix_for_cast: bool = True
   arg_int_prefix: str = ""
-  type_map: Dict[DType, str] = {}
+  type_names: Dict[DType, str] = {}
   barrier: str = ""
   xid: List[str] = []
   gid: List[str] = []
@@ -164,10 +164,10 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       if (child_count[u] <= 1 or dtypes.is_int(dtype)) and args != BinaryOps.MAX and not getenv("EXPAND_SSA"):  # fix index rendering issue. fix clang nested max macro issue
         r[u] = val
       else:
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_map[dtype] if dtype in lang.type_map else dtype.name} {ssa(u,'alu')} = {val};")
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_names[dtype] if dtype in lang.type_names else dtype.name} {ssa(u,'alu')} = {val};")
     elif uop == UOps.DEFINE_ACC:
       assert dtype is not None
-      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_map[dtype] if dtype in lang.type_map else dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
+      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_names[dtype] if dtype in lang.type_names else dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
     elif uop == UOps.SPECIAL:
       xid = lang.gid if args[1].startswith("g") else (lang.xid if args[1].startswith("i") else lang.lid)
       kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]}; /* {args[2]} */")
@@ -179,7 +179,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       assert dtype is not None
       val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
       if len(vin) > 3: val = lang.render_conditional(r[vin[2]], val, r[vin[3]])
-      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_map[dtype] if dtype in lang.type_map else dtype.name} {ssa(u,'val')} = {val};")
+      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_names[dtype] if dtype in lang.type_names else dtype.name} {ssa(u,'val')} = {val};")
     elif uop == UOps.PHI:
       kk(f"{r[vin[0]]} = {r[vin[1]]};")
       r[u] = r[vin[0]]
@@ -226,9 +226,9 @@ class OpenCLLanguage(CStyleLanguage):
   uses_vload = True
   # NOTE: mad is used so the loads aren't reordered into the math on 845
   code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda a,b,c,dtype: f"mad({a},{b},{c})"}
-  type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
+  type_names = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
-    return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
+    return f"as_{self.type_names.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
 class MetalLanguage(CStyleLanguage):
@@ -322,7 +322,7 @@ __device__ bool operator<(const unsigned short &a, const half &b) { return __hlt
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 
 class GLSLLanguage(CStyleLanguage):
-  type_map = {dtypes.float64: "double", dtypes.float: "float", dtypes.half: "float", dtypes.int32: "int", dtypes.uint32: "uint", dtypes.bool: "bool"}
+  type_names = {dtypes.float64: "double", dtypes.float: "float", dtypes.half: "float", dtypes.int32: "int", dtypes.uint32: "uint", dtypes.bool: "bool"}
   sampler_prefix = {dtypes.float64: "d", dtypes.float: "", dtypes.half: "", dtypes.int32: "i", dtypes.uint32: "u", dtypes.bool: "i"}
   fragment_center_offset = 0.5
   xid = [f"int(gl_FragCoord.y-{fragment_center_offset}) * width + int(gl_FragCoord.x-{fragment_center_offset})"]
@@ -337,11 +337,11 @@ class GLSLLanguage(CStyleLanguage):
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     prg = "#version 330\nprecision highp float;\nprecision highp int;\nin vec2 uv;\nuniform int width;\n"
     prg += "\n".join([f"uniform {self.sampler_prefix[dtype]}sampler2D {name};" for name,dtype in bufs if name != "data0"])
-    prg += f"\nout {'int' if bufs[0][1] == dtypes.bool else self.type_map[bufs[0][1]]} out_data;\n"
+    prg += f"\nout {'int' if bufs[0][1] == dtypes.bool else self.type_names[bufs[0][1]]} out_data;\n"
     return prg + "\nvoid main() {\n" + "\n".join(kernel) + "\n}"
 
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
-    if self.type_map[var_dtype]: return f"{self.type_map[var_dtype]}({x[0]})"
+    if self.type_names[var_dtype]: return f"{self.type_names[var_dtype]}({x[0]})"
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
@@ -351,7 +351,7 @@ class GLSLLanguage(CStyleLanguage):
     return f"{self.render_cast([out_val], output_dtype)}"
 
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
-    return f"out_data = {'int' if buf_dtype == dtypes.bool else self.type_map[buf_dtype]}({var_name});"
+    return f"out_data = {'int' if buf_dtype == dtypes.bool else self.type_names[buf_dtype]}({var_name});"
 
 # TODO: how much of this can be merged with above?
 class WGSLLanguage(CStyleLanguage):
@@ -362,7 +362,7 @@ class WGSLLanguage(CStyleLanguage):
   generic_var_prefix = "var "
   external_local_bufs = True
   code_for_op = { **CStyleLanguage().code_for_op, BinaryOps.CMPLT: lambda x,y,dtype: f"f32({x}<{y})", TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a}!=0.)" }
-  type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"}
+  type_names = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"}
 
   def render_local(self, name: str, size: int):
     return f"var<workgroup> {name}: array<f32,{size}>;"
@@ -376,7 +376,7 @@ class WGSLLanguage(CStyleLanguage):
     local_size = local_size[::-1] if local_size else [1]
     bind_it = iter(range(len(bufs)))
     prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
-    prg += "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) {'var<uniform>' if dtype == dtypes._arg_int32 else 'var<storage,read_write>'} {name}: {'i32' if dtype == dtypes._arg_int32 else f'array<{self.type_map[dtype]}>'};" for name,dtype in bufs])
+    prg += "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) {'var<uniform>' if dtype == dtypes._arg_int32 else 'var<storage,read_write>'} {name}: {'i32' if dtype == dtypes._arg_int32 else f'array<{self.type_names[dtype]}>'};" for name,dtype in bufs])
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
     return prg
 
@@ -390,7 +390,7 @@ class WGSLLanguage(CStyleLanguage):
     return f"select(f32({y}), {x}, bool({cond}))"
 
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
-    if self.type_map[var_dtype]: return f"bitcast<{self.type_map[var_dtype]}>({x[0]})" if bitcast else f"{self.type_map[var_dtype]}({x[0]})"
+    if self.type_names[var_dtype]: return f"bitcast<{self.type_names[var_dtype]}>({x[0]})" if bitcast else f"{self.type_names[var_dtype]}({x[0]})"
     raise NotImplementedError(f"no cast for {var_dtype}")
 
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
