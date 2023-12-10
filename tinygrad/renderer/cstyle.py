@@ -224,7 +224,7 @@ class OpenCLLanguage(CStyleLanguage):
   xid = [f'get_global_id({i})' for i in range(3)]
   uses_vload = True
   # NOTE: mad is used so the loads aren't reordered into the math on 845
-  code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda a,b,c,dtype: f"mad({a},{b},{c})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})" if dtype != dtypes.half else f"log2((float){x})", UnaryOps.EXP2: lambda x,dtype: f"exp2({x})" if dtype != dtypes.half else f"exp2((float){x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})" if dtype != dtypes.half else f"sin((float){x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})" if dtype != dtypes.half else f"sqrt((float){x})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"max((float){a}, (float){b})"}
+  code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda a,b,c,dtype: f"mad({a},{b},{c})" if dtype != dtypes.half else f"mad((float){a}, (float){b}, (float){c})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})" if dtype != dtypes.half else f"log2((float){x})", UnaryOps.EXP2: lambda x,dtype: f"exp2({x})" if dtype != dtypes.half else f"exp2((float){x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})" if dtype != dtypes.half else f"sin((float){x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})" if dtype != dtypes.half else f"sqrt((float){x})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"max((float){a}, (float){b})"}
 
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
