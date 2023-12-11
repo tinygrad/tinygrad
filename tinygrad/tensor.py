@@ -375,6 +375,7 @@ class Tensor:
         dims_collapsed_, dims_injected = sum(1 for d in dims_collapsed if tensor_dim >= d), sum(1 for d in type_dim[None] if tensor_dim >= d)
         tdim.append(td := tensor_dim - dims_collapsed_ + dims_injected)
         idx.append((t := indices[tensor_dim + dims_injected]).sign().__neg__().relu() * ret.shape[td] + t) # normalize the negative tensor indices
+        if dtypes.is_float(t.dtype): raise IndexError("tensors used as indices must be int, byte or bool tensors")
 
       # compute sum_dim, arange, and idx
       max_dim = max(i.ndim for i in idx)
@@ -382,11 +383,13 @@ class Tensor:
       arange = [Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, tdim))]
       first_idx = [idx[0].reshape(*[1]*tdim[0], *[1]*(1 + max_dim - idx[0].ndim), *idx[0].shape, *[1]*(ret.ndim - tdim[0] - 1))]
       rest_idx = [i.reshape(*[1]*tdim[0], *[1]*(max_dim - i.ndim), *i.shape, *[1]*(ret.ndim - tdim[0] - n)) for n,i in enumerate(idx[1:], 1)]
-      idx = first_idx + rest_idx
+      reshaped_idx = first_idx + rest_idx
       ret = ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*max_dim, *ret.shape[sum_dim[0]+1:])
 
       # iteratively eq -> mul -> sum fancy index
-      for a,i,sd in zip(arange, idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
+      try:
+        for dim, (a,i,sd) in enumerate(zip(arange, reshaped_idx, sum_dim)): ret = (a==i).mul(ret).sum(sd)
+      except AssertionError as exc: raise IndexError(f"shape mismatch: indexing tensors could not be broadcast together with shapes {idx[dim-1].shape}, {idx[dim].shape}") from exc
 
       # special permute case
       if tdim[0] != 0 and len(tdim) != 1 and tdim != list(range(tdim[0], tdim[-1]+1)):

@@ -1085,15 +1085,15 @@ class TestIndexing(unittest.TestCase):
   def test_int_indices2d(self):
     # From the NumPy indexing example
     x = Tensor.arange(0, 12).reshape(4, 3)
-    rows = Tensor([[0, 0], [3, 3]])
-    columns = Tensor([[0, 2], [0, 2]])
+    rows = Tensor([[0, 0], [3, 3]], dtype=dtypes.int32)
+    columns = Tensor([[0, 2], [0, 2]], dtype=dtypes.int32)
     numpy_testing_assert_equal_helper(x[rows, columns].numpy().tolist(), [[0, 2], [9, 11]])
 
   def test_int_indices_broadcast(self):
     # From the NumPy indexing example
     x = Tensor.arange(0, 12).reshape(4, 3)
-    rows = Tensor([0, 3])
-    columns = Tensor([0, 2])
+    rows = Tensor([0, 3], dtype=dtypes.int32)
+    columns = Tensor([0, 2], dtype=dtypes.int32)
     result = x[rows[:, None], columns]
     numpy_testing_assert_equal_helper(result.numpy().tolist(), [[0, 2], [9, 11]])
 
@@ -1132,12 +1132,9 @@ class TestIndexing(unittest.TestCase):
         x[:, [0, 1]]
   '''
 
-  # TODO empty Tensor fancy index
-  '''
   def test_empty_ndim_index_bool(self):
     x = Tensor.randn(5)
     self.assertRaises(IndexError, lambda: x[Tensor.empty(0, 2, dtype=dtypes.uint8)])
-  '''
 
   def test_empty_slice(self):
     x = Tensor.randn(2, 3, 4, 5)
@@ -1341,7 +1338,7 @@ class TestIndexing(unittest.TestCase):
 
   def test_ellipsis_tensor(self):
     x = Tensor.arange(0, 9).reshape(3, 3)
-    idx = Tensor([0, 2])
+    idx = Tensor([0, 2], dtype=dtypes.int32)
     numpy_testing_assert_equal_helper(x[..., idx].numpy().tolist(), [[0, 2],
                                                                      [3, 5],
                                                                      [6, 8]])
@@ -1796,13 +1793,10 @@ class TestNumpy(unittest.TestCase):
     self.assertIsNot(a, a[...])
     self.assertIsNot(a, a[:])
 
-  # TODO shape mismatch fancy indexing error
-  '''
   def test_broaderrors_indexing(self):
     a = Tensor.zeros(5, 5)
     self.assertRaisesRegex(IndexError, 'shape mismatch', a.__getitem__, ([0, 1], [0, 1, 2]))
     self.assertRaisesRegex(IndexError, 'shape mismatch', a.__setitem__, ([0, 1], [0, 1, 2]), 0)
-  '''
 
   # TODO setitem
   '''

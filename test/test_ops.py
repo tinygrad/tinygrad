@@ -1271,8 +1271,8 @@ class TestOps(unittest.TestCase):
 
   def test_slice_fancy_indexing_with_idx(self):
     # indexing using idx with different dim
-    helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor(1)], lambda x: x[Tensor([[0,0,0],[0,0,0]]), Tensor(1)])
-    helper_test_op([(2,3)], lambda x: x[torch.tensor([1]), torch.tensor([[0,0,0],[0,0,0]])], lambda x: x[Tensor([1]), Tensor([[0,0,0],[0,0,0]])])
+    helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor(1)], lambda x: x[Tensor([[0,0,0],[0,0,0]], dtype=dtypes.int32), Tensor(1, dtype=dtypes.int32)])
+    helper_test_op([(2,3)], lambda x: x[torch.tensor([1]), torch.tensor([[0,0,0],[0,0,0]])], lambda x: x[Tensor([1], dtype=dtypes.int32), Tensor([[0,0,0],[0,0,0]], dtype=dtypes.int32)])
 
   def test_slice_fancy_indexing_list_indices(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
@@ -1307,7 +1307,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,(1,1))], lambda x: x[(i,(1,1))])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,b,c,d,e)], lambda x: x[(i,j,k,o,p)])
 
-  def test_slice_fancy_indexing_errors(self): ...
+  def test_slice_fancy_indexing_errors(self):
+    a = Tensor.ones(10,11,12)
+    with self.assertRaises(IndexError): a[Tensor(1.1)] # tensors used as indices must be int, byte or bool tensors
+    with self.assertRaises(IndexError): a[Tensor.randint(3,1,1,1), Tensor.randint(1,4,1,1), Tensor.randint(2,3,4,1)] # shape mismatch (1, 4, 1, 1), (2, 3, 4, 1)
+
     # TODO: currently we not support IndexError for out of bounds idx values
     # any out of bounds in fancy indexing returns 0
     # ex: Tensor([1,2])[Tensor([1,2,55])].numpy() -> array([2., 0., 0.], dtype=float32)
