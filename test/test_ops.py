@@ -138,6 +138,16 @@ class TestOps(unittest.TestCase):
   def test_arange_big(self):
     helper_test_op([], lambda: torch.arange(256), lambda: Tensor.arange(256), forward_only=True)
 
+  def test_linspace(self):
+    helper_test_op([], lambda: torch.linspace(5, 10, 0), lambda: Tensor.linspace(5, 10, 0), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(5, 10, 1), lambda: Tensor.linspace(5, 10, 1), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(5, 10, 5), lambda: Tensor.linspace(5, 10, 5), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(5.1, 10.1, 5), lambda: Tensor.linspace(5.1, 10.1, 5), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(10, 5, 5), lambda: Tensor.linspace(10, 5, 5), forward_only=True)
+    helper_test_op([], lambda: torch.linspace(-math.pi, math.pi, 2000), lambda: Tensor.linspace(-math.pi, math.pi, 2000), forward_only=True)
+    with self.assertRaises(AssertionError):
+      Tensor.linspace(10, 5, -1)
+
   def test_sum_fake(self):
     helper_test_op([(256, 1)], lambda x: x.sum(axis=1))
 
