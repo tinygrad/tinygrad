@@ -32,7 +32,7 @@ if __name__ == "__main__":
   total_tm = 0
   running_gflops = 0
   for i,si in enumerate(sched):
-    rawbufs = bufs_from_lin(Linearizer(si.ast))
+    rawbufs = bufs_from_lin(Linearizer(si.ast), device.linearizer_opts.device)
 
     # "linearize" the op into uops in different ways
     lins:List[Linearizer] = []
