@@ -69,9 +69,9 @@ class Buffer:
     # TODO: image hack shouldn't be here. where should it be?
     self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else size * dtype.itemsize)
     # TODO: mem_used for all devices
-    if self.device == Device.DEFAULT: GlobalCounters.mem_used += self.size * self.dtype.itemsize
+    if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.size * self.dtype.itemsize
   def __del__(self):
-    if self.device == Device.DEFAULT: GlobalCounters.mem_used -= self.size * self.dtype.itemsize
+    if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.size * self.dtype.itemsize
     if isinstance(self.dtype, ImageDType): self.allocator.free(self._buf, self.dtype)
     else: self.allocator.free(self._buf, self.size * self.dtype.itemsize)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}>"
