@@ -14,7 +14,6 @@ class Optimizer:
     self.device = self.params[0].device
     self.buffers: List[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
     self.lr = Tensor([lr], requires_grad=False, device=self.device).contiguous()
-    print(self.lr)
 
   def zero_grad(self):
     for param in self.params: param.grad = None
@@ -28,7 +27,6 @@ class SGD(Optimizer):
     super().__init__(params, lr)
     self.momentum, self.wd, self.nesterov = momentum, weight_decay, nesterov
     self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params] if self.momentum else []
-    print(self.b)
 
   # https://pytorch.org/docs/stable/generated/torch.optim.SGD.html
   def step(self) -> None:
