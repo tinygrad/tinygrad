@@ -119,11 +119,6 @@ class Tensor:
     self.lazydata = x.lazydata
     return self
 
-  def copy_with_st(self, other:Tensor, st) -> Tensor:
-    # TODO: do we call a contiguous().realize() on self implicitly?
-    self.lazydata.copy_with_st(other.lazydata, st)
-    return self
-
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
 
   # TODO: these are good places to start removing numpy
@@ -400,7 +395,13 @@ class Tensor:
         ret = ret.permute(ret_dims[tdim[0]:tdim[0]+max_dim] + ret_dims[:tdim[0]] + ret_dims[tdim[0]+max_dim:])
     return ret
 
-  def __setitem__(self,indices,v): return self.__getitem__(indices).assign(v)
+  def __setitem__(self, indices, v:Tensor):
+    indexed = self[indices]
+    print(f"{self.lazydata.device=}")
+    # TODO: fix the disk tensor hack
+    if indexed.lazydata.base is self.lazydata.base and not self.lazydata.device.lower().startswith("disk"):
+      return self.lazydata.copy_with_st(v.lazydata, indexed.lazydata.st)
+    return self.__getitem__(indices).assign(v)
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
   def slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:

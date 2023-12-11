@@ -40,9 +40,12 @@ class Attention:
 
     if isinstance(Device[Device.DEFAULT], Compiled):
       # update the cache
+      # # the dream. we cannot getitem a Variable index yet...
+      # self.cache_kv[:, :, start_pos:start_pos+seqlen, :, :] = Tensor.stack([xk, xv])
       st = self.cache_kv.lazydata.st
       st = st.shrink(((0, st.shape[0]), (0, st.shape[1]), (start_pos, start_pos+seqlen), (0, st.shape[3]), (0, st.shape[4])))
-      self.cache_kv.copy_with_st(Tensor.stack([xk, xv]), st).realize()
+      self.cache_kv.lazydata.copy_with_st(Tensor.stack([xk, xv]).lazydata, st)
+      self.cache_kv.realize()
 
       keys = self.cache_kv[0].shrink((None, (0, start_pos+seqlen), None, None))
       values = self.cache_kv[1].shrink((None, (0, start_pos+seqlen), None, None))

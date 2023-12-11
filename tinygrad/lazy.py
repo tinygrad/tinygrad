@@ -223,7 +223,10 @@ class LazyBuffer:
     return LazyBuffer.loadop(LoadOps.CONTIGUOUS, self.shape, self.dtype, self.device, src=self)
 
   def copy_with_st(self:LazyBuffer, other:LazyBuffer, st:ShapeTracker):
+    assert self.dtype == other.dtype
+    # if not, need to materialize the buffer before partial update
     assert self.st.contiguous and self.realized, "can only copy to contiguous and realized buffer"
+    # updating the base
     self.output_buffer = self.realized
     self.realized = None
     self.op = LazyOp(BufferOps.STORE, (other,), st)
