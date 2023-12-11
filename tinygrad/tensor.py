@@ -335,8 +335,8 @@ class Tensor:
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, (tuple, list)):
-      if isinstance(indices, list) and all(isinstance(i, int) for i in indices): indices = [Tensor(indices)] # special case <indices: List[int]>, a lil ugly
-      else: indices = [Tensor(list(i)) if isinstance(i, (tuple, list)) else i for i in indices]
+      if isinstance(indices, list) and all(isinstance(i, int) for i in indices): indices = [Tensor(indices, dtype=dtypes.int32, requires_grad=False, device=self.device)] # special case <indices: List[int]>, a lil ugly
+      else: indices = [Tensor(list(i), dtype=dtypes.int32, requires_grad=False, device=self.device) if isinstance(i, (tuple, list)) else i for i in indices]
     else: indices = [indices]
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
@@ -356,6 +356,7 @@ class Tensor:
     for dim,i in enumerate(indices_filtered): type_dim[type(i)].append(dim)
 
     # validation! raise Errors
+    if slice in type_dim and self.ndim == 0: raise IndexError("slice cannot be applied to a 0-dim tensor.")
     if len(ellipsis_idx) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
     if float in type_dim: raise IndexError("float type is not valid index")
     if any(isinstance(i, slice) and i.step == 0 for i in indices): raise ValueError('slice step cannot be 0')
@@ -531,6 +532,31 @@ class Tensor:
     idx = m * Tensor.arange(self.shape[axis]-1,-1,-1, dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
     return self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1
   def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
+
+  @staticmethod
+  def einsum(formula, *xs) -> Tensor:
+    xs = argfix(*xs)
+    lhs, rhs = formula.split("->")
+    lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in lhs.split(',')]
+    rhs = sorted(enumerate(rhs), key=lambda e:e[1])
+
+    assert len(xs) == len(lhs), f"number of inputs doesn't match number of operands in formula, expected {len(lhs)}, got {len(xs)}"
+
+    lhs, rhs = [[list(zip(*l)) for l in lhs], list(zip(*rhs)) or [[], []]]
+    dims = {}
+    for i, l in enumerate(lhs):
+      for order, letter in enumerate(l[1]):
+        if letter not in dims: dims[letter] = xs[i].shape[l[0][order]]
+        else: assert dims[letter] == xs[i].shape[l[0][order]], f"dims of the same index should all be equal in the inputs. expected {dims[letter]} for input #{i+1}, got {xs[i].shape[l[0][order]]}"
+    xs_ = [None]*len(xs)
+    for i,x in enumerate(xs):
+      xs_[i] = x.permute(lhs[i][0]) \
+        .reshape([dims[letter] if letter in lhs[i][1] else 1 for letter in sorted(dims.keys())]) \
+        .expand([e[1] for e in sorted(dims.items(), key=lambda e: e[0])])
+
+    return reduce(lambda a,b:a*b, xs_) \
+      .sum(axis=[axis for axis,letter in enumerate(sorted(dims.keys())) if letter not in rhs[1]]) \
+      .permute(rhs[0])
 
   # ***** processing ops *****
 
