@@ -6,7 +6,6 @@ from tinygrad.tensor import Tensor
 import tinygrad.nn as nn
 from tinygrad.helpers import dtypes
 from functools import partial
-import jax.extend
 
 # https://gist.github.com/devries/11405101
 def ksprob(a):
@@ -61,8 +60,11 @@ class TestRandomness(unittest.TestCase):
 
   def test_rand_against_reference(self):
     Tensor.manual_seed(1337)
-    jr = (jax.extend.random.threefry_2x32((np.uint32(1337), np.uint32(0x0)), np.arange(20 * 23, dtype=np.uint32).reshape(20, 23))).astype(float) / np.float32(2**32 - 1)
-    r = Tensor.rand(20, 23).numpy()
+    # generated using
+    # jax.extend.random.threefry_2x32((np.uint32(1337), np.uint32(0x0)), np.arange(20, dtype=np.uint32)).astype(float) / np.float32(2**32 - 1)
+    jr = np.array([0.30984974, 0.4272377, 0.9244876, 0.272683, 0.48820806, 0.29587173, 0.3213513, 0.05805139, 0.49541774, 0.23303077,
+                   0.6247813, 0.5186134, 0.24712528, 0.12718698, 0.52360743, 0.50704265, 0.9166272, 0.69187635, 0.65300864, 0.34640664])
+    r = Tensor.rand(20).numpy()
     np.testing.assert_allclose(jr, r, atol=1e-5, rtol=1e-5)
 
   def test_randn(self):
