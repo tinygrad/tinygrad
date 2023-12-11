@@ -35,6 +35,7 @@ def get_test_global_size(global_size, max_global_size):
 
 # get (scrap) buffers for timing the linearizer
 def bufs_from_lin(lin:Linearizer, device:str=Device.DEFAULT) -> List[Buffer]:
+  assert device != "", "device must be set"
   bufsts:DefaultDict[int, List[MemBuffer]] = defaultdict(list)
   for x in lin.membufs: bufsts[x.idx].append(x)
   rawbufs:List[Optional[Buffer]] = [None]*len(bufsts)
