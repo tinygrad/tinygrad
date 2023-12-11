@@ -112,7 +112,8 @@ class Tensor:
       self.contiguous().realize().lazydata.realized.copyin(x.numpy().data)
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
-    assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
+    # NOTE: we allow cross device assign
+    assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.dtype == x.dtype and self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized
@@ -855,7 +856,10 @@ class Tensor:
 
   # ***** cast ops *****
 
-  def cast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
+  def cast(self, dtype:DType) -> Tensor:
+    # hack for devices that don't support bfloat16
+    if self.dtype == dtypes.bfloat16: return self.bitcast(dtypes.uint16).cast(dtypes.uint32).mul(1<<16).contiguous().bitcast(dtypes.float32).cast(dtype)
+    return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
   def bitcast(self, dtype:DType) -> Tensor:
     assert self.dtype.itemsize == dtype.itemsize, "can't bitcast mismatched dtype itemsizes"
     return mlops.Cast.apply(self, dtype=dtype, bitcast=True) if self.dtype != dtype else self
