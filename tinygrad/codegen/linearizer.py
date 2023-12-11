@@ -168,6 +168,9 @@ class Linearizer(Kernel):
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
 
+    # remove global dims where global_max is 1
+    if self.opts.global_max: self.reshape_and_permute(lambda x: self.shrink_global_dims(x[:self.global_dims], self.opts.global_max) + list(x[self.global_dims:]), None)
+
     # limit dims if we need to
     if self.opts.global_max and self.opts.local_max: self.limit_dims_to_max(self.opts.global_max, self.opts.local_max)
 
@@ -201,8 +204,6 @@ class Linearizer(Kernel):
     Linearizer.kernel_cnt[(function_name := to_function_name(self.name))] += 1
     suffix = f"{'n'+str(Linearizer.kernel_cnt[function_name]-1)}" if Linearizer.kernel_cnt[function_name] > 1 else ""
     self.name = self.name+colored(suffix, 'BLACK')
-
-    if self.opts.device == "WEBGL": self.reshape_and_permute(lambda x: [prod(x[:self.global_dims])] + list(x[self.global_dims:]) if (self.global_dims > 1) else x, None)
 
     # define indexes
     global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)

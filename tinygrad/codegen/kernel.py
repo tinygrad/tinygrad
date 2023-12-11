@@ -294,6 +294,13 @@ class Kernel:
           new_shape[next_idx] = new_shape[next_idx] * 2
     return tuple(new_shape)
 
+  def shrink_global_dims(self, globals, global_max):
+    out = list(globals)
+    for i in reversed(range(1, len(out))):
+      if i >= len(global_max) or global_max[i] == 1:
+        out[i - 1] *= out.pop(i)
+    return out
+
   def limit_dims_to_max(self, global_max: List[int], local_max: List[int]):
     # Check the global allocation limit, current the global_size will be flipped during codegen
     # and then padded right with 1s if its length < 3 which makes this part a bit awkward to write
