@@ -27,18 +27,18 @@ class TestLazyBuffer(unittest.TestCase):
           helper(a[(slice(start, None, stride),)*ndims])
 
   def test_shuffle_pad_ops_cmpeq(self):
-    y = Tensor([1]).cat(Tensor([1]) == 0).numpy()
-    z = Tensor([1, 0]).numpy()
+    y = Tensor([1.]).cat(Tensor([1.]) == 0).numpy()
+    z = Tensor([1., 0]).numpy()
     np.testing.assert_allclose(y, z)
 
   def test_shuffle_pad_ops_div(self):
-    y = Tensor([1]).cat(Tensor([1]).div(Tensor([2.0]))).numpy()
+    y = Tensor([1.]).cat(Tensor([1.]).div(Tensor([2.0]))).numpy()
     z = Tensor([1., 0.5]).numpy()
     np.testing.assert_allclose(y, z)
 
   def test_shuffle_pad_ops_log(self):
-    y = Tensor([1]).cat(Tensor([1]).log()).numpy()
-    z = Tensor([1, 0]).numpy()
+    y = Tensor([1.]).cat(Tensor([1.]).log()).numpy()
+    z = Tensor([1., 0.]).numpy()
     np.testing.assert_allclose(y, z)
 
   def test_shuffle_pad_ops_exp(self):

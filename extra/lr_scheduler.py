@@ -6,7 +6,7 @@ from tinygrad.tensor import Tensor
 class LR_Scheduler:
   def __init__(self, optimizer: Optimizer):
     self.optimizer = optimizer
-    self.epoch_counter = Tensor([0], requires_grad=False, device=self.optimizer.device)
+    self.epoch_counter = Tensor([0.], requires_grad=False, device=self.optimizer.device)
 
   def get_lr(self): pass
 

@@ -250,7 +250,7 @@ class Tensor:
 
     # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
     # this is "implicit gradient creation"
-    self.grad = Tensor(1, device=self.device, requires_grad=False)
+    self.grad = Tensor(1., device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
       assert (t0.grad is not None)
@@ -470,7 +470,7 @@ class Tensor:
     axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if isinstance(axis, int) else list(axis))
     axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
     shape = tuple(s for i,s in enumerate(self.shape) if i not in axis_)
-    if 0 in self.shape and 0 not in shape: return Tensor.full(tuple(1 if s == 0 else s for s in self.shape) if keepdim else shape, {mlops.Sum: 0, mlops.Max: -float("inf")}[fxn])
+    if 0 in self.shape and 0 not in shape: return Tensor.full(tuple(1 if s == 0 else s for s in self.shape) if keepdim else shape, {mlops.Sum: 0, mlops.Max: -float("inf")}[fxn], dtype=dtypes.float)
     ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else s for i,s in enumerate(self.shape)]))
     return ret if keepdim else ret.reshape(shape=shape)
 

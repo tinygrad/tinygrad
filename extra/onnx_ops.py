@@ -16,7 +16,10 @@ tensor_methods = {"Neg", "Reciprocal", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mis
 # **************** Free Ops ****************
 
 def Identity(input: Tensor): return input
-def Add(input: Tensor, other: Tensor, broadcast=None): return input + other if input.dtype == dtypes.float or isinstance(input.dtype, ImageDType) else (input + other).cast(input.dtype)
+def Add(input: Tensor, other: Tensor, broadcast=None):
+  ret = input + other if input.dtype == dtypes.float or isinstance(input.dtype, ImageDType) else (input + other).cast(input.dtype)
+  print(ret)
+  return ret
 def Sub(input: Union[Tensor, Any], other: Tensor): return input - other # some test has input as int
 def Div(input: Tensor, other: Tensor): return input / other if input.dtype == dtypes.float or isinstance(input.dtype, ImageDType) else input.div(other).floor()   # TODO: this has dtype issues
 def Pow(input: Tensor, other: Tensor): return (input.float() ** other.float()).cast(input.dtype)   # TODO: this has dtype issues
@@ -427,8 +430,8 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     return ret.clip(0, x_len-1)
   def _coordinate_transformation(x_out, y_out, output_shape, scales_lol, roi=None):
     if coordinate_transformation_mode == "half_pixel":
-      x_out = (x_out + 0.5)/Tensor(scales_lol[-1]) - 0.5 # TODO Tensor() because try (((Tensor([0,1,2,3,4,5])+0.5)/3.5 - 0.5)) with LLVM or METAL, inaccuacy.
-      y_out = (y_out + 0.5)/Tensor(scales_lol[-2]) - 0.5
+      x_out = (x_out + 0.5)/Tensor(scales_lol[-1], dtype=dtypes.float) - 0.5
+      y_out = (y_out + 0.5)/Tensor(scales_lol[-2], dtype=dtypes.float) - 0.5
     elif coordinate_transformation_mode == "align_corners":
       x_out = x_out * (X.shape[-1] - 1) / (output_shape[-1] - 1)
       y_out = y_out * (X.shape[-2] - 1) / (output_shape[-2] - 1)
@@ -439,8 +442,8 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       x_out = X.shape[-1] / 2 * (1 - int(output_shape[-1]) / output_shape[-1]) + (x_out + 0.5) / scales_lol[-1] - 0.5
       y_out = X.shape[-2] / 2 * (1 - int(output_shape[-2]) / output_shape[-2]) + (y_out + 0.5) / scales_lol[-2] - 0.5
     elif coordinate_transformation_mode == "pytorch_half_pixel":
-      x_out = (x_out + 0.5)/scales_lol[-1] - 0.5 if output_shape[-1] > 1 else Tensor([0])
-      y_out = (y_out + 0.5)/scales_lol[-2] - 0.5 if output_shape[-2] > 1 else Tensor([0])
+      x_out = (x_out + 0.5)/scales_lol[-1] - 0.5 if output_shape[-1] > 1 else Tensor([0.])
+      y_out = (y_out + 0.5)/scales_lol[-2] - 0.5 if output_shape[-2] > 1 else Tensor([0.])
     elif coordinate_transformation_mode == "tf_crop_and_resize":
       x_out = roi[-1][0] * (X.shape[-1] - 1) + x_out * ((roi[-1][1] - roi[-1][0]) * (X.shape[-1] - 1) / (output_shape[-1] - 1))  if output_shape[-1] > 1 else Tensor([0.5 * (roi[-1][0] + roi[-1][1]) * (X.shape[-1] - 1)])
       y_out = roi[-2][0] * (X.shape[-2] - 1) + y_out * ((roi[-2][1] - roi[-2][0]) * (X.shape[-2] - 1) / (output_shape[-2] - 1))  if output_shape[-2] > 1 else Tensor([0.5 * (roi[-2][0] + roi[-2][1]) * (X.shape[-2] - 1)])
@@ -472,17 +475,17 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     else: scales = [si/xs for xs, si in zip(X.shape, sizes)]
     if keep_aspect_ratio_policy == "not_larger":
       scale = min(scales)
-      sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, "round_up")
+      sizes = _round(Tensor(list(X.shape[-2:]), dtype=dtypes.float)*scale, 0.5, "round_up")
       sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
     elif keep_aspect_ratio_policy == "not_smaller":
       scale = max(scales)
-      sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, "round_up")
+      sizes = _round(Tensor(list(X.shape[-2:]), dtype=dtypes.float)*scale, 0.5, "round_up")
       sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
   output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)]
   output_shape_ = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
   scales_lol = [os/xs for xs, os in zip(X.shape, output_shape)]
-  x_out = Tensor.arange(output_shape[-1])
-  y_out = Tensor.arange(output_shape[-2])
+  x_out = Tensor.arange(output_shape[-1], dtype=dtypes.float32)
+  y_out = Tensor.arange(output_shape[-2], dtype=dtypes.float32)
   if mode == "nearest":
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_lol, roi)
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
