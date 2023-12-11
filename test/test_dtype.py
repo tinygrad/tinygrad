@@ -49,7 +49,7 @@ class TestDType(unittest.TestCase):
   DATA: Any = None
   @classmethod
   def setUpClass(cls):
-    if not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
+    if not cls.DTYPE or not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
     cls.DATA = np.random.randint(0, 100, size=10, dtype=cls.DTYPE.np).tolist() if dtypes.is_int(cls.DTYPE) else np.random.choice([True, False], size=10).tolist() if cls.DTYPE == dtypes.bool else np.random.uniform(0, 1, size=10).tolist()
   def setUp(self):
     if self.DTYPE is None: raise unittest.SkipTest("base class")
@@ -188,6 +188,14 @@ class TestEqStrDType(unittest.TestCase):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")
     self.assertEqual(str(PtrDType(dtypes.float32)), "ptr.dtypes.float")
+
+class TestHelpers(unittest.TestCase):
+  def test_helpers(self):
+    self.assertTrue(dtypes.is_int(dtypes.int8))
+    self.assertFalse(dtypes.is_int(dtypes.float))
+    self.assertTrue(dtypes.is_float(dtypes.float))
+    self.assertTrue(dtypes.is_int(dtypes.int.vec(4)))
+    self.assertTrue(dtypes.is_float(dtypes.float.vec(4)))
 
 if __name__ == '__main__':
   unittest.main()
