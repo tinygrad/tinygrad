@@ -48,7 +48,7 @@ class JITRunner:
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
-def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count:int, jit=False, num_kernels=1, lra: Optional[Dict]=None, device:str=""):
+def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count:int, jit=False, num_kernels=1, lra: Optional[Dict]=None, device:str="", first_run=False):
   if var_vals is None: var_vals = {}
   op_estimate, mem_estimate = sym_infer(op_estimate, var_vals), sym_infer(mem_estimate, var_vals)
   GlobalCounters.kernel_count += num_kernels
@@ -56,7 +56,7 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
   GlobalCounters.global_mem += mem_estimate
   if et is not None: GlobalCounters.time_sum_s += et
   if DEBUG >= 2:
-    print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', ('magenta' if num_kernels == 1 else 'CYAN') if jit else None)} {name+' '*(37-ansilen(name))} arg {buf_count:3d} sz {str(lra.get('global_size', '') if lra else ''):18s} dev {device[:10]:10s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
+    print(f"{colored(f'*** {GlobalCounters.kernel_count:4d}', ('magenta' if num_kernels == 1 else 'CYAN') if jit else ('green' if first_run else None))} {name+' '*(37-ansilen(name))} arg {buf_count:3d} sz {str(lra.get('global_size', '') if lra else ''):18s} dev {device[:10]:10s} OPs {int(op_estimate/1e6):6d}M/{GlobalCounters.global_ops/1e9:7.2f}G  mem {GlobalCounters.mem_used/1e9:5.2f} GB " +
           (str() if et is None else f"tm {et*1e6:9.2f}us/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))
 
 # **************** Buffer / Allocator ****************
@@ -69,9 +69,9 @@ class Buffer:
     # TODO: image hack shouldn't be here. where should it be?
     self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else size * dtype.itemsize)
     # TODO: mem_used for all devices
-    if self.device == Device.DEFAULT: GlobalCounters.mem_used += self.size * self.dtype.itemsize
+    if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.size * self.dtype.itemsize
   def __del__(self):
-    if self.device == Device.DEFAULT: GlobalCounters.mem_used -= self.size * self.dtype.itemsize
+    if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.size * self.dtype.itemsize
     if isinstance(self.dtype, ImageDType): self.allocator.free(self._buf, self.dtype)
     else: self.allocator.free(self._buf, self.size * self.dtype.itemsize)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}>"
@@ -236,8 +236,8 @@ class CompiledASTRunner(JITRunner):
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
-    self.name, self.display_name, self.prg, self.global_size, self.local_size, self.runtime_args = \
-      to_function_name(name), name, prg, global_size, local_size, runtime_args if runtime_args is not None else {}
+    self.name, self.display_name, self.prg, self.global_size, self.local_size, self.runtime_args, self.first_run = \
+      to_function_name(name), name, prg, global_size, local_size, runtime_args if runtime_args is not None else {}, True
     self.vars: List[Variable] = []
     if ast:
       info = get_lazyop_info(ast)
@@ -266,7 +266,8 @@ class CompiledASTRunner(JITRunner):
     if global_size: lra['global_size'] = global_size
     if local_size and 'local_size' not in lra: lra['local_size'] = local_size
     et = self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.vars), wait=wait or DEBUG>=2)
-    update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra, device=rawbufs[0].device)
+    update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra, device=rawbufs[0].device, first_run=self.first_run)
+    self.first_run = False
     return et
 
 class Compiled:

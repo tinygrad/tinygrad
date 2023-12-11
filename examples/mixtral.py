@@ -1,6 +1,6 @@
 import functools, argparse, os
 from tqdm import tqdm
-from tinygrad import Tensor, nn, Device, GlobalCounters
+from tinygrad import Tensor, nn, Device, GlobalCounters, Variable
 from tinygrad.helpers import Timing
 from tinygrad.nn.state import torch_load, get_state_dict
 from extra.models.llama import FeedForward, Transformer
@@ -16,8 +16,8 @@ class MixtureFeedForward:
     top = sorted(enumerate(choice), key=lambda x: -x[1])
     norm = top[0][1] + top[1][1]
     e1, e2 = self.experts[top[0][0]], self.experts[top[1][0]]
-    ret = e1(x.to(e1.w1.weight.device)).to(x.device) * (top[0][1]/norm) + \
-          e2(x.to(e2.w1.weight.device)).to(x.device) * (top[1][1]/norm)
+    ret = e1(x.to(e1.w1.weight.device)).to(x.device) * Tensor([top[0][1]/norm]) + \
+          e2(x.to(e2.w1.weight.device)).to(x.device) * Tensor([top[1][1]/norm])
     return ret
 
 if __name__ == "__main__":
@@ -33,12 +33,12 @@ if __name__ == "__main__":
   model_state_dict = get_state_dict(model)
 
   for k in (t := tqdm(state)):
-    t.set_description(f"loading {k}")
     if 'feed_forward.experts.' in k:
       expert_no = int(k.split('feed_forward.experts.')[1].split('.')[0])
       device = Device.DEFAULT + ":" + str((expert_no//2)+1)
     else:
       device = Device.DEFAULT
+    t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, loading {k} to {device}")
     # NOTE: we have to copy through CLANG to avoid the HIP hang bug when copying directly from the DISK
     model_state_dict[k].assign(state[k].to("CLANG").contiguous().to(device).half()).realize()
 
@@ -50,7 +50,7 @@ if __name__ == "__main__":
   for i in range(args.count):
     GlobalCounters.reset()
     with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
-      tok = model(Tensor([toks[start_pos:]]), start_pos, args.temperature).multinomial().item()
+      tok = model(Tensor([toks[start_pos:]]), 0 if start_pos == 0 else Variable("start_pos", 1, 1024).bind(start_pos), args.temperature).multinomial().item()
     toks.append(tok)
     start_pos += 1
     print(spp.decode(toks))
