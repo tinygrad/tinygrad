@@ -49,7 +49,8 @@ class HIPAllocator(LRUAllocator):
   def _free(self, opaque:T): check(hip.hipFree(opaque))
   def copyin(self, dest:T, src: memoryview):
     check(hip.hipSetDevice(self.device))
-    check(hip.hipMemcpyAsync(dest, from_mv(src), len(src), hip.hipMemcpyHostToDevice, None))
+    # TODO: have to make sure src isn't freed to make this async
+    check(hip.hipMemcpy(dest, from_mv(src), len(src), hip.hipMemcpyHostToDevice))
   def copyout(self, dest:memoryview, src:T):
     check(hip.hipSetDevice(self.device))
     check(hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
