@@ -139,12 +139,12 @@ def load_tokens_from_gguf(gguf_model_path):
   token_model = sentencepiece_model_pb2.ModelProto()
 
   for i in range(len(tokens)):
-      token = token_model.pieces.add()
-      token.piece = tokens[i]
-      token.score = scores[i]
-      token.type  = types[i]
-      if token.type == TokenType.BYTE:
-          token_model.trainer_spec.byte_fallback = 1
+    token = token_model.pieces.add()
+    token.piece = tokens[i]
+    token.score = scores[i]
+    token.type  = types[i]
+    if token.type == TokenType.BYTE:
+      token_model.trainer_spec.byte_fallback = 1
 
   token_model.trainer_spec.unk_id = reader.fields['tokenizer.ggml.unknown_token_id'].parts[-1][0]
   token_model.trainer_spec.bos_id = reader.fields['tokenizer.ggml.bos_token_id'].parts[-1][0]
