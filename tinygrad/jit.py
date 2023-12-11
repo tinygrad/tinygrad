@@ -48,12 +48,13 @@ class TinyJit(Generic[ReturnType]):
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj)
 
   def __call__(self, *args, **kwargs) -> ReturnType:
-    # all inputs are realized
+    # all inputs (except const) are realized
     input_tensors: Dict[Union[int, str], Tensor] = {cast(Union[int, str], k):v.realize() for k,v in itertools.chain(enumerate(args), kwargs.items()) if v.__class__ is Tensor}
     expected_name_sts_dtype = tuple([(k, v.lazydata.st.unbind(), v.dtype) for k,v in input_tensors.items()])
 
     # get rawbuffers
-    input_rawbuffers: List[Buffer] = [cast(Buffer, v.lazydata.realized) for v in input_tensors.values()]
+    # TODO: why can .realized have Any type?
+    input_rawbuffers: List[Buffer] = [cast(Buffer, v.lazydata.realized) for v in input_tensors.values() if v.lazydata.realized is not None]
     assert len(set(input_rawbuffers)) == len(input_rawbuffers), "duplicate inputs to JIT"
 
     # get variables: they can either be in Tensors or passed in as arguments, and all must be bound. these are all global

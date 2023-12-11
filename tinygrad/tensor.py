@@ -7,7 +7,7 @@ from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
 
-from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int, round_up
+from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int, round_up, merge_dicts
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
@@ -112,7 +112,8 @@ class Tensor:
       self.contiguous().realize().lazydata.realized.copyin(x.numpy().data)
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
-    assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
+    # NOTE: we allow cross device assign
+    assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.dtype == x.dtype and self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized
@@ -313,8 +314,8 @@ class Tensor:
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, (tuple, list)):
-      if isinstance(indices, list) and all(isinstance(i, int) for i in indices): indices = [Tensor(indices)] # special case <indices: List[int]>, a lil ugly
-      else: indices = [Tensor(list(i)) if isinstance(i, (tuple, list)) else i for i in indices]
+      if isinstance(indices, list) and all(isinstance(i, int) for i in indices): indices = [Tensor(indices, dtype=dtypes.int32, requires_grad=False, device=self.device)] # special case <indices: List[int]>, a lil ugly
+      else: indices = [Tensor(list(i), dtype=dtypes.int32, requires_grad=False, device=self.device) if isinstance(i, (tuple, list)) else i for i in indices]
     else: indices = [indices]
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
@@ -334,6 +335,7 @@ class Tensor:
     for dim,i in enumerate(indices_filtered): type_dim[type(i)].append(dim)
 
     # validation! raise Errors
+    if slice in type_dim and self.ndim == 0: raise IndexError("slice cannot be applied to a 0-dim tensor.")
     if len(ellipsis_idx) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
     if float in type_dim: raise IndexError("float type is not valid index")
     if any(isinstance(i, slice) and i.step == 0 for i in indices): raise ValueError('slice step cannot be 0')
@@ -509,6 +511,30 @@ class Tensor:
     idx = m * Tensor.arange(self.shape[axis]-1,-1,-1, dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
     return self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1
   def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
+
+  @staticmethod
+  def einsum(formula:str, *raw_xs) -> Tensor:
+    xs:Tuple[Tensor] = argfix(*raw_xs)
+    inputs_str, output = formula.split("->")
+    inputs = [x for x in inputs_str.split(',')]
+    assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
+
+    # map the value of each letter in the formula
+    all_letter_val = sorted(merge_dicts([{letter:dim for letter, dim in zip(letters, tensor.shape)} for letters, tensor in zip(inputs, xs)]).items())
+
+    xs_:List[Tensor] = []
+    lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in inputs]
+    for x,(order,letters) in zip(xs, [list(zip(*l)) for l in lhs]):
+      # permute to the sorted letter order, then reshape/expand to create dimensions for the missing letters
+      xs_.append(x.permute(order) \
+        .reshape([val if letter in letters else 1 for letter,val in all_letter_val]) \
+        .expand([val for _,val in all_letter_val]))
+
+    rhs_order, rhs_letters = tuple(zip(*sorted(enumerate(output), key=lambda e:e[1]))) or ([], [])
+    # sum over all axes that's not in the output, then permute to the output order
+    return reduce(lambda a,b:a*b, xs_) \
+      .sum(axis=[axis for axis,(letter,_) in enumerate(all_letter_val) if letter not in rhs_letters]) \
+      .permute(rhs_order)
 
   # ***** processing ops *****
 
@@ -829,7 +855,10 @@ class Tensor:
 
   # ***** cast ops *****
 
-  def cast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
+  def cast(self, dtype:DType) -> Tensor:
+    # hack for devices that don't support bfloat16
+    if self.dtype == dtypes.bfloat16: return self.bitcast(dtypes.uint16).cast(dtypes.uint32).mul(1<<16).contiguous().bitcast(dtypes.float32).cast(dtype)
+    return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
   def bitcast(self, dtype:DType) -> Tensor:
     assert self.dtype.itemsize == dtype.itemsize, "can't bitcast mismatched dtype itemsizes"
     return mlops.Cast.apply(self, dtype=dtype, bitcast=True) if self.dtype != dtype else self
