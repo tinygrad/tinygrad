@@ -109,7 +109,7 @@ class TestSafetensors(unittest.TestCase):
     assert json.loads(dat[8:8+sz])['__metadata__']['hello'] == 'world'
 
   def test_save_all_dtypes(self):
-    for dtype in dtypes.fields().values(): 
+    for dtype in dtypes.fields().values():
       if dtype in [dtypes.bfloat16, dtypes._arg_int32]: continue # not supported in numpy
       path = temp("ones.safetensors")
       ones = Tensor.rand((10,10), dtype=dtype)
