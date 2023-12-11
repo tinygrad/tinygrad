@@ -22,6 +22,12 @@ def train_bert():
   pass
 
 def train_maskrcnn():
+  import random
+  import numpy as np
+  Tensor.manual_seed(seed=1234)
+  random.seed(1234)
+  np.random.seed(1234)
+
   from extra.datasets.coco import iterate, TRAIN_TRANSFORMS
   from extra.models.mask_rcnn import MaskRCNN
   from extra.models.resnet import ResNet
@@ -32,8 +38,9 @@ def train_maskrcnn():
   bs = getenv("BS", default=2)
 
   backbone = ResNet(50, num_classes=None, stride_in_1x1=True)
-  backbone.load_from_pretrained()
+  backbone.freeze_model(2)
   model = MaskRCNN(backbone)
+  model.load_from_pretrained()
 
   params = get_parameters(model)
   # TODO: need to implement LR scheduler
@@ -42,7 +49,7 @@ def train_maskrcnn():
   for imgs, tgts in tqdm(iterate(bs=bs, transforms=TRAIN_TRANSFORMS), desc="Training MASK-RCNN"):
     # features = model.backbone(imgs.tensors)
     # proposals, _ = model.rpn(imgs, features, tgts)
-    pred = model(imgs, targets=tgts)
+    losses = model(imgs, targets=tgts)
 
 
   # NOTE: mask_rcnn accepts a List[Tensor] as its input.

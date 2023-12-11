@@ -31,23 +31,24 @@ class Resize:
       if max_original_size / min_original_size * size > max_size:
         size = int(round(max_size * min_original_size / max_original_size))
 
-      if (w <= h and w == size) or (h <= w and h == size):
-        return (h, w)
+    if (w <= h and w == size) or (h <= w and h == size):
+      return (h, w)
 
-      if w < h:
-        ow = size
-        oh = int(size * h / w)
-      else:
-        oh = size
-        ow = int(size * w / h)
+    if w < h:
+      ow = size
+      oh = int(size * h / w)
+    else:
+      oh = size
+      ow = int(size * w / h)
 
-      return (oh, ow)
+    return (oh, ow)
 
   # TODO: update to work with example
   def __call__(self, image, target=None):
     size = self.get_size(image.size)
     image = Ft.resize(image, size)
     if target is not None: target = target.resize(image.size)
+    print(f"image has size: {image.size}")
     return image, target
 
 

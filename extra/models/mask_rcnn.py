@@ -3,11 +3,13 @@ import math
 import os
 import numpy as np
 import torch
+import pycocotools.mask as mask_utils
 from pathlib import Path
 from tinygrad import nn
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, get_child, fetch
 from tinygrad.nn.state import torch_load
+from tinygrad.shape.symbolic import Node
 from typing import Tuple
 from extra.models.resnet import ResNet
 from extra.models.retinanet import nms as _box_nms
@@ -273,8 +275,11 @@ class BoxList:
       if sum(item) == len(item) and isinstance(item[0], bool):
         return self
     bbox = BoxList(tensor_gather(self.bbox, item), self.size, self.mode)
-    for k, v in self.extra_fields.items():
-      bbox.add_field(k, tensor_gather(v, item))
+    try:
+      for k, v in self.extra_fields.items():
+        bbox.add_field(k, tensor_gather(v, item))
+    except:
+      return bbox
     return bbox
 
   def __len__(self):
@@ -290,7 +295,199 @@ class BoxList:
       elif not skip_missing:
         raise KeyError("Field '{}' not found in {}".format(field, self))
     return bbox
+  
+  def crop(self, box):
+    """
+    Cropss a rectangular region from this bounding box. The box is a
+    4-tuple defining the left, upper, right, and lower pixel
+    coordinate.
+    """
+    xmin, ymin, xmax, ymax = self._split_into_xyxy()
+    w, h = box[2] - box[0], box[3] - box[1]
+    cropped_xmin = (xmin - box[0]).clamp(min=0, max=w)
+    cropped_ymin = (ymin - box[1]).clamp(min=0, max=h)
+    cropped_xmax = (xmax - box[0]).clamp(min=0, max=w)
+    cropped_ymax = (ymax - box[1]).clamp(min=0, max=h)
 
+    # TODO should I filter empty boxes here?
+    if False:
+        is_empty = (cropped_xmin == cropped_xmax) | (cropped_ymin == cropped_ymax)
+
+    cropped_box = torch.cat(
+        (cropped_xmin, cropped_ymin, cropped_xmax, cropped_ymax), dim=-1
+    )
+    bbox = BoxList(cropped_box, (w, h), mode="xyxy")
+    # bbox._copy_extra_fields(self)
+    for k, v in self.extra_fields.items():
+        if not isinstance(v, torch.Tensor):
+            v = v.crop(box)
+        bbox.add_field(k, v)
+    return bbox.convert(self.mode)
+  
+class Polygons(object):
+  """
+  This class holds a set of polygons that represents a single instance
+  of an object mask. The object can be represented as a set of
+  polygons
+  """
+
+  def __init__(self, polygons, size, mode):
+    # assert isinstance(polygons, list), '{}'.format(polygons)
+    if isinstance(polygons, list):
+      polygons = [torch.as_tensor(p, dtype=torch.float32) for p in polygons]
+    elif isinstance(polygons, Polygons):
+      polygons = polygons.polygons
+
+    self.polygons = polygons
+    self.size = size
+    self.mode = mode
+
+  def transpose(self, method):
+    if method not in (FLIP_LEFT_RIGHT, FLIP_TOP_BOTTOM):
+      raise NotImplementedError(
+          "Only FLIP_LEFT_RIGHT and FLIP_TOP_BOTTOM implemented"
+      )
+
+    flipped_polygons = []
+    width, height = self.size
+    if method == FLIP_LEFT_RIGHT:
+      dim = width
+      idx = 0
+    elif method == FLIP_TOP_BOTTOM:
+      dim = height
+      idx = 1
+
+    for poly in self.polygons:
+      p = poly.clone()
+      TO_REMOVE = 1
+      p[idx::2] = dim - poly[idx::2] - TO_REMOVE
+      flipped_polygons.append(p)
+
+    return Polygons(flipped_polygons, size=self.size, mode=self.mode)
+
+  def crop(self, box):
+    w, h = box[2] - box[0], box[3] - box[1]
+
+    # TODO chck if necessary
+    w = max(w, 1)
+    h = max(h, 1)
+
+    cropped_polygons = []
+    for poly in self.polygons:
+      p = poly.clone()
+      p[0::2] = p[0::2] - box[0]  # .clamp(min=0, max=w)
+      p[1::2] = p[1::2] - box[1]  # .clamp(min=0, max=h)
+      cropped_polygons.append(p)
+
+    return Polygons(cropped_polygons, size=(w, h), mode=self.mode)
+
+  def resize(self, size, *args, **kwargs):
+    ratios = tuple(float(s) / float(s_orig) for s, s_orig in zip(size, self.size))
+    if ratios[0] == ratios[1]:
+        ratio = ratios[0]
+        scaled_polys = [p * ratio for p in self.polygons]
+        return Polygons(scaled_polys, size, mode=self.mode)
+
+    ratio_w, ratio_h = ratios
+    scaled_polygons = []
+    for poly in self.polygons:
+        p = poly.clone()
+        p[0::2] *= ratio_w
+        p[1::2] *= ratio_h
+        scaled_polygons.append(p)
+
+    return Polygons(scaled_polygons, size=size, mode=self.mode)
+
+  def convert(self, mode):
+    width, height = self.size
+    if mode == "mask":
+      rles = mask_utils.frPyObjects(
+          [p.numpy() for p in self.polygons], height, width
+      )
+      rle = mask_utils.merge(rles)
+      mask = mask_utils.decode(rle)
+      mask = torch.from_numpy(mask)
+      # TODO add squeeze?
+      return mask
+
+  def __repr__(self):
+    s = self.__class__.__name__ + "("
+    s += "num_polygons={}, ".format(len(self.polygons))
+    s += "image_width={}, ".format(self.size[0])
+    s += "image_height={}, ".format(self.size[1])
+    s += "mode={})".format(self.mode)
+    return s
+
+class SegmentationMask:
+  """
+  This class stores the segmentations for all objects in the image
+  """
+
+  def __init__(self, polygons, size, mode=None):
+    """
+    Arguments:
+      polygons: a list of list of lists of numbers. The first
+          level of the list correspond to individual instances,
+          the second level to all the polygons that compose the
+          object, and the third level to the polygon coordinates.
+    """
+    assert isinstance(polygons, list)
+
+    self.polygons = [Polygons(p, size, mode) for p in polygons]
+    self.size = size
+    self.mode = mode
+
+  def transpose(self, method):
+    if method not in (FLIP_LEFT_RIGHT, FLIP_TOP_BOTTOM):
+        raise NotImplementedError(
+            "Only FLIP_LEFT_RIGHT and FLIP_TOP_BOTTOM implemented"
+        )
+
+    flipped = []
+    for polygon in self.polygons:
+        flipped.append(polygon.transpose(method))
+    return SegmentationMask(flipped, size=self.size, mode=self.mode)
+
+  def crop(self, box):
+    w, h = box[2] - box[0], box[3] - box[1]
+    cropped = []
+    for polygon in self.polygons:
+      cropped.append(polygon.crop(box))
+    return SegmentationMask(cropped, size=(w, h), mode=self.mode)
+
+  def resize(self, size, *args, **kwargs):
+    scaled = []
+    for polygon in self.polygons:
+      scaled.append(polygon.resize(size, *args, **kwargs))
+    return SegmentationMask(scaled, size=size, mode=self.mode)
+
+  def to(self, *args, **kwargs):
+    return self
+
+  def __getitem__(self, item):
+    if isinstance(item, (int, slice)):
+      selected_polygons = [self.polygons[item]]
+    else:
+      # advanced indexing on a single dimension
+      selected_polygons = []
+      if isinstance(item, torch.Tensor) and \
+              (item.dtype == torch.uint8 or item.dtype == torch.bool):
+        item = item.nonzero()
+        item = item.squeeze(1) if item.numel() > 0 else item
+        item = item.tolist()
+      for i in item:
+        selected_polygons.append(self.polygons[i])
+    return SegmentationMask(selected_polygons, size=self.size, mode=self.mode)
+
+  def __iter__(self):
+    return iter(self.polygons)
+
+  def __repr__(self):
+    s = self.__class__.__name__ + "("
+    s += "num_instances={}, ".format(len(self.polygons))
+    s += "image_width={}, ".format(self.size[0])
+    s += "image_height={})".format(self.size[1])
+    return s
 
 def cat_boxlist(bboxes):
   size = bboxes[0].size
@@ -343,8 +540,9 @@ class FPN:
     return tuple(results)
 
 class ResNetFPN:
-  def __init__(self, resnet, out_channels=256):
+  def __init__(self, resnet, out_channels=256, training=True):
     self.out_channels = out_channels
+    self.training = training
     self.body = resnet
     in_channels_stage2 = 256
     in_channels_list = [
@@ -356,7 +554,8 @@ class ResNetFPN:
     self.fpn = FPN(in_channels_list, out_channels)
 
   def __call__(self, x):
-    x = self.body(x)
+    # NOTE: this ensures that `BatchNorm2d` behaves similar to mlperf's implementation of FrozenBatchNorm2d
+    with Tensor.train(val=not self.training): x = self.body(x)
     return self.fpn(x)
 
 class AnchorGenerator:
@@ -668,7 +867,7 @@ class RPNPostProcessor:
       result.append(boxlist)
     return result
 
-  def __call__(self, anchors, objectness, box_regression):
+  def __call__(self, anchors, objectness, box_regression, targets=None):
     sampled_boxes = []
     num_levels = len(objectness)
     anchors = list(zip(*anchors))
@@ -680,6 +879,9 @@ class RPNPostProcessor:
 
     if num_levels > 1:
       boxlists = self.select_over_all_levels(boxlists)
+
+    if targets is not None:
+      boxlists = self.add_gt_proposals(boxlists, targets)
 
     return boxlists
 
@@ -693,6 +895,17 @@ class RPNPostProcessor:
       )
       boxlists[i] = boxlists[i][inds_sorted]
     return boxlists
+ 
+  def add_gt_proposals(self, proposals, targets):
+    gt_boxes = [target.copy_with_fields([]) for target in targets]
+
+    # later cat of bbox requires all fields to be present for all bbox
+    # so we need to add a dummy for objectness that's missing
+    for gt_box in gt_boxes:
+      gt_box.add_field("objectness", Tensor.ones(len(gt_box)))
+
+    proposals = [cat_boxlist((proposal, gt_box)) for proposal, gt_box in zip(proposals, gt_boxes)]
+    return proposals
 
 
 class RPN:
@@ -704,6 +917,14 @@ class RPN:
       in_channels, self.anchor_generator.num_anchors_per_location()[0]
     )
     rpn_box_coder = BoxCoder(weights=(1.0, 1.0, 1.0, 1.0))
+    box_selector_train = RPNPostProcessor(
+      pre_nms_top_n=2000,
+      post_nms_top_n=2000,
+      nms_thresh=0.7,
+      min_size=0,
+      box_coder=rpn_box_coder,
+      fpn_post_nms_top_n=2000
+    )
     box_selector_test = RPNPostProcessor(
         pre_nms_top_n=1000,
         post_nms_top_n=1000,
@@ -713,13 +934,28 @@ class RPN:
         fpn_post_nms_top_n=1000
     )
     self.head = head
+    self.box_selector_train = box_selector_train
     self.box_selector_test = box_selector_test
+    self.loss_evaluator = self.create_loss_evaluator(rpn_box_coder)
+    # TODO: create loss_evaluator here
 
   def __call__(self, images, features, targets=None):
     objectness, rpn_box_regression = self.head(features)
     anchors = self.anchor_generator(images, features)
-    boxes = self.box_selector_test(anchors, objectness, rpn_box_regression)
-    return boxes, {}
+    if targets is not None:
+      with Tensor.train(val=False):
+        boxes = self.box_selector_train(anchors, objectness, rpn_box_regression, targets=targets)
+
+      loss_objectness, loss_rpn_box_neg = self.loss_evaluator(anchors, objectness, rpn_box_regression, targets)
+      return boxes, {"loss_objectness": loss_objectness, "loss_rpn_box_neg": loss_rpn_box_neg}
+    else:
+      boxes = self.box_selector_test(anchors, objectness, rpn_box_regression)
+      return boxes, {}
+    
+  def create_loss_evaluator(self, rpn_box_coder):
+    matcher = Matcher(0.7, 0.3, allow_low_quality_matches=True)
+    fg_bg_sampler = BalancedPositiveNegativeSampler(256, 0.5)
+    return RPNLossComputation(matcher, fg_bg_sampler, rpn_box_coder, generate_rpn_labels)
 
 
 def make_conv3x3(
@@ -1124,23 +1360,23 @@ class PostProcessor:
 
 class RoIBoxHead:
   def __init__(self, in_channels):
+    box_coder = BoxCoder((10., 10., 5., 5.))
+    matcher = Matcher(0.5, 0.5, allow_low_quality_matches=False)
+    fg_bg_sampler = BalancedPositiveNegativeSampler(512, 0.25)
+
     self.feature_extractor = FPN2MLPFeatureExtractor(in_channels)
     self.predictor = FPNPredictor()
     self.post_processor = PostProcessor(
         score_thresh=0.05,
         nms=0.5,
         detections_per_img=100,
-        box_coder=BoxCoder(weights=(10., 10., 5., 5.)),
+        box_coder=box_coder,
         cls_agnostic_bbox_reg=False
     )
-
-    matcher = Matcher(0.5, 0.5, allow_low_quality_matches=False)
-    box_coder = BoxCoder((10., 10., 5., 5.))
-    fg_bg_sampler = BalancedPositiveNegativeSampler(512, 0.25)
     self.loss_evaluator = FastRCNNLossComputation(matcher, fg_bg_sampler, box_coder, cls_agnostic_bbox_reg=False)
 
   def __call__(self, features, proposals, targets=None):
-    if Tensor.training:
+    if targets is not None:
       with Tensor.train(val=False):
         proposals = self.loss_evaluator.subsample(proposals, targets)
 
@@ -1151,9 +1387,8 @@ class RoIBoxHead:
       result = self.post_processor((class_logits, box_regression), proposals)
       return x, result, {}
     
-    # loss_classifier, loss_box_reg = self.loss_evaluator([class_logits], [box_regression])
-    # return x, proposals, dict(loss_classifier=loss_classifier, loss_box_reg=loss_box_reg)
-    return x, proposals, {}
+    loss_classifier, loss_box_reg = self.loss_evaluator([class_logits], [box_regression])
+    return x, proposals, dict(loss_classifier=loss_classifier, loss_box_reg=loss_box_reg)
 
 
 class MaskPostProcessor:
@@ -1188,15 +1423,27 @@ class Mask:
     self.feature_extractor = MaskRCNNFPNFeatureExtractor()
     self.predictor = MaskRCNNC4Predictor()
     self.post_processor = MaskPostProcessor()
+    self.loss_evaluator = self.create_loss_evaluator()
 
   def __call__(self, features, proposals, targets=None):
+    if targets is not None:
+      all_proposals = proposals
+      proposals, _ = keep_only_positive_boxes(proposals)
+
     x = self.feature_extractor(features, proposals)
     if x:
       mask_logits = self.predictor(x)
-      if not Tensor.training:
-        result = self.post_processor(mask_logits, proposals)
-        return x, result, {}
-    return x, [], {}
+      # TODO: Fix this issue when we start to introduce SegmentationMasks
+      # if targets is not None:
+      #   loss_mask = self.loss_evaluator(proposals, mask_logits, targets)
+      #   return x, all_proposals, dict(loss_mask=loss_mask)
+      # else:
+      result = self.post_processor(mask_logits, proposals)
+      return x, result, {}
+      
+  def create_loss_evaluator(self):
+    matcher = Matcher(0.5, 0.5, allow_low_quality_matches=False)
+    return MaskRCNNLossComputation(matcher, 28)
 
 
 class RoIHeads:
@@ -1205,9 +1452,9 @@ class RoIHeads:
     self.mask = Mask()
 
   def __call__(self, features, proposals, targets=None):
-    x, detections, _ = self.box(features, proposals, targets)
-    x, detections, _ = self.mask(features, detections, targets)
-    return x, detections, {}
+    x, detections, loss_box = self.box(features, proposals, targets)
+    x, detections, loss_mask = self.mask(features, detections, targets)
+    return x, detections, dict(loss_box=loss_box, loss_mask=loss_mask)
 
 
 class ImageList(object):
@@ -1302,6 +1549,7 @@ class Matcher(object):
         [0, M - 1] or a negative value indicating that prediction i could not
         be matched.
     """
+    match_quality_matrix = torch.from_numpy(match_quality_matrix.numpy())
     if match_quality_matrix.numel() == 0:
       # empty targets or proposals not supported during training
       if match_quality_matrix.shape[0] == 0:
@@ -1315,11 +1563,10 @@ class Matcher(object):
 
     # match_quality_matrix is M (gt) x N (predicted)
     # Max over gt elements (dim 0) to find best gt candidate for each prediction
-    matched_vals, matches = torch.from_numpy(match_quality_matrix.numpy()).max(axis=0)
+    matched_vals, matches = match_quality_matrix.max(dim=0)
     # matched_vals, matches = Tensor(matched_vals.numpy()), Tensor(matches.numpy())
     if self.allow_low_quality_matches:
-        raise NotImplementedError
-        # all_matches = matches.clone()
+      all_matches = matches.clone()
 
     # Assign candidate matches with low quality to negative (unassigned) values
     below_low_threshold = matched_vals < self.low_threshold
@@ -1330,8 +1577,7 @@ class Matcher(object):
     matches[between_thresholds] = Matcher.BETWEEN_THRESHOLDS
 
     if self.allow_low_quality_matches:
-        raise NotImplementedError
-        # self.set_low_quality_matches_(matches, all_matches, match_quality_matrix)
+        self.set_low_quality_matches_(matches, all_matches, match_quality_matrix)
 
     return Tensor(matches.numpy())
 
@@ -1507,12 +1753,13 @@ class FastRCNNLossComputation:
     labels = Tensor.cat(*[proposal.get_field("labels") for proposal in proposals])
     regression_targets = Tensor.cat(*[proposal.get_field("regression_targets") for proposal in proposals])
 
-    classification_loss = Tensor.binary_crossentropy(class_logits, labels)
+    # TODO: figure this out
+    classification_loss = torch.nn.functional.cross_entropy(torch.from_numpy(class_logits.numpy()), torch.from_numpy(labels.numpy()).long())
 
     # get indices that correspond to the regression targets for
     # the corresponding ground truth labels, to be used with
     # advanced indexing
-    sampled_pos_inds_subset = nonzero(Tensor(labels > 0)).squeeze(1)
+    sampled_pos_inds_subset = nonzero(labels > 0)
     labels_pos = labels[sampled_pos_inds_subset]
     if self.cls_agnostic_bbox_reg:
       map_inds = Tensor([4, 5, 6, 7], device=device)
@@ -1528,6 +1775,56 @@ class FastRCNNLossComputation:
     box_loss = box_loss / labels.numel()
     return classification_loss, box_loss
 
+class MaskRCNNLossComputation:
+  def __init__(self, proposal_matcher, discretization_size):
+    self.proposal_matcher = proposal_matcher
+    self.discretization_size = discretization_size
+
+  def match_targets_to_proposals(self, proposal, target):
+    match_quality_matrix = boxlist_iou(target, proposal)
+    matched_idxs = self.proposal_matcher(match_quality_matrix)
+    # Fast RCNN only need "labels" field for selecting the targets
+    target = target.copy_with_fields("labels")
+    # get the targets corresponding GT for each proposal
+    # NB: need to clamp the indices because we can have a single
+    # GT in the image, and matched_idxs can be -2, which goes
+    # out of bounds
+    matched_targets = target[matched_idxs.maximum(0)]
+    return matched_targets, matched_idxs
+  
+  def prepare_targets(self, proposals, targets):
+    labels, masks = [], []
+    for proposals_per_image, targets_per_image in zip(proposals, targets):
+      matched_targets, matched_idxs = self.match_targets_to_proposals(proposals_per_image, targets_per_image)
+
+      labels_per_image = matched_targets.get_field("labels").cast(dtypes.int64)
+      labels_per_image = (matched_idxs == Matcher.BELOW_LOW_THRESHOLD).where(0, labels_per_image)
+
+      positive_inds = nonzero(labels_per_image > 0)
+
+      segmentation_masks = matched_targets.get_field("masks")
+      segmentation_masks = segmentation_masks[positive_inds]
+
+      positive_proposals = proposals_per_image[positive_inds]
+
+      masks_per_image = project_masks_on_boxes(segmentation_masks, positive_proposals, self.discretization_size)
+
+      labels.append(labels_per_image)
+      masks.append(masks_per_image)
+
+    return labels, masks
+  
+  def __call__(self, proposals, mask_logits, targets):
+    labels, mask_targets = self.prepare_targets(proposals, targets)
+    labels, mask_targets = Tensor.cat(*labels), Tensor.cat(*mask_targets)
+
+    positive_inds = nonzero(labels > 0)
+    labels_pos = labels[positive_inds]
+
+    if mask_targets.numel() == 0: return mask_logits.sum() * 0
+
+    return Tensor.binary_crossentropy_logits(mask_logits[positive_inds, labels_pos], mask_targets)
+
 class RPNLossComputation:
   def __init__(self, proposal_matcher, fg_bg_sampler, box_coder, generate_labels_func):
     self.proposal_matcher = proposal_matcher
@@ -1540,7 +1837,7 @@ class RPNLossComputation:
     anchors = [cat_boxlist(anchors_per_image) for anchors_per_image in anchors]
     labels, regression_targets = self.prepare_targets(anchors, targets)
     sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
-    sampled_pos_inds, sampled_neg_inds = nonzero(Tensor.cat(sampled_pos_inds)), nonzero(Tensor.cat(sampled_neg_inds))
+    sampled_pos_inds, sampled_neg_inds = nonzero(Tensor.cat(*sampled_pos_inds)), nonzero(Tensor.cat(*sampled_neg_inds))
     sampled_inds = sampled_pos_inds.cat(sampled_neg_inds)
 
     objectness, box_regression = concat_box_prediction_layers(objectness, box_regression)
@@ -1562,19 +1859,19 @@ class RPNLossComputation:
     for anchors_per_image, targets_per_image in zip(anchors, targets):
       matched_targets, matched_idxs = self.match_targets_to_anchors(anchors_per_image, targets_per_image)
 
-      labels_per_images = self.generate_labels_func(matched_idxs)
-      labels_per_images = labels_per_images.cast(dtypes.float32)
-      labels_per_images = (matched_idxs == -1).where(0, labels_per_images)
+      labels_per_image = self.generate_labels_func(matched_idxs)
+      labels_per_image = labels_per_image.cast(dtypes.float32)
+      labels_per_image = (matched_idxs == -1).where(0, labels_per_image)
 
       if "not_visibility" in self.discard_cases:
-        mask = tilde(anchors_per_image.bbox).cast(dtypes.bool)
-        labels_per_images = mask.where(-1, labels_per_images)
+        mask = tilde(anchors_per_image.get_field("visibility").cast(dtypes.bool))
+        labels_per_image = mask.where(-1, labels_per_image)
 
       if "between_thresholds" in self.discard_cases:
-        labels_per_images = (matched_idxs == -2).where(-1, labels_per_images)
+        labels_per_image = (matched_idxs == -2).where(-1, labels_per_image)
 
       regression_targets_per_image = self.box_coder.encode(matched_targets.bbox, anchors_per_image.bbox)
-      labels.append(labels_per_images)
+      labels.append(labels_per_image)
       regression_targets.append(regression_targets_per_image)
 
     return labels, regression_targets
@@ -1629,6 +1926,62 @@ def tilde(x: Tensor) -> Tensor:
   if x.dtype == dtypes.bool: return (1 - x).cast(dtypes.bool)
   return (x + 1) * -1  # this seems to be what the ~ operator does in pytorch for non bool
 
+def project_masks_on_boxes(segmentation_masks, proposals, discretization_size):
+  """ Given segmentation masks and the bounding boxes corresponding
+  to the location of the masks in the image, this function
+  crops and resizes the masks in the position defined by the
+  boxes. This prepares the masks for them to be fed to the
+  loss computation as the targets.
+
+  Arguments:
+      segmentation_masks: an instance of SegmentationMask
+      proposals: an instance of BoxList
+  """
+  masks = []
+  M = discretization_size
+  device = proposals.bbox.device
+  proposals = proposals.convert("xyxy")
+  assert segmentation_masks.size == proposals.size, "{}, {}".format(
+    segmentation_masks, proposals
+  )
+  # TODO put the proposals on the CPU, as the representation for the
+  # masks is not efficient GPU-wise (possibly several small tensors for
+  # representing a single instance mask)
+  proposals = proposals.bbox
+  for segmentation_mask, proposal in zip(segmentation_masks, proposals):
+    # crop the masks, resize them to the desired resolution and
+    # then convert them to the tensor representation,
+    # instead of the list representation that was used
+    cropped_mask = segmentation_mask.crop(proposal)
+    scaled_mask = cropped_mask.resize((M, M))
+    mask = scaled_mask.convert(mode="mask")
+    masks.append(mask)
+  if len(masks) == 0:
+    return Tensor.empty(0, dtype=dtypes.float32)
+  return masks.stack(dim=0).cast(dtypes.float32)
+
+def keep_only_positive_boxes(boxes):
+  """
+  Given a set of BoxList containing the `labels` field,
+  return a set of BoxList for which `labels > 0`.
+
+  Arguments:
+      boxes (list of BoxList)
+  """
+  assert isinstance(boxes, (list, tuple))
+  assert isinstance(boxes[0], BoxList)
+  assert boxes[0].has_field("labels")
+  positive_boxes = []
+  positive_inds = []
+  num_boxes = 0
+  for boxes_per_image in boxes:
+    labels = boxes_per_image.get_field("labels")
+    inds_mask = labels > 0
+    inds = nonzero(inds_mask)
+    positive_boxes.append(boxes_per_image[inds])
+    positive_inds.append(inds_mask)
+  return positive_boxes, positive_inds
+
 class MaskRCNN:
   def __init__(self, backbone: ResNet):
     self.backbone = ResNetFPN(backbone, out_channels=256)
@@ -1662,8 +2015,10 @@ class MaskRCNN:
 
     images = to_image_list(images)
     features = self.backbone(images.tensors)
-    proposals, _ = self.rpn(images, features, targets=targets)
-    x, result, _ = self.roi_heads(features, proposals, targets=targets)
+    proposals, proposal_losses = self.rpn(images, features, targets=targets)
+    x, result, detector_losses = self.roi_heads(features, proposals, targets=targets)
+
+    if targets is not None: return dict(detector_losses=detector_losses, proposal_losses=proposal_losses)
     return result
 
 

@@ -7,6 +7,7 @@ from tinygrad.helpers import fetch
 from tinygrad.tensor import Tensor
 from typing import List
 import pycocotools._mask as _mask
+from extra.models.mask_rcnn import SegmentationMask
 from examples.mask_rcnn import Masker, Resize, ToTensor, Normalize, BoxList
 from PIL import Image
 from pycocotools.coco import COCO
@@ -237,13 +238,15 @@ def filter_ids(ids:List[str], coco:COCO, is_val:bool = False) -> List[str]:
     ann_ids = coco.getAnnIds(imgIds=id)
     anno = coco.loadAnns(ids=ann_ids)
     if has_valid_annotation(anno): filtered_ids.append(id)
-  return filtered_ids
+  return [9] # TODO: remove this after debugging
+  # return filtered_ids
 
 def load_sample(coco:COCO, img_ids:List[str], idx:int, transforms=None, is_val:bool = False):
   _json_category_id_to_contiguous_id = {v: i + 1 for i, v in enumerate(coco.getCatIds())}
   try:
     img_id = img_ids[idx]
     filename = coco.loadImgs(ids=img_id)[0]["file_name"]
+    print(f"filename is: {filename}")
     img = Image.open(BASEDIR/f"{'val2017' if is_val else 'train2017'}"/filename).convert("RGB")
     anno = coco.loadAnns(coco.getAnnIds(imgIds=img_id))
     anno = [obj for obj in anno if obj["iscrowd"] == 0]
@@ -255,6 +258,10 @@ def load_sample(coco:COCO, img_ids:List[str], idx:int, transforms=None, is_val:b
     classes = [_json_category_id_to_contiguous_id[c] for c in classes]
     classes = Tensor(classes)
     target.add_field("labels", classes)
+
+    masks = [obj["segmentation"] for obj in anno]
+    masks = SegmentationMask(masks, img.size)
+    target.add_field("masks", masks)
 
     target = target.clip_to_image()
 

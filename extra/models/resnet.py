@@ -1,7 +1,7 @@
 import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
-from tinygrad.nn.state import torch_load, load_state_dict
-from tinygrad.helpers import fetch, get_child
+from tinygrad.nn.state import torch_load, get_parameters
+from tinygrad.helpers import fetch, get_child, DEBUG
 
 class BasicBlock:
   expansion = 1
@@ -85,6 +85,7 @@ class ResNet:
     self.layer3 = self._make_layer(self.block, 256, self.num_blocks[2], stride=2, stride_in_1x1=stride_in_1x1)
     self.layer4 = self._make_layer(self.block, 512, self.num_blocks[3], stride=2, stride_in_1x1=stride_in_1x1)
     self.fc = nn.Linear(512 * self.block.expansion, num_classes) if num_classes is not None else None
+    self.num_layers = len([(self.conv1, self.bn1), self.layer1, self.layer2, self.layer3, self.layer4])
 
   def _make_layer(self, block, planes, num_blocks, stride, stride_in_1x1):
     strides = [stride] + [1] * (num_blocks-1)
@@ -132,19 +133,30 @@ class ResNet:
     }
 
     self.url = model_urls[(self.num, self.groups, self.base_width)]
-    state_dict = torch_load(fetch(self.url))
-    load_state_dict(self, state_dict, strict=False)
-    # for k, v in torch_load(fetch(self.url)).items():
-    #   obj: Tensor = get_child(self, k)
-    #   dat = v.detach().numpy()
+    for k, v in torch_load(fetch(self.url)).items():
+      obj: Tensor = get_child(self, k)
+      dat = v.detach().numpy()
 
-    #   if 'fc.' in k and obj.shape != dat.shape:
-    #     print("skipping fully connected layer")
-    #     continue # Skip FC if transfer learning
+      if 'fc.' in k and obj.shape != dat.shape:
+        print("skipping fully connected layer")
+        continue # Skip FC if transfer learning
 
-    #   # TODO: remove or when #777 is merged
-    #   assert obj.shape == dat.shape or (obj.shape == (1,) and dat.shape == ()), (k, obj.shape, dat.shape)
-    #   obj.assign(dat)
+      # TODO: remove or when #777 is merged
+      assert obj.shape == dat.shape or (obj.shape == (1,) and dat.shape == ()), (k, obj.shape, dat.shape)
+      obj.assign(dat)
+
+  def freeze_model(self, freeze_at: int):
+    if freeze_at < 0:
+      if DEBUG >= 1: print("not freezing model")
+      return
+    
+    for i in range(self.num_layers):
+      if i == 0: mods = [self.conv1, self.bn1]
+      else: mods = [getattr(self, f"layer{i}")]
+
+      for mod in mods:
+        for p in get_parameters(mod):
+          p.requires_grad = False
 
 ResNet18 = lambda num_classes=1000: ResNet(18, num_classes=num_classes)
 ResNet34 = lambda num_classes=1000: ResNet(34, num_classes=num_classes)
