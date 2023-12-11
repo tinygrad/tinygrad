@@ -191,15 +191,28 @@ class TestEqStrDType(unittest.TestCase):
     self.assertEqual(str(PtrDType(dtypes.float32)), "ptr.dtypes.float")
 
 class TestHelpers(unittest.TestCase):
-  def test_helpers(self):
-    self.assertTrue(dtypes.is_int(dtypes.int8))
-    self.assertTrue(dtypes.is_int(dtypes.int.vec(4)))
-    self.assertTrue(dtypes.is_unsigned(dtypes.uint8))
-    self.assertTrue(dtypes.is_unsigned(dtypes.uint32.vec(4)))
-    self.assertTrue(dtypes.is_float(dtypes.float))
-    self.assertTrue(dtypes.is_float(dtypes.float.vec(4)))
-    self.assertFalse(dtypes.is_int(dtypes.float))
-    self.assertFalse(dtypes.is_int(dtypes.float.vec(4)))
+  signed_ints = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)
+  uints = (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
+  floats = (dtypes.float16, dtypes.float32, dtypes.float64)
+
+  @given(st.sampled_from(signed_ints+uints), st.integers(min_value=1, max_value=8))
+  def test_is_int(self, dtype, amt):
+    assert dtypes.is_int(dtype.vec(amt) if amt > 1 else dtype)
+    assert not dtypes.is_float(dtype.vec(amt) if amt > 1 else dtype)
+
+  @given(st.sampled_from(uints), st.integers(min_value=1, max_value=8))
+  def test_is_unsigned_uints(self, dtype, amt):
+    assert dtypes.is_unsigned(dtype.vec(amt) if amt > 1 else dtype)
+
+  @given(st.sampled_from(signed_ints), st.integers(min_value=1, max_value=8))
+  def test_is_unsigned_signed_ints(self, dtype, amt):
+    assert not dtypes.is_unsigned(dtype.vec(amt) if amt > 1 else dtype)
+
+  @given(st.sampled_from(floats), st.integers(min_value=1, max_value=8))
+  def test_is_float(self, dtype, amt):
+    assert dtypes.is_float(dtype.vec(amt) if amt > 1 else dtype)
+    assert not dtypes.is_int(dtype.vec(amt) if amt > 1 else dtype)
+    assert not dtypes.is_unsigned(dtype.vec(amt) if amt > 1 else dtype)
 
   @given(st.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_float(d) or dtypes.is_int(d)]), st.integers(min_value=2, max_value=8))
   def test_scalar(self, dtype, amt):
