@@ -1,11 +1,9 @@
-import functools
+import functools, argparse
 from tqdm import tqdm
 from tinygrad import Tensor, nn, Device, dtypes, GlobalCounters
+from tinygrad.helpers import Timing
 from tinygrad.nn.state import torch_load, get_state_dict
 from extra.models.llama import FeedForward, Transformer
-
-def fake_bfloat16_to_float16(x, device):
-  return x.to("CLANG").contiguous().to(device).cast(dtypes.uint32).mul(1<<16).contiguous().bitcast(dtypes.float32).half()
 
 class MixtureFeedForward:
   def __init__(self, num_experts:int, dim:int, hidden_dim:int, linear=nn.Linear):
@@ -17,15 +15,17 @@ class MixtureFeedForward:
     choice = g.data().tolist()[0][0]
     top = sorted(enumerate(choice), key=lambda x: -x[1])
     norm = top[0][1] + top[1][1]
-    e1 = self.experts[top[0][0]]
-    e2 = self.experts[top[1][0]]
-    e1_dev = e1.w1.weight.device
-    e2_dev = e2.w1.weight.device
-    #print(top[0][1]/norm, top[1][1]/norm)
-    ret = e1(x.to(e1_dev)).to(x.device) * (top[0][1]/norm) + e2(x.to(e2_dev)).to(x.device) * (top[1][1]/norm)
+    e1, e2 = self.experts[top[0][0]], self.experts[top[1][0]]
+    ret = e1(x.to(e1.w1.weight.device)).to(x.device) * (top[0][1]/norm) + e2(x.to(e2.w1.weight.device)).to(x.device) * (top[1][1]/norm)
     return ret
 
 if __name__ == "__main__":
+  parser = argparse.ArgumentParser(description="Run LLaMA in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser.add_argument("--count", type=int, default=30, help="Max number of tokens to generate")
+  parser.add_argument("--temperature", type=float, default=0.7, help="Temperature in the softmax")
+  parser.add_argument("--timing", action="store_true", help="Print timing per token")
+  args = parser.parse_args()
+
   state = torch_load("/home/tiny/Downloads/mixtral-8x7b-32kseqlen/consolidated.00.pth.b")
   model = Transformer(n_layers=32, dim=4096, hidden_dim=14336, n_heads=32, n_kv_heads=8, norm_eps=1e-5, vocab_size=32000, feed_forward=functools.partial(MixtureFeedForward, 8), jit=False)
   model_state_dict = get_state_dict(model)
@@ -37,24 +37,18 @@ if __name__ == "__main__":
       device = Device.DEFAULT + ":" + str((expert_no//2)+1)
     else:
       device = Device.DEFAULT
-    #print(k, state[k].shape, device)
-    model_state_dict[k].assign(fake_bfloat16_to_float16(state[k], device)).realize()
-
-  #for k,v in get_state_dict(model).items():
-  #  if k in {'freqs_cis'}: continue
-  #  v.assign(fake_bfloat16_to_float16(state[k]))
+    # NOTE: we have to copy through CLANG to avoid the HIP hang bug when copying directly from the DISK
+    model_state_dict[k].assign(state[k].to("CLANG").contiguous().to(device).half()).realize()
 
   from sentencepiece import SentencePieceProcessor
   spp = SentencePieceProcessor(model_file="/home/tiny/Downloads/mixtral-8x7b-32kseqlen/tokenizer.model")
 
-  toks = [spp.bos_id()] # + spp.encode("hello")
-  #print(toks)
+  toks = [spp.bos_id()]
   start_pos = 0
-  temperature = 0 #.7
-
-  for i in range(30):
+  for i in range(args.count):
     GlobalCounters.reset()
-    tok = model(Tensor([toks[start_pos:]]), start_pos, temperature).multinomial().item()
+    with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
+      tok = model(Tensor([toks[start_pos:]]), start_pos, args.temperature).multinomial().item()
     toks.append(tok)
     start_pos += 1
     print(spp.decode(toks))
