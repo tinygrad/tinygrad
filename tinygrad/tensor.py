@@ -7,7 +7,7 @@ from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
 
-from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int, round_up
+from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int, round_up, merge_dicts
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
@@ -513,29 +513,28 @@ class Tensor:
   def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
 
   @staticmethod
-  def einsum(formula, *xs) -> Tensor:
-    xs = argfix(*xs)
-    lhs, rhs = formula.split("->")
-    lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in lhs.split(',')]
-    rhs = sorted(enumerate(rhs), key=lambda e:e[1])
+  def einsum(formula:str, *raw_xs) -> Tensor:
+    xs:Tuple[Tensor] = argfix(*raw_xs)
+    inputs_str, output = formula.split("->")
+    inputs = [x for x in inputs_str.split(',')]
+    assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
 
-    assert len(xs) == len(lhs), f"number of inputs doesn't match number of operands in formula, expected {len(lhs)}, got {len(xs)}"
+    # map the value of each letter in the formula
+    all_letter_val = sorted(merge_dicts([{letter:dim for letter, dim in zip(letters, tensor.shape)} for letters, tensor in zip(inputs, xs)]).items())
 
-    lhs, rhs = [[list(zip(*l)) for l in lhs], list(zip(*rhs)) or [[], []]]
-    dims = {}
-    for i, l in enumerate(lhs):
-      for order, letter in enumerate(l[1]):
-        if letter not in dims: dims[letter] = xs[i].shape[l[0][order]]
-        else: assert dims[letter] == xs[i].shape[l[0][order]], f"dims of the same index should all be equal in the inputs. expected {dims[letter]} for input #{i+1}, got {xs[i].shape[l[0][order]]}"
-    xs_ = [None]*len(xs)
-    for i,x in enumerate(xs):
-      xs_[i] = x.permute(lhs[i][0]) \
-        .reshape([dims[letter] if letter in lhs[i][1] else 1 for letter in sorted(dims.keys())]) \
-        .expand([e[1] for e in sorted(dims.items(), key=lambda e: e[0])])
+    xs_:List[Tensor] = []
+    lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in inputs]
+    for x,(order,letters) in zip(xs, [list(zip(*l)) for l in lhs]):
+      # permute to the sorted letter order, then reshape/expand to create dimensions for the missing letters
+      xs_.append(x.permute(order) \
+        .reshape([val if letter in letters else 1 for letter,val in all_letter_val]) \
+        .expand([val for _,val in all_letter_val]))
 
+    rhs_order, rhs_letters = tuple(zip(*sorted(enumerate(output), key=lambda e:e[1]))) or ([], [])
+    # sum over all axes that's not in the output, then permute to the output order
     return reduce(lambda a,b:a*b, xs_) \
-      .sum(axis=[axis for axis,letter in enumerate(sorted(dims.keys())) if letter not in rhs[1]]) \
-      .permute(rhs[0])
+      .sum(axis=[axis for axis,(letter,_) in enumerate(all_letter_val) if letter not in rhs_letters]) \
+      .permute(rhs_order)
 
   # ***** processing ops *****
 
