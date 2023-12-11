@@ -161,7 +161,7 @@ class TestTinygrad(unittest.TestCase):
 
     a = Tensor([1, 2, 3])
     b = Tensor.zeros_like(a, dtype=dtypes.int8)
-    assert a.dtype != b.dtype and a.dtype == dtypes.float32 and b.dtype == dtypes.int8, "a.dtype should be float and b.dtype should be char"
+    assert a.dtype != b.dtype and a.dtype == dtypes.int32 and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
     assert a.shape == b.shape, f"shape mismatch (Tensor.zeros_like){a.shape} != (torch){b.shape}"
 
   def test_ones_like_has_same_dtype_and_shape(self):
@@ -173,7 +173,7 @@ class TestTinygrad(unittest.TestCase):
 
     a = Tensor([1, 2, 3])
     b = Tensor.ones_like(a, dtype=dtypes.int8)
-    assert a.dtype != b.dtype and a.dtype == dtypes.float32 and b.dtype == dtypes.int8, "a.dtype should be float and b.dtype should be char"
+    assert a.dtype != b.dtype and a.dtype == dtypes.int32 and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
     assert a.shape == b.shape, f"shape mismatch (Tensor.ones_like){a.shape} != (torch){b.shape}"
 
   def test_ndim(self):
