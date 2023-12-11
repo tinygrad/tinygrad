@@ -7,8 +7,8 @@ from tinygrad.helpers import fetch
 from tinygrad.tensor import Tensor
 from typing import List
 import pycocotools._mask as _mask
-from extra.models.mask_rcnn import SegmentationMask
-from examples.mask_rcnn import Masker, Resize, ToTensor, Normalize, BoxList
+import extra.models.mask_rcnn as mask_rcnn
+from examples.mask_rcnn import Masker, Resize, ToTensor, Normalize
 from PIL import Image
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
@@ -252,7 +252,7 @@ def load_sample(coco:COCO, img_ids:List[str], idx:int, transforms=None, is_val:b
     anno = [obj for obj in anno if obj["iscrowd"] == 0]
     boxes = [obj["bbox"] for obj in anno]
     boxes = Tensor(boxes).reshape(-1, 4)
-    target = BoxList(boxes, img.size, mode="xywh").convert("xyxy")
+    target = mask_rcnn.BoxList(boxes, img.size, mode="xywh").convert("xyxy")
 
     classes = [obj["category_id"] for obj in anno]
     classes = [_json_category_id_to_contiguous_id[c] for c in classes]
@@ -260,7 +260,7 @@ def load_sample(coco:COCO, img_ids:List[str], idx:int, transforms=None, is_val:b
     target.add_field("labels", classes)
 
     masks = [obj["segmentation"] for obj in anno]
-    masks = SegmentationMask(masks, img.size)
+    masks = mask_rcnn.SegmentationMask(masks, img.size)
     target.add_field("masks", masks)
 
     target = target.clip_to_image()
