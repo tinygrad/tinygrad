@@ -36,8 +36,7 @@ def preprocess(im, imgsz=640, model_stride=32, model_pt=True):
   im = Tensor([compute_transform(x, new_shape=imgsz, auto=auto, stride=model_stride) for x in im])
   im = Tensor.stack(im) if im.shape[0] > 1 else im
   im = im[..., ::-1].permute(0, 3, 1, 2)  # BGR to RGB, BHWC to BCHW, (n, 3, h, w)
-  im /= 255  # 0 - 255 to 0.0 - 1.0
-  return im
+  return im/255 # 0 - 255 to 0.0 - 1.0
 
 # Post Processing functions
 def box_area(box):
@@ -50,8 +49,7 @@ def box_iou(box1, box2):
   inter = wh[:, :, 0] * wh[:, :, 1]
   area1 = box_area(box1)[:, None]
   area2 = box_area(box2)[None, :]
-  iou = inter / (area1 + area2 - inter)
-  return iou
+  return inter / (area1 + area2 - inter) #return iou
 
 def compute_nms(boxes, scores, iou_threshold):
   order, keep = scores.argsort()[::-1], []
@@ -315,11 +313,9 @@ class Darknet:
     return [*self.b1, *self.b2, *self.b3, *self.b4, *self.b5]
 
   def __call__(self, x):
-    x1 = x.sequential(self.b1)
-    x2 = x1.sequential(self.b2)
+    x2 = x.sequential(self.b1, self.b2)
     x3 = x2.sequential(self.b3)
-    x4 = x3.sequential(self.b4)
-    x5 = x4.sequential(self.b5)
+    x5 = x4.sequential(self.b4, self.b5)
     return (x2, x3, x5)
 
 #yolo fpn (neck)
