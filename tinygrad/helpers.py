@@ -112,7 +112,7 @@ class DType(NamedTuple):
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
   def vec(self, sz:int):
     assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
-    return DType(self.priority, self.itemsize*sz, self.name+str(sz), None, sz)
+    return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self]}{str(sz)}", None, sz)
   def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
 
 # dependent typing?
@@ -137,11 +137,11 @@ class PtrDType(DType):
 
 class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
-  def is_int(x: DType)-> bool: return x in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
+  def is_int(x: DType)-> bool: return x.scalar() in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
-  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes.float64, dtypes.half.vec(4), dtypes.float.vec(2), dtypes.float.vec(4))
+  def is_float(x: DType) -> bool: return x.scalar() in (dtypes.float16, dtypes.float32, dtypes.float64)
   @staticmethod
-  def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
+  def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
   def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod
@@ -154,14 +154,21 @@ class dtypes:
   float64: Final[DType] = DType(11, 8, "double", np.float64)
   double = float64
   int8: Final[DType] = DType(1, 1, "char", np.int8)
+  char = int8
   int16: Final[DType] = DType(3, 2, "short", np.int16)
+  short = int16
   int32: Final[DType] = DType(5, 4, "int", np.int32)
   int = int32
   int64: Final[DType] = DType(7, 8, "long", np.int64)
+  long = int64
   uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
+  uchar = uint8
   uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
+  ushort = uint16
   uint32: Final[DType] = DType(6, 4, "unsigned int", np.uint32)
+  uint = uint32
   uint64: Final[DType] = DType(8, 8, "unsigned long", np.uint64)
+  ulong = uint64
 
   # NOTE: bfloat16 isn't supported in numpy
   bfloat16: Final[DType] = DType(9, 2, "__bf16", None)
@@ -268,6 +275,7 @@ def cpu_time_execution(cb, enable):
 
 # *** ctypes helpers
 
+# TODO: make this work with read only memoryviews (if possible)
 def from_mv(mv, to_type=ctypes.c_char): return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type))
 def to_char_p_p(options: List[bytes], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])
 @functools.lru_cache(maxsize=None)
