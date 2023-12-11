@@ -48,8 +48,9 @@ class Linearizer(Kernel):
   def cast(self, val: UOp, dtype) -> UOp: return self.uop(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
 
   def get_reduce_acc(self):
-    if cast(LazyOp,self.reduceop).op == ReduceOps.SUM: return 0.0 if dtypes.is_float(get_lazyop_info(self.reduceop).dtype.scalar()) else 0
-    if cast(LazyOp,self.reduceop).op == ReduceOps.MAX: return -math.inf if dtypes.is_float(get_lazyop_info(self.reduceop).dtype.scalar()) else -2**31 if dtypes.is_int(get_lazyop_info(self.reduceop).dtype.scalar()) else False
+    dtype = get_lazyop_info(self.reduceop).dtype.scalar()
+    if cast(LazyOp,self.reduceop).op == ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
+    if cast(LazyOp,self.reduceop).op == ReduceOps.MAX: return -math.inf if dtypes.is_float(dtype) else -2**31 if dtypes.is_int(dtype) else False
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: ctx.const(self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
