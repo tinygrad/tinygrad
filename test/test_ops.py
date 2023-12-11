@@ -1362,7 +1362,7 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(IndexError): a[Tensor(1.1)] # tensors used as indices must be int or bool tensors
     with self.assertRaises(IndexError): a[Tensor.randint(3,1,1,1), Tensor.randint(1,4,1,1), Tensor.randint(2,4,4,1)] # shape mismatch (3,1,1,1), (1,4,1,1), (2,3,4,1)
     with self.assertRaises(IndexError): a[Tensor.randint(3,1,1,1), Tensor.randint(1,4,1,1,1)] # shape mismatch (3,1,1,1), (1,4,1,1,1)
-    # TODO: currently we not support IndexError for out of bounds idx values
+    # TODO: currently we do not support IndexError for out of bounds idx values
     # any out of bounds in fancy indexing returns 0
     # ex: Tensor([1,2])[Tensor([1,2,55])].numpy() -> array([2., 0., 0.], dtype=float32)
     # TODO: currently we do not support tensor indexing for list of list tensor
