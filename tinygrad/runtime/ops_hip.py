@@ -1,7 +1,7 @@
 import ctypes, functools, subprocess
 from typing import Tuple, TypeVar
 import gpuctypes.hip as hip
-from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style, synchronize_cuda_style
+from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -67,4 +67,6 @@ class HIPDevice(Compiled):
 
     from tinygrad.features.graph.hip import HIPGraph
     super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self.device), LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, functools.partial(HIPProgram, self.device), HIPGraph)
-  def synchronize(self): synchronize_cuda_style(self.device, hip.hipSetDevice, hip.hipDeviceSynchronize, check)
+  def synchronize(self):
+    check(hip.hipSetDevice(self.device))
+    check(hip.hipDeviceSynchronize())
