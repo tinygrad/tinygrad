@@ -3,7 +3,7 @@ import subprocess, hashlib, tempfile, ctypes, ctypes.util, functools
 from pathlib import Path
 from typing import Tuple, Optional
 import gpuctypes.cuda as cuda
-from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_c_var, pretty_ptx, cpu_time_execution, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
+from tinygrad.helpers import DEBUG, getenv, diskcache, from_mv, init_c_var, pretty_ptx, cpu_time_execution, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style, synchronize_cuda_style
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import CUDARenderer
@@ -70,8 +70,7 @@ class CUDADevice(Compiled):
     if not CUDACPU:
       check(cuda.cuInit(0))
       check(cuda.cuDeviceGet(ctypes.byref(device := cuda.CUdevice()), device_id))
-      check(cuda.cuCtxCreate_v2(ctypes.byref(context := cuda.CUcontext()), 0, device))
-      self.context = context
+      self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, device)))
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
       if device_id == 0: CUDADevice.default_arch_name = f"sm_{major.value}{minor.value}"
 
@@ -79,4 +78,4 @@ class CUDADevice(Compiled):
     super().__init__(CUDAAllocator(self) if not CUDACPU else MallocAllocator,
                      LinearizerOptions(supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
                      CUDARenderer, compile_cuda, functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
-  def synchronize(self): return check(cuda.cuCtxSynchronize()) if not CUDACPU else None
+  def synchronize(self): synchronize_cuda_style(self.context, cuda.cuCtxSetCurrent, cuda.cuCtxSynchronize, check) if not CUDACPU else None
