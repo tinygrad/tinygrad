@@ -2,11 +2,12 @@ import math
 from typing import List
 from tinygrad.nn.optim import Optimizer
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import dtypes
 
 class LR_Scheduler:
   def __init__(self, optimizer: Optimizer):
     self.optimizer = optimizer
-    self.epoch_counter = Tensor([0.], requires_grad=False, device=self.optimizer.device)
+    self.epoch_counter = Tensor([0], dtype=dtypes.float, requires_grad=False, device=self.optimizer.device)
 
   def get_lr(self): pass
 
