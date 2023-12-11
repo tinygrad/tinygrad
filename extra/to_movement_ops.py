@@ -72,11 +72,14 @@ def to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
 
   scratch_st = make_scratch_st(st)
   ret = []
+  seen = {}  # {shapetracker: list of mops to generate that shapetracker}
   for mop_arg in to_apply:
-    st = apply_mop(scratch_st, mop_arg)
-    if st != scratch_st:
+    scratch_st = apply_mop(scratch_st, mop_arg)
+    if scratch_st in seen:
+      ret = seen[scratch_st][:]
+    else:
       ret.append(mop_arg)
-      scratch_st = st
+      seen[scratch_st] = ret[:]
 
   return ret
 
@@ -109,7 +112,6 @@ def st_equivalent(st1: ShapeTracker, st2: ShapeTracker):
   for i, ranges in enumerate(itertools.product(*[range(v.min, v.max+1) for v in vs])):
     if i > 1000:
       print("WARNING: did not search all possible combinations")
-      # not happening for now
       break
     var_vals = {k:v for k,v in zip(vs, ranges)}
     r1 = sym_infer(idx1, var_vals) if sym_infer(valid1, var_vals) else 0
