@@ -463,12 +463,6 @@ class Linearizer(Kernel):
   def uop(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None, simplify=True) -> UOp:
     key = (uop, dtype, vin, arg)
     if uop == UOps.PHI and vin[1].dtype != dtype: vin = (vin[0], self.cast(vin[1], dtype)) + vin[1:]
-     # TODO drop this - dtypes should be correct
-    if uop == UOps.ALU: # upcast vins to the same dtype TODO get rid of this
-      if isinstance(dtype, ImageDType): dtype = dtypes.float # TODO image dtype hack same with localtype def
-      if arg == TernaryOps.WHERE: vin = (vin[0],) + tuple(self.cast(x, dtype) for x in vin[1:]) # the first arg is always bool
-      elif arg == BinaryOps.CMPLT: vin = tuple(self.cast(x, max([cast(DType,v.dtype) for v in vin])) for x in vin); dtype = dtypes.bool # HACK - see ops.py L104
-      else: vin = tuple(self.cast(x, dtype) for x in vin)
     if simplify:
       if uop == UOps.PHI and len(vin) == 2: return vin[1]   # a phi without loops is a noop
       if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype, insert_before)
