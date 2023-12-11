@@ -112,7 +112,7 @@ class DType(NamedTuple):
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
   def vec(self, sz:int):
     assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
-    return DType(self.priority, self.itemsize*sz, self.name+str(sz), None, sz)
+    return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self]}{str(sz)}", None, sz)
   def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
 
 # dependent typing?
@@ -154,14 +154,21 @@ class dtypes:
   float64: Final[DType] = DType(11, 8, "double", np.float64)
   double = float64
   int8: Final[DType] = DType(1, 1, "char", np.int8)
+  char = int8
   int16: Final[DType] = DType(3, 2, "short", np.int16)
+  short = int16
   int32: Final[DType] = DType(5, 4, "int", np.int32)
   int = int32
   int64: Final[DType] = DType(7, 8, "long", np.int64)
+  long = int64
   uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
+  uchar = uint8
   uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
+  ushort = uint16
   uint32: Final[DType] = DType(6, 4, "unsigned int", np.uint32)
+  uint = uint32
   uint64: Final[DType] = DType(8, 8, "unsigned long", np.uint64)
+  ulong = uint64
 
   # NOTE: bfloat16 isn't supported in numpy
   bfloat16: Final[DType] = DType(9, 2, "__bf16", None)

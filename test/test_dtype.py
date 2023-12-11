@@ -4,6 +4,7 @@ from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, 
 from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
+from hypothesis import given, strategies as st
 
 def is_dtype_supported(dtype: DType):
   # for GPU, cl_khr_fp16 isn't supported (except now we don't need it!)
@@ -192,10 +193,17 @@ class TestEqStrDType(unittest.TestCase):
 class TestHelpers(unittest.TestCase):
   def test_helpers(self):
     self.assertTrue(dtypes.is_int(dtypes.int8))
-    self.assertFalse(dtypes.is_int(dtypes.float))
-    self.assertTrue(dtypes.is_float(dtypes.float))
     self.assertTrue(dtypes.is_int(dtypes.int.vec(4)))
+    self.assertTrue(dtypes.is_unsigned(dtypes.uint8))
+    self.assertTrue(dtypes.is_unsigned(dtypes.uint32.vec(4)))
+    self.assertTrue(dtypes.is_float(dtypes.float))
     self.assertTrue(dtypes.is_float(dtypes.float.vec(4)))
+    self.assertFalse(dtypes.is_int(dtypes.float))
+    self.assertFalse(dtypes.is_int(dtypes.float.vec(4)))
+
+  @given(st.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_float(d) or dtypes.is_int(d)]), st.integers(min_value=2, max_value=8))
+  def test_scalar(self, dtype, amt):
+    assert dtype.vec(amt).scalar() == dtype
 
 if __name__ == '__main__':
   unittest.main()
