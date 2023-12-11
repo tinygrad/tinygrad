@@ -1,6 +1,6 @@
-import functools, argparse
+import functools, argparse, os
 from tqdm import tqdm
-from tinygrad import Tensor, nn, Device, dtypes, GlobalCounters
+from tinygrad import Tensor, nn, Device, GlobalCounters
 from tinygrad.helpers import Timing
 from tinygrad.nn.state import torch_load, get_state_dict
 from extra.models.llama import FeedForward, Transformer
@@ -24,9 +24,10 @@ if __name__ == "__main__":
   parser.add_argument("--count", type=int, default=30, help="Max number of tokens to generate")
   parser.add_argument("--temperature", type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
+  parser.add_argument("--weights", type=str, default=os.path.expanduser("~/Downloads/mixtral-8x7b-32kseqlen/"), help="Path to the downloaded weights")
   args = parser.parse_args()
 
-  state = torch_load("/home/tiny/Downloads/mixtral-8x7b-32kseqlen/consolidated.00.pth.b")
+  state = torch_load(args.weights + "/consolidated.00.pth.b")
   model = Transformer(n_layers=32, dim=4096, hidden_dim=14336, n_heads=32, n_kv_heads=8, norm_eps=1e-5, vocab_size=32000, feed_forward=functools.partial(MixtureFeedForward, 8), jit=False)
   model_state_dict = get_state_dict(model)
 
@@ -41,7 +42,7 @@ if __name__ == "__main__":
     model_state_dict[k].assign(state[k].to("CLANG").contiguous().to(device).half()).realize()
 
   from sentencepiece import SentencePieceProcessor
-  spp = SentencePieceProcessor(model_file="/home/tiny/Downloads/mixtral-8x7b-32kseqlen/tokenizer.model")
+  spp = SentencePieceProcessor(model_file=args.weights + "/tokenizer.model")
 
   toks = [spp.bos_id()]
   start_pos = 0
