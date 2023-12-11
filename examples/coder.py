@@ -4,7 +4,7 @@ sys.path.append(os.getcwd())
 
 from io import StringIO
 from contextlib import redirect_stdout
-from tinygrad import Tensor, nn
+from tinygrad import Tensor, nn, Device, dtypes
 from tinygrad.helpers import Timing, colored, getenv, fetch
 from extra.models.llama import Transformer, convert_from_huggingface
 from sentencepiece import SentencePieceProcessor
@@ -30,9 +30,12 @@ if __name__ == "__main__":
     part1 = nn.state.torch_load(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/pytorch_model-00001-of-00002.bin?download=true"))
     part2 = nn.state.torch_load(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/pytorch_model-00002-of-00002.bin?download=true"))
 
+  # fix bf16, TODO: check if device supports bf16
+  def fix_bf16(weights): return {k:v.to(Device.DEFAULT).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
+
   with Timing("weights -> model: "):
-    nn.state.load_state_dict(model, convert_from_huggingface(part1, model, 32, 8), strict=False)
-    nn.state.load_state_dict(model, convert_from_huggingface(part2, model, 32, 8), strict=False)
+    nn.state.load_state_dict(model, fix_bf16(convert_from_huggingface(part1, model, 32, 8)), strict=False)
+    nn.state.load_state_dict(model, fix_bf16(convert_from_huggingface(part2, model, 32, 8)), strict=False)
 
   if not os.path.isfile("/tmp/tokenizer.model"): create_fixed_tokenizer("/tmp/tokenizer.model")
   spp = SentencePieceProcessor(model_file="/tmp/tokenizer.model")
