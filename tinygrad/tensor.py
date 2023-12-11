@@ -388,8 +388,8 @@ class Tensor:
 
       # iteratively eq -> mul -> sum fancy index
       try:
-        for dim, (a,i,sd) in enumerate(zip(arange, reshaped_idx, sum_dim)): ret = (a==i).mul(ret).sum(sd)
-      except AssertionError as exc: raise IndexError(f"shape mismatch: indexing tensors could not be broadcast together with shapes {idx[dim-1].shape}, {idx[dim].shape}") from exc
+        for a,i,sd in zip(arange, reshaped_idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
+      except AssertionError as exc: raise IndexError(f"shape mismatch: indexing tensors could not be broadcast together with shapes {', '.join([str(i.shape) for i in idx])}") from exc
 
       # special permute case
       if tdim[0] != 0 and len(tdim) != 1 and tdim != list(range(tdim[0], tdim[-1]+1)):
