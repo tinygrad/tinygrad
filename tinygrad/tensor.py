@@ -168,10 +168,10 @@ class Tensor:
   def full(shape:Tuple[sint, ...], fill_value, **kwargs): return Tensor(fill_value, **kwargs).reshape([1]*len(new_shape := argfix(shape))).expand(new_shape)
 
   @staticmethod
-  def zeros(*shape, **kwargs): return Tensor.full(argfix(*shape), 0, dtype=kwargs.pop("dtype", Tensor.default_type), **kwargs)
+  def zeros(*shape, **kwargs): return Tensor.full(argfix(*shape), 0., **kwargs)
 
   @staticmethod
-  def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, dtype=kwargs.pop("dtype", Tensor.default_type), **kwargs)
+  def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1., **kwargs)
 
   @staticmethod
   def arange(start, stop=None, step=1, **kwargs):

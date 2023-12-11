@@ -33,7 +33,7 @@ class TestLazyBuffer(unittest.TestCase):
 
   def test_shuffle_pad_ops_div(self):
     y = Tensor([1]).cat(Tensor([1]).div(Tensor([2.0]))).numpy()
-    z = Tensor([1, 0.5]).numpy()
+    z = Tensor([1., 0.5]).numpy()
     np.testing.assert_allclose(y, z)
 
   def test_shuffle_pad_ops_log(self):
@@ -42,8 +42,8 @@ class TestLazyBuffer(unittest.TestCase):
     np.testing.assert_allclose(y, z)
 
   def test_shuffle_pad_ops_exp(self):
-    y = Tensor([1]).cat(Tensor([1]).exp()).numpy()
-    z = Tensor([1, np.e]).numpy()
+    y = Tensor([1.]).cat(Tensor([1.]).exp()).numpy()
+    z = Tensor([1., np.e]).numpy()
     np.testing.assert_allclose(y, z)
 
   @unittest.skipUnless(Device.DEFAULT in ["METAL", "CUDA", "GPU"], "Only GPU backends supports cache")
