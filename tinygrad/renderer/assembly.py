@@ -123,16 +123,15 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
         kernel.append(f"mad.wide.u32 {(loc:=ssa(None,'loc','u64'))}, {cast(r[vin[1]], dtypes.uint32, vin[1].dtype)}, {const(vin[0].dtype.itemsize, dtypes.uint32, force_mov=True)}, {r[vin[0]]};")
         loc = f"[{loc}]"
       else: loc = f"[{r[vin[0]]}{f'+{int(vin[1].arg * vin[0].dtype.itemsize)}' if vin[1] else ''}]"
-      if vin[0].dtype != vin[2].dtype: kernel.append(lang.render_cast(cast_out:=ssa(None, "cast", lang.dtype_to_asmtype[vin[0].dtype]), r[vin[2]], vin[0].dtype, vin[2].dtype))
       if len(vin) > 3:
         assert vin[3].dtype is not None
         kernel.append(f"setp.ne.{lang.dtype_to_asmtype[vin[3].dtype]} {(pred:=ssa(None, 'st', 'pred'))}, {r[vin[3]]}, {const(0, vin[3].dtype)};")
-      kernel.append(f"{f'@{pred} ' if len(vin) > 3 else ''}st{'.shared' if vin[0].uop == UOps.DEFINE_LOCAL else ''}.{'s8' if vin[0].dtype.itemsize == 1 else 'b16' if vin[0].dtype == dtypes.float16 else lang.dtype_to_asmtype[vin[0].dtype]} {loc}, {r[vin[2]] if vin[0].dtype == vin[2].dtype else cast_out};")
+      kernel.append(f"{f'@{pred} ' if len(vin) > 3 else ''}st{'.shared' if vin[0].uop == UOps.DEFINE_LOCAL else ''}.{'s8' if vin[0].dtype.itemsize == 1 else 'b16' if vin[0].dtype == dtypes.float16 else lang.dtype_to_asmtype[vin[0].dtype]} {loc}, {r[vin[2]] if vin[0].dtype == vin[2].dtype else cast(r[vin[2]], vin[0].dtype, vin[2].dtype)};")
     elif uop == UOps.CAST and dtype is not None:
       assert vin[0].dtype is not None
       if dtype == dtypes.bool: kernel.extend([f"setp.ne.{'b16' if vin[0].dtype == dtypes.half else lang.dtype_to_asmtype[vin[0].dtype]} {(pred:=ssa(None, 'bool', 'pred'))}, {r[vin[0]]}, {'0' if vin[0].dtype == dtypes.half else const(0, vin[0].dtype)};",
                                               f"selp.{lang.dtype_to_asmtype[dtype]} {ssa(u, 'cast')}, {const(1, dtype)}, {const(0, dtype)}, {(pred)};"])
-      else: kernel.append(lang.render_cast(ssa(u, 'cast'), r[vin[0]], dtype, vin[0].dtype, bitcast=isinstance(args, tuple) and args[1]))
+      else: cast(r[vin[0]], dtype, vin[0].dtype, bitcast=isinstance(args, tuple) and args[1], u=u)
     elif uop == UOps.DEFINE_LOCAL:
       assert dtype is not None
       kernel.extend([f".shared .align 4 .b8 {args[0]}[{args[1]*dtype.itemsize}];", f"mov.u64 {ssa(u, 'local', 'u64')}, {args[0]}[0];"])
