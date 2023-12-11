@@ -1,7 +1,7 @@
 import numpy as np
 from tqdm import trange
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, dtypes
 from tinygrad.jit import TinyJit
 
 
@@ -27,7 +27,7 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=lambda out,y: ou
     for i in (t := trange(steps, disable=CI)):
       samp = np.random.randint(0, X_train.shape[0], size=(BS))
       x = Tensor(transform(X_train[samp]), requires_grad=False)
-      y = Tensor(target_transform(Y_train[samp]))
+      y = Tensor(target_transform(Y_train[samp]), dtype=dtypes.float32)
       loss, accuracy = train_step(x, y)
       # printing
       if not noloss:
