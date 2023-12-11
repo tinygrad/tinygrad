@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, subprocess, pathlib, ctypes, tempfile, functools
 import Metal, libdispatch
-from typing import List, Any, Tuple, Optional
+from typing import List, Any, Tuple, Optional, Dict
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, diskcache, unwrap2
 from tinygrad.device import Compiled, LRUAllocator
@@ -72,10 +72,8 @@ class MetalAllocator(LRUAllocator):
     return src.contents().as_buffer(src.length())
   def copyin(self, dest:Any, src:memoryview): self.as_buffer(dest)[:] = src
   def copyout(self, dest:memoryview, src:Any): dest[:] = self.as_buffer(src)
-  def load_buffer(self, dest:Any, src:Any, handles={}):
-    if (path := src.device.split(":")[1]) not in handles:
-      handles[path], err = self.device.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(path), None)
-      assert err is None, "failed to load from disk"
+  def load_buffer(self, dest:Any, src:Any, handles:Dict={}):
+    handles.setdefault((path := src.device.split(":")[1]), unwrap2(self.device.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(path), None)))
     cbuf = self.device.mtl_io_queue.commandBuffer()
     cbuf.loadBuffer_offset_size_sourceHandle_sourceHandleOffset_(dest._buf, 0, dest.size*dest.dtype.itemsize, handles[path], src._buf.offset)
     cbuf.commit()
@@ -86,9 +84,7 @@ class MetalDevice(Compiled):
     self.device = Metal.MTLCreateSystemDefaultDevice()
     if MetalDevice.compiler_device is None: MetalDevice.compiler_device = self.device
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
-    self.mtl_io_queue, e = self.device.newIOCommandQueueWithDescriptor_error_(Metal.MTLIOCommandQueueDescriptor.new(), None)
-    self.mtl_io_command_buffer = self.mtl_io_queue.commandBuffer()
-    assert e is None, "failed to create mtliocommandqueue"
+    self.mtl_io_queue = unwrap2(self.device.newIOCommandQueueWithDescriptor_error_(Metal.MTLIOCommandQueueDescriptor.new(), None))
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
     from tinygrad.features.graph.metal import MetalGraph
