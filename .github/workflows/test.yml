@@ -31,7 +31,6 @@ jobs:
     - name: Install dependencies
       run: |
         pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-        pip3 install --upgrade --force-reinstall ruff
     - name: Repo line count
       run: python sz.py
     - name: Lint with pylint
