@@ -6,7 +6,6 @@ from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps
 from tinygrad.device import Compiled, Device, Buffer
 from tinygrad.ops import BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
-from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
@@ -132,7 +131,7 @@ class TestLinearizer(unittest.TestCase):
     uops = Linearizer([si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0].ast).linearize().uops
     acc = [u for u in uops if u.uop == UOps.DEFINE_ACC][0]
     phi = [u for u in uops if u.uop == UOps.PHI][0]
-    assert acc.dtype == dtypes.float if op == Tensor.sum and not dtypes.is_float(d) else d
+    assert acc.dtype == d
     assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype
 
   def test_reduce_midcast_acc(self):
@@ -145,7 +144,7 @@ class TestLinearizer(unittest.TestCase):
     uops = Linearizer([si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0].ast).linearize().uops
     acc = [u for u in uops if u.uop == UOps.DEFINE_ACC][0]
     phi = [u for u in uops if u.uop == UOps.PHI][0]
-    assert acc.dtype == dtypes.float if op == Tensor.sum and not dtypes.is_float(d2) else d2
+    assert acc.dtype == d2
     assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype
 
   @given(st.sampled_from(float_dtypes), st.sampled_from(float_dtypes))

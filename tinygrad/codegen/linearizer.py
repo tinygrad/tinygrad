@@ -6,7 +6,7 @@ from enum import Enum, auto
 from dataclasses import dataclass
 
 from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, getenv, all_same, to_function_name, flatten
-from tinygrad.ops import LazyOp, LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, vars_from_ast
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info, vars_from_ast
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, VariableOrNum, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
@@ -47,16 +47,11 @@ class Linearizer(Kernel):
   def const(self, b:Union[int,float], dtype=dtypes.int32, insert_before=None) -> UOp: return self.uop(UOps.CONST, dtype, tuple(), b, insert_before=insert_before)
   def cast(self, val: UOp, dtype) -> UOp: return self.uop(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
 
-  def get_reduce_acc(self, op, dtype:DType):
-    if op == ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
-    elif op == ReduceOps.MAX: return -math.inf if dtypes.is_float(dtype) else -2**31 if dtypes.is_int(dtype) else False
+  def get_reduce_acc(self, op):
+    if op.op == ReduceOps.SUM: return 0.0 if dtypes.is_float(get_lazyop_info(op).dtype) else 0
+    elif op.op == ReduceOps.MAX: return -math.inf if dtypes.is_float(get_lazyop_info(op).dtype) else -2**31 if dtypes.is_int(get_lazyop_info(op).dtype) else False
 
-  # TODO less dumb implementation
-  def get_reduce_dtype(self, i:int, op):
-    if op.op == ReduceOps.MAX: return self.bufs[i].dtype # TODO wrong
-    sum_dtype = max([x.arg.dtype if not isinstance(x.arg.dtype, ImageDType) else dtypes.float for x in op.get_lazyops() if x.op in BufferOps])
-    if op.src[0].op == UnaryOps.CAST: sum_dtype = op.src[0].arg[0]
-    return sum_dtype if dtypes.is_float(sum_dtype) else dtypes.float # MULACC always upcasts to float (TODO should we just not fuse if it's not float?)
+  def get_reduce_dtype(self, i:int, op): return 
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: ctx.const(self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
@@ -85,7 +80,7 @@ class Linearizer(Kernel):
         (g_idx, g_valid), amt, dim = self.sts[i].expr_idxs(fake_idxs), 1, None
     else:
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
-    localtype = dtypes.float if isinstance(buf.dtype, ImageDType) else self.get_reduce_dtype(i, self.reduceop) if acc is not None else buf.dtype
+    localtype = dtypes.float if isinstance(buf.dtype, ImageDType) else get_lazyop_info(self.reduceop).dtype if acc is not None else buf.dtype
     if amt > 1: localtype = buf.dtype.vec(amt)
 
     e_idxs, e_valids = g_idx.expand(expand_vars), g_valid.expand(expand_vars)
@@ -249,7 +244,7 @@ class Linearizer(Kernel):
       fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
       # define accumulator
-      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop.op, self.get_reduce_dtype(0, self.reduceop)))
+      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
 
       if self.tensor_core:
         def calc_tc_idxs(local_size: int, aliases: List[List[int]]):
@@ -355,7 +350,7 @@ class Linearizer(Kernel):
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop.op, self.get_reduce_dtype(-1, self.reduceop)))
+        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
 
         # late reduce loop
         loop_ctx = render_loop(end_local_idxs)
@@ -471,7 +466,6 @@ class Linearizer(Kernel):
     key = (uop, dtype, vin, arg)
     if uop == UOps.ALU: # upcast vins to the same dtype
       upcast_dtype = max(cast(DType, x.dtype) for x in vin)
-      if arg == TernaryOps.MULACC and not dtypes.is_float(upcast_dtype): upcast_dtype = dtypes.float # MULACC is only supported in float
       if arg == TernaryOps.WHERE: vin = (vin[0],) + tuple(self.cast(x, upcast_dtype) for x in vin[1:]) # the first arg is always bool
       else: vin = tuple(self.cast(x, upcast_dtype) for x in vin)
       dtype = dtype or upcast_dtype # some ops like BinaryOps.CMPLT return bool
@@ -511,10 +505,10 @@ class Linearizer(Kernel):
       assert offs is None, "not available if we aren't doing reduce"
       return acc
 
-    # MULACC fusion. TODO: this is copied from Interpreted
-    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL:
+    # MULACC fusion for floats. TODO: this is copied from Interpreted
+    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL and dtypes.is_float(get_lazyop_info(x).dtype):
       x = LazyOp(TernaryOps.MULACC, x.src[0].src, x.arg)
-    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL:
+    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL and dtypes.is_float(x.src[0].arg[0]):
       x = LazyOp(TernaryOps.MULACC, tuple([LazyOp(UnaryOps.CAST, (s,), x.src[0].arg) for s in x.src[0].src[0].src]), x.arg) # Apply the cast to each of the ADD vars
 
     values = [self.ast_parse(cast(LazyOp, v), acc, offs, loaded_buffers, loop_ctx=loop_ctx) for v in x.src]
