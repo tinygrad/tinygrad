@@ -112,7 +112,7 @@ class Tensor:
       self.contiguous().realize().lazydata.realized.copyin(x.numpy().data)
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
-    #assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
+    # NOTE: we allow cross device assign
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
@@ -512,6 +512,31 @@ class Tensor:
     return self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1
   def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
 
+  @staticmethod
+  def einsum(formula, *xs) -> Tensor:
+    xs = argfix(*xs)
+    lhs, rhs = formula.split("->")
+    lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in lhs.split(',')]
+    rhs = sorted(enumerate(rhs), key=lambda e:e[1])
+
+    assert len(xs) == len(lhs), f"number of inputs doesn't match number of operands in formula, expected {len(lhs)}, got {len(xs)}"
+
+    lhs, rhs = [[list(zip(*l)) for l in lhs], list(zip(*rhs)) or [[], []]]
+    dims = {}
+    for i, l in enumerate(lhs):
+      for order, letter in enumerate(l[1]):
+        if letter not in dims: dims[letter] = xs[i].shape[l[0][order]]
+        else: assert dims[letter] == xs[i].shape[l[0][order]], f"dims of the same index should all be equal in the inputs. expected {dims[letter]} for input #{i+1}, got {xs[i].shape[l[0][order]]}"
+    xs_ = [None]*len(xs)
+    for i,x in enumerate(xs):
+      xs_[i] = x.permute(lhs[i][0]) \
+        .reshape([dims[letter] if letter in lhs[i][1] else 1 for letter in sorted(dims.keys())]) \
+        .expand([e[1] for e in sorted(dims.items(), key=lambda e: e[0])])
+
+    return reduce(lambda a,b:a*b, xs_) \
+      .sum(axis=[axis for axis,letter in enumerate(sorted(dims.keys())) if letter not in rhs[1]]) \
+      .permute(rhs[0])
+
   # ***** processing ops *****
 
   def _pool(self, k_:Tuple[sint, ...], stride:Union[Tuple[int, ...], int]=1, dilation:Union[Tuple[int, ...], int]=1) -> Tensor:
@@ -831,7 +856,10 @@ class Tensor:
 
   # ***** cast ops *****
 
-  def cast(self, dtype:DType) -> Tensor: return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
+  def cast(self, dtype:DType) -> Tensor:
+    # hack for devices that don't support bfloat16
+    if self.dtype == dtypes.bfloat16: return self.bitcast(dtypes.uint16).cast(dtypes.uint32).mul(1<<16).contiguous().bitcast(dtypes.float32).cast(dtype)
+    return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
   def bitcast(self, dtype:DType) -> Tensor:
     assert self.dtype.itemsize == dtype.itemsize, "can't bitcast mismatched dtype itemsizes"
     return mlops.Cast.apply(self, dtype=dtype, bitcast=True) if self.dtype != dtype else self

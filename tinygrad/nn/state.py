@@ -71,13 +71,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
     lens[storage[2]] = storage[4] * storage[1].itemsize
     if storage[2] not in offsets: return None
     byte_offset = offsets[storage[2]]+storage_offset*storage[1].itemsize
-    ret = t[byte_offset:byte_offset+prod(size)]
-    # convert bfloat16 -> float16 using LLVM for Llama 2
-    # upstream LLaMA also does this conversion:
-    # https://github.com/facebookresearch/llama/blob/6c7fe276574e78057f917549435a2554000a876d/llama/generation.py#L95
-    # TODO: should this be done in the example instead? or maybe we don't need this anymore with better bfloat16 support
-    if storage[1] == dtypes.bfloat16: ret = ret.cast(dtypes.uint16) #.to(Device.DEFAULT).cast(dtypes.uint32).mul(1<<16).contiguous().bitcast(dtypes.float32).half()
-    else: ret = ret.cast(storage[1])
+    ret = t[byte_offset:byte_offset+prod(size)].cast(storage[1])
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
     shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
@@ -86,6 +80,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
       intermediate_shape = tuple([shape_strides[x][0] for x in argsort(permute_indexes)])
       assert tuple([shape_strides[i][1] for i in argsort(permute_indexes)]) == strides_for_shape(intermediate_shape), "nonpermutable strides"
       if DEBUG >= 3: print(f"WARNING: this torch load is slow. CPU to permute {intermediate_shape} with {permute_indexes}")
+      assert storage[1] != dtypes.bfloat16, "can't CPU permute BF16"
       # TODO: find a nice way to support all shapetracker on disktensors
       ret = ret.cpu().reshape(intermediate_shape).permute(permute_indexes)
 
