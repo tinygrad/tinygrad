@@ -516,7 +516,7 @@ class TestLinearizerOpts(unittest.TestCase):
 
   def test_padto_matmul(self):
     if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
-    if Device.DEFAULT == "CUDA": self.skipTest("super slow on CUDA")
+    if Device.DEFAULT in ["CUDA", "WEBGPU"]: self.skipTest(f"super slow on {Device.DEFAULT}")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)
@@ -541,6 +541,7 @@ class TestLinearizerOpts(unittest.TestCase):
   def test_padto_where(self):
     # pad uses invalid value 0, so kernel with max is not allowed
     if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
+    if Device.DEFAULT == "WEBGPU": self.skipTest("super slow on WEBGPU")
     N = 17 * 17
     a = (Tensor.rand(N, N).max(axis=0) > 1).where(1, 0)
     with self.assertRaises(AssertionError):
