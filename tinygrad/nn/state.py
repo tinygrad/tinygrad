@@ -61,7 +61,7 @@ def load_state_dict(model, state_dict, strict=True, verbose=True):
 
 # torch support!
 
-def torch_load(fn:str):
+def torch_load(fn:str) -> Dict[str, Tensor]:
   t = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
 
   offsets: Dict[Union[str, int], int] = {}
