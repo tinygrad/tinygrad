@@ -375,7 +375,7 @@ class Tensor:
         dims_collapsed_, dims_injected = sum(1 for d in dims_collapsed if tensor_dim >= d), sum(1 for d in type_dim[None] if tensor_dim >= d)
         tdim.append(td := tensor_dim - dims_collapsed_ + dims_injected)
         idx.append((t := indices[tensor_dim + dims_injected]).sign().__neg__().relu() * ret.shape[td] + t) # normalize the negative tensor indices
-        if dtypes.is_float(t.dtype): raise IndexError("tensors used as indices must be int, byte or bool tensors")
+        if not (dtypes.is_int(t.dtype) or t.dtype == dtypes.bool): raise IndexError("tensors used as indices must be int or bool tensors") # TODO uint8 and bool tensor indexing
 
       # compute sum_dim, arange, and idx
       max_dim = max(i.ndim for i in idx)
