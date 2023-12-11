@@ -21,14 +21,15 @@ class MixtureFeedForward:
     return ret
 
 if __name__ == "__main__":
-  parser = argparse.ArgumentParser(description="Run LLaMA in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-  parser.add_argument("--count", type=int, default=30, help="Max number of tokens to generate")
+  parser = argparse.ArgumentParser(description="Run Mixtral (Mistral MoE) in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+  parser.add_argument("--count", type=int, default=100, help="Max number of tokens to generate")
   parser.add_argument("--temperature", type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument("--weights", type=str, default=os.path.expanduser("~/Downloads/mixtral-8x7b-32kseqlen/"), help="Path to the downloaded weights")
+  parser.add_argument("--initial-tokens", type=str, default="molten salt reactors", help="Initial tokens to begin with")
   args = parser.parse_args()
 
-  state = torch_load(args.weights + "/consolidated.00.pth.b")
+  state = torch_load(args.weights + "/consolidated.00.pth")
   model = Transformer(n_layers=32, dim=4096, hidden_dim=14336, n_heads=32, n_kv_heads=8, norm_eps=1e-5, vocab_size=32000, feed_forward=functools.partial(MixtureFeedForward, 8), jit=False)
   model_state_dict = get_state_dict(model)
 
@@ -44,13 +45,12 @@ if __name__ == "__main__":
 
   from sentencepiece import SentencePieceProcessor
   spp = SentencePieceProcessor(model_file=args.weights + "/tokenizer.model")
-
-  toks = [spp.bos_id()]
+  toks = [spp.bos_id()] + spp.encode(args.initial_tokens)
   start_pos = 0
   for i in range(args.count):
     GlobalCounters.reset()
     with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
-      tok = model(Tensor([toks[start_pos:]]), 0 if start_pos == 0 else Variable("start_pos", 1, 1024).bind(start_pos), args.temperature).multinomial().item()
+      tok = model(Tensor([toks[start_pos:]]), start_pos, args.temperature).multinomial().item()
     toks.append(tok)
     start_pos += 1
     print(spp.decode(toks))
