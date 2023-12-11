@@ -48,8 +48,8 @@ class Linearizer(Kernel):
   def cast(self, val: UOp, dtype) -> UOp: return self.uop(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
 
   def get_reduce_acc(self, op):
-    if op.op == ReduceOps.SUM: return 0.0 if dtypes.is_float(get_lazyop_info(op).dtype) else 0
-    elif op.op == ReduceOps.MAX: return -math.inf if dtypes.is_float(get_lazyop_info(op).dtype) else -2**31 if dtypes.is_int(get_lazyop_info(op).dtype) else False
+    if op.op == ReduceOps.SUM: return 0.0 if dtypes.is_float(get_lazyop_info(op).dtype.scalar()) else 0
+    elif op.op == ReduceOps.MAX: return -math.inf if dtypes.is_float(get_lazyop_info(op).dtype.scalar()) else -2**31 if dtypes.is_int(get_lazyop_info(op).dtype.scalar()) else False
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: ctx.const(self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
@@ -504,9 +504,9 @@ class Linearizer(Kernel):
       return acc
 
     # MULACC fusion for floats. TODO: this is copied from Interpreted
-    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL and dtypes.is_float(get_lazyop_info(x).dtype):
+    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL and dtypes.is_float(get_lazyop_info(x).dtype.scalar()):
       x = LazyOp(TernaryOps.MULACC, x.src[0].src, x.arg)
-    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL and dtypes.is_float(x.src[0].arg[0]):
+    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL and dtypes.is_float(x.src[0].arg[0].scalar()):
       x = LazyOp(TernaryOps.MULACC, tuple([LazyOp(UnaryOps.CAST, (s,), x.src[0].arg) for s in x.src[0].src[0].src]), x.arg) # Apply the cast to each of the ADD vars
 
     values = [self.ast_parse(cast(LazyOp, v), acc, offs, loaded_buffers, loop_ctx=loop_ctx) for v in x.src]
