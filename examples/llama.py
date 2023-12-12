@@ -7,7 +7,7 @@ from pathlib import Path
 import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
-from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes
+from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes, colored
 from tinygrad import Device
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
@@ -155,7 +155,8 @@ class LLaMa:
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
 
-    model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT)
+    jit = bool(getenv("JIT", 1))
+    model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
 
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
@@ -163,6 +164,9 @@ class LLaMa:
       weights = load(str(model_path))
     if "model.embed_tokens.weight" in weights:
       weights = convert_from_huggingface(weights, model, params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
+
+    # fix bf16, TODO: check if device supports bf16
+    weights = {k:v.to(Device.DEFAULT).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
 
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
@@ -192,7 +196,7 @@ class LLaMa:
     return output
 
 # **** main code ****
-"""
+r"""
 test:
 python3 examples/llama.py  --temperature=0 --count=50 --prompt="Hello."
 output:
@@ -429,3 +433,17 @@ After you are done speaking, output [EOS]. You are not Chad.
       # stop after you have your answer
       if chatbot and outputted.endswith(end_delim): break
     if not chatbot: break
+
+  # validate output!
+  if args.temperature == 0 and args.count == 10 and args.prompt == "Hello." and not args.quantize:
+    text = llama.tokenizer.decode(toks)
+    key = (args.gen, args.size)
+    expected = {
+      ("1", "7B"): "Hello. I'm a 20 year old male",
+      ("2", "7B"): "Hello. I'm a 20 year old girl",
+    }
+    try:
+      assert text == expected[key], "invalid output: " + colored(text, "red")
+      print("\n" + colored("output validated", "green"))  # NOTE: "\n" iside colored does not render the color in github action
+    except KeyError:
+      pass

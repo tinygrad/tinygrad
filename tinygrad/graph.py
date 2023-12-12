@@ -2,6 +2,7 @@ import os, atexit, functools
 from collections import defaultdict
 from typing import Dict, List
 from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, OpType, LazyOp
+from tinygrad.device import Device
 from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters, getenv, dedup
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -21,7 +22,7 @@ if GRAPH:
   G = nx.DiGraph()
   def save_graph_exit():
     for k,v in cnts.items(): print(k, v)
-    print("saving", G)
+    print("saving", G, f"to {GRAPHPATH}.svg")
     nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
     # -Gnslimit=100 can make it finish, but you won't like results
     os.system(f'dot -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
@@ -68,7 +69,7 @@ def log_schedule_item(si: ScheduleItem):
   cnts[optype] += 1
   if GRAPH:
     assert si.out.base == si.out, "all outputs based"
-    top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#8080ff", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#FF8080'}
+    top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
 
     # get inputs for shapetrackers
     input_to_st = defaultdict(list)
@@ -88,7 +89,7 @@ def log_schedule_item(si: ScheduleItem):
 
     if nm(si.out) not in G.nodes: G.add_node(nm(si.out))
 
-    G.nodes[nm(si.out)]['label'] = (str(set(x.shape for x in si.inputs))+"\n"+str(si.out.shape) if optype == ReduceOps else str(si.out.shape))+str_dtype(si.out.dtype)+(f"\n{si.ast.op}" if si.ast.op in LoadOps else "")
+    G.nodes[nm(si.out)]['label'] = '"' + (str(set(x.shape for x in si.inputs))+"\n"+str(si.out.shape) if optype == ReduceOps else str(si.out.shape))+str_dtype(si.out.dtype)+(f"\n{si.ast.op}" if si.ast.op in LoadOps or optype is BufferOps else "")+(f"\n{si.out.device}" if si.out.device != Device.DEFAULT else "") + '"'
     G.nodes[nm(si.out)]['fillcolor'] = top_colors[optype]
     G.nodes[nm(si.out)]['color'] = 'black'
     G.nodes[nm(si.out)]['style'] = 'filled'
