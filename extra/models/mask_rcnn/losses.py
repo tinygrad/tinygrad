@@ -40,13 +40,6 @@ def _project_masks_on_boxes(segmentation_masks, proposals, discretization_size):
     return Tensor.empty(0, dtype=dtypes.float32)
   return masks.stack(dim=0).cast(dtypes.float32)
 
-def smooth_l1_loss(self:Tensor, Y:Tensor, beta:float = 1./9, size_average:bool = True) -> Tensor:
-  n = (self-Y).abs()
-  cond = n < beta
-  loss = cond.where(0.5 * n ** 2 / beta, n - 0.5 * beta)
-  if size_average: return loss.mean()
-  return loss.sum()
-
 
 class Matcher:
   """
@@ -485,6 +478,13 @@ class MaskRCNNLossComputation:
 
     return Tensor.binary_crossentropy_logits(mask_logits[positive_inds, labels_pos], mask_targets)
 
+
+def smooth_l1_loss(self:Tensor, Y:Tensor, beta:float = 1./9, size_average:bool = True) -> Tensor:
+  n = (self-Y).abs()
+  cond = n < beta
+  loss = cond.where(0.5 * n ** 2 / beta, n - 0.5 * beta)
+  if size_average: return loss.mean()
+  return loss.sum()
 
 def create_rpn_loss_evaluator(box_coder:BoxCoder) -> RPNLossComputation:
   matcher = Matcher(0.7, 0.3, allow_low_quality_matches=True)
