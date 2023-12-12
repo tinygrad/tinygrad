@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, Set, Tuple, Any
 from tinygrad.ops import LoadOps, ScheduleItem, LazyOp, BufferOps, MemBuffer, ConstBuffer, vars_from_ast, get_lazyop_info
 from tinygrad.device import Device, Buffer, BufferCopy, JITRunner
-from tinygrad.graph import log_schedule_item, print_tree
+from tinygrad.graph import log_schedule_item, print_tree, log_lazybuffer
 from tinygrad.helpers import prod, dedup, merge_dicts, ImageDType, DEBUG
 from tinygrad.shape.symbolic import Variable
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -23,8 +23,8 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
 def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
   while len(schedule):
     si = schedule.pop(0)
-    if not disable_logging: log_schedule_item(si)
-    assert all(x.realized for x in si.inputs), "can't run schedule, some inputs aren't realized"
+    #if not disable_logging: log_schedule_item(si)
+    assert all(x.realized for x in si.inputs), f"can't run schedule, some inputs aren't realized {[x for x in si.inputs if x.realized is None]}"
 
     # get the program
     prg = lower_schedule_item(si)
@@ -33,28 +33,32 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     assert si.out._base is None, "no setting of non-base LazyBuffers"
     si.out._realized = si.out.output_buffer if si.out.output_buffer is not None else \
       Buffer(si.out.device, prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype)
-    del si.out.op
+    si.out.op = None
     #for v in si.out.views: del v.op
 
     # run the function (put it in JIT)
     if prg: prg.exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)
 
 def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], first=True) -> LazyOp:
-  if not buf.realized:
-    if buf.base.op == LoadOps.CONST: return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.base.arg), buf.dtype, buf.st.simplify().unbind()))
-    if buf.op == LoadOps.CONTIGUOUS and first: return _recursive_get_lazyop(buf.srcs[0], inputs, True)
-    if buf.op == LoadOps.COPY and first:
-      assert buf.st.contiguous
+  log_lazybuffer(buf)
+  if buf.base.op == LoadOps.CONST:
+    # const is never a buffer
+    op = LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.base.arg), buf.dtype, buf.st.simplify().unbind()))
+  elif buf.op == LoadOps.CONTIGUOUS and first:
+    # include one contiguous
+    return _recursive_get_lazyop(buf.srcs[0], inputs, True)
+  elif buf.op == LoadOps.COPY and first:
+    if buf.srcs[0].base.is_unrealized_const():
+      op = LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.srcs[0].base.arg), buf.dtype, buf.st.simplify().unbind()))   # CONSTs don't actually have to be copied
+    else:
       inputs.append(buf.srcs[0].base)
       return LazyOp(LoadOps.COPY, (), buf.srcs[0].base)
-  #if buf.realized or not buf.st.contiguous or buf.base.op in LoadOps:  # no mop pushing
-  if buf.realized or buf != buf.base or buf.base.op in LoadOps:
+  elif buf.realized or buf != buf.base or buf.base.op in LoadOps:
+    # have to do a load
     if buf.base not in inputs: inputs.append(buf.base)
     op = LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf.base)+1, buf.dtype, buf.st.simplify().unbind()))
   else:
-    assert buf.op is not None
     op = LazyOp(buf.op, tuple(_recursive_get_lazyop(x, inputs, False) for x in buf.srcs), buf.arg)
-  #print("store", first, buf.realized, buf.op, op)
   return LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, buf.dtype, buf.st)) if first else op
 
 #def _recursive_get_lazyop(op:LazyOp, srcs:Tuple[LazyBuffer], arg:Any) -> LazyOp:
@@ -66,9 +70,6 @@ def _schedule_one(out:LazyBuffer, seen:Optional[Set[LazyBuffer]]) -> List[Schedu
   if out in seen or out.realized or out.is_unrealized_const(): return []
   seen.add(out)
   if out.base is not out: return _schedule_one(out.base, seen)
-  if out.op == LoadOps.CONTIGUOUS: return _schedule_one(out.srcs[0], seen)
-
-  #print(out)
 
   inputs: List[LazyBuffer] = []
   op = _recursive_get_lazyop(out, inputs)
@@ -77,8 +78,8 @@ def _schedule_one(out:LazyBuffer, seen:Optional[Set[LazyBuffer]]) -> List[Schedu
     assert x.base == x, f"all inputs must be base, {x} isn't"
     ret += _schedule_one(x, seen)
 
-  from tinygrad.graph import print_tree
-  print_tree(op)
+  #from tinygrad.graph import print_tree
+  #print_tree(op)
   return ret + [ScheduleItem(op, out, tuple(inputs), {})]
 
 

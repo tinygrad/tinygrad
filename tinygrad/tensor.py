@@ -60,7 +60,7 @@ class Tensor:
     self._ctx: Optional[Function] = None
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     elif isinstance(data, (int, float)):
-      data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
+      data = LazyBuffer.new(device, (), Tensor.default_type if dtype is None else dtype, LoadOps.CONST, data)
     elif data is None or data.__class__ is list:
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
       data = LazyBuffer.fromCPU(np.array([] if data is None else data, dtype=(dtype or Tensor.default_type).np))
@@ -69,7 +69,7 @@ class Tensor:
     elif isinstance(data, np.ndarray):
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
       if data.shape == ():
-        data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
+        data = LazyBuffer.new(device, (), dtype or dtypes.from_np(data.dtype), LoadOps.CONST, data.item())
       else:
         data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
 
@@ -148,7 +148,7 @@ class Tensor:
   @staticmethod
   def _loadop(op, sz, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
     assert isinstance(sz, int), f"cannot create with symbolic size {sz}"
-    return Tensor(LazyBuffer.loadop(op, (sz,), Tensor.default_type if dtype is None else dtype, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
+    return Tensor(LazyBuffer.new(Device.canonicalize(device), (sz, ), Tensor.default_type if dtype is None else dtype, op, arg))
 
   @staticmethod
   def empty(*shape, **kwargs):

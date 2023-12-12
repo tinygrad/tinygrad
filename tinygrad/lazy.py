@@ -18,7 +18,7 @@ class LazyBuffer:
     self.output_buffer: Optional[Buffer] = None
 
   def __repr__(self) -> str:
-    return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.op if self.op else self.realized}>"
+    return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.op if hasattr(self, 'op') else self.realized}>"
 
   @property
   def base(self) -> LazyBuffer: return self._base if self._base is not None else self
@@ -26,7 +26,10 @@ class LazyBuffer:
   @property
   def realized(self): return self.base._realized
 
-  def const(self, val:Union[float, int]) -> LazyBuffer: return LazyBuffer(self.device, ShapeTracker.from_shape(self.shape), self.dtype.scalar(), LoadOps.CONST, val)
+  @staticmethod
+  def new(device, shape:Tuple[int], dtype:DType, op, arg): return LazyBuffer(device, ShapeTracker.from_shape(shape), dtype.scalar(), op, arg)
+
+  def const(self, val:Union[float, int]) -> LazyBuffer: return LazyBuffer.new(self.device, self.shape, self.dtype, LoadOps.CONST, val)
 
   # NOTE: this no longer breaks the graph
   def contiguous(self): return self if self.st.contiguous else self.e(LoadOps.CONTIGUOUS)

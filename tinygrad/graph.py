@@ -94,6 +94,22 @@ def log_schedule_item(si: ScheduleItem):
     G.nodes[nm(si.out)]['color'] = 'black'
     G.nodes[nm(si.out)]['style'] = 'filled'
 
+def log_lazybuffer(lb):
+  top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
+  if GRAPH:
+    if lb.base != lb:
+      offset = lb.st.expr_node(NumNode(0))[0]
+      G.add_node(nm(lb), style='filled', fillcolor="#80ff8080", color="black", label=f"{lb.st.shape}\n{lb.st.real_strides()}" + (f"\n{offset}" if offset != 0 else ""))
+      G.add_edge(nm(lb.base), nm(lb), color='#00000060')
+      lb = lb.base
+    for x in lb.srcs:
+      if nm(x) not in G.nodes: G.add_node(nm(x), label=f'"{x.realized}"', style='filled', fillcolor="#c0804080")
+      G.add_edge(nm(x), nm(lb), color='#00000060')
+    G.nodes[nm(lb)]['label'] = '"' + (str(set(x.shape for x in lb.srcs))+"\n"+str(lb.shape) if lb.op in ReduceOps else str(lb.shape))+str_dtype(lb.dtype)+f"\n{lb.op}"+(f"\n{lb.arg}" if lb.op == LoadOps.CONST else "")+(f"\n{lb.device}" if lb.device != Device.DEFAULT else "") + '"'
+    G.nodes[nm(lb)]['fillcolor'] = [v for k,v in top_colors.items() if lb.op in k][0]
+    G.nodes[nm(lb)]['color'] = 'black'
+    G.nodes[nm(lb)]['style'] = 'filled'
+
 def _tree(lazydata, prefix=""):
   if type(lazydata).__name__ == "LazyBuffer": return [f"━━ realized {lazydata.dtype.name} {lazydata.shape}"] if (lazydata.realized) else _tree(lazydata.op, "LB ")
   if len(lazydata.src) == 0: return [f"━━ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
