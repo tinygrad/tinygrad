@@ -31,3 +31,21 @@ def idxs {n : Nat} (v : View n) : Type :=
 def reshapeable {n m : Nat} (v : View n) (w: View m)
   (f : idxs v → idxs w) (g : idxs w → idxs v) : Prop :=
   (f ∘ g = id) ∧ (g ∘ f = id)
+
+def tt : Tuple Nat 2 :=
+  Subtype.mk [2,2] rfl
+
+def zz : Tuple Nat 2 :=
+  Subtype.mk [0,0] rfl
+
+def v1 : View 2 :=
+  View.mk 0 tt zz tt (Subtype.mk [2,1] rfl)
+
+def wrap (x : Nat) : Tuple Nat 1 := Subtype.mk [x] rfl
+
+def v2 : View 1 :=
+  View.mk 0 (wrap 4) (wrap 0) (wrap 3) (wrap 1)
+
+theorem thm1 (f : idxs v1 → idxs v2) (g : idxs v2 → idxs v1) :
+  ¬ reshapeable v1 v2 f g :=
+  sorry
