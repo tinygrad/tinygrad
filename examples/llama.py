@@ -14,7 +14,7 @@ from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parame
 from tinygrad.helpers import GlobalCounters
 from extra.models.llama import Transformer, convert_from_huggingface
 from sentencepiece import SentencePieceProcessor, sentencepiece_model_pb2
-from gguf import GGUFReader, TokenType, ReaderTensor  
+from gguf import GGUFReader, TokenType, ReaderTensor
 from gguf.constants import GGML_QUANT_SIZES, GGMLQuantizationType
 import os
 
@@ -141,7 +141,7 @@ def dequantize_q4_0(path, tensor: ReaderTensor):
   # Bitwise tensors to extract the weights packed at uint8s
   bitwise  = Tensor([1<<4,1], dtype=dtypes.uint8).repeat((block_sz//2,1)).transpose().flatten().repeat((total_blocks,1))
   bitwise2 = Tensor([1,1<<4], dtype=dtypes.uint8).repeat((block_sz//2,1)).transpose().flatten().repeat((total_blocks,1))
-  weights = blks.to(Device.DEFAULT)[:,2:].repeat((1,2)) 
+  weights = blks.to(Device.DEFAULT)[:,2:].repeat((1,2))
   weights = weights.cast(dtypes.uint16).mul(bitwise).cast(dtypes.uint8).div(bitwise).div(bitwise2) - 8
   return (weights*scales).reshape(tensor.shape.tolist())
 
@@ -171,9 +171,9 @@ def load_from_gguf(path):
   w = {}
   for tensor in reader.tensors:
     if tensor.tensor_type == GGMLQuantizationType.Q4_0:
-        w[tensor.name] = dequantize_q4_0(path, tensor).numpy() 
+      w[tensor.name] = dequantize_q4_0(path, tensor).numpy()
     elif tensor.tensor_type == GGMLQuantizationType.F32:
-        w[tensor.name] = Tensor(tensor.data) 
+      w[tensor.name] = Tensor(tensor.data)
     else: raise RuntimeError("Quantization type still not supported!")
   return sp, w
 
@@ -216,8 +216,7 @@ class LLaMa:
       weights = convert_from_huggingface(weights, model, params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
 
     if tokenizer_path != '': sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
-    assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
-    
+    assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}" 
     # fix bf16, TODO: check if device supports bf16
     weights = {k:v.to(Device.DEFAULT).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
 
