@@ -23,7 +23,6 @@ def cu_time_execution(cb, enable=False) -> Optional[float]: return time_executio
 
 @diskcache
 def compile_cuda(prg) -> bytes: return compile_cuda_style(prg, [f'--gpu-architecture={CUDADevice.default_arch_name}', "-I/usr/local/cuda/include", "-I/usr/include"], cuda.nvrtcProgram, cuda.nvrtcCreateProgram, cuda.nvrtcCompileProgram, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check)
-@diskcache
 def compile_ptx(prg) -> bytes: return prg.replace("TARGET", CUDADevice.default_arch_name).encode("utf-8")
 
 class CUDAProgram:
