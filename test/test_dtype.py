@@ -250,14 +250,19 @@ class TestTypePromotion(unittest.TestCase):
 
   def test_dtype_promo(self):
     assert least_upper_dtype(dtypes.bool, dtypes.int8) == dtypes.int8
-    assert least_upper_dtype(dtypes.int8, dtypes.int16) == dtypes.int16
     assert least_upper_dtype(dtypes.int8, dtypes.uint8) == dtypes.int16
-    assert least_upper_dtype(dtypes.int16, dtypes.int32) == dtypes.int32
-    assert least_upper_dtype(dtypes.int32, dtypes.int64) == dtypes.int64
-    assert least_upper_dtype(dtypes.bool, dtypes.float32) == dtypes.float32
-    assert least_upper_dtype(dtypes.float_scalar, dtypes.float32) == dtypes.float32
+    assert least_upper_dtype(dtypes.uint8, dtypes.int16) == dtypes.int16
+    assert least_upper_dtype(dtypes.int16, dtypes.uint16) == dtypes.int32
+    assert least_upper_dtype(dtypes.uint16, dtypes.int32) == dtypes.int32
+    assert least_upper_dtype(dtypes.int32, dtypes.uint32) == dtypes.int64
+    assert least_upper_dtype(dtypes.uint32, dtypes.int64) == dtypes.int64
+    # special!
+    assert least_upper_dtype(dtypes.int64, dtypes.uint64) == dtypes.float_scalar
     assert least_upper_dtype(dtypes.float_scalar, dtypes.float16) == dtypes.float16
-    assert least_upper_dtype(dtypes.int_scalar, dtypes.float_scalar) == dtypes.float_scalar
+    assert least_upper_dtype(dtypes.float16, dtypes.float32) == dtypes.float32
+    assert least_upper_dtype(dtypes.float32, dtypes.float64) == dtypes.float64
+
+    assert least_upper_dtype(dtypes.bool, dtypes.float32) == dtypes.float32
     assert least_upper_dtype(dtypes.bool, dtypes.float64) == dtypes.float64
 
 

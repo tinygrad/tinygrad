@@ -148,6 +148,7 @@ class dtypes:
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", np.bool_)
   float16: Final[DType] = DType(9, 2, "half", np.float16)
+  # TODO: make float_scalar and int_scalar real and link to default float and int dtype
   float_scalar = float16
   half = float16
   float32: Final[DType] = DType(10, 4, "float", np.float32)
