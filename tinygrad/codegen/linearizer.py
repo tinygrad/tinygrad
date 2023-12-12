@@ -508,7 +508,7 @@ class Linearizer(Kernel):
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL and dtypes.is_float(get_lazyop_info(x).dtype.scalar()):
       x = LazyOp(TernaryOps.MULACC, x.src[0].src, x.arg)
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL and dtypes.is_float(x.src[0].arg[0].scalar()):
-      x = LazyOp(TernaryOps.MULACC, tuple([LazyOp(UnaryOps.CAST, (s,), x.src[0].arg) for s in x.src[0].src[0].src]), x.arg) # Apply the cast to each of the ADD vars
+      x = LazyOp(TernaryOps.MULACC, x.src[0].src[0].src, x.arg)
 
     values = [self.ast_parse(cast(LazyOp, v), acc, offs, loaded_buffers, loop_ctx=loop_ctx) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
@@ -520,6 +520,7 @@ class Linearizer(Kernel):
         ret.append(acc[off])
       for off in range(len(acc)):
         if input_acc[off] != acc[off]:
+          if input_acc[off].dtype != acc[off].dtype: input_acc[off].dtype = acc[off].dtype # DANGEROUS TODO replace this cast with extra logic in the InterpretedFlopCounter to handle fused casted MULACC (shouldnt the vin be readonly anyways?)
           acc[off] = self.uop(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]) + tuple(loop_ctx))
     else:
       ret = [self.uop(UOps.ALU, dtype=dtypes.bool if x.op == BinaryOps.CMPLT else None, vin=val, arg=x.op) for val in zip(*values)]
