@@ -66,7 +66,7 @@ class Normalize:
       image = image[[0, 1, 2]] * 255
     image = Ft.normalize(image, mean=self.mean, std=self.std)
     return image, target
-  
+ 
 class ToTensor:
   # TODO: update to work with example
   def __call__(self, image, target=None): return Ft.to_tensor(image), target
