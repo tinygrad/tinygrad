@@ -144,7 +144,7 @@ class TestLinearizer(unittest.TestCase):
     uops = Linearizer([si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0].ast).linearize().uops
     acc = [u for u in uops if u.uop == UOps.DEFINE_ACC][0]
     phi = [u for u in uops if u.uop == UOps.PHI][0]
-    assert acc.dtype == max(d1, d2)
+    assert acc.dtype == d2
     assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype
 
   @given(st.sampled_from(float_dtypes), st.sampled_from(float_dtypes))
@@ -155,7 +155,7 @@ class TestLinearizer(unittest.TestCase):
     uops = Linearizer([si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0].ast).linearize().uops
     mulacc = [u for u in uops if u.uop == UOps.ALU and u.arg == TernaryOps.MULACC][0]
     phi = [u for u in uops if u.uop == UOps.PHI][0]
-    assert mulacc.vin[0].dtype == mulacc.vin[1].dtype == max(d1, d2)
+    assert mulacc.vin[0].dtype == mulacc.vin[1].dtype == d2
     assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype
 
   def test_simplify_uop(self):
