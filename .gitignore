@@ -45,3 +45,6 @@ coverage.xml
 htmlcov
 outputs_yolov8
 wandb
+model.safetensors
+quickstart.py
+.hypothesis

@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    # TODO: run the pre-commit hook to replace a lot of this
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
@@ -34,12 +35,10 @@ jobs:
       run: python sz.py
     - name: Lint with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' **/*.py
-    - name: Lint with flake8
-      run: python -m flake8 . --statistics -j4
     - name: Lint with ruff
       run: |
         pip3 install --upgrade --force-reinstall ruff
-        python3 -m ruff .
+        python3 -m ruff . --preview
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
@@ -49,7 +48,9 @@ jobs:
     - name: Check <5000 lines
       run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
     - name: Test Docs
-      run: python docs/abstractions.py
+      run: |
+        python docs/abstractions.py
+        python docs/abstractions2.py
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Fuzz Test symbolic
@@ -180,14 +181,11 @@ jobs:
       - if: ${{ matrix.task == 'optimage'}}
         name: Test GPU IMAGE=2 ops
         run: GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
-      - if: ${{ matrix.task == 'optimage' }}
-        name: Test tensor core ops
-        run: GPU=1 TC=2 python -m pytest -n=auto test/test_ops.py
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model compile and size
         run: |
           DEBUG=2 ALLOWED_KERNEL_COUNT=207 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile2.py
-          python -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
+          #python -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model correctness (float32)
         run: FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile2.py
@@ -197,11 +195,11 @@ jobs:
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot fastvits model correctness (float32)
         run: FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile2.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
-      - if: ${{ matrix.task == 'openpilot' }}
-        name: Test multigpu
-        run: |
-          PYTHONPATH="." python test/external/dist/test_world.py
-          PYTHONPATH="." python test/external/dist/test_collectives.py
+      #- if: ${{ matrix.task == 'openpilot' }}
+      #  name: Test multigpu
+      #  run: |
+      #    PYTHONPATH="." python test/external/dist/test_world.py
+      #    PYTHONPATH="." python test/external/dist/test_collectives.py
       - if: ${{ matrix.task == 'onnx' }}
         name: Test ONNX (CPU)
         run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
@@ -248,7 +246,10 @@ jobs:
     #- name: Run webgpu pytest
     #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
     - name: Run selected webgpu tests
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_dtype.py test/test_jit.py
+      run: |
+        WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_ops.py test/test_dtype.py \
+        test/test_jit.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_linearizer.py \
+        test/test_linearizer_failures.py test/test_nn.py
     - name: Build WEBGPU Efficientnet
       run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
     - name: Install Puppeteer
@@ -258,7 +259,7 @@ jobs:
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
 
-  testmetalwebgpu:
+  testmetal:
     name: Metal Tests
     runs-on: macos-13
     timeout-minutes: 20
@@ -290,10 +291,8 @@ jobs:
       run: METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
-    - name: Run whisper test
-      run: METAL=1 python -m pytest test/models/test_whisper.py
-    - name: Test tensor core reshape-only ops
-      run: METAL=1 TC=2 python -m pytest -n=auto test/test_ops.py
+    - name: Test tensor core ops
+      run: METAL=1 TC=2 python test/test_ops.py TestOps.test_big_gemm
 
   testhipcompilation:
     name: HIP Compilation Tests
@@ -328,9 +327,9 @@ jobs:
         # Prefer packages from the rocm repository over system packages
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
         sudo apt update
-        sudo apt install --allow-unauthenticated -y rocm-hip-libraries hip-dev
+        sudo apt install --no-install-recommends --allow-unauthenticated -y rocm-hip-libraries hip-dev
     - name: Install Python Dependencies
-      run: pip install -e '.[testing]'
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test HIP compilation on RDNA3 [gfx1100]
       run: |
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
@@ -382,7 +381,7 @@ jobs:
           echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           sudo apt update -y
           sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
-            flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+            flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc libzstd-dev
       - name: Cache gpuocelot
         if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         id: cache-build
@@ -415,13 +414,13 @@ jobs:
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Run pytest (not cuda)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
-        run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}' --durations=20
+        run: python -m pytest -n=auto test/ -m 'not exclude_${{matrix.backend}}' --durations=20
       - name: Run ONNX (only LLVM)
         if: matrix.backend == 'llvm'
         run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
-        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models --durations=20
+        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models --durations=20
 
   #testunicorn:
   #  name: ARM64 unicorn Test

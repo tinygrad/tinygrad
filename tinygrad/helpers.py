@@ -1,9 +1,9 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes
 import numpy as np
 from urllib import request
 from tqdm import tqdm
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Set
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
 
@@ -40,6 +40,10 @@ def partition(lst:List[T], fxn:Callable[[T],bool]):
 def unwrap(x:Optional[T]) -> T:
   assert x is not None
   return x
+def unwrap2(x:Tuple[T,Any]) -> T:
+  ret, err = x
+  assert err is None, str(err)
+  return ret
 def get_child(obj, key):
   for k in key.split('.'):
     if k.isnumeric(): obj = obj[int(k)]
@@ -108,16 +112,19 @@ class DType(NamedTuple):
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
   def vec(self, sz:int):
     assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
-    return DType(self.priority, self.itemsize*sz, self.name+str(sz), None, sz)
+    return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self]}{str(sz)}", None, sz)
   def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
 
 # dependent typing?
 class ImageDType(DType):
-  def __new__(cls, priority, itemsize, name, np, shape):
+  def __new__(cls, priority, itemsize, name, np, shape, base):
     return super().__new__(cls, priority, itemsize, name, np)
-  def __init__(self, priority, itemsize, name, np, shape):
+  def __init__(self, priority, itemsize, name, np, shape, base):
     self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
+    self.base: DType = base
     super().__init__()
+  def scalar(self): return self.base
+  def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
   # TODO: fix this to not need these
   def __hash__(self): return hash((super().__hash__(), self.shape))
@@ -130,31 +137,41 @@ class PtrDType(DType):
 
 class dtypes:
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
-  def is_int(x: DType)-> bool: return x in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
+  def is_int(x: DType)-> bool: return x.scalar() in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
-  def is_float(x: DType) -> bool: return x in (dtypes.float16, dtypes.float32, dtypes.float64, dtypes.half.vec(4), dtypes.float.vec(2), dtypes.float.vec(4))
+  def is_float(x: DType) -> bool: return x.scalar() in (dtypes.float16, dtypes.float32, dtypes.float64)
   @staticmethod
-  def is_unsigned(x: DType) -> bool: return x in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
+  def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
   def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", np.bool_)
   float16: Final[DType] = DType(9, 2, "half", np.float16)
+  # TODO: make float_scalar and int_scalar real and link to default float and int dtype
+  float_scalar = float16
   half = float16
   float32: Final[DType] = DType(10, 4, "float", np.float32)
   float = float32
   float64: Final[DType] = DType(11, 8, "double", np.float64)
   double = float64
   int8: Final[DType] = DType(1, 1, "char", np.int8)
+  int_scalar = int8
+  char = int8
   int16: Final[DType] = DType(3, 2, "short", np.int16)
+  short = int16
   int32: Final[DType] = DType(5, 4, "int", np.int32)
   int = int32
   int64: Final[DType] = DType(7, 8, "long", np.int64)
+  long = int64
   uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
+  uchar = uint8
   uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
+  ushort = uint16
   uint32: Final[DType] = DType(6, 4, "unsigned int", np.uint32)
+  uint = uint32
   uint64: Final[DType] = DType(8, 8, "unsigned long", np.uint64)
+  ulong = uint64
 
   # NOTE: bfloat16 isn't supported in numpy
   bfloat16: Final[DType] = DType(9, 2, "__bf16", None)
@@ -164,12 +181,23 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shp)
+  def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shp, dtypes.float32)
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp)
+  def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp, dtypes.float32)
+
+# https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
+promo_lattice = { dtypes.bool: [dtypes.int_scalar],
+  dtypes.int_scalar: [dtypes.uint8, dtypes.int8], dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64], dtypes.int64: [dtypes.float_scalar],
+  dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32], dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.float_scalar],
+  dtypes.float_scalar: [dtypes.float16, dtypes.bfloat16], dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], }
+
+@functools.lru_cache(None)
+def _get_recursive_parents(dtype:DType) -> Set[DType]: return set.union(*[_get_recursive_parents(d) for d in promo_lattice[dtype]], {dtype}) if dtype != dtypes.float64 else {dtypes.float64}
+@functools.lru_cache(None)
+def least_upper_dtype(*ds:DType) -> DType: return min(set.intersection(*[_get_recursive_parents(d) for d in ds]))
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and not v.__class__ == staticmethod}
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and v.__class__ is not staticmethod}
 INVERSE_DTYPES_DICT = {v:k for k,v in DTYPES_DICT.items()}
 
 class GlobalCounters:
@@ -251,3 +279,60 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=n
         if (file_size:=os.stat(f.name).st_size) < total_length: raise RuntimeError(f"fetch size incomplete, {file_size} < {total_length}")
         pathlib.Path(f.name).rename(fp)
   return fp
+
+# *** Exec helpers
+
+def cpu_time_execution(cb, enable):
+  if enable: st = time.perf_counter()
+  cb()
+  if enable: return time.perf_counter()-st
+
+# *** ctypes helpers
+
+# TODO: make this work with read only memoryviews (if possible)
+def from_mv(mv, to_type=ctypes.c_char): return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type))
+def to_char_p_p(options: List[bytes], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])
+@functools.lru_cache(maxsize=None)
+def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
+  class CStruct(ctypes.Structure):
+    _pack_, _fields_ = 1, fields
+  return CStruct
+def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
+def get_bytes(arg, get_sz, get_str, check) -> bytes: return (sz := init_c_var(ctypes.c_size_t(), lambda x: check(get_sz(arg, ctypes.byref(x)))), ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value))[1]
+def flat_mv(mv:memoryview):
+  if len(mv) == 0: return mv
+  return mv.cast("B", shape=(mv.nbytes,))
+
+# *** Helpers for CUDA-like APIs.
+
+def pretty_ptx(s):
+  # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
+  s = re.sub(r'([!@<\[\s,\+\-;\n])((?:[_%$][\w%\$_]+(?:\.[xyz])?\:?)|(?:buf\d+))([<>\]\s,\+\-;\n\)])', lambda m:m[1]+colored(m[2], "blue")+m[3], s, flags=re.M) # identifiers
+  s = re.sub(r'(.)((?:b|s|u|f)(?:8|16|32|64)|pred)([\.\s])', lambda m:m[1]+colored(m[2], "green")+m[3], s, flags=re.M) # types
+  s = re.sub(r'^(\s*)([\w]+)(.*?;$)', lambda m:m[1]+colored(m[2], "yellow")+m[3], s, flags=re.M) # instructions
+  s = re.sub(r'([<>\[\]\s,\+\-;])((?:0[fF][0-9a-fA-F]{8})|(?:[0-9]+)|(?:0[xX][0-9a-fA-F]+))([<>\[\]\s,\+\-;])', lambda m:m[1]+colored(m[2], "yellow")+m[3], s, flags=re.M) # numbers
+  s = re.sub(r'(\.)(param|reg|global)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # space
+  s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
+  return s
+
+def compile_cuda_style(prg, compile_options, prog_t, create_prog, compile_prog, get_code, get_code_size, get_log, get_log_size, check) -> bytes:
+  check(create_prog(ctypes.byref(prog := prog_t()), prg.encode(), "<null>".encode(), 0, None, None))
+  status = compile_prog(prog, len(compile_options), to_char_p_p([o.encode() for o in compile_options]))
+
+  if status != 0: raise RuntimeError(f"compile failed: {get_bytes(prog, get_log_size, get_log, check).decode()}")
+  return get_bytes(prog, get_code_size, get_code, check)
+
+def encode_args_cuda_style(bufs, vals, device_ptr_t, marks) -> Tuple[ctypes.Array, ctypes.Structure]:
+  c_args = init_c_struct_t(tuple([(f'f{i}', device_ptr_t) for i in range(len(bufs))] + [(f'f{i}', ctypes.c_int) for i in range(len(bufs), len(bufs)+len(vals))]))(*bufs, *vals)
+  return (ctypes.c_void_p * 5)(ctypes.c_void_p(marks[0]), ctypes.cast(ctypes.pointer(c_args), ctypes.c_void_p), ctypes.c_void_p(marks[1]), ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(marks[2])), c_args
+
+def time_execution_cuda_style(cb, ev_t, evcreate, evrecord, evsync, evdestroy, evtime, enable=False) -> Optional[float]:
+  if not enable: return cb()
+  evs = [init_c_var(ev_t(), lambda x: evcreate(ctypes.byref(x), 0)) for _ in range(2)]
+  evrecord(evs[0], None)
+  cb()
+  evrecord(evs[1], None)
+  evsync(evs[1])
+  evtime(ctypes.byref(ret := ctypes.c_float()), evs[0], evs[1])
+  for ev in evs: evdestroy(ev)
+  return ret.value * 1e-3

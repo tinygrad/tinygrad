@@ -4,9 +4,8 @@ from typing import Dict, Union, List, Optional, Any, Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, prod, argsort, DEBUG, Timing, GlobalCounters, CI, unwrap
 from tinygrad.shape.view import strides_for_shape
-from tinygrad import Device
 
-safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64}
+safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64, "F64": dtypes.double, "B": dtypes.bool, "I16": dtypes.short, "U16": dtypes.ushort, "UI": dtypes.uint, "UL": dtypes.ulong}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
 def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
@@ -49,7 +48,8 @@ def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> Dict[str, Tensor]:
 def get_parameters(obj) -> List[Tensor]: return list(get_state_dict(obj).values())
 
 def load_state_dict(model, state_dict, strict=True, verbose=True):
-  with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
+  start_mem_used = GlobalCounters.mem_used
+  with Timing("loaded weights in ", lambda et_ns: f", {(GlobalCounters.mem_used-start_mem_used)/1e9:.2f} GB loaded at {(GlobalCounters.mem_used-start_mem_used)/et_ns:.2f} GB/s"):
     model_state_dict = get_state_dict(model)
     if DEBUG >= 1 and len(state_dict) > len(model_state_dict): print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
     for k,v in (t := tqdm(model_state_dict.items(), disable=CI or not verbose)):
@@ -61,7 +61,7 @@ def load_state_dict(model, state_dict, strict=True, verbose=True):
 
 # torch support!
 
-def torch_load(fn:str):
+def torch_load(fn:str) -> Dict[str, Tensor]:
   t = Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
 
   offsets: Dict[Union[str, int], int] = {}
@@ -72,13 +72,6 @@ def torch_load(fn:str):
     if storage[2] not in offsets: return None
     byte_offset = offsets[storage[2]]+storage_offset*storage[1].itemsize
     ret = t[byte_offset:byte_offset+prod(size)].cast(storage[1])
-    # convert bfloat16 -> float16 using LLVM for Llama 2
-    # upstream LLaMA also does this conversion:
-    # https://github.com/facebookresearch/llama/blob/6c7fe276574e78057f917549435a2554000a876d/llama/generation.py#L95
-    # TODO: should this be done in the example instead? or maybe we don't need this anymore with better bfloat16 support
-    if storage[1] == dtypes.bfloat16:
-      ret = ret.bitcast(dtypes.uint16).to("CPU").cast(dtypes.uint32).mul(1<<16).bitcast(dtypes.float32).to(Device.DEFAULT).half()
-      #ret = ret.to("LLVM").half().to(Device.DEFAULT)
 
     # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
     shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
@@ -87,6 +80,7 @@ def torch_load(fn:str):
       intermediate_shape = tuple([shape_strides[x][0] for x in argsort(permute_indexes)])
       assert tuple([shape_strides[i][1] for i in argsort(permute_indexes)]) == strides_for_shape(intermediate_shape), "nonpermutable strides"
       if DEBUG >= 3: print(f"WARNING: this torch load is slow. CPU to permute {intermediate_shape} with {permute_indexes}")
+      assert storage[1] != dtypes.bfloat16, "can't CPU permute BF16"
       # TODO: find a nice way to support all shapetracker on disktensors
       ret = ret.cpu().reshape(intermediate_shape).permute(permute_indexes)
 
