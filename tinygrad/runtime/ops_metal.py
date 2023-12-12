@@ -77,6 +77,7 @@ class MetalAllocator(LRUAllocator):
     cbuf = self.device.mtl_io_queue.commandBuffer()
     cbuf.loadBuffer_offset_size_sourceHandle_sourceHandleOffset_(dest._buf, 0, dest.size*dest.dtype.itemsize, handles[path], src._buf.offset)
     cbuf.commit()
+    self.device.mtl_buffers_in_flight.append(cbuf)
 
 class MetalDevice(Compiled):
   compiler_device = None
