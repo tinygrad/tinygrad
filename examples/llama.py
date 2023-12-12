@@ -14,7 +14,9 @@ from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parame
 from tinygrad.helpers import GlobalCounters
 from extra.models.llama import Transformer, convert_from_huggingface
 from sentencepiece import SentencePieceProcessor, sentencepiece_model_pb2
-from gguf import GGUFReader, TokenType  # noqa: E402
+from gguf import GGUFReader, TokenType, ReaderTensor  
+from gguf.constants import GGML_QUANT_SIZES, GGMLQuantizationType
+import os
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
 
@@ -127,17 +129,30 @@ def load(fn:str):
   else:
     return torch_load(fn)
 
-def load_tokens_from_gguf(gguf_model_path):
-  reader = GGUFReader(gguf_model_path, 'r')
+def dequantize_q4_0(path, tensor: ReaderTensor):
+  # GGML Q4_0 quantization stores the weights as 4 bit uints and scales as 16 bit floats
+  block_sz, type_sz = GGML_QUANT_SIZES[tensor.tensor_type]
+  total_blocks = int(tensor.n_elements // block_sz)
+  t    = Tensor.empty(os.stat(path).st_size, dtype=dtypes.uint8, device=f"disk:{path}")
+  blks = t[tensor.data_offset: tensor.data_offset+int(tensor.n_bytes)].reshape(-1,type_sz)
 
-  # TODO: Make a diccionary of these
+  # Cast to float 16 and extract all the scales, then populate each one for every 32 weights
+  scales  = Tensor(blks.numpy()[:,:2].flatten().view(np.float16)).repeat((32,1)).transpose()
+  # Bitwise tensors to extract the weights packed at uint8s
+  bitwise  = Tensor([1<<4,1], dtype=dtypes.uint8).repeat((block_sz//2,1)).transpose().flatten().repeat((total_blocks,1))
+  bitwise2 = Tensor([1,1<<4], dtype=dtypes.uint8).repeat((block_sz//2,1)).transpose().flatten().repeat((total_blocks,1))
+  weights = blks.to(Device.DEFAULT)[:,2:].repeat((1,2)) 
+  weights = weights.cast(dtypes.uint16).mul(bitwise).cast(dtypes.uint8).div(bitwise).div(bitwise2) - 8
+  return (weights*scales).reshape(tensor.shape.tolist())
+
+def load_from_gguf(path):
+  reader = GGUFReader(path, 'r')
   tokens = [str(bytes(reader.fields['tokenizer.ggml.tokens'].parts[idx]), encoding="utf-8") for idx in reader.fields['tokenizer.ggml.tokens'].data]
   scores = [pv for idx in reader.fields['tokenizer.ggml.scores'].data for pv in reader.fields['tokenizer.ggml.scores'].parts[idx].tolist()]
   types  = [pv for idx in reader.fields['tokenizer.ggml.token_type'].data for pv in reader.fields['tokenizer.ggml.token_type'].parts[idx].tolist()]
 
   # Model tokens for Sentence Piece use Google's Protocol Buffer
   token_model = sentencepiece_model_pb2.ModelProto()
-
   for i in range(len(tokens)):
     token = token_model.pieces.add()
     token.piece = tokens[i]
@@ -152,8 +167,16 @@ def load_tokens_from_gguf(gguf_model_path):
   # Load the model from the Protocol Buffer created with the .gguf info
   sp =  SentencePieceProcessor()
   sp.load_from_serialized_proto(token_model.SerializeToString())
-  return sp 
- 
+
+  w = {}
+  for tensor in reader.tensors:
+    if tensor.tensor_type == GGMLQuantizationType.Q4_0:
+        w[tensor.name] = dequantize_q4_0(path, tensor).numpy() 
+    elif tensor.tensor_type == GGMLQuantizationType.F32:
+        w[tensor.name] = Tensor(tensor.data) 
+    else: raise RuntimeError("Quantization type still not supported!")
+  return sp, w
+
 class AbsmaxQuantizedLinear:
   def __init__(self, in_features, out_features, bias=False):
     assert bias == False
@@ -180,19 +203,21 @@ class LLaMa:
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
     params = MODEL_PARAMS[model_gen][model_size]
-    sp_model = SentencePieceProcessor(model_file=str(tokenizer_path)) if tokenizer_path != '' else load_tokens_from_gguf(model_path)
-    assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
-
     jit = bool(getenv("JIT", 1))
     model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
 
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
+    elif str(model_path).endswith(".gguf"):
+      sp_model, weights = load_from_gguf(model_path)
     else:
       weights = load(str(model_path))
     if "model.embed_tokens.weight" in weights:
       weights = convert_from_huggingface(weights, model, params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
 
+    if tokenizer_path != '': sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
+    assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
+    
     # fix bf16, TODO: check if device supports bf16
     weights = {k:v.to(Device.DEFAULT).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
 
@@ -396,7 +421,8 @@ After you are done speaking, output [EOS]. You are not Chad.
 
   LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code", "tiny": "-tiny"}[args.gen]
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
-  TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
+  is_gguf = str(MODEL_PATH).endswith(".gguf")
+  TOKENIZER_PATH = ((MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model") if not is_gguf else ''
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
   param_count = sum(x.lazydata.st.size() for x in get_parameters(llama.model))
