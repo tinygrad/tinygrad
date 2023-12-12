@@ -72,7 +72,7 @@ class CStyleLanguage(NamedTuple):
     return self.smem_align + self.smem_prefix + f"float {name}[{size}];"
 
   def render_for(self, expr: str, _min:Union[int,str], _max:Union[int,str]) -> str:
-    return f"for ({self.generic_var_prefix if self.generic_var_prefix else 'int'} {expr} = {_min}; {expr} < {_max}; {f'{expr}++' if self.generic_var_prefix else f'++{expr}'}) {{"
+    return f"for ({self.generic_var_prefix if self.generic_var_prefix else 'int'} {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
 
   def render_if(self, cond: str):
     return f"if ({cond}) {{"
