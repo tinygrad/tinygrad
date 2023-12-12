@@ -4,9 +4,6 @@ from typing import Dict, Union, List, Optional, Any, Tuple
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import dtypes, prod, argsort, DEBUG, Timing, GlobalCounters, CI, unwrap
 from tinygrad.shape.view import strides_for_shape
-from gguf import ReaderTensor
-from gguf.constants import GGML_QUANT_SIZES
-
 
 safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
@@ -61,29 +58,6 @@ def load_state_dict(model, state_dict, strict=True, verbose=True):
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
         continue
       v.assign(state_dict[k].to(v.device)).realize()
-
-# gguf support!
-
-def dequantize_q4(gguf_path, tensor: ReaderTensor):
-  t = Tensor.empty(os.stat(gguf_path).st_size, dtype=dtypes.uint8, device=f"disk:{gguf_path}")
-  
-  block_sz, type_sz = GGML_QUANT_SIZES[tensor.tensor_type]
-  total_blocks = int (tensor.n_elements / block_sz)
-
-  offset = tensor.data_offset
-  blks   = t[offset: offset+int(tensor.n_bytes)].reshape(-1,type_sz)
-
-  # Cast to float 16 and extract all the scales, then populate each one for every 32 weights
-  scales = Tensor(blks.numpy()[:,:2].flatten().view(np.float16))
-  scales = scales.repeat((32,1)).transpose()
-
-  bitwise  = Tensor([1<<4,1]).repeat((block_sz//2,1)).transpose().flatten().repeat((total_blocks,1)).cast(dtypes.uint8)
-  bitwise2 = Tensor([1,1<<4]).repeat((block_sz//2,1)).transpose().flatten().repeat((total_blocks,1)).cast(dtypes.uint8)
-
-  weights = blks.to(Device.DEFAULT)[:,2:].repeat((1,2)).cast(dtypes.uint8) 
-  weights = weights.cast(dtypes.uint16).mul(bitwise).cast(dtypes.uint8).div(bitwise).div(bitwise2) - 8
-
-  return Tensor.flatten(weights*scales)
 
 # torch support!
 
@@ -161,3 +135,4 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
         base_offset += 8 + lens[i]
       f.seek(rwd)
       return TorchPickle(f).load()
+
