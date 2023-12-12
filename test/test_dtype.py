@@ -256,14 +256,15 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.uint16, dtypes.int32) == dtypes.int32
     assert least_upper_dtype(dtypes.int32, dtypes.uint32) == dtypes.int64
     assert least_upper_dtype(dtypes.uint32, dtypes.int64) == dtypes.int64
-    # special!
-    assert least_upper_dtype(dtypes.int64, dtypes.uint64) == dtypes.float_scalar
-    assert least_upper_dtype(dtypes.float_scalar, dtypes.float16) == dtypes.float16
+    # similar to jax but we don't use weak type
+    assert least_upper_dtype(dtypes.int64, dtypes.uint64) == dtypes.float16
     assert least_upper_dtype(dtypes.float16, dtypes.float32) == dtypes.float32
     assert least_upper_dtype(dtypes.float32, dtypes.float64) == dtypes.float64
 
     assert least_upper_dtype(dtypes.bool, dtypes.float32) == dtypes.float32
     assert least_upper_dtype(dtypes.bool, dtypes.float64) == dtypes.float64
+    assert least_upper_dtype(dtypes.float16, dtypes.int64) == dtypes.float16
+    assert least_upper_dtype(dtypes.float16, dtypes.uint64) == dtypes.float16
 
 
 if __name__ == '__main__':
