@@ -25,7 +25,7 @@ class AssemblyLanguage(NamedTuple):
   def render_cast(self, d:str, a:str, dtype:DType, atype:DType, bitcast=False) -> str:
     if bitcast: return f"mov.b{self.dtype_to_asmtype[dtype][1:]} {d}, {a};"
     no_round = ((dtypes.is_int(dtype) or dtype == dtypes.bool) and (dtypes.is_int(atype) or atype == dtypes.bool)) or ((dtypes.is_float(dtype) and dtypes.is_float(atype)) and dtype.itemsize >= atype.itemsize)
-    return f"cvt{'' if no_round else '.rz' if dtypes.is_float(dtype) else '.rzi'}.{self.dtype_to_asmtype[dtype]}.{self.dtype_to_asmtype[atype]} {d}, {a};"
+    return f"cvt{'' if no_round else '.rn' if dtypes.is_float(dtype) else '.rzi'}.{self.dtype_to_asmtype[dtype]}.{self.dtype_to_asmtype[atype]} {d}, {a};"
 
 def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
   local_size: List[int] = []
