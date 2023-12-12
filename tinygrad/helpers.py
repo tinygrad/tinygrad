@@ -148,15 +148,12 @@ class dtypes:
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", np.bool_)
   float16: Final[DType] = DType(9, 2, "half", np.float16)
-  # TODO: make float_scalar and int_scalar real and link to default float and int dtype
-  float_scalar = float16
   half = float16
-  float32: Final[DType] = DType(10, 4, "float", np.float32)
+  float32: Final[DType] = DType(11, 4, "float", np.float32)
   float = float32
-  float64: Final[DType] = DType(11, 8, "double", np.float64)
+  float64: Final[DType] = DType(12, 8, "double", np.float64)
   double = float64
   int8: Final[DType] = DType(1, 1, "char", np.int8)
-  int_scalar = int8
   char = int8
   int16: Final[DType] = DType(3, 2, "short", np.int16)
   short = int16
@@ -174,7 +171,8 @@ class dtypes:
   ulong = uint64
 
   # NOTE: bfloat16 isn't supported in numpy
-  bfloat16: Final[DType] = DType(9, 2, "__bf16", None)
+  # it has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
+  bfloat16: Final[DType] = DType(10, 2, "__bf16", None)
 
   # NOTE: these are internal dtypes, should probably check for that
   _arg_int32: Final[DType] = DType(2, 4, "_arg_int32", None)
@@ -186,10 +184,11 @@ class dtypes:
   def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp, dtypes.float32)
 
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
-promo_lattice = { dtypes.bool: [dtypes.int_scalar],
-  dtypes.int_scalar: [dtypes.uint8, dtypes.int8], dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64], dtypes.int64: [dtypes.float_scalar],
-  dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32], dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.float_scalar],
-  dtypes.float_scalar: [dtypes.float16, dtypes.bfloat16], dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], }
+# we don't support weak type and complex type
+promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8],
+  dtypes.int8: [dtypes.int16], dtypes.int16: [dtypes.int32], dtypes.int32: [dtypes.int64], dtypes.int64: [dtypes.float16, dtypes.bfloat16],
+  dtypes.uint8: [dtypes.int16, dtypes.uint16], dtypes.uint16: [dtypes.int32, dtypes.uint32], dtypes.uint32: [dtypes.int64, dtypes.uint64], dtypes.uint64: [dtypes.float16, dtypes.bfloat16],
+  dtypes.float16: [dtypes.float32], dtypes.bfloat16: [dtypes.float32], dtypes.float32: [dtypes.float64], }
 
 @functools.lru_cache(None)
 def _get_recursive_parents(dtype:DType) -> Set[DType]: return set.union(*[_get_recursive_parents(d) for d in promo_lattice[dtype]], {dtype}) if dtype != dtypes.float64 else {dtypes.float64}
