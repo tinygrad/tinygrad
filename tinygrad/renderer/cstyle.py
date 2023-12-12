@@ -3,7 +3,7 @@ import math, functools
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import ImageDType, dtypes, prod, DType, strip_parens, getenv
+from tinygrad.helpers import INVERSE_DTYPES_DICT, ImageDType, dtypes, prod, DType, strip_parens, getenv
 
 class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"
@@ -225,9 +225,8 @@ class OpenCLLanguage(CStyleLanguage):
   uses_vload = True
   # NOTE: mad is used so the loads aren't reordered into the math on 845
   code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda a,b,c,dtype: f"mad({a},{b},{c})"}
-  type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
-    return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
+    return f"as_{INVERSE_DTYPES_DICT[var_dtype]}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
 class MetalLanguage(CStyleLanguage):
