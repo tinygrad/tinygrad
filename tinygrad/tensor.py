@@ -129,7 +129,9 @@ class Tensor:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
     if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.np)
-    return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)  # noqa: E501
+    cpu_lazydata = self.detach().cast(self.dtype.scalar()).contiguous().to('CPU').realize().lazydata
+    if cpu_lazydata.op == LoadOps.CONST: return np.full(self.shape, cpu_lazydata.arg, dtype=self.dtype.np)
+    return cpu_lazydata.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
 
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self

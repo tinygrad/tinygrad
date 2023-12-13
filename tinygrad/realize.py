@@ -48,7 +48,10 @@ def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], first=True) -
   elif buf.op == LoadOps.COPY and first:
     inputs.append(buf.srcs[0].base)
     return LazyOp(LoadOps.COPY, (), buf.srcs[0].base)
-  elif buf.realized or buf != buf.base or buf.base.op in LoadOps:
+  elif buf.op == LoadOps.CUSTOM and first:
+    inputs += buf.srcs
+    return LazyOp(LoadOps.CUSTOM, (), buf.arg)
+  elif buf.realized or buf != buf.base or buf.base.op in LoadOps or (len(buf.base.children) > 1 and not first):
     # have to do a load
     if buf.base not in inputs: inputs.append(buf.base)
     return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf.base)+1, buf.dtype, buf.st.simplify().unbind()))

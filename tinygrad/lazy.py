@@ -6,7 +6,7 @@ from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
-from weakref import ref, WeakValueDictionary
+from weakref import ref, WeakSet, WeakValueDictionary
 
 lazycache: WeakValueDictionary = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType,
@@ -27,12 +27,14 @@ class LazyBuffer:
     self.shape = self.st.shape
     assert base is None or base.base == base
     self._base = base
+    self.children: WeakSet[LazyBuffer] = WeakSet()
+    for x in srcs: x.base.children.add(self)
     self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
     self._realized = None
     self.output_buffer: Optional[Buffer] = None
 
   def __repr__(self) -> str:
-    return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.op if hasattr(self, 'op') else self.realized}>"
+    return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.op} {self.realized}>"
 
   @property
   def base(self) -> LazyBuffer: return self._base if self._base is not None else self
@@ -58,7 +60,7 @@ class LazyBuffer:
     return ret
 
   def copy_to_device(self, device:str) -> LazyBuffer:
-    if self.is_unrealized_const(): return LazyBuffer(device, self.st, self.dtype, LoadOps.CONST, self.arg)  # const doesn't have to be copied
+    if self.is_unrealized_const(): return LazyBuffer(device, self.st, self.dtype, LoadOps.CONST, self.base.arg)  # const doesn't have to be copied
     out = self.contiguous()
     return create_lazybuffer(device, out.st, out.dtype, LoadOps.COPY, srcs=(out,))
 
