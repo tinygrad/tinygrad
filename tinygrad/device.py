@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 class _Device:
   def __init__(self): self._buffers:List[str] = [x.stem[len("ops_"):].upper() for x in pathlib.Path(__file__).parent.glob("runtime/ops_*")]
-  def canonicalize(self, d: Optional[str]) -> str: return f"{d.partition(':')[::2][0].upper()}".replace(":0", "") if d else self.DEFAULT
+  def canonicalize(self, d: Optional[str]) -> str: return f"{d.split(':')[0].upper()}{':'+d.split(':')[1] if ':' in d else ''}" if d else self.DEFAULT
   def __getitem__(self, ix:str) -> Union[Interpreted, Compiled]: return self.__get_canonicalized_item(self.canonicalize(ix))
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Union[Interpreted, Compiled]:
