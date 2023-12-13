@@ -1,8 +1,8 @@
 from typing import List, Dict, Optional, Set
-from tinygrad.ops import LoadOps, ScheduleItem, LazyOp, BufferOps, MemBuffer, ConstBuffer
+from tinygrad.ops import LoadOps, ScheduleItem, LazyOp, BufferOps, MemBuffer, ConstBuffer, vars_from_ast
 from tinygrad.device import Device, Buffer, BufferCopy, JITRunner
 from tinygrad.graph import print_tree, log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import prod, GlobalCounters
+from tinygrad.helpers import prod, GlobalCounters, merge_dicts
 from tinygrad.shape.symbolic import Variable
 from tinygrad.lazy import LazyBuffer
 
@@ -73,7 +73,7 @@ def create_schedule(out:LazyBuffer, seen:Optional[Set[LazyBuffer]]=None) -> List
 
   inputs: List[LazyBuffer] = []
   op = _recursive_get_lazyop(out, inputs)
-  if op.op not in LoadOps: op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, out.st))
+  if op.op not in LoadOps: op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, out.st.simplify().unbind()))
   ret: List[ScheduleItem] = []
   for x in inputs:
     assert x.base == x, f"all inputs must be base, {x} isn't"
@@ -91,4 +91,6 @@ def create_schedule(out:LazyBuffer, seen:Optional[Set[LazyBuffer]]=None) -> List
 
   #from tinygrad.graph import print_tree
   #print_tree(op)
-  return ret + [ScheduleItem(op, out, tuple(inputs), {})]
+
+  var_vals = merge_dicts([out.st.var_vals] + [buf.st.var_vals for buf in inputs])
+  return ret + [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in vars_from_ast(op)})]
