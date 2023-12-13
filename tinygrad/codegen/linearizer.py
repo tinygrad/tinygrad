@@ -516,7 +516,7 @@ class Linearizer(Kernel):
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL and dtypes.is_float(get_lazyop_info(x).dtype.scalar()):
       x = LazyOp(TernaryOps.MULACC, x.src[0].src, x.arg)
     if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL and dtypes.is_float(x.src[0].arg[0].scalar()):  # noqa: E501
-      x = LazyOp(TernaryOps.MULACC, tuple([LazyOp(UnaryOps.CAST, (s,), x.src[0].arg) for s in x.src[0].src[0].src]), x.arg) # Apply the cast to each of the ADD vars
+      x = LazyOp(TernaryOps.MULACC, x.src[0].src[0].src, x.arg)
     values = [self.ast_parse(cast(LazyOp, v), acc, offs, loaded_buffers, loop_ctx=loop_ctx) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:

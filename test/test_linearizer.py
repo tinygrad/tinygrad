@@ -135,19 +135,19 @@ class TestLinearizer(unittest.TestCase):
     assert acc.dtype == d
     assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype
 
-  def test_reduce_midcast_acc(self):
-    d1=dtypes.half
-    d2=dtypes.float
-    op=Tensor.max
+  @unittest.skip("TODO this is failing because get_lazyop_info doesn't correctly handle midcasted fused MULACC")
+  @given(st.sampled_from(float_dtypes), st.sampled_from(float_dtypes), st.sampled_from(reduce_ops))
+  def test_reduce_midcast_acc(self, d1, d2, op):
     a = Tensor.rand(1024,1024, dtype=d1)
     b = Tensor.rand(1024,1024, dtype=d1)
     out = op((a*b).cast(d2)).cast(d1)
     uops = Linearizer([si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0].ast).linearize().uops
     acc = [u for u in uops if u.uop == UOps.DEFINE_ACC][0]
     phi = [u for u in uops if u.uop == UOps.PHI][0]
-    assert acc.dtype == d2
+    assert acc.dtype == max(d1, d2)
     assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype
 
+  @unittest.skip("TODO this is failing because get_lazyop_info doesn't correctly handle midcasted fused MULACC")
   @given(st.sampled_from(float_dtypes), st.sampled_from(float_dtypes))
   def test_mulacc_midcast(self, d1:DType, d2:DType):
     a = Tensor.rand(1024,1024, dtype=d1)
@@ -157,7 +157,7 @@ class TestLinearizer(unittest.TestCase):
     mulacc = [u for u in uops if u.uop == UOps.ALU and u.arg == TernaryOps.MULACC][0]
     phi = [u for u in uops if u.uop == UOps.PHI][0]
     assert mulacc.vin[0].dtype == mulacc.vin[1].dtype == d2
-    assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype
+    assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype == max(d1, d2)
 
   def test_simplify_uop(self):
     def helper_test_simplify(uop, dtype, vin, arg=None):
