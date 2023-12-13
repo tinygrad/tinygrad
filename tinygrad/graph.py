@@ -14,8 +14,8 @@ cnts: Dict[OpType, int] = defaultdict(int)
 if DEBUG >= 2:
   def print_globalcounters():
     if GlobalCounters.time_sum_s == 0: return
-    print(f"avg: {GlobalCounters.global_ops*1e-9/GlobalCounters.time_sum_s:8.2f} GFLOPS {GlobalCounters.global_mem*1e-9/GlobalCounters.time_sum_s:8.2f} GB/s",
-          f"{' '*10}total: {GlobalCounters.kernel_count:5d} kernels {GlobalCounters.global_ops*1e-9:8.2f} GOPS {GlobalCounters.global_mem*1e-9:8.2f} GB {GlobalCounters.time_sum_s*1e3:8.2f} ms")
+    print(f"avg: {GlobalCounters.global_ops*1e-9/GlobalCounters.time_sum_s:8.2f} GFLOPS {GlobalCounters.global_mem*1e-9/GlobalCounters.time_sum_s:8.2f} GB/s",  # noqa: E501
+          f"{' '*10}total: {GlobalCounters.kernel_count:5d} kernels {GlobalCounters.global_ops*1e-9:8.2f} GOPS {GlobalCounters.global_mem*1e-9:8.2f} GB {GlobalCounters.time_sum_s*1e3:8.2f} ms")  # noqa: E501
   atexit.register(print_globalcounters)
 if GRAPH:
   import networkx as nx
@@ -52,7 +52,7 @@ def add_st_node(nmx, nmo, label, st:ShapeTracker):
   inter_node = node_count
   node_count += 1
   offset = st.expr_node(NumNode(0))[0]
-  G.add_node(inter_node, style='filled', fillcolor="#80ff8080", color="black", label=f"{st.shape}\n{st.real_strides()}" + (f"\n{offset}" if offset != 0 else ""))
+  G.add_node(inter_node, style='filled', fillcolor="#80ff8080", color="black", label=f"{st.shape}\n{st.real_strides()}" + (f"\n{offset}" if offset != 0 else ""))  # noqa: E501
   G.add_edge(nmx, inter_node, color='#00000060')
   G.add_edge(inter_node, nmo, label=label, color='#00000060')
 
@@ -69,7 +69,8 @@ def log_schedule_item(si: ScheduleItem):
   cnts[optype] += 1
   if GRAPH:
     assert si.out.base == si.out, "all outputs based"
-    top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
+    top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0",
+                  MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
 
     # get inputs for shapetrackers
     input_to_st = defaultdict(list)
@@ -89,13 +90,14 @@ def log_schedule_item(si: ScheduleItem):
 
     if nm(si.out) not in G.nodes: G.add_node(nm(si.out))
 
-    G.nodes[nm(si.out)]['label'] = '"' + (str(set(x.shape for x in si.inputs))+"\n"+str(si.out.shape) if optype == ReduceOps else str(si.out.shape))+str_dtype(si.out.dtype)+(f"\n{si.ast.op}" if si.ast.op in LoadOps or optype is BufferOps else "")+(f"\n{si.out.device}" if si.out.device != Device.DEFAULT else "") + '"'
+    G.nodes[nm(si.out)]['label'] = '"' + (str(set(x.shape for x in si.inputs))+"\n"+str(si.out.shape) if optype == ReduceOps else str(si.out.shape))+str_dtype(si.out.dtype)+(f"\n{si.ast.op}" if si.ast.op in LoadOps or optype is BufferOps else "")+(f"\n{si.out.device}" if si.out.device != Device.DEFAULT else "") + '"'  # noqa: E501
     G.nodes[nm(si.out)]['fillcolor'] = top_colors[optype]
     G.nodes[nm(si.out)]['color'] = 'black'
     G.nodes[nm(si.out)]['style'] = 'filled'
 
 def _tree(lazydata, prefix=""):
-  if type(lazydata).__name__ == "LazyBuffer": return [f"━━ realized {lazydata.dtype.name} {lazydata.shape}"] if (lazydata.realized) else _tree(lazydata.op, "LB ")
+  if type(lazydata).__name__ == "LazyBuffer":
+    return [f"━━ realized {lazydata.dtype.name} {lazydata.shape}"] if (lazydata.realized) else _tree(lazydata.op, "LB ")
   if len(lazydata.src) == 0: return [f"━━ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
   lines = [f"━┳ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
   childs = [_tree(c) for c in lazydata.src[:]]
@@ -112,7 +114,7 @@ def graph_uops(uops:List[UOp]):
   G = nx.DiGraph()
   for u in uops:
     if u.uop == UOps.END: continue
-    G.add_node(uops.index(u), label=f"{str(u.uop)[5:]}{(' '+str(u.arg)) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.uop, "#ffffff"))
+    G.add_node(uops.index(u), label=f"{str(u.uop)[5:]}{(' '+str(u.arg)) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.uop, "#ffffff"))  # noqa: E501
     for v in u.vin: G.add_edge(uops.index(v), uops.index(u))
   GRAPHPATH = "/tmp/uops"
   nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
