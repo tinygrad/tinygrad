@@ -333,7 +333,7 @@ DTYPE_TYPECODE = {
   dtypes.uint64: "Q"
 }
 
-def pack_list(data: list, dtype: DType) -> Tuple[memoryview, Tuple[int, ...]]:
+def pack_list(data: Union[None, int, float, list], dtype: DType) -> Tuple[memoryview, Tuple[int, ...]]:
   assert dtype in DTYPE_TYPECODE, f"{dtype} is not supported."
   flat_data, shape = flat_list(data=data)
   buffer = memoryview(bytearray(len(flat_data) * dtype.itemsize))

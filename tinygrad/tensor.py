@@ -62,7 +62,7 @@ class Tensor:
     elif isinstance(data, (int, float)):
       data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
     elif data is None or data.__class__ is list:
-      data = LazyBuffer.fromNative(data or [], dtype=dtype or Tensor.default_type)
+      data = LazyBuffer.fromNative(list(data or []), dtype=dtype or Tensor.default_type)
     elif isinstance(data, bytes):
       data = LazyBuffer.fromCPU(np.frombuffer(data, np.uint8))
     elif isinstance(data, np.ndarray):
