@@ -328,9 +328,8 @@ class WGSLLanguage(CStyleLanguage):
   barrier="workgroupBarrier();"
   generic_var_prefix = "var "
   external_local_bufs = True
-  code_for_op = { **CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c,dtype:
-  f"select({c},{b},f32({a})!=0.)", **{opcode: lambda a,b,dtype,op=op: f"bool(i32({a}){op}i32({b}))" if dtype == dtypes.bool else f"({a}{op}{b})"
-  for opcode,op in [(BinaryOps.MUL,"*"),(BinaryOps.ADD,"+"),(BinaryOps.SUB,"-"),(BinaryOps.DIV,"/")]} }
+  code_for_op = { **CStyleLanguage().code_for_op, BinaryOps.CMPLT: lambda x,y,dtype: f"f32({x}<{y})",
+  TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a}!=0.)" }
   type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"}
 
   def render_local(self, name: str, size: int):
@@ -348,6 +347,9 @@ class WGSLLanguage(CStyleLanguage):
     prg += "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) {'var<uniform>' if dtype == dtypes._arg_int32 else 'var<storage,read_write>'} {name}: {'i32' if dtype == dtypes._arg_int32 else f'array<{self.type_map[dtype]}>'};" for name,dtype in bufs])
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"
     return prg
+
+  def render_if(self, cond: str):
+     return f"if (bool({cond})) {{"
 
   def render_conditional(self, cond:str, x:str, y:str) -> str:
     return f"select(f32({y}), {x}, bool({cond}))"
