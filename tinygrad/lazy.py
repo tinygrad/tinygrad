@@ -31,7 +31,7 @@ class LazyBuffer:
     self.children: WeakSet[LazyBuffer] = WeakSet()
     for x in srcs: x.base.children.add(self)
     self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
-    self._realized = None
+    self._realized: Optional[Buffer] = None
     self.output_buffer: Optional[Buffer] = None
 
   def __repr__(self) -> str:
@@ -44,7 +44,8 @@ class LazyBuffer:
   def realized(self): return self.base._realized
 
   @staticmethod
-  def new(device, shape:Tuple[int], dtype:DType, op, arg): return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype.scalar(), op, arg)
+  def new(device, shape:Tuple[int, ...], dtype:DType, op, arg):
+    return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype.scalar(), op, arg)
 
   def const(self, val:Union[float, int]) -> LazyBuffer:
     return LazyBuffer.new(self.device, (), self.dtype, LoadOps.CONST, val).reshape((1,)*len(self.shape)).expand(self.shape)

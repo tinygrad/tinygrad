@@ -52,24 +52,23 @@ def realized_lazybuffer(lb, num):
     G.nodes[nm(lb)]['label'] = '"' + G.nodes[nm(lb)]["label"].replace('"', '') + f'\nK:{num}"'
 
 def log_lazybuffer(lb):
-  top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0", MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
+  top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0",
+                MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
   if GRAPH and not lb.realized:
     if lb.base != lb:
       offset = lb.st.expr_node(NumNode(0))[0]
-      G.add_node(nm(lb), style='"filled,dashed"', fillcolor="#80ff8080", color="black", label=f"{lb.st.shape}\n{lb.st.real_strides()}" + (f"\n{offset}" if offset != 0 else ""))
+      label = f"{lb.st.shape}\n{lb.st.real_strides()}" + (f"\n{offset}" if offset != 0 else "")
+      G.add_node(nm(lb), style='"filled,dashed"', fillcolor="#80ff8080", color="black", label=label)
       G.add_edge(nm(lb.base), nm(lb), color='#00000060')
       lb = lb.base
     for x in lb.srcs:
       if nm(x) not in G.nodes: G.add_node(nm(x), label=f'"{str(x.realized)[5:-1].replace(" ", chr(10))}"', style='filled', fillcolor="#f0c080")
       G.add_edge(nm(x), nm(lb), color='#a0a0a0')
-    G.add_node(nm(lb))
-    G.nodes[nm(lb)]['label'] = '"' + \
+    label = '"' + \
       (str(set(x.shape for x in lb.srcs))+"\n"+str(lb.shape) if lb.op in ReduceOps else str(lb.shape)) + \
       str_dtype(lb.dtype)+f"\n{lb.op}"+(f"\n{lb.arg}" if lb.op in {LoadOps.CONST, UnaryOps.CAST} else "") + \
       (f"\n{lb.device}" if lb.device != Device.DEFAULT else "") + '"'
-    G.nodes[nm(lb)]['color'] = 'black'
-    G.nodes[nm(lb)]['fillcolor'] = [v for k,v in top_colors.items() if lb.op in k][0] + "80"
-    G.nodes[nm(lb)]['style'] = '"filled,dashed"'
+    G.add_node(nm(lb), style='"filled,dashed"', fillcolor=[v for k,v in top_colors.items() if lb.op in k][0] + "80", color="black", label=label)
 
 def _tree(lazydata, prefix=""):
   if type(lazydata).__name__ == "LazyBuffer":

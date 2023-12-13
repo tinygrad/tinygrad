@@ -45,22 +45,23 @@ def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], first=True) -
   if buf.base.op == LoadOps.CONST:
     # const is never a buffer
     return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.base.arg), buf.dtype, buf.st.simplify().unbind()))
-  elif buf.op == LoadOps.CONTIGUOUS and first:
+  if buf.op == LoadOps.CONTIGUOUS and first:
     # include one contiguous
     return _recursive_get_lazyop(buf.srcs[0], inputs, True)
-  elif buf.op == LoadOps.COPY and first:
+  if buf.op == LoadOps.COPY and first:
     inputs.append(buf.srcs[0].base)
     return LazyOp(LoadOps.COPY, (), buf.srcs[0].base)
-  elif buf.op == LoadOps.CUSTOM and first:
+  if buf.op == LoadOps.CUSTOM and first:
     inputs += buf.srcs
     return LazyOp(LoadOps.CUSTOM, (), buf.arg)
-  elif buf.op == LoadOps.EMPTY and first:
+  if buf.op == LoadOps.EMPTY and first:
     return LazyOp(LoadOps.EMPTY)
-  elif buf.realized or buf != buf.base or buf.base.op in LoadOps or (len(buf.base.children) > 1 and not first):
+  if buf.realized or buf != buf.base or buf.base.op in LoadOps or (len(buf.base.children) > 1 and not first):
     # have to do a load
     if buf.base not in inputs: inputs.append(buf.base)
     return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf.base)+1, buf.dtype, buf.st.simplify().unbind()))
   # convert to a lazyop
+  assert buf.op is not None
   return LazyOp(buf.op, tuple(_recursive_get_lazyop(x, inputs, False) for x in buf.srcs), buf.arg)
 
 def create_schedule(out:LazyBuffer, seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
