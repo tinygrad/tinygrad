@@ -45,7 +45,7 @@ class Tensor:
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any): Tensor.training = self.prev
 
   no_grad: ClassVar[bool] = False
-  default_type: ClassVar[DType] = dtypes.float32
+  default_type: ClassVar[DType] = dtypes.float16
   def __init__(self, data:Union[None, int, float, list, LazyBuffer, np.ndarray, bytes], device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):  # noqa: E501
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     device = Device.canonicalize(device)
@@ -61,7 +61,7 @@ class Tensor:
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     elif isinstance(data, (int, float)):
       data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or Tensor.default_type, device, data)
-    elif data is None or data.__class__ is list:
+    elif data is None or isinstance(data, (tuple, list)):
       assert dtype is None or dtype.np is not None, f"{dtype} doesn't have a numpy dtype"
       data = LazyBuffer.fromCPU(np.array([] if data is None else data, dtype=(dtype or Tensor.default_type).np))
     elif isinstance(data, bytes):
@@ -320,9 +320,7 @@ class Tensor:
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, (tuple, list)):
-      # special case <indices: List[int]>, a lil ugly
-      if isinstance(indices, list) and all(isinstance(i, int) for i in indices): indices = [Tensor(indices, dtype=dtypes.int32, requires_grad=False, device=self.device)]  # noqa: E501
-      else: indices = [Tensor(list(i), dtype=dtypes.int32, requires_grad=False, device=self.device) if isinstance(i, (tuple, list)) else i for i in indices]  # noqa: E501
+      indices = [Tensor(i, dtype=dtypes.int32, requires_grad=False, device=self.device) if isinstance(i, (tuple, list)) else i for i in indices]
     else: indices = [indices]
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
