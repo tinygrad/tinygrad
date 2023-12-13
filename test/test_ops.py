@@ -104,6 +104,59 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
     helper_test_op([], lambda: torch.eye(1), lambda: Tensor.eye(1), forward_only=True)
 
+  def test_split_basic_split(self):
+    tor = torch.arange(10).split(5)
+    ten = Tensor.arange(10).split(5)
+    assert len(tor) == len(ten)
+    for i in range(len(tor)):
+      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
+
+  def test_split_uneven_split(self):
+    tor = torch.arange(10).split(3)
+    ten = Tensor.arange(10).split(3)
+    assert len(tor) == len(ten)
+    for i in range(len(tor)):
+      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
+
+  def test_split_multi_dimensional_tensor(self):
+    tor = torch.arange(12).reshape(3, 4).split(1)
+    ten = Tensor.arange(12).reshape(3, 4).split(1)
+    assert len(tor) == len(ten)
+    for i in range(len(tor)):
+      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
+
+  def test_split_large_tensor(self):
+    tor = torch.arange(10000).split(2500)
+    ten = Tensor.arange(10000).split(2500)
+    assert len(tor) == len(ten)
+    for i in range(len(tor)):
+      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
+
+  def test_split_type_errors(self):
+    ten = Tensor.arange(1)
+    with self.assertRaises(TypeError): ten.split(1.0)
+    with self.assertRaises(TypeError): ten.split(tuple(1,))
+    with self.assertRaises(TypeError): ten.split(set(1))
+    with self.assertRaises(TypeError): ten.split([1.0])
+    with self.assertRaises(TypeError): ten.split([1.0, 1])
+    with self.assertRaises(TypeError): ten.split(Tensor(1))
+
+  def test_split_index_errors(self):
+    ten = Tensor.arange(12).reshape(3, 4)
+    with self.assertRaises(IndexError): ten.split(1, ten.ndim)      # dim == ten.ndim
+    with self.assertRaises(IndexError): ten.split(1, ten.ndim + 1)  # dim > ten.ndim
+    with self.assertRaises(IndexError): ten.split(1, -ten.ndim - 1) # dim < -ten.ndim
+
+  def test_split_runtime_errors(self):
+    ten = Tensor.arange(12).reshape(3, 4)
+    with self.assertRaises(RuntimeError): ten.split(0)        # split_sizes == 0 and dim_size > 0
+    with self.assertRaises(RuntimeError): ten.split(-1)       # split_sizes < 0
+    with self.assertRaises(RuntimeError): Tensor(1).split(1)  # ndim < 1
+
+  def test_split_not_implemented_errors(self):
+    ten = Tensor.arange(12).reshape(3, 4)
+    with self.assertRaises(NotImplementedError): ten.split([1])
+
   def test_chunk(self):
     tor = torch.arange(13).repeat(8, 1).chunk(6, 1)
     ten = Tensor.arange(13).repeat((8, 1)).chunk(6, 1)
