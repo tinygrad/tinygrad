@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes, struct
 import numpy as np
 from urllib import request
 from tqdm import tqdm
@@ -317,6 +317,29 @@ def flat_list(data: Union[None, int, float, list]) -> Tuple[list, Tuple[int, ...
       if flatten(data=item) != shape: raise ValueError("The data has an inhomogenous shape.")
     return (len(data), *shape)
   return result, flatten(data=data)
+
+DTYPE_TYPECODE = {
+  dtypes.bool: "?",
+  dtypes.float16: "e",
+  dtypes.float32: "f",
+  dtypes.float64: "d",
+  dtypes.int8: "b",
+  dtypes.uint8: "B",
+  dtypes.int16: "h",
+  dtypes.uint16: "H",
+  dtypes.int32: "i",
+  dtypes.uint32: "I",
+  dtypes.int64: "q",
+  dtypes.uint64: "Q"
+}
+
+def pack_list(data: list, dtype: DType) -> Tuple[memoryview, Tuple[int, ...]]:
+  assert dtype in DTYPE_TYPECODE, f"{dtype} is not supported."
+  flat_data, shape = flat_list(data=data)
+  buffer = memoryview(bytearray(len(flat_data) * dtype.itemsize))
+  struct.pack_into(f"{len(flat_data)}{DTYPE_TYPECODE[dtype]}", buffer, 0, *flat_data)
+  # Ideally, we would want to set the shape and type in the memoryview, but that does not support float16.
+  return buffer, shape
 
 # *** Helpers for CUDA-like APIs.
 

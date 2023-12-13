@@ -1,7 +1,9 @@
 import unittest
 import numpy as np
+import pytest
 from PIL import Image
-from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch, flat_list
+import tinygrad.helpers
+from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch, flat_list, pack_list
 from tinygrad.shape.symbolic import Variable, NumNode
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -187,6 +189,16 @@ class TestFlattenLIst(unittest.TestCase):
 
     with self.assertRaises(ValueError):
       flat_list([[[1, 2], [3, 4]], [[5, 6], [7]]])
+
+
+class TestPackList:
+    @pytest.mark.parametrize("dtype", tinygrad.helpers.DTYPE_TYPECODE.keys())  # List all dtypes
+    def test_pack_unpack(self, dtype):
+        for data in (1, [], [0, 1, 2], [[0], [1], [2]]):
+            buffer, shape = pack_list(data, dtype=dtype)
+            reference = np.array(data, dtype=dtype.np)
+            assert buffer.tobytes() == reference.tobytes()
+            assert shape == reference.shape
 
 
 if __name__ == '__main__':
