@@ -150,7 +150,7 @@ class Tensor:
   @staticmethod
   def _loadop(op, sz, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
     assert isinstance(sz, int), f"cannot create with symbolic size {sz}"
-    return Tensor(LazyBuffer.new(Device.canonicalize(device), (sz, ), Tensor.default_type if dtype is None else dtype, op, arg))
+    return Tensor(LazyBuffer.new(Device.canonicalize(device), (sz, ), Tensor.default_type if dtype is None else dtype, op, arg), dtype=dtype, device=device, **kwargs)  # noqa: E501
 
   @staticmethod
   def empty(*shape, **kwargs):

@@ -49,8 +49,10 @@ class LazyBuffer:
   def const(self, val:Union[float, int]) -> LazyBuffer:
     return LazyBuffer.new(self.device, (), self.dtype, LoadOps.CONST, val).reshape((1,)*len(self.shape)).expand(self.shape)
 
-  # NOTE: this no longer breaks the graph
-  def contiguous(self): return self if self.st.contiguous and self.st.size() == self.base.st.size() else self.e(LoadOps.CONTIGUOUS)
+  # NOTE: this no longer always breaks the graph
+  def contiguous(self):
+    return self if self.st.contiguous and self.st.size() == self.base.st.size() and not self.is_unrealized_const() else self.e(LoadOps.CONTIGUOUS)
+
   def cast(self, dtype:DType, bitcast:bool=False):
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
 
@@ -64,8 +66,8 @@ class LazyBuffer:
     return ret
 
   def copy_to_device(self, device:str) -> LazyBuffer:
-    # const doesn't have to be copied
-    if self.is_unrealized_const(): return self.const(self.base.arg)._view(self.st)
+    # TODO: const doesn't have to be copied (issues with disk tensor)
+    #if self.is_unrealized_const(): return self.const(self.base.arg)._view(self.st)
     out = self.contiguous()
     return create_lazybuffer(device, out.st, out.dtype, LoadOps.COPY, srcs=(out,))
 
