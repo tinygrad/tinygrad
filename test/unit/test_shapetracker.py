@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# ruff: noqa: E501
 import unittest
 import numpy as np
 from tinygrad.helpers import prod, DEBUG

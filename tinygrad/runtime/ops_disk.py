@@ -13,7 +13,8 @@ class UnderlyingDiskBuffer:
     if self.fd: self.fd.close()
 
 class DiskBuffer:
-  def __init__(self, ud:UnderlyingDiskBuffer, size:int, dtype:DType=dtypes.uint8, offset=0): self.ud, self.size, self.dtype, self.offset = ud, size, dtype, offset
+  def __init__(self, ud:UnderlyingDiskBuffer, size:int, dtype:DType=dtypes.uint8, offset=0):
+    self.ud, self.size, self.dtype, self.offset = ud, size, dtype, offset
   def __repr__(self): return f"<DiskBuffer size={self.size} dtype={self.dtype} offset={self.offset}>"
   def cast(self, arg:Tuple[DType, bool]): return DiskBuffer(self.ud, self.size, arg[0], offset=self.offset)
   def as_strided(self, arg):

@@ -1,3 +1,5 @@
+# ruff: noqa: E501
+# TODO: replace with new lazy with <= 150 length lines
 from __future__ import annotations
 import sys, math
 from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapping, Set
