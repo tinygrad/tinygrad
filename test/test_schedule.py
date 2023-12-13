@@ -9,18 +9,17 @@ from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Compiled
 from tinygrad.helpers import DEBUG, dtypes
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.graph import log_schedule_item, print_tree
+from tinygrad.graph import print_tree
+from tinygrad.realize import create_schedule
 from tinygrad import nn
 
 def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
   seen = set()
   if to_prerealize:
     for pre in to_prerealize:
-      for s in pre.lazydata.schedule(seen.copy()):
-        log_schedule_item(s)
+      for s in create_schedule(pre.lazydata, seen.copy()):
         seen.add(s.out)
-  sched = t.lazydata.schedule(seen)
-  for s in sched: log_schedule_item(s)
+  sched = create_schedule(t.lazydata, seen)
   if filter_loadops: sched = [s for s in sched if s.ast.op not in LoadOps]
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:

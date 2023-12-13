@@ -1,7 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, math
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, DefaultDict
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Any, Iterable, DefaultDict, Set
 from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
@@ -96,10 +96,13 @@ class Tensor:
 
   @staticmethod
   def corealize(lst:Iterable[Tensor]):
-    run_schedule(create_schedule([x.lazydata for x in lst]))
+    seen:Set[LazyBuffer] = set()
+    sched = []
+    for t in lst: sched += create_schedule(t.lazydata, seen)
+    run_schedule(sched)
 
   def realize(self) -> Tensor:
-    run_schedule(create_schedule([self.lazydata]))
+    run_schedule(create_schedule(self.lazydata))
     return self
 
   def assign(self, x) -> Tensor:
