@@ -6,7 +6,7 @@ from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapp
 from weakref import ref, WeakSet, WeakValueDictionary
 
 import numpy as np
-from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, dedup, merge_dicts, all_int, ImageDType, DEBUG
+from tinygrad.helpers import prod, getenv, DType, dtypes, flatten, dedup, merge_dicts, all_int, ImageDType, DEBUG, pack_list
 from tinygrad.ops import ScheduleItem, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, LoadOps, OpType, LazyOp, MemBuffer, ConstBuffer, BufferOps, get_lazyop_info, vars_from_ast
 from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import sint
@@ -223,6 +223,11 @@ class LazyBuffer:
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:
     return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, None, dtypes.from_np(x.dtype), Buffer("CPU", prod(x.shape), dtypes.from_np(x.dtype), x.flatten()))
+
+  @staticmethod
+  def fromNative(x: Union[None, list], dtype: DType):
+    mv, shape = pack_list(data=x, dtype=dtype)
+    return LazyBuffer("CPU", ShapeTracker.from_shape(shape), LoadOps, None, dtype, Buffer("CPU", prod(shape), dtype, np.frombuffer(mv, dtype=np.uint8)))
 
   def cast(self, dtype:DType, bitcast:bool=False):
     return self.e(UnaryOps.CAST, arg=(dtype, bitcast))
