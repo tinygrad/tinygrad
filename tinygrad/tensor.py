@@ -130,7 +130,7 @@ class Tensor:
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
     if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.np)
     cpu_lazydata = self.detach().cast(self.dtype.scalar()).contiguous().to('CPU').realize().lazydata
-    if cpu_lazydata.op == LoadOps.CONST: return np.full(self.shape, cpu_lazydata.arg, dtype=self.dtype.np)
+    if cpu_lazydata.base.op == LoadOps.CONST: return np.full(self.shape, cpu_lazydata.base.arg, dtype=self.dtype.np)
     return cpu_lazydata.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
 
   def to(self, device:Optional[str]) -> Tensor:

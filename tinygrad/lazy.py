@@ -47,7 +47,7 @@ class LazyBuffer:
   def new(device, shape:Tuple[int], dtype:DType, op, arg): return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype.scalar(), op, arg)
 
   def const(self, val:Union[float, int]) -> LazyBuffer:
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), self.dtype.scalar(), LoadOps.CONST, val)
+    return LazyBuffer.new(self.device, (), self.dtype, LoadOps.CONST, val).reshape((1,)*len(self.shape)).expand(self.shape)
 
   # NOTE: this no longer breaks the graph
   def contiguous(self): return self if self.st.contiguous and self.st.size() == self.base.st.size() else self.e(LoadOps.CONTIGUOUS)
@@ -65,7 +65,7 @@ class LazyBuffer:
 
   def copy_to_device(self, device:str) -> LazyBuffer:
     # const doesn't have to be copied
-    if self.is_unrealized_const(): return create_lazybuffer(device, self.st, self.dtype, LoadOps.CONST, self.base.arg)
+    if self.is_unrealized_const(): return self.const(self.base.arg)._view(self.st)
     out = self.contiguous()
     return create_lazybuffer(device, out.st, out.dtype, LoadOps.COPY, srcs=(out,))
 
