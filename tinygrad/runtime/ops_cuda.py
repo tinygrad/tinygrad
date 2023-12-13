@@ -70,8 +70,7 @@ class CUDADevice(Compiled):
     if not CUDACPU:
       check(cuda.cuInit(0))
       check(cuda.cuDeviceGet(ctypes.byref(device := cuda.CUdevice()), device_id))
-      check(cuda.cuCtxCreate_v2(ctypes.byref(context := cuda.CUcontext()), 0, device))
-      self.context = context
+      self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, device)))
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
       if device_id == 0: CUDADevice.default_arch_name = f"sm_{major.value}{minor.value}"
 
