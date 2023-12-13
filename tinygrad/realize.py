@@ -33,8 +33,6 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     assert si.out._base is None, "no setting of non-base LazyBuffers"
     si.out._realized = si.out.output_buffer if si.out.output_buffer is not None else \
       Buffer(si.out.device, prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype)
-    si.out.op = None
-    #for v in si.out.views: del v.op
 
     # run the function (put it in JIT)
     if prg: prg.exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)
@@ -49,7 +47,8 @@ def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], first=True) -
     return _recursive_get_lazyop(buf.srcs[0], inputs, True)
   elif buf.op == LoadOps.COPY and first:
     if buf.srcs[0].base.is_unrealized_const():
-      op = LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.srcs[0].base.arg), buf.dtype, buf.st.simplify().unbind()))   # CONSTs don't actually have to be copied
+      # CONSTs don't actually have to be copied
+      op = LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.srcs[0].base.arg), buf.dtype, buf.st.simplify().unbind()))
     else:
       inputs.append(buf.srcs[0].base)
       return LazyOp(LoadOps.COPY, (), buf.srcs[0].base)
@@ -69,7 +68,9 @@ def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], first=True) -
 def _schedule_one(out:LazyBuffer, seen:Optional[Set[LazyBuffer]]) -> List[ScheduleItem]:
   if out in seen or out.realized or out.is_unrealized_const(): return []
   seen.add(out)
-  if out.base is not out: return _schedule_one(out.base, seen)
+  if out.base is not out:
+    log_lazybuffer(out)
+    return _schedule_one(out.base, seen)
 
   inputs: List[LazyBuffer] = []
   op = _recursive_get_lazyop(out, inputs)
