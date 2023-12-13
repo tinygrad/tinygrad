@@ -1,7 +1,7 @@
 # ruff: noqa: E501
 import numpy as np
 import unittest, os
-from hypothesis import given, strategies as st
+from hypothesis import assume, given, strategies as st
 
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps
@@ -135,21 +135,9 @@ class TestLinearizer(unittest.TestCase):
     assert acc.dtype == d
     assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype
 
-  @unittest.skip("TODO this is failing because get_lazyop_info doesn't correctly handle midcasted fused MULACC")
-  @given(st.sampled_from(float_dtypes), st.sampled_from(float_dtypes), st.sampled_from(reduce_ops))
-  def test_reduce_midcast_acc(self, d1, d2, op):
-    a = Tensor.rand(1024,1024, dtype=d1)
-    b = Tensor.rand(1024,1024, dtype=d1)
-    out = op((a*b).cast(d2)).cast(d1)
-    uops = Linearizer([si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0].ast).linearize().uops
-    acc = [u for u in uops if u.uop == UOps.DEFINE_ACC][0]
-    phi = [u for u in uops if u.uop == UOps.PHI][0]
-    assert acc.dtype == max(d1, d2)
-    assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype
-
-  @unittest.skip("TODO this is failing because get_lazyop_info doesn't correctly handle midcasted fused MULACC")
   @given(st.sampled_from(float_dtypes), st.sampled_from(float_dtypes))
   def test_mulacc_midcast(self, d1:DType, d2:DType):
+    assume(d1.priority < d2.priority) # TODO downcast fails because get_lazyop_info doesn't correctly handle midcasted fused MULACC
     a = Tensor.rand(1024,1024, dtype=d1)
     b = Tensor.rand(1024,1024, dtype=d1)
     out = (a*b).cast(d2).sum(-1)
