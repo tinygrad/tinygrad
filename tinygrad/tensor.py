@@ -107,11 +107,10 @@ class Tensor:
 
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
+    if x.__class__ is not Tensor: x = Tensor(x, device="CPU" if self.device.startswith("DISK") else self.device, dtype=self.dtype)
     if self.device.startswith("DISK"):
-      if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
       self.contiguous().realize().lazydata.realized.copyin(x.numpy().data)
       return self
-    if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     # NOTE: we allow cross device assign
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert not x.requires_grad  # self requires_grad is okay?
@@ -208,8 +207,7 @@ class Tensor:
 
   @staticmethod
   def uniform(*shape, low=0.0, high=1.0, **kwargs) -> Tensor:
-    dtype = kwargs.pop("dtype", Tensor.default_type)
-    return ((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype) + low
+    return ((high-low) * Tensor.rand(*shape, **kwargs)).cast(kwargs.pop("dtype", Tensor.default_type)) + low
 
   @staticmethod
   def scaled_uniform(*shape, **kwargs) -> Tensor: return Tensor.uniform(*shape, low=-1.0, high=1.0, **kwargs).mul(prod(shape)**-0.5)
@@ -227,8 +225,7 @@ class Tensor:
   # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_normal_
   @staticmethod
   def kaiming_normal(*shape, a:float = 0.01, **kwargs) -> Tensor:
-    std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(shape[1:]))
-    return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
+    return Tensor.normal(*shape, mean=0.0, std=math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(shape[1:])), **kwargs)
 
   def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
     assert 1 <= self.ndim <= 2 and num_samples > 0, f"{self.ndim=} must be 1 or 2 dim, {num_samples=} must be positive"
