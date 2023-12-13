@@ -6,17 +6,29 @@ from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
+from weakref import ref, WeakValueDictionary
+
+lazycache: WeakValueDictionary = WeakValueDictionary()
+def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType,
+                      op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
+                      base:Optional[LazyBuffer]=None):
+  wop = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs), ref(base) if base else None)
+  if wop in lazycache: return lazycache[wop]
+
+  ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base)
+  if op not in {LoadOps.EMPTY, LoadOps.CUSTOM, LoadOps.CONST}: lazycache[wop] = ret
+  return ret
 
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-               realized:Optional[Buffer]=None, base:Optional[LazyBuffer]=None):
+               base:Optional[LazyBuffer]=None):
     self.device, self.st, self.dtype = device, st, dtype
     self.shape = self.st.shape
     assert base is None or base.base == base
     self._base = base
     self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
-    self._realized = realized
+    self._realized = None
     self.output_buffer: Optional[Buffer] = None
 
   def __repr__(self) -> str:
@@ -41,22 +53,25 @@ class LazyBuffer:
 
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:
-    buffer = Buffer("CPU", prod(x.shape), dtypes.from_np(x.dtype), x.flatten())
-    return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), dtypes.from_np(x.dtype), realized=buffer)
+    ret = LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), dtypes.from_np(x.dtype))
+    ret._realized = Buffer("CPU", prod(x.shape), dtypes.from_np(x.dtype), x.flatten())
+    return ret
 
   def copy_to_device(self, device:str) -> LazyBuffer:
     out = self.contiguous()
-    return LazyBuffer(device, out.st, out.dtype, LoadOps.COPY, srcs=(out,))    # TODO: rename to LoadOps.COPY
+    return create_lazybuffer(device, out.st, out.dtype, LoadOps.COPY, srcs=(out,))    # TODO: rename to LoadOps.COPY
 
   def e(self:LazyBuffer, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     srcs = (self,)+srcs
-    return LazyBuffer(self.device, ShapeTracker.from_shape(self.shape), max(x.dtype for x in srcs), op, arg, srcs)
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), max(x.dtype for x in srcs), op, arg, srcs)
 
   def r(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
-    return LazyBuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, new_shape, (self,))
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, new_shape, (self,))
+
+  def _view(self:LazyBuffer, new_st:ShapeTracker) -> LazyBuffer:
+    return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
 
   # movement ops
-  def _view(self:LazyBuffer, new_st:ShapeTracker) -> LazyBuffer: return LazyBuffer(self.device, new_st, self.dtype, base=self.base)
   def reshape(self:LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer: return self._view(self.st.reshape(arg))
   def pad(self:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer: return self._view(self.st.pad(arg))
   def expand(self:LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer: return self._view(self.st.expand(arg))

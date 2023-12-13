@@ -1,8 +1,8 @@
 from typing import List, Dict, Optional, Set, Tuple, Any
 from tinygrad.ops import LoadOps, ScheduleItem, LazyOp, BufferOps, MemBuffer, ConstBuffer, vars_from_ast, get_lazyop_info
 from tinygrad.device import Device, Buffer, BufferCopy, JITRunner
-from tinygrad.graph import log_schedule_item, print_tree, log_lazybuffer
-from tinygrad.helpers import prod, dedup, merge_dicts, ImageDType, DEBUG
+from tinygrad.graph import log_schedule_item, print_tree, log_lazybuffer, realized_lazybuffer
+from tinygrad.helpers import prod, dedup, merge_dicts, ImageDType, DEBUG, GlobalCounters
 from tinygrad.shape.symbolic import Variable
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.lazy import LazyBuffer
@@ -36,6 +36,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
 
     # run the function (put it in JIT)
     if prg: prg.exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)
+    realized_lazybuffer(si.out, GlobalCounters.kernel_count)
 
 def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], first=True) -> LazyOp:
   log_lazybuffer(buf)
@@ -68,9 +69,8 @@ def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], first=True) -
 def _schedule_one(out:LazyBuffer, seen:Optional[Set[LazyBuffer]]) -> List[ScheduleItem]:
   if out in seen or out.realized or out.is_unrealized_const(): return []
   seen.add(out)
-  if out.base is not out:
-    log_lazybuffer(out)
-    return _schedule_one(out.base, seen)
+  log_lazybuffer(out)
+  if out.base is not out: return _schedule_one(out.base, seen)
 
   inputs: List[LazyBuffer] = []
   op = _recursive_get_lazyop(out, inputs)
