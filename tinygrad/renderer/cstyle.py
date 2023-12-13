@@ -328,8 +328,9 @@ class WGSLLanguage(CStyleLanguage):
   barrier="workgroupBarrier();"
   generic_var_prefix = "var "
   external_local_bufs = True
-  code_for_op = { **CStyleLanguage().code_for_op, **{opcode: lambda a,b,dtype,op=op: f"bool(i32({a}){op}i32({b}))" if dtype == dtypes.bool else f"({a}{op}{b})" for opcode,op in [(BinaryOps.MUL,"*"),(BinaryOps.ADD,"+"),(BinaryOps.SUB,"-"),(BinaryOps.DIV,"/")]},
-  TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},f32({a})!=0.)" }
+  code_for_op = { **CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c,dtype:
+  f"select({c},{b},f32({a})!=0.)", **{opcode: lambda a,b,dtype,op=op: f"bool(i32({a}){op}i32({b}))" if dtype == dtypes.bool else f"({a}{op}{b})"
+  for opcode,op in [(BinaryOps.MUL,"*"),(BinaryOps.ADD,"+"),(BinaryOps.SUB,"-"),(BinaryOps.DIV,"/")]} }
   type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"}
 
   def render_local(self, name: str, size: int):
