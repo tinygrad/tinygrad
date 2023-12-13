@@ -72,7 +72,7 @@ class CStyleLanguage(NamedTuple):
     return self.smem_align + self.smem_prefix + f"float {name}[{size}];"
 
   def render_for(self, expr: str, _min:Union[int,str], _max:Union[int,str]) -> str:
-    return f"for (int {expr} = {_min}; {expr} < {_max}; ++{expr}) {{"
+    return f"for ({self.generic_var_prefix if self.generic_var_prefix else 'int'} {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
 
   def render_if(self, cond: str):
     return f"if ({cond}) {{"
@@ -357,9 +357,6 @@ class WGSLLanguage(CStyleLanguage):
     prg += "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) {'var<uniform>' if dtype == dtypes._arg_int32 else 'var<storage,read_write>'} {name}: {'i32' if dtype == dtypes._arg_int32 else f'array<{self.type_map[dtype]}>'};" for name,dtype in bufs])  # noqa: E501
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"  # noqa: E501
     return prg
-
-  def render_for(self, expr:str, _min:Union[int,str], _max:Union[int,str]) -> str:
-    return f"for(var {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
 
   def render_if(self, cond: str):
     return f"if (bool({cond})) {{"
