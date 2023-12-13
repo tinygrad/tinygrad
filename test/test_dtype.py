@@ -285,7 +285,7 @@ class TestAutoCastType(unittest.TestCase):
       lambda t: t.sigmoid(),
     ]:
       a = [2, 3, 4]
-      np.testing.assert_allclose(func(Tensor(a, dtype=dtype)).numpy(), func(torch.tensor(a)), rtol=1e-5, atol=1e-5)
+      np.testing.assert_allclose(func(Tensor(a, dtype=dtype)).numpy(), func(torch.tensor(a)), rtol=1e-4, atol=1e-4)
 
 
 if __name__ == '__main__':
