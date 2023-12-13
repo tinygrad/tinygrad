@@ -57,8 +57,8 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
   GlobalCounters.global_mem += mem_estimate
   if et is not None: GlobalCounters.time_sum_s += et
   if DEBUG >= 2:
-    ptm = (colored(f"{et*1e3:9.2f}ms", "RED") if et > 0.01 else f"{et*1e6:9.2f}us") if et is not None else ""
-    print(f"{colored(f'** {device[:7]:7} {GlobalCounters.kernel_count:4d}', ('magenta' if num_kernels == 1 else 'CYAN') if jit else ('green' if first_run else None))} {name+' '*(37-ansilen(name))} arg {buf_count:3d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
+    ptm = (colored(f"{et*1e3:9.2f}ms", "yellow") if et > 0.01 else f"{et*1e6:9.2f}us") if et is not None else ""
+    print(f"{colored(f'** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', ('magenta' if num_kernels == 1 else 'CYAN') if jit else ('green' if first_run else None))} {name+' '*(37-ansilen(name))} arg {buf_count:3d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
           (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))  # noqa: E501
 
 # **************** Buffer / Allocator ****************
@@ -126,7 +126,7 @@ class _BufferCopy(JITRunner):
     if wait or DEBUG >= 2:
       Device[dest.device].synchronize()
       et = time.perf_counter() - st
-    update_stats(colored(f"copy {dest.size:8d}, {dest.device[:7]:7} <- {src.device[:7]:7}", "yellow"), 0, dest.size*dest.dtype.itemsize, {}, et, 2, jit, device=dest.device)  # noqa: E501
+    update_stats(colored(f"copy {dest.size:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", "yellow"), 0, dest.size*dest.dtype.itemsize, {}, et, 2, jit, device=dest.device)  # noqa: E501
 BufferCopy = _BufferCopy()
 
 # TODO: size, dest, src are the same type. can we enforce this?
