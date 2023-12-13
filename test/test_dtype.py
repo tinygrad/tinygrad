@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 import unittest
 import numpy as np
 from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX, temp, least_upper_dtype
