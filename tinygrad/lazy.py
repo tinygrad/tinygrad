@@ -16,6 +16,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType,
   if wop in lazycache: return lazycache[wop]
 
   ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base)
+  # TODO: CONST can be removed here
   if op not in {LoadOps.EMPTY, LoadOps.CUSTOM, LoadOps.CONST}: lazycache[wop] = ret
   return ret
 
@@ -43,12 +44,15 @@ class LazyBuffer:
   def realized(self): return self.base._realized
 
   @staticmethod
-  def new(device, shape:Tuple[int], dtype:DType, op, arg): return LazyBuffer(device, ShapeTracker.from_shape(shape), dtype.scalar(), op, arg)
+  def new(device, shape:Tuple[int], dtype:DType, op, arg): return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype.scalar(), op, arg)
 
-  def const(self, val:Union[float, int]) -> LazyBuffer: return LazyBuffer.new(self.device, self.shape, self.dtype, LoadOps.CONST, val)
+  def const(self, val:Union[float, int]) -> LazyBuffer:
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), self.dtype.scalar(), LoadOps.CONST, val)
 
   # NOTE: this no longer breaks the graph
   def contiguous(self): return self if self.st.contiguous and self.st.size() == self.base.st.size() else self.e(LoadOps.CONTIGUOUS)
+  def cast(self, dtype:DType, bitcast:bool=False):
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
 
   def is_unrealized_const(self): return not self.realized and self.base.op == LoadOps.CONST
   def is_unrealized_contiguous_const(self): return not self.realized and self.op == LoadOps.CONST
@@ -60,7 +64,8 @@ class LazyBuffer:
     return ret
 
   def copy_to_device(self, device:str) -> LazyBuffer:
-    if self.is_unrealized_const(): return LazyBuffer(device, self.st, self.dtype, LoadOps.CONST, self.base.arg)  # const doesn't have to be copied
+    # const doesn't have to be copied
+    if self.is_unrealized_const(): return create_lazybuffer(device, self.st, self.dtype, LoadOps.CONST, self.base.arg)
     out = self.contiguous()
     return create_lazybuffer(device, out.st, out.dtype, LoadOps.COPY, srcs=(out,))
 
