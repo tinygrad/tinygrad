@@ -35,7 +35,7 @@ class TestYOLOv8(unittest.TestCase):
   def test_forward_pass_torch_onnx(self):
     variant = 'n'
     weights_location = fetch(f'https://gitlab.com/r3sist/yolov8_weights/-/raw/master/yolov8{variant}.safetensors')
-    weights_location_pt = fetch(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{variant}.pt', name=f"yolov8{variant}.pt")   # it needs the pt extension
+    weights_location_pt = fetch(f'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8{variant}.pt', name=f"yolov8{variant}.pt")   # it needs the pt extension  # noqa: E501
     weights_location_onnx = weights_location_pt.parent / f"yolov8{variant}.onnx"
 
     # the ultralytics export prints a lot of unneccesary things
@@ -48,7 +48,7 @@ class TestYOLOv8(unittest.TestCase):
     state_dict = safe_load(weights_location)
     load_state_dict(TinyYolov8, state_dict)
 
-    image_location = [np.frombuffer(io.BytesIO(fetch('https://raw.githubusercontent.com/ultralytics/yolov5/master/data/images/bus.jpg').read_bytes()).read(), np.uint8)]
+    image_location = [np.frombuffer(io.BytesIO(fetch('https://raw.githubusercontent.com/ultralytics/yolov5/master/data/images/bus.jpg').read_bytes()).read(), np.uint8)]  # noqa: E501
     orig_image = [cv2.imdecode(image_location[0], 1)]
 
     input_image = preprocess(orig_image)

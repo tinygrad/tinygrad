@@ -52,7 +52,7 @@ def benchmark_model(m, devices, validate_outs=False):
   onnx_model = onnx.load(fn)
   output_names = [out.name for out in onnx_model.graph.output]
   excluded = {inp.name for inp in onnx_model.graph.initializer}
-  input_shapes = {inp.name:tuple(x.dim_value if x.dim_value != 0 else 1 for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input if inp.name not in excluded}
+  input_shapes = {inp.name:tuple(x.dim_value if x.dim_value != 0 else 1 for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input if inp.name not in excluded}  # noqa: E501
   input_types = {inp.name: tensor_dtype_to_np_dtype(inp.type.tensor_type.elem_type) for inp in onnx_model.graph.input if inp.name not in excluded}
   #input_types = {k:v if v!=np.float16 else np.float32 for k,v in input_types.items()}  # cast
   np_inputs = {k:torch.randn(shp).numpy().astype(input_types[k]) for k,shp in input_shapes.items()}
