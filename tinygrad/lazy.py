@@ -46,7 +46,7 @@ class LazyBuffer:
   def const(self, val:Union[float, int]) -> LazyBuffer: return LazyBuffer.new(self.device, self.shape, self.dtype, LoadOps.CONST, val)
 
   # NOTE: this no longer breaks the graph
-  def contiguous(self): return self if self.st.contiguous else self.e(LoadOps.CONTIGUOUS)
+  def contiguous(self): return self if self.st.contiguous and self.st.size() == self.base.st.size() else self.e(LoadOps.CONTIGUOUS)
 
   def is_unrealized_const(self): return not self.realized and self.base.op == LoadOps.CONST
   def is_unrealized_contiguous_const(self): return not self.realized and self.op == LoadOps.CONST
@@ -58,8 +58,9 @@ class LazyBuffer:
     return ret
 
   def copy_to_device(self, device:str) -> LazyBuffer:
+    if self.is_unrealized_const(): return LazyBuffer(device, self.st, self.dtype, LoadOps.CONST, self.arg)  # const doesn't have to be copied
     out = self.contiguous()
-    return create_lazybuffer(device, out.st, out.dtype, LoadOps.COPY, srcs=(out,))    # TODO: rename to LoadOps.COPY
+    return create_lazybuffer(device, out.st, out.dtype, LoadOps.COPY, srcs=(out,))
 
   def e(self:LazyBuffer, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     srcs = (self,)+srcs

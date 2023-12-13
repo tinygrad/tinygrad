@@ -742,7 +742,7 @@ class Tensor:
     return (x, y)
 
   def _to_float(self, x:Union[Tensor, float]):
-    return x.lazydata.base.op.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
+    return x.lazydata.base.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
   def add(self, x:Union[Tensor, float], reverse=False) -> Tensor:
