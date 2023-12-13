@@ -21,7 +21,7 @@ def train_retinanet():
   pass
 
 def train_unet3d():
-  # import pycuda.autoinit
+  """Before running this script, please get the data using `extra/datasets/kits19.py` script."""
 
   def train_single_unet3d(conf):
     is_successful, diverged = False, False
@@ -39,6 +39,10 @@ def train_unet3d():
 
       val_dice_score = s / (i+1)
       return {"epoch": epoch, "mean_dice": val_dice_score}
+
+    def lr_warmup(optim, init_lr, lr, current_epoch, warmup_epochs):
+      scale = current_epoch / warmup_epochs
+      optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale])).realize()
 
     from extra.models.unet3d import UNet3D
     mdl = UNet3D()
@@ -83,6 +87,8 @@ def train_unet3d():
     t0_total = time.monotonic()
     for epoch in range(conf.start_epoch, conf.epochs):
       cumulative_loss = []
+      if epoch <= conf.lr_warmup_epochs and conf.lr_warmup_epochs > 0:
+        lr_warmup(optim, conf.init_lr, conf.lr, epoch, conf.lr_warmup_epochs)
 
       if not getenv("MOCKTRAIN"):
         train_loader = get_batch(train_x, train_y, conf.batch_size, conf.input_shape, conf.oversampling)
@@ -142,7 +148,7 @@ def train_unet3d():
     assert conf.batch_size % world_size == 0, f"batch size {conf.batch_size} is not divisible by world size {world_size}"
     # init out-of-band communication
     dist.init_oob(world_size)
-    # start the processes
+
     processes = []
     for rank, device in enumerate(devices):
       processes.append(dist.spawn(rank, device, fn=train_single_unet3d, args=(conf)))

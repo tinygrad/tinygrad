@@ -9,7 +9,7 @@ from scipy import signal, ndimage
 import torch
 import torch.nn.functional as F
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import fetch
+from tinygrad.helpers import fetch, getenv
 
 BASEDIR = Path(__file__).parent / "kits19" / "data"
 PROCESSED_DIR = Path(__file__).parent / "kits19" / "processed"
@@ -26,7 +26,7 @@ mv kits extra/datasets
 
 Run to preprocess the datasets.
 cd extra/datasets
-python3 kits19.py
+PREPROCESS=1 python3 kits19.py
 ```
 """
 @functools.lru_cache(None)
@@ -273,7 +273,7 @@ def get_batch(lX, lY, batch_size=32, patch_size=(128, 128, 128), oversampling=0.
     yield (np.stack(bX, axis=0), np.stack(bY, axis=0))
 
 if __name__ == "__main__":
-  preprocess_save()
+  if getenv("PREPROCESS"): preprocess_save()
 
   for X, Y in iterate():
     print(X.shape, Y.shape)

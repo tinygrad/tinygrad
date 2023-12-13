@@ -1,9 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Tuple
 
-DATASET_SIZE = 168
-
-
 @dataclass
 class Conf:
   """
@@ -31,16 +28,14 @@ class Conf:
   val_split: float = 0.1
 
   start_epoch: int = 0
-  epochs: int = 100
+  epochs: int = 200
   quality_threshold: float = 0.908
   ga_steps: int = 1
-  warmup_step: int = 4
+  warmup_step: int = 100 # 200
   batch_size: int = 2
   layout: str = "NCDHW"
-  # input_shape: Tuple[int, int, int] = (128, 128, 128)
-  # val_input_shape: Tuple[int, int, int] = (128, 128, 128)
-  input_shape: Tuple[int, int, int] = (64,64,64)
-  val_input_shape: Tuple[int, int, int] = (64,64,64)
+  input_shape: Tuple[int, int, int] = (128, 128, 128)
+  val_input_shape: Tuple[int, int, int] = (128, 128, 128)
   seed: int = 0
   num_workers: int = 8
   exec_mode: str = "train"
@@ -48,15 +43,15 @@ class Conf:
   benchmark: bool = False
   amp: bool = False
   optimizer: str = "sgd"
-  lr: float = 0.08 # 1e-3
+  lr: float = 0.8 # 1e-3
   init_lr: float = 1e-4
   lr_warmup_epochs: int = 1 # 200
-  lr_decay_epochs: int = field(default_factory=lambda: [1,2])
+  lr_decay_epochs: int = field(default_factory=lambda: [200])
   lr_decay_factor: float = 0.1
   momentum: float = 0.9
   weight_decay: float = 0.0
-  eval_every: int = 10
-  start_eval_at: int = 10 # 20
+  eval_every: int = 20 # 20
+  start_eval_at: int = 20 # 20
   verbose: bool = True
   normalization: str = "instancenorm"
   activation: str = "relu"
