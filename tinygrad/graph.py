@@ -63,6 +63,7 @@ def log_lazybuffer(lb):
     for x in lb.srcs:
       if nm(x) not in G.nodes: G.add_node(nm(x), label=f'"{str(x.realized)[5:-1].replace(" ", chr(10))}"', style='filled', fillcolor="#f0c080")
       G.add_edge(nm(x), nm(lb), color='#a0a0a0')
+    G.add_node(nm(lb))
     G.nodes[nm(lb)]['label'] = '"' + \
       (str(set(x.shape for x in lb.srcs))+"\n"+str(lb.shape) if lb.op in ReduceOps else str(lb.shape)) + \
       str_dtype(lb.dtype)+f"\n{lb.op}"+(f"\n{lb.arg}" if lb.op in {LoadOps.CONST, UnaryOps.CAST} else "") + \
