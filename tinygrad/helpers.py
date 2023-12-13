@@ -304,6 +304,20 @@ def flat_mv(mv:memoryview):
   if len(mv) == 0: return mv
   return mv.cast("B", shape=(mv.nbytes,))
 
+# *** Hepers for handling native lists.
+def flat_list(data: Union[None, int, float, list]) -> Tuple[list, Tuple[int, ...]]:
+  result = []
+  def flatten(data: Union[None, int, float, list]) -> Tuple[int, ...]:
+    if not isinstance(data, list):
+      result.append(data)
+      return ()
+    if not data: return (0,)
+    shape = flatten(data=data[0])
+    for item in data[1:]:
+      if flatten(data=item) != shape: raise ValueError("The data has an inhomogenous shape.")
+    return (len(data), *shape)
+  return result, flatten(data=data)
+
 # *** Helpers for CUDA-like APIs.
 
 def pretty_ptx(s):

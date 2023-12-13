@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from PIL import Image
-from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch
+from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch, flat_list
 from tinygrad.shape.symbolic import Variable, NumNode
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -159,6 +159,35 @@ class TestFetch(unittest.TestCase):
     img = fetch("https://media.istockphoto.com/photos/hen-picture-id831791190", allow_caching=False)
     with Image.open(img) as pimg:
       assert pimg.size == (705, 1024)
+
+class TestFlattenLIst(unittest.TestCase):
+  def test_empty(self):
+    flattened, shape = flat_list([])
+    self.assertEqual(shape, (0,))
+    self.assertEqual(flattened, [])
+
+  def test_scalars(self):
+    flattened, shape = flat_list(1)
+    self.assertEqual(shape, ())
+    self.assertEqual(flattened, [1])
+
+  def test_simple(self):
+    flattened, shape = flat_list([1, 2, 3])
+    self.assertEqual(shape, (3,))
+    self.assertEqual(flattened, [1, 2, 3])
+
+  def test_nested(self):
+    flattened, shape = flat_list([[[[1, 2, 3], [3, 4, 5]], [[5, 6, 7], [7, 8, 9]]]])
+    self.assertEqual(shape, (1, 2, 2, 3))
+    self.assertEqual(flattened, [1, 2, 3, 3, 4, 5, 5, 6, 7, 7, 8, 9])
+
+  def test_inhomogenous(self):
+    with self.assertRaises(ValueError):
+      flat_list([[1, 2], [3, 4, 5]])
+
+    with self.assertRaises(ValueError):
+      flat_list([[[1, 2], [3, 4]], [[5, 6], [7]]])
+
 
 if __name__ == '__main__':
   unittest.main()
