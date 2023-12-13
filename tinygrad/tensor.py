@@ -906,7 +906,7 @@ if IMAGE:
 # TODO: remove the custom op and replace with threefry
 def custom_random(out:Buffer):
   Tensor._seed += 1
-  if DEBUG >= 2: print(f"** {out.device}   rand  seed {Tensor._seed} size {out.size:<15d} dtype {out.dtype}")
+  if DEBUG >= 2: print(f"*** {out.device}   rand  seed {Tensor._seed} size {out.size:<15d} dtype {out.dtype}")
   rng = np.random.default_rng(Tensor._seed)
   rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=out.dtype.np, copy=False)
   out.copyin(rng_np_buffer.data)
