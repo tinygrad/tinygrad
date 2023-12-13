@@ -69,6 +69,7 @@ class LazyBuffer:
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), max(x.dtype for x in srcs), op, arg, srcs)
 
   def r(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+    if self.shape == tuple(new_shape): return self
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, new_shape, (self,))
 
   def _view(self:LazyBuffer, new_st:ShapeTracker) -> LazyBuffer:
