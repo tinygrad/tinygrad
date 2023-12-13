@@ -4,6 +4,7 @@ from tqdm import tqdm
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, dtypes
 from tinygrad.nn.state import get_parameters, safe_load, safe_save, get_state_dict, load_state_dict
+from tinygrad.nn.optim import SGD
 from extra.lr_scheduler import MultiStepLR
 from extra.datasets.kits19 import get_batch, sliding_window_inference, get_data_split
 from extra import dist
@@ -20,7 +21,7 @@ def train_retinanet():
   pass
 
 def train_unet3d():
-  import pycuda.autoinit
+  # import pycuda.autoinit
 
   def train_single_unet3d(conf):
     is_successful, diverged = False, False
@@ -39,18 +40,6 @@ def train_unet3d():
       val_dice_score = s / (i+1)
       return {"epoch": epoch, "mean_dice": val_dice_score}
 
-    def get_optimizer(params, conf: dict):
-      from tinygrad.nn.optim import Adam, SGD, LAMB
-      if conf.optimizer == "adam":
-        optim = Adam(params, lr=conf.lr, weight_decay=conf.weight_decay)
-      elif conf.optimizer == "sgd":
-        optim = SGD(params, lr=conf.lr, momentum=conf.momentum, nesterov=True, weight_decay=conf.weight_decay)
-      elif conf.optimizer == "lamb":
-        optim = LAMB(params, lr=conf.lr, weight_decay=conf.weight_decay)
-      else:
-        raise ValueError("Optimizer {} unknown.".format(conf.optimizer))
-      return optim
-
     from extra.models.unet3d import UNet3D
     mdl = UNet3D()
     if getenv("PRETRAINED"):
@@ -68,21 +57,21 @@ def train_unet3d():
     mdl_run = TinyJit(lambda x: mdl(x).realize()) if getenv("JIT") else mdl
 
     is_successful, diverged = False, False
-    optim = get_optimizer(get_parameters(mdl), conf)
+    optim = SGD(get_parameters(mdl), lr=conf.lr, momentum=conf.momentum, nesterov=True, weight_decay=conf.weight_decay)
 
     if conf.lr_decay_epochs:
       scheduler = MultiStepLR(optim, milestones=conf.lr_decay_epochs, gamma=conf.lr_decay_factor)
 
     if getenv("MOCKTRAIN", 0):
       import numpy as np
-      train_loader = [(np.random.rand(2,1,128,128,128), np.random.rand(2,1,128,128,128)) for i in range(3)]
+      train_loader = [(np.random.rand(2,1,32,32,32), np.random.rand(2,1,32,32,32)) for i in range(3)]
       total_batches = 1
     else:
       train_x, train_y, val_x, val_y = get_data_split()
       total_files = len(train_x)
       total_batches = (total_files + conf.batch_size - 1) // conf.batch_size
 
-    # @TinyJit
+    @TinyJit
     def train_step(out, y):
       with Tensor.train():
         optim.zero_grad()
@@ -114,9 +103,7 @@ def train_unet3d():
       if conf.lr_decay_epochs:
         scheduler.step()
 
-      if len(cumulative_loss):
-        print(f'  (train) epoch {epoch} | loss: {(sum(cumulative_loss).numpy() / len(cumulative_loss)):.6f}')
-
+      print(f'  (train) epoch {epoch} | loss: {(sum(cumulative_loss).numpy() / len(cumulative_loss)):.6f}')
       if epoch == next_eval_at:
         next_eval_at += conf.eval_every
         dtype_im = dtypes.half if getenv("FP16") else dtypes.float
@@ -125,7 +112,6 @@ def train_unet3d():
         print("  (eval):", eval_metrics)
 
         # safe_save(get_state_dict(mdl), os.path.join(conf.save_ckpt_path, f"unet3d-ckpt-{epoch}.safetensors"))
-
         Tensor.training = True
         if eval_metrics["mean_dice"] >= conf.quality_threshold:
           print("\nsuccess", eval_metrics["mean_dice"], ">", conf.quality_threshold, "runtime", time.monotonic()-t0_total)
@@ -152,7 +138,6 @@ def train_unet3d():
       from tinygrad.runtime.ops_gpu import CL
       devices = [f"gpu:{i}" for i in range(len(CL.devices))]
     world_size = len(devices)
-
     # ensure that the batch size is divisible by the number of devices
     assert conf.batch_size % world_size == 0, f"batch size {conf.batch_size} is not divisible by world size {world_size}"
     # init out-of-band communication
