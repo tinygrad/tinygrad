@@ -67,6 +67,9 @@ class LazyBuffer:
     return ret
 
   def copy_to_device(self, device:str) -> LazyBuffer:
+    # COPY there and back = no COPY at all
+    if not self.realized and self.op == LoadOps.COPY and self.srcs[0].device == device: return self.srcs[0]
+
     # TODO: const doesn't have to be copied (issues with disk tensor)
     #if self.is_unrealized_const(): return self.const(self.base.arg)._view(self.st)
     out = self.contiguous()
@@ -81,6 +84,7 @@ class LazyBuffer:
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, new_shape, (self,))
 
   def _view(self:LazyBuffer, new_st:ShapeTracker) -> LazyBuffer:
+    if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
 
   # movement ops
