@@ -51,7 +51,7 @@ def realized_lazybuffer(lb, num):
     G.nodes[nm(lb)]['fillcolor'] = G.nodes[nm(lb)]['fillcolor'][:-2]
     G.nodes[nm(lb)]['label'] = '"' + G.nodes[nm(lb)]["label"].replace('"', '') + f'\nK:{num}"'
 
-def log_lazybuffer(lb):
+def log_lazybuffer(lb, scheduled=False):
   top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0",
                 MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
   if GRAPH and not lb.realized:
@@ -69,6 +69,7 @@ def log_lazybuffer(lb):
       str_dtype(lb.dtype)+f"\n{lb.op}"+(f"\n{lb.arg}" if lb.op in {LoadOps.CONST, UnaryOps.CAST} else "") + \
       (f"\n{lb.device}" if lb.device != Device.DEFAULT else "") + '"'
     G.add_node(nm(lb), style='"filled,dashed"', fillcolor=[v for k,v in top_colors.items() if lb.op in k][0] + "80", color="black", label=label)
+    if scheduled: G.nodes[nm(lb)]['shape'] = 'box'
 
 def _tree(lazydata, prefix=""):
   if type(lazydata).__name__ == "LazyBuffer":

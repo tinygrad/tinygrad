@@ -56,20 +56,21 @@ def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], first=True) -
     return LazyOp(LoadOps.CUSTOM, (), buf.arg)
   if buf.op == LoadOps.EMPTY and first:
     return LazyOp(LoadOps.EMPTY)
-  if buf.realized or buf != buf.base or buf.base.op in LoadOps or (len(buf.base.children) > 1 and not first):
-    # have to do a load
-    if buf.base not in inputs: inputs.append(buf.base)
-    return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf.base)+1, buf.dtype, buf.st.simplify().unbind()))
-  # convert to a lazyop
-  assert buf.op is not None
-  return LazyOp(buf.op, tuple(_recursive_get_lazyop(x, inputs, False) for x in buf.srcs), buf.arg)
 
-def create_schedule(out:LazyBuffer, seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
-  if seen is None: seen = set()
+  # we can merge this as a LazyOp
+  if not buf.realized and buf.base.op not in LoadOps and (len(buf.base.children) == 1 or first) and buf == buf.base:
+    assert buf.op is not None
+    return LazyOp(buf.op, tuple(_recursive_get_lazyop(x, inputs, False) for x in buf.srcs), buf.arg)
+
+  # have to do a load
+  if buf.base not in inputs: inputs.append(buf.base)
+  return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf.base)+1, buf.dtype, buf.st.simplify().unbind()))
+
+def _create_schedule(out:LazyBuffer, seen:Set[LazyBuffer]) -> List[ScheduleItem]:
   if out in seen or out.realized or out.is_unrealized_const(): return []
   seen.add(out)
   log_lazybuffer(out)
-  if out.base is not out: return create_schedule(out.base, seen)
+  if out.base is not out: return _create_schedule(out.base, seen)
 
   inputs: List[LazyBuffer] = []
   op = _recursive_get_lazyop(out, inputs)
@@ -77,7 +78,7 @@ def create_schedule(out:LazyBuffer, seen:Optional[Set[LazyBuffer]]=None) -> List
   ret: List[ScheduleItem] = []
   for x in inputs:
     assert x.base == x, f"all inputs must be base, {x} isn't"
-    ret += create_schedule(x, seen)
+    ret += _create_schedule(x, seen)
 
   # check if we can reuse the output buffer
   # if it's aliased, don't use it
@@ -94,3 +95,8 @@ def create_schedule(out:LazyBuffer, seen:Optional[Set[LazyBuffer]]=None) -> List
 
   var_vals = merge_dicts([out.st.var_vals] + [buf.st.var_vals for buf in inputs])
   return ret + [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in vars_from_ast(op)})]
+
+def create_schedule(out:LazyBuffer, seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
+  if seen is None: seen = set()
+  log_lazybuffer(out, scheduled=True)
+  return _create_schedule(out, seen)
