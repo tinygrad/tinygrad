@@ -12,20 +12,20 @@ from tinygrad.tensor import Tensor
 from tinygrad import Device
 
 MODELS = {
-  "resnet50": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
+  "resnet50": "https://github.com/onnx/models/raw/main/archive/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
   "openpilot": "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx",
-  "efficientnet": "https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
-  "shufflenet": "https://github.com/onnx/models/raw/main/vision/classification/shufflenet/model/shufflenet-9.onnx",
+  "efficientnet": "https://github.com/onnx/models/raw/main/archive/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
+  "shufflenet": "https://github.com/onnx/models/raw/main/archive/vision/classification/shufflenet/model/shufflenet-9.onnx",
   "commavq": "https://huggingface.co/commaai/commavq-gpt2m/resolve/main/gpt2m.onnx",
 
   # broken in torch MPS
-  #"zfnet": "https://github.com/onnx/models/raw/main/vision/classification/zfnet-512/model/zfnet512-9.onnx",
+  # "zfnet": "https://github.com/onnx/models/raw/main/archive/vision/classification/zfnet-512/model/zfnet512-9.onnx",
   # TypeError: BatchNormalization() got an unexpected keyword argument 'is_test'
-  #"densenet": "https://github.com/onnx/models/raw/main/vision/classification/densenet-121/model/densenet-3.onnx",
+  # "densenet": "https://github.com/onnx/models/raw/main/archive/vision/classification/densenet-121/model/densenet-3.onnx",
   # AssertionError: only onnx version >= 10 supported for slice
-  #"bert": "https://github.com/onnx/models/raw/main/text/machine_comprehension/bert-squad/model/bertsquad-8.onnx",
+  # "bert": "https://github.com/onnx/models/raw/main/archive/text/machine_comprehension/bert-squad/model/bertsquad-8.onnx",
   # really slow
-  #"resnet18": "https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet18-v2-7.onnx",
+  # "resnet18": "https://github.com/onnx/models/raw/main/archive/vision/classification/resnet/model/resnet18-v2-7.onnx",
 }
 
 CSV = {}
