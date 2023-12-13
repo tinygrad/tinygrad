@@ -300,7 +300,7 @@ class SumNode(RedNode):
         all_others = Variable.sum(others)
         if all_others.min >= 0 and all_others.max < mul_gcd:
           lhs, b = Variable.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
-    return Node.__lt__(lhs, b)
+    return Node.__lt__(lhs, b) if isinstance(lhs, SumNode) else lhs < b
 
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return Variable.sum([node.substitute(var_vals) for node in self.nodes])
 

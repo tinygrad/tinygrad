@@ -72,6 +72,18 @@ class TestSafetensors(unittest.TestCase):
     ret2 = safe_load(temp("model.safetensors_alt"))
     for k,v in tensors.items(): np.testing.assert_array_equal(ret2[k].numpy(), v.numpy())
 
+  def test_real_safetensors_open(self):
+    fn = temp("real_safe")
+    state_dict = {"tmp": Tensor.rand(10,10)}
+    safe_save(state_dict, fn)
+    import os
+    assert os.path.getsize(fn) == 8+0x40+(10*10*4)
+    from safetensors import safe_open
+    with safe_open(fn, framework="pt", device="cpu") as f:
+      assert sorted(list(f.keys())) == sorted(list(state_dict.keys()))
+      for k in f.keys():
+        np.testing.assert_array_equal(f.get_tensor(k).numpy(), state_dict[k].numpy())
+
   def test_efficientnet_safetensors(self):
     from extra.models.efficientnet import EfficientNet
     model = EfficientNet(0)

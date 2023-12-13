@@ -276,6 +276,7 @@ class Tensor:
     new_shape = argfix(shape, *args)
     return mlops.Reshape.apply(self, shape=tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)]))  # noqa: E501
   def expand(self, shape, *args) -> Tensor:
+    if shape == self.shape: return self
     return mlops.Expand.apply(self, shape=tuple([x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))]))
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
@@ -384,7 +385,8 @@ class Tensor:
       for tensor_dim in type_dim[Tensor]:
         dims_collapsed_, dims_injected = sum(1 for d in dims_collapsed if tensor_dim >= d), sum(1 for d in type_dim[None] if tensor_dim >= d)
         tdim.append(td := tensor_dim - dims_collapsed_ + dims_injected)
-        idx.append((t := indices[tensor_dim + dims_injected]).sign().__neg__().relu() * ret.shape[td] + t) # normalize the negative tensor indices
+        # normalize the negative tensor indices
+        idx.append(((t := indices[tensor_dim + dims_injected]) < 0).where(ret.shape[td], 0) + t)
 
       # compute sum_dim, arange, and idx
       max_dim = max(i.ndim for i in idx)
@@ -421,7 +423,7 @@ class Tensor:
     permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
     return ((idx == Tensor.arange(self.shape[dim], dtype=dtypes.int32, requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])).unsqueeze(0)).sum(-1).transpose(ax1=0, ax2=dim)  # noqa: E501
 
-  def cat(self, *args:Tensor, dim:int=0) -> Tensor:
+  def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     dim = (dim + len(self.shape)) if dim < 0 else dim
     assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args)
     catargs = [self, *args]
@@ -590,7 +592,7 @@ class Tensor:
     padding = flatten((((k-1)*d-p,(k-1)*d-p+op) for k,d,p,op in reversed(list(zip(HW, make_pair(dilation, len(HW)), make_pair(padding, len(HW)), make_pair(output_padding, len(HW)))))))  # noqa: E501
     return x.conv2d(w.reshape(w.shape[0]*w.shape[1],*w.shape[2:]), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
-  wino = int(getenv("WINO", "0"))
+  wino = getenv("WINO", 0)
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"  # noqa: E501
@@ -664,13 +666,12 @@ class Tensor:
     return fix(ret) + fix(base_add)
 
   @staticmethod
-  def _tri(r:int, c:int, k:int=0, **kwargs) -> Tensor:
+  def _tri(r:sint, c:sint, k:int=0, **kwargs) -> Tensor:
+    assert all_int((r,c)), "does not support symbolic"
     return Tensor.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= Tensor.arange(-k, c-k, **kwargs).unsqueeze(0).expand(r,c)
   def triu(self, k:int=0) -> Tensor:
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     return Tensor._tri(self.shape[-2], self.shape[-1], k=k, dtype=self.dtype, device=self.device).where(self, Tensor.zeros_like(self))
   def tril(self, k:int=0) -> Tensor:
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, dtype=self.dtype, device=self.device).where(Tensor.zeros_like(self), self)
 
   # ***** mlops (unary) *****
@@ -726,24 +727,25 @@ class Tensor:
 
   # ***** broadcasted binary mlops *****
 
+  # TODO: y can be int here
   def _broadcasted(self, y:Union[Tensor, float], reverse:bool=False) -> Tuple[Tensor, Tensor]:
-    x: Tensor = self
     if not isinstance(y, Tensor):
-      if 0 in x.shape: return x, x.full_like(y)
-      y = Tensor(y, device=self.device, requires_grad=False, dtype=self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32)  # noqa: E501
+      # make y a Tensor
+      if 0 in self.shape: return self, self.full_like(y)
+      y_dtype = self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
+      y = Tensor(y, self.device, dtype=y_dtype, requires_grad=False)
+
+    x: Tensor = self
     if reverse: x, y = y, x
-    if (xshape:=x.shape) == (yshape:=y.shape): return (x, y)
 
-    shape_delta = len(xshape) - len(yshape)
-    if shape_delta > 0: y = y.reshape((1,) * shape_delta + yshape)
-    elif shape_delta < 0: x = x.reshape((1,) * -shape_delta + xshape)
-    if (xshape:=x.shape) == (yshape:=y.shape): return (x, y)
+    # left pad shape with 1s
+    if len(y.shape) < len(x.shape): y = y.reshape((1,) * (len(x.shape) - len(y.shape)) + y.shape)
+    elif len(x.shape) < len(y.shape): x = x.reshape((1,) * (len(y.shape) - len(x.shape)) + x.shape)
 
-    shape_ret = tuple([max(x, y) for x, y in zip(xshape, yshape)])
-    if xshape != shape_ret: x = x.expand(shape_ret)
-    if yshape != shape_ret: y = y.expand(shape_ret)
-    return (x, y)
+    broadcasted_shape = tuple(max(xi, yi) for xi, yi in zip(x.shape, y.shape))
+    return x.expand(broadcasted_shape), y.expand(broadcasted_shape)
 
+  # TODO: x can be int here
   def _to_float(self, x:Union[Tensor, float]):
     return x.lazydata.base.op.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
@@ -764,12 +766,10 @@ class Tensor:
     return mlops.Div.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or reverse or not x or not dtypes.is_float(self.dtype) else self.mul(1/x)  # noqa: E501
   def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
     x = self._to_float(x)
-    if x.__class__ is not Tensor and not reverse:
+    if not isinstance(x, Tensor) and not reverse:
       # simple pow identities
       if x < 0: return self.reciprocal().pow(-x)
-      if x == 3.0: return self*self*self
-      if x == 2.0: return self*self
-      if x == 1.0: return self
+      if x in [3,2,1,0]: return reduce(lambda acc,_: acc * self, range(int(x)), mlops.Zero.apply(self)+1)
       if x == 0.5: return self.sqrt()
     if not isinstance(x, Tensor) and reverse and x > 0: return self.mul(math.log(x)).exp()
     ar = self.abs().log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(math.log(abs(x))).exp()
@@ -865,7 +865,7 @@ class Tensor:
   def binary_crossentropy_logits(self, y:Tensor) -> Tensor:
     return (self.maximum(0) - y * self + (1 + self.abs().__neg__().exp()).log()).mean()
 
-  def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
+  def sparse_categorical_crossentropy(self, Y:Tensor, ignore_index=-1) -> Tensor:
     # NOTE: self is a logits input
     loss_mask = Y != ignore_index
     y_counter = Tensor.arange(self.shape[-1], dtype=dtypes.int32, requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])  # noqa: E501
