@@ -195,7 +195,8 @@ promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8],
 def _get_recursive_parents(dtype:DType) -> Set[DType]:
   return set.union(*[_get_recursive_parents(d) for d in promo_lattice[dtype]], {dtype}) if dtype != dtypes.float64 else {dtypes.float64}
 @functools.lru_cache(None)
-def least_upper_dtype(*ds:DType) -> DType: return min(set.intersection(*[_get_recursive_parents(d) for d in ds]))
+def least_upper_dtype(*ds:DType) -> DType:
+  return min(set.intersection(*[_get_recursive_parents(d) for d in ds])) if not (images:=[d for d in ds if isinstance(d, ImageDType)]) else images[0]
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and v.__class__ is not staticmethod}

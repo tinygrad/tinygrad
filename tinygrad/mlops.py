@@ -1,6 +1,6 @@
 import math
 from typing import Tuple, Optional, cast
-from tinygrad.helpers import argsort, DType
+from tinygrad.helpers import argsort, DType, dtypes, least_upper_dtype
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
@@ -35,7 +35,7 @@ class Neg(Function):
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return x.e(UnaryOps.SIN)
+    return x.cast(least_upper_dtype(x.dtype, dtypes.float)).e(UnaryOps.SIN)
 
   def backward(self, grad:LazyBuffer) -> LazyBuffer:
     return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad)
@@ -52,14 +52,14 @@ class Relu(Function):
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return x.e(UnaryOps.LOG2).e(BinaryOps.MUL, x.const(math.log(2)))
+    return x.cast(ftype:=least_upper_dtype(x.dtype, dtypes.float)).e(UnaryOps.LOG2).e(BinaryOps.MUL, x.cast(ftype).const(math.log(2)))
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.e(BinaryOps.DIV, self.x)
 
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.e(BinaryOps.MUL, x.const(1/math.log(2))).e(UnaryOps.EXP2)
+    self.ret = x.cast(ftype:=least_upper_dtype(x.dtype, dtypes.float)).e(BinaryOps.MUL, x.cast(ftype).const(1/math.log(2))).e(UnaryOps.EXP2)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
@@ -67,7 +67,7 @@ class Exp(Function):
 
 class Sqrt(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.e(UnaryOps.SQRT)
+    self.ret = x.cast(least_upper_dtype(x.dtype, dtypes.float)).e(UnaryOps.SQRT)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
@@ -78,7 +78,8 @@ class Sqrt(Function):
 # TODO: have the backend automatically find this
 class Sigmoid(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.const(1).e(BinaryOps.DIV, x.const(1).e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.const(-1/math.log(2))).e(UnaryOps.EXP2)))
+    self.ret = x.cast(ftype:=least_upper_dtype(x.dtype, dtypes.float)).const(1).e(
+      BinaryOps.DIV, x.cast(ftype).const(1).e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.cast(ftype).const(-1/math.log(2))).e(UnaryOps.EXP2)))
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
