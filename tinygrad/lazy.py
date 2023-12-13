@@ -1,3 +1,5 @@
+# ruff: noqa: E501
+# TODO: replace with new lazy with <= 150 length lines
 from __future__ import annotations
 import numpy as np
 from typing import Union, Optional, Any, Tuple, List
