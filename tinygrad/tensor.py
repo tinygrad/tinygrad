@@ -421,7 +421,7 @@ class Tensor:
     permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
     return ((idx == Tensor.arange(self.shape[dim], dtype=dtypes.int32, requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])).unsqueeze(0)).sum(-1).transpose(ax1=0, ax2=dim)  # noqa: E501
 
-  def cat(self, *args:Tensor, dim:int=0) -> Tensor:
+  def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     dim = (dim + len(self.shape)) if dim < 0 else dim
     assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args)
     catargs = [self, *args]
@@ -590,7 +590,7 @@ class Tensor:
     padding = flatten((((k-1)*d-p,(k-1)*d-p+op) for k,d,p,op in reversed(list(zip(HW, make_pair(dilation, len(HW)), make_pair(padding, len(HW)), make_pair(output_padding, len(HW)))))))  # noqa: E501
     return x.conv2d(w.reshape(w.shape[0]*w.shape[1],*w.shape[2:]), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
-  wino = int(getenv("WINO", "0"))
+  wino = getenv("WINO", 0)
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"  # noqa: E501
@@ -664,13 +664,12 @@ class Tensor:
     return fix(ret) + fix(base_add)
 
   @staticmethod
-  def _tri(r:int, c:int, k:int=0, **kwargs) -> Tensor:
+  def _tri(r:sint, c:sint, k:int=0, **kwargs) -> Tensor:
+    assert all_int((r,c)), "does not support symbolic"
     return Tensor.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= Tensor.arange(-k, c-k, **kwargs).unsqueeze(0).expand(r,c)
   def triu(self, k:int=0) -> Tensor:
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     return Tensor._tri(self.shape[-2], self.shape[-1], k=k, dtype=self.dtype, device=self.device).where(self, Tensor.zeros_like(self))
   def tril(self, k:int=0) -> Tensor:
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, dtype=self.dtype, device=self.device).where(Tensor.zeros_like(self), self)
 
   # ***** mlops (unary) *****
@@ -865,7 +864,7 @@ class Tensor:
   def binary_crossentropy_logits(self, y:Tensor) -> Tensor:
     return (self.maximum(0) - y * self + (1 + self.abs().__neg__().exp()).log()).mean()
 
-  def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
+  def sparse_categorical_crossentropy(self, Y:Tensor, ignore_index=-1) -> Tensor:
     # NOTE: self is a logits input
     loss_mask = Y != ignore_index
     y_counter = Tensor.arange(self.shape[-1], dtype=dtypes.int32, requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])  # noqa: E501
