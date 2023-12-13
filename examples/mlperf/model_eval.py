@@ -58,7 +58,7 @@ def eval_unet3d():
   from extra.datasets.kits19 import iterate, sliding_window_inference
   from examples.mlperf.metrics import get_dice_score_np
   mdl = UNet3D()
-  load_state_dict(mdl, safe_load(os.path.join(f"unet3d-ckpt-90.safetensors"))) if getenv("CUSTOM") else mdl.load_from_pretrained()
+  load_state_dict(mdl, safe_load(os.path.join(f"unet3d.safetensors"))) if getenv("CUSTOM") else mdl.load_from_pretrained()
   s = 0
   st = time.perf_counter()
   for i, (image, label) in enumerate(iterate(), start=1):

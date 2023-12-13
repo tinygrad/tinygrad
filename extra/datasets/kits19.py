@@ -2,6 +2,7 @@ import os
 import random
 import glob
 import functools
+from tqdm import tqdm
 from pathlib import Path
 import numpy as np
 import nibabel as nib
@@ -103,7 +104,7 @@ def preprocess(file_path):
 
 def preprocess_save(results_dir="kits19/processed", data_dir="kits19/data", max_id=210, excluded_cases=[]):
   os.makedirs(results_dir, exist_ok=True)
-  for case in sorted([f for f in os.listdir(data_dir) if "case" in f]):
+  for case in tqdm(sorted([f for f in os.listdir(data_dir) if "case" in f])):
     case_id = int(case.split("_")[1])
     if case_id in excluded_cases or case_id >= max_id:
       print("Case {}. Skipped.".format(case_id))
@@ -273,7 +274,7 @@ def get_batch(lX, lY, batch_size=32, patch_size=(128, 128, 128), oversampling=0.
     yield (np.stack(bX, axis=0), np.stack(bY, axis=0))
 
 if __name__ == "__main__":
-  if getenv("PREPROCESS"): preprocess_save()
+  if getenv("PREPROCESS"): preprocess_save(); exit()
 
   for X, Y in iterate():
     print(X.shape, Y.shape)

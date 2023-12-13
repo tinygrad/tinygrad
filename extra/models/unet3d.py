@@ -1,9 +1,7 @@
 from pathlib import Path
-import numpy as np
 import torch
 from tinygrad import nn
 from tinygrad.tensor import Tensor
-from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import fetch, get_child
 
 class DownsampleBlock:
