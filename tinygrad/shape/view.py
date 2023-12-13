@@ -137,8 +137,8 @@ class View:
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def permute(self, axis: Tuple[int, ...]) -> View:
-    assert all(isinstance(x, int) and x >= 0 and x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
-    assert len(set(axis)) == len(axis) and len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
+    assert all(isinstance(x, int) and  0 <= x < len(self.shape) for x in axis), f"invalid permute {axis} for {self.shape}"
+    assert len(set(axis)) == len(axis) == len(self.shape), f"can't permute {self.shape} with {axis}"
     return View.create(tuple([self.shape[a] for a in axis]), tuple([self.strides[a] for a in axis]), self.offset, tuple([self.mask[a] for a in axis]) if self.mask is not None else None)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
@@ -178,7 +178,7 @@ class View:
         new_stride *= (new_dim if (acc :=  acc * new_dim) < real_dim else 0)
       if acc != merged_dim: break
     else:
-      strides += [0,] * (len(new_shape) - len(strides))
+      strides += [0] * (len(new_shape) - len(strides))
       mask, off_mask, extra = _reshape_mask(self, new_shape)
       total_offset = sum([off * s for off, s in zip(off_mask, strides)]) if off_mask else 0
       if not extra: return View.create(new_shape, tuple(reversed(strides)), self.offset - total_offset, mask)
