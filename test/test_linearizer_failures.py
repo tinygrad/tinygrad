@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 import unittest
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import Opt, OptOps

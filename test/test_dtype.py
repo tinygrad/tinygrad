@@ -1,10 +1,12 @@
+# ruff: noqa: E501
 import unittest
 import numpy as np
-from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX, temp
+import torch
+from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX, temp, least_upper_dtype
 from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
-from hypothesis import given, strategies as st
+from hypothesis import given, settings, strategies as st
 
 def is_dtype_supported(dtype: DType):
   # for GPU, cl_khr_fp16 isn't supported (except now we don't need it!)
@@ -42,7 +44,7 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
     raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e
 
 def _test_op(fxn, target_dtype:DType, target): _assert_eq(fxn(), target_dtype, target)
-def _test_cast(a:Tensor, target_dtype:DType): _test_op(lambda: a.cast(target_dtype), target_dtype, a.numpy().astype(target_dtype.np).tolist())
+def _test_cast(a:Tensor, target_dtype:DType): _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(target_dtype.np)))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None): _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(target_dtype.np).tolist())
 
 class TestDType(unittest.TestCase):
@@ -233,6 +235,57 @@ class TestTypeSpec(unittest.TestCase):
   def test_reduce_0d_default(self):
     assert Tensor.ones([2,3,0]).sum(2).dtype ==  Tensor.default_type
     # assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int
+
+core_types = list(DTYPES_DICT.values())
+class TestTypePromotion(unittest.TestCase):
+  @given(st.sampled_from(core_types))
+  def test_self_promo_to_self(self, dtype):
+    assert least_upper_dtype(dtype) == dtype
+    assert least_upper_dtype(dtype, dtype) == dtype
+    assert least_upper_dtype(dtype, dtype, dtype) == dtype
+
+  @given(st.sampled_from(core_types), st.sampled_from(core_types))
+  def test_promo_resulted_higher_than_inputs(self, dtype1, dtype2):
+    result = least_upper_dtype(dtype1, dtype2)
+    assert result >= dtype1 and result >= dtype2
+
+  def test_dtype_promo(self):
+    assert least_upper_dtype(dtypes.bool, dtypes.int8) == dtypes.int8
+    assert least_upper_dtype(dtypes.int8, dtypes.uint8) == dtypes.int16
+    assert least_upper_dtype(dtypes.uint8, dtypes.int16) == dtypes.int16
+    assert least_upper_dtype(dtypes.int16, dtypes.uint16) == dtypes.int32
+    assert least_upper_dtype(dtypes.uint16, dtypes.int32) == dtypes.int32
+    assert least_upper_dtype(dtypes.int32, dtypes.uint32) == dtypes.int64
+    assert least_upper_dtype(dtypes.uint32, dtypes.int64) == dtypes.int64
+    # similar to jax but we don't use weak type
+    assert least_upper_dtype(dtypes.int64, dtypes.uint64) == dtypes.float16
+    assert least_upper_dtype(dtypes.float16, dtypes.float32) == dtypes.float32
+    assert least_upper_dtype(dtypes.float32, dtypes.float64) == dtypes.float64
+
+    assert least_upper_dtype(dtypes.bool, dtypes.float32) == dtypes.float32
+    assert least_upper_dtype(dtypes.bool, dtypes.float64) == dtypes.float64
+    assert least_upper_dtype(dtypes.float16, dtypes.int64) == dtypes.float16
+    assert least_upper_dtype(dtypes.float16, dtypes.uint64) == dtypes.float16
+
+class TestAutoCastType(unittest.TestCase):
+  @given(st.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_int(d) and is_dtype_supported(d)]))
+  @settings(deadline=None)
+  def test_int_to_float_unary_func(self, dtype):
+    for func in [
+      lambda t: t.exp(),
+      # lambda t: t.exp2(),  # requires MUL
+      lambda t: t.log(),
+      lambda t: t.log2(),
+      lambda t: t.sqrt(),
+      # lambda t: t.rsqrt(),  # requires DIV
+      lambda t: t.sin(),
+      # lambda t: t.cos(),  # requires SUB
+      # lambda t: t.tan(),  # requires .cos() to work
+      lambda t: t.sigmoid(),
+    ]:
+      a = [2, 3, 4]
+      np.testing.assert_allclose(func(Tensor(a, dtype=dtype)).numpy(), func(torch.tensor(a)), rtol=1e-4, atol=1e-4)
+
 
 if __name__ == '__main__':
   unittest.main()
