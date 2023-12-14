@@ -348,33 +348,32 @@ class Tensor:
     if num_slices > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
 
     # 2. basic indexing (no copy)
-    if indexed := type_dim[int] or type_dim[slice]:
-      # turn indices in indices_filtered to Tuple[shrink_arg, strides]
-      for dim in type_dim[int]:
-        if (i := indices_filtered[dim]) >= self.shape[dim] or i < -self.shape[dim]:
-          raise IndexError(f"index {i} is out of bounds for dimension {dim} with size {self.shape[dim]}")
-        indices_filtered[dim] = ((i,i+1),1) if i >= 0 else ((self.shape[dim]+i, self.shape[dim]+i+1), 1)
-      for dim in type_dim[slice]:
-        s, e, st = indices_filtered[dim].indices(self.shape[dim])
-        indices_filtered[dim] = (((0, 0) if e < s else (s, e)) if st > 0 else ((0, 0) if e > s else (e+1, s+1)), st)
-      for dim in type_dim[Tensor]: indices_filtered[dim] = ((0,self.shape[dim]), 1)
+    # turn indices in indices_filtered to Tuple[shrink_arg, strides]
+    for dim in type_dim[int]:
+      if (i := indices_filtered[dim]) >= self.shape[dim] or i < -self.shape[dim]:
+        raise IndexError(f"index {i} is out of bounds for dimension {dim} with size {self.shape[dim]}")
+      indices_filtered[dim] = ((i,i+1),1) if i >= 0 else ((self.shape[dim]+i, self.shape[dim]+i+1), 1)
+    for dim in type_dim[slice]:
+      s, e, st = indices_filtered[dim].indices(self.shape[dim])
+      indices_filtered[dim] = ((0, 0) if (st > 0 and e < s) or (st <= 0 and e > s) else (s, e) if st > 0 else (e+1, s+1), st)
+    for dim in type_dim[Tensor]: indices_filtered[dim] = ((0,self.shape[dim]), 1)
 
-      new_slice, strides = zip(*tuple(i for i in indices_filtered))
-      ret = self.shrink(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
-      # add strides by pad -> reshape -> shrink
-      if any(abs(s) != 1 for s in strides):
-        strides = tuple(abs(s) for s in strides)
-        ret = ret.pad(tuple((0, s-(sh % s) if sh % s != 0 else 0) for s, sh in zip(strides, ret.shape)))
-        ret = ret.reshape(flatten([sh // s, s] for s, sh in zip(strides, ret.shape)))
-        ret = ret.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in ret.shape[::2]))).reshape(ret.shape[::2])
+    new_slice, strides = ((),()) if not indices_filtered else zip(*tuple(i for i in indices_filtered))
+    ret = self.shrink(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
+    # add strides by pad -> reshape -> shrink
+    if any(abs(s) != 1 for s in strides):
+      strides = tuple(abs(s) for s in strides)
+      ret = ret.pad(tuple((0, s-(sh % s) if sh % s != 0 else 0) for s, sh in zip(strides, ret.shape)))
+      ret = ret.reshape(flatten([sh // s, s] for s, sh in zip(strides, ret.shape)))
+      ret = ret.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in ret.shape[::2]))).reshape(ret.shape[::2])
 
     # inject 1 for dim where it's None and collapse dim for int
-    new_shape = list(ret.shape) if indexed else list(self.shape)
+    new_shape = list(ret.shape)
     for dim in type_dim[None]: new_shape.insert(dim, 1)
     for dim in (dims_collapsed := [dim + sum(1 for d in type_dim[None] if dim >= d) for dim in reversed(type_dim[int])]): new_shape.pop(dim)
     for dim_sh in new_shape: assert isinstance(dim_sh, int), f"does not support symbolic shape {dim_sh}"
 
-    ret = ret.reshape(tuple(new_shape)) if indexed else self.reshape(tuple(new_shape))
+    ret = ret.reshape(tuple(new_shape))
 
     # 3. advanced indexing (copy)
     if type_dim[Tensor]:
