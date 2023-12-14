@@ -21,9 +21,8 @@ def proj {n : Nat} (v : View n) (i : Fin n)  (j : Nat) : Nat :=
 def valid {n : Nat} (v : View n) (i : Fin n) (j : Nat) : Prop :=
   let p : i.val < List.length v.min.val := by rw [v.min.property]; exact i.isLt
   let q : i.val < List.length v.max.val := by rw [v.max.property]; exact i.isLt
-
   (proj v i j) >= List.get v.min.val (Fin.mk i p)
-  ∧ (proj v i j) <= List.get v.max.val (Fin.mk i p)
+  ∧ (proj v i j) <= List.get v.max.val (Fin.mk i q)
 
 
 def idxs {n : Nat} (v : View n) : Type :=
