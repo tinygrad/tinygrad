@@ -348,6 +348,7 @@ class Tensor:
     if num_slices > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
 
     # 2. basic indexing (no copy)
+    # currently indices_filtered: Tuple[Union[slice, int, Tensor], ...]
     # turn indices in indices_filtered to Tuple[shrink_arg, strides]
     for dim in type_dim[int]:
       if (i := indices_filtered[dim]) >= self.shape[dim] or i < -self.shape[dim]:
