@@ -358,6 +358,8 @@ class TestHandCodedOpts(unittest.TestCase):
     assert prod(k.full_shape[k.shape_len-k.upcasted:k.shape_len]) <= 49
 
   def test_matvec(self):
+    if not Device[Device.DEFAULT].linearizer_opts.has_local:
+      self.skipTest("Only devices with locals")
     N = 128
     a = Tensor.rand(1, N).realize()
     b = Tensor.rand(N, N).realize()
