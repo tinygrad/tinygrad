@@ -199,8 +199,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
         kk(lang.render_local(args[0], args[1]))
       r[u] = args[0]
     elif uop == UOps.DEFINE_GLOBAL:
-      bufs.append(args)
-      r[u] = args[0]
+      assert dtype is not None
+      bufs.append((args, dtype))
+      r[u] = args
     elif uop == UOps.GEP:
       if cast(DType, vin[0].dtype).sz > 4:
         r[u] = f"({r[vin[0]]})[{args}]"  # this is correct for HIP

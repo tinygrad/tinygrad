@@ -98,8 +98,8 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       kk(f"{'if '+r[vin[3]]+': ' if len(vin)>3 else ''}tl.store({r[vin[0]]} + {r[vin[1]]}, {r[vin[2]].replace('//', '/')}, mask = {render_valid(valid)}) ")
     elif uop == UOps.DEFINE_GLOBAL:
       bufs.append(args)
-      signatures.append("*" if isinstance(args[1], PtrDType) else "" +  signature_dtypes[args[1]])
-      r[u] = args[0]
+      signatures.append("*" if isinstance(dtype, PtrDType) else "" +  signature_dtypes[dtype])
+      r[u] = args
     elif uop == UOps.SPECIAL:
       dims.append(args[1])
       valid.append(f"{args[1]}<{get_max(args[2])}")
@@ -111,7 +111,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     elif uop == UOps.CAST and dtype is not None: r[u] = render_cast(r[vin[0]], dtype, isinstance(args, tuple) and args[1])
     else: raise NotImplementedError(f"unimplemented: {uop}")
 
-  prg = f"import triton\nimport triton.language as tl\ntl.core.TRITON_MAX_TENSOR_NUMEL = float('inf')\n@triton.jit\ndef {function_name}("+','.join(f"{buf[0]}" for buf in bufs)+"):\n"
+  prg = f"import triton\nimport triton.language as tl\ntl.core.TRITON_MAX_TENSOR_NUMEL = float('inf')\n@triton.jit\ndef {function_name}("+','.join(bufs)+"):\n"
   for i, line in enumerate(list(filter(lambda line: "tl.arange" in line, kernel))): kernel[kernel.index(line)] +=  f"[{', '.join([':' if i == j else 'None' for j in range(len(local_size))])}]"
   prg += "\n".join(kernel)
 
