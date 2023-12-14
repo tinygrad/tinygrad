@@ -513,7 +513,7 @@ class Linearizer(Kernel):
       ret: List[UOp] = []
       input_acc = acc[:]
       for val, off in zip(zip(*values), cast(List[int], offs)):
-        if x.src[0].op != TernaryOps.MULACC and not (x.src[0].op == UnaryOps.CAST and x.src[0].src[0].op == TernaryOps.MULACC): acc[off] = self.uop(UOps.ALU, vin=val+(acc[off],), arg=ops[x.op]) # noqa: E501
+        if x.src[0].op != TernaryOps.MULACC: acc[off] = self.uop(UOps.ALU, vin=val+(acc[off],), arg=ops[x.op])
         ret.append(acc[off])
       for off in range(len(acc)):
         if input_acc[off] != acc[off]:
