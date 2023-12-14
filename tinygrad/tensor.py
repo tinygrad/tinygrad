@@ -387,7 +387,8 @@ class Tensor:
       for tensor_dim in type_dim[Tensor]:
         dims_collapsed_, dims_injected = sum(1 for d in dims_collapsed if tensor_dim >= d), sum(1 for d in type_dim[None] if tensor_dim >= d)
         tdim.append(td := tensor_dim - dims_collapsed_ + dims_injected)
-        idx.append((t := indices[tensor_dim + dims_injected]).sign().__neg__().relu() * ret.shape[td] + t) # normalize the negative tensor indices
+        # normalize the negative tensor indices
+        idx.append(((t := indices[tensor_dim + dims_injected]) < 0).where(ret.shape[td], 0) + t)
 
       # compute sum_dim, arange, and idx
       max_dim = max(i.ndim for i in idx)
@@ -728,8 +729,7 @@ class Tensor:
 
   # ***** broadcasted binary mlops *****
 
-  # TODO: y can be int here
-  def _broadcasted(self, y:Union[Tensor, float], reverse:bool=False) -> Tuple[Tensor, Tensor]:
+  def _broadcasted(self, y:Union[Tensor, float, int], reverse:bool=False) -> Tuple[Tensor, Tensor]:
     if not isinstance(y, Tensor):
       # make y a Tensor
       if 0 in self.shape: return self, self.full_like(y)
@@ -747,25 +747,25 @@ class Tensor:
     return x.expand(broadcasted_shape), y.expand(broadcasted_shape)
 
   # TODO: x can be int here
-  def _to_float(self, x:Union[Tensor, float]):
+  def _to_float(self, x:Union[Tensor, float, int]):
     return x.lazydata.base.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
-  def add(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+  def add(self, x:Union[Tensor, float, int], reverse=False) -> Tensor:
     x = self._to_float(x)
     return mlops.Add.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else self
-  def sub(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+  def sub(self, x:Union[Tensor, float, int], reverse=False) -> Tensor:
     x = self._to_float(x)
     return mlops.Sub.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else (-self if reverse else self)
-  def mul(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+  def mul(self, x:Union[Tensor, float, int], reverse=False) -> Tensor:
     x = self._to_float(x)
     if x.__class__ is not Tensor and x == 0.0: return mlops.Zero.apply(self)
     if x.__class__ is not Tensor and x == -1.0: return -self
     return mlops.Mul.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x != 1.0 else self
-  def div(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+  def div(self, x:Union[Tensor, float, int], reverse=False) -> Tensor:
     x = self._to_float(x)
     return mlops.Div.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or reverse or not x or not dtypes.is_float(self.dtype) else self.mul(1/x)  # noqa: E501
-  def pow(self, x:Union[Tensor, float], reverse=False) -> Tensor:
+  def pow(self, x:Union[Tensor, float, int], reverse=False) -> Tensor:
     x = self._to_float(x)
     if not isinstance(x, Tensor) and not reverse:
       # simple pow identities
@@ -858,7 +858,8 @@ class Tensor:
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     if is_causal: attn_mask = Tensor.ones(self.shape[-2], key.shape[-2], requires_grad=False, device=self.device).tril(0).cast(dtypes.bool)
     if attn_mask is not None and attn_mask.dtype == dtypes.bool: attn_mask = (attn_mask == 0).where(-float("inf"), 0)
-    return (self @ key.transpose(-2,-1) / math.sqrt(self.shape[-1]) + attn_mask).softmax(-1).dropout(dropout_p) @ value
+    qk = self @ key.transpose(-2,-1) / math.sqrt(self.shape[-1])
+    return ((qk+attn_mask) if attn_mask is not None else qk).softmax(-1).dropout(dropout_p) @ value
 
   def binary_crossentropy(self, y:Tensor) -> Tensor:
     return (-y*self.log() - (1-y)*(1-self).log()).mean()
