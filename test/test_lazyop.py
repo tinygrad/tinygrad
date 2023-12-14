@@ -37,6 +37,14 @@ class TestLazyOp(unittest.TestCase):
     reduceop = [op for op in out.lazydata.schedule()[-1].ast.get_lazyops() if op.op == ReduceOps.SUM][0]
     assert reduceop.src[0].op == TernaryOps.MULACC and len(reduceop.src[0].src) == 2
 
+  def test_mulacc_fusion_mid_ops(self):
+    x = Tensor.rand(1024,1024)
+    w = Tensor.rand(1024,1024)
+    x = x.add(4).mul(8)
+    out = (x*w).sum(-1).add(4).mul(8)
+    reduceop = [op for op in out.lazydata.schedule()[-1].ast.get_lazyops() if op.op == ReduceOps.SUM][0]
+    assert reduceop.src[0].op == TernaryOps.MULACC and len(reduceop.src[0].src) == 2
+
   floats = [dtype for dtype in DTYPES_DICT.values() if dtypes.is_float(dtype)]
   @unittest.skip("TODO support CAST in MULACC fusion")
   @given(st.sampled_from(floats), st.sampled_from(floats))
