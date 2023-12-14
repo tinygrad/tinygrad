@@ -337,8 +337,8 @@ class Tensor:
 
     # record None for dimension injection later and filter None and record rest of indices
     type_dim[None] = [dim for dim, i in enumerate(indices) if i is None]
-    indices = [v for v in indices if v is not None]
-    for dim,i in enumerate(indices): type_dim[type(i)].append(dim)
+    indices_filtered = [v for v in indices if v is not None]
+    for dim,i in enumerate(indices_filtered): type_dim[type(i)].append(dim)
 
     # validation! raise Errors
     if slice in type_dim and self.ndim == 0: raise IndexError("slice cannot be applied to a 0-dim tensor.")
@@ -349,17 +349,17 @@ class Tensor:
 
     # 2. basic indexing (no copy)
     if indexed := type_dim[int] or type_dim[slice]:
-      # turn indices in indices to Tuple[shrink_arg, strides]
+      # turn indices in indices_filtered to Tuple[shrink_arg, strides]
       for dim in type_dim[int]:
-        if (i := indices[dim]) >= self.shape[dim] or i < -self.shape[dim]:
+        if (i := indices_filtered[dim]) >= self.shape[dim] or i < -self.shape[dim]:
           raise IndexError(f"index {i} is out of bounds for dimension {dim} with size {self.shape[dim]}")
-        indices[dim] = ((i,i+1),1) if i >= 0 else ((self.shape[dim]+i, self.shape[dim]+i+1), 1)
+        indices_filtered[dim] = ((i,i+1),1) if i >= 0 else ((self.shape[dim]+i, self.shape[dim]+i+1), 1)
       for dim in type_dim[slice]:
-        s, e, st = indices[dim].indices(self.shape[dim])
-        indices[dim] = (((0, 0) if e < s else (s, e)) if st > 0 else ((0, 0) if e > s else (e+1, s+1)), st)
-      for dim in type_dim[Tensor]: indices[dim] = ((0,self.shape[dim]), 1)
+        s, e, st = indices_filtered[dim].indices(self.shape[dim])
+        indices_filtered[dim] = (((0, 0) if e < s else (s, e)) if st > 0 else ((0, 0) if e > s else (e+1, s+1)), st)
+      for dim in type_dim[Tensor]: indices_filtered[dim] = ((0,self.shape[dim]), 1)
 
-      new_slice, strides = zip(*tuple(i for i in indices))
+      new_slice, strides = zip(*tuple(i for i in indices_filtered))
       ret = self.shrink(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
       # add strides by pad -> reshape -> shrink
       if any(abs(s) != 1 for s in strides):
