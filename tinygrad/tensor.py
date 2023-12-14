@@ -452,10 +452,11 @@ class Tensor:
     if self.ndim < 1: raise RuntimeError("split expects at least a 1-dimensional tensor")
     if not -self.ndim <= dim < self.ndim: raise IndexError(f"Dimension out of range (expected to be in range of [{-self.ndim if self.ndim > 0 else self.ndim-1}, {self.ndim-1 if self.ndim > 0 else self.ndim}], but got {dim})")  # noqa: E501
     if isinstance(split_sizes, int): return self._split_int(split_sizes, dim)
-    if isinstance(split_sizes, list) and all_int(split_sizes): return self._split_list(split_sizes, dim)
+    if isinstance(split_sizes, list) and all(isinstance(x, int) for x in split_sizes): return self._split_list(split_sizes, dim)
     raise TypeError(f"Expected split_sizes to be int or list of ints, got {type(split_sizes)}")
 
   def _split_int(self, split_sizes:int, dim:int=0) -> Tuple[Tensor, ...]:
+    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     if split_sizes < 0: raise RuntimeError(f"split_sizes cannot be negative, got {split_sizes}")
     if split_sizes == 0 and self.shape[dim] > 0: raise RuntimeError(f"split_sizes can only be 0 if dimension size is 0, but got dimension size of {self.shape[dim]}")  # noqa: E501
     return tuple(self.chunk(math.ceil(self.shape[dim]/split_sizes)))
