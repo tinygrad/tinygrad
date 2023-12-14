@@ -351,20 +351,20 @@ class Tensor:
     # currently indices_filtered: Tuple[Union[slice, int, Tensor], ...]
     # turn indices in indices_filtered to Tuple[shrink_arg, strides]
     for dim in type_dim[int]:
-      if (i := indices_filtered[dim]) >= self.shape[dim] or i < -self.shape[dim]:
-        raise IndexError(f"index {i} is out of bounds for dimension {dim} with size {self.shape[dim]}")
-      indices_filtered[dim] = ((i,i+1),1) if i >= 0 else ((self.shape[dim]+i, self.shape[dim]+i+1), 1)
+      if (i := indices_filtered[dim]) >= (sh := self.shape[dim]) or i < -sh:
+        raise IndexError(f"index {i} is out of bounds for dimension {dim} with size {sh}")
+      indices_filtered[dim] = ((i, i+1), 1) if i >= 0 else ((sh+i, sh+i+1), 1)
     for dim in type_dim[slice]:
       s, e, st = indices_filtered[dim].indices(self.shape[dim])
       indices_filtered[dim] = ((0, 0) if (st > 0 and e < s) or (st <= 0 and e > s) else (s, e) if st > 0 else (e+1, s+1), st)
-    for dim in type_dim[Tensor]: indices_filtered[dim] = ((0,self.shape[dim]), 1)
+    for dim in type_dim[Tensor]: indices_filtered[dim] = ((0, self.shape[dim]), 1)
 
     new_slice, strides = ((),()) if not indices_filtered else zip(*tuple(i for i in indices_filtered))
     ret = self.shrink(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
     # add strides by pad -> reshape -> shrink
     if any(abs(s) != 1 for s in strides):
       strides = tuple(abs(s) for s in strides)
-      ret = ret.pad(tuple((0, round_up(sh,s) - sh) for s, sh in zip(strides, ret.shape)))
+      ret = ret.pad(tuple((0, round_up(sh, s) - sh) for s, sh in zip(strides, ret.shape)))
       ret = ret.reshape(flatten([sh // s, s] for s, sh in zip(strides, ret.shape)))
       ret = ret.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in ret.shape[::2]))).reshape(ret.shape[::2])
 
