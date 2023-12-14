@@ -31,7 +31,7 @@ class LazyBuffer:
     assert base is None or base.base == base
     self._base = base
     self.children: WeakSet[LazyBuffer] = WeakSet()
-    for x in srcs: x.base.children.add(self)
+    for x in srcs: x.base.children.add(self.base)
     self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
     self._realized: Optional[Buffer] = None
     self.output_buffer: Optional[Buffer] = None

@@ -55,7 +55,8 @@ class ShapeTracker:
   def __post_init__(self):
     assert isinstance(self.views, tuple) and all(isinstance(v, View) for v in self.views), "ShapeTracker must be created with a tuple of Views"
 
-  def __add__(self, st): return ShapeTracker(self.views+st.views)
+  #@functools.lru_cache(maxsize=None)
+  def __add__(self, st:ShapeTracker) -> ShapeTracker: return ShapeTracker(self.views+st.views).simplify()
 
   @staticmethod
   def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),))
@@ -144,7 +145,7 @@ class ShapeTracker:
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := merge_views(self.views[-2], self.views[-1])) is not None:
-      if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
+      if DEBUG >= 6: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
       return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
     return self
 
