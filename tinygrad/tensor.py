@@ -189,24 +189,24 @@ class Tensor:
 
   @staticmethod
   def full(shape:Tuple[sint, ...], fill_value, **kwargs):
-    return Tensor(fill_value, **kwargs).reshape([1]*len(new_shape := argfix(shape))).expand(new_shape)
+    dtype = kwargs.pop("dtype", Tensor.default_type if isinstance(fill_value, float) else dtypes.int32)
+    return Tensor(fill_value, dtype=dtype, **kwargs).reshape([1]*len(new_shape := argfix(shape))).expand(new_shape)
 
   @staticmethod
-  def zeros(*shape, **kwargs): return Tensor.full(argfix(*shape), 0, **kwargs)
+  def zeros(*shape, **kwargs): return Tensor.full(argfix(*shape), 0.0, **kwargs)
 
   @staticmethod
-  def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1, **kwargs)
+  def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1.0, **kwargs)
 
   @staticmethod
   def arange(start, stop=None, step=1, **kwargs):
     if stop is None: stop, start = start, 0
-    if isinstance(start, float) and step == 1: start = int(start)
-    if isinstance(stop, float) and step == 1: stop = int(stop)
-    return Tensor.full((math.ceil((stop-start)/step) if step != 1 else (stop-start),), step, **kwargs).cumsum() + (start - step)
+    dtype = kwargs.pop("dtype", Tensor.default_type if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.int32)
+    return Tensor.full((math.ceil((stop-start)/step) if step != 1 else (stop-start),), step, dtype=dtype, **kwargs).cumsum() + (start - step)
 
   @staticmethod
   def eye(dim:int, **kwargs):
-    return Tensor.full((dim,1),1,**kwargs).pad(((0,0),(0,dim))).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
+    return Tensor.full((dim,1),1.0,**kwargs).pad((None,(0,dim))).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
 
   def full_like(self, fill_value, **kwargs):
     return Tensor.full(self.shape, fill_value=fill_value, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
