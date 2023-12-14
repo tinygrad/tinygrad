@@ -18,8 +18,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType,
   if wop in lazycache: return lazycache[wop]
 
   ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base)
-  # TODO: CONST can be removed here
-  if op not in {LoadOps.EMPTY, LoadOps.CUSTOM, LoadOps.CONST}: lazycache[wop] = ret
+  if op not in {LoadOps.EMPTY, LoadOps.CUSTOM}: lazycache[wop] = ret
   return ret
 
 class LazyBuffer:

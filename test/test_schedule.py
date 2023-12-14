@@ -25,7 +25,7 @@ def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=N
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     for i, s in enumerate(sched):
-      print("op", i)
+      print("kernel", i+1)
       print_tree(s.ast)
   for i,s in enumerate(sched): realized_lazybuffer(s.out, i+1)
   assert len(sched) == allowed
