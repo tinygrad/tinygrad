@@ -64,7 +64,7 @@ class LazyBuffer:
 
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:
-    ret = LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), dtypes.from_np(x.dtype))
+    ret = LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), dtypes.from_np(x.dtype), op=LoadOps.EMPTY)
     ret._realized = Buffer("CPU", prod(x.shape), dtypes.from_np(x.dtype), x.flatten())
     return ret
 
