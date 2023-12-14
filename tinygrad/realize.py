@@ -1,9 +1,10 @@
 from typing import List, Dict, Optional, Set
-from tinygrad.ops import LoadOps, ScheduleItem, LazyOp, BufferOps, MemBuffer, ConstBuffer, vars_from_ast
+from tinygrad.ops import LoadOps, ScheduleItem, LazyOp, BufferOps, MemBuffer, ConstBuffer, vars_from_ast, ReduceOps, BinaryOps, UnaryOps, TernaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, JITRunner
 from tinygrad.graph import print_tree, log_lazybuffer, realized_lazybuffer
-from tinygrad.helpers import prod, GlobalCounters, merge_dicts
+from tinygrad.helpers import prod, GlobalCounters, merge_dicts, DEBUG
 from tinygrad.shape.symbolic import Variable
+from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.lazy import LazyBuffer
 
 # *** schedule running ***
@@ -40,14 +41,14 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
 
 # *** schedule creation ***
 
-def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], first=True) -> LazyOp:
+def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker, first=True) -> LazyOp:
   log_lazybuffer(buf)
   if buf.base.op == LoadOps.CONST:
     # const is never a buffer
-    return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.base.arg), buf.dtype, buf.st.simplify().unbind()))
+    return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.base.arg), buf.dtype, (buf.st+st).simplify().unbind()))
   if buf.op == LoadOps.CONTIGUOUS and first:
     # include one contiguous
-    return _recursive_get_lazyop(buf.srcs[0], inputs, True)
+    return _recursive_get_lazyop(buf.srcs[0], inputs, st, True)
   if buf.op == LoadOps.COPY and first:
     inputs.append(buf.srcs[0].base)
     return LazyOp(LoadOps.COPY, (), buf.srcs[0].base)
@@ -58,13 +59,23 @@ def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], first=True) -
     return LazyOp(LoadOps.EMPTY)
 
   # we can merge this as a LazyOp
+  #if not buf.base.realized and buf.base.op not in LoadOps and buf.base.op not in BufferOps and (len(buf.base.children) == 1 or first) and first:
+  #  if buf.base.op in ReduceOps and (buf.st+st).contiguous:
+  #    # reduce ops has to be contiguous
+  #    st = ShapeTracker.from_shape(buf.base.srcs[0].shape)
+  #    return LazyOp(buf.base.op, tuple(_recursive_get_lazyop(x, inputs, st, False) for x in buf.base.srcs), buf.base.arg)
+  #  elif buf.base.op in UnaryOps or buf.base.op in BinaryOps or buf.base.op in TernaryOps:
+  #    # push shapetrackers up through binaryops
+  #    st = (buf.st+st).simplify()
+  #    return LazyOp(buf.base.op, tuple(_recursive_get_lazyop(x, inputs, st, False) for x in buf.base.srcs), buf.base.arg)
   if not buf.realized and buf.base.op not in LoadOps and (len(buf.base.children) == 1 or first) and buf == buf.base:
-    assert buf.op is not None
-    return LazyOp(buf.op, tuple(_recursive_get_lazyop(x, inputs, False) for x in buf.srcs), buf.arg)
+    if buf.op in ReduceOps:
+      st = ShapeTracker.from_shape(buf.base.srcs[0].shape)
+    return LazyOp(buf.op, tuple(_recursive_get_lazyop(x, inputs, st, False) for x in buf.srcs), buf.arg)
 
   # have to do a load
   if buf.base not in inputs: inputs.append(buf.base)
-  return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf.base)+1, buf.dtype, buf.st.simplify().unbind()))
+  return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf.base)+1, buf.dtype, (buf.st+st).simplify().unbind()))
 
 def _create_schedule(out:LazyBuffer, seen:Set[LazyBuffer]) -> List[ScheduleItem]:
   if out in seen or out.realized or out.is_unrealized_const(): return []
@@ -73,7 +84,7 @@ def _create_schedule(out:LazyBuffer, seen:Set[LazyBuffer]) -> List[ScheduleItem]
   if out.base is not out: return _create_schedule(out.base, seen)
 
   inputs: List[LazyBuffer] = []
-  op = _recursive_get_lazyop(out, inputs)
+  op = _recursive_get_lazyop(out, inputs, ShapeTracker.from_shape(out.shape))
   if op.op not in LoadOps: op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, out.st.simplify().unbind()))
   ret: List[ScheduleItem] = []
   for x in inputs:
@@ -90,8 +101,9 @@ def _create_schedule(out:LazyBuffer, seen:Set[LazyBuffer]) -> List[ScheduleItem]
           out.output_buffer = None
           break
 
-  #from tinygrad.graph import print_tree
-  #print_tree(op)
+  if DEBUG >= 5:
+    from tinygrad.graph import print_tree
+    print_tree(op)
 
   var_vals = merge_dicts([out.st.var_vals] + [buf.st.var_vals for buf in inputs])
   return ret + [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in vars_from_ast(op)})]
