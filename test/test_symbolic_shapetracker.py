@@ -116,9 +116,9 @@ class TestSymbolicReshape(unittest.TestCase):
   def test_reshape_into_symbols_bad_shape(self):
     vi = Variable("i", 1, 10).bind(4)
     with self.assertRaises(ValueError):
-      t = Tensor.rand(4, 6).reshape(vi, 6).reshape(1, 77) # reshape to a different size new shape through symbolic shape
+      Tensor.rand(4, 6).reshape(vi, 6).reshape(1, 77) # reshape to a different size new shape through symbolic shape
     with self.assertRaises(AssertionError):
-      t = Tensor.rand(3, 4).reshape(3, (vi+1)) # reshape into non-Variable Node
+      Tensor.rand(3, 4).reshape(3, (vi+1)) # reshape into non-Variable Node
 
   def test_two_symbol_reshape(self):
     for i in range(1, 6):
@@ -132,6 +132,17 @@ class TestSymbolicReshape(unittest.TestCase):
         # assert t.shape == (1, vi*vj)
         t = t.reshape(vj, vi)
         assert t.shape == (vj, vi)
+
+  def test_symbolic_mask(self):
+    # taken from gpt2 single kvcache
+    # these two caused problems in gpt2 if reshape merged views
+    view = View(shape=(1, (NumNode(1)+Variable('start_pos', 1, 128).bind(2)), 16, 64), strides=(0, 0, 64, 1), offset=NumNode(1024), mask=((0, 1), (Variable('start_pos', 1, 128).bind(2), (NumNode(1)+Variable('start_pos', 1, 128).bind(2))), (0, 16), (0, 64)), contiguous=False)   # noqa: E501
+    new_shape = (1, 1, (NumNode(1)+Variable('start_pos', 1, 128).bind(2)), 16, 64)
+    assert view.reshape(new_shape) is None
+
+    view = View(shape=(2, 1, (NumNode(1)+Variable('start_pos', 1, 128)), 16, 64), strides=(0, 0, 1024, 64, 1), offset=131072, mask=((1, 2), (0, 1), (0, (NumNode(1)+Variable('start_pos', 1, 128))), (0, 16), (0, 64)), contiguous=False)   # noqa: E501
+    new_shape = (2, (NumNode(1)+Variable('start_pos', 1, 128)), 16, 64)
+    assert view.reshape(new_shape) is None
 
 class TestSymbolicExpand(unittest.TestCase):
   def test_expand_into_symbols(self):
@@ -165,7 +176,7 @@ class TestSymbolicShapeExpr(unittest.TestCase):
     shape = (i+1, 8, 4)
     strides = (1, (i*4)+4, i+1)
     st = ShapeTracker((View.create(shape, strides), ))
-    idx, valid = st.expr_idxs(idx)
+    idx, _valid = st.expr_idxs(idx)
     assert idx.render() == "((lidx1*((i*4)+4))+1+gidx0+i)"
 
 if __name__ == '__main__':

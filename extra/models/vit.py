@@ -1,5 +1,6 @@
 import numpy as np
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import fetch
 from extra.models.transformer import TransformerBlock
 
 class ViT:
@@ -29,9 +30,6 @@ class ViT:
     return x[:, 0].linear(*self.head)
 
   def load_from_pretrained(m):
-    import io
-    from extra.utils import fetch
-
     # https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py
     if m.embed_dim == 192:
       url = "https://storage.googleapis.com/vit_models/augreg/Ti_16-i21k-300ep-lr_0.001-aug_none-wd_0.03-do_0.0-sd_0.0--imagenet2012-steps_20k-lr_0.03-res_224.npz"
@@ -39,7 +37,7 @@ class ViT:
       url = "https://storage.googleapis.com/vit_models/augreg/B_16-i21k-300ep-lr_0.001-aug_medium1-wd_0.1-do_0.0-sd_0.0--imagenet2012-steps_20k-lr_0.01-res_224.npz"
     else:
       raise Exception("no pretrained weights for configuration")
-    dat = np.load(io.BytesIO(fetch(url)))
+    dat = np.load(fetch(url))
 
     #for x in dat.keys():
     #  print(x, dat[x].shape, dat[x].dtype)

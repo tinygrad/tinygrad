@@ -1,6 +1,16 @@
 #!/usr/bin/env python
-import unittest
-from tinygrad.shape.symbolic import Node, MulNode, SumNode, Variable, NumNode, LtNode, sym_render, sym_infer, create_rednode
+import unittest, pickle
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, ModNode, sym_render, sym_infer, create_rednode
+
+class TestSymbolicPickle(unittest.TestCase):
+  def test_pickle_variable(self):
+    dat = Variable("a", 3, 8)
+    datp = pickle.loads(pickle.dumps(dat))
+    self.assertEqual(str(datp), "<a[3-8]>")
+  def test_pickle_variable_times_2(self):
+    dat = Variable("a", 3, 8)*2
+    datp = pickle.loads(pickle.dumps(dat))
+    self.assertEqual(str(datp), "<(a[3-8]*2)>")
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -58,6 +68,7 @@ class TestSymbolic(unittest.TestCase):
     assert idx1+idx2 == idx1+idx2
     assert idx1+idx2 == idx2+idx1
     assert idx1+idx2 != idx2
+    assert idx1*idx2 == idx2*idx1
 
   def test_factorize(self):
     a = Variable("a", 0, 8)
@@ -142,6 +153,7 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_lt_fold(self):
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 3)]) < 16, 0, 1, "(a<4)")
     self.helper_test_variable(Variable.sum([Variable("a", 0, 7) * 4, Variable("b", 0, 4)]) < 16, 0, 1, "(((a*4)+b)<16)")
+    self.helper_test_variable(Variable.sum([Variable("uidx", 0, 3), Variable("a", 0, 1529) * 12]) < (4 * 67), 0, 1, "(a<23)")
 
   def test_mod_mul(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)%9, 0, 5, "a")
@@ -377,6 +389,20 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     assert (ridx2*(i*4+4)+1+i+gidx0) // (i*128+128) == 0
     assert (ridx2*(i*4+4)+1+i+gidx0) % (i*128+128) == (ridx2*(i*4+4)+1+i+gidx0)
 
+  def test_mod_node_max(self):
+    i = Variable("i", 1, 128)
+    gidx0 = Variable("gidx0", 0, i)
+    mod = gidx0 % 8
+    assert isinstance(mod, ModNode) and mod.a == gidx0 and mod.b == 8
+    mod = gidx0 % 2
+    assert isinstance(mod, ModNode) and mod.a == gidx0 and mod.b == 2
+
+    gidx0 = Variable("gidx0", 0, i*8+7)
+    mod = gidx0 % 8
+    assert isinstance(mod, ModNode) and mod.a == gidx0 and mod.b == 8
+    mod = gidx0 % 2
+    assert isinstance(mod, ModNode) and mod.a == gidx0 and mod.b == 2
+
   def test_node_lt_node(self):
     a = Variable("a", 1, 5)
     b = Variable("b", 6, 9)
@@ -400,7 +426,13 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     c = Variable("c", 1, 2)
     x = SumNode([MulNode(a, b), c])
     with self.assertRaises(AssertionError):
-      lt3 = (x < 3)
+      (x < 3)
+
+  def test_nested_variable_mod(self):
+    i = Variable("i", 1, 5)
+    idx0 = Variable("idx0", 0, i)
+    with self.assertRaises(AssertionError):
+      assert idx0 % 2 == idx0
 
   def test_num_node_mul_node(self):
     a = Variable("a", 1, 5)

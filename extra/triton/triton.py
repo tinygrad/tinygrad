@@ -29,15 +29,15 @@ def get_max(var):
 def remove_single_scalar_curly_braces(ptx_code):
   return '\n'.join([re.sub(r'\{\s*(%\w+)\s*\}', r'\1', line) for line in ptx_code.split('\n')])
 
-def render_const(args):
-  return (('-' if args<0 else '') + 'tl.where(1,float("inf"),0)') if math.isinf(args) else ('tl.where(1,float("nan"),0)' if math.isnan(args) else str(args))
+def render_const(args,dtype:DType):
+  return (('-' if args<0 else '') + 'tl.where(1,float("inf"),0)') if math.isinf(args) else ('tl.where(1,float("nan"),0)' if math.isnan(args) else f"{int(args)}" if dtypes.is_int(dtype) else str(args))
 
-def render_cast(x:str, dtype:DType):
-  return f"{x}.to({triton_dtypes[dtype]})"
+def render_cast(x:str, dtype:DType, bitcast=False):
+  return f"{x}.to({triton_dtypes[dtype]}, bitcast={bitcast})"
 
 def define_scalar(local_size, dtype, args):
-  if len(local_size) > 0: return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{render_const(args)}, dtype={triton_dtypes[dtype]})"
-  return render_const(args)
+  if len(local_size) > 0: return f"tl.full(({','.join([str(next_power_of_2(x)) for x in local_size])},),{render_const(args,dtype)}, dtype={triton_dtypes[dtype]})"
+  return render_const(args,dtype)
 
 def uops_to_triton(function_name:str, uops:List[UOp]):
   local_size: List[int] = []
@@ -59,18 +59,18 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
 
   def kk(s): kernel.append("  "*depth+s)
   code_for_op: Final[Dict[Op, Callable]] = {
-    UnaryOps.EXP2: lambda x,: f"tl.math.exp2({x})",
-    UnaryOps.LOG2: lambda x,: f"tl.math.log2({x})",
-    UnaryOps.SIN: lambda x,: f"tl.sin({x})",
-    UnaryOps.SQRT: lambda x,: f"tl.sqrt({x})",
-    UnaryOps.NEG: lambda x,: f"-{x}",
-    BinaryOps.ADD: lambda x,y,: f"({x}+{y})", BinaryOps.SUB: lambda x,y,: f"({x}-{y})",
-    BinaryOps.MUL: lambda x,y,: f"({x}*{y})", BinaryOps.DIV: lambda x,y,: f"({x}/{y})" if y != '0.0' else f"{x}*tl.where({x}==0.0, float('nan'), float('inf'))",
-    BinaryOps.MAX: lambda x,y,: f"tl.maximum({x},{y})",
-    BinaryOps.CMPLT: lambda x,y,: f"({x}<{y})",
-    BinaryOps.MOD: lambda x,y,: f"tl.abs({x})%tl.abs({y})*tl.where({x}<0,-1,1)",
-    TernaryOps.MULACC: lambda x,y,z,: f"(({x}*{y})+{z})",
-    TernaryOps.WHERE: lambda x,y,z,: f"tl.where({x},{y},{z})",
+    UnaryOps.EXP2: lambda x,dtype,: f"tl.math.exp2({x})",
+    UnaryOps.LOG2: lambda x,dtype,: f"tl.math.log2({x})",
+    UnaryOps.SIN: lambda x,dtype: f"tl.sin({x})",
+    UnaryOps.SQRT: lambda x,dtype: f"tl.sqrt({x})",
+    UnaryOps.NEG: lambda x,dtype: f"-{x}" if dtype != dtypes.bool else f"tl.where({x}, 0, 1)",
+    BinaryOps.ADD: lambda x,y,dtype: f"({x}+{y})", BinaryOps.SUB: lambda x,y,: f"({x}-{y})",
+    BinaryOps.MUL: lambda x,y,dtype: f"({x}*{y})", BinaryOps.DIV: lambda x,y,: f"({x}/{y})" if y != '0.0' else f"{x}*tl.where({x}==0.0, float('nan'), float('inf'))",
+    BinaryOps.MAX: lambda x,y,dtype: f"tl.maximum({x},{y})",
+    BinaryOps.CMPLT: lambda x,y,dtype: f"({x}<{y})",
+    BinaryOps.MOD: lambda x,y,dtype: f"tl.abs({x})%tl.abs({y})*tl.where({x}<0,-1,1)",
+    TernaryOps.MULACC: lambda x,y,z,dtype: f"(({x}*{y})+{z})",
+    TernaryOps.WHERE: lambda x,y,z,dtype: f"tl.where({x},{y},{z})",
   }
   def int_div(x,y): return f"({x}//{y})" if y != '0' else f"{x}*tl.where({x}==0, float('nan'), float('inf'))"
   for u in uops:
@@ -108,7 +108,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
         kk(f"{args[1]} = tl.arange({0}, {next_power_of_2(args[2])})")
         local_size.append(args[2])
       r[u] = args[1]
-    elif uop == UOps.CAST and dtype is not None: r[u] = render_cast(r[vin[0]], dtype)
+    elif uop == UOps.CAST and dtype is not None: r[u] = render_cast(r[vin[0]], dtype, isinstance(args, tuple) and args[1])
     else: raise NotImplementedError(f"unimplemented: {uop}")
 
   prg = f"import triton\nimport triton.language as tl\ntl.core.TRITON_MAX_TENSOR_NUMEL = float('inf')\n@triton.jit\ndef {function_name}("+','.join(f"{buf[0]}" for buf in bufs)+"):\n"

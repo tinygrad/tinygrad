@@ -1,9 +1,12 @@
 #!/usr/bin/env python
-import unittest
+import unittest, functools
 import numpy as np
-from tinygrad import Device
+
+from test.helpers import assert_jit_cache_len
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
+from tinygrad.device import Device
+from tinygrad.helpers import CI
 
 class TestJit(unittest.TestCase):
   def test_simple_jit(self):
@@ -14,7 +17,7 @@ class TestJit(unittest.TestCase):
       b = Tensor.randn(10, 10)
       c = add(a, b)
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
-    assert len(add.jit_cache) == 1
+    assert_jit_cache_len(add, 1)
 
   def test_jit_multiple_outputs(self):
     @TinyJit
@@ -26,7 +29,7 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
       np.testing.assert_allclose(d.numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
       np.testing.assert_allclose(e.numpy(), a.numpy()*b.numpy(), atol=1e-4, rtol=1e-5)
-    assert len(f.jit_cache) == 3 or (len(f.jit_cache) == 1 and getattr(Device[Device.DEFAULT], "graph", None))
+    assert_jit_cache_len(f, 3)
 
   def test_nothing_jitted(self):
     @TinyJit
@@ -35,7 +38,7 @@ class TestJit(unittest.TestCase):
       for _ in range(5):
         a = Tensor.randn(10, 10)
         b = Tensor.randn(10, 10)
-        c = add(a, b)
+        add(a, b)
 
   def test_jit_shape_mismatch(self):
     @TinyJit
@@ -43,7 +46,7 @@ class TestJit(unittest.TestCase):
     for _ in range(5):
       a = Tensor.randn(10, 10)
       b = Tensor.randn(10, 10)
-      c = add(a, b)
+      add(a, b)
     bad = Tensor.randn(20, 20)
     with self.assertRaises(AssertionError):
       add(a, bad)
@@ -73,7 +76,7 @@ class TestJit(unittest.TestCase):
       b = Tensor.randn(10, 10)
       c = add_kwargs(first=a, second=b)
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
-    assert len(add_kwargs.jit_cache) == 1
+    assert_jit_cache_len(add_kwargs, 1)
 
   def test_array_jit(self):
     @TinyJit
@@ -88,7 +91,7 @@ class TestJit(unittest.TestCase):
         np.testing.assert_allclose(np.any(np.not_equal(c.numpy(),a.numpy()+b.numpy())), True, atol=1e-4, rtol=1e-5)
       else:
         np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
-    assert len(add_array.jit_cache) == 1
+    assert_jit_cache_len(add_array, 1)
 
   def test_method_jit(self):
     class Fun:
@@ -102,7 +105,7 @@ class TestJit(unittest.TestCase):
       b = Tensor.randn(10, 10)
       c = fun(b)
       np.testing.assert_allclose(c.numpy(), fun.a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
-    assert len(fun.__call__.func.__self__.jit_cache) == 1
+    assert_jit_cache_len(fun.__call__.func.__self__, 1)
 
   def test_jit_size1_input(self):
     @TinyJit
@@ -110,7 +113,7 @@ class TestJit(unittest.TestCase):
     a = Tensor([1, 2, 3])
     for i in range(5):
       np.testing.assert_allclose(f(a, Tensor([i])).numpy(), (a+i).numpy(), atol=1e-4, rtol=1e-5)
-    assert len(f.jit_cache) == 1
+    assert_jit_cache_len(f, 1)
 
   def test_jit_output_non_tensor_fail(self):
     @TinyJit
@@ -128,15 +131,14 @@ class TestJit(unittest.TestCase):
     np.testing.assert_allclose(output1, expect1, atol=1e-4, rtol=1e-5)
     # the jit only works with Tensor outputs
     assert output2 != expect2
-    assert len(f.jit_cache) == 1
+    assert_jit_cache_len(f, 1)
 
-  @unittest.skip("random isn't working in JIT")
   def test_jit_random_regen(self):
     def f(a, b):
       rn = Tensor.randn(*a.shape)
       return ((a+b)*rn).realize()
-    a = Tensor.randn(10, 10)
-    b = Tensor.randn(10, 10)
+    a = Tensor.randn(10, 10).realize()  # realize these before resetting the random seed
+    b = Tensor.randn(10, 10).realize()
 
     Tensor._seed = 1234
     jf = TinyJit(f)
@@ -237,8 +239,64 @@ class TestJit(unittest.TestCase):
     # but the bad_jitted doesn't!
     np.testing.assert_equal([1], cache.bad_jitted(zero).numpy())
 
-    assert len(cache.good_jitted.jit_cache) == 1
-    assert len(cache.bad_jitted.jit_cache) == 1
+    assert_jit_cache_len(cache.good_jitted, 1)
+    assert_jit_cache_len(cache.bad_jitted, 1)
+
+  def test_jit_buffer_behavior(self):
+    @TinyJit
+    def foo(x) -> Tensor: return x.sum().realize()
+
+    result_1 = foo(Tensor([1] * 2))
+    result_2 = foo(Tensor([2] * 2))
+    result_3 = foo(Tensor([3] * 2))
+
+    # expect the buffer to share underlying buffer
+    np.testing.assert_allclose(result_1.numpy(), [2], atol=1e-4, rtol=1e-5)
+    np.testing.assert_allclose(result_2.numpy(), [6], atol=1e-4, rtol=1e-5)
+    np.testing.assert_allclose(result_3.numpy(), [6], atol=1e-4, rtol=1e-5)
+
+  @unittest.skipIf(CI and Device.DEFAULT=="METAL", "no ICB in CI, creation of graph fails")
+  def test_jit_batch_split(self):
+    if Device[Device.DEFAULT].graph is None: raise unittest.SkipTest("only test graphs")
+
+    # Create long jit with 83 kernels.
+    def f(a, b, c, d, e):
+      for _ in range(80):
+        a = (a+b).realize()
+      y = (a*c).realize()
+      z = (y*d).realize()
+      w = (z*e)
+      return w.realize()
+
+    a = Tensor.randn(10, 10).realize()
+    b = Tensor.randn(10, 10).realize()
+    c = Tensor.randn(10, 10).realize()
+    d = Tensor.randn(10, 10).realize()
+    e = Tensor.randn(10, 10).realize()
+
+    jf = TinyJit(f)
+    prev = None
+    for _ in range(5):
+      o = jf(a, b, c, d, e).numpy()
+      if prev is not None: np.testing.assert_allclose(o, prev, atol=1e-4, rtol=1e-5)
+      prev = o
+
+    graph_t = Device[Device.DEFAULT].graph.func if isinstance(Device[Device.DEFAULT].graph, functools.partial) else Device[Device.DEFAULT].graph
+    # Checking that 2 graphs are inited.
+    assert isinstance(jf.jit_cache[0].prg, graph_t)
+    assert isinstance(jf.jit_cache[1].prg, graph_t)
+
+  def test_jit_const_inputs(self):
+    @TinyJit
+    def f(x,y): return (x+y).realize()
+    for _ in range(5):
+      np.testing.assert_equal(f(Tensor.ones(3), Tensor.zeros(3)).numpy(), np.ones(3))
+
+    @TinyJit
+    def g(x,y,z): return (x+y+z).realize()
+    for i in range(5):
+      np.testing.assert_equal(g(Tensor([i]*3), Tensor.ones(3), Tensor.zeros(3)).numpy(), np.array([i+1]*3))
+
 
 if __name__ == '__main__':
   unittest.main()

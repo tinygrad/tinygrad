@@ -1,4 +1,4 @@
-tab-size = 2
+indent-width = 2
 
 select = [
   "F",
@@ -12,13 +12,18 @@ select = [
   "E272",
   # "E303",
   # "E304",
+  "E501",
   # "E502",
   "E702",
   "E703",
   "E731",
   "W191",
+  "W291",
+  "W293",
   "UP039",  # unnecessary-class-parentheses
 ]
+
+line-length = 150
 
 exclude = [
   "disassemblers/",
@@ -28,14 +33,3 @@ exclude = [
   "openpilot/",
 ]
 
-[per-file-ignores]
-"test/*" = [
-  "F401",
-  "F403",
-  "F405",
-  "F541",
-  "E722",
-  "E731",
-  "F821",
-  "F841",
-]

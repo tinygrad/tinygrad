@@ -238,7 +238,7 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.empty(10)
     c = Tensor.empty(10)
     keep_me = a+b
-    e = keep_me.sum() # give keep_me a child (NOTE: BinaryOps won't be a child since it will instant fuse)
+    e = keep_me.sum() # noqa: F841 give keep_me a child (NOTE: BinaryOps won't be a child since it will instant fuse)
     d = keep_me+c
     check_schedule(d, 2)
     check_schedule(keep_me, 0, [d])
@@ -327,10 +327,22 @@ class TestSchedule(unittest.TestCase):
     out = x.to('cpu')
     check_schedule(out, 0, filter_loadops=False)
 
-  def test_pow_const_tensor(self):
+  def test_pow_const_tensor_simplified(self):
     x = Tensor([1,2,3,4])
+    # NOTE: this does not test ** Tensor(2) is simpler in ast than ** Tensor(2.5)
     out = x ** Tensor(2)
     check_schedule(out, 1)
+
+  def test_pow_const_tensor_to_zero(self):
+    x = Tensor([1,2,3,4])
+    out = x ** Tensor(0)
+    # NOTE: this is ConstBuffer 0 + ConstBuffer 1
+    check_schedule(out, 1)
+
+  def test_zero_size(self):
+    x = Tensor.rand(2, 3, 0)
+    out = x + 1
+    check_schedule(out, 0, filter_loadops=False)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

@@ -4,6 +4,8 @@ import os
 import torch
 if "OPT" not in os.environ:
   os.environ["OPT"] = "2"
+else:
+  assert int(os.environ["OPT"]) >= 2, "test is broken with OPT=0 or OPT=1"
 
 import gc
 import numpy as np
@@ -18,7 +20,8 @@ from tinygrad.lazy import PUSH_PERMUTES
 from tinygrad.jit import CacheCollector
 
 class CLCache:
-  def __init__(self, allowed=None, strict=False, preclear=True, var_vals=None): self.allowed, self.strict, self.preclear, self.var_vals = allowed, strict, preclear, var_vals if var_vals is not None else {}
+  def __init__(self, allowed=None, strict=False, preclear=True, var_vals=None):
+    self.allowed, self.strict, self.preclear, self.var_vals = allowed, strict, preclear, var_vals if var_vals is not None else {}
   def __enter__(self):
     if self.preclear:
       gc.collect()
@@ -42,7 +45,10 @@ from tinygrad.nn.state import get_parameters
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestInferenceMinKernels(unittest.TestCase):
   def setUp(self):
+    self.training_old = Tensor.training
     Tensor.training = False
+  def tearDown(self):
+    Tensor.training = self.training_old
 
   @unittest.skipIf(not PUSH_PERMUTES, "this test requires PUSH_PERMUTES")
   def test_convnext(self):
@@ -85,12 +91,12 @@ class TestInferenceMinKernels(unittest.TestCase):
 
   def test_llama(self):
     from examples.llama import Transformer
-    from tinygrad.shape.symbolic import Variable
     args_tiny = {"dim": 512, "hidden_dim": 1024, "n_heads": 8, "n_layers": 4, "norm_eps": 1e-05, "vocab_size": 1000}
     model = Transformer(**args_tiny)
     for p in get_parameters(model): p.assign(np.zeros(p.shape, dtype=p.dtype.np))
+    inp = Tensor([[1,2,3,4]])
     with CLCache(100):
-      model(Tensor([[1,2,3,4]]), 0).realize()
+      model(inp, 0).realize()
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOptBinOp(unittest.TestCase):
@@ -107,7 +113,9 @@ class TestOptBinOp(unittest.TestCase):
 
   def test_no_binop_rerun(self): return self._test_no_binop_rerun(lambda a,b: a*b, lambda a,b: (a*b).reshape(16, 16, 1))
   def test_no_binop_rerun_alt(self): return self._test_no_binop_rerun(lambda a,b: (a*b).reshape(16, 16, 1), lambda a,b: a*b)
-  def test_no_binop_rerun_reduce_broadcast(self): return self._test_no_binop_rerun(lambda a,b: a.sum()+b, lambda a,b: a.sum().reshape(1,1)+b, allowed=2)
+  def test_no_binop_rerun_reduce_broadcast(self):
+    return self._test_no_binop_rerun(lambda a,b: a.sum()+b, lambda a,b: a.sum().reshape(1,1)+b, allowed=2)
+
   @unittest.skip("this test started failing with the new change, based movementop issue")
   def test_no_binop_rerun_transposed(self): return self._test_no_binop_rerun(lambda a,b: (a.T*b.T).T, lambda a,b: a*b)
   def test_no_binop_rerun_mid_reshape(self): return self._test_no_binop_rerun(lambda a,b: (a*b).reshape(256)+a.reshape(256))
@@ -148,19 +156,19 @@ class TestOptWChild(unittest.TestCase):
     with CLCache():
       c = (a*b).sum()
       d = c+1
-      e = c+2
+      e = c+2 # noqa: F841
       d.realize()
       assert len(CacheCollector.cache) == 2, "don't fuse if you have children"
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOpt(unittest.TestCase):
   def test_muladd(self):
-    a,b,c = [Tensor.ones(2,2) for _ in range(3)]
-    with CLCache():
+    a,b,c = [Tensor.randn(2,2).realize() for _ in range(3)]
+    na,nb,nc = a.numpy(),b.numpy(),c.numpy()
+    with CLCache(allowed=1):
       d = a * b + c
       d.realize()
-      assert len(CacheCollector.cache) == 1, "optimizer didn't fold muladd"
-    np.testing.assert_allclose(d.numpy(), np.ones((2,2))*2, rtol=1e-5)
+    np.testing.assert_allclose(d.numpy(), na*nb+nc, rtol=1e-5, atol=1e-7)
 
   def test_fold_reduce_elementwise(self):
     img = Tensor.ones(32)
@@ -169,7 +177,7 @@ class TestOpt(unittest.TestCase):
       ret = img.sum() + addme
       ret.realize()
       assert len(CacheCollector.cache) == 1, "optimizer didn't fold reduce/elementwise"
-    assert ret.numpy()[0] == 33
+    assert ret.item() == 33
 
   def test_fold_batchnorm(self):
     with Tensor.train():
@@ -179,7 +187,6 @@ class TestOpt(unittest.TestCase):
         img_bn = bn(img).realize()
         print(img_bn)
         assert len(CacheCollector.cache) == 3, f"optimizer didn't fold batchnorm, got {len(CacheCollector.cache)}"
-    # Tensor.training = False
 
   def test_fold_conv_sgd(self):
     with Tensor.train():
@@ -194,7 +201,6 @@ class TestOpt(unittest.TestCase):
         # with pushing_permutes it can be 3
         # TODO: broken with optim fixes
         assert len(CacheCollector.cache) in [4,5,6], f"optimizer didn't fold conv-backward SGD, got {len(CacheCollector.cache)}"
-    # Tensor.training = False
 
   def test_fold_2convs_sgd(self):
     with Tensor.train():
@@ -206,7 +212,6 @@ class TestOpt(unittest.TestCase):
         opt.zero_grad()
         c2(c1(img).relu()).relu().sum().backward()
         opt.step()
-    # Tensor.training = False
 
   def test_fold_4convs_sgd(self):
     with Tensor.train():
@@ -220,7 +225,6 @@ class TestOpt(unittest.TestCase):
         opt.zero_grad()
         c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
         opt.step()
-    # Tensor.training = False
 
   def test_fold_conv_batchnorm_sgd(self):
     with Tensor.train():
@@ -228,21 +232,20 @@ class TestOpt(unittest.TestCase):
       c1 = nn.Conv2d(3,32,3)
       bn = nn.BatchNorm2d(32, track_running_stats=False)
       opt = optim.SGD(get_parameters([c1, bn]))
-      with CLCache(allowed=18): # this is too high
+      with CLCache(allowed=17): # this is too high
         img_bn = bn(c1(img)).elu().sum()
         opt.zero_grad()
         img_bn.backward()
         opt.step()
-    # Tensor.training = False
 
   def test_fold_conv_batchnorm_notrain(self):
     img = Tensor.ones(1,3,8,8)
     c1 = nn.Conv2d(3,32,3)
     bn = nn.BatchNorm2d(32, track_running_stats=False)
     # precache the bn
-    img_conv = bn(c1(img)).relu().realize()
+    bn(c1(img)).relu().realize()
     with CLCache():
-      img_conv = bn(c1(img)).relu().realize()
+      bn(c1(img)).relu().realize()
       assert len(CacheCollector.cache) == 1, f"optimizer didn't fold conv-batchnorm at test time, got {len(CacheCollector.cache)}"
 
   def test_fold_conv_batchnorm(self):
@@ -284,7 +287,7 @@ class TestOpt(unittest.TestCase):
 
   def test_permute_was_pushed(self):
     a = Tensor.randn(16, 16, 16)
-    with CLCache():
+    with CLCache(2):
       c = a.sum(2)
       d = c.permute(1,0).contiguous()
       d.realize()
@@ -294,7 +297,7 @@ class TestOpt(unittest.TestCase):
 
   def test_permute_was_pushed_through_contract_reshape(self):
     a = Tensor.randn(4, 4, 4, 4, 4)
-    with CLCache():
+    with CLCache(2):
       c = a.sum(-1)
       d = c.reshape(16,16).permute(1,0).contiguous()
       d.realize()
@@ -304,7 +307,7 @@ class TestOpt(unittest.TestCase):
 
   def test_permute_was_pushed_through_contractw1s_reshape(self):
     a = Tensor.randn(4, 4, 4, 4, 4)
-    with CLCache():
+    with CLCache(2):
       c = a.sum(-1)
       d = c.reshape(16,1,16).permute(2,1,0).contiguous()
       d.realize()
@@ -352,20 +355,9 @@ class TestOpt(unittest.TestCase):
   def test_fold_with_contiguous(self):
     a = Tensor.randn(16, 16, 16)
     b = Tensor.randn(16, 16)
-    with CLCache():
+    with CLCache(1):
       c = (a.sum(2).contiguous() + b).contiguous()
       c.realize()
-      cache_len = len(CacheCollector.cache)
-    assert cache_len == 1, "contiguous wasn't folded"
-
-  def _test_fold_expand_reduce_helper(self, n, m, axis, allowed):
-    b = torch.ones(n, m).sum(axis).reshape(n, 1).expand(n, m).sum(axis)
-    with CLCache(allowed=allowed):
-      a = Tensor.ones(n, m).sum(axis).reshape(n, 1).expand(n, m).sum(axis)
-      a.realize()
-      cache_len = len(CacheCollector.cache)
-    np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
-    return cache_len
 
   def test_expand_reduce_is_folded_on_same_axis(self):
     for axis in [0, 1]:
@@ -374,20 +366,16 @@ class TestOpt(unittest.TestCase):
         with CLCache(allowed=2):
           a = Tensor.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
           a.realize()
-          cache_len = len(CacheCollector.cache)
         np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
-        return cache_len
 
   def test_expand_reduce_is_not_folded_on_different_axes(self):
     axis1, axis2 = 0, 1
     for n in [4, 8, 16]:
       b = torch.ones(n, n).sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
-      with CLCache(allowed=3):
+      with CLCache(allowed=2):
         a = Tensor.ones(n, n).sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
         a.realize()
-        cache_len = len(CacheCollector.cache)
       np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
-      return cache_len
 
 if __name__ == '__main__':
   unittest.main()

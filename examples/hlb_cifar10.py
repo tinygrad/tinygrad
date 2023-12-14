@@ -5,6 +5,7 @@ from tinygrad.helpers import getenv, dtypes
 if __name__ == "__main__":
   if getenv("DIST"):
     dist.preinit()
+    from extra.dist import collectives
 
 # tinygrad implementation of https://github.com/tysam-code/hlb-CIFAR10/blob/main/main.py
 # https://myrtle.ai/learn/how-to-train-your-resnet-8-bag-of-tricks/
@@ -22,7 +23,6 @@ from tinygrad.helpers import GlobalCounters
 from tinygrad.shape.symbolic import Node
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
-from extra.dist import collectives
 
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 
@@ -430,8 +430,8 @@ if __name__ == "__main__":
       from tinygrad.runtime.ops_hip import HIP
       devices = [f"hip:{i}" for i in range(HIP.device_count)]
     else:
-      from tinygrad.runtime.ops_gpu import CL
-      devices = [f"gpu:{i}" for i in range(len(CL.devices))]
+      from tinygrad.runtime.ops_gpu import CLDevice
+      devices = [f"gpu:{i}" for i in range(len(CLDevice.device_ids))]
     world_size = len(devices)
 
     # ensure that the batch size is divisible by the number of devices
