@@ -7,7 +7,7 @@ from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
 
-from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int, round_up, merge_dicts
+from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int, merge_dicts
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
@@ -524,14 +524,6 @@ class Tensor:
     return self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1
   def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
 
-  def associative_scan(self, fn, axis=0, reverse=False):
-    x = self.transpose(axis,0).flip(0) if reverse else self.transpose(axis,0)
-    assert isinstance(x.shape[0], int), "symbolic shape not supported" # needed to silence mypy
-    ret = x[:1].cat(fn(x[:-1],x[1:]))
-    for i in range(1, int(math.log(x.shape[0], 2)) + 1):
-      ret = ret[:2**i].cat(fn(ret[2**i:],ret[:-2**i])).realize()
-    return ret.transpose(axis,0)
-
   @staticmethod
   def einsum(formula:str, *raw_xs) -> Tensor:
     xs:Tuple[Tensor] = argfix(*raw_xs)
@@ -659,19 +651,15 @@ class Tensor:
     w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
     return (x*w).sum(-1)
 
-  def _cumsum(self, axis:int=0, _first_zero=False) -> Tensor:
-    return self.transpose(axis,-1).pad2d((self.shape[axis]-int(not _first_zero),0))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
-  def cumsum(self, axis:int=0) -> Tensor:
-    # TODO: someday the optimizer will find this on it's own
-    # for now this is a two stage cumsum
-    SPLIT = 256
-    if self.shape[axis] <= SPLIT*2: return self._cumsum(axis)
-    ret = self.transpose(axis,-1).pad2d((round_up(self.shape[axis], SPLIT)-self.shape[axis], 0))
-    ret = ret.reshape(*ret.shape[0:-1], ret.shape[-1]//SPLIT, SPLIT)._cumsum(-1)
-    base_add = ret[..., -1]._cumsum(-1, _first_zero=True)[..., :-1]
-    base_add = base_add.unsqueeze(-1).expand(*base_add.shape, ret.shape[-1])
-    def fix(x:Tensor): return x.reshape(*ret.shape[0:-2], ret.shape[-2] * ret.shape[-1])[..., -self.shape[axis]:].transpose(axis,-1)
-    return fix(ret) + fix(base_add)
+  def associative_scan(self, fn, axis=0, reverse=False):
+    x = self.transpose(axis,0).flip(0) if reverse else self.transpose(axis,0)
+    assert isinstance(x.shape[0], int), "symbolic shape not supported" # needed to silence mypy
+    ret = x[:1].cat(fn(x[:-1],x[1:]))
+    for i in range(1, int(math.log(x.shape[0], 2)) + 1):
+      ret = ret[:2**i].cat(fn(ret[2**i:],ret[:-2**i])).realize()
+    return ret.transpose(axis,0)
+
+  def cumsum(self, axis:int=0) -> Tensor: return self.associative_scan(lambda a,b:a+b, axis=axis)
 
   @staticmethod
   def _tri(r:sint, c:sint, k:int=0, **kwargs) -> Tensor:
