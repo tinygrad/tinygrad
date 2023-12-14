@@ -14,12 +14,16 @@ def size {n : Nat} (v : View n) : Nat :=
 
 
 def proj {n : Nat} (v : View n) (i : Fin n)  (j : Nat) : Nat :=
-  (j - v.offset) % (List.get v.stride.val (Fin.mk i sorry))
+  let p : i.val < List.length v.stride.val := by rw [v.stride.property]; exact i.isLt
+  (j - v.offset) % (List.get v.stride.val (Fin.mk i p))
 
 
 def valid {n : Nat} (v : View n) (i : Fin n) (j : Nat) : Prop :=
-  (proj v i j) >= List.get v.min.val (Fin.mk i sorry)
-  ∧ (proj v i j) <= List.get v.max.val (Fin.mk i sorry)
+  let p : i.val < List.length v.min.val := by rw [v.min.property]; exact i.isLt
+  let q : i.val < List.length v.max.val := by rw [v.max.property]; exact i.isLt
+
+  (proj v i j) >= List.get v.min.val (Fin.mk i p)
+  ∧ (proj v i j) <= List.get v.max.val (Fin.mk i p)
 
 
 def idxs {n : Nat} (v : View n) : Type :=
@@ -46,6 +50,6 @@ def wrap (x : Nat) : Tuple Nat 1 := Subtype.mk [x] rfl
 def v2 : View 1 :=
   View.mk 0 (wrap 4) (wrap 0) (wrap 3) (wrap 1)
 
-theorem thm1 (f : idxs v1 → idxs v2) (g : idxs v2 → idxs v1) :
+theorem cx (f : idxs v1 → idxs v2) (g : idxs v2 → idxs v1) :
   ¬ reshapeable v1 v2 f g :=
   sorry
