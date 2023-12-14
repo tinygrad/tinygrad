@@ -14,7 +14,7 @@ class CStyleLanguage(NamedTuple):
   smem_align: str = ""
   smem_prefix: str = ""
   smem_prefix_for_cast: bool = True
-  arg_int_prefix: str = ""
+  arg_int_prefix: str = "const int"
   barrier: str = ""
   xid: List[str] = []
   gid: List[str] = []
@@ -216,7 +216,6 @@ class OpenCLLanguage(CStyleLanguage):
   buffer_prefix = "__global "
   smem_align = "__attribute__ ((aligned (16))) "
   smem_prefix = "__local "
-  arg_int_prefix = "const int"
   half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable"
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
   float4 = "(float4)"
@@ -250,7 +249,6 @@ class CUDALanguage(CStyleLanguage):
   kernel_prefix = "#define INFINITY (__int_as_float(0x7f800000))\n#define NAN (__int_as_float(0x7fffffff))\nextern \"C\" __global__ "
   smem_prefix = "__shared__ "
   smem_prefix_for_cast = False
-  arg_int_prefix = "const int"
   barrier = "__syncthreads();"
   float4 = "make_float4"
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
@@ -284,7 +282,6 @@ class HIPLanguage(CStyleLanguage):
   float4 = "make_float4"
   uses_vload=True
   uses_ptr_arithmetic=True
-  arg_int_prefix = "const int"
   half_prekernel = "#include <hip/hip_fp16.h>\n" + """
 typedef union { struct { half x, y, z, w; } __attribute__((aligned(8))); half data[4]; } half4;
 __device__ half4 make_half4(half x, half y, half z, half w) { return {x, y, z, w}; }
