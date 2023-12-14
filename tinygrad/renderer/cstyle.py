@@ -3,7 +3,7 @@ import math, functools
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import ImageDType, dtypes, prod, DType, strip_parens, getenv
+from tinygrad.helpers import ImageDType, dtypes, prod, DType, PtrDType, strip_parens, getenv
 
 class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"
@@ -14,7 +14,7 @@ class CStyleLanguage(NamedTuple):
   smem_align: str = ""
   smem_prefix: str = ""
   smem_prefix_for_cast: bool = True
-  arg_int_prefix: str = ""
+  arg_int_prefix: str = "const int"
   barrier: str = ""
   xid: List[str] = []
   gid: List[str] = []
@@ -83,8 +83,8 @@ class CStyleLanguage(NamedTuple):
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""  # noqa: E501
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
-                self.arg_int_prefix if dtype == dtypes._arg_int32 else
-                ("const " if i > 0 else "")+self.buffer_prefix+dtype.name+"*"+self.buffer_suffix) for i,(name,dtype) in enumerate(bufs)]
+                ("const " if i > 0 else "")+self.buffer_prefix+dtype.name+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
+                self.arg_int_prefix if dtype == dtypes.int else None) for i,(name,dtype) in enumerate(bufs)]
     prg = ''.join([f"{self.kernel_prefix}void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
@@ -216,7 +216,6 @@ class OpenCLLanguage(CStyleLanguage):
   buffer_prefix = "__global "
   smem_align = "__attribute__ ((aligned (16))) "
   smem_prefix = "__local "
-  arg_int_prefix = "const int"
   half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable"
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
   float4 = "(float4)"
@@ -250,7 +249,6 @@ class CUDALanguage(CStyleLanguage):
   kernel_prefix = "#define INFINITY (__int_as_float(0x7f800000))\n#define NAN (__int_as_float(0x7fffffff))\nextern \"C\" __global__ "
   smem_prefix = "__shared__ "
   smem_prefix_for_cast = False
-  arg_int_prefix = "const int"
   barrier = "__syncthreads();"
   float4 = "make_float4"
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
@@ -284,7 +282,6 @@ class HIPLanguage(CStyleLanguage):
   float4 = "make_float4"
   uses_vload=True
   uses_ptr_arithmetic=True
-  arg_int_prefix = "const int"
   half_prekernel = "#include <hip/hip_fp16.h>\n" + """
 typedef union { struct { half x, y, z, w; } __attribute__((aligned(8))); half data[4]; } half4;
 __device__ half4 make_half4(half x, half y, half z, half w) { return {x, y, z, w}; }
@@ -354,7 +351,7 @@ class WGSLLanguage(CStyleLanguage):
     local_size = local_size[::-1] if local_size else [1]
     bind_it = iter(range(len(bufs)))
     prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
-    prg += "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) {'var<uniform>' if dtype == dtypes._arg_int32 else 'var<storage,read_write>'} {name}: {'i32' if dtype == dtypes._arg_int32 else f'array<{self.type_map[dtype]}>'};" for name,dtype in bufs])  # noqa: E501
+    prg += "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) {'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'} {name}: {f'array<{self.type_map[dtype]}>' if isinstance(dtype, PtrDType) else 'i32'};" for name,dtype in bufs])  # noqa: E501
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"  # noqa: E501
     return prg
 

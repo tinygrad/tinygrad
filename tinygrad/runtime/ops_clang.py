@@ -24,5 +24,5 @@ class ClangProgram:
 
   def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
 
-renderer = functools.partial(uops_to_cstyle, CStyleLanguage(buffer_suffix=" restrict", arg_int_prefix="const int"))
+renderer = functools.partial(uops_to_cstyle, CStyleLanguage(buffer_suffix=" restrict"))
 ClangDevice = Compiled(MallocAllocator, LinearizerOptions(supports_float4=False, has_local=False), renderer, compile_clang, ClangProgram)
