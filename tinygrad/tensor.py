@@ -364,7 +364,7 @@ class Tensor:
     # add strides by pad -> reshape -> shrink
     if any(abs(s) != 1 for s in strides):
       strides = tuple(abs(s) for s in strides)
-      ret = ret.pad(tuple((0, s-(sh % s) if sh % s != 0 else 0) for s, sh in zip(strides, ret.shape)))
+      ret = ret.pad(tuple((0, round_up(sh,s) - sh) for s, sh in zip(strides, ret.shape)))
       ret = ret.reshape(flatten([sh // s, s] for s, sh in zip(strides, ret.shape)))
       ret = ret.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in ret.shape[::2]))).reshape(ret.shape[::2])
 
