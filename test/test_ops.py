@@ -577,6 +577,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x), lambda x: Tensor.std(x))
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=None, correction=0), lambda x: Tensor.std(x, correction=0))
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=None, correction=5), lambda x: Tensor.std(x, correction=5))
+
+  def test_mulacc_downcast(self):
+    helper_test_op([(1024, 1024), (1024, 1024)], lambda x,w: (x*w).to(torch.half).sum(-1).to(torch.float), lambda x,w: (x*w).cast(dtypes.half).sum(-1).cast(dtypes.float), atol=1e-2, rtol=1e-1)
+
   def test_std_axis(self):
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=0), lambda x: Tensor.std(x, axis=0))
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=2), lambda x: Tensor.std(x, axis=2))
