@@ -73,6 +73,7 @@ class Buffer:
     # TODO: mem_used for all devices
     if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.size * self.dtype.itemsize
   def __del__(self):
+    if not hasattr(self, '_buf'): return # happens when __init__ has raised exception
     if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.size * self.dtype.itemsize
     if isinstance(self.dtype, ImageDType): self.allocator.free(self._buf, self.dtype)
     else: self.allocator.free(self._buf, self.size * self.dtype.itemsize)
