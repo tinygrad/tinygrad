@@ -76,8 +76,11 @@ def _replace_bufferops(op:LazyOp) -> Tuple[LazyOp, List[LazyBuffer]]:
 
 def _fuse_mulacc(op) -> LazyOp:
   if op.op == ReduceOps.SUM:
-    mul_op = op.src[0].src[0] if op.src[0].op == UnaryOps.CAST and op.src[0].src[0].op == BinaryOps.MUL else op.src[0] if op.src[0].op == BinaryOps.MUL else None
-    if mul_op: op = LazyOp(ReduceOps.SUM, (LazyOp(TernaryOps.MULACC, mul_op.src, op.arg),), op.arg)
+    cast_op = op.src[0] if op.src[0].op == UnaryOps.CAST else None
+    mul_op = op.src[0].src[0] if cast_op and op.src[0].src[0].op == BinaryOps.MUL else op.src[0] if op.src[0].op == BinaryOps.MUL else None
+    if mul_op:
+      op = LazyOp(ReduceOps.SUM, (LazyOp(TernaryOps.MULACC, mul_op.src, op.arg),), op.arg)
+      if cast_op: op = LazyOp(UnaryOps.CAST, (op,), cast_op.arg)
   return op.map_buffers({x: _fuse_mulacc(x) for x in op.src})
 
 # **** lazy operations ****

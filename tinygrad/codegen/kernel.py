@@ -340,7 +340,7 @@ class Kernel:
         if has_cast and not(isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == UnaryOps.CAST and self.reduceop.src[0].arg[0] == tc.dtype_out): continue  # noqa: E501
         mul_op = self.reduceop.src[0].src[0] if has_cast else self.reduceop.src[0]
 
-        if not(isinstance(mul_op, LazyOp) and mul_op.op == BinaryOps.MUL): continue
+        if not(isinstance(mul_op, LazyOp) and mul_op.op == TernaryOps.MULACC): continue
         if not(isinstance(mul_op.src[0], LazyOp) and mul_op.src[0].op == BufferOps.LOAD and mul_op.src[0].arg.dtype == tc.dtype_in): continue
         if not(isinstance(mul_op.src[1], LazyOp) and mul_op.src[1].op == BufferOps.LOAD and mul_op.src[1].arg.dtype == tc.dtype_in): continue
         buf0, buf1 = self.bufs.index(cast(MemBuffer, mul_op.src[0].arg)), self.bufs.index(cast(MemBuffer, mul_op.src[1].arg))

@@ -1,3 +1,4 @@
+from typing import Any
 import unittest
 from hypothesis import assume, given, strategies as st
 from tinygrad.tensor import Tensor
@@ -30,33 +31,38 @@ class TestLazyOp(unittest.TestCase):
       # sanity check if caching works this should be way faster
       assert time.monotonic() -st < 0.5, f"{i}"
 
+class TestMULACC(unittest.TestCase):
+  floats = [dtype for dtype in DTYPES_DICT.values() if dtypes.is_float(dtype)]
+  @staticmethod
+  def _get_reduce(out): return [op for op in out.lazydata.schedule()[-1].ast.get_lazyops() if op.op == ReduceOps.SUM][0]
+  @staticmethod
+  def _get_cast(out): return [op for op in out.lazydata.schedule()[-1].ast.get_lazyops() if op.op == UnaryOps.CAST][0]
+
   def test_basic_mulacc_fusion(self):
     x = Tensor.rand(1024,1024)
     w = Tensor.rand(1024,1024)
     out = (x*w).sum(-1)
-    reduceop = [op for op in out.lazydata.schedule()[-1].ast.get_lazyops() if op.op == ReduceOps.SUM][0]
+    reduceop = self._get_reduce(out)
     assert reduceop.src[0].op == TernaryOps.MULACC and len(reduceop.src[0].src) == 2
 
-  def test_mulacc_fusion_mid_ops(self):
+  def test_mulacc_fusion_mid_ast(self):
     x = Tensor.rand(1024,1024)
     w = Tensor.rand(1024,1024)
-    x = x.add(4).mul(8)
-    out = (x*w).sum(-1).add(4).mul(8)
-    reduceop = [op for op in out.lazydata.schedule()[-1].ast.get_lazyops() if op.op == ReduceOps.SUM][0]
+    out = ((x.add(4).mul(2))*w).sum(-1).add(4).mul(2)
+    reduceop = self._get_reduce(out)
     assert reduceop.src[0].op == TernaryOps.MULACC and len(reduceop.src[0].src) == 2
 
-  floats = [dtype for dtype in DTYPES_DICT.values() if dtypes.is_float(dtype)]
-  @unittest.skip("TODO support CAST in MULACC fusion")
   @given(st.sampled_from(floats), st.sampled_from(floats))
   def test_mulacc_fusion_midcast(self, d1, d2):
     assume(d1 != d2)
     x = Tensor.rand(1024,1024, dtype=d1)
     w = Tensor.rand(1024,1024, dtype=d1)
     out = (x*w).cast(d2).sum(-1)
-    reduceop = [op for op in out.lazydata.schedule()[-1].ast.get_lazyops() if op.op == ReduceOps.SUM][0]
-    assert reduceop.op == ReduceOps.SUM
-    assert reduceop.src[0].op == UnaryOps.CAST and reduceop.src[0].arg[0] == d2
-    assert reduceop.src[0].src[0].op == TernaryOps.MULACC and len(reduceop.src[0].src[0].src) == 2
+    reduceop = self._get_reduce(out)
+    castop = self._get_cast(out)
+    assert reduceop.src[0].op == TernaryOps.MULACC
+    assert castop.src[0].op == ReduceOps.SUM
+    assert castop.arg[0] == d2
 
 if __name__ == '__main__':
   unittest.main()
