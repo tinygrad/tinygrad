@@ -524,8 +524,8 @@ class Tensor:
     return self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1
   def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
 
-  def associative_scan(self, fn, axis=0): # TODO: reverse=False
-    x = self.transpose(axis,0)
+  def associative_scan(self, fn, axis=0, reverse=False):
+    x = self.transpose(axis,0).flip(0) if reverse else self.transpose(axis,0)
     assert isinstance(x.shape[0], int), "symbolic shape not supported" # needed to silence mypy
     ret = x[:1].cat(fn(x[:-1],x[1:]))
     for i in range(1, int(math.log(x.shape[0], 2)) + 1):
