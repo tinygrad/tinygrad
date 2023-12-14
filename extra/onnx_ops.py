@@ -645,12 +645,16 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
   compute_seg_emb = (segment_embedding is not None and segment_ids is not None)
   vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
 
+  def embedding(x:Tensor, vocab_size, weight:Tensor)->Tensor:  # TODO from nn.Embedding. Could probably upstream this to Tensor
+    vocab_counter = Tensor.arange(vocab_size, dtype=x.dtype, requires_grad=False).reshape(1, 1, vocab_size).expand(*x.shape, vocab_size)
+    return (vocab_counter == x.unsqueeze(2).expand(*x.shape, vocab_size)) @ weight
+
   # bert embedding layer
   if epsilon is None: epsilon = 1e-12
   if position_ids is None: position_ids = Tensor.arange(seq_length, requires_grad=False).unsqueeze(0).expand(*input_shape)
-  wrd_embedding_res = Embedding(vocab_size, word_embedding)(input_ids)
-  pos_embedding_res = Embedding(max_position_embeddings, position_embedding)(position_ids)
-  seg_embedding_res = Embedding(type_vocab_size, segment_embedding)(segment_ids) if compute_seg_emb else None
+  wrd_embedding_res = embedding(input_ids, vocab_size, word_embedding)
+  pos_embedding_res = embedding(position_ids, max_position_embeddings, position_embedding)
+  seg_embedding_res = embedding(segment_ids, type_vocab_size, segment_embedding) if compute_seg_emb else None
 
   embedding_sum = wrd_embedding_res + pos_embedding_res + seg_embedding_res
   out = embedding_sum.layernorm(eps=epsilon) * gamma + beta
