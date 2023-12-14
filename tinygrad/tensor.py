@@ -529,7 +529,7 @@ class Tensor:
     assert isinstance(x.shape[0], int), "symbolic shape not supported" # needed to silence mypy
     ret = x[:1].cat(fn(x[:-1],x[1:]))
     for i in range(1, int(math.log(x.shape[0], 2)) + 1):
-      ret = ret[:2**i].cat(fn(ret[2**i:],ret[:-2**i]))
+      ret = ret[:2**i].cat(fn(ret[2**i:],ret[:-2**i])).realize()
     return ret.transpose(axis,0)
 
   @staticmethod
