@@ -6,7 +6,7 @@ from hypothesis import assume, given, strategies as st
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps
 from tinygrad.device import Compiled, Device, Buffer
-from tinygrad.ops import BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
+from tinygrad.ops import BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, ReduceOps, TernaryOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
@@ -129,23 +129,28 @@ class TestLinearizer(unittest.TestCase):
   def test_reduce_acc(self, d:DType, op):
     a = Tensor.rand(1024,1024, dtype=d)
     out = op(a)
-    uops = Linearizer([si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0].ast).linearize().uops
-    acc = [u for u in uops if u.uop == UOps.DEFINE_ACC][0]
+
+    ast = [si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0].ast
+    reduceop = [op for op in ast.get_lazyops() if op.op in ReduceOps][0]
+    uops = Linearizer(ast).linearize().uops
     phi = [u for u in uops if u.uop == UOps.PHI][0]
-    assert acc.dtype == d
-    assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype
+
+    assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype == get_lazyop_info(reduceop).dtype
 
   @given(st.sampled_from(float_dtypes), st.sampled_from(float_dtypes))
   def test_mulacc_midcast(self, d1:DType, d2:DType):
-    assume(d1.priority < d2.priority) # TODO downcast fails because get_lazyop_info doesn't correctly handle midcasted fused MULACC
     a = Tensor.rand(1024,1024, dtype=d1)
     b = Tensor.rand(1024,1024, dtype=d1)
     out = (a*b).cast(d2).sum(-1)
-    uops = Linearizer([si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0].ast).linearize().uops
+
+    ast = [si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0].ast
+    reduceop = [op for op in ast.get_lazyops() if op.op in ReduceOps][0]
+    uops = Linearizer(ast).linearize().uops
     mulacc = [u for u in uops if u.uop == UOps.ALU and u.arg == TernaryOps.MULACC][0]
     phi = [u for u in uops if u.uop == UOps.PHI][0]
-    assert mulacc.vin[0].dtype == mulacc.vin[1].dtype == d2
-    assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype == max(d1, d2)
+
+    assert mulacc.vin[0].dtype == mulacc.vin[1].dtype
+    assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype == get_lazyop_info(reduceop).dtype
 
   def test_simplify_uop(self):
     def helper_test_simplify(uop, dtype, vin, arg=None):
