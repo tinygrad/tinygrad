@@ -20,8 +20,8 @@ def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], ar
 
 def _test_single_value(vals, op, dtype):
   uops = []
-  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), ('data0', dtype))
-  buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), (f'data{i+1}', dtype)) for i in range(len(vals))]
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), 'data0')
+  buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), f'data{i+1}') for i in range(len(vals))]
   loads = (uop(uops, UOps.LOAD, dtype, [buf_loads[i], uop(uops, UOps.CONST, dtypes.int32, (), 0)]) for i in range(len(vals)))
   alu = uop(uops, UOps.ALU, dtype, loads, op)
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
@@ -33,7 +33,7 @@ def _test_single_value(vals, op, dtype):
 
 def _test_single_value_const(vals, op, dtype):
   uops = []
-  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), ('data0', dtype))
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), 'data0')
   loads = (uop(uops, UOps.CONST, dtype, [], a) for a in vals)
   alu = uop(uops, UOps.ALU, dtype, loads, op)
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
