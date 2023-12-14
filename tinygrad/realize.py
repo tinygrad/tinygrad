@@ -41,14 +41,23 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
 
 # *** schedule creation ***
 
-def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker, first=True) -> LazyOp:
+def _find_reducebuf(buf:LazyBuffer) -> Optional[LazyBuffer]:
+  if buf.base != buf: return _find_reducebuf(buf.base) if buf.st.contiguous and buf.st.size() == buf.base.st.size() else None
+  assert buf.base == buf
+  if buf.op in ReduceOps: return buf
+  if isinstance(buf.op, (UnaryOps, BinaryOps, TernaryOps)):
+    for x in buf.srcs:
+      if (rb := _find_reducebuf(x)): return rb
+  return None
+
+def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker, reduce:Optional[LazyBuffer]=None, first=True) -> LazyOp:
   log_lazybuffer(buf)
   if buf.base.op == LoadOps.CONST:
     # const is never a buffer
     return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.base.arg), buf.dtype, (buf.st+st).simplify().unbind()))
   if buf.op == LoadOps.CONTIGUOUS and first:
     # include one contiguous
-    return _recursive_get_lazyop(buf.srcs[0], inputs, st, True)
+    return _recursive_get_lazyop(buf.srcs[0], inputs, st, reduce, True)
   if buf.op == LoadOps.COPY and first:
     inputs.append(buf.srcs[0].base)
     return LazyOp(LoadOps.COPY, (), buf.srcs[0].base)
@@ -59,19 +68,13 @@ def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTrack
     return LazyOp(LoadOps.EMPTY)
 
   # we can merge this as a LazyOp
-  #if not buf.base.realized and buf.base.op not in LoadOps and buf.base.op not in BufferOps and (len(buf.base.children) == 1 or first) and first:
-  #  if buf.base.op in ReduceOps and (buf.st+st).contiguous:
-  #    # reduce ops has to be contiguous
-  #    st = ShapeTracker.from_shape(buf.base.srcs[0].shape)
-  #    return LazyOp(buf.base.op, tuple(_recursive_get_lazyop(x, inputs, st, False) for x in buf.base.srcs), buf.base.arg)
-  #  elif buf.base.op in UnaryOps or buf.base.op in BinaryOps or buf.base.op in TernaryOps:
-  #    # push shapetrackers up through binaryops
-  #    st = (buf.st+st).simplify()
-  #    return LazyOp(buf.base.op, tuple(_recursive_get_lazyop(x, inputs, st, False) for x in buf.base.srcs), buf.base.arg)
-  if not buf.realized and buf.base.op not in LoadOps and (len(buf.base.children) == 1 or first) and buf == buf.base:
-    if buf.op in ReduceOps:
+  if not buf.realized and buf.base.op not in LoadOps and buf.base.op not in BufferOps: # and (len(buf.base.children) == 1 or first): # and buf == buf.base:
+    if buf.base == reduce:
       st = ShapeTracker.from_shape(buf.base.srcs[0].shape)
-    return LazyOp(buf.op, tuple(_recursive_get_lazyop(x, inputs, st, False) for x in buf.srcs), buf.arg)
+      return LazyOp(buf.base.op, tuple(_recursive_get_lazyop(x, inputs, st, reduce, False) for x in buf.base.srcs), buf.base.arg)
+    elif isinstance(buf.base.op, (UnaryOps, BinaryOps, TernaryOps)):
+      st = (buf.st+st).simplify()
+      return LazyOp(buf.base.op, tuple(_recursive_get_lazyop(x, inputs, st, reduce, False) for x in buf.base.srcs), buf.base.arg)
 
   # have to do a load
   if buf.base not in inputs: inputs.append(buf.base)
@@ -82,10 +85,13 @@ def _create_schedule(out:LazyBuffer, seen:Set[LazyBuffer]) -> List[ScheduleItem]
   seen.add(out)
   log_lazybuffer(out)
   if out.base is not out: return _create_schedule(out.base, seen)
+  assert out.base == out and out.op is not None
+  reduce = _find_reducebuf(out)
 
   inputs: List[LazyBuffer] = []
-  op = _recursive_get_lazyop(out, inputs, ShapeTracker.from_shape(out.shape))
-  if op.op not in LoadOps: op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, out.st.simplify().unbind()))
+  st = ShapeTracker.from_shape(reduce.shape if reduce else out.shape)
+  op = _recursive_get_lazyop(out, inputs, st, reduce)
+  if op.op not in LoadOps: op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, st.simplify().unbind()))
   ret: List[ScheduleItem] = []
   for x in inputs:
     assert x.base == x, f"all inputs must be base, {x} isn't"
