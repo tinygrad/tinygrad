@@ -1,9 +1,12 @@
+# ruff: noqa: E501
 import unittest
 import numpy as np
-from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX, temp
+import torch
+from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX, temp, least_upper_dtype
 from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
+from hypothesis import given, settings, strategies as st
 
 def is_dtype_supported(dtype: DType):
   # for GPU, cl_khr_fp16 isn't supported (except now we don't need it!)
@@ -41,7 +44,7 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
     raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e
 
 def _test_op(fxn, target_dtype:DType, target): _assert_eq(fxn(), target_dtype, target)
-def _test_cast(a:Tensor, target_dtype:DType): _test_op(lambda: a.cast(target_dtype), target_dtype, a.numpy().astype(target_dtype.np).tolist())
+def _test_cast(a:Tensor, target_dtype:DType): _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(target_dtype.np)))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None): _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(target_dtype.np).tolist())
 
 class TestDType(unittest.TestCase):
@@ -49,7 +52,7 @@ class TestDType(unittest.TestCase):
   DATA: Any = None
   @classmethod
   def setUpClass(cls):
-    if not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
+    if not cls.DTYPE or not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
     cls.DATA = np.random.randint(0, 100, size=10, dtype=cls.DTYPE.np).tolist() if dtypes.is_int(cls.DTYPE) else np.random.choice([True, False], size=10).tolist() if cls.DTYPE == dtypes.bool else np.random.uniform(0, 1, size=10).tolist()
   def setUp(self):
     if self.DTYPE is None: raise unittest.SkipTest("base class")
@@ -189,6 +192,102 @@ class TestEqStrDType(unittest.TestCase):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")
     self.assertEqual(str(PtrDType(dtypes.float32)), "ptr.dtypes.float")
+
+class TestHelpers(unittest.TestCase):
+  signed_ints = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)
+  uints = (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
+  floats = (dtypes.float16, dtypes.float32, dtypes.float64)
+
+  @given(st.sampled_from(signed_ints+uints), st.integers(min_value=1, max_value=8))
+  def test_is_int(self, dtype, amt):
+    assert dtypes.is_int(dtype.vec(amt) if amt > 1 else dtype)
+    assert not dtypes.is_float(dtype.vec(amt) if amt > 1 else dtype)
+
+  @given(st.sampled_from(uints), st.integers(min_value=1, max_value=8))
+  def test_is_unsigned_uints(self, dtype, amt):
+    assert dtypes.is_unsigned(dtype.vec(amt) if amt > 1 else dtype)
+
+  @given(st.sampled_from(signed_ints), st.integers(min_value=1, max_value=8))
+  def test_is_unsigned_signed_ints(self, dtype, amt):
+    assert not dtypes.is_unsigned(dtype.vec(amt) if amt > 1 else dtype)
+
+  @given(st.sampled_from(floats), st.integers(min_value=1, max_value=8))
+  def test_is_float(self, dtype, amt):
+    assert dtypes.is_float(dtype.vec(amt) if amt > 1 else dtype)
+    assert not dtypes.is_int(dtype.vec(amt) if amt > 1 else dtype)
+    assert not dtypes.is_unsigned(dtype.vec(amt) if amt > 1 else dtype)
+
+  @given(st.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_float(d) or dtypes.is_int(d)]), st.integers(min_value=2, max_value=8))
+  def test_scalar(self, dtype, amt):
+    assert dtype.vec(amt).scalar() == dtype
+
+class TestTypeSpec(unittest.TestCase):
+  def test_creation(self):
+    assert Tensor([]).dtype == Tensor.default_type
+    # assert Tensor([1]).dtype == dtypes.int
+    assert Tensor([1.1]).dtype == Tensor.default_type
+
+  def test_const_full(self):
+    assert Tensor.ones([2,3]).dtype == Tensor.default_type
+    assert Tensor.zeros([2,3]).dtype == Tensor.default_type
+    assert Tensor.full([2,3], 3.3).dtype == Tensor.default_type
+    # assert Tensor.full([2,3], 3).dtype == dtypes.int
+
+  def test_reduce_0d_default(self):
+    assert Tensor.ones([2,3,0]).sum(2).dtype ==  Tensor.default_type
+    # assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int
+
+# TODO: better way to write a set of core dtypes?
+core_types = [d for d in DTYPES_DICT.values() if d not in [dtypes._arg_int32]]
+class TestTypePromotion(unittest.TestCase):
+  @given(st.sampled_from(core_types))
+  def test_self_promo_to_self(self, dtype):
+    assert least_upper_dtype(dtype) == dtype
+    assert least_upper_dtype(dtype, dtype) == dtype
+    assert least_upper_dtype(dtype, dtype, dtype) == dtype
+
+  @given(st.sampled_from(core_types), st.sampled_from(core_types))
+  def test_promo_resulted_higher_than_inputs(self, dtype1, dtype2):
+    result = least_upper_dtype(dtype1, dtype2)
+    assert result >= dtype1 and result >= dtype2
+
+  def test_dtype_promo(self):
+    assert least_upper_dtype(dtypes.bool, dtypes.int8) == dtypes.int8
+    assert least_upper_dtype(dtypes.int8, dtypes.uint8) == dtypes.int16
+    assert least_upper_dtype(dtypes.uint8, dtypes.int16) == dtypes.int16
+    assert least_upper_dtype(dtypes.int16, dtypes.uint16) == dtypes.int32
+    assert least_upper_dtype(dtypes.uint16, dtypes.int32) == dtypes.int32
+    assert least_upper_dtype(dtypes.int32, dtypes.uint32) == dtypes.int64
+    assert least_upper_dtype(dtypes.uint32, dtypes.int64) == dtypes.int64
+    # similar to jax but we don't use weak type
+    assert least_upper_dtype(dtypes.int64, dtypes.uint64) == dtypes.float16
+    assert least_upper_dtype(dtypes.float16, dtypes.float32) == dtypes.float32
+    assert least_upper_dtype(dtypes.float32, dtypes.float64) == dtypes.float64
+
+    assert least_upper_dtype(dtypes.bool, dtypes.float32) == dtypes.float32
+    assert least_upper_dtype(dtypes.bool, dtypes.float64) == dtypes.float64
+    assert least_upper_dtype(dtypes.float16, dtypes.int64) == dtypes.float16
+    assert least_upper_dtype(dtypes.float16, dtypes.uint64) == dtypes.float16
+
+class TestAutoCastType(unittest.TestCase):
+  @given(st.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_int(d) and is_dtype_supported(d)]))
+  @settings(deadline=None)
+  def test_int_to_float_unary_func(self, dtype):
+    for func in [
+      lambda t: t.exp(),
+      # lambda t: t.exp2(),  # requires MUL
+      lambda t: t.log(),
+      lambda t: t.log2(),
+      lambda t: t.sqrt(),
+      # lambda t: t.rsqrt(),  # requires DIV
+      lambda t: t.sin(),
+      # lambda t: t.cos(),  # requires SUB
+      # lambda t: t.tan(),  # requires .cos() to work
+      lambda t: t.sigmoid(),
+    ]:
+      a = [2, 3, 4]
+      np.testing.assert_allclose(func(Tensor(a, dtype=dtype)).numpy(), func(torch.tensor(a)), rtol=1e-4, atol=1e-4)
+
 
 if __name__ == '__main__':
   unittest.main()
