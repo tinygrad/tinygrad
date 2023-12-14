@@ -1,18 +1,12 @@
 from tinygrad.device import JITRunner
-from tinygrad.ops import LazyOp, LoadOps
+from tinygrad.ops import LoadOps
 from tinygrad.nn.state import get_parameters
-
-# for speed
-def derandomize(x):
-  if isinstance(x, LazyOp):
-    new_op = LoadOps.EMPTY if x.op == LoadOps.CUSTOM else x.op
-    return LazyOp(new_op, tuple([derandomize(s) for s in x.src]), None if x.op == LoadOps.CUSTOM else x.arg)
-  x.op = derandomize(x.op)
-  return x
 
 def derandomize_model(model):
   for p in get_parameters(model):
-    p.lazydata = derandomize(p.lazydata)
+    if p.lazydata.op == LoadOps.CUSTOM:
+      p.lazydata.op = LoadOps.EMPTY
+      p.lazydata.arg = None
     p.realize()
 
 def assert_jit_cache_len(fxn, expected_len):
