@@ -1,7 +1,7 @@
 from typing import Final, Dict, Callable, Any, List, Optional, Tuple
 from llvmlite import ir
 from tinygrad.codegen.linearizer import UOps, UOp
-from tinygrad.helpers import DType, dtypes
+from tinygrad.helpers import DType, PtrDType, dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
 
 MFLAGS = ('nsz', 'arcp', 'contract', 'afn', 'reassoc') # All from fast math, but nnan and ninf
@@ -33,7 +33,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
 
 dtype_to_llvm_dtype = {dtypes.float64:ir.DoubleType(), dtypes.float16:ir.HalfType(), dtypes.bfloat16:ir.IntType(16), dtypes.float32:ir.FloatType(),
                        dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.bool: ir.IntType(1), dtypes.int64: ir.IntType(64),
-                       dtypes.int32: ir.IntType(32), dtypes._arg_int32: ir.IntType(32), dtypes.int16:ir.IntType(16), dtypes.uint16:ir.IntType(16),
+                       dtypes.int32: ir.IntType(32), dtypes.int16:ir.IntType(16), dtypes.uint16:ir.IntType(16),
                        dtypes.uint32:ir.IntType(32), dtypes.uint64:ir.IntType(64)}
 
 def cast(bb, val, input_type, output_type, bitcast=False):
@@ -84,7 +84,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
 
   # create llvm function
   func_dtypes = [(dtype_to_llvm_dtype[dtype],dtype) for dtype in buf_to_dtype.values()]
-  func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() if dt!=dtypes._arg_int32 else x for x,dt in func_dtypes]), name=function_name)  # noqa: E501
+  func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() if isinstance(dt, PtrDType) else x for x,dt in func_dtypes]), name=function_name)  # noqa: E501
   for a in func.args:
     if a.type.is_pointer: a.add_attribute("noalias")
 
@@ -99,7 +99,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
   lvars: Dict[Optional[UOp], Any] = {}  # this Any is an llvm type
 
   for bufname,dtype in buf_to_dtype.items():
-    if dtype == dtypes._arg_int32: lvars[bufname] = bb[-1].sext(func.args[buf_index[bufname]], ir.IntType(32))
+    if not isinstance(dtype, PtrDType) and dtype == dtypes.int32: lvars[bufname] = bb[-1].sext(func.args[buf_index[bufname]], ir.IntType(32))
 
   for u in uops:
     uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg

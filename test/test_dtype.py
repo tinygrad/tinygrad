@@ -236,8 +236,7 @@ class TestTypeSpec(unittest.TestCase):
     assert Tensor.ones([2,3,0]).sum(2).dtype ==  Tensor.default_type
     # assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int
 
-# TODO: better way to write a set of core dtypes?
-core_types = [d for d in DTYPES_DICT.values() if d not in [dtypes._arg_int32]]
+core_types = list(DTYPES_DICT.values())
 class TestTypePromotion(unittest.TestCase):
   @given(st.sampled_from(core_types))
   def test_self_promo_to_self(self, dtype):
