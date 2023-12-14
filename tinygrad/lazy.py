@@ -12,6 +12,8 @@ lazycache: WeakValueDictionary = WeakValueDictionary()
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType,
                       op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None):
+  if 0 in st.shape: st, op, arg, srcs = ShapeTracker.from_shape(st.shape), LoadOps.CONST, 0, ()
+
   wop = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs), ref(base) if base else None)
   if wop in lazycache: return lazycache[wop]
 

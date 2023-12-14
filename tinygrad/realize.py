@@ -41,13 +41,14 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
 
 # *** schedule creation ***
 
-def _find_reducebuf(buf:LazyBuffer) -> Optional[LazyBuffer]:
-  if buf.base != buf: return _find_reducebuf(buf.base) if buf.st.contiguous and buf.st.size() == buf.base.st.size() else None
-  assert buf.base == buf
-  if buf.op in ReduceOps: return buf
-  if isinstance(buf.op, (UnaryOps, BinaryOps, TernaryOps)):
+# find the one reducebuf in the op
+def _find_reducebuf(buf:LazyBuffer, st:ShapeTracker, sz, first=True) -> Optional[LazyBuffer]:
+  #if buf.base != buf: return _find_reducebuf(buf.base) if buf.st.contiguous and buf.st.size() == buf.base.st.size() else None
+  assert buf.base == buf and buf.op is not None
+  if buf.op in ReduceOps and st.contiguous and (len(buf.base.children) == 1 or first) and prod(buf.base.shape) == sz: return buf
+  if isinstance(buf.op, (UnaryOps, BinaryOps, TernaryOps)) or (buf.op == LoadOps.CONTIGUOUS and first):
     for x in buf.srcs:
-      if (rb := _find_reducebuf(x)): return rb
+      if (rb := _find_reducebuf(x.base, (buf.st+st).simplify(), sz, False)): return rb
   return None
 
 def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker, reduce:Optional[LazyBuffer]=None, first=True) -> LazyOp:
@@ -68,11 +69,15 @@ def _recursive_get_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTrack
     return LazyOp(LoadOps.EMPTY)
 
   # we can merge this as a LazyOp
-  if not buf.realized and buf.base.op not in LoadOps and buf.base.op not in BufferOps: # and (len(buf.base.children) == 1 or first): # and buf == buf.base:
+  if not buf.realized and buf.base.op not in LoadOps and buf.base.op not in BufferOps and (len(buf.base.children) == 1 or first):
+    # merge the reduce
     if buf.base == reduce:
+      assert buf.base.op is not None
       st = ShapeTracker.from_shape(buf.base.srcs[0].shape)
       return LazyOp(buf.base.op, tuple(_recursive_get_lazyop(x, inputs, st, reduce, False) for x in buf.base.srcs), buf.base.arg)
-    elif isinstance(buf.base.op, (UnaryOps, BinaryOps, TernaryOps)):
+
+    # maybe merge an ewop
+    if isinstance(buf.base.op, (UnaryOps, BinaryOps, TernaryOps)) and buf.st.size() == prod(buf.st.shape):
       st = (buf.st+st).simplify()
       return LazyOp(buf.base.op, tuple(_recursive_get_lazyop(x, inputs, st, reduce, False) for x in buf.base.srcs), buf.base.arg)
 
@@ -86,7 +91,7 @@ def _create_schedule(out:LazyBuffer, seen:Set[LazyBuffer]) -> List[ScheduleItem]
   log_lazybuffer(out)
   if out.base is not out: return _create_schedule(out.base, seen)
   assert out.base == out and out.op is not None
-  reduce = _find_reducebuf(out)
+  reduce = _find_reducebuf(out, ShapeTracker.from_shape(out.shape), prod(out.shape))
 
   inputs: List[LazyBuffer] = []
   st = ShapeTracker.from_shape(reduce.shape if reduce else out.shape)
@@ -107,9 +112,7 @@ def _create_schedule(out:LazyBuffer, seen:Set[LazyBuffer]) -> List[ScheduleItem]
           out.output_buffer = None
           break
 
-  if DEBUG >= 5:
-    from tinygrad.graph import print_tree
-    print_tree(op)
+  if DEBUG >= 5: print_tree(op)
 
   var_vals = merge_dicts([out.st.var_vals] + [buf.st.var_vals for buf in inputs])
   return ret + [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in vars_from_ast(op)})]
