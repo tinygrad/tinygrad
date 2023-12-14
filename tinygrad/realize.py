@@ -53,7 +53,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[ShapeTracker], st:ShapeTracker
 
   # if we aren't fusing it, it's a load and we add it to the inputs
   if buf not in seen_children:
-    inputs.append(buf)
+    if buf not in inputs: inputs.append(buf)
     return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, st.simplify().unbind()))
 
   # if it's a reduce, we have to change the shapetracker
