@@ -46,18 +46,18 @@ class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):
     if not (math.isnan(v1) and math.isnan(v2)): self.assertAlmostEqual(v1, v2, places=5) if v1.dtype != np.bool_ else self.assertEqual(v1, v2)
 
-  def _test_uop_fxn(self, bop, fxn, dt=dtypes.float32):
+  def _test_uop_fxn(self, bop, fxn, dt=PtrDType(dtypes.float32)):
     for f in [_test_single_value, _test_single_value_const]:
       for a in [-2.0, 0.0, 1.0]:
         self._equal(f([a], bop, dt), fxn(a))
 
-  def _test_bop_fxn(self, bop, fxn, dt=dtypes.float32, no_b_zero=False):
+  def _test_bop_fxn(self, bop, fxn, dt=PtrDType(dtypes.float32), no_b_zero=False):
     for f in [_test_single_value, _test_single_value_const]:
       for a in [-2.0, 0.0, 1.0]:
         for b in [-3.0, 1.0] + ([] if no_b_zero else [0.0]):
           self._equal(f([a,b], bop, dt), fxn(a,b))
 
-  def _test_top_fxn(self, bop, fxn, dt=dtypes.float32):
+  def _test_top_fxn(self, bop, fxn, dt=PtrDType(dtypes.float32)):
     for f in [_test_single_value, _test_single_value_const]:
       for a in [-2.0, 0, 1]:
         for b in [-3.0, 3.0]:
@@ -88,15 +88,15 @@ class TestFloatUOps(TestUOps):
 # TODO: fix this on all the backends
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled) or getenv('ARM64', False), "only test for compiled backends, broken on some")
 class TestNonFloatUOps(TestUOps):
-  def test_neg_int32(self): self._test_uop_fxn(UnaryOps.NEG, lambda a: -a, dtypes.int32)
-  def test_add_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: int(a)+int(b), dtypes.int32)
-  def test_sub_int32(self): self._test_bop_fxn(BinaryOps.SUB, lambda a,b: int(a)-int(b), dtypes.int32)
-  def test_mul_int32(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: int(a)*int(b), dtypes.int32)
-  def test_div_int32(self): self._test_bop_fxn(BinaryOps.DIV, lambda a,b: int(a/b), dtypes.int32, no_b_zero=True)
-  def test_mod_int32(self): self._test_bop_fxn(BinaryOps.MOD, lambda a,b: abs(int(a))%abs(int(b))*(1,-1)[a<0], dtypes.int32, no_b_zero=True)
-  def test_cmplt_int32(self): self._test_bop_fxn(BinaryOps.CMPLT, lambda a,b: float(a<b), dtypes.int32)
+  def test_neg_int32(self): self._test_uop_fxn(UnaryOps.NEG, lambda a: -a, PtrDType(dtypes.int32))
+  def test_add_int32(self): self._test_bop_fxn(BinaryOps.ADD, lambda a,b: int(a)+int(b), PtrDType(dtypes.int32))
+  def test_sub_int32(self): self._test_bop_fxn(BinaryOps.SUB, lambda a,b: int(a)-int(b), PtrDType(dtypes.int32))
+  def test_mul_int32(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: int(a)*int(b), PtrDType(dtypes.int32))
+  def test_div_int32(self): self._test_bop_fxn(BinaryOps.DIV, lambda a,b: int(a/b), PtrDType(dtypes.int32), no_b_zero=True)
+  def test_mod_int32(self): self._test_bop_fxn(BinaryOps.MOD, lambda a,b: abs(int(a))%abs(int(b))*(1,-1)[a<0], PtrDType(dtypes.int32), no_b_zero=True)
+  def test_cmplt_int32(self): self._test_bop_fxn(BinaryOps.CMPLT, lambda a,b: float(a<b), PtrDType(dtypes.int32))
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "no bool storage buffer on webgpu")
-  def test_mul_bool(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: bool(a) and bool(b), dtypes.bool)
+  def test_mul_bool(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: bool(a) and bool(b), PtrDType(dtypes.bool))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
