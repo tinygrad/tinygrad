@@ -41,11 +41,12 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
 
 # *** schedule creation ***
 
-def _recursive_lazyop(buf:LazyBuffer, inputs:List[ShapeTracker], st:ShapeTracker, seen_children:Set[LazyBuffer]):
+def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker, seen_children:Set[LazyBuffer]):
   if buf != buf.base:
     st = buf.st+st
     buf = buf.base
   # all buffers here are base now
+  assert buf.op is not None
 
   # consts are always fused and generated
   if buf.op == LoadOps.CONST:
@@ -65,7 +66,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[ShapeTracker], st:ShapeTracker
 
 def _get_lazyop(out:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker) -> LazyOp:
   potential_inputs = [(out,st)]
-  merged_reduce = None
+  merged_reduce: Optional[LazyBuffer] = None
   output_st = st
   seen_children = set()
 
@@ -90,7 +91,7 @@ def _get_lazyop(out:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker) -> Laz
       # maybe merge a reduce, if it's contiguous and it's the one we are merging
       elif pi.base.op in ReduceOps and (merged_reduce is None or merged_reduce == pi.base):
         new_st = pi.st+st if pi.base != pi else st
-        if new_st.contiguous:
+        if new_st.contiguous and new_st.size() == pi.base.st.size():
           merged_reduce = pi.base
           output_st = pi.base.st
           potential_inputs.append((pi.base.srcs[0], pi.base.srcs[0].st))
@@ -111,7 +112,7 @@ def _create_schedule(out:LazyBuffer, seen:Set[LazyBuffer]) -> List[ScheduleItem]
   if out.op == LoadOps.COPY:
     op, inputs = LazyOp(LoadOps.COPY, (), out.srcs[0].base), [out.srcs[0].base]
   elif out.op == LoadOps.CUSTOM:
-    op, inputs = LazyOp(LoadOps.CUSTOM, (), out.arg), out.srcs
+    op, inputs = LazyOp(LoadOps.CUSTOM, (), out.arg), list(out.srcs)
   elif out.op == LoadOps.EMPTY:
     op = LazyOp(LoadOps.EMPTY)
   else:

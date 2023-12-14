@@ -55,7 +55,7 @@ class ShapeTracker:
   def __post_init__(self):
     assert isinstance(self.views, tuple) and all(isinstance(v, View) for v in self.views), "ShapeTracker must be created with a tuple of Views"
 
-  #@functools.lru_cache(maxsize=None)
+  @functools.lru_cache(maxsize=None)
   def __add__(self, st:ShapeTracker) -> ShapeTracker: return ShapeTracker(self.views+st.views).simplify()
 
   @staticmethod

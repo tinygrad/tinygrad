@@ -158,13 +158,12 @@ class TestSchedule(unittest.TestCase):
     out = y.sum(keepdim=True).sqrt().__neg__()
     check_schedule(out, 1)
 
-  #@unittest.skip("may want to reconsider this")
   def test_fold_batchnorm(self):
     with Tensor.train():
       img = Tensor.empty(1,32,4,4)
       bn = nn.BatchNorm2d(32, track_running_stats=False)
       out = bn(img)
-      check_schedule(out, 3)
+      check_schedule(out, 4) # NOTE: 4 is expected here now
 
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)
