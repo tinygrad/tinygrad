@@ -368,7 +368,7 @@ class Tensor:
         ret = ret.reshape(flatten([sh // s, s] for s, sh in zip(strides, ret.shape)))
         ret = ret.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in ret.shape[::2]))).reshape(ret.shape[::2])
 
-    # inject dim=1 for None and collapse dim for int
+    # inject 1 for dim where it's None and collapse dim for int
     new_shape = list(ret.shape) if indexed else list(self.shape)
     for dim in type_dim[None]: new_shape.insert(dim, 1)
     for dim in (dims_collapsed := [dim + sum(1 for d in type_dim[None] if dim >= d) for dim in reversed(type_dim[int])]): new_shape.pop(dim)
