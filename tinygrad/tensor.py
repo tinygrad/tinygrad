@@ -359,7 +359,7 @@ class Tensor:
       indices_filtered[dim] = ((0, 0) if (st > 0 and e < s) or (st <= 0 and e > s) else (s, e) if st > 0 else (e+1, s+1), st)
     for dim in type_dim[Tensor]: indices_filtered[dim] = ((0, self.shape[dim]), 1)
 
-    new_slice, strides = ((),()) if not indices_filtered else zip(*tuple(i for i in indices_filtered))
+    new_slice, strides = ((),()) if not indices_filtered else zip(*indices_filtered)
     ret = self.shrink(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
     # add strides by pad -> reshape -> shrink
     if any(abs(s) != 1 for s in strides):
