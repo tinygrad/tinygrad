@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 import math
 import unittest
 import numpy as np

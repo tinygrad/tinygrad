@@ -32,7 +32,7 @@ def expr_node(view:View, idx:Optional[Node]=None) -> Node:
 # generate an expression if you have a variable or expression for each index
 def expr_idxs(view:View, idxs:Tuple[Node, ...]) -> Node:
   assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
-  return Variable.sum([NumNode(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])
+  return Variable.sum([NumNode(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])  # noqa: E501
 
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
@@ -52,7 +52,8 @@ def idxs_to_idx(shape:Tuple[int, ...], idxs:Tuple[Node, ...]) -> Node:
 @dataclass(frozen=True)
 class ShapeTracker:
   views: Tuple[View, ...]
-  def __post_init__(self): assert isinstance(self.views, tuple) and all(isinstance(v, View) for v in self.views), "ShapeTracker must be created with a tuple of Views"
+  def __post_init__(self):
+    assert isinstance(self.views, tuple) and all(isinstance(v, View) for v in self.views), "ShapeTracker must be created with a tuple of Views"
 
   @staticmethod
   def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),))
