@@ -61,7 +61,7 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
     assert num_ops == 0, "more alu uops than needed"
 
-  @unittest.skip("not supported yet")
+  @unittest.skip("constant folding not supported yet")
   def test_constant_fold(self):
     a, b = Tensor(2), Tensor(3)
     r = a * b
