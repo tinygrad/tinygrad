@@ -5,7 +5,7 @@ from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.jit import TinyJit
 from tinygrad import Device, GlobalCounters
-from tinygrad.helpers import CI, dtypes
+from tinygrad.helpers import CI, dtypes, Context
 from tinygrad.shape.symbolic import Variable
 from test.helpers import derandomize_model
 
@@ -16,13 +16,17 @@ from examples.stable_diffusion import UNetModel
 
 def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed, all_jitted=False):
   tms = []
-  for _ in range(4):
+  for t in range(4):
     early_gen = [x.realize() if isinstance(x, Tensor) else x for x in gen()]
     GlobalCounters.reset()
     GlobalCounters.mem_used = 0
     Device[Device.DEFAULT].synchronize()
     st = time.perf_counter_ns()
-    train(*early_gen)
+    if t != 1:
+      with Context(GRAPH=0):
+        train(*early_gen)
+    else:
+      train(*early_gen)
     Device[Device.DEFAULT].synchronize()
     tms.append(time.perf_counter_ns() - st)
 

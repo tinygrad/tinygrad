@@ -140,7 +140,7 @@ def _get_lazyop(out:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker) -> Laz
       if pi.realized: continue  # if it's realized we just use it
 
       # maybe merge an elementwise op, as long as it doesn't expand and all the children have been seen
-      if isinstance(pi.base.op, (UnaryOps, BinaryOps, TernaryOps)) and pi.st.size() == prod(pi.st.shape):
+      if isinstance(pi.base.op, (UnaryOps, BinaryOps, TernaryOps)) and prod(pi.base.st.shape) >= prod(pi.st.shape):
         allowed = True
         if pi != out:
           for x in pi.base.children:

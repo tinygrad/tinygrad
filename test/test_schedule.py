@@ -260,6 +260,22 @@ class TestSchedule(unittest.TestCase):
     check_schedule(c, 1)
     check_schedule(e, 1)
 
+  def test_shrink_fuse(self):
+    a = Tensor.empty(8192, 16)
+    b = Tensor.empty(8192, 16)
+    c = a * b
+    d = Tensor.empty(1, 16)
+    e = c[0] * d
+    check_schedule(e, 1)
+
+  def test_expand_nofuse(self):
+    a = Tensor.empty(1, 16)
+    b = Tensor.empty(1, 16)
+    c = a * b
+    d = Tensor.empty(8192, 16)
+    e = c * d
+    check_schedule(e, 2)
+
   # this is the failing case in openpilot...it's very simple like this
   @unittest.skip("failing in old lazy")
   def test_image_conv_fusion(self):
