@@ -75,15 +75,15 @@ class Kernel:
 
     # there's only allowed to be one reduceop
     reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
-    assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
-    self.reduceop = reduceops[0] if reduceops else None
+    #assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
+    self.reduceops = reduceops if reduceops else None
 
     # create new shapetrackers inside this kernel, we will permute them
     self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = dedup([x.arg for x in self.ast.get_lazyops() if x.op in BufferOps])
     assert isinstance(self.bufs[0], MemBuffer) and self.bufs[0].idx == 0, f"buffer 0 is not the store buffer {self.bufs[0]}"
 
     # get earlybufs, before the one reduce op
-    self.earlybufs = [x.arg for x in self.reduceop.get_lazyops() if x.op in BufferOps] if self.reduceop else []
+    self.earlybufs = [x.arg for x in self.reduceops[0].get_lazyops() if x.op in BufferOps] if self.reduceops else []
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
 
     # create the (permuted) shapetrackers
@@ -118,8 +118,8 @@ class Kernel:
 
     # things downstream of the AST
     # NOTE: we copy bufs for local buffers and sts for optimizations
-    ret.info, ret.reduceop, ret.bufs, ret.earlybufs, ret.full_buf_index, ret.sts = \
-      self.info, self.reduceop, self.bufs[:], self.earlybufs, self.full_buf_index, self.sts[:]
+    ret.info, ret.reduceops, ret.bufs, ret.earlybufs, ret.full_buf_index, ret.sts = \
+      self.info, self.reduceops, self.bufs[:], self.earlybufs, self.full_buf_index, self.sts[:]
 
     # parameters for optimizations
     ret.applied_opts, ret.group_for_reduce, ret.upcasted, ret.local_dims, ret.local_alias, ret.tensor_core, ret.dont_use_locals = \
@@ -332,13 +332,13 @@ class Kernel:
   # ******************** high level optimizers ********************
 
   def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None):
-    if use_tensor_cores and self.opts.has_local and self.reduceop and self.reduceop.op == ReduceOps.SUM and self.opts.device in tensor_cores:
+    if use_tensor_cores and self.opts.has_local and self.reduceops and self.reduceops[0].op == ReduceOps.SUM and self.opts.device in tensor_cores:
       for tc in tensor_cores[self.opts.device]:
         if not((tc.arch is None or tc.arch == os.uname().machine) and isinstance(self.reduceop.src[0], LazyOp)): continue
         has_cast = tc.dtype_in != tc.dtype_out
 
         if has_cast and not(isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == UnaryOps.CAST and self.reduceop.src[0].arg[0] == tc.dtype_out): continue  # noqa: E501
-        mul_op = self.reduceop.src[0].src[0] if has_cast else self.reduceop.src[0]
+        mul_op = self.reduceops[0].src[0].src[0] if has_cast else self.reduceops[0].src[0]
 
         if not(isinstance(mul_op, LazyOp) and mul_op.op == BinaryOps.MUL): continue
         if not(isinstance(mul_op.src[0], LazyOp) and mul_op.src[0].op == BufferOps.LOAD and mul_op.src[0].arg.dtype == tc.dtype_in): continue
@@ -478,11 +478,11 @@ class Kernel:
     # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
     MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
     if self.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
-        self.reduceop and self.reduceop.op == ReduceOps.SUM and len(self.full_shape) >= 2 and self.opts.has_shared and \
-        isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == BinaryOps.MUL and \
-        self.reduceop.src[0].src[0].op == BufferOps.LOAD and self.reduceop.src[0].src[1].op == BufferOps.LOAD:
-      buf0 = self.bufs.index(self.reduceop.src[0].src[0].arg)
-      buf1 = self.bufs.index(self.reduceop.src[0].src[1].arg)
+        self.reduceops and self.reduceops[0].op == ReduceOps.SUM and len(self.full_shape) >= 2 and self.opts.has_shared and \
+        isinstance(self.reduceops[0].src[0], LazyOp) and self.reduceops[0].src[0].op == BinaryOps.MUL and \
+        self.reduceops[0].src[0].src[0].op == BufferOps.LOAD and self.reduceops[0].src[0].src[1].op == BufferOps.LOAD:
+      buf0 = self.bufs.index(self.reduceops[0].src[0].src[0].arg)
+      buf1 = self.bufs.index(self.reduceops[0].src[0].src[1].arg)
       buf0_strides = self.sts[buf0].real_strides()
       buf1_strides = self.sts[buf1].real_strides()
       def has_expanded_axis(s, st): return any(x > 1 and y == 0 for x,y in zip(s,st))
