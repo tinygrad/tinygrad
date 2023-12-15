@@ -96,7 +96,10 @@ def time_program(dev:str, lib:bytes, global_size, local_size, var_vals, rawbufs,
   for _ in range(cnt):
     if clear_l2:
       with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
-    tms.append(clprg(*[x._buf for x in rawbufs], **lra, vals=var_vals.values(), wait=True)*factor)
+    try:
+      tms.append(clprg(*[x._buf for x in rawbufs], **lra, vals=var_vals.values(), wait=True)*factor)
+    except Exception:
+      return [float('inf')]
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
-import numpy as np
 import sys
+import numpy as np
 from typing import Union, Optional, Any, Tuple, List, Set, Dict
 from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten, getenv
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps
@@ -109,6 +109,7 @@ class LazyBuffer:
 
 # *** schedule creation ***
 
+# recursively create a lazyop
 def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker, realizes:Set[LazyBuffer], first=True):
   if buf != buf.base:
     st = buf.st+st
@@ -137,6 +138,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker, 
   # otherwise we fuse it like normal
   return LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, st, realizes, False) for x in buf.srcs), buf.arg)
 
+# recursively walk back in the graph to create the schedule
 def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyBuffer],
                         reduce_for_op: Dict[LazyBuffer, LazyBuffer]) -> List[ScheduleItem]:
   if out in seen or out.realized or out.op == LoadOps.CONST: return []
@@ -159,22 +161,27 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
   return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + \
     [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in vars_from_ast(op)})]
 
+# recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None]):
   if buf in allbufs or buf.realized: return
   log_lazybuffer(buf)
   if buf.base != buf:
+    # realize all places where the buffer is expanded
     if prod(buf.base.st.shape) < prod(buf.st.shape):
       realizes.add(buf.base)
     return _recurse_lb(buf.base, realizes, allbufs)
   allbufs[buf] = None
   if buf.op in LoadOps: realizes.add(buf.base)
+  if buf.op == LoadOps.COPY:
+    assert buf.srcs[0].st.contiguous and buf.srcs[0].st.size() == buf.srcs[0].base.st.size()
+    realizes.add(buf.srcs[0].base)
   for x in buf.srcs: _recurse_lb(x, realizes, allbufs)
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
   if seen is None: seen = set()
   for out in outs: log_lazybuffer(out, scheduled=True)
 
-  # realize all places where the buffer is expanded
+  # start by just realizing the buffers passed in
   realizes: Set[LazyBuffer] = set([x.base for x in outs if not x.realized])
   allbufs: Dict[LazyBuffer, None] = {}
   for out in outs: _recurse_lb(out.base, realizes, allbufs)
