@@ -35,9 +35,7 @@ class Attention:
 
     # create kv cache
     if not hasattr(self, "cache_kv"):
-      self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim)
-      if HALF:
-        self.cache_kv = self.cache_kv.half()
+      self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim, dtype=x.dtype)
 
     keys = self.cache_kv[0].shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
     values = self.cache_kv[1].shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
@@ -89,13 +87,11 @@ class Transformer:
     pos_emb = self.wpe(self.allpos.shrink((None, (start_pos, start_pos+seqlen))))
     h = tok_emb + pos_emb
 
-    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf")).triu(start_pos.val+1).realize() if seqlen > 1 else None
+    if HALF: h = h.half()
 
-    if HALF:
-      h = h.half()
-      if mask is not None: mask = mask.half()
+    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos.val+1).realize() if seqlen > 1 else None
 
-    for hi in self.h: h = hi(h, start_pos=start_pos, mask=mask)
+    for hi in self.h: h = hi(h, start_pos, mask)
 
     logits = self.lm_head(self.ln_f(h))
     # NOTE: temperature=0 with HALF breaks due to precision, should use argmax instead

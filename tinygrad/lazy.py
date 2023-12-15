@@ -1,13 +1,13 @@
 from __future__ import annotations
 import numpy as np
 from typing import Union, Optional, Any, Tuple, List, Set, Dict
-from tinygrad.helpers import prod, dtypes, DType, merge_dicts, DEBUG, dedup, flatten
+from tinygrad.helpers import prod, dtypes, DType, merge_dicts, dedup, flatten
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps
 from tinygrad.ops import Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem, vars_from_ast
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
-from tinygrad.graph import print_tree, log_lazybuffer, realized_lazybuffer
+from tinygrad.graph import log_lazybuffer
 from weakref import ref, WeakSet, WeakValueDictionary
 
 lazycache: WeakValueDictionary = WeakValueDictionary()

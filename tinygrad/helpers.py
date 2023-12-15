@@ -174,9 +174,6 @@ class dtypes:
   # it has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
   bfloat16: Final[DType] = DType(10, 2, "__bf16", None)
 
-  # NOTE: these are internal dtypes, should probably check for that
-  _arg_int32: Final[DType] = DType(2, 4, "_arg_int32", None)
-
   # NOTE: these are image dtypes
   @staticmethod
   def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shp, dtypes.float32)

@@ -23,6 +23,7 @@ class TestHIPCompilationRDNA(unittest.TestCase):
     output.numpy()
 
   def test_compile_hip_speedyresnet_hf(self):
+    old_default_type = Tensor.default_type
     Tensor.default_type = dtypes.float16
 
     W = Tensor.rand(12,3,2,2)
@@ -31,6 +32,8 @@ class TestHIPCompilationRDNA(unittest.TestCase):
     input = Tensor.rand(512, 3, 32, 32)
     output = model(input)
     output.numpy()
+
+    Tensor.default_type = old_default_type
 
 if __name__ == "__main__":
   unittest.main()
