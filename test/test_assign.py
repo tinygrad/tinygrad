@@ -40,12 +40,10 @@ class TestAssign(unittest.TestCase):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N).realize()
     b = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N).realize()
     a_original, b_original = a.numpy(), b.numpy()
-    
     # Test with incorrect permutation
     a.assign(a.permute(1,0) + b.permute(1,0)).realize()
     with self.assertRaises(AssertionError):
       np.testing.assert_allclose(a.numpy(), a_original + b_original)
-
     # Test with correct permutation
     a = Tensor(a_original).permute(1,0)
     a.assign(a + Tensor(b_original)).realize()
