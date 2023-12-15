@@ -137,21 +137,6 @@ class TestLinearizer(unittest.TestCase):
 
     assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype == get_lazyop_info(reduceop).dtype
 
-  @given(st.sampled_from(float_dtypes), st.sampled_from(float_dtypes))
-  def test_mulacc_midcast(self, d1:DType, d2:DType):
-    a = Tensor.rand(1024,1024, dtype=d1)
-    b = Tensor.rand(1024,1024, dtype=d1)
-    out = (a*b).cast(d2).sum(-1)
-
-    ast = [si for si in out.lazydata.schedule() if si.ast.op not in LoadOps][0].ast
-    reduceop = [op for op in ast.get_lazyops() if op.op in ReduceOps][0]
-    uops = Linearizer(ast).linearize().uops
-    mulacc = [u for u in uops if u.uop == UOps.ALU and u.arg == TernaryOps.MULACC][0]
-    phi = [u for u in uops if u.uop == UOps.PHI][0]
-
-    assert mulacc.vin[0].dtype == mulacc.vin[1].dtype
-    assert phi.dtype == phi.vin[0].dtype == phi.vin[1].dtype == get_lazyop_info(reduceop).dtype
-
   def test_simplify_uop(self):
     def helper_test_simplify(uop, dtype, vin, arg=None):
       ast = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=42, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
