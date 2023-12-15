@@ -320,6 +320,8 @@ class TestSchedule(unittest.TestCase):
     check_schedule(x, 3)
 
   def test_resnet_block(self):
+    Tensor.training = False
+
     in_planes, planes = 64, 64
     conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
     bn1 = nn.BatchNorm2d(planes)
