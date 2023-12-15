@@ -12,7 +12,8 @@ from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
-from tinygrad.helpers import DTYPES_DICT, DType, dtypes, prod
+from tinygrad.helpers import DType, dtypes, prod
+from test.helpers import float_dtypes, int_dtypes
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestLinearizer(unittest.TestCase):
@@ -108,9 +109,7 @@ class TestLinearizer(unittest.TestCase):
     assert not any(u.uop == UOps.LOOP for u in lin.linearize().uops), "found loop in sum collapse"
 
   reduce_ops = (Tensor.max, Tensor.min, Tensor.sum)
-  float_dtypes = [v for v in DTYPES_DICT.values() if dtypes.is_float(v)]
-  numeric_dtypes = float_dtypes + [v for v in DTYPES_DICT.values() if dtypes.is_int(v)]
-  @given(st.sampled_from(numeric_dtypes), st.sampled_from(reduce_ops))
+  @given(st.sampled_from(float_dtypes+int_dtypes), st.sampled_from(reduce_ops))
   def test_reduce_acc(self, d:DType, op):
     a = Tensor.rand(1024,1024, dtype=d)
     out = op(a)
