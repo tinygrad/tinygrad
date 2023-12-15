@@ -37,31 +37,19 @@ class TestAssign(unittest.TestCase):
     np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
 
   def test_post_permuted_assignment(self):
-    a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
-    b = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
-    a.realize()
-    b.realize()
-    #GlobalCounters.cache = []
-    ba1 = a.lazydata.realized # noqa: F841
-    bb1 = b.lazydata.realized # noqa: F841
-    b = b.permute(1,0)
-    a.assign(a.permute(1,0) + b)   # this should not work!
-    a.realize()
-    ba2 = a.lazydata.realized # noqa: F841
-    # NOTE: don't test that it's assigned
-    #assert ba1 == ba2 and ba1 != bb1
+    a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N).realize()
+    b = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N).realize()
+    a_original, b_original = a.numpy(), b.numpy()
+    
+    # Test with incorrect permutation
+    a.assign(a.permute(1,0) + b.permute(1,0)).realize()
     with self.assertRaises(AssertionError):
-      np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)))
+      np.testing.assert_allclose(a.numpy(), a_original + b_original)
 
-    a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
-    b = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
-    a.realize()
-    b.realize()
-    a = a.permute(1,0)
-    a.assign(a + b)  # Add original b to permuted a
-    a.realize()
-
-    np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)).transpose(1,0) + np.arange(N*N).reshape((N,N)))
+    # Test with correct permutation
+    a = Tensor(a_original).permute(1,0)
+    a.assign(a + Tensor(b_original)).realize()
+    np.testing.assert_allclose(a.numpy(), a_original.T + b_original)
 
   def test_cast_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
