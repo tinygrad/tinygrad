@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.helpers import GlobalCounters, getenv
 from tinygrad.jit import TinyJit
 from tinygrad.nn import optim
-from tinygrad.nn.state import get_parameters
+from tinygrad.nn.state import get_parameters, load_state_dict, safe_load, safe_save, get_state_dict
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor, dtypes
 from extra.lr_scheduler import OneCycleLR
@@ -41,12 +41,19 @@ def get_model_and_config(path:str):
     config["attention_probs_dropout_prob"], 
     config["hidden_dropout_prob"]
   )
-  embedding_table = model.embeddings.word_embeddings.weight
+  p_weights = Tensor.uniform(*(config["hidden_size"], config["hidden_size"]), low=-0.1, high=0.1) #TODO: change init range
   s_weights = Tensor.uniform(*(2, config["hidden_size"]), low=-0.1, high=0.1) #TODO: change init range
   s_bias = Tensor.zeros(2)
   m_weights = Tensor.uniform(*(config["hidden_size"], config["hidden_size"]), low=-0.1, high=0.1) #TODO: change init range
   m_bias = Tensor.zeros((config["vocab_size"],))
-  p_weights = Tensor.uniform(*(config["hidden_size"], config["hidden_size"]), low=-0.1, high=0.1) #TODO: change init range
+  if getenv('USE_PRETRAINED'):
+    load_state_dict(model, safe_load("/tmp/bert.safetensor"))
+    p_weights = load_state_dict(p_weights, safe_load("/tmp/p_weights.safetensor"))
+    s_weights = load_state_dict(s_weights, safe_load("/tmp/s_weights.safetensor"))
+    s_bias = load_state_dict(s_bias, safe_load("/tmp/s_bias.safetensor"))
+    m_weights = load_state_dict(m_weights, safe_load("/tmp/m_weights.safetensor"))
+    m_bias = load_state_dict(m_bias, safe_load("/tmp/m_bias.safetensor"))
+  embedding_table = model.embeddings.word_embeddings.weight
   return model, embedding_table, s_weights, s_bias, m_weights, m_bias, p_weights 
 
 def one_hot(arr:Tensor, num_classes=3):
@@ -183,6 +190,13 @@ def pretrain():
               minutes, seconds = divmod(remainder, 60)
               print(f"MLM accuracy achieved in {int(hours)} hours, {int(minutes)} minutes, and {int(seconds)} seconds.")
               accuracy_achieved = True
+              print("Saving weights...")
+              safe_save(get_state_dict(model), "bert.safetensors")
+              safe_save(get_state_dict(p_weights), "/tmp/p_weights.safetensor")
+              safe_save(get_state_dict(s_weights), "/tmp/s_weights.safetensor")
+              safe_save(get_state_dict(s_bias), "/tmp/s_bias.safetensor")
+              safe_save(get_state_dict(m_weights), "/tmp/m_weights.safetensor")
+              safe_save(get_state_dict(m_bias), "/tmp/m_bias.safetensor")
               break
           e += 1
           st = cl
@@ -212,9 +226,9 @@ def train():
     pretrain()
   else:
     if getenv("HIP"):
-      devices = [f"hip:{i}" for i in range(6)] # find way to query device count
+      devices = [f"hip:{i}" for i in range(8)] # find way to query device count
     else:
-      devices = [f"gpu:{i}" for i in range(6)] # find way to query device count
+      devices = [f"gpu:{i}" for i in range(8)] # find way to query device count
     world_size = len(devices)
 
     assert BS % world_size == 0, f"batch size {BS} is not divisible by world size {world_size}"
