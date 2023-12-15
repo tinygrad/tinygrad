@@ -1,6 +1,6 @@
 import math
 from typing import Tuple, Optional, cast
-from tinygrad.helpers import argsort, DType, least_upper_float
+from tinygrad.helpers import argsort, DType, least_upper_float, dtypes
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
@@ -133,8 +133,8 @@ class Div(Function):
 
 class Where(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer, z:LazyBuffer) -> LazyBuffer:
-    self.x = x
-    return x.e(TernaryOps.WHERE, y, z)
+    self.x = x.cast(dtypes.bool)
+    return self.x.e(TernaryOps.WHERE, y, z)
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[None, Optional[LazyBuffer], Optional[LazyBuffer]]:
     return None, \
