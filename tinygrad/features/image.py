@@ -97,7 +97,7 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
 
 # *** images have weird indexing requirements ***
 
-from tinygrad.shape.symbolic import Node, AndNode, Variable, NumNode, SumNode, LtNode, sym_infer
+from tinygrad.shape.symbolic import Node, AndNode, Variable, LtNode, sym_infer
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
   idx = (idxy // 4) % base_shape[1]
@@ -122,8 +122,8 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       sig = -1 if muller < 0 else 1
 
       key_node = sig*node.a
-      if key_node not in val_dict: val_dict[key_node] = [key_node.min, key_node.max, abs(muller)]
-      val_dict[key_node][(sig + 1)//2] = sig*(node.b - 1)
+      lst = val_dict.setdefault(key_node, [key_node.min, key_node.max, abs(muller)])
+      lst[(sig + 1)//2] = sig*(node.b - 1)
 
     fakes = {}
     for cnt, (key_node, (mnn, mxn, multip)) in enumerate(val_dict.items()):
@@ -146,7 +146,5 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
       if idy_vars == node_vars or idy_vars & node_vars == set(): ones.append(node)
     valid = Variable.ands([i for i in nodes if i not in ones])
 
-  if valid.min == 0:
-    print(valid, idxy)
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy, valid)
   return (idx, idy), valid
