@@ -51,7 +51,7 @@ class TestAssign(unittest.TestCase):
     # NOTE: don't test that it's assigned
     #assert ba1 == ba2 and ba1 != bb1
     with self.assertRaises(AssertionError):
-        np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)))
+      np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)))
 
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
     b = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
