@@ -26,7 +26,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
       builder.urem(x, y) if is_bool_or_unsigned(var_dtype) else builder.srem(x, y) if dtypes.is_int(var_dtype) else builder.frem(x, y),
     BinaryOps.XOR: lambda builder, x, y, var_dtype: builder.xor(x, y),
     TernaryOps.MULACC: lambda builder, x, y, z, var_dtype: builder.fadd(builder.fmul(x, y, flags=MFLAGS), z, flags=MFLAGS),
-    TernaryOps.WHERE: lambda builder, x, y, z, var_dtype: builder.select(builder.trunc(x, ir.IntType(1)) if isinstance(x.type, ir.IntType) else builder.fcmp_unordered("!=", x, ir.Constant(ir.FloatType(), 0), flags=MFLAGS), y, z)  # noqa: E501
+    TernaryOps.WHERE: lambda builder, x, y, z, var_dtype: builder.select(x, y, z),
 }
 
 
