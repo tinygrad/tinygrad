@@ -474,6 +474,7 @@ class Tensor:
   @property
   def T(self) -> Tensor: return self.transpose()
   def transpose(self, ax1=1, ax2=0) -> Tensor:
+    assert len(self.shape) > ax1 and len(self.shape) > ax2, f"axes out of range for shape {self.shape}"
     order = list(range(len(self.shape)))
     order[ax1], order[ax2] = order[ax2], order[ax1]
     return self.permute(order)

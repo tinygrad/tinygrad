@@ -267,6 +267,9 @@ class TestTinygrad(unittest.TestCase):
     # force device copy - to() is opt'd away - Tensor(dev)/1 is ignored
     np.testing.assert_allclose(ua_arr, (Tensor(ua_arr)/Tensor(1)).numpy())
 
+  def test_transpose_1d(self):
+    with self.assertRaises(AssertionError): Tensor([1]).transpose()
+
 class TestZeroShapeTensor(unittest.TestCase):
   def test_shape_stride(self):
     t = Tensor.rand(3, 2, 0)
