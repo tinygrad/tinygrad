@@ -481,6 +481,9 @@ class Linearizer(Kernel):
     if uop == UOps.ALU:
       if arg in UnaryOps:
         assert dtype == vin[0].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=}"
+      elif arg == BinaryOps.CMPLT:
+        assert dtype == dtypes.bool, f"{arg} output dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
+        assert vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
       elif arg in BinaryOps:
         assert dtype == vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
       elif arg == TernaryOps.WHERE:
@@ -546,6 +549,6 @@ class Linearizer(Kernel):
         if input_acc[off] != acc[off]:
           acc[off] = self.uop(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]) + tuple(loop_ctx))
     else:
-      ret = [self.uop(UOps.ALU, dtype=dtypes.bool if x.op == BinaryOps.CMPLT else None, vin=val, arg=x.op) for val in zip(*values)]
+      ret = [self.uop(UOps.ALU, dtype=dtypes.bool if x.op == BinaryOps.CMPLT else val[-1].dtype, vin=val, arg=x.op) for val in zip(*values)]
     cache[x] = ret
     return ret
