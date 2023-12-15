@@ -1,6 +1,6 @@
 import os, atexit
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, Any
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, OpType, LazyOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters
@@ -17,7 +17,7 @@ if DEBUG >= 2:
           f"{' '*10}total: {GlobalCounters.kernel_count:5d} kernels {GlobalCounters.global_ops*1e-9:8.2f} GOPS {GlobalCounters.global_mem*1e-9:8.2f} GB {GlobalCounters.time_sum_s*1e3:8.2f} ms")  # noqa: E501
   atexit.register(print_globalcounters)
 
-G = None
+G:Any = None
 def init_graph():
   global G
   import networkx as nx
