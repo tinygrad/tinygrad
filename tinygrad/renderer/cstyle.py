@@ -302,8 +302,9 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) {
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
   code_for_op = {
-    **CStyleLanguage().code_for_op, **{op: lambda a,dtype,op=op: f"h{CStyleLanguage().code_for_op[op](a,dtype)}(half({a}))" if dtype == dtypes.half else f"float4({CStyleLanguage().code_for_op[op](a+'.x',dtype)}, {CStyleLanguage().code_for_op[op](a+'.y',dtype)}, {CStyleLanguage().code_for_op[op](a+'.z',dtype)}, {CStyleLanguage().code_for_op[op](a+'.w',dtype)})" if dtype == dtypes.float.vec(4) else f"{CStyleLanguage().code_for_op[op](a,dtype)}" for op in UnaryOps},
-    **{op: lambda a,b,dtype: f"__h{fxn}((half){a},(half){b})" if dtype == dtypes.half else CStyleLanguage().code_for_op[op](a,b,dtype) for op, fxn in zip(BinaryOps, ["add","sub","mul","div","lt"])},
+    **CStyleLanguage().code_for_op, **{op: lambda a,dtype,op=op: f"h{CStyleLanguage().code_for_op[op]('(half)'+a,dtype)}" if dtype == dtypes.half else f"float4({CStyleLanguage().code_for_op[op](a+'.x',dtype)}, {CStyleLanguage().code_for_op[op](a+'.y',dtype)}, {CStyleLanguage().code_for_op[op](a+'.z',dtype)}, {CStyleLanguage().code_for_op[op](a+'.w',dtype)})" if dtype == dtypes.float.vec(4) else f"{CStyleLanguage().code_for_op[op](a,dtype)}" for op in UnaryOps},
+    UnaryOps.NEG: lambda a,dtype: f"(-(half){a})" if dtype == dtypes.half else CStyleLanguage().code_for_op[UnaryOps.NEG](a,dtype),
+    **{op: lambda a, b, dtype, op=op, fxn=fxn: f"__h{fxn}((half){a},(half){b})" if dtype == dtypes.half else CStyleLanguage().code_for_op[op](a,b,dtype) for op, fxn in zip([BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.DIV, BinaryOps.CMPLT], ["add","sub","mul","div", "lt"])},
     BinaryOps.MAX: lambda a,b,dtype: f"__hgt((half){a},(half){b})?(half){a}:(half){b}" if dtype == dtypes.half else f"float4(max({a}.x,{b}.x),max({a}.y,{b}.y),max({a}.z,{b}.z),max({a}.w,{b}.w))" if dtype == dtypes.float.vec(4) else f"max({a},{b})",
     BinaryOps.MOD: lambda a,b,dtype: f"__hsub({a}, __hmul({b}, __float2half(floorf(__half2float({a}) / __half2float({b})))))" if dtype == dtypes.half else f"{a}%{b}",
     TernaryOps.WHERE: lambda a,b,c,dtype: f"((float){a}!=0?{b}:{c})" if dtype != dtypes.half else f"(half)((float){a}!=0?{b}:{c})"
