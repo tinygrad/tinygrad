@@ -266,12 +266,8 @@ CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 class HIPLanguage(CStyleLanguage):
   kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
-  __device__ float4 max(float4 x, float4 y) { return float4(max(x.x, y.x), max(x.y, y.y), max(x.z, y.z), max(x.w, y.w)); }
   __device__ float4 pow(float x, float4 y) { return float4(pow(x, y.x), pow(x, y.y), pow(x, y.z), pow(x, y.w)); }
   __device__ float4 pow(float4 x, float4 y) { return float4(pow(x.x, y.x), pow(x.y, y.y), pow(x.z, y.z), pow(x.w, y.w)); }
-  __device__ float4 log2(float4 x) { return float4(log2(x.x), log2(x.y), log2(x.z), log2(x.w)); }
-  __device__ float4 exp2(float4 x) { return float4(exp2(x.x), exp2(x.y), exp2(x.z), exp2(x.w)); }
-  __device__ float4 sin(float4 x) { return float4(sin(x.x), sin(x.y), sin(x.z), sin(x.w)); }
   typedef float float8 __attribute__((ext_vector_type(8)));
   __device__ float8 make_float8(float x, float y, float z, float w, float a, float b, float c, float d) { return {x, y, z, w, a, b, c, d}; }
   extern "C" __global__
@@ -300,32 +296,27 @@ __device__ void vstore_half(float data, size_t offset, half *p) { *(p + offset) 
 __device__ void vstore_half2(float2 data, size_t offset, half *p) { *(p + offset*2) = (half)data.x; *(p + offset*2 + 1) = (half)data.y; }
 __device__ void vstore_half4(float4 data, size_t offset, half *p) {
   *(p + offset*4) = (half)data.x; *(p + offset*4 + 1) = (half)data.y; *(p + offset*4 + 2) = (half)data.z; *(p + offset*4 + 3) = (half)data.w; }
-__device__ half exp2(half x) { return hexp2(x); }
-__device__ half log2(half x) { return hlog2(x); }
-__device__ half sin(half x) { return hsin(x); }
-__device__ half sqrt(half x) { return hsqrt(x); }
-__device__ half hmax(half a, half b) { return __hgt(a, b) ? a : b; }
-__device__ half operator%(const half &a, const half &b) { return __hsub(a, __hmul(b, __float2half(floorf(__half2float(a) / __half2float(b))))); }
-__device__ bool operator!=(const half &a, const int &b) { return (float)a != b; }
-
-// HACKS for ALU ops on half and result of half2 GEP
-__device__ half operator+(const half &a, const unsigned short &b) { return __hadd(a, (half)(b)); }
-__device__ half operator-(const half &a, const unsigned short &b) { return __hsub(a, (half)(b)); }
-__device__ half operator*(const half &a, const unsigned short &b) { return __hmul(a, (half)(b)); }
-__device__ half operator/(const half &a, const unsigned short &b) { return __hdiv(a, (half)(b)); }
-__device__ bool operator<(const half &a, const unsigned short &b) { return __hlt(a, (half)(b)); }
-// now the other way
-__device__ half operator+(const unsigned short &a, const half &b) { return __hadd((half)(a), b); }
-__device__ half operator-(const unsigned short &a, const half &b) { return __hsub((half)(a), b); }
-__device__ half operator*(const unsigned short &a, const half &b) { return __hmul((half)(a), b); }
-__device__ half operator/(const unsigned short &a, const half &b) { return __hdiv((half)(a), b); }
-__device__ bool operator<(const unsigned short &a, const half &b) { return __hlt((half)(a), b); }
   """
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
-  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"hmax({a},{b})",
-                 TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}!=0?{b}:{c})" if dtype != dtypes.half else f"(half)({a}!=0?{b}:{c})"}
+  code_for_op = {
+      **CStyleLanguage().code_for_op,
+      UnaryOps.LOG2: lambda a,dtype: f"hlog2({a})" if dtype == dtypes.half else f"float4(log2({a}.x),log2({a}.y),log2({a}.z),log2({a}.w))" if dtype == dtypes.float.vec(4) else f"log2({a})",
+      UnaryOps.EXP2: lambda a,dtype: f"hexp2({a})" if dtype == dtypes.half else f"float4(exp2({a}.x),exp2({a}.y),exp2({a}.z),exp2({a}.w))" if dtype == dtypes.float.vec(4) else f"exp2({a})",
+      UnaryOps.SIN: lambda a,dtype: f"hsin({a})" if dtype == dtypes.half else f"float4(sin({a}.x),sin({a}.y),sin({a}.z),sin({a}.w))" if dtype == dtypes.float.vec(4) else f"sin({a})",
+      UnaryOps.SQRT: lambda a,dtype: f"hsqrt({a})" if dtype == dtypes.half else f"float4(sqrt({a}.x),sqrt({a}.y),sqrt({a}.z),sqrt({a}.w))" if dtype == dtypes.float.vec(4) else f"sqrt({a})",
+
+      BinaryOps.ADD: lambda a,b,dtype: f"__hadd((half){a},(half){b})" if dtype == dtypes.half else f"{a}+{b}",
+      BinaryOps.SUB: lambda a,b,dtype: f"__hsub((half){a},(half){b})" if dtype == dtypes.half else f"{a}-{b}",
+      BinaryOps.MUL: lambda a,b,dtype: f"__hmul((half){a},(half){b})" if dtype == dtypes.half else f"{a}*{b}",
+      BinaryOps.DIV: lambda a,b,dtype: f"__hdiv((half){a},(half){b})" if dtype == dtypes.half else f"{a}/{b}",
+      BinaryOps.CMPLT: lambda a,b,dtype: f"__hlt((half){a},(half){b})" if dtype == dtypes.half else f"{a}<{b}",
+      BinaryOps.MAX: lambda a,b,dtype: f"__hgt((half){a},(half){b})?(half){a}:(half){b}" if dtype == dtypes.half else f"float4(max({a}.x,{b}.x),max({a}.y,{b}.y),max({a}.z,{b}.z),max({a}.w,{b}.w))" if dtype == dtypes.float.vec(4) else f"max({a},{b})",
+      BinaryOps.MOD: lambda a,b,dtype: f"__hsub({a}, __hmul({b}, __float2half(floorf(__half2float({a}) / __half2float({b})))))" if dtype == dtypes.half else f"{a}%{b}",
+
+      TernaryOps.WHERE: lambda a,b,c,dtype: f"((float){a}!=0?{b}:{c})" if dtype != dtypes.half else f"(half)((float){a}!=0?{b}:{c})"
+  }
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 
 # TODO: how much of this can be merged with above?
