@@ -126,6 +126,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker, 
   # otherwise we fuse it like normal
   return LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, st, seen_children) for x in buf.srcs), buf.arg)
 
+# this function determines what fuses
 def _get_lazyop(out:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker) -> LazyOp:
   potential_inputs = [(out,st)]
   merged_reduce: Optional[LazyBuffer] = None
@@ -142,9 +143,9 @@ def _get_lazyop(out:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker) -> Laz
       # maybe merge an elementwise op, as long as it doesn't expand and all the children have been seen
       if isinstance(pi.base.op, (UnaryOps, BinaryOps, TernaryOps)) and prod(pi.base.st.shape) >= prod(pi.st.shape):
         allowed = True
-        if pi != out:
-          for x in pi.base.children:
-            if x not in seen_children: allowed = False
+        #if pi != out:
+        #  for x in pi.base.children:
+        #    if x not in seen_children: allowed = False
         if allowed:
           new_st = pi.st+st if pi.base != pi else st
           potential_inputs += [(x,new_st) for x in pi.base.srcs]
@@ -172,6 +173,7 @@ def _create_schedule(out:LazyBuffer, seen:Set[LazyBuffer]) -> List[ScheduleItem]
 
   inputs: List[LazyBuffer] = []
   if out.op == LoadOps.COPY:
+    log_lazybuffer(out.srcs[0])
     op, inputs = LazyOp(LoadOps.COPY, (), out.srcs[0].base), [out.srcs[0].base]
   elif out.op == LoadOps.CUSTOM:
     op, inputs = LazyOp(LoadOps.CUSTOM, (), out.arg), list(out.srcs)
@@ -179,6 +181,7 @@ def _create_schedule(out:LazyBuffer, seen:Set[LazyBuffer]) -> List[ScheduleItem]
     op = LazyOp(LoadOps.EMPTY)
   else:
     base = out.srcs[0] if out.op == LoadOps.CONTIGUOUS else out
+    log_lazybuffer(base)
     op = _get_lazyop(base, inputs, ShapeTracker.from_shape(out.shape))
 
   ret: List[ScheduleItem] = []

@@ -16,7 +16,10 @@ if DEBUG >= 2:
     print(f"avg: {GlobalCounters.global_ops*1e-9/GlobalCounters.time_sum_s:8.2f} GFLOPS {GlobalCounters.global_mem*1e-9/GlobalCounters.time_sum_s:8.2f} GB/s",  # noqa: E501
           f"{' '*10}total: {GlobalCounters.kernel_count:5d} kernels {GlobalCounters.global_ops*1e-9:8.2f} GOPS {GlobalCounters.global_mem*1e-9:8.2f} GB {GlobalCounters.time_sum_s*1e3:8.2f} ms")  # noqa: E501
   atexit.register(print_globalcounters)
-if GRAPH:
+
+G = None
+def init_graph():
+  global G
   import networkx as nx
   G = nx.DiGraph()
   def save_graph_exit():
@@ -47,6 +50,7 @@ def str_dtype(dtyp):
 
 def realized_lazybuffer(lb, num):
   if GRAPH:
+    if G is None: init_graph()
     G.nodes[nm(lb)]['style'] = '"filled,bold"'
     G.nodes[nm(lb)]['fillcolor'] = G.nodes[nm(lb)]['fillcolor'][:-2]
     G.nodes[nm(lb)]['label'] = '"' + G.nodes[nm(lb)]["label"].replace('"', '') + f'\nK:{num}"'
@@ -55,6 +59,7 @@ def log_lazybuffer(lb, scheduled=False):
   top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0",
                 MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
   if GRAPH and not lb.realized:
+    if G is None: init_graph()
     if lb.base != lb:
       offset = lb.st.expr_node(NumNode(0))[0]
       label = f"{lb.st.shape}\n{lb.st.real_strides()}" + (f"\n{offset}" if offset != 0 else "")
