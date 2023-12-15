@@ -5,17 +5,6 @@ from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, prod, DType, PtrDType, strip_parens, getenv
 
-base = {
-    UnaryOps.NEG: lambda x,dtype: f"(-{x})" if dtype != dtypes.bool else f"(!{x})",
-    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})",
-    UnaryOps.SIN: lambda x,dtype: f"sin({x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
-    BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})",
-    BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})",
-    BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
-    BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
-    TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})", TernaryOps.WHERE: lambda a,b,c,dtype: f"((bool){a}?{b}:{c})"
-}
-
 class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"
   generic_var_prefix: str = ""
@@ -39,7 +28,16 @@ class CStyleLanguage(NamedTuple):
   external_local_bufs: bool = False
   uses_ptr_arithmetic: bool = False
   launch_bounds: bool = False
-  code_for_op: Dict = base
+  code_for_op: Dict = {
+    UnaryOps.NEG: lambda x,dtype: f"(-{x})" if dtype != dtypes.bool else f"(!{x})",
+    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})",
+    UnaryOps.SIN: lambda x,dtype: f"sin({x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
+    BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})",
+    BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})",
+    BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
+    BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
+    TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})", TernaryOps.WHERE: lambda a,b,c,dtype: f"((bool){a}?{b}:{c})"
+  }
 
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
@@ -304,7 +302,7 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) {
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
   code_for_op = {
-    **base, **{op: lambda a,dtype,op=op: f"h{base[op](a,dtype)}(half({a}))" if dtype == dtypes.half else f"float4({base[op](a+'.x',dtype)}, {base[op](a+'.y',dtype)}, {base[op](a+'.z',dtype)}, {base[op](a+'.w',dtype)})" if dtype == dtypes.float.vec(4) else f"{base[op](a,dtype)}" for op in [UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.SQRT]},
+    **CStyleLanguage().code_for_op, **{op: lambda a,dtype,op=op: f"h{CStyleLanguage().code_for_op[op](a,dtype)}(half({a}))" if dtype == dtypes.half else f"float4({CStyleLanguage().code_for_op[op](a+'.x',dtype)}, {CStyleLanguage().code_for_op[op](a+'.y',dtype)}, {CStyleLanguage().code_for_op[op](a+'.z',dtype)}, {CStyleLanguage().code_for_op[op](a+'.w',dtype)})" if dtype == dtypes.float.vec(4) else f"{CStyleLanguage().code_for_op[op](a,dtype)}" for op in [UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.SQRT]},
     BinaryOps.ADD: lambda a,b,dtype: f"__hadd((half){a},(half){b})" if dtype == dtypes.half else f"{a}+{b}",
     BinaryOps.SUB: lambda a,b,dtype: f"__hsub((half){a},(half){b})" if dtype == dtypes.half else f"{a}-{b}",
     BinaryOps.MUL: lambda a,b,dtype: f"__hmul((half){a},(half){b})" if dtype == dtypes.half else f"{a}*{b}",
