@@ -114,7 +114,7 @@ class Linearizer(Kernel):
             out = self.uop(UOps.GEP, localtype, (self.load_cache[key],), idx_small.max)
             for ix in range(idx_small.max, idx_small.min, -1):
               rvv = self.uop(UOps.GEP, localtype, (self.load_cache[key],), ix-1)
-              sel = self.uop(UOps.ALU, res.dtype, (res, self.const(ix)), BinaryOps.CMPLT)
+              sel = self.uop(UOps.ALU, dtypes.bool, (res, self.const(ix)), BinaryOps.CMPLT)
               out = self.uop(UOps.ALU, localtype, (sel, rvv, out), TernaryOps.WHERE)
             self.load_cache[key] = out
         else:
@@ -467,6 +467,11 @@ class Linearizer(Kernel):
 
   def uop(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None, simplify=True) -> UOp:  # noqa: E501
     key = (uop, dtype, vin, arg)
+
+    if uop == UOps.ALU:
+      if arg == BinaryOps.CMPLT: assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
+      if arg == TernaryOps.WHERE: assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
+
     if uop == UOps.PHI and vin[1].dtype != dtype: vin = (vin[0], self.cast(vin[1], dtype)) + vin[1:]
     if uop == UOps.ALU: # upcast vins to the same dtype
       upcast_dtype = dtypes.float if arg == TernaryOps.MULACC else max(cast(DType, x.dtype) for x in vin) # MULACC is only supported in float
