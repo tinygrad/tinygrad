@@ -337,7 +337,7 @@ class WGSLLanguage(CStyleLanguage):
   external_local_bufs = True
   code_for_op = { **CStyleLanguage().code_for_op, BinaryOps.CMPLT: lambda x,y,dtype: f"f32({x}<{y})",
                  TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},bool({a}))" }
-  # HACK: write bool as f32. remove after elementsize op cast inputs properly
+  # HACK: write bool as f32. remove after elementwise op cast inputs properly
   type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "f32"}
 
   def render_local(self, name: str, size: int):
