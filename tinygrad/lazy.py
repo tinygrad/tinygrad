@@ -173,8 +173,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       if prod(buf.base.st.shape) < prod(buf.st.shape):
         realizes.add(buf.base)
       return recurse_lb(buf.base)
-    else:
-      allbufs[buf] = None
+    allbufs[buf] = None
     if buf.op in LoadOps: realizes.add(buf.base)
     for x in buf.srcs: recurse_lb(x)
   for out in outs: recurse_lb(out.base)
@@ -212,7 +211,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       child_set = next_child_set
     if forced_realize:
       tr = r
-      if can_chase and False:
+      if can_chase:
         # can chase this down to contiguous children
         st = tr.st
         while len(tr.children) == 1:

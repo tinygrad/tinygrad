@@ -1,8 +1,6 @@
 import os, atexit
-try: import networkx as nx
-except ImportError: pass
 from typing import List, Any
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, OpType, LazyOp
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, LazyOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters
 from tinygrad.codegen.linearizer import UOps, UOp
@@ -21,6 +19,7 @@ G:Any = None
 def init_graph():
   global G
   if G is not None: return
+  import networkx as nx
   G = nx.DiGraph()
   def save_graph_exit():
     print("saving", G, f"to {GRAPHPATH}.svg")
