@@ -32,6 +32,7 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
     assert si.out._base is None, "no setting of non-base LazyBuffers"
     si.out._realized = si.out.output_buffer if si.out.output_buffer is not None else \
       Buffer(si.out.device, prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype)
+    del si.out.srcs
 
     # run the function (put it in JIT)
     if prg: prg.exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)
