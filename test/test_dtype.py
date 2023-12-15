@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 import torch
-from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX, temp, least_upper_dtype
+from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX, least_upper_float, temp, least_upper_dtype
 from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
@@ -268,6 +268,7 @@ class TestTypeSpec(unittest.TestCase):
     assert Tensor.eye(3, dtype= dtypes.int64).dtype == dtypes.int64
 
 core_types = list(DTYPES_DICT.values())
+floats = [dt for dt in core_types if dtypes.is_float(dt)]
 class TestTypePromotion(unittest.TestCase):
   @given(st.sampled_from(core_types))
   def test_self_promo_to_self(self, dtype):
@@ -297,6 +298,10 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.bool, dtypes.float64) == dtypes.float64
     assert least_upper_dtype(dtypes.float16, dtypes.int64) == dtypes.float16
     assert least_upper_dtype(dtypes.float16, dtypes.uint64) == dtypes.float16
+
+  @given(st.sampled_from(floats))
+  def test_float_to_float(self, dt):
+    assert least_upper_float(dt) == dt
 
 class TestAutoCastType(unittest.TestCase):
   @given(st.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_int(d) and is_dtype_supported(d)]))
