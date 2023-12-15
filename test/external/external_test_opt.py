@@ -113,7 +113,9 @@ class TestOptBinOp(unittest.TestCase):
 
   def test_no_binop_rerun(self): return self._test_no_binop_rerun(lambda a,b: a*b, lambda a,b: (a*b).reshape(16, 16, 1))
   def test_no_binop_rerun_alt(self): return self._test_no_binop_rerun(lambda a,b: (a*b).reshape(16, 16, 1), lambda a,b: a*b)
-  def test_no_binop_rerun_reduce_broadcast(self): return self._test_no_binop_rerun(lambda a,b: a.sum()+b, lambda a,b: a.sum().reshape(1,1)+b, allowed=2)
+  def test_no_binop_rerun_reduce_broadcast(self):
+    return self._test_no_binop_rerun(lambda a,b: a.sum()+b, lambda a,b: a.sum().reshape(1,1)+b, allowed=2)
+
   @unittest.skip("this test started failing with the new change, based movementop issue")
   def test_no_binop_rerun_transposed(self): return self._test_no_binop_rerun(lambda a,b: (a.T*b.T).T, lambda a,b: a*b)
   def test_no_binop_rerun_mid_reshape(self): return self._test_no_binop_rerun(lambda a,b: (a*b).reshape(256)+a.reshape(256))
@@ -166,7 +168,7 @@ class TestOpt(unittest.TestCase):
     with CLCache(allowed=1):
       d = a * b + c
       d.realize()
-    np.testing.assert_allclose(d.numpy(), na*nb+nc, rtol=1e-5)
+    np.testing.assert_allclose(d.numpy(), na*nb+nc, rtol=1e-5, atol=1e-7)
 
   def test_fold_reduce_elementwise(self):
     img = Tensor.ones(32)

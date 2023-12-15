@@ -1,7 +1,7 @@
 from typing import Dict, List, Final, Callable, DefaultDict
 from collections import defaultdict
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, Op
-from tinygrad.helpers import DType, dtypes, ImageDType, DEBUG, getenv
+from tinygrad.helpers import DType, PtrDType, dtypes, ImageDType, DEBUG, getenv
 from tinygrad.codegen.linearizer import  UOp, UOps
 from triton.compiler import compile as triton_compile
 import linecache
@@ -9,7 +9,7 @@ import math
 import re
 
 triton_dtypes = {dtypes.double: "tl.float64", dtypes.float32: "tl.float32", dtypes.float16: "tl.float16", dtypes.bool: "tl.int1", dtypes.int8: "tl.int8", dtypes.uint8: "tl.uint8", dtypes.int32: "tl.int32", dtypes.int64: "tl.int64", dtypes.uint32: "tl.uint32", dtypes.uint64: "tl.uint64", dtypes.int16: "tl.int16", dtypes.uint16: "tl.uint16"}
-signature_dtypes = {dtypes.double: "*fp64",dtypes.float32: "*fp32", dtypes.float16: "*fp16", dtypes.bool: "*i8", dtypes.int8: "*i1", dtypes.uint8: "*u8", dtypes._arg_int32: "i32", dtypes.int32: "*i32", dtypes.int64: "*i64", dtypes.uint32: "*u32", dtypes.uint64: "*u64", dtypes.int16: "*i16", dtypes.uint16: "*u16"}
+signature_dtypes = {dtypes.double: "fp64",dtypes.float32: "fp32", dtypes.float16: "fp16", dtypes.bool: "i8", dtypes.int8: "i1", dtypes.uint8: "u8", dtypes.int32: "i32", dtypes.int64: "i64", dtypes.uint32: "u32", dtypes.uint64: "u64", dtypes.int16: "i16", dtypes.uint16: "u16"}
 
 def next_power_of_2(x):
   return 1 << (x - 1).bit_length()
@@ -98,8 +98,8 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
       kk(f"{'if '+r[vin[3]]+': ' if len(vin)>3 else ''}tl.store({r[vin[0]]} + {r[vin[1]]}, {r[vin[2]].replace('//', '/')}, mask = {render_valid(valid)}) ")
     elif uop == UOps.DEFINE_GLOBAL:
       bufs.append(args)
-      signatures.append(signature_dtypes[args[1]])
-      r[u] = args[0]
+      signatures.append("*" if isinstance(dtype, PtrDType) else "" +  signature_dtypes[dtype])
+      r[u] = args
     elif uop == UOps.SPECIAL:
       dims.append(args[1])
       valid.append(f"{args[1]}<{get_max(args[2])}")
@@ -111,7 +111,7 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     elif uop == UOps.CAST and dtype is not None: r[u] = render_cast(r[vin[0]], dtype, isinstance(args, tuple) and args[1])
     else: raise NotImplementedError(f"unimplemented: {uop}")
 
-  prg = f"import triton\nimport triton.language as tl\ntl.core.TRITON_MAX_TENSOR_NUMEL = float('inf')\n@triton.jit\ndef {function_name}("+','.join(f"{buf[0]}" for buf in bufs)+"):\n"
+  prg = f"import triton\nimport triton.language as tl\ntl.core.TRITON_MAX_TENSOR_NUMEL = float('inf')\n@triton.jit\ndef {function_name}("+','.join(bufs)+"):\n"
   for i, line in enumerate(list(filter(lambda line: "tl.arange" in line, kernel))): kernel[kernel.index(line)] +=  f"[{', '.join([':' if i == j else 'None' for j in range(len(local_size))])}]"
   prg += "\n".join(kernel)
 
