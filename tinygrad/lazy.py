@@ -206,14 +206,14 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker, 
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
+    assert st.contiguous, "ReduceOps late fusion must be contiguous"
     st = ShapeTracker.from_shape(buf.srcs[0].shape)
 
   # otherwise we fuse it like normal
   return LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, st, realizes, False) for x in buf.srcs), buf.arg)
 
 def _get_bufs_for_chunk(out:LazyBuffer, realized:Set[LazyBuffer], first=True) -> Set[LazyBuffer]:
-  if out.realized: assert out in realized
-  if out in realized and not first: return set()
+  if out.realized or (out in realized and not first): return set()
   return set([out]).union(*[_get_bufs_for_chunk(x.base, realized, False) for x in out.srcs])
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
@@ -221,19 +221,16 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   for out in outs: log_lazybuffer(out, scheduled=True)
 
   # realize all places where the buffer is expanded
-  realized: Set[LazyBuffer] = set([x.base for x in outs])
+  realized: Set[LazyBuffer] = set([x.base for x in outs if not x.realized])
   allbufs: Set[LazyBuffer] = set()
   def recurse_lb(buf:LazyBuffer):
-    if buf in allbufs: return
+    if buf in allbufs or buf.realized: return
     allbufs.add(buf)
     log_lazybuffer(buf)
     if buf.base != buf:
       if prod(buf.base.st.shape) < prod(buf.st.shape):
         realized.add(buf.base)
       return recurse_lb(buf.base)
-    if buf.realized:
-      realized.add(buf.base)
-      return
     if buf.op in LoadOps: realized.add(buf.base)
     for x in buf.srcs: recurse_lb(x)
   for out in outs: recurse_lb(out.base)
@@ -249,13 +246,16 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   extra_realizes = set()
   for r in realized:
     assert r.base == r
-    if r.realized or r.op in LoadOps: continue
+    assert not r.realized
+    if r.op in LoadOps: continue
     chunk = _get_bufs_for_chunk(r, realized)
     reduces = dedup([x for x in chunk if x.op in ReduceOps])
     if len(reduces) == 1:
       reduce_for_op[r] = reduces[0]
     elif len(reduces) > 1:
+      extra_realizes |= set(reduces)
       # find a reduce that works
+      """
       for r2 in reduces:
         extra_realize = set([x for x in reduces if x != r2])
         chunk2 = _get_bufs_for_chunk(r, realized | extra_realize)
@@ -265,6 +265,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
           break
       else:
         extra_realizes |= set(reduces)
+      """
   realized = realized | extra_realizes
 
   """
