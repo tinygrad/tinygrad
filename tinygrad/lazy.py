@@ -2,7 +2,7 @@ from __future__ import annotations
 import numpy as np
 import sys
 from typing import Union, Optional, Any, Tuple, List, Set, Dict
-from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten
+from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten, getenv
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps
 from tinygrad.ops import Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem, vars_from_ast
 from tinygrad.shape.symbolic import sint
@@ -26,7 +26,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType,
   ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base)
   # TODO: remove LoadOps.CONST here while keeping a pretty graph and working fusions
   # TODO: might be possible to remove LoadOps.COPY
-  if op not in {LoadOps.EMPTY, LoadOps.CUSTOM, LoadOps.CONST, LoadOps.COPY}: lazycache[wop] = ret
+  if op not in {LoadOps.EMPTY, LoadOps.CUSTOM, LoadOps.CONST, LoadOps.COPY} and getenv("LAZYCACHE", 1): lazycache[wop] = ret
   return ret
 
 class LazyBuffer:
@@ -36,6 +36,7 @@ class LazyBuffer:
     self.device, self.st, self.dtype = device, st, dtype
     self.shape = self.st.shape
     assert base is None or base.base == base
+    assert base is None or len(srcs) == 0
     self._base = base
     self.children: WeakSet[LazyBuffer] = WeakSet()
     for x in srcs: x.base.children.add(self.base)
@@ -167,12 +168,13 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   allbufs: Dict[LazyBuffer, None] = {}
   def recurse_lb(buf:LazyBuffer):
     if buf in allbufs or buf.realized: return
-    allbufs[buf] = None
     log_lazybuffer(buf)
     if buf.base != buf:
       if prod(buf.base.st.shape) < prod(buf.st.shape):
         realizes.add(buf.base)
       return recurse_lb(buf.base)
+    else:
+      allbufs[buf] = None
     if buf.op in LoadOps: realizes.add(buf.base)
     for x in buf.srcs: recurse_lb(x)
   for out in outs: recurse_lb(out.base)
@@ -186,6 +188,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
     child_set: Dict[LazyBuffer, ShapeTracker] = {r: r.st}
     realized_children: Dict[LazyBuffer, ShapeTracker] = {}
     forced_realize = False
+    can_chase = True
     while not forced_realize and len(child_set):
       next_child_set = {}
       for tr,st in child_set.items():
@@ -195,6 +198,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
           # can only reduce contiguous
           # max one reduceop per kernel
           if len(realized_children) > 1 or not st.contiguous or (tr in reduce_for_op and reduce_for_op[tr] != r):
+            can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
             forced_realize = True
             break
           continue
@@ -207,8 +211,17 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
             next_child_set[tr_next] = st + [s for s in tr_next.srcs if s.base == tr][0].st
       child_set = next_child_set
     if forced_realize:
-      # TODO: can chase this down to contiguous children
-      realizes.add(r)
+      tr = r
+      if can_chase and False:
+        # can chase this down to contiguous children
+        st = tr.st
+        while len(tr.children) == 1:
+          tr_next = next(iter(tr.children))
+          st = st + [s for s in tr_next.srcs if s.base == tr][0].st
+          if not st.contiguous or tr_next.op in ReduceOps: break
+          tr = tr_next
+        reduce_for_op[tr] = r
+      realizes.add(tr)
     else:
       assert len(realized_children) == 1
       reduce_for_op[next(iter(realized_children.keys()))] = r

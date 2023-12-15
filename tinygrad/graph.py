@@ -1,6 +1,7 @@
 import os, atexit
-from collections import defaultdict
-from typing import Dict, List, Any
+try: import networkx as nx
+except ImportError: pass
+from typing import List, Any
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, OpType, LazyOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters
@@ -9,7 +10,6 @@ from tinygrad.shape.symbolic import NumNode
 
 # **** debugging and graphing ****
 
-cnts: Dict[OpType, int] = defaultdict(int)
 if DEBUG >= 2:
   def print_globalcounters():
     if GlobalCounters.time_sum_s == 0: return
@@ -20,10 +20,9 @@ if DEBUG >= 2:
 G:Any = None
 def init_graph():
   global G
-  import networkx as nx
+  if G is not None: return
   G = nx.DiGraph()
   def save_graph_exit():
-    for k,v in cnts.items(): print(k, v)
     print("saving", G, f"to {GRAPHPATH}.svg")
     nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
     # -Gnslimit=100 can make it finish, but you won't like results
@@ -50,7 +49,7 @@ def str_dtype(dtyp):
 
 def realized_lazybuffer(lb, num):
   if GRAPH:
-    if G is None: init_graph()
+    init_graph()
     G.nodes[nm(lb)]['style'] = '"filled,bold"'
     G.nodes[nm(lb)]['fillcolor'] = G.nodes[nm(lb)]['fillcolor'][:-2]
     G.nodes[nm(lb)]['label'] = '"' + G.nodes[nm(lb)]["label"].replace('"', '') + f'\nK:{num}"'
@@ -59,7 +58,7 @@ def log_lazybuffer(lb, scheduled=False):
   top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0",
                 MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
   if GRAPH and not lb.realized:
-    if G is None: init_graph()
+    init_graph()
     if lb.base != lb:
       offset = lb.st.expr_node(NumNode(0))[0]
       label = f"{lb.st.shape}\n{lb.st.real_strides()}" + (f"\n{offset}" if offset != 0 else "")

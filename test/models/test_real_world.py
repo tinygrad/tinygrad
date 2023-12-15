@@ -12,7 +12,7 @@ from test.helpers import derandomize_model
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
 from examples.hlb_cifar10 import SpeedyResNet
 from examples.llama import Transformer as LLaMaTransformer, MODEL_PARAMS as LLAMA_MODEL_PARAMS
-from examples.stable_diffusion import UNetModel
+from examples.stable_diffusion import UNetModel, ResBlock
 
 global_mem_used = 0
 def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed, all_jitted=False):
@@ -54,6 +54,20 @@ class TestRealWorld(unittest.TestCase):
     @TinyJit
     def test(t, t2): return model(t, 801, t2).realize()
     helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 953)
+
+  def test_mini_stable_diffusion(self):
+    model = [ResBlock(320, 1280, 320) for _ in range(4)]
+    derandomize_model(model)
+    @TinyJit
+    def test(t, t2):
+      import gc
+      for l in model:
+        t = l(t, t2)
+        gc.collect()
+      ret = t.realize()
+      gc.collect()
+      return ret
+    helper_test("test_mini_sd", lambda: (Tensor.empty(4, 320, 64, 64), Tensor.empty(1, 1280)), test, 18.0, 953)
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp1")

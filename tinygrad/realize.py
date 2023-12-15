@@ -1,8 +1,8 @@
 from typing import List, Dict, Optional
 from tinygrad.ops import LoadOps, ScheduleItem
-from tinygrad.device import Device, Buffer, BufferCopy, JITRunner
+from tinygrad.device import Device, Buffer, BufferCopy, JITRunner, update_stats
 from tinygrad.graph import print_tree, realized_lazybuffer
-from tinygrad.helpers import prod, GlobalCounters
+from tinygrad.helpers import prod, GlobalCounters, colored
 from tinygrad.shape.symbolic import Variable
 
 # *** schedule running ***
@@ -20,7 +20,7 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   if si.ast.op is LoadOps.CUSTOM: return CustomOp(si.ast.arg)
   return Device[si.out.device].get_runner(si.ast)
 
-def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
+def run_schedule(schedule:List[ScheduleItem]):
   while len(schedule):
     si = schedule.pop(0)
     assert all(x.realized for x in si.inputs), f"can't run schedule, some inputs aren't realized {[x for x in si.inputs if x.realized is None]}"
@@ -36,4 +36,5 @@ def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
 
     # run the function (put it in JIT)
     if prg: prg.exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)
+    else: update_stats(colored(f"empty {si.out.st.size():10d} {si.out.dtype}", "yellow"), 0, 0, {}, None, 1, device=si.out.device)
     realized_lazybuffer(si.out, GlobalCounters.kernel_count)
