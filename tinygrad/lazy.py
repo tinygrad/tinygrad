@@ -200,7 +200,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker, 
     return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.arg), buf.dtype, st.simplify().unbind()))
 
   # if we aren't fusing it, it's a load and we add it to the inputs
-  if buf.realized or (buf in realizes and not first):
+  if buf.realized or (buf in realizes and (not first or buf.op in LoadOps)):
     if buf not in inputs: inputs.append(buf)
     return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, st.simplify().unbind()))
 
@@ -235,57 +235,31 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
     for x in buf.srcs: recurse_lb(x)
   for out in outs: recurse_lb(out.base)
 
-  # realize all places where the buffer has two children
-  #for b in allbufs:
-  #  if b.base != b: continue
-  #  if len(b.children) > 1:
-  #    realized.add(b)
-
-  # get the reduces for each chunk of the graph, select the one for each
+  # find all reduces, and pair them to a elementwise op
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
-  extra_realizes = set()
-  for r in realized:
-    assert r.base == r
-    assert not r.realized
-    if r.op in LoadOps: continue
-    chunk = _get_bufs_for_chunk(r, realized)
-    reduces = dedup([x for x in chunk if x.op in ReduceOps])
-    if len(reduces) == 1:
-      reduce_for_op[r] = reduces[0]
-    elif len(reduces) > 1:
-      extra_realizes |= set(reduces)
-      # find a reduce that works
-      """
-      for r2 in reduces:
-        extra_realize = set([x for x in reduces if x != r2])
-        chunk2 = _get_bufs_for_chunk(r, realized | extra_realize)
-        if len(dedup([x for x in chunk2 if x.op in ReduceOps])) == 1:
-          reduce_for_op[r] = r2
-          extra_realizes |= extra_realize
-          break
-      else:
-        extra_realizes |= set(reduces)
-      """
-  realized = realized | extra_realizes
+  for r in allbufs:
+    if r != r.base or r.op not in ReduceOps: continue
 
-  """
-  # realize all reduces that would have been run twice
-  seen_reduce = set()
-  extra_realizes = set()
-  for r in reduce_for_op.values():
-    if r in seen_reduce:
-      extra_realizes.add(r)
-    seen_reduce.add(r)
-  reduce_for_op = {k:v for k,v in reduce_for_op.items() if v not in extra_realizes}
-  realized = realized | extra_realizes
-
-  # confirm no reduce is run twice
-  assert len(reduce_for_op) == len(set(reduce_for_op.values()))
-  """
+    # follow the reduce down
+    child_set: Dict[LazyBuffer, ShapeTracker] = {r: r.st}
+    realized_children: Dict[LazyBuffer, ShapeTracker] = {}
+    while len(child_set):
+      next_child_set = {}
+      for tr,st in child_set.items():
+        if tr in realized:
+          realized_children[tr] = st
+          continue
+        for tr_next in tr.children:
+          next_child_set[tr_next] = st + [s for s in tr_next.srcs if s.base == tr][0].st
+      child_set = next_child_set
+    if len(realized_children) == 1 and realized_children[k:=next(iter(realized_children.keys()))].contiguous and k not in reduce_for_op:
+      reduce_for_op[k] = r
+    else:
+      realized.add(r)
 
   # schedule
   def recursive_schedule(out:LazyBuffer) -> List[ScheduleItem]:
-    if out in seen or out.realized: return []
+    if out in seen or out.realized or out.op == LoadOps.CONST: return []
     assert out.base == out
     seen.add(out)
 
@@ -298,7 +272,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       op = LazyOp(LoadOps.EMPTY)
     else:
       base = out.srcs[0] if out.op == LoadOps.CONTIGUOUS else out
-      output_st = ShapeTracker.from_shape(reduce_for_op[base].shape if base in reduce_for_op else base.shape)
+      output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else base.shape)
       op = _recursive_lazyop(base, inputs, output_st, realized)
       op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, base.dtype, output_st.simplify().unbind()))
 

@@ -234,6 +234,7 @@ class TestSchedule(unittest.TestCase):
     f = d+e
     check_schedule(f, 2)
 
+  @unittest.skip("don't do this anymore")
   def test_dont_fuse_binops_with_children(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
