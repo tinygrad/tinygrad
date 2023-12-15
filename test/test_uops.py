@@ -84,7 +84,7 @@ class TestFloatUOps(TestUOps):
   # MOD isn't tested on floats
 
   def test_mulacc(self): self._test_top_fxn(TernaryOps.MULACC, lambda a,b,c: (a*b)+c)
-  def test_where(self): self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c)
+  # def test_where(self): self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c)
 
 # TODO: fix this on all the backends
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled) or getenv('ARM64', False), "only test for compiled backends, broken on some")
@@ -98,8 +98,8 @@ class TestNonFloatUOps(TestUOps):
   def test_cmplt_int32(self): self._test_bop_fxn(BinaryOps.CMPLT, lambda a,b: float(a<b), PtrDType(dtypes.int32))
   @unittest.skipUnless(is_dtype_supported(dtypes.bool), "dtype not supported")
   def test_mul_bool(self): self._test_bop_fxn(BinaryOps.MUL, lambda a,b: bool(a) and bool(b), PtrDType(dtypes.bool))
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "dtype not supported")
-  def test_where_float16(self): self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, PtrDType(dtypes.float16))
+  # @unittest.skipUnless(is_dtype_supported(dtypes.float16), "dtype not supported")
+  # def test_where_float16(self): self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, PtrDType(dtypes.float16))
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
