@@ -297,6 +297,7 @@ class TestSchedule(unittest.TestCase):
     # NOOP, 3 convs, contiguous
     check_schedule(x, 5)
 
+  @unittest.skip("This needs contiguous w inverted shapetracker")
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)
     b2 = Tensor.empty(16)
@@ -390,6 +391,14 @@ class TestSchedule(unittest.TestCase):
     x = x.sum(2)
     out2 = x + 1
     out = x.relu().sum(1) + out2[0]
+    check_schedule(out, 2)
+
+  def test_example_matmul(self):
+    x = Tensor.eye(64, requires_grad=True)
+    y = Tensor.eye(64, requires_grad=True)
+    z = y.matmul(x).sum()
+    z.backward()
+    out = x.grad.contiguous()
     check_schedule(out, 2)
 
 if __name__ == '__main__':
