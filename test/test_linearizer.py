@@ -302,10 +302,13 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.upcasted >= 2 and k.full_shape[k.shape_len-k.upcasted:k.shape_len].count(6) == 2
 
   def test_masked_upcast_wino_full(self):
+    x,w = Tensor.rand(1,4,9,9, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
+
     old_wino = Tensor.wino
     Tensor.wino = True
-    x,w = Tensor.rand(1,4,9,9, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
     out = Tensor.conv2d(x,w, padding=1)
+    Tensor.wino = old_wino
+
     upcasts = []
     # collect upcasts of tile transform kernels
     for i, si in enumerate(out.lazydata.schedule()):
@@ -325,8 +328,6 @@ class TestHandCodedOpts(unittest.TestCase):
       if len(k.bufs) < 20: continue  # not a tile transform kernel
       # heuristic number to make sure that at least some upcasts but not too many upcasts are being done
       assert 6 <= prod(k.full_shape[k.shape_len - k.upcasted:k.shape_len]) <= 49
-
-    Tensor.wino = old_wino
 
   def test_masked_upcast_many(self):
     layer_1 = Tensor.cat(Tensor.rand(3, 4), Tensor.rand(4, 4))

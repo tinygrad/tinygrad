@@ -157,6 +157,13 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
     op = _recursive_lazyop(out, inputs, output_st, realizes)
     op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st))
 
+  if out.output_buffer is not None:
+    for i,a in enumerate(inputs):
+      if a.realized == out.output_buffer:
+        if any(not x.arg.st.contiguous for x in op.get_lazyops() if x.op == BufferOps.LOAD and x.arg.idx == i+1):
+          out.output_buffer = None
+          break
+
   var_vals = merge_dicts([out.st.var_vals] + [buf.st.var_vals for buf in inputs])
   return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + \
     [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in vars_from_ast(op)})]
