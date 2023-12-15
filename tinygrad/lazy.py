@@ -168,7 +168,9 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
   if buf.base != buf:
     # realize all places where the buffer is expanded
     if prod(buf.base.st.shape) < prod(buf.st.shape):
-      realizes.add(buf.base)
+      # make an exception for simple pads
+      if len(buf.st.views) != 1 or buf.st.views[-1].mask is None or prod(buf.base.st.shape) != prod([y-x for x,y in buf.st.views[-1].mask]):
+        realizes.add(buf.base)
     return _recurse_lb(buf.base, realizes, allbufs)
   allbufs[buf] = None
   if buf.op in LoadOps: realizes.add(buf.base)
@@ -186,7 +188,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   allbufs: Dict[LazyBuffer, None] = {}
   for out in outs: _recurse_lb(out.base, realizes, allbufs)
 
-  # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce
+  # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
   for r in allbufs.keys():
     if r != r.base or r.op not in ReduceOps or r in realizes: continue

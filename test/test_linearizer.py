@@ -126,7 +126,7 @@ def helper_realized_ast(r:Tensor):
   s = r.lazydata.schedule()
   run_schedule(s[:-1])  # run all kernels except the last one
   # now all input LazyBuffers buffers in s[-1] should be realized
-  output_buffer = Buffer(s[-1].out.device, prod((s if isinstance(s, int) else s.max for s in s[-1].out.shape)), s[-1].out.dtype, **s[-1].out._device_extra_args())  # allocate an output buffer
+  output_buffer = Buffer(s[-1].out.device, prod((s if isinstance(s, int) else s.max for s in s[-1].out.shape)), s[-1].out.dtype)  # allocate an output buffer
   return s[-1].ast, [output_buffer] + [l.realized for l in s[-1].inputs]
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
@@ -281,10 +281,10 @@ class TestHandCodedOpts(unittest.TestCase):
     layer_1 = Tensor.cat(*[Tensor.rand(5) for _ in range(4)])
     layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 20))
 
-    s = layer_2.lazydata.schedule()[-1]
-    k = Linearizer(s.ast)
+    s = layer_2.lazydata.schedule()
+    k = Linearizer(s[-1].ast)
     k.hand_coded_optimizations()
-    assert len(k.bufs) == 6  # make sure all ops are done in one kernel
+    assert len(k.bufs) == 6, f"got {len(k.bufs)=} != 6"  # make sure all ops are done in one kernel
     # masked upcast should upcast masked axis of size 7
     # masked upcast should not upcast large (20) last axis
     # float4/other hcopt shouldn't upcast last axis, since we already have 7 upcast, and the last axis is not very contiguous
