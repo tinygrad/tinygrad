@@ -1,4 +1,5 @@
 from tinygrad.device import JITRunner
+from tinygrad.helpers import DTYPES_DICT, dtypes
 from tinygrad.ops import LazyOp, LoadOps
 from tinygrad.nn.state import get_parameters
 
@@ -24,3 +25,6 @@ def assert_jit_cache_len(fxn, expected_len):
     # until we have a better way of typing the prg in JitItem
     assert type(fxn.jit_cache[0].prg).__name__.endswith('Graph')
     assert len(fxn.jit_cache[0].prg.jit_cache) == expected_len
+
+float_dtypes = [v for v in DTYPES_DICT.values() if dtypes.is_float(v)]
+int_dtypes = [v for v in DTYPES_DICT.values() if dtypes.is_int(v)]
