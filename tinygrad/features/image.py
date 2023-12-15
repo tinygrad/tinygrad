@@ -97,30 +97,32 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
 
 # *** images have weird indexing requirements ***
 
-from tinygrad.shape.symbolic import Node, AndNode, Variable, NumNode, SumNode, LtNode
+from tinygrad.shape.symbolic import Node, AndNode, Variable, NumNode, SumNode, LtNode, sym_infer
 
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
   idx = (idxy // 4) % base_shape[1]
   idy = (idxy // (4 * base_shape[1]))
 
   if valid.min == 0:
+    idxy_vars = idxy.vars()
     nodes = valid.nodes if isinstance(valid, AndNode) else [valid]
     val_dict: Dict[Node, Any] = {}
     # TODO: is this correct? should it check there's only one variable from each component?
-    idxy_nodes = idxy.flat_components if isinstance(idxy, SumNode) else [idxy]
-    idxy_flat_var = [(i, list(i.vars())[0]) for i in idxy_nodes if not isinstance(i, NumNode)]
+    idxy_numnode = sym_infer(idxy, {var: 0 for var in idxy_vars})
 
     for node in nodes:
       assert isinstance(node, LtNode)
-      node_flat, node_vars = node.a.flat_components if isinstance(node.a, SumNode) else [node.a], node.vars()
-      same_sym = [i for (i, var) in idxy_flat_var if var in node_vars]
-      if len(same_sym) == 0: continue
-      first, second = sorted(same_sym)[0], sorted(node_flat)[0]
-      f_b = 1 if isinstance(first, Variable) else first.b
-      s_b = 1 if isinstance(second, Variable) else second.b
-      sig = -1 if s_b < 0 else 1
+      node_vars = node.vars()
+      if node_vars - idxy_vars != set(): continue
+      one_infer = {var: (1 if var in node_vars else 0) for var in idxy_vars}
+      a = sym_infer(idxy, one_infer) - idxy_numnode
+      c = sym_infer(node.a, one_infer)
+
+      muller = (a//c)
+      sig = -1 if muller < 0 else 1
+
       key_node = sig*node.a
-      if key_node not in val_dict: val_dict[key_node] = [key_node.min, key_node.max, abs(f_b//s_b)]
+      if key_node not in val_dict: val_dict[key_node] = [key_node.min, key_node.max, abs(muller)]
       val_dict[key_node][(sig + 1)//2] = sig*(node.b - 1)
 
     fakes = {}
@@ -133,18 +135,18 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
     idx = (idxy // 4) % base_shape[1]
     idy = (idxy // (4 * base_shape[1]))
 
-    fake_rep = {fake: node for fake, node in fakes.items()}
+    idx = idx.substitute(fakes)
+    idy = idy.substitute(fakes)
 
-    idx = idx.substitute(fake_rep)
-    idy = idy.substitute(fake_rep)
-
-    idy_vars, idx_vars, ones = set(idy.vars()), set(idx.vars()), []
+    idy_vars, idx_vars, ones = idy.vars(), idx.vars(), []
     for node in nodes:
-      node_vars = set(node.vars())
+      node_vars = node.vars()
       if not node_vars & (idx_vars | idy_vars): continue #There is simplified NumNode which can not go outside the bounds
       # NOTE: Why does only idy is problematic? and not the idx
       if idy_vars == node_vars or idy_vars & node_vars == set(): ones.append(node)
     valid = Variable.ands([i for i in nodes if i not in ones])
 
+  if valid.min == 0:
+    print(valid, idxy)
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy, valid)
   return (idx, idy), valid
