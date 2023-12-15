@@ -387,7 +387,7 @@ jobs:
         id: cache-build
         uses: actions/cache@v3
         env:
-          cache-name: cache-gpuocelot-build
+          cache-name: cache-gpuocelot-build-2
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
           key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480-rebuild
