@@ -374,5 +374,23 @@ class TestSchedule(unittest.TestCase):
     out = x.sum(axis=2).T+y
     check_schedule(out, 2)
 
+  def test_two_elus_sum(self):
+    x = Tensor.empty(32, 32)
+    y = Tensor.empty(32, 32)
+    out = x.sum(1).relu().elu() + y.sum(1).relu().elu()
+    check_schedule(out, 2)
+
+  def test_multistage_reduce(self):
+    x = Tensor.empty(32, 32, 32)
+    out = x.sum(2).relu().sum(1)
+    check_schedule(out, 2)
+
+  def test_multistage_reduce_fork(self):
+    x = Tensor.empty(32, 32, 32)
+    x = x.sum(2)
+    out2 = x + 1
+    out = x.relu().sum(1) + out2[0]
+    check_schedule(out, 2)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
