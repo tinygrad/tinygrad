@@ -8,7 +8,7 @@ from itertools import accumulate
 import numpy as np
 
 from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int, round_up, merge_dicts
-from tinygrad.lazy import LazyBuffer
+from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import sint
@@ -95,11 +95,7 @@ class Tensor:
   # ***** data handlers ****
 
   @staticmethod
-  def corealize(lst:Iterable[Tensor]):
-    seen:Set[LazyBuffer] = set()
-    sched = []
-    for t in lst: sched += t.lazydata.schedule(seen)
-    run_schedule(sched)
+  def corealize(lst:Iterable[Tensor]): run_schedule(create_schedule([x.lazydata for x in lst]))
 
   def realize(self) -> Tensor:
     run_schedule(self.lazydata.schedule())

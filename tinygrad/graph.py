@@ -67,7 +67,7 @@ def log_lazybuffer(lb, scheduled=False):
       G.add_edge(nm(lb.base), nm(lb), color='#00000060')
       lb = lb.base
     for x in lb.srcs:
-      if nm(x) not in G.nodes: G.add_node(nm(x), label=f'"{str(x.realized)[5:-1].replace(" ", chr(10))}"', style='filled', fillcolor="#f0c080")
+      if nm(x) not in G.nodes: G.add_node(nm(x), label=f'"{str(x.realized)[5:-1].replace(" ", chr(10))}"', style='filled', fillcolor="#f0c08080")
       G.add_edge(nm(x), nm(lb), color='#a0a0a0')
     label = '"' + \
       (str(set(x.shape for x in lb.srcs))+"\n"+str(lb.shape) if lb.op in ReduceOps else str(lb.shape)) + \

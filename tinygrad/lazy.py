@@ -1,13 +1,13 @@
 from __future__ import annotations
 import numpy as np
-from typing import Union, Optional, Any, Tuple, List, Set
-from tinygrad.helpers import prod, dtypes, DType, merge_dicts, DEBUG
+from typing import Union, Optional, Any, Tuple, List, Set, Dict
+from tinygrad.helpers import prod, dtypes, DType, merge_dicts, DEBUG, dedup, flatten
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps
 from tinygrad.ops import Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem, vars_from_ast
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
-from tinygrad.graph import print_tree, log_lazybuffer
+from tinygrad.graph import print_tree, log_lazybuffer, realized_lazybuffer
 from weakref import ref, WeakSet, WeakValueDictionary
 
 lazycache: WeakValueDictionary = WeakValueDictionary()
@@ -64,7 +64,7 @@ class LazyBuffer:
   def is_unrealized_const(self): return not self.realized and self.base.op == LoadOps.CONST
   def is_unrealized_contiguous_const(self): return not self.realized and self.op == LoadOps.CONST
 
-  def schedule(self, seen=None): return create_schedule(self, seen)
+  def schedule(self, seen=None): return create_schedule([self], seen)
 
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:
@@ -103,29 +103,8 @@ class LazyBuffer:
 
 # *** schedule creation ***
 
-def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker, seen_children:Set[LazyBuffer]):
-  if buf != buf.base:
-    st = buf.st+st
-    buf = buf.base
-  # all buffers here are base now
-  assert buf.op is not None
 
-  # consts are always fused and generated
-  if buf.op == LoadOps.CONST:
-    return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.arg), buf.dtype, st.simplify().unbind()))
-
-  # if we aren't fusing it, it's a load and we add it to the inputs
-  if buf not in seen_children:
-    if buf not in inputs: inputs.append(buf)
-    return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, st.simplify().unbind()))
-
-  # if it's a reduce, we have to change the shapetracker
-  if buf.op in ReduceOps:
-    st = ShapeTracker.from_shape(buf.srcs[0].shape)
-
-  # otherwise we fuse it like normal
-  return LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, st, seen_children) for x in buf.srcs), buf.arg)
-
+"""
 # this function determines what fuses
 def _get_lazyop(out:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker) -> LazyOp:
   potential_inputs = [(out,st)]
@@ -140,16 +119,17 @@ def _get_lazyop(out:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker) -> Laz
       log_lazybuffer(pi)
       if pi.realized: continue  # if it's realized we just use it
 
+      allowed = True
+      if pi != out:
+        for x in pi.base.children:
+          if x not in seen_children: allowed = False
+      if not allowed: continue  # if we haven't seen all children, continue
+
       # maybe merge an elementwise op, as long as it doesn't expand and all the children have been seen
       if isinstance(pi.base.op, (UnaryOps, BinaryOps, TernaryOps)) and prod(pi.base.st.shape) >= prod(pi.st.shape):
-        allowed = True
-        if pi != out:
-          for x in pi.base.children:
-            if x not in seen_children: allowed = False
-        if allowed:
-          new_st = pi.st+st if pi.base != pi else st
-          potential_inputs += [(x,new_st) for x in pi.base.srcs]
-          seen_children.add(pi.base)
+        new_st = pi.st+st if pi.base != pi else st
+        potential_inputs += [(x,new_st) for x in pi.base.srcs]
+        seen_children.add(pi.base)
 
       # maybe merge a reduce, if it's contiguous and it's the one we are merging
       elif pi.base.op in ReduceOps and (merged_reduce is None or merged_reduce == pi.base):
@@ -203,8 +183,122 @@ def _create_schedule(out:LazyBuffer, seen:Set[LazyBuffer]) -> List[ScheduleItem]
 
   var_vals = merge_dicts([out.st.var_vals] + [buf.st.var_vals for buf in inputs])
   return ret + [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in vars_from_ast(op)})]
+"""
 
-def create_schedule(out:LazyBuffer, seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
+#def realize_buffers(outs:List[LazyBuffer], realized:Set[LazyBuffer]):
+#  for out in outs:
+
+def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker, realized:Set[LazyBuffer], first=True):
+  if buf != buf.base:
+    st = buf.st+st
+    buf = buf.base
+  # all buffers here are base now
+  assert buf.op is not None
+
+  # consts are always fused and generated
+  if buf.op == LoadOps.CONST:
+    return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.arg), buf.dtype, st.simplify().unbind()))
+
+  # if we aren't fusing it, it's a load and we add it to the inputs
+  if buf in realized and not first:
+    if buf not in inputs: inputs.append(buf)
+    return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, st.simplify().unbind()))
+
+  # if it's a reduce, we have to change the shapetracker
+  if buf.op in ReduceOps:
+    st = ShapeTracker.from_shape(buf.srcs[0].shape)
+
+  # otherwise we fuse it like normal
+  return LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, st, realized, False) for x in buf.srcs), buf.arg)
+
+def _get_bufs_for_chunk(out:LazyBuffer, realized:Set[LazyBuffer], first=True) -> Set[LazyBuffer]:
+  if out.realized: assert out in realized
+  if out in realized and not first: return set()
+  return set([out]).union(*[_get_bufs_for_chunk(x.base, realized, False) for x in out.srcs])
+
+def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
   if seen is None: seen = set()
-  log_lazybuffer(out, scheduled=True)
-  return _create_schedule(out, seen)
+  for out in outs: log_lazybuffer(out, scheduled=True)
+
+  # realize all places where the buffer is expanded
+  realized: Set[LazyBuffer] = set([x.base for x in outs])
+  allbufs: Set[LazyBuffer] = set()
+  def recurse_lb(buf:LazyBuffer):
+    if buf in allbufs: return
+    allbufs.add(buf)
+    log_lazybuffer(buf)
+    if buf.base != buf:
+      if prod(buf.base.st.shape) < prod(buf.st.shape):
+        realized.add(buf.base)
+      return recurse_lb(buf.base)
+    if buf.realized:
+      realized.add(buf.base)
+      return
+    if buf.op in LoadOps: realized.add(buf.base)
+    for x in buf.srcs: recurse_lb(x)
+  for out in outs: recurse_lb(out.base)
+
+  # realize all places where the buffer has two children
+  for b in allbufs:
+    if b.base != b: continue
+    if len(b.children) > 1:
+      realized.add(b)
+
+  # get the reduces for each chunk of the graph
+  reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
+  extra_realizes = set()
+  for r in realized:
+    if r.realized: continue
+    chunk = _get_bufs_for_chunk(r, realized)
+    reduces = dedup([x for x in chunk if x.op in ReduceOps])
+    if len(reduces) == 1:
+      reduce_for_op[r] = reduces[0]
+    elif len(reduces) > 1:
+      for r in reduces:
+        reduce_for_op[r] = r
+        extra_realizes.add(r)
+  realized = realized | extra_realizes
+
+  # confirm no reduce is run twice
+  assert len(reduce_for_op) == len(set(reduce_for_op.values()))
+
+  # schedule
+  scheduled = set()
+  def recursive_schedule(out:LazyBuffer) -> List[ScheduleItem]:
+    if out in scheduled or out.realized: return []
+    assert out.base == out
+    scheduled.add(out)
+
+    inputs: List[LazyBuffer] = []
+    if out.op == LoadOps.COPY:
+      op, inputs = LazyOp(LoadOps.COPY, (), out.srcs[0].base), [out.srcs[0].base]
+    elif out.op == LoadOps.CUSTOM:
+      op, inputs = LazyOp(LoadOps.CUSTOM, (), out.arg), list(out.srcs)
+    elif out.op == LoadOps.EMPTY:
+      op = LazyOp(LoadOps.EMPTY)
+    else:
+      base = out.srcs[0] if out.op == LoadOps.CONTIGUOUS else out
+      output_st = ShapeTracker.from_shape(reduce_for_op[base].shape if base in reduce_for_op else base.shape)
+      op = _recursive_lazyop(base, inputs, output_st, realized)
+      op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, base.dtype, output_st.simplify().unbind()))
+
+    var_vals = merge_dicts([out.st.var_vals] + [buf.st.var_vals for buf in inputs])
+    return flatten(recursive_schedule(x.base) for x in inputs) + [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in vars_from_ast(op)})]
+  schedule = flatten(recursive_schedule(x.base) for x in outs)
+  return schedule
+
+  aa = 0
+  for x in realized:
+    assert x == x.base
+    assert x in allbufs
+    if x.op not in LoadOps and not x.realized:
+      #realized_lazybuffer(x, -1)
+      aa += 1
+    #x._realized = "swag"
+  print("******", len(schedule), aa)
+
+  #for s in schedule: print(s.out)
+
+  return schedule #:[::-1]
+
+  #return _create_schedule(out, seen)

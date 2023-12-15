@@ -1,5 +1,6 @@
 import unittest, time
 import numpy as np
+from tinygrad import nn
 from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
@@ -74,6 +75,23 @@ class TestRealWorld(unittest.TestCase):
     @TinyJit
     def test(t, v): return model(t, v).realize()
     helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.21 if CI else 0.9, 164 if CI else 468, all_jitted=True)
+
+  def test_train_mnist(self):
+    from examples.beautiful_mnist import Model
+    with Tensor.train():
+      model = Model()
+      optimizer = nn.optim.Adam(nn.state.get_parameters(model))
+      BS = 32
+
+      @TinyJit
+      def train(X):
+        out = model(X)
+        loss = out.mean()
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+      helper_test("train_mnist", lambda: (Tensor.randn(BS, 1, 28, 28),), train, (1.0/48)*BS, 142 if CI else 154)   # it's 154 on metal
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(Device.DEFAULT in ["LLVM", "CLANG"] and CI, "too long on CI LLVM and CLANG")
