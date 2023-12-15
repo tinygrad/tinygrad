@@ -1,12 +1,15 @@
 import unittest
 
 from tinygrad import Tensor, dtypes, Device
+from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.renderer.cstyle import HIPRenderer
+from tinygrad.runtime.ops_hip import compile_hip
 import operator
 import numpy as np
 from hypothesis import given, strategies as st, settings
-from tinygrad.helpers import CI, getenv, DType, OSX
+from tinygrad.helpers import CI, DEBUG, getenv, DType, OSX, to_function_name
 
-settings.register_profile("my_profile", max_examples=200, deadline=None)
+settings.register_profile("my_profile", max_examples=2 if getenv("MOCKHIP") else 200, deadline=None) # we only want to try compiling in MOCKHIP
 settings.load_profile("my_profile")
 print(settings.default)
 
@@ -47,21 +50,36 @@ class ht:
   int64 = st.integers(-9223372036854775808, 9223372036854775807)
   bool = st.booleans()
 
+def compile_ast_to_hip(out: Tensor):
+  lin = Linearizer(out.lazydata.schedule()[-1].ast)
+  lin.hand_coded_optimizations()
+  lin.linearize()
+  code = HIPRenderer(to_function_name(lin.name), lin.uops)[0]
+  if DEBUG >= 4: print(code)
+  compile_hip(code)
+
 def universal_test(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
-  tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
+  tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype)))
+
+  if getenv("MOCKHIP"): return compile_ast_to_hip(tensor_value)
+
   numpy_value = op[1](np.array([a]).astype(dtype.np), np.array([b]).astype(dtype.np))
-  if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
-  else: np.testing.assert_equal(tensor_value, numpy_value)
+  if dtype in dtypes_float: np.testing.assert_allclose(tensor_value.numpy(), numpy_value, atol=1e-10)
+  else: np.testing.assert_equal(tensor_value.numpy(), numpy_value)
 
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
-  tensor_value = op[0](Tensor([a], dtype=dtype)).numpy()
+  tensor_value = op[0](Tensor([a], dtype=dtype))
+
+  if getenv("MOCKHIP"): return compile_ast_to_hip(tensor_value)
+
   numpy_value = op[1](np.array([a]).astype(dtype.np))
-  if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=5 if Device.DEFAULT == "METAL" and op[0] == Tensor.sin else 1e-3, rtol=2 if Device.DEFAULT == "METAL" and op[0] == Tensor.sin else 1e-4 if dtype == dtypes.float32 else 1e-2)  # exp and log and sin are approximations (in METAL, the default fast-math versions are less precise)  # noqa: E501
-  else: np.testing.assert_equal(tensor_value, numpy_value)
+  if dtype in dtypes_float: np.testing.assert_allclose(tensor_value.numpy(), numpy_value, atol=5 if Device.DEFAULT == "METAL" and op[0] == Tensor.sin else 1e-3, rtol=2 if Device.DEFAULT == "METAL" and op[0] == Tensor.sin else 1e-4 if dtype == dtypes.float32 else 1e-2)  # exp and log and sin are approximations (in METAL, the default fast-math versions are less precise)  # noqa: E501
+  else: np.testing.assert_equal(tensor_value.numpy(), numpy_value)
 
 def universal_test_cast(a, in_dtype, dtype):
+  if getenv("MOCKHIP"): return # not testing in HIP because we use LoadOps.COPY
   tensor_value = Tensor([a], dtype=in_dtype).cast(dtype)
   numpy_value = np.array([a]).astype(dtype.np)
   np.testing.assert_equal(tensor_value, numpy_value)
@@ -71,9 +89,12 @@ def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   if not isinstance(op2, tuple): op2 = (op2, op2)
   at, bt, ct = Tensor([a], dtype=d1), Tensor([b], dtype=d1), Tensor([c], dtype=d2)
   an, bn, cn = np.array([a]).astype(d1.np), np.array([b]).astype(d1.np), np.array([c]).astype(d2.np)
-  tensor_value = op2[0](op1[0](at, bt).cast(d2), ct).numpy()
+  tensor_value = op2[0](op1[0](at, bt).cast(d2), ct)
   numpy_value = op2[1](op1[1](an, bn).astype(d2.np), cn)
-  np.testing.assert_almost_equal(tensor_value, numpy_value)
+
+  if getenv("MOCKHIP"): return compile_ast_to_hip(tensor_value)
+
+  np.testing.assert_almost_equal(tensor_value.numpy(), numpy_value)
 
 class TestDTypeALU(unittest.TestCase):
   @unittest.skipIf(OSX and Device.DEFAULT in {"GPU", "METAL"}, "no float64 on OSX GPU")
