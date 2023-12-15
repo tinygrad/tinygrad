@@ -159,6 +159,17 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
   return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + \
     [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in vars_from_ast(op)})]
 
+def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None]):
+  if buf in allbufs or buf.realized: return
+  log_lazybuffer(buf)
+  if buf.base != buf:
+    if prod(buf.base.st.shape) < prod(buf.st.shape):
+      realizes.add(buf.base)
+    return _recurse_lb(buf.base, realizes, allbufs)
+  allbufs[buf] = None
+  if buf.op in LoadOps: realizes.add(buf.base)
+  for x in buf.srcs: _recurse_lb(x, realizes, allbufs)
+
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
   if seen is None: seen = set()
   for out in outs: log_lazybuffer(out, scheduled=True)
@@ -166,17 +177,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   # realize all places where the buffer is expanded
   realizes: Set[LazyBuffer] = set([x.base for x in outs if not x.realized])
   allbufs: Dict[LazyBuffer, None] = {}
-  def recurse_lb(buf:LazyBuffer):
-    if buf in allbufs or buf.realized: return
-    log_lazybuffer(buf)
-    if buf.base != buf:
-      if prod(buf.base.st.shape) < prod(buf.st.shape):
-        realizes.add(buf.base)
-      return recurse_lb(buf.base)
-    allbufs[buf] = None
-    if buf.op in LoadOps: realizes.add(buf.base)
-    for x in buf.srcs: recurse_lb(x)
-  for out in outs: recurse_lb(out.base)
+  for out in outs: _recurse_lb(out.base, realizes, allbufs)
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}

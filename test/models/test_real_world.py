@@ -60,14 +60,9 @@ class TestRealWorld(unittest.TestCase):
     derandomize_model(model)
     @TinyJit
     def test(t, t2):
-      import gc
-      for l in model:
-        t = l(t, t2)
-        gc.collect()
-      ret = t.realize()
-      gc.collect()
-      return ret
-    helper_test("test_mini_sd", lambda: (Tensor.empty(4, 320, 64, 64), Tensor.empty(1, 1280)), test, 18.0, 953)
+      for l in model: t = l(t, t2)
+      return t.realize()
+    helper_test("test_mini_sd", lambda: (Tensor.empty(4, 320, 64, 64), Tensor.empty(1, 1280)), test, 0.15, 40)
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp1")
