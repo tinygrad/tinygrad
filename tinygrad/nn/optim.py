@@ -32,9 +32,9 @@ class SGD(Optimizer):
   def step(self) -> None:
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      g = t.grad + self.wd * t.detach()
+      g = t.grad.realize() + self.wd * t.detach()
       if self.momentum:
-        self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
+        self.b[i].assign(self.momentum * self.b[i] + g).realize()  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       t.assign(t.detach() - g * self.lr)
     self.realize(self.b)
@@ -54,9 +54,9 @@ class LAMB(Optimizer):
     self.t.assign(self.t + 1).realize()
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      g = t.grad
-      self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * g)
-      self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (g * g))
+      g = t.grad.realize()
+      self.m[i].assign(self.b1 * self.m[i] + (1.0 - self.b1) * g).realize()
+      self.v[i].assign(self.b2 * self.v[i] + (1.0 - self.b2) * (g * g)).realize()
       m_hat = self.m[i] / (1.0 - self.b1**self.t)
       v_hat = self.v[i] / (1.0 - self.b2**self.t)
       up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
