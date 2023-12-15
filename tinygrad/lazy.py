@@ -239,16 +239,17 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   for out in outs: recurse_lb(out.base)
 
   # realize all places where the buffer has two children
-  for b in allbufs:
-    if b.base != b: continue
-    if len(b.children) > 1:
-      realized.add(b)
+  #for b in allbufs:
+  #  if b.base != b: continue
+  #  if len(b.children) > 1:
+  #    realized.add(b)
 
-  # get the reduces for each chunk of the graph
+  # get the reduces for each chunk of the graph, select the one for each
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
   extra_realizes = set()
   for r in realized:
-    if r.realized: continue
+    assert r.base == r
+    if r.realized or r.op in LoadOps: continue
     chunk = _get_bufs_for_chunk(r, realized)
     reduces = dedup([x for x in chunk if x.op in ReduceOps])
     if len(reduces) == 1:
@@ -259,15 +260,24 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
         extra_realizes.add(r)
   realized = realized | extra_realizes
 
+  # realize all reduces that would have been run twice
+  seen_reduce = set()
+  extra_realizes = set()
+  for r in reduce_for_op.values():
+    if r in seen_reduce:
+      extra_realizes.add(r)
+    seen_reduce.add(r)
+  reduce_for_op = {k:v for k,v in reduce_for_op.items() if v not in extra_realizes}
+  realized = realized | extra_realizes
+
   # confirm no reduce is run twice
   assert len(reduce_for_op) == len(set(reduce_for_op.values()))
 
   # schedule
-  scheduled = set()
   def recursive_schedule(out:LazyBuffer) -> List[ScheduleItem]:
-    if out in scheduled or out.realized: return []
+    if out in seen or out.realized: return []
     assert out.base == out
-    scheduled.add(out)
+    seen.add(out)
 
     inputs: List[LazyBuffer] = []
     if out.op == LoadOps.COPY:
@@ -284,21 +294,4 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
 
     var_vals = merge_dicts([out.st.var_vals] + [buf.st.var_vals for buf in inputs])
     return flatten(recursive_schedule(x.base) for x in inputs) + [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in vars_from_ast(op)})]
-  schedule = flatten(recursive_schedule(x.base) for x in outs)
-  return schedule
-
-  aa = 0
-  for x in realized:
-    assert x == x.base
-    assert x in allbufs
-    if x.op not in LoadOps and not x.realized:
-      #realized_lazybuffer(x, -1)
-      aa += 1
-    #x._realized = "swag"
-  print("******", len(schedule), aa)
-
-  #for s in schedule: print(s.out)
-
-  return schedule #:[::-1]
-
-  #return _create_schedule(out, seen)
+  return flatten(recursive_schedule(x.base) for x in outs)
