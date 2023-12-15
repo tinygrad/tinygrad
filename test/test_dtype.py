@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 import torch
-from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX, temp, least_upper_dtype
+from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX, least_upper_float, temp, least_upper_dtype
 from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
@@ -236,8 +236,39 @@ class TestTypeSpec(unittest.TestCase):
     assert Tensor.ones([2,3,0]).sum(2).dtype ==  Tensor.default_type
     # assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int
 
-# TODO: better way to write a set of core dtypes?
-core_types = [d for d in DTYPES_DICT.values() if d not in [dtypes._arg_int32]]
+  def test_arange(self):
+    assert Tensor.arange(5).dtype == dtypes.int32
+    assert Tensor.arange(5.0).dtype == Tensor.default_type
+    assert Tensor.arange(5, dtype=dtypes.int16).dtype == dtypes.int16
+    assert Tensor.arange(5, dtype=dtypes.int64).dtype == dtypes.int64
+    assert Tensor.arange(5, dtype=dtypes.float16).dtype == dtypes.float16
+    assert Tensor.arange(3, 9, 0.7).dtype == Tensor.default_type
+    assert Tensor.arange(3, 8.5, 3).dtype == Tensor.default_type
+
+  def test_zeros(self):
+    assert Tensor.zeros(3, 3).dtype == Tensor.default_type
+    assert Tensor.zeros(3, 3, dtype= dtypes.float16).dtype == dtypes.float16
+    assert Tensor.zeros(3, 3, dtype= dtypes.int64).dtype == dtypes.int64
+
+  def test_ones(self):
+    assert Tensor.ones(3, 3).dtype == Tensor.default_type
+    assert Tensor.ones(3, 3, dtype= dtypes.float16).dtype == dtypes.float16
+    assert Tensor.ones(3, 3, dtype= dtypes.int64).dtype == dtypes.int64
+
+  def test_full(self):
+    assert Tensor.full((3, 3), 3).dtype == dtypes.int
+    assert Tensor.full((3, 3), 3.0).dtype == Tensor.default_type
+    assert Tensor.full((3, 3), 3, dtype= dtypes.float16).dtype == dtypes.float16
+    assert Tensor.full((3, 3), 3, dtype= dtypes.int64).dtype == dtypes.int64
+
+  def test_eye(self):
+    assert Tensor.eye(0).dtype == Tensor.default_type
+    assert Tensor.eye(3).dtype == Tensor.default_type
+    assert Tensor.eye(3, dtype= dtypes.float16).dtype == dtypes.float16
+    assert Tensor.eye(3, dtype= dtypes.int64).dtype == dtypes.int64
+
+core_types = list(DTYPES_DICT.values())
+floats = [dt for dt in core_types if dtypes.is_float(dt)]
 class TestTypePromotion(unittest.TestCase):
   @given(st.sampled_from(core_types))
   def test_self_promo_to_self(self, dtype):
@@ -267,6 +298,10 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.bool, dtypes.float64) == dtypes.float64
     assert least_upper_dtype(dtypes.float16, dtypes.int64) == dtypes.float16
     assert least_upper_dtype(dtypes.float16, dtypes.uint64) == dtypes.float16
+
+  @given(st.sampled_from(floats))
+  def test_float_to_float(self, dt):
+    assert least_upper_float(dt) == dt
 
 class TestAutoCastType(unittest.TestCase):
   @given(st.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_int(d) and is_dtype_supported(d)]))

@@ -13,7 +13,6 @@ import onnx
 from tqdm import tqdm
 from typing import Tuple, List, Optional, Dict
 from extra.onnx import get_run_onnx
-from tinygrad.graph import log_schedule_item
 from tinygrad import Tensor, Device
 from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, fetch, getenv, ImageDType, GRAPH, DEBUG
 from tinygrad.realize import run_schedule, lower_schedule_item
@@ -110,10 +109,6 @@ if __name__ == "__main__":
   with Context(DEBUG=max(DEBUG.value, 2), BEAM=getenv("LATEBEAM")):
     image_count = sum(isinstance(si.out.dtype, ImageDType) for si in schedule)
     print(f"**** running real kernels {image_count}/{len(schedule)} images ****")
-
-    if GRAPH:
-      for si in schedule_input: log_schedule_item(si)
-      for si in schedule: log_schedule_item(si)
 
     GlobalCounters.reset()
     run_schedule(schedule[:])
