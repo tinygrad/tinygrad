@@ -5,6 +5,17 @@ from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, prod, DType, PtrDType, strip_parens, getenv
 
+base = {
+    UnaryOps.NEG: lambda x,dtype: f"(-{x})" if dtype != dtypes.bool else f"(!{x})",
+    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})",
+    UnaryOps.SIN: lambda x,dtype: f"sin({x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
+    BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})",
+    BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})",
+    BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
+    BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
+    TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})", TernaryOps.WHERE: lambda a,b,c,dtype: f"((bool){a}?{b}:{c})"
+}
+
 class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"
   generic_var_prefix: str = ""
@@ -28,16 +39,7 @@ class CStyleLanguage(NamedTuple):
   external_local_bufs: bool = False
   uses_ptr_arithmetic: bool = False
   launch_bounds: bool = False
-  code_for_op: Dict = {
-    UnaryOps.NEG: lambda x,dtype: f"(-{x})" if dtype != dtypes.bool else f"(!{x})",
-    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})",
-    UnaryOps.SIN: lambda x,dtype: f"sin({x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
-    BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})",
-    BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})",
-    BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
-    BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
-    TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})", TernaryOps.WHERE: lambda a,b,c,dtype: f"((bool){a}?{b}:{c})"
-  }
+  code_for_op: Dict = base
 
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
@@ -265,6 +267,7 @@ class CUDALanguage(CStyleLanguage):
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 class HIPLanguage(CStyleLanguage):
+  # TODO do we even use the pow functions?
   kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
   __device__ float4 pow(float x, float4 y) { return float4(pow(x, y.x), pow(x, y.y), pow(x, y.z), pow(x, y.w)); }
   __device__ float4 pow(float4 x, float4 y) { return float4(pow(x.x, y.x), pow(x.y, y.y), pow(x.z, y.z), pow(x.w, y.w)); }
@@ -301,21 +304,15 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) {
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
   code_for_op = {
-      **CStyleLanguage().code_for_op,
-      UnaryOps.LOG2: lambda a,dtype: f"hlog2({a})" if dtype == dtypes.half else f"float4(log2({a}.x),log2({a}.y),log2({a}.z),log2({a}.w))" if dtype == dtypes.float.vec(4) else f"log2({a})",
-      UnaryOps.EXP2: lambda a,dtype: f"hexp2({a})" if dtype == dtypes.half else f"float4(exp2({a}.x),exp2({a}.y),exp2({a}.z),exp2({a}.w))" if dtype == dtypes.float.vec(4) else f"exp2({a})",
-      UnaryOps.SIN: lambda a,dtype: f"hsin({a})" if dtype == dtypes.half else f"float4(sin({a}.x),sin({a}.y),sin({a}.z),sin({a}.w))" if dtype == dtypes.float.vec(4) else f"sin({a})",
-      UnaryOps.SQRT: lambda a,dtype: f"hsqrt({a})" if dtype == dtypes.half else f"float4(sqrt({a}.x),sqrt({a}.y),sqrt({a}.z),sqrt({a}.w))" if dtype == dtypes.float.vec(4) else f"sqrt({a})",
-
-      BinaryOps.ADD: lambda a,b,dtype: f"__hadd((half){a},(half){b})" if dtype == dtypes.half else f"{a}+{b}",
-      BinaryOps.SUB: lambda a,b,dtype: f"__hsub((half){a},(half){b})" if dtype == dtypes.half else f"{a}-{b}",
-      BinaryOps.MUL: lambda a,b,dtype: f"__hmul((half){a},(half){b})" if dtype == dtypes.half else f"{a}*{b}",
-      BinaryOps.DIV: lambda a,b,dtype: f"__hdiv((half){a},(half){b})" if dtype == dtypes.half else f"{a}/{b}",
-      BinaryOps.CMPLT: lambda a,b,dtype: f"__hlt((half){a},(half){b})" if dtype == dtypes.half else f"{a}<{b}",
-      BinaryOps.MAX: lambda a,b,dtype: f"__hgt((half){a},(half){b})?(half){a}:(half){b}" if dtype == dtypes.half else f"float4(max({a}.x,{b}.x),max({a}.y,{b}.y),max({a}.z,{b}.z),max({a}.w,{b}.w))" if dtype == dtypes.float.vec(4) else f"max({a},{b})",
-      BinaryOps.MOD: lambda a,b,dtype: f"__hsub({a}, __hmul({b}, __float2half(floorf(__half2float({a}) / __half2float({b})))))" if dtype == dtypes.half else f"{a}%{b}",
-
-      TernaryOps.WHERE: lambda a,b,c,dtype: f"((float){a}!=0?{b}:{c})" if dtype != dtypes.half else f"(half)((float){a}!=0?{b}:{c})"
+    **base, **{op: lambda a,dtype,op=op: f"h{base[op](a,dtype)}(half({a}))" if dtype == dtypes.half else f"float4({base[op](a+'.x',dtype)}, {base[op](a+'.y',dtype)}, {base[op](a+'.z',dtype)}, {base[op](a+'.w',dtype)})" if dtype == dtypes.float.vec(4) else f"{base[op](a,dtype)}" for op in [UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.SIN, UnaryOps.SQRT]},
+    BinaryOps.ADD: lambda a,b,dtype: f"__hadd((half){a},(half){b})" if dtype == dtypes.half else f"{a}+{b}",
+    BinaryOps.SUB: lambda a,b,dtype: f"__hsub((half){a},(half){b})" if dtype == dtypes.half else f"{a}-{b}",
+    BinaryOps.MUL: lambda a,b,dtype: f"__hmul((half){a},(half){b})" if dtype == dtypes.half else f"{a}*{b}",
+    BinaryOps.DIV: lambda a,b,dtype: f"__hdiv((half){a},(half){b})" if dtype == dtypes.half else f"{a}/{b}",
+    BinaryOps.CMPLT: lambda a,b,dtype: f"__hlt((half){a},(half){b})" if dtype == dtypes.half else f"{a}<{b}",
+    BinaryOps.MAX: lambda a,b,dtype: f"__hgt((half){a},(half){b})?(half){a}:(half){b}" if dtype == dtypes.half else f"float4(max({a}.x,{b}.x),max({a}.y,{b}.y),max({a}.z,{b}.z),max({a}.w,{b}.w))" if dtype == dtypes.float.vec(4) else f"max({a},{b})",
+    BinaryOps.MOD: lambda a,b,dtype: f"__hsub({a}, __hmul({b}, __float2half(floorf(__half2float({a}) / __half2float({b})))))" if dtype == dtypes.half else f"{a}%{b}",
+    TernaryOps.WHERE: lambda a,b,c,dtype: f"((float){a}!=0?{b}:{c})" if dtype != dtypes.half else f"(half)((float){a}!=0?{b}:{c})"
   }
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 
