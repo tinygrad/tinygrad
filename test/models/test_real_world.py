@@ -57,13 +57,13 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT in ["CPU", "TORCH"], "tons of ram with interpreted")
   def test_mini_stable_diffusion(self):
-    model = [ResBlock(320, 1280, 320) for _ in range(4)]
+    model = [ResBlock(16, 24, 16) for _ in range(4)]
     derandomize_model(model)
     @TinyJit
     def test(t, t2):
       for l in model: t = l(t, t2)
       return t.realize()
-    helper_test("test_mini_sd", lambda: (Tensor.empty(4, 320, 64, 64), Tensor.empty(1, 1280)), test, 0.17, 56)
+    helper_test("test_mini_sd", lambda: (Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24)), test, 0.01, 43)
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp1")
