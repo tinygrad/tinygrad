@@ -157,7 +157,7 @@ class TestSchedule(unittest.TestCase):
     out = y.sum(keepdim=True).sqrt().__neg__()
     check_schedule(out, 1)
 
-  # TODO: might want to rethink this
+  #@unittest.skip("may want to reconsider this")
   def test_fold_batchnorm(self):
     with Tensor.train():
       img = Tensor.empty(1,32,4,4)
