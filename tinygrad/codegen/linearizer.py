@@ -384,7 +384,8 @@ class Linearizer(Kernel):
 
     # graph helper functions
     @functools.lru_cache(None)
-    def get_recursive_parents(x:UOp) -> Set[UOp]: return set.union(set(x.vin), *[get_recursive_parents(p) for p in x.vin], set(acc_scope[x]))
+    def get_recursive_parents(x:UOp, with_phi=False) -> Set[UOp]:
+      return set.union(set(x.vin), *[get_recursive_parents(p, with_phi) for p in x.vin], set(acc_scope[x]) if with_phi else set())
 
     def get_recursive_children(x:UOp) -> Set[UOp]:
       deps = set([x])
@@ -408,7 +409,7 @@ class Linearizer(Kernel):
       elif u.uop == UOps.LOOP: loop_stack.append([u])
       elif u.uop not in [UOps.CONST, UOps.ALU, UOps.CAST, UOps.LOAD]: loop_stack[-1].append(u)
       else:
-        parents = get_recursive_parents(u)
+        parents = get_recursive_parents(u, with_phi=True)
         for i in reversed(range(len(loop_stack))):
           # check backwards and put the uop in the first encounter with some dependency
           if any(x in parents for x in loop_stack[i]) or i == 0:
