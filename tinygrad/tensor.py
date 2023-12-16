@@ -728,14 +728,18 @@ class Tensor:
 
   # ***** broadcasted binary mlops *****
 
+  # TODO: y can be bool
   def _broadcasted(self, y:Union[Tensor, float, int], reverse:bool=False) -> Tuple[Tensor, Tensor]:
+    x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
       if 0 in self.shape: return self, self.full_like(y)
-      y_dtype = self.dtype if self.dtype != dtypes.bool and self.dtype.__class__ is not ImageDType else dtypes.float32
-      y = Tensor(y, self.device, dtype=y_dtype, requires_grad=False)
+      if isinstance(self.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
+      else:
+        y_dtype = dtypes.int32 if isinstance(y, int) else Tensor.default_type
+        x = x.cast(y_dtype)
+      y = Tensor(y, self.device, y_dtype, requires_grad=False)
 
-    x: Tensor = self
     if reverse: x, y = y, x
 
     # left pad shape with 1s
