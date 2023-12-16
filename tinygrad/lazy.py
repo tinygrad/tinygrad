@@ -180,7 +180,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
     # realize all places where the buffer is expanded
     if prod(buf.base.st.shape) < prod(buf.st.shape):
       # make an exception for simple pads (TODO: this is breaking exp and div)
-      if len(buf.st.views) != 1 or buf.st.views[-1].mask is None or prod(buf.base.st.shape) != prod([y-x for x,y in buf.st.views[-1].mask]):
+      if len(buf.st.views) != 1 or buf.st.views[-1].mask is None or prod(buf.base.st.shape) != prod([y-x for x,y in buf.st.views[-1].mask]) or True:
         realizes.add(buf.base)
     return _recurse_lb(buf.base, realizes, allbufs)
   allbufs[buf] = None
