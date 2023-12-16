@@ -73,6 +73,7 @@ class Buffer:
     # TODO: mem_used for all devices
     if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.size * self.dtype.itemsize
   def __del__(self):
+    if not hasattr(self, '_buf'): return # happens when __init__ has raised exception
     if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.size * self.dtype.itemsize
     if isinstance(self.dtype, ImageDType): self.allocator.free(self._buf, self.dtype)
     else: self.allocator.free(self._buf, self.size * self.dtype.itemsize)
@@ -121,7 +122,8 @@ class _BufferCopy(JITRunner):
   # TODO: make wait work
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
     dest, src = rawbufs
-    assert dest.size == src.size and dest.dtype == src.dtype, "buffer copy size/dtype mismatch"
+    assert dest.size == src.size, f"buffer copy size mismatch, {dest.size} != {src.size}"
+    assert dest.dtype == src.dtype, f"buffer copy dtype mismatch, {dest.dtype} != {src.dtype}"
     st = time.perf_counter()
     _internal_buffer_copy(dest, src)
     et = None

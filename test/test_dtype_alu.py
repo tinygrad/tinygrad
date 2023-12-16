@@ -5,6 +5,7 @@ import operator
 import numpy as np
 from hypothesis import given, strategies as st, settings
 from tinygrad.helpers import CI, getenv, DType, OSX
+from tinygrad.ops import UnaryOps, get_lazyop_info
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
@@ -56,10 +57,15 @@ def universal_test(a, b, dtype, op):
 
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
-  tensor_value = op[0](Tensor([a], dtype=dtype)).numpy()
+  out: Tensor = op[0](Tensor([a], dtype=dtype))
+  ast = out.lazydata.schedule()[-1].ast
+  tensor_value = out.numpy()
   numpy_value = op[1](np.array([a]).astype(dtype.np))
   if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=5 if Device.DEFAULT == "METAL" and op[0] == Tensor.sin else 1e-3, rtol=2 if Device.DEFAULT == "METAL" and op[0] == Tensor.sin else 1e-4 if dtype == dtypes.float32 else 1e-2)  # exp and log and sin are approximations (in METAL, the default fast-math versions are less precise)  # noqa: E501
   else: np.testing.assert_equal(tensor_value, numpy_value)
+  if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
+    op = [x for x in ast.get_lazyops() if x.op in UnaryOps][0]
+    assert get_lazyop_info(op).dtype == dtype
 
 def universal_test_cast(a, in_dtype, dtype):
   tensor_value = Tensor([a], dtype=in_dtype).cast(dtype)
@@ -94,7 +100,7 @@ class TestDTypeALU(unittest.TestCase):
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
 
   @unittest.skipIf((Device.DEFAULT in ["GPU", "LLVM"] and CI) or getenv("CUDACPU"), "")
-  @given(ht.float32, st.sampled_from(unary_operations))
+  @given(ht.float16, st.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
 
   @given(ht.uint8, ht.uint8, st.sampled_from(integer_binary_operations))
