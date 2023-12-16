@@ -176,11 +176,6 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
   else:
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
     op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes)
-    if isinstance(out.dtype, ImageDType) and (prod(out.shape) != prod(out.dtype.shape) or
-                                              not any(out.shape[x]%4 == 0 for x in out.st.unit_stride_axes())):
-      if DEBUG >= 3: print(f"forcing image {out.dtype} to float32")
-      out.dtype = dtypes.float32  # NOTE; this is what makes the dtype above not match
-      op = LazyOp(UnaryOps.CAST, (op, ), (dtypes.float32, False))
     op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()))
 
   if out.output_buffer is not None:
@@ -197,6 +192,10 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None], simple_pads:Set[LazyBuffer]):
   if buf in allbufs or buf.realized: return
   log_lazybuffer(buf)
+  if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
+                                            not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
+    if DEBUG >= 3: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
+    buf.dtype = dtypes.float32  # NOTE; this is what makes the dtype above not match
   if buf.forced_realize: realizes.add(buf)
   if buf.base != buf:
     # realize all places where the buffer is expanded
