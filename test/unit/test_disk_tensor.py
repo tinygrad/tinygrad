@@ -31,6 +31,7 @@ class TestTorchLoad(unittest.TestCase):
   # CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
   @unittest.skipIf(Device.DEFAULT in ["GPU", "LLVM", "CUDA"] and CI, "fp16 broken in some backends")
   @unittest.skipIf(Device.DEFAULT == "TORCH", "torch doesn't support the way we load bfloat (cast to uint32)")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "float16 and uint16 are broken in webgpu")
   def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/qazalin/bf16-lightweight/resolve/main/consolidated.00.pth?download=true")
 
   # TODO: support pytorch tar format with minimal lines
