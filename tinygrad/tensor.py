@@ -12,7 +12,8 @@ from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import sint
 from tinygrad.realize import run_schedule
-from tinygrad.helpers import ImageDType,argfix,make_pair,getenv,IMAGE,DEBUG,flatten,DType,dtypes,prod,all_int,round_up,merge_dicts,fully_flatten
+from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int, round_up, merge_dicts
+from tinygrad.helpers import fully_flatten
 
 class Function:
   def __init__(self, device:str, *tensors:Tensor):
@@ -64,7 +65,9 @@ class Tensor:
     elif isinstance(data, bytes): data = LazyBuffer.fromCPU(np.frombuffer(data, np.uint8))
     elif data is None: data = LazyBuffer.fromCPU(np.array([], dtype=(dtype or Tensor.default_type).np))
     elif isinstance(data, list):
-      data = LazyBuffer.fromCPU(np.array(data, (dtype or (dtypes.int32 if data and all_int(fully_flatten(data)) else Tensor.default_type)).np))
+      dtype = dtype or (dtypes.int32 if data and all_int(fully_flatten(data)) else Tensor.default_type)
+      # NOTE: cast at the end for the types that do not have a numpy dtype
+      data = LazyBuffer.fromCPU(np.array(data, dtype.np)).cast(dtype)
     elif isinstance(data, np.ndarray):
       if data.shape == (): data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
       else: data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
@@ -724,15 +727,14 @@ class Tensor:
 
   # ***** broadcasted binary mlops *****
 
-  # TODO: y can be bool
-  def _broadcasted(self, y:Union[Tensor, float, int], reverse:bool=False) -> Tuple[Tensor, Tensor]:
+  def _broadcasted(self, y:Union[Tensor, float, int, bool], reverse:bool=False) -> Tuple[Tensor, Tensor]:
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
       if 0 in self.shape: return self, self.full_like(y)
       if isinstance(self.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
       else:
-        y_dtype = dtypes.int32 if isinstance(y, int) else Tensor.default_type
+        y_dtype = dtypes.bool if isinstance(y, bool) else dtypes.int32 if isinstance(y, int) else Tensor.default_type
         x = x.cast(y_dtype)
       y = Tensor(y, self.device, y_dtype, requires_grad=False)
 
@@ -745,26 +747,26 @@ class Tensor:
     broadcasted_shape = tuple(max(xi, yi) for xi, yi in zip(x.shape, y.shape))
     return x.expand(broadcasted_shape), y.expand(broadcasted_shape)
 
-  def _to_float(self, x:Union[Tensor, float, int]):
+  def _to_const_val(self, x:Union[Tensor, float, int, bool]) -> Union[Tensor, float, int, bool]:
     return x.lazydata.base.op.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
-  def add(self, x:Union[Tensor, float, int], reverse=False) -> Tensor:
-    x = self._to_float(x)
+  def add(self, x:Union[Tensor, float, int, bool], reverse=False) -> Tensor:
+    x = self._to_const_val(x)
     return mlops.Add.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else self
-  def sub(self, x:Union[Tensor, float, int], reverse=False) -> Tensor:
-    x = self._to_float(x)
+  def sub(self, x:Union[Tensor, float, int, bool], reverse=False) -> Tensor:
+    x = self._to_const_val(x)
     return mlops.Sub.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else (-self if reverse else self)
-  def mul(self, x:Union[Tensor, float, int], reverse=False) -> Tensor:
-    x = self._to_float(x)
+  def mul(self, x:Union[Tensor, float, int, bool], reverse=False) -> Tensor:
+    x = self._to_const_val(x)
     if x.__class__ is not Tensor and x == 0.0: return mlops.Zero.apply(self)
     if x.__class__ is not Tensor and x == -1.0: return -self
     return mlops.Mul.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x != 1.0 else self
-  def div(self, x:Union[Tensor, float, int], reverse=False) -> Tensor:
-    x = self._to_float(x)
+  def div(self, x:Union[Tensor, float, int, bool], reverse=False) -> Tensor:
+    x = self._to_const_val(x)
     return mlops.Div.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or reverse or not x or not dtypes.is_float(self.dtype) else self.mul(1/x)  # noqa: E501
-  def pow(self, x:Union[Tensor, float, int], reverse=False) -> Tensor:
-    x = self._to_float(x)
+  def pow(self, x:Union[Tensor, float, int, bool], reverse=False) -> Tensor:
+    x = self._to_const_val(x)
     if not isinstance(x, Tensor) and not reverse:
       # simple pow identities
       if x < 0: return self.reciprocal().pow(-x)
