@@ -357,12 +357,7 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.float32) + True).dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64) + True).dtype == dtypes.float64
 
-# for GPU, cl_khr_fp16 isn't supported
-# for LLVM, it segfaults because it can't link to the casting function
-# CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
-@unittest.skipIf(Device.DEFAULT in ["GPU", "LLVM", "CUDA"] and CI, "fp16 broken in some backends")
-@unittest.skipIf(Device.DEFAULT == "TORCH", "torch doesn't have uint32")
-@unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu's fp16 and uint16 are broken")
+@unittest.skipUnless(is_dtype_supported(dtypes.float16), "no float16 support")
 class TestBF16Cast(unittest.TestCase):
   def helper_prepare_bf16(self, fn: str):
     fn = temp(fn)
