@@ -64,6 +64,10 @@ class Linearizer(Kernel):
     AndNode: lambda self,ops,ctx:
       functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
+  def get_uop_dtype(self, dtype: DType, amt=1):
+    if isinstance(dtype, ImageDType): dtype = dtypes.float
+    return dtype if amt == 1 else dtype.vec(amt)
+
   def global_load(self, i:int, idxs:Sequence[Node], acc=None, barrier:Optional[UOp]=None) -> List[UOp]:
     buf = self.bufs[i]
     const = buf.val if isinstance(buf, ConstBuffer) else acc
@@ -83,8 +87,7 @@ class Linearizer(Kernel):
         (g_idx, g_valid), amt, dim = self.sts[i].expr_idxs(fake_idxs), 1, None
     else:
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
-    localtype = buf.dtype if amt == 1 else buf.dtype.vec(amt)
-    if isinstance(buf.dtype, ImageDType): localtype = dtypes.float if amt == 1 else dtypes.float.vec(amt)
+    localtype = self.get_uop_dtype(buf.dtype)
 
     e_idxs, e_valids = g_idx.expand(expand_vars), g_valid.expand(expand_vars)
 
@@ -530,5 +533,5 @@ class Linearizer(Kernel):
         if input_acc[off] != acc[off]:
           acc[off] = self.uop(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]) + tuple(loop_ctx))
     else:
-      ret = [self.uop(UOps.ALU, dtype=dtypes.bool if x.op == BinaryOps.CMPLT else get_lazyop_info(x).dtype, vin=val, arg=x.op) for val in zip(*values)]
+      ret = [self.uop(UOps.ALU, dtype=dtypes.bool if x.op == BinaryOps.CMPLT else self.get_uop_dtype(get_lazyop_info(x).dtype), vin=val, arg=x.op) for val in zip(*values)]
     return ret
