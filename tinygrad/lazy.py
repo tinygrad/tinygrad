@@ -2,10 +2,10 @@ from __future__ import annotations
 import sys
 import numpy as np
 from typing import Union, Optional, Any, Tuple, List, Set, Dict
-from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten, getenv, dedup
+from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten, getenv, dedup, ImageDType, DEBUG
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps
 from tinygrad.ops import Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem, vars_from_ast
-from tinygrad.shape.symbolic import sint
+from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from tinygrad.graph import log_lazybuffer
@@ -113,8 +113,9 @@ class LazyBuffer:
 # *** schedule creation ***
 
 # recursively create a lazyop
-def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker, realizes:Set[LazyBuffer], first=True):
+def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Variable, int], st:ShapeTracker, realizes:Set[LazyBuffer], first=True):
   if buf != buf.base:
+    var_vals.update(merge_dicts([var_vals, buf.st.var_vals]))
     st = buf.st+st
     buf = buf.base
   # all buffers here are base now
@@ -131,7 +132,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker, 
 
   # if a CONTIGUOUS made it all the way here, just skip it
   if buf.op == LoadOps.CONTIGUOUS:
-    return _recursive_lazyop(buf.srcs[0], inputs, st, realizes, False)
+    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, False)
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
@@ -139,7 +140,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], st:ShapeTracker, 
     st = ShapeTracker.from_shape(buf.srcs[0].shape)
 
   # otherwise we fuse it like normal
-  return LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, st, realizes, False) for x in buf.srcs), buf.arg)
+  return LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, False) for x in buf.srcs), buf.arg)
 
 # recursively walk back in the graph to create the schedule
 def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyBuffer],
@@ -149,6 +150,7 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
   seen.add(out)
 
   inputs: List[LazyBuffer] = []
+  var_vals: Dict[Variable, int] = out.st.var_vals.copy()
   if out.op == LoadOps.COPY:
     op, inputs = LazyOp(LoadOps.COPY, (), out.srcs[0].base), [out.srcs[0].base]
   elif out.op == LoadOps.CUSTOM:
@@ -157,7 +159,12 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
     op = LazyOp(LoadOps.EMPTY)
   else:
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
-    op = _recursive_lazyop(out, inputs, output_st, realizes)
+    op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes)
+    if isinstance(out.dtype, ImageDType) and (prod(out.shape) != prod(out.dtype.shape) or
+                                              not any(out.shape[x]%4 == 0 for x in out.st.unit_stride_axes())):
+      if DEBUG >= 3: print(f"forcing image {out.dtype} to float32")
+      out.dtype = dtypes.float32  # NOTE; this is what makes the dtype above not match
+      op = LazyOp(UnaryOps.CAST, (op, ), (dtypes.float32, False))
     op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()))
 
   if out.output_buffer is not None:
@@ -167,7 +174,6 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
           out.output_buffer = None
           break
 
-  var_vals = merge_dicts([out.st.var_vals] + [buf.st.var_vals for buf in inputs])
   return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + \
     [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in vars_from_ast(op)})]
 
