@@ -244,6 +244,12 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
     assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
 
+  def test_tensor_multidim_list_dtype(self):
+    for arr in [[[1,1],[1,1]], [[[1,1],[1,1]],[[1,1],[1,1]]]]:
+      assert Tensor(arr).dtype == dtypes.int32
+      assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
+      assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+
   def test_tensor_copy(self):
     x = copy.deepcopy(Tensor.ones((3,3,3)))
     np.testing.assert_allclose(x.numpy(), np.ones((3,3,3)))
