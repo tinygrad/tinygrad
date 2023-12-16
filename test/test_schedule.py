@@ -372,5 +372,52 @@ class TestSchedule(unittest.TestCase):
     out = x.sum(axis=2).T+y
     check_schedule(out, 2)
 
+  def test_two_elus_sum(self):
+    x = Tensor.empty(32, 32)
+    y = Tensor.empty(32, 32)
+    out = x.sum(1).relu().elu() + y.sum(1).relu().elu()
+    check_schedule(out, 2)
+
+  def test_multistage_reduce(self):
+    x = Tensor.empty(32, 32, 32)
+    out = x.sum(2).relu().sum(1)
+    check_schedule(out, 2)
+
+  def test_multistage_reduce_fork(self):
+    x = Tensor.empty(32, 32, 32)
+    x = x.sum(2)
+    out2 = x + 1
+    out = x.relu().sum(1) + out2[0]
+    check_schedule(out, 2)
+
+  def test_example_matmul(self):
+    x = Tensor.eye(64, requires_grad=True)
+    y = Tensor.eye(64, requires_grad=True)
+    z = y.matmul(x).sum()
+    z.backward()
+    out = x.grad.contiguous()
+    check_schedule(out, 2)
+
+  def test_contiguous_add(self):
+    x = Tensor.empty(32)
+    y = Tensor.empty(32)
+    z = Tensor.empty(32)
+    out = (x+y).contiguous()+z
+    check_schedule(out, 2)
+
+  def test_double_sum_ref(self):
+    x = Tensor.empty(32, 32, 32)
+    x = x.sum(2)
+    out = x + x[:, 4]
+    check_schedule(out, 2)
+
+  def test_reduce_shrink(self):
+    x = Tensor.empty(32, 32)
+    y = Tensor.empty(16)
+    x = x.sum(1)
+    x = x[:16]
+    out = x + y
+    check_schedule(out, 2)  # TODO: this should be 1
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
