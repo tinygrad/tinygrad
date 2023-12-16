@@ -239,13 +239,7 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64 # check that it works for something else
 
   def test_tensor_list_dtype(self):
-    arr = [1]
-    assert Tensor(arr).dtype == dtypes.int32
-    assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
-    assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
-
-  def test_tensor_multidim_list_dtype(self):
-    for arr in [[[1,1],[1,1]], [[[1,1],[1,1]],[[1,1],[1,1]]]]:
+    for arr in ([1], [[1,1],[1,1]], [[[1,1],[1,1]],[[1,1],[1,1]]]):
       assert Tensor(arr).dtype == dtypes.int32
       assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
       assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
