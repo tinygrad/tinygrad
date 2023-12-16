@@ -83,7 +83,7 @@ class Kernel:
     assert isinstance(self.bufs[0], MemBuffer) and self.bufs[0].idx == 0, f"buffer 0 is not the store buffer {self.bufs[0]}"
 
     # get earlybufs, before the one reduce op
-    self.earlybufs = [x.arg for x in self.reduceops[0].get_lazyops() if x.op in BufferOps] if self.reduceops else []
+    self.earlybufs = [x.arg for reduceop in self.reduceops for x in reduceop.get_lazyops() if x.op in BufferOps] if self.reduceops else []
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
 
     # create the (permuted) shapetrackers
@@ -143,11 +143,14 @@ class Kernel:
                     [x!=y for x,y in zip(self.sts[0].shape[self.shape_len-self.upcasted:], self.full_shape[self.shape_len-self.upcasted:])]))
 
   # TODO: is there a better way to write this?
-  def acc_offsets(self, i:int) -> List[int]:
+  def acc_offsets(self, i:int, prev=[]) -> List[int]:
     if self.upcasted == 0: return [0]
     upcasted_i = self.upcasted_axis(i)
     acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
-    return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
+    temp = [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
+    k = list(map(lambda x: x + prev[-1], temp))
+    prev[-1] = k[-1] + 1
+    return k
 
   def get_upcast_dim(self, i:int) -> List[int]:
     should_upcast = self.opts.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))  # noqa: E501
