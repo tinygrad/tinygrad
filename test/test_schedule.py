@@ -408,5 +408,11 @@ class TestSchedule(unittest.TestCase):
     out = (x+y).contiguous()+z
     check_schedule(out, 2)
 
+  def test_double_sum_ref(self):
+    x = Tensor.empty(32, 32, 32)
+    x = x.sum(2)
+    out = x + x[:, 4]
+    check_schedule(out, 2)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

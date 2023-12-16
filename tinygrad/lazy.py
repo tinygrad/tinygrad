@@ -2,7 +2,7 @@ from __future__ import annotations
 import sys
 import numpy as np
 from typing import Union, Optional, Any, Tuple, List, Set, Dict
-from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten, getenv
+from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten, getenv, dedup
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps
 from tinygrad.ops import Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem, vars_from_ast
 from tinygrad.shape.symbolic import sint
@@ -241,7 +241,11 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
             if tr_next.op in ReduceOps:
               forced_realize = True
               break
-            next_child_set[tr_next] = st + [s for s in tr_next.srcs if s.base == tr][0].st
+            st_childs = dedup([s for s in tr_next.srcs if s.base == tr])
+            if len(st_childs) > 1:
+              forced_realize = True
+              break
+            next_child_set[tr_next] = st + st_childs[0].st
       child_set = next_child_set
     if forced_realize:
       tr = r
@@ -250,7 +254,9 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
         st = tr.st
         while len(tr.children) == 1:
           tr_next = next(iter(tr.children))
-          st = st + [s for s in tr_next.srcs if s.base == tr][0].st
+          st_childs = dedup([s for s in tr_next.srcs if s.base == tr])
+          if len(st_childs) > 1: break
+          st = st + st_childs[0].st
           if not st.contiguous or tr_next.op in ReduceOps: break
           tr = tr_next
         reduce_for_op[tr] = r
