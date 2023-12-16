@@ -9,7 +9,7 @@ from tinygrad.runtime.ops_cpu import einsum_mulacc, shape_to_axis
 device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if getenv("MPS", 0) else "cpu"))
 type_map = {torch.float64: dtypes.float64, torch.float16: dtypes.float16, torch.float32: dtypes.float32,
             torch.int8: dtypes.int8, torch.int32: dtypes.int32, torch.int64: dtypes.int64,
-            torch.uint8: dtypes.uint8, torch.bool: dtypes.bool, torch.int16: dtypes.int16}
+            torch.uint8: dtypes.uint8, torch.bool: dtypes.bool, torch.int16: dtypes.int16, torch.bfloat16: dtypes.bfloat16}
 inverse_type_map = {v:k for k,v in type_map.items()}
 
 def output_type(x, y): return x.dtype if type_map[x.dtype].priority > type_map[y.dtype].priority else y.dtype
