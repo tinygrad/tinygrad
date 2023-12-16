@@ -1,3 +1,5 @@
+# ruff: noqa: E501
+# TODO: replace with new lazy with <= 150 length lines
 from __future__ import annotations
 import sys, math
 from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapping, Set
@@ -223,7 +225,7 @@ class LazyBuffer:
     return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, None, dtypes.from_np(x.dtype), Buffer("CPU", prod(x.shape), dtypes.from_np(x.dtype), x.flatten()))
 
   def cast(self, dtype:DType, bitcast:bool=False):
-    return self.e(UnaryOps.CAST, arg=(dtype, bitcast))
+    return self.e(UnaryOps.CAST, arg=(dtype, bitcast)) if self.dtype != dtype else self
 
   # *** elementwise ops ***
 

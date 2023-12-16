@@ -1,7 +1,8 @@
 import os
 import numpy as np
 os.environ["CUDA"] = "1"
-from tinygrad.runtime.ops_cuda import RawCUDABuffer, CUDAProgram, compile_cuda
+from tinygrad.runtime.ops_cuda import CUDAAllocator, CUDADevice, CUDAProgram, compile_cuda
+from tinygrad.helpers import flat_mv
 
 FLOAT16 = True
 ACC_FLOAT16 = False
@@ -9,19 +10,26 @@ N = 4096
 
 na = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32)
 nb = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32)
+nc = np.empty(N*N, np.float32)
 
 if FLOAT16:
   na = na.astype(np.float16)
   nb = nb.astype(np.float16)
 
-a = RawCUDABuffer.fromCPU(na)
-b = RawCUDABuffer.fromCPU(nb)
-c = RawCUDABuffer.fromCPU(np.ones((N,N),dtype=np.float32))
+device = CUDADevice("cuda:0")
+cudaalloc = CUDAAllocator(device)
+
+a = cudaalloc.alloc(N*N*2 if FLOAT16 else N*N*4)
+b = cudaalloc.alloc(N*N*2 if FLOAT16 else N*N*4)
+c = cudaalloc.alloc(N*N*4)
+
+cudaalloc.copyin(a, bytearray(na))
+cudaalloc.copyin(b, bytearray(nb))
 
 FLOPS = N*N*N*2
 BW = N*N*3*4
 
-prog = CUDAProgram("wmma_example", compile_cuda(f"""
+prog = CUDAProgram(device, "wmma_example", compile_cuda(f"""
 #include <mma.h>
 using namespace nvcuda;
 
@@ -29,7 +37,7 @@ const int WMMA_M = 16;
 const int WMMA_N = 16;
 const int WMMA_K = {'16' if FLOAT16 else '8'};
 
-__global__ void wmma_example({'half' if FLOAT16 else 'float'} *a, {'half' if FLOAT16 else 'float'} *b, float *c)
+extern "C" __global__ void wmma_example({'half' if FLOAT16 else 'float'} *a, {'half' if FLOAT16 else 'float'} *b, float *c)
 {{
   int warpM = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
   int warpN = (blockIdx.y * blockDim.y + threadIdx.y);
@@ -90,8 +98,8 @@ __global__ void wmma_example({'half' if FLOAT16 else 'float'} *a, {'half' if FLO
 }}
 """))
 
-global_size, local_size = [(N//16)//4, (N//16)//4], [32, 1, 1]
+global_size, local_size = [(N//16)//4, (N//16)//4, 1], [32, 1, 1]
 tm = min([prog(a, b, c, global_size=global_size, local_size=local_size, wait=True) for _ in range(20)])
 print(f"{N*N:10d} {tm*1e6:9.2f} us, would be {FLOPS*1e-9/tm:9.2f} GFLOPS matmul, {BW*1e-9/tm:.2f} GB/s")
-
-np.testing.assert_allclose(na.T.astype(np.float32) @ nb.T.astype(np.float32), c.toCPU().reshape((N,N)).T, atol=1e-2)
+cudaalloc.copyout(flat_mv(nc.data), c)
+np.testing.assert_allclose(na.T.astype(np.float32) @ nb.T.astype(np.float32), nc.reshape(N,N).T, atol=1e-2)

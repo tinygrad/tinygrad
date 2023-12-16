@@ -48,7 +48,8 @@ class TestOnnxModel(unittest.TestCase):
       mt2 = time.monotonic()
       tinygrad_out = tinygrad_out.numpy()
       et = time.monotonic()
-      if not CI: print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
+      if not CI:
+        print(f"ran openpilot model in {(et-st)*1000.0:.2f} ms, waited {(mt2-mt)*1000.0:.2f} ms for realize, {(et-mt2)*1000.0:.2f} ms for GPU queue")
 
     if not CI:
       import cProfile
@@ -100,17 +101,17 @@ class TestOnnxModel(unittest.TestCase):
 
   def test_efficientnet(self):
     input_name, input_new = "images:0", True
-    self._test_model(fetch("https://github.com/onnx/models/raw/main/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx"), input_name, input_new)
+    self._test_model(fetch("https://github.com/onnx/models/raw/main/archive/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx"), input_name, input_new)   # noqa: E501
 
   def test_shufflenet(self):
     input_name, input_new = "gpu_0/data_0", False
-    self._test_model(fetch("https://github.com/onnx/models/raw/main/vision/classification/shufflenet/model/shufflenet-9.onnx"), input_name, input_new)
+    self._test_model(fetch("https://github.com/onnx/models/raw/main/archive/vision/classification/shufflenet/model/shufflenet-9.onnx"), input_name, input_new)   # noqa: E501
 
   @unittest.skip("test is very slow")
   def test_resnet(self):
     # NOTE: many onnx models can't be run right now due to max pool with strides != kernel_size
     input_name, input_new = "data", False
-    self._test_model(fetch("https://github.com/onnx/models/raw/main/vision/classification/resnet/model/resnet18-v2-7.onnx"), input_name, input_new)
+    self._test_model(fetch("https://github.com/onnx/models/raw/main/archive/vision/classification/resnet/model/resnet18-v2-7.onnx"), input_name, input_new)   # noqa: E501
 
   def _test_model(self, fn, input_name, input_new, debug=False):
     onnx_model = onnx.load(fn)

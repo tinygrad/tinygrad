@@ -38,7 +38,7 @@ def gen_diff(table_old, table_new):
       file_stat_old = [stats for stats in table_old if file in stats]
       file_stat_new = [stats for stats in table_new if file in stats]
       if file_stat_new[0][1]-file_stat_old[0][1] != 0 or file_stat_new[0][2]-file_stat_old[0][2] != 0:
-        table.append([file_stat_new[0][0], file_stat_new[0][1], file_stat_new[0][1]-file_stat_old[0][1], file_stat_new[0][2], file_stat_new[0][2]-file_stat_old[0][2]])
+        table.append([file_stat_new[0][0], file_stat_new[0][1], file_stat_new[0][1]-file_stat_old[0][1], file_stat_new[0][2], file_stat_new[0][2]-file_stat_old[0][2]])  # noqa: E501
   return table
 
 def display_diff(diff): return "+"+str(diff) if diff > 0 else str(diff)
@@ -58,7 +58,7 @@ if __name__ == "__main__":
     if len(sys.argv) == 3:
       print("### Changes")
       print("```")
-      print(tabulate([headers] + sorted(table, key=lambda x: -x[1]), headers="firstrow", intfmt=(..., "d", "+d"), floatfmt=(..., ..., ..., ".1f", "+.1f"))+"\n")
+      print(tabulate([headers] + sorted(table, key=lambda x: -x[1]), headers="firstrow", intfmt=(..., "d", "+d"), floatfmt=(..., ..., ..., ".1f", "+.1f"))+"\n")  # noqa: E501
       print(f"\ntotal lines changes: {display_diff(sum([x[2] for x in table]))}")
       print("```")
     else:

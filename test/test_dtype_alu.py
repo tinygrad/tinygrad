@@ -5,6 +5,7 @@ import operator
 import numpy as np
 from hypothesis import given, strategies as st, settings
 from tinygrad.helpers import CI, getenv, DType, OSX
+from tinygrad.ops import UnaryOps, get_lazyop_info
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
@@ -15,7 +16,8 @@ dtypes_int = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint
 dtypes_bool = (dtypes.bool,)
 binary_operations = [operator.add, operator.sub, operator.mul]
 integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor)]
-unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (Tensor.sin, np.sin), (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
+unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (Tensor.sin, np.sin),
+                    (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
 
 # TODO: enable this (this is a dtype issue)
 #binary_operations.append(operator.truediv)
@@ -55,10 +57,15 @@ def universal_test(a, b, dtype, op):
 
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
-  tensor_value = op[0](Tensor([a], dtype=dtype)).numpy()
+  out: Tensor = op[0](Tensor([a], dtype=dtype))
+  ast = out.lazydata.schedule()[-1].ast
+  tensor_value = out.numpy()
   numpy_value = op[1](np.array([a]).astype(dtype.np))
-  if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=5 if Device.DEFAULT == "METAL" and op[0] == Tensor.sin else 1e-3, rtol=2 if Device.DEFAULT == "METAL" and op[0] == Tensor.sin else 1e-4 if dtype == dtypes.float32 else 1e-2)  # exp and log and sin are approximations (in METAL, the default fast-math versions are less precise)
+  if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=5 if Device.DEFAULT == "METAL" and op[0] == Tensor.sin else 1e-3, rtol=2 if Device.DEFAULT == "METAL" and op[0] == Tensor.sin else 1e-4 if dtype == dtypes.float32 else 1e-2)  # exp and log and sin are approximations (in METAL, the default fast-math versions are less precise)  # noqa: E501
   else: np.testing.assert_equal(tensor_value, numpy_value)
+  if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
+    op = [x for x in ast.get_lazyops() if x.op in UnaryOps][0]
+    assert get_lazyop_info(op).dtype == dtype
 
 def universal_test_cast(a, in_dtype, dtype):
   tensor_value = Tensor([a], dtype=in_dtype).cast(dtype)
@@ -93,7 +100,7 @@ class TestDTypeALU(unittest.TestCase):
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
 
   @unittest.skipIf((Device.DEFAULT in ["GPU", "LLVM"] and CI) or getenv("CUDACPU"), "")
-  @given(ht.float32, st.sampled_from(unary_operations))
+  @given(ht.float16, st.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
 
   @given(ht.uint8, ht.uint8, st.sampled_from(integer_binary_operations))
@@ -130,7 +137,7 @@ class TestDTypeALU(unittest.TestCase):
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 
   # Metal and CUDACPU behave differently than numpy in CI for overflows
-  @given(st.floats(width=32, min_value=0, max_value=10.0) if CI and (Device.DEFAULT == "METAL" or getenv("CUDACPU")) else ht.float32, st.floats(width=32, min_value=0, max_value=10.0) if CI and (Device.DEFAULT == "METAL" or getenv("CUDACPU")) else ht.float32, ht.int32, st.sampled_from(binary_operations), st.sampled_from(integer_binary_operations))
+  @given(st.floats(width=32, min_value=0, max_value=10.0) if CI and (Device.DEFAULT == "METAL" or getenv("CUDACPU")) else ht.float32, st.floats(width=32, min_value=0, max_value=10.0) if CI and (Device.DEFAULT == "METAL" or getenv("CUDACPU")) else ht.float32, ht.int32, st.sampled_from(binary_operations), st.sampled_from(integer_binary_operations))   # noqa: E501
   def test_float_midcast_int32(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.float32, dtypes.int32)
 
   @given(ht.float32, st.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
