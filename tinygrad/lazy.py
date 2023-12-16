@@ -44,6 +44,7 @@ class LazyBuffer:
     self._realized: Optional[Buffer] = None
     self.output_buffer: Optional[Buffer] = None
     self.forced_realize = False
+    self.contiguous_child: Optional[Tuple] = None
 
   def __repr__(self) -> str:
     return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.op} {self.realized}>"
@@ -61,9 +62,11 @@ class LazyBuffer:
   def const(self, val:Union[float, int]) -> LazyBuffer:
     return LazyBuffer.new(self.device, (), self.dtype, LoadOps.CONST, val).reshape((1,)*len(self.shape)).expand(self.shape)
 
-  # NOTE: this no longer always breaks the graph
   def contiguous(self):
-    if not self.st.contiguous or self.st.size() != self.base.st.size() or self.is_unrealized_const(): return self.e(LoadOps.CONTIGUOUS)
+    if not self.st.contiguous or self.st.size() != self.base.st.size() or self.is_unrealized_const():
+      ret = self.e(LoadOps.CONTIGUOUS)
+      self.base.contiguous_child = (ref(ret), self.st)
+      return ret
     self.base.forced_realize = True
     return self
 
@@ -93,6 +96,17 @@ class LazyBuffer:
 
   def e(self:LazyBuffer, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     srcs = (self,)+srcs
+    new_srcs = []
+    for s in srcs:
+      if s.contiguous_child is not None:
+        wroot, st = s.contiguous_child
+        root: LazyBuffer = wroot()
+        sti = st.invert()
+        if root is not None and sti is not None:
+          new_srcs.append(root._view(sti))
+          continue
+      new_srcs.append(s)
+    srcs = tuple(new_srcs)
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), max(x.dtype for x in srcs), op, arg, srcs)
 
   # *** reduce ops ***

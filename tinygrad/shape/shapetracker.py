@@ -4,7 +4,7 @@ import functools, itertools, operator
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast, Union, Iterable, Callable
 from tinygrad.ops import MovementOps
-from tinygrad.helpers import prod, DEBUG, merge_dicts, getenv
+from tinygrad.helpers import prod, DEBUG, merge_dicts, getenv, argsort
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
 from tinygrad.shape.view import View, _merge_dims
 
@@ -65,6 +65,16 @@ class ShapeTracker:
     for mop,arg in st.mops:
       ret = MOVEMENT_OPS_DISPATCHER[mop](ret, arg)
     return ret.simplify()
+
+  # NOTE: this is the derivative
+  def invert(self):
+    assert self.mops is not None
+    ret = ShapeTracker.from_shape(self.shape)
+    for mop,arg in self.mops[::-1]:
+      if mop == MovementOps.PERMUTE: ret = ret.permute(argsort(arg))
+      elif mop == MovementOps.RESHAPE: ret = ret.reshape(arg)
+      else: return None
+    return ret
 
   @staticmethod
   def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),), ((MovementOps.RESHAPE, shape),))

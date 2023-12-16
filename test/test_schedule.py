@@ -297,7 +297,6 @@ class TestSchedule(unittest.TestCase):
     # NOOP, 3 convs, contiguous
     check_schedule(x, 5)
 
-  @unittest.skip("This needs contiguous w inverted shapetracker")
   def test_image_conv_fusion_minimal(self):
     b1 = Tensor.empty(16)
     b2 = Tensor.empty(16)
