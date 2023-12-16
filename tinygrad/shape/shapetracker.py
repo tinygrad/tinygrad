@@ -53,6 +53,7 @@ def idxs_to_idx(shape:Tuple[int, ...], idxs:Tuple[Node, ...]) -> Node:
 class ShapeTracker:
   views: Tuple[View, ...]
   mops: Optional[Tuple] = None
+  def __repr__(self): return f"ShapeTracker({self.views})"
   def __eq__(self, st): return self.views == st.views
   def __post_init__(self):
     assert isinstance(self.views, tuple) and all(isinstance(v, View) for v in self.views), "ShapeTracker must be created with a tuple of Views"
