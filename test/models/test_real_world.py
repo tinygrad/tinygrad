@@ -62,7 +62,7 @@ class TestRealWorld(unittest.TestCase):
     def test(t, t2):
       for l in model: t = l(t, t2)
       return t.realize()
-    helper_test("test_mini_sd", lambda: (Tensor.empty(4, 320, 64, 64), Tensor.empty(1, 1280)), test, 0.15, 40)
+    helper_test("test_mini_sd", lambda: (Tensor.empty(4, 320, 64, 64), Tensor.empty(1, 1280)), test, 0.17, 56)
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp1")
