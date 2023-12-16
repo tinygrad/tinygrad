@@ -414,5 +414,13 @@ class TestSchedule(unittest.TestCase):
     out = x + x[:, 4]
     check_schedule(out, 2)
 
+  def test_reduce_shrink(self):
+    x = Tensor.empty(32, 32)
+    y = Tensor.empty(16)
+    x = x.sum(1)
+    x = x[:16]
+    out = x + y
+    check_schedule(out, 2)  # TODO: this should be 1
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
