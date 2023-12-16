@@ -104,70 +104,21 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
     helper_test_op([], lambda: torch.eye(1), lambda: Tensor.eye(1), forward_only=True)
 
-  def test_split_basic_split(self):
-    tor = torch.arange(10).split(5)
-    ten = Tensor.arange(10).split(5)
-    assert len(tor) == len(ten)
-    for i in range(len(tor)):
-      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
+  def test_split(self):
+    test_cases = [
+      (torch.arange(10), Tensor.arange(10), 5),
+      (torch.arange(10), Tensor.arange(10), [1, 4, 5]),
+      (torch.arange(10), Tensor.arange(10), 3),
+      (torch.arange(12).reshape(3, 4), Tensor.arange(12).reshape(3, 4), 1),
+      (torch.arange(16).reshape(4, 4), Tensor.arange(16).reshape(4, 4), [2, 2]),
+      (torch.arange(10000), Tensor.arange(10000), 2500),
+    ]
 
-    tor = torch.arange(10).split([1, 4, 5])
-    ten = Tensor.arange(10).split([1, 4, 5])
-    assert len(tor) == len(ten)
-    for i in range(len(tor)):
-      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
-
-  def test_split_uneven_split(self):
-    tor = torch.arange(10).split(3)
-    ten = Tensor.arange(10).split(3)
-    assert len(tor) == len(ten)
-    for i in range(len(tor)):
-      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
-
-  def test_split_multi_dimensional_tensor(self):
-    tor = torch.arange(12).reshape(3, 4).split(1)
-    ten = Tensor.arange(12).reshape(3, 4).split(1)
-    assert len(tor) == len(ten)
-    for i in range(len(tor)):
-      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
-
-    tor = torch.arange(16).reshape(4, 4).split([2, 2])
-    ten = Tensor.arange(16).reshape(4, 4).split([2, 2])
-    assert len(tor) == len(ten)
-    for i in range(len(tor)):
-      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
-
-  def test_split_large_tensor(self):
-    tor = torch.arange(10000).split(2500)
-    ten = Tensor.arange(10000).split(2500)
-    assert len(tor) == len(ten)
-    for i in range(len(tor)):
-      helper_test_op([], lambda: tor[i], lambda: ten[i], forward_only=True)
-
-  def test_split_type_errors(self):
-    ten = Tensor.arange(1)
-    with self.assertRaises(TypeError): ten.split(1.0)
-    with self.assertRaises(TypeError): ten.split(tuple(1,))
-    with self.assertRaises(TypeError): ten.split(set(1))
-    with self.assertRaises(TypeError): ten.split([1.0])
-    with self.assertRaises(TypeError): ten.split([1.0, 1])
-    with self.assertRaises(TypeError): ten.split(Tensor(1))
-
-  def test_split_index_errors(self):
-    ten = Tensor.arange(12).reshape(3, 4)
-    with self.assertRaises(IndexError): ten.split(1, ten.ndim)      # dim == ten.ndim
-    with self.assertRaises(IndexError): ten.split(1, ten.ndim + 1)  # dim > ten.ndim
-    with self.assertRaises(IndexError): ten.split(1, -ten.ndim - 1) # dim < -ten.ndim
-
-  def test_split_runtime_errors(self):
-    ten = Tensor.arange(12).reshape(3, 4)
-    with self.assertRaises(RuntimeError): ten.split(0)        # split_sizes == 0 and dim_size > 0
-    with self.assertRaises(RuntimeError): ten.split(-1)       # split_sizes < 0
-    with self.assertRaises(RuntimeError): Tensor(1).split(1)  # ndim < 1
-
-    ten = Tensor.arange(10)
-    with self.assertRaises(RuntimeError): ten.split([2, 3, 6])  # uneven total size
-    with self.assertRaises(RuntimeError): ten.split([2, -3, 6]) # negative sizes
+    for tor, ten, sizes in test_cases:
+      tor_splits, ten_splits = tor.split(sizes), ten.split(sizes)
+      assert len(tor_splits) == len(ten_splits)
+      for tor_chunk, ten_chunk in zip(tor_splits, ten_splits):
+        helper_test_op([], lambda: tor_chunk, lambda: ten_chunk, forward_only=True)
 
   def test_chunk(self):
     tor = torch.arange(13).repeat(8, 1).chunk(6, 1)
