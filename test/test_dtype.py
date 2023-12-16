@@ -225,6 +225,9 @@ class TestHelpers(unittest.TestCase):
 
 class TestTypeSpec(unittest.TestCase):
   def test_creation(self):
+    assert Tensor(True).dtype == dtypes.bool
+    assert Tensor(2).dtype == dtypes.int
+    assert Tensor(2.34).dtype == Tensor.default_type
     assert Tensor([]).dtype == Tensor.default_type
     assert Tensor([1]).dtype == dtypes.int
     assert Tensor([1.1]).dtype == Tensor.default_type
