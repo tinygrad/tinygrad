@@ -9,7 +9,7 @@ from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
 from tinygrad.graph import log_lazybuffer
-from weakref import ref, WeakSet, WeakValueDictionary
+from weakref import ref, WeakSet, WeakValueDictionary, ReferenceType
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
@@ -44,7 +44,7 @@ class LazyBuffer:
     self._realized: Optional[Buffer] = None
     self.output_buffer: Optional[Buffer] = None
     self.forced_realize = False
-    self.contiguous_child: Optional[Tuple] = None
+    self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
 
   def __repr__(self) -> str:
     return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.op} {self.realized}>"
@@ -100,7 +100,7 @@ class LazyBuffer:
     for s in srcs:
       if s.contiguous_child is not None:
         wroot, st = s.contiguous_child
-        root: LazyBuffer = wroot()
+        root: Optional[LazyBuffer] = wroot()
         sti = st.invert()
         if root is not None and sti is not None:
           new_srcs.append(root._view(sti))

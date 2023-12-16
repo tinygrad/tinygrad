@@ -58,7 +58,6 @@ class ShapeTracker:
   def __post_init__(self):
     assert isinstance(self.views, tuple) and all(isinstance(v, View) for v in self.views), "ShapeTracker must be created with a tuple of Views"
 
-  @functools.lru_cache(maxsize=None)
   def __add__(self, st:ShapeTracker) -> ShapeTracker:
     ret = self
     assert st.mops is not None
@@ -73,6 +72,9 @@ class ShapeTracker:
     for mop,arg in self.mops[::-1]:
       if mop == MovementOps.PERMUTE: ret = ret.permute(argsort(arg))
       elif mop == MovementOps.RESHAPE: ret = ret.reshape(arg)
+      elif mop == MovementOps.PAD: ret = ret.shrink(tuple([(p[0], s+p[0]) for s,p in zip(ret.shape, arg)]))
+      elif mop == MovementOps.STRIDE and all(x == -1 or x == 1 for x in arg): ret = ret.stride(arg)
+      # SHRINK and EXPAND aren't invertable, nor non flip stride
       else: return None
     return ret
 
