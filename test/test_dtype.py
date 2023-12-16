@@ -1,4 +1,5 @@
 # ruff: noqa: E501
+import pathlib
 import unittest
 import numpy as np
 import torch
@@ -345,6 +346,23 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor.rand(4, 4, dtype=dtypes.float32) + 2).dtype == dtypes.float32
     assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2).dtype == dtypes.float64
 
+class TestBF16Cast(unittest.TestCase):
+  def helper_prepare_bf16(self, fn: str):
+      fn = temp(fn)
+      pathlib.Path(fn).unlink(missing_ok=True)
+      return Tensor([1043529728, 1043529728, 1043202048, 1043005440, 1042939904], device="CPU", dtype=dtypes.bfloat16).to(f"disk:{fn}").to(Device.DEFAULT)
+
+  def test_bf16_cast(self):
+    out = self.helper_prepare_bf16("temp_bf16_1")
+    assert out.numpy().tolist() == [0.0, 0.1748046875, 0.0, 0.1748046875, 0.0]
+    assert out.dtype == dtypes.half
+    assert out.device == Device.DEFAULT
+
+  def test_bf16_ops(self):
+    out = self.helper_prepare_bf16("temp_bf16_2").add(4)
+    np.testing.assert_allclose(out.numpy().tolist(), [4.0, 4.1748046875, 4.0, 4.1748046875, 4.0], rtol=1e-3, atol=1e-3)
+    assert out.dtype == dtypes.half
+    assert out.device == Device.DEFAULT
 
 if __name__ == '__main__':
   unittest.main()
