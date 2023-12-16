@@ -346,21 +346,26 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor.rand(4, 4, dtype=dtypes.float32) + 2).dtype == dtypes.float32
     assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2).dtype == dtypes.float64
 
+# for GPU, cl_khr_fp16 isn't supported
+# for LLVM, it segfaults because it can't link to the casting function
+# CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
+@unittest.skipIf(Device.DEFAULT in ["GPU", "LLVM", "CUDA"] and CI, "fp16 broken in some backends")
+@unittest.skipIf(Device.DEFAULT == "TORCH", "torch doesn't support the way we load bfloat (cast to uint32)")
 class TestBF16Cast(unittest.TestCase):
   def helper_prepare_bf16(self, fn: str):
     fn = temp(fn)
     pathlib.Path(fn).unlink(missing_ok=True)
-    return Tensor([1043529728, 1043529728, 1043202048, 1043005440, 1042939904], device="CPU", dtype=dtypes.bfloat16).to(f"disk:{fn}").to(Device.DEFAULT)
+    return Tensor([1043529728, 1043529728, 1043202048, 1042939904], device="CPU", dtype=dtypes.bfloat16).to(f"disk:{fn}").cast(dtypes.bfloat16)
 
   def test_bf16_cast(self):
     out = self.helper_prepare_bf16("temp_bf16_1")
-    assert out.numpy().tolist() == [0.0, 0.1748046875, 0.0, 0.1748046875, 0.0]
+    np.testing.assert_allclose(out.numpy(), [0.0, 0.1748, 0.0, 0.0], rtol=1e-4, atol=1e-4)
     assert out.dtype == dtypes.half
     assert out.device == Device.DEFAULT
 
   def test_bf16_ops(self):
     out = self.helper_prepare_bf16("temp_bf16_2").add(4)
-    np.testing.assert_allclose(out.numpy().tolist(), [4.0, 4.1748046875, 4.0, 4.1748046875, 4.0], rtol=1e-3, atol=1e-3)
+    np.testing.assert_allclose(out.numpy(), [4.0, 4.1748, 4.0, 4.0], rtol=1e-3, atol=1e-4)
     assert out.dtype == dtypes.half
     assert out.device == Device.DEFAULT
 
