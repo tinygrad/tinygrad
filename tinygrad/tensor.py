@@ -515,11 +515,11 @@ class Tensor:
 
   def argmax(self, axis=None, keepdim=False):
     if axis is None:
-      idx = (self == self.max(axis)) * Tensor.arange(prod(self.shape)-1,-1,-1, dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(self.shape)  # noqa: E501
+      idx = (self == self.max(axis)) * Tensor.arange(prod(self.shape)-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape)
       return prod(self.shape) - idx.max() - 1
     axis = axis + len(self.shape) if axis < 0 else axis
     m = self == self.max(axis=axis, keepdim=True)
-    idx = m * Tensor.arange(self.shape[axis]-1,-1,-1, dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))  # noqa: E501
+    idx = m * Tensor.arange(self.shape[axis]-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
     return self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1
   def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
 
