@@ -43,6 +43,7 @@ class LazyBuffer:
     self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
     self._realized: Optional[Buffer] = None
     self.output_buffer: Optional[Buffer] = None
+    self.forced_realize = False
 
   def __repr__(self) -> str:
     return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.op} {self.realized}>"
@@ -62,7 +63,10 @@ class LazyBuffer:
 
   # NOTE: this no longer always breaks the graph
   def contiguous(self):
-    return self if self.st.contiguous and self.st.size() == self.base.st.size() and not self.is_unrealized_const() else self.e(LoadOps.CONTIGUOUS)
+    if self.st.contiguous and self.st.size() == self.base.st.size() and not self.is_unrealized_const():
+      self.base.forced_realize = True
+      return self
+    return self.e(LoadOps.CONTIGUOUS)
 
   def cast(self, dtype:DType, bitcast:bool=False):
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
@@ -155,7 +159,7 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
   else:
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
     op = _recursive_lazyop(out, inputs, output_st, realizes)
-    op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st))
+    op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()))
 
   if out.output_buffer is not None:
     for i,a in enumerate(inputs):
@@ -172,6 +176,7 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None]):
   if buf in allbufs or buf.realized: return
   log_lazybuffer(buf)
+  if buf.forced_realize: realizes.add(buf)
   if buf.base != buf:
     # realize all places where the buffer is expanded
     if prod(buf.base.st.shape) < prod(buf.st.shape):

@@ -401,5 +401,12 @@ class TestSchedule(unittest.TestCase):
     out = x.grad.contiguous()
     check_schedule(out, 2)
 
+  def test_contiguous_add(self):
+    x = Tensor.empty(32)
+    y = Tensor.empty(32)
+    z = Tensor.empty(32)
+    out = (x+y).contiguous()+z
+    check_schedule(out, 2)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
