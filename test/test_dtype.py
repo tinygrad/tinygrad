@@ -350,8 +350,8 @@ class TestAutoCastType(unittest.TestCase):
 # for LLVM, it segfaults because it can't link to the casting function
 # CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
 @unittest.skipIf(Device.DEFAULT in ["GPU", "LLVM", "CUDA"] and CI, "fp16 broken in some backends")
-@unittest.skipIf(Device.DEFAULT == "TORCH", "torch doesn't support the way we load bfloat (cast to uint32)")
-@unittest.skipIf(Device.DEFAULT == "WEBGPU", "float16 and uint16 are broken in webgpu")
+@unittest.skipIf(Device.DEFAULT == "TORCH", "torch doesn't have uint32")
+@unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu's fp16 and uint16 are broken")
 class TestBF16Cast(unittest.TestCase):
   def helper_prepare_bf16(self, fn: str):
     fn = temp(fn)
