@@ -376,9 +376,15 @@ class Linearizer(Kernel):
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
+    # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
+    acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
+    for u in self.uops:
+      if u.uop == UOps.PHI:
+        acc_scope[u.vin[0]] += u.vin[2:]
+
     # graph helper functions
     @functools.lru_cache(None)
-    def get_recursive_parents(x:UOp) -> Set[UOp]: return set.union(set(x.vin), *[get_recursive_parents(p) for p in x.vin])
+    def get_recursive_parents(x:UOp) -> Set[UOp]: return set.union(set(x.vin), *[get_recursive_parents(p) for p in x.vin], set(acc_scope[x]))
 
     def get_recursive_children(x:UOp) -> Set[UOp]:
       deps = set([x])
