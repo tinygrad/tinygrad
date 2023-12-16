@@ -103,7 +103,7 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
 
 class TestBFloat16DType(unittest.TestCase):
   def setUp(self):
-    if Device.DEFAULT not in ["LLVM"]: raise unittest.SkipTest("bfloat16 not supported")
+    if Device.DEFAULT not in ["LLVM", "TORCH"]: raise unittest.SkipTest("bfloat16 not supported")
   def test_bf16_to_float(self):
     with self.assertRaises(AssertionError):
       _test_cast(Tensor([100000], dtype=dtypes.bfloat16), dtypes.float32)
