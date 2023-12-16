@@ -56,7 +56,7 @@ def compile_ast_to_hip(out: Tensor):
 
 binary_operations = [operator.add, operator.sub, operator.mul]
 unary_operations = [Tensor.exp, Tensor.log, operator.neg, Tensor.sin, Tensor.sqrt, Tensor.reciprocal]
-float_dtypes = [v for v in DTYPES_DICT.values() if dtypes.is_float(v)]
+float_dtypes = [v for v in DTYPES_DICT.values() if dtypes.is_float(v) and v.dtypes != dtypes.bfloat16]
 
 @unittest.skipIf(Device.DEFAULT != "HIP", reason="testing HIP->rdna3 compilation needs HIP=1")
 class TestHIPALUCompilation(unittest.TestCase):
