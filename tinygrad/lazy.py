@@ -68,6 +68,7 @@ class LazyBuffer:
     return self
 
   def cast(self, dtype:DType, bitcast:bool=False):
+    if self.dtype == dtype: return self
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
 
   def is_unrealized_const(self): return not self.realized and self.base.op == LoadOps.CONST
