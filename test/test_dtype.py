@@ -226,18 +226,19 @@ class TestHelpers(unittest.TestCase):
 class TestTypeSpec(unittest.TestCase):
   def test_creation(self):
     assert Tensor([]).dtype == Tensor.default_type
-    # assert Tensor([1]).dtype == dtypes.int
+    assert Tensor([1]).dtype == dtypes.int
     assert Tensor([1.1]).dtype == Tensor.default_type
+    assert Tensor([0, 1], dtype=dtypes.bfloat16).dtype == dtypes.bfloat16
 
   def test_const_full(self):
     assert Tensor.ones([2,3]).dtype == Tensor.default_type
     assert Tensor.zeros([2,3]).dtype == Tensor.default_type
     assert Tensor.full([2,3], 3.3).dtype == Tensor.default_type
-    # assert Tensor.full([2,3], 3).dtype == dtypes.int
+    assert Tensor.full([2,3], 3).dtype == dtypes.int
 
   def test_reduce_0d_default(self):
     assert Tensor.ones([2,3,0]).sum(2).dtype ==  Tensor.default_type
-    # assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int
+    # assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int  # requires reduceop acc fix
 
   def test_arange(self):
     assert Tensor.arange(5).dtype == dtypes.int32
@@ -312,14 +313,14 @@ class TestAutoCastType(unittest.TestCase):
   def test_int_to_float_unary_func(self, dtype):
     for func in [
       lambda t: t.exp(),
-      # lambda t: t.exp2(),  # requires MUL
+      lambda t: t.exp2(),
       lambda t: t.log(),
       lambda t: t.log2(),
       lambda t: t.sqrt(),
-      # lambda t: t.rsqrt(),  # requires DIV
+      lambda t: t.rsqrt(),
       lambda t: t.sin(),
-      # lambda t: t.cos(),  # requires SUB
-      # lambda t: t.tan(),  # requires .cos() to work
+      lambda t: t.cos(),
+      lambda t: t.tan(),
       lambda t: t.sigmoid(),
     ]:
       a = [2, 3, 4]
@@ -345,6 +346,15 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor.rand(4, 4, dtype=dtypes.float32) + 2).dtype == dtypes.float32
     assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2).dtype == dtypes.float64
 
+  def test_broadcast_bool(self):
+    assert (Tensor([0, 1], dtype=dtypes.bool) + True).dtype == dtypes.bool
+    assert (Tensor([0, 1], dtype=dtypes.int) + True).dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int8) + True).dtype == dtypes.int8
+    assert (Tensor([0, 1], dtype=dtypes.uint64) + True).dtype == dtypes.uint64
+    assert (Tensor([0, 1], dtype=dtypes.float16) + True).dtype == dtypes.float16
+    assert (Tensor([0, 1], dtype=dtypes.bfloat16) + True).dtype == dtypes.bfloat16
+    assert (Tensor([0, 1], dtype=dtypes.float32) + True).dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.float64) + True).dtype == dtypes.float64
 
 if __name__ == '__main__':
   unittest.main()
