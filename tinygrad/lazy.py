@@ -172,23 +172,30 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
     [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in vars_from_ast(op)})]
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
-def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None]):
+def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None], simple_pads:Set[LazyBuffer]):
   if buf in allbufs or buf.realized: return
   log_lazybuffer(buf)
   if buf.forced_realize: realizes.add(buf)
   if buf.base != buf:
     # realize all places where the buffer is expanded
     if prod(buf.base.st.shape) < prod(buf.st.shape):
-      # make an exception for simple pads (TODO: this is breaking exp and div)
-      if len(buf.st.views) != 1 or buf.st.views[-1].mask is None or prod(buf.base.st.shape) != prod([y-x for x,y in buf.st.views[-1].mask]) or True:
+      if len(buf.st.views) == 1 and buf.st.views[-1].mask and prod(buf.base.st.shape) == prod([y-x for x,y in buf.st.views[-1].mask]):
+        simple_pads.add(buf.base)
+      else:
         realizes.add(buf.base)
-    return _recurse_lb(buf.base, realizes, allbufs)
+    return _recurse_lb(buf.base, realizes, allbufs, simple_pads)
   allbufs[buf] = None
   if buf.op in LoadOps: realizes.add(buf.base)
   if buf.op == LoadOps.COPY:
     assert buf.srcs[0].st.contiguous and buf.srcs[0].st.size() == buf.srcs[0].base.st.size()
     realizes.add(buf.srcs[0].base)
-  for x in buf.srcs: _recurse_lb(x, realizes, allbufs)
+  for x in buf.srcs: _recurse_lb(x, realizes, allbufs, simple_pads)
+
+UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
+def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
+  if buf in realizes or buf.realized: return True
+  if buf.op in UNSAFE_PAD_OPS: return False
+  return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
   if seen is None: seen = set()
@@ -197,7 +204,13 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   # start by just realizing the buffers passed in
   realizes: Set[LazyBuffer] = set([x.base for x in outs if not x.realized])
   allbufs: Dict[LazyBuffer, None] = {}
-  for out in outs: _recurse_lb(out.base, realizes, allbufs)
+  simple_pads: Set[LazyBuffer] = set()
+  for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads)
+
+  # check if we have to realize pads
+  for p in simple_pads:
+    if not _is_padding_okay(p, realizes):
+      realizes.add(p)
 
   # find all reduces, and pair them to a elementwise op. if they can't be cleanly paired, force realize the reduce (or a contig child)
   reduce_for_op: Dict[LazyBuffer, LazyBuffer] = {}
