@@ -362,9 +362,15 @@ class TestSchedule(unittest.TestCase):
     check_schedule(out, 1)
 
   def test_zero_size(self):
-    x = Tensor.rand(2, 3, 0)
+    x = Tensor.empty(2, 3, 0)
     out = x + 1
     check_schedule(out, 0, filter_loadops=False)
+
+  def test_reduce_permute_nofuse(self):
+    x = Tensor.empty(32, 32, 32)
+    y = Tensor.empty(32, 32)
+    out = x.sum(axis=2).T+y
+    check_schedule(out, 2)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

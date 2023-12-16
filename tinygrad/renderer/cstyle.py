@@ -36,7 +36,7 @@ class CStyleLanguage(NamedTuple):
     BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})",
     BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
-    TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})", TernaryOps.WHERE: lambda a,b,c,dtype: f"((bool){a}?{b}:{c})"
+    TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})", TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"
   }
 
   # returns a str expression of the casted xs with the given type
@@ -320,8 +320,9 @@ class WGSLLanguage(CStyleLanguage):
   generic_var_prefix = "var "
   external_local_bufs = True
   code_for_op = { **CStyleLanguage().code_for_op, BinaryOps.CMPLT: lambda x,y,dtype: f"f32({x}<{y})",
-                 TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a}!=0.)" }
-  type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"}
+                 TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},bool({a}))" }
+  # HACK: write bool as f32. remove after elementwise op cast inputs properly
+  type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "f32"}
 
   def render_local(self, name: str, size: int):
     return f"var<workgroup> {name}: array<f32,{size}>;"
@@ -343,7 +344,7 @@ class WGSLLanguage(CStyleLanguage):
     return f"if (bool({cond})) {{"
 
   def render_conditional(self, cond:str, x:str, y:str) -> str:
-    return f"select(f32({y}), {x}, bool({cond}))"
+    return f"select({y}, {x}, bool({cond}))"
 
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
     if self.type_map[var_dtype]: return f"bitcast<{self.type_map[var_dtype]}>({x[0]})" if bitcast else f"{self.type_map[var_dtype]}({x[0]})"
