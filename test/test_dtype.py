@@ -226,18 +226,18 @@ class TestHelpers(unittest.TestCase):
 class TestTypeSpec(unittest.TestCase):
   def test_creation(self):
     assert Tensor([]).dtype == Tensor.default_type
-    # assert Tensor([1]).dtype == dtypes.int
+    assert Tensor([1]).dtype == dtypes.int
     assert Tensor([1.1]).dtype == Tensor.default_type
 
   def test_const_full(self):
     assert Tensor.ones([2,3]).dtype == Tensor.default_type
     assert Tensor.zeros([2,3]).dtype == Tensor.default_type
     assert Tensor.full([2,3], 3.3).dtype == Tensor.default_type
-    # assert Tensor.full([2,3], 3).dtype == dtypes.int
+    assert Tensor.full([2,3], 3).dtype == dtypes.int
 
   def test_reduce_0d_default(self):
     assert Tensor.ones([2,3,0]).sum(2).dtype ==  Tensor.default_type
-    # assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int
+    # assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int  # requires reduceop acc fix
 
   def test_arange(self):
     assert Tensor.arange(5).dtype == dtypes.int32
