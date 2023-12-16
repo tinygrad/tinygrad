@@ -228,6 +228,7 @@ class TestTypeSpec(unittest.TestCase):
     assert Tensor([]).dtype == Tensor.default_type
     assert Tensor([1]).dtype == dtypes.int
     assert Tensor([1.1]).dtype == Tensor.default_type
+    assert Tensor([0, 1], dtype=dtypes.bfloat16).dtype == dtypes.bfloat16
 
   def test_const_full(self):
     assert Tensor.ones([2,3]).dtype == Tensor.default_type
@@ -345,6 +346,15 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor.rand(4, 4, dtype=dtypes.float32) + 2).dtype == dtypes.float32
     assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2).dtype == dtypes.float64
 
+  def test_broadcast_bool(self):
+    assert (Tensor([0, 1], dtype=dtypes.bool) + True).dtype == dtypes.bool
+    assert (Tensor([0, 1], dtype=dtypes.int) + True).dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int8) + True).dtype == dtypes.int8
+    assert (Tensor([0, 1], dtype=dtypes.uint64) + True).dtype == dtypes.uint64
+    assert (Tensor([0, 1], dtype=dtypes.float16) + True).dtype == dtypes.float16
+    assert (Tensor([0, 1], dtype=dtypes.bfloat16) + True).dtype == dtypes.bfloat16
+    assert (Tensor([0, 1], dtype=dtypes.float32) + True).dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.float64) + True).dtype == dtypes.float64
 
 if __name__ == '__main__':
   unittest.main()
