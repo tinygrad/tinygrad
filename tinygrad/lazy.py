@@ -214,7 +214,8 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
   if buf.base != buf:
     # realize all places where the buffer is expanded
     if prod(buf.base.st.shape) < prod(buf.st.shape):
-      if len(buf.st.views) == 1 and buf.st.views[-1].mask and prod(buf.base.st.shape) == prod([y-x for x,y in buf.st.views[-1].mask]):
+      if len(buf.st.views) == 1 and buf.st.views[-1].mask and all_int(buf.base.st.shape) and \
+          prod(buf.base.st.shape) == prod([y-x for x,y in buf.st.views[-1].mask]):
         simple_pads.add(buf.base)
       else:
         realizes.add(buf.base)

@@ -61,8 +61,7 @@ class ShapeTracker:
   def __add__(self, st:ShapeTracker) -> ShapeTracker:
     ret = self
     assert st.mops is not None
-    for mop,arg in st.mops:
-      ret = MOVEMENT_OPS_DISPATCHER[mop](ret, arg)
+    for mop,arg in st.mops: ret = MOVEMENT_OPS_DISPATCHER[mop](ret, arg)
     return ret.simplify()
 
   # NOTE: this is the derivative
