@@ -357,7 +357,7 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.float32) + True).dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64) + True).dtype == dtypes.float64
 
-@unittest.skipUnless(is_dtype_supported(dtypes.float16), "no float16 support")
+@unittest.skipIf(not is_dtype_supported(dtypes.float16) or not is_dtype_supported(dtypes.uint32), "backend doesn't support loading bfloat16")
 class TestBF16Cast(unittest.TestCase):
   def helper_prepare_bf16(self, fn: str):
     fn = temp(fn)
