@@ -7,12 +7,12 @@ from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
 
-from tinygrad.helpers import ImageDType, argfix, make_pair, getenv, IMAGE, DEBUG, flatten, DType, dtypes, prod, all_int, round_up, merge_dicts, fully_flatten  # noqa: E501
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import sint
 from tinygrad.realize import run_schedule
+from tinygrad.helpers import ImageDType,argfix,make_pair,getenv,IMAGE,DEBUG,flatten,DType,dtypes,prod,all_int,round_up,merge_dicts,fully_flatten
 
 class Function:
   def __init__(self, device:str, *tensors:Tensor):
