@@ -63,10 +63,9 @@ class LazyBuffer:
 
   # NOTE: this no longer always breaks the graph
   def contiguous(self):
-    if self.st.contiguous and self.st.size() == self.base.st.size() and not self.is_unrealized_const():
-      self.base.forced_realize = True
-      return self
-    return self.e(LoadOps.CONTIGUOUS)
+    if not self.st.contiguous or self.st.size() != self.base.st.size() or self.is_unrealized_const(): return self.e(LoadOps.CONTIGUOUS)
+    self.base.forced_realize = True
+    return self
 
   def cast(self, dtype:DType, bitcast:bool=False):
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
@@ -180,7 +179,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
   if buf.base != buf:
     # realize all places where the buffer is expanded
     if prod(buf.base.st.shape) < prod(buf.st.shape):
-      # make an exception for simple pads
+      # make an exception for simple pads (TODO: this is breaking exp and div)
       if len(buf.st.views) != 1 or buf.st.views[-1].mask is None or prod(buf.base.st.shape) != prod([y-x for x,y in buf.st.views[-1].mask]):
         realizes.add(buf.base)
     return _recurse_lb(buf.base, realizes, allbufs)
