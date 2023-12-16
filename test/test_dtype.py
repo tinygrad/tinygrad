@@ -312,14 +312,14 @@ class TestAutoCastType(unittest.TestCase):
   def test_int_to_float_unary_func(self, dtype):
     for func in [
       lambda t: t.exp(),
-      # lambda t: t.exp2(),  # requires MUL
+      lambda t: t.exp2(),
       lambda t: t.log(),
       lambda t: t.log2(),
       lambda t: t.sqrt(),
-      # lambda t: t.rsqrt(),  # requires DIV
+      lambda t: t.rsqrt(),
       lambda t: t.sin(),
-      # lambda t: t.cos(),  # requires SUB
-      # lambda t: t.tan(),  # requires .cos() to work
+      lambda t: t.cos(),
+      lambda t: t.tan(),
       lambda t: t.sigmoid(),
     ]:
       a = [2, 3, 4]

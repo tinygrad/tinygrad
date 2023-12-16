@@ -684,7 +684,7 @@ class Tensor:
   def sigmoid(self): return mlops.Sigmoid.apply(self)
   def sin(self): return mlops.Sin.apply(self)
   def sqrt(self): return mlops.Sqrt.apply(self)
-  def rsqrt(self): return (1/self).sqrt()
+  def rsqrt(self): return self.reciprocal().sqrt()
   def cos(self): return ((math.pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
 
