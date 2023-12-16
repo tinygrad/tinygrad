@@ -348,9 +348,9 @@ class TestAutoCastType(unittest.TestCase):
 
 class TestBF16Cast(unittest.TestCase):
   def helper_prepare_bf16(self, fn: str):
-      fn = temp(fn)
-      pathlib.Path(fn).unlink(missing_ok=True)
-      return Tensor([1043529728, 1043529728, 1043202048, 1043005440, 1042939904], device="CPU", dtype=dtypes.bfloat16).to(f"disk:{fn}").to(Device.DEFAULT)
+    fn = temp(fn)
+    pathlib.Path(fn).unlink(missing_ok=True)
+    return Tensor([1043529728, 1043529728, 1043202048, 1043005440, 1042939904], device="CPU", dtype=dtypes.bfloat16).to(f"disk:{fn}").to(Device.DEFAULT)
 
   def test_bf16_cast(self):
     out = self.helper_prepare_bf16("temp_bf16_1")
