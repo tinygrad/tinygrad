@@ -64,7 +64,12 @@ class Tensor:
     elif isinstance(data, bytes): data = LazyBuffer.fromCPU(np.frombuffer(data, np.uint8))
     elif data is None: data = LazyBuffer.fromCPU(np.array([], dtype=(dtype or Tensor.default_type).np))
     elif isinstance(data, list):
+<<<<<<< HEAD
       data = LazyBuffer.fromCPU(np.array(data, (dtype or (dtypes.int32 if data and all_int(data) else Tensor.default_type)).np))
+=======
+      # NOTE: cast at the end for the types that do not have a numpy dtype
+      data = LazyBuffer.fromCPU(np.array(data, (dtype:=(dtype or (dtypes.int32 if data and all_int(data) else Tensor.default_type))).np)).cast(dtype)
+>>>>>>> master
     elif isinstance(data, np.ndarray):
       if data.shape == (): data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
       else: data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
@@ -320,8 +325,13 @@ class Tensor:
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, (tuple, list)):
       # special case <indices: List[int]>, a lil ugly
+<<<<<<< HEAD
       if isinstance(indices, list) and all(isinstance(i, int) for i in indices): indices = [Tensor(indices, requires_grad=False, device=self.device)]
       else: indices = [Tensor(list(i), requires_grad=False, device=self.device) if isinstance(i, (tuple, list)) else i for i in indices]
+=======
+      if isinstance(indices, list) and all(isinstance(i, int) for i in indices): indices = [Tensor(indices, dtype=dtypes.int32, requires_grad=False, device=self.device)]  # noqa: E501
+      else: indices = [Tensor(list(i), dtype=dtypes.int32, requires_grad=False, device=self.device) if isinstance(i, (tuple, list)) else i for i in indices]  # noqa: E501
+>>>>>>> master
     else: indices = [indices]
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
@@ -384,8 +394,11 @@ class Tensor:
         tdim.append(td := tensor_dim - dims_collapsed_ + dims_injected)
         # normalize the negative tensor indices
         idx.append(((t := indices[tensor_dim + dims_injected]) < 0).where(ret.shape[td], 0) + t)
+<<<<<<< HEAD
         # TODO uint8 and bool tensor indexing
         if not (dtypes.is_int(t.dtype) or t.dtype == dtypes.bool): raise IndexError("tensors used as indices must be int or bool tensors")
+=======
+>>>>>>> master
 
       # compute sum_dim, arange, and idx
       max_dim = max(i.ndim for i in idx)
@@ -728,15 +741,23 @@ class Tensor:
 
   # ***** broadcasted binary mlops *****
 
+<<<<<<< HEAD
   # TODO: y can be bool
   def _broadcasted(self, y:Union[Tensor, float, int], reverse:bool=False) -> Tuple[Tensor, Tensor]:
+=======
+  def _broadcasted(self, y:Union[Tensor, float, int, bool], reverse:bool=False) -> Tuple[Tensor, Tensor]:
+>>>>>>> master
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
       if 0 in self.shape: return self, self.full_like(y)
       if isinstance(self.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
       else:
+<<<<<<< HEAD
         y_dtype = dtypes.int32 if isinstance(y, int) else Tensor.default_type
+=======
+        y_dtype = dtypes.bool if isinstance(y, bool) else dtypes.int32 if isinstance(y, int) else Tensor.default_type
+>>>>>>> master
         x = x.cast(y_dtype)
       y = Tensor(y, self.device, y_dtype, requires_grad=False)
 
@@ -749,6 +770,7 @@ class Tensor:
     broadcasted_shape = tuple(max(xi, yi) for xi, yi in zip(x.shape, y.shape))
     return x.expand(broadcasted_shape), y.expand(broadcasted_shape)
 
+<<<<<<< HEAD
   def _to_float(self, x:Union[Tensor, float, int]):
     return x.lazydata.base.op.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
@@ -769,6 +791,28 @@ class Tensor:
     return mlops.Div.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or reverse or not x or not dtypes.is_float(self.dtype) else self.mul(1/x)  # noqa: E501
   def pow(self, x:Union[Tensor, float, int], reverse=False) -> Tensor:
     x = self._to_float(x)
+=======
+  def _to_const_val(self, x:Union[Tensor, float, int, bool]) -> Union[Tensor, float, int, bool]:
+    return x.lazydata.base.op.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
+      and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
+
+  def add(self, x:Union[Tensor, float, int, bool], reverse=False) -> Tensor:
+    x = self._to_const_val(x)
+    return mlops.Add.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else self
+  def sub(self, x:Union[Tensor, float, int, bool], reverse=False) -> Tensor:
+    x = self._to_const_val(x)
+    return mlops.Sub.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x else (-self if reverse else self)
+  def mul(self, x:Union[Tensor, float, int, bool], reverse=False) -> Tensor:
+    x = self._to_const_val(x)
+    if x.__class__ is not Tensor and x == 0.0: return mlops.Zero.apply(self)
+    if x.__class__ is not Tensor and x == -1.0: return -self
+    return mlops.Mul.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x != 1.0 else self
+  def div(self, x:Union[Tensor, float, int, bool], reverse=False) -> Tensor:
+    x = self._to_const_val(x)
+    return mlops.Div.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or reverse or not x or not dtypes.is_float(self.dtype) else self.mul(1/x)  # noqa: E501
+  def pow(self, x:Union[Tensor, float, int, bool], reverse=False) -> Tensor:
+    x = self._to_const_val(x)
+>>>>>>> master
     if not isinstance(x, Tensor) and not reverse:
       # simple pow identities
       if x < 0: return self.reciprocal().pow(-x)
