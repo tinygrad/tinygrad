@@ -226,18 +226,18 @@ class TestHelpers(unittest.TestCase):
 class TestTypeSpec(unittest.TestCase):
   def test_creation(self):
     assert Tensor([]).dtype == Tensor.default_type
-    # assert Tensor([1]).dtype == dtypes.int
+    assert Tensor([1]).dtype == dtypes.int
     assert Tensor([1.1]).dtype == Tensor.default_type
 
   def test_const_full(self):
     assert Tensor.ones([2,3]).dtype == Tensor.default_type
     assert Tensor.zeros([2,3]).dtype == Tensor.default_type
     assert Tensor.full([2,3], 3.3).dtype == Tensor.default_type
-    # assert Tensor.full([2,3], 3).dtype == dtypes.int
+    assert Tensor.full([2,3], 3).dtype == dtypes.int
 
   def test_reduce_0d_default(self):
     assert Tensor.ones([2,3,0]).sum(2).dtype ==  Tensor.default_type
-    # assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int
+    # assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int  # requires reduceop acc fix
 
   def test_arange(self):
     assert Tensor.arange(5).dtype == dtypes.int32
@@ -312,14 +312,14 @@ class TestAutoCastType(unittest.TestCase):
   def test_int_to_float_unary_func(self, dtype):
     for func in [
       lambda t: t.exp(),
-      # lambda t: t.exp2(),  # requires MUL
+      lambda t: t.exp2(),
       lambda t: t.log(),
       lambda t: t.log2(),
       lambda t: t.sqrt(),
-      # lambda t: t.rsqrt(),  # requires DIV
+      lambda t: t.rsqrt(),
       lambda t: t.sin(),
-      # lambda t: t.cos(),  # requires SUB
-      # lambda t: t.tan(),  # requires .cos() to work
+      lambda t: t.cos(),
+      lambda t: t.tan(),
       lambda t: t.sigmoid(),
     ]:
       a = [2, 3, 4]
