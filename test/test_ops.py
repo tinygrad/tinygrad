@@ -841,6 +841,13 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3,1,6)], lambda x: x.expand(arg), lambda x: x.expand(shape=arg))
     helper_test_op([()], lambda x: x.expand([]), lambda x: x.expand(shape=[]))
 
+  def test_roll(self):
+    helper_test_op([(2,4)], lambda x: torch.roll(x, 1, 0), lambda x: x.roll(1, 0), forward_only=True)
+
+  def test_narrow(self):
+    helper_test_op([(2,4)], lambda x: torch.narrow(x, 0, 0, 2), lambda x: x.narrow(0, 0, 2), forward_only=True)
+    helper_test_op([(2,4)], lambda x: torch.narrow(x, 1, 1, 2), lambda x: x.narrow(1, 1, 2), forward_only=True)
+
   @unittest.skip("very slow")
   def test_sd_big_conv(self):
     # internal shape (1, 1, 512, 62, 62, 512, 3, 3) overflows a int

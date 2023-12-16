@@ -478,6 +478,17 @@ class Tensor:
     return self.permute(order)
   def flatten(self, start_dim=0): return self.reshape(shape=self.shape[:start_dim] + (-1,))
 
+  def roll(self, shift:int, dim:int=0) -> Tensor:
+    if dim < 0: dim += self.ndim
+    dim_size = self.shape[dim]
+    shift %= dim_size
+    if shift == 0: return self
+    parts = [self.narrow(dim, dim_size - shift, shift), self.narrow(dim, 0, dim_size - shift)]
+    return Tensor.cat(*parts, dim=dim)
+
+  def narrow(self, dim:int, start:int, length:int) -> Tensor:
+    return self[tuple(slice(None) if i != dim else slice(start, start + length) for i in range(self.ndim))]
+
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False) -> Tensor:
