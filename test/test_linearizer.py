@@ -13,10 +13,9 @@ from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
 from tinygrad.helpers import dtypes, prod
 
+@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled):
-      self.skipTest("Only Compiled supports cache")
     a, b = Tensor.randn(4), Tensor.randn(4)
     np_a, np_b = a.numpy(), b.numpy()
     CacheCollector.start()
@@ -28,9 +27,6 @@ class TestLinearizer(unittest.TestCase):
 
   def test_load_dedup(self):
     # for different leaves in the AST, the same loads may occur.
-
-    if not isinstance(Device[Device.DEFAULT], Compiled):
-      self.skipTest("Only Compiled uses linearizer")
 
     a = Tensor.randn(4).realize()
     # these are of size 3 to avoid float4 coalesce
@@ -46,9 +42,6 @@ class TestLinearizer(unittest.TestCase):
   def test_upcast_cse(self):
     # when upcasting, within a subtree, there may be common expressions.
 
-    if not isinstance(Device[Device.DEFAULT], Compiled):
-      self.skipTest("Only Compiled uses linearizer")
-
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = a.expand([2]) + b.expand([2])
 
@@ -59,9 +52,6 @@ class TestLinearizer(unittest.TestCase):
     assert num_ops <= 1, "more alu uops than needed"
 
   def test_zero_fold(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled):
-      self.skipTest("Only Compiled uses linearizer")
-
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack([a, b])
 
@@ -73,20 +63,15 @@ class TestLinearizer(unittest.TestCase):
 
   @unittest.skip("constant folding not supported yet")
   def test_constant_fold(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled):
-      self.skipTest("Only Compiled uses linearizer")
-
     a, b = Tensor(2), Tensor(3)
     r = a * b
 
-    k = Linearizer(r.lazydata.schedule()[-1][0])
+    k = Linearizer(r.lazydata.schedule()[-1].ast)
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
     assert num_ops <= 0, "more load or alu uops than needed"
 
   def test_tensor_cores(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled):
-      self.skipTest("Only Compiled uses linearizer")
     if Device.DEFAULT not in tensor_cores:
       self.skipTest("No tensor cores for device")
 
@@ -144,9 +129,10 @@ def helper_realized_ast(r:Tensor):
   output_buffer = Buffer(s[-1].out.device, prod((s if isinstance(s, int) else s.max for s in s[-1].out.shape)), s[-1].out.dtype, **s[-1].out._device_extra_args())  # allocate an output buffer
   return s[-1].ast, [output_buffer] + [l.realized for l in s[-1].inputs]
 
+@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestFloat4(unittest.TestCase):
   def setUp(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.supports_float4:
+    if not Device[Device.DEFAULT].linearizer_opts.supports_float4:
       self.skipTest("Device does not support float4")
 
   @staticmethod
@@ -289,11 +275,8 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(k) == (1, 1)
 
+@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestHandCodedOpts(unittest.TestCase):
-  def setUp(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled):
-      self.skipTest("Device does not use linearizer")
-
   def test_masked_upcast(self):
     layer_1 = Tensor.cat(*[Tensor.rand(5) for _ in range(4)])
     layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 20))
@@ -405,9 +388,10 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
   for x in opts: # Check custom transformations if any.
     check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_program)
 
+@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestLinearizerOpts(unittest.TestCase):
   def test_local_and_grouped_reduce(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.has_local or not Device[Device.DEFAULT].linearizer_opts.has_shared:
+    if not Device[Device.DEFAULT].linearizer_opts.has_local or not Device[Device.DEFAULT].linearizer_opts.has_shared:
       self.skipTest("Only Compiled uses linearizer with locals and shared")
 
     N = 128
@@ -430,9 +414,6 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
   def test_upcasts(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled):
-      self.skipTest("Only Compiled uses linearizer")
-
     N = 16
     Tensor.manual_seed(1772)
     a = Tensor.rand(N, N)
@@ -445,9 +426,6 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
   def test_full_upcast(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled):
-      self.skipTest("Only Compiled uses linearizer")
-
     Tensor.manual_seed(1772)
     a = Tensor.rand(4)
     b = Tensor.rand(4)
@@ -457,7 +435,7 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
   def test_matmul(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.has_local or not Device[Device.DEFAULT].linearizer_opts.has_shared:
+    if not Device[Device.DEFAULT].linearizer_opts.has_local or not Device[Device.DEFAULT].linearizer_opts.has_shared:
       self.skipTest("Only Compiled uses linearizer with locals and shared")
 
     N = 128
@@ -484,7 +462,7 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
   def test_double_reduce(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.has_local or not Device[Device.DEFAULT].linearizer_opts.has_shared:
+    if not Device[Device.DEFAULT].linearizer_opts.has_local or not Device[Device.DEFAULT].linearizer_opts.has_shared:
       self.skipTest("Only Compiled uses linearizer with locals and shared")
 
     N = 128
@@ -508,7 +486,7 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
   def test_tensor_core_opts(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled) or not Device[Device.DEFAULT].linearizer_opts.has_local:
+    if not not Device[Device.DEFAULT].linearizer_opts.has_local:
       self.skipTest("Only Compiled uses linearizer with locals")
     if Device.DEFAULT not in tensor_cores:
       self.skipTest("No tensor cores for device")
@@ -532,7 +510,6 @@ class TestLinearizerOpts(unittest.TestCase):
     ], apply_tc=True)
 
   def test_padto_matmul(self):
-    if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
     if Device.DEFAULT == "CUDA": self.skipTest("super slow on CUDA")
     N = 17 * 17
     Tensor.manual_seed(289)
@@ -549,7 +526,6 @@ class TestLinearizerOpts(unittest.TestCase):
 
   def test_padto_max(self):
     # pad uses invalid value 0, so max is not allowed
-    if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
     N = 17 * 17
     a = -Tensor.ones(N, N)
     with self.assertRaises(AssertionError):
@@ -557,7 +533,6 @@ class TestLinearizerOpts(unittest.TestCase):
 
   def test_padto_where(self):
     # pad uses invalid value 0, so kernel with max is not allowed
-    if not isinstance(Device[Device.DEFAULT], Compiled): self.skipTest("Only Compiled uses linearizer")
     N = 17 * 17
     a = (Tensor.rand(N, N).max(axis=0) > 1).where(1, 0)
     with self.assertRaises(AssertionError):
