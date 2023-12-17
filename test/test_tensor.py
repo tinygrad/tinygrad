@@ -239,8 +239,13 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64 # check that it works for something else
 
   def test_tensor_list_dtype(self):
-    for arr in ([1], [[1,1],[1,1]], [[[1,1],[1,1]],[[1,1],[1,1]]]):
+    for arr in ([1], [[[1]]], [[1,1],[1,1]], [[[1,1],[1,1]],[[1,1],[1,1]]]):
       assert Tensor(arr).dtype == dtypes.int32
+      assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
+      assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+
+    for arr in ([True], [[[False]]], [[True,False],[True,False]], [[[False,True],[False,False]],[[True,True],[False,True]]]):
+      assert Tensor(arr).dtype == dtypes.bool
       assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
       assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
 
@@ -249,9 +254,13 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor([[0,1],[3.,4]]).dtype == Tensor.default_type
     assert Tensor([[[0],[1]],[[3.],[4]]]).dtype == Tensor.default_type
 
+  def test_tensor_list_values(self):
+    self.assertEqual(Tensor([[[]]]).shape, (1,1,0))
     self.assertEqual(Tensor([[],[]]).shape, (2,0))
-    self.assertEqual(Tensor([[[[]]]]).shape, (1,1,1,0))
+    np.testing.assert_equal(Tensor[[[]]].numpy(), np.array([[]]))
+    np.testing.assert_equal(Tensor[[[],[]]].numpy(), np.array([[],[]]))
 
+  def test_tensor_list_errors(self):
     # inhomogeneous shape
     with self.assertRaises(ValueError): Tensor([[],[[]]])
     with self.assertRaises(ValueError): Tensor([[1],[1],1])

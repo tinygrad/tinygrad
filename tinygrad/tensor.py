@@ -66,7 +66,9 @@ class Tensor:
     elif isinstance(data, bytes): data = LazyBuffer.fromCPU(np.frombuffer(data, np.uint8))
     elif data is None: data = LazyBuffer.fromCPU(np.array([], dtype=(dtype or Tensor.default_type).np))
     elif isinstance(data, list):
-      dtype = dtype or (dtypes.int32 if bool(fdata := fully_flatten(data)) and all_int(fdata) else Tensor.default_type)
+      if not dtype and bool(d := fully_flatten(data)) and all_int(d): dtype = dtypes.int32
+      elif not dtype and bool(d) and all(isinstance(s, bool) for s in d): dtype = dtypes.bool
+      elif not dtype: dtype = Tensor.default_type
       # NOTE: cast at the end for the types that do not have a numpy dtype
       data = LazyBuffer.fromCPU(np.array(data, dtype.np)).cast(dtype)
     elif isinstance(data, np.ndarray):
