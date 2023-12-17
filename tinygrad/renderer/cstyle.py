@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict, cast
 import math, functools
-from collections import defaultdict
+from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, prod, DType, PtrDType, strip_parens, getenv
@@ -113,14 +113,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
   r: Dict[UOp, str] = {}
   def ssa(u, prefix="t"):
     nonlocal c, r
+    r[u]=f"{prefix}{c[prefix]}"
     c[prefix] += 1
-    r[u]=f"{prefix}{c[prefix]-1}"
     return r[u]
 
-  child_count: DefaultDict[UOp, int] = defaultdict(int)
-  for ru in uops:
-    for v in ru.vin:
-      child_count[v] += 1
+  child_count = Counter(v for ru in uops for v in ru.vin)
 
   for u in uops:
     uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
