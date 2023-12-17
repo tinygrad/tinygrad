@@ -845,7 +845,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x.expand([]), lambda x: x.expand(shape=[]))
 
   def test_roll(self):
+    helper_test_op([(2,4)], lambda x: torch.roll(x, 1), lambda x: x.roll(1), forward_only=True)
     helper_test_op([(2,4)], lambda x: torch.roll(x, 1, 0), lambda x: x.roll(1, 0), forward_only=True)
+    helper_test_op([(2,4)], lambda x: torch.roll(x, -1, 0), lambda x: x.roll(-1, 0), forward_only=True)
+    helper_test_op([(2,4)], lambda x: torch.roll(x, shifts=(2, 1), dims=(0, 1)), lambda x: x.roll(shifts=(2, 1), dims=(0, 1)), forward_only=True)
 
   def test_narrow(self):
     helper_test_op([(2,)], lambda x: torch.narrow(x, 0, 0, 0), lambda x: x.narrow(0, 0, 0), forward_only=True)

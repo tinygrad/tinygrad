@@ -480,13 +480,21 @@ class Tensor:
     return self.permute(order)
   def flatten(self, start_dim=0): return self.reshape(shape=self.shape[:start_dim] + (-1,))
 
-  def roll(self, shift:int, dim:int=0) -> Tensor:
-    if dim < 0: dim += self.ndim
-    dim_size = self.shape[dim]
-    shift %= dim_size
-    if shift == 0: return self
-    parts = [self.narrow(dim, dim_size - shift, shift), self.narrow(dim, 0, dim_size - shift)]
-    return Tensor.cat(*parts, dim=dim)
+  def roll(self, shifts:Union[int, Tuple[int]], dims:Union[int, Tuple[int]]=()) -> Tensor:
+    shifts = (shifts,) if isinstance(shifts, int) else shifts
+    dims = (dims,) if isinstance(dims, int) else dims
+    if not dims:
+      flattened = self.reshape(-1)
+      shift = shifts[0] % flattened.shape[0]
+      parts = [flattened[-shift:], flattened[:-shift]]
+      return Tensor.cat(*parts, dim=0).reshape(self.shape) if shift else self
+    result = self
+    for dim, shift in zip(dims, shifts):
+      shift %= self.shape[dim % self.ndim]
+      if shift:
+        parts = [result.narrow(dim, -shift, shift), result.narrow(dim, 0, result.shape[dim % self.ndim] - shift)]
+        result = Tensor.cat(*parts, dim=dim % self.ndim)
+    return result
 
   def narrow(self, dim:int, start:Union[int, Tensor], length:int) -> Tensor:
     if dim < 0: dim += self.ndim
