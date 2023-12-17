@@ -3,7 +3,7 @@ tinygrad is a bit bloated now, and there's several places where concerns should 
 tensor.py and mlops.py are great code. The interface going backward here is:
 
 LazyBuffer.const (this creates a matching size buffer)
-LazyBuffer.contiguous (tbis is not exactly elementwise)
+LazyBuffer.contiguous (this is not exactly elementwise)
 LazyBuffer.e (elementwise)
 LazyBuffer.r (reduce)
 reshape/permute/expand/stride/shrink/pad (movement)

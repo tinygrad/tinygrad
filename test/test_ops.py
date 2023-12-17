@@ -448,12 +448,18 @@ class TestOps(unittest.TestCase):
 
   def test_argmax(self):
     self.assertEqual(torch.Tensor([2,2]).argmax().numpy(), Tensor([2,2]).argmax().numpy()) # check if returns first index for same max
+    self.assertEqual(torch.Tensor([2,2]).argmax().numpy().dtype, Tensor([2,2]).argmax().numpy().dtype)
+    self.assertEqual(torch.Tensor([2,2]).argmax(axis=0).numpy(), Tensor([2,2]).argmax(axis=0).numpy())
+    self.assertEqual(torch.Tensor([2,2]).argmax(axis=0).numpy().dtype, Tensor([2,2]).argmax(axis=0).numpy().dtype)
     helper_test_op([(10,20)], lambda x: x.argmax(), lambda x: x.argmax(), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmax(0, False), lambda x: x.argmax(0, False), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmax(1, False), lambda x: x.argmax(1, False), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmax(1, True), lambda x: x.argmax(1, True), forward_only=True)
   def test_argmin(self):
     self.assertEqual(torch.Tensor([2, 2]).argmin().numpy(), Tensor([2, 2]).argmin().numpy())
+    self.assertEqual(torch.Tensor([2, 2]).argmin().numpy().dtype, Tensor([2, 2]).argmin().numpy().dtype)
+    self.assertEqual(torch.Tensor([2, 2]).argmin(axis=0).numpy(), Tensor([2, 2]).argmin(axis=0).numpy())
+    self.assertEqual(torch.Tensor([2, 2]).argmin(axis=0).numpy().dtype, Tensor([2, 2]).argmin(axis=0).numpy().dtype)
     helper_test_op([(10,20)], lambda x: x.argmin(), lambda x: x.argmin(), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmin(0, False), lambda x: x.argmin(0, False), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmin(1, False), lambda x: x.argmin(1, False), forward_only=True)
