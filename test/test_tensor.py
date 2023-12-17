@@ -243,9 +243,12 @@ class TestTinygrad(unittest.TestCase):
       assert Tensor(arr).dtype == dtypes.int32
       assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
       assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+    assert Tensor([]).dtype == Tensor.default_type
+    assert Tensor([[],[]]).dtype == Tensor.default_type
     assert Tensor([[0,1],[3.,4]]).dtype == Tensor.default_type
     assert Tensor([[[0],[1]],[[3.],[4]]]).dtype == Tensor.default_type
-    with self.assertRaises(ValueError): Tensor([[[1,1,1], [1,1]]]) # has an inhomogeneous shape
+    with self.assertRaises(ValueError): Tensor([[1],[1],1]).dtype
+    with self.assertRaises(ValueError): Tensor([[[1,1,1],[1,1]]]) # has an inhomogeneous shape
     with self.assertRaises(ValueError): Tensor([[1,1,1],[[1,1,1]]]) # has an inhomogeneous shape
 
   def test_tensor_copy(self):
