@@ -52,6 +52,9 @@ def hprint(vals):
     else: ret.append(f"{v}")
   return f"({','.join(ret)})"
 
+ST6_SHADER = 0
+ST6_CONSTANTS = 1
+
 def parse_cmd_buf(dat):
   ptr = 0
   while ptr < len(dat):
@@ -62,12 +65,16 @@ def parse_cmd_buf(dat):
       vals = struct.unpack("I"*size, dat[ptr+4:ptr+4+4*size])
       print(f"{ptr:3X} -- typ 7: {size=:3d}, {opcode=:#x} {ops[opcode]}", hprint(vals))
       if ops[opcode] == "CP_LOAD_STATE6_FRAG":
+        dst_off = vals[0] & 0x3FFF
+        state_type = (vals[0]>>14) & 0x3
+        state_src = (vals[0]>>16) & 0x3
+        state_block = (vals[0]>>18) & 0xF  # 13 = SB4_CS_SHADER
+        num_unit = vals[0]>>22
+        print(f"{num_unit=} {state_block=} {state_src=} {state_type=} {dst_off=}")
+
         from disassemblers.adreno import disasm_raw
-        # pointers @ 0x140 in first call
-        #if vals[0] == 0x40364000: hexdump(get_mem(((vals[2] << 32) | vals[1]) + 0x140, 0x40))
-        if vals[0] == 0x40364000: hexdump(get_mem(((vals[2] << 32) | vals[1]), 0x180))
-        if vals[0] == 0xb60000: disasm_raw(get_mem(((vals[2] << 32) | vals[1]), 0x180))
-        #hexdump(get_mem((vals[2] << 32) | vals[1], 0x180))
+        if state_type == ST6_SHADER: disasm_raw(get_mem(((vals[2] << 32) | vals[1]), 0x180))
+        if state_type == ST6_CONSTANTS: hexdump(get_mem(((vals[2] << 32) | vals[1]), min(0x180, num_unit*4)))
         pass
       ptr += 4*size
     elif (cmd>>28) == 0x4:
