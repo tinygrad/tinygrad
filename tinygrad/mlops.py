@@ -89,11 +89,13 @@ class Sigmoid(Function):
 
 class Less(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    return x.e(BinaryOps.CMPLT, y)
+    output_dtype = least_upper_dtype(x.dtype, y.dtype)
+    return x.cast(output_dtype).e(BinaryOps.CMPLT, y.cast(output_dtype))
 
 class Xor(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    return x.e(BinaryOps.XOR, y)
+    output_dtype = least_upper_dtype(x.dtype, y.dtype)
+    return x.cast(output_dtype).e(BinaryOps.XOR, y.cast(output_dtype))
 
 class Add(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
