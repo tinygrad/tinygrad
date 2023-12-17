@@ -125,7 +125,7 @@ class TestBFloat16DType(unittest.TestCase):
     t.to(f"disk:{temp('f32')}").realize()
 
     # hack to "cast" f32 -> bf16
-    dat = open(temp('f32'), "rb").read()
+    with open(temp('f32'), "rb") as f: dat = f.read()
     adat = b''.join([dat[i+2:i+4] for i in range(0, len(dat), 4)])
     with open(temp('bf16'), "wb") as f: f.write(adat)
 
