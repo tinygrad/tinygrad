@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from PIL import Image
-from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch
+from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten
 from tinygrad.shape.symbolic import Variable, NumNode
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -159,6 +159,15 @@ class TestFetch(unittest.TestCase):
     img = fetch("https://media.istockphoto.com/photos/hen-picture-id831791190", allow_caching=False)
     with Image.open(img) as pimg:
       assert pimg.size == (705, 1024)
+
+class TestFullyFlatten(unittest.TestCase):
+  def test_fully_flatten(self):
+    self.assertEqual(fully_flatten([[1, 3], [1, 2]]), [1, 3, 1, 2])
+    self.assertEqual(fully_flatten(((1, 3), (1, 2))), [1, 3, 1, 2])
+    self.assertEqual(fully_flatten([[[1], [3]], [[1], [2]]]), [1, 3, 1, 2])
+    self.assertEqual(fully_flatten([[[[1], 2], 3], 4]), [1, 2, 3, 4])
+    self.assertEqual(fully_flatten([[1, 2, [3, 4]], [5, 6], 7]), [1, 2, 3, 4, 5, 6, 7])
+    self.assertEqual(fully_flatten([[1, "ab"], [True, None], [3.14, [5, "b"]]]), [1, "ab", True, None, 3.14, 5, "b"])
 
 if __name__ == '__main__':
   unittest.main()
