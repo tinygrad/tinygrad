@@ -253,15 +253,15 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor([[],[]]).dtype == Tensor.default_type
     assert Tensor([[0,1],[3.,4]]).dtype == Tensor.default_type
     assert Tensor([[[0],[1]],[[3.],[4]]]).dtype == Tensor.default_type
-    assert Tensor([[True,True],[3.,True]]).dtype == Tensor.int32
-    assert Tensor([[True], [3]]).dtype == Tensor.int32
+    assert Tensor([[True,True],[3.,True]]).dtype == Tensor.default_type
+    assert Tensor([[True], [3]]).dtype == dtypes.int32
 
   def test_tensor_list_values(self):
     self.assertEqual(Tensor([[1,1],[1,1]]).shape, (2,2))
     self.assertEqual(Tensor([[[]]]).shape, (1,1,0))
     self.assertEqual(Tensor([[],[]]).shape, (2,0))
-    np.testing.assert_equal(Tensor[[[]]].numpy(), np.array([[]]))
-    np.testing.assert_equal(Tensor[[[],[]]].numpy(), np.array([[],[]]))
+    np.testing.assert_equal(Tensor([[]]).numpy(), np.array([[]]))
+    np.testing.assert_equal(Tensor([[],[]]).numpy(), np.array([[],[]]))
 
   def test_tensor_list_errors(self):
     # inhomogeneous shape
