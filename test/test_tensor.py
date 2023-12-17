@@ -239,10 +239,46 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64 # check that it works for something else
 
   def test_tensor_list_dtype(self):
-    arr = [1]
-    assert Tensor(arr).dtype == dtypes.int32
-    assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
-    assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+    for arr in ([1], [[[1]]], [[1,1],[1,1]], [[[1,1],[1,1]],[[1,1],[1,1]]]):
+      assert Tensor(arr).dtype == dtypes.int32
+      assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
+      assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+
+    for arr in ([True], [[[False]]], [[True,False],[True,False]], [[[False,True],[False,False]],[[True,True],[False,True]]]):
+      assert Tensor(arr).dtype == dtypes.bool
+      assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
+      assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+
+    # empty tensor defaults
+    for arr in ([], [[[]]], [[],[]]):
+      t = Tensor(arr)
+      assert t.dtype == Tensor.default_type
+      np.testing.assert_allclose(t.numpy(), np.array(arr))
+
+    # mixture of bool and int
+    for arr in ([True, 3], [[True],[3]], [[[True]], [[3]]], [[True, 3], [3, True]]):
+      t = Tensor(arr)
+      assert t.dtype == dtypes.int32
+      np.testing.assert_allclose(t.numpy(), np.array(arr))
+
+    # mixture of bool, int and float
+    for arr in ([[True,True],[3.,True]], [[0,1],[3.,4]], [[[0],[1]],[[3.],[4]]], [[[True],[1]],[[3.],[4]]]):
+      t = Tensor(arr)
+      assert t.dtype == Tensor.default_type
+      np.testing.assert_allclose(t.numpy(), np.array(arr))
+
+  def test_tensor_list_shapes(self):
+    self.assertEqual(Tensor([[[]]]).shape, (1,1,0))
+    self.assertEqual(Tensor([[],[]]).shape, (2,0))
+    self.assertEqual(Tensor([[[[]],[[]]], [[[]],[[]]], [[[]],[[]]]]).shape, (3,2,1,0))
+
+  def test_tensor_list_errors(self):
+    # inhomogeneous shape
+    with self.assertRaises(ValueError): Tensor([[],[[]]])
+    with self.assertRaises(ValueError): Tensor([[1],[]])
+    with self.assertRaises(ValueError): Tensor([[1],[1],1])
+    with self.assertRaises(ValueError): Tensor([[[1,1,1],[1,1]]])
+    with self.assertRaises(ValueError): Tensor([[1,1,1],[[1,1,1]]])
 
   def test_tensor_copy(self):
     x = copy.deepcopy(Tensor.ones((3,3,3)))
