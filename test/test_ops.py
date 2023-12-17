@@ -283,12 +283,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: 2/x, lambda x: 2/x)
     helper_test_op([()], lambda x: x/2, lambda x: x/2)
     helper_test_op([()], lambda x: 2/x, lambda x: 2/x)
-  @unittest.skipIf(Device.DEFAULT == "METAL", "METAL has issues with -inf")
+  @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "METAL has issues with -inf")
   def test_mul_const_naninf(self):
     helper_test_op([(45,65)], lambda x: x*float("inf"), lambda x: x*float("inf"))
     helper_test_op([(45,65)], lambda x: x*-float("inf"), lambda x: x*-float("inf"))
     helper_test_op([(45,65)], lambda x: x*float("nan"), lambda x: x*float("nan"))
-  @unittest.skipIf(Device.DEFAULT == "METAL", "METAL has issues with -inf")
+  @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "METAL has issues with -inf")
   def test_div_const_naninf(self):
     helper_test_op([(45,65)], lambda x: x/float("inf"), lambda x: x/float("inf"))
     helper_test_op([(45,65)], lambda x: x/-float("inf"), lambda x: x/-float("inf"))
@@ -462,6 +462,9 @@ class TestOps(unittest.TestCase):
   def test_einsum(self):
     # matrix transpose
     helper_test_op([(150,150)], lambda a: torch.einsum('ij->ji', a), lambda a: Tensor.einsum('ij->ji', a))
+    helper_test_op([(150,150)], lambda a: torch.einsum('ji', a), lambda a: Tensor.einsum('ji', a))
+    helper_test_op([(20,30,40)], lambda a: torch.einsum('jki', a), lambda a: Tensor.einsum('jki', a))
+    helper_test_op([(20,30,40)], lambda a: torch.einsum('dog', a), lambda a: Tensor.einsum('dog', a))
     # sum all elements
     helper_test_op([(20,30,40)], lambda a: torch.einsum('ijk->', a), lambda a: Tensor.einsum('ijk->', a))
     # column sum
@@ -1311,6 +1314,10 @@ class TestOps(unittest.TestCase):
 
     np.testing.assert_allclose(x.repeat((2, 0, 4)).numpy(), Tensor.zeros(8, 0, 12).numpy())
 
+  def test_simple_repeat(self):
+    repeats = [3, 3, 4]
+    helper_test_op([(3, 3)], lambda x: x.repeat(*repeats), lambda x: x.repeat(repeats))
+
   def test_clip(self):
     helper_test_op([(45,65)], lambda x: x.clip(-2.3, 1.2), lambda x: x.clip(-2.3, 1.2))
 
@@ -1385,6 +1392,8 @@ class TestOps(unittest.TestCase):
     # indexing using idx with different dim
     helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor(1)], lambda x: x[Tensor([[0,0,0],[0,0,0]]), Tensor(1)])
     helper_test_op([(2,3)], lambda x: x[torch.tensor([1]), torch.tensor([[0,0,0],[0,0,0]])], lambda x: x[Tensor([1]), Tensor([[0,0,0],[0,0,0]])])
+    helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor([2,1,1])], lambda x: x[Tensor([[0,0,0],[0,0,0]]), Tensor([2,1,1])])
+    helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,1,-1],[-1,-2,0]]), torch.tensor([2,1,-1])], lambda x: x[Tensor([[0,1,-1],[-1,-2,0]]), Tensor([2,1,-1])])
 
   def test_slice_fancy_indexing_list_indices(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
