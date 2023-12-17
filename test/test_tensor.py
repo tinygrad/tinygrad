@@ -258,7 +258,7 @@ class TestTinygrad(unittest.TestCase):
     # mixture of bool and int
     for arr in ([True, 3], [[True],[3]], [[[True]], [[3]]], [[True, 3], [3, True]]):
       t = Tensor(arr)
-      assert t.dtype == Tensor.int32
+      assert t.dtype == dtypes.int32
       np.testing.assert_allclose(t.numpy(), np.array(arr))
 
     # mixture of bool, int and float
