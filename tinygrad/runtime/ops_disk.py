@@ -17,6 +17,8 @@ class DiskBuffer:
     self.ud, self.size, self.dtype, self.offset = ud, size, dtype, offset
   def __repr__(self): return f"<DiskBuffer size={self.size} dtype={self.dtype} offset={self.offset}>"
   def cast(self, arg:Tuple[DType, bool]):
+    # hack for loading bfloat16 from disktensors to other backends
+    if arg[0] == dtypes.bfloat16: return DiskBuffer(self.ud, self.size, dtypes.uint16, offset=self.offset)
     # TODO: support shape changing bitcast
     #assert arg[1], "DiskTensor only supports bitcast"
     return DiskBuffer(self.ud, self.size, arg[0], offset=self.offset)

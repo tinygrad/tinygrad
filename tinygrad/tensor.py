@@ -873,8 +873,8 @@ class Tensor:
 
   def cast(self, dtype:DType) -> Tensor:
     # hack loading bf16 from disktensors for devices that don't support bfloat16
-    if dtype == dtypes.bfloat16 and self.device.startswith("DISK"):
-      return self.cast(dtypes.uint16).to(Device.DEFAULT).cast(dtypes.uint32).mul(1<<16).contiguous().bitcast(dtypes.float32).half()
+    if self.dtype == dtypes.bfloat16:
+      return mlops.Cast.apply(self, dtype=dtypes.uint32).mul(1<<16).contiguous().bitcast(dtypes.float32).cast(dtype)
     return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
   def bitcast(self, dtype:DType) -> Tensor:
     assert self.dtype.itemsize == dtype.itemsize, "can't bitcast mismatched dtype itemsizes"

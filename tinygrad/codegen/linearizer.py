@@ -84,6 +84,7 @@ class Linearizer(Kernel):
     else:
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
     localtype = buf.dtype if amt == 1 else buf.dtype.vec(amt)
+    if localtype == dtypes.bfloat16: localtype = dtypes.uint16 if amt == 1 else buf.dtype.vec(amt)
     if isinstance(buf.dtype, ImageDType): localtype = dtypes.float if amt == 1 else dtypes.float.vec(amt)
 
     e_idxs, e_valids = g_idx.expand(expand_vars), g_valid.expand(expand_vars)
@@ -184,7 +185,7 @@ class Linearizer(Kernel):
     # add global buffers
     for i,buf in enumerate(self.bufs):
       if isinstance(buf, MemBuffer):
-        self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL, buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (), f"data{buf.idx}")
+        self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL, buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(dtypes.uint16) if buf.dtype == dtypes.bfloat16 else PtrDType(buf.dtype), (), f"data{buf.idx}") # noqa: E501
     # add var vals
     for var in vars_from_ast(self.ast):
       assert var.expr is not None

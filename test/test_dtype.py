@@ -367,15 +367,14 @@ class TestBF16Cast(unittest.TestCase):
     pathlib.Path(fn).unlink(missing_ok=True)
     return Tensor([51, 62, 51, 62, 46, 62, 43, 62, 42, 62], device="CPU", dtype=dtypes.int8).to(f"disk:{fn}").cast(dtypes.bfloat16)
 
-  def test_bf16_cast(self):
+  def test_bf16_in_disk(self):
     out = self.helper_prepare_bf16("temp_bf16_1")
-    np.testing.assert_allclose(out.numpy(), [0.1748046875, 0.1748046875, 0.169921875, 0.1669921875, 0.166015625, 0.0, 0.0, 0.0, 0.0, 0.0], rtol=1e-4, atol=1e-4)
-    assert out.dtype == dtypes.half
-    assert out.device == Device.DEFAULT
+    assert out.dtype == dtypes.bfloat16
+    assert out.device.startswith("DISK")
 
-  def test_bf16_ops(self):
-    out = self.helper_prepare_bf16("temp_bf16_2").add(4)
-    np.testing.assert_allclose(out.numpy(), [4.1748046875, 4.1748046875, 4.169921875, 4.1669921875, 4.166015625, 4.0, 4.0, 4.0, 4.0, 4.0], rtol=1e-3, atol=1e-3)
+  def test_bf16_cast_from_disk(self):
+    out = self.helper_prepare_bf16("temp_bf16_1").to(Device.DEFAULT).half()
+    np.testing.assert_allclose(out.numpy(), [0.1748046875, 0.1748046875, 0.169921875, 0.1669921875, 0.166015625, 0.0, 0.0, 0.0, 0.0, 0.0], rtol=1e-4, atol=1e-4)
     assert out.dtype == dtypes.half
     assert out.device == Device.DEFAULT
 
