@@ -9,8 +9,9 @@ from tinygrad.runtime.ops_cpu import einsum_mulacc, shape_to_axis
 device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if getenv("MPS", 0) else "cpu"))
 type_map = {torch.float64: dtypes.float64, torch.float16: dtypes.float16, torch.float32: dtypes.float32,
             torch.int8: dtypes.int8, torch.int32: dtypes.int32, torch.int64: dtypes.int64,
-            torch.uint8: dtypes.uint8, torch.bool: dtypes.bool, torch.int16: dtypes.int16}
-inverse_type_map = {v:k for k,v in type_map.items()}
+            torch.uint8: dtypes.uint8, torch.bool: dtypes.bool, torch.int16: dtypes.int16, torch.bfloat16: dtypes.bfloat16}
+inverse_type_map = dict([(v, k) for k,v in type_map.items()] + [(dtypes.ushort, torch.int16), (dtypes.uint, torch.int32)])
+def np_type_cvt(t): return {np.uint32: np.int32}.get(t, t)
 
 def output_type(x, y): return x.dtype if type_map[x.dtype].priority > type_map[y.dtype].priority else y.dtype
 def match_types(x, y, disallow_bool=False):
@@ -27,9 +28,9 @@ def as_strided(x, arg):
 torch_fxn_for_op: Dict[Op, Callable] = {
   # TODO: torch.tensor should work here. it doesn't due to "overflow" in uint8
   #BufferOps.CONST: lambda val, dtype: torch.tensor(val, device=device, dtype=inverse_type_map[dtype]),
-  BufferOps.CONST: lambda val, dtype: torch.from_numpy(np.array(val, dtype=dtype.np)).to(device),
+  BufferOps.CONST: lambda val, dtype: torch.from_numpy(np.array(val, dtype=np_type_cvt(dtype.np))).to(device),
   UnaryOps.SQRT: lambda x: x.sqrt(), UnaryOps.EXP2: lambda x: x.exp2(), UnaryOps.LOG2: lambda x: x.log2(), UnaryOps.SIN: torch.sin,
-  UnaryOps.CAST: lambda x,y: (x.view if y[1] else x.type)(next(k for k,v in type_map.items() if v==y[0])),
+  UnaryOps.CAST: lambda x,y: (x.view if y[1] else x.type)(inverse_type_map[y[0]]),
   UnaryOps.NEG: lambda x: torch.logical_not(x) if x.dtype is torch.bool else torch.neg(x),
   BinaryOps.MAX: torch.maximum, BinaryOps.CMPLT: lambda x,y: (x<y).type(torch.promote_types(x.dtype, y.dtype)),
   BinaryOps.ADD: lambda x,y: torch.add(*match_types(x, y)).type(output_type(x,y)),
