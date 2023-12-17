@@ -36,6 +36,8 @@ tm = min([torch_prog(b, c) for _ in range(200)])
 print(f"{N:d}x{M:d} {tm*1e6:9.2f} us, would be {FLOPS*1e-9/tm:9.2f} GFLOPS matvec in torch")
 torch_a = (b@c).cpu()
 
+device = MetalDevice("METAL")
+metalalloc = MetalAllocator(device)
 WORKSIZE_ROW = 16
 WORKSIZE_COL = 1
 LOCAL_SIZE = [32, WORKSIZE_COL, WORKSIZE_ROW]
@@ -87,9 +89,7 @@ kernel void test(device float* data0, const device float* data1, const device fl
   }}
 }}
 """)
-device = MetalDevice("METAL")
 prog = MetalProgram(device,"test", prog)
-metalalloc = MetalAllocator(device)
 a = metalalloc.alloc(M*4)
 b = metalalloc.alloc(N*4)
 c = metalalloc.alloc(N*M*4)
