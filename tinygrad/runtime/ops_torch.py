@@ -10,7 +10,8 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if geten
 type_map = {torch.bool: dtypes.bool, torch.int8: dtypes.int8, torch.uint8: dtypes.uint8, torch.int16: dtypes.int16, torch.int32: dtypes.int32,
             torch.int64: dtypes.int64, torch.float16: dtypes.float16, torch.bfloat16: dtypes.bfloat16, torch.float32: dtypes.float32,
             torch.float64: dtypes.float64}
-inverse_type_map = {v: k for k,v in type_map.items()} | {dtypes.uint16: torch.int16, dtypes.uint32: torch.int32, dtypes.uint64: torch.int64}
+inverse_type_map = {v: k for k,v in type_map.items()}
+inverse_type_map.update({dtypes.uint16: torch.int16, dtypes.uint32: torch.int32, dtypes.uint64: torch.int64})
 def np_type_cvt(t): return {np.uint32: np.int32}.get(t, t)
 
 def output_type(x, y): return x.dtype if type_map[x.dtype].priority > type_map[y.dtype].priority else y.dtype
