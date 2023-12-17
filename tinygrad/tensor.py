@@ -872,9 +872,9 @@ class Tensor:
   # ***** cast ops *****
 
   def cast(self, dtype:DType) -> Tensor:
-    # hack loading bf16 from disktensors for devices that don't support bfloat16
+    # hack for devices that don't support bfloat16
     if self.dtype == dtypes.bfloat16:
-      return mlops.Cast.apply(self, dtype=dtypes.uint32).mul(1<<16).contiguous().bitcast(dtypes.float32).cast(dtype)
+      return self.bitcast(dtypes.uint16).cast(dtypes.uint32).mul(1<<16).contiguous().bitcast(dtypes.float32).cast(dtype)
     return mlops.Cast.apply(self, dtype=dtype) if self.dtype != dtype else self
   def bitcast(self, dtype:DType) -> Tensor:
     assert self.dtype.itemsize == dtype.itemsize, "can't bitcast mismatched dtype itemsizes"
