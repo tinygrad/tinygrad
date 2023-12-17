@@ -25,7 +25,7 @@ def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=N
   if len(sched) != allowed: print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
   if len(sched) != allowed or DEBUG >= 3:
     for i, s in enumerate(sched):
-      print("op", i)
+      print("kernel", i+1)
       print_tree(s.ast)
   assert len(sched) == allowed
   # test the (non loadops) ops linearize
@@ -260,6 +260,22 @@ class TestSchedule(unittest.TestCase):
     check_schedule(c, 1)
     check_schedule(e, 1)
 
+  def test_shrink_fuse(self):
+    a = Tensor.empty(8192, 16)
+    b = Tensor.empty(8192, 16)
+    c = a * b
+    d = Tensor.empty(1, 16)
+    e = c[0] * d
+    check_schedule(e, 1)
+
+  def test_expand_nofuse(self):
+    a = Tensor.empty(1, 16)
+    b = Tensor.empty(1, 16)
+    c = a * b
+    d = Tensor.empty(8192, 16)
+    e = c * d
+    check_schedule(e, 2)
+
   # this is the failing case in openpilot...it's very simple like this
   @unittest.skip("failing in old lazy")
   def test_image_conv_fusion(self):
@@ -304,12 +320,18 @@ class TestSchedule(unittest.TestCase):
     check_schedule(x, 3)
 
   def test_resnet_block(self):
-    from extra.models.resnet import BasicBlock
     Tensor.training = False
-    bb = BasicBlock(64,64)
+
+    in_planes, planes = 64, 64
+    conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
+    bn1 = nn.BatchNorm2d(planes)
+    conv2 = nn.Conv2d(planes, planes, kernel_size=3, padding=1, stride=1, bias=False)
+    bn2 = nn.BatchNorm2d(planes)
 
     x = Tensor.empty(1, 64, 32, 32)
-    out = bb(x)
+    out = bn1(conv1(x)).relu()
+    out = bn2(conv2(out))
+    out = (out + x).relu()
     check_schedule(out, 4)
 
   def test_contiguous_while_contiguous(self):
@@ -327,15 +349,75 @@ class TestSchedule(unittest.TestCase):
     out = x.to('cpu')
     check_schedule(out, 0, filter_loadops=False)
 
-  def test_pow_const_tensor(self):
+  def test_pow_const_tensor_simplified(self):
     x = Tensor([1,2,3,4])
+    # NOTE: this does not test ** Tensor(2) is simpler in ast than ** Tensor(2.5)
     out = x ** Tensor(2)
     check_schedule(out, 1)
 
+  def test_pow_const_tensor_to_zero(self):
+    x = Tensor([1,2,3,4])
+    out = x ** Tensor(0)
+    # NOTE: this is ConstBuffer 0 + ConstBuffer 1
+    check_schedule(out, 1)
+
   def test_zero_size(self):
-    x = Tensor.rand(2, 3, 0)
+    x = Tensor.empty(2, 3, 0)
     out = x + 1
     check_schedule(out, 0, filter_loadops=False)
+
+  def test_reduce_permute_nofuse(self):
+    x = Tensor.empty(32, 32, 32)
+    y = Tensor.empty(32, 32)
+    out = x.sum(axis=2).T+y
+    check_schedule(out, 2)
+
+  def test_two_elus_sum(self):
+    x = Tensor.empty(32, 32)
+    y = Tensor.empty(32, 32)
+    out = x.sum(1).relu().elu() + y.sum(1).relu().elu()
+    check_schedule(out, 2)
+
+  def test_multistage_reduce(self):
+    x = Tensor.empty(32, 32, 32)
+    out = x.sum(2).relu().sum(1)
+    check_schedule(out, 2)
+
+  def test_multistage_reduce_fork(self):
+    x = Tensor.empty(32, 32, 32)
+    x = x.sum(2)
+    out2 = x + 1
+    out = x.relu().sum(1) + out2[0]
+    check_schedule(out, 2)
+
+  def test_example_matmul(self):
+    x = Tensor.eye(64, requires_grad=True)
+    y = Tensor.eye(64, requires_grad=True)
+    z = y.matmul(x).sum()
+    z.backward()
+    out = x.grad.contiguous()
+    check_schedule(out, 2)
+
+  def test_contiguous_add(self):
+    x = Tensor.empty(32)
+    y = Tensor.empty(32)
+    z = Tensor.empty(32)
+    out = (x+y).contiguous()+z
+    check_schedule(out, 2)
+
+  def test_double_sum_ref(self):
+    x = Tensor.empty(32, 32, 32)
+    x = x.sum(2)
+    out = x + x[:, 4]
+    check_schedule(out, 2)
+
+  def test_reduce_shrink(self):
+    x = Tensor.empty(32, 32)
+    y = Tensor.empty(16)
+    x = x.sum(1)
+    x = x[:16]
+    out = x + y
+    check_schedule(out, 2)  # TODO: this should be 1
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
