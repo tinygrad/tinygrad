@@ -480,27 +480,22 @@ class Tensor:
     return self.permute(order)
   def flatten(self, start_dim=0): return self.reshape(shape=self.shape[:start_dim] + (-1,))
 
-  def roll(self, shifts:Union[int, Tuple[int]], dims:Union[int, Tuple[int]]=()) -> Tensor:
+  def roll(self, shifts:Union[int, Tuple[int]], dims:Union[None, int, Tuple[int]]=None) -> Tensor:
     shifts = (shifts,) if isinstance(shifts, int) else shifts
+    if dims is None:
+      shift = shifts[0] % self.numel()
+      return Tensor.cat(*[self.flatten()[-shift:], self.flatten()[:-shift]], dim=0).reshape(self.shape)
     dims = (dims,) if isinstance(dims, int) else dims
-    if not dims:
-      flattened = self.reshape(-1)
-      shift = shifts[0] % flattened.shape[0]
-      parts = [flattened[-shift:], flattened[:-shift]]
-      return Tensor.cat(*parts, dim=0).reshape(self.shape) if shift else self
     result = self
     for dim, shift in zip(dims, shifts):
       shift %= self.shape[dim % self.ndim]
-      if shift:
-        parts = [result.narrow(dim, -shift, shift), result.narrow(dim, 0, result.shape[dim % self.ndim] - shift)]
-        result = Tensor.cat(*parts, dim=dim % self.ndim)
+      if shift: result = Tensor.cat(*[self.narrow(dim, -shift, shift), self.narrow(dim, 0, self.shape[dim % self.ndim] - shift)], dim=dim % self.ndim)
     return result
 
   def narrow(self, dim:int, start:Union[int, Tensor], length:int) -> Tensor:
-    if dim < 0: dim += self.ndim
-    if (st := self._to_const_val(start)) and not isinstance(st, int): raise TypeError("start must be a 0-dim integral tensor")
-    if st < 0: st += self.shape[dim]
-    return self[tuple(slice(None) if i != dim else slice(st, st + length) for i in range(self.ndim))]
+    dim = dim % self.ndim
+    _start = self._to_integral_val(start) + self.shape[dim] if start < 0 else self._to_integral_val(start)
+    return self[tuple(slice(None) if i != dim else slice(_start, _start + length) for i in range(self.ndim))]
 
   # ***** reduce ops *****
 
@@ -766,6 +761,11 @@ class Tensor:
 
     broadcasted_shape = tuple(max(xi, yi) for xi, yi in zip(x.shape, y.shape))
     return x.expand(broadcasted_shape), y.expand(broadcasted_shape)
+
+  def _to_integral_val(self, x:Union[int, Tensor]) -> int:
+    const_val = self._to_const_val(x)
+    if not isinstance(const_val, int): raise TypeError("_to_integral expects an integer or 0-dim integral tensor")
+    return const_val
 
   def _to_const_val(self, x:Union[Tensor, float, int, bool]) -> Union[Tensor, float, int, bool]:
     return x.lazydata.base.op.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
