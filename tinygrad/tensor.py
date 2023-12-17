@@ -490,9 +490,9 @@ class Tensor:
 
   def narrow(self, dim:int, start:Union[int, Tensor], length:int) -> Tensor:
     if dim < 0: dim += self.ndim
-    if isinstance(start, Tensor) and start.ndim == 0: start = self._to_float(start)
-    if start < 0: start += self.shape[dim]
-    return self[tuple(slice(None) if i != dim else slice(start, start + length) for i in range(self.ndim))]
+    if (st := self._to_const_val(start)) and not isinstance(st, int): raise TypeError("start must be a 0-dim integral tensor")
+    if st < 0: st += self.shape[dim]
+    return self[tuple(slice(None) if i != dim else slice(st, st + length) for i in range(self.ndim))]
 
   # ***** reduce ops *****
 
