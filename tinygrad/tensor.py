@@ -486,7 +486,10 @@ class Tensor:
     parts = [self.narrow(dim, dim_size - shift, shift), self.narrow(dim, 0, dim_size - shift)]
     return Tensor.cat(*parts, dim=dim)
 
-  def narrow(self, dim:int, start:int, length:int) -> Tensor:
+  def narrow(self, dim:int, start:Union[int, Tensor], length:int) -> Tensor:
+    if dim < 0: dim += self.ndim
+    if isinstance(start, Tensor) and start.ndim == 0: start = self._to_float(start)
+    if start < 0: start += self.shape[dim]
     return self[tuple(slice(None) if i != dim else slice(start, start + length) for i in range(self.ndim))]
 
   # ***** reduce ops *****
