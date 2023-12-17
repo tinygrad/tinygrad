@@ -1,3 +1,5 @@
+# ruff: noqa: E501
+# TODO: replace with new lazy with <= 150 length lines
 from __future__ import annotations
 import sys, math
 from typing import Callable, Optional, Tuple, Union, List, Dict, Any, cast, Mapping, Set
@@ -19,8 +21,7 @@ LAZYCACHE = getenv("LAZYCACHE", 1)
 # TODO: movement ops that only change shape are really nops. treat them as such
 REMOVE_MOVEMENT_NOPS, MERGE_ELEMENTWISE_INTO_REDUCE, SHUFFLE_MOVEMENT_OPS, MERGE_ELEMENTWISE_OPS = OPT>=1, OPT>=1, OPT>=1, OPT>=1
 MERGE_ONE_REDUCE_INTO_ELEMENTWISE, SHUFFLE_PAD_OPS = OPT>=2, OPT>=2
-PUSH_PERMUTES, PUSH_CONTIGUOUS = OPT>=3, OPT>=3
-PUSH_RESHAPES = OPT>=4
+PUSH_PERMUTES = OPT>=3
 
 # **** ast fixing functions ****
 
@@ -223,7 +224,7 @@ class LazyBuffer:
     return LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), LoadOps, None, dtypes.from_np(x.dtype), Buffer("CPU", prod(x.shape), dtypes.from_np(x.dtype), x.flatten()))
 
   def cast(self, dtype:DType, bitcast:bool=False):
-    return self.e(UnaryOps.CAST, arg=(dtype, bitcast))
+    return self.e(UnaryOps.CAST, arg=(dtype, bitcast)) if self.dtype != dtype else self
 
   # *** elementwise ops ***
 
@@ -236,16 +237,6 @@ class LazyBuffer:
 
     # get outputs now
     out_device, out_shape, out_dtype = srcs[0].device, srcs[0].shape, max([x.dtype for x in srcs]) if op != UnaryOps.CAST else cast(Tuple[DType, bool], arg)[0]
-
-    # push all contiguous to the end of BinaryOps
-    if PUSH_CONTIGUOUS and any(not x.realized and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1 for x in srcs):
-      new_srcs: List[LazyBuffer] = []
-      for x in srcs:
-        if not x.realized and x.op.op == LoadOps.CONTIGUOUS and len(x.op.src[0].children) <= 1:
-          x.op.src[0].children.discard(x)
-          x = cast(LazyBuffer, x.op.src[0])
-        new_srcs.append(x)
-      return new_srcs[0].e(op, *new_srcs[1:], arg=arg).contiguous()
 
     if MERGE_ELEMENTWISE_OPS:
       # remove the buffers from any (childless) BinaryOps that feed into this
@@ -327,7 +318,7 @@ class LazyBuffer:
 
   def _movement_op(self, st: ShapeTracker, op: MovementOps, arg: Union[Tuple[sint, ...], Tuple[Tuple[sint, sint], ...]]) -> LazyBuffer:
     if SHUFFLE_MOVEMENT_OPS and not self.realized and self.optype == BinaryOps and not self.children:
-      if op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op == MovementOps.RESHAPE and (self.op.op in UnaryOps or PUSH_RESHAPES)):
+      if op in {MovementOps.SHRINK, MovementOps.STRIDE, MovementOps.PERMUTE} or (op == MovementOps.RESHAPE and self.op.op in UnaryOps):
         return self.op.replace_with_movement_ops([(op, arg)])
     if REMOVE_MOVEMENT_NOPS and not self.realized and st.contiguous:
       # MovementOps aren't stacked any more, they each have one parent, find the root

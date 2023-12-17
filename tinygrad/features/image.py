@@ -7,7 +7,7 @@ def image_dot(self, w):
   # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
   n1, n2 = len(self.shape), len(w.shape)
   assert n1 != 0 and n2 != 0, f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
-  assert self.shape[-1] == w.shape[-min(n2, 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(n2, 2)]})"
+  assert self.shape[-1] == w.shape[-min(n2, 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(n2, 2)]})"  # noqa: E501
   bs, groups = prod(self.shape[0:-2]), prod(w.shape[0:-2])
   cin, cout = w.shape[-2], w.shape[-1]
   out_shape_t = self.shape[0:-2] + (cout,-1)
@@ -103,11 +103,12 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
   idx = (idxy // 4) % base_shape[1]
   idy = (idxy // (4 * base_shape[1]))
 
-  if valid.min == 0 and isinstance(idxy, SumNode):
+  if valid.min == 0:
     nodes = valid.nodes if isinstance(valid, AndNode) else [valid]
     val_dict: Dict[Node, Any] = {}
     # TODO: is this correct? should it check there's only one variable from each component?
-    idxy_flat_var = [(i, list(i.vars())[0]) for i in idxy.flat_components if not isinstance(i, NumNode)]
+    idxy_nodes = idxy.flat_components if isinstance(idxy, SumNode) else [idxy]
+    idxy_flat_var = [(i, list(i.vars())[0]) for i in idxy_nodes if not isinstance(i, NumNode)]
 
     for node in nodes:
       assert isinstance(node, LtNode)

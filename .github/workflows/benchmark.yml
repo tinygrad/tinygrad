@@ -33,7 +33,7 @@ jobs:
     - name: Run Tensor Core GEMM
       run: DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
     - name: Run Stable Diffusion
-      run: python3 examples/stable_diffusion.py --noshow --timing | tee sd.txt
+      run: python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run LLaMA
       run: |
         JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
@@ -81,6 +81,8 @@ jobs:
       run: |
         CUDA=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
         CUDA=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
+    - name: Run GPT2 w HALF
+      run: CUDA=1 JIT=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing
     - name: Run GPT2 w HALF/BEAM
       run: CUDA=1 JIT=1 HALF=1 BEAM=4 CACHELEVEL=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
     - uses: actions/upload-artifact@v3
@@ -118,7 +120,7 @@ jobs:
     - name: Run Tensor Core GEMM
       run: HIP=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
     - name: Run Stable Diffusion
-      run: python3 examples/stable_diffusion.py --noshow --timing | tee sd.txt
+      run: python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run LLaMA
       run: |
         JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt

@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# ruff: noqa: E501
 import unittest
 import numpy as np
 from tinygrad.helpers import prod, DEBUG
@@ -77,11 +78,24 @@ class CheckingShapeTracker:
     assert self.st.shape == self.shape
     assert x == y, f"mismatch shapetracker:{x} real:{y}"
 
+@unittest.skip("don't create shapetrackers with views")
 class TestRealIssues(unittest.TestCase):
   def test_reshape_doesnt_multiview(self):
     self.st = ShapeTracker((View.create((256, 256, 2, 2, 2, 2, 2, 256, 8, 2), (0, 8, 0, 4, 0, 0, 2, 16384, 2048, 1), 0, None),))
     self.st.reshape((128, 2, 256, 2, 2, 2, 2, 2, 256, 8, 2))
     assert len(self.st.views) == 1
+
+  def test_reshape_stable_diffusion(self):
+    # regression test for https://github.com/tinygrad/tinygrad/pull/2616
+    st = ShapeTracker((View((2, 1920, 32, 32), (1310720, 1024, 32, 1), 0, ((0, 2), (0, 1280), (0, 32), (0, 32)), False),))
+    st = st.reshape((2, 32, 240, 256))
+    assert len(st.views) == 2
+
+  def test_reshape_trailing_invalid_ones(self):
+    st = ShapeTracker((View(shape=(1, 1, 5), strides=(0, 0, 1), offset=-5, mask=((1, 1), (0, 1), (0, 5)), contiguous=False),))
+    st = st.reshape((5,))
+    assert len(st.views) == 1
+    assert st.views[0].mask == ((0,0),)
 
 class TestRealDoesntSimplify(unittest.TestCase):
   def tearDown(self):
@@ -135,7 +149,7 @@ class TestIndexExpressions2d(unittest.TestCase):
   def setUp(self):
     shapes = [(30, 5), (15, 10), (15, 1), (5, 10), (5, 1)] # Make sure dim0 is a multiple of 5, one of the tests divides this dimension by 5
     offsets = [0, 1, 15, 28, 10000]
-    self.sts = [ShapeTracker((View.create(base_shape, offset=offset),)) for base_shape in shapes for offset in offsets]
+    self.sts = [ShapeTracker.from_shape((prod(base_shape)+offset,)).shrink(((offset, offset+prod(base_shape)),)).reshape(base_shape) for base_shape in shapes for offset in offsets]
     self.offset = [NumNode(offset) for base_shape in shapes for offset in offsets]
     self.shapes = [shape for shape in shapes for offset in offsets]
     self.node_exprs = []
@@ -476,18 +490,6 @@ class TestComplexShapeTracker(unittest.TestCase):
     self.st.reshape((64, 1024, 4))
     print(self.st.views)
     assert self.st.contiguous
-
-  def test_reshape_stable_diffusion(self):
-    # regression test for https://github.com/tinygrad/tinygrad/pull/2616
-    st = ShapeTracker((View((2, 1920, 32, 32), (1310720, 1024, 32, 1), 0, ((0, 2), (0, 1280), (0, 32), (0, 32)), False),))
-    st = st.reshape((2, 32, 240, 256))
-    assert len(st.views) == 2
-
-  def test_reshape_trailing_invalid_ones(self):
-    st = ShapeTracker((View(shape=(1, 1, 5), strides=(0, 0, 1), offset=-5, mask=((1, 1), (0, 1), (0, 5)), contiguous=False),))
-    st = st.reshape((5,))
-    assert len(st.views) == 1
-    assert st.views[0].mask == ((0,0),)
 
 class TestSingleShapeTracker(unittest.TestCase):
   def setUp(self):

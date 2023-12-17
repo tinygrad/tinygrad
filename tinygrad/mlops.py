@@ -1,6 +1,6 @@
 import math
 from typing import Tuple, Optional, cast
-from tinygrad.helpers import argsort, DType
+from tinygrad.helpers import argsort, DType, least_upper_float, dtypes, least_upper_dtype
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
@@ -35,7 +35,7 @@ class Neg(Function):
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return x.e(UnaryOps.SIN)
+    return x.cast(least_upper_float(x.dtype)).e(UnaryOps.SIN)
 
   def backward(self, grad:LazyBuffer) -> LazyBuffer:
     return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad)
@@ -52,14 +52,14 @@ class Relu(Function):
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
-    return x.e(UnaryOps.LOG2).e(BinaryOps.MUL, x.const(math.log(2)))
+    return x.cast(ftype:= least_upper_float(x.dtype)).e(UnaryOps.LOG2).e(BinaryOps.MUL, x.cast(ftype).const(math.log(2)))
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.e(BinaryOps.DIV, self.x)
 
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.e(BinaryOps.MUL, x.const(1/math.log(2))).e(UnaryOps.EXP2)
+    self.ret = x.cast(ftype:=least_upper_float(x.dtype)).e(BinaryOps.MUL, x.cast(ftype).const(1/math.log(2))).e(UnaryOps.EXP2)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
@@ -67,7 +67,7 @@ class Exp(Function):
 
 class Sqrt(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.e(UnaryOps.SQRT)
+    self.ret = x.cast(least_upper_float(x.dtype)).e(UnaryOps.SQRT)
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
@@ -78,7 +78,8 @@ class Sqrt(Function):
 # TODO: have the backend automatically find this
 class Sigmoid(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.const(1).e(BinaryOps.DIV, x.const(1).e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.const(-1/math.log(2))).e(UnaryOps.EXP2)))
+    self.ret = x.cast(ftype:=least_upper_float(x.dtype)).const(1).e(
+      BinaryOps.DIV, x.cast(ftype).const(1).e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.cast(ftype).const(-1/math.log(2))).e(UnaryOps.EXP2)))
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
@@ -96,49 +97,51 @@ class Xor(Function):
 
 class Add(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    return x.e(BinaryOps.ADD, y)
+    self.x_dtype, self.y_dtype, output_dtype = x.dtype, y.dtype, least_upper_dtype(x.dtype, y.dtype)
+    return x.cast(output_dtype).e(BinaryOps.ADD, y.cast(output_dtype))
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
-    return grad_output if self.needs_input_grad[0] else None, \
-           grad_output if self.needs_input_grad[1] else None
+    return grad_output.cast(self.x_dtype) if self.needs_input_grad[0] else None, \
+           grad_output.cast(self.y_dtype) if self.needs_input_grad[1] else None
 
 class Sub(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    return x.e(BinaryOps.SUB, y)
+    self.x_dtype, self.y_dtype, output_dtype = x.dtype, y.dtype, least_upper_dtype(x.dtype, y.dtype)
+    return x.cast(output_dtype).e(BinaryOps.SUB, y.cast(output_dtype))
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
-    return grad_output if self.needs_input_grad[0] else None, \
-           grad_output.e(UnaryOps.NEG) if self.needs_input_grad[1] else None
+    return grad_output.cast(self.x_dtype) if self.needs_input_grad[0] else None, \
+           grad_output.cast(self.y_dtype).e(UnaryOps.NEG) if self.needs_input_grad[1] else None
 
 class Mul(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    self.x, self.y = x, y
-    return x.e(BinaryOps.MUL, y)
+    self.x, self.y, output_dtype = x, y, least_upper_dtype(x.dtype, y.dtype)
+    return x.cast(output_dtype).e(BinaryOps.MUL, y.cast(output_dtype))
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
-    return self.y.e(BinaryOps.MUL, grad_output) if self.needs_input_grad[0] else None, \
-           self.x.e(BinaryOps.MUL, grad_output) if self.needs_input_grad[1] else None
+    return self.y.cast(self.x.dtype).e(BinaryOps.MUL, grad_output.cast(self.x.dtype)) if self.needs_input_grad[0] else None, \
+           self.x.cast(self.y.dtype).e(BinaryOps.MUL, grad_output.cast(self.y.dtype)) if self.needs_input_grad[1] else None
 
 class Div(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    self.x, self.y = x, y
-    return x.e(BinaryOps.DIV, y)
+    self.x, self.y, output_dtype = x, y, least_upper_dtype(x.dtype, y.dtype)
+    return x.cast(output_dtype).e(BinaryOps.DIV, y.cast(output_dtype))
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
-    return grad_output.e(BinaryOps.DIV, self.y) if self.needs_input_grad[0] else None, \
-           grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.x).e(BinaryOps.DIV, self.y.e(BinaryOps.MUL, self.y)) if self.needs_input_grad[1] else None
+    return grad_output.cast(self.x.dtype).e(BinaryOps.DIV, self.y.cast(self.x.dtype)) if self.needs_input_grad[0] else None, \
+           grad_output.cast(self.y.dtype).e(UnaryOps.NEG).e(BinaryOps.MUL, self.x.cast(self.y.dtype)).e(BinaryOps.DIV, self.y.e(BinaryOps.MUL, self.y)) if self.needs_input_grad[1] else None  # noqa: E501
 
 # ************* ternary ops *************
 
 class Where(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer, z:LazyBuffer) -> LazyBuffer:
-    self.x = x
-    return x.e(TernaryOps.WHERE, y, z)
+    self.x, self.y_dtype, self.z_dtype, output_type = x.cast(dtypes.bool), y.dtype, z.dtype, least_upper_dtype(y.dtype, z.dtype)
+    return self.x.e(TernaryOps.WHERE, y.cast(output_type), z.cast(output_type))
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[None, Optional[LazyBuffer], Optional[LazyBuffer]]:
     return None, \
-           self.x.e(TernaryOps.WHERE, grad_output, grad_output.const(0)) if self.needs_input_grad[1] else None, \
-           self.x.e(TernaryOps.WHERE, grad_output.const(0), grad_output) if self.needs_input_grad[2] else None
+      self.x.e(TernaryOps.WHERE, grad_output.cast(self.y_dtype), grad_output.cast(self.y_dtype).const(0)) if self.needs_input_grad[1] else None, \
+      self.x.e(TernaryOps.WHERE, grad_output.const(0), grad_output) if self.needs_input_grad[2] else None
 
 # ************* reduce ops *************
 
