@@ -167,7 +167,7 @@ class TestFullyFlatten(unittest.TestCase):
     self.assertEqual(fully_flatten([[[1], [3]], [[1], [2]]]), [1, 3, 1, 2])
     self.assertEqual(fully_flatten([[[[1], 2], 3], 4]), [1, 2, 3, 4])
     self.assertEqual(fully_flatten([[1, 2, [3, 4]], [5, 6], 7]), [1, 2, 3, 4, 5, 6, 7])
-    self.assertEqual(fully_flatten([[1, "a"], [True, None], [3.14, [5, "b"]]]), [1, "a", True, None, 3.14, 5, "b"])
+    self.assertEqual(fully_flatten([[1, "ab"], [True, None], [3.14, [5, "b"]]]), [1, "ab", True, None, 3.14, 5, "b"])
 
 if __name__ == '__main__':
   unittest.main()
