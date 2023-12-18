@@ -301,7 +301,7 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) {
   code_for_op = {
     **CStyleLanguage().code_for_op, **{op: lambda a,dtype,op=op: f"h{CStyleLanguage().code_for_op[op]('(half)'+a,dtype)}" if dtype == dtypes.half else f"float4({CStyleLanguage().code_for_op[op](a+'.x',dtype)}, {CStyleLanguage().code_for_op[op](a+'.y',dtype)}, {CStyleLanguage().code_for_op[op](a+'.z',dtype)}, {CStyleLanguage().code_for_op[op](a+'.w',dtype)})" if dtype == dtypes.float.vec(4) else f"{CStyleLanguage().code_for_op[op](a,dtype)}" for op in UnaryOps}, # noqa: E501
     UnaryOps.NEG: lambda a,dtype: f"(-(half){a})" if dtype == dtypes.half else CStyleLanguage().code_for_op[UnaryOps.NEG](a,dtype), # noqa: E501
-    **{op: lambda a, b, dtype, op=op, fxn=fxn: f"__h{fxn}((half){a},(half){b})" if dtype == dtypes.half else CStyleLanguage().code_for_op[op](a,b,dtype) for op, fxn in zip([BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.DIV, BinaryOps.CMPLT], ["add","sub","mul","div", "lt"])}, # noqa: E501
+    **{op: lambda a, b, dtype, op=op, fxn=fxn: f"__h{fxn}((half){a},(half){b})" if dtype == dtypes.half else CStyleLanguage().code_for_op[op](a,b,dtype) for op, fxn in zip([BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.DIV], ["add","sub","mul","div"])}, # noqa: E501
     BinaryOps.MAX: lambda a,b,dtype: f"__hgt((half){a},(half){b})?(half){a}:(half){b}" if dtype == dtypes.half else f"float4(max({a}.x,{b}.x),max({a}.y,{b}.y),max({a}.z,{b}.z),max({a}.w,{b}.w))" if dtype == dtypes.float.vec(4) else f"max({a},{b})",# noqa: E501
   }
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
