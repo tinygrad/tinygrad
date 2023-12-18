@@ -82,10 +82,7 @@ class CStyleLanguage(NamedTuple):
     return f"({cond})?({x}):{y}"
 
   def render_dtype(self, dtype:DType) -> str:
-    if self.type_map:
-      return self.type_map[dtype] if dtype in self.type_map else dtype.name
-    else:
-      return dtype.name
+    return self.type_map[dtype] if dtype in self.type_map else dtype.name if self.type_map else dtype.name
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""  # noqa: E501
