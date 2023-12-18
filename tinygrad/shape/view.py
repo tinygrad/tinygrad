@@ -101,10 +101,10 @@ class View:
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def invert(self, out_shape:Tuple[int, ...]) -> Optional[View]:
     if prod(self.shape) != prod(out_shape): return None
-    oneless_strides_in = tuple(-st for s,st in zip(self.shape, self.strides) if s != 1)
     ret = self.reshape(tuple(s for s in self.shape if s != 1))
-    assert ret is not None
-    return ret.permute(argsort(oneless_strides_in)).reshape(out_shape)
+    assert ret is not None, "removing ones will never be an issue"
+    ret = ret.stride(tuple(-1 if x < 0 else 1 for x in ret.strides))
+    return ret.permute(argsort(tuple(-x for x in ret.strides))).reshape(out_shape)
 
   # MovementOps live here now
 

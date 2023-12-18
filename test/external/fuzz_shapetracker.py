@@ -44,7 +44,7 @@ def do_stride(st):
   if DEBUG >= 1: print("st.stride(", stride, ")")
   st.stride(stride)
 
-def do_simple_stride(st):
+def do_flip(st):
   c = random.randint(0, len(st.shape)-1)
   stride = tuple(random.choice([-1,1]) if i==c else 1 for i in range(len(st.shape)))
   if DEBUG >= 1: print("st.stride(", stride, ")")

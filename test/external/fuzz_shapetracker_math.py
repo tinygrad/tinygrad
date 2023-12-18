@@ -1,9 +1,10 @@
 import random
 from typing import List
-from tinygrad.helpers import getenv
+from tqdm import trange
+from tinygrad.helpers import getenv, DEBUG
 from tinygrad.shape.shapetracker import ShapeTracker
 from test.external.fuzz_shapetracker import shapetracker_ops
-from test.external.fuzz_shapetracker import do_permute, do_pad, do_reshape_split_one, do_reshape_combine_two, do_simple_stride
+from test.external.fuzz_shapetracker import do_permute, do_reshape_split_one, do_reshape_combine_two, do_flip
 
 class MultiShapeTracker:
   def __init__(self, sts:List[ShapeTracker]): self.sts = sts
@@ -23,31 +24,29 @@ def fuzz_plus():
   m.sts.append(ShapeTracker.from_shape(m.sts[0].shape))
   for _ in range(1): random.choice(shapetracker_ops)(m)
   st_sum = backup + m.sts[1]
-  print(f"GOT: {st_sum}")
-  print(f"EXP: {m.sts[0]}")
   return m.sts[0], st_sum
 
 # shrink and expand aren't invertible (stride isn't always)
-invertible_shapetracker_ops = [do_permute, do_pad, do_reshape_split_one, do_reshape_combine_two, do_simple_stride]
-invertible_simple_shapetracker_ops = [do_permute, do_reshape_split_one, do_reshape_combine_two]
+invertible_simple_shapetracker_ops = [do_permute, do_reshape_split_one, do_reshape_combine_two, do_flip]
 
 def fuzz_invert():
-  start = ShapeTracker.from_shape((random.randint(2, 10), random.randint(2, 10), random.randint(2, 10)))
+  start = ShapeTracker.from_shape((random.randint(1, 10), random.randint(1, 10), random.randint(1, 10)))
   m = MultiShapeTracker([start])
-  for _ in range(2): random.choice(invertible_simple_shapetracker_ops)(m)
+  for _ in range(8): random.choice(invertible_simple_shapetracker_ops)(m)
   inv = m.sts[0].invert(start.shape)
   st_sum = (ShapeTracker.from_shape(m.sts[0].shape) + inv) if inv else None
   return start, st_sum
 
 if __name__ == "__main__":
   total = getenv("CNT", 100)
-  good = 0
-  for _ in range(total):
-    print("****")
-    #st1, st2 = fuzz_plus()
-    st1, st2 = fuzz_invert()
-    if st1 == st2: good += 1
-    else:
-      print(f"GOT: {st2}")
-      print(f"EXP: {st1}")
-  print(f"hit {good}/{total}")
+  #for fuzz in [fuzz_invert, fuzz_plus]:
+  for fuzz in [fuzz_invert, fuzz_plus]:
+    good = 0
+    for _ in trange(total):
+      if DEBUG >= 1: print("****")
+      st1, st2 = fuzz()
+      if st1 == st2: good += 1
+      if st1 != st2 or DEBUG >= 1:
+        print(f"EXP: {st1}")
+        print(f"GOT: {st2}")
+    print(f"hit {good}/{total}")
