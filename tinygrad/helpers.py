@@ -181,6 +181,9 @@ class dtypes:
   @staticmethod
   def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp, dtypes.float32)
 
+  default_float: ClassVar[DType] = float32
+  default_int: ClassVar[DType] = int32
+
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support weak type and complex type
 promo_lattice = { dtypes.bool: [dtypes.int8, dtypes.uint8],
@@ -198,7 +201,8 @@ def least_upper_dtype(*ds:DType) -> DType:
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.float32)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and v.__class__ is not staticmethod}
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if (
+  not k.startswith('__') and not k.startswith('default') and not callable(v) and v.__class__ is not staticmethod)}
 INVERSE_DTYPES_DICT = {v:k for k,v in DTYPES_DICT.items()}
 
 class GlobalCounters:

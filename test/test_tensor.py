@@ -252,7 +252,7 @@ class TestTinygrad(unittest.TestCase):
     # empty tensor defaults
     for arr in ([], [[[]]], [[],[]]):
       t = Tensor(arr)
-      assert t.dtype == Tensor.default_type
+      assert t.dtype == dtypes.default_float
       np.testing.assert_allclose(t.numpy(), np.array(arr))
 
     # mixture of bool and int
@@ -264,7 +264,7 @@ class TestTinygrad(unittest.TestCase):
     # mixture of bool, int and float
     for arr in ([[True,True],[3.,True]], [[0,1],[3.,4]], [[[0],[1]],[[3.],[4]]], [[[True],[1]],[[3.],[4]]]):
       t = Tensor(arr)
-      assert t.dtype == Tensor.default_type
+      assert t.dtype == dtypes.default_float
       np.testing.assert_allclose(t.numpy(), np.array(arr))
 
   def test_tensor_list_shapes(self):
