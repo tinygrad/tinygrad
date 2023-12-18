@@ -100,7 +100,7 @@ class View:
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def invert(self, out_shape:Tuple[int, ...]) -> Optional[View]:
-    if prod(self.shape) != prod(out_shape): return None
+    if prod(self.shape) != prod(out_shape) or self.mask is not None: return None
     ret = self.reshape(tuple(s for s in self.shape if s != 1))
     assert ret is not None, "removing ones will never be an issue"
     ret = ret.stride(tuple(-1 if x < 0 else 1 for x in ret.strides))

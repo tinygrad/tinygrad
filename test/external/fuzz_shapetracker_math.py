@@ -1,7 +1,7 @@
 import random
 from typing import List
 from tqdm import trange
-from tinygrad.helpers import getenv, DEBUG
+from tinygrad.helpers import getenv, DEBUG, colored
 from tinygrad.shape.shapetracker import ShapeTracker
 from test.external.fuzz_shapetracker import shapetracker_ops
 from test.external.fuzz_shapetracker import do_permute, do_reshape_split_one, do_reshape_combine_two, do_flip
@@ -19,10 +19,10 @@ class MultiShapeTracker:
 
 def fuzz_plus():
   m = MultiShapeTracker([ShapeTracker.from_shape((random.randint(1, 10), random.randint(1, 10), random.randint(1, 10)))])
-  for _ in range(1): random.choice(shapetracker_ops)(m)
+  for _ in range(4): random.choice(shapetracker_ops)(m)
   backup = m.sts[0]
   m.sts.append(ShapeTracker.from_shape(m.sts[0].shape))
-  for _ in range(1): random.choice(shapetracker_ops)(m)
+  for _ in range(4): random.choice(shapetracker_ops)(m)
   st_sum = backup + m.sts[1]
   return m.sts[0], st_sum
 
@@ -43,10 +43,11 @@ if __name__ == "__main__":
   for fuzz in [fuzz_invert, fuzz_plus]:
     good = 0
     for _ in trange(total):
-      if DEBUG >= 1: print("****")
       st1, st2 = fuzz()
       if st1 == st2: good += 1
       if st1 != st2 or DEBUG >= 1:
         print(f"EXP: {st1}")
         print(f"GOT: {st2}")
+        print(colored("****", "red" if st1 != st2 else "green"))
     print(f"hit {good}/{total}")
+    assert good == total
