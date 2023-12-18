@@ -80,6 +80,7 @@ class Sigmoid(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     x = x.cast(least_upper_float(x.dtype))
     self.ret = x.const(1).e(BinaryOps.DIV, x.const(1).e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.const(-1/math.log(2))).e(UnaryOps.EXP2)))
+    return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return self.ret.e(BinaryOps.MUL, self.ret.const(1).e(BinaryOps.SUB, self.ret)).e(BinaryOps.MUL, grad_output)
@@ -88,8 +89,8 @@ class Sigmoid(Function):
 
 class Less(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    self.ret = x.e(BinaryOps.CMPLT, y)
-    return self.ret
+    output_dtype = least_upper_dtype(x.dtype, y.dtype)
+    return x.cast(output_dtype).e(BinaryOps.CMPLT, y.cast(output_dtype))
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     return None, None
