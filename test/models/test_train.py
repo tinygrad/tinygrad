@@ -64,6 +64,7 @@ class TestTrain(unittest.TestCase):
     train_one_step(model,X,Y)
     check_gc()
 
+  @unittest.skipIf(CI, "slow")
   def test_resnet(self):
     X = np.zeros((BS, 3, 224, 224), dtype=np.float32)
     Y = np.zeros((BS), dtype=np.int32)
