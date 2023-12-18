@@ -173,7 +173,7 @@ class dtypes:
 
   # NOTE: bfloat16 isn't supported in numpy
   # it has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
-  bfloat16: Final[DType] = DType(10, 2, "__nv_bfloat16", None) if os.getenv("CUDA") else DType(10, 2, "__bf16", None)
+  bfloat16: Final[DType] = DType(10, 2, "__bf16", None)
 
   # NOTE: these are image dtypes
   @staticmethod

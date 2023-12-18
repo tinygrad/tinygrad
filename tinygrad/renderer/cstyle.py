@@ -79,11 +79,14 @@ class CStyleLanguage(NamedTuple):
 
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"({cond})?({x}):{y}"
+  
+  def render_dtype(self, dtype:DType) -> str:
+    return self.type_map[dtype] if dtype in self.type_map else dtype.name 
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""  # noqa: E501
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
-                ("const " if i > 0 else "")+self.buffer_prefix+dtype.name+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
+                ("const " if i > 0 else "")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
                 self.arg_int_prefix if dtype == dtypes.int else None) for i,(name,dtype) in enumerate(bufs)]
     prg = ''.join([f"{self.kernel_prefix}void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
@@ -176,7 +179,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       assert dtype is not None
       val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
       if len(vin) > 3: val = lang.render_conditional(r[vin[2]], val, r[vin[3]])
-      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'val')} = {val};")
+      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.render_dtype(dtype)} {ssa(u,'val')} = {val};")
     elif uop == UOps.PHI:
       kk(f"{r[vin[0]]} = {r[vin[1]]};")
       r[u] = r[vin[0]]
@@ -254,6 +257,7 @@ class CUDALanguage(CStyleLanguage):
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
   code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"__hmax({a},{b})",
                  UnaryOps.EXP2: lambda x,dtype: f"exp2({x})" if dtype != dtypes.half else f"hexp2({x})"}
+  type_map = { dtypes.bfloat16: "__nv_bfloat16" }
   half_prekernel = """
     #include <cuda_fp16.h>
     #include <cuda_bf16.h>
