@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, operator
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, cast
-from tinygrad.helpers import prod, all_int
+from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, VariableOrNum, Set, sint
 
 @functools.lru_cache(maxsize=None)
@@ -97,6 +97,15 @@ class View:
     new_offset = self.offset if isinstance(self.offset, int) else self.offset.substitute(unbound_vars)
     new_mask = tuple((a if isinstance(a, int) else a.substitute(unbound_vars), b if isinstance(b, int) else b.substitute(unbound_vars)) for (a, b) in self.mask) if self.mask is not None else None  # noqa: E501
     return View.create(new_shape, new_strides, new_offset, new_mask)
+
+  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  def invert(self) -> Optional[View]:
+    # support simple permutes (TODO: this is incomplete)
+    base_strides = strides_for_shape(self.shape)
+    try: permute = tuple(base_strides.index(x) for x in self.strides)
+    except ValueError: return None
+    if len(set(permute)) != len(permute): return None
+    return View.create(self.shape).permute(argsort(permute))
 
   # MovementOps live here now
 
