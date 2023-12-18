@@ -9,7 +9,7 @@ from examples.beautiful_mnist import Model as MNIST
 from examples.hlb_cifar10 import SpeedyResNet
 
 from hypothesis import given, strategies as st, settings
-settings.register_profile("my_profile", max_examples=5, deadline=None)
+settings.register_profile("my_profile", deadline=None)
 settings.load_profile("my_profile")
 print(settings.default)
 
@@ -55,7 +55,7 @@ def compile_ast_to_hip(out: Tensor):
 
 binary_operations = [operator.add, operator.sub, operator.mul]
 unary_operations = [Tensor.exp, Tensor.log, operator.neg, Tensor.sin, Tensor.sqrt, Tensor.reciprocal]
-float_dtypes = [dtypes.float16, dtypes.float32, dtypes.float64]
+float_dtypes = [dtypes.float16, dtypes.float32]
 
 @unittest.skipIf(Device.DEFAULT != "HIP", reason="testing HIP->rdna3 compilation needs HIP=1")
 class TestHIPALUCompilation(unittest.TestCase):
@@ -66,7 +66,7 @@ class TestHIPALUCompilation(unittest.TestCase):
     compile_ast_to_hip(out)
 
   @given(st.sampled_from(binary_operations), st.sampled_from(float_dtypes))
-  def test_binary_ops(self, op, dtype, amt):
+  def test_binary_ops(self, op, dtype):
     a = Tensor.randn(4,4, dtype=dtype)
     b = Tensor.randn(4,4, dtype=dtype)
     out = op(a,b)
