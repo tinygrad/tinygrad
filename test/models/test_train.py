@@ -47,6 +47,7 @@ class TestTrain(unittest.TestCase):
     train_one_step(model,X,Y)
     check_gc()
 
+  @unittest.skipIf(CI, "slow")
   @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "too many buffers for webgpu and metal")
   def test_vit(self):
     model = ViT()

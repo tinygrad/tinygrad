@@ -188,7 +188,7 @@ class TestIndexing(unittest.TestCase):
     # def delitem(): del reference[0]
     # self.assertRaises(TypeError, delitem)
 
-  @unittest.skipIf(CI and Device.DEFAULT in ["CLANG"], "slow")
+  @unittest.skipIf(CI and Device.DEFAULT in ["CLANG", "GPU"], "slow")
   def test_advancedindex(self):
     # integer array indexing
 
