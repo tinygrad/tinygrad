@@ -88,7 +88,12 @@ class CStyleLanguage(NamedTuple):
     prg = ''.join([f"{self.kernel_prefix}void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
-    if self.half_prekernel and any(dtype == dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
+    # print("=====")
+    # print(self.half_prekernel)
+    # for _,dtype in bufs:
+    #   print(dtype)
+    # print("=====")
+    if self.half_prekernel and any(dtype == dtypes.float16 or dtype == dtypes.bfloat16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
     return prg
 
   # returns a str statement that does the store
@@ -256,6 +261,7 @@ class CUDALanguage(CStyleLanguage):
                  UnaryOps.EXP2: lambda x,dtype: f"exp2({x})" if dtype != dtypes.half else f"hexp2({x})"}
   half_prekernel = """
     #include <cuda_fp16.h>
+    #include <cuda_bf16.h>
     struct half4 { half x, y, z, w; };
     __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
   """
