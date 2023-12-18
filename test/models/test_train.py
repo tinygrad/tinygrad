@@ -11,9 +11,6 @@ from extra.models.efficientnet import EfficientNet
 from extra.models.transformer import Transformer
 from extra.models.vit import ViT
 from extra.models.resnet import ResNet18
-import pytest
-
-pytestmark = [pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
 
 BS = getenv("BS", 2)
 
