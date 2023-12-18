@@ -238,6 +238,7 @@ class TestTypeSpec(unittest.TestCase):
     assert Tensor.zeros([2,3]).dtype == Tensor.default_type
     assert Tensor.full([2,3], 3.3).dtype == Tensor.default_type
     assert Tensor.full([2,3], 3).dtype == dtypes.int
+    assert Tensor.full([2,3], True).dtype == dtypes.bool
 
   def test_reduce_0d_default(self):
     assert Tensor.ones([2,3,0]).sum(2).dtype ==  Tensor.default_type
