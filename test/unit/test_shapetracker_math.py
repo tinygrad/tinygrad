@@ -1,6 +1,19 @@
 import unittest
 from tinygrad.shape.shapetracker import ShapeTracker
 
+class TestShapeTrackerBasics(unittest.TestCase):
+  def test_pad_shrink_removes_mask(self):
+    a = ShapeTracker.from_shape((10, 10))
+    a = a.pad(((0,2), (0,2)))
+    a = a.shrink(((0,10), (0,10)))
+    assert len(a.views) == 1 and a.views[-1].mask is None
+
+  def test_pad_shrink_leaves_mask(self):
+    a = ShapeTracker.from_shape((10, 10))
+    a = a.pad(((0,2), (0,2)))
+    a = a.shrink(((0,10), (0,11)))
+    assert len(a.views) == 1 and a.views[-1].mask is not None
+
 class TestShapeTrackerAdd(unittest.TestCase):
   def test_simple_add_reshape(self):
     a = ShapeTracker.from_shape((10, 10))

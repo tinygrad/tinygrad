@@ -100,9 +100,9 @@ class View:
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def invert(self, out_shape:Tuple[int, ...]) -> Optional[View]:
-    if prod(self.shape) != prod(out_shape) or self.mask is not None: return None
-    ret = self.reshape(tuple(s for s in self.shape if s != 1))
-    assert ret is not None, "removing ones will never be an issue"
+    ret = self.shrink(self.mask) if self.mask else self
+    if prod(ret.shape) != prod(out_shape): return None
+    ret = cast(View, ret.reshape(tuple(s for s in ret.shape if s != 1)))  # removing ones will never be an issue
     ret = ret.stride(tuple(-1 if x < 0 else 1 for x in ret.strides))
     return ret.permute(argsort(tuple(-x for x in ret.strides))).reshape(out_shape)
 
@@ -116,6 +116,7 @@ class View:
       # merge the masks if we have two
       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
     shape = [y-x for x,y in arg]
+    if mask is not None and all(m[0] == 0 and m[1] == s for m,s in zip(mask, shape)): mask = None
     return View.create(tuple(s.b if isinstance(s, NumNode) else s for s in shape), self.strides, self.offset+offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
