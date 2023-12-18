@@ -303,7 +303,6 @@ __device__ void vstore_half4(float4 data, size_t offset, half *p) {
     UnaryOps.NEG: lambda a,dtype: f"(-(half){a})" if dtype == dtypes.half else CStyleLanguage().code_for_op[UnaryOps.NEG](a,dtype), # noqa: E501
     **{op: lambda a, b, dtype, op=op, fxn=fxn: f"__h{fxn}((half){a},(half){b})" if dtype == dtypes.half else CStyleLanguage().code_for_op[op](a,b,dtype) for op, fxn in zip([BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.DIV, BinaryOps.CMPLT], ["add","sub","mul","div", "lt"])}, # noqa: E501
     BinaryOps.MAX: lambda a,b,dtype: f"__hgt((half){a},(half){b})?(half){a}:(half){b}" if dtype == dtypes.half else f"float4(max({a}.x,{b}.x),max({a}.y,{b}.y),max({a}.z,{b}.z),max({a}.w,{b}.w))" if dtype == dtypes.float.vec(4) else f"max({a},{b})",# noqa: E501
-    BinaryOps.MOD: lambda a,b,dtype: f"__hsub({a}, __hmul({b}, __float2half(floorf(__half2float({a}) / __half2float({b})))))" if dtype == dtypes.half else f"{a}%{b}", # noqa: E501
   }
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 
