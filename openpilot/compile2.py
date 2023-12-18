@@ -104,7 +104,7 @@ if __name__ == "__main__":
   schedule, schedule_input = partition(schedule, lambda x: x.ast.op not in LoadOps)
   print(f"{len(schedule_input)} inputs")
 
-  run_schedule(schedule_independent, disable_logging=True)
+  run_schedule(schedule_independent)
   run_schedule(schedule_input)
   with Context(DEBUG=max(DEBUG.value, 2), BEAM=getenv("LATEBEAM")):
     image_count = sum(isinstance(si.out.dtype, ImageDType) for si in schedule)

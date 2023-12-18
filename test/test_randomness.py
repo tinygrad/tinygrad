@@ -63,6 +63,10 @@ class TestRandomness(unittest.TestCase):
     self.assertTrue(normal_test(Tensor.randn))
     self.assertTrue(equal_distribution(Tensor.randn, torch.randn, lambda x: np.random.randn(*x)))
 
+  def test_randint(self):
+    self.assertFalse(normal_test(Tensor.randint))
+    self.assertTrue(equal_distribution(partial(Tensor.randint, low=-2, high=5), numpy_func=lambda x: np.random.randint(low=-2, high=5, size=x)))
+
   def test_normal(self):
     self.assertTrue(normal_test(Tensor.normal))
     self.assertTrue(equal_distribution(Tensor.normal, lambda x: torch.nn.init.normal_(torch.empty(x), mean=0, std=1), lambda x: np.random.normal(loc=0, scale=1, size=x)))

@@ -38,6 +38,13 @@ def cast(bb, val, input_type, output_type, bitcast=False):
   if input_type == output_type: return val
   if bitcast: return bb[-1].bitcast(val, dtype_to_llvm_dtype[output_type])
 
+  if input_type == dtypes.bfloat16:
+    val = bb[-1].bitcast(bb[-1].shl(bb[-1].sext(val, ir.IntType(32)), ir.Constant(ir.IntType(32), 16)),val, ir.FloatType())
+    input_type = dtypes.float32
+  if output_type == dtypes.bfloat16:
+    val = cast(bb, val, input_type, dtypes.float32)
+    return bb[-1].trunc(bb[-1].lshr(bb[-1].bitcast(val, ir.IntType(32)), ir.Constant(ir.IntType(32), 16)), ir.IntType(16))
+
   if dtypes.is_float(input_type):
     if dtypes.is_float(output_type):
       if output_type.itemsize > input_type.itemsize: return bb[-1].fpext(val, dtype_to_llvm_dtype[output_type])

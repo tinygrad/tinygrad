@@ -103,14 +103,14 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
 
 class TestBFloat16DType(unittest.TestCase):
   def setUp(self):
-    if not is_dtype_supported(dtypes.bfloat16): raise unittest.SkipTest("bfloat16 not supported")
+    if Device.DEFAULT not in ["LLVM", "TORCH"]: raise unittest.SkipTest("bfloat16 not supported")
   def test_bf16_to_float(self):
     with self.assertRaises(AssertionError):
-      _test_cast(Tensor([100000], dtype=dtypes.bfloat16), dtypes.float32, [100000])
+      _test_cast(Tensor([100000], dtype=dtypes.bfloat16), dtypes.float32)
 
   def test_float_to_bf16(self):
     with self.assertRaises(AssertionError):
-      _test_cast(Tensor([100000], dtype=dtypes.float32), dtypes.bfloat16, [100000])
+      _test_cast(Tensor([100000], dtype=dtypes.float32), dtypes.bfloat16)
 
   # torch.tensor([10000, -1, -1000, -10000, 20]).type(torch.bfloat16)
 
@@ -125,7 +125,7 @@ class TestBFloat16DType(unittest.TestCase):
     t.to(f"disk:{temp('f32')}").realize()
 
     # hack to "cast" f32 -> bf16
-    dat = open(temp('f32'), "rb").read()
+    with open(temp('f32'), "rb") as f: dat = f.read()
     adat = b''.join([dat[i+2:i+4] for i in range(0, len(dat), 4)])
     with open(temp('bf16'), "wb") as f: f.write(adat)
 
@@ -224,51 +224,78 @@ class TestHelpers(unittest.TestCase):
     assert dtype.vec(amt).scalar() == dtype
 
 class TestTypeSpec(unittest.TestCase):
-  def test_creation(self):
-    assert Tensor([]).dtype == Tensor.default_type
-    assert Tensor([1]).dtype == dtypes.int
-    assert Tensor([1.1]).dtype == Tensor.default_type
+  def setUp(self):
+    self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
+  def tearDown(self):
+    dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
 
-  def test_const_full(self):
-    assert Tensor.ones([2,3]).dtype == Tensor.default_type
-    assert Tensor.zeros([2,3]).dtype == Tensor.default_type
-    assert Tensor.full([2,3], 3.3).dtype == Tensor.default_type
-    assert Tensor.full([2,3], 3).dtype == dtypes.int
+  def test_set_dtype_default(self):
+    dtypes.default_int = dtypes.int16
+    assert dtypes.default_int == dtypes.int16
+    dtypes.default_int = dtypes.int64
+    assert dtypes.default_int == dtypes.int64
+    dtypes.default_int = dtypes.int32
+    assert dtypes.default_int == dtypes.int32
+    dtypes.default_float = dtypes.float16
+    assert dtypes.default_float == dtypes.float16
+    dtypes.default_float = dtypes.float64
+    assert dtypes.default_float == dtypes.float64
+
+  @given(st.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), st.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
+  def test_creation(self, default_int, default_float):
+    dtypes.default_int, dtypes.default_float = default_int, default_float
+    assert Tensor(True).dtype == dtypes.bool
+    assert Tensor(2).dtype == dtypes.default_int
+    assert Tensor(2.34).dtype == dtypes.default_float
+    assert Tensor([]).dtype == dtypes.default_float
+    assert Tensor([1]).dtype == dtypes.default_int
+    assert Tensor([1.1]).dtype == dtypes.default_float
+    assert Tensor([0,1], dtype=dtypes.bfloat16).dtype == dtypes.bfloat16
+
+    assert Tensor.eye(0).dtype == dtypes.default_float
+    assert Tensor.eye(3).dtype == dtypes.default_float
+    assert Tensor.eye(3, dtype=dtypes.float16).dtype == dtypes.float16
+    assert Tensor.eye(3, dtype=dtypes.int64).dtype == dtypes.int64
+
+
+  @given(st.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), st.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
+  def test_full(self, default_int, default_float):
+    dtypes.default_int, dtypes.default_float = default_int, default_float
+
+    assert Tensor.ones([2,3]).dtype == dtypes.default_float
+    assert Tensor.zeros([2,3]).dtype == dtypes.default_float
+    assert Tensor.full([2,3], 3.3).dtype == dtypes.default_float
+    assert Tensor.full([2,3], 3).dtype == dtypes.default_int
+    assert Tensor.full([2,3], True).dtype == dtypes.bool
+
+    assert Tensor.zeros(3, 3).dtype == dtypes.default_float
+    assert Tensor.zeros(3, 3, dtype=dtypes.float16).dtype == dtypes.float16
+    assert Tensor.zeros(3, 3, dtype=dtypes.int64).dtype == dtypes.int64
+
+    assert Tensor.ones(3, 3).dtype == dtypes.default_float
+    assert Tensor.ones(3, 3, dtype=dtypes.float16).dtype == dtypes.float16
+    assert Tensor.ones(3, 3, dtype=dtypes.int64).dtype == dtypes.int64
+
+    assert Tensor.full((3, 3), 3).dtype == dtypes.default_int
+    assert Tensor.full((3, 3), 3.0).dtype == dtypes.default_float
+    assert Tensor.full((3, 3), 3, dtype=dtypes.float16).dtype == dtypes.float16
+    assert Tensor.full((3, 3), 3, dtype=dtypes.int64).dtype == dtypes.int64
 
   def test_reduce_0d_default(self):
-    assert Tensor.ones([2,3,0]).sum(2).dtype ==  Tensor.default_type
+    assert Tensor.ones([2,3,0]).sum(2).dtype ==  dtypes.default_float
     # assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int  # requires reduceop acc fix
 
-  def test_arange(self):
-    assert Tensor.arange(5).dtype == dtypes.int32
-    assert Tensor.arange(5.0).dtype == Tensor.default_type
+  @given(st.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), st.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
+  def test_arange(self, default_int, default_float):
+    dtypes.default_int, dtypes.default_float = default_int, default_float
+
+    assert Tensor.arange(5).dtype == dtypes.default_int
+    assert Tensor.arange(5.0).dtype == dtypes.default_float
     assert Tensor.arange(5, dtype=dtypes.int16).dtype == dtypes.int16
     assert Tensor.arange(5, dtype=dtypes.int64).dtype == dtypes.int64
     assert Tensor.arange(5, dtype=dtypes.float16).dtype == dtypes.float16
-    assert Tensor.arange(3, 9, 0.7).dtype == Tensor.default_type
-    assert Tensor.arange(3, 8.5, 3).dtype == Tensor.default_type
-
-  def test_zeros(self):
-    assert Tensor.zeros(3, 3).dtype == Tensor.default_type
-    assert Tensor.zeros(3, 3, dtype= dtypes.float16).dtype == dtypes.float16
-    assert Tensor.zeros(3, 3, dtype= dtypes.int64).dtype == dtypes.int64
-
-  def test_ones(self):
-    assert Tensor.ones(3, 3).dtype == Tensor.default_type
-    assert Tensor.ones(3, 3, dtype= dtypes.float16).dtype == dtypes.float16
-    assert Tensor.ones(3, 3, dtype= dtypes.int64).dtype == dtypes.int64
-
-  def test_full(self):
-    assert Tensor.full((3, 3), 3).dtype == dtypes.int
-    assert Tensor.full((3, 3), 3.0).dtype == Tensor.default_type
-    assert Tensor.full((3, 3), 3, dtype= dtypes.float16).dtype == dtypes.float16
-    assert Tensor.full((3, 3), 3, dtype= dtypes.int64).dtype == dtypes.int64
-
-  def test_eye(self):
-    assert Tensor.eye(0).dtype == Tensor.default_type
-    assert Tensor.eye(3).dtype == Tensor.default_type
-    assert Tensor.eye(3, dtype= dtypes.float16).dtype == dtypes.float16
-    assert Tensor.eye(3, dtype= dtypes.int64).dtype == dtypes.int64
+    assert Tensor.arange(3, 9, 0.7).dtype == dtypes.default_float
+    assert Tensor.arange(3, 8.5, 3).dtype == dtypes.default_float
 
 core_types = list(DTYPES_DICT.values())
 floats = [dt for dt in core_types if dtypes.is_float(dt)]
@@ -326,10 +353,10 @@ class TestAutoCastType(unittest.TestCase):
       np.testing.assert_allclose(func(Tensor(a, dtype=dtype)).numpy(), func(torch.tensor(a)), rtol=1e-4, atol=1e-4)
 
   def test_broadcast_float(self):
-    assert (Tensor.rand(4, 4, dtype=dtypes.bool) + 2.3).dtype == Tensor.default_type
-    assert (Tensor.rand(4, 4, dtype=dtypes.int) + 2.3).dtype == Tensor.default_type
-    assert (Tensor.rand(4, 4, dtype=dtypes.int8) + 2.3).dtype == Tensor.default_type
-    assert (Tensor.rand(4, 4, dtype=dtypes.uint64) + 2.3).dtype == Tensor.default_type
+    assert (Tensor.rand(4, 4, dtype=dtypes.bool) + 2.3).dtype == dtypes.default_float
+    assert (Tensor.rand(4, 4, dtype=dtypes.int) + 2.3).dtype == dtypes.default_float
+    assert (Tensor.rand(4, 4, dtype=dtypes.int8) + 2.3).dtype == dtypes.default_float
+    assert (Tensor.rand(4, 4, dtype=dtypes.uint64) + 2.3).dtype == dtypes.default_float
     assert (Tensor.rand(4, 4, dtype=dtypes.float16) + 2.3).dtype == dtypes.float16
     assert (Tensor.rand(4, 4, dtype=dtypes.bfloat16) + 2.3).dtype == dtypes.bfloat16
     assert (Tensor.rand(4, 4, dtype=dtypes.float32) + 2.3).dtype == dtypes.float32
@@ -345,6 +372,15 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor.rand(4, 4, dtype=dtypes.float32) + 2).dtype == dtypes.float32
     assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2).dtype == dtypes.float64
 
+  def test_broadcast_bool(self):
+    assert (Tensor([0, 1], dtype=dtypes.bool) + True).dtype == dtypes.bool
+    assert (Tensor([0, 1], dtype=dtypes.int) + True).dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int8) + True).dtype == dtypes.int8
+    assert (Tensor([0, 1], dtype=dtypes.uint64) + True).dtype == dtypes.uint64
+    assert (Tensor([0, 1], dtype=dtypes.float16) + True).dtype == dtypes.float16
+    assert (Tensor([0, 1], dtype=dtypes.bfloat16) + True).dtype == dtypes.bfloat16
+    assert (Tensor([0, 1], dtype=dtypes.float32) + True).dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.float64) + True).dtype == dtypes.float64
 
 if __name__ == '__main__':
   unittest.main()

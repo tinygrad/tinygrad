@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict, cast
 import math, functools
-from collections import defaultdict
+from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, prod, DType, PtrDType, strip_parens, getenv
@@ -113,14 +113,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
   r: Dict[UOp, str] = {}
   def ssa(u, prefix="t"):
     nonlocal c, r
+    r[u]=f"{prefix}{c[prefix]}"
     c[prefix] += 1
-    r[u]=f"{prefix}{c[prefix]-1}"
     return r[u]
 
-  child_count: DefaultDict[UOp, int] = defaultdict(int)
-  for ru in uops:
-    for v in ru.vin:
-      child_count[v] += 1
+  child_count = Counter(v for ru in uops for v in ru.vin)
 
   for u in uops:
     uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
@@ -328,13 +325,13 @@ class WGSLLanguage(CStyleLanguage):
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): return "nan()"
-    elif math.isinf(x): return ("-" if x < 0 else "") + "(1.0/0.0)"
+    elif math.isinf(x): return ("-" if x < 0 else "") + "inf(1.0)"
     return f"({super().render_const(x, var_dtype)})"
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     local_size = local_size[::-1] if local_size else [1]
     bind_it = iter(range(len(bufs)))
-    prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
+    prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\nfn inf(a: f32) -> f32 { return a/0.0; }\n"
     prg += "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) {'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'} {name}: {f'array<{self.type_map[dtype]}>' if isinstance(dtype, PtrDType) else 'i32'};" for name,dtype in bufs])  # noqa: E501
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"  # noqa: E501
     return prg
