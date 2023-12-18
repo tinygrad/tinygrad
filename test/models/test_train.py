@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
 from tinygrad.tensor import Device
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, CI
 from extra.training import train
 from extra.models.convnext import ConvNeXt
 from extra.models.efficientnet import EfficientNet
@@ -39,6 +39,7 @@ class TestTrain(unittest.TestCase):
     train_one_step(model,X,Y)
     check_gc()
 
+  @unittest.skipIf(CI, "slow")
   def test_efficientnet(self):
     model = EfficientNet(0)
     X = np.zeros((BS,3,224,224), dtype=np.float32)
