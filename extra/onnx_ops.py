@@ -482,8 +482,8 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)]
   output_shape_ = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
   scales_ = [os/xs for xs, os in zip(X.shape, output_shape)]
-  x_out = Tensor.arange(output_shape[-1]).cast(Tensor.default_type)
-  y_out = Tensor.arange(output_shape[-2]).cast(Tensor.default_type)
+  x_out = Tensor.arange(output_shape[-1]).cast(dtypes.default_float)
+  y_out = Tensor.arange(output_shape[-2]).cast(dtypes.default_float)
   if mode == "nearest":
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_, roi)
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
