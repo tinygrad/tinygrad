@@ -1,8 +1,9 @@
 from typing import Tuple, Dict, List
 from tinygrad.helpers import DType
-from tinygrad.tensor import Device, Tensor
+from tinygrad.tensor import Tensor, Device, Buffer
 from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
+from tinygrad.features.graph.cuda import CUDAGraph
 import json
 
 EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CLANG", "CUDA", "GPU"]
@@ -11,6 +12,7 @@ def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str]
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
   for ji in run.jit_cache:
     fxn = ji.prg
+    assert not isinstance(fxn, CUDAGraph), "CUDAGraph not supported"
     functions[fxn.name] = fxn.prg   # NOTE: this assumes all with the same name are the same
     cargs = []
     for i,arg in enumerate(ji.rawbufs):
@@ -51,7 +53,7 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
     special_names[id(output.lazydata.realized)] = f'output{i}'
   return run, special_names
 
-def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]], bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str]) -> str:
+def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]], bufs_to_save:Dict[str,Buffer], input_names:List[str], output_names:List[str]) -> str:
   from tinygrad.runtime.ops_clang import CLANG_PROGRAM_HEADER
   cprog = [CLANG_PROGRAM_HEADER]
 
