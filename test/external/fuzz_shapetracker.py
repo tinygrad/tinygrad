@@ -59,8 +59,6 @@ def do_expand(st):
   st.expand(expand)
 
 shapetracker_ops = [do_permute, do_pad, do_shrink, do_reshape_split_one, do_reshape_combine_two, do_stride, do_expand]
-# shrink and expand aren't invertible (stride isn't always)
-invertible_shapetracker_ops = [do_permute, do_pad, do_reshape_split_one, do_reshape_combine_two, do_stride]
 
 if __name__ == "__main__":
   random.seed(42)

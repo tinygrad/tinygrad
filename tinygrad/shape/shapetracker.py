@@ -57,9 +57,9 @@ class ShapeTracker:
 
   def __add__(self, st:ShapeTracker) -> ShapeTracker: return ShapeTracker(self.views + st.views).simplify()
 
-  def invert(self, out_shape:Optional[Tuple[int, ...]]=None) -> Optional[ShapeTracker]:
-    ret = tuple(v.invert() for v in (self.views[::-1] + (() if out_shape is None else (View.create(out_shape),))))
-    return None if (any(x is None for x in ret)) else ShapeTracker(ret)
+  def invert(self, out_shape:Tuple[int, ...]) -> Optional[ShapeTracker]:
+    ret = tuple(v.invert(s) for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]))
+    return ShapeTracker(cast(Tuple[View, ...], ret)) if all(x is not None for x in ret) else None
 
   @staticmethod
   def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),))

@@ -99,13 +99,12 @@ class View:
     return View.create(new_shape, new_strides, new_offset, new_mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def invert(self) -> Optional[View]:
-    # support simple permutes (TODO: this is incomplete)
-    base_strides = strides_for_shape(self.shape)
-    try: permute = tuple(base_strides.index(x) for x in self.strides)
-    except ValueError: return None
-    if len(set(permute)) != len(permute): return None
-    return View.create(self.shape).permute(argsort(permute))
+  def invert(self, out_shape:Tuple[int, ...]) -> Optional[View]:
+    if prod(self.shape) != prod(out_shape): return None
+    oneless_strides_in = tuple(-st for s,st in zip(self.shape, self.strides) if s != 1)
+    ret = self.reshape(tuple(s for s in self.shape if s != 1))
+    assert ret is not None
+    return ret.permute(argsort(oneless_strides_in)).reshape(out_shape)
 
   # MovementOps live here now
 

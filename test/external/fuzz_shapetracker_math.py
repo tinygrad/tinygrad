@@ -32,20 +32,22 @@ invertible_shapetracker_ops = [do_permute, do_pad, do_reshape_split_one, do_resh
 invertible_simple_shapetracker_ops = [do_permute, do_reshape_split_one, do_reshape_combine_two]
 
 def fuzz_invert():
-  start = ShapeTracker.from_shape((random.randint(1, 10), random.randint(1, 10), random.randint(1, 10)))
+  start = ShapeTracker.from_shape((random.randint(2, 10), random.randint(2, 10), random.randint(2, 10)))
   m = MultiShapeTracker([start])
-  for _ in range(1): random.choice(invertible_simple_shapetracker_ops)(m)
+  for _ in range(2): random.choice(invertible_simple_shapetracker_ops)(m)
   inv = m.sts[0].invert(start.shape)
-  st_sum = (m.sts[0] + inv) if inv else None
+  st_sum = (ShapeTracker.from_shape(m.sts[0].shape) + inv) if inv else None
   return start, st_sum
 
 if __name__ == "__main__":
   total = getenv("CNT", 100)
   good = 0
   for _ in range(total):
-    st1, st2 = fuzz_plus()
-    #st1, st2 = fuzz_invert()
-    print(f"GOT: {st2}")
-    print(f"EXP: {st1}")
+    print("****")
+    #st1, st2 = fuzz_plus()
+    st1, st2 = fuzz_invert()
     if st1 == st2: good += 1
+    else:
+      print(f"GOT: {st2}")
+      print(f"EXP: {st1}")
   print(f"hit {good}/{total}")
