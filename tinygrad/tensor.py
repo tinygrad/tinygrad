@@ -457,11 +457,11 @@ class Tensor:
     return [self[tuple(sl)] for sl in slice_params]
 
   def squeeze(self, dim:Optional[int]=None) -> Tensor:
-    if dim is None: return self if 1 not in self.shape else self.reshape(*[size for size in self.shape if size != 1])
-    if dim <= 0 and self.ndim == 0: return self # This is to match PyTorch behavior
-    if not -self.ndim <= dim < self.ndim: raise IndexError(f"Dimension out of range (expected to be in range of [{-self.ndim if self.ndim > 0 else self.ndim-1}, {self.ndim-1 if self.ndim > 0 else self.ndim}], but got {dim})")  # noqa: E501
+    if dim is None: return self if 1 not in self.shape else self.reshape(*[dim for dim in self.shape if dim != 1])
+    if self.ndim == 0 and dim in [-1, 0]: return self  # this is to match torch behavior
+    if not -self.ndim <= dim <= self.ndim-1: raise IndexError(f"{dim=} out of range {[-self.ndim, self.ndim-1] if self.ndim else [-1, 0]}")
     if dim < 0: dim += self.ndim
-    return self if self.shape[dim] != 1 else self.reshape(*[size for idx, size in enumerate(self.shape) if idx != dim])
+    return self if self.shape[dim] != 1 else self.reshape(self.shape[:dim] + self.shape[dim+1:])
 
   def unsqueeze(self, dim:int) -> Tensor:
     if dim < 0: dim = len(self.shape) + dim + 1
