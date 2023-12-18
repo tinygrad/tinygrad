@@ -425,5 +425,23 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_equal(Tensor([]).sum().numpy(), 0)
     np.testing.assert_equal(Tensor([]).mean().numpy(), 0)
 
+class TestMLOps(unittest.TestCase):
+  def test_less_backward(self):
+    from tinygrad.nn.optim import SGD
+    from tinygrad.nn.state import get_parameters
+    def relu_(t): return t * (t > 0)
+    class Net:
+      def __init__(self): self.w = Tensor.randn(10, 10)
+      def __call__(self, x: Tensor): return self.w.dot(x)
+    net = Net()
+    optim = SGD(get_parameters(net))
+    rd = Tensor.randn(10)
+    relu_(net(rd)).mean().backward()
+    grad = net.w.grad.numpy()
+    optim.zero_grad()
+    net(rd).relu().mean().backward()
+    np.testing.assert_equal(grad, net.w.grad.numpy())
+
+
 if __name__ == '__main__':
   unittest.main()

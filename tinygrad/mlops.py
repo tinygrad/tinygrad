@@ -78,8 +78,8 @@ class Sqrt(Function):
 # TODO: have the backend automatically find this
 class Sigmoid(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
-    x = x.cast(least_upper_float(x.dtype))
-    self.ret = x.const(1).e(BinaryOps.DIV, x.const(1).e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.const(-1/math.log(2))).e(UnaryOps.EXP2)))
+    self.ret = x.cast(ftype:=least_upper_float(x.dtype)).const(1).e(
+      BinaryOps.DIV, x.cast(ftype).const(1).e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.cast(ftype).const(-1/math.log(2))).e(UnaryOps.EXP2)))
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
@@ -89,13 +89,15 @@ class Sigmoid(Function):
 
 class Less(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    output_dtype = least_upper_dtype(x.dtype, y.dtype)
-    return x.cast(output_dtype).e(BinaryOps.CMPLT, y.cast(output_dtype))
+    self.ret = x.e(BinaryOps.CMPLT, y)
+    return self.ret
+
+  def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
+    return None, None
 
 class Xor(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    output_dtype = least_upper_dtype(x.dtype, y.dtype)
-    return x.cast(output_dtype).e(BinaryOps.XOR, y.cast(output_dtype))
+    return x.e(BinaryOps.XOR, y)
 
 class Add(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
