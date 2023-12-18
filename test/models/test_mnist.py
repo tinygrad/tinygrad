@@ -6,9 +6,6 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import optim, BatchNorm2d
 from extra.training import train, evaluate
 from extra.datasets import fetch_mnist
-import pytest
-
-pytestmark = [pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
 
 # load the mnist dataset
 X_train, Y_train, X_test, Y_test = fetch_mnist()
