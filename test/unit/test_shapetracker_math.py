@@ -47,9 +47,25 @@ class TestShapeTrackerInvert(unittest.TestCase):
     ap = ShapeTracker.from_shape(x.shape) + x.invert(a.shape)
     assert ap == a, f"{ap} != {a}"
 
-  def test_cant_permute_expand(self):
+  def test_cant_invert_expand(self):
     a = ShapeTracker.from_shape((10, 1))
     x = a.expand((10,10))
+    assert x.invert(a.shape) is None
+
+  def test_cant_invert_shrink(self):
+    a = ShapeTracker.from_shape((10, 10))
+    x = a.shrink(((0,10),(2,8)))
+    assert x.invert(a.shape) is None
+
+  def test_can_invert_flip(self):
+    a = ShapeTracker.from_shape((10, 10))
+    x = a.stride((-1,1))
+    ap = ShapeTracker.from_shape(x.shape) + x.invert(a.shape)
+    assert ap == a, f"{ap} != {a}"
+
+  def test_cant_invert_stride(self):
+    a = ShapeTracker.from_shape((10, 10))
+    x = a.stride((2,2))
     assert x.invert(a.shape) is None
 
 if __name__ == '__main__':
