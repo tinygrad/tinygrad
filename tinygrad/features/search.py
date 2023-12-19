@@ -58,8 +58,7 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
         if c in {"cyan", "green", "white"}: lcl *= s
       if up > 256 or lcl > 256: continue
       acted_lins[i+1] = lin2
-    except Exception:
-      pass
+    except Exception: pass
   return acted_lins
 
 def try_compile_linearized_w_idx(x):
