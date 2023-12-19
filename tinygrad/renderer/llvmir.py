@@ -77,8 +77,7 @@ def const(args, dtype):
   return ir.Constant(dtype_to_llvm_dtype[dtype], int(args) if dtypes.is_int(dtype) else bool(args) if dtype == dtypes.bool else args)
 
 def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
-  # all llvm stuff goes into a module
-  module = ir.Module(name=__file__)
+  module = ir.Module(name=__file__) # all llvm stuff goes into a module
 
   # extract global buffers
   buf_to_dtype = {u.arg:u.dtype for u in uops if u.uop == UOps.DEFINE_GLOBAL}
@@ -87,8 +86,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
   # create llvm function
   func_dtypes = [(dtype_to_llvm_dtype[dtype],dtype) for dtype in buf_to_dtype.values() if dtype is not None]
   func = ir.Function(module, ir.FunctionType(ir.VoidType(), [x.as_pointer() if isinstance(dt, PtrDType) else x for x,dt in func_dtypes]), name=function_name)  # noqa: E501
-  for a in func.args:
-    if a.type.is_pointer: a.add_attribute("noalias")
+  [a.add_attribute("noalias") for a in func.args if a.type.is_pointer]
 
   # add the function attribute "no-nans-fp-math"="true", which informs llvm that it allowed to use vectorization optimizations
   func.attributes._known = func.attributes._known.union(frozenset(['"no-nans-fp-math"="true"']))
