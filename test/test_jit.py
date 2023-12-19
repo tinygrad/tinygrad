@@ -221,8 +221,9 @@ class TestJit(unittest.TestCase):
     np.testing.assert_equal([1], cache.bad_cache.numpy())
 
     for i in range(5):
-      cache.good_jitted(zero)
-      cache.bad_jitted(zero)
+      x = Tensor([i]) # NOTE: if this doesn't change, it just hits the lazybuffer cache
+      cache.good_jitted(x)
+      cache.bad_jitted(x)
 
     # verify the jitted calls read 1 from the cache
     np.testing.assert_equal([1], cache.good_jitted(zero).numpy())

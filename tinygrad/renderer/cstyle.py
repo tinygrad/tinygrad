@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict, cast
 import math, functools
-from collections import defaultdict
+from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, prod, DType, PtrDType, strip_parens, getenv
@@ -36,7 +36,7 @@ class CStyleLanguage(NamedTuple):
     BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})",
     BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
-    TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})", TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}!=0?{b}:{c})"
+    TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})", TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"
   }
 
   # returns a str expression of the casted xs with the given type
@@ -113,14 +113,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
   r: Dict[UOp, str] = {}
   def ssa(u, prefix="t"):
     nonlocal c, r
+    r[u]=f"{prefix}{c[prefix]}"
     c[prefix] += 1
-    r[u]=f"{prefix}{c[prefix]-1}"
     return r[u]
 
-  child_count: DefaultDict[UOp, int] = defaultdict(int)
-  for ru in uops:
-    for v in ru.vin:
-      child_count[v] += 1
+  child_count = Counter(v for ru in uops for v in ru.vin)
 
   for u in uops:
     uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
@@ -306,26 +303,11 @@ __device__ half sin(half x) { return hsin(x); }
 __device__ half sqrt(half x) { return hsqrt(x); }
 __device__ half hmax(half a, half b) { return __hgt(a, b) ? a : b; }
 __device__ half operator%(const half &a, const half &b) { return __hsub(a, __hmul(b, __float2half(floorf(__half2float(a) / __half2float(b))))); }
-__device__ bool operator!=(const half &a, const int &b) { return (float)a != b; }
-
-// HACKS for ALU ops on half and result of half2 GEP
-__device__ half operator+(const half &a, const unsigned short &b) { return __hadd(a, (half)(b)); }
-__device__ half operator-(const half &a, const unsigned short &b) { return __hsub(a, (half)(b)); }
-__device__ half operator*(const half &a, const unsigned short &b) { return __hmul(a, (half)(b)); }
-__device__ half operator/(const half &a, const unsigned short &b) { return __hdiv(a, (half)(b)); }
-__device__ bool operator<(const half &a, const unsigned short &b) { return __hlt(a, (half)(b)); }
-// now the other way
-__device__ half operator+(const unsigned short &a, const half &b) { return __hadd((half)(a), b); }
-__device__ half operator-(const unsigned short &a, const half &b) { return __hsub((half)(a), b); }
-__device__ half operator*(const unsigned short &a, const half &b) { return __hmul((half)(a), b); }
-__device__ half operator/(const unsigned short &a, const half &b) { return __hdiv((half)(a), b); }
-__device__ bool operator<(const unsigned short &a, const half &b) { return __hlt((half)(a), b); }
   """
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
-  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"hmax({a},{b})",
-                 TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}!=0?{b}:{c})" if dtype != dtypes.half else f"(half)({a}!=0?{b}:{c})"}
+  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"hmax({a},{b})",}
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 
 # TODO: how much of this can be merged with above?
@@ -337,21 +319,22 @@ class WGSLLanguage(CStyleLanguage):
   generic_var_prefix = "var "
   external_local_bufs = True
   code_for_op = { **CStyleLanguage().code_for_op, BinaryOps.CMPLT: lambda x,y,dtype: f"f32({x}<{y})",
-                 TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a}!=0.)" }
-  type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool"}
+                 TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},bool({a}))" }
+  # HACK: write bool as f32. remove after elementwise op cast inputs properly
+  type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "f32"}
 
   def render_local(self, name: str, size: int):
     return f"var<workgroup> {name}: array<f32,{size}>;"
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): return "nan()"
-    elif math.isinf(x): return ("-" if x < 0 else "") + "(1.0/0.0)"
+    elif math.isinf(x): return ("-" if x < 0 else "") + "inf(1.0)"
     return f"({super().render_const(x, var_dtype)})"
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     local_size = local_size[::-1] if local_size else [1]
     bind_it = iter(range(len(bufs)))
-    prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
+    prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\nfn inf(a: f32) -> f32 { return a/0.0; }\n"
     prg += "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) {'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'} {name}: {f'array<{self.type_map[dtype]}>' if isinstance(dtype, PtrDType) else 'i32'};" for name,dtype in bufs])  # noqa: E501
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"  # noqa: E501
     return prg

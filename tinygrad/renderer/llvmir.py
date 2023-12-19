@@ -26,7 +26,7 @@ code_for_op: Final[Dict[Op, Callable]] = {
       builder.urem(x, y) if is_bool_or_unsigned(var_dtype) else builder.srem(x, y) if dtypes.is_int(var_dtype) else builder.frem(x, y),
     BinaryOps.XOR: lambda builder, x, y, var_dtype: builder.xor(x, y),
     TernaryOps.MULACC: lambda builder, x, y, z, var_dtype: builder.fadd(builder.fmul(x, y, flags=MFLAGS), z, flags=MFLAGS),
-    TernaryOps.WHERE: lambda builder, x, y, z, var_dtype: builder.select(builder.trunc(x, ir.IntType(1)) if isinstance(x.type, ir.IntType) else builder.fcmp_unordered("!=", x, ir.Constant(ir.FloatType(), 0), flags=MFLAGS), y, z)  # noqa: E501
+    TernaryOps.WHERE: lambda builder, x, y, z, var_dtype: builder.select(x, y, z),
 }
 
 
@@ -37,6 +37,13 @@ dtype_to_llvm_dtype = { dtypes.bool:ir.IntType(1), dtypes.int8:ir.IntType(8), dt
 def cast(bb, val, input_type, output_type, bitcast=False):
   if input_type == output_type: return val
   if bitcast: return bb[-1].bitcast(val, dtype_to_llvm_dtype[output_type])
+
+  if input_type == dtypes.bfloat16:
+    val = bb[-1].bitcast(bb[-1].shl(bb[-1].sext(val, ir.IntType(32)), ir.Constant(ir.IntType(32), 16)),val, ir.FloatType())
+    input_type = dtypes.float32
+  if output_type == dtypes.bfloat16:
+    val = cast(bb, val, input_type, dtypes.float32)
+    return bb[-1].trunc(bb[-1].lshr(bb[-1].bitcast(val, ir.IntType(32)), ir.Constant(ir.IntType(32), 16)), ir.IntType(16))
 
   if dtypes.is_float(input_type):
     if dtypes.is_float(output_type):

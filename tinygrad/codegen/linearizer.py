@@ -114,7 +114,7 @@ class Linearizer(Kernel):
             out = self.uop(UOps.GEP, localtype, (self.load_cache[key],), idx_small.max)
             for ix in range(idx_small.max, idx_small.min, -1):
               rvv = self.uop(UOps.GEP, localtype, (self.load_cache[key],), ix-1)
-              sel = self.uop(UOps.ALU, res.dtype, (res, self.const(ix)), BinaryOps.CMPLT)
+              sel = self.uop(UOps.ALU, dtypes.bool, (res, self.const(ix)), BinaryOps.CMPLT)
               out = self.uop(UOps.ALU, localtype, (sel, rvv, out), TernaryOps.WHERE)
             self.load_cache[key] = out
         else:
@@ -376,9 +376,16 @@ class Linearizer(Kernel):
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
+    # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
+    acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
+    for u in self.uops:
+      if u.uop == UOps.PHI:
+        acc_scope[u.vin[0]] += u.vin[2:]
+
     # graph helper functions
     @functools.lru_cache(None)
-    def get_recursive_parents(x:UOp) -> Set[UOp]: return set.union(set(x.vin), *[get_recursive_parents(p) for p in x.vin])
+    def get_recursive_parents(x:UOp, with_phi=False) -> Set[UOp]:
+      return set.union(set(x.vin), *[get_recursive_parents(p, with_phi) for p in x.vin], set(acc_scope[x]) if with_phi else set())
 
     def get_recursive_children(x:UOp) -> Set[UOp]:
       deps = set([x])
@@ -400,9 +407,9 @@ class Linearizer(Kernel):
     for u in self.uops:
       if not loop_stack[-1]: loop_stack[-1].append(u)
       elif u.uop == UOps.LOOP: loop_stack.append([u])
-      elif u.uop not in [UOps.CONST, UOps.ALU, UOps.CAST]: loop_stack[-1].append(u)
+      elif u.uop not in [UOps.CONST, UOps.ALU, UOps.CAST, UOps.LOAD]: loop_stack[-1].append(u)
       else:
-        parents = get_recursive_parents(u)
+        parents = get_recursive_parents(u, with_phi=True)
         for i in reversed(range(len(loop_stack))):
           # check backwards and put the uop in the first encounter with some dependency
           if any(x in parents for x in loop_stack[i]) or i == 0:
@@ -467,6 +474,11 @@ class Linearizer(Kernel):
 
   def uop(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None, simplify=True) -> UOp:  # noqa: E501
     key = (uop, dtype, vin, arg)
+
+    if uop == UOps.ALU:
+      if arg == BinaryOps.CMPLT: assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
+      if arg == TernaryOps.WHERE: assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
+
     if uop == UOps.PHI and vin[1].dtype != dtype: vin = (vin[0], self.cast(vin[1], dtype)) + vin[1:]
     if uop == UOps.ALU: # upcast vins to the same dtype
       upcast_dtype = dtypes.float if arg == TernaryOps.MULACC else max(cast(DType, x.dtype) for x in vin) # MULACC is only supported in float
