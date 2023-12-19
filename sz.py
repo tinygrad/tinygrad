@@ -18,6 +18,8 @@ def gen_stats(base_path="."):
       with tokenize.open(filepath) as file_:
         tokens = [t for t in tokenize.generate_tokens(file_.readline) if t.type in TOKEN_WHITELIST]
         token_count, line_count = len(tokens), len(set([t.start[0] for t in tokens]))
+        # TODO: this is proper counting
+        #token_count, line_count = len(tokens), len(set([x for t in tokens for x in range(t.start[0], t.end[0]+1)]))
         table.append([relfilepath, line_count, token_count/line_count])
   return table
 
