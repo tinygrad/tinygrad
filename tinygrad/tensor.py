@@ -402,7 +402,7 @@ class Tensor:
       try:
         for a,i,sd in zip(arange, reshaped_idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
       except AssertionError as exc:
-        raise IndexError(f"shape mismatch: broadcasting not possible with with index shapes {', '.join(str(i.shape) for i in idx)}") from exc
+        raise IndexError(f"shape mismatch: broadcasting not possible with index shapes {', '.join(str(i.shape) for i in idx)}") from exc
 
       # special permute case
       if tdim[0] != 0 and len(tdim) != 1 and tdim != list(range(tdim[0], tdim[-1]+1)):
