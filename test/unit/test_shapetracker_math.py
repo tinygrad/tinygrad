@@ -21,7 +21,7 @@ class TestShapeTrackerBasics(unittest.TestCase):
     x = x.reshape( (2, 2, 5) )
     x1 = x.reshape( (4, 5) )
     x1 = x1.reshape( (2, 2, 5) )
-    assert x == x1
+    assert x == x1.simplify()
 
 class TestShapeTrackerAdd(unittest.TestCase):
   def test_simple_add_reshape(self):
