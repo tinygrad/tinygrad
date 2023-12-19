@@ -111,7 +111,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
       return intercept[name] if module_root == "torch" else super().find_class(module, name)
     def persistent_load(self, pid): return deserialized_objects[pid] if pid in deserialized_objects else pid
 
-  if tuple(t[0:2].numpy()) == (0x50, 0x4b):
+  if zipfile.is_zipfile(fn):
     myzip = zipfile.ZipFile(fn, 'r')
     base_name = myzip.namelist()[0].split('/', 1)[0]
     for n in myzip.namelist():
@@ -120,7 +120,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
           offsets[n.split("/")[-1]] = myfile._orig_compress_start # type: ignore
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       return TorchPickle(myfile).load()
-  elif bytes(t[0:0xe].numpy()) == b"././@PaxHeader":  # TODO: is this how you detect a tarfile?
+  elif tarfile.is_tarfile(fn):
     with tarfile.open(fn, "r") as tar:
       storages_offset = tar.getmember('storages').offset_data
       f = unwrap(tar.extractfile('storages'))
