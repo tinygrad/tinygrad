@@ -36,6 +36,7 @@ def expr_idxs(view:View, idxs:Tuple[Node, ...]) -> Node:
 
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
+  if vm1.contiguous and vm1.shape == vm2.shape: return vm2
   if vm2.contiguous: return vm1
   if vm2.mask or vm1.offset != 0: return None  # this isn't supported yet
   if None in (strides := ShapeTracker((vm2, vm1)).real_strides()): return None

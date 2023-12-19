@@ -150,32 +150,24 @@ class dtypes:
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", np.bool_)
-  float16: Final[DType] = DType(9, 2, "half", np.float16)
-  half = float16
-  float32: Final[DType] = DType(11, 4, "float", np.float32)
-  float = float32
-  float64: Final[DType] = DType(12, 8, "double", np.float64)
-  double = float64
   int8: Final[DType] = DType(1, 1, "char", np.int8)
-  char = int8
-  int16: Final[DType] = DType(3, 2, "short", np.int16)
-  short = int16
-  int32: Final[DType] = DType(5, 4, "int", np.int32)
-  int = int32
-  int64: Final[DType] = DType(7, 8, "long", np.int64)
-  long = int64
   uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
-  uchar = uint8
+  int16: Final[DType] = DType(3, 2, "short", np.int16)
   uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
-  ushort = uint16
+  int32: Final[DType] = DType(5, 4, "int", np.int32)
   uint32: Final[DType] = DType(6, 4, "unsigned int", np.uint32)
-  uint = uint32
+  int64: Final[DType] = DType(7, 8, "long", np.int64)
   uint64: Final[DType] = DType(8, 8, "unsigned long", np.uint64)
-  ulong = uint64
-
-  # NOTE: bfloat16 isn't supported in numpy
-  # it has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
+  float16: Final[DType] = DType(9, 2, "half", np.float16)
+  # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
   bfloat16: Final[DType] = DType(10, 2, "__bf16", None)
+  float32: Final[DType] = DType(11, 4, "float", np.float32)
+  float64: Final[DType] = DType(12, 8, "double", np.float64)
+
+  # dtype aliases
+  half = float16; float = float32; double = float64 # noqa: E702
+  uchar = uint8; ushort = uint16; uint = uint32; ulong = uint64 # noqa: E702
+  char = int8; short = int16; int = int32; long = int64 # noqa: E702
 
   # NOTE: these are image dtypes
   @staticmethod
