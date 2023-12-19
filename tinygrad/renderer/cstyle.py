@@ -49,7 +49,7 @@ class CStyleLanguage(NamedTuple):
     return f"{self.float4.replace('float4', var_dtype.name)}({','.join(x)})"
 
   # returns a str expression of the const with the given type
-  def render_const(self, x:Union[float,int,bool], var_dtype:DType) -> str:
+  def render_const(self, x:Union[float,int,bool], var_dtype) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
     else: val = f"{float(x)}f" if dtypes.is_float(var_dtype) else f"{int(x)}" if dtypes.is_int(var_dtype) else f"{bool(x)}".lower()
