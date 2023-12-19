@@ -379,8 +379,6 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor.rand(4, 4, dtype=dtypes.float32) + 2).dtype == dtypes.float32
     assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2).dtype == dtypes.float64
 
-<<<<<<< HEAD
-=======
   def test_broadcast_bool(self):
     assert (Tensor([0, 1], dtype=dtypes.bool) + True).dtype == dtypes.bool
     assert (Tensor([0, 1], dtype=dtypes.int) + True).dtype == dtypes.int32
@@ -390,7 +388,6 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.bfloat16) + True).dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32) + True).dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64) + True).dtype == dtypes.float64
->>>>>>> master
 
 if __name__ == '__main__':
   unittest.main()
