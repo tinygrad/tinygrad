@@ -1,11 +1,9 @@
 import numpy as np
 import torch
 import unittest
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor, Device
 from tinygrad.nn.optim import Adam, SGD, AdamW
-import pytest
-
-pytestmark = pytest.mark.exclude_cuda
+from tinygrad.helpers import CI
 
 np.random.seed(1337)
 x_init = np.random.randn(1,4).astype(np.float32)
@@ -35,6 +33,7 @@ def step(tensor, optim, steps=1, kwargs={}):
     optim.step()
   return net.x.detach().numpy(), net.W.detach().numpy()
 
+@unittest.skipIf(CI and Device.DEFAULT == "CUDA", "slow")
 class TestOptim(unittest.TestCase):
 
   def _test_optim(self, tinygrad_optim, torch_optim, steps, opts, atol, rtol):
