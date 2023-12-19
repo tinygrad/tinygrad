@@ -1294,7 +1294,7 @@ class TestOps(unittest.TestCase):
     c = torch.randint(low=-5, high=5, size=(1,1,4,1,1,1), dtype=torch.int64, requires_grad=False)
     d = torch.randint(high=4, size=(2,1,1,5,1,1), dtype=torch.int64, requires_grad=False)
     e = torch.randint(high=1, size=(1,1,1,1,6,1), dtype=torch.int64, requires_grad=False)
-    i, j, k, o, p = [Tensor(tor.detach().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False) for tor in [a,b,c,d,e]]
+    i, j, k, o, p = [Tensor(tor.detach().numpy().astype(np.int32), requires_grad=False) for tor in [a,b,c,d,e]]
     return a,b,c,d,e,i,j,k,o,p
 
   def test_slice_fancy_indexing_no_dim_collapse(self):
@@ -1373,9 +1373,11 @@ class TestOps(unittest.TestCase):
 
   def test_slice_fancy_indexing_errors(self):
     a = Tensor.ones(10,11,12)
-    with self.assertRaises(IndexError): a[Tensor(1.1)] # tensors used as indices must be int or bool tensors
-    with self.assertRaises(IndexError): a[Tensor.randint(3,1,1,1), Tensor.randint(1,4,1,1), Tensor.randint(2,4,4,1)] # shape mismatch (3,1,1,1), (1,4,1,1), (2,3,4,1)
-    with self.assertRaises(IndexError): a[Tensor.randint(3,1,1,1), Tensor.randint(1,4,1,1,1)] # shape mismatch (3,1,1,1), (1,4,1,1,1)
+    # tensors used as indices must be int or bool tensors
+    with self.assertRaises(IndexError): a[Tensor(1.1)]
+    # shape mismatch
+    with self.assertRaises(IndexError): a[Tensor.randint(3,1,1,1), Tensor.randint(1,4,1,1), Tensor.randint(2,4,4,1)]
+    with self.assertRaises(IndexError): a[Tensor.randint(3,1,1,1), Tensor.randint(1,4,1,1,1)]
     # TODO: currently we do not support IndexError for out of bounds idx values
     # any out of bounds in fancy indexing returns 0
     # ex: Tensor([1,2])[Tensor([1,2,55])].numpy() -> array([2., 0., 0.], dtype=float32)

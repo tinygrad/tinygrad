@@ -1087,15 +1087,15 @@ class TestIndexing(unittest.TestCase):
   def test_int_indices2d(self):
     # From the NumPy indexing example
     x = Tensor.arange(0, 12).reshape(4, 3)
-    rows = Tensor([[0, 0], [3, 3]], dtype=dtypes.int32)
-    columns = Tensor([[0, 2], [0, 2]], dtype=dtypes.int32)
+    rows = Tensor([[0, 0], [3, 3]])
+    columns = Tensor([[0, 2], [0, 2]])
     numpy_testing_assert_equal_helper(x[rows, columns].numpy().tolist(), [[0, 2], [9, 11]])
 
   def test_int_indices_broadcast(self):
     # From the NumPy indexing example
     x = Tensor.arange(0, 12).reshape(4, 3)
-    rows = Tensor([0, 3], dtype=dtypes.int32)
-    columns = Tensor([0, 2], dtype=dtypes.int32)
+    rows = Tensor([0, 3])
+    columns = Tensor([0, 2])
     result = x[rows[:, None], columns]
     numpy_testing_assert_equal_helper(result.numpy().tolist(), [[0, 2], [9, 11]])
 
@@ -1340,7 +1340,7 @@ class TestIndexing(unittest.TestCase):
 
   def test_ellipsis_tensor(self):
     x = Tensor.arange(0, 9).reshape(3, 3)
-    idx = Tensor([0, 2], dtype=dtypes.int32)
+    idx = Tensor([0, 2])
     numpy_testing_assert_equal_helper(x[..., idx].numpy().tolist(), [[0, 2],
                                                                      [3, 5],
                                                                      [6, 8]])
