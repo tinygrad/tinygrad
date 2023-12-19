@@ -389,7 +389,7 @@ class Tensor:
         # TODO uint8 and bool tensor indexing
         if not (dtypes.is_int(t.dtype) or t.dtype == dtypes.bool): raise IndexError("tensors used as indices must be int or bool tensors")
 
-      if empty_idx and 0 in ret.shape: return Tensor.empty(0, dtype=ret.dtype, requires_grad=ret.requires_grad)
+      if empty_idx and 0 in ret.shape: return Tensor.empty(0, dtype=ret.dtype)
 
       # manual broadcasting
       final_shape = (shapes := tuple(list(i.shape) for i in idx))[0]
@@ -404,7 +404,7 @@ class Tensor:
       if empty_idx or 0 in ret.shape:
         new_shape = list(new_shape) # bro wtf why is mypy being dumb
         new_shape[tdim[0]:tdim[0]+len(idx)] = final_shape
-        ret = Tensor.empty(new_shape, dtype=ret.dtype, requires_grad=ret.requires_grad)
+        ret = Tensor.empty(new_shape, dtype=ret.dtype)
       else:
         max_dim = max(i.ndim for i in idx)
         sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(tdim)]
