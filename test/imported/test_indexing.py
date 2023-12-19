@@ -195,7 +195,7 @@ class TestIndexing(unittest.TestCase):
     # pick a random valid indexer type
     def ri(indices):
       choice = random.randint(0, 2)
-      if choice == 0: return Tensor(indices, dtype=dtypes.int32)
+      if choice == 0: return Tensor(indices)
       if choice == 1: return list(indices)
       return tuple(indices)
 
