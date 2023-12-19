@@ -1,7 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, math
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Iterable, Set, DefaultDict, cast
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Iterable, DefaultDict, cast
 from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
@@ -9,7 +9,7 @@ import numpy as np
 
 from tinygrad.helpers import DType, dtypes, ImageDType
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
-from tinygrad.lazy import LazyBuffer
+from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import sint
@@ -95,11 +95,7 @@ class Tensor:
   # ***** data handlers ****
 
   @staticmethod
-  def corealize(lst:Iterable[Tensor]):
-    seen:Set[LazyBuffer] = set()
-    sched = []
-    for t in lst: sched += t.lazydata.schedule(seen)
-    run_schedule(sched)
+  def corealize(lst:Iterable[Tensor]): run_schedule(create_schedule([x.lazydata for x in lst]))
 
   def realize(self) -> Tensor:
     run_schedule(self.lazydata.schedule())
@@ -743,7 +739,7 @@ class Tensor:
     return x.expand(broadcasted_shape), y.expand(broadcasted_shape)
 
   def _to_const_val(self, x:Union[Tensor, float, int, bool]) -> Union[Tensor, float, int, bool]:
-    return x.lazydata.base.op.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
+    return x.lazydata.base.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
   def add(self, x:Union[Tensor, float, int, bool], reverse=False) -> Tensor:

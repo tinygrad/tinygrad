@@ -1,9 +1,11 @@
 from typing import List, Dict, Optional
 from tinygrad.ops import LoadOps, ScheduleItem
-from tinygrad.device import Device, Buffer, BufferCopy, JITRunner
-from tinygrad.graph import log_schedule_item, print_tree
-from tinygrad.helpers import prod
+from tinygrad.device import Device, Buffer, BufferCopy, JITRunner, update_stats
+from tinygrad.graph import print_tree, realized_lazybuffer
+from tinygrad.helpers import prod, GlobalCounters, colored
 from tinygrad.shape.symbolic import Variable
+
+# *** schedule running ***
 
 class CustomOp(JITRunner):
   def __init__(self, fxn):
@@ -18,20 +20,21 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   if si.ast.op is LoadOps.CUSTOM: return CustomOp(si.ast.arg)
   return Device[si.out.device].get_runner(si.ast)
 
-def run_schedule(schedule:List[ScheduleItem], disable_logging=False):
+def run_schedule(schedule:List[ScheduleItem]):
   while len(schedule):
     si = schedule.pop(0)
-    if not disable_logging: log_schedule_item(si)
-    assert all(x.realized for x in si.inputs), "can't run schedule, some inputs aren't realized"
+    assert all(x.realized for x in si.inputs), f"can't run schedule, some inputs aren't realized {[x for x in si.inputs if x.realized is None]}"
 
     # get the program
     prg = lower_schedule_item(si)
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
-    si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
+    assert si.out._base is None, "no setting of non-base LazyBuffers"
+    si.out._realized = si.out.output_buffer if si.out.output_buffer is not None else \
       Buffer(si.out.device, prod((s if isinstance(s, int) else s.max for s in si.out.shape)), si.out.dtype)
-    del si.out.op
-    for v in si.out.views: del v.op
+    del si.out.srcs
 
     # run the function (put it in JIT)
     if prg: prg.exec([si.out.realized] + [x.realized for x in si.inputs], si.var_vals)
+    else: update_stats(colored(f"empty {si.out.st.size():10d} {si.out.dtype}", "yellow"), 0, 0, {}, None, 1, device=si.out.device)
+    realized_lazybuffer(si.out, GlobalCounters.kernel_count)
