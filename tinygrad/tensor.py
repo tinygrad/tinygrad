@@ -168,7 +168,7 @@ class Tensor:
     if Device.canonicalize(device) == "TORCH":
       return Tensor._loadop(LoadOps.CUSTOM, prod((shape:=argfix(*shape))), arg=custom_random, device=device, dtype=dtype, **kwargs).reshape(shape)
     if (num := prod((shape:=argfix(*shape)))) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
-    counts = (Tensor.arange(num, device=device, dtype=dtypes.uint32, requires_grad=False) + Tensor._rng_counter.to(device)).realize()
+    counts = (Tensor.arange(num, device=device, dtype=dtypes.uint32, requires_grad=False) + Tensor._rng_counter.to(device))
     if num % 2: counts = counts.pad(((0,1),))
     Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
 
@@ -182,7 +182,7 @@ class Tensor:
         x[1] = x[0] ^ ((x[1] * (2 ** r)) + (x[1] / (2 ** (32 - r))))
       x = [(x[0] + ks[0]).realize(), (x[1] + ks[1] + i + 1).realize()]
       rotations, ks = rotations[1:] + rotations[:1], ks[1:] + ks[:1]
-    out = (x[0].cat(x[1])[:num].realize().cast(dtypes.float32) / (2 ** 32 - 1)).reshape(shape).cast(dtypes.default_float if dtype is None else dtype)
+    out = (x[0].cat(x[1])[:num].cast(dtypes.float32) / (2 ** 32 - 1)).reshape(shape).cast(dtypes.default_float if dtype is None else dtype)
     out.requires_grad = kwargs.get("requires_grad")
     return out
 
