@@ -97,7 +97,7 @@ def uops_to_asmstyle(lang, function_name:str, uops:List[UOp]):
   lang.ins.clear()
   lang.tor.clear()
   lang.cnts.clear()
-  buf_to_dtype = {args[0]:args[1] for uop,_,_,args,_ in uops if uop == UOps.DEFINE_GLOBAL}
+  buf_to_dtype = {args:dtype for uop,dtype,_,args,_ in uops if uop == UOps.DEFINE_GLOBAL}
   global_size, local_size = [], []
   skipload_branch = 0
   lang.ins += [AssemblyInstruction(UOps.SPECIAL, lang.newreg(buf, dtype=dtypes.uint64, scalar=True), [], buf) for buf in buf_to_dtype]

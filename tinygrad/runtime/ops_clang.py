@@ -1,5 +1,4 @@
 import ctypes, subprocess, functools, pathlib, tempfile
-from typing import Any
 from tinygrad.device import Compiled, MallocAllocator
 from tinygrad.helpers import diskcache, cpu_time_execution
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -20,9 +19,9 @@ class ClangProgram:
     # write to disk so we can load it
     with tempfile.NamedTemporaryFile(delete=True) as cached_file_path:
       pathlib.Path(cached_file_path.name).write_bytes(lib)
-      self.fxn: Any = ctypes.CDLL(str(cached_file_path.name))[name]
+      self.fxn = ctypes.CDLL(str(cached_file_path.name))[name]
 
   def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
 
-renderer = functools.partial(uops_to_cstyle, CStyleLanguage(buffer_suffix=" restrict", arg_int_prefix="const int"))
+renderer = functools.partial(uops_to_cstyle, CStyleLanguage(buffer_suffix=" restrict"))
 ClangDevice = Compiled(MallocAllocator, LinearizerOptions(supports_float4=False, has_local=False), renderer, compile_clang, ClangProgram)

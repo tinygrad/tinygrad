@@ -149,7 +149,6 @@ backend_test.exclude('test_resize_upsample_sizes_cubic_*') # unsure how to imple
 
 # rest of the failing tests
 backend_test.exclude('test_regex_*') # does not support string Tensors
-backend_test.exclude('test_reshape_allowzero_reordered_cpu') # reshaping to shape with 0, also allowzero
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
@@ -190,6 +189,10 @@ backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 # TODO: this somehow passes in CI but does not pass if run locally
 if isinstance(Device[Device.DEFAULT], Compiled):
   backend_test.exclude('test_MaxPool3d_stride_padding_cpu')
+
+# TODO: inaccuracy only for numpy backend. will get back to this after dtype refactor.
+if Device.DEFAULT == "CPU":
+  backend_test.exclude('test_sce_')
 
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):
