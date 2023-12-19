@@ -41,11 +41,10 @@ class JITRunner:
   def __init__(self):
     self.op_estimate, self.mem_estimate = 0, 0
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
-    var_vals = var_vals if var_vals is not None else {}
+    var_vals = var_vals or {}
     from tinygrad.jit import CacheCollector
-    et = self(rawbufs, var_vals)
     CacheCollector.add(self, rawbufs, var_vals)
-    return et
+    return self(rawbufs, var_vals)
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
@@ -148,8 +147,7 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
   def __init__(self): self.cache: Dict[sz_type, Any] = defaultdict(list)
   def alloc(self, size:sz_type):
     if len(c := self.cache[size]): return c.pop()
-    try:
-      return super().alloc(size)
+    try: return super().alloc(size)
     except MemoryError:
       self.free_cache()
       return super().alloc(size)
@@ -220,8 +218,7 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
       if ast.op == ast.op == BufferOps.CONST: tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})"
       else: tmp = f"{gstr(fxn_for_op[UnaryOps.CAST], UnaryOps.CAST)}(inputs[{ast.arg.idx}], ({gstr(ast.arg.dtype)}, True))"
       for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(fxn_for_op[mop], mop)}({tmp}, {gstr(arg)})"
-    else:
-      tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({', '.join([_interpret_ast(src) for src in ast.src] + ([gstr(ast.arg)] if ast.arg else []))})"
+    else: tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({', '.join([_interpret_ast(src) for src in ast.src] + ([gstr(ast.arg)] if ast.arg else []))})"
 
     ret = f"a{len(lines)}"
     lines.append(f"  {ret} = {tmp}")
