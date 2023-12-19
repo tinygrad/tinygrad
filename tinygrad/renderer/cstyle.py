@@ -49,7 +49,7 @@ class CStyleLanguage(NamedTuple):
     return f"{self.float4.replace('float4', var_dtype.name)}({','.join(x)})"
 
   # returns a str expression of the const with the given type
-  def render_const(self, x:Union[float,int,bool], var_dtype) -> str:
+  def render_const(self, x:Union[float,int,bool], var_dtype:DType) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
     else: val = f"{float(x)}f" if dtypes.is_float(var_dtype) else f"{int(x)}" if dtypes.is_int(var_dtype) else f"{bool(x)}".lower()
@@ -81,8 +81,8 @@ class CStyleLanguage(NamedTuple):
   def render_conditional(self, cond: str, x:str, y:str) -> str:
     return f"({cond})?({x}):{y}"
 
-  def render_dtype(self, dtype:DType) -> str:
-    return self.type_map[dtype] if dtype in self.type_map else dtype.name if self.type_map else dtype.name
+  def render_dtype(self, var_dtype:DType) -> str:
+    return self.type_map[var_dtype] if var_dtype in self.type_map else var_dtype.name if self.type_map else var_dtype.name
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""  # noqa: E501
@@ -92,7 +92,7 @@ class CStyleLanguage(NamedTuple):
     prg = ''.join([f"{self.kernel_prefix}void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
-    if self.half_prekernel and any(dtype in [dtypes.float16, dtypes.bfloat16] for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])  # noqa: E501
+    if self.half_prekernel and any(dtype in [dtypes.float16, dtypes.bfloat16] for _,dtype in bufs): prg = ''.join((self.half_prekernel, "\n", prg))
     return prg
 
   # returns a str statement that does the store
