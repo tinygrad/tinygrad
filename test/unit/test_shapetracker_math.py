@@ -16,7 +16,7 @@ class TestShapeTrackerBasics(unittest.TestCase):
 
   @unittest.skip("reshape is broken")
   def test_reshape_makes_same(self):
-    a = ShapeTracker.from_shape((2, 5, 5))
+    a = ShapeTracker.from_shape((2, 5))
     x = a.pad( ((2, 0), (0, 0)) )
     x = x.reshape( (2, 2, 5) )
     x1 = x.reshape( (4, 5) )
@@ -79,7 +79,7 @@ class TestShapeTrackerInvert(unittest.TestCase):
 
   @unittest.skip("reshape is broken")
   def test_invert_failure(self):
-    a = ShapeTracker.from_shape((2, 5, 5))
+    a = ShapeTracker.from_shape((2, 5))
     x = a.pad( ((2, 0), (0, 0)) )
     x = x.reshape( (2, 2, 5) )
     x = x.reshape( (4, 5) )
