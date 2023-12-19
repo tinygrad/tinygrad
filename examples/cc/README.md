@@ -20,3 +20,7 @@ GPU=1 python3 examples/compile_efficientnet.py
 ```
 tinygrad_exec path_to_weights/net.safetensors path_to_arch/net.json path_to_image/image.jpg
 ```
+
+## TODO
+[ ] Add other backends
+[ ] Check on other architectures
