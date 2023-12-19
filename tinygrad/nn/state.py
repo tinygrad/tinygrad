@@ -62,10 +62,8 @@ def load_state_dict(model, state_dict, strict=True, verbose=True):
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
     for k,v in (t := tqdm(model_state_dict.items(), disable=CI or not verbose)):
       t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}")
-      if k not in state_dict and not strict:
-        if DEBUG >= 1: print(f"WARNING: not loading {k}")
-        continue
-      v.assign(state_dict[k].to(v.device)).realize()
+      if k in state_dict or strict: v.assign(state_dict[k].to(v.device)).realize()
+      elif DEBUG >= 1: print(f"WARNING: not loading {k}")
 
 # torch support!
 
@@ -120,7 +118,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
           offsets[n.split("/")[-1]] = myfile._orig_compress_start # type: ignore
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       return TorchPickle(myfile).load()
-  elif bytes(t[0:0xe].numpy()) == b"././@PaxHeader":  # TODO: is this how you detect a tarfile?
+  if bytes(t[0:0xe].numpy()) == b"././@PaxHeader":  # TODO: is this how you detect a tarfile?
     with tarfile.open(fn, "r") as tar:
       storages_offset = tar.getmember('storages').offset_data
       f = unwrap(tar.extractfile('storages'))
@@ -135,12 +133,11 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
         storage_offset = struct.unpack('<q', f.read(8))[0]
         deserialized_objects[str(key)] = _rebuild_tensor_v2((None, storage_type, storage_id, None, -1), storage_offset, size, stride)
       return {k:v.tensor if isinstance(v, Parameter) else v for k,v in TorchPickle(unwrap(tar.extractfile('pickle'))).load().items()}
-  else:
-    with open(fn, "rb") as f:
-      pkl = TorchPickle(f)
-      _, _, _, rwd, _, ids, base_offset = pkl.load(), pkl.load(), pkl.load(), f.tell(), pkl.load(), pkl.load(), f.tell()
-      for i in ids:
-        offsets[i] = base_offset + 8
-        base_offset += 8 + lens[i]
-      f.seek(rwd)
-      return TorchPickle(f).load()
+  with open(fn, "rb") as f:
+    pkl = TorchPickle(f)
+    _, _, _, rwd, _, ids, base_offset = pkl.load(), pkl.load(), pkl.load(), f.tell(), pkl.load(), pkl.load(), f.tell()
+    for i in ids:
+      offsets[i] = base_offset + 8
+      base_offset += 8 + lens[i]
+    f.seek(rwd)
+    return TorchPickle(f).load()

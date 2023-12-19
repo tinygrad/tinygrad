@@ -77,8 +77,7 @@ class Linear:
     bound = 1 / math.sqrt(self.weight.shape[1])
     self.bias = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
 
-  def __call__(self, x:Tensor):
-    return x.linear(self.weight.transpose(), self.bias)
+  def __call__(self, x:Tensor): return x.linear(self.weight.transpose(), self.bias)
 
 class GroupNorm:
   def __init__(self, num_groups:int, num_channels:int, eps:float=1e-5, affine:bool=True):
@@ -122,9 +121,7 @@ class LayerNorm2d(LayerNorm):
   def __call__(self, x): return super().__call__(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
 
 class Embedding:
-  def __init__(self, vocab_size:int, embed_size:int):
-    self.vocab_size = vocab_size
-    self.weight = Tensor.glorot_uniform(vocab_size, embed_size)
+  def __init__(self, vocab_size:int, embed_size:int): self.vocab_size, self.weight = vocab_size, Tensor.glorot_uniform(vocab_size, embed_size)
 
   def __call__(self, idx:Tensor) -> Tensor:
     if not hasattr(self, 'vocab_counter'): self.vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False).reshape(1, 1, self.vocab_size)

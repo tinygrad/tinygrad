@@ -22,8 +22,7 @@ class _Device:
   def __get_canonicalized_item(self, ix:str) -> Union[Interpreted, Compiled]:
     x = ix.split(":")[0].upper()
     ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._buffers][0]  # noqa: E501
-    if isinstance(ret, type): ret = ret(ix)
-    return ret
+    return ret(ix) if isinstance(ret, type) else ret
   @functools.cached_property
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None)   # type: ignore
@@ -38,8 +37,7 @@ Device = _Device()
 # **************** base Runner + helpers ****************
 
 class JITRunner:
-  def __init__(self):
-    self.op_estimate, self.mem_estimate = 0, 0
+  def __init__(self): self.op_estimate, self.mem_estimate = 0, 0
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     var_vals = var_vals if var_vals is not None else {}
     from tinygrad.jit import CacheCollector
@@ -148,8 +146,7 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
   def __init__(self): self.cache: Dict[sz_type, Any] = defaultdict(list)
   def alloc(self, size:sz_type):
     if len(c := self.cache[size]): return c.pop()
-    try:
-      return super().alloc(size)
+    try: return super().alloc(size)
     except MemoryError:
       self.free_cache()
       return super().alloc(size)
@@ -192,10 +189,13 @@ class Interpreted:
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def get_runner(self, ast:LazyOp) -> InterpretedASTRunner: return _get_interpreted_fxn(self.fxn_for_op, ast)
 
+def debug_print_tree(ast):
+  if DEBUG < 3: return
+  from tinygrad.graph import print_tree
+  print_tree(ast)
+
 def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> InterpretedASTRunner:
-  if DEBUG >= 3:
-    from tinygrad.graph import print_tree
-    print_tree(ast)
+  debug_print_tree(ast)
   tglob: Dict[str, Any] = {"Variable": Variable}
 
   @functools.lru_cache(None)
@@ -286,9 +286,7 @@ class Compiled:
     return CompiledASTRunner(k.ast, k.name, src, k.global_size, k.local_size, runtime_args).build(self.compiler, self.runtime)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
-    if DEBUG >= 3:
-      from tinygrad.graph import print_tree
-      print_tree(ast)
+    debug_print_tree(ast)
     from tinygrad.codegen.linearizer import Linearizer
     k = Linearizer(ast, self.linearizer_opts)
     k.required_optimizations()

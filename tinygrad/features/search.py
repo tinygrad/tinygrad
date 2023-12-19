@@ -58,8 +58,7 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
         if c in {"cyan", "green", "white"}: lcl *= s
       if up > 256 or lcl > 256: continue
       acted_lins[i+1] = lin2
-    except Exception:
-      pass
+    except Exception: pass
   return acted_lins
 
 def try_compile_linearized_w_idx(x):
@@ -156,8 +155,7 @@ def optimize_local_size(clprg:Callable, global_size:List[int], rawbufs:List[Buff
   def try_exec(local_size):
     try:
       return clprg(*[x._buf for x in test_rawbuffers], global_size=[g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)], local_size=local_size, wait=True)  # noqa: E501
-    except Exception:
-      return float('inf')
+    except Exception: return float('inf')
   ret = min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])
   assert not math.isinf(ret[0]), "all optimize_local_size exec failed"
   return ret[1]

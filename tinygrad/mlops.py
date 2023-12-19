@@ -19,8 +19,7 @@ class Cast(Function):
     self.input_dtype, self.bitcast = x.dtype, bitcast
     return x.cast(dtype, bitcast)
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.cast(self.input_dtype, self.bitcast)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.cast(self.input_dtype, self.bitcast)
 
 # ************* unary ops *************
 
@@ -54,24 +53,21 @@ class Log(Function):
     self.x = x
     return x.cast(ftype:= least_upper_float(x.dtype)).e(UnaryOps.LOG2).e(BinaryOps.MUL, x.cast(ftype).const(math.log(2)))
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.e(BinaryOps.DIV, self.x)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.DIV, self.x)
 
 class Exp(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.ret = x.cast(ftype:=least_upper_float(x.dtype)).e(BinaryOps.MUL, x.cast(ftype).const(1/math.log(2))).e(UnaryOps.EXP2)
     return self.ret
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.ret.e(BinaryOps.MUL, grad_output)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return self.ret.e(BinaryOps.MUL, grad_output)
 
 class Sqrt(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.ret = x.cast(least_upper_float(x.dtype)).e(UnaryOps.SQRT)
     return self.ret
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.e(BinaryOps.DIV, self.ret.e(BinaryOps.MUL, self.ret.const(2)))
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(BinaryOps.DIV, self.ret.e(BinaryOps.MUL, self.ret.const(2)))
 
 # NOTE: the implicit derivative of sigmoid is not stable
 # https://towardsdatascience.com/derivative-of-the-sigmoid-function-536880cf918e
@@ -103,8 +99,7 @@ class Add(Function):
     return x.cast(output_dtype).e(BinaryOps.ADD, y.cast(output_dtype))
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
-    return grad_output.cast(self.x_dtype) if self.needs_input_grad[0] else None, \
-           grad_output.cast(self.y_dtype) if self.needs_input_grad[1] else None
+    return tuple([grad_output.cast(x) if self.needs_input_grad[i] else None for i, x in enumerate((self.x_dtype, self.y_dtype))])
 
 class Sub(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
@@ -152,8 +147,7 @@ class Sum(Function):
     self.input_shape = x.shape
     return x.r(ReduceOps.SUM, new_shape)
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.expand(self.input_shape)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.expand(self.input_shape)
 
 class Max(Function):
   def forward(self, x:LazyBuffer, new_shape:Tuple[int, ...]) -> LazyBuffer:
@@ -174,16 +168,14 @@ class Expand(Function):
     self.input_shape = x.shape
     return x.expand(shape)
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.r(ReduceOps.SUM, self.input_shape)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.r(ReduceOps.SUM, self.input_shape)
 
 class Reshape(Function):
   def forward(self, x:LazyBuffer, shape:Tuple[int, ...]) -> LazyBuffer:
     self.input_shape = x.shape
     return x.reshape(shape)
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.reshape(self.input_shape)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.reshape(self.input_shape)
 
 class Permute(Function):
   def forward(self, x:LazyBuffer, order:Tuple[int, ...]) -> LazyBuffer:
@@ -198,8 +190,7 @@ class Pad(Function):
     self.narg = tuple([(p[0], s+p[0]) for s,p in zip(x.shape, arg)])
     return x.pad(arg)
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.shrink(self.narg)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.shrink(self.narg)
 
 class Shrink(Function):
   def forward(self, x:LazyBuffer, arg:Tuple[Tuple[sint, sint], ...]) -> LazyBuffer:
@@ -216,5 +207,4 @@ class Flip(Function):
     self.arg = tuple([-1 if i in set(axis) else 1 for i in range(len(x.shape))])
     return x.stride(self.arg)
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return grad_output.stride(self.arg)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.stride(self.arg)
