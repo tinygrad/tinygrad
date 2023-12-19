@@ -241,15 +241,16 @@ class Tensor:
 
   # ***** toposort and backward pass *****
 
+  def _deepwalk(self, visited, nodes):
+    visited.add(self)
+    if getattr(self, "_ctx", None):
+      for i in self._ctx.parents:
+        if i not in visited: i._deepwalk(visited, nodes)
+      nodes.append(self)
+    return nodes
+
   def deepwalk(self):
-    def _deepwalk(node, visited, nodes):
-      visited.add(node)
-      if getattr(node, "_ctx", None):
-        for i in node._ctx.parents:
-          if i not in visited: _deepwalk(i, visited, nodes)
-        nodes.append(node)
-      return nodes
-    return _deepwalk(self, set(), [])
+    return self._deepwalk(set(), [])
 
   def backward(self) -> Tensor:
     assert self.shape == tuple(), f"backward can only be called for scalar tensors, but it has shape {self.shape})"
