@@ -34,7 +34,7 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   schedule = ret.lazydata.schedule()
 
   # filter schedule that don't depend on the inputs
-  input_lb = [x.lazydata.base for x in inputs.values()]
+  input_lb = {x.lazydata.base for x in inputs.values()}
   depends = set(input_lb)
   for si in schedule:
     if any(b in depends for b in si.inputs):
