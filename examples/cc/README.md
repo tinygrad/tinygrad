@@ -22,5 +22,5 @@ tinygrad_exec path_to_weights/net.safetensors path_to_arch/net.json path_to_imag
 ```
 
 ## TODO
-[ ] Add other backends
-[ ] Check on other architectures
+- [ ] Add other backends
+- [ ] Check on other architectures
