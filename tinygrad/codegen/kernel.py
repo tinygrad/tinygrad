@@ -408,7 +408,7 @@ class Kernel:
     if opt.op in [OptOps.LOCAL, OptOps.LASTLOCAL]:   # cyan
       assert self.opts.has_local, "target does not support local"
       assert axis < self.first_reduce, "can't local a reduce"
-      assert not self.tensor_core, "can't local with tensor cores"
+      if opt.op == OptOps.LOCAL: assert not(self.tensor_core), "can't local with tensor cores"
       insert_before = self.first_reduce if opt.op == OptOps.LOCAL else self.first_reduce - self.local_dims
       self.shift_to(axis, amt, insert_before=insert_before)
       self.local_dims += 1
