@@ -243,6 +243,14 @@ class MetalLanguage(CStyleLanguage):
     return f"as_type<{var_dtype.name}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 
+code_for_op_half = {
+  BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"__hmax({a},{b})",
+  UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})" if dtype != dtypes.half else f"hsqrt({x})",
+  UnaryOps.SIN: lambda x,dtype: f"sin({x})" if dtype != dtypes.half else f"hsin({x})",
+  UnaryOps.LOG2: lambda x,dtype: f"log2({x})" if dtype != dtypes.half else f"hlog2({x})",
+  UnaryOps.EXP2: lambda x,dtype: f"exp2({x})" if dtype != dtypes.half else f"hexp2({x})",
+}
+
 class CUDALanguage(CStyleLanguage):
   kernel_prefix = "#define INFINITY (__int_as_float(0x7f800000))\n#define NAN (__int_as_float(0x7fffffff))\nextern \"C\" __global__ "
   smem_prefix = "__shared__ "
@@ -252,8 +260,7 @@ class CUDALanguage(CStyleLanguage):
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
-  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"__hmax({a},{b})",
-                 UnaryOps.EXP2: lambda x,dtype: f"exp2({x})" if dtype != dtypes.half else f"hexp2({x})"}
+  code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
   half_prekernel = """
     #include <cuda_fp16.h>
     struct half4 { half x, y, z, w; };
@@ -263,12 +270,6 @@ CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 class HIPLanguage(CStyleLanguage):
   kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
-  __device__ float4 max(float4 x, float4 y) { return float4(max(x.x, y.x), max(x.y, y.y), max(x.z, y.z), max(x.w, y.w)); }
-  __device__ float4 pow(float x, float4 y) { return float4(pow(x, y.x), pow(x, y.y), pow(x, y.z), pow(x, y.w)); }
-  __device__ float4 pow(float4 x, float4 y) { return float4(pow(x.x, y.x), pow(x.y, y.y), pow(x.z, y.z), pow(x.w, y.w)); }
-  __device__ float4 log2(float4 x) { return float4(log2(x.x), log2(x.y), log2(x.z), log2(x.w)); }
-  __device__ float4 exp2(float4 x) { return float4(exp2(x.x), exp2(x.y), exp2(x.z), exp2(x.w)); }
-  __device__ float4 sin(float4 x) { return float4(sin(x.x), sin(x.y), sin(x.z), sin(x.w)); }
   typedef float float8 __attribute__((ext_vector_type(8)));
   __device__ float8 make_float8(float x, float y, float z, float w, float a, float b, float c, float d) { return {x, y, z, w, a, b, c, d}; }
   extern "C" __global__
@@ -278,7 +279,6 @@ class HIPLanguage(CStyleLanguage):
   smem_prefix_for_cast=False
   barrier = "__syncthreads();"
   float4 = "make_float4"
-  uses_vload=True
   uses_ptr_arithmetic=True
   half_prekernel = "#include <hip/hip_fp16.h>\n" + """
 typedef union { struct { half x, y, z, w; } __attribute__((aligned(8))); half data[4]; } half4;
@@ -289,25 +289,11 @@ __device__ half8 make_half8(half x, half y, half z, half w, half a, half b, half
 __device__ half16 make_half16(half x, half y, half z, half w, half a, half b, half c, half d,
                               half e, half f, half g, half h, half i, half j, half k, half l) {
                                 return {x, y, z, w, a, b, c, d, e, f, g, h, i, j, k, l}; }
-__device__ float vload_half(size_t offset, const half *p) { return (float)*(p + offset); }
-__device__ float2 vload_half2(size_t offset, const half *p) { return make_float2((float)*(p + offset*2), (float)*(p + offset*2 + 1)); }
-__device__ float4 vload_half4(size_t offset, const half *p) {
-  return make_float4((float)*(p + offset*4), (float)*(p + offset*4 + 1), (float)*(p + offset*4 + 2), (float)*(p + offset*4 + 3)); }
-__device__ void vstore_half(float data, size_t offset, half *p) { *(p + offset) = (half)data; }
-__device__ void vstore_half2(float2 data, size_t offset, half *p) { *(p + offset*2) = (half)data.x; *(p + offset*2 + 1) = (half)data.y; }
-__device__ void vstore_half4(float4 data, size_t offset, half *p) {
-  *(p + offset*4) = (half)data.x; *(p + offset*4 + 1) = (half)data.y; *(p + offset*4 + 2) = (half)data.z; *(p + offset*4 + 3) = (half)data.w; }
-__device__ half exp2(half x) { return hexp2(x); }
-__device__ half log2(half x) { return hlog2(x); }
-__device__ half sin(half x) { return hsin(x); }
-__device__ half sqrt(half x) { return hsqrt(x); }
-__device__ half hmax(half a, half b) { return __hgt(a, b) ? a : b; }
-__device__ half operator%(const half &a, const half &b) { return __hsub(a, __hmul(b, __float2half(floorf(__half2float(a) / __half2float(b))))); }
   """
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
-  code_for_op = {**CStyleLanguage().code_for_op, BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"hmax({a},{b})",}
+  code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 
 # TODO: how much of this can be merged with above?
