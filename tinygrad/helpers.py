@@ -30,7 +30,7 @@ def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
 def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
-def full_flatten(lst): return [item for sublist in lst for item in (full_flatten(sublist) if isinstance(sublist, (list, tuple)) else [sublist])]
+def fully_flatten(l): return [item for sublist in l for item in (fully_flatten(sublist) if isinstance(sublist, (tuple, list)) else [sublist])]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
 def round_up(num, amt:int): return (num+amt-1)//amt * amt
@@ -149,41 +149,38 @@ class dtypes:
   def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
   def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
+  @staticmethod  # NOTE: isinstance(True, int) is True in python
+  def from_py(x) -> DType: return dtypes.default_float if isinstance(x, float) else dtypes.bool if isinstance(x, bool) else dtypes.default_int
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", np.bool_)
-  float16: Final[DType] = DType(9, 2, "half", np.float16)
-  half = float16
-  float32: Final[DType] = DType(11, 4, "float", np.float32)
-  float = float32
-  float64: Final[DType] = DType(12, 8, "double", np.float64)
-  double = float64
   int8: Final[DType] = DType(1, 1, "char", np.int8)
-  char = int8
-  int16: Final[DType] = DType(3, 2, "short", np.int16)
-  short = int16
-  int32: Final[DType] = DType(5, 4, "int", np.int32)
-  int = int32
-  int64: Final[DType] = DType(7, 8, "long", np.int64)
-  long = int64
   uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
-  uchar = uint8
+  int16: Final[DType] = DType(3, 2, "short", np.int16)
   uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
-  ushort = uint16
+  int32: Final[DType] = DType(5, 4, "int", np.int32)
   uint32: Final[DType] = DType(6, 4, "unsigned int", np.uint32)
-  uint = uint32
+  int64: Final[DType] = DType(7, 8, "long", np.int64)
   uint64: Final[DType] = DType(8, 8, "unsigned long", np.uint64)
-  ulong = uint64
-
-  # NOTE: bfloat16 isn't supported in numpy
-  # it has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
+  float16: Final[DType] = DType(9, 2, "half", np.float16)
+  # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
   bfloat16: Final[DType] = DType(10, 2, "__bf16", None)
+  float32: Final[DType] = DType(11, 4, "float", np.float32)
+  float64: Final[DType] = DType(12, 8, "double", np.float64)
+
+  # dtype aliases
+  half = float16; float = float32; double = float64 # noqa: E702
+  uchar = uint8; ushort = uint16; uint = uint32; ulong = uint64 # noqa: E702
+  char = int8; short = int16; int = int32; long = int64 # noqa: E702
 
   # NOTE: these are image dtypes
   @staticmethod
   def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shp, dtypes.float32)
   @staticmethod
   def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp, dtypes.float32)
+
+  default_float: ClassVar[DType] = float32
+  default_int: ClassVar[DType] = int32
 
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support weak type and complex type
@@ -202,7 +199,8 @@ def least_upper_dtype(*ds:DType) -> DType:
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.float32)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not k.startswith('__') and not callable(v) and v.__class__ is not staticmethod}
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if (
+  not k.startswith('__') and not k.startswith('default') and not callable(v) and v.__class__ is not staticmethod)}
 INVERSE_DTYPES_DICT = {v:k for k,v in DTYPES_DICT.items()}
 
 class GlobalCounters:

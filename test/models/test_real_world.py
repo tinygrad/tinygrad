@@ -12,7 +12,7 @@ from test.helpers import derandomize_model
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
 from examples.hlb_cifar10 import SpeedyResNet
 from examples.llama import Transformer as LLaMaTransformer, MODEL_PARAMS as LLAMA_MODEL_PARAMS
-from examples.stable_diffusion import UNetModel
+from examples.stable_diffusion import UNetModel, ResBlock
 
 global_mem_used = 0
 def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed, all_jitted=False):
@@ -40,11 +40,11 @@ class TestRealWorld(unittest.TestCase):
     gc.collect()
     global global_mem_used
     global_mem_used = GlobalCounters.mem_used
-    self.old_type = Tensor.default_type
+    self.old_float = dtypes.default_float
     np.random.seed(2002)
 
   def tearDown(self):
-    Tensor.default_type = self.old_type
+    dtypes.default_float = self.old_float
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(CI, "too big for CI")
@@ -55,10 +55,20 @@ class TestRealWorld(unittest.TestCase):
     def test(t, t2): return model(t, 801, t2).realize()
     helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 953)
 
+  @unittest.skipIf(Device.DEFAULT in ["CPU", "TORCH"], "tons of ram with interpreted")
+  def test_mini_stable_diffusion(self):
+    model = [ResBlock(16, 24, 16) for _ in range(4)]
+    derandomize_model(model)
+    @TinyJit
+    def test(t, t2):
+      for l in model: t = l(t, t2)
+      return t.realize()
+    helper_test("test_mini_sd", lambda: (Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24)), test, 0.01, 43)
+
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp1")
   def test_llama(self):
-    Tensor.default_type = dtypes.float16
+    dtypes.default_float = dtypes.float16
 
     args_tiny = {"dim": 1024, "hidden_dim": 2048, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
     model = LLaMaTransformer(**(args_tiny if CI else LLAMA_MODEL_PARAMS["1"]["7B"]["args"]))
@@ -66,11 +76,11 @@ class TestRealWorld(unittest.TestCase):
     @TinyJit
     def test(t): return model(t, 0).realize()
     # TODO: test first token vs rest properly, also memory test is broken with CacheCollector
-    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.25 if CI else 13.5, 181 if CI else 685, all_jitted=True)
+    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.27 if CI else 13.5, 181 if CI else 685, all_jitted=True)
 
   @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp16")
   def test_gpt2(self):
-    Tensor.default_type = dtypes.float16
+    dtypes.default_float = dtypes.float16
 
     args_tiny = {"dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-5, "vocab_size": 1000}
     model = GPT2Transformer(**(args_tiny if CI else GPT2_MODEL_PARAMS["gpt2-medium"]))

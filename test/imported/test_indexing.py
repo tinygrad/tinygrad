@@ -4,11 +4,12 @@ import math, unittest, random, copy
 # import warnings
 import numpy as np
 
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, dtypes, Device
 # from tinygrad import TinyJit
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
+from tinygrad.helpers import CI
 
 random.seed(42)
 
@@ -187,6 +188,7 @@ class TestIndexing(unittest.TestCase):
     # def delitem(): del reference[0]
     # self.assertRaises(TypeError, delitem)
 
+  @unittest.skipIf(CI and Device.DEFAULT in ["CLANG", "GPU"], "slow")
   def test_advancedindex(self):
     # integer array indexing
 

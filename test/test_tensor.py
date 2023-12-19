@@ -156,25 +156,25 @@ class TestTinygrad(unittest.TestCase):
     for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
       a = Tensor([1, 2, 3], dtype=datatype)
       b = Tensor.zeros_like(a)
-      assert a.dtype == b.dtype, f"a.dtype and b.dtype should be {datatype}"
-      assert a.shape == b.shape, f"shape mismatch (Tensor.zeros_like){a.shape} != (torch){b.shape}"
+      assert a.dtype == b.dtype, f"dtype mismatch {a.dtype=} != {b.dtype}"
+      assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
     a = Tensor([1, 2, 3])
     b = Tensor.zeros_like(a, dtype=dtypes.int8)
-    assert a.dtype == dtypes.int32 and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
-    assert a.shape == b.shape, f"shape mismatch (Tensor.zeros_like){a.shape} != (torch){b.shape}"
+    assert a.dtype == dtypes.default_int and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
+    assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
   def test_ones_like_has_same_dtype_and_shape(self):
     for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
       a = Tensor([1, 2, 3], dtype=datatype)
       b = Tensor.ones_like(a)
-      assert a.dtype == b.dtype, f"a.dtype and b.dtype should be {datatype}"
-      assert a.shape == b.shape, f"shape mismatch (Tensor.ones_like){a.shape} != (torch){b.shape}"
+      assert a.dtype == b.dtype, f"dtype mismatch {a.dtype=} != {b.dtype}"
+      assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
     a = Tensor([1, 2, 3])
     b = Tensor.ones_like(a, dtype=dtypes.int8)
-    assert a.dtype == dtypes.int32 and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
-    assert a.shape == b.shape, f"shape mismatch (Tensor.ones_like){a.shape} != (torch){b.shape}"
+    assert a.dtype == dtypes.default_int and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
+    assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
   def test_ndim(self):
     assert Tensor(1).ndim == 0
@@ -239,10 +239,46 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64 # check that it works for something else
 
   def test_tensor_list_dtype(self):
-    arr = [1]
-    assert Tensor(arr).dtype == dtypes.int32
-    assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
-    assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+    for arr in ([1], [[[1]]], [[1,1],[1,1]], [[[1,1],[1,1]],[[1,1],[1,1]]]):
+      assert Tensor(arr).dtype == dtypes.default_int
+      assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
+      assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+
+    for arr in ([True], [[[False]]], [[True,False],[True,False]], [[[False,True],[False,False]],[[True,True],[False,True]]]):
+      assert Tensor(arr).dtype == dtypes.bool
+      assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
+      assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+
+    # empty tensor defaults
+    for arr in ([], [[[]]], [[],[]]):
+      t = Tensor(arr)
+      assert t.dtype == dtypes.default_float
+      np.testing.assert_allclose(t.numpy(), np.array(arr))
+
+    # mixture of bool and int
+    for arr in ([True, 3], [[True],[3]], [[[True]], [[3]]], [[True, 3], [3, True]]):
+      t = Tensor(arr)
+      assert t.dtype == dtypes.default_int
+      np.testing.assert_allclose(t.numpy(), np.array(arr))
+
+    # mixture of bool, int and float
+    for arr in ([[True,True],[3.,True]], [[0,1],[3.,4]], [[[0],[1]],[[3.],[4]]], [[[True],[1]],[[3.],[4]]]):
+      t = Tensor(arr)
+      assert t.dtype == dtypes.default_float
+      np.testing.assert_allclose(t.numpy(), np.array(arr))
+
+  def test_tensor_list_shapes(self):
+    self.assertEqual(Tensor([[[]]]).shape, (1,1,0))
+    self.assertEqual(Tensor([[],[]]).shape, (2,0))
+    self.assertEqual(Tensor([[[[]],[[]]], [[[]],[[]]], [[[]],[[]]]]).shape, (3,2,1,0))
+
+  def test_tensor_list_errors(self):
+    # inhomogeneous shape
+    with self.assertRaises(ValueError): Tensor([[],[[]]])
+    with self.assertRaises(ValueError): Tensor([[1],[]])
+    with self.assertRaises(ValueError): Tensor([[1],[1],1])
+    with self.assertRaises(ValueError): Tensor([[[1,1,1],[1,1]]])
+    with self.assertRaises(ValueError): Tensor([[1,1,1],[[1,1,1]]])
 
   def test_tensor_copy(self):
     x = copy.deepcopy(Tensor.ones((3,3,3)))
