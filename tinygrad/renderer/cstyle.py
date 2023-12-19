@@ -89,9 +89,8 @@ class CStyleLanguage(NamedTuple):
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
                 ("const " if i > 0 else "")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
                 self.arg_int_prefix if dtype == dtypes.int else None) for i,(name,dtype) in enumerate(bufs)]
-    prg = ''.join([f"{self.kernel_prefix}void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
-    [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
-    [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
+    prg = ''.join((self.kernel_prefix, "void ", f"__launch_bounds__ ({prod(local_size)}, 1) " if self.launch_bounds else "",function_name, "(",
+                  ", ".join([f'{t} {name}' for name, t in buftypes] + self.extra_args), ") {\n", tmp, "\n".join(kernel), "\n}"))
     if self.half_prekernel and any(dtype in [dtypes.float16, dtypes.bfloat16] for _,dtype in bufs): prg = ''.join((self.half_prekernel, "\n", prg))
     return prg
 
