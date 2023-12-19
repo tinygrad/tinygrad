@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, operator
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, cast
-from tinygrad.helpers import prod, all_int
+from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, VariableOrNum, Set, sint
 
 @functools.lru_cache(maxsize=None)
@@ -98,6 +98,14 @@ class View:
     new_mask = tuple((a if isinstance(a, int) else a.substitute(unbound_vars), b if isinstance(b, int) else b.substitute(unbound_vars)) for (a, b) in self.mask) if self.mask is not None else None  # noqa: E501
     return View.create(new_shape, new_strides, new_offset, new_mask)
 
+  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  def invert(self, out_shape:Tuple[int, ...]) -> Optional[View]:
+    ret = self.shrink(self.mask) if self.mask else self
+    if prod(ret.shape) != prod(out_shape): return None   # don't support shrink, expand, or stride != (-1, 1)
+    ret = cast(View, ret.reshape(tuple(s for s in ret.shape if s != 1)))  # removing ones will never be an issue
+    ret = ret.stride(tuple(-1 if x < 0 else 1 for x in ret.strides))
+    return ret.permute(argsort(tuple(-x for x in ret.strides))).reshape(out_shape)
+
   # MovementOps live here now
 
   def __unsafe_resize(self, arg: Tuple[Tuple[sint, sint], ...], mask=None) -> View:
@@ -108,6 +116,7 @@ class View:
       # merge the masks if we have two
       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
     shape = [y-x for x,y in arg]
+    if mask is not None and all(m[0] == 0 and m[1] == s for m,s in zip(mask, shape)): mask = None
     return View.create(tuple(s.b if isinstance(s, NumNode) else s for s in shape), self.strides, self.offset+offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
