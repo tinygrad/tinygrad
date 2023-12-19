@@ -16,10 +16,9 @@ class DiskBuffer:
   def __init__(self, ud:UnderlyingDiskBuffer, size:int, dtype:DType=dtypes.uint8, offset=0):
     self.ud, self.size, self.dtype, self.offset = ud, size, dtype, offset
   def __repr__(self): return f"<DiskBuffer size={self.size} dtype={self.dtype} offset={self.offset}>"
-  def cast(self, arg:Tuple[DType, bool]):
-    # TODO: support shape changing bitcast
-    #assert arg[1], "DiskTensor only supports bitcast"
-    return DiskBuffer(self.ud, self.size, arg[0], offset=self.offset)
+  # TODO: support shape changing bitcast
+  #assert arg[1], "DiskTensor only supports bitcast"
+  def cast(self, arg:Tuple[DType, bool]): return DiskBuffer(self.ud, self.size, arg[0], offset=self.offset)
   def as_strided(self, arg):
     assert strides_for_shape(arg[0]) == arg[1], "disk tensors don't support strides"
     return DiskBuffer(self.ud, prod(arg[0]), self.dtype, offset=self.offset+arg[2]*self.dtype.itemsize)
@@ -54,8 +53,7 @@ class DiskAllocator(Allocator):
     if src.ud.fd is not None:
       src.ud.fd.seek(src.offset)
       src.ud.fd.readinto(dest)
-    else:
-      dest[:] = src._buf()
+    else: dest[:] = src._buf()
 
 class DiskDevice(Interpreted):
   def __init__(self, device): super().__init__(DiskAllocator(device[5:]), disk_fxn_for_op)

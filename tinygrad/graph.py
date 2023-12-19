@@ -81,10 +81,8 @@ def log_schedule_item(si: ScheduleItem):
     # add them to the graph, potentially with a movement op separating them
     for x in input_to_st:
       for st in dedup(input_to_st[x]):
-        if st.contiguous:
-          G.add_edge(nm(x), nm(si.out), label=get_sop(op), color='#00000060')
-        else:
-          add_st_node(nm(x), nm(si.out), get_sop(op), st)
+        if st.contiguous: G.add_edge(nm(x), nm(si.out), label=get_sop(op), color='#00000060')
+        else: add_st_node(nm(x), nm(si.out), get_sop(op), st)
       if 'label' not in G.nodes[nm(x)]:
         G.nodes[nm(x)]['label'] = str(x.shape)+str_dtype(si.out.dtype)
 
