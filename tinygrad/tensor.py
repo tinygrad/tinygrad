@@ -164,9 +164,9 @@ class Tensor:
 
   @staticmethod
   def rand(*shape, device:Optional[str]=None, dtype:Optional[DType]=None, **kwargs):
+    if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
     if Device.canonicalize(device) == "TORCH":
       return Tensor._loadop(LoadOps.CUSTOM, prod((shape:=argfix(*shape))), arg=custom_random, device=device, dtype=dtype, **kwargs).reshape(shape)
-    if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
     num = prod((shape:=argfix(*shape)))
     if num == 0: return Tensor.zeros(shape, device=device, **kwargs)
     counts = (Tensor.arange(num, dtype=dtypes.uint32, device=device, requires_grad=False) + Tensor._rng_counter.to(device)).realize()
