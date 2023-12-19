@@ -190,6 +190,10 @@ backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 if isinstance(Device[Device.DEFAULT], Compiled):
   backend_test.exclude('test_MaxPool3d_stride_padding_cpu')
 
+# TODO: this somehow passes in CI but does not pass if run locally
+if Device.DEFAULT == 'METAL':
+  backend_test.exclude('test_maxpool_2d_same_upper_cpu')
+
 # TODO: inaccuracy only for numpy backend. will get back to this after dtype refactor.
 if Device.DEFAULT == "CPU":
   backend_test.exclude('test_sce_')

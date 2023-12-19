@@ -195,7 +195,7 @@ class TestIndexing(unittest.TestCase):
     # pick a random valid indexer type
     def ri(indices):
       choice = random.randint(0, 2)
-      if choice == 0: return Tensor(indices, dtype=dtypes.int32)
+      if choice == 0: return Tensor(indices)
       if choice == 1: return list(indices)
       return tuple(indices)
 
@@ -1134,12 +1134,9 @@ class TestIndexing(unittest.TestCase):
         x[:, [0, 1]]
   '''
 
-  # TODO empty Tensor fancy index
-  '''
   def test_empty_ndim_index_bool(self):
     x = Tensor.randn(5)
     self.assertRaises(IndexError, lambda: x[Tensor.empty(0, 2, dtype=dtypes.uint8)])
-  '''
 
   def test_empty_slice(self):
     x = Tensor.randn(2, 3, 4, 5)
@@ -1798,13 +1795,10 @@ class TestNumpy(unittest.TestCase):
     self.assertIsNot(a, a[...])
     self.assertIsNot(a, a[:])
 
-  # TODO shape mismatch fancy indexing error
-  '''
   def test_broaderrors_indexing(self):
     a = Tensor.zeros(5, 5)
     self.assertRaisesRegex(IndexError, 'shape mismatch', a.__getitem__, ([0, 1], [0, 1, 2]))
     self.assertRaisesRegex(IndexError, 'shape mismatch', a.__setitem__, ([0, 1], [0, 1, 2]), 0)
-  '''
 
   # TODO setitem
   '''
