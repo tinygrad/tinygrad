@@ -3,6 +3,7 @@ import math
 import unittest
 import numpy as np
 import torch
+from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 import tinygrad.nn as nn
 from tinygrad.helpers import dtypes
@@ -59,7 +60,8 @@ class TestRandomness(unittest.TestCase):
     self.assertFalse(normal_test(Tensor.rand))
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
 
-  def test_rand_against_reference(self):
+  @unittest.skipIf(Device.DEFAULT == "TORCH", "threefly not implemented for torch")
+  def test_threefly_against_reference(self):
     Tensor.manual_seed(1337)
     # generated using
     # jax.extend.random.threefry_2x32((np.uint32(1337), np.uint32(0x0)), np.arange(20, dtype=np.uint32)).astype(float) / np.float32(2**32 - 1)
