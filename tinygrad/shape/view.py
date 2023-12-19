@@ -99,7 +99,7 @@ class View:
     return View.create(new_shape, new_strides, new_offset, new_mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def invert(self, out_shape:Tuple[int, ...]) -> Optional[View]:
+  def invert(self, out_shape:Tuple[sint, ...]) -> Optional[View]:
     ret = self.shrink(self.mask) if self.mask else self
     if prod(ret.shape) != prod(out_shape): return None   # don't support shrink, expand, or stride != (-1, 1)
     ret = cast(View, ret.reshape(tuple(s for s in ret.shape if s != 1)))  # removing ones will never be an issue
