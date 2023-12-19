@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Callable, List, Tuple, Dict, cast, Union, Optional, TypeVar, Generic
 import functools, itertools, operator
-from tinygrad.helpers import DEBUG, DType, merge_dicts, getenv, all_int
+from tinygrad.helpers import DEBUG, DType, merge_dicts, getenv, all_int, Context, GRAPH
 from tinygrad.device import Device, JITRunner, CompiledASTRunner, Buffer
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -71,7 +71,8 @@ class TinyJit(Generic[ReturnType]):
       # jit capture
       self.expected_vals, self.expected_name_sts_dtype = expected_vals, expected_name_sts_dtype
       CacheCollector.start(var_vals)
-      self.ret = self.fxn(*args, **kwargs)
+      with Context(GRAPH=getenv("JITGRAPH", GRAPH.value)):
+        self.ret = self.fxn(*args, **kwargs)
       self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
       assert len(set(get_input_replace(self.jit_cache, input_rawbuffers).values())) == len(input_rawbuffers), "some input tensors not found"
