@@ -38,6 +38,7 @@ def fuzz_invert():
   return start, st_sum
 
 if __name__ == "__main__":
+  random.seed(42)
   total = getenv("CNT", 100)
   for fuzz in [globals()[f'fuzz_{x}'] for x in getenv("FUZZ", "invert,plus").split(",")]:
     good = 0
