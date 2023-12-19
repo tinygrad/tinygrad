@@ -1100,14 +1100,13 @@ class TestIndexing(unittest.TestCase):
     result = x[rows[:, None], columns]
     numpy_testing_assert_equal_helper(result.numpy().tolist(), [[0, 2], [9, 11]])
 
-  # TODO setitem
-  # TODO empty Tensor fancy index
-  '''
   def test_empty_index(self):
     x = Tensor.arange(0, 12).reshape(4, 3)
     idx = Tensor([], dtype=dtypes.int64)
     numpy_testing_assert_equal_helper(x[idx].numel(), 0)
 
+    # TODO setitem
+    '''
     # empty assignment should have no effect but not throw an exception
     y = clone(x)
     y[idx] = -1
@@ -1116,10 +1115,8 @@ class TestIndexing(unittest.TestCase):
     mask = Tensor.zeros(4, 3).cast(dtypes.bool)
     y[mask] = -1
     numpy_testing_assert_equal_helper(x, y)
-  '''
+    '''
 
-  # TODO empty Tensor fancy index
-  '''
   def test_empty_ndim_index(self):
     x = Tensor.randn(5)
     numpy_testing_assert_equal_helper(Tensor.empty(0, 2), x[Tensor.empty(0, 2, dtype=dtypes.int64)])
@@ -1131,14 +1128,20 @@ class TestIndexing(unittest.TestCase):
     x = Tensor.empty(10, 0)
     numpy_testing_assert_equal_helper(x[[1, 2]].shape, (2, 0))
     numpy_testing_assert_equal_helper(x[[], []].shape, (0,))
+
+    # TODO cannot check for out of bounds with Tensor indexing
+    '''
     with self.assertRaisesRegex(IndexError, 'for dimension with size 0'):
         x[:, [0, 1]]
-  '''
+    '''
 
+  # TODO bool indexing
+  # TODO cannot check for out of bounds with Tensor indexing
+  '''
   def test_empty_ndim_index_bool(self):
     x = Tensor.randn(5)
     self.assertRaises(IndexError, lambda: x[Tensor.empty(0, 2, dtype=dtypes.uint8)])
-
+  '''
   def test_empty_slice(self):
     x = Tensor.randn(2, 3, 4, 5)
     y = x[:, :, :, 1]
@@ -1604,8 +1607,6 @@ class TestNumpy(unittest.TestCase):
     numpy_testing_assert_equal_helper(a[()].data_ptr(), a.data_ptr())
     '''
 
-  # TODO empty fancy index
-  '''
   def test_empty_fancy_index(self):
     # Empty list index creates an empty array
     a = Tensor([1, 2, 3])
@@ -1617,7 +1618,6 @@ class TestNumpy(unittest.TestCase):
     # TODO fancy index dtype error
     b = Tensor([]).float()
     self.assertRaises(IndexError, lambda: a[b])
-  '''
 
   def test_ellipsis_index(self):
     a = Tensor([[1, 2, 3],

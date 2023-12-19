@@ -322,8 +322,8 @@ class Tensor:
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, (tuple, list)):
       # special case <indices: List[int]>, a lil ugly
-      if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, requires_grad=False, device=self.device)]
-      else: indices = [Tensor(list(i), requires_grad=False, device=self.device) if isinstance(i, (tuple, list)) else i for i in indices]
+      if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, dtype=dtypes.int, requires_grad=False, device=self.device)]
+      else: indices = [Tensor(list(i), dtype=dtypes.int, requires_grad=False, device=self.device) if isinstance(i, (tuple, list)) else i for i in indices]  # noqa: E501
     else: indices = [indices]
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
@@ -380,28 +380,42 @@ class Tensor:
     if type_dim[Tensor]:
 
       # extract tensors and tensor dimensions
-      idx, tdim = [], []
+      idx, tdim, empty_idx = [], [], False
       for tensor_dim in type_dim[Tensor]:
         dims_collapsed_, dims_injected = sum(1 for d in dims_collapsed if tensor_dim >= d), sum(1 for d in type_dim[None] if tensor_dim >= d)
         tdim.append(td := tensor_dim - dims_collapsed_ + dims_injected)
-        # normalize the negative tensor indices
         idx.append(((t := indices[tensor_dim + dims_injected]) < 0).where(ret.shape[td], 0) + t)
+        if 0 in t.shape: empty_idx = True
         # TODO uint8 and bool tensor indexing
         if not (dtypes.is_int(t.dtype) or t.dtype == dtypes.bool): raise IndexError("tensors used as indices must be int or bool tensors")
 
-      # compute sum_dim, arange, and idx
-      max_dim = max(i.ndim for i in idx)
-      sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(tdim)]
-      arange = [Tensor.arange(ret.shape[d], requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, tdim))]   # noqa: E501
-      first_idx = [idx[0].reshape(*[1]*tdim[0], *[1]*(1 + max_dim - idx[0].ndim), *idx[0].shape, *[1]*(ret.ndim - tdim[0] - 1))]
-      rest_idx = [i.reshape(*[1]*tdim[0], *[1]*(max_dim - i.ndim), *i.shape, *[1]*(ret.ndim - tdim[0] - n)) for n,i in enumerate(idx[1:], 1)]
-      reshaped_idx = first_idx + rest_idx
-      ret = ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*max_dim, *ret.shape[sum_dim[0]+1:])
+      if empty_idx and 0 in ret.shape: return Tensor.empty(0, dtype=ret.dtype, requires_grad=ret.requires_grad)
 
-      # iteratively eq -> mul -> sum fancy index
-      try:
+      # manual broadcasting
+      final_shape = (shapes := tuple(list(i.shape) for i in idx))[0]
+      for interim_shape in shapes[1:]:
+        if len(final_shape) < len(interim_shape): final_shape = [1]*(len(interim_shape) - len(final_shape)) + final_shape
+        if len(final_shape) > len(interim_shape): interim_shape = [1]*(len(final_shape) - len(interim_shape)) + interim_shape
+        if any(ish%fsh != 0 and fsh%ish != 0 for ish, fsh in zip(interim_shape, final_shape)):
+          raise IndexError(f"cannot broadcast {interim_shape=} with shape={final_shape}")
+        final_shape = [max(sh) for sh in zip(final_shape, interim_shape)]
+
+      # compute sum_dim, arange, and idx
+      if empty_idx or 0 in ret.shape:
+        new_shape = list(new_shape) # bro wtf why is mypy being dumb
+        new_shape[tdim[0]:tdim[0]+len(idx)] = final_shape
+        ret = Tensor.empty(new_shape, dtype=ret.dtype, requires_grad=ret.requires_grad)
+      else:
+        max_dim = max(i.ndim for i in idx)
+        sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(tdim)]
+        arange = [Tensor.arange(ret.shape[d], requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, tdim))]   # noqa: E501
+        first_idx = [idx[0].reshape(*[1]*tdim[0], *[1]*(1 + max_dim - idx[0].ndim), *idx[0].shape, *[1]*(ret.ndim - tdim[0] - 1))]
+        rest_idx = [i.reshape(*[1]*tdim[0], *[1]*(max_dim - i.ndim), *i.shape, *[1]*(ret.ndim - tdim[0] - n)) for n,i in enumerate(idx[1:], 1)]
+        reshaped_idx = first_idx + rest_idx
+        ret = ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*max_dim, *ret.shape[sum_dim[0]+1:])
+
+        # iteratively eq -> mul -> sum fancy index
         for a,i,sd in zip(arange, reshaped_idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
-      except AssertionError as exc: raise IndexError(f"cannot broadcast with index shapes {', '.join(str(i.shape) for i in idx)}") from exc
 
       # special permute case
       if tdim[0] != 0 and len(tdim) != 1 and tdim != list(range(tdim[0], tdim[-1]+1)):
