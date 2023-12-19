@@ -345,7 +345,7 @@ class Tensor:
     if len(ellipsis_idx) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
     if float in type_dim: raise IndexError("float type is not valid index")
     if any(isinstance(i, slice) and i.step == 0 for i in indices): raise ValueError('slice step cannot be 0')
-    if num_slices > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+    if num_slices > len(self.shape): raise IndexError(f"too many indices for {self.ndim=}")
 
     # 2. basic indexing (no copy)
     # currently indices_filtered: Tuple[Union[slice, int, Tensor], ...]
