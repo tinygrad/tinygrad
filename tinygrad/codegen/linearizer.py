@@ -55,7 +55,7 @@ class Linearizer(Kernel):
     elif op == ReduceOps.MAX: return -math.inf if dtypes.is_float(dtype) else -2**31 if dtypes.is_int(dtype) else False
 
   # NOTE: once images are loaded, we uop them as their base float
-  def get_var_dtype(self, dt:DType): return dt if not isinstance(dt, ImageDType) else dt.base
+  def get_base_dtype(self, dt:DType): return dt.base if isinstance(dt, ImageDType) else dt
 
   render_ops: Any = { Variable: lambda self, ops, ctx: ctx.loop_uops[self.expr], NumNode: lambda self, ops, ctx: ctx.const(self.b),
                 MulNode: lambda self, ops, ctx: ctx.uop_alu_idx(self.a.render(ops, ctx), self.b, ops, ctx, BinaryOps.MUL),
@@ -69,7 +69,7 @@ class Linearizer(Kernel):
 
   def global_load(self, i:int, idxs:Sequence[Node], acc=None, barrier:Optional[UOp]=None) -> List[UOp]:
     buf = self.bufs[i]
-    localtype = self.get_var_dtype(buf.dtype)
+    localtype = self.get_base_dtype(buf.dtype)
     const = buf.val if isinstance(buf, ConstBuffer) else acc
 
     def rename_var(v: VariableOrNum, expr: str): return v if isinstance(v, NumNode) else Variable(expr, v.min, v.max)
