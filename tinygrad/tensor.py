@@ -11,7 +11,7 @@ from tinygrad.helpers import DType, dtypes, ImageDType
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LoadOps
-from tinygrad.device import Device
+from tinygrad.device import Buffer, Device
 from tinygrad.shape.symbolic import sint
 from tinygrad.realize import run_schedule
 
@@ -164,10 +164,12 @@ class Tensor:
 
   @staticmethod
   def rand(*shape, dtype:Optional[DType]=None, **kwargs):
+    device = Device.canonicalize(kwargs.pop("device", Device.DEFAULT))
+    if device == "TORCH": return Tensor._loadop(LoadOps.CUSTOM, prod((shape:=argfix(*shape))), arg=custom_random, **kwargs).reshape(shape)
     if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
     num = prod((shape:=argfix(*shape)))
-    if num == 0: return Tensor.zeros(shape, **kwargs)
-    counts = (Tensor.arange(num, dtype=dtypes.uint32, requires_grad=False) + Tensor._rng_counter).realize()
+    if num == 0: return Tensor.zeros(shape, device=device, **kwargs)
+    counts = (Tensor.arange(num, dtype=dtypes.uint32, device=device, requires_grad=False) + Tensor._rng_counter).realize()
     if num % 2: counts = counts.pad(((0,1),))
     Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
 
@@ -919,3 +921,11 @@ if IMAGE:
   from tinygrad.features.image import image_conv2d, image_dot
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)
+
+# TODO: find a way to make threefly work for TORCH
+def custom_random(out:Buffer):
+  Tensor._seed += 1
+  if DEBUG >= 2: print(f"*** {out.device}   rand  seed {Tensor._seed} size {out.size:<15d} dtype {out.dtype}")
+  rng = np.random.default_rng(Tensor._seed)
+  rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=out.dtype.np, copy=False)
+  out.copyin(rng_np_buffer.data)
