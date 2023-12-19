@@ -6,7 +6,7 @@ in the Software without restriction, including without limitation the rights
 to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
- 
+
 The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
 
@@ -89,10 +89,10 @@ TinyModel::TinyModel(const std::string &weights_file,
 
   std::string kernel_source;
 
-  for (const auto& func : functions) {
+  for (const auto &func : functions) {
     kernel_source += func.get<std::string>() + '\n';
   }
-  
+
   cl::Program::Sources sources;
   sources.push_back({kernel_source.c_str(), kernel_source.length()});
   program_ = std::make_unique<cl::Program>(*context_.get(), sources);
@@ -105,8 +105,9 @@ TinyModel::TinyModel(const std::string &weights_file,
   }
 }
 
-void TinyModel::SetInputs(const std::vector<void*>& inputs) {
-  assert((inputs.size() == inputs_.size()) && "inputs.size() != inputs_.size()");
+void TinyModel::SetInputs(const std::vector<void *> &inputs) {
+  assert((inputs.size() == inputs_.size()) &&
+         "inputs.size() != inputs_.size()");
 
   auto size = inputs.size();
 
@@ -114,8 +115,9 @@ void TinyModel::SetInputs(const std::vector<void*>& inputs) {
     std::string input_name = "input" + std::to_string(i);
     int buffer_size = inputs_[i]["size"].get<int>();
 
-    auto& cl_input_buffer = buffers_[input_name];
-    command_queue_->enqueueWriteBuffer(cl_input_buffer, CL_TRUE, 0, buffer_size, inputs[i]);
+    auto &cl_input_buffer = buffers_[input_name];
+    command_queue_->enqueueWriteBuffer(cl_input_buffer, CL_TRUE, 0, buffer_size,
+                                       inputs[i]);
   }
 }
 
@@ -138,12 +140,14 @@ void TinyModel::Inference() {
 
     cl::NDRange local_size_cl(local_size[0], local_size[1], local_size[2]);
 
-    command_queue_->enqueueNDRangeKernel(kernel, cl::NullRange, global_size_cl, local_size_cl);
+    command_queue_->enqueueNDRangeKernel(kernel, cl::NullRange, global_size_cl,
+                                         local_size_cl);
   }
 }
 
-void TinyModel::GetOutputs(std::vector<void*>& outputs) {
-  assert((outputs.size() == outputs_.size()) && "outputs.size() != outputs_.size()");
+void TinyModel::GetOutputs(std::vector<void *> &outputs) {
+  assert((outputs.size() == outputs_.size()) &&
+         "outputs.size() != outputs_.size()");
 
   auto size = outputs.size();
 
@@ -151,8 +155,9 @@ void TinyModel::GetOutputs(std::vector<void*>& outputs) {
     std::string output_name = "output" + std::to_string(i);
     int buffer_size = outputs_[i]["size"].get<int>();
 
-    auto& cl_output_buffer = buffers_[output_name];
-    command_queue_->enqueueReadBuffer(cl_output_buffer, CL_TRUE, 0, buffer_size, outputs[i]);
+    auto &cl_output_buffer = buffers_[output_name];
+    command_queue_->enqueueReadBuffer(cl_output_buffer, CL_TRUE, 0, buffer_size,
+                                      outputs[i]);
   }
 }
 
