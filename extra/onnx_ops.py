@@ -425,7 +425,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     elif nearest_mode == "round_prefer_ceil": ret = _round(x_resized, 0.5, "round_up")
     elif nearest_mode == "floor": ret = x_resized.floor()
     elif nearest_mode == "ceil": ret = x_resized.ceil()
-    return ret.clip(0, x_len-1).cast(dtypes.int32)
+    return ret.cast(dtypes.int32).clip(0, x_len-1)
   def _coordinate_transformation(x_out, y_out, output_shape, scales_, roi=None):
     if coordinate_transformation_mode == "half_pixel":
       x_out = (x_out + 0.5)/Tensor(scales_[-1]) - 0.5
