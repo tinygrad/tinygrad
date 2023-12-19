@@ -4,6 +4,7 @@ import token
 import tokenize
 import itertools
 from tabulate import tabulate
+from tinygrad.helpers import getenv
 
 TOKEN_WHITELIST = [token.OP, token.NAME, token.NUMBER, token.STRING]
 
@@ -65,4 +66,7 @@ if __name__ == "__main__":
       print(tabulate([headers] + sorted(table, key=lambda x: -x[1]), headers="firstrow", floatfmt=".1f")+"\n")
       for dir_name, group in itertools.groupby(sorted([(x[0].rsplit("/", 1)[0], x[1], x[2]) for x in table]), key=lambda x:x[0]):
         print(f"{dir_name:30s} : {sum([x[1] for x in group]):6d}")
-      print(f"\ntotal line count: {sum([x[1] for x in table])}")
+      total_lines = sum([x[1] for x in table])
+      print(f"\ntotal line count: {total_lines}")
+      max_line_count = getenv("MAX_LINE_COUNT", -1)
+      assert max_line_count == -1 or total_lines < max_line_count, f"OVER {max_line_count} LINES"
