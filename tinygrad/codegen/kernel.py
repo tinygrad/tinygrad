@@ -400,26 +400,17 @@ class Kernel:
   def apply_opt(self, opt:Opt):
     assert not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.LASTLOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals"  # noqa: E501
     self.applied_opts.append(opt)
-    if opt.axis is not None:
-      axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op in [OptOps.GROUP, OptOps.GROUPTOP] else 0))  # noqa: E501
-    else:
-      axis = -1
+    axis = -1 if opt.axis is None else opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op in [OptOps.GROUP, OptOps.GROUPTOP] else 0))  # noqa: E501
+    amt = -1 if opt.amt is None else (self.full_shape[axis] if opt.amt == 0 else opt.amt)
     if opt.amt is not None:
-      amt = opt.amt if opt.amt != 0 else self.full_shape[axis]
       assert isinstance(amt, int) and amt != 1, "shift/padto of amt 1 or Node is meaningless"
       if opt.op != OptOps.PADTO: assert self.full_shape[axis] % amt == 0, "no longer valid shift"
-    else:
-      amt = -1
-    if opt.op == OptOps.LOCAL:                        # cyan
+    if opt.op in [OptOps.LOCAL, OptOps.LASTLOCAL]:   # cyan
       assert self.opts.has_local, "target does not support local"
       assert axis < self.first_reduce, "can't local a reduce"
-      assert not(self.tensor_core), "can't local with tensor cores"
-      self.shift_to(axis, amt, insert_before=self.first_reduce)
-      self.local_dims += 1
-    elif opt.op == OptOps.LASTLOCAL:                  # cyan
-      assert self.opts.has_local, "target does not support local"
-      assert axis < self.first_reduce, "can't local a reduce"
-      self.shift_to(axis, amt, insert_before=self.first_reduce-self.local_dims)
+      assert not self.tensor_core, "can't local with tensor cores"
+      insert_before = self.first_reduce if opt.op == OptOps.LOCAL else self.first_reduce - self.local_dims
+      self.shift_to(axis, amt, insert_before=insert_before)
       self.local_dims += 1
     elif opt.op in [OptOps.GROUP, OptOps.GROUPTOP]:   # green
       assert self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem"
