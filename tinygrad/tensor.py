@@ -351,9 +351,9 @@ class Tensor:
     # currently indices_filtered: Tuple[Union[slice, int, Tensor], ...]
     # turn indices in indices_filtered to Tuple[shrink_arg, strides]
     for dim in type_dim[int]:
-      if (i := indices_filtered[dim]) >= (sh := self.shape[dim]) or i < -sh:
-        raise IndexError(f"index {i} is out of bounds for dimension {dim} with size {sh}")
-      indices_filtered[dim] = ((i, i+1), 1) if i >= 0 else ((sh+i, sh+i+1), 1)
+      if (index := indices_filtered[dim]) >= (size := self.shape[dim]) or index < -size:
+        raise IndexError(f"{index=} is out of bounds for dimension {dim} with {size=}")
+      indices_filtered[dim] = ((index, index+1), 1) if index >= 0 else ((size+index, size+index+1), 1)
     for dim in type_dim[slice]:
       s, e, st = indices_filtered[dim].indices(self.shape[dim])
       indices_filtered[dim] = ((0, 0) if (st > 0 and e < s) or (st <= 0 and e > s) else (s, e) if st > 0 else (e+1, s+1), st)
@@ -401,8 +401,7 @@ class Tensor:
       # iteratively eq -> mul -> sum fancy index
       try:
         for a,i,sd in zip(arange, reshaped_idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
-      except AssertionError as exc:
-        raise IndexError(f"shape mismatch: broadcasting not possible with index shapes {', '.join(str(i.shape) for i in idx)}") from exc
+      except AssertionError as exc: raise IndexError(f"cannot broadcast with index shapes {', '.join(str(i.shape) for i in idx)}") from exc
 
       # special permute case
       if tdim[0] != 0 and len(tdim) != 1 and tdim != list(range(tdim[0], tdim[-1]+1)):
