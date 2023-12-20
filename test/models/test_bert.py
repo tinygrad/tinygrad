@@ -14,9 +14,7 @@ def get_question_samp(bsz, seq_len, vocab_size, seed):
 def set_equal_weights(mdl, torch_mdl):
   from tinygrad.nn.state import get_state_dict
   state, torch_state = get_state_dict(mdl), torch_mdl.state_dict()
-  print(state.keys())
-  print(torch_state.keys())
-  # assert len(state) == len(torch_state)
+  assert len(state) == len(torch_state)
   for k, v in state.items():
     assert k in torch_state
     torch_state[k].copy_(torch.from_numpy(v.numpy()))
@@ -52,8 +50,6 @@ class TestBert(unittest.TestCase):
       out = mdl(Tensor(in_ids), Tensor(mask), Tensor(seg_ids))
       torch_out = torch_mdl.forward(torch.from_numpy(in_ids).long(), torch.from_numpy(mask), torch.from_numpy(seg_ids).long())[:2]
       torch_out = torch.cat(torch_out).unsqueeze(2)
-      print(out.numpy())
-      print(torch_out.detach().numpy())
       np.testing.assert_allclose(out.numpy(), torch_out.detach().numpy(), atol=5e-4, rtol=5e-4)
 
 if __name__ == '__main__':
