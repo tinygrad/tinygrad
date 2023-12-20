@@ -479,7 +479,20 @@ class Tensor:
     order[ax1], order[ax2] = order[ax2], order[ax1]
     return self.permute(order)
   def flatten(self, start_dim=0): return self.reshape(shape=self.shape[:start_dim] + (-1,))
-
+  def cross(self, other, dim=0):
+    if self.shape[dim] != 3 or other.shape[dim] != 3: 
+      raise RuntimeError(f"inputs dimension {dim} must have length 3. Got {self.shape[dim]} and {other.shape[dim]}")
+    dim = dim % len(self.shape)
+    perm = [i for i in range(len(self.shape)) if i != dim] + [dim]
+    self_perm = self.permute(*perm)
+    other_perm = other.permute(*perm)
+    result = Tensor.stack([
+        self_perm[..., 1] * other_perm[..., 2] - self_perm[..., 2] * other_perm[..., 1],
+        self_perm[..., 2] * other_perm[..., 0] - self_perm[..., 0] * other_perm[..., 2],
+        self_perm[..., 0] * other_perm[..., 1] - self_perm[..., 1] * other_perm[..., 0]
+    ], dim=-1)
+    inv_perm = [perm.index(i) for i in range(len(perm))]
+    return result.permute(*inv_perm)
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False) -> Tensor:
