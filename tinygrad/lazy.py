@@ -64,8 +64,10 @@ class LazyBuffer:
   def contiguous(self):
     if not self.st.contiguous or self.st.size() != self.base.st.size() or self.is_unrealized_const():
       ret = self.e(LoadOps.CONTIGUOUS)
-      #sti = self.st.invert(self.shape)
-      #if sti: self.base.contiguous_child = ref(ret._view(sti))
+      sti = self.st.invert(self.base.shape)
+      print(self.st)
+      print(sti)
+      #if sti is not None: self.base.contiguous_child = ref(ret), sti
       return ret
     self.base.forced_realize = True
     return self
@@ -98,8 +100,8 @@ class LazyBuffer:
     srcs = (self,)+srcs
     new_srcs = []
     for s in srcs:
-      if s == s.base and s.base.contiguous_child and (root:=s.base.contiguous_child()) is not None:
-        new_srcs.append(root)
+      if s == s.base and s.base.contiguous_child and (root:=s.base.contiguous_child[0]()) is not None:
+        new_srcs.append(root._view(s.base.contiguous_child[1]))
       else:
         new_srcs.append(s)
     srcs = tuple(new_srcs)
@@ -220,7 +222,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
 UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
 def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   if buf in realizes or buf.realized: return True
-  #return False
+  return False
   if buf.op in UNSAFE_PAD_OPS: return False
   return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
