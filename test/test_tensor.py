@@ -303,6 +303,12 @@ class TestTinygrad(unittest.TestCase):
     # force device copy - to() is opt'd away - Tensor(dev)/1 is ignored
     np.testing.assert_allclose(ua_arr, (Tensor(ua_arr)/Tensor(1)).numpy())
 
+  def test_item(self):
+    assert Tensor(10).item() == 10
+    assert Tensor(10).reshape(1).item() == 10
+    assert (Tensor(10)+1).item() == 11
+    assert (Tensor([1,2,3,4])+1).max().item() == 5
+
 class TestZeroShapeTensor(unittest.TestCase):
   def test_shape_stride(self):
     t = Tensor.rand(3, 2, 0)
