@@ -15,6 +15,7 @@ def compare_weights_both(url):
   for k in tg_weights:
     if tg_weights[k].dtype == dtypes.bfloat16: tg_weights[k] = torch_weights[k].float() # numpy doesn't support bfloat16
     if torch_weights[k].dtype == torch.bfloat16: torch_weights[k] = torch_weights[k].float() # numpy doesn't support bfloat16
+    if torch_weights[k].requires_grad: torch_weights[k] = torch_weights[k].detach()
     np.testing.assert_equal(tg_weights[k].numpy(), torch_weights[k].numpy(), err_msg=f"mismatch at {k}, {tg_weights[k].shape}")
   print(f"compared {len(tg_weights)} weights")
 
@@ -34,7 +35,7 @@ class TestTorchLoad(unittest.TestCase):
   def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/qazalin/bf16-lightweight/resolve/main/consolidated.00.pth?download=true")
 
   # TODO: support pytorch tar format with minimal lines
-  #def test_load_resnet(self): compare_weights_both('https://download.pytorch.org/models/resnet50-19c8e357.pth')
+  def test_load_resnet(self): compare_weights_both('https://download.pytorch.org/models/resnet50-19c8e357.pth')
 
 test_fn = pathlib.Path(__file__).parents[2] / "weights/LLaMA/7B/consolidated.00.pth"
 #test_size = test_fn.stat().st_size

@@ -149,13 +149,13 @@ class Tensor:
   # ***** creation llop entrypoint *****
 
   @staticmethod
-  def _loadop(op, sz, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
-    assert isinstance(sz, int), f"cannot create with symbolic size {sz}"
-    return Tensor(LazyBuffer.loadop(op, (sz,), dtype or dtypes.default_float, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
+  def _loadop(op, shape, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
+    assert all_int(shape), f"cannot create with symbolic shape {shape}"
+    return Tensor(LazyBuffer.loadop(op, shape, dtype or dtypes.default_float, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
 
   @staticmethod
   def empty(*shape, **kwargs):
-    return Tensor._loadop(LoadOps.EMPTY, prod((shape:=argfix(*shape))), **kwargs).reshape(shape)
+    return Tensor._loadop(LoadOps.EMPTY, argfix(*shape), **kwargs)
 
   _seed: int = int(time.time())
   @staticmethod
@@ -163,7 +163,7 @@ class Tensor:
 
   @staticmethod
   def rand(*shape, **kwargs):
-    return Tensor._loadop(LoadOps.CUSTOM, prod((shape:=argfix(*shape))), arg=custom_random, **kwargs).reshape(shape)
+    return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, **kwargs)
 
   # ***** creation helper functions *****
 
@@ -185,10 +185,10 @@ class Tensor:
 
   @staticmethod
   def eye(dim:int, **kwargs):
-    return Tensor.full((dim,1),1.0,**kwargs).pad((None,(0,dim))).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
+    return Tensor.ones((dim,1),**kwargs).pad((None,(0,dim))).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
 
-  def full_like(self, fill_value, **kwargs):
-    return Tensor.full(self.shape, fill_value=fill_value, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
+  def full_like(self, fill_value: Union[bool, int, float], **kwargs):
+    return Tensor.full(self.shape, fill_value, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
   def zeros_like(self, **kwargs): return self.full_like(0, **kwargs)
   def ones_like(self, **kwargs): return self.full_like(1, **kwargs)
 
@@ -322,8 +322,8 @@ class Tensor:
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, (tuple, list)):
       # special case <indices: List[int]>, a lil ugly
-      if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, dtype=dtypes.int32, requires_grad=False, device=self.device)]
-      else: indices = [Tensor(list(i), dtype=dtypes.int32, requires_grad=False, device=self.device) if isinstance(i, (tuple, list)) else i for i in indices]  # noqa: E501
+      if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, requires_grad=False, device=self.device)]
+      else: indices = [Tensor(list(i), requires_grad=False, device=self.device) if isinstance(i, (tuple, list)) else i for i in indices]
     else: indices = [indices]
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
@@ -351,9 +351,9 @@ class Tensor:
     # currently indices_filtered: Tuple[Union[slice, int, Tensor], ...]
     # turn indices in indices_filtered to Tuple[shrink_arg, strides]
     for dim in type_dim[int]:
-      if (i := indices_filtered[dim]) >= (sh := self.shape[dim]) or i < -sh:
-        raise IndexError(f"index {i} is out of bounds for dimension {dim} with size {sh}")
-      indices_filtered[dim] = ((i, i+1), 1) if i >= 0 else ((sh+i, sh+i+1), 1)
+      if (index := indices_filtered[dim]) >= (size := self.shape[dim]) or index < -size:
+        raise IndexError(f"{index=} is out of bounds for dimension {dim} with {size=}")
+      indices_filtered[dim] = ((index, index+1), 1) if index >= 0 else ((size+index, size+index+1), 1)
     for dim in type_dim[slice]:
       s, e, st = indices_filtered[dim].indices(self.shape[dim])
       indices_filtered[dim] = ((0, 0) if (st > 0 and e < s) or (st <= 0 and e > s) else (s, e) if st > 0 else (e+1, s+1), st)
@@ -386,18 +386,22 @@ class Tensor:
         tdim.append(td := tensor_dim - dims_collapsed_ + dims_injected)
         # normalize the negative tensor indices
         idx.append(((t := indices[tensor_dim + dims_injected]) < 0).where(ret.shape[td], 0) + t)
+        # TODO uint8 and bool tensor indexing
+        if not (dtypes.is_int(t.dtype) or t.dtype == dtypes.bool): raise IndexError("tensors used as indices must be int or bool tensors")
 
       # compute sum_dim, arange, and idx
       max_dim = max(i.ndim for i in idx)
       sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(tdim)]
-      arange = [Tensor.arange(ret.shape[d], dtype=dtypes.int32, requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, tdim))]   # noqa: E501
+      arange = [Tensor.arange(ret.shape[d], requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, tdim))]   # noqa: E501
       first_idx = [idx[0].reshape(*[1]*tdim[0], *[1]*(1 + max_dim - idx[0].ndim), *idx[0].shape, *[1]*(ret.ndim - tdim[0] - 1))]
       rest_idx = [i.reshape(*[1]*tdim[0], *[1]*(max_dim - i.ndim), *i.shape, *[1]*(ret.ndim - tdim[0] - n)) for n,i in enumerate(idx[1:], 1)]
-      idx = first_idx + rest_idx
+      reshaped_idx = first_idx + rest_idx
       ret = ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*max_dim, *ret.shape[sum_dim[0]+1:])
 
       # iteratively eq -> mul -> sum fancy index
-      for a,i,sd in zip(arange, idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
+      try:
+        for a,i,sd in zip(arange, reshaped_idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
+      except AssertionError as exc: raise IndexError(f"cannot broadcast with index shapes {', '.join(str(i.shape) for i in idx)}") from exc
 
       # special permute case
       if tdim[0] != 0 and len(tdim) != 1 and tdim != list(range(tdim[0], tdim[-1]+1)):
@@ -420,7 +424,7 @@ class Tensor:
     idx = idx.transpose(ax1=dim, ax2=0).unsqueeze(-1)
     permarg = list(range(self.ndim))
     permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
-    return ((idx == Tensor.arange(self.shape[dim], dtype=dtypes.int32, requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])).unsqueeze(0)).sum(-1).transpose(ax1=0, ax2=dim)  # noqa: E501
+    return ((idx == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])).unsqueeze(0)).sum(-1).transpose(ax1=0, ax2=dim)  # noqa: E501
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     dim = (dim + len(self.shape)) if dim < 0 else dim
@@ -435,10 +439,9 @@ class Tensor:
 
   @staticmethod
   def stack(tensors:Sequence[Tensor], dim:int=0) -> Tensor:
-    first = tensors[0].unsqueeze(dim)
-    unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors[1:]]
+    unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors]
     # checks for shapes and number of dimensions delegated to cat
-    return first.cat(*unsqueezed_tensors, dim=dim)
+    return unsqueezed_tensors[0].cat(*unsqueezed_tensors[1:], dim=dim)
 
   def repeat(self, repeats:Sequence[int]) -> Tensor:
     base_shape = (1,) * (len(repeats) - self.ndim) + self.shape
@@ -465,14 +468,14 @@ class Tensor:
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
   # (padding_left, padding_right, padding_top, padding_bottom)
-  def pad2d(self, padding:Union[List[int], Tuple[int, ...]], value:float=0) -> Tensor:
+  def pad2d(self, padding:Sequence[int], value:float=0) -> Tensor:
     slc = [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], self.shape[::-1])][::-1]
     return self.slice([(0,s) for s in self.shape[:-(len(padding)//2)]] + slc, value=value)
 
   @property
   def T(self) -> Tensor: return self.transpose()
   def transpose(self, ax1=1, ax2=0) -> Tensor:
-    order = list(range(len(self.shape)))
+    order = list(range(self.ndim))
     order[ax1], order[ax2] = order[ax2], order[ax1]
     return self.permute(order)
   def flatten(self, start_dim=0): return self.reshape(shape=self.shape[:start_dim] + (-1,))

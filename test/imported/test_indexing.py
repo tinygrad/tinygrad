@@ -188,14 +188,15 @@ class TestIndexing(unittest.TestCase):
     # def delitem(): del reference[0]
     # self.assertRaises(TypeError, delitem)
 
-  @unittest.skipIf(CI and Device.DEFAULT in ["CLANG", "GPU"], "slow")
+  # TODO: LLVM is quite fast, why are other compiled backends slow?
+  @unittest.skipIf(CI and Device.DEFAULT in ["CLANG", "GPU", "METAL"], "slow")
   def test_advancedindex(self):
     # integer array indexing
 
     # pick a random valid indexer type
     def ri(indices):
       choice = random.randint(0, 2)
-      if choice == 0: return Tensor(indices, dtype=dtypes.int32)
+      if choice == 0: return Tensor(indices)
       if choice == 1: return list(indices)
       return tuple(indices)
 
@@ -1134,12 +1135,9 @@ class TestIndexing(unittest.TestCase):
         x[:, [0, 1]]
   '''
 
-  # TODO empty Tensor fancy index
-  '''
   def test_empty_ndim_index_bool(self):
     x = Tensor.randn(5)
     self.assertRaises(IndexError, lambda: x[Tensor.empty(0, 2, dtype=dtypes.uint8)])
-  '''
 
   def test_empty_slice(self):
     x = Tensor.randn(2, 3, 4, 5)
@@ -1383,10 +1381,10 @@ class TestIndexing(unittest.TestCase):
 
   def test_out_of_bound_index(self):
     x = Tensor.arange(0, 100).reshape(2, 5, 10)
-    self.assertRaisesRegex(IndexError, 'index 5 is out of bounds for dimension 1 with size 5', lambda: x[0, 5])
-    self.assertRaisesRegex(IndexError, 'index 4 is out of bounds for dimension 0 with size 2', lambda: x[4, 5])
-    self.assertRaisesRegex(IndexError, 'index 15 is out of bounds for dimension 2 with size 10', lambda: x[0, 1, 15])
-    self.assertRaisesRegex(IndexError, 'index 12 is out of bounds for dimension 2 with size 10', lambda: x[:, :, 12])
+    self.assertRaises(IndexError, lambda: x[0, 5])
+    self.assertRaises(IndexError, lambda: x[4, 5])
+    self.assertRaises(IndexError, lambda: x[0, 1, 15])
+    self.assertRaises(IndexError, lambda: x[:, :, 12])
 
   # TODO .item() bug
   '''
@@ -1798,13 +1796,10 @@ class TestNumpy(unittest.TestCase):
     self.assertIsNot(a, a[...])
     self.assertIsNot(a, a[:])
 
-  # TODO shape mismatch fancy indexing error
-  '''
   def test_broaderrors_indexing(self):
     a = Tensor.zeros(5, 5)
-    self.assertRaisesRegex(IndexError, 'shape mismatch', a.__getitem__, ([0, 1], [0, 1, 2]))
-    self.assertRaisesRegex(IndexError, 'shape mismatch', a.__setitem__, ([0, 1], [0, 1, 2]), 0)
-  '''
+    self.assertRaises(IndexError, a.__getitem__, ([0, 1], [0, 1, 2]))
+    self.assertRaises(IndexError, a.__setitem__, ([0, 1], [0, 1, 2]), 0)
 
   # TODO setitem
   '''

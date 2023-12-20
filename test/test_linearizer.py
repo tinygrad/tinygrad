@@ -126,7 +126,7 @@ def helper_realized_ast(r:Tensor):
   s = r.lazydata.schedule()
   run_schedule(s[:-1])  # run all kernels except the last one
   # now all input LazyBuffers buffers in s[-1] should be realized
-  output_buffer = Buffer(s[-1].out.device, prod((s if isinstance(s, int) else s.max for s in s[-1].out.shape)), s[-1].out.dtype, **s[-1].out._device_extra_args())  # allocate an output buffer
+  output_buffer = Buffer(s[-1].out.device, prod((s if isinstance(s, int) else s.max for s in s[-1].out.shape)), s[-1].out.dtype)  # allocate an output buffer
   return s[-1].ast, [output_buffer] + [l.realized for l in s[-1].inputs]
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
