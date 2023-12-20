@@ -226,9 +226,9 @@ def _diskcache_exec(table:str, key:Union[Dict, str, int], val:Optional[Any] = No
     _db_connection.commit()
     cur.close()
     return val
-  else: # get
-    res = cur.execute(f"SELECT val FROM {table}_{VERSION} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
-    if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
+  # get
+  res = cur.execute(f"SELECT val FROM {table}_{VERSION} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
+  if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
 
 def diskcache_get(table:str, key:Union[Dict, str, int]): return _diskcache_exec(table, key)
 def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
