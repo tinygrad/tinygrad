@@ -51,10 +51,10 @@ class TestLazyBuffer(unittest.TestCase):
     a = Tensor.ones(8,8,8)
     d1 = a.sum((0))
     d2 = a.sum((0)).reshape(32,2) # noqa: F841
-    assert len(d1.lazydata.base.srcs[0].children) == 0
+    assert len(d1.lazydata.base.srcs[0].base.children) == 1
     in1 = d1.reshape(16,4)
     d3 = in1.reshape(8,8)
-    assert len(d3.lazydata.base.srcs[0].children) == 0
+    assert len(d3.lazydata.base.srcs[0].base.children) == 1
 
     CacheCollector.start()
     l = Tensor.ones(8,8)
