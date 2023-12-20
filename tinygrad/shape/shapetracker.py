@@ -57,11 +57,15 @@ class ShapeTracker:
   def __post_init__(self):
     assert isinstance(self.views, tuple) and all(isinstance(v, View) for v in self.views), "ShapeTracker must be created with a tuple of Views"
 
-  def __add__(self, st:ShapeTracker) -> ShapeTracker: return ShapeTracker(self.views + st.views).simplify()
+  def __add__(self, st:ShapeTracker) -> ShapeTracker:
+    base = ShapeTracker(self.views)
+    for v in st.views:
+      base = ShapeTracker(base.views + (v,)).simplify()
+    return base
 
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[ShapeTracker]:
     ret = tuple(v.invert(s) for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]))
-    return ShapeTracker(cast(Tuple[View, ...], ret)) if all(x is not None for x in ret) else None
+    return ShapeTracker(cast(Tuple[View, ...], ret)).reshape(out_shape) if all(x is not None for x in ret) else None
 
   @staticmethod
   def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),))

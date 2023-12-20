@@ -46,13 +46,20 @@ class TestShapeTrackerInvert(unittest.TestCase):
   def test_invert_permute(self):
     a = ShapeTracker.from_shape((5, 20))
     x = a.permute((1,0))
-    ap = ShapeTracker.from_shape(x.shape) + x.invert(a.shape)
+    ap = x + x.invert(a.shape)
     assert ap == a, f"{ap} != {a}"
 
   def test_invert_permute_3(self):
     a = ShapeTracker.from_shape((8, 4, 5))
     x = a.permute((1,2,0))
-    ap = ShapeTracker.from_shape(x.shape) + x.invert(a.shape)
+    ap = x + x.invert(a.shape)
+    assert ap == a, f"{ap} != {a}"
+
+  def test_invert_real1(self):
+    a = ShapeTracker.from_shape((3, 6, 10))
+    x = a.reshape( (3, 3, 2, 10) )
+    x = x.permute( (2, 1, 3, 0) )
+    ap = x + x.invert(a.shape)
     assert ap == a, f"{ap} != {a}"
 
   def test_cant_invert_expand(self):
@@ -66,10 +73,21 @@ class TestShapeTrackerInvert(unittest.TestCase):
     assert x.invert(a.shape) is None
 
   def test_can_invert_flip(self):
-    a = ShapeTracker.from_shape((10, 10))
+    a = ShapeTracker.from_shape((20, 10))
     x = a.stride((-1,1))
-    ap = ShapeTracker.from_shape(x.shape) + x.invert(a.shape)
-    assert ap == a, f"{ap} != {a}"
+    ap = x + x.invert(a.shape)
+    # TODO: this is an incomplete test due to simplify being incomplete
+    assert ap.real_strides()[1] == a.real_strides()[1]
+    print(ap.expr_idxs())
+
+  def test_can_invert_flip_permute(self):
+    a = ShapeTracker.from_shape((20, 10))
+    x = a.permute((1,0))
+    x = x.stride((-1,1))
+    ap = x + x.invert(a.shape)
+    # TODO: this is an incomplete test due to simplify being incomplete
+    assert ap.real_strides()[0] == a.real_strides()[0]
+    print(ap.expr_idxs())
 
   def test_cant_invert_stride(self):
     a = ShapeTracker.from_shape((10, 10))

@@ -104,9 +104,9 @@ class View:
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[View]:
     ret = self.shrink(self.mask) if self.mask else self
     if prod(ret.shape) != prod(out_shape): return None   # don't support shrink, expand, or stride != (-1, 1)
-    ret = cast(View, ret.reshape(tuple(s for s in ret.shape if s != 1)))  # removing ones will never be an issue
-    ret = ret.stride(tuple(-1 if x < 0 else 1 for x in ret.strides))
-    return ret.permute(argsort(tuple(-x for x in ret.strides))).reshape(out_shape)
+    flips = tuple(-1 if x < 0 else 1 for x in ret.strides)
+    reorder = argsort(tuple(-abs(x) for x in ret.strides))
+    return View.create(ret.shape).stride(flips).permute(reorder)
 
   # MovementOps live here now
 
