@@ -372,7 +372,8 @@ class Tensor:
     new_shape = list(ret.shape)
     for dim in type_dim[None]: new_shape.insert(dim, 1)
     for dim in (dims_collapsed := [dim + sum(1 for d in type_dim[None] if dim >= d) for dim in reversed(type_dim[int])]): new_shape.pop(dim)
-    assert all_int(new_shape), f"does not support symbolic shape {new_shape}"
+    # TypeGuard in all_int turns new_shape type hint into a tuple
+    assert all(isinstance(s, int) for s in new_shape), f"does not support symbolic shape {new_shape}"
 
     ret = ret.reshape(tuple(new_shape))
 
@@ -390,12 +391,11 @@ class Tensor:
         if not (dtypes.is_int(t.dtype) or t.dtype == dtypes.bool): raise IndexError("tensors used as indices must be int or bool tensors")
 
       # broadcasting for final shape
-      try: max_dim = len(broadcasted_shape := reduce(lambda x,y: x._broadcasted(y)[0], idx).shape)
-      except AssertionError as exc: raise IndexError("cannot broadcast") from exc
+      try: max_dim = len(broadcasted_shape := list(reduce(lambda x,y: x._broadcasted(y)[0], idx).shape))
+      except AssertionError as exc: raise IndexError("cannot broadcast Tensor indices") from exc
 
       if empty_idx or 0 in self.shape:
-        final_shape = tuple(new_shape)[:tdim[0]] + broadcasted_shape + tuple(new_shape)[tdim[0]+len(idx):]
-        ret = Tensor.empty(final_shape, dtype=ret.dtype, requires_grad=ret.requires_grad)
+        ret = Tensor.empty(new_shape[:tdim[0]] + broadcasted_shape + new_shape[tdim[0]+len(idx):], dtype=ret.dtype, requires_grad=ret.requires_grad)
       else:
         sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(tdim)]
         arange = [Tensor.arange(ret.shape[d], requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, tdim))]   # noqa: E501
