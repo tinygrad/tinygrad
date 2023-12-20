@@ -33,27 +33,26 @@ class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                base:Optional[LazyBuffer]=None):
-    self.device, self.st, self.dtype = device, st, dtype
-    self.shape = self.st.shape
-    assert base is None or base.base == base
-    assert base is None or len(srcs) == 0
-    self._base = base
-    self.children: WeakSet[LazyBuffer] = WeakSet()
-    for x in srcs: x.base.children.add(self.base)
-    self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
-    self._realized: Optional[Buffer] = None
-    self.output_buffer: Optional[Buffer] = None
-    self.forced_realize = False
-    self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
+    self.device, self.st, self.dtype, self.shape = device, st, dtype, st.shape
+    if base is None:
+      # properties on base
+      self.children: WeakSet[LazyBuffer] = WeakSet()
+      for x in srcs: x.base.children.add(self.base)
+      self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
+      self.realized: Optional[Buffer] = None
+      self.output_buffer: Optional[Buffer] = None
+      self.forced_realize = False
+      self.contiguous_child: Optional[ReferenceType[LazyBuffer]] = None
+    else:
+      # properties on view
+      assert base.base == base, "base must be a base itself"
+      self._base = base
 
   def __repr__(self) -> str:
-    return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.op} {self.realized}>"
+    return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.st if self.base != self else (self.op, self.realized)}>"
 
   @property
-  def base(self) -> LazyBuffer: return self._base if self._base is not None else self
-
-  @property
-  def realized(self): return self.base._realized
+  def base(self) -> LazyBuffer: return self._base if hasattr(self, '_base') else self
 
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None) -> LazyBuffer:
@@ -65,7 +64,9 @@ class LazyBuffer:
   def contiguous(self):
     if not self.st.contiguous or self.st.size() != self.base.st.size() or self.is_unrealized_const():
       ret = self.e(LoadOps.CONTIGUOUS)
-      self.base.contiguous_child = (ref(ret), self.st)
+      sti = self.st.invert(self.shape)
+      if sti:
+        self.base.contiguous_child = ref(ret._view(sti))
       return ret
     self.base.forced_realize = True
     return self
@@ -74,20 +75,20 @@ class LazyBuffer:
     if self.dtype == dtype: return self
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
 
-  def is_unrealized_const(self): return not self.realized and self.base.op == LoadOps.CONST
-  def is_unrealized_contiguous_const(self): return not self.realized and self.op == LoadOps.CONST
+  def is_unrealized_const(self): return not self.base.realized and self.base.op == LoadOps.CONST
+  def is_unrealized_contiguous_const(self): return self.base == self and not self.base.realized and self.op == LoadOps.CONST
 
   def schedule(self, seen=None): return create_schedule([self], seen)
 
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:
     ret = LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), dtypes.from_np(x.dtype), op=LoadOps.EMPTY)
-    ret._realized = Buffer("CPU", prod(x.shape), dtypes.from_np(x.dtype), x.flatten())
+    ret.realized = Buffer("CPU", prod(x.shape), dtypes.from_np(x.dtype), x.flatten())
     return ret
 
   def copy_to_device(self, device:str) -> LazyBuffer:
     # COPY there and back = no COPY at all
-    if not self.realized and self.op == LoadOps.COPY and self.srcs[0].device == device: return self.srcs[0]
+    if self.base == self and not self.realized and self.op == LoadOps.COPY and self.srcs[0].device == device: return self.srcs[0]
 
     # TODO: const doesn't have to be copied (issues with disk tensor)
     #if self.is_unrealized_const(): return self.const(self.base.arg)._view(self.st)
@@ -98,15 +99,10 @@ class LazyBuffer:
     srcs = (self,)+srcs
     new_srcs = []
     for s in srcs:
-      if s.contiguous_child is not None:
-        wroot, st = s.contiguous_child
-        root: Optional[LazyBuffer] = wroot()
-        if root is not None:
-          sti = st.invert(root.shape)
-          if sti is not None:
-            new_srcs.append(root._view(sti))
-            continue
-      new_srcs.append(s)
+      if s == s.base and s.base.contiguous_child and (root:=s.base.contiguous_child()) is not None:
+        new_srcs.append(root)
+      else:
+        new_srcs.append(s)
     srcs = tuple(new_srcs)
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), max(x.dtype for x in srcs), op, arg, srcs)
 
@@ -205,13 +201,12 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None], simple_pads:Set[LazyBuffer]):
-  if buf in allbufs or buf.realized: return
+  if buf in allbufs or buf.base.realized: return
   log_lazybuffer(buf)
   if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
                                             not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
     if DEBUG >= 3: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
     buf.dtype = dtypes.float32  # NOTE; this is what makes the dtype above not match
-  if buf.forced_realize: realizes.add(buf)
   if buf.base != buf:
     # realize all places where the buffer is expanded
     if prod(buf.base.st.shape) < prod(buf.st.shape):
@@ -221,10 +216,11 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
       else:
         realizes.add(buf.base)
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads)
+  if buf.forced_realize: realizes.add(buf)
   allbufs[buf] = None
   if buf.op in LoadOps: realizes.add(buf.base)
   if buf.op == LoadOps.COPY:
-    assert buf.srcs[0].st.contiguous and buf.srcs[0].st.size() == buf.srcs[0].base.st.size()
+    assert buf.srcs[0].st.contiguous and buf.srcs[0].st.size() == buf.srcs[0].base.st.size(), "can only copy contig"
     realizes.add(buf.srcs[0].base)
   for x in buf.srcs: _recurse_lb(x, realizes, allbufs, simple_pads)
 
@@ -240,7 +236,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   for out in outs: log_lazybuffer(out, scheduled=True)
 
   # start by just realizing the buffers passed in
-  realizes: Set[LazyBuffer] = set([x.base for x in outs if not x.realized])
+  realizes: Set[LazyBuffer] = set([x.base for x in outs if not x.base.realized])
   allbufs: Dict[LazyBuffer, None] = {}
   simple_pads: Set[LazyBuffer] = set()
   for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads)
