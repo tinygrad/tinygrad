@@ -395,7 +395,8 @@ class Tensor:
       except AssertionError as exc: raise IndexError("cannot broadcast Tensor indices") from exc
 
       if empty_idx or 0 in self.shape:
-        ret = Tensor.empty(new_shape[:tdim[0]] + broadcasted_shape + new_shape[tdim[0]+len(idx):], dtype=ret.dtype, requires_grad=ret.requires_grad)
+        for d in reversed(tdim): new_shape.pop(d)
+        ret = Tensor.empty(new_shape[:tdim[0]] + broadcasted_shape + new_shape[tdim[0]:], dtype=ret.dtype, requires_grad=ret.requires_grad)
       else:
         sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(tdim)]
         arange = [Tensor.arange(ret.shape[d], requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, tdim))]   # noqa: E501

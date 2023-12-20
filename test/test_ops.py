@@ -1376,7 +1376,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,b,c,d,e)], lambda x: x[(i,j,k,o,p)])
 
   def test_slice_fancy_indexing_with_0_shape_tensors(self):
-    # due to there being zeros in shape, forward only is True
+    # due to there being zeros in shape, we're not testing backward
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()  # noqa
     shapes = [(1,1,0,1), (4,0,4)]
     q,r = [torch.empty(size=sh, dtype=torch.int64, requires_grad=False) for sh in shapes]
@@ -1384,10 +1384,12 @@ class TestOps(unittest.TestCase):
     # indexing normal tensor with 0 shape indices
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[:,q], lambda x: x[:,z], forward_only=True)
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[:,q,r], lambda x: x[:,z,y], forward_only=True)
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[:,q,:,r], lambda x: x[:,z,:,y], forward_only=True)
     # indexing 0 shape tensor with normal indices
     helper_test_op([(2,5,0,5,3,4)], lambda x: x[:,b], lambda x: x[:,j], forward_only=True)
     # indexing 0 shape tensor with 0 shape indices
     helper_test_op([(2,5,0,5,3,4)], lambda x: x[:,q], lambda x: x[:,z], forward_only=True)
+    helper_test_op([(2,5,0,5,3,4)], lambda x: x[:,q,:,r], lambda x: x[:,z,:,y], forward_only=True)
 
 
   def test_slice_fancy_indexing_errors(self):
