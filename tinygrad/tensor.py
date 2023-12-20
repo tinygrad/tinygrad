@@ -150,20 +150,17 @@ class Tensor:
 
   @staticmethod
   def _loadop(op, shape, device:Optional[str]=None, dtype:Optional[DType]=None, arg=None, **kwargs):
-    assert all_int(shape), f"cannot create with symbolic shape {shape}"
     return Tensor(LazyBuffer.loadop(op, shape, dtype or dtypes.default_float, Device.canonicalize(device), arg), dtype=dtype, device=device, **kwargs)
 
   @staticmethod
-  def empty(*shape, **kwargs):
-    return Tensor._loadop(LoadOps.EMPTY, argfix(*shape), **kwargs)
+  def empty(*shape, **kwargs): return Tensor._loadop(LoadOps.EMPTY, argfix(*shape), **kwargs)
 
   _seed: int = int(time.time())
   @staticmethod
   def manual_seed(seed=0): Tensor._seed = seed
 
   @staticmethod
-  def rand(*shape, **kwargs):
-    return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, **kwargs)
+  def rand(*shape, **kwargs): return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, **kwargs)
 
   # ***** creation helper functions *****
 
