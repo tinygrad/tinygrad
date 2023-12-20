@@ -33,45 +33,39 @@ def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tu
   return tuple(ret)
 
 @functools.lru_cache(maxsize=None)
-def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tuple[Tuple[sint, sint], ...]], Optional[Tuple[sint, ...]], bool]:
-  if view.mask is None: return view.mask, None, False
-  if any(not isinstance(m[0], int) or not isinstance(m[1], int) for m in view.mask): return view.mask, None, True
+def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tuple[Tuple[sint, sint], ...]], bool]:
+  if view.mask is None: return view.mask, False
+  if any(not isinstance(m[0], int) or not isinstance(m[1], int) for m in view.mask): return view.mask, True
   new_mask: List[Tuple[int, int]] = []
 
   r_masks, r_shape, r_new_shape = reversed(view.mask), reversed(view.shape), reversed(new_shape)
-  curr_stride, off, offsets, old_dim, new_dim, mask = 1, 0, [], next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
-  #  off represents offset while combining masks of range one & zero stride
-  if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape), None, False # invalid mask
+  curr_stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
+  if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape), False # invalid mask
 
   while len(new_mask) < len(new_shape):
     (l, r), next_stride = mask, new_dim * curr_stride
 
     if old_dim >= next_stride: # need to split mask.
-      offsets.append(off)
-
       if old_dim == next_stride: # simply copy the mask and get next batch for merging
         new_mask.append((l // curr_stride, (r - 1) // curr_stride + 1))
-        curr_stride, off, old_dim, new_dim, mask = 1, 0, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
-        if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape), None, False # invalid mask
+        curr_stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
+        if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape), False # invalid mask
 
       else: # mask can only be splitted if reshape doesn't cut across the mask.
-        if ((l % next_stride != 0 or r % next_stride != 0) and l // next_stride != (r - 1) // next_stride): return view.mask, None, True
+        if ((l % next_stride != 0 or r % next_stride != 0) and l // next_stride != (r - 1) // next_stride): return view.mask, True
         new_mask.append((l % next_stride // curr_stride, (r - 1) % next_stride // curr_stride + 1))
         curr_stride, new_dim = next_stride,  next(r_new_shape, 1) # need to get mask for next dimension
 
     else:
-      # TODO: fix this, it's incorrect
-      return view.mask, None, True
-      # next_mask = next(r_masks, (0, 1))
-      # # combine if the mask can unfold continuously
-      # if mask != (0, old_dim) and next_mask[1] - next_mask[0] != 1: return view.mask, None, True
-      # if next_mask != (0, 1) and mask != (0, 1) and (next_mask[1] - next_mask[0] == 1): off += next_mask[0] * old_dim
-      # mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), old_dim * next(r_shape, 1)
+      next_mask = next(r_masks, (0, 1))
+      # combine if the mask can unfold continuously
+      if mask != (0, old_dim) and next_mask[1] - next_mask[0] != 1: return view.mask, True
+      mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), old_dim * next(r_shape, 1)
 
   for mask in r_masks: # if the old shape has leading 1s, need to make sure their mask is (0,1)
-    if mask != (0, 1): return ((0, 0),) * len(new_shape), None, False
+    if mask != (0, 1): return ((0, 0),) * len(new_shape), False # invalid mask
 
-  return tuple(reversed(new_mask)), tuple(offsets), False
+  return tuple(reversed(new_mask)), False
 
 @dataclass(frozen=True)
 class View:
@@ -190,8 +184,9 @@ class View:
       if acc != merged_dim: break
     else:
       strides += [0,] * (len(new_shape) - len(strides))
-      mask, off_mask, extra = _reshape_mask(self, new_shape)
-      total_offset = sum([off * s for off, s in zip(off_mask, strides)]) if off_mask else 0
-      if not extra: return View.create(new_shape, tuple(reversed(strides)), self.offset - total_offset, mask)
+      mask, extra = _reshape_mask(self, new_shape)
+      fstrides = filter_strides(tuple(e-b for b,e in mask) if mask else new_shape, tuple(reversed(strides)))
+      extra_offset = (sum(m[0] * s for m,s in zip(self.mask, self.strides)) if self.mask else 0) - (sum(m[0] * s for m,s in zip(mask, fstrides)) if mask else 0) # noqa: E501
+      if not extra: return View.create(new_shape, fstrides, self.offset + extra_offset, mask)
 
     return None
