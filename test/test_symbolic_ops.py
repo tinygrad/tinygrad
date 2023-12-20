@@ -46,6 +46,7 @@ class TestSymbolicOps(unittest.TestCase):
       expected = f(q, k, v).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
+  @unittest.skipIf(getenv("MOCKHIP"), "MOCKHIP only compiles and does not run")
   def test_attention_training(self):
     with Tensor.train():
       self.test_attention(dropout_p=0.0)

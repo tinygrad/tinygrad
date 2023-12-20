@@ -1,14 +1,11 @@
 from __future__ import annotations
-import functools
+import functools, itertools
 from math import gcd
-from itertools import product
 from tinygrad.helpers import partition
 from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Iterator, Set
 
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
-
-def is_sym_int(x: Any) -> bool: return isinstance(x, (int, Node))
 
 class Node:
   b: Union[Node, int]
@@ -29,7 +26,7 @@ class Node:
     return [self.substitute(dict(zip(idxs, (NumNode(x) for x in rep)))) for rep in Node.iter_idxs(idxs)]
   @staticmethod
   def iter_idxs(idxs:Tuple[VariableOrNum, ...]) -> Iterator[Tuple[int,...]]:
-    yield from (x[::-1] for x in product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
+    yield from (x[::-1] for x in itertools.product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
   # substitute Variables with the values in var_vals
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: raise RuntimeError(self.__class__.__name__)
   def unbind(self) -> Tuple[Node, Optional[int]]: return self.substitute({v: v.unbind()[0] for v in self.vars() if v.val is not None}), None
