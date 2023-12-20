@@ -451,17 +451,14 @@ class TestIndexing(unittest.TestCase):
     # test invalid index fails
     reference = Tensor.empty(10)
     for err_idx in (10, -11):
-      # TODO change regex
-      '''
-      with self.assertRaisesRegex(IndexError, r'out of'):
-        reference[err_idx]
-      '''
+      with self.assertRaises(IndexError): reference[err_idx]
+
       # TODO: cannot check for out of bounds with Tensor indexing
       # see test_ops.py: test_slice_fancy_indexing_errors()
       '''
-      with self.assertRaisesRegex(IndexError, r'out of'):
+      with self.assertRaises(IndexError):
         reference[Tensor([err_idx], dtype=dtypes.int64)]
-      with self.assertRaisesRegex(IndexError, r'out of'):
+      with self.assertRaises(IndexError):
         reference[[err_idx]]
       '''
 
@@ -1134,7 +1131,7 @@ class TestIndexing(unittest.TestCase):
 
     # TODO cannot check for out of bounds with Tensor indexing
     '''
-    with self.assertRaisesRegex(IndexError, 'for dimension with size 0'):
+    with self.assertRaises(IndexError):
         x[:, [0, 1]]
     '''
 
@@ -1356,37 +1353,34 @@ class TestIndexing(unittest.TestCase):
 
   # TODO unravel_index
   # def test_unravel_index_errors(self):
-  #   with self.assertRaisesRegex(TypeError, r"expected 'indices' to be integer"):
+  #   with self.assertRaises(TypeError):
   #     unravel_index(
   #       Tensor(0.5),
   #       (2, 2))
 
-  #   with self.assertRaisesRegex(TypeError, r"expected 'indices' to be integer"):
+  #   with self.assertRaises(TypeError):
   #     unravel_index(
   #       Tensor([]),
   #       (10, 3, 5))
 
-  #   with self.assertRaisesRegex(TypeError, r"expected 'shape' to be int or sequence"):
+  #   with self.assertRaises(TypeError):
   #     unravel_index(
   #       Tensor([1], dtype=dtypes.int64),
   #       Tensor([1, 2, 3]))
 
-  #   with self.assertRaisesRegex(TypeError, r"expected 'shape' sequence to only contain ints"):
+  #   with self.assertRaises(TypeError):
   #     unravel_index(
   #       Tensor([1], dtype=dtypes.int64),
   #       (1, 2, 2.0))
 
-  #   with self.assertRaisesRegex(ValueError, r"'shape' cannot have negative values, but got \(2, -3\)"):
+  #   with self.assertRaises(ValueError):
   #     unravel_index(
   #       Tensor(0),
   #       (2, -3))
 
   def test_invalid_index(self):
-    # TODO change regex
-    '''
     x = Tensor.arange(0, 16).reshape(4, 4)
-    self.assertRaisesRegex(TypeError, 'slice indices', lambda: x["0":"1"])
-    '''
+    self.assertRaises(TypeError, lambda: x["0":"1"])
 
   def test_out_of_bound_index(self):
     x = Tensor.arange(0, 100).reshape(2, 5, 10)
@@ -1405,7 +1399,7 @@ class TestIndexing(unittest.TestCase):
       print(x[0])
       return x[0]
 
-    self.assertRaisesRegex(IndexError, 'invalid index', runner)
+    self.assertRaises(IndexError, runner)
   '''
 
   # TODO not too sure
@@ -1486,24 +1480,24 @@ class TestIndexing(unittest.TestCase):
       indices = argsort(t, dim=dim)
 
       # dim of `t` and `indices` does not match
-      with self.assertRaisesRegex(RuntimeError, "input and indices should have the same number of dimensions"):
+      with self.assertRaises(RuntimeError):
         t.gather(indices[0], dim=0)
 
       # invalid `indices` dtype
-      with self.assertRaisesRegex(RuntimeError, r"dtype of indices should be Long"):
+      with self.assertRaises(RuntimeError):
         t.gather(indices.cast(dtypes.bool), dim=0)
 
-      with self.assertRaisesRegex(RuntimeError, r"dtype of indices should be Long"):
+      with self.assertRaises(RuntimeError):
         t.gather(indices.cast(dtypes.float32), dim=0)
 
-      with self.assertRaisesRegex(RuntimeError, r"dtype of indices should be Long"):
+      with self.assertRaises(RuntimeError):
         t.gather(indices.cast(dtypes.int32), dim=0)
 
       # invalid axis
-      with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+      with self.assertRaises(IndexError):
         t.gather(indices, dim=-7)
 
-      with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+      with self.assertRaises(IndexError):
         t.gather(t, indices, dim=7)
   '''
 
@@ -1516,16 +1510,16 @@ class TestIndexing(unittest.TestCase):
     t = make_tensor(shape, dtype=dtype)
     indices = argsort(t, dim=dim)
 
-    with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+    with self.assertRaises(RuntimeError):
       torch.gather(t, 0, indices.cpu())
 
-    with self.assertRaisesRegex(RuntimeError, r"Expected tensor to have .* but got tensor with .* torch.take_along_dim()"):
+    with self.assertRaises(RuntimeError):
       torch.take_along_dim(t, indices.cpu(), dim=0)
 
-    with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+    with self.assertRaises(RuntimeError):
       torch.gather(t.cpu(), 0, indices)
 
-    with self.assertRaisesRegex(RuntimeError, r"Expected tensor to have .* but got tensor with .* torch.take_along_dim()"):
+    with self.assertRaises(RuntimeError):
       torch.take_along_dim(t.cpu(), indices, dim=0)
   '''
 
@@ -1682,15 +1676,15 @@ class TestNumpy(unittest.TestCase):
     arr = Tensor.ones((5, 4, 3))
 
     index = Tensor([True])
-    self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
+    self.assertRaises(IndexError)
 
     index = Tensor([False] * 6)
-    self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
+    self.assertRaises(IndexError)
 
     # index = torch.ByteTensor(4, 4).to(device).zero_()
     index = Tensor.zeros(4, 4, dtype=dtypes.uint8)
-    self.assertRaisesRegex(IndexError, 'mask', lambda: arr[index])
-    self.assertRaisesRegex(IndexError, 'mask', lambda: arr[(slice(None), index)])
+    self.assertRaises(IndexError)
+    self.assertRaises(IndexError, lambda: arr[(slice(None), index)])
   '''
 
   # TODO setitem
@@ -1718,9 +1712,9 @@ class TestNumpy(unittest.TestCase):
     def f(a, v):
       a[a > -1] = Tensor(v)
 
-    self.assertRaisesRegex(Exception, 'shape mismatch', f, a, [])
-    self.assertRaisesRegex(Exception, 'shape mismatch', f, a, [1, 2, 3])
-    self.assertRaisesRegex(Exception, 'shape mismatch', f, a[:1], [1, 2, 3])
+    self.assertRaises(Exception, f, a, [])
+    self.assertRaises(Exception, f, a, [1, 2, 3])
+    self.assertRaises(Exception, f, a[:1], [1, 2, 3])
   '''
 
   # TODO setitem
