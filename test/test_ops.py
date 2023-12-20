@@ -1381,14 +1381,11 @@ class TestOps(unittest.TestCase):
     shapes = [(1,1,0,1), (4,0,4)]
     q,r = [torch.empty(size=sh, dtype=torch.int64, requires_grad=False) for sh in shapes]
     z,y = [Tensor.empty(tuple(t.shape), dtype=dtypes.int, requires_grad=False) for t in (q,r)]
-
     # indexing normal tensor with 0 shape indices
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[:,q], lambda x: x[:,z], forward_only=True)
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[:,q,r], lambda x: x[:,z,y], forward_only=True)
-
     # indexing 0 shape tensor with normal indices
     helper_test_op([(2,5,0,5,3,4)], lambda x: x[:,b], lambda x: x[:,j], forward_only=True)
-
     # indexing 0 shape tensor with 0 shape indices
     helper_test_op([(2,5,0,5,3,4)], lambda x: x[:,q], lambda x: x[:,z], forward_only=True)
 
