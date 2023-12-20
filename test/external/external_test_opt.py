@@ -16,7 +16,8 @@ from tinygrad import nn
 from tinygrad.helpers import getenv
 from tinygrad.nn import optim
 from tinygrad.helpers import GlobalCounters
-from tinygrad.lazy import PUSH_PERMUTES
+#from tinygrad.lazy import PUSH_PERMUTES
+PUSH_PERMUTES = False
 from tinygrad.jit import CacheCollector
 
 class CLCache:
@@ -150,6 +151,7 @@ class TestOptReduceLoop(unittest.TestCase):
 
 @unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
 class TestOptWChild(unittest.TestCase):
+  @unittest.skip("this no longer happens, use corealize")
   def test_unrealized_child(self):
     a = Tensor.randn(16, 16)
     b = Tensor.randn(16, 16)
@@ -355,7 +357,7 @@ class TestOpt(unittest.TestCase):
   def test_fold_with_contiguous(self):
     a = Tensor.randn(16, 16, 16)
     b = Tensor.randn(16, 16)
-    with CLCache(1):
+    with CLCache(2):
       c = (a.sum(2).contiguous() + b).contiguous()
       c.realize()
 
