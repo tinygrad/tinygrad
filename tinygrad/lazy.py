@@ -64,9 +64,8 @@ class LazyBuffer:
   def contiguous(self):
     if not self.st.contiguous or self.st.size() != self.base.st.size() or self.is_unrealized_const():
       ret = self.e(LoadOps.CONTIGUOUS)
-      sti = self.st.invert(self.shape)
-      if sti:
-        self.base.contiguous_child = ref(ret._view(sti))
+      #sti = self.st.invert(self.shape)
+      #if sti: self.base.contiguous_child = ref(ret._view(sti))
       return ret
     self.base.forced_realize = True
     return self
@@ -159,6 +158,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
 
   # if a CONTIGUOUS made it all the way here, just skip it
   if buf.op == LoadOps.CONTIGUOUS:
+    assert first
     return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, False)
 
   # if it's a reduce, we have to change the shapetracker
