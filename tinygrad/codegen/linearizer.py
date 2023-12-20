@@ -525,8 +525,8 @@ class Linearizer(Kernel):
     # MULACC fusion. TODO: this is copied from Interpreted
     if x.op == ReduceOps.SUM:
       cast_op = x.src[0] if x.src[0].op == UnaryOps.CAST else None
-      mul_op = cast_op.src[0] if cast_op is not None and cast_op.src[0].op == BinaryOps.MUL else x.src[0] if x.src[0].op == BinaryOps.MUL else None
-      if mul_op is not None and dtypes.is_float(get_lazyop_info(x).dtype): x = LazyOp(TernaryOps.MULACC, mul_op.src, x.arg)
+      op = (cast_op if cast_op is not None else x).src[0]
+      if op.op == BinaryOps.MUL and dtypes.is_float(get_lazyop_info(x).dtype): x = LazyOp(TernaryOps.MULACC, op.src, x.arg)
     values = [self.ast_parse(cast(LazyOp, v), acc, offs, loaded_buffers, loop_ctx=loop_ctx) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:
