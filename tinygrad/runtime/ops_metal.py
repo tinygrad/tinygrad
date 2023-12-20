@@ -89,7 +89,7 @@ class MetalDevice(Compiled):
     self.mtl_io_queue = unwrap2(self.device.newIOCommandQueueWithDescriptor_error_(Metal.MTLIOCommandQueueDescriptor.new(), None))
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
-    from tinygrad.features.graph.metal import MetalGraph
+    from tinygrad.runtime.graph.metal import MetalGraph
     super().__init__(MetalAllocator(self), LinearizerOptions(device="METAL"), MetalRenderer,
                      compile_metal, functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
   def synchronize(self):

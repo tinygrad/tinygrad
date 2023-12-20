@@ -40,11 +40,11 @@ class TestRealWorld(unittest.TestCase):
     gc.collect()
     global global_mem_used
     global_mem_used = GlobalCounters.mem_used
-    self.old_type = Tensor.default_type
+    self.old_float = dtypes.default_float
     np.random.seed(2002)
 
   def tearDown(self):
-    Tensor.default_type = self.old_type
+    dtypes.default_float = self.old_float
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(CI, "too big for CI")
@@ -68,7 +68,7 @@ class TestRealWorld(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp1")
   def test_llama(self):
-    Tensor.default_type = dtypes.float16
+    dtypes.default_float = dtypes.float16
 
     args_tiny = {"dim": 1024, "hidden_dim": 2048, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
     model = LLaMaTransformer(**(args_tiny if CI else LLAMA_MODEL_PARAMS["1"]["7B"]["args"]))
@@ -80,7 +80,7 @@ class TestRealWorld(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp16")
   def test_gpt2(self):
-    Tensor.default_type = dtypes.float16
+    dtypes.default_float = dtypes.float16
 
     args_tiny = {"dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-5, "vocab_size": 1000}
     model = GPT2Transformer(**(args_tiny if CI else GPT2_MODEL_PARAMS["gpt2-medium"]))
