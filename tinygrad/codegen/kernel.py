@@ -114,7 +114,7 @@ class Kernel:
   def copy(self):
     ret = deepcopy(self)
     # uncached since linearize didn't run
-    ret.applied_opts_cache = None
+    ret.applied_opts_cache, ret.local_alias = None, self.local_alias.copy()
     return ret
 
   @property
