@@ -28,6 +28,7 @@ class CStyleLanguage(NamedTuple):
   external_local_bufs: bool = False
   uses_ptr_arithmetic: bool = False
   launch_bounds: bool = False
+  bitcast_fun = lambda dtype, x: f"(*(({dtype}*)&{x}))"
   code_for_op: Dict = {
     UnaryOps.NEG: lambda x,dtype: f"(-{x})" if dtype != dtypes.bool else f"(!{x})",
     UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})",
@@ -41,7 +42,7 @@ class CStyleLanguage(NamedTuple):
 
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
-    if bitcast: return f"(*(({var_dtype.name}*)&{x[0]}))"
+    if bitcast: return self.bitcast_fun(self.type_map.get(var_dtype) or var_dtype.name, x[0])
     if len(x) == 1: return f"({var_dtype.name})({x[0]})"
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.float4 is not None, "vectorized cast is not supported on this platform"
@@ -224,8 +225,7 @@ class OpenCLLanguage(CStyleLanguage):
   # NOTE: mad is used so the loads aren't reordered into the math on 845
   code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda a,b,c,dtype: f"mad({a},{b},{c})"}
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
-  def render_cast(self, x, var_dtype, bitcast=False) -> str:
-    return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
+  bitcast_fun = lambda dtype, x: f"as_{dtype}({x})"
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
 class MetalLanguage(CStyleLanguage):
@@ -239,8 +239,7 @@ class MetalLanguage(CStyleLanguage):
   gid = [f"gid.{chr(120+i)}" for i in range(3)]
   lid = [f"lid.{chr(120+i)}" for i in range(3)]
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
-  def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
-    return f"as_type<{var_dtype.name}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
+  bitcast_fun = lambda dtype, x: f"as_type<{dtype}>({x})"
 MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 
 code_for_op_half = {
