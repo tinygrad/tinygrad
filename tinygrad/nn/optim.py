@@ -32,6 +32,7 @@ class SGD(Optimizer):
   def step(self) -> None:
     for i, t in enumerate(self.params):
       assert t.grad is not None
+      t.grad.realize()    # TODO: why is it wrong without this
       g = t.grad + self.wd * t.detach()
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
