@@ -1,5 +1,21 @@
 import unittest
+from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.symbolic import Variable, sym_infer
+
+def st_equal(st1, st2) -> bool:
+  if st1.shape != st2.shape: return False
+  if st1 == st2: return True
+  idx = Variable("idx", 0, prod(st1.shape)-1)
+  st1_idx, st1_valid = st1.expr_node(idx)
+  st2_idx, st2_valid = st2.expr_node(idx)
+  for i in range(idx.min, idx.max):
+    st1_off = sym_infer(st1_idx, {idx: i})
+    st2_off = sym_infer(st2_idx, {idx: i})
+    st1_v = sym_infer(st1_valid, {idx: i})
+    st2_v = sym_infer(st2_valid, {idx: i})
+    if st1_v != st2_v or (st1_off != st2_off and st1_v): return False
+  return True
 
 class TestShapeTrackerBasics(unittest.TestCase):
   def test_pad_shrink_removes_mask(self):
@@ -76,18 +92,14 @@ class TestShapeTrackerInvert(unittest.TestCase):
     a = ShapeTracker.from_shape((20, 10))
     x = a.stride((-1,1))
     ap = x + x.invert(a.shape)
-    # TODO: this is an incomplete test due to simplify being incomplete
-    assert ap.real_strides()[1] == a.real_strides()[1]
-    print(ap.expr_idxs())
+    assert st_equal(ap, a)
 
   def test_can_invert_flip_permute(self):
     a = ShapeTracker.from_shape((20, 10))
     x = a.permute((1,0))
     x = x.stride((-1,1))
     ap = x + x.invert(a.shape)
-    # TODO: this is an incomplete test due to simplify being incomplete
-    assert ap.real_strides()[0] == a.real_strides()[0]
-    print(ap.expr_idxs())
+    assert st_equal(ap, a)
 
   def test_cant_invert_stride(self):
     a = ShapeTracker.from_shape((10, 10))
@@ -99,8 +111,8 @@ class TestShapeTrackerInvert(unittest.TestCase):
     x = a.pad( ((2, 0), (0, 0)) )
     x = x.reshape( (2, 2, 5) )
     x = x.reshape( (4, 5) )
-    ap = ShapeTracker.from_shape(x.shape) + x.invert(a.shape)
-    assert ap == a, f"{ap} != {a}"
+    ap = x + x.invert(a.shape)
+    assert st_equal(ap, a)
 
 if __name__ == '__main__':
   unittest.main()

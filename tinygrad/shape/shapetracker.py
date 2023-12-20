@@ -59,8 +59,7 @@ class ShapeTracker:
 
   def __add__(self, st:ShapeTracker) -> ShapeTracker:
     base = ShapeTracker(self.views)
-    for v in st.views:
-      base = ShapeTracker(base.views + (v,)).simplify()
+    for v in st.views: base = ShapeTracker(base.views + (v,)).simplify() # one view at a time = better simplification
     return base
 
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[ShapeTracker]:

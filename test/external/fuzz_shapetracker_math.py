@@ -1,11 +1,11 @@
 import random
 from typing import List
 from tqdm import trange
-from tinygrad.helpers import getenv, DEBUG, colored, prod
+from tinygrad.helpers import getenv, DEBUG, colored
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, sym_infer
 from test.external.fuzz_shapetracker import shapetracker_ops
 from test.external.fuzz_shapetracker import do_permute, do_reshape_split_one, do_reshape_combine_two, do_flip, do_pad
+from test.unit.test_shapetracker_math import st_equal
 
 class MultiShapeTracker:
   def __init__(self, sts:List[ShapeTracker]): self.sts = sts
@@ -29,7 +29,7 @@ def fuzz_plus():
 
 # shrink and expand aren't invertible, and stride is only invertible in the flip case
 # do_pad and do_flip were removed because simplify isn't good
-invertible_shapetracker_ops = [do_permute, do_reshape_split_one, do_reshape_combine_two, do_flip] #, do_flip]
+invertible_shapetracker_ops = [do_permute, do_reshape_split_one, do_reshape_combine_two, do_flip, do_pad]
 
 def fuzz_invert():
   start = ShapeTracker.from_shape((random.randint(1, 10), random.randint(1, 10), random.randint(1, 10)))
@@ -44,32 +44,13 @@ if __name__ == "__main__":
   total = getenv("CNT", 1000)
   for fuzz in [globals()[f'fuzz_{x}'] for x in getenv("FUZZ", "invert,plus").split(",")]:
     good = 0
-    for _ in trange(total):
+    for _ in trange(total, desc=f"{fuzz}"):
       st1, st2 = fuzz()
-      bad = False
-      #if st1 == st2 and False:
-        # simplify is good enough to tell they are the same
-        #good += 1
-      if st1.shape == st2.shape:
-        # otherwise we have to check them
-        idx = Variable("idx", 0, prod(st1.shape)-1)
-        st1_idx, st1_valid = st1.expr_node(idx)
-        st2_idx, st2_valid = st2.expr_node(idx)
-        for i in range(idx.min, idx.max):
-          st1_off = sym_infer(st1_idx, {idx: i})
-          st2_off = sym_infer(st2_idx, {idx: i})
-          st1_v = sym_infer(st1_valid, {idx: i})
-          st2_v = sym_infer(st2_valid, {idx: i})
-          if st1_off != st2_off or st1_v != st2_v:
-            print(f"MISMATCH {i=}, {st1_off=} != {st2_off=}, {st1_v=} != {st2_v=}")
-            bad = True
-            break
-      else:
-        bad = True
-      if not bad: good += 1
-      if bad or DEBUG == 1:
+      eq = st_equal(st1, st2)
+      if DEBUG >= 1:
         print(f"EXP: {st1}")
         print(f"GOT: {st2}")
-        print(colored("****", "red" if st1 != st2 else "green"))
+        print(colored("****", "green" if eq else "red"))
+      if not eq: exit(0)
     print(f"hit {good}/{total}")
     assert good == total

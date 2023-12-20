@@ -52,7 +52,7 @@ jobs:
     - name: Fuzz Test shapetracker
       run: |
         PYTHONPATH="." python test/external/fuzz_shapetracker.py
-        FUZZ=invert PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
+        PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
     - name: Test shapetracker to_movement_ops
       run: PYTHONPATH="." python extra/to_movement_ops.py
     - name: Use as an external package

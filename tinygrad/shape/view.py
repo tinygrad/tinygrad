@@ -102,11 +102,10 @@ class View:
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[View]:
-    ret = self.shrink(self.mask) if self.mask else self
-    if prod(ret.shape) != prod(out_shape): return None   # don't support shrink, expand, or stride != (-1, 1)
-    flips = tuple(-1 if x < 0 else 1 for x in ret.strides)
-    reorder = argsort(tuple(-abs(x) for x in ret.strides))
-    return View.create(ret.shape).stride(flips).permute(reorder)
+    ret = View.create(self.shape)
+    if self.mask: ret = ret.shrink(self.mask)
+    ret = ret.stride(tuple(-1 if x < 0 else 1 for x in self.strides)).permute(argsort(tuple(-x if x > 0 else x for x in self.strides)))
+    return ret if prod(ret.shape) == prod(out_shape) else None   # don't support shrink, expand, or stride != (-1, 1)
 
   # MovementOps live here now
 
