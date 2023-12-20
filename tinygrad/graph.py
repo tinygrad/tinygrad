@@ -69,12 +69,12 @@ def log_lazybuffer(lb, scheduled=False):
         if nm(x) not in G.nodes:
           G.add_node(nm(x), label=f'"{str(x.base.realized)[5:-1].replace(" ", chr(10))}"', style='filled', fillcolor="#f0c08080")
         G.add_edge(nm(x), nm(lb), color='#a0a0a0')
-    label = '"' + \
-      (str(set(x.shape for x in lb.srcs))+"\n"+str(lb.shape) if lb.op in ReduceOps else str(lb.shape)) + \
-      str_dtype(lb.dtype)+f"\n{lb.op}"+(f"\n{lb.arg}" if lb.op in {LoadOps.CONST, UnaryOps.CAST} else "") + \
-      (f"\n{lb.device}" if lb.device != Device.DEFAULT else "") + '"'
-    G.add_node(nm(lb), style='"filled,dashed"', fillcolor=[v for k,v in top_colors.items() if lb.op in k][0] + "80", color="black", label=label)
-    if scheduled: G.nodes[nm(lb)]['shape'] = 'box'
+      label = '"' + \
+        (str(set(x.shape for x in lb.srcs))+"\n"+str(lb.shape) if lb.op in ReduceOps else str(lb.shape)) + \
+        str_dtype(lb.dtype)+f"\n{lb.op}"+(f"\n{lb.arg}" if lb.op in {LoadOps.CONST, UnaryOps.CAST} else "") + \
+        (f"\n{lb.device}" if lb.device != Device.DEFAULT else "") + '"'
+      G.add_node(nm(lb), style='"filled,dashed"', fillcolor=[v for k,v in top_colors.items() if lb.op in k][0] + "80", color="black", label=label)
+      if scheduled: G.nodes[nm(lb)]['shape'] = 'box'
 
 def _tree(lazydata, prefix=""):
   if type(lazydata).__name__ == "LazyBuffer":
