@@ -42,7 +42,7 @@ class CStyleLanguage(NamedTuple):
 
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
-    if bitcast: return f"(*(({self.buffer_prefix}{var_dtype.name}*)&{x[0]}))"
+    if bitcast: return f"(*(({var_dtype.name}*)&{x[0]}))"
     if len(x) == 1: return f"({var_dtype.name})({x[0]})"
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.float4 is not None, "vectorized cast is not supported on this platform"
