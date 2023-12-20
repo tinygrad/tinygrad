@@ -9,6 +9,7 @@ from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import View, strides_for_shape
 from dataclasses import dataclass
 from enum import Enum, auto
+from copy import deepcopy
 
 class OptOps(Enum):
   UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); LASTLOCAL = auto() # noqa: E702
@@ -111,23 +112,9 @@ class Kernel:
     self.applied_opts_cache: Optional[List[Opt]] = None
 
   def copy(self):
-    ret = type(self).__new__(type(self))
-
-    # base linearizer params
-    ret.opts, ret.ast = self.opts, self.ast
-
-    # things downstream of the AST
-    # NOTE: we copy bufs for local buffers and sts for optimizations
-    ret.info, ret.reduceop, ret.bufs, ret.earlybufs, ret.full_buf_index, ret.sts = \
-      self.info, self.reduceop, self.bufs[:], self.earlybufs, self.full_buf_index, self.sts[:]
-
-    # parameters for optimizations
-    ret.applied_opts, ret.group_for_reduce, ret.upcasted, ret.local_dims, ret.local_alias, ret.tensor_core, ret.dont_use_locals = \
-      self.applied_opts[:], self.group_for_reduce[:], self.upcasted, self.local_dims, self.local_alias.copy(), self.tensor_core, self.dont_use_locals
-
+    ret = deepcopy(self)
     # uncached since linearize didn't run
     ret.applied_opts_cache = None
-
     return ret
 
   @property
