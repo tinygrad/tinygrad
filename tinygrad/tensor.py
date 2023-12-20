@@ -391,16 +391,19 @@ class Tensor:
 
       if empty_idx and 0 in ret.shape: return Tensor.empty(0, dtype=ret.dtype)
 
-      # manual broadcasting
-      final_shape = (shapes := tuple(list(i.shape) for i in idx))[0]
-      for interim_shape in shapes[1:]:
-        if len(final_shape) < len(interim_shape): final_shape = [1]*(len(interim_shape) - len(final_shape)) + final_shape
-        if len(final_shape) > len(interim_shape): interim_shape = [1]*(len(final_shape) - len(interim_shape)) + interim_shape
-        if any(ish%fsh != 0 and fsh%ish != 0 for ish, fsh in zip(interim_shape, final_shape)):
-          raise IndexError(f"cannot broadcast {interim_shape=} with shape={final_shape}")
-        final_shape = [max(sh) for sh in zip(final_shape, interim_shape)]
+      # broadcasting for shape
+      try: final_shape = reduce(lambda x,y: x._broadcasted(y)[0], idx).shape
+      except AssertionError as exc: raise IndexError("cannot broadcast") from exc
 
+      # final_shape = (shapes := tuple(list(i.shape) for i in idx))[0]
+      # for interim_shape in shapes[1:]:
+      #   if len(final_shape) < len(interim_shape): final_shape = [1]*(len(interim_shape) - len(final_shape)) + final_shape
+      #   if len(final_shape) > len(interim_shape): interim_shape = [1]*(len(final_shape) - len(interim_shape)) + interim_shape
+      #   if any(ish%fsh != 0 and fsh%ish != 0 for ish, fsh in zip(interim_shape, final_shape)):
+      #     raise IndexError(f"cannot broadcast {interim_shape=} with shape={final_shape}")
+      #   final_shape = [max(sh) for sh in zip(final_shape, interim_shape)]
       # compute sum_dim, arange, and idx
+
       if empty_idx or 0 in ret.shape:
         new_shape = list(new_shape) # bro wtf why is mypy being dumb
         new_shape[tdim[0]:tdim[0]+len(idx)] = final_shape
