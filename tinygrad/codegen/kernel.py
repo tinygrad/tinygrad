@@ -198,10 +198,8 @@ class Kernel:
   def reshape_and_permute(self, new_shape_fxn, axis):
     new_sts = []
     for st in self.sts:
-      if new_shape_fxn is not None: 
-        st = st.reshape(tuple(new_shape_fxn(st.shape)))
-      if axis is not None: 
-        st = st.permute(tuple(axis))
+      if new_shape_fxn is not None: st = st.reshape(tuple(new_shape_fxn(st.shape)))
+      if axis is not None: st = st.permute(tuple(axis))
       new_sts.append(st)
     self.sts = new_sts
 
