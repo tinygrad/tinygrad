@@ -58,6 +58,9 @@ class ShapeTracker:
     assert isinstance(self.views, tuple) and all(isinstance(v, View) for v in self.views), "ShapeTracker must be created with a tuple of Views"
 
   def __add__(self, st:ShapeTracker) -> ShapeTracker:
+    print("hello")
+    print(self.views)
+    print(st.views)
     base = ShapeTracker(self.views)
     for v in st.views: base = ShapeTracker(base.views + (v,)).simplify() # one view at a time = better simplification
     return base

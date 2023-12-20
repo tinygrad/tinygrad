@@ -84,6 +84,38 @@ class TestShapeTrackerAdd(unittest.TestCase):
     st.reshape( (4, 3) )
     assert st_equal(backup + st.sts[1], st.sts[0])
 
+class TestShapeTrackerAddVariable(unittest.TestCase):
+  def test_self_add(self):
+    j = Variable("j", 0, 20).bind(10)
+    a = ShapeTracker.from_shape((10,10))
+    x = a.reshape((10, j))
+    out = x + x
+    assert out == x
+
+  def test_self_add_reshape(self):
+    j = Variable("j", 0, 20).bind(10)
+    a = ShapeTracker.from_shape((10,10))
+    x = a.reshape((10, j))
+    out = x.reshape((5, 2, j)) + x
+    assert out == x
+
+  def test_merge_symbolic_views(self):
+    var_i = Variable('i', 1, 10)
+    var_j = Variable('i', 1, 10)
+    vm1 = View(shape=(var_i, var_j, 3), strides=(3, 0, 1), offset=0, mask=None, contiguous=False)
+    vm2 = View(shape=(var_i, var_j, 3), strides=(var_j*3, 3, 1), offset=0, mask=None, contiguous=True)
+    ShapeTracker((vm1,)) + ShapeTracker((vm2,))
+
+  @unittest.skip("two vars not supported")
+  def test_merge_symbolic_views_2(self):
+    var_i = Variable('i', 1, 10)
+    var_j = Variable('j', 1, 10)
+    vm1 = View(shape=(var_i, var_j), strides=(0, 0), offset=0, mask=None, contiguous=False)
+    vm2 = View(shape=(var_i, var_j), strides=(var_j, 1), offset=0, mask=None, contiguous=True)
+    ret = (ShapeTracker((vm1,)) + ShapeTracker((vm2,))).reshape((var_i, var_j, 1))
+    ret_2 = ShapeTracker((vm1,)) + ShapeTracker((vm2,)).reshape((var_i, var_j, 1))
+    assert ret == ret_2
+
 class TestShapeTrackerInvert(unittest.TestCase):
   def test_invert_reshape(self):
     a = ShapeTracker.from_shape((10, 10))
