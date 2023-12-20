@@ -1,7 +1,7 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
 import time, math
-from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Iterable, Set, DefaultDict, cast
+from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Iterable, DefaultDict, cast
 from collections import defaultdict
 from functools import partialmethod, reduce
 from itertools import accumulate
@@ -9,7 +9,7 @@ import numpy as np
 
 from tinygrad.helpers import DType, dtypes, ImageDType
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
-from tinygrad.lazy import LazyBuffer
+from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import sint
@@ -95,11 +95,7 @@ class Tensor:
   # ***** data handlers ****
 
   @staticmethod
-  def corealize(lst:Iterable[Tensor]):
-    seen:Set[LazyBuffer] = set()
-    sched = []
-    for t in lst: sched += t.lazydata.schedule(seen)
-    run_schedule(sched)
+  def corealize(lst:Iterable[Tensor]): run_schedule(create_schedule([x.lazydata for x in lst]))
 
   def realize(self) -> Tensor:
     run_schedule(self.lazydata.schedule())
@@ -109,14 +105,14 @@ class Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
     if self.device.startswith("DISK"):
       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
-      self.contiguous().realize().lazydata.realized.copyin(x.numpy().data)
+      self.contiguous().realize().lazydata.base.realized.copyin(x.numpy().data)
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     # NOTE: we allow cross device assign
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
-    if self.dtype == x.dtype and self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized  # noqa: E501
+    if self.dtype == x.dtype and self.lazydata.base.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.base.realized  # noqa: E501
     self.lazydata = x.lazydata
     return self
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
@@ -124,7 +120,7 @@ class Tensor:
   # TODO: these are good places to start removing numpy
   def item(self) -> Union[float, int]:
     assert self.numel() == 1, "must have one element for item"
-    return self.realize().lazydata.realized.toCPU().item()
+    return cast(Buffer, self.contiguous().realize().lazydata.realized).toCPU().item()
   def data(self) -> memoryview: return self.numpy().data
 
   # TODO: this should import numpy and use .data() to construct the array
@@ -132,7 +128,7 @@ class Tensor:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
     if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.np)
-    return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)  # noqa: E501
+    return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.base.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)  # noqa: E501
 
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self
@@ -743,7 +739,7 @@ class Tensor:
     return x.expand(broadcasted_shape), y.expand(broadcasted_shape)
 
   def _to_const_val(self, x:Union[Tensor, float, int, bool]) -> Union[Tensor, float, int, bool]:
-    return x.lazydata.base.op.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
+    return x.lazydata.base.arg if isinstance(x, Tensor) and x.lazydata.is_unrealized_contiguous_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
   def add(self, x:Union[Tensor, float, int, bool], reverse=False) -> Tensor:

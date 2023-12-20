@@ -95,7 +95,7 @@ class Transformer:
 
     logits = self.lm_head(self.ln_f(h))
     # NOTE: temperature=0 with HALF breaks due to precision, should use argmax instead
-    ret = (logits[:, -1, :] / (temperature+1e-10)).softmax()
+    ret = (logits[:, -1, :] / (temperature+1e-6)).softmax()
     return ret.half().realize() if HALF else ret.realize()
 
   # TODO: fix empty token
