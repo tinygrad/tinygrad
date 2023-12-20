@@ -12,7 +12,7 @@ def print_objects():
   tensor_ram_used = sum([prod(x.shape)*4 for x in tensors])
   lazybuffers = [x for x in gc.get_objects() if isinstance(x, LazyBuffer)]
   gpubuffers = [x for x in gc.get_objects() if isinstance(x, Buffer)]
-  realized_buffers = [x.realized for x in lazybuffers if x.realized]
+  realized_buffers = [x.realized for x in lazybuffers if x.base == x and x.realized]
   gpubuffers_orphaned = [x for x in gpubuffers if x not in realized_buffers]
 
   print(f"{len(tensors)} tensors allocated in {tensor_ram_used/1e9:.2f} GB, GPU using {GlobalCounters.mem_used/1e9:.2f} GB")
