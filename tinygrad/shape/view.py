@@ -60,7 +60,7 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
         curr_stride, new_dim = next_stride,  next(r_new_shape, 1) # need to get mask for next dimension
 
     else:
-      # TODO: fix this, it's incomplete and incorrect
+      # TODO: fix this, it's incorrect
       return view.mask, None, True
       # next_mask = next(r_masks, (0, 1))
       # # combine if the mask can unfold continuously

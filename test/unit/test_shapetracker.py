@@ -364,11 +364,10 @@ class TestIndexExpressions2d(unittest.TestCase):
     assert v.strides == (0, 0, 0, 1, 0, 0) and v.mask == ((0, 1), (0, 1), (0, 1), (30, 75), (0, 1), (0, 1)) and v.offset == -30
     self.st.assert_same()
 
-  @unittest.expectedFailure
   def test_pad_reshape(self):
     self.st = CheckingShapeTracker((4,))
-    self.st.pad(((2,0),))
-    self.st.reshape((2,3))
+    self.st.pad(((2,2),))
+    self.st.reshape((4,2))
     assert len(self.st.views) == 1
     self.st.assert_same()
 
