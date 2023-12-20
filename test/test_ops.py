@@ -543,7 +543,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,3,45,65), (3,3,65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
   def test_sum_simple(self):
     helper_test_op(None, lambda x: x.sum(), Tensor.sum, vals=[[1.,1.]])
-    helper_test_op(None, lambda x: x.sum(), Tensor.sum, vals=[[True,False,True]], forward_only=True)
+    if Device.DEFAULT != "WEBGPU": # WEBGPU does not support boolean global vars
+      helper_test_op(None, lambda x: x.sum(), Tensor.sum, vals=[[True,False,True]], forward_only=True)
   def test_sum_full(self):
     helper_test_op([(16384)], lambda x: x.sum(), lambda x: x.sum())
   def test_sum_small_full(self):
