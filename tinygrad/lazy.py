@@ -42,7 +42,7 @@ class LazyBuffer:
       self.realized: Optional[Buffer] = None
       self.output_buffer: Optional[Buffer] = None
       self.forced_realize = False
-      self.contiguous_child: Optional[ReferenceType[LazyBuffer]] = None
+      self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"
@@ -65,9 +65,7 @@ class LazyBuffer:
     if not self.st.contiguous or self.st.size() != self.base.st.size() or self.is_unrealized_const():
       ret = self.e(LoadOps.CONTIGUOUS)
       sti = self.st.invert(self.base.shape)
-      print(self.st)
-      print(sti)
-      #if sti is not None: self.base.contiguous_child = ref(ret), sti
+      if sti is not None: self.base.contiguous_child = ref(ret), sti
       return ret
     self.base.forced_realize = True
     return self
@@ -222,9 +220,10 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
 UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
 def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   if buf in realizes or buf.realized: return True
+  # TODO: why is this broken?
   return False
-  if buf.op in UNSAFE_PAD_OPS: return False
-  return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
+  #if buf.op in UNSAFE_PAD_OPS: return False
+  #return all(_is_padding_okay(x.base, realizes) for x in buf.srcs)
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
   if seen is None: seen = set()
