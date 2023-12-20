@@ -1375,6 +1375,15 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,(1,1))], lambda x: x[(i,(1,1))])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,b,c,d,e)], lambda x: x[(i,j,k,o,p)])
 
+  def test_slice_fancy_indexing_empty_tensors(self):
+    shapes = [(1,1,0,1), (4,0,4)]
+    a,b = [torch.empty(size=sh, dtype=torch.int64, requires_grad=False) for sh in shapes]
+    z,y = [Tensor.empty(tuple(t.shape), dtype=dtypes.int, requires_grad=False) for t in (a,b)]
+
+    # due to there being zeros in shape, forward only is True
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[:,a], lambda x: x[:, z], forward_only=True)
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[:,a,b], lambda x: x[:,z,y], forward_only=True)
+
   def test_slice_fancy_indexing_errors(self):
     a = Tensor.ones(10,11,12)
     # tensors used as indices must be int or bool tensors
