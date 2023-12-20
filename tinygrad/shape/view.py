@@ -60,7 +60,7 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
         curr_stride, new_dim = next_stride,  next(r_new_shape, 1) # need to get mask for next dimension
 
     else:
-      # TODO: fix this, it's incomplete and incorrect
+      # TODO: fix this, it's incorrect
       return view.mask, None, True
       # next_mask = next(r_masks, (0, 1))
       # # combine if the mask can unfold continuously
@@ -102,11 +102,10 @@ class View:
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[View]:
-    ret = self.shrink(self.mask) if self.mask else self
-    if prod(ret.shape) != prod(out_shape): return None   # don't support shrink, expand, or stride != (-1, 1)
-    ret = cast(View, ret.reshape(tuple(s for s in ret.shape if s != 1)))  # removing ones will never be an issue
-    ret = ret.stride(tuple(-1 if x < 0 else 1 for x in ret.strides))
-    return ret.permute(argsort(tuple(-x for x in ret.strides))).reshape(out_shape)
+    ret = View.create(self.shape)
+    if self.mask: ret = ret.shrink(self.mask)
+    ret = ret.stride(tuple(-1 if x < 0 else 1 for x in self.strides)).permute(argsort(tuple(-x if x > 0 else x for x in self.strides)))
+    return ret if prod(ret.shape) == prod(out_shape) else None   # don't support shrink, expand, or stride != (-1, 1)
 
   # MovementOps live here now
 
