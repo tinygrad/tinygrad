@@ -6,7 +6,7 @@ from enum import Enum, auto
 from dataclasses import dataclass
 
 from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, getenv, all_same, to_function_name, flatten
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, vars_from_ast
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info, vars_from_ast
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, VariableOrNum, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
@@ -523,10 +523,10 @@ class Linearizer(Kernel):
       assert offs is None, "not available if we aren't doing reduce"
       return acc
     # MULACC fusion. TODO: this is copied from Interpreted
-    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == BinaryOps.MUL:
-      x = LazyOp(TernaryOps.MULACC, x.src[0].src, x.arg)
-    if x.op == ReduceOps.SUM and x.src[0].__class__ is LazyOp and x.src[0].op == UnaryOps.CAST and x.src[0].src[0].__class__ is LazyOp and x.src[0].src[0].op == BinaryOps.MUL:  # noqa: E501
-      x = LazyOp(TernaryOps.MULACC, x.src[0].src[0].src, x.arg)
+    if x.op == ReduceOps.SUM:
+      cast_op = x.src[0] if x.src[0].op == UnaryOps.CAST else None
+      op = (cast_op if cast_op is not None else x).src[0]
+      if op.op == BinaryOps.MUL and dtypes.is_float(get_lazyop_info(x).dtype): x = LazyOp(TernaryOps.MULACC, op.src, x.arg)
     values = [self.ast_parse(cast(LazyOp, v), acc, offs, loaded_buffers, loop_ctx=loop_ctx) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:

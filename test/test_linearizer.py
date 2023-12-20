@@ -1,17 +1,19 @@
 # ruff: noqa: E501
 import numpy as np
 import unittest, os
+from hypothesis import assume, given, strategies as st
 
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps
 from tinygrad.device import Compiled, Device, Buffer
-from tinygrad.ops import BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
+from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
-from tinygrad.helpers import dtypes, prod
+from tinygrad.helpers import dtypes, least_upper_dtype, prod
+from test.helpers import float_dtypes, int_dtypes
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestLinearizer(unittest.TestCase):
@@ -537,6 +539,49 @@ class TestLinearizerOpts(unittest.TestCase):
     a = (Tensor.rand(N, N).max(axis=0) > 1).where(1, 0)
     with self.assertRaises(AssertionError):
       helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
+
+@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
+class TestMULACCFusion(unittest.TestCase):
+  def _get_reduce_alu(self, out):
+    k = Linearizer(out.lazydata.schedule()[-1].ast)
+    phi = [u for u in k.linearize().uops if u.uop == UOps.PHI][0]
+    return phi.vin[1].vin[0] if phi.vin[1].uop == UOps.CAST else phi.vin[1] # TODO remove cast option once all casts are removed from linearizer's uop'
+
+  @given(st.sampled_from(float_dtypes), st.sampled_from(float_dtypes))
+  def test_basic_both_float(self, d1, d2):
+    assume(d1 != dtypes.bfloat16 and d2 != dtypes.bfloat16)
+    x = Tensor.rand(1024,1024, dtype=d1)
+    w = Tensor.rand(1024,1024, dtype=d2)
+    out = (x*w).sum(-1)
+    uop = self._get_reduce_alu(out)
+    assert uop.uop == UOps.ALU and uop.arg == TernaryOps.MULACC
+
+  @given(st.sampled_from(float_dtypes), st.sampled_from(float_dtypes))
+  def test_midcast_both_float(self, d1, d2):
+    assume(d1 != dtypes.bfloat16 and d2 != dtypes.bfloat16)
+    x = Tensor.rand(1024,1024, dtype=d1)
+    w = Tensor.rand(1024,1024, dtype=d2)
+    out = (x*w).cast(dtypes.half).sum(-1)
+    uop = self._get_reduce_alu(out)
+    assert uop.uop == UOps.ALU and uop.arg == TernaryOps.MULACC
+
+  @given(st.sampled_from(int_dtypes), st.sampled_from(int_dtypes))
+  def test_basic_none_float(self, d1, d2):
+    assume(not dtypes.is_float(least_upper_dtype(d1, d2)))
+    x = Tensor.rand(1024,1024, dtype=d1)
+    w = Tensor.rand(1024,1024, dtype=d2)
+    out = (x*w).sum(-1)
+    uop = self._get_reduce_alu(out)
+    assert uop.uop == UOps.ALU and uop.arg == BinaryOps.ADD
+
+  @given(st.sampled_from(int_dtypes), st.sampled_from(int_dtypes))
+  def test_midcast_none_float(self, d1, d2):
+    assume(not dtypes.is_float(least_upper_dtype(d1, d2)))
+    x = Tensor.rand(1024,1024, dtype=d1)
+    w = Tensor.rand(1024,1024, dtype=d2)
+    out = (x*w).cast(dtypes.int32).sum(-1)
+    uop = self._get_reduce_alu(out)
+    assert uop.uop == UOps.ALU and uop.arg == BinaryOps.ADD
 
 if __name__ == '__main__':
   unittest.main()
