@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, operator
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, cast
-from tinygrad.helpers import prod, all_int
+from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, VariableOrNum, Set, sint
 
 @functools.lru_cache(maxsize=None)
@@ -60,11 +60,13 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
         curr_stride, new_dim = next_stride,  next(r_new_shape, 1) # need to get mask for next dimension
 
     else:
-      next_mask = next(r_masks, (0, 1))
-      # combine if the mask can unfold continuously
-      if mask != (0, old_dim) and next_mask[1] - next_mask[0] != 1: return view.mask, None, True
-      if next_mask != (0, 1) and mask != (0, 1) and (next_mask[1] - next_mask[0] == 1): off += next_mask[0] * old_dim
-      mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), old_dim * next(r_shape, 1)
+      # TODO: fix this, it's incorrect
+      return view.mask, None, True
+      # next_mask = next(r_masks, (0, 1))
+      # # combine if the mask can unfold continuously
+      # if mask != (0, old_dim) and next_mask[1] - next_mask[0] != 1: return view.mask, None, True
+      # if next_mask != (0, 1) and mask != (0, 1) and (next_mask[1] - next_mask[0] == 1): off += next_mask[0] * old_dim
+      # mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), old_dim * next(r_shape, 1)
 
   for mask in r_masks: # if the old shape has leading 1s, need to make sure their mask is (0,1)
     if mask != (0, 1): return ((0, 0),) * len(new_shape), None, False
@@ -98,6 +100,13 @@ class View:
     new_mask = tuple((a if isinstance(a, int) else a.substitute(unbound_vars), b if isinstance(b, int) else b.substitute(unbound_vars)) for (a, b) in self.mask) if self.mask is not None else None  # noqa: E501
     return View.create(new_shape, new_strides, new_offset, new_mask)
 
+  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  def invert(self, out_shape:Tuple[sint, ...]) -> Optional[View]:
+    ret = View.create(self.shape)
+    if self.mask: ret = ret.shrink(self.mask)
+    ret = ret.stride(tuple(-1 if x < 0 else 1 for x in self.strides)).permute(argsort(tuple(-x if x > 0 else x for x in self.strides)))
+    return ret if prod(ret.shape) == prod(out_shape) else None   # don't support shrink, expand, or stride != (-1, 1)
+
   # MovementOps live here now
 
   def __unsafe_resize(self, arg: Tuple[Tuple[sint, sint], ...], mask=None) -> View:
@@ -108,6 +117,7 @@ class View:
       # merge the masks if we have two
       mask = tuple([(max(mx1, mx2), min(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
     shape = [y-x for x,y in arg]
+    if mask is not None and all(m[0] == 0 and m[1] == s for m,s in zip(mask, shape)): mask = None
     return View.create(tuple(s.b if isinstance(s, NumNode) else s for s in shape), self.strides, self.offset+offset, mask)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
