@@ -1386,8 +1386,6 @@ class TestIndexing(unittest.TestCase):
     self.assertRaises(IndexError, lambda: x[0, 1, 15])
     self.assertRaises(IndexError, lambda: x[:, :, 12])
 
-  # TODO .item() bug
-  '''
   def test_zero_dim_index(self):
     x = Tensor(10)
     numpy_testing_assert_equal_helper(x, x.item())
@@ -1396,8 +1394,7 @@ class TestIndexing(unittest.TestCase):
       print(x[0])
       return x[0]
 
-    self.assertRaisesRegex(IndexError, 'invalid index', runner)
-  '''
+    self.assertRaises(IndexError, runner)
 
   # TODO not too sure
   '''
