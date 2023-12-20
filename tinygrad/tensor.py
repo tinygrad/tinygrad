@@ -389,18 +389,14 @@ class Tensor:
         # TODO uint8 and bool tensor indexing
         if not (dtypes.is_int(t.dtype) or t.dtype == dtypes.bool): raise IndexError("tensors used as indices must be int or bool tensors")
 
-      if empty_idx and 0 in ret.shape: return Tensor.empty(0, dtype=ret.dtype, requires_grad=ret.requires_grad)
-
-      # broadcasting for shape
-      try: final_shape = reduce(lambda x,y: x._broadcasted(y)[0], idx).shape
+      # broadcasting for final shape
+      try: max_dim = len(broadcasted_shape := reduce(lambda x,y: x._broadcasted(y)[0], idx).shape)
       except AssertionError as exc: raise IndexError("cannot broadcast") from exc
 
-      if empty_idx or 0 in ret.shape:
-        new_shape = list(new_shape) # bro wtf why is mypy being dumb
-        new_shape[tdim[0]:tdim[0]+len(idx)] = final_shape
-        ret = Tensor.empty(new_shape, dtype=ret.dtype, requires_grad=ret.requires_grad)
+      if empty_idx or 0 in self.shape:
+        final_shape = tuple(new_shape)[:tdim[0]] + broadcasted_shape + tuple(new_shape)[tdim[0]+len(idx):]
+        ret = Tensor.empty(final_shape, dtype=ret.dtype, requires_grad=ret.requires_grad)
       else:
-        max_dim = max(i.ndim for i in idx)
         sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(tdim)]
         arange = [Tensor.arange(ret.shape[d], requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, tdim))]   # noqa: E501
         first_idx = [idx[0].reshape(*[1]*tdim[0], *[1]*(1 + max_dim - idx[0].ndim), *idx[0].shape, *[1]*(ret.ndim - tdim[0] - 1))]
