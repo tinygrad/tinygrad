@@ -1,5 +1,5 @@
 from typing import List, Dict, Optional, cast
-from tinygrad.ops import LoadOps, ScheduleItem
+from tinygrad.ops import LoadOps, ScheduleItem, BufferOps
 from tinygrad.device import Device, Buffer, BufferCopy, JITRunner, update_stats
 from tinygrad.graph import print_tree, realized_lazybuffer
 from tinygrad.helpers import prod, GlobalCounters, colored
@@ -26,6 +26,14 @@ def run_schedule(schedule:List[ScheduleItem]):
 
     # get the program
     prg = lower_schedule_item(si)
+
+    # invalidate the output buffer if there's a non contig usage of it in inputs
+    if si.out.output_buffer is not None:
+      for i,a in enumerate(si.inputs):
+        if a.realized == si.out.output_buffer:
+          if any(not x.arg.st.contiguous for x in si.ast.get_lazyops() if x.op == BufferOps.LOAD and x.arg.idx == i+1):
+            si.out.output_buffer = None
+            break
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
     si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
