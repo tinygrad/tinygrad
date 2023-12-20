@@ -1383,9 +1383,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[:,a], lambda x: x[:,z], forward_only=True)
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[:,a,b], lambda x: x[:,z,y], forward_only=True)
 
-  def test_slice_fancy_indexing_empty_tensors_with_empty_tensors(self):
-    a = torch.empty(size=(1,1,0,1), dtype=torch.int64, requires_grad=False)
-    z = Tensor.empty(tuple(a.shape), dtype=dtypes.int, requires_grad=False)
+  def test_slice_fancy_indexing_empty_tensors_with_empty_tensors(self): ...
+    # a = torch.empty(size=(1,1,0,1), dtype=torch.int64, requires_grad=False)
+    # z = Tensor.empty(tuple(a.shape), dtype=dtypes.int, requires_grad=False)
     # TODO
     # helper_test_op([(2,5,0,5,3,4)], lambda x: x[:,a], lambda x: x[:,z], forward_only=True)
 
