@@ -373,7 +373,7 @@ def NegativeLogLikelihoodLoss(input: Tensor, target: Tensor, weight=None, ignore
 
 def SoftmaxCrossEntropyLoss(scores: Tensor, labels: Tensor, weights=None, ignore_index=None, reduction="mean"):
   N, C, *s_dimensions = scores.shape
-  if ignore_index is not None: labels = (labels == ignore_index).where(C+1, labels)
+  if ignore_index is not None: labels = (labels == ignore_index).where(C+1, labels).cast(dtypes.int32)
   mask = labels.unsqueeze(1) == Tensor.arange(C).reshape(1, C, *[1]*len(s_dimensions))
   y = scores.log_softmax(axis=1)
   if weights is not None: weights = weights.__getitem__(tuple([labels, *[slice(None)]*(weights.ndim-1)]))
@@ -425,10 +425,10 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     elif nearest_mode == "round_prefer_ceil": ret = _round(x_resized, 0.5, "round_up")
     elif nearest_mode == "floor": ret = x_resized.floor()
     elif nearest_mode == "ceil": ret = x_resized.ceil()
-    return ret.clip(0, x_len-1)
+    return ret.cast(dtypes.int32).clip(0, x_len-1)
   def _coordinate_transformation(x_out, y_out, output_shape, scales_, roi=None):
     if coordinate_transformation_mode == "half_pixel":
-      x_out = (x_out + 0.5)/Tensor(scales_[-1]) - 0.5 # TODO Tensor() because try (((Tensor([0,1,2,3,4,5])+0.5)/3.5 - 0.5)) with LLVM or METAL, inaccuacy.
+      x_out = (x_out + 0.5)/Tensor(scales_[-1]) - 0.5
       y_out = (y_out + 0.5)/Tensor(scales_[-2]) - 0.5
     elif coordinate_transformation_mode == "align_corners":
       x_out = x_out * (X.shape[-1] - 1) / (output_shape[-1] - 1)

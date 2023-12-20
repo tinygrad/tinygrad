@@ -60,11 +60,13 @@ def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tupl
         curr_stride, new_dim = next_stride,  next(r_new_shape, 1) # need to get mask for next dimension
 
     else:
-      next_mask = next(r_masks, (0, 1))
-      # combine if the mask can unfold continuously
-      if mask != (0, old_dim) and next_mask[1] - next_mask[0] != 1: return view.mask, None, True
-      if next_mask != (0, 1) and mask != (0, 1) and (next_mask[1] - next_mask[0] == 1): off += next_mask[0] * old_dim
-      mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), old_dim * next(r_shape, 1)
+      # TODO: fix this, it's incorrect
+      return view.mask, None, True
+      # next_mask = next(r_masks, (0, 1))
+      # # combine if the mask can unfold continuously
+      # if mask != (0, old_dim) and next_mask[1] - next_mask[0] != 1: return view.mask, None, True
+      # if next_mask != (0, 1) and mask != (0, 1) and (next_mask[1] - next_mask[0] == 1): off += next_mask[0] * old_dim
+      # mask, old_dim = (next_mask[0] * old_dim + l, (next_mask[1] - 1) * old_dim + r), old_dim * next(r_shape, 1)
 
   for mask in r_masks: # if the old shape has leading 1s, need to make sure their mask is (0,1)
     if mask != (0, 1): return ((0, 0),) * len(new_shape), None, False
@@ -100,11 +102,10 @@ class View:
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[View]:
-    ret = self.shrink(self.mask) if self.mask else self
-    if prod(ret.shape) != prod(out_shape): return None   # don't support shrink, expand, or stride != (-1, 1)
-    ret = cast(View, ret.reshape(tuple(s for s in ret.shape if s != 1)))  # removing ones will never be an issue
-    ret = ret.stride(tuple(-1 if x < 0 else 1 for x in ret.strides))
-    return ret.permute(argsort(tuple(-x for x in ret.strides))).reshape(out_shape)
+    ret = View.create(self.shape)
+    if self.mask: ret = ret.shrink(self.mask)
+    ret = ret.stride(tuple(-1 if x < 0 else 1 for x in self.strides)).permute(argsort(tuple(-x if x > 0 else x for x in self.strides)))
+    return ret if prod(ret.shape) == prod(out_shape) else None   # don't support shrink, expand, or stride != (-1, 1)
 
   # MovementOps live here now
 
