@@ -116,11 +116,11 @@ class TestLinearizer(unittest.TestCase):
       return lin.uop(uop, dtype, vin, arg, cachable=False)
 
     c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
-    assert helper_test_simplify(UOps.ALU, dtypes.bool, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c0), arg=TernaryOps.WHERE) == c0
+    assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c0), arg=TernaryOps.WHERE) == c0
 
     c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
     c1 = UOp(UOps.CONST, dtypes.float, vin=(), arg=1.0)
-    assert helper_test_simplify(UOps.ALU, dtypes.bool, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c1), arg=TernaryOps.WHERE).uop == UOps.ALU
+    assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c1), arg=TernaryOps.WHERE).uop == UOps.ALU
 
 def helper_realized_ast(r:Tensor):
   s = r.lazydata.schedule()
