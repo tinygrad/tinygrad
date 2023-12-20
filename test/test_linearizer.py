@@ -543,9 +543,9 @@ class TestLinearizerOpts(unittest.TestCase):
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestMULACCFusion(unittest.TestCase):
   def _get_reduce_alu(self, out):
-      k = Linearizer(out.lazydata.schedule()[-1].ast)
-      phi = [u for u in k.linearize().uops if u.uop == UOps.PHI][0]
-      return phi.vin[1].vin[0] if phi.vin[1].uop == UOps.CAST else phi.vin[1] # TODO remove cast option once all casts are removed from linearizer's uop'
+    k = Linearizer(out.lazydata.schedule()[-1].ast)
+    phi = [u for u in k.linearize().uops if u.uop == UOps.PHI][0]
+    return phi.vin[1].vin[0] if phi.vin[1].uop == UOps.CAST else phi.vin[1] # TODO remove cast option once all casts are removed from linearizer's uop'
 
   @given(st.sampled_from(float_dtypes), st.sampled_from(float_dtypes))
   def test_basic_both_float(self, d1, d2):
