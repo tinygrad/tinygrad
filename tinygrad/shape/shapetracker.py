@@ -57,11 +57,14 @@ class ShapeTracker:
   def __post_init__(self):
     assert isinstance(self.views, tuple) and all(isinstance(v, View) for v in self.views), "ShapeTracker must be created with a tuple of Views"
 
-  def __add__(self, st:ShapeTracker) -> ShapeTracker: return ShapeTracker(self.views + st.views).simplify()
+  def __add__(self, st:ShapeTracker) -> ShapeTracker:
+    base = ShapeTracker(self.views)
+    for v in st.views: base = ShapeTracker(base.views + (v,)).simplify() # one view at a time = better simplification
+    return base
 
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[ShapeTracker]:
     ret = tuple(v.invert(s) for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]))
-    return ShapeTracker(cast(Tuple[View, ...], ret)) if all(x is not None for x in ret) else None
+    return ShapeTracker(cast(Tuple[View, ...], ret)).reshape(out_shape) if all(x is not None for x in ret) else None
 
   @staticmethod
   def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),))
@@ -115,13 +118,14 @@ class ShapeTracker:
     idxs: List[Node] = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx, valid = self.expr_idxs(idxs)
     ret: List[Optional[sint]] = [None] * len(self.views[-1].shape)
+    bad_idx_vars: Set[Variable] = set()
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
       idx_maybe, stride_maybe = (this_dim.a, this_dim.b) if isinstance(this_dim, MulNode) else (this_dim, 1)
       try: ret[idxs.index(idx_maybe)] = stride_maybe
-      except ValueError: pass
+      except ValueError: bad_idx_vars = bad_idx_vars.union(idx_maybe.vars())
     idx_vars, valid_vars = idx.vars(), valid.vars()
     for i,tidx in enumerate(idxs):
-      if tidx in valid_vars and not ignore_valid: ret[i] = None
+      if tidx in bad_idx_vars or (tidx in valid_vars and not ignore_valid): ret[i] = None
       elif tidx not in idx_vars: ret[i] = 0
     return tuple(ret)
 
