@@ -120,7 +120,7 @@ class Tensor:
   # TODO: these are good places to start removing numpy
   def item(self) -> Union[float, int]:
     assert self.numel() == 1, "must have one element for item"
-    return cast(Buffer, self.realize().lazydata.realized).toCPU().item()
+    return cast(Buffer, self.contiguous().realize().lazydata.realized).toCPU().item()
   def data(self) -> memoryview: return self.numpy().data
 
   # TODO: this should import numpy and use .data() to construct the array

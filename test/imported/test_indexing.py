@@ -1229,6 +1229,11 @@ class TestIndexing(unittest.TestCase):
       a[true] = a_expanded
   '''
 
+  def test_getitem_scalars_simple(self):
+    src = Tensor([[[1.,2.],[3.,4.]], [[1,1],[1,1]]])
+    a = src[0].mul(src[1])
+    self.assertEqual(a[0,1].item(), 2)
+
   def test_getitem_scalars(self):
     zero = Tensor(0, dtype=dtypes.int64)
     one = Tensor(1, dtype=dtypes.int64)
