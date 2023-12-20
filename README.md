@@ -101,7 +101,12 @@ git clone https://github.com/tinygrad/tinygrad.git
 cd tinygrad
 python3 -m pip install -e .
 ```
-Don't forget the `.` at the end!
+
+### Direct (master)
+
+```sh
+python3 -m pip install git+https://github.com/tinygrad/tinygrad.git
+```
 
 ## Documentation
 

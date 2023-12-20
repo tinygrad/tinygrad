@@ -14,7 +14,6 @@ class TestShapeTrackerBasics(unittest.TestCase):
     a = a.shrink(((0,10), (0,11)))
     assert len(a.views) == 1 and a.views[-1].mask is not None
 
-  @unittest.skip("reshape is broken")
   def test_reshape_makes_same(self):
     a = ShapeTracker.from_shape((2, 5))
     x = a.pad( ((2, 0), (0, 0)) )
@@ -77,7 +76,6 @@ class TestShapeTrackerInvert(unittest.TestCase):
     x = a.stride((2,2))
     assert x.invert(a.shape) is None
 
-  @unittest.skip("reshape is broken")
   def test_invert_failure(self):
     a = ShapeTracker.from_shape((2, 5))
     x = a.pad( ((2, 0), (0, 0)) )
