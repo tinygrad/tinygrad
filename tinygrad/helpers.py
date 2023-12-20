@@ -208,7 +208,8 @@ CACHELEVEL = getenv("CACHELEVEL", 2)
 
 VERSION = 10
 _db_connection = None
-def diskcache_put(table:str, key:Union[Dict, str, int], val:Optional[Any] = None):
+def _diskcache_exec(table:str, key:Union[Dict, str, int], val:Optional[Any] = None):
+  # put if val is not None, otherwise get
   if CACHELEVEL == 0 and val is not None: return val
   if isinstance(key, (str,int)): key = {"key": key}
   global _db_connection
@@ -229,7 +230,10 @@ def diskcache_put(table:str, key:Union[Dict, str, int], val:Optional[Any] = None
     res = cur.execute(f"SELECT val FROM {table}_{VERSION} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
     if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
 
-def diskcache_get(table:str, key:Union[Dict, str, int]): return diskcache_put(table, key)
+def diskcache_get(table:str, key:Union[Dict, str, int]): return _diskcache_exec(table, key)
+def diskcache_put(table:str, key:Union[Dict, str, int], val:Any): 
+  assert val is not None, "cannot put val as None"
+  return _diskcache_exec(table, key, val)
 
 def diskcache(func):
   @functools.wraps(func)
