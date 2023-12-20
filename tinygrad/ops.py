@@ -1,8 +1,8 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Dict, Callable, Mapping
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Dict, Callable
 import functools
 from enum import Enum, auto
-from tinygrad.helpers import prod, DType, dedup, least_upper_dtype
+from tinygrad.helpers import prod, DType, least_upper_dtype
 from tinygrad.shape.symbolic import Variable
 from dataclasses import dataclass
 
@@ -48,38 +48,13 @@ class ScheduleItem:
 @dataclass(frozen=True)
 class LazyOp:
   op: Op
-  src: Tuple[Union[LazyOp, LazyBuffer], ...] = ()
+  src: Tuple[LazyOp, ...] = ()
   arg: Any = None
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
   @functools.cached_property
-  def buffers(self) -> Tuple[LazyBuffer, ...]: return tuple(dedup(sum([x.buffers for x in self.src], ())))
-  @functools.cached_property
-  def hash(self): return hash((self.op,self.src, self.arg))
+  def hash(self): return hash((self.op, self.src, self.arg))
   def __hash__(self): return self.hash
-
-  def map_buffers(self, real_srcs: Mapping[Any, Union[LazyBuffer, LazyOp]]) -> LazyOp:
-    return LazyOp(self.op, tuple([y.map_buffers(real_srcs) if y not in real_srcs else real_srcs[y] for y in self.src]), self.arg)
   def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
-
-  def replace_with_movement_ops(self:LazyOp, ops:List[Tuple[MovementOps, Tuple[Any, ...]]]) -> 'LazyBuffer':
-    assert isinstance(self.op, (UnaryOps, BinaryOps, TernaryOps))
-    srcs = [z.replace_with_movement_ops(ops) for z in self.src]
-    return srcs[0].e(self.op, *srcs[1:], arg=self.arg)
-
-  @property
-  def st(self): raise NotImplementedError
-  @property
-  def realized(self): raise NotImplementedError
-  @property
-  def children(self): raise NotImplementedError
-
-  # movement ops
-  def reshape(self, _): raise NotImplementedError
-  def pad(self, _): raise NotImplementedError
-  def expand(self, _): raise NotImplementedError
-  def permute(self, _): raise NotImplementedError
-  def shrink(self, _): raise NotImplementedError
-  def stride(self, _): raise NotImplementedError
 
 def vars_from_ast(ast:LazyOp) -> List[Variable]:
   return sorted(set.union(*[x.arg.st.vars() for x in ast.get_lazyops() if x.op in BufferOps], set()), key=lambda x: str(x.expr))

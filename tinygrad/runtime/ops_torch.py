@@ -19,10 +19,12 @@ def output_type(x, y): return x.dtype if type_map[x.dtype].priority > type_map[y
 
 def as_strided(x, arg):
   shape, stride, offset = arg
+  x = x.contiguous()
+  offset += x.storage_offset()    # NOTE: contiguous can still have a storage_offset, so we adjust for it
   if any(i < 0 for i in stride):
-    return torch.as_strided(x.contiguous(), shape, tuple(abs(i) for i in stride),
+    return torch.as_strided(x, shape, tuple(abs(i) for i in stride),
       offset + sum((s-1)*a if a < 0 else 0 for (s,a) in zip(shape, stride))).flip([i for i,a in enumerate(stride) if a < 0])
-  return torch.as_strided(x.contiguous(), shape, stride, offset)
+  return torch.as_strided(x, shape, stride, offset)
 
 torch_fxn_for_op: Dict[Op, Callable] = {
   # TODO: torch.tensor should work here. it doesn't due to "overflow" in uint8
