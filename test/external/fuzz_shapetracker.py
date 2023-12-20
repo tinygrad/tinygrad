@@ -1,7 +1,6 @@
 import random
 from tinygrad.helpers import DEBUG, getenv
 from test.unit.test_shapetracker import CheckingShapeTracker
-random.seed(42)
 
 def do_permute(st):
   perm = list(range(0, len(st.shape)))
@@ -45,6 +44,12 @@ def do_stride(st):
   if DEBUG >= 1: print("st.stride(", stride, ")")
   st.stride(stride)
 
+def do_flip(st):
+  c = random.randint(0, len(st.shape)-1)
+  stride = tuple(-1 if i==c else 1 for i in range(len(st.shape)))
+  if DEBUG >= 1: print("st.stride(", stride, ")")
+  st.stride(stride)
+
 def do_expand(st):
   c = [i for i,s in enumerate(st.shape) if s==1]
   if len(c) == 0: return
@@ -53,9 +58,11 @@ def do_expand(st):
   if DEBUG >= 1: print("st.expand(", expand, ")")
   st.expand(expand)
 
+shapetracker_ops = [do_permute, do_pad, do_shrink, do_reshape_split_one, do_reshape_combine_two, do_stride, do_expand]
+
 if __name__ == "__main__":
-  ops = [do_permute, do_pad, do_shrink, do_reshape_split_one, do_reshape_combine_two, do_stride, do_expand]
+  random.seed(42)
   for _ in range(getenv("CNT", 200)):
     st = CheckingShapeTracker((random.randint(2, 10), random.randint(2, 10), random.randint(2, 10)))
-    for i in range(8): random.choice(ops)(st)
+    for i in range(8): random.choice(shapetracker_ops)(st)
     st.assert_same()

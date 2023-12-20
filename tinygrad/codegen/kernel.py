@@ -66,17 +66,14 @@ class LinearizerOptions(NamedTuple):
 
 class Kernel:
   def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None):
-    self.opts = opts if opts else (cast(Compiled, Device[Device.DEFAULT]).linearizer_opts if isinstance(Device[Device.DEFAULT], Compiled) else LinearizerOptions())  # noqa: E501
+    self.opts = opts or (device.linearizer_opts if isinstance(device:=Device[Device.DEFAULT], Compiled) else LinearizerOptions())
     self.ast = ast
     assert ast.op == BufferOps.STORE, f"kernels must have a store as the output, got {ast.op}"
 
     # fetch lazyop info
     self.info: FlopCounter = get_lazyop_info(self.ast)
 
-    # there's only allowed to be one reduceop
-    reduceops = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
-    #assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
-    self.reduceops = reduceops if reduceops else None
+    self.reduceops:List[LazyOp] = [x for x in self.ast.get_lazyops() if x.op in ReduceOps]
 
     # create new shapetrackers inside this kernel, we will permute them
     self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = dedup([x.arg for x in self.ast.get_lazyops() if x.op in BufferOps])
@@ -266,7 +263,7 @@ class Kernel:
         strides.append(special_strides)
 
     # merge dimensions if we can, multi get_shape_strides
-    # TODO: does this always preserve the reduce dimension, NO
+    # NOTE: this does not always preserve the reduce dimension
     # TODO: move this into shapetracker, with tests!
     rets = [[(shapes[j][0], strides[j][0])] for j in range(len(shapes))]
     for i in range(1, len(shapes[0])):
@@ -335,77 +332,77 @@ class Kernel:
   # ******************** high level optimizers ********************
 
   def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None):
-    if use_tensor_cores and self.opts.has_local and self.reduceops and self.reduceops[0].op == ReduceOps.SUM and self.opts.device in tensor_cores:
-      for tc in tensor_cores[self.opts.device]:
-        if not((tc.arch is None or tc.arch == os.uname().machine) and isinstance(self.reduceop.src[0], LazyOp)): continue
-        has_cast = tc.dtype_in != tc.dtype_out
+    for reduceop in self.reduceops:
+      if use_tensor_cores and self.opts.has_local and reduceop.op == ReduceOps.SUM and self.opts.device in tensor_cores:
+        for tc in tensor_cores[self.opts.device]:
+          if not((tc.arch is None or tc.arch == os.uname().machine) and isinstance(reduceop.src[0], LazyOp)): continue
+          has_cast = tc.dtype_in != tc.dtype_out
 
-        if has_cast and not(isinstance(self.reduceop.src[0], LazyOp) and self.reduceop.src[0].op == UnaryOps.CAST and self.reduceop.src[0].arg[0] == tc.dtype_out): continue  # noqa: E501
-        mul_op = self.reduceops[0].src[0].src[0] if has_cast else self.reduceops[0].src[0]
+          if has_cast and not(isinstance(reduceop.src[0], LazyOp) and reduceop.src[0].op == UnaryOps.CAST and reduceop.src[0].arg[0] == tc.dtype_out): continue  # noqa: E501
+          mul_op = reduceop.src[0].src[0] if has_cast else reduceop.src[0]
 
-        if not(isinstance(mul_op, LazyOp) and mul_op.op == BinaryOps.MUL): continue
-        if not(isinstance(mul_op.src[0], LazyOp) and mul_op.src[0].op == BufferOps.LOAD and mul_op.src[0].arg.dtype == tc.dtype_in): continue
-        if not(isinstance(mul_op.src[1], LazyOp) and mul_op.src[1].op == BufferOps.LOAD and mul_op.src[1].arg.dtype == tc.dtype_in): continue
-        buf0, buf1 = self.bufs.index(cast(MemBuffer, mul_op.src[0].arg)), self.bufs.index(cast(MemBuffer, mul_op.src[1].arg))
-        buf0_strides, buf1_strides = self.sts[buf0].real_strides(), self.sts[buf1].real_strides()
-        axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides[:self.first_reduce]) if s == 0 and self.full_shape[i]%tc.dims[0] == 0]  # noqa: E501
-        axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides[:self.first_reduce]) if s == 0 and self.full_shape[i]%tc.dims[1] == 0]  # noqa: E501
+          if not(isinstance(mul_op, LazyOp) and mul_op.op == BinaryOps.MUL): continue
+          if not(isinstance(mul_op.src[0], LazyOp) and mul_op.src[0].op == BufferOps.LOAD and mul_op.src[0].arg.dtype == tc.dtype_in): continue
+          if not(isinstance(mul_op.src[1], LazyOp) and mul_op.src[1].op == BufferOps.LOAD and mul_op.src[1].arg.dtype == tc.dtype_in): continue
+          buf0, buf1 = self.bufs.index(cast(MemBuffer, mul_op.src[0].arg)), self.bufs.index(cast(MemBuffer, mul_op.src[1].arg))
+          buf0_strides, buf1_strides = self.sts[buf0].real_strides(), self.sts[buf1].real_strides()
+          axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides[:self.first_reduce]) if s == 0 and self.full_shape[i]%tc.dims[0] == 0]  # noqa: E501
+          axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides[:self.first_reduce]) if s == 0 and self.full_shape[i]%tc.dims[1] == 0]  # noqa: E501
 
-        if not(axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%tc.dims[2] == 0 and self.full_shape[self.first_reduce] >= tc.dims[2] and (self.shape_len-self.first_reduce) == 1): continue  # noqa: E501
+          if not(axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%tc.dims[2] == 0 and self.full_shape[self.first_reduce] >= tc.dims[2] and (self.shape_len-self.first_reduce) == 1): continue  # noqa: E501
 
-        if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
+          if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
 
-        s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0] # TODO: select axis in smart way
-        s0_exists, s1_exists = True, True
-        assert s0 != s1 and self.full_shape[s0]%tc.dims[0] == 0 and self.full_shape[s1]%tc.dims[1] == 0
-        def fix(needed, ax):
-          nonlocal s0, s1, s0_exists, s1_exists
-          if not needed: return
-          if s0_exists and ax == s0:
-            if s1_exists and s0 < s1: s1 -= 1
-            s0_exists = False
-          elif s1_exists and ax == s1:
-            if s0_exists and s1 < s0: s0 -= 1
-            s1_exists = False
+          s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0] # TODO: select axis in smart way
+          s0_exists, s1_exists = True, True
+          assert s0 != s1 and self.full_shape[s0]%tc.dims[0] == 0 and self.full_shape[s1]%tc.dims[1] == 0
+          def fix(needed, ax):
+            nonlocal s0, s1, s0_exists, s1_exists
+            if not needed: return
+            if s0_exists and ax == s0:
+              if s1_exists and s0 < s1: s1 -= 1
+              s0_exists = False
+            elif s1_exists and ax == s1:
+              if s0_exists and s1 < s0: s0 -= 1
+              s1_exists = False
 
-        # tensor core -- unroll the reduce dim, upcast input, then create the correct thread pattern
-        self.apply_opt(Opt(OptOps.UNROLL, 0, tc.dims[2]))
-        self.apply_opt(Opt(OptOps.UPCAST, s0 if tc.upcast_dim == 0 else s1, (tc.dims[0]*tc.dims[2])//prod([a[1] for a in tc.threads])))
-        for (tc_dim, tc_amt) in tc.threads:
-          fix(self.apply_opt(Opt(OptOps.LASTLOCAL, s0 if tc_dim == 0 else s1, tc_amt)), s0 if tc_dim == 0 else s1)
+          # tensor core -- unroll the reduce dim, upcast input, then create the correct thread pattern
+          self.apply_opt(Opt(OptOps.UNROLL, 0, tc.dims[2]))
+          self.apply_opt(Opt(OptOps.UPCAST, s0 if tc.upcast_dim == 0 else s1, (tc.dims[0]*tc.dims[2])//prod([a[1] for a in tc.threads])))
+          for (tc_dim, tc_amt) in tc.threads:
+            fix(self.apply_opt(Opt(OptOps.LASTLOCAL, s0 if tc_dim == 0 else s1, tc_amt)), s0 if tc_dim == 0 else s1)
 
-        # assert tensor core and prevent extra_opts from altering the key shape structure
-        if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
+          # assert tensor core and prevent extra_opts from altering the key shape structure
+          if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
 
-        if extra_opts is not None:
-          for opt in extra_opts:
-            self.apply_opt(opt)
-        else:
-          # hand-coded TC opts
-          if s1_exists:
-            s1_div = [upc for upc in [5,4,3,2,1] if self.full_shape[s1]%upc == 0][0]
-            if s1_div != 1: fix(self.apply_opt(Opt(OptOps.UPCAST, s1, s1_div)), s1)
-          if s0_exists:
-            s0_div = [upc for upc in [5,4,3,2,1] if self.full_shape[s0]%upc == 0][0]
-            if s0_div != 1: fix(self.apply_opt(Opt(OptOps.UPCAST, s0, s0_div)), s0)
-          if self.tensor_core and s0_exists:
-            for upc in [4,2]:
-              if self.full_shape[s0] % upc == 0:
-                self.apply_opt(Opt(OptOps.LASTLOCAL, s0, upc))
-                break
+          if extra_opts is not None:
+            for opt in extra_opts: self.apply_opt(opt)
+          else:
+            # hand-coded TC opts
+            if s1_exists:
+              s1_div = [upc for upc in [5,4,3,2,1] if self.full_shape[s1]%upc == 0][0]
+              if s1_div != 1: fix(self.apply_opt(Opt(OptOps.UPCAST, s1, s1_div)), s1)
+            if s0_exists:
+              s0_div = [upc for upc in [5,4,3,2,1] if self.full_shape[s0]%upc == 0][0]
+              if s0_div != 1: fix(self.apply_opt(Opt(OptOps.UPCAST, s0, s0_div)), s0)
+            if self.tensor_core and s0_exists:
+              for upc in [4,2]:
+                if self.full_shape[s0] % upc == 0:
+                  self.apply_opt(Opt(OptOps.LASTLOCAL, s0, upc))
+                  break
 
-        # alias buffer
-        alias_pattern = [0]*(self.global_dims+(self.local_dims-len(tc.threads))) + [2]*(len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
-        self.alias_buffer(buf0, alias_pattern)
-        self.alias_buffer(buf1, alias_pattern)
-        return True
+          # alias buffer
+          alias_pattern = [0]*(self.global_dims+(self.local_dims-len(tc.threads))) + [2]*(len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
+          self.alias_buffer(buf0, alias_pattern)
+          self.alias_buffer(buf1, alias_pattern)
+          return True
     return False
 
   def apply_opt(self, opt:Opt):
     assert not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.LASTLOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals"  # noqa: E501
     self.applied_opts.append(opt)
     if opt.axis is not None:
-      axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op == OptOps.GROUP or opt.op == OptOps.GROUPTOP else 0))  # noqa: E501
+      axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op in [OptOps.GROUP, OptOps.GROUPTOP] else 0))  # noqa: E501
     else:
       axis = -1
     if opt.amt is not None:
@@ -493,12 +490,9 @@ class Kernel:
         for global_idx in range(self.global_dims):
           if self.full_shape[self.first_reduce]%MV_THREADS_PER_ROW == 0 and self.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
             if DEBUG >= 3: print(f"MATVEC: full_shape={self.full_shape} first_reduce={self.first_reduce} buf0_strides={buf0_strides} blocksize={MV_BLOCKSIZE} threads_per_row={MV_THREADS_PER_ROW} rows_per_thread={MV_ROWS_PER_THREAD}")  # noqa: E501
-            if MV_THREADS_PER_ROW > 1:
-              self.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
-            if MV_BLOCKSIZE > 1:
-              self.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
-            if MV_ROWS_PER_THREAD > 1:
-              self.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
+            if MV_THREADS_PER_ROW > 1: self.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
+            if MV_BLOCKSIZE > 1: self.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
+            if MV_ROWS_PER_THREAD > 1: self.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
             return
 
     if self.opts.has_local and self.opts.has_shared and all(isinstance(s, int) for s in self.sts[0].shape[:self.first_reduce]):
@@ -547,8 +541,7 @@ class Kernel:
         prod(self.full_shape[self.shape_len - self.upcasted:]) * prod(self.full_shape[j] for j in to_upcast) * self.full_shape[axis] <= 7 * 7:
         if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
         to_upcast.append(axis)
-    for axis in to_upcast[::-1]:
-      self.apply_opt(Opt(OptOps.UPCAST, axis, 0))
+    for axis in to_upcast[::-1]: self.apply_opt(Opt(OptOps.UPCAST, axis, 0))
 
     # potentially do more upcasts of non reduce axes based on a heuristic
     upcasted_axis = set()
@@ -563,8 +556,7 @@ class Kernel:
         if DEBUG >= 4: print(f"float4 merging axis : {xb_choices}")
         self.apply_opt(Opt(OptOps.UPCAST, xb_choices[0][2], xb_choices[0][3]))
         upcasted_axis.add(xb_choices[0][2])
-      else:
-        break
+      else: break
 
     # if last dim is small(ish) and it's a reduce dim, upcast the reduce (loop unrolling). no simplify needed since it's just an upcast.
     if self.first_reduce < (self.shape_len-self.upcasted) and (len(list(self.shape_offsets(self.full_buf_index))) <= 4 or not any(r for _,_,r in self.upcasted_axis(self.full_buf_index))) and (self.upcasted == 0 or prod(self.full_shape[-self.upcasted:]) < 64):  # noqa: E501

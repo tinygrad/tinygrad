@@ -179,6 +179,14 @@ class TestOpt(unittest.TestCase):
       assert len(CacheCollector.cache) == 1, "optimizer didn't fold reduce/elementwise"
     assert ret.item() == 33
 
+  def test_stddev_plus_mean_kernel_fuse(self):
+    a = Tensor([1, 2, 3, 4])
+    b = Tensor([1, 2, 3, 4])
+    with CLCache():
+      ret = a.std() + b.mean()
+      ret.numpy()
+      assert len(CacheCollector.cache) == 3, f"stddev + mean kernels didn't fuse, got {len(CacheCollector.cache)} instead of 5 kernels"
+
   def test_fold_batchnorm(self):
     with Tensor.train():
       img = Tensor.ones(1,32,4,4)
