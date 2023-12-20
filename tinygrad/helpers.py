@@ -150,33 +150,25 @@ class dtypes:
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", np.bool_)
-  int8: Final[DType] = DType(1, 1, "char", np.int8)
-  uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
-  int16: Final[DType] = DType(3, 2, "short", np.int16)
-  uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
-  int32: Final[DType] = DType(5, 4, "int", np.int32)
-  uint32: Final[DType] = DType(6, 4, "unsigned int", np.uint32)
-  int64: Final[DType] = DType(7, 8, "long", np.int64)
-  uint64: Final[DType] = DType(8, 8, "unsigned long", np.uint64)
-  float16: Final[DType] = DType(9, 2, "half", np.float16)
+  char: Final[DType] = (int8 := DType(1, 1, "char", np.int8))
+  uchar: Final[DType] = (uint8 := DType(2, 1, "unsigned char", np.uint8))
+  short: Final[DType] = (int16 := DType(3, 2, "short", np.int16))
+  ushort: Final[DType] = (uint16 := DType(4, 2, "unsigned short", np.uint16))
+  default_int: ClassVar[DType] = (int := (int32 := DType(5, 4, "int", np.int32)))
+  uint: Final[DType] = (uint32 := DType(6, 4, "unsigned int", np.uint32))
+  long: Final[DType] = (int64 := DType(7, 8, "long", np.int64))
+  ulong: Final[DType] = (uint64:= DType(8, 8, "unsigned long", np.uint64))
+  half: Final[DType] = (float16 := DType(9, 2, "half", np.float16))
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
   bfloat16: Final[DType] = DType(10, 2, "__bf16", None)
-  float32: Final[DType] = DType(11, 4, "float", np.float32)
-  float64: Final[DType] = DType(12, 8, "double", np.float64)
-
-  # dtype aliases
-  half = float16; float = float32; double = float64 # noqa: E702
-  uchar = uint8; ushort = uint16; uint = uint32; ulong = uint64 # noqa: E702
-  char = int8; short = int16; int = int32; long = int64 # noqa: E702
+  default_float: ClassVar[DType] = (float := (float32 := DType(11, 4, "float", np.float32)))
+  double: Final[DType] = (float64 := DType(12, 8, "double", np.float64))
 
   # NOTE: these are image dtypes
   @staticmethod
   def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shp, dtypes.float32)
   @staticmethod
   def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp, dtypes.float32)
-
-  default_float: ClassVar[DType] = float32
-  default_int: ClassVar[DType] = int32
 
 # https://jax.readthedocs.io/en/latest/jep/9407-type-promotion.html
 # we don't support weak type and complex type
@@ -216,41 +208,28 @@ CACHELEVEL = getenv("CACHELEVEL", 2)
 
 VERSION = 10
 _db_connection = None
-def db_connection():
+def diskcache_put(table:str, key:Union[Dict, str, int], val:Optional[Any] = None):
+  if CACHELEVEL == 0 and val is not None: return val
+  if isinstance(key, (str,int)): key = {"key": key}
   global _db_connection
   if _db_connection is None:
     os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
     _db_connection = sqlite3.connect(CACHEDB)
     if DEBUG >= 7: _db_connection.set_trace_callback(print)
-  return _db_connection
-
-def diskcache_get(table:str, key:Union[Dict, str, int]) -> Any:
-  if CACHELEVEL == 0: return None
-  if isinstance(key, (str,int)): key = {"key": key}
-  conn = db_connection()
-  cur = conn.cursor()
-  try:
+  cur = _db_connection.cursor()
+  TYPES = {str: "text", bool: "integer", int: "integer", float: "numeric", bytes: "blob"}
+  ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
+  cur.execute(f"CREATE TABLE IF NOT EXISTS {table}_{VERSION} ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
+  if val is not None: # put
+    cur.execute(f"REPLACE INTO {table}_{VERSION} ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val), ))  # noqa: E501
+    _db_connection.commit()
+    cur.close()
+    return val  
+  else: # get
     res = cur.execute(f"SELECT val FROM {table}_{VERSION} WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
-  except sqlite3.OperationalError:
-    return None  # table doesn't exist
-  if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
-  return None
+    if (val:=res.fetchone()) is not None: return pickle.loads(val[0])
 
-_db_tables = set()
-def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
-  if CACHELEVEL == 0: return val
-  if isinstance(key, (str,int)): key = {"key": key}
-  conn = db_connection()
-  cur = conn.cursor()
-  if table not in _db_tables:
-    TYPES = {str: "text", bool: "integer", int: "integer", float: "numeric", bytes: "blob"}
-    ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
-    cur.execute(f"CREATE TABLE IF NOT EXISTS {table}_{VERSION} ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
-    _db_tables.add(table)
-  cur.execute(f"REPLACE INTO {table}_{VERSION} ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val), ))  # noqa: E501
-  conn.commit()
-  cur.close()
-  return val
+def diskcache_get(table:str, key:Union[Dict, str, int]): return diskcache_put(table, key)
 
 def diskcache(func):
   @functools.wraps(func)
