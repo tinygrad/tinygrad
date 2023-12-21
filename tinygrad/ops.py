@@ -53,8 +53,8 @@ class LazyOp:
   def cached_compare(self, x, context):
     if id(self) == id(x): return True
     if self.op != x.op or self.arg != x.arg or len(self.src) != len(x.src): return False
-    if (self,x) in context: return context[(self,x)]
-    ret = context[self,x] = all(a.cached_compare(b, context) for a,b in zip(self.src, x.src))
+    if (key := (id(self), id(x))) in context: return context[key]
+    ret = context[key] = all(a.cached_compare(b, context) for a,b in zip(self.src, x.src))
     return ret
   def __eq__(self, x): return self.cached_compare(x, context={})
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
