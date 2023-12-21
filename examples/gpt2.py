@@ -35,9 +35,7 @@ class Attention:
 
     # create kv cache
     if not hasattr(self, "cache_kv"):
-      self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim)
-      if HALF:
-        self.cache_kv = self.cache_kv.half()
+      self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim, dtype=x.dtype)
 
     keys = self.cache_kv[0].shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
     values = self.cache_kv[1].shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
@@ -89,17 +87,15 @@ class Transformer:
     pos_emb = self.wpe(self.allpos.shrink((None, (start_pos, start_pos+seqlen))))
     h = tok_emb + pos_emb
 
-    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf")).triu(start_pos.val+1).realize() if seqlen > 1 else None
+    if HALF: h = h.half()
 
-    if HALF:
-      h = h.half()
-      if mask is not None: mask = mask.half()
+    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos.val+1).realize() if seqlen > 1 else None
 
-    for hi in self.h: h = hi(h, start_pos=start_pos, mask=mask)
+    for hi in self.h: h = hi(h, start_pos, mask)
 
     logits = self.lm_head(self.ln_f(h))
     # NOTE: temperature=0 with HALF breaks due to precision, should use argmax instead
-    ret = (logits[:, -1, :] / (temperature+1e-10)).softmax()
+    ret = (logits[:, -1, :] / (temperature+1e-6)).softmax()
     return ret.half().realize() if HALF else ret.realize()
 
   # TODO: fix empty token
@@ -136,7 +132,7 @@ class GPT2:
     self.model = model
     self.tokenizer = tokenizer
 
-  def greedy_until(self, prompt:str, max_length:int, temperature:float, timing:bool=False, batch_size:int=1):
+  def generate(self, prompt:str, max_length:int, temperature:float, timing:bool=False, batch_size:int=1):
     prompt_tokens = self.tokenizer.encode(prompt, allowed_special={"<|endoftext|>"})
     toks = [prompt_tokens[:] for _ in range(batch_size)]
     start_pos = 0
@@ -157,8 +153,7 @@ class GPT2:
         tok = probs.multinomial().flatten().numpy().tolist()
       start_pos = len(toks[0])
       for i,t in enumerate(tok): toks[i].append(t)
-      output = [self.tokenizer.decode(x) for x in toks]
-    return output
+    return [self.tokenizer.decode(x) for x in toks]
 
 # **** main code ****
 
@@ -193,7 +188,7 @@ if __name__ == "__main__":
   if args.benchmark != -1:
     gpt2.model(Tensor.rand(args.batch_size, args.benchmark), Variable("a", 0, MAX_CONTEXT).bind(0)).realize()
   else:
-    texts = gpt2.greedy_until(args.prompt, args.count, args.temperature, timing=args.timing, batch_size=args.batch_size)
+    texts = gpt2.generate(args.prompt, args.count, args.temperature, timing=args.timing, batch_size=args.batch_size)
     if not args.noshow:
       print('Generating text...')
       if len(texts) == 1: print(texts[0])

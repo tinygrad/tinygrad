@@ -7,22 +7,17 @@ def image_dot(self, w):
   # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
   n1, n2 = len(self.shape), len(w.shape)
   assert n1 != 0 and n2 != 0, f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
-  assert self.shape[-1] == w.shape[-min(n2, 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(n2, 2)]})"
+  assert self.shape[-1] == w.shape[-min(n2, 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(n2, 2)]})"  # noqa: E501
   bs, groups = prod(self.shape[0:-2]), prod(w.shape[0:-2])
   cin, cout = w.shape[-2], w.shape[-1]
-  out_shape_t = self.shape[0:-2] + (cout,-1)
-  if len(self.shape) > 1:
-    order = tuple(range(len(self.shape)-2)) + (len(self.shape)-1, len(self.shape)-2)
-  else:
-    order, out_shape_t = (0,), (cout, )
-  worder = tuple(range(len(w.shape)-2)) + (len(w.shape)-1, len(w.shape)-2)
+  out_shape_t = self.shape[0:-2] + (cout,-1) if len(self.shape) > 1 else (cout, )
 
   # NOTE: with NHWC we can remove the transposes
   # bs x groups*cin x H x W
-  cx = self.permute(order=order).reshape(shape=(bs//groups, groups*cin, -1, 1))
+  cx = self.transpose(self.ndim-1, self.ndim-2).reshape((bs//groups, groups*cin, -1, 1))
   # groups*cout x cin x H, W
-  cw = w.permute(order=worder).reshape(shape=(groups*cout, cin, 1, 1))
-  return image_conv2d(cx, cw, groups=groups).reshape(shape=out_shape_t).permute(order=order)
+  cw = w.transpose(w.ndim-1, w.ndim-2).reshape((groups*cout, cin, 1, 1))
+  return image_conv2d(cx, cw, groups=groups).reshape(out_shape_t).transpose(self.ndim-1, self.ndim-2)
 
 def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
   base_image_type = dtypes.imageh if getenv("FLOAT16", 0) else dtypes.imagef
@@ -35,8 +30,8 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   if cin % 4 != 0 and not (cin == 1 and groups%4 == 0):
     x = x.reshape(bs, groups, cin, iy, ix)   # do this always?
     added_input_channels = 4 - (cin % 4)
-    w = w.pad(tuple((0, added_input_channels) if i == 2 else (0, 0) for i in range(len(w.shape))))
-    x = x.pad(tuple((0, added_input_channels) if i == 2 else (0, 0) for i in range(len(x.shape))))
+    w = w.pad(tuple((0, added_input_channels) if i == 2 else None for i in range(w.ndim)))
+    x = x.pad(tuple((0, added_input_channels) if i == 2 else None for i in range(x.ndim)))
     cin = cin + added_input_channels
     x = x.reshape(bs, groups*cin, iy, ix)
 
@@ -46,7 +41,7 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
     added_output_channels = 4 - (rcout % 4)
     rcout += added_output_channels
     cout = groups * rcout
-    w = w.slice(tuple((0, rcout) if i == 1 else (0, s) for i,s in enumerate(w.shape)))
+    w = w.pad(tuple((0, added_output_channels) if i == 1 else None for i in range(w.ndim)))
 
   # packed (note: flipping bs and iy would make the auto-padding work)
   x = x.permute(0,2,3,1)
@@ -103,11 +98,13 @@ def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tup
   idx = (idxy // 4) % base_shape[1]
   idy = (idxy // (4 * base_shape[1]))
 
-  if valid.min == 0 and isinstance(idxy, SumNode):
-    nodes = valid.nodes if isinstance(valid, AndNode) else [valid]
+  # this is wrong
+  if valid.min == 0 and False:
+    nodes = valid.nodes if isinstance(valid, AndNode) else [valid]  # type: ignore
     val_dict: Dict[Node, Any] = {}
     # TODO: is this correct? should it check there's only one variable from each component?
-    idxy_flat_var = [(i, list(i.vars())[0]) for i in idxy.flat_components if not isinstance(i, NumNode)]
+    idxy_nodes = idxy.flat_components if isinstance(idxy, SumNode) else [idxy]
+    idxy_flat_var = [(i, list(i.vars())[0]) for i in idxy_nodes if not isinstance(i, NumNode)]
 
     for node in nodes:
       assert isinstance(node, LtNode)

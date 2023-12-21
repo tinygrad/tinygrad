@@ -141,7 +141,7 @@ def export_model(model, target:str, *inputs):
   run,special_names = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
   state = get_state_dict(model)
-  weight_names = {id(x.lazydata.realized): name for name, x in state.items()}
+  weight_names = {id(x.lazydata.base.realized): name for name, x in state.items()}
   input_names = [name for _,name in special_names.items() if "input" in name]
   output_names = [name for _,name in special_names.items() if "output" in name]
   prg = ""

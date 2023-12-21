@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 import math
 import unittest
 import numpy as np
@@ -61,6 +62,10 @@ class TestRandomness(unittest.TestCase):
   def test_randn(self):
     self.assertTrue(normal_test(Tensor.randn))
     self.assertTrue(equal_distribution(Tensor.randn, torch.randn, lambda x: np.random.randn(*x)))
+
+  def test_randint(self):
+    self.assertFalse(normal_test(Tensor.randint))
+    self.assertTrue(equal_distribution(partial(Tensor.randint, low=-2, high=5), numpy_func=lambda x: np.random.randint(low=-2, high=5, size=x)))
 
   def test_normal(self):
     self.assertTrue(normal_test(Tensor.normal))
