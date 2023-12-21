@@ -107,7 +107,7 @@ def Atan(y: Tensor):
 
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
   k = int(k.numpy().item()) if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
-  return x.triu(k) if upper else x.tril(k)
+  return x.triu(k).cast(dtypes.int64) if upper else x.tril(k).cast(dtypes.int64)
 
 def Squeeze(data: Tensor, axes):
   if isinstance(axes, Tensor): axes = safe_numpy(axes)

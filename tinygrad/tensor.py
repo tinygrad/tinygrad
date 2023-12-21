@@ -7,7 +7,7 @@ from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
 
-from tinygrad.helpers import DType, dtypes, ImageDType, least_upper_float
+from tinygrad.helpers import DType, dtypes, ImageDType, least_upper_float, least_upper_dtype
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
 from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.ops import LoadOps
@@ -249,7 +249,7 @@ class Tensor:
 
     # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
     # this is "implicit gradient creation"
-    self.grad = Tensor(1, device=self.device, requires_grad=False)
+    self.grad = Tensor(1.0, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
       assert (t0.grad is not None)
@@ -728,6 +728,9 @@ class Tensor:
         y_dtype = dtypes.from_py(y)
         x = x.cast(y_dtype)
       y = Tensor(y, self.device, y_dtype, requires_grad=False)
+
+    output_dtype = least_upper_dtype(x.dtype, y.dtype)
+    x, y = x.cast(output_dtype), y.cast(output_dtype)
 
     if reverse: x, y = y, x
 
