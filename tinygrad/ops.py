@@ -45,11 +45,18 @@ class ScheduleItem:
   inputs: Tuple[LazyBuffer, ...]
   var_vals: Dict[Variable, int]
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class LazyOp:
   op: Op
   src: Tuple[LazyOp, ...] = ()
   arg: Any = None
+  def cached_compare(self, x, context):
+    if id(self) == id(x): return True
+    if self.op != x.op or self.arg != x.arg or len(self.src) != len(x.src): return False
+    if (self,x) in context: return context[(self,x)]
+    ret = context[self,x] = all(a.cached_compare(b, context) for a,b in zip(self.src, x.src))
+    return ret
+  def __eq__(self, x): return self.cached_compare(x, context={})
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
   @functools.cached_property
   def hash(self): return hash((self.op, self.src, self.arg))
