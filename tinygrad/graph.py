@@ -1,5 +1,5 @@
 import os, atexit
-from typing import List, Any
+from typing import Dict, List, Any, Tuple
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, LazyOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters, getenv
@@ -87,7 +87,8 @@ def log_lazybuffer(lb, scheduled=False):
         # realized but unseen?
         G.add_node(nm(lb), label=f'"{str(lb.base.realized)[5:-1].replace(" ", chr(10))}\nb:{bm(lb.realized)}"', style='filled', fillcolor="#f0c08080")
 
-cycle_tracker, tree_cnt = {}, -1
+cycle_tracker: Dict[int, Tuple[int, int]] = {}
+tree_cnt: int = -1
 def _tree(lazydata, prefix=""):
   global tree_cnt
   tree_cnt += 1
@@ -96,7 +97,7 @@ def _tree(lazydata, prefix=""):
   if len(lazydata.src) == 0: return [f"━━ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
   if id(lazydata) in cycle_tracker and cycle_tracker[id(lazydata)][1] > getenv("TREE_CYCLE_CNT", 5):
     return [f"━⬆︎ goto {cycle_tracker[id(lazydata)][0]}: {lazydata.op.name}"]
-  cycle_tracker[id(lazydata)] = [tree_cnt, 1 if id(lazydata) not in cycle_tracker else cycle_tracker[id(lazydata)][1]+1]
+  cycle_tracker[id(lazydata)] = (tree_cnt, 1 if id(lazydata) not in cycle_tracker else cycle_tracker[id(lazydata)][1]+1)
   lines = [f"━┳ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
   childs = [_tree(c) for c in lazydata.src[:]]
   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
