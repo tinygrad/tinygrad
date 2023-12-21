@@ -47,7 +47,7 @@ class Relu(Function):
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.ret.const(0).e(BinaryOps.CMPLT, self.ret).e(BinaryOps.MUL, grad_output)
+    return self.ret.const(0).e(BinaryOps.CMPLT, self.ret).cast(grad_output.dtype).e(BinaryOps.MUL, grad_output)
 
 class Log(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
@@ -162,7 +162,7 @@ class Max(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     # 1s in locations where the max was chosen (can be two locations)
-    max_is_1s = self.x.const(1.0).e(BinaryOps.SUB, self.x.e(BinaryOps.CMPLT, self.ret.expand(self.x.shape)))
+    max_is_1s = self.x.const(1.0).e(BinaryOps.SUB, self.x.e(BinaryOps.CMPLT, self.ret.expand(self.x.shape)).cast(self.x.dtype))
     div = max_is_1s.r(ReduceOps.SUM, grad_output.shape).expand(self.x.shape)
     return max_is_1s.e(BinaryOps.DIV, div).e(BinaryOps.MUL, grad_output.expand(self.x.shape))
 
