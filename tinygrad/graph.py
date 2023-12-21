@@ -89,7 +89,7 @@ def log_lazybuffer(lb, scheduled=False):
 
 cycle_tracker, tree_cnt = {}, -1
 def _tree(lazydata, prefix=""):
-  global cycle_tracker, tree_cnt
+  global tree_cnt
   tree_cnt += 1
   if type(lazydata).__name__ == "LazyBuffer":
     return [f"━━ realized {lazydata.dtype.name} {lazydata.shape}"] if (lazydata.realized) else _tree(lazydata.op, "LB ")
