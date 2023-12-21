@@ -116,7 +116,7 @@ class Transformer:
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos+1).realize() if seqlen > 1 else None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h))
-    return logits
+    return logits.realize()
 
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
     # TODO: better way to handle the first call v.s. the rest?

@@ -147,8 +147,9 @@ class AbsmaxQuantizedLinear:
       else:
         new_tensors[name] = v
     return new_tensors
-  
+
 class QK4_0Linear:
+  
   def __init__(self, in_features, out_features, bias=False):
     assert bias == False
     self.in_features = in_features
@@ -162,6 +163,7 @@ class QK4_0Linear:
 
   @staticmethod
   def quantize(tensors):
+    # https://github.com/ggerganov/llama.cpp/blob/master/ggml-quants.c#L427
     new_tensors = {}
     for name,v in tensors.items():
       if "feed_forward" in name or ("attention.w") in name or name == "output.weight":
@@ -181,6 +183,7 @@ class QK4_0Linear:
     return new_tensors
 
   def dequantize(self):
+    # https://github.com/ggerganov/llama.cpp/blob/master/ggml-quants.c#L1074
     div = (self.weight / 16)
     return (
         (Tensor.cat(self.weight - (div * 16), div, dim=1).cast(dtypes.int8) - 8).half() * self.scale
@@ -458,7 +461,8 @@ After you are done speaking, output [EOS]. You are not Chad.
           with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                       f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                       (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
-            probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
+            logits = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature)
+            probs = (logits[:, -1, :] / (args.temperature+1e-6)).softmax().flatten().realize()
           # TODO: fix JIT rand so we can put this in the JIT
           tok = probs.multinomial().item()
 
