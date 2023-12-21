@@ -1,6 +1,6 @@
 import math
 from typing import Tuple, Optional, cast
-from tinygrad.helpers import argsort, DType, dtypes
+from tinygrad.helpers import argsort, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
