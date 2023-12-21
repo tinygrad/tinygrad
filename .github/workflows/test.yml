@@ -329,9 +329,10 @@ jobs:
     - name: Install Python Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test HIP compilation on RDNA3 [gfx1100]
+      # test/test_symbolic_ops.py can't run here, it was comparing empty memory
       run: |
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
-        MOCKHIP=1 HIP=1 python -m pytest -s test/test_hip_rdna3.py test/test_symbolic_ops.py
+        MOCKHIP=1 HIP=1 python -m pytest -s test/test_hip_rdna3.py
 
 
   tests:
