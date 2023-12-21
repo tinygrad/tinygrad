@@ -1,5 +1,5 @@
 import os, atexit
-from typing import Dict, List, Any, Tuple
+from typing import List, Any
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, LazyOp
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters, getenv
