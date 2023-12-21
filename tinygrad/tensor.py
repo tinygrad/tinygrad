@@ -383,11 +383,12 @@ class Tensor:
         # TODO uint8 and bool tensor indexing
         if not (dtypes.is_int(t.dtype) or t.dtype == dtypes.bool): raise IndexError("tensors used as indices must be int or bool tensors")
 
-      # broadcasting for final shape
+      # broadcasting for combined index shape
       try: max_dim = len(broadcasted_shape := list(reduce(lambda x,y: x._broadcasted(y)[0], idx).shape))
       except AssertionError as exc: raise IndexError("cannot broadcast Tensor indices") from exc
 
       if empty_idx or 0 in self.shape:
+        # pop the dims that are indexed
         for d in reversed(tdim): new_shape.pop(d)
         ret = Tensor.empty(new_shape[:tdim[0]] + broadcasted_shape + new_shape[tdim[0]:], dtype=ret.dtype, requires_grad=ret.requires_grad)
       else:
