@@ -26,9 +26,7 @@ class WebGPUProgram:
     command_encoder = device.create_command_encoder()
     if wait and timestamp_supported:
       query_set = device.create_query_set(type=wgpu.QueryType.timestamp, count=2)
-      query_buf = device.create_buffer(
-        size=8 * query_set.count,
-        usage=wgpu.BufferUsage.QUERY_RESOLVE | wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_SRC | wgpu.BufferUsage.COPY_DST)
+      query_buf = device.create_buffer(size=16, usage=wgpu.BufferUsage.QUERY_RESOLVE | wgpu.BufferUsage.COPY_SRC)
       timestamp_writes = {"query_set": query_set, "beginning_of_pass_write_index": 0, "end_of_pass_write_index": 1}
     compute_pass = command_encoder.begin_compute_pass(timestamp_writes=timestamp_writes if wait and timestamp_supported else None)
     compute_pass.set_pipeline(compute_pipeline)
@@ -38,9 +36,7 @@ class WebGPUProgram:
     if wait and timestamp_supported:
       command_encoder.resolve_query_set(query_set=query_set, first_query=0, query_count=2, destination=query_buf, destination_offset=0)
     device.queue.submit([command_encoder.finish()])
-    if wait and timestamp_supported:
-      timestamps = device.queue.read_buffer(query_buf).cast("Q").tolist()
-      return timestamps[1]-timestamps[0]
+    return (timestamps := device.queue.read_buffer(query_buf).cast("Q").tolist())[1] - timestamps[0] if wait and timestamp_supported else None
 
 class WebGpuAllocator(Allocator):
   def _alloc(self, size: int):
