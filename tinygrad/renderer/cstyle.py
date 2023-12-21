@@ -158,7 +158,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
         val = lang.code_for_op[args](*[r[x] for x in vin] + [dtype])
       assert child_count[u] != 0, f"childless ALU op found {u}"
       # TODO: fix index rendering issue. fix clang nested max macro issue
-      if (child_count[u] <= 1 or dtypes.is_int(dtype)) and args != BinaryOps.MAX and not getenv("EXPAND_SSA"):
+      if child_count[u] <= 1 and args != BinaryOps.MAX and not getenv("EXPAND_SSA"):
         r[u] = val
       else:
         kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'alu')} = {val};")
