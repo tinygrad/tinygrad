@@ -102,8 +102,8 @@ class LazyBuffer:
       else:
         srcs.append(s)
     assert all_same(dts:=[x.dtype.scalar() for x in (srcs if op != TernaryOps.WHERE else srcs[1:])]), f"all dtypes must match {dts} on {op}"
-    assert op != TernaryOps.WHERE or self.device != "WEBGPU" or srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
-    output_dtype = srcs[-1].dtype if op != BinaryOps.CMPLT else (dtypes.bool if self.device != "WEBGPU" else dtypes.float32)
+    if op == TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
+    output_dtype = srcs[-1].dtype if op != BinaryOps.CMPLT else dtypes.bool
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), output_dtype, op, arg, tuple(srcs))
 
   # *** reduce ops ***
