@@ -4,7 +4,9 @@ from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import WGSLRenderer
 import wgpu
 
-wgpu_device = get_default_device()
+adapter = wgpu.gpu.request_adapter(power_preference="high-performance")
+wgpu_device = adapter.request_device(required_features=[wgpu.FeatureName.timestamp_query])
+
 def create_uniform(val: int) -> wgpu.GPUBuffer:
   buf = wgpu_device.create_buffer(size=4, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST)
   wgpu_device.queue.write_buffer(buf, 0, val.to_bytes(4, "little"))
@@ -16,18 +18,30 @@ class WebGPUProgram:
   def __call__(self, *bufs, global_size, local_size, vals=(), wait=False):
     assert len(bufs) <= 8, "WEBGPU only supports 8 buffers"
     binding_layouts = [{"binding": i, "visibility": wgpu.ShaderStage.COMPUTE, "buffer": {"type": wgpu.BufferBindingType.uniform if i >= len(bufs) else wgpu.BufferBindingType.storage }} for i in range(len(bufs)+len(vals))]  # noqa: E501
-    bindings = [{"binding": i, "resource": {"buffer": create_uniform(x) if i >= len(bufs) else x, "offset": 0, "size": 4 if i >= len(bufs) else x.size}} for i,x in enumerate(bufs+vals)]  # noqa: E501
+    bindings = [{"binding": i, "resource": {"buffer": create_uniform(x) if i >= len(bufs) else x, "offset": 0, "size": 4 if i >= len(bufs) else x.size}} for i,x in enumerate(bufs+tuple(vals))]  # noqa: E501
     bind_group_layout = wgpu_device.create_bind_group_layout(entries=binding_layouts)
     pipeline_layout = wgpu_device.create_pipeline_layout(bind_group_layouts=[bind_group_layout])
     bind_group = wgpu_device.create_bind_group(layout=bind_group_layout, entries=bindings)
     compute_pipeline = wgpu_device.create_compute_pipeline(layout=pipeline_layout,compute={"module": self.prg, "entry_point": self.name},)
     command_encoder = wgpu_device.create_command_encoder()
-    compute_pass = command_encoder.begin_compute_pass()
+    if wait:
+      query_set = wgpu_device.create_query_set(type=wgpu.QueryType.timestamp, count=2)
+      query_buf = wgpu_device.create_buffer(
+        size=8*query_set.count,
+        usage=wgpu.BufferUsage.QUERY_RESOLVE | wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_SRC | wgpu.BufferUsage.COPY_DST
+      )
+      timestamp_writes = {"query_set": query_set, "beginning_of_pass_write_index": 0, "end_of_pass_write_index": 1}
+    compute_pass = command_encoder.begin_compute_pass(timestamp_writes=timestamp_writes if wait else None)
     compute_pass.set_pipeline(compute_pipeline)
     compute_pass.set_bind_group(0, bind_group, [], 0, 999999) # last 2 not used
     compute_pass.dispatch_workgroups(*global_size)  # x y z
     compute_pass.end()
+    if wait:
+      command_encoder.resolve_query_set(query_set=query_set, first_query=0, query_count=2, destination=query_buf, destination_offset=0)
     wgpu_device.queue.submit([command_encoder.finish()])
+    if wait:
+      timestamps = wgpu_device.queue.read_buffer(query_buf).cast("Q").tolist()
+      return timestamps[1]-timestamps[0]
 
 class WebGpuAllocator(Allocator):
   def _alloc(self, size: int):
