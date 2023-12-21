@@ -171,7 +171,7 @@ class Tensor:
     x = [(c := counts.chunk(2))[0] + ks[-1], c[1] + ks[0]]
     for i in range(5):
       for r in rotations[i % 2]: x[0], x[1] = (x0 := x[0] + x[1]), x0 ^ ((x[1] * (2 ** r)) + (x[1] / (2 ** (32 - r))))
-      x = [(x[0] + ks[i % 3]).realize(), (x[1] + ks[(i + 1) % 3] + i + 1).realize()]
+      x = [(x[0] + ks[i % 3]), (x[1] + ks[(i + 1) % 3] + i + 1)]
     out = (x[0].cat(x[1])[:num].cast(dtypes.float32).realize() / (2 ** 32 - 1)).reshape(shape).cast(dtypes.default_float if dtype is None else dtype)
     out.requires_grad = kwargs.get("requires_grad")
     return out
