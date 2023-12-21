@@ -113,12 +113,9 @@ class LazyBuffer:
 
     # if possible, reduce the amount of compute done by not computing on padded areas
     if op in {BinaryOps.MUL, BinaryOps.ADD}:
-      m0, m1 = srcs[0].st.views[-1].mask, srcs[1].st.views[-1].mask
-      out_mask = None
+      m0, m1, out_mask = srcs[0].st.views[-1].mask, srcs[1].st.views[-1].mask, None
       if m0 is not None and m0 == m1: out_mask = m0 # if they match, it works for both MUL and ADD
-      if op == BinaryOps.MUL:  # MUL only needs one mask
-        if m0 is None and m1 is not None: out_mask = m1
-        elif m0 is not None and m1 is None: out_mask = m0
+      elif op == BinaryOps.MUL: out_mask = m0 or m1  # MUL only needs one mask
       if out_mask is not None:
         shrink_srcs = tuple(x.shrink(out_mask) for x in srcs)  # remove the mask from the inputs
         ret = create_lazybuffer(self.device, ShapeTracker.from_shape(shrink_srcs[0].shape), out_dtype, op, arg, shrink_srcs)
