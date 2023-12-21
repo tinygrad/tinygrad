@@ -146,7 +146,7 @@ class TestDiskTensor(unittest.TestCase):
   def test_write_ones(self):
     pathlib.Path(temp("dt2")).unlink(missing_ok=True)
 
-    out = Tensor.ones(10, 10, device="CPU")
+    out = Tensor.ones(10, 10, device="CPU").contiguous()
     outdisk = out.to(f"disk:{temp('dt2')}")
     print(outdisk)
     outdisk.realize()
