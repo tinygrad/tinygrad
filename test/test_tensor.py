@@ -305,6 +305,7 @@ class TestTinygrad(unittest.TestCase):
 
   def test_item(self):
     assert Tensor(10).item() == 10
+    assert Tensor(-10).item() == -10
     assert Tensor(10.).item() == 10.
     assert Tensor(True).item() is True
     assert Tensor(10).reshape(1).item() == 10
