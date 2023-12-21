@@ -724,9 +724,7 @@ class Tensor:
       # make y a Tensor
       if 0 in self.shape: return self, self.full_like(y)
       if isinstance(self.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
-      else:
-        y_dtype = dtypes.from_py(y)
-        if match_dtype: x = x.cast(y_dtype)
+      else: y_dtype = dtypes.from_py(y)
       y = Tensor(y, self.device, y_dtype, requires_grad=False)
 
     if match_dtype:
