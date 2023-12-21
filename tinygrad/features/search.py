@@ -47,7 +47,7 @@ def bufs_from_lin(lin:Linearizer) -> List[Buffer]:
 # get dictionary of all possible actions
 def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Linearizer]:
   acted_lins = {0:lin} if include_0 else {}
-  is_valid = lambda a: (a.axis is None) or (a.axis<lin.shape_len) or (lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) not in actions)
+  def is_valid(a): return (a.axis is None) or (a.axis<lin.shape_len) or (lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) not in actions)
   for i,a in enumerate(filter(is_valid, actions)):
     try:
       (lin2:=lin.copy()).apply_opt(a)
