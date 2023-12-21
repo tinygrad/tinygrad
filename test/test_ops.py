@@ -846,6 +846,36 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3,1,6)], lambda x: x.expand(arg), lambda x: x.expand(shape=arg))
     helper_test_op([()], lambda x: x.expand([]), lambda x: x.expand(shape=[]))
 
+  def test_cross(self):
+    test_cases = [
+    ((3,), (3,), {'dim': 0}),
+    ((3,), (3,), {'dim': -1}),
+    ((5, 3), (5, 3), {'dim': 1}),
+    ((5, 3), (5, 3), {'dim': -1}),
+    ((7, 3), (7, 3), {'dim': 1}),
+    ((7, 3), (7, 3), {'dim': -1}),
+    ((2, 4, 3), (2, 4, 3), {'dim': 2}),
+    ((2, 4, 3), (2, 4, 3), {'dim': -1}),
+    ((6, 5, 3), (6, 5, 3), {'dim': 2}),
+    ((6, 5, 3), (6, 5, 3), {'dim': -1}),
+    ((3, 1), (3, 5), {'dim': 0}),
+    ((3, 1), (3, 5), {'dim': -2}),
+    ((1, 3), (10, 3), {'dim': 1}),
+    ((1, 3), (10, 3), {'dim': -1}),
+    ((8, 1, 3), (8, 5, 3), {'dim': 2}),
+    ((8, 1, 3), (8, 5, 3), {'dim': -1}),
+    ((3, 3), (3, 3), {'dim': 0}),
+    ((3, 3), (3, 3), {'dim': 1}),
+    ((4, 10, 30, 3), (4, 10, 1, 3), {'dim': 3}),
+    ((4, 10, 30, 3), (4, 10, 1, 3), {'dim': -1}),
+    ((4, 10, 30, 3, 5), (4, 10, 1, 3, 5), {'dim': -2}),
+    ((4, 10, 30, 3, 5), (4, 10, 1, 3, 5), {'dim': 3}),
+    ((1, 10, 30, 3, 5), (4, 10, 1, 3, 5), {'dim': 3}),
+    ((1, 10, 30, 3, 5), (4, 10, 1, 3, 5), {'dim': -2}),
+    ]
+    for input_shape_a, input_shape_b, kwargs in test_cases:
+      helper_test_op([input_shape_a, input_shape_b], lambda x, y: x.cross(y, **kwargs), lambda x, y: x.cross(y, **kwargs))
+
   @unittest.skip("very slow")
   def test_sd_big_conv(self):
     # internal shape (1, 1, 512, 62, 62, 512, 3, 3) overflows a int
