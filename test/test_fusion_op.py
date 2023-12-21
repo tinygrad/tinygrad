@@ -27,7 +27,7 @@ class TestFusionOp(unittest.TestCase):
   def test_recursive_add(self):
     st = time.perf_counter()
     a = Tensor([1,2,3,4])
-    for _ in range(12): a = a + a
+    for _ in range(20): a = a + a
     sched = create_schedule([a.lazydata], None)
     ji = lower_schedule_item(sched[-1])
     et = time.perf_counter()

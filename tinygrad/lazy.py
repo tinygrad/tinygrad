@@ -36,20 +36,20 @@ class LazyBuffer:
     self.device, self.st, self.dtype, self.shape = device, st, dtype, st.shape
     if base is None:
       # properties on base
-      self.children: WeakSet[LazyBuffer] = WeakSet()
-      for x in srcs: x.base.children.add(self.base)
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
       self.realized: Optional[Buffer] = None
       self.output_buffer: Optional[Buffer] = None
       self.forced_realize = False
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
+      self.children: WeakSet[LazyBuffer] = WeakSet()
+      for x in srcs: x.base.children.add(self.base)
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"
       self._base = base
 
   def __repr__(self) -> str:
-    return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.st if self.base != self else (self.op, self.realized)}>"
+    return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.st if hasattr(self, '_base') else (self.op, self.realized)}>"
 
   @property
   def base(self) -> LazyBuffer: return self._base if hasattr(self, '_base') else self
@@ -141,7 +141,10 @@ class LazyBuffer:
 # *** schedule creation ***
 
 # recursively create a lazyop
-def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Variable, int], st:ShapeTracker, realizes:Set[LazyBuffer], first=True):
+def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Variable, int], st:ShapeTracker,
+                      realizes:Set[LazyBuffer], first=True, cache=None) -> LazyOp:
+  if cache is None: cache = {}
+  if (buf, st) in cache: return cache[(buf, st)]
   if buf != buf.base:
     var_vals.update(merge_dicts([var_vals, buf.st.var_vals]))
     st = buf.st.unbind()+st
@@ -161,7 +164,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
   # if a CONTIGUOUS made it all the way here, just skip it
   if buf.op == LoadOps.CONTIGUOUS:
     assert first
-    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, False)
+    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, False, cache)
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
@@ -169,7 +172,8 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     st = ShapeTracker.from_shape(buf.srcs[0].shape).unbind()
 
   # otherwise we fuse it like normal
-  return LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, False) for x in buf.srcs), buf.arg)
+  cache[(buf, st)] = ret = LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, False, cache) for x in buf.srcs), buf.arg)
+  return ret
 
 # recursively walk back in the graph to create the schedule
 def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyBuffer],
