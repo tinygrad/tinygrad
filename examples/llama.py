@@ -147,16 +147,58 @@ class AbsmaxQuantizedLinear:
       else:
         new_tensors[name] = v
     return new_tensors
+  
+class QK4_0Linear:
+  def __init__(self, in_features, out_features, bias=False):
+    assert bias == False
+    self.in_features = in_features
+    self.out_features = out_features
+    dim = out_features * in_features
+    # each block stores 32 weights
+    assert dim % 32 == 0
+    n_blocks = dim // 32
+    self.weight = Tensor.ones(n_blocks, 16, dtype=dtypes.uint8)
+    self.scale = Tensor.ones(n_blocks, 1, dtype=dtypes.half)
+
+  @staticmethod
+  def quantize(tensors):
+    new_tensors = {}
+    for name,v in tensors.items():
+      if "feed_forward" in name or ("attention.w") in name or name == "output.weight":
+        blocks = v.reshape(-1, 32)
+        weight = Tensor.zeros(blocks.shape[0], 16, dtype=dtypes.uint8)
+        _min, _max = blocks.min(axis=1), blocks.max(axis=1)
+        scale = (_min.abs() > _max).where(_min, _max) / -8
+        scale_inverse = scale.where(scale.reciprocal(), Tensor.zeros_like(scale))
+        quants = (((blocks * scale_inverse.unsqueeze(1)) + 8.5).clip(0, 15)).cast(dtypes.uint8)
+        weight = weight.xor(quants[:, :16])
+        weight = weight.xor(quants[:, 16:] * 16)
+        scale = scale.unsqueeze(1).half()
+        new_tensors[name] = weight
+        new_tensors[name.replace('weight', 'scale')] = scale
+      else:
+        new_tensors[name] = v
+    return new_tensors
+
+  def dequantize(self):
+    div = (self.weight / 16)
+    return (
+        (Tensor.cat(self.weight - (div * 16), div, dim=1).cast(dtypes.int8) - 8).half() * self.scale
+      ).reshape((self.out_features, self.in_features))
+
+  def __call__(self, x):
+    return x.dot(self.dequantize().T)
 
 class LLaMa:
   @staticmethod
-  def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
+  def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False, use_4bit=False):
     params = MODEL_PARAMS[model_gen][model_size]
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
 
     jit = bool(getenv("JIT", 1))
-    model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
+    linear_layer = QK4_0Linear if use_4bit else AbsmaxQuantizedLinear
+    model = Transformer(**params["args"], linear=linear_layer, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
 
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
@@ -169,7 +211,7 @@ class LLaMa:
     weights = {k:v.to(Device.DEFAULT).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
 
     if quantize:
-      weights = AbsmaxQuantizedLinear.quantize(weights)
+      weights = linear_layer.quantize(weights)
       for _,v in weights.items(): v.realize()
     load_state_dict(model, weights, strict=False)
 
@@ -270,6 +312,7 @@ if __name__ == "__main__":
   parser.add_argument("--gen", default="1", help=f"""Generation of the model to use {list(MODEL_PARAMS.keys())}""")
   parser.add_argument("--size", type=str, default=None, help=f"""Size of model to use {", ".join([f"{list(v.keys())} for gen '{k}'" for k, v in MODEL_PARAMS.items()])}""")
   parser.add_argument("--quantize", action="store_true", help="Quantize the weights to int8 in memory")
+  parser.add_argument("--use_4bit", action="store_true", help='Quantize using 4 bits')
   parser.add_argument("--model", type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
 
   args = parser.parse_args()
@@ -370,7 +413,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
-  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
+  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, use_4bit=args.use_4bit)
   param_count = sum(x.lazydata.st.size() for x in get_parameters(llama.model))
 
   if chatbot:
