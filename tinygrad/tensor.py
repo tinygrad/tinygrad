@@ -817,8 +817,13 @@ class Tensor:
   def __imatmul__(self, x) -> Tensor: return self.assign(self.matmul(x))
   def __ixor__(self, x) -> Tensor: return self.assign(self.xor(x))
 
-  def __lt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, False))
-  def __gt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, True))
+  # in webgpu bool cannot be used as a storage buffer type
+  def __lt__(self, x) -> Tensor:
+    out = mlops.Less.apply(*self._broadcasted(x, False))
+    return out.float() if self.device == "WEBGPU" else out
+  def __gt__(self, x) -> Tensor:
+    out = mlops.Less.apply(*self._broadcasted(x, True))
+    return out.float() if self.device == "WEBGPU" else out
   def __ge__(self, x) -> Tensor: return 1.0-(self<x)
   def __le__(self, x) -> Tensor: return 1.0-(self>x)
   def __ne__(self, x) -> Tensor: return (self<x) + (self>x)   # type: ignore[override]

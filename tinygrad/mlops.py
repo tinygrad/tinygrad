@@ -88,9 +88,7 @@ class Sigmoid(Function):
 
 class Less(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    out = x.e(BinaryOps.CMPLT, y)
-    # in webgpu bool cannot be used as a storage buffer type
-    return out.cast(dtypes.float) if out.device == "WEBGPU" else out
+    return x.e(BinaryOps.CMPLT, y)
 
 class Xor(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
