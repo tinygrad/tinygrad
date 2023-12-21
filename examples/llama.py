@@ -149,7 +149,6 @@ class AbsmaxQuantizedLinear:
     return new_tensors
 
 class QK4_0Linear:
-  
   def __init__(self, in_features, out_features, bias=False):
     assert bias == False
     self.in_features = in_features
