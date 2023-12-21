@@ -92,11 +92,10 @@ class LazyBuffer:
     # const doesn't have to be copied (issues with disk tensor)
     if self.is_unrealized_const(): return self.const(self.base.arg)._view(self.st)
 
-    # if it's a shrink, do the shrink before the copy
+    # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     # TODO: why is this required on WEBGPU?
     if prod(self.st.shape) < prod(self.base.st.shape) or device == "WEBGPU":
-      out = self.contiguous()
-      return create_lazybuffer(device, out.st, out.dtype, LoadOps.COPY, srcs=(out,))
+      return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, srcs=(self.contiguous(),))
 
     # copy the base and apply the shapetracker on the new device
     return create_lazybuffer(device, self.base.st, self.dtype, LoadOps.COPY, srcs=(self.base,))._view(self.st)
