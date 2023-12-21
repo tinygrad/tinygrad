@@ -135,8 +135,8 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       kernel.extend([f".shared .align 4 .b8 {args[0]}[{args[1]*dtype.itemsize}];", f"mov.u64 {ssa(u, 'local', 'u64')}, {args[0]}[0];"])
     elif uop == UOps.DEFINE_GLOBAL:
       assert dtype is not None
-      bufs.append((args[0], dtype))
-      kernel.append(f"ld.param.{'u64' if dtype.__class__ == PtrDType else lang.dtype_to_asmtype[dtype]} {ssa(u, 'dat', dtype='u64' if dtype.__class__ == PtrDType else lang.dtype_to_asmtype[dtype])}, [{args[0]}];")
+      bufs.append((args, dtype))
+      kernel.append(f"ld.param.{'u64' if dtype.__class__ == PtrDType else lang.dtype_to_asmtype[dtype]} {ssa(u, 'dat', dtype='u64' if dtype.__class__ == PtrDType else lang.dtype_to_asmtype[dtype])}, [{args}];")
     else: raise NotImplementedError(f"no code for {uop}")
 
   kernel = [f".reg .{reg.split('_')[-2]} %{reg}<{cnt}>;" for reg,cnt in c.items()] + kernel + ["ret;"]
@@ -170,6 +170,6 @@ class PTXLanguage(AssemblyLanguage):
     dtypes.int8: "s16", dtypes.int16: "s16", dtypes.int32: "s32", dtypes.int64: "s64",
     dtypes.uint8: "u16", dtypes.uint16: "u16", dtypes.uint32: "u32", dtypes.uint64: "u64",
     dtypes.float16: "f16", dtypes.float32: "f32", dtypes.float64: "f64",
-    dtypes.bool: "u32", dtypes._arg_int32: "u32"
+    dtypes.bool: "u32"
   }
 PTXRenderer = functools.partial(uops_to_asm, PTXLanguage())
