@@ -15,8 +15,6 @@ inverse_type_map = {v: k for k,v in type_map.items()}
 inverse_type_map.update({dtypes.uint16: torch.int16, dtypes.uint32: torch.int32, dtypes.uint64: torch.int64})
 def np_type_cvt(t): return {np.uint32: np.int32, np.uint64: np.int64}.get(t, t)
 
-def output_type(x, y): return x.dtype if type_map[x.dtype].priority > type_map[y.dtype].priority else y.dtype
-
 def as_strided(x, arg):
   shape, stride, offset = arg
   x = x.contiguous()
@@ -33,7 +31,7 @@ torch_fxn_for_op: Dict[Op, Callable] = {
   UnaryOps.EXP2: torch.exp2, UnaryOps.LOG2: torch.log2, UnaryOps.SIN: torch.sin, UnaryOps.SQRT: torch.sqrt,
   UnaryOps.CAST: lambda x,y: (x.view if y[1] else x.type)(inverse_type_map[y[0]]),
   UnaryOps.NEG: lambda x: torch.logical_not(x) if x.dtype is torch.bool else torch.neg(x),
-  BinaryOps.MAX: torch.maximum, BinaryOps.CMPLT: lambda x,y: x<y,
+  BinaryOps.MAX: torch.maximum, BinaryOps.CMPLT: torch.lt,
   BinaryOps.ADD: torch.add, BinaryOps.SUB: torch.sub, BinaryOps.MUL: torch.mul,
   BinaryOps.DIV: lambda x,y: torch.div(x, y).type(x.dtype), BinaryOps.XOR: torch.bitwise_xor,
   TernaryOps.MULACC: einsum_mulacc(lambda s,a,b: torch.einsum(s, a.float(), b.float()).type(a.dtype), lambda x: x.stride(), lambda x,s: x.expand(s)),
