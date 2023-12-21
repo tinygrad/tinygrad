@@ -194,7 +194,7 @@ class LLaMa:
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False, use_4bit=False):
     params = MODEL_PARAMS[model_gen][model_size]
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
-    assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
+    # assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
 
     jit = bool(getenv("JIT", 1))
     linear_layer = QK4_0Linear if use_4bit else AbsmaxQuantizedLinear
@@ -225,7 +225,8 @@ class LLaMa:
     toks = [self.tokenizer.bos_id()] + self.tokenizer.encode(prompt)
     start_pos = 0
     for i in range(max_length):
-      probs = llama.model(Tensor([toks[start_pos:]]), start_pos, temperature).realize()
+      logits = llama.model(Tensor([toks[start_pos:]]), start_pos, temperature)
+      probs = (logits[:, -1, :] / (temperature+1e-6)).softmax().flatten().realize()
       probs_np = probs.numpy()
       tok = int(np.random.choice(len(probs_np), p=probs_np))
       start_pos = len(toks)
