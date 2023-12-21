@@ -94,7 +94,8 @@ def _tree(lazydata, prefix=""):
   if type(lazydata).__name__ == "LazyBuffer":
     return [f"━━ realized {lazydata.dtype.name} {lazydata.shape}"] if (lazydata.realized) else _tree(lazydata.op, "LB ")
   if len(lazydata.src) == 0: return [f"━━ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
-  if id(lazydata) in cycle_tracker and cycle_tracker[id(lazydata)][1] > getenv("TREE_CYCLE_CNT", 5): return [f"━⬆︎ goto {cycle_tracker[id(lazydata)][0]}: {lazydata.op.name}"]
+  if id(lazydata) in cycle_tracker and cycle_tracker[id(lazydata)][1] > getenv("TREE_CYCLE_CNT", 5):
+    return [f"━⬆︎ goto {cycle_tracker[id(lazydata)][0]}: {lazydata.op.name}"]
   cycle_tracker[id(lazydata)] = [tree_cnt, 1 if id(lazydata) not in cycle_tracker else cycle_tracker[id(lazydata)][1]+1]
   lines = [f"━┳ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
   childs = [_tree(c) for c in lazydata.src[:]]
