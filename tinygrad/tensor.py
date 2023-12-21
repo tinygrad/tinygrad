@@ -784,7 +784,7 @@ class Tensor:
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
     x_,y = self._broadcasted(input_)
     x,z = x_._broadcasted(other)
-    return mlops.Where.apply(x, *y._broadcasted(z))
+    return mlops.Where.apply(x.cast(dtypes.bool), *y._broadcasted(z))
 
   # ***** op wrappers (wasted lines to make the typechecker happy) *****
 
