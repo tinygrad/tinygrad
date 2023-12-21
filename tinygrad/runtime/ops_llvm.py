@@ -21,9 +21,9 @@ class LLVM:
     llvm.initialize_native_target()
     llvm.initialize_native_asmprinter()
     llvm.initialize_native_asmparser()
-    target = llvm.Target.from_triple(llvm.get_process_triple())
-    LLVM.optimizer = llvm.create_module_pass_manager()
-    LLVM.target_machine = target.create_target_machine(opt=2)  # this opt actually can change things. ex: opt=3 means no FMA, opt=2 means FMA
+    target = llvm.Target.from_triple(ptrip:=llvm.get_process_triple())
+    LLVM.optimizer, attrs = llvm.create_module_pass_manager(), '+f16c' if ptrip.startswith('x86_64-') else None # f16c is for FP16 support
+    LLVM.target_machine = target.create_target_machine(opt=2, features=attrs)
     LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
 
     # TODO: this makes compile times so much faster
