@@ -718,19 +718,18 @@ class Tensor:
 
   # ***** broadcasted binary mlops *****
 
-  def _broadcasted(self, y:Union[Tensor, float, int, bool], reverse:bool=False) -> Tuple[Tensor, Tensor]:
+  def _broadcasted(self, y:Union[Tensor, float, int, bool], reverse:bool=False, match_dtype:bool=True) -> Tuple[Tensor, Tensor]:
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
       if 0 in self.shape: return self, self.full_like(y)
       if isinstance(self.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
-      else:
-        y_dtype = dtypes.from_py(y)
-        x = x.cast(y_dtype)
+      else: y_dtype = dtypes.from_py(y)
       y = Tensor(y, self.device, y_dtype, requires_grad=False)
 
-    output_dtype = least_upper_dtype(x.dtype, y.dtype)
-    x, y = x.cast(output_dtype), y.cast(output_dtype)
+    if match_dtype:
+      output_dtype = least_upper_dtype(x.dtype, y.dtype)
+      x, y = x.cast(output_dtype), y.cast(output_dtype)
 
     if reverse: x, y = y, x
 
@@ -785,8 +784,8 @@ class Tensor:
   def minimum(self, x:Union[Tensor, float]) -> Tensor: return -((-self).maximum(-x))
 
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
-    x_,y = self._broadcasted(input_)
-    x,z = x_._broadcasted(other)
+    x_,y = self._broadcasted(input_, match_dtype=False)
+    x,z = x_._broadcasted(other, match_dtype=False)
     return mlops.Where.apply(x.cast(dtypes.bool), *y._broadcasted(z))
 
   # ***** op wrappers (wasted lines to make the typechecker happy) *****
@@ -818,12 +817,8 @@ class Tensor:
   def __ixor__(self, x) -> Tensor: return self.assign(self.xor(x))
 
   # in webgpu bool cannot be used as a storage buffer type
-  def __lt__(self, x) -> Tensor:
-    out = mlops.Less.apply(*self._broadcasted(x, False))
-    return out.float() if self.device == "WEBGPU" else out
-  def __gt__(self, x) -> Tensor:
-    out = mlops.Less.apply(*self._broadcasted(x, True))
-    return out.float() if self.device == "WEBGPU" else out
+  def __lt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, False)).cast(dtypes.float if self.device == "WEBGPU" else dtypes.bool)
+  def __gt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, True)).cast(dtypes.float if self.device == "WEBGPU" else dtypes.bool)
   def __ge__(self, x) -> Tensor: return 1.0-(self<x)
   def __le__(self, x) -> Tensor: return 1.0-(self>x)
   def __ne__(self, x) -> Tensor: return (self<x) + (self>x)   # type: ignore[override]
