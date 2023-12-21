@@ -27,12 +27,26 @@ class TestFusionOp(unittest.TestCase):
   def test_recursive_add(self):
     st = time.perf_counter()
     a = Tensor([1,2,3,4])
-    for _ in range(20): a = a + a
+    for _ in range(24): a = a + a
     sched = create_schedule([a.lazydata], None)
     ji = lower_schedule_item(sched[-1])
-    et = time.perf_counter()
-    self.assertLess(et-st, 10.0)
+    self.assertLess(time.perf_counter()-st, 1.0)
     assert isinstance(ji, InterpretedASTRunner) or len(ji.prg) < 5000
+
+  def test_recursive_add_cmp(self):
+    st = time.perf_counter()
+    a = Tensor([1,2,3,4])
+    for _ in range(24): a = a + a
+    sched1 = create_schedule([a.lazydata], None)
+    b = Tensor([1,2,3,4])
+    for _ in range(24): b = b + b
+    sched2 = create_schedule([b.lazydata], None)
+    c = Tensor([1,2,3,4])
+    for _ in range(23): c = c + c
+    sched3 = create_schedule([c.lazydata], None)
+    assert sched1[-1].ast == sched2[-1].ast
+    assert sched1[-1].ast != sched3[-1].ast
+    self.assertLess(time.perf_counter()-st, 1.0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
