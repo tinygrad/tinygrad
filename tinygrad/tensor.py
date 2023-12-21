@@ -485,10 +485,11 @@ class Tensor:
       raise RuntimeError(f"inputs dimension {dim} must have length 3. Got {self.shape[dim]} and {other.shape[dim]}")
     dim = dim % len(self.shape)
     idx = (slice(None),) * dim
+    idx_0, idx_1, idx_2 = [idx + (i,) for i in range(3)]
     result = Tensor.stack([
-      self[idx + (1,)] * other[idx + (2,)] - self[idx + (2,)] * other[idx + (1,)],
-      self[idx + (2,)] * other[idx + (0,)] - self[idx + (0,)] * other[idx + (2,)],
-      self[idx + (0,)] * other[idx + (1,)] - self[idx + (1,)] * other[idx + (0,)],
+      self[idx_1] * other[idx_2] - self[idx_2] * other[idx_1],
+      self[idx_2] * other[idx_0] - self[idx_0] * other[idx_2],
+      self[idx_0] * other[idx_1] - self[idx_1] * other[idx_0],
     ], dim=dim)
     return result
   # ***** reduce ops *****
