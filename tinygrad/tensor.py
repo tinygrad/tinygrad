@@ -7,7 +7,7 @@ from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
 
-from tinygrad.helpers import DType, dtypes, ImageDType
+from tinygrad.helpers import DType, dtypes, ImageDType, least_upper_float, least_upper_dtype
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
 from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.ops import LoadOps
@@ -249,7 +249,7 @@ class Tensor:
 
     # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
     # this is "implicit gradient creation"
-    self.grad = Tensor(1, device=self.device, requires_grad=False)
+    self.grad = Tensor(1.0, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
       assert (t0.grad is not None)
@@ -670,14 +670,14 @@ class Tensor:
   def neg(self): return mlops.Neg.apply(self)
   def contiguous(self): return mlops.Contiguous.apply(self)
   def contiguous_backward(self): return mlops.ContiguousBackward.apply(self)
-  def log(self): return mlops.Log.apply(self)
-  def log2(self): return mlops.Log.apply(self)/math.log(2)
-  def exp(self): return mlops.Exp.apply(self)
+  def log(self): return mlops.Log.apply(self.cast(least_upper_float(self.dtype)))
+  def log2(self): return self.log()/math.log(2)
+  def exp(self): return mlops.Exp.apply(self.cast(least_upper_float(self.dtype)))
   def exp2(self): return mlops.Exp.apply(self*math.log(2))
   def relu(self): return mlops.Relu.apply(self)
-  def sigmoid(self): return mlops.Sigmoid.apply(self)
-  def sin(self): return mlops.Sin.apply(self)
-  def sqrt(self): return mlops.Sqrt.apply(self)
+  def sigmoid(self): return mlops.Sigmoid.apply(self.cast(least_upper_float(self.dtype)))
+  def sin(self): return mlops.Sin.apply(self.cast(least_upper_float(self.dtype)))
+  def sqrt(self): return mlops.Sqrt.apply(self.cast(least_upper_float(self.dtype)))
   def rsqrt(self): return self.reciprocal().sqrt()
   def cos(self): return ((math.pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
@@ -728,6 +728,9 @@ class Tensor:
         y_dtype = dtypes.from_py(y)
         x = x.cast(y_dtype)
       y = Tensor(y, self.device, y_dtype, requires_grad=False)
+
+    output_dtype = least_upper_dtype(x.dtype, y.dtype)
+    x, y = x.cast(output_dtype), y.cast(output_dtype)
 
     if reverse: x, y = y, x
 
@@ -784,7 +787,7 @@ class Tensor:
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
     x_,y = self._broadcasted(input_)
     x,z = x_._broadcasted(other)
-    return mlops.Where.apply(x, *y._broadcasted(z))
+    return mlops.Where.apply(x.cast(dtypes.bool), *y._broadcasted(z))
 
   # ***** op wrappers (wasted lines to make the typechecker happy) *****
 
@@ -860,9 +863,9 @@ class Tensor:
 
   def sparse_categorical_crossentropy(self, Y:Tensor, ignore_index=-1) -> Tensor:
     # NOTE: self is a logits input
-    loss_mask = Y != ignore_index
-    y_counter = Tensor.arange(self.shape[-1], dtype=dtypes.int32, requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])  # noqa: E501
-    y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
+    loss_mask = (Y != ignore_index).cast(dtypes.float)
+    y_counter = Tensor.arange(self.shape[-1], requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])  # noqa: E501
+    y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1, 0) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
     return self.log_softmax().mul(y).sum() / loss_mask.sum()
 
   # ***** cast ops *****
