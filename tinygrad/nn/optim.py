@@ -1,6 +1,6 @@
 # sorted in order of increasing complexity
 from typing import List
-from tinygrad.helpers import dedup
+from tinygrad.helpers import dedup, getenv
 from tinygrad.tensor import Tensor
 
 class Optimizer:
@@ -13,7 +13,7 @@ class Optimizer:
     assert len(self.params) != 0, "optimizer must have at least one param"
     self.device = self.params[0].device
     self.buffers: List[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
-    self.lr = Tensor([lr], requires_grad=False, device=self.device).contiguous()
+    self.lr = lr if getenv("CONST_LR") else Tensor([lr], requires_grad=False, device=self.device).contiguous()
 
   def zero_grad(self):
     for param in self.params: param.grad = None
@@ -32,7 +32,9 @@ class SGD(Optimizer):
   def step(self) -> None:
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      t.grad.realize()    # TODO: why is it wrong without this
+      # this is needed since the grads can form a "diamond"
+      # TODO: fix this in lazy.py
+      t.grad.realize()
       g = t.grad + self.wd * t.detach()
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required

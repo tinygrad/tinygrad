@@ -36,6 +36,14 @@ def nm(x):
     node_count += 1
   return x.node_id
 
+buf_count = 0
+def bm(x):
+  global buf_count
+  if not hasattr(x, 'buf_id'):
+    setattr(x, 'buf_id', buf_count)
+    buf_count += 1
+  return x.buf_id
+
 def get_sop(op: List[Op]):
   op = [x for x in op if x not in BufferOps]
   if len(op) <= 2: return '.'.join([str(y).split(".")[1] for y in op][::-1])
@@ -51,7 +59,7 @@ def realized_lazybuffer(lb, num):
     init_graph()
     G.nodes[nm(lb)]['style'] = '"filled,bold"'
     G.nodes[nm(lb)]['fillcolor'] = G.nodes[nm(lb)]['fillcolor'][:-2]
-    G.nodes[nm(lb)]['label'] = '"' + G.nodes[nm(lb)]["label"].replace('"', '') + f'\nK:{num}"'
+    G.nodes[nm(lb)]['label'] = '"' + G.nodes[nm(lb)]["label"].replace('"', '') + f'\nK:{num} b:{bm(lb.realized)}"'
 
 def log_lazybuffer(lb, scheduled=False):
   top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0",
@@ -66,8 +74,7 @@ def log_lazybuffer(lb, scheduled=False):
       lb = lb.base
     if lb.realized is None:
       for x in lb.srcs:
-        if nm(x) not in G.nodes:
-          G.add_node(nm(x), label=f'"{str(x.base.realized)[5:-1].replace(" ", chr(10))}"', style='filled', fillcolor="#f0c08080")
+        log_lazybuffer(x)
         G.add_edge(nm(x), nm(lb), color='#a0a0a0')
       label = '"' + \
         (str(set(x.shape for x in lb.srcs))+"\n"+str(lb.shape) if lb.op in ReduceOps else str(lb.shape)) + \
@@ -75,7 +82,10 @@ def log_lazybuffer(lb, scheduled=False):
         (f"\n{lb.device}" if lb.device != Device.DEFAULT else "") + '"'
       G.add_node(nm(lb), style='"filled,dashed"', fillcolor=[v for k,v in top_colors.items() if lb.op in k][0] + "80", color="black", label=label)
       if scheduled: G.nodes[nm(lb)]['shape'] = 'box'
-
+    else:
+      if nm(lb) not in G.nodes:
+        # realized but unseen?
+        G.add_node(nm(lb), label=f'"{str(lb.base.realized)[5:-1].replace(" ", chr(10))}\nb:{bm(lb.realized)}"', style='filled', fillcolor="#f0c08080")
 def _tree(lazydata, prefix=""):
   if type(lazydata).__name__ == "LazyBuffer":
     return [f"━━ realized {lazydata.dtype.name} {lazydata.shape}"] if (lazydata.realized) else _tree(lazydata.op, "LB ")
