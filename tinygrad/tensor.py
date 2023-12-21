@@ -315,9 +315,10 @@ class Tensor:
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, (tuple, list)):
       # special case <indices: List[int]>, a lil ugly
-      if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, requires_grad=False, device=self.device)]
-      else: indices = [Tensor(list(i), requires_grad=False, device=self.device) if isinstance(i, (tuple, list)) else i for i in indices]
+      if isinstance(indices, list) and all_int(indices): indices = [indices]
+      else: indices = [list(i) if isinstance(i, (tuple, list)) else i for i in indices]
     else: indices = [indices]
+    indices = [i.realize().lazydata.realized.toCPU().tolist() if isinstance(i, Tensor) else i for i in indices]
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
     ellipsis_idx = [dim for dim, i in enumerate(indices) if i is Ellipsis]
@@ -350,7 +351,7 @@ class Tensor:
     for dim in type_dim[slice]:
       s, e, st = indices_filtered[dim].indices(self.shape[dim])
       indices_filtered[dim] = ((0, 0) if (st > 0 and e < s) or (st <= 0 and e > s) else (s, e) if st > 0 else (e+1, s+1), st)
-    for dim in type_dim[Tensor]: indices_filtered[dim] = ((0, self.shape[dim]), 1)
+    for dim in type_dim[list]: indices_filtered[dim] = ((0, self.shape[dim]), 1)
 
     new_slice, strides = ((),()) if not indices_filtered else zip(*indices_filtered)
     ret = self.shrink(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
@@ -370,18 +371,24 @@ class Tensor:
     ret = ret.reshape(tuple(new_shape))
 
     # 3. advanced indexing (copy)
-    if type_dim[Tensor]:
+    if type_dim[list]:
 
       # extract tensors and tensor dimensions
-      idx, tdim = [], []
-      for tensor_dim in type_dim[Tensor]:
+      idx, idim = [], []
+      for tensor_dim in type_dim[list]:
         dims_collapsed_, dims_injected = sum(1 for d in dims_collapsed if tensor_dim >= d), sum(1 for d in type_dim[None] if tensor_dim >= d)
-        tdim.append(td := tensor_dim - dims_collapsed_ + dims_injected)
+        idim.append(td := tensor_dim - dims_collapsed_ + dims_injected)
+        idx.append(t := indices[tensor_dim + dims_injected])
         # normalize the negative tensor indices
-        idx.append(((t := indices[tensor_dim + dims_injected]) < 0).where(ret.shape[td], 0) + t)
+        # idx.append(((t := indices[tensor_dim + dims_injected]) < 0).where(ret.shape[td], 0) + t)
         # TODO uint8 and bool tensor indexing
-        if not (dtypes.is_int(t.dtype) or t.dtype == dtypes.bool): raise IndexError("tensors used as indices must be int or bool tensors")
+        # if not (dtypes.is_int(t.dtype) or t.dtype == dtypes.bool): raise IndexError("tensors used as indices must be int or bool tensors")
+      print(idx)
+      print(idim)
 
+
+
+      exit()
       # compute sum_dim, arange, and idx
       max_dim = max(i.ndim for i in idx)
       sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(tdim)]
