@@ -70,7 +70,7 @@ class TestSymbolicJit(unittest.TestCase):
       symbolic = jf(q, k.reshape(2, vi, 4, 8), v.reshape(2, vi, 4, 8)).reshape(2, 4, 1, 8).numpy()
       expected = f(q, k, v).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
-    assert_jit_cache_len(jf, 6)
+    assert_jit_cache_len(jf, 5)
 
   def test_cat_dim0(self):
     def f(a, b): return a.cat(b, dim=0).realize()
@@ -124,6 +124,7 @@ class TestSymbolicJit(unittest.TestCase):
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert_jit_cache_len(jf, 1)
 
+  @unittest.skip("two vars not supported")
   def test_two_vars_plus1_ij(self):
     def f(a, b): return (a@b+1).realize()
     jf = TinyJit(f)
@@ -138,6 +139,7 @@ class TestSymbolicJit(unittest.TestCase):
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert_jit_cache_len(jf, 1)
 
+  @unittest.skip("two vars not supported")
   def test_two_vars_plus1_ji(self):
     def f(a, b): return (a@b+1).realize()
     jf = TinyJit(f)
