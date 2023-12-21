@@ -7,7 +7,7 @@ from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
 
-from tinygrad.helpers import DType, dtypes, ImageDType
+from tinygrad.helpers import DType, dtypes, ImageDType, least_upper_float
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
 from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.ops import LoadOps
@@ -670,14 +670,14 @@ class Tensor:
   def neg(self): return mlops.Neg.apply(self)
   def contiguous(self): return mlops.Contiguous.apply(self)
   def contiguous_backward(self): return mlops.ContiguousBackward.apply(self)
-  def log(self): return mlops.Log.apply(self)
-  def log2(self): return mlops.Log.apply(self)/math.log(2)
-  def exp(self): return mlops.Exp.apply(self)
+  def log(self): return mlops.Log.apply(self.cast(least_upper_float(self.dtype)))
+  def log2(self): return self.log()/math.log(2)
+  def exp(self): return mlops.Exp.apply(self.cast(least_upper_float(self.dtype)))
   def exp2(self): return mlops.Exp.apply(self*math.log(2))
   def relu(self): return mlops.Relu.apply(self)
-  def sigmoid(self): return mlops.Sigmoid.apply(self)
-  def sin(self): return mlops.Sin.apply(self)
-  def sqrt(self): return mlops.Sqrt.apply(self)
+  def sigmoid(self): return mlops.Sigmoid.apply(self.cast(least_upper_float(self.dtype)))
+  def sin(self): return mlops.Sin.apply(self.cast(least_upper_float(self.dtype)))
+  def sqrt(self): return mlops.Sqrt.apply(self.cast(least_upper_float(self.dtype)))
   def rsqrt(self): return self.reciprocal().sqrt()
   def cos(self): return ((math.pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
