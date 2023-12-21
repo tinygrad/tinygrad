@@ -93,7 +93,8 @@ class LazyBuffer:
     if self.is_unrealized_const(): return self.const(self.base.arg)._view(self.st)
 
     # if it's a shrink, do the shrink before the copy
-    if prod(self.st.shape) < prod(self.base.st.shape):
+    # TODO: why is this required on WEBGPU?
+    if prod(self.st.shape) < prod(self.base.st.shape) or device == "WEBGPU":
       out = self.contiguous()
       return create_lazybuffer(device, out.st, out.dtype, LoadOps.COPY, srcs=(out,))
 
