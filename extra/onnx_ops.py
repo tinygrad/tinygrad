@@ -107,7 +107,7 @@ def Atan(y: Tensor):
 
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
   k = int(k.numpy().item()) if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
-  return x.triu(k) if upper else x.tril(k)
+  return x.triu(k).cast(dtypes.int64) if upper else x.tril(k).cast(dtypes.int64)
 
 def Squeeze(data: Tensor, axes):
   if isinstance(axes, Tensor): axes = safe_numpy(axes)
@@ -122,7 +122,7 @@ def Unsqueeze(data: Tensor, axes):
       new_shape[i] = next(ptr)
   return data.reshape(new_shape)
 
-def Binarizer(input, threshold=0.0): return input > threshold
+def Binarizer(input, threshold=0.0): return (input > threshold).cast(dtypes.float32)
 
 def ArgMax(x: Tensor, axis=0, keepdims=1, select_last_index=0):
   axis = axis + x.ndim if axis < 0 else axis
