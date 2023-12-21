@@ -640,6 +640,8 @@ class Tensor:
     assert self.shape[-1] == w.shape[-min(n2, 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(n2, 2)]})"  # noqa: E501
     x = self.reshape(*self.shape[0:-1], *[1]*min(n1-1, n2-1, 1), self.shape[-1])
     w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
+    output_dtype = least_upper_float(least_upper_dtype(x.dtype, w.dtype))
+    x, w = x.cast(output_dtype), w.cast(output_dtype)
     return (x*w).sum(-1)
 
   def _cumsum(self, axis:int=0, _first_zero=False) -> Tensor:
