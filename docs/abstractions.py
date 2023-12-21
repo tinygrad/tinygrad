@@ -118,24 +118,24 @@ Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, TernaryOps, LoadOps]
 
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LazyOp, BinaryOps, LoadOps
+from tinygrad.lazy import LazyBuffer
 
 # the 2+3 from before
 result = Tensor([2]) + Tensor([3])
 print(type(result.lazydata), result.lazydata)  # let's look at the lazydata of result
 
-# you'll see it has a LazyOp
 # the op type is BinaryOps.ADD
 # and it has two sources, the 2 and the 3
-lazyop: LazyOp = result.lazydata.op
+lazyop: LazyBuffer = result.lazydata
 assert lazyop.op == BinaryOps.ADD
-assert len(lazyop.src) == 2
+assert len(lazyop.srcs) == 2
 
 # the first source is the 2, it comes from the CPU
 # the source is a LazyBuffer that is a "CPU" Tensor
 # again, a LazyOp AST is like a GPU kernel. you have to copy the data on the device first
-assert lazyop.src[0].op.op == LoadOps.COPY
-assert lazyop.src[0].op.src[0].device == "CPU"
-assert lazyop.src[0].op.src[0].op.src[0].realized._buf[0] == 2, "the src of the COPY LazyOP is a LazyBuffer on the CPU holding [2.]"
+assert lazyop.srcs[0].op == LoadOps.COPY
+assert lazyop.srcs[0].srcs[0].device == "CPU"
+assert lazyop.srcs[0].srcs[0].realized._buf[0] == 2, "the src of the COPY LazyOP is a LazyBuffer on the CPU holding [2.]"
 assert result.lazydata.realized is None, "the LazyBuffer is not realized yet"
 
 # now we realize the LazyBuffer

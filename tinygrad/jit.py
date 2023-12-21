@@ -54,7 +54,7 @@ class TinyJit(Generic[ReturnType]):
 
     # get rawbuffers
     # TODO: why can .realized have Any type?
-    input_rawbuffers: List[Buffer] = [cast(Buffer, v.lazydata.realized) for v in input_tensors.values() if v.lazydata.realized is not None]
+    input_rawbuffers: List[Buffer] = [v.lazydata.base.realized for v in input_tensors.values() if v.lazydata.base.realized is not None]
     assert len(set(input_rawbuffers)) == len(input_rawbuffers), "duplicate inputs to JIT"
 
     # get variables: they can either be in Tensors or passed in as arguments, and all must be bound. these are all global
