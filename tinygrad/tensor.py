@@ -480,6 +480,7 @@ class Tensor:
     return self.permute(order)
   def flatten(self, start_dim=0): return self.reshape(shape=self.shape[:start_dim] + (-1,))
   def cross(self, other, dim=0):
+    if len(self.shape) != len(other.shape): raise RuntimeError("inputs must have the same number of dimensions")
     if self.shape[dim] != 3 or other.shape[dim] != 3: 
       raise RuntimeError(f"inputs dimension {dim} must have length 3. Got {self.shape[dim]} and {other.shape[dim]}")
     dim = dim % len(self.shape)
