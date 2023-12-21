@@ -15,20 +15,7 @@ def explicit_shard_W_axis_1(X, W):
   Ws = [Ws[0].pad((None, (0,N//2))), Ws[1].pad((None, (N//2,0)))]
   for x in Xs: assert x.shape == X.shape
   for w in Ws: assert w.shape == W.shape
-
-  # TODO: it shouldn't be faster with these realize
-  for x in Xs+Ws: x.realize()
-  def lm(x:Tensor, w:Tensor):
-    # these are movement ops on the local device
-    x = x.reshape(N, 1, N).expand(N, N, N)
-    w = w.T.reshape(1, N, N).expand(N, N, N)
-    m = x*w
-    assert m.lazydata.st.views[0].mask is not None
-    ret = m.sum(2)
-    return ret
-  #Os = [lm(Xs[0], Ws[0]), lm(Xs[1], Ws[1])]
   Os = [Xs[0] @ Ws[0], Xs[1] @ Ws[1]]
-  for x in Os: x.realize()
   return Os[0].to(Device.DEFAULT) + Os[1].to(Device.DEFAULT)
 
   #return Tensor.cat(*[x.to(Device.DEFAULT) for x in Os], dim=1)   # TODO: someday we can remove this copy too
@@ -51,7 +38,10 @@ if __name__ == "__main__":
   GlobalCounters.reset()
   print("******** multiply start")
   with Timing("******** multiply done: ", lambda x: f"  {FLOPS/x:.2f} GFLOPS"):
-    O = matmul(X, W).realize()
+    Xs = X.shard((d0, d1), None)
+    Ws = W.shard((d0, d1), 1)
+    print(Xs.shape, Ws.shape)
+    O = (Xs@Ws).to(Device.DEFAULT).realize()
     Device[Device.DEFAULT].synchronize()
 
   with Timing("testing: "):

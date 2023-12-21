@@ -9,7 +9,7 @@ import numpy as np
 
 from tinygrad.helpers import DType, dtypes, ImageDType, least_upper_float, least_upper_dtype
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
-from tinygrad.lazy import LazyBuffer, create_schedule
+from tinygrad.lazy import LazyBuffer, create_schedule, MultiLazyBuffer
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import sint
@@ -74,7 +74,7 @@ class Tensor:
       else: data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
 
     # data is a LazyBuffer, but it might be on the wrong device
-    if not isinstance(data, LazyBuffer): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
+    if not isinstance(data, (LazyBuffer, MultiLazyBuffer)): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
     self.lazydata = data if data.device == device else data.copy_to_device(device)
 
   def __repr__(self):
@@ -141,6 +141,18 @@ class Tensor:
     if self.grad: self.grad = self.grad.to_(device)
     _ret = Tensor(self.lazydata, device)
     self.lazydata = _ret.lazydata
+
+  def shard(self, devices:Sequence[str], axis:Optional[int]) -> Tensor:
+    if axis is not None:
+      assert self.shape[axis] % len(devices) == 0
+      sz = self.shape[axis] // len(devices)
+      def fix(d, i):
+        d = d.shrink(tuple((0,s) if a != axis else (sz*i,sz*(i+1)) for a,s in enumerate(self.shape)))
+        return d.pad(tuple((0,0) if a != axis else (sz*i,s-sz*(i+1)) for a,s in enumerate(self.shape)))
+      local_lbs = [fix(self.lazydata, i) for i in range(len(devices))]
+    else:
+      local_lbs = [self.lazydata] * len(devices)
+    return Tensor(MultiLazyBuffer([x.copy_to_device(d) for x,d in zip(local_lbs, devices)]), device=devices)
 
   # ***** creation llop entrypoint *****
 

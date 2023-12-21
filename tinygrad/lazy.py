@@ -1,7 +1,7 @@
 from __future__ import annotations
-import sys, math
+import sys, math, functools
 import numpy as np
-from typing import Union, Optional, Any, Tuple, List, Set, Dict
+from typing import Union, Optional, Any, Tuple, List, Set, Dict, Sequence
 from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten, getenv, dedup, ImageDType, DEBUG, all_int, all_same
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps
 from tinygrad.ops import Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem, vars_from_ast
@@ -28,6 +28,38 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType,
   # TODO: might be possible to remove LoadOps.COPY
   if op not in {LoadOps.EMPTY, LoadOps.CUSTOM, LoadOps.CONST, LoadOps.COPY} and getenv("LAZYCACHE", 1): lazycache[wop] = ret
   return ret
+
+class MultiLazyBuffer:
+  def __init__(self, lbs:Sequence[LazyBuffer]):
+    assert all(isinstance(x, LazyBuffer) for x in lbs), "all lbs must be LazyBuffers"
+    self.lbs = lbs
+    assert all_same([(x.shape, x.dtype) for x in lbs]), "all multilazybuffer needs same shape and dtype"
+    self.shape, self.dtype, self.device = lbs[0].shape, lbs[0].dtype, tuple(x.device for x in lbs)
+
+  def copy_to_device(self, device:str) -> LazyBuffer:
+    return functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [lb.copy_to_device(device) for lb in self.lbs])
+
+  def is_unrealized_contiguous_const(self): return False
+
+  def schedule(self, seen=None): return create_schedule(self.lbs, seen)
+
+  def contiguous(self): return MultiLazyBuffer([x.contiguous() for x in self.lbs])
+
+  # elementwise is simple
+  def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:MultiLazyBuffer, arg:Optional[Any]=None) -> MultiLazyBuffer:
+    assert all(self.device == x.device for x in in_srcs), "all buffer must have the same device"
+    return MultiLazyBuffer([lsrcs[0].e(op, *lsrcs[1:], arg=arg) for lsrcs in zip(self.lbs, *[x.lbs for x in in_srcs])])
+
+  def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+    # TODO: this is not always right, sometimes we have to allreduce
+    return MultiLazyBuffer([x.r(op, new_shape) for x in self.lbs])
+
+  def reshape(self, arg:Tuple[sint, ...]): return MultiLazyBuffer([x._view(x.st.reshape(arg)) for x in self.lbs])
+  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return MultiLazyBuffer([x._view(x.st.pad(arg)) for x in self.lbs])
+  def expand(self, arg:Tuple[sint, ...]): return MultiLazyBuffer([x._view(x.st.expand(arg)) for x in self.lbs])
+  def permute(self, arg:Tuple[int, ...]): return MultiLazyBuffer([x._view(x.st.permute(arg)) for x in self.lbs])
+  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return MultiLazyBuffer([x._view(x.st.shrink(arg)) for x in self.lbs])
+  def stride(self, arg:Tuple[int, ...]): return MultiLazyBuffer([x._view(x.st.stride(arg)) for x in self.lbs])
 
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
@@ -100,7 +132,7 @@ class LazyBuffer:
     # copy the base and apply the shapetracker on the new device
     return create_lazybuffer(device, self.base.st, self.dtype, LoadOps.COPY, srcs=(self.base,))._view(self.st)
 
-  def e(self:LazyBuffer, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
+  def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     srcs: List[LazyBuffer] = []
     for s in (self,)+in_srcs:
       if s == s.base and s.base.contiguous_child and (root:=s.base.contiguous_child[0]()) is not None:
@@ -125,12 +157,12 @@ class LazyBuffer:
 
   # *** reduce ops ***
 
-  def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+  def _reduce_op(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
     unbound_new_shape = tuple(s.unbind()[0] if not isinstance(s, int) else s for s in new_shape)
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, unbound_new_shape, (self,))
 
-  def r(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+  def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     # if possible, reduce the amount of compute done by not computing on padded areas
     if op == ReduceOps.SUM and (out_mask:=self.st.views[-1].mask) is not None:
       new_input = self.shrink(out_mask)
@@ -150,16 +182,16 @@ class LazyBuffer:
 
   # *** movement ops ***
 
-  def _view(self:LazyBuffer, new_st:ShapeTracker) -> LazyBuffer:
+  def _view(self, new_st:ShapeTracker) -> LazyBuffer:
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
 
-  def reshape(self:LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer: return self._view(self.st.reshape(arg))
-  def pad(self:LazyBuffer, arg:Tuple[Tuple[sint, sint], ...]) -> LazyBuffer: return self._view(self.st.pad(arg))
-  def expand(self:LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer: return self._view(self.st.expand(arg))
-  def permute(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer: return self._view(self.st.permute(arg))
-  def shrink(self:LazyBuffer, arg:Tuple[Tuple[sint, sint], ...]) -> LazyBuffer: return self._view(self.st.shrink(arg))
-  def stride(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer: return self._view(self.st.stride(arg))
+  def reshape(self, arg:Tuple[sint, ...]) -> LazyBuffer: return self._view(self.st.reshape(arg))
+  def pad(self, arg:Tuple[Tuple[sint, sint], ...]) -> LazyBuffer: return self._view(self.st.pad(arg))
+  def expand(self, arg:Tuple[sint, ...]) -> LazyBuffer: return self._view(self.st.expand(arg))
+  def permute(self, arg:Tuple[int, ...]) -> LazyBuffer: return self._view(self.st.permute(arg))
+  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]) -> LazyBuffer: return self._view(self.st.shrink(arg))
+  def stride(self, arg:Tuple[int, ...]) -> LazyBuffer: return self._view(self.st.stride(arg))
 
 # *** schedule creation ***
 
