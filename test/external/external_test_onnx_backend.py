@@ -194,10 +194,6 @@ if isinstance(Device[Device.DEFAULT], Compiled):
 if Device.DEFAULT == 'METAL':
   backend_test.exclude('test_maxpool_2d_same_upper_cpu')
 
-# TODO: inaccuracy only for numpy backend. will get back to this after dtype refactor.
-if Device.DEFAULT == "CPU":
-  backend_test.exclude('test_sce_')
-
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):
   for x in backend_test.test_suite:
