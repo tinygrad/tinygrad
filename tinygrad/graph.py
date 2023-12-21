@@ -87,26 +87,17 @@ def log_lazybuffer(lb, scheduled=False):
         # realized but unseen?
         G.add_node(nm(lb), label=f'"{str(lb.base.realized)[5:-1].replace(" ", chr(10))}\nb:{bm(lb.realized)}"', style='filled', fillcolor="#f0c08080")
 
-cycle_tracker: Dict[int, Tuple[int, int]] = {}
-tree_cnt: int = -1
-def _tree(lazydata, prefix=""):
-  global tree_cnt
-  tree_cnt += 1
-  if type(lazydata).__name__ == "LazyBuffer":
-    return [f"━━ realized {lazydata.dtype.name} {lazydata.shape}"] if (lazydata.realized) else _tree(lazydata.op, "LB ")
+def _tree(lazydata, cycles, cnt, prefix=""):
   if len(lazydata.src) == 0: return [f"━━ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
-  if id(lazydata) in cycle_tracker and cycle_tracker[id(lazydata)][1] > getenv("TREE_CYCLE_CNT", 5):
-    return [f"━⬆︎ goto {cycle_tracker[id(lazydata)][0]}: {lazydata.op.name}"]
-  cycle_tracker[id(lazydata)] = (tree_cnt, 1 if id(lazydata) not in cycle_tracker else cycle_tracker[id(lazydata)][1]+1)
+  if (lid := id(lazydata)) in cycles and cycles[lid][1] > getenv("TREE_CYCLE_CNT", 5):
+    return [f"━⬆︎ goto {cycles[id(lazydata)][0]}: {lazydata.op.name}"]
+  cycles[lid] = (cnt, 1 if lid not in cycles else cycles[lid][1]+1)
   lines = [f"━┳ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
-  childs = [_tree(c) for c in lazydata.src[:]]
+  childs = [_tree(c, cycles, cnt + 1) for c in lazydata.src[:]]
   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
 
-def print_tree(lazydata:LazyOp):
-  global cycle_tracker, tree_cnt
-  cycle_tracker, tree_cnt = {}, -1
-  print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(lazydata))]))
+def print_tree(lazydata:LazyOp): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(lazydata, {}, 0))]))
 
 def graph_uops(uops:List[UOp]):
   import networkx as nx
