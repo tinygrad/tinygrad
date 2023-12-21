@@ -154,6 +154,8 @@ class Tensor:
       local_lbs = [self.lazydata] * len(devices)
     return Tensor(MultiLazyBuffer([x.copy_to_device(d) for x,d in zip(local_lbs, devices)]), device=devices)
 
+  def shard_(self, devices:Sequence[str], axis:Optional[int]): self.lazydata = self.shard(devices, axis).lazydata
+
   # ***** creation llop entrypoint *****
 
   @staticmethod
