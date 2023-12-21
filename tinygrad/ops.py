@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Dict, Callable
 import functools
 from enum import Enum, auto
-from tinygrad.helpers import prod, DType, least_upper_dtype
+from tinygrad.helpers import prod, DType, least_upper_dtype, dedup
 from tinygrad.shape.symbolic import Variable
 from dataclasses import dataclass
 
@@ -54,10 +54,11 @@ class LazyOp:
   @functools.cached_property
   def hash(self): return hash((self.op, self.src, self.arg))
   def __hash__(self): return self.hash
-  def get_lazyops(self) -> List[LazyOp]: return [self] + [item for x in self.src for item in x.get_lazyops()]
+  @functools.cached_property
+  def lazyops(self) -> List[LazyOp]: return dedup([self] + [item for x in self.src for item in x.lazyops])
 
 def vars_from_ast(ast:LazyOp) -> List[Variable]:
-  return sorted(set.union(*[x.arg.st.vars() for x in ast.get_lazyops() if x.op in BufferOps], set()), key=lambda x: str(x.expr))
+  return sorted(set.union(*[x.arg.st.vars() for x in ast.lazyops if x.op in BufferOps], set()), key=lambda x: str(x.expr))
 
 # **************** independent FlopCounter ****************
 

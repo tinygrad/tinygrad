@@ -1,6 +1,8 @@
 import unittest
+import time
 import numpy as np
 from tinygrad import Tensor, dtypes
+from tinygrad.device import InterpretedASTRunner
 from tinygrad.lazy import create_schedule
 from tinygrad.realize import run_schedule, lower_schedule_item
 
@@ -22,12 +24,14 @@ class TestFusionOp(unittest.TestCase):
     assert all(x == 20.0 for x in outd)
 
   def test_recursive_add(self):
+    st = time.perf_counter()
     a = Tensor([1,2,3,4])
-    for _ in range(15):
-      a = a + a
+    for _ in range(17): a = a + a
     sched = create_schedule([a.lazydata], None)
     ji = lower_schedule_item(sched[-1])
-    assert len(ji.prg) < 5000
+    et = time.perf_counter()
+    self.assertLess(et-st, 1.0)
+    assert isinstance(ji, InterpretedASTRunner) or len(ji.prg) < 5000
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
