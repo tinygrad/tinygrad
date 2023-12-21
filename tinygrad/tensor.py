@@ -7,7 +7,7 @@ from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
 
-from tinygrad.helpers import DType, dtypes, ImageDType
+from tinygrad.helpers import DType, dtypes, ImageDType, least_upper_float, least_upper_dtype
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
 from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.ops import LoadOps
@@ -174,7 +174,7 @@ class Tensor:
   def arange(start, stop=None, step=1, **kwargs):
     if stop is None: stop, start = start, 0
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
-    return Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs).cumsum() + (start - step)
+    return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs).cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
   def eye(dim:int, **kwargs):
@@ -249,7 +249,7 @@ class Tensor:
 
     # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
     # this is "implicit gradient creation"
-    self.grad = Tensor(1, device=self.device, requires_grad=False)
+    self.grad = Tensor(1.0, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
       assert (t0.grad is not None)
@@ -484,7 +484,9 @@ class Tensor:
     ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else s for i,s in enumerate(self.shape)]))
     return ret if keepdim else ret.reshape(shape=shape)
 
-  def sum(self, axis=None, keepdim=False): return self._reduce(mlops.Sum, axis, keepdim)
+  def sum(self, axis=None, keepdim=False):
+    output_type = least_upper_float(self.dtype) if dtypes.is_float(self.dtype) else least_upper_dtype(self.dtype, dtypes.default_int)
+    return self.cast(output_type)._reduce(mlops.Sum, axis, keepdim)
   def max(self, axis=None, keepdim=False): return self._reduce(mlops.Max, axis, keepdim)
   def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
 
@@ -640,7 +642,7 @@ class Tensor:
     assert self.shape[-1] == w.shape[-min(n2, 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(n2, 2)]})"  # noqa: E501
     x = self.reshape(*self.shape[0:-1], *[1]*min(n1-1, n2-1, 1), self.shape[-1])
     w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
-    return (x*w).sum(-1)
+    return (x*w).sum(-1).cast(least_upper_dtype(self.dtype, w.dtype))
 
   def _cumsum(self, axis:int=0, _first_zero=False) -> Tensor:
     return self.transpose(axis,-1).pad2d((self.shape[axis]-int(not _first_zero),0))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
@@ -650,7 +652,7 @@ class Tensor:
     SPLIT = 256
     if self.shape[axis] <= SPLIT*2: return self._cumsum(axis)
     ret = self.transpose(axis,-1).pad2d((round_up(self.shape[axis], SPLIT)-self.shape[axis], 0))
-    ret = ret.reshape(*ret.shape[0:-1], ret.shape[-1]//SPLIT, SPLIT)._cumsum(-1)
+    ret = ret.reshape(*ret.shape[0:-1], ret.shape[-1]//SPLIT, SPLIT)._cumsum(-1).cast(self.dtype)
     base_add = ret[..., -1]._cumsum(-1, _first_zero=True)[..., :-1]
     base_add = base_add.unsqueeze(-1).expand(*base_add.shape, ret.shape[-1])
     def fix(x:Tensor): return x.reshape(*ret.shape[0:-2], ret.shape[-2] * ret.shape[-1])[..., -self.shape[axis]:].transpose(axis,-1)
@@ -670,15 +672,14 @@ class Tensor:
   def neg(self): return mlops.Neg.apply(self)
   def contiguous(self): return mlops.Contiguous.apply(self)
   def contiguous_backward(self): return mlops.ContiguousBackward.apply(self)
-  def log(self): return mlops.Log.apply(self)
-  def log2(self): return mlops.Log.apply(self)/math.log(2)
-  def exp(self): return mlops.Exp.apply(self)
-  def exp2(self): return mlops.Exp.apply(self*math.log(2))
+  def log(self): return mlops.Log.apply(self.cast(least_upper_float(self.dtype)))
+  def log2(self): return self.log() / math.log(2)
+  def exp(self): return mlops.Exp.apply(self.cast(least_upper_float(self.dtype)))
+  def exp2(self): return mlops.Exp.apply(self * math.log(2))
   def relu(self): return mlops.Relu.apply(self)
-  def sigmoid(self): return mlops.Sigmoid.apply(self)
-  def sin(self): return mlops.Sin.apply(self)
-  def sqrt(self): return mlops.Sqrt.apply(self)
-  def rsqrt(self): return self.reciprocal().sqrt()
+  def sigmoid(self): return mlops.Sigmoid.apply(self.cast(least_upper_float(self.dtype)))
+  def sin(self): return mlops.Sin.apply(self.cast(least_upper_float(self.dtype)))
+  def sqrt(self): return mlops.Sqrt.apply(self.cast(least_upper_float(self.dtype)))
   def cos(self): return ((math.pi/2)-self).sin()
   def tan(self): return self.sin() / self.cos()
 
@@ -692,7 +693,8 @@ class Tensor:
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return ((self.float()) / (self.float().abs() + 1e-12)).cast(self.dtype)
-  def reciprocal(self): return 1.0/self
+  def reciprocal(self): return 1.0 / self
+  def rsqrt(self): return self.reciprocal().sqrt()
 
   # ***** activation functions (unary) *****
 
@@ -728,6 +730,9 @@ class Tensor:
         y_dtype = dtypes.from_py(y)
         x = x.cast(y_dtype)
       y = Tensor(y, self.device, y_dtype, requires_grad=False)
+
+    output_dtype = least_upper_dtype(x.dtype, y.dtype)
+    x, y = x.cast(output_dtype), y.cast(output_dtype)
 
     if reverse: x, y = y, x
 
@@ -784,7 +789,7 @@ class Tensor:
   def where(self:Tensor, input_:Union[Tensor, float], other:Union[Tensor, float]):
     x_,y = self._broadcasted(input_)
     x,z = x_._broadcasted(other)
-    return mlops.Where.apply(x, *y._broadcasted(z))
+    return mlops.Where.apply(x.cast(dtypes.bool), *y._broadcasted(z))
 
   # ***** op wrappers (wasted lines to make the typechecker happy) *****
 

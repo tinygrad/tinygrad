@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Device
+from tinygrad import Device, dtypes
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, CI
 
@@ -39,7 +39,7 @@ class TestExample(unittest.TestCase):
 
   @multidevice_test
   def test_example_readme(self, device):
-    x = Tensor.eye(3, device=device, requires_grad=True)
+    x = Tensor.eye(3, device=device, dtype=dtypes.float, requires_grad=True)
     y = Tensor([[2.0,0,-2.0]], device=device, requires_grad=True)
     z = y.matmul(x).sum()
     z.backward()
