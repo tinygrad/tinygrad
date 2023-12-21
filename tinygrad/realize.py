@@ -31,7 +31,7 @@ def run_schedule(schedule:List[ScheduleItem]):
     if si.out.output_buffer is not None:
       for i,a in enumerate(si.inputs):
         if a.realized == si.out.output_buffer:
-          if any(not x.arg.st.contiguous for x in si.ast.get_lazyops() if x.op == BufferOps.LOAD and x.arg.idx == i+1):
+          if any(not x.arg.st.contiguous for x in si.ast.lazyops if x.op == BufferOps.LOAD and x.arg.idx == i+1):
             si.out.output_buffer = None
             break
 
