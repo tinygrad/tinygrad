@@ -484,16 +484,13 @@ class Tensor:
     if self.shape[dim] != 3 or other.shape[dim] != 3: 
       raise RuntimeError(f"inputs dimension {dim} must have length 3. Got {self.shape[dim]} and {other.shape[dim]}")
     dim = dim % len(self.shape)
-    perm = [i for i in range(len(self.shape)) if i != dim] + [dim]
-    self_perm = self.permute(*perm)
-    other_perm = other.permute(*perm)
+    idx = (slice(None),) * dim
     result = Tensor.stack([
-        self_perm[..., 1] * other_perm[..., 2] - self_perm[..., 2] * other_perm[..., 1],
-        self_perm[..., 2] * other_perm[..., 0] - self_perm[..., 0] * other_perm[..., 2],
-        self_perm[..., 0] * other_perm[..., 1] - self_perm[..., 1] * other_perm[..., 0]
-    ], dim=-1)
-    inv_perm = [perm.index(i) for i in range(len(perm))]
-    return result.permute(*inv_perm)
+      self[idx + (1,)] * other[idx + (2,)] - self[idx + (2,)] * other[idx + (1,)],
+      self[idx + (2,)] * other[idx + (0,)] - self[idx + (0,)] * other[idx + (2,)],
+      self[idx + (0,)] * other[idx + (1,)] - self[idx + (1,)] * other[idx + (0,)],
+    ], dim=dim)
+    return result
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False) -> Tensor:
