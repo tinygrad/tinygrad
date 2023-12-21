@@ -1,3 +1,4 @@
+import warnings
 import unittest
 import numpy as np
 import torch
@@ -6,7 +7,7 @@ from tinygrad.helpers import CI, getenv, DEBUG, OSX, temp
 from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype
 from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes
-from typing import Any, List
+from typing import Any, Set
 from hypothesis import given, settings, strategies as st
 
 core_dtypes = list(DTYPES_DICT.values())
@@ -22,9 +23,9 @@ def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
   return True
 
-def get_available_cast_dtypes(dtype: DType) -> List[DType]:
+def get_available_cast_dtypes(dtype: DType) -> Set[DType]:
   if not is_dtype_supported(dtype): return []
-  return [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_")] # dont cast internal dtypes
+  return set([v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_")]) # dont cast internal dtypes
 
 def _test_to_np(a:Tensor, np_dtype, target):
   if DEBUG >= 2: print(a)
@@ -97,6 +98,68 @@ class TestDType(unittest.TestCase):
         _test_bitcast(Tensor(self.DATA, dtype=self.DTYPE), dtype) if dtype.itemsize == self.DTYPE.itemsize and dtype != dtypes.bool else None,
      get_available_cast_dtypes(self.DTYPE)
     ))
+  def test_load_downcast_ops(self):
+    from functools import reduce
+    def sz(x): return x.itemsize
+    def is_int(*x): return all(dtypes.is_int(_x) for _x in x)
+    def is_uint(*x): return all(dtypes.is_unsigned(_x) for _x in x)
+    def get_test_data(dt):
+      test_data = [0 if x < 0 and is_uint(dt) else x for x in [10000, -23222332, 1, 1000, 0, 100001, 20]]
+      return tuple([x if is_int(dt) else float(x) for x in test_data])
+    inf_f = float('inf')
+    expected_half = [((dtypes.half, t), (10000.0, 0, 1.0, 1000.0, 0.0, inf_f, 20.0)) for t in (dtypes.uint, dtypes.ulong)]
+    expected_bool = [(dtypes.bool, (True, True, True, True, False, True, True)),]
+    expected_bool += [((dtypes.bool, t), (True, False, True, True, False, True, True)) for t in (dtypes.uint, dtypes.ulong)]
+    # Those looks good
+    expected = [(dtypes.uchar, (255, 0, 1, 255, 0, 255, 20)), (dtypes.char, (127, -128, 1, 127, 0, 127, 20)),
+                (dtypes.half,(10000.0, -inf_f, 1.0, 1000.0, 0.0, inf_f, 20.0)), (dtypes.ushort, (10000, 0, 1, 1000, 0, 65535, 20)),
+                (dtypes.short, (10000, -32768, 1, 1000, 0, 32767, 20)), (dtypes.uint, (10000, 0, 1, 1000, 0, 100001, 20))]
+    expected += expected_half + expected_bool
+    # Those int-to-int conversion are likely just the truncation, but at least they are consistent across backends
+    truncations = {(sz(dtypes.char), 0, 0):(16, -60, 1, -24, 0, -95, 20), (sz(dtypes.char), 1, 0):(16, 196, 1, 232, 0, 161, 20),
+                   (sz(dtypes.char), 0, 1):(16, 0, 1, -24, 0, -95, 20), (sz(dtypes.char), 1, 1):(16, 0, 1, 232, 0, 161, 20),
+                   (sz(dtypes.short), 0, 0):(10000, -22588, 1, 1000, 0, -31071, 20), (sz(dtypes.short), 1, 0):(10000, 42948, 1, 1000, 0, 34465, 20),
+                   (sz(dtypes.short), 0, 1):(10000, 0, 1, 1000, 0, -31071, 20), (sz(dtypes.short), 1, 1):(10000, 0, 1, 1000, 0, 34465, 20),
+                   (sz(dtypes.int), 1, 0):(10000, 4271744964, 1, 1000, 0, 100001, 20)}
+    # Those are broken in some backends, but not in others or broken in a different ways, tuples are (dest, soruce)
+    dt = dtypes
+    def from_T2Achar(T): return ((dt.char, T), (dt.uchar, T))
+    def from_T2Ashort(T): return ((dt.short, T), (dt.ushort, T))
+    def from_TstoTs(T1, T2): return reduce(lambda x, y: x+y, [tt(t) for t in (T1) for tt in T2])
+    broken = {
+      'TORCH':from_TstoTs((dt.half, dt.float, dt.double), (from_T2Achar,)) + ((dt.short, dt.float),) + ((dt.short, dt.double),),
+      'LLVM':from_T2Achar(dt.float) + from_T2Ashort(dt.float) + from_T2Achar(dt.half),
+      'CPU':from_TstoTs((dt.half, dt.float, dt.double), (from_T2Achar,)) + from_TstoTs((dt.float, dt.double), (from_T2Ashort,)) +
+            ((dt.uint, dt.double),),
+      'CLANG':from_TstoTs((dt.float, dt.double), (from_T2Achar, from_T2Ashort)) + from_T2Achar(dt.half) + ((dt.uint, dt.double),),
+      'METAL':from_T2Achar(dt.half),
+      'CUDA':from_TstoTs((dt.float, dt.double), (from_T2Achar, from_T2Ashort)),
+      # OpenCL is weird, it works with zero errors on some devices, but not on the others
+      'GPU':from_TstoTs((dt.float, dt.double), (from_T2Achar, from_T2Ashort)) + ((dt.uint, dt.double),)
+    }
+    load_types = [x for x in get_available_cast_dtypes(self.DTYPE) if sz(x) > sz(self.DTYPE) and is_int(x)]
+    bitcast_to_types = dict([(x, [y for y in get_available_cast_dtypes(x) if y != self.DTYPE and sz(y) == sz(x)]) for x in load_types])
+    for t1, t2 in [(t1, t2) for t1, t2s in bitcast_to_types.items() for t2 in t2s if not is_int(t2) or sz(t2) >= sz(dtypes.int)]:
+      with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        t = Tensor([get_test_data(t2)], dtype=t2)
+        tin = tuple(t.numpy().tolist()[0])
+        _t = t.bitcast(t1).realize().bitcast(t2).cast(self.DTYPE).numpy().tolist()
+      akey = (sz(self.DTYPE), is_uint(self.DTYPE), is_uint(t2))
+      expect_an = [((self.DTYPE, t2), truncations[akey])] if is_int(self.DTYPE, t2) and akey in truncations else []
+      expect = dict(expected + expect_an)
+      def get_expect():
+        return tuple([int(x) if is_int(self.DTYPE) else x for x in expect.get((self.DTYPE, t2), expect.get(self.DTYPE, get_test_data(t2)))])
+      def match_expect(r): return len(r) == 1 and tuple(r[0]) == get_expect()
+      br_expect = (self.DTYPE, t2) in broken.get(Device.DEFAULT, [])
+      test_descr = f'{Device.DEFAULT}: {tin} {t2}-b->{t1}->r-b->{t2}-c->{self.DTYPE} = {tuple(_t[0])}'
+      if match_expect(_t):
+        assert not br_expect, test_descr + ' is not broken'
+        if DEBUG > 0: print(f'Passed: {test_descr}')
+        continue
+      test_descr += f'\nExpected: {get_expect()}'
+      assert br_expect, test_descr
+      if DEBUG > 0 and br_expect: print(f'Still broken: {test_descr}')
 
   def test_dtypes_fields(self):
     fields = dtypes.fields()
