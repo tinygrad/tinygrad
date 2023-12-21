@@ -31,11 +31,13 @@ setup(name='tinygrad',
         'webgpu': ["wgpu>=v0.12.0"],
         'linting': [
             "pylint",
+            "pylint-exit",
             "mypy",
             "typing-extensions",
             "pre-commit",
             "ruff",
             "types-tqdm",
+            "tabulate",
         ],
         'testing': [
             "torch",

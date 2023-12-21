@@ -1060,10 +1060,10 @@ class TestIndexing(unittest.TestCase):
   '''
 
   def test_int_indices(self):
-      v = Tensor.randn(5, 7, 3)
-      numpy_testing_assert_equal_helper(v[[0, 4, 2]].shape, (3, 7, 3))
-      numpy_testing_assert_equal_helper(v[:, [0, 4, 2]].shape, (5, 3, 3))
-      numpy_testing_assert_equal_helper(v[:, [[0, 1], [4, 3]]].shape, (5, 2, 2, 3))
+    v = Tensor.randn(5, 7, 3)
+    numpy_testing_assert_equal_helper(v[[0, 4, 2]].shape, (3, 7, 3))
+    numpy_testing_assert_equal_helper(v[:, [0, 4, 2]].shape, (5, 3, 3))
+    numpy_testing_assert_equal_helper(v[:, [[0, 1], [4, 3]]].shape, (5, 2, 2, 3))
 
   # TODO setindex
   '''
