@@ -1,3 +1,4 @@
+import numpy as np
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, random, math, time, multiprocessing, traceback, signal
 from tinygrad.device import Device, Compiled, Buffer
@@ -46,18 +47,15 @@ def bufs_from_lin(lin:Linearizer) -> List[Buffer]:
 # get dictionary of all possible actions
 def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Linearizer]:
   acted_lins = {0:lin} if include_0 else {}
-  for i,a in enumerate(actions):
-    if a.axis is not None and a.axis >= lin.shape_len: continue
-    if a.axis is not None and lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) in actions: continue
-    lin2 = lin.copy()
+  is_valid = lambda a: (a.axis is None) or (a.axis<lin.shape_len) or (lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) not in actions)
+  for i,a in enumerate(filter(is_valid, actions)):
     try:
-      lin2.apply_opt(a)
-      up, lcl = 1, 1
-      for s,c in zip(lin2.full_shape, lin2.colors()):
-        if c in {"magenta", "yellow"}: up *= s
-        if c in {"cyan", "green", "white"}: lcl *= s
-      if up > 256 or lcl > 256: continue
-      acted_lins[i+1] = lin2
+      (lin2:=lin.copy()).apply_opt(a)
+      colors, full_shape = np.array(lin2.colors),  np.array(lin2.full_shape)
+      up = prod(full_shape[(colors=='magenta') | (colors=='yellow')])
+      lcl = prod(full_shape[(colors=='cyan') | (colors=='green') | (colors=='white')])
+      if up <= 256 and lcl <= 256:
+        acted_lins[i+1] = lin2
     except Exception:
       pass
   return acted_lins
@@ -76,8 +74,7 @@ def compile_linearizer(dev:str, lin:Linearizer, name:Optional[str]=None) -> Tupl
   return rdev.compiler(src), lin.global_size, lin.local_size
 
 def time_program(dev:str, lib:bytes, global_size, local_size, var_vals, rawbufs, early_stop=None, max_global_size=65536, clear_l2=False, cnt=3, name="test"):  # noqa: E501
-  rdev = Device[dev]
-  assert isinstance(rdev, Compiled)
+  rdev:Compiled = Device[dev]
   clprg = rdev.runtime(name, lib)
   factor = 1
   if global_size is not None:
