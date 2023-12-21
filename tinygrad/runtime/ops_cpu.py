@@ -1,15 +1,12 @@
 import numpy as np
 from typing import Callable, Dict, Tuple
-from tinygrad.helpers import dtypes, flat_mv
+from tinygrad.helpers import flat_mv
 from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, TernaryOps,  ReduceOps, MovementOps, Op
 from tinygrad.device import Interpreted, Allocator
 
 def reduce_axis(in_shape:Tuple[int, ...], out_shape:Tuple[int, ...]) -> Tuple[int, ...]:
   assert len(in_shape) == len(out_shape), "reduce shapes must have same dimensions"
   return tuple(i for i,(a,b) in enumerate(zip(in_shape, out_shape)) if a != b)
-
-# TODO: this should be global infrastructure
-def output_type(x, y): return x.dtype if dtypes.from_np(x.dtype).priority > dtypes.from_np(y.dtype).priority else y.dtype
 
 def einsum_mulacc(einsum, get_strides, expand):
   def einscripts(x): return ''.join(["abcdefghijklmnopqrstuvwxyz"[i] for i in x])
@@ -33,7 +30,7 @@ numpy_fxn_for_op: Dict[Op, Callable] = {
   UnaryOps.NEG: lambda x: np.logical_not(x) if x.dtype == np.bool_ else np.negative(x),
   BinaryOps.MAX: np.maximum, BinaryOps.CMPLT: lambda x,y: x<y,
   BinaryOps.ADD: np.add, BinaryOps.SUB: np.subtract, BinaryOps.MUL: np.multiply,
-  BinaryOps.DIV: lambda x, y: np.divide(x, y).astype(output_type(x, y), copy=False),
+  BinaryOps.DIV: lambda x, y: np.divide(x, y).astype(x.dtype, copy=False),
   BinaryOps.XOR: np.bitwise_xor,
   TernaryOps.MULACC: einsum_mulacc(lambda s,a,b: np.einsum(s, a.copy(), b.copy(), optimize=True), lambda x: x.strides, np.broadcast_to),
   TernaryOps.WHERE: np.where,
