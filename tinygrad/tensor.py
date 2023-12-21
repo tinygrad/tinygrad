@@ -314,7 +314,7 @@ class Tensor:
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, (tuple, list)):
-      # special case <indices: List[int]>, a lil ugly
+      # explicitly define dtype.int here to cover the case that it's an empty []
       if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, dtype=dtypes.int, requires_grad=False, device=self.device)]
       else: indices = [Tensor(list(i), dtype=dtypes.int, requires_grad=False, device=self.device) if isinstance(i, (tuple, list)) else i for i in indices]  # noqa: E501
     else: indices = [indices]
