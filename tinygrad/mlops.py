@@ -93,8 +93,7 @@ class Less(Function):
 
 class Xor(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    output_dtype = least_upper_dtype(x.dtype, y.dtype)
-    return x.cast(output_dtype).e(BinaryOps.XOR, y.cast(output_dtype))
+    return x.e(BinaryOps.XOR, y)
 
 class Add(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
@@ -124,12 +123,12 @@ class Mul(Function):
 
 class Div(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    self.x, self.y, output_dtype = x, y, least_upper_dtype(x.dtype, y.dtype)
-    return x.cast(output_dtype).e(BinaryOps.DIV, y.cast(output_dtype))
+    self.x, self.y = x, y
+    return x.e(BinaryOps.DIV, y)
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
-    return grad_output.cast(self.x.dtype).e(BinaryOps.DIV, self.y.cast(self.x.dtype)) if self.needs_input_grad[0] else None, \
-           grad_output.cast(self.y.dtype).e(UnaryOps.NEG).e(BinaryOps.MUL, self.x.cast(self.y.dtype)).e(BinaryOps.DIV, self.y.e(BinaryOps.MUL, self.y)) if self.needs_input_grad[1] else None  # noqa: E501
+    return grad_output.e(BinaryOps.DIV, self.y) if self.needs_input_grad[0] else None, \
+           grad_output.e(UnaryOps.NEG).e(BinaryOps.MUL, self.x).e(BinaryOps.DIV, self.y.e(BinaryOps.MUL, self.y)) if self.needs_input_grad[1] else None  # noqa: E501
 
 # ************* ternary ops *************
 
