@@ -2,7 +2,7 @@ from __future__ import annotations
 import sys, math
 import numpy as np
 from typing import Union, Optional, Any, Tuple, List, Set, Dict
-from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten, getenv, dedup, ImageDType, DEBUG, all_int
+from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten, getenv, dedup, ImageDType, DEBUG, all_int, all_same
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps
 from tinygrad.ops import Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem, vars_from_ast
 from tinygrad.shape.symbolic import sint, Variable
@@ -94,16 +94,17 @@ class LazyBuffer:
     out = self.contiguous()
     return create_lazybuffer(device, out.st, out.dtype, LoadOps.COPY, srcs=(out,))
 
-  def e(self:LazyBuffer, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
-    srcs = (self,)+srcs
-    new_srcs = []
-    for s in srcs:
+  def e(self:LazyBuffer, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
+    srcs: List[LazyBuffer] = []
+    for s in (self,)+in_srcs:
       if s == s.base and s.base.contiguous_child and (root:=s.base.contiguous_child[0]()) is not None:
-        new_srcs.append(root._view(s.base.contiguous_child[1]))
+        srcs.append(root._view(s.base.contiguous_child[1]))
       else:
-        new_srcs.append(s)
-    srcs = tuple(new_srcs)
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), max(x.dtype for x in srcs), op, arg, srcs)
+        srcs.append(s)
+    assert all_same([x.dtype for x in (srcs if op != TernaryOps.WHERE else srcs[1:])]), f"all dtypes must match {[x.dtype for x in srcs]} on {op}"
+    assert op != TernaryOps.WHERE or srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
+    output_dtype = srcs[-1].dtype if op != BinaryOps.CMPLT else dtypes.bool
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), output_dtype, op, arg, tuple(srcs))
 
   # *** reduce ops ***
 
