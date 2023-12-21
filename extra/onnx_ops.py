@@ -122,7 +122,7 @@ def Unsqueeze(data: Tensor, axes):
       new_shape[i] = next(ptr)
   return data.reshape(new_shape)
 
-def Binarizer(input, threshold=0.0): return input > threshold
+def Binarizer(input, threshold=0.0): return (input > threshold).cast(dtypes.float32)
 
 def ArgMax(x: Tensor, axis=0, keepdims=1, select_last_index=0):
   axis = axis + x.ndim if axis < 0 else axis

@@ -1,6 +1,6 @@
 import math
 from typing import Tuple, Optional, cast
-from tinygrad.helpers import argsort, DType, least_upper_float, dtypes, least_upper_dtype
+from tinygrad.helpers import argsort, DType, dtypes
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
@@ -88,8 +88,8 @@ class Sigmoid(Function):
 
 class Less(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    output_dtype = least_upper_dtype(x.dtype, y.dtype)
-    return x.cast(output_dtype).e(BinaryOps.CMPLT, y.cast(output_dtype))
+    # in webgpu bool cannot be used as a storage buffer type
+    return x.e(BinaryOps.CMPLT, y).cast(dtypes.float if self.device == "WEBGPU" else dtypes.bool)
 
 class Xor(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
