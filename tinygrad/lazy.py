@@ -59,9 +59,7 @@ class LazyBuffer:
     return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else ())
 
   def const(self, val:Union[float, int]) -> LazyBuffer:
-    # NOTE: we force the image dtype const to be a float32
-    const_dtype = self.dtype if not isinstance(self.dtype, ImageDType) else dtypes.float32
-    return LazyBuffer.loadop(LoadOps.CONST, tuple(), const_dtype, self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
+    return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
 
   def contiguous(self):
     if not self.st.contiguous or self.st.size() != self.base.st.size() or self.is_unrealized_const():
