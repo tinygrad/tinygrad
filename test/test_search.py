@@ -5,11 +5,13 @@ from tinygrad.features.search import time_linearizer
 from tinygrad.device import Compiled, Device, Buffer
 from tinygrad.ops import LoadOps
 from tinygrad.tensor import Tensor
+from tinygrad.helpers import CI
 
 class TestTimeLinearizer(unittest.TestCase):
   def setUp(self) -> None:
     if not isinstance(Device[Device.DEFAULT], Compiled): raise unittest.SkipTest("only test for compiled backends")
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "timestamp-query feature is not supported in CI Metal")
   def test_reasonable_time(self):
     si = [si for si in Tensor([1,2,3,4]).add(1).lazydata.schedule() if si.ast.op not in LoadOps][0]
     rawbufs = [Buffer(Device.DEFAULT, si.out.st.size(), si.out.dtype)] + [Buffer(Device.DEFAULT, x.st.size(), x.dtype) for x in si.inputs]
