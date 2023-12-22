@@ -376,7 +376,7 @@ class TestAutoCastType(unittest.TestCase):
   def test_broadcast_int(self, default_int):
     dtypes.default_int = default_int
     assert (Tensor.rand(4, 4, dtype=dtypes.bool) + 2).dtype == dtypes.default_int
-    assert (Tensor.rand(4, 4, dtype=dtypes.int32) + 2).dtype == dtypes.int32
+    assert (Tensor.rand(4, 4, dtype=dtypes.int) + 2).dtype == dtypes.int
     assert (Tensor.rand(4, 4, dtype=dtypes.int8) + 2).dtype == dtypes.int8
     assert (Tensor.rand(4, 4, dtype=dtypes.uint64) + 2).dtype == dtypes.uint64
     assert (Tensor.rand(4, 4, dtype=dtypes.float16) + 2).dtype == dtypes.float16
