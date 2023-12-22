@@ -42,7 +42,7 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
 
   # hack to put the inputs back
   for (j,i),idx in run.input_replace.items():
-    realized_input = args[idx].lazydata.realized
+    realized_input = args[idx].lazydata.base.realized
     run.jit_cache[j].rawbufs[i] = realized_input
     special_names[id(realized_input)] = f'input{idx}'
 
