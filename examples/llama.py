@@ -128,10 +128,10 @@ def dequantize_q4_0(tensor: gguf.ReaderTensor):
   return ((Tensor.cat(weights - (div * 16), div, dim=1).cast(dtypes.int8) - 8) * scales).reshape(np.flip(tensor.shape).tolist())
 
 def get_weight_and_scale_from_q4_0(tensor):
-    blocks = tensor.reshape(-1, 18)
-    weight = blocks[:, 2:]
-    scale = blocks[:, :2].view(np.float16)
-    return Tensor(weight), Tensor(scale)
+  blocks = tensor.reshape(-1, 18)
+  weight = blocks[:, 2:]
+  scale = blocks[:, :2].view(np.float16)
+  return Tensor(weight), Tensor(scale)
 
 def dequantize_q6_k(tensor: gguf.ReaderTensor):
   # https://github.com/ggerganov/llama.cpp/blob/master/ggml-quants.c#L2263
