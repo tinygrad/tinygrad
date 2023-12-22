@@ -13,7 +13,9 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad.helpers import GlobalCounters
 from extra.models.llama import Transformer, convert_from_huggingface
-from sentencepiece import SentencePieceProcessor
+from sentencepiece import SentencePieceProcessor, sentencepiece_model_pb2
+import gguf
+from gguf.constants import GGML_QUANT_SIZES, GGMLQuantizationType
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
 
@@ -116,6 +118,99 @@ def concat_weights(models):
     return lazy_tensors[0].cat(*lazy_tensors[1:], dim=axis)
   return {name: convert(name) for name in {name: None for model in models for name in model}}
 
+def dequantize_q4_0(tensor: gguf.ReaderTensor):
+  # https://github.com/ggerganov/llama.cpp/blob/master/ggml-quants.c#L1074
+  block_sz, type_sz = GGML_QUANT_SIZES[tensor.tensor_type]
+  blks = tensor.data.reshape(-1,type_sz)
+  scales  = Tensor(blks[:,:2].flatten().view(np.float16)).repeat((block_sz,1)).transpose().cast(dtypes.float16)
+  weights = Tensor(blks)[:,2:]
+  div = (weights / 16)
+  return ((Tensor.cat(weights - (div * 16), div, dim=1).cast(dtypes.int8) - 8) * scales).reshape(np.flip(tensor.shape).tolist())
+
+def get_weight_and_scale_from_q4_0(tensor):
+    blocks = tensor.reshape(-1, 18)
+    weight = blocks[:, 2:]
+    scale = blocks[:, :2].view(np.float16)
+    return Tensor(weight), Tensor(scale)
+
+def dequantize_q6_k(tensor: gguf.ReaderTensor):
+  # https://github.com/ggerganov/llama.cpp/blob/master/ggml-quants.c#L2263
+  k , _= GGML_QUANT_SIZES[tensor.tensor_type]
+  gguf_tensor_data = tensor.data.reshape((-1, 210))
+  ql = gguf_tensor_data[:, :k//2]  # Lower 4 bits, uint8
+  qh = gguf_tensor_data[:, k//2:(k//2)+(k//4)]  # Upper 2 bits, uint8
+  scales = gguf_tensor_data[:, (k//2)+(k//4):(k//2)+(k//4)+(k//16)].view(np.int8)  # scales, int8
+  d = gguf_tensor_data[:, (k//2)+(k//4)+(k//16):].view(np.float16).astype(np.float16)  # super-block scale, fp16
+
+  vals = []
+  for n in range(2):
+    q = []
+    ql_idx = n*64
+    qh_idx = n*32
+    scales_idx = n*8
+    q.append(((ql[:, ql_idx:32+ql_idx] & 0xF) | ((qh[:, qh_idx:32+qh_idx] >> 0) & 3) << 4).astype(np.int8) - 32)
+    q.append(((ql[:, ql_idx+32:64+ql_idx] & 0xF) | ((qh[:, qh_idx:32+qh_idx] >> 2) & 3) << 4).astype(np.int8) - 32)
+    q.append(((ql[:, ql_idx:32+ql_idx] >> 4) | ((qh[:, qh_idx:32+qh_idx] >> 4) & 3) << 4).astype(np.int8) - 32)
+    q.append(((ql[:, ql_idx+32:ql_idx+64] >> 4) | ((qh[:, qh_idx:32+qh_idx] >> 6) & 3) << 4).astype(np.int8) - 32)
+    for i in range(8):
+      qval = q[i//2][:, :16] if i % 2 == 0 else q[i//2][:, 16:]
+      vals.append(d * scales[:, i+scales_idx:i+scales_idx+1] * qval)
+
+  y = np.concatenate(vals, axis=1).reshape(np.flip(tensor.shape))
+  return Tensor(y)
+
+def load_gguf_weights(reader: gguf.GGUFReader, model):
+  sd = {}
+  gguf_to_tinygrad_keymap = {
+      'token_embd.weight': 'tok_embeddings.weight',
+      **{f"blk.{i}.attn_norm.weight": f"layers.{i}.attention_norm.weight" for i in range(len(model.layers))},
+      **{f"blk.{i}.attn_{v}.weight": f"layers.{i}.attention.w{v[0]}.weight" for v in ["q", "k", "v", "output"] for i in range(len(model.layers))},
+      **{f"blk.{i}.ffn_norm.weight": f"layers.{i}.ffn_norm.weight" for i in range(len(model.layers))},
+      **{f"blk.{i}.ffn_{x}.weight": f"layers.{i}.feed_forward.w{y}.weight" for x,y in {"gate": 1, "down": 2, "up": 3}.items() for i in range(len(model.layers))},
+      'output_norm.weight': 'norm.weight', 'output.weight': 'output.weight',
+  }
+  for tensor in reader.tensors:
+    scale = None
+    k = gguf_to_tinygrad_keymap[tensor.field.name]
+    if tensor.tensor_type == GGMLQuantizationType.Q4_0:
+      if 'embedding' not in k:
+        w, scale = get_weight_and_scale_from_q4_0(tensor.data)
+      else:
+        w = dequantize_q4_0(tensor)
+    elif tensor.tensor_type == GGMLQuantizationType.Q6_K:
+      w = dequantize_q6_k(tensor)
+    elif tensor.tensor_type == GGMLQuantizationType.F32:
+      w = Tensor(tensor.data).reshape(np.flip(tensor.shape).tolist()).half()
+    else: raise RuntimeError("Quantization type still not supported!")
+
+    sd[k] = w
+    if scale is not None:
+      sd[k.replace('.weight', '.scale')] = scale
+  return sd
+
+def load_gguf_tokenizer(reader: gguf.GGUFReader):
+  tokens = [str(bytes(reader.fields['tokenizer.ggml.tokens'].parts[idx]), encoding="utf-8") for idx in reader.fields['tokenizer.ggml.tokens'].data]
+  scores = [pv for idx in reader.fields['tokenizer.ggml.scores'].data for pv in reader.fields['tokenizer.ggml.scores'].parts[idx].tolist()]
+  types  = [pv for idx in reader.fields['tokenizer.ggml.token_type'].data for pv in reader.fields['tokenizer.ggml.token_type'].parts[idx].tolist()]
+
+  # Model tokens for Sentence Piece use Google's Protocol Buffer
+  token_model = sentencepiece_model_pb2.ModelProto()
+  for i in range(len(tokens)):
+    token = token_model.pieces.add()
+    token.piece = tokens[i]
+    token.score = scores[i]
+    token.type  = types[i]
+    if token.type == gguf.TokenType.BYTE:
+      token_model.trainer_spec.byte_fallback = 1
+
+  token_model.trainer_spec.unk_id = reader.fields['tokenizer.ggml.unknown_token_id'].parts[-1][0]
+  token_model.trainer_spec.bos_id = reader.fields['tokenizer.ggml.bos_token_id'].parts[-1][0]
+  token_model.trainer_spec.eos_id = reader.fields['tokenizer.ggml.eos_token_id'].parts[-1][0]
+  # Load the model from the Protocol Buffer created with the .gguf info
+  sp = SentencePieceProcessor()
+  sp.load_from_serialized_proto(token_model.SerializeToString())
+  return sp
+
 def load(fn:str):
   if fn.endswith('.index.json'):
     with open(fn) as fp: weight_map = json.load(fp)['weight_map']
@@ -195,15 +290,22 @@ class LLaMa:
   @staticmethod
   def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False, use_4bit=False):
     params = MODEL_PARAMS[model_gen][model_size]
-    sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
-    # assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
+    if str(model_path).endswith('.gguf'): gguf_reader = gguf.GGUFReader(model_path)
+    sp_model = SentencePieceProcessor(model_file=str(tokenizer_path)) if tokenizer_path != '' else load_gguf_tokenizer(gguf_reader)
+    assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
 
     jit = bool(getenv("JIT", 1))
-    linear_layer = QK4_0Linear if use_4bit else AbsmaxQuantizedLinear
-    model = Transformer(**params["args"], linear=linear_layer, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
+    if (quantize and not use_4bit) :
+      model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, output_layer=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit)
+    elif use_4bit:
+      model = Transformer(**params["args"], linear=QK4_0Linear, max_context=MAX_CONTEXT, jit=jit)
+    else:
+      model = Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
 
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
+    elif str(model_path).endswith('.gguf'):
+      weights = load_gguf_weights(gguf_reader, model)
     else:
       weights = load(str(model_path))
     if "model.embed_tokens.weight" in weights:
@@ -414,9 +516,10 @@ After you are done speaking, output [EOS]. You are not Chad.
 
   LLAMA_SUFFIX = {"1": "", "2": "-2", "code": "-code", "tiny": "-tiny"}[args.gen]
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
-  TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
+  TOKENIZER_PATH = '' if str(args.model).endswith('.gguf') else (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
-  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, use_4bit=args.use_4bit)
+  use_4bit = args.use_4bit or str(args.model).endswith('.gguf')
+  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, use_4bit=use_4bit)
   param_count = sum(x.lazydata.st.size() for x in get_parameters(llama.model))
 
   if chatbot:
