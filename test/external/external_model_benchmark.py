@@ -99,7 +99,6 @@ def benchmark_model(m, devices, validate_outs=False):
 
   if validate_outs:
     rtol, atol = 2e-3, 2e-3  # tolerance for fp16 models
-    if m == "openpilot" and 'CUDA' in devices: rtol, atol = 0.1, 0.1  # TODO: why is this broken?
     inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
     tinygrad_model = get_run_onnx(onnx_model)
     tinygrad_out = tinygrad_model(inputs)
