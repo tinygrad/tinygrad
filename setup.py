@@ -53,8 +53,8 @@ setup(name='tinygrad',
             "librosa",
             "networkx",
             "hypothesis",
-            "protobuf==3.20.3"
-            "gguf"
+            "protobuf==3.20.3",
+            "gguf",
         ]
       },
       include_package_data=True)
