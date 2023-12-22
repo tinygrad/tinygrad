@@ -12,10 +12,10 @@ from tinygrad.tensor import Tensor
 from tinygrad import Device
 
 MODELS = {
-  "resnet50": "https://github.com/onnx/models/raw/main/archive/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
+  "resnet50": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
   "openpilot": "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx",
-  "efficientnet": "https://github.com/onnx/models/raw/main/archive/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
-  "shufflenet": "https://github.com/onnx/models/raw/main/archive/vision/classification/shufflenet/model/shufflenet-9.onnx",
+  "efficientnet": "https://github.com/onnx/models/raw/main/validated/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
+  "shufflenet": "https://github.com/onnx/models/raw/main/validated/vision/classification/shufflenet/model/shufflenet-9.onnx",
   "commavq": "https://huggingface.co/commaai/commavq-gpt2m/resolve/main/gpt2m.onnx",
 
   # broken in torch MPS
