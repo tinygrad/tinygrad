@@ -9,7 +9,6 @@ class TestCopySpeed(unittest.TestCase):
   @classmethod
   def setUpClass(cls): Device[Device.DEFAULT].synchronize()
 
-  @unittest.skipIf(OSX, "no shm on OSX")
   def testCopySHMtoDefault(self):
     s = shared_memory.SharedMemory(name="test_X", create=True, size=N*N*4)
     s.close()
