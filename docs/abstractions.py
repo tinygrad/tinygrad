@@ -136,15 +136,15 @@ assert len(lazyop.srcs) == 2
 assert lazyop.srcs[0].op == LoadOps.COPY
 assert lazyop.srcs[0].srcs[0].device == "CPU"
 assert lazyop.srcs[0].srcs[0].realized._buf[0] == 2, "the src of the COPY LazyOP is a LazyBuffer on the CPU holding [2.]"
-assert result.lazydata.realized is None, "the LazyBuffer is not realized yet"
+assert result.lazydata.base.realized is None, "the LazyBuffer is not realized yet"
 
 # now we realize the LazyBuffer
 result.realize()
-assert result.lazydata.realized is not None, "the LazyBuffer is realized!"
+assert result.lazydata.base.realized is not None, "the LazyBuffer is realized!"
 # this brings us nicely to DeviceBuffer, of which the realized ClangBuffer is a subclass
-#assert 'RawMallocBuffer' in str(type(result.lazydata.realized))
+#assert 'RawMallocBuffer' in str(type(result.lazydata.base.realized))
 # getting ahead of ourselves, but we can copy the DeviceBuffer toCPU
-assert result.lazydata.realized.toCPU()[0] == 5, "when put in numpy with toCPU, it's 5"
+assert result.lazydata.base.realized.toCPU()[0] == 5, "when put in numpy with toCPU, it's 5"
 
 # %%
 # == Union[Interpreted, Compiled] (in tinygrad/ops.py, code 5/10) ==

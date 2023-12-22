@@ -42,13 +42,13 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
 
   # hack to put the inputs back
   for (j,i),idx in run.input_replace.items():
-    realized_input = args[idx].lazydata.realized
+    realized_input = args[idx].lazydata.base.realized
     run.jit_cache[j].rawbufs[i] = realized_input
     special_names[id(realized_input)] = f'input{idx}'
 
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
   for i, output in enumerate(the_output):
-    special_names[id(output.lazydata.realized)] = f'output{i}'
+    special_names[id(output.lazydata.base.realized)] = f'output{i}'
   return run, special_names
 
 def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]], bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str]) -> str:

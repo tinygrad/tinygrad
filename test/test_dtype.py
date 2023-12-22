@@ -30,7 +30,7 @@ def get_available_cast_dtypes(dtype: DType) -> List[DType]:
 def _test_to_np(a:Tensor, np_dtype, target):
   if DEBUG >= 2: print(a)
   na = a.numpy()
-  if DEBUG >= 2: print(na, na.dtype, a.lazydata.realized)
+  if DEBUG >= 2: print(na, na.dtype, a.lazydata.base.realized)
   try:
     assert na.dtype == np_dtype
     np.testing.assert_allclose(na, target)
