@@ -36,18 +36,21 @@ class MultiLazyBuffer:
     assert all_same([(x.shape, x.dtype) for x in lbs]), "all multilazybuffer needs same shape and dtype"
     self.shape, self.dtype, self.device = lbs[0].shape, lbs[0].dtype, tuple(x.device for x in lbs)
 
-  def copy_to_device(self, device:str) -> LazyBuffer:
+  def copy_to_device(self, device:str) -> MultiLazyBuffer:
     return functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [lb.copy_to_device(device) for lb in self.lbs])
 
   def is_unrealized_contiguous_const(self): return False
 
   def schedule(self, seen=None): return create_schedule(self.lbs, seen)
 
+  def const(self, val:Union[float, int]) -> MultiLazyBuffer: return MultiLazyBuffer([x.const(val) for x in self.lbs])
+
   def contiguous(self): return MultiLazyBuffer([x.contiguous() for x in self.lbs])
 
   # elementwise is simple
   def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:MultiLazyBuffer, arg:Optional[Any]=None) -> MultiLazyBuffer:
-    assert all(self.device == x.device for x in in_srcs), "all buffer must have the same device"
+    assert all(isinstance(x, MultiLazyBuffer) for x in in_srcs), f"all buffers must be MultiLazyBuffer {in_srcs}"
+    assert all(self.device == x.device for x in in_srcs), f"all buffers must have the same device {self.device} != {[x.device for x in in_srcs]}"
     return MultiLazyBuffer([lsrcs[0].e(op, *lsrcs[1:], arg=arg) for lsrcs in zip(self.lbs, *[x.lbs for x in in_srcs])])
 
   def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
@@ -65,6 +68,7 @@ class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                base:Optional[LazyBuffer]=None):
+    assert isinstance(device, str)
     self.device, self.st, self.dtype, self.shape = device, st, dtype, st.shape
     if base is None:
       # properties on base
@@ -88,7 +92,10 @@ class LazyBuffer:
 
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None) -> LazyBuffer:
-    return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else ())
+    if isinstance(device, str):
+      return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else ())
+    else:
+      return MultiLazyBuffer([create_lazybuffer(d, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else ()) for d in device])
 
   def const(self, val:Union[float, int]) -> LazyBuffer:
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
@@ -122,7 +129,8 @@ class LazyBuffer:
     if self.base == self and not self.realized and self.op == LoadOps.COPY and self.srcs[0].device == device: return self.srcs[0]
 
     # const doesn't have to be copied (issues with disk tensor)
-    if self.is_unrealized_const(): return self.const(self.base.arg)._view(self.st)
+    if self.is_unrealized_const():
+      return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, device, arg=self.base.arg)._view(self.st)
 
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     # TODO: why is this required on WEBGPU?

@@ -37,5 +37,19 @@ class TestMultiTensor(unittest.TestCase):
   def test_double_matmul_shard_W_0(self): return self._test_double_matmul_shard_axis(None, 0)
   def test_double_matmul_shard_W_1(self): return self._test_double_matmul_shard_axis(None, 1)
 
+  def test_data_parallel(self):
+    import sys, pathlib
+    sys.path.append((pathlib.Path(__file__).parent.parent / "extra" / "models").as_posix())
+    from resnet import ResNet18
+    from tinygrad.nn.state import get_parameters
+
+    fake_image = Tensor.rand((2, 3, 224, 224))
+    m = ResNet18()
+    m.load_from_pretrained()
+    real_output = m(fake_image).numpy()
+    for p in get_parameters(m): p.shard_((d0, d1))
+    shard_output = m(fake_image.shard((d0, d1), axis=0)).numpy()
+    np.testing.assert_allclose(real_output, shard_output)
+
 if __name__ == '__main__':
   unittest.main()

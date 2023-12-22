@@ -142,7 +142,7 @@ class Tensor:
     _ret = Tensor(self.lazydata, device)
     self.lazydata = _ret.lazydata
 
-  def shard(self, devices:Sequence[str], axis:Optional[int]) -> Tensor:
+  def shard(self, devices:Sequence[str], axis:Optional[int]=None) -> Tensor:
     if axis is not None:
       assert self.shape[axis] % len(devices) == 0
       sz = self.shape[axis] // len(devices)
@@ -154,7 +154,8 @@ class Tensor:
       local_lbs = [self.lazydata] * len(devices)
     return Tensor(MultiLazyBuffer([x.copy_to_device(d) for x,d in zip(local_lbs, devices)]), device=devices)
 
-  def shard_(self, devices:Sequence[str], axis:Optional[int]): self.lazydata = self.shard(devices, axis).lazydata
+  def shard_(self, devices:Sequence[str], axis:Optional[int]=None):
+    self.lazydata = self.shard(devices, axis).lazydata
 
   # ***** creation llop entrypoint *****
 
