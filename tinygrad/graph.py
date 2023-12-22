@@ -89,12 +89,12 @@ def log_lazybuffer(lb, scheduled=False):
 
 def _tree(lazydata, cycles, cnt, prefix=""):
   cnt[0] += 1
-  if len(lazydata.src) == 0: return [f"━━ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
+  if len(lazydata.srcs) == 0: return [f"━━ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
   if (lid := id(lazydata)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
     return [f"━⬆︎ goto {cycles[id(lazydata)][0]}: {lazydata.op.name}"]
   cycles[lid] = (cnt[0], 1 if lid not in cycles else cycles[lid][1]+1)
   lines = [f"━┳ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
-  childs = [_tree(c, cycles, cnt) for c in lazydata.src[:]]
+  childs = [_tree(c, cycles, cnt) for c in lazydata.srcs[:]]
   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
 
