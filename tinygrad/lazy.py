@@ -29,6 +29,9 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType,
   if op not in {LoadOps.EMPTY, LoadOps.CUSTOM, LoadOps.CONST, LoadOps.COPY} and getenv("LAZYCACHE", 1): lazycache[wop] = ret
   return ret
 
+def all_reduce(lbs):
+  return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
+
 class MultiLazyBuffer:
   def __init__(self, lbs:Sequence[LazyBuffer], st:ShapeTracker, sts:Sequence[ShapeTracker]):
     assert all(isinstance(x, LazyBuffer) for x in lbs), "all lbs must be LazyBuffers"
@@ -50,10 +53,11 @@ class MultiLazyBuffer:
     return MultiLazyBuffer([lb.copy_to_device(d) for d in devices], lb.st, None)
 
   def copy_to_device(self, device:str) -> MultiLazyBuffer:
-    if self.sts is None: return self.lbs[0].copy_to_device(device)
+    if self.sts is None: return self.lbs[0]._view(self.st).copy_to_device(device)
     for st in self.sts:
       print(st, self.st.shape, st.invert(self.st.shape))
 
+    print("sum reduce")
     sum_lbs = [lb._view(st) for st, lb in zip(self.sts, self.lbs)]
     return functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [lb.copy_to_device(device) for lb in sum_lbs])
 
@@ -71,21 +75,25 @@ class MultiLazyBuffer:
     srcs = (self,)+in_srcs
     assert all(isinstance(x, MultiLazyBuffer) for x in srcs), f"all buffers must be MultiLazyBuffer {srcs}"
     assert all_same([x.device for x in srcs]), f"all buffers must have the same device {[x.device for x in srcs]}"
-    this_sts = [list(zip(x.lbs, x.sts)) for x in srcs if x.sts is not None]
-    assert len(this_sts) <= 1, f"multiple sts {this_sts}"
-    this_inv_sts = [st.invert(lb.shape) for lb,st in this_sts[0]] if len(this_sts) else None
+    this_sts = dedup([tuple((y[0].shape, y[1]) for y in zip(x.lbs, x.sts)) for x in srcs if x.sts is not None])
+    if len(this_sts) > 1: raise RuntimeError(f"multiple sts {this_sts}")
+    this_sts = this_sts[0] if len(this_sts) else None
+    this_inv_sts = [st.invert(shape) for shape,st in this_sts] if this_sts else None
     new_srcs = []
     for s in srcs:
       if s.sts is None and this_inv_sts is not None:
         new_srcs.append([x._view(this_inv_sts[i]) for i,x in enumerate(s.lbs)])
       else:
-        new_srcs.append([x for x in s.lbs])
+        new_srcs.append([x._view(s.st) for i,x in enumerate(s.lbs)])
     new_lbs = [lsrcs[0].e(op, *lsrcs[1:], arg=arg) for lsrcs in zip(*new_srcs)]
-    return MultiLazyBuffer(new_lbs, ShapeTracker.from_shape(self.st.shape), [x[1] for x in this_sts[0]] if len(this_sts) else None)
+    return MultiLazyBuffer(new_lbs, ShapeTracker.from_shape(self.st.shape), [x[1] for x in this_sts] if this_sts else None)
 
   def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
-    # TODO: this is not always right, sometimes we have to allreduce
-    return MultiLazyBuffer([x.r(op, new_shape) for x in self.lbs])
+    if self.sts is None: return MultiLazyBuffer([x.r(op, new_shape) for x in self.lbs], ShapeTracker.from_shape(new_shape), None)
+    # TODO: we don't always have to allreduce
+    print("all_reduce")
+    lbs = [x._view(st).r(op, new_shape) for x,st in zip(self.lbs, self.sts)]
+    return MultiLazyBuffer(all_reduce(lbs), ShapeTracker.from_shape(new_shape), None)
 
   def reshape(self, arg:Tuple[sint, ...]): return MultiLazyBuffer(self.lbs, self.st.reshape(arg), self.sts)
   def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return MultiLazyBuffer(self.lbs, self.st.pad(arg), self.sts)
@@ -155,6 +163,8 @@ class LazyBuffer:
     return ret
 
   def copy_to_device(self, device:str) -> LazyBuffer:
+    # no COPY
+    if self.device == device: return self
     # COPY there and back = no COPY at all
     if self.base == self and not self.realized and self.op == LoadOps.COPY and self.srcs[0].device == device: return self.srcs[0]
 
@@ -178,6 +188,7 @@ class LazyBuffer:
       else:
         srcs.append(s)
     assert all_same(dts:=[x.dtype.scalar() for x in (srcs if op != TernaryOps.WHERE else srcs[1:])]), f"all dtypes must match {dts} on {op}"
+    assert all_same([x.shape for x in srcs]), f"all shapes must be the same {[x.shape for x in srcs]}"
     if op == TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
     out_dtype = srcs[-1].dtype if op != BinaryOps.CMPLT else dtypes.bool
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
@@ -190,6 +201,8 @@ class LazyBuffer:
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, unbound_new_shape, (self,))
 
   def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+    assert len(self.shape) == len(new_shape) and all(s == ns or ns == 1 for s,ns in zip(self.shape, new_shape)), \
+      f"reduce shape lens must match {self.shape} {new_shape}"
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not all_int(self.shape) or (0 in self.shape) or prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, new_shape)

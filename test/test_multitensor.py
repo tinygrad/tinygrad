@@ -15,8 +15,8 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(X.numpy(), 1)
 
   def _test_simple_add_axis(self, shard_x, shard_w):
-    X = Tensor.ones(256)
-    W = Tensor.ones(256)
+    X = Tensor.ones(256).contiguous().realize()
+    W = Tensor.ones(256).contiguous().realize()
     X.shard_((d0, d1), shard_x)
     W.shard_((d0, d1), shard_w)
     O = X + W
@@ -26,6 +26,16 @@ class TestMultiTensor(unittest.TestCase):
   def test_simple_add_X(self): return self._test_simple_add_axis(0, None)
   def test_simple_add_W(self): return self._test_simple_add_axis(None, 0)
   def test_simple_add_XW(self): return self._test_simple_add_axis(0, 0)
+
+  def _test_simple_reduce_axis(self, shard_x):
+    X = Tensor.ones(256, 256).contiguous().realize()
+    X.shard_((d0, d1), shard_x)
+    O = X.sum(axis=1)
+    np.testing.assert_allclose(O.numpy(), 256)
+
+  def test_simple_reduce(self): return self._test_simple_reduce_axis(None)
+  def test_simple_reduce_0(self): return self._test_simple_reduce_axis(0)
+  def test_simple_reduce_1(self): return self._test_simple_reduce_axis(1)
 
   def _test_matmul_shard_axis(self, shard_x, shard_w):
     X = Tensor.kaiming_uniform(N, N).realize()
@@ -45,6 +55,7 @@ class TestMultiTensor(unittest.TestCase):
     O = (Xs@W1s)@W2s
     np.testing.assert_allclose((X.numpy() @ W1.numpy()) @ W2.numpy(), O.to(Device.DEFAULT).numpy(), atol=1e-5)
 
+  def test_matmul_shard_none(self): return self._test_matmul_shard_axis(None, None)
   def test_matmul_shard_X_0(self): return self._test_matmul_shard_axis(0, None)
   def test_matmul_shard_X_1(self): return self._test_matmul_shard_axis(1, None)
   def test_matmul_shard_W_0(self): return self._test_matmul_shard_axis(None, 0)
