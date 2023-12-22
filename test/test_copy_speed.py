@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad import Device
-from tinygrad.helpers import Timing, CI, OSX
+from tinygrad.helpers import Timing, CI
 import multiprocessing.shared_memory as shared_memory
 
 N = 4096 if CI else 16384

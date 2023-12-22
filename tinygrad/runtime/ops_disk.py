@@ -25,14 +25,14 @@ class DiskBuffer:
 
 disk_fxn_for_op: Dict[Op, Callable] = { UnaryOps.CAST: DiskBuffer.cast, MovementOps.AS_STRIDED: DiskBuffer.as_strided }
 
-MAP_LOCKED, MAP_POPULATE, MADV_HUGEPAGE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), getattr(mmap, "MADV_HUGEPAGE", None)
+MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class DiskAllocator(Allocator):
   def __init__(self, device): self.device = device
   def _alloc(self, size):
     if str(self.device).startswith("shm:"):
       fd = _posixshmem.shm_open("/"+self.device[4:], os.O_RDWR, 0o600)
       shm = mmap.mmap(fd, size, flags=mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
-      if MADV_HUGEPAGE is not None: shm.madvise(MADV_HUGEPAGE) # type: ignore
+      if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: shm.madvise(hp) # type: ignore
       os.close(fd)
       buf = UnderlyingDiskBuffer(None, shm)
     else:
