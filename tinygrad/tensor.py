@@ -143,16 +143,7 @@ class Tensor:
     self.lazydata = _ret.lazydata
 
   def shard(self, devices:Sequence[str], axis:Optional[int]=None) -> Tensor:
-    if axis is not None:
-      assert self.shape[axis] % len(devices) == 0
-      sz = self.shape[axis] // len(devices)
-      def fix(d, i):
-        d = d.shrink(tuple((0,s) if a != axis else (sz*i,sz*(i+1)) for a,s in enumerate(self.shape)))
-        return d.pad(tuple((0,0) if a != axis else (sz*i,s-sz*(i+1)) for a,s in enumerate(self.shape)))
-      local_lbs = [fix(self.lazydata, i) for i in range(len(devices))]
-    else:
-      local_lbs = [self.lazydata] * len(devices)
-    return Tensor(MultiLazyBuffer([x.copy_to_device(d) for x,d in zip(local_lbs, devices)]), device=devices)
+    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, devices, axis), device=devices)
 
   def shard_(self, devices:Sequence[str], axis:Optional[int]=None):
     self.lazydata = self.shard(devices, axis).lazydata

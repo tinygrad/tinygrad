@@ -30,14 +30,32 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType,
   return ret
 
 class MultiLazyBuffer:
-  def __init__(self, lbs:Sequence[LazyBuffer]):
+  def __init__(self, lbs:Sequence[LazyBuffer], st:ShapeTracker, sts:Sequence[ShapeTracker]):
     assert all(isinstance(x, LazyBuffer) for x in lbs), "all lbs must be LazyBuffers"
-    self.lbs = lbs
+    self.lbs, self.st, self.sts = lbs, st, sts
     assert all_same([(x.shape, x.dtype) for x in lbs]), "all multilazybuffer needs same shape and dtype"
-    self.shape, self.dtype, self.device = lbs[0].shape, lbs[0].dtype, tuple(x.device for x in lbs)
+    self.shape, self.dtype, self.device = st.shape, lbs[0].dtype, tuple(x.device for x in lbs)
+
+  #return d.pad(tuple((0,0) if a != axis else (sz*i,s-sz*(i+1)) for a,s in enumerate(lb.shape)))
+  @staticmethod
+  def from_sharded(lb:LazyBuffer, devices:Sequence[str], axis:Optional[int]):
+    lb = lb.contiguous()
+    if axis is not None:
+      assert lb.shape[axis] % len(devices) == 0
+      sz = lb.shape[axis] // len(devices)
+      sts = [lb.st.shrink(tuple((0,s) if a != axis else (sz*i,sz*(i+1)) for a,s in enumerate(lb.shape))) for i in range(len(devices))]
+      invert_sts = [ShapeTracker.from_shape(sts[i].shape).pad(tuple(((0,0) if a != axis else (sz*i,s-sz*(i+1))) for a,s in enumerate(lb.shape)))
+                    for i in range(len(devices))]
+      return MultiLazyBuffer([lb._view(st).copy_to_device(d) for st,d in zip(sts, devices)], lb.st, invert_sts)
+    return MultiLazyBuffer([lb.copy_to_device(d) for d in devices], lb.st, None)
 
   def copy_to_device(self, device:str) -> MultiLazyBuffer:
-    return functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [lb.copy_to_device(device) for lb in self.lbs])
+    if self.sts is None: return self.lbs[0].copy_to_device(device)
+    for st in self.sts:
+      print(st, self.st.shape, st.invert(self.st.shape))
+
+    sum_lbs = [lb._view(st) for st, lb in zip(self.sts, self.lbs)]
+    return functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [lb.copy_to_device(device) for lb in sum_lbs])
 
   def is_unrealized_contiguous_const(self): return False
 
@@ -45,24 +63,36 @@ class MultiLazyBuffer:
 
   def const(self, val:Union[float, int]) -> MultiLazyBuffer: return MultiLazyBuffer([x.const(val) for x in self.lbs])
 
-  def contiguous(self): return MultiLazyBuffer([x.contiguous() for x in self.lbs])
+  #def contiguous(self): return MultiLazyBuffer([x.contiguous() for x in self.lbs])
+  def contiguous(self): return self
 
   # elementwise is simple
   def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:MultiLazyBuffer, arg:Optional[Any]=None) -> MultiLazyBuffer:
-    assert all(isinstance(x, MultiLazyBuffer) for x in in_srcs), f"all buffers must be MultiLazyBuffer {in_srcs}"
-    assert all(self.device == x.device for x in in_srcs), f"all buffers must have the same device {self.device} != {[x.device for x in in_srcs]}"
-    return MultiLazyBuffer([lsrcs[0].e(op, *lsrcs[1:], arg=arg) for lsrcs in zip(self.lbs, *[x.lbs for x in in_srcs])])
+    srcs = (self,)+in_srcs
+    assert all(isinstance(x, MultiLazyBuffer) for x in srcs), f"all buffers must be MultiLazyBuffer {srcs}"
+    assert all_same([x.device for x in srcs]), f"all buffers must have the same device {[x.device for x in srcs]}"
+    this_sts = [list(zip(x.lbs, x.sts)) for x in srcs if x.sts is not None]
+    assert len(this_sts) <= 1, f"multiple sts {this_sts}"
+    this_inv_sts = [st.invert(lb.shape) for lb,st in this_sts[0]] if len(this_sts) else None
+    new_srcs = []
+    for s in srcs:
+      if s.sts is None and this_inv_sts is not None:
+        new_srcs.append([x._view(this_inv_sts[i]) for i,x in enumerate(s.lbs)])
+      else:
+        new_srcs.append([x for x in s.lbs])
+    new_lbs = [lsrcs[0].e(op, *lsrcs[1:], arg=arg) for lsrcs in zip(*new_srcs)]
+    return MultiLazyBuffer(new_lbs, ShapeTracker.from_shape(self.st.shape), [x[1] for x in this_sts[0]] if len(this_sts) else None)
 
   def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     # TODO: this is not always right, sometimes we have to allreduce
     return MultiLazyBuffer([x.r(op, new_shape) for x in self.lbs])
 
-  def reshape(self, arg:Tuple[sint, ...]): return MultiLazyBuffer([x._view(x.st.reshape(arg)) for x in self.lbs])
-  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return MultiLazyBuffer([x._view(x.st.pad(arg)) for x in self.lbs])
-  def expand(self, arg:Tuple[sint, ...]): return MultiLazyBuffer([x._view(x.st.expand(arg)) for x in self.lbs])
-  def permute(self, arg:Tuple[int, ...]): return MultiLazyBuffer([x._view(x.st.permute(arg)) for x in self.lbs])
-  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return MultiLazyBuffer([x._view(x.st.shrink(arg)) for x in self.lbs])
-  def stride(self, arg:Tuple[int, ...]): return MultiLazyBuffer([x._view(x.st.stride(arg)) for x in self.lbs])
+  def reshape(self, arg:Tuple[sint, ...]): return MultiLazyBuffer(self.lbs, self.st.reshape(arg), self.sts)
+  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return MultiLazyBuffer(self.lbs, self.st.pad(arg), self.sts)
+  def expand(self, arg:Tuple[sint, ...]): return MultiLazyBuffer(self.lbs, self.st.expand(arg), self.sts)
+  def permute(self, arg:Tuple[int, ...]): return MultiLazyBuffer(self.lbs, self.st.permute(arg), self.sts)
+  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return MultiLazyBuffer(self.lbs, self.st.shrink(arg), self.sts)
+  def stride(self, arg:Tuple[int, ...]): return MultiLazyBuffer(self.lbs, self.st.stride(arg), self.sts)
 
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,

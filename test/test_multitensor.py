@@ -9,6 +9,24 @@ N = 128
 # shard_w is "model parallel"
 
 class TestMultiTensor(unittest.TestCase):
+  def test_numpy(self):
+    X = Tensor.ones(256)
+    X.shard_((d0, d1), 0)
+    np.testing.assert_allclose(X.numpy(), 1)
+
+  def _test_simple_add_axis(self, shard_x, shard_w):
+    X = Tensor.ones(256)
+    W = Tensor.ones(256)
+    X.shard_((d0, d1), shard_x)
+    W.shard_((d0, d1), shard_w)
+    O = X + W
+    np.testing.assert_allclose(O.numpy(), 2)
+
+  def test_simple_add(self): return self._test_simple_add_axis(None, None)
+  def test_simple_add_X(self): return self._test_simple_add_axis(0, None)
+  def test_simple_add_W(self): return self._test_simple_add_axis(None, 0)
+  def test_simple_add_XW(self): return self._test_simple_add_axis(0, 0)
+
   def _test_matmul_shard_axis(self, shard_x, shard_w):
     X = Tensor.kaiming_uniform(N, N).realize()
     W = Tensor.kaiming_uniform(N, N).realize()
