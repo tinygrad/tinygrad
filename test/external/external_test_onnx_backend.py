@@ -31,7 +31,6 @@ class TinygradBackend(Backend):
     net_feed_input = [x for x in input_all if x not in input_initializer]
     print("prepare", cls, device, net_feed_input)
     run_onnx = get_run_onnx(model)
-    #print(model)
     return TinygradModel(run_onnx, net_feed_input)
 
   @classmethod
