@@ -17,13 +17,12 @@ def Identity(x: Tensor): return x
 def Add(x: Tensor, other: Tensor, broadcast=None): return x + other if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else (x + other).cast(x.dtype)
 def Sub(x: Union[Tensor, Any], other: Tensor): return x - other # some test has input as int
 def Div(x: Tensor, other: Tensor): return x / other if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else x.div(other).floor()   # TODO: this has dtype issues
-# TODO get rid of casts
 def Pow(x: Tensor, other: Tensor): return x.float() ** other.float()
-def Less(x:Tensor,y:Tensor): return (x<y).cast(dtypes.bool)
-def LessOrEqual(x:Tensor,y:Tensor): return (x<=y).cast(dtypes.bool)
-def Greater(x:Tensor,y:Tensor): return (x>y).cast(dtypes.bool)
-def GreaterOrEqual(x:Tensor,y:Tensor): return (x>=y).cast(dtypes.bool)
-def Equal(x:Tensor,y:Tensor): return (x==y).cast(dtypes.bool)
+def Less(x:Tensor,y:Tensor): return x<y
+def LessOrEqual(x:Tensor,y:Tensor): return x<=y
+def Greater(x:Tensor,y:Tensor): return x>y
+def GreaterOrEqual(x:Tensor,y:Tensor): return x>=y
+def Equal(x:Tensor,y:Tensor): return x==y
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
