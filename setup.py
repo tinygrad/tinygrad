@@ -54,6 +54,7 @@ setup(name='tinygrad',
             "networkx",
             "hypothesis",
             "protobuf==3.20.3"
+            "gguf"
         ]
       },
       include_package_data=True)
