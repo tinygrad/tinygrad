@@ -18,6 +18,10 @@ def hip_time_execution(cb, enable=False): return time_execution_cuda_style(cb, h
 @diskcache
 def compile_hip(prg) -> bytes: return compile_cuda_style(prg, [f'--offload-arch={HIPDevice.default_arch_name}'], hip.hiprtcProgram, hip.hiprtcCreateProgram, hip.hiprtcCompileProgram, hip.hiprtcGetCode, hip.hiprtcGetCodeSize, hip.hiprtcGetProgramLog, hip.hiprtcGetProgramLogSize, check)  # noqa: E501
 
+# Compile hip to llvm ir bitcode
+@diskcache
+def compile_hip_bc(prg) -> bytes: return compile_cuda_style(prg, [f'--offload-arch={HIPDevice.default_arch_name}', '-fgpu-rdc'], hip.hiprtcProgram, hip.hiprtcCreateProgram, hip.hiprtcCompileProgram, hip.hiprtcGetBitcode, hip.hiprtcGetBitcodeSize, hip.hiprtcGetProgramLog, hip.hiprtcGetProgramLogSize, check)  # noqa: E501
+
 class HIPProgram:
   def __init__(self, device:int, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib

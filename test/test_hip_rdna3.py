@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-import unittest
-import operator
+import operator, subprocess, unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import DEBUG, to_function_name
 from tinygrad.codegen.linearizer import Linearizer
@@ -44,14 +43,17 @@ class TestHIPCompilationRDNA(unittest.TestCase):
     dtypes.default_float = old_default_float
 
 def compile_ast_to_hip(out: Tensor):
-  from tinygrad.runtime.ops_hip import compile_hip
+  from tinygrad.runtime.ops_hip import compile_hip_bc
 
   lin = Linearizer(out.lazydata.schedule()[-1].ast)
   lin.hand_coded_optimizations()
   lin.linearize()
   code = HIPRenderer(to_function_name(lin.name), lin.uops)[0]
   if DEBUG >= 4: print(code)
-  compile_hip(code)
+  llvm_bc = compile_hip_bc(code)
+  asm = subprocess.check_output(["/opt/rocm/llvm/bin/llc", '-o', '-'], input=llvm_bc)
+  if DEBUG >= 4: print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
+  return asm
 
 binary_operations = [operator.add, operator.sub, operator.mul]
 unary_operations = [Tensor.exp, Tensor.log, operator.neg, Tensor.sin, Tensor.sqrt, Tensor.reciprocal]
@@ -63,14 +65,16 @@ class TestHIPALUCompilation(unittest.TestCase):
   def test_unary_ops(self, op, dtype):
     a = Tensor.randn(4,4, dtype=dtype)
     out = op(a)
-    compile_ast_to_hip(out)
+    asm = compile_ast_to_hip(out)
+    self.assertTrue(len(asm) > 0)
 
   @given(st.sampled_from(binary_operations), st.sampled_from(float_dtypes))
   def test_binary_ops(self, op, dtype):
     a = Tensor.randn(4,4, dtype=dtype)
     b = Tensor.randn(4,4, dtype=dtype)
     out = op(a,b)
-    compile_ast_to_hip(out)
+    asm = compile_ast_to_hip(out)
+    self.assertTrue(len(asm) > 0)
 
 if __name__ == "__main__":
   unittest.main()
