@@ -819,10 +819,10 @@ class Tensor:
   # in webgpu bool cannot be used as a storage buffer type
   def __lt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, False)).cast(dtypes.float if self.device == "WEBGPU" else dtypes.bool)
   def __gt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, True)).cast(dtypes.float if self.device == "WEBGPU" else dtypes.bool)
-  def __ge__(self, x) -> Tensor: return -(self<x)
-  def __le__(self, x) -> Tensor: return -(self>x)
+  def __ge__(self, x) -> Tensor: return -(self<x) if self.device != "WEBGPU" else 1.0-(self<x)
+  def __le__(self, x) -> Tensor: return -(self>x) if self.device != "WEBGPU" else 1.0-(self>x)
   def __ne__(self, x) -> Tensor: return (self<x) + (self>x)   # type: ignore[override]
-  def __eq__(self, x) -> Tensor: return -(self != x)       # type: ignore[override]
+  def __eq__(self, x) -> Tensor: return -(self != x) if self.device != "WEBGPU" else 1.0-(self != x) # type: ignore[override]
 
   # ***** functional nn ops *****
 
