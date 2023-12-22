@@ -252,6 +252,7 @@ class TestTypeSpec(unittest.TestCase):
   def test_creation(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
     assert Tensor(True).dtype == dtypes.bool
+    assert Tensor(None).dtype == dtypes.default_float
     assert Tensor(2).dtype == dtypes.default_int
     assert Tensor(2.34).dtype == dtypes.default_float
     assert Tensor([]).dtype == dtypes.default_float
