@@ -341,6 +341,11 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_float(dt) == dt
 
 class TestAutoCastType(unittest.TestCase):
+  def setUp(self):
+    self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
+  def tearDown(self):
+    dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
+
   @given(st.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_int(d) and is_dtype_supported(d)]))
   @settings(deadline=None)
   def test_int_to_float_unary_func(self, dtype):
