@@ -341,6 +341,11 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_float(dt) == dt
 
 class TestAutoCastType(unittest.TestCase):
+  def setUp(self):
+    self.old_default_int, self.old_default_float = dtypes.default_int, dtypes.default_float
+  def tearDown(self):
+    dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
+
   @given(st.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_int(d) and is_dtype_supported(d)]))
   @settings(deadline=None)
   def test_int_to_float_unary_func(self, dtype):
@@ -357,9 +362,12 @@ class TestAutoCastType(unittest.TestCase):
       lambda t: t.sigmoid(),
     ]:
       a = [2, 3, 4]
-      np.testing.assert_allclose(func(Tensor(a, dtype=dtype)).numpy(), func(torch.tensor(a)), rtol=1e-4, atol=1e-4)
+      # float16 can have larger precision errors
+      np.testing.assert_allclose(func(Tensor(a, dtype=dtype)).numpy(), func(torch.tensor(a)), rtol=1e-3, atol=1e-3)
 
-  def test_broadcast_float(self):
+  @given(st.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
+  def test_broadcast_float(self, default_float):
+    dtypes.default_float = default_float
     assert (Tensor.rand(4, 4, dtype=dtypes.bool) + 2.3).dtype == dtypes.default_float
     assert (Tensor.rand(4, 4, dtype=dtypes.int) + 2.3).dtype == dtypes.default_float
     assert (Tensor.rand(4, 4, dtype=dtypes.int8) + 2.3).dtype == dtypes.default_float
@@ -369,9 +377,11 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor.rand(4, 4, dtype=dtypes.float32) + 2.3).dtype == dtypes.float32
     assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2.3).dtype == dtypes.float64
 
-  def test_broadcast_int(self):
-    assert (Tensor.rand(4, 4, dtype=dtypes.bool) + 2).dtype == dtypes.int32
-    assert (Tensor.rand(4, 4, dtype=dtypes.int) + 2).dtype == dtypes.int32
+  @given(st.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]))
+  def test_broadcast_int(self, default_int):
+    dtypes.default_int = default_int
+    assert (Tensor.rand(4, 4, dtype=dtypes.bool) + 2).dtype == dtypes.default_int
+    assert (Tensor.rand(4, 4, dtype=dtypes.int) + 2).dtype == dtypes.int
     assert (Tensor.rand(4, 4, dtype=dtypes.int8) + 2).dtype == dtypes.int8
     assert (Tensor.rand(4, 4, dtype=dtypes.uint64) + 2).dtype == dtypes.uint64
     assert (Tensor.rand(4, 4, dtype=dtypes.float16) + 2).dtype == dtypes.float16

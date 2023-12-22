@@ -21,8 +21,7 @@ def safe_numpy(t) -> np.ndarray:
   if t not in numpy_cache:
     if DEBUG >= 3: print("numpy cache miss", t)
     tmp = t.numpy()
-    numpy_cache[t] = tmp if len(tmp.shape) else tmp.reshape(1)
-  assert len(numpy_cache[t].shape) > 0
+    numpy_cache[t] = tmp
   return numpy_cache[t]
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
