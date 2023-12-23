@@ -5,6 +5,7 @@ from tinygrad.device import Interpreted, Allocator
 from tinygrad.ops import Op, MovementOps, UnaryOps
 from tinygrad.shape.view import strides_for_shape
 
+MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class UnderlyingDiskBuffer:
   def __init__(self, device:str, size:int): self.device, self.size, self._fd, self._mem = device, size, None, None
   def __load(self):
@@ -40,7 +41,6 @@ class DiskBuffer:
 
 disk_fxn_for_op: Dict[Op, Callable] = { UnaryOps.CAST: DiskBuffer.cast, MovementOps.AS_STRIDED: DiskBuffer.as_strided }
 
-MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class DiskAllocator(Allocator):
   def __init__(self, device): self.device = device
   def _alloc(self, size): return DiskBuffer(UnderlyingDiskBuffer(self.device, size), size)
