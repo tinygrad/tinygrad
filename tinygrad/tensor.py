@@ -546,6 +546,64 @@ class Tensor:
     # sum over all axes that's not in the output, then permute to the output order
     return reduce(lambda a,b:a*b, xs_).sum(axis=[axis for axis,(letter,_) in enumerate(letter_val) if letter not in rhs_letters]).permute(rhs_order)
 
+  @staticmethod
+  def einsum_new(formula:str, *raw_xs) -> Tensor:
+    xs:Tuple[Tensor] = argfix(*raw_xs)
+    inputs_str, output = formula.split("->") if "->" in formula else (formula, sorted(formula))
+    inputs = [x for x in cast(str,inputs_str).split(',')]
+    assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
+    assert all(s.count('.') % 3 == 0 for s in inputs if '.' in s), "d" #TODO write error message here
+    # map the value of each letter in the formula
+    # First we need to find the start of ellipsis operator #TODO remove this comment just for writing the code now 
+    letter_val = []
+    ellipsis_range_count = []
+    for letters, tensor in zip(inputs, xs):
+      ellipsis_start_letter = letters.find("...")
+      if ellipsis_start_letter != -1:
+        ellipsis_end_letter = letters.find("...") + 3 if ellipsis_start_letter != -1 else -1
+        dim_count_before = ellipsis_start_letter - 0
+        dim_count_after = len(tensor.shape) - (len(letters) - ellipsis_end_letter)
+        non_ellipsis_letters, tensor_shape_non_ellipsis = letters[:ellipsis_start_letter] + letters[ellipsis_end_letter:], tensor.shape[:dim_count_before] + tensor.shape[dim_count_after:]
+        tensor_shape_ellipsis = tensor.shape[dim_count_before:dim_count_after]
+      else:
+        dim_count_before = 0
+        dim_count_after = 0
+        non_ellipsis_letters, tensor_shape_non_ellipsis = letters, tensor.shape
+        tensor_shape_ellipsis = tensor.shape[:0]
+      
+      temp_dict_1 = {}
+      ellipsis_range_count.append(dim_count_after - dim_count_before)
+      for letter, dim in zip(non_ellipsis_letters, tensor_shape_non_ellipsis):
+        temp_dict_1[letter] = dim
+      
+      for idx, dim in enumerate(tensor_shape_ellipsis):
+        temp_key = '.' * (idx + 1)
+        temp_dict_1[temp_key] = dim
+      letter_val.append(temp_dict_1)
+    
+    merged_dict = {}
+    for d in letter_val:
+        for k, v in d.items():
+            if k not in merged_dict or v > merged_dict[k]:
+                merged_dict[k] = v
+
+    letter_val = merged_dict
+    # letter_val = merge_dicts(letter_val)
+    xs_:List[Tensor] = []
+    lhs = [sorted(enumerate(s.replace(".","")), key=lambda e:e[1]) for s in inputs]
+    for i in range(len(lhs)):
+      max_order = max(lhs[i], key=lambda x: x[0])[0]
+      lhs[i].extend([(i, '.' * (i - max_order)) for i in range(max_order + 1, max_order + 1 + ellipsis_range_count[i])])
+    temp = [list(zip(*l)) for l in lhs]
+    for x,(order,letters) in zip(xs, temp):
+      # permute to the sorted letter order, then reshape/expand to create dimensions for the missing letters
+      xs_.append(x.permute(order).reshape([val if letter in letters else 1 for letter,val in letter_val.items()]).expand([val for val in letter_val.values()]))
+      print(xs_[-1].shape)
+
+    rhs_order, rhs_letters = tuple(zip(*sorted(enumerate(output), key=lambda e:e[1]))) or ([], [])
+    # sum over all axes that's not in the output, then permute to the output order
+    return reduce(lambda a,b:a*b, xs_).sum(axis=[axis for axis,(letter,_) in enumerate(letter_val) if letter not in rhs_letters]).permute(rhs_order)
+
   # ***** processing ops *****
 
   def _pool(self, k_:Tuple[sint, ...], stride:Union[Tuple[int, ...], int]=1, dilation:Union[Tuple[int, ...], int]=1) -> Tensor:
