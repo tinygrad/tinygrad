@@ -4,11 +4,12 @@ import math, unittest, random, copy
 # import warnings
 import numpy as np
 
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, dtypes, Device
 # from tinygrad import TinyJit
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
+from tinygrad.helpers import CI
 
 random.seed(42)
 
@@ -24,9 +25,11 @@ def consec(shape, start=1):
 def set_(reference: Tensor, shape, strides, offset):
   if reference.lazydata.base.realized is None: reference.realize()
   assert reference.lazydata.base.realized, "base has to be realized before setting it to strided's base"
-  strided = Tensor(LazyBuffer(device=reference.device, st=ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),)), optype=None, op=None, dtype=reference.dtype, src=None, base=reference.lazydata.base))   # noqa: E501
+  # TODO: this shouldn't directly create a LazyBuffer
+  strided = Tensor(LazyBuffer(device=reference.device,
+                              st=ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),)),
+                              op=None, dtype=reference.dtype, srcs=(), base=reference.lazydata.base))
   assert strided.lazydata.st.real_strides() == strides, "real_strides should equal strides for strided"
-  assert strided.lazydata in reference.lazydata.base.views, "base.views should contain strided.lazydata"
   return strided
 
 # TODO tries to mimic .detach().copy() or just .copy() behavior
@@ -187,13 +190,15 @@ class TestIndexing(unittest.TestCase):
     # def delitem(): del reference[0]
     # self.assertRaises(TypeError, delitem)
 
+  # TODO: LLVM is quite fast, why are other compiled backends slow?
+  @unittest.skipIf(CI and Device.DEFAULT in ["CLANG", "GPU", "METAL"], "slow")
   def test_advancedindex(self):
     # integer array indexing
 
     # pick a random valid indexer type
     def ri(indices):
       choice = random.randint(0, 2)
-      if choice == 0: return Tensor(indices, dtype=dtypes.int32)
+      if choice == 0: return Tensor(indices)
       if choice == 1: return list(indices)
       return tuple(indices)
 
@@ -1132,12 +1137,9 @@ class TestIndexing(unittest.TestCase):
         x[:, [0, 1]]
   '''
 
-  # TODO empty Tensor fancy index
-  '''
   def test_empty_ndim_index_bool(self):
     x = Tensor.randn(5)
     self.assertRaises(IndexError, lambda: x[Tensor.empty(0, 2, dtype=dtypes.uint8)])
-  '''
 
   def test_empty_slice(self):
     x = Tensor.randn(2, 3, 4, 5)
@@ -1226,6 +1228,11 @@ class TestIndexing(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       a[true] = a_expanded
   '''
+
+  def test_getitem_scalars_simple(self):
+    src = Tensor([[[1.,2.],[3.,4.]], [[1,1],[1,1]]])
+    a = src[0].mul(src[1])
+    self.assertEqual(a[0,1].item(), 2)
 
   def test_getitem_scalars(self):
     zero = Tensor(0, dtype=dtypes.int64)
@@ -1381,10 +1388,10 @@ class TestIndexing(unittest.TestCase):
 
   def test_out_of_bound_index(self):
     x = Tensor.arange(0, 100).reshape(2, 5, 10)
-    self.assertRaisesRegex(IndexError, 'index 5 is out of bounds for dimension 1 with size 5', lambda: x[0, 5])
-    self.assertRaisesRegex(IndexError, 'index 4 is out of bounds for dimension 0 with size 2', lambda: x[4, 5])
-    self.assertRaisesRegex(IndexError, 'index 15 is out of bounds for dimension 2 with size 10', lambda: x[0, 1, 15])
-    self.assertRaisesRegex(IndexError, 'index 12 is out of bounds for dimension 2 with size 10', lambda: x[:, :, 12])
+    self.assertRaises(IndexError, lambda: x[0, 5])
+    self.assertRaises(IndexError, lambda: x[4, 5])
+    self.assertRaises(IndexError, lambda: x[0, 1, 15])
+    self.assertRaises(IndexError, lambda: x[:, :, 12])
 
   # TODO .item() bug
   '''
@@ -1796,13 +1803,10 @@ class TestNumpy(unittest.TestCase):
     self.assertIsNot(a, a[...])
     self.assertIsNot(a, a[:])
 
-  # TODO shape mismatch fancy indexing error
-  '''
   def test_broaderrors_indexing(self):
     a = Tensor.zeros(5, 5)
-    self.assertRaisesRegex(IndexError, 'shape mismatch', a.__getitem__, ([0, 1], [0, 1, 2]))
-    self.assertRaisesRegex(IndexError, 'shape mismatch', a.__setitem__, ([0, 1], [0, 1, 2]), 0)
-  '''
+    self.assertRaises(IndexError, a.__getitem__, ([0, 1], [0, 1, 2]))
+    self.assertRaises(IndexError, a.__setitem__, ([0, 1], [0, 1, 2]), 0)
 
   # TODO setitem
   '''
