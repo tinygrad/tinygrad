@@ -1,6 +1,6 @@
 import math
-from typing import Tuple, Optional, cast
-from tinygrad.helpers import argsort, DType, dtypes
+from typing import Tuple, Optional
+from tinygrad.helpers import argsort, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
@@ -88,8 +88,7 @@ class Sigmoid(Function):
 
 class Less(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
-    # in webgpu bool cannot be used as a storage buffer type
-    return x.e(BinaryOps.CMPLT, y).cast(dtypes.float if self.device == "WEBGPU" else dtypes.bool)
+    return x.e(BinaryOps.CMPLT, y)
 
 class Xor(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
@@ -204,9 +203,7 @@ class Shrink(Function):
     return x.shrink(arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    assert all(isinstance(x[0], int) and isinstance(x[1], int) for x in self.narg), "symbolic shrink does not support backward"
-    # need this cast because mypy cannot narrow the type even with assert
-    return grad_output.pad(cast(Tuple[Tuple[int, int], ...], self.narg))
+    return grad_output.pad(self.narg)
 
 class Flip(Function):
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
