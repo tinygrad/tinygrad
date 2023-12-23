@@ -511,7 +511,8 @@ class Tensor:
 
   def argmax(self, axis=None, keepdim=False):
     if axis is None:
-      idx = (self == self.max(axis)).cast(dtypes.int) * Tensor.arange(prod(self.shape)-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape)
+      m = (self == self.max(axis)).cast(dtypes.int)
+      idx = m * Tensor.arange(prod(self.shape)-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape)
       return prod(self.shape) - idx.max() - 1
     axis = axis + len(self.shape) if axis < 0 else axis
     m = (self == self.max(axis=axis, keepdim=True)).cast(dtypes.int)
