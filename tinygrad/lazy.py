@@ -77,8 +77,10 @@ class MultiLazyBuffer:
     assert all_same([x.device for x in srcs]), f"all buffers must have the same device {[x.device for x in srcs]}"
 
     mask_sets = []
+    src_to_mask = {}
     for src in srcs:
       masks = tuple(lb.st.views[-1].mask for lb in src.lbs)
+      src_to_mask[src] = masks
       if all(masks) and len(set(masks)) == len(masks):
         new_lbs = [lb.shrink(m) for lb,m in zip(src.lbs, masks)]
         assert all_same([x.st for x in new_lbs]), "shapetrackers must match"
@@ -87,7 +89,16 @@ class MultiLazyBuffer:
         masks = None
     mask_sets = dedup(mask_sets)
     if len(mask_sets) > 1:
-      raise RuntimeError(f"multiple sts {mask_sets}")
+      #raise RuntimeError(f"multiple mask sets {mask_sets}")
+      # allreduce all the mask_sets besides the last one
+      rsrcs: List[MultiLazyBuffer] = []
+      for src in srcs:
+        # TODO: different choices can be made here
+        if src_to_mask[src] in mask_sets[:-1]:
+          rsrcs.append(MultiLazyBuffer(all_reduce(src.lbs)))
+        else:
+          rsrcs.append(src)
+      return rsrcs[0].e(op, *rsrcs[1:], arg=arg)
     elif len(mask_sets) == 1:
       lops = []
       for i,lsrcs in enumerate(zip(*[x.lbs for x in srcs])):
@@ -107,7 +118,11 @@ class MultiLazyBuffer:
       for x,m in zip(new_lbs, masks):
         pad_back = tuple([(p[0], s-p[1]) if ns != 1 else (0,0) for s,ns,p in zip(self.shape, new_shape, m)])
         lbs.append(x.r(op, new_new_shape).pad(pad_back))
-      return MultiLazyBuffer(all_reduce(lbs))
+      new_masks = tuple(lb.st.views[-1].mask for lb in lbs)
+      if all(new_masks) and len(set(new_masks)) == len(new_masks):
+        return MultiLazyBuffer(lbs)
+      else:
+        return MultiLazyBuffer(all_reduce(lbs))
     return MultiLazyBuffer([x.r(op, new_shape) for x in self.lbs])
 
   def reshape(self, arg:Tuple[sint, ...]): return MultiLazyBuffer([x.reshape(arg) for x in self.lbs])
