@@ -143,7 +143,6 @@ terminado==0.18.0
 threadpoolctl==3.2.0
 tiktoken==0.5.2
 tinycss2==1.2.1
--e git+https://github.com/obar1/tinygrad@d424babe2cd22ed5d09eff59af3bd7bf8db7eb51#egg=tinygrad
 tokenizers==0.15.0
 tomli==2.0.1
 torch==2.1.2

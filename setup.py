@@ -1,11 +1,30 @@
 #!/usr/bin/env python3
 
+import pathlib
 from pathlib import Path
+
+import pkg_resources
+import setuptools
 from setuptools import setup
 
+def load_requirements(fn: str) -> list:
+  with pathlib.Path(fn).open(encoding='utf-8') as f:
+    return [
+        str(requirement)
+        for requirement
+        in pkg_resources.parse_requirements(f)
+    ]
+
+def load_file(fn: str) -> list:
+  with pathlib.Path(fn).open(encoding='utf-8') as f:
+    return f.read()
+
 directory = Path(__file__).resolve().parent
-with open(directory / 'README.md', encoding='utf-8') as f:
-  long_description = f.read()
+
+install_requires = load_requirements('requirements.txt')
+install_testing_requires = load_requirements('requirements-testing.txt')
+long_description = load_file(directory / 'README.md')
+
 
 setup(name='tinygrad',
       version='0.8.0',
@@ -20,7 +39,7 @@ setup(name='tinygrad',
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
       ],
-      install_requires=[line.strip() for line in open("requirements.txt")],
+      install_requires=install_requires,
       python_requires='>=3.8',
       extras_require={
         'llvm': ["llvmlite"],
@@ -35,6 +54,6 @@ setup(name='tinygrad',
             "ruff",
             "types-tqdm",
         ],
-        'testing': install_requires=[line.strip() for line in open("requirements-testing.txt")],
+        'testing': install_testing_requires
       },
       include_package_data=True)
