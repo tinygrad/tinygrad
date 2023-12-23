@@ -100,14 +100,8 @@ def _internal_buffer_copy(dest, src):
     Device[src.device].synchronize()   # TODO: async this
     dest.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
     return
-  if getenv("FROM_BUFFER") and hasattr(dest.allocator, 'from_buffer') and hasattr(dest.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
-    # fast path, used on Metal in OS X Sonoma
-    # NOTE: this is *only* faster if the pages from disk are already loaded into memory
-    fb = dest.allocator.from_buffer(src.allocator.as_buffer(src._buf))
-    if fb:
-      dest.allocator.transfer(dest._buf, fb, dest.size*dest.dtype.itemsize)
-      return
-  if hasattr(dest.allocator, 'load_buffer') and src.device.startswith("DISK"):
+  if hasattr(dest.allocator, 'load_buffer') and src.device.startswith("DISK") and "shm:" not in src.device:
+    # NOTE: this doesn't work for shared memory in OSX because no file handle is created
     return dest.allocator.load_buffer(dest, src)
   if hasattr(dest.allocator, 'as_buffer'):
     # fast(ish) path, uses readinto in diskbuffers

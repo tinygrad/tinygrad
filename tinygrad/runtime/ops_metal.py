@@ -62,10 +62,6 @@ class MetalAllocator(LRUAllocator):
     encoder.endEncoding()
     command_buffer.commit()
     self.device.mtl_buffers_in_flight.append(command_buffer)
-  def from_buffer(self, src:memoryview) -> Optional[Any]:
-    ret = self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, len(src), Metal.MTLResourceStorageModeShared, None)
-    if ret: self.device.mv_in_metal.append(src)
-    return ret
   def _free(self, opaque:Any): opaque.release()
   def as_buffer(self, src:Any) -> memoryview:
     self.device.synchronize()
@@ -73,8 +69,7 @@ class MetalAllocator(LRUAllocator):
   def copyin(self, dest:Any, src:memoryview): self.as_buffer(dest)[:] = src
   def copyout(self, dest:memoryview, src:Any): dest[:] = self.as_buffer(src)
   def load_buffer(self, dest:Any, src:Any, handles:Dict={}):
-    if (path := src.device.split(":")[1]).startswith("shm"): path = f"/tmp/shm_{src.device.split(':')[2]}"
-    handles.setdefault(path, unwrap2(self.device.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(path), None)))
+    handles.setdefault((path := src.device.split(":")[1]), unwrap2(self.device.device.newIOHandleWithURL_error_(NSURL.fileURLWithPath_(path), None)))
     cbuf = self.device.mtl_io_queue.commandBuffer()
     cbuf.loadBuffer_offset_size_sourceHandle_sourceHandleOffset_(dest._buf, 0, dest.size*dest.dtype.itemsize, handles[path], src._buf.offset)
     cbuf.commit()
