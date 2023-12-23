@@ -7,9 +7,6 @@ from tinygrad.nn.optim import Adam
 from extra.lr_scheduler import MultiStepLR, ReduceLROnPlateau, CosineAnnealingLR, OneCycleLR
 from extra.training import train, evaluate
 from extra.datasets import fetch_mnist
-import pytest
-
-pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu]
 
 np.random.seed(1337)
 Tensor.manual_seed(1337)

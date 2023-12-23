@@ -6,10 +6,8 @@ from tinygrad.jit import TinyJit
 from tinygrad.tensor import Tensor, Device
 from tinygrad.nn import BatchNorm2d, Conv1d,ConvTranspose1d, Conv2d,ConvTranspose2d, Linear, GroupNorm, LayerNorm,LayerNorm2d, Embedding, InstanceNorm
 import torch
-import pytest
 
-pytestmark = [pytest.mark.exclude_cuda]
-
+@unittest.skipIf(CI and Device.DEFAULT == "CUDA", "slow")
 class TestNN(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "no int64 on WebGPU")
   def test_sparse_cat_cross_entropy(self):
@@ -129,13 +127,10 @@ class TestNN(unittest.TestCase):
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
-  @unittest.skipIf(Device.DEFAULT != "TORCH", "Takes too long to compile for Compiled backends")
+  @unittest.skipIf(Device.DEFAULT not in {"CPU", "TORCH"}, "Takes too long to compile for Compiled backends")
   def test_conv2d_winograd(self):
     BS, C1, H, W = 2, 8, 16, 16
     C2, K, S, P = 8, 3, 1, 1
-
-    old_wino = Tensor.wino
-    Tensor.wino = True
 
     # create in tinygrad
     layer = Conv2d(C1, C2, kernel_size=K, stride=S, padding=P)
@@ -149,7 +144,12 @@ class TestNN(unittest.TestCase):
 
     # test
     x = Tensor.uniform(BS, C1, H, W, requires_grad=True)
+
+    old_wino = Tensor.wino
+    Tensor.wino = True
     z = layer(x)
+    Tensor.wino = old_wino
+
     torch_x = torch.tensor(x.numpy(), requires_grad=True)
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
@@ -165,7 +165,6 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(gb.numpy(), torch_layer.bias.grad.numpy(), atol=5e-4, rtol=1e-5)
     np.testing.assert_allclose(gx.numpy(), torch_x.grad.numpy(), atol=5e-4, rtol=1e-5)
 
-    Tensor.wino = old_wino
 
   @unittest.skipIf(CI and Device.DEFAULT == "WEBGPU", "runs out of memory in CI")
   def test_conv_transpose1d(self):
