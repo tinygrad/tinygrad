@@ -2,7 +2,7 @@ from __future__ import annotations
 import sys, math
 import numpy as np
 from typing import Union, Optional, Any, Tuple, List, Set, Dict
-from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten, getenv, dedup, ImageDType, DEBUG, all_int
+from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten, getenv, dedup, ImageDType, DEBUG, all_int, all_same
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps
 from tinygrad.ops import Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem, vars_from_ast
 from tinygrad.shape.symbolic import sint, Variable
@@ -36,20 +36,20 @@ class LazyBuffer:
     self.device, self.st, self.dtype, self.shape = device, st, dtype, st.shape
     if base is None:
       # properties on base
-      self.children: WeakSet[LazyBuffer] = WeakSet()
-      for x in srcs: x.base.children.add(self.base)
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
       self.realized: Optional[Buffer] = None
       self.output_buffer: Optional[Buffer] = None
       self.forced_realize = False
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
+      self.children: WeakSet[LazyBuffer] = WeakSet()
+      for x in srcs: x.base.children.add(self.base)
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"
       self._base = base
 
   def __repr__(self) -> str:
-    return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.st if self.base != self else (self.op, self.realized)}>"
+    return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.st if hasattr(self, '_base') else (self.op, self.realized)}>"
 
   @property
   def base(self) -> LazyBuffer: return self._base if hasattr(self, '_base') else self
@@ -59,7 +59,7 @@ class LazyBuffer:
     return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else ())
 
   def const(self, val:Union[float, int]) -> LazyBuffer:
-    return LazyBuffer.loadop(LoadOps.CONST, (), self.dtype, self.device, val).reshape((1,)*len(self.shape)).expand(self.shape)
+    return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
 
   def contiguous(self):
     if not self.st.contiguous or self.st.size() != self.base.st.size() or self.is_unrealized_const():
@@ -89,30 +89,38 @@ class LazyBuffer:
     # COPY there and back = no COPY at all
     if self.base == self and not self.realized and self.op == LoadOps.COPY and self.srcs[0].device == device: return self.srcs[0]
 
-    # TODO: const doesn't have to be copied (issues with disk tensor)
-    #if self.is_unrealized_const(): return self.const(self.base.arg)._view(self.st)
-    out = self.contiguous()
-    return create_lazybuffer(device, out.st, out.dtype, LoadOps.COPY, srcs=(out,))
+    # const doesn't have to be copied (issues with disk tensor)
+    if self.is_unrealized_const():
+      return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, device, arg=self.base.arg)._view(self.st)
 
-  def e(self:LazyBuffer, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
-    srcs = (self,)+srcs
-    new_srcs = []
-    for s in srcs:
+    # if it's a shrink, do the shrink before the copy with CONTIGUOUS
+    # TODO: why is this required on WEBGPU?
+    if prod(self.st.shape) < prod(self.base.st.shape) or device == "WEBGPU":
+      return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, srcs=(self.contiguous(),))
+
+    # copy the base and apply the shapetracker on the new device
+    return create_lazybuffer(device, self.base.st, self.dtype, LoadOps.COPY, srcs=(self.base,))._view(self.st)
+
+  def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
+    srcs: List[LazyBuffer] = []
+    for s in (self,)+in_srcs:
       if s == s.base and s.base.contiguous_child and (root:=s.base.contiguous_child[0]()) is not None:
-        new_srcs.append(root._view(s.base.contiguous_child[1]))
+        srcs.append(root._view(s.base.contiguous_child[1]))
       else:
-        new_srcs.append(s)
-    srcs = tuple(new_srcs)
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), max(x.dtype for x in srcs), op, arg, srcs)
+        srcs.append(s)
+    assert all_same(dts:=[x.dtype.scalar() for x in (srcs if op != TernaryOps.WHERE else srcs[1:])]), f"all dtypes must match {dts} on {op}"
+    if op == TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
+    out_dtype = srcs[-1].dtype if op != BinaryOps.CMPLT else dtypes.bool
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
 
   # *** reduce ops ***
 
-  def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+  def _reduce_op(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
     unbound_new_shape = tuple(s.unbind()[0] if not isinstance(s, int) else s for s in new_shape)
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, unbound_new_shape, (self,))
 
-  def r(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+  def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not all_int(self.shape) or (0 in self.shape) or prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, new_shape)
@@ -125,21 +133,24 @@ class LazyBuffer:
 
   # *** movement ops ***
 
-  def _view(self:LazyBuffer, new_st:ShapeTracker) -> LazyBuffer:
+  def _view(self, new_st:ShapeTracker) -> LazyBuffer:
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
 
-  def reshape(self:LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer: return self._view(self.st.reshape(arg))
-  def pad(self:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer: return self._view(self.st.pad(arg))
-  def expand(self:LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer: return self._view(self.st.expand(arg))
-  def permute(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer: return self._view(self.st.permute(arg))
-  def shrink(self:LazyBuffer, arg:Tuple[Tuple[sint, sint], ...]) -> LazyBuffer: return self._view(self.st.shrink(arg))
-  def stride(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer: return self._view(self.st.stride(arg))
+  def reshape(self, arg:Tuple[sint, ...]): return self._view(self.st.reshape(arg))
+  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self._view(self.st.pad(arg))
+  def expand(self, arg:Tuple[sint, ...]): return self._view(self.st.expand(arg))
+  def permute(self, arg:Tuple[int, ...]): return self._view(self.st.permute(arg))
+  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self._view(self.st.shrink(arg))
+  def stride(self, arg:Tuple[int, ...]): return self._view(self.st.stride(arg))
 
 # *** schedule creation ***
 
 # recursively create a lazyop
-def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Variable, int], st:ShapeTracker, realizes:Set[LazyBuffer], first=True):
+def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Variable, int], st:ShapeTracker,
+                      realizes:Set[LazyBuffer], first=True, cache=None) -> LazyOp:
+  if cache is None: cache = {}
+  if (buf, st) in cache: return cache[(buf, st)]
   if buf != buf.base:
     var_vals.update(merge_dicts([var_vals, buf.st.var_vals]))
     st = buf.st.unbind()+st
@@ -159,7 +170,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
   # if a CONTIGUOUS made it all the way here, just skip it
   if buf.op == LoadOps.CONTIGUOUS:
     assert first
-    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, False)
+    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, False, cache)
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
@@ -167,7 +178,8 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     st = ShapeTracker.from_shape(buf.srcs[0].shape).unbind()
 
   # otherwise we fuse it like normal
-  return LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, False) for x in buf.srcs), buf.arg)
+  cache[(buf, st)] = ret = LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, False, cache) for x in buf.srcs), buf.arg)
+  return ret
 
 # recursively walk back in the graph to create the schedule
 def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyBuffer],

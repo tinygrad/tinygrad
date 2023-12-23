@@ -1,6 +1,4 @@
-import os, mmap
-try: import _posixshmem
-except Exception: pass
+import os, mmap, _posixshmem
 from typing import Callable, Dict, Tuple
 from tinygrad.helpers import prod, DType, OSX, dtypes
 from tinygrad.device import Interpreted, Allocator
@@ -27,21 +25,15 @@ class DiskBuffer:
 
 disk_fxn_for_op: Dict[Op, Callable] = { UnaryOps.CAST: DiskBuffer.cast, MovementOps.AS_STRIDED: DiskBuffer.as_strided }
 
-MAP_LOCKED, MAP_POPULATE = 0x2000, 0x008000
+MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class DiskAllocator(Allocator):
   def __init__(self, device): self.device = device
   def _alloc(self, size):
     if str(self.device).startswith("shm:"):
-      if OSX:
-        with open(f"/tmp/shm_{self.device[4:]}", "w+b") as f:
-          f.truncate(size)
-          shm = mmap.mmap(f.fileno(), size, flags=mmap.MAP_SHARED)
-      else:
-        fd = _posixshmem.shm_open(self.device[4:], os.O_RDWR, 0o600)
-        # TODO: these flags are somewhat platform specific, but python doesn't expose the ones we need
-        shm = mmap.mmap(fd, size, flags=mmap.MAP_SHARED | MAP_LOCKED | MAP_POPULATE)
-        shm.madvise(mmap.MADV_HUGEPAGE)     # type: ignore   # not on OSX
-        os.close(fd)
+      fd = _posixshmem.shm_open("/"+self.device[4:].lstrip("/"), os.O_RDWR, 0o600)
+      shm = mmap.mmap(fd, size, flags=mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
+      if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: shm.madvise(hp) # type: ignore
+      os.close(fd)
       buf = UnderlyingDiskBuffer(None, shm)
     else:
       f = open(self.device, "a+b")
