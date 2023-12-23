@@ -117,7 +117,7 @@ tenacity==8.2.3
 terminado==0.18.0
 threadpoolctl==3.2.0
 tinycss2==1.2.1
-tinygrad @ file:///workspaces/tinygrad
+tinygrad==0.8.0
 tomli==2.0.1
 torch==2.1.1
 tornado==6.4
