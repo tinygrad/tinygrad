@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Dict, Callable
 import functools
-from enum import Enum, auto
+from enum import Enum
 from tinygrad.helpers import dtypes, prod, DType, dedup
 from tinygrad.shape.symbolic import Variable
 from dataclasses import dataclass
@@ -10,14 +10,14 @@ from dataclasses import dataclass
 # the Enum class doesn't work with mypy, this is static. sorry it's ugly
 # NOTE: MOD, CMPLT don't have to be implemented on vectors, just scalars
 # NOTE: rdna3 only has RECIP and not DIV. DIV is on the chopping block
-class UnaryOps(Enum): EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto() # noqa: E702
-class BinaryOps(Enum): ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); XOR = auto() # noqa: E702
-class TernaryOps(Enum): MULACC = auto(); WHERE = auto() # noqa: E702
-class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
-class BufferOps(Enum): LOAD = auto(); CONST = auto(); STORE = auto() # noqa: E702
+UnaryOps = Enum("UnaryOps", ['EXP2', 'LOG2', 'CAST', 'SIN', 'SQRT', 'RECIP', 'NEG'])
+BinaryOps = Enum("BinaryOps", ['ADD', 'SUB', 'MUL', 'DIV', 'MAX', 'MOD', 'CMPLT', 'XOR'])
+TernaryOps = Enum("TernaryOps", ['MULACC', 'WHERE'])
+ReduceOps = Enum("ReduceOps", ['SUM', 'MAX'])
+BufferOps = Enum("BufferOps", ['LOAD', 'CONST', 'STORE'])
 # Ops below this line are not allowed in ASTs
-class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
-class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto() # noqa: E702
+MovementOps = Enum('MovementOps', ['RESHAPE', 'PERMUTE', 'EXPAND', 'PAD', 'SHRINK', 'STRIDE', 'AS_STRIDED'])
+LoadOps = Enum('LoadOps', ['EMPTY', 'CONST', 'COPY', 'CONTIGUOUS', 'CUSTOM'])
 
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, TernaryOps, BufferOps]
 OpType = Union[Type[UnaryOps], Type[BinaryOps], Type[ReduceOps], Type[MovementOps], Type[LoadOps], Type[TernaryOps], Type[BufferOps]]

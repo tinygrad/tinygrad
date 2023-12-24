@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Sequence, Final, Set
 import itertools, math, functools
 from collections import defaultdict
-from enum import Enum, auto
+from enum import Enum
 from dataclasses import dataclass
 
 from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, getenv, all_same, to_function_name, flatten
@@ -13,11 +13,7 @@ from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.features.image import to_image_idx
 
 # bottom ones are asm only
-class UOps(Enum):
-  LOOP = auto(); IF = auto(); END = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
-  DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
-  LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto(); PHI = auto() # noqa: E702
-  ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
+UOps = Enum("UOps", ['LOOP', 'IF', 'END', 'SPECIAL', 'DEFINE_GLOBAL', 'DEFINE_LOCAL', 'DEFINE_ACC', 'LOAD', 'STORE', 'CONST', 'BARRIER', 'PHI', 'ALU', 'WMMA', 'CAST', 'GEP']) #noqa: E501
 
 @dataclass(eq=False)
 class UOp:

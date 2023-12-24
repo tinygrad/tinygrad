@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, math, itertools
-from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
+from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union, Callable
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps, vars_from_ast
 from tinygrad.device import Device, Compiled
 from tinygrad.helpers import dedup, dtypes, colored, ImageDType, DType, ansilen, getenv, prod, DEBUG, round_up
@@ -8,12 +8,10 @@ from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import View, strides_for_shape
 from dataclasses import dataclass
-from enum import Enum, auto
+from enum import Enum
 
-class OptOps(Enum):
-  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); LASTLOCAL = auto() # noqa: E702
-  GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto() # noqa: E702
-  def __lt__(self, x:OptOps): return self.value < x.value
+OptOps = Enum('OptOps', ['UPCAST', 'UPCASTMID', 'UNROLL', 'LOCAL', 'LASTLOCAL', 'GROUP', 'GROUPTOP', 'NOLOCALS', 'PADTO'])
+OptOps.__lt__: Callable[[OptOps, OptOps], bool] = lambda self, other: self.value < other.value #type: ignore
 
 @dataclass(frozen=True, order=True)
 class Opt:
