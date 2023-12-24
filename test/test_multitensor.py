@@ -1,5 +1,6 @@
 import unittest
-from tinygrad import Tensor, Device
+from tinygrad import Tensor, Device, nn
+from tinygrad.nn.state import get_parameters
 import numpy as np
 
 d0, d1 = f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2"
@@ -66,18 +67,26 @@ class TestMultiTensor(unittest.TestCase):
   def test_double_matmul_shard_W_0(self): return self._test_double_matmul_shard_axis(None, 0)
   def test_double_matmul_shard_W_1(self): return self._test_double_matmul_shard_axis(None, 1)
 
-  def test_data_parallel(self):
+  def test_conv_data_shard(self):
+    conv = nn.Conv2d(3, 16, 3, bias=False)
+    for p in get_parameters(conv): p.shard_((d0, d1))
+    fake_image = Tensor.rand((2, 3, 32, 32)).shard((d0, d1), axis=0)
+    out = conv(fake_image)
+    out.numpy()
+
+  def test_data_parallel_resnet(self):
     import sys, pathlib
     sys.path.append((pathlib.Path(__file__).parent.parent / "extra" / "models").as_posix())
     from resnet import ResNet18
-    from tinygrad.nn.state import get_parameters
 
     fake_image = Tensor.rand((2, 3, 224, 224))
+    fake_image_sharded = fake_image.shard((d0, d1), axis=0)
+    print(fake_image_sharded.shape)
     m = ResNet18()
     m.load_from_pretrained()
     real_output = m(fake_image).numpy()
     for p in get_parameters(m): p.shard_((d0, d1))
-    shard_output = m(fake_image.shard((d0, d1), axis=0)).numpy()
+    shard_output = m(fake_image_sharded).numpy()
     np.testing.assert_allclose(real_output, shard_output)
 
 if __name__ == '__main__':
