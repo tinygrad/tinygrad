@@ -128,7 +128,6 @@ class TestDType(unittest.TestCase):
     def from_TstoTs(T1, T2): return reduce(lambda x, y: x+y, [tt(t) for t in (T1) for tt in T2])
     broken = {
       'TORCH':from_TstoTs((dt.half, dt.float, dt.double), (from_T2Achar,)) + ((dt.short, dt.float),) + ((dt.short, dt.double),),
-      'LLVM':from_T2Achar(dt.float) + from_T2Ashort(dt.float) + from_T2Achar(dt.half),
       'CPU':from_TstoTs((dt.half, dt.float, dt.double), (from_T2Achar,)) + from_TstoTs((dt.float, dt.double), (from_T2Ashort,)) +
             ((dt.uint, dt.double),),
       'CLANG':from_TstoTs((dt.float, dt.double), (from_T2Achar, from_T2Ashort)) + from_T2Achar(dt.half) + ((dt.uint, dt.double),),

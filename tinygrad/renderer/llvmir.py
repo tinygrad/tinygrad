@@ -39,6 +39,14 @@ def cast(bb, val, input_type, output_type, bitcast=False):
   if input_type == output_type: return val
   if bitcast: return bb[-1].bitcast(val, dtype_to_llvm_dtype[output_type])
 
+  def float2int(b, val):
+    keepbits, it, signed = output_type.itemsize * 8, dtype_to_llvm_dtype[input_type], int(not dtypes.is_unsigned(output_type))
+    for mm, fn in zip([ir.Constant(it, ((x*(2**(keepbits-(1*signed))))-(x if x > 0 else 0))) for x in (1.0, -1.0 * signed)], ('<', '>')):
+      try: mm._to_string()
+      except OverflowError: continue
+      val = b.select(b.fcmp_ordered(fn, val, mm), val, mm)
+    return (b.fptosi if signed else b.fptoui)(val, dtype_to_llvm_dtype[output_type])
+
   if input_type == dtypes.bfloat16:
     val = bb[-1].bitcast(bb[-1].shl(bb[-1].sext(val, ir.IntType(32)), ir.Constant(ir.IntType(32), 16)),val, ir.FloatType())
     input_type = dtypes.float32
@@ -48,11 +56,11 @@ def cast(bb, val, input_type, output_type, bitcast=False):
 
   if dtypes.is_float(input_type):
     if dtypes.is_float(output_type):
+      # FIXME: Direct conversion from double to half needs a runtime function (__truncdfhf2). llvmlite MCJIT fails to provide it. Do d->f->h
+      if input_type == dtypes.double and output_type == dtypes.half: val = cast(bb, val, input_type, (input_type:=dtypes.float32))
       if output_type.itemsize > input_type.itemsize: return bb[-1].fpext(val, dtype_to_llvm_dtype[output_type])
       return bb[-1].fptrunc(val, dtype_to_llvm_dtype[output_type])
-    if dtypes.is_int(output_type):
-      if dtypes.is_unsigned(output_type): return bb[-1].fptoui(val, dtype_to_llvm_dtype[output_type])
-      return bb[-1].fptosi(val, dtype_to_llvm_dtype[output_type])
+    if dtypes.is_int(output_type): return float2int(bb[-1], val)
     if output_type == dtypes.bool: return bb[-1].fcmp_unordered('!=', cast(bb, val, input_type, dtypes.float32), ir.Constant(ir.FloatType(), 0))
 
   if dtypes.is_unsigned(input_type) or input_type == dtypes.bool:
