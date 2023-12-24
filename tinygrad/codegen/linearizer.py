@@ -65,9 +65,7 @@ class Linearizer(Kernel):
   def get_reduce_acc(self, reduceop:LazyOp):
     dtype = get_lazyop_info(reduceop).dtype
     if reduceop.op == ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
-    elif reduceop.op == ReduceOps.MAX:
-      if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
-      return -math.inf if dtypes.is_float(dtype) else False
+    elif reduceop.op == ReduceOps.MAX: return dtypes.min_val(dtype)
 
   # NOTE: once images are loaded, we uop them as their base float
   def get_base_dtype(self, dt:DType): return dt.base if isinstance(dt, ImageDType) else dt

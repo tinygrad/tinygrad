@@ -1,3 +1,4 @@
+from math import inf
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Any
 from dataclasses import dataclass, field
 import numpy as np  # TODO: remove numpy
@@ -48,6 +49,10 @@ class dtypes:
   def from_py(x) -> DType: return dtypes.default_float if isinstance(x, float) else dtypes.bool if isinstance(x, bool) else dtypes.default_int
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
+  @staticmethod
+  def min_val(x: DType): return (False, -inf, -2**(x.itemsize*8-1), 0)[int(dtypes.is_float(x)) + dtypes.is_int(x)*(2 + dtypes.is_unsigned(x))]
+  @staticmethod
+  def max_val(x: DType): return inf if dtypes.is_float(x) else ((2**(x.itemsize*8-int(not dtypes.is_unsigned(x))))-1 if dtypes.is_int(x) else True)
   bool: Final[DType] = DType(0, 1, "bool", np.bool_)
   int8: Final[DType] = DType(1, 1, "char", np.int8)
   uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)

@@ -40,12 +40,11 @@ def cast(bb, val, input_type, output_type, bitcast=False):
   if bitcast: return bb[-1].bitcast(val, dtype_to_llvm_dtype[output_type])
 
   def float2int(b, val):
-    keepbits, it, signed = output_type.itemsize * 8, dtype_to_llvm_dtype[input_type], int(not dtypes.is_unsigned(output_type))
-    for mm, fn in zip([ir.Constant(it, ((x*(2**(keepbits-(1*signed))))-(x if x > 0 else 0))) for x in (1.0, -1.0 * signed)], ('<', '>')):
+    for mm, fn in zip([ir.Constant(dtype_to_llvm_dtype[input_type], float(x(output_type))) for x in (dtypes.max_val, dtypes.min_val)], ('<', '>')):
       try: mm._to_string()
       except OverflowError: continue
       val = b.select(b.fcmp_ordered(fn, val, mm), val, mm)
-    return (b.fptosi if signed else b.fptoui)(val, dtype_to_llvm_dtype[output_type])
+    return (b.fptoui if dtypes.is_unsigned(output_type) else b.fptosi)(val, dtype_to_llvm_dtype[output_type])
 
   if input_type == dtypes.bfloat16:
     val = bb[-1].bitcast(bb[-1].shl(bb[-1].sext(val, ir.IntType(32)), ir.Constant(ir.IntType(32), 16)),val, ir.FloatType())
