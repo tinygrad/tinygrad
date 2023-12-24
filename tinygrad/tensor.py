@@ -9,7 +9,8 @@ import numpy as np
 
 from tinygrad.helpers import DType, dtypes, ImageDType, least_upper_float, least_upper_dtype
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
-from tinygrad.lazy import LazyBuffer, create_schedule, MultiLazyBuffer
+from tinygrad.lazy import LazyBuffer, create_schedule
+from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import sint
