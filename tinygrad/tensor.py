@@ -526,6 +526,7 @@ class Tensor:
   @staticmethod
   def einsum(formula:str, *raw_xs) -> Tensor:
     xs:Tuple[Tensor] = argfix(*raw_xs)
+    formula = formula.replace(" ", "")
     inputs_str, output = formula.split("->") if "->" in formula else (formula, sorted(formula))
     inputs = [x for x in cast(str,inputs_str).split(',')]
     assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
