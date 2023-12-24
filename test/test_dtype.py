@@ -77,18 +77,18 @@ class TestDType(unittest.TestCase):
 
   def test_same_size_ops(self):
     list(map(
-      lambda dtype: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype,
-                              target_dtype=least_upper_dtype(self.DTYPE, dtype)) if dtype.itemsize == self.DTYPE.itemsize else None,
+      lambda dtype: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype) if dtype.itemsize == self.DTYPE.itemsize else None,
       get_available_cast_dtypes(self.DTYPE)
     ))
-  def test_upcast_ops(self): list(map(
-    lambda dtype: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype) if dtype.itemsize > self.DTYPE.itemsize else None,
-    get_available_cast_dtypes(self.DTYPE)
+  def test_upcast_ops(self):
+    list(map(
+      lambda dtype: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype) if dtype.itemsize > self.DTYPE.itemsize else None,
+      get_available_cast_dtypes(self.DTYPE)
   ))
   def test_upcast_to_ops(self):
     list(map(
-    lambda dtype: _test_ops(a_dtype=dtype, b_dtype=self.DTYPE) if dtype.itemsize < self.DTYPE.itemsize else None,
-    get_available_cast_dtypes(self.DTYPE)
+      lambda dtype: _test_ops(a_dtype=dtype, b_dtype=self.DTYPE) if dtype.itemsize < self.DTYPE.itemsize else None,
+      get_available_cast_dtypes(self.DTYPE)
   ))
   def test_bitcast(self):
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
