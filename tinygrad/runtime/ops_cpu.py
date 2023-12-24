@@ -24,9 +24,9 @@ def as_strided(x, arg):
                     strides=tuple(y*x.dtype.itemsize for y in stride))
 
 numpy_fxn_for_op: Dict[Op, Callable] = {
-  BufferOps.CONST: lambda val, dtype: np.array(val, dtype=dtype.np),
+  BufferOps.CONST: lambda val, dtype: np.array(val, dtype=dtype.ctype_as_dtype()),
   UnaryOps.EXP2: np.exp2, UnaryOps.LOG2: np.log2, UnaryOps.SIN: np.sin, UnaryOps.SQRT: np.sqrt,
-  UnaryOps.CAST: lambda x,y: x.view(y[0].np) if y[1] else x.astype(y[0].np, copy=False),
+  UnaryOps.CAST: lambda x,y: x.view(y[0].ctype_as_dtype()) if y[1] else x.astype(y[0].ctype_as_dtype(), copy=False),
   UnaryOps.NEG: lambda x: np.logical_not(x) if x.dtype == np.bool_ else np.negative(x),
   BinaryOps.MAX: np.maximum, BinaryOps.CMPLT: np.less,
   BinaryOps.ADD: np.add, BinaryOps.SUB: np.subtract, BinaryOps.MUL: np.multiply,

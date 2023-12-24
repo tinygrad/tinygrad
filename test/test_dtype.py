@@ -48,9 +48,9 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
 def _test_op(fxn, target_dtype:DType, target):
   _assert_eq(fxn(), target_dtype, target)
 def _test_cast(a:Tensor, target_dtype:DType):
-  _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(target_dtype.np)))
+  _test_op(lambda: a.cast(target_dtype), target_dtype, list(a.numpy().astype(target_dtype.ctype_as_dtype())))
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
-  _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(target_dtype.np).tolist())
+  _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(target_dtype.ctype_as_dtype()).tolist())
 
 class TestDType(unittest.TestCase):
   DTYPE: Any = None
@@ -58,13 +58,13 @@ class TestDType(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     if not cls.DTYPE or not is_dtype_supported(cls.DTYPE): raise unittest.SkipTest("dtype not supported")
-    if dtypes.is_int(cls.DTYPE): cls.DATA = np.random.randint(0, 100, size=10, dtype=cls.DTYPE.np).tolist()
+    if dtypes.is_int(cls.DTYPE): cls.DATA = np.random.randint(0, 100, size=10, dtype=cls.DTYPE.ctype_as_dtype()).tolist()
     elif cls.DTYPE == dtypes.bool: cls.DATA = np.random.choice([True, False], size=10).tolist()
     else: cls.DATA = np.random.uniform(0, 1, size=10).tolist()
   def setUp(self):
     if self.DTYPE is None: raise unittest.SkipTest("base class")
 
-  def test_to_np(self): _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), self.DTYPE.np, np.array(self.DATA, dtype=self.DTYPE.np))
+  def test_to_np(self): _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), self.DTYPE.ctype_as_dtype(), np.array(self.DATA, dtype=self.DTYPE.ctype_as_dtype()))  # noqa: E501
 
   def test_casts_to(self): list(map(
     lambda dtype: _test_cast(Tensor(self.DATA, dtype=dtype), self.DTYPE),

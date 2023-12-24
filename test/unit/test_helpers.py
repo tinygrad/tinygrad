@@ -1,5 +1,4 @@
 import unittest
-import numpy as np
 from PIL import Image
 from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten
 from tinygrad.shape.symbolic import Variable, NumNode
@@ -125,7 +124,6 @@ class TestDtypes(unittest.TestCase):
   def test_dtypes_fields(self):
     fields = dtypes.fields()
     self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
-    self.assertTrue(all(issubclass(value.np, np.generic) for value in fields.values() if value.np is not None))
 
 class TestStripParens(unittest.TestCase):
   def test_simple(self): self.assertEqual("1+2", strip_parens("(1+2)"))

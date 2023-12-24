@@ -369,7 +369,7 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
       for opt in opts:
         k.apply_opt(opt)
     prg = to_prg(k)
-    real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
+    real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.ctype_as_dtype()).data) # Zero to check that all values are filled
     prg.exec(real_bufs)
     np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
 
@@ -383,7 +383,7 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
   k = Linearizer(realized_ast)
   k.hand_coded_optimizations()
   prg = Device[Device.DEFAULT].to_program(k)
-  real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
+  real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.ctype_as_dtype()).data) # Zero to check that all values are filled
   prg.exec(real_bufs)
   np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
   for x in opts: # Check custom transformations if any.

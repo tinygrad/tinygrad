@@ -68,10 +68,10 @@ class Tensor:
       elif d and all_int(d): dtype = dtype or dtypes.default_int
       else: dtype = dtype or dtypes.default_float
       # NOTE: cast at the end for the dtypes that do not have a numpy dtype
-      data = LazyBuffer.fromCPU(np.array(data, dtype.np)).cast(dtype)
+      data = LazyBuffer.fromCPU(np.array(data, dtype.ctype_as_dtype())).cast(dtype)
     elif isinstance(data, np.ndarray):
       if data.shape == (): data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
-      else: data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
+      else: data = LazyBuffer.fromCPU(data.astype(dtype.ctype_as_dtype()) if dtype is not None and dtype.ctype is not None else data)  # noqa: E501
 
     # data is a LazyBuffer, but it might be on the wrong device
     if not isinstance(data, LazyBuffer): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
@@ -126,9 +126,9 @@ class Tensor:
   # TODO: this should import numpy and use .data() to construct the array
   def numpy(self) -> np.ndarray:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
-    assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
-    if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.np)
-    return self.cast(self.dtype.scalar()).contiguous().realize().lazydata.base.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
+    assert self.dtype.name == "half" or self.dtype.ctype is not None, f"no numpy dtype for {self.dtype}"
+    if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.ctype_as_dtype())
+    return self.cast(self.dtype.scalar()).contiguous().realize().lazydata.base.realized.toCPU().astype(self.dtype.ctype_as_dtype(), copy=True).reshape(self.shape)  # noqa: E501
 
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self
@@ -909,5 +909,5 @@ def custom_random(out:Buffer):
   Tensor._seed += 1
   if DEBUG >= 2: print(f"*** {out.device}   rand  seed {Tensor._seed} size {out.size:<15d} dtype {out.dtype}")
   rng = np.random.default_rng(Tensor._seed)
-  rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=out.dtype.np, copy=False)
+  rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=out.dtype.ctype_as_dtype(), copy=False)
   out.copyin(rng_np_buffer.data)

@@ -6,6 +6,7 @@ from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Set, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
+  import _ctypes.PyCSimpleType
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -108,13 +109,14 @@ class DType(NamedTuple):
   priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
-  np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
+  ctype: Optional['_ctypes.PyCSimpleType']
   sz: int = 1
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
   def vec(self, sz:int):
     assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self]}{str(sz)}", None, sz)
   def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
+  def ctype_as_dtype(self): return np.dtype("float16") if self.name == "half" else np.dtype(self.ctype)
 
 # dependent typing?
 class ImageDType(DType):
@@ -133,13 +135,13 @@ class ImageDType(DType):
   def __ne__(self, x): return super().__ne__(x) or self.shape != x.shape
 
 class PtrDType(DType):
-  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.np, dt.sz)
+  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.ctype, dt.sz)
   def __repr__(self): return f"ptr.{super().__repr__()}"
 
 class dtypes:
   @staticmethod
   def is_float(x: DType) -> bool: return x.scalar() in (dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64)
-  @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
+  @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
   def is_int(x: DType) -> bool: return x.scalar() in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64) or dtypes.is_unsigned(x)
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
@@ -149,20 +151,20 @@ class dtypes:
   def from_py(x) -> DType: return dtypes.default_float if isinstance(x, float) else dtypes.bool if isinstance(x, bool) else dtypes.default_int
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
-  bool: Final[DType] = DType(0, 1, "bool", np.bool_)
-  int8: Final[DType] = DType(1, 1, "char", np.int8)
-  uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
-  int16: Final[DType] = DType(3, 2, "short", np.int16)
-  uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
-  int32: Final[DType] = DType(5, 4, "int", np.int32)
-  uint32: Final[DType] = DType(6, 4, "unsigned int", np.uint32)
-  int64: Final[DType] = DType(7, 8, "long", np.int64)
-  uint64: Final[DType] = DType(8, 8, "unsigned long", np.uint64)
-  float16: Final[DType] = DType(9, 2, "half", np.float16)
+  bool: Final[DType] = DType(0, 1, "bool", ctypes.c_bool)
+  int8: Final[DType] = DType(1, 1, "char", ctypes.c_byte)
+  uint8: Final[DType] = DType(2, 1, "unsigned char", ctypes.c_ubyte)
+  int16: Final[DType] = DType(3, 2, "short", ctypes.c_short)
+  uint16: Final[DType] = DType(4, 2, "unsigned short", ctypes.c_ushort)
+  int32: Final[DType] = DType(5, 4, "int", ctypes.c_int)
+  uint32: Final[DType] = DType(6, 4, "unsigned int", ctypes.c_uint)
+  int64: Final[DType] = DType(7, 8, "long", ctypes.c_long)
+  uint64: Final[DType] = DType(8, 8, "unsigned long", ctypes.c_ulong)
+  float16: Final[DType] = DType(9, 2, "half", None)  # ctypes doesn't have an equivalent to np.float16
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
   bfloat16: Final[DType] = DType(10, 2, "__bf16", None)
-  float32: Final[DType] = DType(11, 4, "float", np.float32)
-  float64: Final[DType] = DType(12, 8, "double", np.float64)
+  float32: Final[DType] = DType(11, 4, "float", ctypes.c_float)
+  float64: Final[DType] = DType(12, 8, "double", ctypes.c_double)
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
