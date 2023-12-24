@@ -6,7 +6,7 @@ from enum import Enum, auto
 from dataclasses import dataclass
 
 from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, getenv, all_same, to_function_name, flatten
-from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info, vars_from_ast
+from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, vars_from_ast, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, VariableOrNum, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
@@ -50,9 +50,12 @@ class Linearizer(Kernel):
 
   def cast(self, val: UOp, dtype) -> UOp: return self.uop(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
 
-  def get_reduce_acc(self, op, dtype:DType):
-    if op == ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
-    elif op == ReduceOps.MAX: return -math.inf if dtypes.is_float(dtype) else -2**31 if dtypes.is_int(dtype) else False
+  def get_reduce_acc(self, reduceop:LazyOp):
+    dtype = get_lazyop_info(reduceop).dtype
+    if reduceop.op == ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
+    elif reduceop.op == ReduceOps.MAX:
+      if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
+      return -math.inf if dtypes.is_float(dtype) else False
 
   # NOTE: once images are loaded, we uop them as their base float
   def get_base_dtype(self, dt:DType): return dt.base if isinstance(dt, ImageDType) else dt
@@ -199,7 +202,7 @@ class Linearizer(Kernel):
     if self.group_for_reduce:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+len(self.group_for_reduce)]) + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
-      temp_dtype = self.get_base_dtype(self.bufs[-1].dtype)
+      temp_dtype = self.get_base_dtype(get_lazyop_info(self.reduceop).dtype)
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size(), temp_dtype))
       self.buf_uops.append(self.uop(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), ("temp", self.sts[-1].size())))
 
@@ -251,7 +254,7 @@ class Linearizer(Kernel):
       fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
       # define accumulator
-      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop.op, self.bufs[0].dtype))
+      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
 
       if self.tensor_core:
         def calc_tc_idxs(local_size: int, aliases: List[List[int]]):
@@ -357,7 +360,7 @@ class Linearizer(Kernel):
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop.op, self.bufs[-1].dtype))  # noqa: E501
+        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
 
         # late reduce loop
         loop_ctx = render_loop(end_local_idxs)
@@ -523,8 +526,7 @@ class Linearizer(Kernel):
     if cache is None: cache = {}
     if x in cache: return cache[x]
     if x.op in BufferOps: return loaded_buffers[x.arg]
-    if x.op == UnaryOps.CAST:
-      return [self.uop(UOps.CAST, self.get_base_dtype(x.arg[0]), (u,), x.arg) for u in self.ast_parse(x.src[0], acc, offs, loaded_buffers)]
+    if x.op == UnaryOps.CAST: return [self.uop(UOps.CAST, x.arg[0], (u,), x.arg) if not isinstance(x.arg[0], ImageDType) else u for u in self.ast_parse(x.src[0], acc, offs, loaded_buffers)]  # noqa: E501
     if x.op in ReduceOps and not do_reduce:
       assert offs is None, "not available if we aren't doing reduce"
       return acc
@@ -543,7 +545,7 @@ class Linearizer(Kernel):
         ret.append(acc[off])
       for off in range(len(acc)):
         if input_acc[off] != acc[off]:
-          acc[off] = self.uop(UOps.PHI, acc[off].dtype, (input_acc[off], acc[off]) + tuple(loop_ctx))
+          acc[off] = self.uop(UOps.PHI, input_acc[off].dtype, (input_acc[off], acc[off]) + tuple(loop_ctx))
     else:
       ret = [self.uop(UOps.ALU, dtype=dtypes.bool if x.op == BinaryOps.CMPLT else val[-1].dtype, vin=val, arg=x.op) for val in zip(*values)]
     cache[x] = ret

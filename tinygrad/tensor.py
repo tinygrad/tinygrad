@@ -118,9 +118,9 @@ class Tensor:
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
 
   # TODO: these are good places to start removing numpy
-  def item(self) -> Union[float, int]:
+  def item(self) -> Union[float, int, bool]:
     assert self.numel() == 1, "must have one element for item"
-    return cast(Buffer, self.contiguous().realize().lazydata.realized).toCPU().item()
+    return cast(Buffer, self.contiguous().realize().lazydata.base.realized).toCPU().item()
   def data(self) -> memoryview: return self.numpy().data
 
   # TODO: this should import numpy and use .data() to construct the array
@@ -128,7 +128,7 @@ class Tensor:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
     if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.np)
-    return self.detach().cast(dtypes.from_np(self.dtype.np)).contiguous().to('CPU').realize().lazydata.base.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)  # noqa: E501
+    return self.cast(self.dtype.scalar()).contiguous().realize().lazydata.base.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
 
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self
@@ -174,7 +174,7 @@ class Tensor:
   def arange(start, stop=None, step=1, **kwargs):
     if stop is None: stop, start = start, 0
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
-    return Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs).cumsum() + (start - step)
+    return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs).cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
   def eye(dim:int, **kwargs):
@@ -229,7 +229,7 @@ class Tensor:
     weight = self.unsqueeze(0) if self.ndim == 1 else self
     cdf = (cw := weight.cumsum(1)) / cw[:, -1].unsqueeze(1)
     unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1)
-    indices = ((unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).cast(dtypes.int)).sum(2).permute((1, 0))
+    indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
     return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
   # ***** toposort and backward pass *****
@@ -406,9 +406,9 @@ class Tensor:
 
   # NOTE: using slice is discouraged and things should migrate to pad and shrink
   def slice(self, arg:Sequence[Optional[Tuple[int, sint]]], value:float=0) -> Tensor:
-    arg_ = tuple([a if a is not None else (0,s) for s,a in zip(self.shape, arg)])
-    padding = tuple([(max(0, -p[0]), max(0, p[1]-self.shape[i])) for i,p in enumerate(arg_)])
-    return self.pad(padding, value=value).shrink(tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i,p in enumerate(arg_)]))
+    arg_ = tuple(a if a is not None else (0, s) for s,a in zip(self.shape, arg))
+    padding = tuple((max(0, -l), max(0, r-s)) for s,(l,r) in zip(self.shape, arg_))
+    return self.pad(padding, value=value).shrink(tuple((l + pl, r + pl) for (l,r),(pl,_) in zip(arg_, padding)))
 
   def gather(self:Tensor, idx:Tensor, dim:int) -> Tensor:
     assert idx.ndim == self.ndim, "self.ndim must equal idx.ndim"
@@ -420,13 +420,13 @@ class Tensor:
     return ((idx == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])).unsqueeze(0)).sum(-1).transpose(ax1=0, ax2=dim)  # noqa: E501
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
-    dim = (dim + len(self.shape)) if dim < 0 else dim
+    if dim < 0: dim += self.ndim
     assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args)
     catargs = [self, *args]
     assert all(t.shape for t in catargs), "zero-dimensional tensor cannot be concatenated"
     shapes = [s.shape[dim] for s in catargs]
     shape_cumsum = [0, *accumulate(shapes)]
-    slc:List[List[Tuple[sint, sint]]] = [[(0, 0) for _ in self.shape] for _ in catargs]
+    slc:List[List[Optional[Tuple[sint, sint]]]] = [[None for _ in self.shape] for _ in catargs]
     for shp,k,s in zip(shapes, shape_cumsum[:-1], slc): s[dim] = (k, shape_cumsum[-1] - k - shp)
     return reduce(Tensor.__add__, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
 
@@ -457,7 +457,7 @@ class Tensor:
     return self if self.shape[dim] != 1 else self.reshape(self.shape[:dim] + self.shape[dim+1:])
 
   def unsqueeze(self, dim:int) -> Tensor:
-    if dim < 0: dim = len(self.shape) + dim + 1
+    if dim < 0: dim = self.ndim + dim + 1
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
   # (padding_left, padding_right, padding_top, padding_bottom)
@@ -484,7 +484,11 @@ class Tensor:
     ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else s for i,s in enumerate(self.shape)]))
     return ret if keepdim else ret.reshape(shape=shape)
 
-  def sum(self, axis=None, keepdim=False): return self._reduce(mlops.Sum, axis, keepdim)
+  def sum(self, axis=None, keepdim=False):
+    output_dtype = least_upper_dtype(self.dtype, dtypes.uint) if dtypes.is_unsigned(self.dtype) else \
+                   least_upper_dtype(self.dtype, dtypes.int) if (dtypes.is_int(self.dtype) or self.dtype==dtypes.bool) else self.dtype
+    return self.cast(output_dtype)._reduce(mlops.Sum, axis, keepdim)
+
   def max(self, axis=None, keepdim=False): return self._reduce(mlops.Max, axis, keepdim)
   def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
 
@@ -511,11 +515,10 @@ class Tensor:
 
   def argmax(self, axis=None, keepdim=False):
     if axis is None:
-      m = (self == self.max(axis)).cast(dtypes.int)
-      idx = m * Tensor.arange(prod(self.shape)-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape)
+      idx = (self == self.max(axis)) * Tensor.arange(prod(self.shape)-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape)
       return prod(self.shape) - idx.max() - 1
     axis = axis + len(self.shape) if axis < 0 else axis
-    m = (self == self.max(axis=axis, keepdim=True)).cast(dtypes.int)
+    m = self == self.max(axis=axis, keepdim=True)
     idx = m * Tensor.arange(self.shape[axis]-1,-1,-1, requires_grad=False, device=self.device).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
     return self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1
   def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
@@ -523,6 +526,7 @@ class Tensor:
   @staticmethod
   def einsum(formula:str, *raw_xs) -> Tensor:
     xs:Tuple[Tensor] = argfix(*raw_xs)
+    formula = formula.replace(" ", "")
     inputs_str, output = formula.split("->") if "->" in formula else (formula, sorted(formula))
     inputs = [x for x in cast(str,inputs_str).split(',')]
     assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
@@ -577,10 +581,10 @@ class Tensor:
     x, w = self, weight.reshape(groups, weight.shape[0]//groups, weight.shape[1], *weight.shape[2:]).permute(0,2,1,*trailing).flip(trailing)
     stride = make_pair(stride, len(HW))
     if any(s>1 for s in stride):
-      x = x.reshape(*x.shape[:2], *flatten((k,1) for k in x.shape[2:]))
-      x = x.pad(((0,0), (0,0), *flatten(((0,0),(0,s-1)) for s in stride)))
-      x = x.reshape(*x.shape[:2], *[k*s for k,s in zip(x.shape[2::2], stride)])
-      x = x.shrink(((0,x.shape[0]), (0,x.shape[1]), *[(0,k-(s-1)) for k,s in zip(x.shape[2:], stride)]))
+      x = x.reshape(None, None, *flatten((k,1) for k in x.shape[2:]))
+      x = x.pad((None, None, *flatten((None,(0,s-1)) for s in stride)))
+      x = x.reshape(None, None, *[k*s for k,s in zip(x.shape[2::2], stride)])
+      x = x.shrink((None, None, *[(0,k-(s-1)) for k,s in zip(x.shape[2:], stride)]))
     padding = flatten((((k-1)*d-p,(k-1)*d-p+op) for k,d,p,op in reversed(list(zip(HW, make_pair(dilation, len(HW)), make_pair(padding, len(HW)), make_pair(output_padding, len(HW)))))))  # noqa: E501
     return x.conv2d(w.reshape(w.shape[0]*w.shape[1],*w.shape[2:]), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
@@ -641,11 +645,7 @@ class Tensor:
     assert self.shape[-1] == w.shape[-min(n2, 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(n2, 2)]})"  # noqa: E501
     x = self.reshape(*self.shape[0:-1], *[1]*min(n1-1, n2-1, 1), self.shape[-1])
     w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
-    promoted_dtype = least_upper_dtype(x.dtype, w.dtype)
-    output_dtype = least_upper_float(promoted_dtype)
-    x, w = x.cast(output_dtype), w.cast(output_dtype)
-    out = (x*w).sum(-1)
-    return out if output_dtype == promoted_dtype else out.cast(promoted_dtype)
+    return (x*w).sum(-1).cast(least_upper_dtype(x.dtype, w.dtype))
 
   def _cumsum(self, axis:int=0, _first_zero=False) -> Tensor:
     return self.transpose(axis,-1).pad2d((self.shape[axis]-int(not _first_zero),0))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
@@ -666,9 +666,9 @@ class Tensor:
     assert all_int((r,c)), "does not support symbolic"
     return Tensor.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= Tensor.arange(-k, c-k, **kwargs).unsqueeze(0).expand(r,c)
   def triu(self, k:int=0) -> Tensor:
-    return Tensor._tri(self.shape[-2], self.shape[-1], k=k, dtype=self.dtype, device=self.device).where(self, Tensor.zeros_like(self))
+    return Tensor._tri(self.shape[-2], self.shape[-1], k=k, device=self.device).where(self, Tensor.zeros_like(self))
   def tril(self, k:int=0) -> Tensor:
-    return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, dtype=self.dtype, device=self.device).where(Tensor.zeros_like(self), self)
+    return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, device=self.device).where(Tensor.zeros_like(self), self)
 
   # ***** mlops (unary) *****
 
