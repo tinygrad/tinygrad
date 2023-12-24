@@ -57,7 +57,7 @@ class MultiLazyBuffer:
     if axis is not None: lbs = to_sharded(lbs, axis)
     return MultiLazyBuffer([lb.copy_to_device(d) for lb,d in zip(lbs, devices)], axis)
 
-  def copy_to_device(self, device:str) -> MultiLazyBuffer:
+  def copy_to_device(self, device:str) -> LazyBuffer:
     if self.axis is None: return self.lbs[0].copy_to_device(device)
     sz = self.lbs[0].shape[self.axis]
     llbs = []
@@ -80,14 +80,26 @@ class MultiLazyBuffer:
     assert all(isinstance(x, MultiLazyBuffer) for x in srcs), f"all buffers must be MultiLazyBuffer {srcs}"
     assert all_same([x.device for x in srcs]), f"all buffers must have the same device {[x.device for x in srcs]}"
 
-    # we can support two different options
+    # we can support three different options
     axes = dedup([x.axis for x in srcs if x.axis is not None])
-    if len(axes) > 1: raise RuntimeError(f"multisharding {axes}")
-    if len(axes) == 1:
+    if len(axes) > 1:
+      # TODO: this can be done in multiple ways
+      nsrcs = []
+      axis = axes[-1]
+      for src in srcs:
+        if src.axis is None or src.axis == axis:
+          nsrcs.append(src.lbs)
+        else:
+          # all-gather
+          nsrcs.append(to_sharded([src.copy_to_device(lb.device) for lb in src.lbs], axis))
+      srcs = nsrcs
+    elif len(axes) == 1:
       srcs = [to_sharded(lb.lbs, axes[0]) if lb.axis is None else lb.lbs for lb in srcs]
+      axis = axes[0]
     else:
       srcs = [x.lbs for x in srcs]
-    return MultiLazyBuffer([lsrcs[0].e(op, *lsrcs[1:], arg=arg) for lsrcs in zip(*srcs)], axes[0] if len(axes) else None)
+      axis = None
+    return MultiLazyBuffer([lsrcs[0].e(op, *lsrcs[1:], arg=arg) for lsrcs in zip(*srcs)], axis)
 
   def _new_shape(self, shape):
     return tuple(s//len(self.lbs) if a == self.axis else s for a,s in enumerate(shape))
@@ -96,9 +108,8 @@ class MultiLazyBuffer:
     if self.axis is None:
       return MultiLazyBuffer([x.r(op, new_shape) for x in self.lbs], None)
     if new_shape[self.axis] == 1:
-      # reduce on sharded axes
+      # all-reduce on sharded axes
       return MultiLazyBuffer(all_reduce([x.r(op, new_shape) for x in self.lbs]), None)
-    #print(new_shape, self._new_shape(new_shape), self.lbs[0].shape, self.axis)
     return MultiLazyBuffer([x.r(op, self._new_shape(new_shape)) for x in self.lbs], self.axis)
 
   def reshape(self, arg:Tuple[sint, ...]):
