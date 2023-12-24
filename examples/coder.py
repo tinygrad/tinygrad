@@ -33,12 +33,14 @@ if __name__ == "__main__":
     part1 = nn.state.torch_load(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/pytorch_model-00001-of-00002.bin?download=true"))
     part2 = nn.state.torch_load(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/pytorch_model-00002-of-00002.bin?download=true"))
 
-  # fix bf16, TODO: check if device supports bf16
-  def fix_bf16(weights): return {k:v.to(Device.DEFAULT).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
+  def fix_bf16(weights): return {k: v.cast(dtypes.float16).to(Device.DEFAULT) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
 
+  load_device = Device.DEFAULT
+  try: fix_bf16({0:Tensor([1, 2, 3, 4], dtype = dtypes.bfloat16)})[0].realize() # check if device supports bfloat
+  except (RuntimeError, ValueError, AssertionError): load_device = 'LLVM'
   with Timing("weights -> model: "):
-    nn.state.load_state_dict(model, fix_bf16(convert_from_huggingface(part1, model, 32, 8)), strict=False)
-    nn.state.load_state_dict(model, fix_bf16(convert_from_huggingface(part2, model, 32, 8)), strict=False)
+    nn.state.load_state_dict(model, fix_bf16(convert_from_huggingface(part1, model, 32, 8, device=load_device)), strict=False)
+    nn.state.load_state_dict(model, fix_bf16(convert_from_huggingface(part2, model, 32, 8, device=load_device)), strict=False)
 
   if not os.path.isfile("/tmp/tokenizer.model"): create_fixed_tokenizer("/tmp/tokenizer.model")
   spp = SentencePieceProcessor(model_file="/tmp/tokenizer.model")
