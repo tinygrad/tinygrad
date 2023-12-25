@@ -48,7 +48,7 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
 
   # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
   for i, output in enumerate(the_output):
-    special_names[id(output.lazydata.realized)] = f'output{i}'
+    special_names[id(output.lazydata.base.realized)] = f'output{i}'
   return run, special_names
 
 def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]], bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str]) -> str:
