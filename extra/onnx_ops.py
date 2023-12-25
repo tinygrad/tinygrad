@@ -404,7 +404,7 @@ def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
   if equidistant_case == "round_down": return (x > b).where(b+1-n, b-n)
   if equidistant_case == "round_up": return (x >= b).where(b+1-n, b-n)
   if equidistant_case == "round_to_even":
-    def _and(cond1, cond2): return ((cond1 + cond2) == 2).where(1, 0)
+    def _and(cond1, cond2): return ((cond1.cast(dtypes.int) + cond2.cast(dtypes.int)) == 2).where(1, 0)
     x_ceil_fraction = x.ceil()/2
     cond_ceil_even = x_ceil_fraction.ceil() == x_ceil_fraction
     x = (_and(x == b, cond_ceil_even)).where(x+1-n, x)
