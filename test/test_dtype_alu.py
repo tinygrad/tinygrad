@@ -14,7 +14,7 @@ print(settings.default)
 dtypes_float = (dtypes.float32, dtypes.float16)
 dtypes_int = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
 dtypes_bool = (dtypes.bool,)
-binary_operations = [operator.add, operator.sub, operator.mul]
+binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, operator.eq]
 integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor)]
 unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (Tensor.sin, np.sin),
                     (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
@@ -24,9 +24,6 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (T
 
 # TODO: enable mod on Tensor
 #binary_operations.append(operator.mod)
-
-# TODO: lt and eq should cast in tensor before we can test them, this is a separate project
-#binary_operations += [operator.lt, operator.eq]
 
 # TODO: (a+b)/2 in tensor.py's maximum can overflow. This requires a new implementation of maximum that can be backpropagated
 #binary_operations += [(Tensor.maximum, np.maximum)]
