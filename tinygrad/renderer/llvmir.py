@@ -163,7 +163,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
       else: store_op()
     if uop == UOps.ALU:
       if args == TernaryOps.MULACC: lvars[u] = mulacc(bb, lvars[vin[0]], lvars[vin[1]], lvars[vin[2]], vin[0].dtype, dtype)
-      else: lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin] + [dtype if args != BinaryOps.CMPLT else vin[0].dtype])
+      else: lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin] + [vin[0].dtype if args in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else dtype])
     if uop == UOps.CAST: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=isinstance(args, tuple) and args[1])
 
   bb[-1].ret_void()
