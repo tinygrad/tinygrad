@@ -19,6 +19,7 @@ class MultiLazyBuffer:
     assert all(isinstance(x, LazyBuffer) for x in lbs), "all lbs must be LazyBuffers"
     self.lbs, self.axis = lbs, axis
     assert all_same([(x.shape, x.dtype) for x in lbs]), "all multilazybuffer needs same shape and dtype"
+    assert len(lbs) >= 2, "need at least 2 devices"
     self.dtype, self.device = lbs[0].dtype, tuple(x.device for x in lbs)
     self.shape = tuple(s*len(self.lbs) if a == self.axis else s for a,s in enumerate(lbs[0].shape))
 
@@ -71,9 +72,11 @@ class MultiLazyBuffer:
           nsrcs.append(to_sharded([src.copy_to_device(lb.device) for lb in src.lbs], axis))
       srcs = nsrcs
     elif len(axes) == 1:
+      # all sharded on same axis
       srcs = [to_sharded(lb.lbs, axes[0]) if lb.axis is None else lb.lbs for lb in srcs]
       axis = axes[0]
     else:
+      # independent ewop on each device
       srcs = [x.lbs for x in srcs]
       axis = None
     return MultiLazyBuffer([lsrcs[0].e(op, *lsrcs[1:], arg=arg) for lsrcs in zip(*srcs)], axis)
@@ -83,31 +86,36 @@ class MultiLazyBuffer:
 
   def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> MultiLazyBuffer:
     if self.axis is None:
+      # independent reduce on each device
       return MultiLazyBuffer([x.r(op, new_shape) for x in self.lbs], None)
     if new_shape[self.axis] == 1:
       # all-reduce on sharded axes
       return MultiLazyBuffer(all_reduce([x.r(op, new_shape) for x in self.lbs]), None)
+    # reduce on non sharded axes, piecewise is fine
     return MultiLazyBuffer([x.r(op, self._new_shape(new_shape)) for x in self.lbs], self.axis)
 
   def reshape(self, arg:Tuple[sint, ...]):
     if self.axis is None: return MultiLazyBuffer([x.reshape(arg) for x in self.lbs], None)
+    # TODO: this can be wrong
     st = ShapeTracker.from_shape(self.shape)
     rs = st.real_strides()[self.axis]
     new_axis = st.reshape(arg).real_strides().index(rs)
     narg = tuple(s//len(self.lbs) if a == new_axis else s for a,s in enumerate(arg))
     return MultiLazyBuffer([x.reshape(narg) for x in self.lbs], new_axis)
   def pad(self, arg:Tuple[Tuple[sint, sint], ...]):
-    assert arg[self.axis] == (0,0)
+    assert arg[self.axis] == (0,0), "padding not supported on sharded axis"
     return MultiLazyBuffer([x.pad(arg) for x in self.lbs], self.axis)
   def expand(self, arg:Tuple[sint, ...]):
-    assert self.axis is None or arg[self.axis] == self.shard_sz
+    # NOTE: this assert isn't needed, sharded axis can have dim 1
+    assert self.axis is None or arg[self.axis] == self.shard_sz, "expand not supported on sharded axis"
     return MultiLazyBuffer([x.expand(self._new_shape(arg)) for x in self.lbs], self.axis)
   def permute(self, arg:Tuple[int, ...]):
+    # all permutes supported!
     return MultiLazyBuffer([x.permute(arg) for x in self.lbs], arg.index(self.axis) if self.axis is not None else None)
   def shrink(self, arg:Tuple[Tuple[sint, sint], ...]):
-    assert self.axis is None or arg[self.axis] == (0, self.shard_sz)
+    assert self.axis is None or arg[self.axis] == (0, self.shard_sz), "shrinking not supported on sharded axis"
     narg = tuple((s1//len(self.lbs), s2//len(self.lbs)) if a == self.axis else (s1,s2) for a,(s1,s2) in enumerate(arg))
     return MultiLazyBuffer([x.shrink(narg) for x in self.lbs], self.axis)
   def stride(self, arg:Tuple[int, ...]):
-    assert self.axis is None or arg[self.axis] == 1
+    assert self.axis is None or arg[self.axis] == 1, "flipping not supported on sharded axis"
     return MultiLazyBuffer([x.stride(arg) for x in self.lbs], self.axis)

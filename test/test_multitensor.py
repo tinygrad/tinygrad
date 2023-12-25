@@ -62,6 +62,11 @@ class TestMultiTensor(unittest.TestCase):
   def test_matmul_shard_W_0(self): return self._test_matmul_shard_axis(None, 0)
   def test_matmul_shard_W_1(self): return self._test_matmul_shard_axis(None, 1)
 
+  def test_matmul_shard_0_0(self): return self._test_matmul_shard_axis(0, 0)
+  def test_matmul_shard_0_1(self): return self._test_matmul_shard_axis(0, 1)
+  def test_matmul_shard_1_0(self): return self._test_matmul_shard_axis(1, 0)
+  def test_matmul_shard_1_1(self): return self._test_matmul_shard_axis(1, 1)
+
   def test_double_matmul_shard_X_0(self): return self._test_double_matmul_shard_axis(0, None)
   def test_double_matmul_shard_X_1(self): return self._test_double_matmul_shard_axis(1, None)
   def test_double_matmul_shard_W_0(self): return self._test_double_matmul_shard_axis(None, 0)
@@ -73,6 +78,25 @@ class TestMultiTensor(unittest.TestCase):
     fake_image = Tensor.rand((2, 3, 32, 32)).shard((d0, d1), axis=0)
     out = conv(fake_image)
     out.numpy()
+
+  def test_conv_bias_data_shard(self):
+    conv = nn.Conv2d(3, 16, 3)
+    for p in get_parameters(conv): p.shard_((d0, d1))
+    fake_image = Tensor.rand((2, 3, 32, 32)).shard((d0, d1), axis=0)
+    out = conv(fake_image)
+    out.numpy()
+
+  def test_backprop_conv(self):
+    conv = nn.Conv2d(3, 16, 3)
+    for p in get_parameters(conv): p.shard_((d0, d1))
+    optim = nn.optim.Adam(get_parameters(conv))
+    fake_image = Tensor.rand((2, 3, 32, 32)).shard((d0, d1), axis=0)
+    out = conv(fake_image)
+    optim.zero_grad()
+    out.mean().backward()
+    for p in get_parameters(conv):
+      p.grad.realize()
+    #optim.step()
 
   def test_data_parallel_resnet(self):
     import sys, pathlib
