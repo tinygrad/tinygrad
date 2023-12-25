@@ -194,7 +194,7 @@ class Tensor:
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     length = math.ceil((stop-start)/step) if step != 1 else (stop-start)
     if isinstance(length, float): length = int(length)
-    return Tensor.full((length,), step, dtype=dtype, **kwargs).cumsum() + (start - step)
+    return (Tensor.full((length,), step, dtype=dtype, **kwargs).cumsum() + (start - step)).cast(dtype)
 
   @staticmethod
   def eye(dim:int, **kwargs):
