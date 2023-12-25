@@ -7,6 +7,9 @@ from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
 from hypothesis import given, settings, strategies as st
 
+core_dtypes = list(DTYPES_DICT.values())
+floats = [dt for dt in core_dtypes if dtypes.is_float(dt)]
+
 def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   # for GPU, cl_khr_fp16 isn't supported
   # for LLVM, it segfaults because it can't link to the casting function
@@ -305,8 +308,14 @@ class TestTypeSpec(unittest.TestCase):
     assert Tensor.arange(3, 9, 0.7).dtype == dtypes.default_float
     assert Tensor.arange(3, 8.5, 3).dtype == dtypes.default_float
 
-core_dtypes = list(DTYPES_DICT.values())
-floats = [dt for dt in core_dtypes if dtypes.is_float(dt)]
+  @given(st.sampled_from(core_dtypes),
+         st.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), st.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
+  def test_functions_return_index(self, dtype, default_int, default_float):
+    dtypes.default_int, dtypes.default_float = default_int, default_float
+    assert Tensor([0, 1], dtype=dtype).argmax().dtype == dtypes.default_int
+    assert Tensor([0, 1], dtype=dtype).argmin().dtype == dtypes.default_int
+    assert Tensor([0, 1], dtype=dtype).multinomial().dtype == dtypes.default_int
+
 class TestTypePromotion(unittest.TestCase):
   @given(st.sampled_from(core_dtypes))
   def test_self_promo_to_self(self, dtype):
@@ -414,6 +423,21 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.bfloat16)).sum().dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32)).sum().dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).sum().dtype == dtypes.float64
+
+  def test_cumsum(self):
+    assert (Tensor([0, 1], dtype=dtypes.bool)).cumsum(0).dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int8)).cumsum(0).dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int16)).cumsum(0).dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int32)).cumsum(0).dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int64)).cumsum(0).dtype == dtypes.int64
+    assert (Tensor([0, 1], dtype=dtypes.uint8)).cumsum(0).dtype == dtypes.uint32
+    assert (Tensor([0, 1], dtype=dtypes.uint16)).cumsum(0).dtype == dtypes.uint32
+    assert (Tensor([0, 1], dtype=dtypes.uint32)).cumsum(0).dtype == dtypes.uint32
+    assert (Tensor([0, 1], dtype=dtypes.uint64)).cumsum(0).dtype == dtypes.uint64
+    assert (Tensor([0, 1], dtype=dtypes.float16)).cumsum(0).dtype == dtypes.float16
+    assert (Tensor([0, 1], dtype=dtypes.bfloat16)).cumsum(0).dtype == dtypes.bfloat16
+    assert (Tensor([0, 1], dtype=dtypes.float32)).cumsum(0).dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.float64)).cumsum(0).dtype == dtypes.float64
 
   @given(st.sampled_from(core_dtypes), st.sampled_from(core_dtypes))
   def test_matmul(self, dt1, dt2):

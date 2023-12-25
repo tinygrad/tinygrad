@@ -231,7 +231,7 @@ class Tensor:
     cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
     unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1)
     indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
-    return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
+    return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.default_int)
 
   # ***** toposort and backward pass *****
 
