@@ -50,7 +50,12 @@ class Tensor:
   def __init__(self, data:Union[None, bool, int, float, List, Tuple, LazyBuffer, np.ndarray, bytes],
                device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
-    device = Device.canonicalize(device)
+    if isinstance(device, (tuple, list)):
+      md = tuple(Device.canonicalize(x) for x in device)
+      device = md[0]
+    else:
+      md = None
+      device = Device.canonicalize(device)
     # tensors have gradients, buffers do not
     self.grad: Optional[Tensor] = None
 
@@ -77,6 +82,7 @@ class Tensor:
     # data is a LazyBuffer, but it might be on the wrong device
     if not isinstance(data, (LazyBuffer, MultiLazyBuffer)): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
     self.lazydata = data if data.device == device else data.copy_to_device(device)
+    if md is not None: self.lazydata = MultiLazyBuffer.from_sharded(self.lazydata, md, None)
 
   def __repr__(self):
     return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
@@ -96,7 +102,14 @@ class Tensor:
   # ***** data handlers ****
 
   @staticmethod
-  def corealize(lst:Iterable[Tensor]): run_schedule(create_schedule([x.lazydata for x in lst]))
+  def corealize(lst:Iterable[Tensor]):
+    lbs = []
+    for x in lst:
+      if isinstance(x.lazydata, MultiLazyBuffer):
+        lbs += x.lazydata.lbs
+      else:
+        lbs.append(x.lazydata)
+    run_schedule(create_schedule(lbs))
 
   def realize(self) -> Tensor:
     run_schedule(self.lazydata.schedule())

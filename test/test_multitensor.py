@@ -94,9 +94,8 @@ class TestMultiTensor(unittest.TestCase):
     out = conv(fake_image)
     optim.zero_grad()
     out.mean().backward()
-    for p in get_parameters(conv):
-      p.grad.realize()
-    #optim.step()
+    #for p in get_parameters(conv): p.grad.realize()
+    optim.step()
 
   def test_data_parallel_resnet(self):
     import sys, pathlib

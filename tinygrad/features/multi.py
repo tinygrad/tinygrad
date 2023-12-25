@@ -1,9 +1,9 @@
 from __future__ import annotations
 from typing import Sequence, Optional, Union, Any, Tuple
 import functools
-from tinygrad.helpers import all_same, dedup
+from tinygrad.helpers import all_same, dedup, DType
 from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
-from tinygrad.lazy import LazyBuffer, create_schedule
+from tinygrad.lazy import LazyBuffer, create_schedule, create_lazybuffer
 from tinygrad.shape.shapetracker import ShapeTracker, sint
 
 def all_reduce(lbs):
@@ -47,6 +47,10 @@ class MultiLazyBuffer:
   def is_unrealized_contiguous_const(self): return False
 
   def schedule(self, seen=None): return create_schedule(self.lbs, seen)
+
+  def cast(self, dtype:DType, bitcast:bool=False):
+    if self.dtype == dtype: return self
+    return MultiLazyBuffer([create_lazybuffer(x.device, ShapeTracker.from_shape(x.shape), dtype, UnaryOps.CAST, (dtype, bitcast), (x,)) for x in self.lbs], self.axis)
 
   def const(self, val:Union[float, int]) -> MultiLazyBuffer: return MultiLazyBuffer([x.const(val) for x in self.lbs], self.axis)
 
