@@ -1,5 +1,5 @@
 import os, mmap, _posixshmem
-from typing import Callable, Dict, Tuple, Optional, TextIO
+from typing import Callable, Dict, Tuple, Optional, BinaryIO
 from tinygrad.helpers import prod, DType, OSX, dtypes
 from tinygrad.device import Interpreted, Allocator
 from tinygrad.ops import Op, MovementOps, UnaryOps
@@ -7,7 +7,7 @@ from tinygrad.shape.view import strides_for_shape
 
 MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class UnderlyingDiskBuffer:
-  def __init__(self, device:str, size:int, fd:Optional[TextIO]=None, mem:Optional[memoryview]=None):
+  def __init__(self, device:str, size:int, fd:Optional[BinaryIO]=None, mem:Optional[mmap.mmap]=None):
     self.device, self.size, self._fd, self._mem = device, size, fd, mem
   def __load(self):
     if self._mem is not None: return self
