@@ -83,7 +83,7 @@ def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[s
     return
 
   # set inputs
-  for k,v in inputs.items(): v.lazydata.realized.copyin(new_np_inputs[k].data)
+  for k,v in inputs.items(): v.lazydata.base.realized.copyin(new_np_inputs[k].data)
 
   # run code (all buffers have been allocated)
   GlobalCounters.reset()

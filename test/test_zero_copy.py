@@ -7,7 +7,7 @@ def time_tensor_numpy(out:Tensor):
   times = []
   for _ in range(5):
     st = time.perf_counter()
-    out.lazydata.realized.toCPU()
+    out.lazydata.base.realized.toCPU()
     et = time.perf_counter() - st
     times.append(et)
   return min(times)
