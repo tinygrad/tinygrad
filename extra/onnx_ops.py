@@ -364,7 +364,7 @@ def NegativeLogLikelihoodLoss(x: Tensor, target: Tensor, weight=None, ignore_ind
     cond = target == ignore_index
     weight = cond.where(0, weight) if weight is not None else cond.where(Tensor.zeros(*target.shape), 1)
   mask = target[:, None, :] ==  Tensor.arange(C).reshape([1, C] + [1]*(len(x.shape) -2))
-  loss = (-mask * x).sum(axis=1) * (1 if weight is None else weight)
+  loss = -(mask * x).sum(axis=1) * (1 if weight is None else weight)
   if reduction == "mean": return loss.mean() if weight is None else loss.sum() / weight.sum()
   if reduction == "sum": return loss.sum()
   return loss.reshape(t_shape) if len(i_shape) != 3 else loss
@@ -404,7 +404,7 @@ def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
   if equidistant_case == "round_down": return (x > b).where(b+1-n, b-n)
   if equidistant_case == "round_up": return (x >= b).where(b+1-n, b-n)
   if equidistant_case == "round_to_even":
-    def _and(cond1, cond2): return ((cond1 + cond2) == 2).where(1, 0)
+    def _and(cond1, cond2): return ((cond1.cast(dtypes.int) + cond2.cast(dtypes.int)) == 2).where(1, 0)
     x_ceil_fraction = x.ceil()/2
     cond_ceil_even = x_ceil_fraction.ceil() == x_ceil_fraction
     x = (_and(x == b, cond_ceil_even)).where(x+1-n, x)

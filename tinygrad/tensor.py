@@ -823,12 +823,12 @@ class Tensor:
   def __ixor__(self, x) -> Tensor: return self.assign(self.xor(x))
 
   # in webgpu bool cannot be used as a storage buffer type
-  def __lt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, False)).cast(dtypes.float if self.device == "WEBGPU" else dtypes.bool)
-  def __gt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, True)).cast(dtypes.float if self.device == "WEBGPU" else dtypes.bool)
-  def __ge__(self, x) -> Tensor: return 1.0-(self<x)
-  def __le__(self, x) -> Tensor: return 1.0-(self>x)
-  def __ne__(self, x) -> Tensor: return (self<x) + (self>x)   # type: ignore[override]
-  def __eq__(self, x) -> Tensor: return 1.0-(self != x)       # type: ignore[override]
+  def __lt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, False)).cast(dtypes.float if Device.DEFAULT=="WEBGPU" else dtypes.bool)
+  def __gt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, True)).cast(dtypes.float if Device.DEFAULT=="WEBGPU" else dtypes.bool)
+  def __ge__(self, x) -> Tensor: return (self<x).neg() if Device.DEFAULT!="WEBGPU" else (1-(self<x)).cast(dtypes.float)
+  def __le__(self, x) -> Tensor: return (self>x).neg() if Device.DEFAULT!="WEBGPU" else (1-(self>x)).cast(dtypes.float)
+  def __eq__(self, x) -> Tensor: return mlops.Eq.apply(*self._broadcasted(x, True)).cast(dtypes.float if Device.DEFAULT=="WEBGPU" else dtypes.bool)  # type: ignore[override]
+  def __ne__(self, x) -> Tensor: return (self==x).neg() if Device.DEFAULT!="WEBGPU" else (1-(self==x)).cast(dtypes.float)                            # type: ignore[override]
 
   # ***** functional nn ops *****
 
