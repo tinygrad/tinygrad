@@ -18,11 +18,11 @@ def Add(x: Tensor, other: Tensor, broadcast=None): return x + other if x.dtype =
 def Sub(x: Union[Tensor, Any], other: Tensor): return x - other # some test has input as int
 def Div(x: Tensor, other: Tensor): return x / other if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else x.div(other).floor()   # TODO: this has dtype issues
 def Pow(x: Tensor, other: Tensor): return x.float() ** other.float()
-def Less(x:Tensor,y:Tensor): return x<y
-def LessOrEqual(x:Tensor,y:Tensor): return x<=y
-def Greater(x:Tensor,y:Tensor): return x>y
-def GreaterOrEqual(x:Tensor,y:Tensor): return x>=y
-def Equal(x:Tensor,y:Tensor): return x==y
+def Less(x:Tensor,y:Tensor): return (x<y).cast(dtypes.bool)
+def LessOrEqual(x:Tensor,y:Tensor): return (x<=y).cast(dtypes.bool)
+def Greater(x:Tensor,y:Tensor): return (x>y).cast(dtypes.bool)
+def GreaterOrEqual(x:Tensor,y:Tensor): return (x>=y).cast(dtypes.bool)
+def Equal(x:Tensor,y:Tensor): return (x==y).cast(dtypes.bool)
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
@@ -358,13 +358,13 @@ def NegativeLogLikelihoodLoss(x: Tensor, target: Tensor, weight=None, ignore_ind
     x = x.reshape((N, C, -1))
     target = target.reshape((N, -1))
   if weight is not None:
-    mask = (target.unsqueeze(-1) == Tensor.arange(C).repeat((N, 1, 1))).float()
+    mask = target.unsqueeze(-1) == Tensor.arange(C).repeat((N, 1, 1))
     weight = (mask * weight).sum(axis=-1)
   if ignore_index is not None:
     cond = target == ignore_index
     weight = cond.where(0, weight) if weight is not None else cond.where(Tensor.zeros(*target.shape), 1)
-  mask = (target[:, None, :] ==  Tensor.arange(C).reshape([1, C] + [1]*(len(x.shape) -2))).float()
-  loss = (-mask * x).sum(axis=1) * (1 if weight is None else weight)
+  mask = target[:, None, :] ==  Tensor.arange(C).reshape([1, C] + [1]*(len(x.shape) -2))
+  loss = -(mask * x).sum(axis=1) * (1 if weight is None else weight)
   if reduction == "mean": return loss.mean() if weight is None else loss.sum() / weight.sum()
   if reduction == "sum": return loss.sum()
   return loss.reshape(t_shape) if len(i_shape) != 3 else loss
@@ -404,9 +404,9 @@ def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
   if equidistant_case == "round_down": return (x > b).where(b+1-n, b-n)
   if equidistant_case == "round_up": return (x >= b).where(b+1-n, b-n)
   if equidistant_case == "round_to_even":
-    def _and(cond1, cond2): return ((cond1 + cond2) == 2).where(1, 0)
+    def _and(cond1, cond2): return ((cond1.cast(dtypes.int) + cond2.cast(dtypes.int)) == 2).where(1, 0)
     x_ceil_fraction = x.ceil()/2
-    cond_ceil_even = (x_ceil_fraction.ceil() == x_ceil_fraction).float()
+    cond_ceil_even = x_ceil_fraction.ceil() == x_ceil_fraction
     x = (_and(x == b, cond_ceil_even)).where(x+1-n, x)
     x = (x > b).where(b+1-n, b-n)
     return x
