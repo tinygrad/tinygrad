@@ -364,7 +364,7 @@ def NegativeLogLikelihoodLoss(x: Tensor, target: Tensor, weight=None, ignore_ind
     cond = target == ignore_index
     weight = cond.where(0, weight) if weight is not None else cond.where(Tensor.zeros(*target.shape), 1)
   mask = target[:, None, :] ==  Tensor.arange(C).reshape([1, C] + [1]*(len(x.shape) -2))
-  loss = (-mask * x).sum(axis=1) * (1 if weight is None else weight)
+  loss = -(mask * x).sum(axis=1) * (1 if weight is None else weight)
   if reduction == "mean": return loss.mean() if weight is None else loss.sum() / weight.sum()
   if reduction == "sum": return loss.sum()
   return loss.reshape(t_shape) if len(i_shape) != 3 else loss
