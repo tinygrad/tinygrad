@@ -483,8 +483,17 @@ class Linearizer(Kernel):
     key = (uop, dtype, vin, arg)
 
     if uop == UOps.ALU:
-      if arg in (BinaryOps.CMPLT, BinaryOps.CMPEQ): assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
-      if arg == TernaryOps.WHERE: assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
+      if arg in UnaryOps:
+        assert dtype == vin[0].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=}"
+      elif arg in (BinaryOps.CMPLT, BinaryOps.CMPEQ):
+        assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
+        assert vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
+      elif arg in BinaryOps:
+        assert dtype == vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
+      elif arg == TernaryOps.WHERE:
+        assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
+        assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
+
 
     if simplify:
       if uop == UOps.PHI and len(vin) == 2: return vin[1]   # a phi without loops is a noop
@@ -518,7 +527,8 @@ class Linearizer(Kernel):
     if cache is None: cache = {}
     if x in cache: return cache[x]
     if x.op in BufferOps: return loaded_buffers[x.arg]
-    if x.op == UnaryOps.CAST: return [self.uop(UOps.CAST, x.arg[0], (u,), x.arg) if not isinstance(x.arg[0], ImageDType) else u for u in self.ast_parse(x.src[0], acc, offs, loaded_buffers)]  # noqa: E501
+    if x.op == UnaryOps.CAST:
+      return [self.uop(UOps.CAST, self.get_base_dtype(x.arg[0]), (u,), x.arg) for u in self.ast_parse(x.src[0], acc, offs, loaded_buffers)]
     if x.op in ReduceOps and not do_reduce:
       assert offs is None, "not available if we aren't doing reduce"
       return acc
