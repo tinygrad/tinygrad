@@ -493,6 +493,29 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,8,10,5),(11,5,13,16,8)], lambda a,b: torch.einsum('prsq,tquvr->pstuv', a,b), lambda a,b: Tensor.einsum('prsq,tquvr->pstuv', a,b), atol=1e-5)
     # bilinear transformation
     helper_test_op([(2,3),(5,3,7),(2,7)], lambda a,b,c: torch.einsum('ik,jkl,il->ij', [a,b,c]), lambda a,b,c: Tensor.einsum('ik,jkl,il->ij', [a,b,c]))
+    # Ellipsis operations
+    # Sum over the whole tensor
+    helper_test_op([(3, 1, 10, 100, 2, 3, 4)], lambda a: torch.einsum('...->', a), lambda a: Tensor.einsum('...->', a), atol=1e-5)
+    # Multiplication of two similar tensors
+    helper_test_op([(5,3,7),(5,3,7)], lambda a,b: torch.einsum('...,...->', a,b), lambda a,b: Tensor.einsum('...,...->', a,b), atol=1e-5)
+    # Element wise multiplication of two tensors and reducing by sum
+    helper_test_op([(3,2,4),(1,2,4)], lambda a,b: torch.einsum('...i,...i->', a,b), lambda a,b: Tensor.einsum('...i,...i->', a,b), atol=1e-5)
+    # Matrix multiplication of two tensors
+    helper_test_op([(3,2,4),(1,2,4)], lambda a,b: torch.einsum('...i,...i->...', a,b), lambda a,b: Tensor.einsum('...i,...i->...', a,b), atol=1e-5)
+    # Transposing last two dimensions
+    helper_test_op([(3,2,4,5)], lambda a: torch.einsum('...ij->...ji', a), lambda a: Tensor.einsum('...ij->...ji', a), atol=1e-5)
+    # Cross product broadcasting
+    helper_test_op([(3, 3, 3), (10, 2, 4, 5, 6, 3), (10, 1, 4, 1, 6, 3)], lambda a, b, c: torch.einsum('ijk,...i,...k->...k', a, b ,c), lambda a, b, c: Tensor.einsum('ijk,...i,...k->...k', a, b, c), atol=1e-5)
+    # Ellipsis on left hand side
+    helper_test_op([(3, 30)], lambda a: torch.einsum("i...->", a), lambda a: Tensor.einsum("i...->", a))
+    # 2 letters after ellipsis
+    helper_test_op([(3,2,4,5), (3,2,4,5)], lambda a, b: torch.einsum('...ij,...ij->...j', a, b), lambda a, b: Tensor.einsum('...ij,...ij->...j', a, b), atol=1e-5)
+    # ellipsis in the middle
+    helper_test_op([(3,2,4,5), (3,2,4,5)], lambda a, b: torch.einsum('i...j,i...j->...j', a, b), lambda a, b: Tensor.einsum('i...j,i...j->...j', a, b), atol=1e-5)
+    # Ellipsis in the middle and multiple letters before, one letter after
+    helper_test_op([(3,2,4,5), (3,2,4,5)], lambda a, b: torch.einsum('ik...j,ik...j->j...k', a, b), lambda a, b: Tensor.einsum('ik...j,ik...j->j...k', a, b), atol=1e-5)
+    # Ellipsis in the middle and multiple letters before/after + permutations
+    helper_test_op([(3,2,4,5,6), (3,2,4,5,6)], lambda a, b: torch.einsum('ik...jl,ik...jl->jl...ki', a, b), lambda a, b: Tensor.einsum('ik...jl,ik...jl->jl...ki', a, b), atol=1e-5)
 
   def test_einsum_shape_check(self):
     a = Tensor.zeros(3,8,10,5)

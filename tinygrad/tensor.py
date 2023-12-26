@@ -8,7 +8,7 @@ from itertools import accumulate, chain
 import numpy as np
 
 from tinygrad.helpers import DType, dtypes, ImageDType
-from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, merge_dicts_with_max_value
+from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts_with_max_value, fully_flatten
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
@@ -528,72 +528,34 @@ class Tensor:
 
   @staticmethod
   def einsum(formula: str, *raw_xs) -> Tensor:
-    xs: Tuple[Tensor] = argfix(*raw_xs)
+    xs: Tuple[Tensor] = argfix(*raw_xs)    
     formula = formula.replace(" ", "")
     inputs_str, output_str = formula.split("->") if "->" in formula else (formula, "".join(sorted(set(formula))))
     inputs = [x for x in cast(str, inputs_str).split(',')]
     assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
-
-    # Handle ellipsis
     expanded_inputs = []
     for input_str, x in zip(inputs, xs):
-      parts = input_str.split('...')
-      regular_parts = [''.join(f'{char}' for char in part) for part in parts]
-      if '...' in input_str:
-        num_ellipsis_dims = len(x.shape) - (len(input_str) - 3)  # 3 for the ellipsis
-        ellipsis_replacement = ''.join([f'{i}' for i in range(num_ellipsis_dims)])
-        expanded_inputs.append(ellipsis_replacement.join(regular_parts))
-      else:
-        expanded_inputs.append(regular_parts[0])
+      parts = [''.join(f'{char}' for char in part) for part in input_str.split('...')]
+      expanded_inputs.append(''.join(map(str, range(len(x.shape)-(len(input_str)-3)))).join(parts) if '...' in input_str else parts[0])
 
-    # Update output string if it contains ellipsis
-    # Handle ellipsis for the output string
-    if '...' in output_str:
-        max_dims = max(len(x.shape) for x in xs)  # Maximum number of dimensions in input tensors
-        max_num_letters_present_lhs = max([len(j) for j in [i.replace("...", "") for i in inputs]])
-        num_ellipsis_dims = max_dims - (len(output_str.replace('...', ''))) - max_num_letters_present_lhs  # Number of ellipsis dimensions
-        # Replace the ellipsis with a sequence of numbers starting from 9 and going down
-        ellipsis_replacement = ''.join([f'{i}' for i in range(num_ellipsis_dims)])
-        output_str = output_str.replace('...', ellipsis_replacement)
-
-    # map the value of each letter in the formula
-    temp = merge_dicts_with_max_value([{letter: dim for letter, dim in zip(letters, tensor.shape)} for letters, tensor in zip(expanded_inputs, xs)]).items()
-    sorted_indices = [x for x, _ in sorted(zip(range(len(temp)), temp), key=lambda i: i[1][0])]
-    letter_val = sorted(temp)
-    
-
-    xs_: List[Tensor] = []
-    lhs = [sorted(enumerate(s), key=lambda e: e[1]) for s in expanded_inputs]
-    for (x, (order, letters)) in zip(xs, [list(zip(*l)) for l in lhs]):
-      reshape_list = []
-      i = 0
-      counter = 0
-      x_shape_sorted = [x.shape[k] for k in sorted_indices]
-      while i < len(letter_val):
-          letter, val = letter_val[i]
-          if letter in letters:
-            if x_shape_sorted[counter] == val:
-              reshape_list.append(val)
-              counter += 1
-            else:
-              reshape_list.append(1)
-              counter+=1
-          else:
-            reshape_list.append(1)
-          i += 1
-      #and idx < len(x.shape) and x.shape[idx] == val
-      # reshape_list = [val if letter in letters  else 1 for idx, (letter, val) in enumerate(letter_val)]
+    letter_val = sorted(merge_dicts_with_max_value([{letter: dim for letter, dim in zip(letters, tensor.shape)} for letters, tensor in zip(expanded_inputs, xs)]).items())
+    lhs, xs_ = [sorted(enumerate(s), key=lambda e: e[1]) for s in expanded_inputs], []
+    for x, (order, letters) in zip(xs, [list(zip(*l)) for l in lhs]):
+      x_shape_sorted = [v for _, v in letter_val if v in set(x.shape)]
+      reshape_list, counter = [], 0
+      for i in range(len(letter_val)):
+        if letter_val[i][0] in letters and letter_val[i][1] == x_shape_sorted[counter]:
+          reshape_list.append(letter_val[i][1])
+          counter += 1
+        else:
+          reshape_list.append(1)
       expand_list = [val for _, val in letter_val]
       xs_.append(x.permute(order).reshape(reshape_list).expand(expand_list))
-
+    if '...' in output_str:
+      num_ellipsis_dims = max(len(x.shape) for x in xs) - len(output_str.replace(".", "")) - len(set(''.join(inputs[-1].replace('.', ''))) - set(output_str.replace(".", "")))
+      output_str = output_str.replace('...', ''.join(map(str, range(num_ellipsis_dims))))
     rhs_order, rhs_letters = tuple(zip(*sorted(enumerate(output_str), key=lambda e: e[1]))) if output_str else ([], [])
-    reduced_tensors = reduce(lambda a, b: a * b, xs_)
-    summed_tensors = reduced_tensors.sum(axis=[axis for axis, (letter, _) in enumerate(letter_val) if letter not in rhs_letters])
-    permuted_tensors = summed_tensors.permute(rhs_order)
-    return summed_tensors.permute(rhs_order)
-    # return reduce(lambda a, b: a * b, xs_).sum(axis=[axis for axis, (letter, _) in enumerate(letter_val) if letter not in rhs_letters]).permute(rhs_order)
-    # return reduce(lambda a, b: a * b, xs_).sum(axis=[axis for axis, (letter, _) in enumerate(letter_val) if letter not in rhs_letters]).permute(rhs_order)
-
+    return reduce(lambda a, b: a * b, xs_).sum(axis=[axis for axis, (letter, _) in enumerate(letter_val) if letter not in rhs_letters]).permute(rhs_order)
   # ***** processing ops *****
 
   def _pool(self, k_:Tuple[sint, ...], stride:Union[Tuple[int, ...], int]=1, dilation:Union[Tuple[int, ...], int]=1) -> Tensor:
