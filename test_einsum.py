@@ -2,51 +2,58 @@ import torch
 from tinygrad import Tensor
 import numpy as np
 
-# Example usage:
-example_input_A = np.random.rand(10, 2, 4, 5, 6, 3)
-example_input_B = np.random.rand(10, 1, 4, 1, 6, 3)
-epsilon_matrix = [[[0,0,0],[0,0,1],[0,-1,0]], [[0,0,-1],[0,0,0],[1,0,0]], [[0,1,0],[-1,0,0],[0,0,0]]]
-epsilon = torch.tensor(epsilon_matrix).float()
-epsilon_tiny = Tensor(epsilon_matrix)
-epsilon_np = np.array(epsilon_matrix)
+# # Example usage:
+# example_input_A = np.random.rand(10, 2, 4, 5, 6, 3)
+# example_input_B = np.random.rand(10, 1, 4, 1, 6, 3)
+# epsilon_matrix = [[[0,0,0],[0,0,1],[0,-1,0]], [[0,0,-1],[0,0,0],[1,0,0]], [[0,1,0],[-1,0,0],[0,0,0]]]
+# epsilon = torch.tensor(epsilon_matrix).float()
+# epsilon_tiny = Tensor(epsilon_matrix)
+# epsilon_np = np.array(epsilon_matrix)
 
-A = torch.tensor(example_input_A).float()
-B = torch.tensor(example_input_B).float()
-A_tiny = Tensor(example_input_A)
-B_tiny = Tensor(example_input_B)
-A_np = example_input_A
-B_np = example_input_B
+# A = torch.tensor(example_input_A).float()
+# B = torch.tensor(example_input_B).float()
+# A_tiny = Tensor(example_input_A)
+# B_tiny = Tensor(example_input_B)
+# A_np = example_input_A
+# B_np = example_input_B
 # Compute the cross product
 
-# self.shape=(10, 1, 4, 1, 6, 3) -> new_shape=(1, 3, 1, 10, 2, 4, 5, 6)
 
-# 4 * 6
+# example_input_a = np.random.rand(4, 2, 5, 10, 6, 3)
+# example_input_b = np.random.rand(4, 1, 5, 10, 6, 3)
 
-# 10, 1, 1, 3, 6, 4
-# 10, 1, 1, 3,, 6, 4
-# 2 * 5
-# print(torch.einsum('ijk,...i,...j->...k', epsilon, A, B))
-# print(np.einsum('ijk,...i,...j->...k', epsilon, A_np, B_np))
-Tensor.einsum_new('ijk,...i,...j->...k', epsilon_tiny, A_tiny, B_tiny)
+# temp_a = torch.tensor(example_input_a)
+# temp_b = torch.tensor(example_input_b)
+# A_tiny = Tensor(example_input_a)
+# B_tiny = Tensor(example_input_b)
 
-# t -> 10
-# l -> 2
-
-# from tinygrad import Tensor
-# import numpy as np
-# import torch
-
-# # a = Tensor(np.random.rand(1,2,3,4,5,6))
-# # b = torch.tensor(np.random.rand(1, 2, 3, 4, 5, 6))
+# print(torch.einsum('...i,...k->...', temp_a, temp_b).shape)
+# print(A_tiny.shape[0])
+# print(Tensor.einsum('...i,...j->...', A_tiny, B_tiny).numpy().shape)
 
 
-# # Assuming 'matrix' is a 2D square tensor
-# matrix = torch.tensor([[1, 2], [3, 4]])
-# # Calculate the trace using einsum
-# trace = torch.einsum('ij->i', matrix)
+#----
+example_input_a = np.random.rand(1, 2, 3)
 
-# print(trace)
+temp_a = torch.tensor(example_input_a)
+A_tiny = Tensor(example_input_a)
+
+print(torch.einsum("jki", temp_a).numpy())
+print(Tensor.einsum("jki", A_tiny).numpy())
+
+# X = [1, 2, 3]
+# Y = [100, 50, 75, 200, 500]
+
+# [x for _, x in sorted(zip(Y, X))]
+
+# letter_val = [('i', 3), ('j', 1), ('k', 2)]
+# x = Tensor.rand((1, 2, 3))
+
+# [x_shape for _, x_shape in sorted(zip(letter_val, x.shape), key=lambda a: a[0][1])]
 
 
-# some_tensor = Tensor([[1, 2], [3, 4]])
-# Tensor.einsum('ij->i', some_tensor)
+
+# a = {"i": 3, "j": 10, "k": 1}
+
+
+# list(range(len(a)))
