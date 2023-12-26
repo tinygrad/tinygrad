@@ -533,6 +533,7 @@ class Tensor:
     inputs_str, output_str = formula.split("->") if "->" in formula else (formula, "".join(sorted(set(formula))))
     inputs = [x for x in cast(str, inputs_str).split(',')]
     assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
+    assert all(s.count('.') / 3 == 1.0 for s in inputs if '.' in s) and (output_str.count('.') / 3 == 1.0 if '.' in output_str else 1), "einsum(): found '.' not part of any ellipsis in input/output strings" # noqa: E501
     expanded_inputs = []
     for input_str, x in zip(inputs, xs):
       parts = [''.join(f'{char}' for char in part) for part in input_str.split('...')]
