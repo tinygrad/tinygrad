@@ -25,9 +25,11 @@ def consec(shape, start=1):
 def set_(reference: Tensor, shape, strides, offset):
   if reference.lazydata.base.realized is None: reference.realize()
   assert reference.lazydata.base.realized, "base has to be realized before setting it to strided's base"
-  strided = Tensor(LazyBuffer(device=reference.device, st=ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),)), optype=None, op=None, dtype=reference.dtype, src=None, base=reference.lazydata.base))   # noqa: E501
+  # TODO: this shouldn't directly create a LazyBuffer
+  strided = Tensor(LazyBuffer(device=reference.device,
+                              st=ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),)),
+                              op=None, dtype=reference.dtype, srcs=(), base=reference.lazydata.base))
   assert strided.lazydata.st.real_strides() == strides, "real_strides should equal strides for strided"
-  assert strided.lazydata in reference.lazydata.base.views, "base.views should contain strided.lazydata"
   return strided
 
 # TODO tries to mimic .detach().copy() or just .copy() behavior
@@ -1226,6 +1228,11 @@ class TestIndexing(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       a[true] = a_expanded
   '''
+
+  def test_getitem_scalars_simple(self):
+    src = Tensor([[[1.,2.],[3.,4.]], [[1,1],[1,1]]])
+    a = src[0].mul(src[1])
+    self.assertEqual(a[0,1].item(), 2)
 
   def test_getitem_scalars(self):
     zero = Tensor(0, dtype=dtypes.int64)

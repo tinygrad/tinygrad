@@ -35,7 +35,7 @@ class CStyleLanguage(NamedTuple):
     BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})",
     BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})",
     BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
-    BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
+    BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPEQ: lambda a,b,dtype: f"({a}=={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
     TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})", TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"
   }
 
@@ -68,17 +68,15 @@ class CStyleLanguage(NamedTuple):
 
     return self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val
 
-  def render_local(self, name:str, size:int):
-    return self.smem_align + self.smem_prefix + f"float {name}[{size}];"
+  def render_local(self, name:str, dtype:DType, size:int):
+    return self.smem_align + self.smem_prefix + f"{dtype.name} {name}[{size}];"
 
   def render_for(self, expr: str, _min:Union[int,str], _max:Union[int,str]) -> str:
     return f"for ({self.generic_var_prefix if self.generic_var_prefix else 'int'} {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
 
-  def render_if(self, cond: str):
-    return f"if ({cond}) {{"
+  def render_if(self, cond: str): return f"if ({cond}) {{"
 
-  def render_conditional(self, cond: str, x:str, y:str) -> str:
-    return f"({cond})?({x}):{y}"
+  def render_conditional(self, cond: str, x:str, y:str) -> str: return f"({cond})?({x}):{y}"
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""  # noqa: E501
@@ -158,7 +156,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
         val = lang.code_for_op[args](*[r[x] for x in vin] + [dtype])
       assert child_count[u] != 0, f"childless ALU op found {u}"
       # TODO: fix index rendering issue. fix clang nested max macro issue
-      if (child_count[u] <= 1 or dtypes.is_int(dtype)) and args != BinaryOps.MAX and not getenv("EXPAND_SSA"):
+      if child_count[u] <= 1 and args != BinaryOps.MAX and not getenv("EXPAND_SSA"):
         r[u] = val
       else:
         kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'alu')} = {val};")
@@ -190,10 +188,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       if child_count[u] <= 1: r[u] = val
       else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
     elif uop == UOps.DEFINE_LOCAL:
+      assert dtype is not None
       if lang.external_local_bufs:
-        prekernel.append(lang.render_local(args[0], args[1]))
+        prekernel.append(lang.render_local(args[0], dtype, args[1]))
       else:
-        kk(lang.render_local(args[0], args[1]))
+        kk(lang.render_local(args[0], dtype, args[1]))
       r[u] = args[0]
     elif uop == UOps.DEFINE_GLOBAL:
       assert dtype is not None
@@ -222,7 +221,8 @@ class OpenCLLanguage(CStyleLanguage):
   xid = [f'get_global_id({i})' for i in range(3)]
   uses_vload = True
   # NOTE: mad is used so the loads aren't reordered into the math on 845
-  code_for_op = {**CStyleLanguage().code_for_op, TernaryOps.MULACC: lambda a,b,c,dtype: f"mad({a},{b},{c})"}
+  code_for_op = {**CStyleLanguage().code_for_op,
+                 TernaryOps.MULACC: lambda a,b,c,dtype: f"mad({a},{b},{c})" if dtypes.is_float(dtype) else f"(({a}*{b})+{c})"}
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
     return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
@@ -304,13 +304,13 @@ class WGSLLanguage(CStyleLanguage):
   barrier="workgroupBarrier();"
   generic_var_prefix = "var "
   external_local_bufs = True
-  code_for_op = { **CStyleLanguage().code_for_op, BinaryOps.CMPLT: lambda x,y,dtype: f"f32({x}<{y})",
+  code_for_op = { **CStyleLanguage().code_for_op,
+                 BinaryOps.CMPLT: lambda x,y,dtype: f"f32({x}<{y})", BinaryOps.CMPEQ: lambda x,y,dtype: f"f32({x}=={y})",
                  TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},bool({a}))" }
-  # HACK: write bool as f32. remove after elementwise op cast inputs properly
+  # HACK: write bool as f32
   type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "f32"}
 
-  def render_local(self, name: str, size: int):
-    return f"var<workgroup> {name}: array<f32,{size}>;"
+  def render_local(self, name: str, dtype:DType, size: int): return f"var<workgroup> {name}: array<{self.type_map[dtype]},{size}>;"
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): return "nan()"
@@ -325,11 +325,9 @@ class WGSLLanguage(CStyleLanguage):
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"  # noqa: E501
     return prg
 
-  def render_if(self, cond: str):
-    return f"if (bool({cond})) {{"
+  def render_if(self, cond: str): return f"if (bool({cond})) {{"
 
-  def render_conditional(self, cond:str, x:str, y:str) -> str:
-    return f"select({y}, {x}, bool({cond}))"
+  def render_conditional(self, cond:str, x:str, y:str) -> str: return f"select({y}, {x}, bool({cond}))"
 
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
     if self.type_map[var_dtype]: return f"bitcast<{self.type_map[var_dtype]}>({x[0]})" if bitcast else f"{self.type_map[var_dtype]}({x[0]})"
