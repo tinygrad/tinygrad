@@ -794,7 +794,7 @@ class Tensor:
     idx = (slice(None),) * dim
     idx_0, idx_1, idx_2 = [idx + (i,) for i in range(3)]
     return Tensor.stack([self[idx_1] * other[idx_2] - self[idx_2] * other[idx_1], self[idx_2] * other[idx_0] - self[idx_0] * other[idx_2], self[idx_0] * other[idx_1] - self[idx_1] * other[idx_0],], dim=dim) # noqa: E501
-  
+
   # ***** op wrappers (wasted lines to make the typechecker happy) *****
 
   def __neg__(self) -> Tensor: return self.neg()
