@@ -82,7 +82,7 @@ class Linearizer(Kernel):
     if len(upcast_dim) == 1 and len(float4_expand := idxs[upcast_dim[0]].expand()) in [4,2]:
       dim, amt = upcast_dim[0], len(float4_expand)
 
-    expand_vars = tuple([rename_var(idx.expand_idx(), f"_uidx{j}") for j, idx in enumerate(idxs)])
+    expand_vars = tuple(rename_var(idx.expand_idx(), f"_uidx{j}") for j, idx in enumerate(idxs))
     fake_idxs = [idx.substitute({idx.expand_idx(): ev}) for idx, ev in zip(idxs, expand_vars)]
     if dim is not None:
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs[:dim] + [float4_expand[0]] + fake_idxs[dim+1:])

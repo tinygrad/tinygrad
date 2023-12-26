@@ -48,7 +48,7 @@ class CheckingShapeTracker:
 
   def shrink(self, arg):
     self.st = self.st.shrink(arg)
-    self.t = self.t[tuple([slice(x[0], x[1]) for x in arg])]
+    self.t = self.t[tuple(slice(x[0], x[1]) for x in arg)]
     return self
 
   def pad(self, arg):
@@ -58,7 +58,7 @@ class CheckingShapeTracker:
 
   def stride(self, arg):
     self.st = self.st.stride(arg)
-    self.t = self.t[tuple([slice(None, None, x) for x in arg])]
+    self.t = self.t[tuple(slice(None, None, x) for x in arg)]
     return self
 
   def __getitem__(self, val):

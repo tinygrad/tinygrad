@@ -36,7 +36,7 @@ def get_run_onnx(onnx_model: ModelProto):
       if attr == 'tensor_type':
         if "dim_value" not in getattr(type_proto, attr).shape.dim.__dir__(): return () # variable type, unable to determine shape
         elif not ret:
-          return tuple([x.dim_value for x in getattr(type_proto, attr).shape.dim])
+          return tuple(x.dim_value for x in getattr(type_proto, attr).shape.dim)
         else:
           ret.extend([(x.dim_value,) for x in getattr(type_proto, attr).shape.dim])
           return tuple(ret)
@@ -181,14 +181,14 @@ def get_run_onnx(onnx_model: ModelProto):
           arg[axis] = (starts[i], ends[i], steps[i])
         new_shape = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in arg)
         if any(s==e for s,e in new_shape): ret = inp[0].shrink(new_shape)
-        else: ret = inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
+        else: ret = inp[0].__getitem__(tuple(slice(s,e,st) for s,e,st in arg))
 
       # need to call backward on intermediate_tensors
       elif n.op_type == "Gradient":
         assert len(opt["xs"]) == len(inp), f"len(opt['xs']):{len(opt['xs'])}, len(inp):{len(inp)} output and input has to match"
         y = opt["y"]
         intermediate_tensors[y].backward()
-        ret = tuple([t.grad for t in inp])
+        ret = tuple(t.grad for t in inp)
 
       # onnx_ops.py
       elif hasattr(onnx_ops, n.op_type):

@@ -195,7 +195,7 @@ class Permute(Function):
 
 class Pad(Function):
   def forward(self, x:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer:
-    self.narg = tuple([(p[0], s+p[0]) for s,p in zip(x.shape, arg)])
+    self.narg = tuple((p[0], s+p[0]) for s,p in zip(x.shape, arg))
     return x.pad(arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
@@ -203,7 +203,7 @@ class Pad(Function):
 
 class Shrink(Function):
   def forward(self, x:LazyBuffer, arg:Tuple[Tuple[sint, sint], ...]) -> LazyBuffer:
-    self.narg = tuple([(p[0], s-p[1]) for s,p in zip(x.shape, arg)])
+    self.narg = tuple((p[0], s-p[1]) for s,p in zip(x.shape, arg))
     return x.shrink(arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
@@ -211,7 +211,7 @@ class Shrink(Function):
 
 class Flip(Function):
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
-    self.arg = tuple([-1 if i in set(axis) else 1 for i in range(len(x.shape))])
+    self.arg = tuple(-1 if i in set(axis) else 1 for i in range(len(x.shape)))
     return x.stride(self.arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:

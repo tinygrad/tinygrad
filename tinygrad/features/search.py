@@ -21,7 +21,7 @@ actions += [
 ]
 if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
 
-def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
+def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple((x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops)
 
 def get_test_global_size(global_size, max_global_size):
   test_global_size = global_size[:]

@@ -250,29 +250,29 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
     for i,s in enumerate(x.shape):
       if pads[i] == (0,0): continue
       elif pads[i][0] and not pads[i][1]:
-        x = x.flip(i).shrink(tuple([(0,s_) if i_ != i else (s-pads[i][0]-1, s_-1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (0,s) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+        x = x.flip(i).shrink(tuple((0,s_) if i_ != i else (s-pads[i][0]-1, s_-1) for i_,s_ in enumerate(x.shape))).pad(tuple((0,0) if i_ != i else (0,s) for i_ in range(x.ndim))) + \
+            x.pad(tuple((0,0) if i_ != i else pads[i] for i_ in range(x.ndim)))
       elif not pads[i][0] and pads[i][1]:
-        x = x.flip(i).shrink(tuple([(0,s_) if i_ != i else (1, pads[i][1]+1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (s,0) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+        x = x.flip(i).shrink(tuple((0,s_) if i_ != i else (1, pads[i][1]+1) for i_,s_ in enumerate(x.shape))).pad(tuple((0,0) if i_ != i else (s,0) for i_ in range(x.ndim))) + \
+            x.pad(tuple((0,0) if i_ != i else pads[i] for i_ in range(x.ndim)))
       else:
-        x = x.flip(i).shrink(tuple([(0,s_) if i_ != i else (s-pads[i][0]-1, s_-1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (0,s+pads[i][1]) for i_ in range(x.ndim)])) + \
-            x.flip(i).shrink(tuple([(0,s_) if i_ != i else (1, pads[i][1]+1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+        x = x.flip(i).shrink(tuple((0,s_) if i_ != i else (s-pads[i][0]-1, s_-1) for i_,s_ in enumerate(x.shape))).pad(tuple((0,0) if i_ != i else (0,s+pads[i][1]) for i_ in range(x.ndim))) + \
+            x.flip(i).shrink(tuple((0,s_) if i_ != i else (1, pads[i][1]+1) for i_,s_ in enumerate(x.shape))).pad(tuple((0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim))) + \
+            x.pad(tuple((0,0) if i_ != i else pads[i] for i_ in range(x.ndim)))
     return x
   if mode == "edge":
     for i,s in enumerate(x.shape):
       if pads[i] == (0,0): continue
       elif pads[i][0] and not pads[i][1]:
-        x = x.shrink(tuple([(0,s_) if i_ != i else (0,1) for i_,s_ in enumerate(x.shape)])).expand([pads[i][0] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (0,s) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+        x = x.shrink(tuple((0,s_) if i_ != i else (0,1) for i_,s_ in enumerate(x.shape))).expand([pads[i][0] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple((0,0) if i_ != i else (0,s) for i_ in range(x.ndim))) + \
+            x.pad(tuple((0,0) if i_ != i else pads[i] for i_ in range(x.ndim)))
       elif not pads[i][0] and pads[i][1]:
-        x = x.shrink(tuple([(0,s_) if i_ != i else (s_-1, s_) for i_,s_ in enumerate(x.shape)])).expand([pads[i][0] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+        x = x.shrink(tuple((0,s_) if i_ != i else (s_-1, s_) for i_,s_ in enumerate(x.shape))).expand([pads[i][0] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple((0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim))) + \
+            x.pad(tuple((0,0) if i_ != i else pads[i] for i_ in range(x.ndim)))
       else:
-        x = x.shrink(tuple([(0,s_) if i_ != i else (0,1) for i_,s_ in enumerate(x.shape)])).expand([pads[i][0] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (0,s+pads[i][1]) for i_ in range(x.ndim)])) + \
-            x.shrink(tuple([(0,s_) if i_ != i else (s_-1, s_) for i_,s_ in enumerate(x.shape)])).expand([pads[i][1] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+        x = x.shrink(tuple((0,s_) if i_ != i else (0,1) for i_,s_ in enumerate(x.shape))).expand([pads[i][0] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple((0,0) if i_ != i else (0,s+pads[i][1]) for i_ in range(x.ndim))) + \
+            x.shrink(tuple((0,s_) if i_ != i else (s_-1, s_) for i_,s_ in enumerate(x.shape))).expand([pads[i][1] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple((0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim))) + \
+            x.pad(tuple((0,0) if i_ != i else pads[i] for i_ in range(x.ndim)))
     return x
   if mode == "constant":
     return _padding(x, seq_pads, axes=seq_axes, constant_value=constant_value)
@@ -381,7 +381,7 @@ def SoftmaxCrossEntropyLoss(scores: Tensor, labels: Tensor, weights=None, ignore
   return loss, y
 
 def ArrayFeatureExtractor(x: Tensor, indices: Tensor):
-  return x.__getitem__(tuple([slice(None) if i != (x.ndim-1) else indices for i in range(x.ndim)]))
+  return x.__getitem__(tuple(slice(None) if i != (x.ndim-1) else indices for i in range(x.ndim)))
 def Gather(x: Tensor, indices: Tensor, axis=0):
   if indices.numel() < 9: # NOTE lessor kernels for smaller indices but kernel number increases depending on size of indices
     x_sh = list(x.shape)
@@ -391,7 +391,7 @@ def Gather(x: Tensor, indices: Tensor, axis=0):
     args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(x_sh)] for i in indices]
     return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
   # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
-  return x.__getitem__(tuple([slice(None) if i != axis else indices for i in range(x.ndim)]))
+  return x.__getitem__(tuple(slice(None) if i != axis else indices for i in range(x.ndim)))
 
 def GatherElements(x: Tensor, indices: Tensor, axis):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
@@ -548,7 +548,7 @@ def Compress(inp: Tensor, condition: Tensor, axis=None):
 
   con_np = safe_numpy(condition)
   con = Tensor(np.arange(condition.shape[0])[con_np]) # no boolean indexing in Tensor
-  return inp.__getitem__(tuple([slice(None) if i != axis else con for i in range(inp.ndim)]))
+  return inp.__getitem__(tuple(slice(None) if i != axis else con for i in range(inp.ndim)))
 
 type_map = {TensorProto.DOUBLE: dtypes.double, TensorProto.FLOAT: dtypes.float32}
 def EyeLike(x: Tensor, dtype=None, k=0):
@@ -559,7 +559,7 @@ def EyeLike(x: Tensor, dtype=None, k=0):
   if shape[0] == shape[1]:
     return Tensor.eye(dim=dim, dtype=dtype)
   diff = (shape[0]-dim, shape[1]-dim)
-  padarg = tuple([(d, d) if d == 0 else (k, d-k) for d in diff])
+  padarg = tuple((d, d) if d == 0 else (k, d-k) for d in diff)
   return Tensor.eye(dim=dim, dtype=dtype).pad(padarg)
 
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)

@@ -50,7 +50,7 @@ class TinyJit(Generic[ReturnType]):
   def __call__(self, *args, **kwargs) -> ReturnType:
     # all inputs (except const) are realized
     input_tensors: Dict[Union[int, str], Tensor] = {cast(Union[int, str], k):v.realize() for k,v in itertools.chain(enumerate(args), kwargs.items()) if v.__class__ is Tensor}  # noqa: E501
-    expected_name_sts_dtype = tuple([(k, v.lazydata.st.unbind(), v.dtype) for k,v in input_tensors.items()])
+    expected_name_sts_dtype = tuple((k, v.lazydata.st.unbind(), v.dtype) for k,v in input_tensors.items())
 
     # get rawbuffers
     # TODO: why can .realized have Any type?
