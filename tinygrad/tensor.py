@@ -472,19 +472,6 @@ class Tensor:
     order[ax1], order[ax2] = order[ax2], order[ax1]
     return self.permute(order)
   def flatten(self, start_dim=0): return self.reshape(shape=self.shape[:start_dim] + (-1,))
-  def cross(self, other, dim=0):
-    if len(self.shape) != len(other.shape): raise RuntimeError("inputs must have the same number of dimensions")
-    if self.shape[dim] != 3 or other.shape[dim] != 3:
-      raise RuntimeError(f"inputs dimension {dim} must have length 3. Got {self.shape[dim]} and {other.shape[dim]}")
-    dim = dim % len(self.shape)
-    idx = (slice(None),) * dim
-    idx_0, idx_1, idx_2 = [idx + (i,) for i in range(3)]
-    result = Tensor.stack([
-      self[idx_1] * other[idx_2] - self[idx_2] * other[idx_1],
-      self[idx_2] * other[idx_0] - self[idx_0] * other[idx_2],
-      self[idx_0] * other[idx_1] - self[idx_1] * other[idx_0],
-    ], dim=dim)
-    return result
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False) -> Tensor:
@@ -800,6 +787,14 @@ class Tensor:
     x,z = x_._broadcasted(other, match_dtype=False)
     return mlops.Where.apply(x.cast(dtypes.bool), *y._broadcasted(z))
 
+  def cross(self, other, dim=0):
+    if len(self.shape) != len(other.shape): raise RuntimeError("inputs must have the same number of dimensions")
+    if self.shape[dim] != 3 or other.shape[dim] != 3: raise RuntimeError(f"inputs dimension {dim} must have length 3. Got {self.shape[dim]} and {other.shape[dim]}") # noqa: E501
+    dim = dim % len(self.shape)
+    idx = (slice(None),) * dim
+    idx_0, idx_1, idx_2 = [idx + (i,) for i in range(3)]
+    return Tensor.stack([self[idx_1] * other[idx_2] - self[idx_2] * other[idx_1], self[idx_2] * other[idx_0] - self[idx_0] * other[idx_2], self[idx_0] * other[idx_1] - self[idx_1] * other[idx_0],], dim=dim) # noqa: E501
+  
   # ***** op wrappers (wasted lines to make the typechecker happy) *****
 
   def __neg__(self) -> Tensor: return self.neg()
