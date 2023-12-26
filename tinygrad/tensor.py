@@ -4,7 +4,7 @@ import time, math
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Iterable, Set, DefaultDict, cast
 from collections import defaultdict
 from functools import partialmethod, reduce
-from itertools import accumulate, chain
+from itertools import accumulate
 import numpy as np
 
 from tinygrad.helpers import DType, dtypes, ImageDType
