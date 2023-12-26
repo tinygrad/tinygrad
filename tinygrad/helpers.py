@@ -33,6 +33,13 @@ def round_up(num, amt:int): return (num+amt-1)//amt * amt
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"  # noqa: E501
   return {k:v for d in ds for k,v in d.items()}
+def merge_dicts_with_max_value(dict_list):
+    result = {}
+    for d in dict_list:
+        for key, value in d.items():
+            if key not in result or value > result[key]:
+                result[key] = value
+    return result
 def partition(lst:List[T], fxn:Callable[[T],bool]):
   a:List[T] = []
   b:List[T] = []
