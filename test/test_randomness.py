@@ -47,10 +47,11 @@ def equal_distribution(tiny_func, torch_func=None, numpy_func=None, shape=(20, 2
   torch.manual_seed(1337)
   np.random.seed(1337)
   assert not (torch_func is None and numpy_func is None), "no function to compare with"
-  x = tiny_func(*shape).numpy().flatten()
+  x1 = tiny_func(*shape).numpy().flatten()
+  x2 = tiny_func(shape).numpy().flatten()
   if numpy_func is not None: y = numpy_func(shape).flatten()
   if torch_func is not None: z = torch_func(shape).numpy().flatten()
-  return (numpy_func is None or kstest(x, y) >= alpha) and (torch_func is None or kstest(x, z) >= alpha)
+  return (numpy_func is None or (kstest(x1, y) >= alpha and kstest(x2, y) >= alpha)) and (torch_func is None or (kstest(x1, z) >= alpha and kstest(x2, z) >= alpha))
 
 def normal_test(func, shape=(20, 23), alpha=0.05): return equal_distribution(func, numpy_func=lambda x: np.random.randn(*x), shape=shape, alpha=alpha)
 

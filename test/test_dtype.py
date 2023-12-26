@@ -1,12 +1,15 @@
 import unittest
 import numpy as np
 import torch
+import operator
 from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX, least_upper_float, temp, least_upper_dtype
 from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
 from hypothesis import given, settings, strategies as st
 
+core_dtypes = list(DTYPES_DICT.values())
+floats = [dt for dt in core_dtypes if dtypes.is_float(dt)]
 def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   # for GPU, cl_khr_fp16 isn't supported
   # for LLVM, it segfaults because it can't link to the casting function
@@ -77,18 +80,18 @@ class TestDType(unittest.TestCase):
 
   def test_same_size_ops(self):
     list(map(
-      lambda dtype: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype,
-                              target_dtype=least_upper_dtype(self.DTYPE, dtype)) if dtype.itemsize == self.DTYPE.itemsize else None,
+      lambda dtype: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype) if dtype.itemsize == self.DTYPE.itemsize else None,
       get_available_cast_dtypes(self.DTYPE)
     ))
-  def test_upcast_ops(self): list(map(
-    lambda dtype: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype) if dtype.itemsize > self.DTYPE.itemsize else None,
-    get_available_cast_dtypes(self.DTYPE)
+  def test_upcast_ops(self):
+    list(map(
+      lambda dtype: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype) if dtype.itemsize > self.DTYPE.itemsize else None,
+      get_available_cast_dtypes(self.DTYPE)
   ))
   def test_upcast_to_ops(self):
     list(map(
-    lambda dtype: _test_ops(a_dtype=dtype, b_dtype=self.DTYPE) if dtype.itemsize < self.DTYPE.itemsize else None,
-    get_available_cast_dtypes(self.DTYPE)
+      lambda dtype: _test_ops(a_dtype=dtype, b_dtype=self.DTYPE) if dtype.itemsize < self.DTYPE.itemsize else None,
+      get_available_cast_dtypes(self.DTYPE)
   ))
   def test_bitcast(self):
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
@@ -305,16 +308,27 @@ class TestTypeSpec(unittest.TestCase):
     assert Tensor.arange(3, 9, 0.7).dtype == dtypes.default_float
     assert Tensor.arange(3, 8.5, 3).dtype == dtypes.default_float
 
-core_types = list(DTYPES_DICT.values())
-floats = [dt for dt in core_types if dtypes.is_float(dt)]
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't follow the bool ops spec")
+  @given(st.sampled_from(core_dtypes), st.sampled_from([operator.gt, operator.ge, operator.le, operator.lt, operator.eq, operator.ne]))
+  def test_bool_ops(self, dtype, op):
+    assert op(Tensor.rand(4, 4, dtype=dtype), Tensor.rand(4, 4, dtype=dtype)).dtype == dtypes.bool
+
+  @given(st.sampled_from(core_dtypes),
+         st.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), st.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
+  def test_functions_return_index(self, dtype, default_int, default_float):
+    dtypes.default_int, dtypes.default_float = default_int, default_float
+    assert Tensor([0, 1], dtype=dtype).argmax().dtype == dtypes.default_int
+    assert Tensor([0, 1], dtype=dtype).argmin().dtype == dtypes.default_int
+    assert Tensor([0, 1], dtype=dtype).multinomial().dtype == dtypes.default_int
+
 class TestTypePromotion(unittest.TestCase):
-  @given(st.sampled_from(core_types))
+  @given(st.sampled_from(core_dtypes))
   def test_self_promo_to_self(self, dtype):
     assert least_upper_dtype(dtype) == dtype
     assert least_upper_dtype(dtype, dtype) == dtype
     assert least_upper_dtype(dtype, dtype, dtype) == dtype
 
-  @given(st.sampled_from(core_types), st.sampled_from(core_types))
+  @given(st.sampled_from(core_dtypes), st.sampled_from(core_dtypes))
   def test_promo_resulted_higher_than_inputs(self, dtype1, dtype2):
     result = least_upper_dtype(dtype1, dtype2)
     assert result >= dtype1 and result >= dtype2
@@ -399,6 +413,41 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.bfloat16) + True).dtype == dtypes.bfloat16
     assert (Tensor([0, 1], dtype=dtypes.float32) + True).dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64) + True).dtype == dtypes.float64
+
+  def test_sum(self):
+    assert (Tensor([0, 1], dtype=dtypes.bool)).sum().dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int8)).sum().dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int16)).sum().dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int32)).sum().dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int64)).sum().dtype == dtypes.int64
+    assert (Tensor([0, 1], dtype=dtypes.uint8)).sum().dtype == dtypes.uint32
+    assert (Tensor([0, 1], dtype=dtypes.uint16)).sum().dtype == dtypes.uint32
+    assert (Tensor([0, 1], dtype=dtypes.uint32)).sum().dtype == dtypes.uint32
+    assert (Tensor([0, 1], dtype=dtypes.uint64)).sum().dtype == dtypes.uint64
+    assert (Tensor([0, 1], dtype=dtypes.float16)).sum().dtype == dtypes.float16
+    assert (Tensor([0, 1], dtype=dtypes.bfloat16)).sum().dtype == dtypes.bfloat16
+    assert (Tensor([0, 1], dtype=dtypes.float32)).sum().dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.float64)).sum().dtype == dtypes.float64
+
+  def test_cumsum(self):
+    assert (Tensor([0, 1], dtype=dtypes.bool)).cumsum(0).dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int8)).cumsum(0).dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int16)).cumsum(0).dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int32)).cumsum(0).dtype == dtypes.int32
+    assert (Tensor([0, 1], dtype=dtypes.int64)).cumsum(0).dtype == dtypes.int64
+    assert (Tensor([0, 1], dtype=dtypes.uint8)).cumsum(0).dtype == dtypes.uint32
+    assert (Tensor([0, 1], dtype=dtypes.uint16)).cumsum(0).dtype == dtypes.uint32
+    assert (Tensor([0, 1], dtype=dtypes.uint32)).cumsum(0).dtype == dtypes.uint32
+    assert (Tensor([0, 1], dtype=dtypes.uint64)).cumsum(0).dtype == dtypes.uint64
+    assert (Tensor([0, 1], dtype=dtypes.float16)).cumsum(0).dtype == dtypes.float16
+    assert (Tensor([0, 1], dtype=dtypes.bfloat16)).cumsum(0).dtype == dtypes.bfloat16
+    assert (Tensor([0, 1], dtype=dtypes.float32)).cumsum(0).dtype == dtypes.float32
+    assert (Tensor([0, 1], dtype=dtypes.float64)).cumsum(0).dtype == dtypes.float64
+
+  @given(st.sampled_from(core_dtypes), st.sampled_from(core_dtypes))
+  @settings(deadline=None)
+  def test_matmul(self, dt1, dt2):
+    assert (Tensor([0, 1], dtype=dt1) @ Tensor([0, 1], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
 
 if __name__ == '__main__':
   unittest.main()
