@@ -78,7 +78,6 @@ class Kernel:
     assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
     self.reduceop = reduceops[0] if reduceops else None
 
-    # create new shapetrackers inside this kernel, we will permute them
     self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = dedup([x.arg for x in self.ast.lazyops if x.op in BufferOps])
     assert isinstance(self.bufs[0], MemBuffer) and self.bufs[0].idx == 0, f"buffer 0 is not the store buffer {self.bufs[0]}"
 
@@ -86,7 +85,7 @@ class Kernel:
     self.earlybufs = [x.arg for x in self.reduceop.lazyops if x.op in BufferOps] if self.reduceop else []
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
 
-    # create the (permuted) shapetrackers
+    # create new shapetrackers inside this kernel, we will permute them
     self.sts: List[ShapeTracker] = [x.st for x in cast(List[Union[MemBuffer, ConstBuffer]], self.bufs)]
 
     # move all reduce axes to the end
