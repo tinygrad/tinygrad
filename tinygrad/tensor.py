@@ -537,7 +537,7 @@ class Tensor:
       parts = [''.join(f'{char}' for char in part) for part in input_str.split('...')]
       expanded_inputs.append(''.join(map(str, range(len(x.shape)-(len(input_str)-3)))).join(parts) if '...' in input_str else parts[0])
 
-    letter_val = sorted(merge_dicts_with_max_value([{letter: dim for letter, dim in zip(letters, tensor.shape)} for letters, tensor in zip(expanded_inputs, xs)]).items())
+    letter_val = sorted(merge_dicts_with_max_value([{letter: dim for letter, dim in zip(letters, tensor.shape)} for letters, tensor in zip(expanded_inputs, xs)]).items()) # noqa: E501
     lhs, xs_ = [sorted(enumerate(s), key=lambda e: e[1]) for s in expanded_inputs], []
     for x, (order, letters) in zip(xs, [list(zip(*l)) for l in lhs]):
       x_shape_sorted = [v for _, v in letter_val if v in set(x.shape)]
@@ -551,10 +551,10 @@ class Tensor:
       expand_list = [val for _, val in letter_val]
       xs_.append(x.permute(order).reshape(reshape_list).expand(expand_list))
     if '...' in output_str:
-      num_ellipsis_dims = max(len(x.shape) for x in xs) - len(output_str.replace(".", "")) - len(set(''.join(inputs[-1].replace('.', ''))) - set(output_str.replace(".", "")))
+      num_ellipsis_dims = max(len(x.shape) for x in xs) - len(output_str.replace(".", "")) - len(set(''.join(inputs[-1].replace('.', ''))) - set(output_str.replace(".", ""))) # noqa: E501
       output_str = output_str.replace('...', ''.join(map(str, range(num_ellipsis_dims))))
     rhs_order, rhs_letters = tuple(zip(*sorted(enumerate(output_str), key=lambda e: e[1]))) if output_str else ([], [])
-    return reduce(lambda a, b: a * b, xs_).sum(axis=[axis for axis, (letter, _) in enumerate(letter_val) if letter not in rhs_letters]).permute(rhs_order)
+    return reduce(lambda a, b: a * b, xs_).sum(axis=[axis for axis, (letter, _) in enumerate(letter_val) if letter not in rhs_letters]).permute(rhs_order) # noqa: E501
   # ***** processing ops *****
 
   def _pool(self, k_:Tuple[sint, ...], stride:Union[Tuple[int, ...], int]=1, dilation:Union[Tuple[int, ...], int]=1) -> Tensor:

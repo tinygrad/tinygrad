@@ -509,7 +509,7 @@ class TestOps(unittest.TestCase):
     # Transposing last two dimensions
     helper_test_op([(3,2,4,5)], lambda a: torch.einsum('...ij->...ji', a), lambda a: Tensor.einsum('...ij->...ji', a), atol=1e-5)
     # Cross product broadcasting
-    helper_test_op([(3, 3, 3), (10, 2, 4, 5, 6, 3), (10, 1, 4, 1, 6, 3)], lambda a, b, c: torch.einsum('ijk,...i,...k->...k', a, b ,c), lambda a, b, c: Tensor.einsum('ijk,...i,...k->...k', a, b, c), atol=1e-5)
+    helper_test_op([(3, 3, 3), (10, 2, 4, 5, 6, 3), (10, 1, 4, 1, 6, 3)], lambda a, b, c: torch.einsum('ijk,...i,...k->...k', a, b, c), lambda a, b, c: Tensor.einsum('ijk,...i,...k->...k', a, b, c), atol=1e-5)
     # Ellipsis on left hand side
     helper_test_op([(3, 30)], lambda a: torch.einsum("i...->", a), lambda a: Tensor.einsum("i...->", a))
     # 2 letters after ellipsis

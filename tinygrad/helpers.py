@@ -37,7 +37,7 @@ def merge_dicts_with_max_value(dict_list):
   result = {}
   for d in dict_list:
     for key, value in d.items():
-      assert (key not in result or (result[key] == value or value == 1)), f"cannot merge, {d} contains different values for the same key (non 1 values)"
+      assert (key not in result or (result[key] == value or value == 1)), f"cannot merge, {d} contains different values for the same key (non 1 values)" # noqa: E501
       result[key] = value if key not in result or value > result[key] else result[key]
   return result
 def partition(lst:List[T], fxn:Callable[[T],bool]):
