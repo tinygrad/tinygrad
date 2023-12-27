@@ -23,6 +23,20 @@ class TestBeamSearch(unittest.TestCase):
     c = (a@b).realize()
     np.testing.assert_allclose(c.numpy(), a.numpy() @ b.numpy(), atol=1e-4, rtol=1e-4)
 
+  def test_big_prime_number_max(self):
+    a = -Tensor(np.random.rand(367, 367))
+    b = Tensor(np.random.rand(367, 367))
+    # if incorrectly padded 0, the max would be 0 instead of a negative number
+    c = (a*b).max(1)
+    np.testing.assert_allclose(c.numpy(), (a.numpy() * b.numpy()).max(1), atol=1e-4, rtol=1e-4)
+
+  def test_big_prime_number_sum(self):
+    a = Tensor(np.random.rand(367, 367))
+    b = Tensor(np.random.rand(367, 367))
+    # if incorrectly padded 0, the sum would be inf
+    c = (a/b).sum(1).realize()
+    np.testing.assert_allclose(c.numpy(), (a.numpy() / b.numpy()).sum(1), atol=1e-4, rtol=1e-4)
+
   def test_variable_big_prime_number(self):
     v = Variable("v", 1, 400).bind(367)
     a = Tensor(np.random.rand(367, 367))
