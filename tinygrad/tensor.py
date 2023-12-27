@@ -526,7 +526,7 @@ class Tensor:
 
   @staticmethod
   def einsum(formula: str, *raw_xs) -> Tensor:
-    xs: Tuple[Tensor] = argfix(*raw_xs)    
+    xs: Tuple[Tensor] = argfix(*raw_xs)
     formula = formula.replace(" ", "")
     inputs_str, output_str = formula.split("->") if "->" in formula else (formula, "".join(sorted(set(formula))))
     inputs = [x for x in cast(str, inputs_str).split(',')]
