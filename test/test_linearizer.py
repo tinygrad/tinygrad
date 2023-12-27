@@ -130,11 +130,8 @@ def helper_realized_ast(r:Tensor):
   return s[-1].ast, [output_buffer] + [l.realized for l in s[-1].inputs]
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
+@unittest.skipIf(not Device[Device.DEFAULT].linearizer_opts.supports_float4, "Device does not support float4")
 class TestFloat4(unittest.TestCase):
-  def setUp(self):
-    if not Device[Device.DEFAULT].linearizer_opts.supports_float4:
-      self.skipTest("Device does not support float4")
-
   @staticmethod
   def count_float4(k):
     return (len([uop for uop in k.uops if uop.uop == UOps.LOAD and uop.dtype == dtypes.float.vec(4)]),
