@@ -14,15 +14,16 @@ tensor_methods = {"Neg", "Reciprocal", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mis
 # **************** Free Ops ****************
 
 def Identity(x: Tensor): return x
-def Add(x: Tensor, other: Tensor, broadcast=None): return x + other if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else (x + other).cast(x.dtype)
+def Add(x: Tensor, other: Tensor, broadcast=None): return x + other
 def Sub(x: Union[Tensor, Any], other: Tensor): return x - other
-def Div(x: Tensor, other: Tensor): return x / other if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else x.div(other).floor()   # TODO: this has dtype issues
+# TODO: this has dtype issues
+def Div(x: Tensor, other: Tensor): return x / other
 def Pow(x: Tensor, other: Tensor): return x ** other
-def Less(x:Tensor,y:Tensor): return x<y
-def LessOrEqual(x:Tensor,y:Tensor): return x<=y
-def Greater(x:Tensor,y:Tensor): return x>y
-def GreaterOrEqual(x:Tensor,y:Tensor): return x>=y
-def Equal(x:Tensor,y:Tensor): return x==y
+def Less(x:Tensor,y:Tensor): return x < y
+def LessOrEqual(x:Tensor,y:Tensor): return x <= y
+def Greater(x:Tensor,y:Tensor): return x > y
+def GreaterOrEqual(x:Tensor,y:Tensor): return x >= y
+def Equal(x:Tensor,y:Tensor): return x == y
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
@@ -125,7 +126,7 @@ def Unsqueeze(data: Tensor, axes):
       new_shape[i] = next(ptr)
   return data.reshape(new_shape)
 
-def Binarizer(x, threshold=0.0): return (x > threshold).cast(dtypes.float32)
+def Binarizer(x, threshold=0.0): return (x > threshold).float()
 
 def ArgMax(x: Tensor, axis=0, keepdims=1, select_last_index=0):
   axis = axis + x.ndim if axis < 0 else axis
@@ -286,9 +287,9 @@ def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1
   ret = _padding(X, pads, auto_pad, constant_value=float("-inf"), axes=tuple(range(len(X.shape)))[2:], strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
   ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations)
   ret_len, X_len = ret.numel(), X.numel()
-  indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().reshape(1, X_len).expand(ret_len, X_len)) * Tensor.arange(X_len).reshape(1, X_len).expand(ret_len, X_len)).sum(1).reshape(ret.shape).cast(dtypes.int64)
+  indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().reshape(1, X_len).expand(ret_len, X_len)) * Tensor.arange(X_len).reshape(1, X_len).expand(ret_len, X_len)).sum(1).reshape(ret.shape)
   if storage_order: indices = indices.transpose(indices.ndim-2, indices.ndim-1)
-  return ret, indices
+  return ret, indices.cast(dtypes.int64)
 
 def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Tensor=None, kernel_shape=None, pads=None, strides=None):
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
@@ -367,7 +368,7 @@ def NegativeLogLikelihoodLoss(x: Tensor, target: Tensor, weight=None, ignore_ind
 
 def SoftmaxCrossEntropyLoss(scores: Tensor, labels: Tensor, weights=None, ignore_index=None, reduction="mean"):
   _N, C, *s_dimensions = scores.shape
-  if ignore_index is not None: labels = (labels == ignore_index).where(C+1, labels).cast(dtypes.int32)
+  if ignore_index is not None: labels = (labels == ignore_index).where(C+1, labels)
   mask = labels.unsqueeze(1) == Tensor.arange(C).reshape(1, C, *[1]*len(s_dimensions))
   y = scores.log_softmax(axis=1)
   if weights is not None: weights = weights.__getitem__(tuple([labels, *[slice(None)]*(weights.ndim-1)]))
@@ -395,7 +396,7 @@ def GatherElements(x: Tensor, indices: Tensor, axis):
 
 def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
   assert n <= 1, f"n:{n} shouldn't be larger than 1"
-  b = x.cast(dtypes.int32).contiguous().cast(x.dtype)
+  b = x.trunc()
   b = (b >= 0).where(b+n, b-n)
   if equidistant_case == "round_down": return (x > b).where(b+1-n, b-n)
   if equidistant_case == "round_up": return (x >= b).where(b+1-n, b-n)
