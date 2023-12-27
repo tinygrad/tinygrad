@@ -15,29 +15,32 @@ tensor_methods = {"Neg", "Reciprocal", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mis
 
 def Identity(x: Tensor): return x
 def Add(x: Tensor, other: Tensor, broadcast=None): return x + other if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else (x + other).cast(x.dtype)
-def Sub(x: Union[Tensor, Any], other: Tensor): return x - other # some test has input as int
+def Sub(x: Union[Tensor, Any], other: Tensor): return x - other
 def Div(x: Tensor, other: Tensor): return x / other if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else x.div(other).floor()   # TODO: this has dtype issues
-def Pow(x: Tensor, other: Tensor): return x.float() ** other.float()
-def Less(x:Tensor,y:Tensor): return (x<y).cast(dtypes.bool)
-def LessOrEqual(x:Tensor,y:Tensor): return (x<=y).cast(dtypes.bool)
-def Greater(x:Tensor,y:Tensor): return (x>y).cast(dtypes.bool)
-def GreaterOrEqual(x:Tensor,y:Tensor): return (x>=y).cast(dtypes.bool)
-def Equal(x:Tensor,y:Tensor): return (x==y).cast(dtypes.bool)
+def Pow(x: Tensor, other: Tensor): return x ** other
+def Less(x:Tensor,y:Tensor): return x<y
+def LessOrEqual(x:Tensor,y:Tensor): return x<=y
+def Greater(x:Tensor,y:Tensor): return x>y
+def GreaterOrEqual(x:Tensor,y:Tensor): return x>=y
+def Equal(x:Tensor,y:Tensor): return x==y
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
 def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
 def Cast(x: Tensor, to): return x.cast(dtypes.from_np(tensor_dtype_to_np_dtype(to)))
+# TODO maybe support more dtypes
+def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
 
 # **************** Simple Ops ****************
 
 def Constant(value: Tensor=None, value_float=None, value_floats=None, value_int=None, value_ints=None, value_string=None, value_strings=None):
-  if value: return value
-  if value_float: return Tensor(value_float, dtype=dtypes.float32, requires_grad=False)
-  if value_floats: return Tensor(list(value_floats), dtype=dtypes.float32, requires_grad=False)
-  if value_int: return Tensor(value_int, dtype=dtypes.int64, requires_grad=False)
-  if value_ints: return Tensor(list(value_ints), dtype=dtypes.int64, requires_grad=False)
-  if value_string or value_strings: raise NotImplementedError('value_string or value_strings not implemented for Constant op')
+  print(value)
+  if value is not None: return value
+  if value_float is not None: return Tensor(value_float, dtype=dtypes.float32, requires_grad=False)
+  if value_floats is not None: return Tensor(list(value_floats), dtype=dtypes.float32, requires_grad=False)
+  if value_int is not None: return Tensor(value_int, dtype=dtypes.int64, requires_grad=False)
+  if value_ints is not None: return Tensor(list(value_ints), dtype=dtypes.int64, requires_grad=False)
+  if value_string is not None or value_strings is not None: raise NotImplementedError('value_string or value_strings not implemented for Constant op')
 
 def HardSigmoid(x: Tensor, alpha=0.2, beta=0.5): return (alpha*x + beta).clip(0, 1)
 def Gelu(x:Tensor, approximate=None): return x.gelu() if approximate == "tanh" else 0.5 * x * (1 + Erf(x/math.sqrt(2)))
@@ -80,10 +83,10 @@ def Flatten(x: Tensor, axis=1): return x.reshape(prod((1,) + x.shape[0:axis]), -
 def Reshape(data: Tensor, shape: Tensor, allowzero=0):
   return data.reshape([int(x) if x != 0 else (0 if allowzero else data.shape[i]) for i,x in enumerate(safe_numpy(shape))])
 def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
-def And(x:Tensor, y:Tensor): return (x==y).where(x, 0).cast(dtypes.bool)
-def Or(x:Tensor, y:Tensor): return (x==y).where(x, 1).cast(dtypes.bool)
-def Xor(x:Tensor, y:Tensor): return (x==y).where(0, 1).cast(dtypes.bool)
-def Not(x:Tensor): return (x==1).where(0, 1).cast(dtypes.bool)
+def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
+def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
+def Xor(x:Tensor, y:Tensor): return (x==y).where(False, True)
+def Not(x:Tensor): return (x==1).where(False, True)
 
 def Asin(x): return Atan(x / Tensor.sqrt(1 - x * x))
 def Acos(x: Tensor):
@@ -107,7 +110,7 @@ def Atan(y: Tensor):
 
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
   k = int(k.numpy().item()) if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
-  return x.triu(k).cast(dtypes.int64) if upper else x.tril(k).cast(dtypes.int64)
+  return x.triu(k)if upper else x.tril(k)
 
 def Squeeze(data: Tensor, axes):
   if isinstance(axes, Tensor): axes = safe_numpy(axes)
@@ -133,12 +136,6 @@ def ArgMin(x, axis=0, keepdims=1, select_last_index=0): return ArgMax(-x, axis=a
 
 def Concat(*xs: List[Tensor], axis): return xs[0].cat(*xs[1:], dim=axis)
 def Transpose(x: Tensor, perm=None): return x.permute(order=list(range(len(x.shape))[::-1]) if perm is None else perm)
-
-# NOTE: since we only have one type, this is valid!
-# TODO: fix this with dtypes
-def CastLike(x, target_type):
-  assert isinstance(target_type, Tensor), "can only CastLike Tensor"
-  return x
 
 def ConstantOfShape(x, value:Tensor=None):
   if value is None: value=Tensor([0.0])
@@ -351,7 +348,6 @@ def MeanVarianceNormalization(x: Tensor, axis=(0, 2, 3)):
   return (x - data_mean) / (std + 1e-9)
 
 def NegativeLogLikelihoodLoss(x: Tensor, target: Tensor, weight=None, ignore_index=None, reduction="mean"):
-  target = target.cast(dtypes.float32)
   N, C, i_shape = x.shape[0], x.shape[1], x.shape
   t_shape = target.shape
   if len(x.shape) != 3:
@@ -404,10 +400,9 @@ def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
   if equidistant_case == "round_down": return (x > b).where(b+1-n, b-n)
   if equidistant_case == "round_up": return (x >= b).where(b+1-n, b-n)
   if equidistant_case == "round_to_even":
-    def _and(cond1, cond2): return ((cond1.cast(dtypes.int) + cond2.cast(dtypes.int)) == 2).where(1, 0)
     x_ceil_fraction = x.ceil()/2
     cond_ceil_even = x_ceil_fraction.ceil() == x_ceil_fraction
-    x = (_and(x == b, cond_ceil_even)).where(x+1-n, x)
+    x = (And(x == b, cond_ceil_even)).where(x+1-n, x)
     x = (x > b).where(b+1-n, b-n)
     return x
 
@@ -566,20 +561,19 @@ def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 
 # Needs work
 def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
-  ret = (x == float("inf"))*detect_positive + (x == float("-inf"))*detect_negative + Tensor.zeros(*x.shape)
-  return ret.cast(dtypes.bool)
+  ret = (x == float("inf")) * detect_positive + (x == float("-inf"))*detect_negative + Tensor.zeros(*x.shape)
+  return ret
 
 def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1):
   axis = axis + x.ndim if axis < 0 else axis
-  x = x.cast(dtypes.float)
-  if isinstance(x_zero_point, Tensor): x_zero_point.cast(dtypes.float)
+  if isinstance(x_zero_point, Tensor): x_zero_point
   x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
   x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
-  return ((x - x_zer) * x_sc).cast(x_scale.dtype)
+  return ((x - x_zer) * x_sc)
 
 # Needs work
 def IsNaN(x: Tensor):
-  return (x < float("-inf")).cast(dtypes.bool)
+  return x < float("-inf")
 
 # copied from https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_image_decoder.py
 # without importing PIL we'll have to manually decode a bunch of image formats like PNG, JPEG, WebP, etc
