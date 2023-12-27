@@ -8,7 +8,7 @@ from itertools import accumulate
 import numpy as np
 
 from tinygrad.helpers import DType, dtypes, ImageDType, least_upper_float, least_upper_dtype
-from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts_with_max_value, fully_flatten
+from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts_broadcasted, fully_flatten
 from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
@@ -532,16 +532,11 @@ class Tensor:
     inputs = [x for x in inputs_str.split(',')]
     assert len(xs) == len(inputs), f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}"
     assert all(s.count('.') / 3 == 1.0 for s in inputs if '.' in s) and (output_str.count('.') / 3 == 1.0 if '.' in output_str else 1), "einsum(): found '.' not part of any ellipsis in input/output strings" # noqa: E501
-    expanded_inputs = []
-    for input_str, x in zip(inputs, xs):
-      parts = [''.join(f'{char}' for char in part) for part in input_str.split('...')]
-      expanded_inputs.append(''.join(map(str, range(len(x.shape)-(len(input_str)-3)))).join(parts) if '...' in input_str else parts[0])
-
-    letter_val = sorted(merge_dicts_with_max_value([{letter: dim for letter, dim in zip(letters, tensor.shape)} for letters, tensor in zip(expanded_inputs, xs)]).items()) # noqa: E501
+    expanded_inputs = [''.join(map(str, range(len(x.shape) - (len(input) - 3)))).join(input.split('...')) if '...' in input else input for input, x in zip(inputs, xs)] # noqa: E501
+    letter_val = sorted(merge_dicts_broadcasted([{letter: dim for letter, dim in zip(letters, tensor.shape)} for letters, tensor in zip(expanded_inputs, xs)]).items()) # noqa: E501
     lhs, xs_ = [sorted(enumerate(s), key=lambda e: e[1]) for s in expanded_inputs], []
     for x, (order, letters) in zip(xs, [list(zip(*l)) for l in lhs]):
-      x_shape_sorted = [v for _, v in letter_val if v in set(x.shape)]
-      reshape_list, counter = [], 0
+      x_shape_sorted, reshape_list, counter = [v for _, v in letter_val if v in set(x.shape)], [], 0
       for i in range(len(letter_val)):
         if letter_val[i][0] in letters and letter_val[i][1] == x_shape_sorted[counter]:
           reshape_list.append(letter_val[i][1])
