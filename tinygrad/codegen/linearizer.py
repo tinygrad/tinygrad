@@ -76,19 +76,17 @@ class Linearizer(Kernel):
     const = buf.val if isinstance(buf, ConstBuffer) else acc
 
     def rename_var(v: VariableOrNum, expr: str): return v if isinstance(v, NumNode) else Variable(expr, v.min, v.max)
-
-    amt, dim = 1, None
-    upcast_dim = self.get_upcast_dim(i)
-    if len(upcast_dim) == 1 and len(float4_expand := idxs[upcast_dim[0]].expand()) in [4,2]:
-      dim, amt = upcast_dim[0], len(float4_expand)
-
     expand_vars = tuple([rename_var(idx.expand_idx(), f"_uidx{j}") for j, idx in enumerate(idxs)])
     fake_idxs = [idx.substitute({idx.expand_idx(): ev}) for idx, ev in zip(idxs, expand_vars)]
-    if dim is not None:
+
+    dim, amt = None, 1
+    # float 4 grouping
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := idxs[upcast_dim[0]].expand()) in [4,2]:
+      dim, amt = upcast_dim[0], len(float4_expand)
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs[:dim] + [float4_expand[0]] + fake_idxs[dim+1:])
-      if (g_idx // amt * amt).render() != g_idx.render():
-        (g_idx, g_valid), amt, dim = self.sts[i].expr_idxs(fake_idxs), 1, None
-    else:
+      # do not use float4 if idx is not aligned
+      if g_idx != (g_idx//amt*amt): dim, amt = None, 1
+    if dim is None:
       g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
 
     if amt > 1: localtype = localtype.vec(amt)
@@ -142,17 +140,16 @@ class Linearizer(Kernel):
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
-    upcast_dim = self.get_upcast_dim(i)
-    if len(upcast_dim) == 1 and len(expanded_nodes[upcast_dim[0]]) in [2,4]:
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expanded_nodes[upcast_dim[0]]) in [2,4]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
-        _idx = k[:upcast_dim[0]] + (expanded_nodes[upcast_dim[0]][0],) + k[upcast_dim[0]+1:]
+        _idx = k[:upcast_dim[0]] + (float4_expand[0],) + k[upcast_dim[0]+1:]
         grouped_store_offset[_idx].append(store_offset[k])
       store_offset_new = {}
       for k,out_tokens in grouped_store_offset.items():
         amt = len(out_tokens)
         idx, valid = self.sts[i].expr_idxs(k)
-        assert idx.render() == ((idx//amt)*amt).render(), "float4 stores are always aligned"
+        assert idx == ((idx//amt)*amt), "float4 stores are always aligned"
         store_offset_new[k] = self.uop(UOps.CAST, buf.dtype.vec(amt), tuple(out_tokens))
       store_offset = store_offset_new
 
