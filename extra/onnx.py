@@ -59,7 +59,7 @@ def get_run_onnx(onnx_model: ModelProto):
       elif len(inp.int32_data) > 0:
         ret = Tensor(np.array(inp.int32_data, dtype=np.int32).reshape(inp.dims), requires_grad=False)
       else:
-        ret = Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
+        ret = Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).reshape(inp.dims).copy(), requires_grad=False)
     else:
       raise Exception(f"bad data type {inp.name} {inp.dims} {inp.data_type}")
     return ret
@@ -171,7 +171,7 @@ def get_run_onnx(onnx_model: ModelProto):
           starts, ends = inp[1:3]
           axes = safe_numpy(Tensor.arange(inp[0].ndim) if len(inp) <= 3 else inp[3]).tolist()
           steps = safe_numpy(inp[4]) if len(inp) > 4 else [1]*inp[0].ndim
-          starts, ends = safe_numpy(starts.ceil().cast(dtypes.int32)).tolist(), safe_numpy(ends.ceil().cast(dtypes.int32)).tolist()
+          starts, ends = safe_numpy(starts.ceil()).tolist(), safe_numpy(ends.ceil()).tolist()
         arg = [(0,x,1) for x in inp[0].shape]
         for i, axis in enumerate(axes):
           axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)

@@ -9,16 +9,13 @@ import numpy as np
 
 tensor_methods = {"Neg", "Reciprocal", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
                   "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
-                  "Elu", "Celu"}
+                  "Elu", "Celu", "Div", "Pow"}
 
 # **************** Free Ops ****************
 
 def Identity(x: Tensor): return x
 def Add(x: Tensor, other: Tensor, broadcast=None): return x + other
 def Sub(x: Union[Tensor, Any], other: Tensor): return x - other
-# TODO: this has dtype issues
-def Div(x: Tensor, other: Tensor): return x / other
-def Pow(x: Tensor, other: Tensor): return x ** other
 def Less(x:Tensor,y:Tensor): return x < y
 def LessOrEqual(x:Tensor,y:Tensor): return x <= y
 def Greater(x:Tensor,y:Tensor): return x > y
@@ -29,7 +26,7 @@ def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
 def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
 def Cast(x: Tensor, to): return x.cast(dtypes.from_np(tensor_dtype_to_np_dtype(to)))
-# TODO maybe support more dtypes
+# NOTE: does not support saturate
 def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
 
 # **************** Simple Ops ****************
@@ -236,7 +233,7 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
   constant_value = value if constant_value is None else float(safe_numpy(constant_value))
   seq_pads = list(pads) if isinstance(pads, tuple) else safe_numpy(pads)
   seq_pads = [math.ceil(i) for i in seq_pads]
-  seq_axes = safe_numpy(axes).astype(np.int32).tolist() if axes is not None else None
+  seq_axes = safe_numpy(axes).tolist() if axes is not None else None
   base_shape = x.shape
   pads = _format_padding(seq_pads, ndims=len(x.shape), axes=seq_axes)
   if mode == "wrap":
