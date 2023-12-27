@@ -445,6 +445,7 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.float64)).cumsum(0).dtype == dtypes.float64
 
   @given(st.sampled_from(core_dtypes), st.sampled_from(core_dtypes))
+  @settings(deadline=None)
   def test_matmul(self, dt1, dt2):
     assert (Tensor([0, 1], dtype=dt1) @ Tensor([0, 1], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
 

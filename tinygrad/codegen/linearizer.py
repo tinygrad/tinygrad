@@ -111,12 +111,12 @@ class Linearizer(Kernel):
           buf_uop = self.buf_uops[i]
           assert buf_uop is not None, f"buffer {i} wasn't UOped"
           image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
-          rendered_idx = self.uop(UOps.CAST, dtypes.int.vec(2), (image_idx[0].render(self.render_ops, self), image_idx[1].render(self.render_ops, self)))  # noqa: E501
+          rendered_idx = self.uop(UOps.CAST, dtypes.int.vec(2), tuple(x.render(self.render_ops, self) for x in image_idx))
           valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, buf.dtype.base.vec(4))) if valid.min == 0 else tuple()
           self.load_cache[key] = self.uop(UOps.LOAD, buf.dtype.base.vec(4), (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
-          idx_small = idx%4
-          res = idx_small.render(self.render_ops, self)
           if localtype == localtype.scalar():
+            idx_small = idx%4
+            res = idx_small.render(self.render_ops, self)
             out = self.uop(UOps.GEP, localtype, (self.load_cache[key],), idx_small.max)
             for ix in range(idx_small.max, idx_small.min, -1):
               rvv = self.uop(UOps.GEP, localtype, (self.load_cache[key],), ix-1)
@@ -480,8 +480,6 @@ class Linearizer(Kernel):
     return self
 
   def uop(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None, simplify=True) -> UOp:  # noqa: E501
-    key = (uop, dtype, vin, arg)
-
     if uop == UOps.ALU:
       if arg in UnaryOps:
         assert dtype == vin[0].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=}"
@@ -493,7 +491,6 @@ class Linearizer(Kernel):
       elif arg == TernaryOps.WHERE:
         assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
         assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
-
 
     if simplify:
       if uop == UOps.PHI and len(vin) == 2: return vin[1]   # a phi without loops is a noop
@@ -515,6 +512,7 @@ class Linearizer(Kernel):
         if arg == BinaryOps.SUB and vin[1].uop == UOps.CONST and vin[1].arg == 0.0: return vin[0]
         if arg == BinaryOps.DIV and vin[1].uop == UOps.CONST and vin[1].arg == 1.0: return vin[0]
 
+    key = (uop, dtype, vin, arg)
     if insert_before is None: insert_before = len(self.uops)
     # check if the cached expr is valid with the given insert place.
     if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
