@@ -263,17 +263,17 @@ class CUDAStyleLanguage(CStyleLanguage):
 class CUDALanguage(CUDAStyleLanguage):
   kernel_prefix = "#define INFINITY (__int_as_float(0x7f800000))\n#define NAN (__int_as_float(0x7fffffff))\nextern \"C\" __global__ "
   half_prekernel = """
-  #include <cuda_fp16.h>
-  struct half4 { half x, y, z, w; };
-  __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
+#include <cuda_fp16.h>
+struct half4 { half x, y, z, w; };
+__device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
     """
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 class HIPLanguage(CUDAStyleLanguage):
   kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
-  typedef float float8 __attribute__((ext_vector_type(8)));
-  __device__ float8 make_float8(float x, float y, float z, float w, float a, float b, float c, float d) { return {x, y, z, w, a, b, c, d}; }
-  extern "C" __global__
+typedef float float8 __attribute__((ext_vector_type(8)));
+__device__ float8 make_float8(float x, float y, float z, float w, float a, float b, float c, float d) { return {x, y, z, w, a, b, c, d}; }
+extern "C" __global__
   """
   launch_bounds = True
   uses_ptr_arithmetic=True
@@ -282,10 +282,8 @@ typedef union { struct { half x, y, z, w; } __attribute__((aligned(8))); half da
 __device__ half4 make_half4(half x, half y, half z, half w) { return {x, y, z, w}; }
 typedef union { struct { half x, y, z, w, a, b, c, d; } __attribute__((aligned(16))); half data[8]; } half8;
 __device__ half8 make_half8(half x, half y, half z, half w, half a, half b, half c, half d) { return {x, y, z, w, a, b, c, d}; }
- typedef _Float16 half16 __attribute__((ext_vector_type(16)));
-__device__ half16 make_half16(half x, half y, half z, half w, half a, half b, half c, half d,
-                              half e, half f, half g, half h, half i, half j, half k, half l) {
-                                return {x, y, z, w, a, b, c, d, e, f, g, h, i, j, k, l}; }
+typedef _Float16 half16 __attribute__((ext_vector_type(16)));
+__device__ half16 make_half16(half x, half y, half z, half w, half a, half b, half c, half d, half e, half f, half g, half h, half i, half j, half k, half l) { return {x, y, z, w, a, b, c, d, e, f, g, h, i, j, k, l}; }
   """
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 
