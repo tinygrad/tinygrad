@@ -4,7 +4,7 @@ import operator
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import DEBUG, to_function_name
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.renderer.cstyle import HIPRenderer
+from tinygrad.renderer.cstyle import uops_to_cstyle, HIPLanguage
 from examples.beautiful_mnist import Model as MNIST
 from examples.hlb_cifar10 import SpeedyResNet
 
@@ -49,7 +49,7 @@ def compile_ast_to_hip(out: Tensor):
   lin = Linearizer(out.lazydata.schedule()[-1].ast)
   lin.hand_coded_optimizations()
   lin.linearize()
-  code = HIPRenderer(to_function_name(lin.name), lin.uops)[0]
+  code = uops_to_cstyle(HIPLanguage(), to_function_name(lin.name), lin.uops)[0]
   if DEBUG >= 4: print(code)
   compile_hip(code)
 
