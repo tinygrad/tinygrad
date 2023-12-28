@@ -47,10 +47,9 @@ class CStyleLanguage(NamedTuple):
 
   # returns a str expression of the const with the given type
   def render_const(self, x:Union[float,int,bool], var_dtype) -> str:
-    if math.isnan(x): val = "NAN"
-    elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
-    else: val = f"{float(x)}f" if dtypes.is_float(var_dtype) else f"{int(x)}" if dtypes.is_int(var_dtype) else f"{bool(x)}".lower()
-    return self.render_cast([val]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 or var_dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val
+    if math.isnan(x): return "NAN"
+    elif math.isinf(x): return ("-" if x < 0 else "") + "INFINITY"
+    return self.render_cast([str(x)]*var_dtype.sz, var_dtype) if var_dtype.sz > 1 or var_dtype not in [dtypes.float, dtypes.int, dtypes.bool] else str(x)
 
   # returns a str expression of the loaded value with the output type
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
