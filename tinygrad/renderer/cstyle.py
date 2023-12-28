@@ -7,7 +7,7 @@ from tinygrad.helpers import ImageDType, dtypes, prod, DType, PtrDType, strip_pa
 
 class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"
-  generic_var_prefix: str = ""
+  var_prefix = lambda self,dtype: dtype.name
   kernel_prefix: str = ""
   buffer_prefix: str = ""
   buffer_suffix: str = ""
@@ -72,7 +72,7 @@ class CStyleLanguage(NamedTuple):
     return self.smem_align + self.smem_prefix + f"{dtype.name} {name}[{size}];"
 
   def render_for(self, expr: str, _min:Union[int,str], _max:Union[int,str]) -> str:
-    return f"for ({self.generic_var_prefix if self.generic_var_prefix else 'int'} {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
+    return f"for ({self.var_prefix(dtypes.int)} {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
 
   def render_if(self, cond: str): return f"if ({cond}) {{"
 
@@ -135,7 +135,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
         assert dtype == dtypes.float.vec(2), "output dtype of METAL TC is _float2"
         # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
         output = ssa(u, 'wmma')
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {output};")
+        kk(f"{lang.var_prefix(dtype)} {output};")
         kk("{ simdgroup_float8x8 a,b,c;")
         kk(f"a.thread_elements()[0] = {r[vin[0]]}; a.thread_elements()[1] = {r[vin[1]]};")
         kk(f"b.thread_elements()[0] = {r[vin[2]]}; b.thread_elements()[1] = {r[vin[3]]};")
@@ -144,7 +144,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
         kk(f"{output}.x = c.thread_elements()[0]; {output}.y = c.thread_elements()[1]; }}")
       elif args[0] == "HIP":
         assert dtype == dtypes.float.vec(8), "output dtype of HIP TC is _float8"
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
+        kk(f"{lang.var_prefix(dtype)} {ssa(u, 'wmma')} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
       else:
         raise NotImplementedError(f"WMMA not implemented for {args}")
     elif uop == UOps.ALU:
@@ -159,10 +159,10 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       if child_count[u] <= 1 and args != BinaryOps.MAX and not getenv("EXPAND_SSA"):
         r[u] = val
       else:
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'alu')} = {val};")
+        kk(f"{lang.var_prefix(dtype)} {ssa(u,'alu')} = {val};")
     elif uop == UOps.DEFINE_ACC:
       assert dtype is not None
-      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
+      kk(f"{lang.var_prefix(dtype)} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
     elif uop == UOps.SPECIAL:
       xid = lang.gid if args[1].startswith("g") else (lang.xid if args[1].startswith("i") else lang.lid)
       kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]}; /* {args[2]} */")
@@ -174,7 +174,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       assert dtype is not None
       val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
       if len(vin) > 3: val = lang.render_conditional(r[vin[2]], val, r[vin[3]])
-      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'val')} = {val};")
+      kk(f"{lang.var_prefix(dtype)} {ssa(u,'val')} = {val};")
     elif uop == UOps.PHI:
       kk(f"{r[vin[0]]} = {r[vin[1]]};")
       r[u] = r[vin[0]]
@@ -186,7 +186,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
     elif uop == UOps.CAST and dtype is not None:
       val = lang.render_cast([r[x] for x in vin], dtype, bitcast=isinstance(args, tuple) and args[1])
       if child_count[u] <= 1: r[u] = val
-      else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
+      else: kk(f"{lang.var_prefix(dtype)} {ssa(u,'cast')} = {val};")
     elif uop == UOps.DEFINE_LOCAL:
       assert dtype is not None
       if lang.external_local_bufs:
@@ -302,7 +302,7 @@ class WGSLLanguage(CStyleLanguage):
   lid = [f"i32(lindex.{'xyz'[x]})" for x in range(3)]
   size_prefix = "let"
   barrier="workgroupBarrier();"
-  generic_var_prefix = "var "
+  var_prefix = "var "
   external_local_bufs = True
   code_for_op = { **CStyleLanguage().code_for_op,
                  BinaryOps.CMPLT: lambda x,y,dtype: f"f32({x}<{y})", BinaryOps.CMPEQ: lambda x,y,dtype: f"f32({x}=={y})",
