@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict, cast
+from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict, Callable, cast
 import math
 from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
@@ -14,7 +14,7 @@ class CStyleLanguage(NamedTuple):
   smem_prefix_for_cast: bool = True
   arg_int_prefix: str = "const int"
   barrier: str = ""
-  code_for_workitem = {}
+  code_for_workitem: Dict[str, Callable] = {}
   global_max: List[int] = []
   local_max: List[int] = []
   extra_args: List[str] = []
@@ -213,7 +213,7 @@ class OpenCLLanguage(CStyleLanguage):
   half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable"
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
   float4 = "(float4)"
-  code_for_workitem ={ "g": lambda x: f"get_global_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_group_id({x})" }
+  code_for_workitem ={ "g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})" }
   uses_vload = True
   # NOTE: mad is used so the loads aren't reordered into the math on 845
   code_for_op = {**CStyleLanguage().code_for_op,
@@ -241,8 +241,8 @@ class CUDAStyleLanguage(CStyleLanguage):
   barrier = "__syncthreads();"
   float4 = "make_float4"
   code_for_workitem = {
-      "g": lambda x: f"blockIdx.{chr(120+x)}",
-      "l": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"
+      "g": lambda x: f"blockIdx.{chr(120+x)}", "l": lambda x: f"threadIdx.{chr(120+x)}",
+      "x": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"
   }
   code_for_op = {
     **CStyleLanguage().code_for_op,
