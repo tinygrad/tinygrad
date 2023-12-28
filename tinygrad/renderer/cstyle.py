@@ -302,7 +302,7 @@ class WGSLLanguage(CStyleLanguage):
   lid = [f"i32(lindex.{'xyz'[x]})" for x in range(3)]
   size_prefix = "let"
   barrier="workgroupBarrier();"
-  var_prefix = "var "
+  var_prefix = lambda self,dtype: "var "
   external_local_bufs = True
   code_for_op = { **CStyleLanguage().code_for_op,
                  BinaryOps.CMPLT: lambda x,y,dtype: f"f32({x}<{y})", BinaryOps.CMPEQ: lambda x,y,dtype: f"f32({x}=={y})",
