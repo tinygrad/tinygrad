@@ -7,7 +7,6 @@ from tinygrad.helpers import ImageDType, dtypes, prod, DType, PtrDType, strip_pa
 
 class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"
-  var_prefix = lambda self,dtype: dtype.name
   kernel_prefix: str = ""
   buffer_prefix: str = ""
   buffer_suffix: str = ""
@@ -38,6 +37,8 @@ class CStyleLanguage(NamedTuple):
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPEQ: lambda a,b,dtype: f"({a}=={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
     TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})", TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"
   }
+
+  def var_prefix(self, dtype): return dtype.name
 
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
@@ -144,7 +145,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
         kk(f"{output}.x = c.thread_elements()[0]; {output}.y = c.thread_elements()[1]; }}")
       elif args[0] == "HIP":
         assert dtype == dtypes.float.vec(8), "output dtype of HIP TC is _float8"
-        kk(f"{lang.var_prefix(dtype)} {ssa(u, 'wmma')} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
+        kk(f"{lang.var_prefix(dtype)} {ssa(u, 'wmma')} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
       else:
         raise NotImplementedError(f"WMMA not implemented for {args}")
     elif uop == UOps.ALU:
@@ -302,7 +303,6 @@ class WGSLLanguage(CStyleLanguage):
   lid = [f"i32(lindex.{'xyz'[x]})" for x in range(3)]
   size_prefix = "let"
   barrier="workgroupBarrier();"
-  var_prefix = lambda self,dtype: "var "
   external_local_bufs = True
   code_for_op = { **CStyleLanguage().code_for_op,
                  BinaryOps.CMPLT: lambda x,y,dtype: f"f32({x}<{y})", BinaryOps.CMPEQ: lambda x,y,dtype: f"f32({x}=={y})",
@@ -311,6 +311,7 @@ class WGSLLanguage(CStyleLanguage):
   type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "f32"}
 
   def render_local(self, name: str, dtype:DType, size: int): return f"var<workgroup> {name}: array<{self.type_map[dtype]},{size}>;"
+  def var_prefix(self, dtype): return "var"
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): return "nan()"
