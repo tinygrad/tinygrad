@@ -243,16 +243,7 @@ class MetalLanguage(CStyleLanguage):
     return f"as_type<{var_dtype.name}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 
-code_for_op_half = {
-  BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"__hmax({a},{b})",
-  UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})" if dtype != dtypes.half else f"hsqrt({x})",
-  UnaryOps.SIN: lambda x,dtype: f"sin({x})" if dtype != dtypes.half else f"hsin({x})",
-  UnaryOps.LOG2: lambda x,dtype: f"log2({x})" if dtype != dtypes.half else f"hlog2({x})",
-  UnaryOps.EXP2: lambda x,dtype: f"exp2({x})" if dtype != dtypes.half else f"hexp2({x})",
-}
-
-class CUDALanguage(CStyleLanguage):
-  kernel_prefix = "#define INFINITY (__int_as_float(0x7f800000))\n#define NAN (__int_as_float(0x7fffffff))\nextern \"C\" __global__ "
+class CUDAStyleLanguage(CStyleLanguage):
   smem_prefix = "__shared__ "
   smem_prefix_for_cast = False
   barrier = "__syncthreads();"
@@ -260,25 +251,31 @@ class CUDALanguage(CStyleLanguage):
   gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
   lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
   xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
-  code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
+  code_for_op = {
+    **CStyleLanguage().code_for_op,
+    BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})" if dtype != dtypes.half else f"__hmax({a},{b})",
+    UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})" if dtype != dtypes.half else f"hsqrt({x})",
+    UnaryOps.SIN: lambda x,dtype: f"sin({x})" if dtype != dtypes.half else f"hsin({x})",
+    UnaryOps.LOG2: lambda x,dtype: f"log2({x})" if dtype != dtypes.half else f"hlog2({x})",
+    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})" if dtype != dtypes.half else f"hexp2({x})",
+  }
+
+class CUDALanguage(CUDAStyleLanguage):
+  kernel_prefix = "#define INFINITY (__int_as_float(0x7f800000))\n#define NAN (__int_as_float(0x7fffffff))\nextern \"C\" __global__ "
   half_prekernel = """
-    #include <cuda_fp16.h>
-    struct half4 { half x, y, z, w; };
-    __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
-  """
+  #include <cuda_fp16.h>
+  struct half4 { half x, y, z, w; };
+  __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
+    """
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
-class HIPLanguage(CStyleLanguage):
+class HIPLanguage(CUDAStyleLanguage):
   kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
   typedef float float8 __attribute__((ext_vector_type(8)));
   __device__ float8 make_float8(float x, float y, float z, float w, float a, float b, float c, float d) { return {x, y, z, w, a, b, c, d}; }
   extern "C" __global__
   """
   launch_bounds = True
-  smem_prefix = "__shared__ "
-  smem_prefix_for_cast=False
-  barrier = "__syncthreads();"
-  float4 = "make_float4"
   uses_ptr_arithmetic=True
   half_prekernel = "#include <hip/hip_fp16.h>\n" + """
 typedef union { struct { half x, y, z, w; } __attribute__((aligned(8))); half data[4]; } half4;
@@ -290,10 +287,6 @@ __device__ half16 make_half16(half x, half y, half z, half w, half a, half b, ha
                               half e, half f, half g, half h, half i, half j, half k, half l) {
                                 return {x, y, z, w, a, b, c, d, e, f, g, h, i, j, k, l}; }
   """
-  gid = [f'blockIdx.{chr(120+i)}' for i in range(3)]
-  lid = [f'threadIdx.{chr(120+i)}' for i in range(3)]
-  xid = [f'(blockIdx.{chr(120+i)}*blockDim.{chr(120+i)}+threadIdx.{chr(120+i)})' for i in range(3)]
-  code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 
 # TODO: how much of this can be merged with above?
