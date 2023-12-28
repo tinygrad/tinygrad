@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict, cast
-import math, functools
+import math
 from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
@@ -221,7 +221,6 @@ class OpenCLLanguage(CStyleLanguage):
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
     return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
-OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
 class MetalLanguage(CStyleLanguage):
   kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel "
@@ -235,7 +234,6 @@ class MetalLanguage(CStyleLanguage):
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
     return f"as_type<{var_dtype.name}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
-MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 
 class CUDAStyleLanguage(CStyleLanguage):
   smem_prefix = "__shared__ "
@@ -262,7 +260,6 @@ class CUDALanguage(CUDAStyleLanguage):
 struct half4 { half x, y, z, w; };
 __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
     """
-CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 class HIPLanguage(CUDAStyleLanguage):
   kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
@@ -281,7 +278,6 @@ typedef _Float16 half16 __attribute__((ext_vector_type(16)));
 __device__ half16 make_half16(half x, half y, half z, half w, half a, half b, half c, half d, half e, half f, half g,
                               half h, half i, half j, half k, half l) { return {x, y, z, w, a, b, c, d, e, f, g, h, i, j, k, l}; }
   """
-HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 
 # TODO: how much of this can be merged with above?
 class WGSLLanguage(CStyleLanguage):
@@ -320,4 +316,3 @@ class WGSLLanguage(CStyleLanguage):
 
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
     return f"{buf_name}[{idx}] = {self.render_cast([var_name], buf_dtype) if var_dtype != buf_dtype else var_name};"
-WGSLRenderer = functools.partial(uops_to_cstyle, WGSLLanguage())

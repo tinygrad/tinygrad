@@ -1,8 +1,8 @@
 from wgpu.utils.device import get_default_device
 from tinygrad.device import Compiled, Allocator
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.renderer.cstyle import WGSLRenderer
-import wgpu
+from tinygrad.renderer.cstyle import WGSLLanguage, uops_to_cstyle
+import wgpu, functools
 
 wgpu_device = get_default_device()
 def create_uniform(val: int) -> wgpu.GPUBuffer:
@@ -38,4 +38,4 @@ class WebGpuAllocator(Allocator):
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
     super().__init__(WebGpuAllocator(), LinearizerOptions(device="WEBGPU", supports_float4=False, local_max=[256, 256, 64],
-                                                          global_max=[65535, 65535, 65535]), WGSLRenderer, lambda x: x, WebGPUProgram)
+                                                          global_max=[65535, 65535, 65535]), functools.partial(uops_to_cstyle, WGSLLanguage()), lambda x: x, WebGPUProgram)

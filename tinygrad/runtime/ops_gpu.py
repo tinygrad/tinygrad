@@ -4,7 +4,7 @@ import ctypes, functools
 import gpuctypes.opencl as cl
 from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, diskcache, OSX, ImageDType, DEBUG
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.renderer.cstyle import OpenCLRenderer
+from tinygrad.renderer.cstyle import uops_to_cstyle, OpenCLLanguage
 from tinygrad.device import Compiled, LRUAllocator
 
 # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
@@ -93,7 +93,7 @@ class CLDevice(Compiled):
     if CLDevice.compiler_context is None: CLDevice.compiler_context = self
     self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, ctypes.byref(status)), status)
     self.pending_copyin: List[memoryview] = []
-    super().__init__(CLAllocator(self), LinearizerOptions(), OpenCLRenderer, compile_cl, functools.partial(CLProgram, self))
+    super().__init__(CLAllocator(self), LinearizerOptions(), functools.partial(uops_to_cstyle, OpenCLLanguage()), compile_cl, functools.partial(CLProgram, self))
   def synchronize(self):
     check(cl.clFinish(self.queue))
     self.pending_copyin.clear()
