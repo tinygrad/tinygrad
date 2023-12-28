@@ -37,7 +37,7 @@ class CStyleLanguage(NamedTuple):
     TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})", TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"
   }
 
-  def var_prefix(self, dtype): return dtype.name
+  def var_prefix(self, dtype, mutable=True): return dtype.name
 
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
@@ -165,7 +165,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       kk(f"{lang.var_prefix(dtype)} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
     elif uop == UOps.SPECIAL:
       xid = lang.gid if args[1].startswith("g") else (lang.xid if args[1].startswith("i") else lang.lid)
-      kk(f"{lang.var_prefix(dtype)} {args[1]} = {xid[args[0]]}; /* {args[2]} */")
+      kk(f"{lang.var_prefix(dtype, mutable=False)} {args[1]} = {xid[args[0]]}; /* {args[2]} */")
       if args[1].startswith("l"): local_size.append(args[2])
       r[u] = args[1]
     elif uop == UOps.CONST:
@@ -309,7 +309,7 @@ class WGSLLanguage(CStyleLanguage):
   type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "f32"}
 
   def render_local(self, name: str, dtype:DType, size: int): return f"var<workgroup> {name}: array<{self.type_map[dtype]},{size}>;"
-  def var_prefix(self, dtype): return "var"
+  def var_prefix(self, dtype, mutable=True): return "var" if mutable else "let"
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): return "nan()"
