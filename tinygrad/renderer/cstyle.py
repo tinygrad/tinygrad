@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, NamedTuple, Tuple, Union, DefaultDict, Callable, cast
+from typing import Dict, List, Literal, Optional, NamedTuple, Tuple, Union, DefaultDict, Callable, cast
 import math
 from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
@@ -14,7 +14,7 @@ class CStyleLanguage(NamedTuple):
   smem_prefix_for_cast: bool = True
   arg_int_prefix: str = "const int"
   barrier: str = ""
-  code_for_workitem: Dict[str, Callable] = {}
+  code_for_workitem: Dict[Union[Literal["g"], Literal["l"], Literal["i"]], Callable] = {}
   global_max: List[int] = []
   local_max: List[int] = []
   extra_args: List[str] = []
@@ -242,7 +242,7 @@ class CUDAStyleLanguage(CStyleLanguage):
   float4 = "make_float4"
   code_for_workitem = {
       "g": lambda x: f"blockIdx.{chr(120+x)}", "l": lambda x: f"threadIdx.{chr(120+x)}",
-      "x": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"
+      "i": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"
   }
   code_for_op = {
     **CStyleLanguage().code_for_op,
