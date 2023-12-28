@@ -6,7 +6,6 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.helpers import ImageDType, dtypes, prod, DType, PtrDType, strip_parens, getenv
 
 class CStyleLanguage(NamedTuple):
-  size_prefix: str = "int"
   kernel_prefix: str = ""
   buffer_prefix: str = ""
   buffer_suffix: str = ""
@@ -166,7 +165,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
       kk(f"{lang.var_prefix(dtype)} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
     elif uop == UOps.SPECIAL:
       xid = lang.gid if args[1].startswith("g") else (lang.xid if args[1].startswith("i") else lang.lid)
-      kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]}; /* {args[2]} */")
+      kk(f"{lang.var_prefix(dtype)} {args[1]} = {xid[args[0]]}; /* {args[2]} */")
       if args[1].startswith("l"): local_size.append(args[2])
       r[u] = args[1]
     elif uop == UOps.CONST:
@@ -301,7 +300,6 @@ HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 class WGSLLanguage(CStyleLanguage):
   gid = [f"i32(gindex.{'xyz'[x]})" for x in range(3)]
   lid = [f"i32(lindex.{'xyz'[x]})" for x in range(3)]
-  size_prefix = "let"
   barrier="workgroupBarrier();"
   external_local_bufs = True
   code_for_op = { **CStyleLanguage().code_for_op,
