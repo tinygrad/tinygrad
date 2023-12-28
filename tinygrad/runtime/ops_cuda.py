@@ -1,5 +1,6 @@
 from __future__ import annotations
-import subprocess, hashlib, tempfile, ctypes, ctypes.util, functools
+import subprocess, hashlib, tempfile, ctypes, ctypes.util
+from functools import partial
 from pathlib import Path
 from typing import Tuple, Optional
 import gpuctypes.cuda as cuda
@@ -77,7 +78,7 @@ class CUDADevice(Compiled):
     from tinygrad.runtime.graph.cuda import CUDAGraph
     super().__init__(CUDAAllocator(self) if not CUDACPU else MallocAllocator,
                      LinearizerOptions(supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
-                     functools.partial(uops_to_cstyle, CUDALanguage()), compile_cuda, functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
+                     partial(uops_to_cstyle, CUDALanguage()), compile_cuda, partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
   def synchronize(self):
     if not CUDACPU:
       check(cuda.cuCtxSetCurrent(self.context))

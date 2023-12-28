@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Tuple, Optional, List
-import ctypes, functools
+import ctypes
+from functools import partial
 import gpuctypes.opencl as cl
 from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, diskcache, OSX, ImageDType, DEBUG
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -93,7 +94,7 @@ class CLDevice(Compiled):
     if CLDevice.compiler_context is None: CLDevice.compiler_context = self
     self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, ctypes.byref(status)), status)
     self.pending_copyin: List[memoryview] = []
-    super().__init__(CLAllocator(self), LinearizerOptions(), functools.partial(uops_to_cstyle, OpenCLLanguage()), compile_cl, functools.partial(CLProgram, self))
+    super().__init__(CLAllocator(self), LinearizerOptions(), partial(uops_to_cstyle, OpenCLLanguage()), compile_cl, partial(CLProgram, self))
   def synchronize(self):
     check(cl.clFinish(self.queue))
     self.pending_copyin.clear()
