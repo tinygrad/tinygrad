@@ -284,7 +284,7 @@ class QK4_0Linear:
       ).reshape((self.out_features, self.in_features))
 
   def __call__(self, x):
-    return x.dot(self.dequantize().T)
+    return x.dot(self.dequantize().realize().T)
 
 class LLaMa:
   @staticmethod
