@@ -14,8 +14,17 @@ class BatchNorm2d:
     self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
-  def __call__(self, x:Tensor):
-    if Tensor.training:
+  def __call__(self, x:Tensor, new=False):
+    if new:
+      size = x.shape[0]
+      z = 1 - 1/size
+      y = -2/size
+      c = x.pad2d((x.shape[0]-1,0))._pool((x.shape[0],)).flatten()
+      c *= x.repeat([size])
+      c *= Tensor([y]).repeat([size*(size-1)]).pad(((0,size),),value=z)
+      c = (size/c.sum()).pow(0.5)
+      return c
+    else:
       # This requires two full memory accesses to x
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
       # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
