@@ -109,7 +109,7 @@ class DType(NamedTuple):
   priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
-  stdname: Optional[str] = None
+  tag: Optional[str] = None
   sz: int = 1
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
   def vec(self, sz:int):
@@ -117,14 +117,13 @@ class DType(NamedTuple):
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self]}{str(sz)}", None, sz)
   def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
   @property
-  def np(self): return NPMAP[self.stdname]
+  def np(self): return NPMAP[self.tag]
   @property
-  def ct(self): return CTMAP[self.stdname]
+  def ct(self): return CTMAP[self.tag]
 
 # dependent typing?
 class ImageDType(DType):
-  def __new__(cls, priority, itemsize, name, shape, base):
-    return super().__new__(cls, priority, itemsize, name)
+  def __new__(cls, priority, itemsize, name, shape, base): return super().__new__(cls, priority, itemsize, name)
   def __init__(self, priority, itemsize, name, shape, base):
     self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
     self.base: DType = base
@@ -138,7 +137,7 @@ class ImageDType(DType):
   def __ne__(self, x): return super().__ne__(x) or self.shape != x.shape
 
 class PtrDType(DType):
-  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.stdname, dt.sz)
+  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.tag, dt.sz)
   def __repr__(self): return f"ptr.{super().__repr__()}"
 
 class dtypes:
@@ -202,14 +201,11 @@ def least_upper_dtype(*ds:DType) -> DType:
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.float32)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if (
-  not k.startswith('__') and not k.startswith('default') and not callable(v) and v.__class__ is not staticmethod)}
-INVERSE_DTYPES_DICT = {v:k for k,v in DTYPES_DICT.items()}
-_DTMAP = {DTYPES_DICT[s].stdname:s for s in DTYPES_DICT.keys()}; DTMAP = {s:DTYPES_DICT[s] for s in _DTMAP.keys()} # noqa: E702
-NPTYPES = [np.bool_, np.int8, np.uint8, np.int16, np.uint16, np.int32, np.uint32, np.int64, np.uint64, np.float16, None, np.float32, np.float64]
-CTYPES = [ct.c_bool, ct.c_int8, ct.c_uint8, ct.c_int16, ct.c_uint16, ct.c_int32, ct.c_uint32, ct.c_int64, ct.c_uint64, None, None, ct.c_float, ct.c_double] # noqa: E501
-NPMAP, CTMAP = {k:v for k,v in zip(_DTMAP.keys(), NPTYPES)}, {k:v for k,v in zip(_DTMAP.keys(), CTYPES)}
-INVERSE_NPMAP = {v:k for k,v in NPMAP.items()}; INVERSE_CTMAP = {v:k for k,v in CTMAP.items()} # noqa: E702
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if (not k.startswith('__') and not k.startswith('default') and not callable(v) and v.__class__ is not staticmethod)} # noqa: E501
+INVERSE_DTYPES_DICT = {v:k for k,v in DTYPES_DICT.items()}; _DTMAP = {DTYPES_DICT[s].tag:s for s in DTYPES_DICT.keys()}; DTMAP = {s:DTYPES_DICT[s] for s in _DTMAP.keys()} # noqa: E501,E702
+NPTYPES = [np.bool_, np.int8, np.uint8, np.int16, np.uint16, np.int32, np.uint32, np.int64, np.uint64, np.float16, None, np.float32, np.float64]; NPMAP = {k:v for k,v in zip(_DTMAP.keys(), NPTYPES)}; INVERSE_NPMAP = {v:k for k,v in NPMAP.items()} # noqa: E501,E702
+CTYPES = [ct.c_bool, ct.c_int8, ct.c_uint8, ct.c_int16, ct.c_uint16, ct.c_int32, ct.c_uint32, ct.c_int64, ct.c_uint64, None, None, ct.c_float, ct.c_double]; CTMAP = {k:v for k,v in zip(_DTMAP.keys(), CTYPES)}; INVERSE_CTMAP = {v:k for k,v in CTMAP.items()} # noqa: E501,E702
+
 
 class GlobalCounters:
   global_ops: ClassVar[int] = 0
