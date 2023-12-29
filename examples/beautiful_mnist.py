@@ -23,7 +23,6 @@ if __name__ == "__main__":
   model = Model()
   opt = nn.optim.Adam(nn.state.get_parameters(model))
 
-  # TODO: there's a compiler error if you comment out TinyJit since randint isn't being realized and there's something weird with int
   @TinyJit
   def train_step(samples:Tensor) -> Tensor:
     with Tensor.train():
