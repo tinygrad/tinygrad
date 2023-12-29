@@ -139,6 +139,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       elif args == TernaryOps.WHERE and lang.has_pred:
         kk(lang.asm_for_op[args](ssa(u, "alu"), cast(r[vin[0]], dtypes.bool, vin[0].dtype, pred=True), r[vin[1]], r[vin[2]], lang.types[dtype]))
       elif args == TernaryOps.MULACC and not lang.has_mulacc:
+        assert vin[1].dtype is not None
         kk(lang.asm_for_op[BinaryOps.MUL](tmp:=ssa(None, "tmp", lang.types[dtype]),
                                           cast(r[vin[0]], dtype, vin[0].dtype), cast(r[vin[1]], dtype, vin[1].dtype), dtype, lang.types[dtype]),
            lang.asm_for_op[BinaryOps.ADD](ssa(u, "alu"), tmp, r[vin[2]], dtype, lang.types[dtype]))
