@@ -411,14 +411,17 @@ class Linearizer(Kernel):
     for u in self.uops:
       if not loop_stack[-1]: loop_stack[-1].append(u)
       elif u.uop == UOps.LOOP: loop_stack.append([u])
-      elif u.uop not in [UOps.CONST, UOps.ALU, UOps.CAST]: loop_stack[-1].append(u)
+      elif u.uop not in [UOps.CONST, UOps.ALU, UOps.CAST, UOps.LOAD]: loop_stack[-1].append(u)
       else:
         parents = get_recursive_parents(u, with_phi=True)
-        for i in reversed(range(len(loop_stack))):
-          # check backwards and put the uop in the first encounter with some dependency
-          if any(x in parents for x in loop_stack[i]) or i == 0:
-            loop_stack[i].append(u)
-            break
+        # don't push any local buffer
+        if any(u.uop == UOps.DEFINE_LOCAL for u in parents): loop_stack[-1].append(u)
+        else:
+          for i in reversed(range(len(loop_stack))):
+            # check backwards and put the uop in the first encounter with some dependency
+            if any(x in parents for x in loop_stack[i]) or i == 0:
+              loop_stack[i].append(u)
+              break
     self.uops = flatten(loop_stack)
 
     # uops optimization
