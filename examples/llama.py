@@ -315,7 +315,7 @@ class LLaMa:
     weights = {k:v.to(Device.DEFAULT).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
 
     if quantize:
-      weights = linear_layer.quantize(weights)
+      weights = AbsmaxQuantizedLinear.quantize(weights) if not use_4bit else QK4_0Linear.quantize(weights)
       for _,v in weights.items(): v.realize()
     load_state_dict(model, weights, strict=False)
 
