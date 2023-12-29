@@ -294,6 +294,22 @@ def cpu_time_execution(cb, enable):
   cb()
   if enable: return time.perf_counter()-st
 
+# *** array helpers ***
+
+class MemArray:
+  def __init__(self, data: Union[None, bool, int, float, List, Tuple, bytes],
+               dtype: Optional[DType] = None,  shape: Optional[Tuple[int, ...]] = None):
+    if dtype is None:
+      raise NotImplementedError('to do: get/infer dtype from data')
+    self.data, self.dtype, self.shape = data, dtype, shape
+
+  def item(self):
+    assert self.shape == ()
+    raise NotImplementedError('to do: write item method')
+
+  def astype(self, dtype: DType):
+    raise NotImplementedError('to do: write astype method')
+
 # *** ctypes helpers
 
 # TODO: make this work with read only memoryviews (if possible)

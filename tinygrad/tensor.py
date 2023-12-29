@@ -7,7 +7,7 @@ from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
 
-from tinygrad.helpers import DType, dtypes, ImageDType, least_upper_float, least_upper_dtype
+from tinygrad.helpers import DType, dtypes, ImageDType, least_upper_float, least_upper_dtype, MemArray
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
 from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.ops import LoadOps
@@ -46,7 +46,7 @@ class Tensor:
     def __exit__(self, exc_type, exc_value, traceback): Tensor.training = self.prev
 
   no_grad: ClassVar[bool] = False
-  def __init__(self, data:Union[None, bool, int, float, List, Tuple, LazyBuffer, np.ndarray, bytes],
+  def __init__(self, data:Union[None, bool, int, float, List, Tuple, bytes, MemArray, LazyBuffer, np.ndarray],
                device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     device = Device.canonicalize(device)
@@ -69,6 +69,9 @@ class Tensor:
       else: dtype = dtype or dtypes.default_float
       # NOTE: cast at the end for the dtypes that do not have a numpy dtype
       data = LazyBuffer.fromCPU(np.array(data, dtype.np)).cast(dtype)
+    elif isinstance(data, MemArray):
+      if data.shape == (): data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or data.dtype, device, data.item())
+      else: data = LazyBuffer.fromCPU(data.astype(dtype) if dtype is not None and dtype != data.dtype else data)
     elif isinstance(data, np.ndarray):
       if data.shape == (): data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype.type), device, data.item())
       else: data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
