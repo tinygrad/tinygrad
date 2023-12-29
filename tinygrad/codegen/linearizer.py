@@ -406,7 +406,7 @@ class Linearizer(Kernel):
         u.vin = tuple(new if x is old else x for x in u.vin)
       self.uops.remove(old)
 
-    # fix loop scope, push CONST and ALU upward out of loop if it does not depend on the loop
+    # fix loop scope, push uops upward out of loop if it does not depend on the loop
     loop_stack: List[List[UOp]] = [[]]
     for u in self.uops:
       if not loop_stack[-1]: loop_stack[-1].append(u)
@@ -414,7 +414,7 @@ class Linearizer(Kernel):
       elif u.uop not in [UOps.CONST, UOps.ALU, UOps.CAST, UOps.LOAD]: loop_stack[-1].append(u)
       else:
         parents = get_recursive_parents(u, with_phi=True)
-        # don't push any local buffer
+        # don't push any local buffer because there might have STORE (not considered as parent) between DEFINE_LOCAL and here
         if any(u.uop == UOps.DEFINE_LOCAL for u in parents): loop_stack[-1].append(u)
         else:
           for i in reversed(range(len(loop_stack))):
