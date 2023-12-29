@@ -240,7 +240,7 @@ define void @"""
 
   def render_param(self, param, dtype): return f"{self.render_ptr(dtype) + ' noalias' if dtype.__class__ == PtrDType else self.types[dtype]} %{param}"
   def render_const(self, x: Union[float,int,bool], dtype) -> str:
-    if not dtypes.is_float(dtype): return str(int(x))
+    if not dtypes.is_float(dtype): return str(bool(x)).lower() if dtype == dtypes.bool else str(int(x))
     return f"0x{double_to_hex(x if dtype == dtypes.double else trunc_float(x, 'f') if dtype == dtypes.float else trunc_float(x, 'e'))}"
   def render_instr(self, instr, dtype, args): return f"{f'{args[0]} = ' if args else ''}{instr} {self.types[dtype]} {', '.join(args[1:])};"
   def render_cast(self, d: str, a: str, dtype: DType, atype: DType, bitcast=False, pred=False) -> str:
