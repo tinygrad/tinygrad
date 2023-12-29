@@ -3,7 +3,7 @@ from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 import importlib
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, DEBUG, dtypes
+from tinygrad.helpers import getenv, DEBUG, dtypes, CI
 from typing import List, Dict
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto # onnx 1.50 uses serialized file (see onnx/onnx-ml.proto) as descriptors
 try:
@@ -59,7 +59,11 @@ def get_run_onnx(onnx_model: ModelProto):
       elif len(inp.int32_data) > 0:
         ret = Tensor(np.array(inp.int32_data, dtype=np.int32).reshape(inp.dims), requires_grad=False)
       else:
-        ret = Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).reshape(inp.dims).copy(), requires_grad=False)
+        # TODO half broken in CI for GPU backend
+        if CI and (dtype := tensor_dtype_to_np_dtype(inp.data_type)) is np.half:
+          ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
+        else:
+          ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims).copy(), requires_grad=False)
     else:
       raise Exception(f"bad data type {inp.name} {inp.dims} {inp.data_type}")
     return ret
