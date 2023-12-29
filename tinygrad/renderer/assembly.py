@@ -129,7 +129,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       if vin[0].dtype == dtypes.half and args not in lang.supports_half:
         kk(lang.asm_for_op[args]((tmp:=ssa(None, "alu", "f32")), *[cast(r[x], dtypes.float32, dtypes.half) for x in vin], lang.types[dtypes.float32]))
         cast(tmp, dtypes.half, dtypes.float32, u=u)
-      elif args == BinaryOps.CMPLT:
+      elif args == BinaryOps.CMPLT or args == BinaryOps.CMPEQ:
         kk(lang.asm_for_op[args](pred:=ssa(None if lang.has_pred else u,'lt','pred' if lang.has_pred else None),
                                  *[r[x] for x in vin], vin[0].dtype, lang.types[vin[0].dtype]))
         if lang.has_pred: cast(pred, dtype, dtypes.bool, u=u)
@@ -224,10 +224,12 @@ define void @"""
       lambda d,a,b,dtype,asmtype: f"{d} = {'udiv' if is_bool_or_unsigned(dtype) else 'sdiv' if dtypes.is_int(dtype) else 'fdiv'} {asmtype} {a}, {b}",
     BinaryOps.MOD:
       lambda d,a,b,dtype,asmtype: f"{d} = {'urem' if is_bool_or_unsigned(dtype) else 'srem' if dtypes.is_int(dtype) else 'frem'} {asmtype} {a}, {b}",
+    BinaryOps.CMPEQ:
+      lambda d,a,b,dtype,asmtype: f"{d} = {f'fcmp {LLVM_FMATH} ueq' if dtypes.is_float(dtype) else 'icmp eq'} {asmtype} {a}, {b}",
     BinaryOps.CMPLT:
       lambda d,a,b,dtype,asmtype: (f"{d} = " +
-                                   (f'fcmp {LLVM_FMATH} ult' if dtypes.is_float(dtype) else f"icmp {'ult' if is_bool_or_unsigned(dtype) else 'slt'} ")
-                                   + f"{asmtype} {a}, {b}"),
+                                   (f'fcmp {LLVM_FMATH} ult' if dtypes.is_float(dtype) else f"icmp {'ult' if is_bool_or_unsigned(dtype) else 'slt'}")
+                                   + f" {asmtype} {a}, {b}"),
     TernaryOps.WHERE: lambda d,a,b,c,dtype,asmtype: f"{d} = select i1 {a}, {asmtype} {b}, {asmtype} {c};"
   }
   types = {**{k:f"i{k.itemsize*8}" if dtypes.is_int(k) else v for k,v in AssemblyLanguage().types.items()},
