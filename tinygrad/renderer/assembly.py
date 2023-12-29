@@ -89,7 +89,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
 
   def cast(a:str, dtype:DType, atype:DType, bitcast=False, u=None, pred=False):
     if atype == dtype:
-      r[u] = a
+      if u: r[u] = a
       return a
     if "pred" in a and lang.has_pred:
       kk(f"selp.{lang.types[dtype]} {(ret:=ssa(u, 'cast', lang.types[dtype]))}, {const(1, dtype)}, {const(0, dtype)}, {a};")
@@ -139,7 +139,8 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       elif args == TernaryOps.WHERE and lang.has_pred:
         kk(lang.asm_for_op[args](ssa(u, "alu"), cast(r[vin[0]], dtypes.bool, vin[0].dtype, pred=True), r[vin[1]], r[vin[2]], lang.types[dtype]))
       elif args == TernaryOps.MULACC and not lang.has_mulacc:
-        kk(lang.asm_for_op[BinaryOps.MUL](tmp:=ssa(None, "tmp", lang.types[dtype]), r[vin[0]], r[vin[1]], dtype, lang.types[dtype]),
+        kk(lang.asm_for_op[BinaryOps.MUL](tmp:=ssa(None, "tmp", lang.types[dtype]),
+                                          cast(r[vin[0]], dtype, vin[0].dtype), cast(r[vin[1]], dtype, vin[1].dtype), dtype, lang.types[dtype]),
            lang.asm_for_op[BinaryOps.ADD](ssa(u, "alu"), tmp, r[vin[2]], dtype, lang.types[dtype]))
       else: kk(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], dtype, lang.types[dtype]))
     elif uop == UOps.DEFINE_ACC:
