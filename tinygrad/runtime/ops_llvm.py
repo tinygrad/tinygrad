@@ -47,7 +47,6 @@ class LLVM:
 
 @diskcache
 def compile_llvm(prg, llvmopt=LLVMOPT) -> bytes:
-  prg = prg.replace("TARGET", "unknown-unknown-unknown")
   mod = llvm.parse_assembly(prg)
   mod.verify()
   LLVM().optimizer.run(mod)

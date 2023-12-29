@@ -200,7 +200,7 @@ LLVM_FMATH = "nsz arcp contract afn reassoc"
 llvm_intrinsic_types = {dtypes.float32: "f32", dtypes.float64: "f64"}
 
 class LLVMLanguage(AssemblyLanguage):
-  kernel_prefix = """target triple = "TARGET"
+  kernel_prefix = """target triple = "unknown-unknown-unknown"
 define void @"""
   ssa = True
   needs_regs = False
