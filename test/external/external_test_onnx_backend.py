@@ -156,6 +156,10 @@ backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cp
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 
 # issue 1556 https://github.com/tinygrad/tinygrad/issues/1556
+backend_test.exclude('test_isinf_cpu')
+backend_test.exclude('test_isinf_negative_cpu')
+backend_test.exclude('test_isinf_positive_cpu')
+backend_test.exclude('test_isinf_float16_cpu')
 backend_test.exclude('test_isnan_float16_cpu')
 backend_test.exclude('test_isnan_cpu')
 
@@ -181,7 +185,6 @@ if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
 
 # error: casting to type 'half' is not allowed
 backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
-backend_test.exclude('test_isinf_float16_cpu')
 
 # TODO: this somehow passes in CI but does not pass if run locally
 if isinstance(Device[Device.DEFAULT], Compiled):
