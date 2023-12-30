@@ -65,7 +65,7 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
-    assert isinstance(dtype, DType), f"dtype {dtype} {type(dtype)}"
+    assert isinstance(dtype, DType)
     self.device, self.size, self.dtype = device, size, dtype
     self.allocator = Device[self.device].allocator
     # TODO: image hack shouldn't be here. where should it be?
@@ -90,7 +90,6 @@ class Buffer:
   def toCPU(self) -> np.ndarray:
     # zero copy with as_buffer
     if hasattr(self.allocator, 'as_buffer'):
-      # assert self.dtype.np is not None, "dtype {dtype} doesn't have equivalent numpy dtype"
       return np.frombuffer(self.allocator.as_buffer(self._buf), dtype=np.dtype(self.dtype.np, metadata={"backing": self._buf}))  # type: ignore
     ret = np.empty(self.size, self.dtype.np)
     if self.size > 0: self.allocator.copyout(flat_mv(ret.data), self._buf)
