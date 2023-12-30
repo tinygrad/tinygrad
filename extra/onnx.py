@@ -60,7 +60,7 @@ def get_run_onnx(onnx_model: ModelProto):
       elif len(inp.int32_data) > 0:
         ret = Tensor(np.array(inp.int32_data, dtype=np.int32).reshape(inp.dims), requires_grad=False)
       else:
-        # TODO half broken in CI for GPU and LLVM backend
+        # TODO half broken in CI for GPU and LLVM segfaults in CI
         if (dtype := tensor_dtype_to_np_dtype(inp.data_type)) == np.half and CI and Device.DEFAULT in ('GPU', 'LLVM'):
           ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
         else:
