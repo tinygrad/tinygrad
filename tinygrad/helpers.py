@@ -111,11 +111,15 @@ class DType(NamedTuple):
   name: str
   tag: Optional[str] = None
   sz: int = 1
-  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
+  def __repr__(self): return f"dtypes.{self.title}" if self.sz == 1 else f"dtypes.{self.title}"+("_" if self.name[-1].isdigit() else "")+f"{self.sz}"
   def vec(self, sz:int):
     assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
-    return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self]}{str(sz)}", None, sz)
-  def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
+    return DType(self.priority, self.itemsize*sz, f"{self.title}{str(sz)}", None, sz)
+  def scalar(self): return dtypes.__dict__[self.title]
+  @property
+  def title(self):
+    ret = ("" if len(w := self.name.split())<2 else ("u" if w[0].startswith("u") else "")) + w[-1]
+    return ret if self.sz == 1 else ret[:-len(str(self.sz))]
   @property
   def np(self): return NPMAP[self.tag]
   @property
@@ -166,7 +170,7 @@ class dtypes:
   uint64: Final[DType] = DType(8, 8, "unsigned long", "uint64")
   float16: Final[DType] = DType(9, 2, "half", "float16")
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
-  bfloat16: Final[DType] = DType(10, 2, "__bf16", "bfloat16")
+  bfloat16: Final[DType] = DType(10, 2, "bfloat16", "bfloat16")
   float32: Final[DType] = DType(11, 4, "float", "float32")
   float64: Final[DType] = DType(12, 8, "double", "float64")
 
@@ -300,24 +304,24 @@ class MemArray:
   def __init__(self, nda: Union[List, Tuple, bytes, np.ndarray], dtype: Optional[DType] = None):
     if isinstance(nda, bytes):
       self.dtype, self.nda = dtypes.from_np(np.uint8), np.frombuffer(nda, np.uint8)
-      self.mv, self.shape = self.nda.data, self.nda.shape
+      self.buffer, self.shape = self.nda.data, self.nda.shape
     elif isinstance(nda, (list, tuple)):
       if (d := fully_flatten(nda)) and all(isinstance(s, bool) for s in d): self.dtype = dtype or dtypes.bool
       elif d and all_int(d): self.dtype = dtype or dtypes.default_int
       else: self.dtype = dtype or dtypes.default_float
       self.nda = np.array(nda, self.dtype.np)
-      self.mv, self.shape = self.nda.data, self.nda.shape
+      self.buffer, self.shape = self.nda.data, self.nda.shape
     elif isinstance(nda, np.ndarray):
       self.shape = nda.shape
       if self.shape == (): self.nda, self.dtype = nda, dtype or dtypes.from_np(nda.dtype.type)
       else:
         self.nda = nda.astype(dtype.np) if dtype is not None and dtype.np is not None else nda
         self.dtype = dtypes.from_np(nda.dtype.type)
-      self.mv = nda.data
+      self.buffer = nda.data
       assert isinstance(self.dtype, DType), f"dtype {self.dtype} {type(self.dtype)}"
   @property
   def size(self) -> int: return prod(self.shape)
-  def data(self) -> memoryview: return self.mv
+  def data(self) -> memoryview: return self.buffer
   def item(self) -> Any: return self.nda.item() if isinstance(self.nda, np.ndarray) else None
   def flatten(self) -> Any: return self.nda.flatten() if isinstance(self.nda, np.ndarray) else self.nda
 
