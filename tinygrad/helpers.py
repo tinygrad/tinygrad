@@ -1,10 +1,9 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string
-import ctypes as ct
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes as ct
 import numpy as np
 from urllib import request
 from tqdm import tqdm
-from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Set, Sequence
+from typing import Dict, Tuple, Union, List, NamedTuple, Final, ClassVar, Optional, Iterable, Any, Type, TypeVar, TYPE_CHECKING, Callable, Set, Sequence # noqa: E501
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
 
@@ -109,21 +108,20 @@ class DType(NamedTuple):
   priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
-  tag: Optional[str] = None
   sz: int = 1
-  def __repr__(self): return f"dtypes.{self.title}" if self.sz == 1 else f"dtypes.{self.title}"+("_" if self.name[-1].isdigit() else "")+f"{self.sz}"
+  def __repr__(self): return f"dtypes.{self.title}" if self.sz == 1 else f"dtypes.{self.name[:-(i:=len(str(self.sz)))]}[{self.name[-i:]}]"
   def vec(self, sz:int):
     assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
-    return DType(self.priority, self.itemsize*sz, f"{self.title}{str(sz)}", None, sz)
-  def scalar(self): return dtypes.__dict__[self.title]
+    return DType(self.priority, self.itemsize*sz, f"{self.title}{str(sz)}", sz)
+  def scalar(self) -> DType: return DTYPES_DICT[self.title]
   @property
-  def title(self):
+  def title(self) -> str:
     ret = ("" if len(w := self.name.split())<2 else ("u" if w[0].startswith("u") else "")) + w[-1]
     return ret if self.sz == 1 else ret[:-len(str(self.sz))]
   @property
-  def np(self): return NPMAP[self.tag]
+  def np(self) -> Optional[Type]: return NPTYPES[self.priority] if self.sz == 1 else None
   @property
-  def ct(self): return CTMAP[self.tag]
+  def ct(self) -> Optional[Type]: return CTYPES[self.priority] if self.sz == 1 else None
 
 # dependent typing?
 class ImageDType(DType):
@@ -141,7 +139,7 @@ class ImageDType(DType):
   def __ne__(self, x): return super().__ne__(x) or self.shape != x.shape
 
 class PtrDType(DType):
-  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.tag, dt.sz)
+  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.sz)
   def __repr__(self): return f"ptr.{super().__repr__()}"
 
 class dtypes:
@@ -152,27 +150,27 @@ class dtypes:
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
-  def from_np(x) -> DType: return DTMAP[INVERSE_NPMAP[x]]
+  def from_np(x) -> DType: return NPTYPES_MAP[x]
   @staticmethod
-  def from_ct(x) -> DType: return DTMAP[INVERSE_CTMAP[x]]
+  def from_ct(x) -> DType: return CTYPES_MAP[x]
   @staticmethod  # NOTE: isinstance(True, int) is True in python
   def from_py(x) -> DType: return dtypes.default_float if isinstance(x, float) else dtypes.bool if isinstance(x, bool) else dtypes.default_int
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
-  bool: Final[DType] = DType(0, 1, "bool", "bool")
-  int8: Final[DType] = DType(1, 1, "char", "int8")
-  uint8: Final[DType] = DType(2, 1, "unsigned char", "uint8")
-  int16: Final[DType] = DType(3, 2, "short", "int16")
-  uint16: Final[DType] = DType(4, 2, "unsigned short", "uint16")
-  int32: Final[DType] = DType(5, 4, "int", "int32")
-  uint32: Final[DType] = DType(6, 4, "unsigned int", "uint32")
-  int64: Final[DType] = DType(7, 8, "long", "int64")
-  uint64: Final[DType] = DType(8, 8, "unsigned long", "uint64")
-  float16: Final[DType] = DType(9, 2, "half", "float16")
+  bool: Final[DType] = DType(0, 1, "bool")
+  int8: Final[DType] = DType(1, 1, "char")
+  uint8: Final[DType] = DType(2, 1, "unsigned char")
+  int16: Final[DType] = DType(3, 2, "short")
+  uint16: Final[DType] = DType(4, 2, "unsigned short")
+  int32: Final[DType] = DType(5, 4, "int")
+  uint32: Final[DType] = DType(6, 4, "unsigned int")
+  int64: Final[DType] = DType(7, 8, "long")
+  uint64: Final[DType] = DType(8, 8, "unsigned long")
+  float16: Final[DType] = DType(9, 2, "half")
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
-  bfloat16: Final[DType] = DType(10, 2, "bfloat16", "bfloat16")
-  float32: Final[DType] = DType(11, 4, "float", "float32")
-  float64: Final[DType] = DType(12, 8, "double", "float64")
+  bfloat16: Final[DType] = DType(10, 2, "bfloat16")
+  float32: Final[DType] = DType(11, 4, "float")
+  float64: Final[DType] = DType(12, 8, "double")
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
@@ -205,11 +203,9 @@ def least_upper_dtype(*ds:DType) -> DType:
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.float32)
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if (not k.startswith('__') and not k.startswith('default') and not callable(v) and v.__class__ is not staticmethod)} # noqa: E501
-INVERSE_DTYPES_DICT = {v:k for k,v in DTYPES_DICT.items()}; _DTMAP = {DTYPES_DICT[s].tag:s for s in DTYPES_DICT.keys()}; DTMAP = {s:DTYPES_DICT[s] for s in _DTMAP.keys()} # noqa: E501,E702
-NPTYPES = [np.bool_, np.int8, np.uint8, np.int16, np.uint16, np.int32, np.uint32, np.int64, np.uint64, np.float16, None, np.float32, np.float64]; NPMAP = {k:v for k,v in zip(_DTMAP.keys(), NPTYPES)}; INVERSE_NPMAP = {v:k for k,v in NPMAP.items()} # noqa: E501,E702
-CTYPES = [ct.c_bool, ct.c_int8, ct.c_uint8, ct.c_int16, ct.c_uint16, ct.c_int32, ct.c_uint32, ct.c_int64, ct.c_uint64, None, None, ct.c_float, ct.c_double]; CTMAP = {k:v for k,v in zip(_DTMAP.keys(), CTYPES)}; INVERSE_CTMAP = {v:k for k,v in CTMAP.items()} # noqa: E501,E702
-
+DTYPES_DICT = {k:v for k,v in dtypes.__dict__.items() if isinstance(v, DType) and v.sz == 1}; INVERSE_DTYPES_DICT = {v:k for k,v in DTYPES_DICT.items()} # noqa: E501,E702
+NPTYPES = (np.bool_, np.int8, np.uint8, np.int16, np.uint16, np.int32, np.uint32, np.int64, np.uint64, np.float16, None, np.float32, np.float64); NPTYPES_MAP = {k:v for k,v in zip(NPTYPES, INVERSE_DTYPES_DICT.keys()) if k} # noqa: E501,E702
+CTYPES = (ct.c_bool, ct.c_int8, ct.c_uint8, ct.c_int16, ct.c_uint16, ct.c_int32, ct.c_uint32, ct.c_int64, ct.c_uint64, None, None, ct.c_float, ct.c_double); CTYPES_MAP = {k:v for k,v in zip(CTYPES, INVERSE_DTYPES_DICT.keys()) if k} # noqa: E501,E702
 
 class GlobalCounters:
   global_ops: ClassVar[int] = 0
@@ -259,7 +255,7 @@ def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
     ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
     cur.execute(f"CREATE TABLE IF NOT EXISTS {table}_{VERSION} ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
     _db_tables.add(table)
-  cur.execute(f"REPLACE INTO {table}_{VERSION} ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val), ))  # noqa: E501
+  cur.execute(f"REPLACE INTO {table}_{VERSION} ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key.keys()))}, ?)", tuple(key.values()) + (pickle.dumps(val),))  # noqa: E501
   conn.commit()
   cur.close()
   return val
