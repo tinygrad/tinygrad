@@ -181,6 +181,7 @@ if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
 
 # error: casting to type 'half' is not allowed
 backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
+backend_test.exclude('test_isinf_float16_cpu')
 
 # TODO: this somehow passes in CI but does not pass if run locally
 if isinstance(Device[Device.DEFAULT], Compiled):
