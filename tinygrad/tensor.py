@@ -46,7 +46,7 @@ class Tensor:
     def __exit__(self, exc_type, exc_value, traceback): Tensor.training = self.prev
 
   no_grad: ClassVar[bool] = False
-  def __init__(self, data:Union[None, bool, int, float, List, Tuple, bytes, LazyBuffer, MemArray, np.ndarray],
+  def __init__(self, data:Union[None, bool, int, float, List, Tuple, LazyBuffer, MemArray, np.ndarray, bytes],
                device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     device = Device.canonicalize(device)
@@ -60,15 +60,15 @@ class Tensor:
     # internal variables used for autograd graph construction
     self._ctx: Optional[Function] = None
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
-    elif isinstance(data, (bool, int, float)): data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
+    elif isinstance(data, (bool, int, float)): data = LazyBuffer.loadop(LoadOps.CONST, (), dtype or dtypes.from_py(data), device, data)
     elif isinstance(data, bytes): data = LazyBuffer.fromCPU(MemArray(data))
     elif data is None: data = LazyBuffer.loadop(LoadOps.EMPTY, (0,), dtype or dtypes.default_float, device)
-    elif isinstance(data, list):
+    elif isinstance(data, (list, tuple)):
       data = MemArray(data, dtype)
       data = LazyBuffer.fromCPU(data).cast(data.dtype) # NOTE: cast at the end for the dtypes that do not have a numpy dtype
     else:
       data = data if isinstance(data, MemArray) else MemArray(data, dtype)
-      if data.shape == (): data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or data.dtype, device, data.item())
+      if data.shape == (): data = LazyBuffer.loadop(LoadOps.CONST, (), dtype or data.dtype, device, data.item())
       else: data = LazyBuffer.fromCPU(data)
 
     # data is a LazyBuffer, but it might be on the wrong device

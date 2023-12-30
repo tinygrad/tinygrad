@@ -156,9 +156,9 @@ class TestFetch(unittest.TestCase):
     assert(len(fetch('https://google.com', allow_caching=False).read_bytes())>0)
 
   def test_fetch_img(self):
-    img = fetch("https://media.istockphoto.com/photos/hen-picture-id831791190", allow_caching=False)
+    img = fetch("https://raw.githubusercontent.com/tinygrad/tinygrad/master/docs/logo.png", allow_caching=False)
     with Image.open(img) as pimg:
-      assert pimg.size == (705, 1024)
+      assert pimg.size == (411, 272), f"{pimg.size}"
 
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):

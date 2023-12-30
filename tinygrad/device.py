@@ -65,7 +65,7 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
-    assert isinstance(dtype, DType)
+    assert isinstance(dtype, DType), f"{dtype=}"
     self.device, self.size, self.dtype = device, size, dtype
     self.allocator = Device[self.device].allocator
     # TODO: image hack shouldn't be here. where should it be?
@@ -85,7 +85,7 @@ class Buffer:
     return self
   @staticmethod
   def fromCPU(device:str, x:MemArray):
-    assert isinstance(x, MemArray), f"{x} {type(x)}"
+    assert isinstance(x, MemArray), f"{type(x)=}"
     return Buffer(device, x.size, x.dtype).copyin(x.data())
   def toCPU(self) -> np.ndarray:
     # zero copy with as_buffer

@@ -301,7 +301,7 @@ class MemArray:
     if isinstance(data_obj, bytes):
       self.dtype, self.obj = dtypes.from_np(np.uint8), np.frombuffer(data_obj, np.uint8)
       self.mv, self.shape = self.obj.data, self.obj.shape
-    elif isinstance(data_obj, list):
+    elif isinstance(data_obj, (list, tuple)):
       if (d := fully_flatten(data_obj)) and all(isinstance(s, bool) for s in d): self.dtype = dtype or dtypes.bool
       elif d and all_int(d): self.dtype = dtype or dtypes.default_int
       else: self.dtype = dtype or dtypes.default_float
