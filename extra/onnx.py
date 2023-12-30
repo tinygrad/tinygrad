@@ -4,6 +4,7 @@ import importlib
 import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, DEBUG, dtypes, CI
+from tinygrad.device import Device
 from typing import List, Dict
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto # onnx 1.50 uses serialized file (see onnx/onnx-ml.proto) as descriptors
 try:
@@ -60,7 +61,7 @@ def get_run_onnx(onnx_model: ModelProto):
         ret = Tensor(np.array(inp.int32_data, dtype=np.int32).reshape(inp.dims), requires_grad=False)
       else:
         # TODO half broken in CI for GPU backend
-        if (dtype := tensor_dtype_to_np_dtype(inp.data_type)) == np.half and CI:
+        if (dtype := tensor_dtype_to_np_dtype(inp.data_type)) == np.half and CI and Device.DEFAULT == 'GPU':
           ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
         else:
           ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims).copy(), requires_grad=False)
