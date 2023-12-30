@@ -60,10 +60,10 @@ def get_run_onnx(onnx_model: ModelProto):
         ret = Tensor(np.array(inp.int32_data, dtype=np.int32).reshape(inp.dims), requires_grad=False)
       else:
         # TODO half broken in CI for GPU backend
-        if CI and (dtype := tensor_dtype_to_np_dtype(inp.data_type)) == np.half:
-          ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
+        if CI and tensor_dtype_to_np_dtype(inp.data_type) == np.half:
+          ret = Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
         else:
-          ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims).copy(), requires_grad=False)
+          ret = Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).reshape(inp.dims).copy(), requires_grad=False)
     else:
       raise Exception(f"bad data type {inp.name} {inp.dims} {inp.data_type}")
     return ret

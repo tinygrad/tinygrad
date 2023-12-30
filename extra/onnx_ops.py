@@ -106,7 +106,7 @@ def Atan(y: Tensor):
   return (y < 0).where(-t3, t3)
 
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
-  k = int(k.numpy().item()) if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
+  k = k.item() if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
   return x.triu(k)if upper else x.tril(k)
 
 def Squeeze(data: Tensor, axes):
@@ -127,8 +127,8 @@ def Binarizer(x, threshold=0.0): return (x > threshold).float()
 def ArgMax(x: Tensor, axis=0, keepdims=1, select_last_index=0):
   axis = axis + x.ndim if axis < 0 else axis
   m = x == (x.max(axis=axis, keepdim=keepdims) if keepdims else x.max(axis=axis, keepdim=keepdims).unsqueeze(axis))
-  c = Tensor.arange(x.shape[axis]).reshape(*[1]*(axis), x.shape[axis], *[1]*(x.ndim - axis-1)) * m
-  return c.max(axis=axis,keepdim=keepdims).cast(dtypes.int64)
+  c = Tensor.arange(x.shape[axis], dtype=dtypes.int64).reshape(*[1]*(axis), x.shape[axis], *[1]*(x.ndim - axis-1)) * m
+  return c.max(axis=axis,keepdim=keepdims)
 def ArgMin(x, axis=0, keepdims=1, select_last_index=0): return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
 
 def Concat(*xs: List[Tensor], axis): return xs[0].cat(*xs[1:], dim=axis)
@@ -283,9 +283,9 @@ def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1
   ret = _padding(X, pads, auto_pad, constant_value=float("-inf"), axes=tuple(range(len(X.shape)))[2:], strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
   ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations)
   ret_len, X_len = ret.numel(), X.numel()
-  indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().reshape(1, X_len).expand(ret_len, X_len)) * Tensor.arange(X_len).reshape(1, X_len).expand(ret_len, X_len)).sum(1).reshape(ret.shape)
+  indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().reshape(1, X_len).expand(ret_len, X_len)) * Tensor.arange(X_len, dtype=dtypes.int64).reshape(1, X_len).expand(ret_len, X_len)).sum(1).reshape(ret.shape)
   if storage_order: indices = indices.transpose(indices.ndim-2, indices.ndim-1)
-  return ret, indices.cast(dtypes.int64)
+  return ret, indices
 
 def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Tensor=None, kernel_shape=None, pads=None, strides=None):
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
@@ -518,7 +518,7 @@ def OneHot(indices: Tensor, depth: Tensor, values: Tensor, axis=-1):
   if axis < 0: axis += rank + 1
   ls, rs = indices.shape[0:axis], indices.shape[axis: rank]
   cond = indices[:,None] == Tensor.arange(depth).reshape((1,) * len(ls) + (depth,) + (1,) * len(rs))
-  return cond.where(values[1], values[0]).cast(values.dtype)
+  return cond.where(values[1], values[0])
 
 def Erf(x: Tensor):
   t = 1.0 / (1.0 + 0.3275911 * x.abs())
