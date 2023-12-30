@@ -2,7 +2,8 @@ import unittest
 import numpy as np
 import torch
 import operator
-from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX, least_upper_float, temp, least_upper_dtype
+from tinygrad.helpers import CI, DTYPES_DICT, INVERSE_DTYPES_DICT, getenv, DType, ImageDType, PtrDType
+from tinygrad.helpers import DEBUG, OSX, least_upper_float, temp, least_upper_dtype
 from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
@@ -28,7 +29,7 @@ def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
 
 def get_available_cast_dtypes(dtype: DType) -> List[DType]:
   if not is_dtype_supported(dtype): return []
-  return [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("_")] # dont cast internal dtypes
+  return [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) and not k.startswith("b")] # dont cast internal dtypes
 
 def _test_to_np(a:Tensor, np_dtype, target):
   if DEBUG >= 2: print(a)
@@ -201,6 +202,24 @@ class TestEqStrDType(unittest.TestCase):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")
     self.assertEqual(str(PtrDType(dtypes.float32)), "ptr.dtypes.float")
+
+class TestDTypeMapping(unittest.TestCase):
+  def test_numpy_mapping(self):
+    if INVERSE_DTYPES_DICT is None: raise unittest.SkipTest("INVERSE_DTYPES_DICT not found")
+    if dtypes.from_np is None: raise unittest.SkipTest("no numpy to equivalent dtypes conversion support")
+    for dtype in INVERSE_DTYPES_DICT.keys():
+      npt = dtype.np
+      if npt is not None:
+        dtype2 = dtypes.from_np(npt)
+        assert dtype == dtype2, f"{dtype} unexpected numpy conversion, bad conversion: [{dtype}] -> [{npt}] -> [{dtype2}]"
+  def test_ctypes_mapping(self):
+    if INVERSE_DTYPES_DICT is None: raise unittest.SkipTest("INVERSE_DTYPES_DICT not found")
+    if dtypes.from_ct is None: raise unittest.SkipTest("no numpy to equivalent dtypes conversion support")
+    for dtype in INVERSE_DTYPES_DICT.keys():
+      ct = dtype.ct
+      if ct is not None:
+        dtype2 = dtypes.from_ct(ct := dtype.ct)
+        assert dtype == dtype2, f"{dtype} unexpected ctypes conversion, bad conversion: [{dtype}] -> [{ct}] -> [{dtype2}]"
 
 class TestHelpers(unittest.TestCase):
   signed_ints = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)
