@@ -1,8 +1,7 @@
 from __future__ import annotations
 import sys, math
-import numpy as np
 from typing import Union, Optional, Any, Tuple, List, Set, Dict
-from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten, getenv, dedup, ImageDType, DEBUG, all_int, all_same
+from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten, getenv, dedup, ImageDType, DEBUG, all_int, all_same, MemArray
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps
 from tinygrad.ops import Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem, vars_from_ast
 from tinygrad.shape.symbolic import sint, Variable
@@ -80,9 +79,10 @@ class LazyBuffer:
   def schedule(self, seen=None): return create_schedule([self], seen)
 
   @staticmethod
-  def fromCPU(x: np.ndarray) -> LazyBuffer:
-    ret = LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), dtypes.from_np(x.dtype.type), op=LoadOps.EMPTY)
-    ret.realized = Buffer("CPU", prod(x.shape), dtypes.from_np(x.dtype.type), x.flatten())
+  def fromCPU(x: MemArray) -> LazyBuffer:
+    assert isinstance(x, MemArray), f"{type(x)}"
+    ret = LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), x.dtype, op=LoadOps.EMPTY)
+    ret.realized = Buffer("CPU", x.size, x.dtype, x.flatten())
     return ret
 
   def copy_to_device(self, device:str) -> LazyBuffer:

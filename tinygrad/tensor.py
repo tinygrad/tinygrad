@@ -8,7 +8,7 @@ from itertools import accumulate
 import numpy as np
 
 from tinygrad.helpers import DType, dtypes, ImageDType, least_upper_float, least_upper_dtype, MemArray
-from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
+from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts
 from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
@@ -46,7 +46,7 @@ class Tensor:
     def __exit__(self, exc_type, exc_value, traceback): Tensor.training = self.prev
 
   no_grad: ClassVar[bool] = False
-  def __init__(self, data:Union[None, bool, int, float, List, Tuple, bytes, MemArray, LazyBuffer, np.ndarray],
+  def __init__(self, data:Union[None, bool, int, float, List, Tuple, bytes, LazyBuffer, MemArray, np.ndarray],
                device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     device = Device.canonicalize(device)
@@ -61,20 +61,15 @@ class Tensor:
     self._ctx: Optional[Function] = None
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     elif isinstance(data, (bool, int, float)): data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
-    elif isinstance(data, bytes): data = LazyBuffer.fromCPU(np.frombuffer(data, np.uint8))
+    elif isinstance(data, bytes): data = LazyBuffer.fromCPU(MemArray(data))
     elif data is None: data = LazyBuffer.loadop(LoadOps.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif isinstance(data, list):
-      if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtype or dtypes.bool
-      elif d and all_int(d): dtype = dtype or dtypes.default_int
-      else: dtype = dtype or dtypes.default_float
-      # NOTE: cast at the end for the dtypes that do not have a numpy dtype
-      data = LazyBuffer.fromCPU(np.array(data, dtype.np)).cast(dtype)
-    elif isinstance(data, MemArray):
+      data = MemArray(data, dtype)
+      data = LazyBuffer.fromCPU(data).cast(data.dtype) # NOTE: cast at the end for the dtypes that do not have a numpy dtype
+    else:
+      data = data if isinstance(data, MemArray) else MemArray(data, dtype)
       if data.shape == (): data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or data.dtype, device, data.item())
-      else: data = LazyBuffer.fromCPU(data.astype(dtype) if dtype is not None and dtype != data.dtype else data)
-    elif isinstance(data, np.ndarray):
-      if data.shape == (): data = LazyBuffer.loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype.type), device, data.item())
-      else: data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
+      else: data = LazyBuffer.fromCPU(data)
 
     # data is a LazyBuffer, but it might be on the wrong device
     if not isinstance(data, LazyBuffer): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")

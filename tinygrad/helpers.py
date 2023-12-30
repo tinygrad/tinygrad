@@ -297,18 +297,29 @@ def cpu_time_execution(cb, enable):
 # *** array helpers ***
 
 class MemArray:
-  def __init__(self, data: Union[None, bool, int, float, List, Tuple, bytes],
-               dtype: Optional[DType] = None,  shape: Optional[Tuple[int, ...]] = None):
-    if dtype is None:
-      raise NotImplementedError('to do: get/infer dtype from data')
-    self.data, self.dtype, self.shape = data, dtype, shape
-
-  def item(self):
-    assert self.shape == ()
-    raise NotImplementedError('to do: write item method')
-
-  def astype(self, dtype: DType):
-    raise NotImplementedError('to do: write astype method')
+  def __init__(self, data_obj: Union[List, Tuple, bytes, np.ndarray], dtype: Optional[DType] = None):
+    if isinstance(data_obj, bytes):
+      self.dtype, self.obj = dtypes.from_np(np.uint8), np.frombuffer(data_obj, np.uint8)
+      self.mv, self.shape = self.obj.data, self.obj.shape
+    elif isinstance(data_obj, list):
+      if (d := fully_flatten(data_obj)) and all(isinstance(s, bool) for s in d): self.dtype = dtype or dtypes.bool
+      elif d and all_int(d): self.dtype = dtype or dtypes.default_int
+      else: self.dtype = dtype or dtypes.default_float
+      self.obj = np.array(data_obj, self.dtype.np)
+      self.mv, self.shape = self.obj.data, self.obj.shape
+    elif isinstance(data_obj, np.ndarray):
+      self.shape = data_obj.shape
+      if self.shape == (): self.obj, self.dtype = data_obj, dtype or dtypes.from_np(data_obj.dtype.type)
+      else:
+        self.obj = data_obj.astype(dtype.np) if dtype is not None and dtype.np is not None else data_obj
+        self.dtype = dtypes.from_np(data_obj.dtype.type)
+      self.mv = data_obj.data
+      assert isinstance(self.dtype, DType), f"dtype {self.dtype} {type(self.dtype)}"
+  @property
+  def size(self) -> int: return 1 if len(self.shape) == 0 else prod(self.shape)
+  def data(self) -> memoryview: return self.mv
+  def item(self) -> Any: return self.obj.item() if isinstance(self.obj, np.ndarray) else None
+  def flatten(self) -> Any: return self.obj.flatten() if isinstance(self.obj, np.ndarray) else self.obj
 
 # *** ctypes helpers
 

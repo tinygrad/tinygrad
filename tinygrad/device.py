@@ -3,7 +3,7 @@ import numpy as np
 from collections import defaultdict
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable
 import importlib, inspect, functools, pathlib, time, re, ctypes
-from tinygrad.helpers import DType, dtypes, ImageDType
+from tinygrad.helpers import DType, ImageDType, MemArray
 from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op, vars_from_ast
@@ -65,7 +65,7 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
-    assert isinstance(dtype, DType)
+    assert isinstance(dtype, DType), f"dtype {dtype} {type(dtype)}"
     self.device, self.size, self.dtype = device, size, dtype
     self.allocator = Device[self.device].allocator
     # TODO: image hack shouldn't be here. where should it be?
@@ -84,7 +84,9 @@ class Buffer:
     self.allocator.copyin(self._buf, mv)
     return self
   @staticmethod
-  def fromCPU(device:str, x:np.ndarray): return Buffer(device, x.size, dtypes.from_np(x.dtype.type)).copyin(x.data)
+  def fromCPU(device:str, x:MemArray):
+    assert isinstance(x, MemArray), f"{x} {type(x)}"
+    return Buffer(device, x.size, x.dtype).copyin(x.data())
   def toCPU(self) -> np.ndarray:
     # zero copy with as_buffer
     if hasattr(self.allocator, 'as_buffer'):
