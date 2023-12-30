@@ -194,7 +194,7 @@ if isinstance(Device[Device.DEFAULT], Compiled):
 if Device.DEFAULT == 'METAL':
   backend_test.exclude('test_maxpool_2d_same_upper_cpu')
 
-# TODO RuntimeError: OpenCL Error -48
+# TODO when ran locally, RuntimeError: OpenCL Error -48
 if Device.DEFAULT == 'GPU':
   backend_test.exclude('test_max_float64_cpu')
   backend_test.exclude('test_min_float64_cpu')
