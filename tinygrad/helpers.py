@@ -297,29 +297,29 @@ def cpu_time_execution(cb, enable):
 # *** array helpers ***
 
 class MemArray:
-  def __init__(self, data_obj: Union[List, Tuple, bytes, np.ndarray], dtype: Optional[DType] = None):
-    if isinstance(data_obj, bytes):
-      self.dtype, self.obj = dtypes.from_np(np.uint8), np.frombuffer(data_obj, np.uint8)
-      self.mv, self.shape = self.obj.data, self.obj.shape
-    elif isinstance(data_obj, (list, tuple)):
-      if (d := fully_flatten(data_obj)) and all(isinstance(s, bool) for s in d): self.dtype = dtype or dtypes.bool
+  def __init__(self, nda: Union[List, Tuple, bytes, np.ndarray], dtype: Optional[DType] = None):
+    if isinstance(nda, bytes):
+      self.dtype, self.nda = dtypes.from_np(np.uint8), np.frombuffer(nda, np.uint8)
+      self.mv, self.shape = self.nda.data, self.nda.shape
+    elif isinstance(nda, (list, tuple)):
+      if (d := fully_flatten(nda)) and all(isinstance(s, bool) for s in d): self.dtype = dtype or dtypes.bool
       elif d and all_int(d): self.dtype = dtype or dtypes.default_int
       else: self.dtype = dtype or dtypes.default_float
-      self.obj = np.array(data_obj, self.dtype.np)
-      self.mv, self.shape = self.obj.data, self.obj.shape
-    elif isinstance(data_obj, np.ndarray):
-      self.shape = data_obj.shape
-      if self.shape == (): self.obj, self.dtype = data_obj, dtype or dtypes.from_np(data_obj.dtype.type)
+      self.nda = np.array(nda, self.dtype.np)
+      self.mv, self.shape = self.nda.data, self.nda.shape
+    elif isinstance(nda, np.ndarray):
+      self.shape = nda.shape
+      if self.shape == (): self.nda, self.dtype = nda, dtype or dtypes.from_np(nda.dtype.type)
       else:
-        self.obj = data_obj.astype(dtype.np) if dtype is not None and dtype.np is not None else data_obj
-        self.dtype = dtypes.from_np(data_obj.dtype.type)
-      self.mv = data_obj.data
+        self.nda = nda.astype(dtype.np) if dtype is not None and dtype.np is not None else nda
+        self.dtype = dtypes.from_np(nda.dtype.type)
+      self.mv = nda.data
       assert isinstance(self.dtype, DType), f"dtype {self.dtype} {type(self.dtype)}"
   @property
-  def size(self) -> int: return 1 if len(self.shape) == 0 else prod(self.shape)
+  def size(self) -> int: return prod(self.shape)
   def data(self) -> memoryview: return self.mv
-  def item(self) -> Any: return self.obj.item() if isinstance(self.obj, np.ndarray) else None
-  def flatten(self) -> Any: return self.obj.flatten() if isinstance(self.obj, np.ndarray) else self.obj
+  def item(self) -> Any: return self.nda.item() if isinstance(self.nda, np.ndarray) else None
+  def flatten(self) -> Any: return self.nda.flatten() if isinstance(self.nda, np.ndarray) else self.nda
 
 # *** ctypes helpers
 
