@@ -107,7 +107,7 @@ def Atan(y: Tensor):
 
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
   k = k.item() if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
-  return x.triu(k)if upper else x.tril(k)
+  return x.triu(k) if upper else x.tril(k)
 
 def Squeeze(data: Tensor, axes):
   if isinstance(axes, Tensor): axes = safe_numpy(axes)
@@ -556,9 +556,8 @@ def EyeLike(x: Tensor, dtype=None, k=0):
 
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 
-# Needs work
 def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
-  ret = (x == float("inf")) * detect_positive + (x == float("-inf"))*detect_negative + Tensor.zeros(*x.shape)
+  ret = (x == float("inf")) * bool(detect_positive) + (x == float("-inf")) * bool(detect_negative) + Tensor.zeros(*x.shape, dtype=dtypes.bool)
   return ret
 
 def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1):
