@@ -106,7 +106,7 @@ def Atan(y: Tensor):
   return (y < 0).where(-t3, t3)
 
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
-  k = k.item() if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
+  k = safe_numpy(k).item() if isinstance(k, Tensor) else 0 # onnx passes k as a tensor int64 with one element, default is 0
   return x.triu(k) if upper else x.tril(k)
 
 def Squeeze(data: Tensor, axes):
@@ -472,8 +472,8 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
   output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)]
   output_shape_ = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
   scales_ = [os/xs for xs, os in zip(X.shape, output_shape)]
-  x_out = Tensor.arange(output_shape[-1]).cast(dtypes.default_float)
-  y_out = Tensor.arange(output_shape[-2]).cast(dtypes.default_float)
+  x_out = Tensor.arange(output_shape[-1], dtype=dtypes.default_float)
+  y_out = Tensor.arange(output_shape[-2], dtype=dtypes.default_float)
   if mode == "nearest":
     x_out, y_out = _coordinate_transformation(x_out, y_out, output_shape, scales_, roi)
     x_out = _nearest_mode(x_out, nearest_mode, X.shape[-1])
