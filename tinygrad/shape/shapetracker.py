@@ -34,50 +34,53 @@ def expr_idxs(view:View, idxs:Tuple[Node, ...]) -> Node:
   assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
   return Variable.sum([NumNode(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])  # noqa: E501
 
+def calc_offset(pos, s, m): return 0 if s == 0 else s * (pos + m[0])
+def safe_mask(_v): return _v.mask if _v.mask else tuple([(0, ss) for ss in _v.shape])
+def get_real_shape(_v): return tuple(y-x for x,y in _v.mask) if _v.mask else _v.shape
+def pos2offset(vm, pos): return vm.offset + sum(calc_offset(_d, _s, _m) for _d, _s, _m in zip(pos, vm.strides, safe_mask(vm)))
+
+def merge_views_real(view1, view2):
+  #print(f'merge_views_real {view1=} {view2=}')
+  from tinygrad.shape.view import strides_for_shape
+  #if view2.contiguous and not view1.contiguous: return None
+  vm1_mask, vm2_mask = [safe_mask(_x) for _x in (view1, view2)]
+  newmask = [list(_m) for _m in vm2_mask]
+
+  _rs, _st, _od, _sh = get_real_shape(view2), view2.strides, len(view2.shape), view2.shape
+  apos = dict([[-1, [0 for _ in _sh]]] + [[_shi, [_shv - 1 if _shi == _id else 0 for _id in range(_od)]] for (_shi, _shv), _st in zip(enumerate(_rs), _st) if _st != 0])
+
+  v = {}
+  for idim, pos in apos.items():
+    logoff = pos2offset(view2, pos)
+    d = [((logoff // _s) if _s != 0 else 0) for _s in strides_for_shape(view1.shape)]
+    d = [_d % _r for _d, _r in zip(d, view1.shape)]
+    if idim >= 0 and any([_d >= _r for _d, _r in zip(d, get_real_shape(view1))]):
+      mtr = [_id for _id, (_d, _r) in enumerate(zip(d, get_real_shape(view1))) if _d >= _r]
+      print(f'0: {idim=} {pos=} {d=} {mtr=} {vm1_mask[mtr[0]]=} {newmask[idim]=}')
+      if len(mtr) > 1: return None
+      mtr = mtr[0]
+      if not pos[idim] == d[mtr]: return None
+      print(f'1: {newmask=}')
+      newmask[idim] = [vm1_mask[mtr][0] + newmask[idim][0], newmask[idim][0] + vm1_mask[mtr][1]]
+    #print(f'{idim=} {pos=} {d=} {logoff=} {newmask=}')
+    v[idim] = pos2offset(view1, d)
+
+  newstrides = [((v[_d] - v[-1]) / apos[_d][_d]) if _d in v else 0 for _d in range(_od)]
+  if not all([x == int(x) for x in newstrides]): print(f'{v=} {newstrides=}'); return None
+  #assert all([x == int(x) for x in newstrides])
+  newstrides = [int(_x) for _x in newstrides]
+  newoffset = v[-1] - sum([int(_s) * _m[0] for _s, _m in zip(newstrides, newmask)])
+  newmask = tuple([tuple(x) for x in newmask])
+  #print(f'{newstrides=} {newoffset=} {newmask=}')
+  if all([tuple(nst) == (0, nsh) for nst, nsh in zip(newmask, view2.shape)]): newmask = None
+
+  return View.create(view2.shape, cast(Tuple[sint, ...], tuple(newstrides)), newoffset, newmask)
+
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
-  print(f"merge_views {vm2} {vm1}")
-  from tinygrad.shape.view import strides_for_shape
   if vm1.contiguous and vm1.shape == vm2.shape: return vm2
   if vm2.contiguous: return vm1
-  if vm2.mask or vm1.offset != 0:
-    real_shape = tuple(y-x for x,y in vm1.mask) if vm1.mask else vm1.shape
-    newstrides = []
-    def safe_mask(_v): return _v.mask if _v.mask else tuple([(0, ss) for ss in _v.shape])
-    vm1_mask = safe_mask(vm1)
-    vm2_mask = safe_mask(vm2)
-    print(f"vm2_mask {vm2_mask}")
-    newmask = [[0,0] for _ in range(len(vm2.shape))]
-    def calc_offset(pos, s, m):
-      if s == 0: return 0
-      if s > 0: return s * (m[0] + pos)
-      return s * (m[0] + pos - m[1])
-    for idim in range(len(vm2.shape)):
-      v = []
-      newmask[idim] = [vm2_mask[idim][0] for _ in range(2)]
-      for i in range(*vm2_mask[idim]):
-        d = [((calc_offset(i, vm2.strides[idim], vm2_mask[idim])) // _s) if _s != 0 else 0 for _s in strides_for_shape(real_shape)]
-        d[1:] = [(_d % _r) if _d >= 0 else -(-_d % _r) for _d, _r in zip(d[1:], real_shape[1:])]
-        if vm2.strides[idim] >= 0 and d[0] < real_shape[0]: newmask[idim][1] += 1
-        elif vm2.strides[idim] < 0 and d[0] > 0: newmask[idim][1] += 1
-        else:
-          newmask[idim] = [k + vm1_mask[0][0] for k in newmask[idim]]
-          break
-        v.append(0)
-        for t, dn in enumerate(d):
-          v[-1] += calc_offset(dn, vm1.strides[t], vm1_mask[t])
-        #if idim == 0 and i == 0: newoffset = vm1.offset + v[0]
-      s = v[1] - v[0] if len(v) > 1 else 0
-      newstrides.append(s)
-    newmask = tuple(tuple(x) for x in newmask)
-    d = [((abs(vm2.offset) // _s) if _s != 0 else 0)  for _s in strides_for_shape(real_shape)]
-    d[1:] = [_d % _r for _d, _r in zip(d[1:], real_shape[1:])]
-    newoffset = vm1.offset
-    for t, dn in enumerate(d):
-      newoffset += calc_offset(dn if vm2.offset * vm1.strides[t] >= 0 else -dn, abs(vm1.strides[t]), vm1_mask[t])
-    if all(tuple(nst) == (0, nsh) for nst, nsh in zip(newmask, vm2.shape)): newmask = None
-    print(f"{newstrides=} {newoffset=} {newmask=}")
-    return View.create(vm2.shape, cast(Tuple[sint, ...], tuple(newstrides)), newoffset, newmask)
+  if vm2.mask or vm1.offset != 0: return merge_views_real(vm2, vm1)  # this isn't supported yet
   if None in (strides := ShapeTracker((vm2, vm1)).real_strides()): return None
   return View.create(vm1.shape, cast(Tuple[sint, ...], strides), vm2.offset, vm1.mask)
 
