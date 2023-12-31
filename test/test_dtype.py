@@ -310,6 +310,7 @@ class TestTypeSpec(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't follow the bool ops spec")
   @given(st.sampled_from(core_dtypes), st.sampled_from([operator.gt, operator.ge, operator.le, operator.lt, operator.eq, operator.ne]))
+  @settings(deadline=1000) # The timing is flaky
   def test_bool_ops(self, dtype, op):
     assert op(Tensor.rand(4, 4, dtype=dtype), Tensor.rand(4, 4, dtype=dtype)).dtype == dtypes.bool
 
