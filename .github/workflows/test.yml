@@ -290,7 +290,7 @@ jobs:
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
     - name: Test tensor core ops
-      run: METAL=1 TC=2 python test/test_ops.py TestOps.test_big_gemm
+      run: METAL=1 TC=2 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
 
   testhipcompilation:
     name: HIP Compilation Tests
