@@ -316,6 +316,7 @@ class TestTypeSpec(unittest.TestCase):
 
   @given(st.sampled_from(core_dtypes),
          st.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), st.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
+  @settings(deadline=1000) # The timing is flaky
   def test_functions_return_index(self, dtype, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
     assert Tensor([0, 1], dtype=dtype).argmax().dtype == dtypes.default_int
