@@ -33,7 +33,7 @@ class AssemblyLanguage(NamedTuple):
   def render_param(self, param, dtype): pass
   def render_instr(self, instr, dtype, args): pass
   def render_loop(self, idx, start, label, acc=None): pass
-  def render_gep(self, loc, base, offset, dtype): pass
+  def render_gep(self, loc, base, offset, dtype, gate=None): pass
   def render_load(self, loc, dest, dtype, gate=None, alt=None): pass
   def render_store(self, loc, val, dtype): pass
   def render_bra(self, b1, pred=None, b2=None): pass
@@ -160,12 +160,13 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
     elif uop == UOps.CONST: r[u] = const(args, dtype, force_mov=True)
     elif uop == UOps.LOAD:
       assert dtype is not None and vin[1].dtype is not None
-      kk(lang.render_gep(loc:=ssa(None,'loc','u64'), r[vin[0]], r[vin[1]], dtype))
       val = ssa(u, 'val')
       if len(vin) > 3:
         assert vin[2].dtype is not None
         pred = cast(r[vin[2]], dtypes.bool, vin[2].dtype, pred=True)
-      kk(*lang.render_load(loc, val, dtype, gate=pred if len(vin) > 3 else None, alt=r[vin[3]] if len(vin) > 3 else None))
+        kk(lang.asm_for_op[TernaryOps.WHERE](off:=ssa(None, "off", "i32"), pred, r[vin[1]], const(0, dtypes.int), dtypes.int, "i32"))
+      kk(lang.render_gep(loc:=ssa(None,'loc','u64'), r[vin[0]], off if len(vin) > 3 else r[vin[1]], dtype),
+         *lang.render_load(loc, val, dtype, gate=pred if len(vin) > 3 else None, alt=r[vin[3]] if len(vin) > 3 else None))
     elif uop == UOps.PHI:
       r[u] = r[vin[1]]
       # PHI UOps can link to other PHI Uops, backtrace this to DEFINE_ACC
