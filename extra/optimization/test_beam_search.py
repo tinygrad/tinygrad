@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from tinygrad.helpers import BEAM, Timing
+from tinygrad.helpers import BEAM, Context, Timing
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
@@ -14,7 +14,7 @@ class TestBeamSearch(unittest.TestCase):
     BEAM.value = self.old_beam
 
   def test_variable_ast_beam(self):
-    a = Tensor.rand(3, 3).reshape((Variable("a", 1, 10).bind(3), 3))
+    a = Tensor(np.random.rand(3, 3)).reshape((Variable("a", 1, 10).bind(3), 3))
     a = (a+1).realize()
 
   def test_big_prime_number(self):
@@ -51,14 +51,14 @@ class TestBeamSearch(unittest.TestCase):
     np.testing.assert_allclose(b.numpy(), a.numpy()[:367]+1, atol=1e-4, rtol=1e-4)
 
   def test_no_mutate_rawbuffers(self):
-    a = Tensor.rand(3, 3).realize()
+    a = Tensor(np.random.rand(3, 3)).realize()
     desired = a.numpy() + 1
     a.assign(a+1)
     actual = a.numpy()
     np.testing.assert_allclose(actual, desired)
 
   def test_conv_beam(self):
-    c = Conv2d(3, 16, (3,3))
+    with Context(BEAM=0): c = Conv2d(3, 16, (3,3))
     x = Tensor(np.random.rand(1,3,32,32))
     with Timing():
       c(x).realize()
