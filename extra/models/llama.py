@@ -135,7 +135,7 @@ class Transformer:
 
 # *** helpers ***
 
-def convert_from_huggingface(weights:Dict[str, Tensor], model: Transformer, n_heads: int, n_kv_heads: int):
+def convert_from_huggingface(weights:Dict[str, Tensor], model: Transformer, n_heads: int, n_kv_heads: int, device: str=Device.DEFAULT):
   def permute(v: Tensor, n_heads: int):
     return v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1]).transpose(1, 2).reshape(*v.shape[:2])
 
@@ -151,7 +151,7 @@ def convert_from_huggingface(weights:Dict[str, Tensor], model: Transformer, n_he
   sd = {}
   for k, v in weights.items():
     if ".rotary_emb." in k: continue
-    v = v.to(Device.DEFAULT)
+    v = v.to(device)
     if "model.layers" in k:
       if "q_proj" in k:
         v = permute(v, n_heads)
