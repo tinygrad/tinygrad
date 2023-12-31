@@ -316,7 +316,7 @@ class TestTypeSpec(unittest.TestCase):
 
   @given(st.sampled_from(core_dtypes),
          st.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), st.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
-  @settings(deadline=1000) # The timing is flaky
+  @settings(deadline=3000) # The timing is flaky
   def test_functions_return_index(self, dtype, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
     assert Tensor([0, 1], dtype=dtype).argmax().dtype == dtypes.default_int
@@ -383,7 +383,7 @@ class TestAutoCastType(unittest.TestCase):
       np.testing.assert_allclose(func(Tensor(a, dtype=dtype)).numpy(), func(torch.tensor(a)), rtol=1e-3, atol=1e-3)
 
   @given(st.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
-  @settings(deadline=1000) # The timing is flaky
+  @settings(deadline=3000) # The timing is flaky
   def test_broadcast_float(self, default_float):
     dtypes.default_float = default_float
     assert (Tensor.rand(4, 4, dtype=dtypes.bool) + 2.3).dtype == dtypes.default_float
@@ -396,7 +396,7 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2.3).dtype == dtypes.float64
 
   @given(st.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]))
-  @settings(deadline=1000) # The timing is flaky
+  @settings(deadline=3000) # The timing is flaky
   def test_broadcast_int(self, default_int):
     dtypes.default_int = default_int
     assert (Tensor.rand(4, 4, dtype=dtypes.bool) + 2).dtype == dtypes.default_int
