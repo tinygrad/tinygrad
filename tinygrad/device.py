@@ -6,7 +6,7 @@ import importlib, inspect, functools, pathlib, time, re, ctypes
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
-from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op, vars_from_ast, GlobalCounters
+from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op, GlobalCounters
 
 if TYPE_CHECKING:
   from tinygrad.codegen.linearizer import Linearizer
@@ -248,7 +248,7 @@ class CompiledASTRunner(JITRunner):
     if ast:
       info = get_lazyop_info(ast)
       self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
-      self.vars = vars_from_ast(ast)
+      self.vars = ast.vars()
       assert all(v._val is None for v in self.vars), f"ASTRunner contains bound Variable {self.vars}"
 
   def build(self, compiler, runtime):

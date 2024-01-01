@@ -65,9 +65,8 @@ class LazyOp:
   def __hash__(self): return self.hash
   @functools.cached_property
   def lazyops(self) -> List[LazyOp]: return dedup([self] + [item for x in self.src for item in x.lazyops])
-
-def vars_from_ast(ast:LazyOp) -> List[Variable]:
-  return sorted(set.union(*[x.arg.st.vars() for x in ast.lazyops if x.op in BufferOps], set()), key=lambda x: str(x.expr))
+  def vars(self) -> List[Variable]:
+    return sorted(set.union(*[x.arg.st.vars() for x in self.lazyops if x.op in BufferOps], set()), key=lambda x: str(x.expr))
 
 # **************** independent FlopCounter ****************
 
