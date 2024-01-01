@@ -32,7 +32,7 @@ class Node:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
   def __neg__(self): return self*-1
-  def __add__(self, b:Union[Node,int]): return Variable.sum([self, b if isinstance(b, Node) else NumNode(b)])
+  def __add__(self, b:Union[Node,int]): return Node.sum([self, b if isinstance(b, Node) else NumNode(b)])
   def __radd__(self, b:int): return self+b
   def __sub__(self, b:Union[Node,int]): return self+-b
   def __rsub__(self, b:int): return -self+b
@@ -283,12 +283,12 @@ class SumNode(RedNode):
         # NOTE: gcd in python 3.8 takes exactly 2 args
         mul_gcd = b
         for x in muls: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell that x.b is int here due to assert above
-        all_others = Variable.sum(others)
+        all_others = Node.sum(others)
         if all_others.min >= 0 and all_others.max < mul_gcd:
-          lhs, b = Variable.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
+          lhs, b = Node.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
     return Node.__lt__(lhs, b) if isinstance(lhs, SumNode) else lhs < b
 
-  def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return Variable.sum([node.substitute(var_vals) for node in self.nodes])
+  def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return Node.sum([node.substitute(var_vals) for node in self.nodes])
 
   @property
   def flat_components(self): # recursively expand sumnode components
@@ -297,13 +297,13 @@ class SumNode(RedNode):
     return new_nodes
 
 class AndNode(RedNode):
-  def __floordiv__(self, b: Union[Node, int], _=True): return Variable.ands([x//b for x in self.nodes])
+  def __floordiv__(self, b: Union[Node, int], _=True): return Node.ands([x//b for x in self.nodes])
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node:
     subed = []
     for node in self.nodes:
       if not (sub:=node.substitute(var_vals)): return NumNode(0)
       subed.append(sub)
-    return Variable.ands(subed)
+    return Node.ands(subed)
 
 def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   ret = typ(nodes)
