@@ -1,6 +1,6 @@
 from typing import Tuple
 import time
-from tinygrad import Tensor, TinyJit, nn, Variable, dtypes
+from tinygrad import Tensor, TinyJit, nn
 import gymnasium as gym
 from tqdm import trange
 import numpy as np  # TODO: remove numpy import
@@ -23,7 +23,7 @@ def evaluate(model:ActorCritic, test_env:gym.Env) -> float:
   (obs, _), terminated, truncated = test_env.reset(), False, False
   total_rew = 0.0
   while not terminated and not truncated:
-    act = model(Tensor(obs))[0].argmax().cast(dtypes.int32).item()
+    act = model(Tensor(obs))[0].argmax().item()
     obs, rew, terminated, truncated, _ = test_env.step(act)
     total_rew += float(rew)
   return total_rew
