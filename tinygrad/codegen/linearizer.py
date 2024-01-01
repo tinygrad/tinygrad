@@ -5,7 +5,8 @@ from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass
 
-from tinygrad.helpers import colored, ImageDType, DEBUG, dtypes, DType, prod, PtrDType, getenv, all_same, to_function_name, flatten
+from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
+from tinygrad.helpers import colored, DEBUG, prod, getenv, all_same, to_function_name, flatten
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, vars_from_ast, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, VariableOrNum, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode

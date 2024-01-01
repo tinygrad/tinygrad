@@ -4,13 +4,13 @@ from tqdm import trange
 import numpy as np
 from tinygrad import Device, GlobalCounters
 from typing import Optional, Union
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor, dtypes
 from tinygrad.nn import Embedding, Linear, LayerNorm
 from tinygrad.shape.symbolic import Variable
 from tinygrad.jit import TinyJit
 import tiktoken
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
-from tinygrad.helpers import Timing, DEBUG, getenv, fetch, colored, dtypes
+from tinygrad.helpers import Timing, DEBUG, getenv, fetch, colored
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 HALF = getenv("HALF")

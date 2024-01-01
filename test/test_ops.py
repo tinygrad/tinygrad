@@ -5,8 +5,8 @@ import math
 import numpy as np
 import unittest
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, dtypes
-from tinygrad import Device
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
+from tinygrad import Device, dtypes
 
 if CI:
   import warnings

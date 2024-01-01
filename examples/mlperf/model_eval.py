@@ -1,9 +1,9 @@
 import time
 from pathlib import Path
 import numpy as np
-from tinygrad import Tensor, GlobalCounters
+from tinygrad import Tensor, GlobalCounters, dtypes
 from tinygrad.jit import TinyJit
-from tinygrad.helpers import getenv, dtypes
+from tinygrad.helpers import getenv
 from examples.mlperf import helpers
 
 def eval_resnet():

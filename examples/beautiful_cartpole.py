@@ -1,7 +1,6 @@
 from typing import Tuple
 import time
-from tinygrad import Tensor, TinyJit, nn, Variable
-from tinygrad.helpers import dtypes  # TODO: wouldn't need this if argmax returned the right dtype
+from tinygrad import Tensor, TinyJit, nn, Variable, dtypes
 import gymnasium as gym
 from tqdm import trange
 import numpy as np  # TODO: remove numpy import

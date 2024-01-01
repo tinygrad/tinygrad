@@ -2,8 +2,8 @@ from __future__ import annotations
 from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 import importlib
 import numpy as np
-from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, DEBUG, dtypes
+from tinygrad import Tensor, dtypes
+from tinygrad.helpers import getenv, DEBUG
 from typing import List, Dict
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto # onnx 1.50 uses serialized file (see onnx/onnx-ml.proto) as descriptors
 try:

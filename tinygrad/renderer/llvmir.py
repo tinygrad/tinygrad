@@ -1,7 +1,7 @@
 from typing import Final, Dict, Callable, Any, List, Optional, Tuple
 from llvmlite import ir
 from tinygrad.codegen.linearizer import UOps, UOp
-from tinygrad.helpers import DType, PtrDType, dtypes
+from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
 
 MFLAGS = ('nsz', 'arcp', 'contract', 'afn', 'reassoc') # All from fast math, but nnan and ninf

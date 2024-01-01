@@ -2,7 +2,8 @@ from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, random, math, time, multiprocessing, traceback, signal
 from tinygrad.device import Device, Compiled, Buffer
 from tinygrad.ops import MemBuffer, vars_from_ast
-from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
+from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
+from tinygrad.dtype import ImageDType
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.shape.symbolic import sym_infer
 from collections import defaultdict
