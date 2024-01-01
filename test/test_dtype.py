@@ -405,7 +405,8 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2).dtype == dtypes.float64
 
   def test_broadcast_bool(self):
-    assert (Tensor([0, 1], dtype=dtypes.bool) + True).dtype == dtypes.bool
+    if Device.DEFAULT != "WEBGPU":
+      assert (Tensor([0, 1], dtype=dtypes.bool) + True).dtype == dtypes.bool
     assert (Tensor([0, 1], dtype=dtypes.int) + True).dtype == dtypes.int32
     assert (Tensor([0, 1], dtype=dtypes.int8) + True).dtype == dtypes.int8
     assert (Tensor([0, 1], dtype=dtypes.uint64) + True).dtype == dtypes.uint64

@@ -311,12 +311,12 @@ class WGSLLanguage(CStyleLanguage):
 
   def render_local(self, name: str, dtype:DType, size: int): return f"var<workgroup> {name}: array<{self.type_map[dtype]},{size}>;"
 
-  def render_if(self, cond: str): return f"if (bool({cond})) {{"
-
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): return "nan()"
     elif math.isinf(x): return ("-" if x < 0 else "") + "inf(1.0)"
     return f"({super().render_const(x, var_dtype)})"
+
+  def render_if(self, cond: str): return f"if (bool({cond})) {{"
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     local_size = local_size[::-1] if local_size else [1]
