@@ -8,10 +8,9 @@ import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
 from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes, colored
-from tinygrad import Device
+from tinygrad import Device, GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
-from tinygrad.helpers import GlobalCounters
 from extra.models.llama import Transformer, convert_from_huggingface
 from sentencepiece import SentencePieceProcessor
 
