@@ -252,15 +252,6 @@ def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
   cur.close()
   return val
 
-def diskcache(func):
-  @functools.wraps(func)
-  def wrapper(*args, **kwargs) -> bytes:
-    table, key = f"cache_{func.__name__}", hashlib.sha256(pickle.dumps((args, kwargs))).hexdigest()
-    if (ret:=diskcache_get(table, key)): return ret
-    return diskcache_put(table, key, func(*args, **kwargs))
-  setattr(wrapper, "__wrapped__", func)
-  return wrapper
-
 # *** http support ***
 
 def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
