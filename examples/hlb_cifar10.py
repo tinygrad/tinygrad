@@ -17,9 +17,8 @@ from extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from tinygrad import nn
 from tinygrad.nn.state import get_state_dict
 from tinygrad.nn import optim
-from tinygrad import Device
+from tinygrad import Device, GlobalCounters
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import GlobalCounters
 from tinygrad.shape.symbolic import Node
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
