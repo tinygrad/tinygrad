@@ -9,6 +9,15 @@ from tinygrad.codegen.kernel import LinearizerOptions
 # The default HIP stream is used for everything.
 HIPCPU = getenv("HIPCPU") # for CI. don't run kernels, only check if they compile
 
+if HIPCPU:
+  remu = ctypes.CDLL("/root/code/tinygrad/rdna/target/release/libremu.so")
+  hip.hipSetDevice = lambda x: x
+  hip.hipDeviceptr_t = lambda: ctypes.c_void_p(None)
+  hip.hipDeviceSynchronize = lambda: 0
+
+  hip.hipMalloc = remu.hipMalloc
+  hip.hipMemcpy = remu.hipMemcpy
+
 def check(status):
   if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
 
@@ -66,7 +75,7 @@ class HIPDevice(Compiled):
     if self.device == 0 and not HIPCPU: HIPDevice.default_arch_name = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode()  # noqa: E501
 
     from tinygrad.runtime.graph.hip import HIPGraph
-    super().__init__(MallocAllocator if HIPCPU else HIPAllocator(self.device), LinearizerOptions(device="HIP"), HIPRenderer,
+    super().__init__(HIPAllocator(self.device), LinearizerOptions(device="HIP"), HIPRenderer,
                      compile_hip, functools.partial(HIPProgram, self.device), HIPGraph)
   def synchronize(self):
     check(hip.hipSetDevice(self.device))
