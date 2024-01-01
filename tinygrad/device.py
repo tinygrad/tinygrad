@@ -3,7 +3,7 @@ import numpy as np
 from collections import defaultdict
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable
 import importlib, inspect, functools, pathlib, time, re, ctypes
-from tinygrad.helpers import DType, dtypes, ImageDType
+from tinygrad.helpers import DType, dtypes, ImageDType, diskcache_get, diskcache_put
 from tinygrad.helpers import ansilen, DEBUG, getenv, GlobalCounters, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op, vars_from_ast
@@ -251,7 +251,13 @@ class CompiledASTRunner(JITRunner):
       assert all(v._val is None for v in self.vars), f"ASTRunner contains bound Variable {self.vars}"
 
   def build(self, compiler, runtime):
-    self.lib = compiler.__wrapped__(self.prg) if getenv("DISABLE_COMPILER_CACHE") else compiler(self.prg)
+    if getenv("DISABLE_COMPILER_CACHE") or '<' in compiler.__name__:
+      self.lib = compiler(self.prg)
+    else:
+      self.lib = diskcache_get(compiler.__name__, self.prg)
+      if self.lib is None:
+        self.lib = compiler(self.prg)
+        diskcache_put(compiler.__name__, self.prg, self.lib)
     self.clprg = runtime(self.name, self.lib)
     return self
 

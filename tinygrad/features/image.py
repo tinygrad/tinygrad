@@ -1,4 +1,4 @@
-from typing import Tuple, Dict, Any
+from typing import Tuple
 from tinygrad.helpers import prod, IMAGE, getenv, dtypes, DEBUG
 
 # *** image Tensor function replacements ***
@@ -92,55 +92,11 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
 
 # *** images have weird indexing requirements ***
 
-from tinygrad.shape.symbolic import Node, AndNode, Variable, NumNode, SumNode, LtNode
-
+from tinygrad.shape.symbolic import Node
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
   idx = (idxy // 4) % base_shape[1]
   idy = (idxy // (4 * base_shape[1]))
 
-  # this is wrong
-  if valid.min == 0 and False:
-    nodes = valid.nodes if isinstance(valid, AndNode) else [valid]  # type: ignore
-    val_dict: Dict[Node, Any] = {}
-    # TODO: is this correct? should it check there's only one variable from each component?
-    idxy_nodes = idxy.flat_components if isinstance(idxy, SumNode) else [idxy]
-    idxy_flat_var = [(i, list(i.vars())[0]) for i in idxy_nodes if not isinstance(i, NumNode)]
-
-    for node in nodes:
-      assert isinstance(node, LtNode)
-      node_flat, node_vars = node.a.flat_components if isinstance(node.a, SumNode) else [node.a], node.vars()
-      same_sym = [i for (i, var) in idxy_flat_var if var in node_vars]
-      if len(same_sym) == 0: continue
-      first, second = sorted(same_sym)[0], sorted(node_flat)[0]
-      f_b = 1 if isinstance(first, Variable) else first.b
-      s_b = 1 if isinstance(second, Variable) else second.b
-      sig = -1 if s_b < 0 else 1
-      key_node = sig*node.a
-      if key_node not in val_dict: val_dict[key_node] = [key_node.min, key_node.max, abs(f_b//s_b)]
-      val_dict[key_node][(sig + 1)//2] = sig*(node.b - 1)
-
-    fakes = {}
-    for cnt, (key_node, (mnn, mxn, multip)) in enumerate(val_dict.items()):
-      if mnn > mxn: return (idx, idy), valid  # TODO: why is this happening?
-      fake_var = Variable("fake_" + str(cnt), mnn, mxn)
-      fakes[fake_var] = key_node
-      idxy += multip*(fake_var - key_node)
-
-    idx = (idxy // 4) % base_shape[1]
-    idy = (idxy // (4 * base_shape[1]))
-
-    fake_rep = {fake: node for fake, node in fakes.items()}
-
-    idx = idx.substitute(fake_rep)
-    idy = idy.substitute(fake_rep)
-
-    idy_vars, idx_vars, ones = set(idy.vars()), set(idx.vars()), []
-    for node in nodes:
-      node_vars = set(node.vars())
-      if not node_vars & (idx_vars | idy_vars): continue #There is simplified NumNode which can not go outside the bounds
-      # NOTE: Why does only idy is problematic? and not the idx
-      if idy_vars == node_vars or idy_vars & node_vars == set(): ones.append(node)
-    valid = Variable.ands([i for i in nodes if i not in ones])
-
+  # TODO: bring back the valid removal logic (correct!)
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy, valid)
   return (idx, idy), valid
