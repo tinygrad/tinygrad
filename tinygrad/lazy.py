@@ -119,7 +119,7 @@ class LazyBuffer:
     assert all_same(dts:=[x.dtype.scalar() for x in (srcs if op != TernaryOps.WHERE else srcs[1:])]), f"all dtypes must match {dts} on {op}"
     assert all_same([x.shape for x in srcs]), f"all shapes must be the same {[x.shape for x in srcs]}"
     if op == TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
-    out_dtype = srcs[-1].dtype if op != BinaryOps.CMPLT else dtypes.bool
+    out_dtype = srcs[-1].dtype if op not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else dtypes.bool
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
 
   # *** reduce ops ***
@@ -240,7 +240,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
     realizes.add(buf.srcs[0].base)
   for x in buf.srcs: _recurse_lb(x, realizes, allbufs, simple_pads)
 
-UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
+UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
 def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   if buf in realizes or buf.realized: return True
   # NOTE: this broke to_image_idx and coder with JIT

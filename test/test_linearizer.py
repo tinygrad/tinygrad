@@ -21,7 +21,7 @@ class TestLinearizer(unittest.TestCase):
     CacheCollector.start()
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),)))).realize()
     rawbufs = CacheCollector.finish()[0].rawbufs
-    assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.realized, b.lazydata.realized}
+    assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.base.realized, b.lazydata.base.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     np.testing.assert_allclose(np_c, c.numpy(), atol=1e-4, rtol=1e-4)
 
@@ -129,12 +129,9 @@ def helper_realized_ast(r:Tensor):
   output_buffer = Buffer(s[-1].out.device, prod((s if isinstance(s, int) else s.max for s in s[-1].out.shape)), s[-1].out.dtype)  # allocate an output buffer
   return s[-1].ast, [output_buffer] + [l.realized for l in s[-1].inputs]
 
-@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT], Compiled) and Device[Device.DEFAULT].linearizer_opts.supports_float4,
+                     "need Compiled backends that support float4")
 class TestFloat4(unittest.TestCase):
-  def setUp(self):
-    if not Device[Device.DEFAULT].linearizer_opts.supports_float4:
-      self.skipTest("Device does not support float4")
-
   @staticmethod
   def count_float4(k):
     return (len([uop for uop in k.uops if uop.uop == UOps.LOAD and uop.dtype == dtypes.float.vec(4)]),
@@ -519,25 +516,37 @@ class TestLinearizerOpts(unittest.TestCase):
     helper_linearizer_opt(a@b, [
       [Opt(OptOps.PADTO, 0, 32)],
       [Opt(OptOps.PADTO, 1, 32)],
-      [Opt(OptOps.PADTO, 2, 32)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32)],
       # can optimize further post PADTO
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UNROLL, 0, 4)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 2),],
     ])
 
   def test_padto_max(self):
-    # pad uses invalid value 0, so max is not allowed
     N = 17 * 17
     a = -Tensor.ones(N, N)
+
+    helper_linearizer_opt(a.max(0), [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
+    ])
+    helper_linearizer_opt(a.max(1), [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
+    ])
+
+    # cannot pad a reduce axis
     with self.assertRaises(AssertionError):
       helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
+    with self.assertRaises(AssertionError):
+      helper_linearizer_opt(a.max(0), [[Opt(OptOps.PADTO, 1, 32)],])
 
   def test_padto_where(self):
-    # pad uses invalid value 0, so kernel with max is not allowed
     N = 17 * 17
-    a = (Tensor.rand(N, N).max(axis=0) > 1).where(1, 0)
-    with self.assertRaises(AssertionError):
-      helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
+    a = (Tensor.rand(N, N).max(axis=0, keepdim=True) > 1).where(1, 0)
+    helper_linearizer_opt(a.max(0), [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
+    ])
 
 if __name__ == '__main__':
   unittest.main()

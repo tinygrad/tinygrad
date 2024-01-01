@@ -1,5 +1,5 @@
 import math
-from typing import Tuple, Optional, cast
+from typing import Tuple, Optional
 from tinygrad.helpers import argsort, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
@@ -90,6 +90,10 @@ class Less(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     return x.e(BinaryOps.CMPLT, y)
 
+class Eq(Function):
+  def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
+    return x.e(BinaryOps.CMPEQ, y)
+
 class Xor(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     return x.e(BinaryOps.XOR, y)
@@ -158,7 +162,7 @@ class Max(Function):
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     # 1s in locations where the max was chosen (can be two locations)
-    max_is_1s = self.x.const(1.0).e(BinaryOps.SUB, self.x.e(BinaryOps.CMPLT, self.ret.expand(self.x.shape)).cast(self.x.dtype))
+    max_is_1s = self.x.e(BinaryOps.CMPEQ, self.ret.expand(self.x.shape)).cast(self.x.dtype)
     div = max_is_1s.r(ReduceOps.SUM, grad_output.shape).expand(self.x.shape)
     return max_is_1s.e(BinaryOps.DIV, div).e(BinaryOps.MUL, grad_output.expand(self.x.shape))
 
@@ -203,9 +207,7 @@ class Shrink(Function):
     return x.shrink(arg)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    assert all(isinstance(x[0], int) and isinstance(x[1], int) for x in self.narg), "symbolic shrink does not support backward"
-    # need this cast because mypy cannot narrow the type even with assert
-    return grad_output.pad(cast(Tuple[Tuple[int, int], ...], self.narg))
+    return grad_output.pad(self.narg)
 
 class Flip(Function):
   def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:

@@ -90,6 +90,7 @@ class TestInferenceMinKernels(unittest.TestCase):
       assert len(CacheCollector.cache) == 0, "ViT prerealized?"
       out.realize()
 
+  @unittest.skip("llama is fp16 but CI does not have fp16")
   def test_llama(self):
     from examples.llama import Transformer
     args_tiny = {"dim": 512, "hidden_dim": 1024, "n_heads": 8, "n_layers": 4, "norm_eps": 1e-05, "vocab_size": 1000}
