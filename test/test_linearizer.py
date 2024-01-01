@@ -8,7 +8,7 @@ from tinygrad.device import Compiled, Device, Buffer
 from tinygrad.ops import BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, create_rednode
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, Node, create_rednode
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
@@ -576,7 +576,7 @@ class TestLinearizerHelper(unittest.TestCase):
     b = Variable("b", 5, 7)
 
     s1 = create_rednode(SumNode, [a, b])
-    assert expand_node(s1) == [Variable.sum([NumNode(i),b]) for i in range(1,4)]
+    assert expand_node(s1) == [Node.sum([NumNode(i),b]) for i in range(1,4)]
 
   def test_multi_expand(self):
     a = Variable("a", 1, 3)
