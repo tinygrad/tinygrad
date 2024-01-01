@@ -3,7 +3,7 @@ import itertools, random, math, time, multiprocessing, traceback, signal
 from tinygrad.device import Device, Compiled, Buffer
 from tinygrad.ops import MemBuffer, vars_from_ast
 from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
-from tinygrad.codegen.linearizer import Linearizer, UOp
+from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.shape.symbolic import sym_infer
 from collections import defaultdict
 from tinygrad.tensor import Tensor
@@ -20,8 +20,6 @@ actions += [
   Opt(op=OptOps.UPCASTMID, axis=1, amt=4),
 ]
 if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
-
-def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
 
 def get_test_global_size(global_size, max_global_size):
   test_global_size = global_size[:]

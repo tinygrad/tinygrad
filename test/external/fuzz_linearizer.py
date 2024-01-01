@@ -1,13 +1,17 @@
 import random, traceback
+from typing import List, Tuple
 import numpy as np
 from collections import Counter
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.features.search import get_linearizer_actions, bufs_from_lin, tuplize_uops
+from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
 from tinygrad.graph import print_tree
 from tinygrad.helpers import getenv
 from tinygrad.device import Device, Compiled, Interpreted
 from tinygrad.ops import vars_from_ast
+from tinygrad.codegen.linearizer import UOp
+
+def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
 
 device = Device[Device.DEFAULT]
 
