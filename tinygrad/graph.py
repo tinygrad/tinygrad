@@ -1,8 +1,8 @@
 import os, atexit
 from typing import List, Any
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, LazyOp
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, LazyOp, GlobalCounters
 from tinygrad.device import Device
-from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters, getenv
+from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, getenv
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.shape.symbolic import NumNode
 

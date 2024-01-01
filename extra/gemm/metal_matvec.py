@@ -3,10 +3,9 @@ import os
 import numpy as np
 import time, torch, torch.mps
 
-from tinygrad.helpers import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
-from tinygrad import Device
+from tinygrad import Device, GlobalCounters
 from tinygrad.helpers import colored, getenv, CI, flat_mv
 
 import os

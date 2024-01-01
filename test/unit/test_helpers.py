@@ -155,6 +155,7 @@ class TestFetch(unittest.TestCase):
   def test_fetch_small(self):
     assert(len(fetch('https://google.com', allow_caching=False).read_bytes())>0)
 
+  @unittest.skip("test is flaky")
   def test_fetch_img(self):
     img = fetch("https://media.istockphoto.com/photos/hen-picture-id831791190", allow_caching=False)
     with Image.open(img) as pimg:

@@ -1,8 +1,8 @@
 from typing import List, Dict, Optional, cast
-from tinygrad.ops import LoadOps, ScheduleItem, BufferOps
+from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters
 from tinygrad.device import Device, Buffer, BufferCopy, JITRunner, update_stats
 from tinygrad.graph import print_tree, realized_lazybuffer
-from tinygrad.helpers import prod, GlobalCounters, colored
+from tinygrad.helpers import prod, colored
 from tinygrad.shape.symbolic import Variable
 
 # *** schedule running ***
