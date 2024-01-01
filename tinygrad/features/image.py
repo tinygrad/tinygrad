@@ -1,5 +1,6 @@
 from typing import Tuple
-from tinygrad.helpers import prod, IMAGE, getenv, dtypes, DEBUG
+from tinygrad.helpers import prod, IMAGE, getenv, DEBUG
+from tinygrad.dtype import dtypes
 
 # *** image Tensor function replacements ***
 

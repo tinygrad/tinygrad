@@ -3,7 +3,8 @@ import numpy as np
 from typing import Dict, Callable
 from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, Op
 from tinygrad.device import Interpreted, Allocator
-from tinygrad.helpers import getenv, dtypes, flatten
+from tinygrad.dtype import dtypes
+from tinygrad.helpers import getenv, flatten
 from tinygrad.runtime.ops_cpu import einsum_mulacc, reduce_axis
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if getenv("MPS", 0) else "cpu"))

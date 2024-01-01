@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor
 # ruff: noqa: F401
 from tinygrad.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer
 from tinygrad.lazy import LazyBuffer
-from tinygrad.helpers import dtypes
+from tinygrad import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.shape.symbolic import Variable

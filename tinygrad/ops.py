@@ -2,7 +2,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Dict, Callable, ClassVar
 import functools
 from enum import Enum, auto
-from tinygrad.helpers import dtypes, prod, DType, dedup
+from tinygrad.helpers import prod, dedup
+from tinygrad.dtype import dtypes, DType
 from tinygrad.shape.symbolic import Variable
 from dataclasses import dataclass
 

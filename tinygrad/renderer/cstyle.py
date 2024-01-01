@@ -3,7 +3,8 @@ import math, functools
 from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import ImageDType, dtypes, prod, DType, PtrDType, strip_parens, getenv
+from tinygrad.helpers import prod, strip_parens, getenv
+from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 
 class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"

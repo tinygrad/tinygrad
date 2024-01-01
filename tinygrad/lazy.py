@@ -2,7 +2,8 @@ from __future__ import annotations
 import sys, math
 import numpy as np
 from typing import Union, Optional, Any, Tuple, List, Set, Dict
-from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten, getenv, dedup, ImageDType, DEBUG, all_int, all_same
+from tinygrad.dtype import dtypes, DType, ImageDType
+from tinygrad.helpers import prod, merge_dicts, flatten, getenv, dedup, DEBUG, all_int, all_same
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps
 from tinygrad.ops import Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem, vars_from_ast
 from tinygrad.shape.symbolic import sint, Variable

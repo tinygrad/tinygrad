@@ -1,7 +1,8 @@
 import functools, io, math
 from typing import Union, Tuple, Optional, List, Any
-from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod, dtypes, ImageDType, flatten
+from tinygrad import Tensor, dtypes
+from tinygrad.dtype import ImageDType
+from tinygrad.helpers import prod, flatten
 from extra.onnx import safe_numpy
 from onnx.helper import tensor_dtype_to_np_dtype
 from onnx import TensorProto

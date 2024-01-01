@@ -1,5 +1,5 @@
 from typing import Tuple, Dict, List
-from tinygrad.helpers import DType
+from tinygrad.dtype import DType
 from tinygrad.tensor import Device, Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_state_dict

@@ -12,7 +12,8 @@ from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, Node, c
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
-from tinygrad.helpers import dtypes, prod
+from tinygrad.helpers import prod
+from tinygrad.dtype import dtypes
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestLinearizer(unittest.TestCase):

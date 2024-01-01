@@ -2,7 +2,8 @@ import unittest
 import numpy as np
 import torch
 import operator
-from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX, least_upper_float, temp, least_upper_dtype
+from tinygrad.helpers import CI, getenv, DEBUG, OSX, temp
+from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype
 from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List

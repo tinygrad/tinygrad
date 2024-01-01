@@ -1,7 +1,8 @@
 from __future__ import annotations
 from typing import Callable, List, Tuple, Dict, cast, Union, Optional, TypeVar, Generic
 import functools, itertools, operator
-from tinygrad.helpers import DEBUG, DType, merge_dicts, getenv, all_int, Context, GRAPH
+from tinygrad.dtype import DType
+from tinygrad.helpers import DEBUG, merge_dicts, getenv, all_int, Context, GRAPH
 from tinygrad.device import Device, JITRunner, CompiledASTRunner, Buffer
 from tinygrad.tensor import Tensor
 from tinygrad.shape.shapetracker import ShapeTracker
