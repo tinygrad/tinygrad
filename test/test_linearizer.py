@@ -3,11 +3,12 @@ import numpy as np
 import unittest, os
 
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
-from tinygrad.codegen.linearizer import Linearizer, UOp, UOps
+from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node
 from tinygrad.device import Compiled, Device, Buffer
 from tinygrad.ops import BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, create_rednode
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
@@ -547,6 +548,43 @@ class TestLinearizerOpts(unittest.TestCase):
       [Opt(OptOps.PADTO, 0, 32)],
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
     ])
+
+class TestLinearizerHelper(unittest.TestCase):
+  def test_num_node_expand(self):
+    a = NumNode(42)
+    assert expand_node(a) == [a]
+
+  def test_variable_expand(self):
+    a = Variable("a", 5, 7)
+    assert expand_node(a) == [a]
+
+  def test_variable_expand_expr_none(self):
+    a = Variable(None, 5, 7)
+    assert expand_node(a) == [NumNode(5), NumNode(6), NumNode(7)]
+
+  def test_mul_node_expand(self):
+    a = Variable(None, 5, 7)
+    m = MulNode(a, 3)
+    assert expand_node(m) == [NumNode(15), NumNode(18), NumNode(21)]
+
+    b = Variable("b", 1, 3)
+    n = MulNode(b, 3)
+    assert expand_node(n) == [Variable("b", 1, 3)*3]
+
+  def test_sum_node_expand(self):
+    a = Variable(None, 1, 3)
+    b = Variable("b", 5, 7)
+
+    s1 = create_rednode(SumNode, [a, b])
+    assert expand_node(s1) == [Variable.sum([NumNode(i),b]) for i in range(1,4)]
+
+  def test_multi_expand(self):
+    a = Variable("a", 1, 3)
+    b = Variable("b", 14, 17)
+    s1 = create_rednode(SumNode, [a, b])
+    # expand increments earlier variables faster than later variables (as specified in the argument)
+    # this behavior was just copied from before, no idea why this should be true
+    assert expand_node(s1, (a, b)) == [NumNode(x + y) for x in range(b.min, b.max + 1) for y in range(a.min, a.max + 1)]
 
 if __name__ == '__main__':
   unittest.main()
