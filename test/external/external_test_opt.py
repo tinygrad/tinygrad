@@ -12,10 +12,9 @@ import numpy as np
 
 import unittest
 from tinygrad.tensor import Tensor, Device
-from tinygrad import nn
+from tinygrad import nn, GlobalCounters
 from tinygrad.helpers import getenv
 from tinygrad.nn import optim
-from tinygrad.helpers import GlobalCounters
 #from tinygrad.lazy import PUSH_PERMUTES
 PUSH_PERMUTES = False
 from tinygrad.jit import CacheCollector
