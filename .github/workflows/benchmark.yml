@@ -26,14 +26,14 @@ jobs:
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
+    - name: Run Stable Diffusion
+      run: python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run model inference benchmark
       run: METAL=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Run Tensor Core GEMM
       run: DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
-    - name: Run Stable Diffusion
-      run: python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run LLaMA
       run: |
         JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
