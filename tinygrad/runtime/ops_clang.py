@@ -1,12 +1,11 @@
 import ctypes, subprocess, functools, pathlib, tempfile
 from tinygrad.device import Compiled, MallocAllocator
-from tinygrad.helpers import diskcache, cpu_time_execution
+from tinygrad.helpers import cpu_time_execution
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import uops_to_cstyle, CStyleLanguage
 
 CLANG_PROGRAM_HEADER = '#include <math.h>\n#define max(x,y) ((x>y)?x:y)\n#define int64 long\n#define half __fp16\n#define uchar unsigned char\n#include <stdbool.h>\n'  # noqa: E501
 
-@diskcache
 def compile_clang(prg:str, header:str=CLANG_PROGRAM_HEADER) -> bytes:
   # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
   with tempfile.NamedTemporaryFile(delete=True) as output_file:

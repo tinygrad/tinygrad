@@ -4,7 +4,6 @@ import secrets
 import string
 from tinygrad.tensor import Tensor
 from tinygrad import Device
-from tinygrad.helpers import diskcache
 
 def generate_random_string(length=16):
   alphabet = string.ascii_letters + string.digits
@@ -12,7 +11,6 @@ def generate_random_string(length=16):
 
 compile_call_count = 0
 
-@diskcache
 def helper_test_compile(prg:str) -> bytes:
   global compile_call_count
   compile_call_count += 1
