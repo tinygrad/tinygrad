@@ -7,8 +7,6 @@ from tinygrad.helpers import prod, strip_parens, getenv
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 
 class CStyleLanguage(NamedTuple):
-  size_prefix: str = "int"
-  generic_var_prefix: str = ""
   kernel_prefix: str = ""
   buffer_prefix: str = ""
   buffer_suffix: str = ""
@@ -35,6 +33,8 @@ class CStyleLanguage(NamedTuple):
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPEQ: lambda a,b,dtype: f"({a}=={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
     TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})", TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"
   }
+
+  def prefix_var(self, dtype, mutable=True): return dtype.name
 
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
@@ -69,7 +69,7 @@ class CStyleLanguage(NamedTuple):
     return self.smem_align + self.smem_prefix + f"{dtype.name} {name}[{size}];"
 
   def render_for(self, expr: str, _min:Union[int,str], _max:Union[int,str]) -> str:
-    return f"for ({self.generic_var_prefix if self.generic_var_prefix else 'int'} {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
+    return f"for ({self.prefix_var(dtypes.int)} {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
 
   def render_if(self, cond: str): return f"if ({cond}) {{"
 
@@ -138,7 +138,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
           assert dtype == dtypes.float.vec(2), "output dtype of METAL TC is _float2"
           # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
           output = ssa(u, 'wmma')
-          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {output};")
+          kk(f"{lang.prefix_var(dtype)} {output};")
           kk("{ simdgroup_float8x8 a,b,c;")
           kk(f"a.thread_elements()[0] = {r[vin[0]]}; a.thread_elements()[1] = {r[vin[1]]};")
           kk(f"b.thread_elements()[0] = {r[vin[2]]}; b.thread_elements()[1] = {r[vin[3]]};")
@@ -147,7 +147,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
           kk(f"{output}.x = c.thread_elements()[0]; {output}.y = c.thread_elements()[1]; }}")
         elif args[0] == "HIP":
           assert dtype == dtypes.float.vec(8), "output dtype of HIP TC is _float8"
-          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
+          kk(f"{lang.prefix_var(dtype)} {ssa(u, 'wmma')} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
         else:
           raise NotImplementedError(f"WMMA not implemented for {args}")
       elif uop == UOps.ALU:
@@ -161,11 +161,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         if child_count[u] <= 1 and args != BinaryOps.MAX and not getenv("EXPAND_SSA"):
           r[u] = val
         else:
-          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'alu')} = {val};")
+          kk(f"{lang.prefix_var(dtype)} {ssa(u,'alu')} = {val};")
       elif uop == UOps.DEFINE_ACC:
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
+        kk(f"{lang.prefix_var(dtype)} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
       elif uop == UOps.SPECIAL:
-        kk(f"{lang.size_prefix} {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
+        kk(f"{lang.prefix_var(dtype, mutable=False)} {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
         if args[1].startswith("l"): local_size.append(args[2])
         r[u] = args[1]
       elif uop == UOps.CONST:
@@ -174,14 +174,14 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
         # NOTE: this relies on the load not happening if it's in the unselected branch
         if len(vin) > 3: val = lang.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'val')} = {val};")
+        kk(f"{lang.prefix_var(dtype)} {ssa(u,'val')} = {val};")
       elif uop == UOps.PHI:
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
         r[u] = r[vin[0]]
       elif uop == UOps.CAST:
         val = lang.render_cast([r[x] for x in vin], dtype, bitcast=isinstance(args, tuple) and args[1])
         if child_count[u] <= 1: r[u] = val
-        else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
+        else: kk(f"{lang.prefix_var(dtype)} {ssa(u,'cast')} = {val};")
       elif uop == UOps.DEFINE_LOCAL:
         if lang.external_local_bufs:
           prekernel.append(lang.render_local(args[0], dtype, args[1]))
@@ -282,9 +282,7 @@ HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 # TODO: how much of this can be merged with above?
 class WGSLLanguage(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"i32(gindex.{'xyz'[x]})", "l": lambda x: f"i32(lindex.{'xyz'[x]})"}
-  size_prefix = "let"
   barrier="workgroupBarrier();"
-  generic_var_prefix = "var "
   external_local_bufs = True
   code_for_op = { **CStyleLanguage().code_for_op,
                  BinaryOps.CMPLT: lambda x,y,dtype: f"f32({x}<{y})", BinaryOps.CMPEQ: lambda x,y,dtype: f"f32({x}=={y})",
@@ -292,6 +290,7 @@ class WGSLLanguage(CStyleLanguage):
   # HACK: write bool as f32
   type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "f32"}
 
+  def prefix_var(self, dtype, mutable=True): return "var" if mutable else "let"
   def render_local(self, name: str, dtype:DType, size: int): return f"var<workgroup> {name}: array<{self.type_map[dtype]},{size}>;"
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
