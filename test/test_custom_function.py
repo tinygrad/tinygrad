@@ -16,11 +16,13 @@ from tinygrad.shape.shapetracker import ShapeTracker
 # we don't always have GPU support, so the type signature is the abstract CompiledBuffer instead of GPUBuffer
 def atan2_gpu(ret:Buffer, a:Buffer, b:Buffer):
   assert a.dtype == b.dtype and a.dtype == dtypes.float32, "gpu function only supports float32"
-  CompiledASTRunner(None, "atan2_gpu", """
-    __kernel void atan2_gpu(global float *c, global float *a, global float *b) {
-      int idx = get_global_id(0);
-      c[idx] = atan2(a[idx], b[idx]);
-    }""", global_size=[ret.size]).build(Device[ret.device].compiler, Device[ret.device].runtime).exec([ret, a, b])
+  src = """
+  __kernel void atan2_gpu(global float *c, global float *a, global float *b) {
+    int idx = get_global_id(0);
+    c[idx] = atan2(a[idx], b[idx]);
+  }"""
+  lib = Device[ret.device].compiler(src)
+  CompiledASTRunner(None, "atan2_gpu", src, lib, global_size=[ret.size]).build(Device[ret.device].runtime).exec([ret, a, b])
 
 def atan2_cpu(ret:Buffer, a:Buffer, b:Buffer): ret.copyin(np.require(np.arctan2(a._buf, b._buf), requirements='C').data)
 

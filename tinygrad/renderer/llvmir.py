@@ -1,4 +1,4 @@
-from typing import Final, Dict, Callable, Any, List, Optional, Tuple
+from typing import Final, Dict, Callable, Any, List, Optional
 from llvmlite import ir
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.dtype import DType, PtrDType, dtypes
@@ -33,7 +33,6 @@ code_for_op: Final[Dict[Op, Callable]] = {
     BinaryOps.XOR: lambda builder, x, y, var_dtype: builder.xor(x, y),
     TernaryOps.WHERE: lambda builder, x, y, z, var_dtype: builder.select(x, y, z),
 }
-
 
 dtype_to_llvm_dtype = { dtypes.bool:ir.IntType(1), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.int16:ir.IntType(16),
   dtypes.uint16:ir.IntType(16), dtypes.int32:ir.IntType(32), dtypes.uint32:ir.IntType(32), dtypes.int64:ir.IntType(64), dtypes.uint64:ir.IntType(64),
@@ -81,7 +80,7 @@ def const(args, dtype):
   # TODO: remove int from int(args) once const args conform with dtype
   return ir.Constant(dtype_to_llvm_dtype[dtype], int(args) if dtypes.is_int(dtype) else bool(args) if dtype == dtypes.bool else args)
 
-def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
+def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
   # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
 
@@ -167,4 +166,4 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
     if uop == UOps.CAST: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=isinstance(args, tuple) and args[1])
 
   bb[-1].ret_void()
-  return str(module), {}
+  return str(module)

@@ -1,11 +1,10 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, random, math, time, multiprocessing, traceback, signal
-from tinygrad.device import Device, Compiled, Buffer
+from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner
 from tinygrad.ops import MemBuffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.shape.symbolic import sym_infer
 from collections import defaultdict
 from tinygrad.tensor import Tensor
 
@@ -25,7 +24,7 @@ if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
 def _get_test_global_size(global_size, max_global_size):
   test_global_size = global_size[:]
   while prod(test_global_size) > max_global_size:
-    for j in range(2,-1,-1):
+    for j in range(len(global_size)-1,-1,-1):
       if test_global_size[j] > 16:
         test_global_size[j] //= 2
         break
@@ -33,31 +32,21 @@ def _get_test_global_size(global_size, max_global_size):
   return test_global_size, factor
 
 def _time_program(rdev:Compiled, lib:bytes, global_size, local_size, var_vals, rawbufs, early_stop=None, max_global_size=65536, clear_l2=False, cnt=3, name="test"):  # noqa: E501
-  clprg = rdev.runtime(name, lib)
   factor = 1
-  if global_size is not None:
-    global_size = [sym_infer(sz, var_vals) for sz in global_size] + [1]*(3-len(global_size))
-    if local_size is None:
-      local_size = optimize_local_size(clprg, global_size, rawbufs)
-      global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
-    else:
-      local_size = [sym_infer(sz, var_vals) for sz in local_size] + [1]*(3-len(local_size))
-    if max_global_size is not None:
-      global_size, factor = _get_test_global_size(global_size, max_global_size=max_global_size)
-  lra = {}
-  if global_size: lra['global_size'] = global_size
-  if local_size: lra['local_size'] = local_size
+  if global_size is not None and max_global_size is not None:
+    global_size, factor = _get_test_global_size(global_size, max_global_size=max_global_size)
+  car = CompiledASTRunner(None, name, "", lib, global_size, local_size).build(rdev.runtime)
   tms = []
   for _ in range(cnt):
     if clear_l2:
       with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
-    tms.append(clprg(*[x._buf for x in rawbufs], **lra, vals=var_vals.values(), wait=True)*factor)
+    tms.append(car(rawbufs, var_vals, wait=True, do_update_stats=False)*factor)
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
 
 def _compile_linearizer(rdev:Compiled, lin:Linearizer, name:Optional[str]=None) -> Tuple[bytes, Optional[List[int]], Optional[List[int]]]:
   lin.linearize()
-  src, _ = rdev.renderer(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
+  src = rdev.renderer(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
   return rdev.compiler(src), lin.global_size, lin.local_size
 
 def _try_compile_linearized_w_idx(x):
