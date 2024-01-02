@@ -3,7 +3,7 @@ import math
 import unittest
 import numpy as np
 import torch
-from tinygrad import nn, dtypes, Tensor
+from tinygrad import nn, dtypes, Tensor, Device
 from functools import partial
 
 # https://gist.github.com/devries/11405101
