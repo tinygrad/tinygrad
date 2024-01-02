@@ -4,7 +4,7 @@ import functools
 from tinygrad.helpers import all_same, dedup
 from tinygrad.dtype import DType
 from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
-from tinygrad.lazy import LazyBuffer, create_schedule, create_lazybuffer
+from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.shape.shapetracker import ShapeTracker, sint
 
 def all_reduce(lbs):
@@ -19,10 +19,16 @@ class MultiLazyBuffer:
   def __init__(self, lbs:Sequence[LazyBuffer], axis:Optional[int]):
     assert all(isinstance(x, LazyBuffer) for x in lbs), "all lbs must be LazyBuffers"
     self.lbs, self.axis = lbs, axis
-    assert all_same([(x.shape, x.dtype) for x in lbs]), "all multilazybuffer needs same shape and dtype"
+    assert all_same([(x.shape, x.dtype, x.st) for x in lbs]), "all multilazybuffer needs same shape and dtype"
     assert len(lbs) >= 2, "need at least 2 devices"
     self.dtype, self.device = lbs[0].dtype, tuple(x.device for x in lbs)
     self.shape = tuple(s*len(self.lbs) if a == self.axis else s for a,s in enumerate(lbs[0].shape))
+
+  @property
+  def base(self): return MultiLazyBuffer([x.base for x in self.lbs], self.axis)
+
+  @property
+  def st(self): return self.lbs[0].st
 
   def __repr__(self):
     return f"<MLB{chr(10)}{chr(10).join([str(x.st) for x in self.lbs])}>"
@@ -51,7 +57,7 @@ class MultiLazyBuffer:
 
   def cast(self, dtype:DType, bitcast:bool=False):
     if self.dtype == dtype: return self
-    return MultiLazyBuffer([create_lazybuffer(x.device, ShapeTracker.from_shape(x.shape), dtype, UnaryOps.CAST, (dtype, bitcast), (x,)) for x in self.lbs], self.axis)
+    return MultiLazyBuffer([x.cast(dtype, bitcast) for x in self.lbs], self.axis)
 
   def const(self, val:Union[float, int]) -> MultiLazyBuffer: return MultiLazyBuffer([x.const(val) for x in self.lbs], self.axis)
 
@@ -108,7 +114,7 @@ class MultiLazyBuffer:
     narg = tuple(s//len(self.lbs) if a == new_axis else s for a,s in enumerate(arg))
     return MultiLazyBuffer([x.reshape(narg) for x in self.lbs], new_axis)
   def pad(self, arg:Tuple[Tuple[sint, sint], ...]):
-    assert arg[self.axis] == (0,0), "padding not supported on sharded axis"
+    assert self.axis is None or arg[self.axis] == (0,0), "padding not supported on sharded axis"
     return MultiLazyBuffer([x.pad(arg) for x in self.lbs], self.axis)
   def expand(self, arg:Tuple[sint, ...]):
     # NOTE: this assert isn't needed, sharded axis can have dim 1

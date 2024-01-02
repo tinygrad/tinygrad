@@ -48,7 +48,7 @@ class Tensor:
 
   no_grad: ClassVar[bool] = False
   def __init__(self, data:Union[None, bool, int, float, List, Tuple, LazyBuffer, np.ndarray, bytes],
-               device:Optional[str]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
+               device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     if isinstance(device, (tuple, list)):
       md = tuple(Device.canonicalize(x) for x in device)
@@ -81,7 +81,7 @@ class Tensor:
 
     # data is a LazyBuffer, but it might be on the wrong device
     if not isinstance(data, (LazyBuffer, MultiLazyBuffer)): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
-    self.lazydata = data if data.device == device else data.copy_to_device(device)
+    self.lazydata: Union[LazyBuffer, MultiLazyBuffer] = data if data.device == device else data.copy_to_device(device)
     if md is not None: self.lazydata = MultiLazyBuffer.from_sharded(self.lazydata, md, None)
 
   def __repr__(self):
@@ -142,7 +142,8 @@ class Tensor:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
     if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.np)
-    return self.cast(self.dtype.scalar()).contiguous().realize().lazydata.base.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
+    t = self if isinstance(self.device, str) else self.to("CPU")
+    return t.cast(self.dtype.scalar()).contiguous().realize().lazydata.base.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
 
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self
@@ -156,10 +157,10 @@ class Tensor:
     _ret = Tensor(self.lazydata, device)
     self.lazydata = _ret.lazydata
 
-  def shard(self, devices:Sequence[str], axis:Optional[int]=None) -> Tensor:
+  def shard(self, devices:List[str], axis:Optional[int]=None) -> Tensor:
     return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, devices, axis), device=devices)
 
-  def shard_(self, devices:Sequence[str], axis:Optional[int]=None):
+  def shard_(self, devices:List[str], axis:Optional[int]=None):
     self.lazydata = self.shard(devices, axis).lazydata
 
   # ***** creation llop entrypoint *****

@@ -57,12 +57,7 @@ class LazyBuffer:
 
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None) -> LazyBuffer:
-    if isinstance(device, str):
-      return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else ())
-    else:
-      # TODO: do this in tensor
-      from tinygrad.features.multi import MultiLazyBuffer
-      return MultiLazyBuffer([create_lazybuffer(d, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else ()) for d in device], None)
+    return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else ())
 
   def const(self, val:Union[float, int]) -> LazyBuffer:
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
@@ -94,6 +89,7 @@ class LazyBuffer:
   def copy_to_device(self, device:str) -> LazyBuffer:
     # no COPY
     if self.device == device: return self
+
     # COPY there and back = no COPY at all
     if self.base == self and not self.realized and self.op == LoadOps.COPY and self.srcs[0].device == device: return self.srcs[0]
 
