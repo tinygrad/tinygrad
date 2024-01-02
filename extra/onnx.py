@@ -34,12 +34,12 @@ def get_run_onnx(onnx_model: ModelProto):
     while True:
       attr = type_proto.WhichOneof('value')
       if attr == 'tensor_type':
-        if "dim_value" not in type_proto.tensor_type.shape.dim.__dir__(): return (tuple(), type_proto.tensor_type.elem_type) # variable type, unable to determine shape
+        if "dim_value" not in type_proto.tensor_type.shape.dim.__dir__(): return () # variable type, unable to determine shape
         elif not ret:
-          return (tuple([x.dim_value for x in type_proto.tensor_type.shape.dim]), type_proto.tensor_type.elem_type)
+          return tuple([x.dim_value for x in type_proto.tensor_type.shape.dim])
         else:
           ret.extend([(x.dim_value,) for x in type_proto.tensor_type.shape.dim])
-          return (tuple(ret), type_proto.tensor_type.elem_type)
+          return tuple(ret)
       elif attr == 'sequence_type':
         type_proto = getattr(type_proto, attr).elem_type
         ret.append(1)
@@ -119,16 +119,14 @@ def get_run_onnx(onnx_model: ModelProto):
     # get inputs
     for inp in onnx_model.graph.input:
       if inp.name in tensors: continue
-      shape, data_type = type_parse(inp.type)
+      shape = type_parse(inp.type)
       if inp.name in inputs:
         if isinstance(inputs[inp.name], Tensor):
           input_tensors[inp.name] = inputs[inp.name]
         elif isinstance(inputs[inp.name], list):
-          # HACK this might be wrong
           input_tensors[inp.name] = [Tensor(i, requires_grad=False) for i in inputs[inp.name]]
         elif domain == "ai.onnx.preview.training": # not sure if in real use the domain is "ai.onnx.preview.training"
-          # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
-          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True)
+          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True) # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
         else:
           input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
         if shape: # if only input_tensor is not variable type
