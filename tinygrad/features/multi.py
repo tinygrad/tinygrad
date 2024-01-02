@@ -1,7 +1,8 @@
 from __future__ import annotations
 from typing import Sequence, Optional, Union, Any, Tuple
 import functools
-from tinygrad.helpers import all_same, dedup, DType
+from tinygrad.helpers import all_same, dedup
+from tinygrad.dtype import DType
 from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
 from tinygrad.lazy import LazyBuffer, create_schedule, create_lazybuffer
 from tinygrad.shape.shapetracker import ShapeTracker, sint

@@ -55,7 +55,7 @@ There are even more of these factory methods, you can find them in the [tensor.p
 All the tensors creation methods can take a `dtype` argument to specify the data type of the tensor.
 
 ```python
-from tinygrad.helpers import dtypes
+from tinygrad.dtype import dtypes
 
 t3 = Tensor([1, 2, 3, 4, 5], dtype=dtypes.int32)
 ```

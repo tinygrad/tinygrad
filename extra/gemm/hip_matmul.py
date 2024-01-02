@@ -1,6 +1,7 @@
 import time
 import numpy as np
-from tinygrad.helpers import dtypes, getenv, prod, flat_mv
+from tinygrad import dtypes
+from tinygrad.helpers import getenv, prod, flat_mv
 from tinygrad.runtime.ops_hip import HIPAllocator, HIPProgram, compile_hip
 
 # AMD_LOG_LEVEL=3 ./MIOpenDriver gemm --iter 1000 --time 1 --a_w 2048 --a_h 2048 --b_w 2048

@@ -2,8 +2,8 @@ import os
 os.environ["METAL"] = "1"
 import time
 import numpy as np
-from tinygrad.helpers import dtypes, getenv, flat_mv
-from tinygrad import Device
+from tinygrad import Device, dtypes
+from tinygrad.helpers import getenv, flat_mv
 from tinygrad.runtime.ops_metal import MetalAllocator, MetalDevice, MetalProgram, compile_metal
 
 N = getenv("N", 2048)

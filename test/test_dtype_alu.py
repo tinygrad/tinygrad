@@ -4,7 +4,8 @@ from tinygrad import Tensor, dtypes, Device
 import operator
 import numpy as np
 from hypothesis import given, strategies as st, settings
-from tinygrad.helpers import CI, getenv, DType, OSX
+from tinygrad.dtype import DType
+from tinygrad.helpers import CI, getenv, OSX
 from tinygrad.ops import UnaryOps, get_lazyop_info
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)

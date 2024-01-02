@@ -1,6 +1,7 @@
 import os, mmap, _posixshmem
 from typing import Callable, Dict, Tuple
-from tinygrad.helpers import prod, DType, OSX, dtypes
+from tinygrad.dtype import DType, dtypes
+from tinygrad.helpers import prod, OSX
 from tinygrad.device import Interpreted, Allocator
 from tinygrad.ops import Op, MovementOps, UnaryOps
 from tinygrad.shape.view import strides_for_shape
