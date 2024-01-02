@@ -45,7 +45,7 @@ class LLVM:
     backing_mod.triple = llvm.get_process_triple()
     LLVM.engine = llvm.create_mcjit_compiler(backing_mod, LLVM.target_machine)
 
-def compile_llvm(prg, llvmopt=LLVMOPT) -> bytes:
+def compile_llvm(prg) -> bytes:
   mod = llvm.parse_assembly(prg)
   mod.verify()
   LLVM().optimizer.run(mod)
