@@ -20,8 +20,7 @@ class MultiLazyBuffer:
   def __init__(self, lbs:List[LazyBuffer], axis:Optional[int]):
     assert all(isinstance(x, LazyBuffer) for x in lbs) and len(lbs) >= 2, "all lbs must be LazyBuffers, and we need at least two of them"
     assert all_same([(x.shape, x.dtype, x.st) for x in lbs]), "all multilazybuffer needs same shape, dtype, and st"
-    self.lbs, self.axis = lbs, axis
-    self.dtype, self.device = lbs[0].dtype, tuple(x.device for x in lbs)
+    self.lbs, self.axis, self.dtype, self.device = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs)
     self.shape = tuple(s*len(self.lbs) if a == self.axis else s for a,s in enumerate(lbs[0].shape))
 
   def __repr__(self):
@@ -68,13 +67,10 @@ class MultiLazyBuffer:
   def _shape_to_single_shard(self, shape): return tuple(s//len(self.lbs) if a == self.axis else s for a,s in enumerate(shape))
 
   def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> MultiLazyBuffer:
-    if self.axis is None:
-      # independent reduce on each device
-      return MultiLazyBuffer([x.r(op, new_shape) for x in self.lbs], None)
-    if new_shape[self.axis] == 1:
+    if self.axis is not None and new_shape[self.axis] == 1:
       # all-reduce on sharded axes
       return MultiLazyBuffer(all_reduce([x.r(op, new_shape) for x in self.lbs]), None)
-    # reduce on non sharded axes, piecewise is fine
+    # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
     return MultiLazyBuffer([x.r(op, self._shape_to_single_shard(new_shape)) for x in self.lbs], self.axis)
 
   # *** movement ops ***
