@@ -24,14 +24,8 @@ class MultiLazyBuffer:
     self.dtype, self.device = lbs[0].dtype, tuple(x.device for x in lbs)
     self.shape = tuple(s*len(self.lbs) if a == self.axis else s for a,s in enumerate(lbs[0].shape))
 
-  @property
-  def base(self): return MultiLazyBuffer([x.base for x in self.lbs], self.axis)
-
-  @property
-  def st(self): return self.lbs[0].st
-
   def __repr__(self):
-    return f"<MLB{chr(10)}{chr(10).join([str(x.st) for x in self.lbs])}>"
+    return f"<MLB{chr(10)}{chr(10).join([f'{x.device} {x.st}' for x in self.lbs])}>"
 
   @property
   def shard_sz(self): return self.lbs[0].shape[self.axis] * len(self.lbs)

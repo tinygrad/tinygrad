@@ -10,6 +10,12 @@ N = 128
 # shard_w is "model parallel"
 
 class TestMultiTensor(unittest.TestCase):
+  def test_shard(self):
+    X = Tensor.ones(256).contiguous().realize()
+    X.shard_((d0, d1), 0)
+    for lb in X.lazydata.lbs:
+      assert lb.shape == (128,)
+
   def test_numpy(self):
     X = Tensor.ones(256)
     X.shard_((d0, d1), 0)

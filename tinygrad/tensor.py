@@ -81,8 +81,11 @@ class Tensor:
 
     # data is a LazyBuffer, but it might be on the wrong device
     if not isinstance(data, (LazyBuffer, MultiLazyBuffer)): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
-    self.lazydata: Union[LazyBuffer, MultiLazyBuffer] = data if data.device == device else data.copy_to_device(device)
-    if md is not None: self.lazydata = MultiLazyBuffer.from_sharded(self.lazydata, md, None)
+    if md is not None:
+      # TODO: what if it's a MultiLazyBuffer on other devices?
+      self.lazydata: Union[LazyBuffer, MultiLazyBuffer] = MultiLazyBuffer.from_sharded(data, md, None) if isinstance(data, LazyBuffer) else data
+    else:
+      self.lazydata: Union[LazyBuffer, MultiLazyBuffer] = data if data.device == device else data.copy_to_device(device)
 
   def __repr__(self):
     return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
