@@ -34,12 +34,12 @@ def get_run_onnx(onnx_model: ModelProto):
     while True:
       attr = type_proto.WhichOneof('value')
       if attr == 'tensor_type':
-        if "dim_value" not in getattr(type_proto, attr).shape.dim.__dir__(): return () # variable type, unable to determine shape
+        if "dim_value" not in type_proto.tensor_type.shape.dim.__dir__(): return (tuple(), type_proto.tensor_type.elem_type) # variable type, unable to determine shape
         elif not ret:
-          return tuple([x.dim_value for x in getattr(type_proto, attr).shape.dim])
+          return (tuple([x.dim_value for x in type_proto.tensor_type.shape.dim]), type_proto.tensor_type.elem_type)
         else:
-          ret.extend([(x.dim_value,) for x in getattr(type_proto, attr).shape.dim])
-          return tuple(ret)
+          ret.extend([(x.dim_value,) for x in type_proto.tensor_type.shape.dim])
+          return (tuple(ret), type_proto.tensor_type.elem_type)
       elif attr == 'sequence_type':
         type_proto = getattr(type_proto, attr).elem_type
         ret.append(1)
@@ -49,18 +49,22 @@ def get_run_onnx(onnx_model: ModelProto):
       elif attr == 'optional_type': type_proto = getattr(type_proto, attr).elem_type
       else: raise Exception(f"unknown attr: {attr}, {type_proto}")
 
-  # NOTE see message TensorProto in onnx-ml.proto
-  # not implemented: String = 8 COMPLEX64 = 14, COMPLEX128 = 15, FLOAT8E4M3FN = 17, FLOAT8E4M3FNUZ = 18, FLOAT8E5M2 = 19, FLOAT8E5M2FNUZ = 20
-  dtype_map = {1:dtypes.float, 2:dtypes.uint8, 3:dtypes.int8, 4:dtypes.uint16, 5:dtypes.int16, 6:dtypes.int32, 7:dtypes.int64,
-               9:dtypes.bool, 10:dtypes.float16, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16}
+  # NOTE: FLOAT8E4M3FN = 17, FLOAT8E4M3FNUZ = 18, FLOAT8E5M2 = 19, FLOAT8E5M2FNUZ = 20
+  # not implemented: String = 8 COMPLEX64 = 14, COMPLEX128 = 15
+  DTYPE_MAP = {1:dtypes.float, 2:dtypes.uint8, 3:dtypes.int8, 4:dtypes.uint16, 5:dtypes.int16, 6:dtypes.int32, 7:dtypes.int64,
+               9:dtypes.bool, 10:dtypes.float16, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16,
+               17:dtypes.float, 18:dtypes.float, 19:dtypes.float, 20:dtypes.float}
+  # NOTE METAL and GPU doesn't support float64
+  if Device.DEFAULT in ('METAL', 'GPU'): DTYPE_MAP[11] = dtypes.float32
+  # TODO half broken in CI for GPU and LLVM segfaults in CI
+  if Device.DEFAULT in ('GPU', 'LLVM') and CI: DTYPE_MAP[10] = dtypes.float32
   def buffer_parse(inp: TensorProto) -> Tensor:
-    if inp.data_type in (8,14,15,17,18,19,20):
+    if inp.data_type in (8,14,15):
       raise Exception(f"data type not supported {inp.name} {inp.dims} {inp.data_type}")
     if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
-      ret = Tensor(dat, dtype=dtype_map[inp.data_type], requires_grad=False).reshape(tuple(inp.dims))
+      ret = Tensor(dat, dtype=DTYPE_MAP[inp.data_type], requires_grad=False).reshape(tuple(inp.dims))
     else:
       # TODO half broken in CI for GPU and LLVM segfaults in CI
-      # we're also still using numpy for this until we del numpy
       if (dtype := tensor_dtype_to_np_dtype(inp.data_type)) == np.half and CI and Device.DEFAULT in ('GPU', 'LLVM'):
         ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
       else:
@@ -115,16 +119,18 @@ def get_run_onnx(onnx_model: ModelProto):
     # get inputs
     for inp in onnx_model.graph.input:
       if inp.name in tensors: continue
-      shape = type_parse(inp.type)
+      shape, data_type = type_parse(inp.type)
       if inp.name in inputs:
         if isinstance(inputs[inp.name], Tensor):
           input_tensors[inp.name] = inputs[inp.name]
         elif isinstance(inputs[inp.name], list):
-          input_tensors[inp.name] = [Tensor(i, requires_grad=False) for i in inputs[inp.name]]
+          # HACK this might be wrong
+          input_tensors[inp.name] = [Tensor(i, requires_grad=False, dtype=DTYPE_MAP[data_type]) for i in inputs[inp.name]]
         elif domain == "ai.onnx.preview.training": # not sure if in real use the domain is "ai.onnx.preview.training"
-          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True) # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
+          # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
+          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True, dtype=DTYPE_MAP[data_type])
         else:
-          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
+          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False, dtype=DTYPE_MAP[data_type])
         if shape: # if only input_tensor is not variable type
           input_shape = input_tensors[inp.name].shape if isinstance(input_tensors[inp.name], Tensor) else (1, *[i.shape for i in input_tensors[inp.name]])
           assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"

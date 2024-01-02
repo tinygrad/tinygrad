@@ -211,9 +211,9 @@ if Device.DEFAULT in ['METAL']:
 
 if Device.DEFAULT in ['GPU', 'METAL']:
   # backend does not support dtype: Double
+  backend_test.exclude('test_eyelike_with_dtype_cpu')
   backend_test.exclude('test_max_float64_cpu')
   backend_test.exclude('test_min_float64_cpu')
-  backend_test.exclude('test_eyelike_with_dtype_cpu')
   backend_test.exclude('test_cast_FLOAT16_to_DOUBLE_cpu')
   backend_test.exclude('test_cast_FLOAT_to_DOUBLE_cpu')
   backend_test.exclude('test_castlike_FLOAT16_to_DOUBLE_cpu')
@@ -229,12 +229,12 @@ if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_mish_expanded_cpu')
 
 # Segfaults in CI, GPU requires cl_khr_fp16
-if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
+if Device.DEFAULT in ['LLVM', 'GPU'] and CI:
+  backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
   backend_test.exclude('test_max_float16_cpu')
   backend_test.exclude('test_min_float16_cpu')
-
-# error: casting to type 'half' is not allowed
-backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
+  backend_test.exclude('test_cast_FLOAT16_*')
+  backend_test.exclude('test_castlike_FLOAT16_*')
 
 # TODO: this somehow passes in CI but does not pass if run locally
 if isinstance(Device[Device.DEFAULT], Compiled):
