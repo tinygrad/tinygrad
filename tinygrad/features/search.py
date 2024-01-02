@@ -1,12 +1,13 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, random, math, time, multiprocessing, traceback, signal
 from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner
-from tinygrad.ops import MemBuffer
+from tinygrad.ops import MemBuffer, LazyOp
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
 from tinygrad.codegen.linearizer import Linearizer
 from collections import defaultdict
 from tinygrad.tensor import Tensor
+from tinygrad.shape.symbolic import sym_infer
 
 from tinygrad.codegen.kernel import Opt, OptOps
 actions = flatten([[Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,7]] for axis in range(6)])
@@ -21,21 +22,21 @@ actions += [
 ]
 if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
 
-def _get_test_global_size(global_size, max_global_size):
-  test_global_size = global_size[:]
+def _get_test_global_size(global_size, max_global_size, var_vals):
+  test_global_size, factor = [sym_infer(sz, var_vals) for sz in global_size], 1
   while prod(test_global_size) > max_global_size:
     for j in range(len(global_size)-1,-1,-1):
       if test_global_size[j] > 16:
         test_global_size[j] //= 2
+        factor *= 2
         break
-  factor = prod(global_size) / prod(test_global_size)
   return test_global_size, factor
 
-def _time_program(rdev:Compiled, lib:bytes, global_size, local_size, var_vals, rawbufs, early_stop=None, max_global_size=65536, clear_l2=False, cnt=3, name="test"):  # noqa: E501
+def _time_program(ast:LazyOp, rdev:Compiled, lib:bytes, global_size, local_size, var_vals, rawbufs, early_stop=None, max_global_size=65536, clear_l2=False, cnt=3, name="test"):  # noqa: E501
   factor = 1
   if global_size is not None and max_global_size is not None:
-    global_size, factor = _get_test_global_size(global_size, max_global_size=max_global_size)
-  car = CompiledASTRunner(None, name, "", lib, global_size, local_size).build(rdev.runtime)
+    global_size, factor = _get_test_global_size(global_size, max_global_size, var_vals)
+  car = CompiledASTRunner(ast, name, "", lib, global_size, local_size).build(rdev.runtime)
   tms = []
   for _ in range(cnt):
     if clear_l2:
@@ -115,7 +116,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
         lib, global_size, local_size = proc
         if lib in seen_libs: continue
         seen_libs.add(lib)
-        tms = _time_program(dev, lib, global_size, local_size, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0)
+        tms = _time_program(lin.ast, dev, lib, global_size, local_size, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0)
         timed_lins.append((acted_lins[i], min(tms)))
         if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")  # noqa: E501
 
@@ -157,7 +158,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
 
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
   lib, global_size, local_size = _compile_linearizer(dev, lin)
-  tms = _time_program(dev, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))  # noqa: E501
+  tms = _time_program(lin.ast, dev, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))  # noqa: E501
 
   if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)
   return min(tms)
