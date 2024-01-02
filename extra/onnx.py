@@ -50,23 +50,22 @@ def get_run_onnx(onnx_model: ModelProto):
       elif attr == 'optional_type': type_proto = getattr(type_proto, attr).elem_type
       else: raise Exception(f"unknown attr: {attr}, {type_proto}")
 
+  # NOTE see message TensorProto in onnx-ml.proto
+  # not implemented: String = 8 COMPLEX64 = 14, COMPLEX128 = 15, FLOAT8E4M3FN = 17, FLOAT8E4M3FNUZ = 18, FLOAT8E5M2 = 19, FLOAT8E5M2FNUZ = 20
+  dtype_map = {1:dtypes.float, 2:dtypes.uint8, 3:dtypes.int8, 4:dtypes.uint16, 5:dtypes.int16, 6:dtypes.int32, 7:dtypes.int64,
+               9:dtypes.bool, 10:dtypes.float16, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16}
   def buffer_parse(inp: TensorProto) -> Tensor:
-    if inp.data_type in (1,10,6,7,5):
-      # TODO: this is shared with below
-      if len(inp.float_data) > 0:
-        ret = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
-      elif len(inp.int64_data) > 0:
-        ret = Tensor(np.array(inp.int64_data, dtype=np.int64).reshape(inp.dims), requires_grad=False)
-      elif len(inp.int32_data) > 0:
-        ret = Tensor(np.array(inp.int32_data, dtype=np.int32).reshape(inp.dims), requires_grad=False)
-      else:
-        # TODO half broken in CI for GPU and LLVM segfaults in CI
-        if (dtype := tensor_dtype_to_np_dtype(inp.data_type)) == np.half and CI and Device.DEFAULT in ('GPU', 'LLVM'):
-          ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
-        else:
-          ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims).copy(), requires_grad=False)
+    if inp.data_type in (8,14,15,17,18,19,20):
+      raise Exception(f"data type not supported {inp.name} {inp.dims} {inp.data_type}")
+    if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
+      ret = Tensor(dat, dtype=dtype_map[inp.data_type], requires_grad=False).reshape(tuple(inp.dims))
     else:
-      raise Exception(f"bad data type {inp.name} {inp.dims} {inp.data_type}")
+      # TODO half broken in CI for GPU and LLVM segfaults in CI
+      # we're also still using numpy for this until we del numpy
+      if (dtype := tensor_dtype_to_np_dtype(inp.data_type)) == np.half and CI and Device.DEFAULT in ('GPU', 'LLVM'):
+        ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
+      else:
+        ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims).copy(), requires_grad=False)
     return ret
 
   def attribute_parse(a: AttributeProto) -> float | int | str | Tensor | tuple[float] | tuple[int]:
@@ -93,7 +92,7 @@ def get_run_onnx(onnx_model: ModelProto):
     elif len(inp.int64_data) > 0:
       tensors[inp.name] = Tensor(np.array(inp.int64_data, dtype=np.int64).reshape(inp.dims), requires_grad=False)
     elif len(inp.raw_data) == 0:
-      tensors[inp.name] = Tensor(np.array([], dtype=np.float32), requires_grad=False)
+      tensors[inp.name] = Tensor(None, requires_grad=False)
     else:
       print(inp.name, inp.dims, inp.data_type, len(inp.raw_data))
       print(inp)

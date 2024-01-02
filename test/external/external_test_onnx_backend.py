@@ -57,16 +57,53 @@ if Device.DEFAULT in ["TORCH"]:
 if Device.DEFAULT in ["METAL"]:
   backend_test.exclude('float64')
 
+# string Tensors
 backend_test.exclude('string')
+backend_test.exclude('test_regex_*')
+backend_test.exclude('test_cast_FLOAT_to_STRING_cpu')
+backend_test.exclude('test_cast_STRING_to_FLOAT_cpu')
+backend_test.exclude('FLOAT_to_STRING_cpu')
+backend_test.exclude('FLOAT_to_STRING_expanded_cpu')
+backend_test.exclude('STRING_to_FLOAT_cpu')
+backend_test.exclude('STRING_to_FLOAT_expanded_cpu')
+
+# TODO support for float8
+backend_test.exclude('test_cast_FLOAT16_to_FLOAT8E4M3FNUZ_cpu')
+backend_test.exclude('test_cast_FLOAT16_to_FLOAT8E4M3FN_cpu')
+backend_test.exclude('test_cast_FLOAT16_to_FLOAT8E5M2FNUZ_cpu')
+backend_test.exclude('test_cast_FLOAT16_to_FLOAT8E5M2_cpu')
+backend_test.exclude('test_cast_FLOAT_to_FLOAT8E4M3FNUZ_cpu')
+backend_test.exclude('test_cast_FLOAT_to_FLOAT8E4M3FN_cpu')
+backend_test.exclude('test_cast_FLOAT_to_FLOAT8E5M2FNUZ_cpu')
+backend_test.exclude('test_cast_FLOAT_to_FLOAT8E5M2_cpu')
+backend_test.exclude('test_cast_no_saturate_FLOAT16_to_FLOAT8E4M3FNUZ_cpu')
+backend_test.exclude('test_cast_no_saturate_FLOAT16_to_FLOAT8E4M3FN_cpu')
+backend_test.exclude('test_cast_no_saturate_FLOAT16_to_FLOAT8E5M2FNUZ_cpu')
+backend_test.exclude('test_cast_no_saturate_FLOAT16_to_FLOAT8E5M2_cpu')
+backend_test.exclude('test_cast_no_saturate_FLOAT_to_FLOAT8E4M3FNUZ_cpu')
+backend_test.exclude('test_cast_no_saturate_FLOAT_to_FLOAT8E4M3FN_cpu')
+backend_test.exclude('test_cast_no_saturate_FLOAT_to_FLOAT8E5M2FNUZ_cpu')
+backend_test.exclude('test_cast_no_saturate_FLOAT_to_FLOAT8E5M2_cpu')
+backend_test.exclude('test_castlike_FLOAT_to_FLOAT8E4M3FNUZ_cpu')
+backend_test.exclude('test_castlike_FLOAT_to_FLOAT8E4M3FNUZ_expanded_cpu')
+backend_test.exclude('test_castlike_FLOAT_to_FLOAT8E4M3FN_cpu')
+backend_test.exclude('test_castlike_FLOAT_to_FLOAT8E4M3FN_expanded_cpu')
+backend_test.exclude('test_castlike_FLOAT_to_FLOAT8E5M2FNUZ_cpu')
+backend_test.exclude('test_castlike_FLOAT_to_FLOAT8E5M2FNUZ_expanded_cpu')
+backend_test.exclude('test_castlike_FLOAT_to_FLOAT8E5M2_cpu')
+backend_test.exclude('test_castlike_FLOAT_to_FLOAT8E5M2_expanded_cpu')
+
+# TODO support for bfloat16 casting
+backend_test.exclude('test_cast_FLOAT_to_BFLOAT16_cpu')
+backend_test.exclude('test_cast_BFLOAT16_to_FLOAT_cpu')
+backend_test.exclude('test_castlike_FLOAT_to_BFLOAT16_cpu')
+backend_test.exclude('test_castlike_FLOAT_to_BFLOAT16_expanded_cpu')
+backend_test.exclude('test_castlike_BFLOAT16_to_FLOAT_cpu')
+backend_test.exclude('test_castlike_BFLOAT16_to_FLOAT_expanded_cpu')
 
 backend_test.exclude('test_pow_types_int*')
-backend_test.exclude('test_cast_*')
-backend_test.exclude('test_castlike_*')
 backend_test.exclude('test_convinteger_*')
 backend_test.exclude('test_matmulinteger_*')
-
-backend_test.exclude('test_reduce_log_sum_exp*') # dependent on actual float64 implementation for backends
-backend_test.exclude('test_operator_add*') # dependent on float64 math. Without it values default to 0 or inf
 
 # we don't support indexes
 # backend_test.exclude('test_argmax_*') # Needs more work: select_last_index
@@ -148,7 +185,6 @@ backend_test.exclude('test_resize_upsample_scales_cubic_*') # unsure how to impl
 backend_test.exclude('test_resize_upsample_sizes_cubic_*') # unsure how to implement cubic
 
 # rest of the failing tests
-backend_test.exclude('test_regex_*') # does not support string Tensors
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
@@ -174,9 +210,23 @@ if Device.DEFAULT in ['METAL']:
   backend_test.exclude('test_maxpool_2d_same_lower_cpu')
 
 if Device.DEFAULT in ['GPU', 'METAL']:
-  backend_test.exclude('test_mish_cpu') # weird inaccuracy
-  backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
-  backend_test.exclude('test_eyelike_with_dtype_cpu') # backend does not support dtype: Double
+  # backend does not support dtype: Double
+  backend_test.exclude('test_max_float64_cpu')
+  backend_test.exclude('test_min_float64_cpu')
+  backend_test.exclude('test_eyelike_with_dtype_cpu')
+  backend_test.exclude('test_cast_FLOAT16_to_DOUBLE_cpu')
+  backend_test.exclude('test_cast_FLOAT_to_DOUBLE_cpu')
+  backend_test.exclude('test_castlike_FLOAT16_to_DOUBLE_cpu')
+  backend_test.exclude('test_castlike_FLOAT16_to_DOUBLE_expanded_cpu')
+  backend_test.exclude('test_castlike_FLOAT_to_DOUBLE_cpu')
+  backend_test.exclude('test_castlike_FLOAT_to_DOUBLE_expanded_cpu')
+  backend_test.exclude('test_cast_DOUBLE_*')
+  backend_test.exclude('test_castlike_DOUBLE_*')
+  backend_test.exclude('test_reduce_log_sum_exp_*')
+  backend_test.exclude('test_operator_add_*')
+  # weird inaccuracy
+  backend_test.exclude('test_mish_cpu')
+  backend_test.exclude('test_mish_expanded_cpu')
 
 # Segfaults in CI, GPU requires cl_khr_fp16
 if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
@@ -193,11 +243,6 @@ if isinstance(Device[Device.DEFAULT], Compiled):
 # TODO: this somehow passes in CI but does not pass if run locally
 if Device.DEFAULT == 'METAL':
   backend_test.exclude('test_maxpool_2d_same_upper_cpu')
-
-# TODO when ran locally, RuntimeError: OpenCL Error -48
-if Device.DEFAULT == 'GPU':
-  backend_test.exclude('test_max_float64_cpu')
-  backend_test.exclude('test_min_float64_cpu')
 
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):

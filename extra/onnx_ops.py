@@ -7,15 +7,15 @@ from onnx.helper import tensor_dtype_to_np_dtype
 from onnx import TensorProto
 import numpy as np
 
-tensor_methods = {"Neg", "Reciprocal", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
-                  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
-                  "Elu", "Celu", "Div", "Pow"}
+tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
+                  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Div", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
+                  "Elu", "Celu"}
 
 # **************** Free Ops ****************
 
 def Identity(x: Tensor): return x
-def Add(x: Tensor, other: Tensor, broadcast=None): return x + other
-def Sub(x: Union[Tensor, Any], other: Tensor): return x - other
+def Add(x: Tensor, other: Tensor, broadcast=None, axis=None): return x + other
+def Sub(x: Union[Tensor, Any], other: Tensor): return x - other # some test has input as int
 def Less(x:Tensor,y:Tensor): return x < y
 def LessOrEqual(x:Tensor,y:Tensor): return x <= y
 def Greater(x:Tensor,y:Tensor): return x > y
@@ -25,8 +25,8 @@ def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
 def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
-def Cast(x: Tensor, to): return x.cast(dtypes.from_np(tensor_dtype_to_np_dtype(to)))
 # NOTE: does not support saturate
+def Cast(x: Tensor, to, saturate=1): return x.cast(dtypes.from_np(tensor_dtype_to_np_dtype(to)))
 def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
 
 # **************** Simple Ops ****************
@@ -557,8 +557,7 @@ def EyeLike(x: Tensor, dtype=None, k=0):
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
 
 def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
-  ret = (x == float("inf")) * bool(detect_positive) + (x == float("-inf")) * bool(detect_negative) + Tensor.zeros(*x.shape, dtype=dtypes.bool)
-  return ret
+  return (x == float("inf")) * bool(detect_positive) + (x == float("-inf")) * bool(detect_negative)
 
 def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1):
   axis = axis + x.ndim if axis < 0 else axis
