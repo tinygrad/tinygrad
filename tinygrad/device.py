@@ -329,7 +329,7 @@ class Compiled:
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.to_program(self.get_linearizer(ast))
 
-# **************** concurrent kernel compilation ****************
+# **************** parallel kernel compilation ****************
 
 # workers should ignore ctrl c
 def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -344,8 +344,8 @@ def _try_compile_k_with_idx(x: Tuple[int, Linearizer], name:Optional[str], ignor
     return (x[0], None)
 
 class MultiKernelCompiler:
-  def __init__(self, concurrent:bool):
-    self._pool = multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker) if concurrent else None
+  def __init__(self, parallel:bool):
+    self._pool = multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker) if parallel else None
 
   def compile_unordered(self, ks:List[Linearizer], name_for_all:Optional[str]=None, ignore_errs:bool=False) -> Iterator[Tuple[int, Optional[Tuple]]]:
     compile_fn = functools.partial(_try_compile_k_with_idx, name=name_for_all, ignore_errs=ignore_errs)

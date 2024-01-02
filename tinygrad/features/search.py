@@ -85,7 +85,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   seen_libs = set()
 
   default_parallel = 1 if Device.DEFAULT in {"CUDA", "HIP"} else 0
-  multi_compiler = MultiKernelCompiler(concurrent=getenv("PARALLEL", default_parallel))
+  multi_compiler = MultiKernelCompiler(parallel=getenv("PARALLEL", default_parallel))
 
   try:
     var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
