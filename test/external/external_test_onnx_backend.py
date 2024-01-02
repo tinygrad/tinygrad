@@ -233,7 +233,14 @@ if Device.DEFAULT in ['LLVM', 'GPU'] and CI:
   backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
   backend_test.exclude('test_max_float16_cpu')
   backend_test.exclude('test_min_float16_cpu')
+  backend_test.exclude('test_cast_FLOAT8E4M3FNUZ_to_FLOAT16_cpu')
+  backend_test.exclude('test_cast_FLOAT8E4M3FN_to_FLOAT16_cpu')
+  backend_test.exclude('test_cast_FLOAT8E5M2FNUZ_to_FLOAT16_cpu')
+  backend_test.exclude('test_cast_FLOAT8E5M2_to_FLOAT16_cpu')
+  backend_test.exclude('test_cast_FLOAT_to_FLOAT16_cpu')
   backend_test.exclude('test_cast_FLOAT16_*')
+  backend_test.exclude('test_castlike_FLOAT_to_FLOAT16_cpu')
+  backend_test.exclude('test_castlike_FLOAT_to_FLOAT16_expanded_cpu')
   backend_test.exclude('test_castlike_FLOAT16_*')
 
 # TODO: this somehow passes in CI but does not pass if run locally

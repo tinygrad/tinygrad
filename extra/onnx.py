@@ -125,12 +125,12 @@ def get_run_onnx(onnx_model: ModelProto):
           input_tensors[inp.name] = inputs[inp.name]
         elif isinstance(inputs[inp.name], list):
           # HACK this might be wrong
-          input_tensors[inp.name] = [Tensor(i, requires_grad=False, dtype=DTYPE_MAP[data_type]) for i in inputs[inp.name]]
+          input_tensors[inp.name] = [Tensor(i, requires_grad=False) for i in inputs[inp.name]]
         elif domain == "ai.onnx.preview.training": # not sure if in real use the domain is "ai.onnx.preview.training"
           # TODO there isn't a good way to parse which inp requires_grad, some are manually turned off in optimizer ops
-          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True, dtype=DTYPE_MAP[data_type])
+          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=True)
         else:
-          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False, dtype=DTYPE_MAP[data_type])
+          input_tensors[inp.name] = Tensor(inputs[inp.name], requires_grad=False)
         if shape: # if only input_tensor is not variable type
           input_shape = input_tensors[inp.name].shape if isinstance(input_tensors[inp.name], Tensor) else (1, *[i.shape for i in input_tensors[inp.name]])
           assert input_shape == shape, f"wrong shape for input {inp.name}, {input_shape} isn't {shape}"
