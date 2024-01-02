@@ -30,12 +30,10 @@ class CStyleLanguage(NamedTuple):
   uses_ptr_arithmetic: bool = False
   launch_bounds: bool = False
   code_for_op: Dict = {
-    UnaryOps.NEG: lambda x,dtype: f"(-{x})" if dtype != dtypes.bool else f"(!{x})",
-    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})",
-    UnaryOps.SIN: lambda x,dtype: f"sin({x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
-    BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})",
-    BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})", BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})",
-    BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
+    UnaryOps.NEG: lambda x,dtype: f"(-{x})" if dtype != dtypes.bool else f"(!{x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
+    UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
+    BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})",
+    BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPEQ: lambda a,b,dtype: f"({a}=={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
     TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})", TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"
   }
@@ -118,10 +116,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
 
   for u in uops:
     uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
-    if uop == UOps.LOOP:
-      kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]))
-      depth += 1
-    elif uop == UOps.IF:
+    # these four uops don't have output dtypes
+    if uop == UOps.IF:
       kk(lang.render_if(r[vin[0]]))
       depth += 1
     elif uop == UOps.BARRIER:
@@ -129,82 +125,82 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
     elif uop == UOps.END:
       depth -= 1
       kk("}")
-    elif uop == UOps.WMMA:
-      if args[0] == "METAL":
-        assert dtype == dtypes.float.vec(2), "output dtype of METAL TC is _float2"
-        # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
-        output = ssa(u, 'wmma')
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {output};")
-        kk("{ simdgroup_float8x8 a,b,c;")
-        kk(f"a.thread_elements()[0] = {r[vin[0]]}; a.thread_elements()[1] = {r[vin[1]]};")
-        kk(f"b.thread_elements()[0] = {r[vin[2]]}; b.thread_elements()[1] = {r[vin[3]]};")
-        kk(f"c.thread_elements()[0] = {r[vin[4]]}; c.thread_elements()[1] = {r[vin[5]]};")
-        kk("simdgroup_multiply_accumulate(c, a, b, c);")
-        kk(f"{output}.x = c.thread_elements()[0]; {output}.y = c.thread_elements()[1]; }}")
-      elif args[0] == "HIP":
-        assert dtype == dtypes.float.vec(8), "output dtype of HIP TC is _float8"
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
-      else:
-        raise NotImplementedError(f"WMMA not implemented for {args}")
-    elif uop == UOps.ALU:
-      assert dtype is not None
-      # remove parens if ALU types are the same. TODO: can do more here
-      if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.XOR}:
-        val = lang.code_for_op[args](strip_parens(r[vin[0]]), *[r[x] for x in vin[1:]], dtype)
-      else:
-        val = lang.code_for_op[args](*[r[x] for x in vin] + [dtype])
-      assert child_count[u] != 0, f"childless ALU op found {u}"
-      # TODO: fix index rendering issue. fix clang nested max macro issue
-      if child_count[u] <= 1 and args != BinaryOps.MAX and not getenv("EXPAND_SSA"):
-        r[u] = val
-      else:
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'alu')} = {val};")
-    elif uop == UOps.DEFINE_ACC:
-      assert dtype is not None
-      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
-    elif uop == UOps.SPECIAL:
-      xid = lang.gid if args[1].startswith("g") else (lang.xid if args[1].startswith("i") else lang.lid)
-      kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]}; /* {args[2]} */")
-      if args[1].startswith("l"): local_size.append(args[2])
-      r[u] = args[1]
-    elif uop == UOps.CONST:
-      r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
-    elif uop == UOps.LOAD:
-      assert dtype is not None
-      val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
-      # NOTE: this relies on the load not happening if it's in the unselected branch
-      if len(vin) > 3: val = lang.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
-      kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'val')} = {val};")
-    elif uop == UOps.PHI:
-      kk(f"{r[vin[0]]} = {r[vin[1]]};")
-      r[u] = r[vin[0]]
     elif uop == UOps.STORE:
       assert vin[0].dtype is not None and vin[2].dtype is not None
       if len(vin) > 3: kk(lang.render_if(r[vin[3]]))
       kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
       if len(vin) > 3: kk("}")
-    elif uop == UOps.CAST and dtype is not None:
-      val = lang.render_cast([r[x] for x in vin], dtype, bitcast=isinstance(args, tuple) and args[1])
-      if child_count[u] <= 1: r[u] = val
-      else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
-    elif uop == UOps.DEFINE_LOCAL:
-      assert dtype is not None
-      if lang.external_local_bufs:
-        prekernel.append(lang.render_local(args[0], dtype, args[1]))
-      else:
-        kk(lang.render_local(args[0], dtype, args[1]))
-      r[u] = args[0]
-    elif uop == UOps.DEFINE_GLOBAL:
-      assert dtype is not None
-      bufs.append((args, dtype))
-      r[u] = args
-    elif uop == UOps.GEP:
-      if cast(DType, vin[0].dtype).sz > 4:
-        r[u] = f"({r[vin[0]]})[{args}]"  # this is correct for HIP
-      else:
-        r[u] = f"({r[vin[0]]}).{'xyzw'[args]}"
     else:
-      raise RuntimeError(f"failed to render {uop}")
+      assert dtype is not None, f"None dtype for uop {uop}"
+      if uop == UOps.LOOP:
+        kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]))
+        depth += 1
+      elif uop == UOps.WMMA:
+        if args[0] == "METAL":
+          assert dtype == dtypes.float.vec(2), "output dtype of METAL TC is _float2"
+          # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
+          output = ssa(u, 'wmma')
+          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {output};")
+          kk("{ simdgroup_float8x8 a,b,c;")
+          kk(f"a.thread_elements()[0] = {r[vin[0]]}; a.thread_elements()[1] = {r[vin[1]]};")
+          kk(f"b.thread_elements()[0] = {r[vin[2]]}; b.thread_elements()[1] = {r[vin[3]]};")
+          kk(f"c.thread_elements()[0] = {r[vin[4]]}; c.thread_elements()[1] = {r[vin[5]]};")
+          kk("simdgroup_multiply_accumulate(c, a, b, c);")
+          kk(f"{output}.x = c.thread_elements()[0]; {output}.y = c.thread_elements()[1]; }}")
+        elif args[0] == "HIP":
+          assert dtype == dtypes.float.vec(8), "output dtype of HIP TC is _float8"
+          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
+        else:
+          raise NotImplementedError(f"WMMA not implemented for {args}")
+      elif uop == UOps.ALU:
+        # remove parens if ALU types are the same. TODO: can do more here
+        if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.XOR}:
+          val = lang.code_for_op[args](strip_parens(r[vin[0]]), *[r[x] for x in vin[1:]], dtype)
+        else:
+          val = lang.code_for_op[args](*[r[x] for x in vin] + [dtype])
+        assert child_count[u] != 0, f"childless ALU op found {u}"
+        # TODO: fix index rendering issue. fix clang nested max macro issue
+        if child_count[u] <= 1 and args != BinaryOps.MAX and not getenv("EXPAND_SSA"):
+          r[u] = val
+        else:
+          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'alu')} = {val};")
+      elif uop == UOps.DEFINE_ACC:
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
+      elif uop == UOps.SPECIAL:
+        xid = lang.gid if args[1].startswith("g") else (lang.xid if args[1].startswith("i") else lang.lid)
+        kk(f"{lang.size_prefix} {args[1]} = {xid[args[0]]}; /* {args[2]} */")
+        if args[1].startswith("l"): local_size.append(args[2])
+        r[u] = args[1]
+      elif uop == UOps.CONST:
+        r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
+      elif uop == UOps.LOAD:
+        val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
+        # NOTE: this relies on the load not happening if it's in the unselected branch
+        if len(vin) > 3: val = lang.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'val')} = {val};")
+      elif uop == UOps.PHI:
+        kk(f"{r[vin[0]]} = {r[vin[1]]};")
+        r[u] = r[vin[0]]
+      elif uop == UOps.CAST:
+        val = lang.render_cast([r[x] for x in vin], dtype, bitcast=isinstance(args, tuple) and args[1])
+        if child_count[u] <= 1: r[u] = val
+        else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
+      elif uop == UOps.DEFINE_LOCAL:
+        if lang.external_local_bufs:
+          prekernel.append(lang.render_local(args[0], dtype, args[1]))
+        else:
+          kk(lang.render_local(args[0], dtype, args[1]))
+        r[u] = args[0]
+      elif uop == UOps.DEFINE_GLOBAL:
+        bufs.append((args, dtype))
+        r[u] = args
+      elif uop == UOps.GEP:
+        if cast(DType, vin[0].dtype).sz > 4:
+          r[u] = f"({r[vin[0]]})[{args}]"  # this is correct for HIP
+        else:
+          r[u] = f"({r[vin[0]]}).{'xyzw'[args]}"
+      else:
+        raise RuntimeError(f"failed to render {uop}")
 
   return lang.render_kernel(function_name, kernel, bufs, local_size, prekernel), {}
 
