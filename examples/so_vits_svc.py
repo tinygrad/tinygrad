@@ -4,9 +4,8 @@ import sys, logging, time, io, math, argparse, operator, numpy as np
 from functools import partial, reduce
 from pathlib import Path
 from typing import Tuple, Optional, Type
-from tinygrad import nn
-from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes, getenv
+from tinygrad import nn, dtypes, Tensor
+from tinygrad.helpers import getenv
 from tinygrad.nn.state import torch_load
 from examples.vits import ResidualCouplingBlock, PosteriorEncoder, Encoder, ResBlock1, ResBlock2, LRELU_SLOPE, sequence_mask, split, download_if_not_present, get_hparams_from_file, load_checkpoint, weight_norm, HParams
 from examples.sovits_helpers import preprocess

@@ -1,6 +1,6 @@
 # load each model here, quick benchmark
-from tinygrad.tensor import Tensor
-from tinygrad.helpers import GlobalCounters, getenv
+from tinygrad import Tensor, GlobalCounters
+from tinygrad.helpers import getenv
 import numpy as np
 
 def test_model(model, *inputs):

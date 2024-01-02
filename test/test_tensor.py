@@ -2,8 +2,8 @@ import numpy as np
 import torch
 import unittest, copy
 import mmap
-from tinygrad.tensor import Tensor, Device
-from tinygrad.helpers import dtypes, temp
+from tinygrad import Tensor, Device, dtypes
+from tinygrad.helpers import temp
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
 x_init = np.random.randn(1,3).astype(np.float32)

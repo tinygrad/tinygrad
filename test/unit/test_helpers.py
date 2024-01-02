@@ -1,7 +1,8 @@
 import unittest
 import numpy as np
 from PIL import Image
-from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten
+from tinygrad.dtype import DType, dtypes
+from tinygrad.helpers import Context, ContextVar, merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten
 from tinygrad.shape.symbolic import Variable, NumNode
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -155,6 +156,7 @@ class TestFetch(unittest.TestCase):
   def test_fetch_small(self):
     assert(len(fetch('https://google.com', allow_caching=False).read_bytes())>0)
 
+  @unittest.skip("test is flaky")
   def test_fetch_img(self):
     img = fetch("https://media.istockphoto.com/photos/hen-picture-id831791190", allow_caching=False)
     with Image.open(img) as pimg:

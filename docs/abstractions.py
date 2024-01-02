@@ -67,7 +67,7 @@ class Function:
 
 # %%
 # == LazyBuffer (in tinygrad/lazy.py, code 5/10) ==
-from tinygrad.helpers import DType
+from tinygrad.dtype import DType
 
 # this is where the properties live that you thought were a part of Tensor
 # LazyBuffer is like a Tensor without derivatives, at the mlop layer
