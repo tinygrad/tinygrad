@@ -177,9 +177,9 @@ class TestSchedule(unittest.TestCase):
     c1 = nn.Conv2d(3,16,3)
 
     # run
-    img = Tensor.empty(2,3,64,64)
+    img = Tensor.rand(2,3,64,64)
     out = c1(img).elu()
-    check_schedule(out, 1, [c1.weight, c1.bias])
+    check_schedule(out, 2, [c1.weight, c1.bias]) # 2 extra from weight initialization
 
   def test_two_sum(self):
     img = Tensor.empty(64,64)
@@ -334,7 +334,7 @@ class TestSchedule(unittest.TestCase):
     out = bn1(conv1(x)).relu()
     out = bn2(conv2(out))
     out = (out + x).relu()
-    check_schedule(out, 4)
+    check_schedule(out, 6) # 2 extra from weight initialization
 
   def test_contiguous_while_contiguous(self):
     x = Tensor.empty(1, 64, 32, 32)

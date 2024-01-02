@@ -174,7 +174,7 @@ class Tensor:
       x = [(x[0] + ks[i % 3]), (x[1] + ks[(i + 1) % 3] + i + 1)]
     out = (x[0].cat(x[1])[:num].cast(dtypes.float32).realize() / (2 ** 32 - 1)).reshape(shape).cast(dtypes.default_float if dtype is None else dtype)
     out.requires_grad = kwargs.get("requires_grad")
-    return out
+    return out.contiguous()
 
   # ***** creation helper functions *****
 

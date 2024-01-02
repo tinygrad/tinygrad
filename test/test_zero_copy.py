@@ -16,9 +16,9 @@ N = 4096
 class TestZeroCopy(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT not in {"CLANG", "LLVM", "CPU", "METAL"}, "device isn't zero copy")
   def test_zero_copy_from_default_to_cpu(self):
-    demo = Tensor.empty(1).realize()
+    demo = Tensor.rand(1).realize()
     t1 = time_tensor_numpy(demo)
-    out = Tensor.empty(N, N).realize()
+    out = Tensor.rand(N, N).realize()
     t2 = time_tensor_numpy(out)
     gbps = out.nbytes()*1e-9/max(t2-t1, 1e-10)
     print(f"time(base): {t1*1e3:.2f} ms, time(copy): {t2*1e3:.2f} ms :  copy speed {gbps:.2f} GB/s")

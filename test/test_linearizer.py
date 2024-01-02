@@ -96,8 +96,8 @@ class TestLinearizer(unittest.TestCase):
   def test_limit_dims_to_max_5d_global(self):
     t = Tensor.rand(3, 4, 5, 6, 7).pad(((1, 1), (1, 1), (1, 1), (1, 1), (1, 1))) + 1
     sched = [si for si in t.lazydata.schedule() if si.ast.op not in LoadOps]
-    assert len(sched) == 1
-    lin = Linearizer(sched[0].ast)
+    assert len(sched) == 2
+    lin = Linearizer(sched[1].ast)
     assert lin.full_shape[:lin.global_dims] == (5, 6, 7, 8, 9)
     lin.limit_dims_to_max(global_max=[16, 16, 16], local_max=[16, 16, 16])
 
@@ -277,8 +277,8 @@ class TestFloat4(unittest.TestCase):
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestHandCodedOpts(unittest.TestCase):
   def test_masked_upcast(self):
-    layer_1 = Tensor.cat(*[Tensor.empty(5) for _ in range(4)])
-    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.empty(6, 20))
+    layer_1 = Tensor.cat(*[Tensor.rand(5) for _ in range(4)])
+    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 20))
 
     s = layer_2.lazydata.schedule()[-1]
     k = Linearizer(s.ast)
@@ -291,7 +291,7 @@ class TestHandCodedOpts(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Failing because of custom kernel splitting to circumvent the 8 buffer limit")
   def test_masked_upcast_wino(self):
-    monster = Tensor.stack([Tensor.stack([Tensor.empty(16) for _ in range(6)]) for _ in range(6)])
+    monster = Tensor.stack([Tensor.stack([Tensor.rand(16) for _ in range(6)]) for _ in range(6)])
 
     s = monster.lazydata.schedule()[-1]
     k = Linearizer(s.ast)
@@ -303,7 +303,7 @@ class TestHandCodedOpts(unittest.TestCase):
   def test_masked_upcast_wino_full(self):
     old_wino = Tensor.wino
     Tensor.wino = True
-    x,w = Tensor.empty(1,4,9,9, requires_grad=True).realize(), Tensor.empty(4,4,3,3, requires_grad=True).realize()
+    x,w = Tensor.rand(1,4,9,9, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
     out = Tensor.conv2d(x,w, padding=1)
     upcasts = []
     # collect upcasts of tile transform kernels
@@ -329,9 +329,9 @@ class TestHandCodedOpts(unittest.TestCase):
     Tensor.wino = old_wino
 
   def test_masked_upcast_many(self):
-    layer_1 = Tensor.cat(Tensor.empty(3, 4), Tensor.empty(4, 4))
-    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.empty(6, 7, 4))
-    layer_3 = Tensor.cat(layer_2.unsqueeze(0), Tensor.empty(6, 7, 7, 4))
+    layer_1 = Tensor.cat(Tensor.rand(3, 4), Tensor.rand(4, 4))
+    layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 7, 4))
+    layer_3 = Tensor.cat(layer_2.unsqueeze(0), Tensor.rand(6, 7, 7, 4))
 
     s = layer_3.lazydata.schedule()[-1]
     k = Linearizer(s.ast)
