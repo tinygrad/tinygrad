@@ -165,6 +165,7 @@ class Tensor:
 
   def shard_(self, devices:List[str], axis:Optional[int]=None):
     self.lazydata = self.shard(devices, axis).lazydata
+    return self
 
   # ***** creation llop entrypoint *****
 

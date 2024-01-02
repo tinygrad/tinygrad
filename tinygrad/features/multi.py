@@ -32,7 +32,7 @@ class MultiLazyBuffer:
 
   @staticmethod
   def from_sharded(lb:LazyBuffer, devices:Sequence[str], axis:Optional[int]=None):
-    lbs = [lb.contiguous()] * len(devices)
+    lbs = [lb.contiguous() if lb.base != lb else lb] * len(devices)
     if axis is not None: lbs = to_sharded(lbs, axis)
     return MultiLazyBuffer([lb.copy_to_device(d) for lb,d in zip(lbs, devices)], axis)
 

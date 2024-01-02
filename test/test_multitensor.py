@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, Device, nn
+from tinygrad import Tensor, Device, nn, GlobalCounters
 from tinygrad.nn.state import get_parameters
 import numpy as np
 
@@ -114,9 +114,13 @@ class TestMultiTensor(unittest.TestCase):
     m = ResNet18()
     m.load_from_pretrained()
     real_output = m(fake_image).numpy()
-    for p in get_parameters(m): p.shard_((d0, d1))
-    shard_output = m(fake_image_sharded).numpy()
-    np.testing.assert_allclose(real_output, shard_output)
+    for p in get_parameters(m): p.shard_((d0, d1)).realize()
+    GlobalCounters.reset()
+    shard_output = m(fake_image_sharded).realize()
+    assert shard_output.lazydata.lbs[0].shape == (1, 1000)
+    assert shard_output.lazydata.lbs[1].shape == (1, 1000)
+    shard_output_np = shard_output.numpy()
+    np.testing.assert_allclose(real_output, shard_output_np)
 
 if __name__ == '__main__':
   unittest.main()
