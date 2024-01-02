@@ -132,6 +132,7 @@ class Tensor:
 
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self
+    if device == "CPU" and self.lazydata.dtype == dtypes.bfloat16: raise RuntimeError("bfloat buffer is not supported on CPU {}".format(self.lazydata))
     ret = Tensor(self.lazydata, device)
     if self.grad: ret.grad = self.grad.to(device)
     return ret
