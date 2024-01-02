@@ -1,8 +1,8 @@
 from __future__ import annotations
 import numpy as np
 from collections import defaultdict
-from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable
-import importlib, inspect, functools, pathlib, time, re, ctypes
+from typing import TYPE_CHECKING, cast, Union, Any, List, Optional, Dict, Callable, Tuple, Iterator
+import importlib, inspect, functools, pathlib, time, re, ctypes, traceback, multiprocessing, signal
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -284,10 +284,10 @@ class Compiled:
     self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph = allocator, linearizer_opts, renderer, compiler, runtime, graph  # noqa: E501
   def synchronize(self): pass  # override this in your device
 
-  def to_program(self, k:Linearizer) -> CompiledASTRunner:
-    assert self.compiler is not None, f"compiler is None, can't build {k.ast}"
+  def compile(self, k:Linearizer, name:Optional[str]=None):
+    assert self.compiler is not None, f"compiler is None, can't compile {k.ast}"
     k.linearize()
-    src = self.renderer(to_function_name(k.name), k.uops)
+    src = self.renderer(name if name is not None else to_function_name(k.name), k.uops)
     if getenv("DISABLE_COMPILER_CACHE") or '<' in self.compiler.__name__:
       lib = self.compiler(src)
     else:
@@ -295,7 +295,11 @@ class Compiled:
       if lib is None:
         lib = self.compiler(src)
         diskcache_put(self.compiler.__name__, src, lib)
-    return CompiledASTRunner(k.ast, k.name, src, lib, k.global_size, k.local_size).build(self.runtime)
+    return lib, src, k.global_size, k.local_size
+
+  def to_program(self, k:Linearizer) -> CompiledASTRunner:
+    lib, src, global_size, local_size = self.compile(k)
+    return CompiledASTRunner(k.ast, k.name, src, lib, global_size, local_size).build(self.runtime)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:
@@ -324,3 +328,32 @@ class Compiled:
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.to_program(self.get_linearizer(ast))
+
+# **************** concurrent kernel compilation ****************
+
+# workers should ignore ctrl c
+def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+def _try_compile_k_with_idx(x: Tuple[int, Linearizer], name:Optional[str], ignore_errs:bool):
+  try:
+    dev = cast(Compiled, Device[Device.DEFAULT])  # TODO: shouldn't use Device.DEFAULT
+    return (x[0], dev.compile(x[1], name))
+  except Exception as e:
+    if not ignore_errs: raise e
+    if DEBUG >= 4: traceback.print_exc()
+    return (x[0], None)
+
+class MultiKernelCompiler:
+  def __init__(self, concurrent:bool):
+    self._pool = multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker) if concurrent else None
+
+  def compile_unordered(self, ks:List[Linearizer], name_for_all:Optional[str]=None, ignore_errs:bool=False) -> Iterator[Tuple[int, Optional[Tuple]]]:
+    compile_fn = functools.partial(_try_compile_k_with_idx, name=name_for_all, ignore_errs=ignore_errs)
+    map_fn = cast(Callable, self._pool.imap_unordered if self._pool is not None else map)
+    yield from map_fn(compile_fn, enumerate(ks))
+
+  def close(self):
+    if self._pool is not None: self._pool.close()
+
+  def terminate(self):
+    if self._pool is not None: self._pool.terminate()

@@ -1,6 +1,6 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
-import itertools, random, math, time, multiprocessing, traceback, signal
-from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner
+import itertools, random, math, time
+from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner, MultiKernelCompiler
 from tinygrad.ops import MemBuffer, LazyOp
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
@@ -41,20 +41,6 @@ def _time_program(ast:LazyOp, rdev:Compiled, lib:bytes, global_size, local_size,
     tms.append(car(rawbufs, var_vals, wait=True, do_update_stats=False)*factor)
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
-
-def _compile_linearizer(rdev:Compiled, lin:Linearizer, name:Optional[str]=None) -> Tuple[bytes, Optional[List[int]], Optional[List[int]]]:
-  lin.linearize()
-  src = rdev.renderer(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
-  return rdev.compiler(src), lin.global_size, lin.local_size
-
-def _try_compile_linearized_w_idx(x):
-  try: return (x[0], _compile_linearizer(cast(Compiled, Device[Device.DEFAULT]), x[1], "test"))
-  except Exception:
-    if DEBUG >= 4: traceback.print_exc()
-    return (x[0], None)
-
-# workers should ignore ctrl c
-def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 # *** external API ***
 
@@ -99,7 +85,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   seen_libs = set()
 
   default_parallel = 1 if Device.DEFAULT in {"CUDA", "HIP"} else 0
-  pool = multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker) if getenv("PARALLEL", default_parallel) else None
+  multi_compiler = MultiKernelCompiler(concurrent=getenv("PARALLEL", default_parallel))
 
   try:
     var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
@@ -109,9 +95,9 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
     while not exiting:
       acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam]) if len(beam) else [lin]
       timed_lins: List[Tuple[Linearizer, float]] = []
-      for i,proc in (pool.imap_unordered(_try_compile_linearized_w_idx, enumerate(acted_lins)) if pool is not None else map(_try_compile_linearized_w_idx, enumerate(acted_lins))):  # noqa: E501
+      for i,proc in multi_compiler.compile_unordered(acted_lins, name_for_all='test', ignore_errs=True):
         if proc is None: continue
-        lib, global_size, local_size = proc
+        lib, _, global_size, local_size = proc
         if lib in seen_libs: continue
         seen_libs.add(lib)
         tms = _time_program(lin.ast, dev, lib, global_size, local_size, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0)
@@ -124,9 +110,9 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
       if not exiting: beam = opts[:amt]
       assert len(beam) > 0, "no BEAM items succeeded?!?"
       if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s:", colored(f"{beam[0][1]*1e6:12.2f} us", "green" if exiting else None), f"from {len(acted_lins):3d} -> {len(opts):3d} actions\033[K", beam[0][0].colored_shape())  # noqa: E501
-    if pool is not None: pool.close()    # the pool is closed
+    multi_compiler.close()
   except KeyboardInterrupt as e:
-    if pool is not None: pool.terminate()
+    multi_compiler.terminate()
     raise e
 
   if CACHELEVEL >= 1: diskcache_put("beam_search", key, beam[0][0].applied_opts)
@@ -153,7 +139,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
   assert isinstance(dev, Compiled)
 
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
-  lib, global_size, local_size = _compile_linearizer(dev, lin)
+  lib, _, global_size, local_size = dev.compile(lin)
   tms = _time_program(lin.ast, dev, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))  # noqa: E501
 
   if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)
