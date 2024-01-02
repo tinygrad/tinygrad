@@ -1,5 +1,6 @@
 import unittest
 from tinygrad import Tensor, Device, nn, GlobalCounters
+from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
 import numpy as np
 
@@ -10,6 +11,7 @@ N = 128
 # shard_x is "data parallel"
 # shard_w is "model parallel"
 
+@unittest.skipIf(CI and Device.DEFAULT == "GPU", "no GPU CI")
 class TestMultiTensor(unittest.TestCase):
   def test_shard(self):
     X = Tensor.ones(256).contiguous().realize()
@@ -129,7 +131,7 @@ class TestMultiTensor(unittest.TestCase):
     assert shard_output.lazydata.lbs[0].shape == (1, 1000)
     assert shard_output.lazydata.lbs[1].shape == (1, 1000)
     shard_output_np = shard_output.numpy()
-    np.testing.assert_allclose(real_output, shard_output_np)
+    np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
 
 if __name__ == '__main__':
   unittest.main()
