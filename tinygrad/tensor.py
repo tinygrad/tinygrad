@@ -19,7 +19,7 @@ from tinygrad.realize import run_schedule
 # **** start with two base classes, Tensor and Function ****
 
 class Function:
-  def __init__(self, device:str, *tensors:Tensor):
+  def __init__(self, device:Union[str, Tuple[str, ...]], *tensors:Tensor):
     self.device = device
     self.needs_input_grad = [t.requires_grad for t in tensors]
     self.requires_grad = True if any(self.needs_input_grad) else None if None in self.needs_input_grad else False
@@ -47,7 +47,7 @@ class Tensor:
     def __exit__(self, exc_type, exc_value, traceback): Tensor.training = self.prev
 
   no_grad: ClassVar[bool] = False
-  def __init__(self, data:Union[None, bool, int, float, List, Tuple, LazyBuffer, np.ndarray, bytes],
+  def __init__(self, data:Union[None, bool, int, float, List, Tuple, LazyBuffer, np.ndarray, bytes, MultiLazyBuffer],
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
     if isinstance(device, (tuple, list)):
@@ -85,7 +85,7 @@ class Tensor:
       # TODO: what if it's a MultiLazyBuffer on other devices?
       self.lazydata: Union[LazyBuffer, MultiLazyBuffer] = MultiLazyBuffer.from_sharded(data, md, None) if isinstance(data, LazyBuffer) else data
     else:
-      self.lazydata: Union[LazyBuffer, MultiLazyBuffer] = data if data.device == device else data.copy_to_device(device)
+      self.lazydata = data if data.device == device else data.copy_to_device(device)
 
   def __repr__(self):
     return f"<Tensor {self.lazydata!r} on {self.device} with grad {(self.grad.lazydata if self.grad else None)!r}>"
@@ -94,7 +94,7 @@ class Tensor:
   def __hash__(self): return id(self)
 
   @property
-  def device(self) -> str: return self.lazydata.device
+  def device(self) -> Union[str, Tuple[str, ...]]: return self.lazydata.device
 
   @property
   def shape(self) -> Tuple[sint, ...]: return self.lazydata.shape
@@ -106,13 +106,7 @@ class Tensor:
 
   @staticmethod
   def corealize(lst:Iterable[Tensor]):
-    lbs = []
-    for x in lst:
-      if isinstance(x.lazydata, MultiLazyBuffer):
-        lbs += x.lazydata.lbs
-      else:
-        lbs.append(x.lazydata)
-    run_schedule(create_schedule(lbs))
+    return run_schedule(create_schedule(flatten([x.lazydata.lbs if isinstance(x.lazydata, MultiLazyBuffer) else [x.lazydata] for x in lst])))
 
   def realize(self) -> Tensor:
     run_schedule(self.lazydata.schedule())
@@ -129,7 +123,11 @@ class Tensor:
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
-    if isinstance(self.device, str) and self.dtype == x.dtype and self.lazydata.base.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.base.realized  # noqa: E501
+    if self.dtype == x.dtype and not getenv("DISALLOW_ASSIGN"):
+      if isinstance(self.lazydata, MultiLazyBuffer):
+        for d,s in zip(x.lazydata.lbs, self.lazydata.lbs): d.output_buffer = s.base.realized
+      else:
+        if self.lazydata.base.realized is not None: x.lazydata.output_buffer = self.lazydata.base.realized
     self.lazydata = x.lazydata
     return self
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
@@ -160,10 +158,11 @@ class Tensor:
     _ret = Tensor(self.lazydata, device)
     self.lazydata = _ret.lazydata
 
-  def shard(self, devices:List[str], axis:Optional[int]=None) -> Tensor:
+  def shard(self, devices:Tuple[str, ...], axis:Optional[int]=None) -> Tensor:
+    assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
     return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, devices, axis), device=devices)
 
-  def shard_(self, devices:List[str], axis:Optional[int]=None):
+  def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None):
     self.lazydata = self.shard(devices, axis).lazydata
     return self
 
