@@ -411,21 +411,19 @@ class Kernel:
       if opt.op != OptOps.PADTO: assert self.full_shape[axis] % amt == 0, "no longer valid shift"
     else:
       amt = -1
-    if opt.op == OptOps.LOCAL:                        # cyan
+    if opt.op in [OptOps.LOCAL, OptOps.LASTLOCAL]:    # cyan
       assert self.opts.has_local, "target does not support local"
       assert axis < self.first_reduce, "can't local a reduce"
-      assert not(self.tensor_core), "can't local with tensor cores"
-      self.shift_to(axis, amt, insert_before=self.first_reduce)
-      self.local_dims += 1
-    elif opt.op == OptOps.LASTLOCAL:                  # cyan
-      assert self.opts.has_local, "target does not support local"
-      assert axis < self.first_reduce, "can't local a reduce"
-      self.shift_to(axis, amt, insert_before=self.first_reduce-self.local_dims)
+      if opt.op == OptOps.LOCAL:
+        assert not self.tensor_core, "can't local with tensor cores"
+        self.shift_to(axis, amt, insert_before=self.first_reduce)
+      else:
+        self.shift_to(axis, amt, insert_before=self.first_reduce-self.local_dims)
       self.local_dims += 1
     elif opt.op in [OptOps.GROUP, OptOps.GROUPTOP]:   # green
       assert self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem"
       assert axis >= self.first_reduce + len(self.group_for_reduce) and axis < self.shape_len-self.upcasted, "must be reduce axis to group"
-      assert not(self.tensor_core), "can't group with tensor cores"
+      assert not self.tensor_core, "can't group with tensor cores"
       self.shift_to(axis, amt, top=(opt.op==OptOps.GROUPTOP), insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(amt)
     elif opt.op == OptOps.UNROLL:                     # purple
@@ -447,21 +445,19 @@ class Kernel:
       self.shift_to(axis, amt, insert_before=self.first_reduce + len(self.group_for_reduce))
       self.group_for_reduce.append(amt)
     elif opt.op == OptOps.NOLOCALS:
-      assert self.opts.has_local, "target does not support local, so this optimization is meaningless"
+      assert self.opts.has_local and not self.dont_use_locals, "NOLOCALS is meaningless if target does not support local or already not using locals"
       assert self.local_dims == 0 and len(self.group_for_reduce) == 0, "can't have no locals with locals"
-      assert not self.dont_use_locals, "already not using locals"
       self.dont_use_locals = True
     elif opt.op == OptOps.PADTO:
       assert not self.ast.vars(), "does not work with symbolic shape"
       assert axis < self.first_reduce, "cannot pad a reduce axis"
       padded = False
       for i,st in enumerate(self.sts):
-        if self.sts[i].shape[axis] != 1:
-          assert self.sts[i].shape[axis] > amt//2, "pad adds more than double the work"
-          if (ru := round_up(self.sts[i].shape[axis], amt) - self.sts[i].shape[axis]):
-            # pad right seems to be faster
-            self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
-            padded = True
+        assert self.sts[i].shape[axis] > amt//2, "pad adds more than double the work"
+        if (ru := round_up(self.sts[i].shape[axis], amt) - self.sts[i].shape[axis]):
+          # pad right seems to be faster
+          self.sts[i] = st.pad(((0,0),) * axis + ((0,ru),) + ((0,0),) * (len(st.shape)-axis-1))
+          padded = True
       assert padded, "nothing was padded"
     return self.simplify_ones()
 
