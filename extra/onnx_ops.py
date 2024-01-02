@@ -564,7 +564,7 @@ def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int
   axis = axis + x.ndim if axis < 0 else axis
   x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
   x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
-  return ((x - x_zer) * x_sc).cast(x_scale.dtype)
+  return ((x.float() - x_zer) * x_sc).cast(x_scale.dtype)
 
 # Needs work
 def IsNaN(x: Tensor):
