@@ -104,6 +104,22 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
     helper_test_op([], lambda: torch.eye(1), lambda: Tensor.eye(1), forward_only=True)
 
+  def test_split(self):
+    test_cases = [
+      (torch.arange(10), Tensor.arange(10), 5),
+      (torch.arange(10), Tensor.arange(10), [1, 4, 5]),
+      (torch.arange(10), Tensor.arange(10), 3),
+      (torch.arange(12).reshape(3, 4), Tensor.arange(12).reshape(3, 4), 1),
+      (torch.arange(16).reshape(4, 4), Tensor.arange(16).reshape(4, 4), [2, 2]),
+      (torch.arange(10000), Tensor.arange(10000), 2500),
+    ]
+
+    for tor, ten, sizes in test_cases:
+      tor_splits, ten_splits = tor.split(sizes), ten.split(sizes)
+      assert len(tor_splits) == len(ten_splits)
+      for tor_chunk, ten_chunk in zip(tor_splits, ten_splits):
+        helper_test_op([], lambda: tor_chunk, lambda: ten_chunk, forward_only=True)
+
   def test_chunk(self):
     tor = torch.arange(13).repeat(8, 1).chunk(6, 1)
     ten = Tensor.arange(13).repeat((8, 1)).chunk(6, 1)
