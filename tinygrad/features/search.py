@@ -1,9 +1,10 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, random, math, time, multiprocessing, traceback, signal
 from tinygrad.device import Device, Compiled, Buffer
-from tinygrad.ops import MemBuffer, vars_from_ast
-from tinygrad.helpers import prod, ImageDType, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
-from tinygrad.codegen.linearizer import Linearizer, UOp
+from tinygrad.ops import MemBuffer
+from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
+from tinygrad.dtype import ImageDType
+from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.shape.symbolic import sym_infer
 from collections import defaultdict
 from tinygrad.tensor import Tensor
@@ -20,8 +21,6 @@ actions += [
   Opt(op=OptOps.UPCASTMID, axis=1, amt=4),
 ]
 if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
-
-def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
 
 def get_test_global_size(global_size, max_global_size):
   test_global_size = global_size[:]
@@ -117,7 +116,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   pool = multiprocessing.Pool(multiprocessing.cpu_count(), init_worker) if getenv("PARALLEL", default_parallel) else None
 
   try:
-    var_vals = {k:(k.max+k.min)//2 for k in vars_from_ast(lin.ast)}
+    var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
     exiting, st = False, time.perf_counter()
     dev = Device[Device.DEFAULT]
     assert isinstance(dev, Compiled)
@@ -166,7 +165,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
   key = {"ast": str(lin.ast), "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size, "clear_l2": clear_l2, "device": Device.DEFAULT}  # noqa: E501
   if not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
 
-  var_vals = {k:(k.max+k.min)//2 for k in vars_from_ast(lin.ast)}
+  var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
   lib, global_size, local_size = compile_linearizer(Device.DEFAULT, lin)
   tms = time_program(Device.DEFAULT, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))  # noqa: E501
 

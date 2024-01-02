@@ -2,7 +2,7 @@
 import numpy as np
 import pickle
 from tinygrad.runtime.ops_gpu import CLProgram, CLBuffer
-from tinygrad.helpers import dtypes
+from tinygrad import dtypes
 from tqdm import trange, tqdm
 from matplotlib import pyplot as plt
 

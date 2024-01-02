@@ -1,8 +1,8 @@
 from __future__ import annotations
-import functools, itertools
+import functools
 from math import gcd
 from tinygrad.helpers import partition
-from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Iterator, Set
+from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Set
 
 # NOTE: Python has different behavior for negative mod and floor div than c
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
@@ -16,17 +16,6 @@ class Node:
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
     return ops[type(self)](self, ops, ctx)
   def vars(self) -> Set[Variable]: return set()
-
-  def expand_idx(self) -> VariableOrNum: return next((v for v in self.vars() if v.expr is None), NumNode(0))
-  # expand a Node into List[Node] that enumerates the underlying Variables from min to max
-  # expand increments earlier variables faster than later variables (as specified in the argument)
-  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def expand(self, idxs:Optional[Tuple[VariableOrNum, ...]]=None) -> List[Node]:
-    if idxs is None: idxs = (self.expand_idx(),)
-    return [self.substitute(dict(zip(idxs, (NumNode(x) for x in rep)))) for rep in Node.iter_idxs(idxs)]
-  @staticmethod
-  def iter_idxs(idxs:Tuple[VariableOrNum, ...]) -> Iterator[Tuple[int,...]]:
-    yield from (x[::-1] for x in itertools.product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
   # substitute Variables with the values in var_vals
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: raise RuntimeError(self.__class__.__name__)
   def unbind(self) -> Tuple[Node, Optional[int]]: return self.substitute({v: v.unbind()[0] for v in self.vars() if v.val is not None}), None
@@ -43,7 +32,7 @@ class Node:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
   def __neg__(self): return self*-1
-  def __add__(self, b:Union[Node,int]): return Variable.sum([self, b if isinstance(b, Node) else NumNode(b)])
+  def __add__(self, b:Union[Node,int]): return Node.sum([self, b if isinstance(b, Node) else NumNode(b)])
   def __radd__(self, b:int): return self+b
   def __sub__(self, b:Union[Node,int]): return self+-b
   def __rsub__(self, b:int): return -self+b
@@ -294,12 +283,12 @@ class SumNode(RedNode):
         # NOTE: gcd in python 3.8 takes exactly 2 args
         mul_gcd = b
         for x in muls: mul_gcd = gcd(mul_gcd, x.b)  # type: ignore  # mypy cannot tell that x.b is int here due to assert above
-        all_others = Variable.sum(others)
+        all_others = Node.sum(others)
         if all_others.min >= 0 and all_others.max < mul_gcd:
-          lhs, b = Variable.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
+          lhs, b = Node.sum([mul//mul_gcd for mul in muls]), b//mul_gcd
     return Node.__lt__(lhs, b) if isinstance(lhs, SumNode) else lhs < b
 
-  def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return Variable.sum([node.substitute(var_vals) for node in self.nodes])
+  def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node: return Node.sum([node.substitute(var_vals) for node in self.nodes])
 
   @property
   def flat_components(self): # recursively expand sumnode components
@@ -308,13 +297,13 @@ class SumNode(RedNode):
     return new_nodes
 
 class AndNode(RedNode):
-  def __floordiv__(self, b: Union[Node, int], _=True): return Variable.ands([x//b for x in self.nodes])
+  def __floordiv__(self, b: Union[Node, int], _=True): return Node.ands([x//b for x in self.nodes])
   def substitute(self, var_vals: Dict[VariableOrNum, Node]) -> Node:
     subed = []
     for node in self.nodes:
       if not (sub:=node.substitute(var_vals)): return NumNode(0)
       subed.append(sub)
-    return Variable.ands(subed)
+    return Node.ands(subed)
 
 def create_rednode(typ:Type[RedNode], nodes:List[Node]):
   ret = typ(nodes)

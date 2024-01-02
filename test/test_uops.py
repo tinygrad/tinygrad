@@ -2,7 +2,8 @@
 from typing import Optional, Tuple, Any, List
 import unittest, math
 import numpy as np
-from tinygrad.helpers import dtypes, getenv, DType, PtrDType
+from tinygrad.dtype import dtypes, DType, PtrDType
+from tinygrad.helpers import getenv
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.device import CompiledASTRunner, Compiled

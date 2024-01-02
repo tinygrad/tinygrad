@@ -7,7 +7,7 @@ from functools import partialmethod, reduce
 from itertools import accumulate
 import numpy as np
 
-from tinygrad.helpers import DType, dtypes, ImageDType, least_upper_float, least_upper_dtype
+from tinygrad.dtype import DType, dtypes, ImageDType, least_upper_float, least_upper_dtype
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
 from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.ops import LoadOps
@@ -692,6 +692,7 @@ class Tensor:
   # ***** mlops (unary) *****
 
   def neg(self): return mlops.Neg.apply(self)
+  def logical_not(self): return self.neg() if self.dtype == dtypes.bool else (1.0-self)
   def contiguous(self): return mlops.Contiguous.apply(self)
   def contiguous_backward(self): return mlops.ContiguousBackward.apply(self)
   def log(self): return mlops.Log.apply(self.cast(least_upper_float(self.dtype)))
@@ -841,12 +842,12 @@ class Tensor:
   def __ixor__(self, x) -> Tensor: return self.assign(self.xor(x))
 
   # in webgpu bool cannot be used as a storage buffer type
-  def __lt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, False)).cast(dtypes.float if Device.DEFAULT=="WEBGPU" else dtypes.bool)
-  def __gt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, True)).cast(dtypes.float if Device.DEFAULT=="WEBGPU" else dtypes.bool)
-  def __ge__(self, x) -> Tensor: return (self<x).neg() if Device.DEFAULT!="WEBGPU" else (1-(self<x)).cast(dtypes.float)
-  def __le__(self, x) -> Tensor: return (self>x).neg() if Device.DEFAULT!="WEBGPU" else (1-(self>x)).cast(dtypes.float)
-  def __eq__(self, x) -> Tensor: return mlops.Eq.apply(*self._broadcasted(x, True)).cast(dtypes.float if Device.DEFAULT=="WEBGPU" else dtypes.bool)  # type: ignore[override]
-  def __ne__(self, x) -> Tensor: return (self==x).neg() if Device.DEFAULT!="WEBGPU" else (1-(self==x)).cast(dtypes.float)                            # type: ignore[override]
+  def __lt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, False))
+  def __gt__(self, x) -> Tensor: return mlops.Less.apply(*self._broadcasted(x, True))
+  def __ge__(self, x) -> Tensor: return (self<x).logical_not()
+  def __le__(self, x) -> Tensor: return (self>x).logical_not()
+  def __eq__(self, x) -> Tensor: return mlops.Eq.apply(*self._broadcasted(x, True))   # type: ignore[override]
+  def __ne__(self, x) -> Tensor: return (self==x).logical_not()                       # type: ignore[override]
 
   # ***** functional nn ops *****
 

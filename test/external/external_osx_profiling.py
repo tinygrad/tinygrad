@@ -1,5 +1,5 @@
 from tinygrad.runtime.ops_gpu import CLProgram, CL, CLBuffer
-from tinygrad.helpers import dtypes
+from tinygrad import dtypes
 import time
 
 N = 1000000

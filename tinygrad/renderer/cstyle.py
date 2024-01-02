@@ -3,7 +3,8 @@ import math, functools
 from collections import defaultdict, Counter
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.helpers import ImageDType, dtypes, prod, DType, PtrDType, strip_parens, getenv
+from tinygrad.helpers import prod, strip_parens, getenv
+from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 
 class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"
@@ -75,8 +76,6 @@ class CStyleLanguage(NamedTuple):
     return f"for ({self.generic_var_prefix if self.generic_var_prefix else 'int'} {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
 
   def render_if(self, cond: str): return f"if ({cond}) {{"
-
-  def render_conditional(self, cond: str, x:str, y:str) -> str: return f"({cond})?({x}):{y}"
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""  # noqa: E501
@@ -173,7 +172,8 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> Tu
     elif uop == UOps.LOAD:
       assert dtype is not None
       val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
-      if len(vin) > 3: val = lang.render_conditional(r[vin[2]], val, r[vin[3]])
+      # NOTE: this relies on the load not happening if it's in the unselected branch
+      if len(vin) > 3: val = lang.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
       kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'val')} = {val};")
     elif uop == UOps.PHI:
       kk(f"{r[vin[0]]} = {r[vin[1]]};")
@@ -317,6 +317,8 @@ class WGSLLanguage(CStyleLanguage):
     elif math.isinf(x): return ("-" if x < 0 else "") + "inf(1.0)"
     return f"({super().render_const(x, var_dtype)})"
 
+  def render_if(self, cond: str): return f"if (bool({cond})) {{"
+
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     local_size = local_size[::-1] if local_size else [1]
     bind_it = iter(range(len(bufs)))
@@ -325,14 +327,7 @@ class WGSLLanguage(CStyleLanguage):
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"  # noqa: E501
     return prg
 
-  def render_if(self, cond: str): return f"if (bool({cond})) {{"
-
-  def render_conditional(self, cond:str, x:str, y:str) -> str: return f"select({y}, {x}, bool({cond}))"
-
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
     if self.type_map[var_dtype]: return f"bitcast<{self.type_map[var_dtype]}>({x[0]})" if bitcast else f"{self.type_map[var_dtype]}({x[0]})"
     raise NotImplementedError(f"no cast for {var_dtype}")
-
-  def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:
-    return f"{buf_name}[{idx}] = {self.render_cast([var_name], buf_dtype) if var_dtype != buf_dtype else var_name};"
 WGSLRenderer = functools.partial(uops_to_cstyle, WGSLLanguage())

@@ -2,7 +2,8 @@ from __future__ import annotations
 from typing import Tuple, Optional, List
 import ctypes, functools
 import gpuctypes.opencl as cl
-from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, diskcache, OSX, ImageDType, DEBUG
+from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG
+from tinygrad.dtype import ImageDType
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import OpenCLRenderer
 from tinygrad.device import Compiled, LRUAllocator
@@ -14,7 +15,6 @@ def check(status):
   if status != 0: raise RuntimeError(f"OpenCL Error {status}")
 def checked(ret, status): return (check(status.value), ret)[1]
 
-@diskcache
 def compile_cl(prg:str) -> bytes:
   assert CLDevice.compiler_context is not None, 'OpenCL requires a "compiler_context" to compile, init a device before you call this'
   program = checked(cl.clCreateProgramWithSource(CLDevice.compiler_context.context, 1, to_char_p_p([prg_bytes := prg.encode()]),
