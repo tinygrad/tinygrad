@@ -54,7 +54,7 @@ class TestCopySpeed(unittest.TestCase):
   def testCopyCPUto6GPUs(self):
     from tinygrad.runtime.ops_gpu import CLDevice
     if len(CLDevice.device_ids) != 6: raise unittest.SkipTest("computer doesn't have 6 GPUs")
-    t = Tensor.zeros(N, N, device="cpu").realize()
+    t = Tensor.rand(N, N, device="cpu").realize()
     print(f"buffer: {t.nbytes()*1e-9:.2f} GB")
     for _ in range(3):
       with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s ({t.nbytes()*6/ns:.2f} GB/s total)"):
