@@ -293,7 +293,7 @@ jobs:
       run: METAL=1 TC=2 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
 
   testhipcompilation:
-    name: HIP Compilation Tests
+    name: HIP Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -326,13 +326,14 @@ jobs:
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
         sudo apt update
         sudo apt install --no-install-recommends --allow-unauthenticated -y rocm-hip-libraries hip-dev
+    - name: Install RDNA3 emulator
+      run: sudo curl -L https://github.com/Qazalin/remu/releases/download/0.0.1-alpha/libremu.so -o /usr/local/lib/libremu.so
     - name: Install Python Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Test HIP compilation on RDNA3 [gfx1100]
-      # test/test_symbolic_ops.py can't run here, it was comparing empty memory
+    - name: Test HIP on RDNA3 [gfx1100]
       run: |
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
-        MOCKHIP=1 HIP=1 python -m pytest -s test/test_hip_rdna3.py
+        HIPCPU=1 HIP=1 NOOPT=1 python -m pytest test/test_ops.py::TestOps::test_add_simpler
 
 
   tests:

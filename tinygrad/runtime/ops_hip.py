@@ -1,24 +1,24 @@
 import ctypes, functools, subprocess
 from typing import Tuple, TypeVar
 import gpuctypes.hip as hip
-from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
-from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
+from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, compile_cuda_style, time_execution_cuda_style
+from tinygrad.device import Compiled, LRUAllocator
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 
 # The default HIP stream is used for everything.
-HIPCPU = getenv("HIPCPU") # for CI. don't run kernels, only check if they compile
+HIPCPU = getenv("HIPCPU")
 
 if HIPCPU:
-  remu = ctypes.CDLL("/root/code/tinygrad/rdna/target/release/libremu.so")
+  remu = ctypes.CDLL("/usr/local/lib/libremu.so")
+  # TODO this whole section will be removed, the api should ideally match 1:1
   hip.hipSetDevice = lambda x: x
   hip.hipDeviceptr_t = lambda: ctypes.c_void_p(None)
   hip.hipModule_t = lambda: ctypes.c_void_p(None)
   hip.hipDeviceSynchronize = lambda: 0
-
   hip.hipMalloc = remu.hipMalloc
   hip.hipMemcpy = remu.hipMemcpy
-  hip.hipModuleLaunchKernel.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p]
+  hip.hipModuleLaunchKernel.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p]  # noqa: E501
   hip.hipModuleLaunchKernel = lambda prg, *args: remu.hipModuleLaunchKernel(prg, len(prg), *args)
 
 def check(status):
