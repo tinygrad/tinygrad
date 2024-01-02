@@ -57,21 +57,12 @@ if Device.DEFAULT in ["TORCH"]:
 if Device.DEFAULT in ["METAL"]:
   backend_test.exclude('float64')
 
+# NOTE: _DTYPE_* are cast and castlike tests
 # string Tensors
 backend_test.exclude('string')
 backend_test.exclude('test_regex_*')
-backend_test.exclude('test_cast_FLOAT_to_STRING_cpu')
-backend_test.exclude('test_cast_STRING_to_FLOAT_cpu')
-backend_test.exclude('FLOAT_to_STRING_cpu')
-backend_test.exclude('FLOAT_to_STRING_expanded_cpu')
-backend_test.exclude('STRING_to_FLOAT_cpu')
-backend_test.exclude('STRING_to_FLOAT_expanded_cpu')
-# backend_test.exclude('test_castlike_FLOAT_to_STRING_cpu')
-# backend_test.exclude('test_castlike_FLOAT_to_STRING_expanded_cpu')
-# backend_test.exclude('test_castlike_STRING_to_FLOAT_cpu')
-# backend_test.exclude('test_castlike_STRING_to_FLOAT_expanded_cpu')
+backend_test.exclude('_STRING_*')
 
-# NOTE: _DTYPE_* are cast and castlike tests
 # TODO: support for float8
 backend_test.exclude('_FLOAT8E4M3FNUZ_*')
 backend_test.exclude('_FLOAT8E4M3FN_*')
