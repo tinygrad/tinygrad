@@ -13,10 +13,13 @@ if HIPCPU:
   remu = ctypes.CDLL("/root/code/tinygrad/rdna/target/release/libremu.so")
   hip.hipSetDevice = lambda x: x
   hip.hipDeviceptr_t = lambda: ctypes.c_void_p(None)
+  hip.hipModule_t = lambda: ctypes.c_void_p(None)
   hip.hipDeviceSynchronize = lambda: 0
 
   hip.hipMalloc = remu.hipMalloc
   hip.hipMemcpy = remu.hipMemcpy
+  hip.hipModuleLaunchKernel.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p]
+  hip.hipModuleLaunchKernel = lambda prg, *args: remu.hipModuleLaunchKernel(prg, len(prg), *args)
 
 def check(status):
   if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
@@ -34,18 +37,18 @@ class HIPProgram:
       asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
-    if HIPCPU: return
-    check(hip.hipSetDevice(self.device))
-    self.module = init_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))
-    self.prg = init_c_var(hip.hipFunction_t(), lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
+    if not HIPCPU:
+      self.module = init_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))
+      prg = init_c_var(hip.hipFunction_t(), lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
+    self.prg = prg if not HIPCPU else lib
 
   def __del__(self):
     if not HIPCPU: check(hip.hipModuleUnload(self.module))
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], vals:Tuple[int, ...]=(), wait=False):
-    if HIPCPU: return float("inf")
     check(hip.hipSetDevice(self.device))
-    return hip_time_execution(lambda: check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, encode_args_cuda_style(args, vals, hip.hipDeviceptr_t, marks=(1,2,3))[0])), enable=wait)  # noqa: E501
+    args = (*args, *vals)
+    return hip_time_execution(lambda: check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]))), enable=wait)  # noqa: E501
 
 T = TypeVar("T")
 class HIPAllocator(LRUAllocator):
