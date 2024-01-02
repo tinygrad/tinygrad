@@ -26,19 +26,19 @@ class Cast(Function):
 
 class Zero(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.const(0)
-  def backward(self, grad:LazyBuffer) -> LazyBuffer: return grad.const(0)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.const(0)
 
 class Neg(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer: return x.e(UnaryOps.NEG)
-  def backward(self, grad:LazyBuffer) -> LazyBuffer: return grad.e(UnaryOps.NEG)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.e(UnaryOps.NEG)
 
 class Sin(Function):
   def forward(self, x:LazyBuffer) -> LazyBuffer:
     self.x = x
     return x.e(UnaryOps.SIN)
 
-  def backward(self, grad:LazyBuffer) -> LazyBuffer:
-    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
+    return self.x.const(math.pi / 2).e(BinaryOps.SUB, self.x).e(UnaryOps.SIN).e(BinaryOps.MUL, grad_output)
 
 # NOTE: maximum(x, 0) behaves differently where x=0
 class Relu(Function):
