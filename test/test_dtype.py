@@ -102,6 +102,11 @@ class TestDType(unittest.TestCase):
      get_available_cast_dtypes(self.DTYPE)
     ))
 
+  def test_dtypes_fields(self):
+    fields = dtypes.fields()
+    self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
+    self.assertTrue(all(issubclass(value.np, np.generic) for value in fields.values() if value.np is not None))
+
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   target_dtype = target_dtype or least_upper_dtype(a_dtype, b_dtype)
   if not is_dtype_supported(a_dtype) or not is_dtype_supported(b_dtype) or not is_dtype_supported(target_dtype): return
