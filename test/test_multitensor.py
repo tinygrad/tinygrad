@@ -4,6 +4,7 @@ from tinygrad.nn.state import get_parameters
 import numpy as np
 
 d0, d1 = f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2"
+d2, d3 = f"{Device.DEFAULT}:3", f"{Device.DEFAULT}:4"
 N = 128
 
 # shard_x is "data parallel"
@@ -33,6 +34,14 @@ class TestMultiTensor(unittest.TestCase):
   def test_simple_add_X(self): return self._test_simple_add_axis(0, None)
   def test_simple_add_W(self): return self._test_simple_add_axis(None, 0)
   def test_simple_add_XW(self): return self._test_simple_add_axis(0, 0)
+
+  def test_four_add(self):
+    X = Tensor.ones(256, 256).contiguous().realize()
+    W = Tensor.ones(256, 256).contiguous().realize()
+    X.shard_((d0, d1, d2, d3), 1)
+    W.shard_((d0, d1, d2, d3), None)
+    O = X + W
+    np.testing.assert_allclose(O.numpy(), 2)
 
   def _test_simple_reduce_axis(self, shard_x):
     X = Tensor.ones(256, 256).contiguous().realize()
