@@ -94,7 +94,7 @@ def train_cifar():
       'bias_decay':         1.08 * 6.45e-4 * BS/bias_scaler,
       'non_bias_decay':     1.08 * 6.45e-4 * BS,
       'final_lr_ratio':     0.025,
-      'initial_div_factor': 1e16,
+      'initial_div_factor': 1e6,
       'label_smoothing':    0.20,
       'momentum':           0.85,
       'percent_start':      0.23,
