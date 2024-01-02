@@ -922,7 +922,7 @@ if IMAGE:
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)
 
-# TODO: find a way to make threefly work for TORCH
+# TODO: find a way to make threefry work for TORCH
 def custom_random(out:Buffer):
   Tensor._seed += 1
   if DEBUG >= 2: print(f"*** {out.device}   rand  seed {Tensor._seed} size {out.size:<15d} dtype {out.dtype}")
