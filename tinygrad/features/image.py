@@ -9,8 +9,7 @@ def image_dot(self, w):
   n1, n2 = len(self.shape), len(w.shape)
   assert n1 != 0 and n2 != 0, f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
   assert self.shape[-1] == w.shape[-min(n2, 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(n2, 2)]})"  # noqa: E501
-  bs, groups = prod(self.shape[0:-2]), prod(w.shape[0:-2])
-  cin, cout = w.shape[-2], w.shape[-1]
+  bs, groups, cin, cout = prod(self.shape[0:-2]), prod(w.shape[0:-2]), w.shape[-2], w.shape[-1]
   out_shape_t = self.shape[0:-2] + (cout,-1) if len(self.shape) > 1 else (cout, )
 
   # NOTE: with NHWC we can remove the transposes
@@ -24,8 +23,7 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   base_image_type = dtypes.imageh if getenv("FLOAT16", 0) else dtypes.imagef
 
   (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
-  rcout = cout//groups
-  x, w = self, weight.reshape(groups, rcout, cin, H, W)
+  x, w = self, weight.reshape(groups, (rcout := cout//groups), cin, H, W)
 
   # hack for non multiples of 4 on cin
   if cin % 4 != 0 and not (cin == 1 and groups%4 == 0):
@@ -68,24 +66,18 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
 
   # prepare input
   x = x.permute(0,3,4,5,1,2)._pool((H, W), stride, dilation) # -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
-  oy, ox = x.shape[4:6]
-  x = x.permute(0,4,5,1,2,3,6,7).reshape(bs, oy, ox, *cout_expand[0:2], 1, 1, rcin_hi, rcin_lo, H, W)
-  x = x.expand(bs, oy, ox, *cout_expand, rcin_hi, rcin_lo, H, W)
+  x = x.permute(0,4,5,1,2,3,6,7).reshape(bs, (oy := x.shape[4]), (ox := x.shape[5]), *cout_expand[0:2], 1, 1, rcin_hi, rcin_lo, H, W)
 
   # prepare weights
-  w = w.permute(0,4,2,5,1,3)
-  w = w.reshape((1, 1, 1, *cout_expand, rcin_hi, rcin_lo, H, W)).expand(x.shape)
+  w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *cout_expand, rcin_hi, rcin_lo, H, W))
 
-  # the conv! (+ the bias)
-  ret = x*w
-  if IMAGE >= 2: ret = ret.cast(base_image_type((bs*oy, ox*cout//4, 4)))
-  ret = ret.sum((-4, -3, -2, -1))
+  # the conv!
+  ret = (x*w).cast(base_image_type((bs*oy, ox*cout//4, 4)) if IMAGE >= 2 else dtypes.float32).sum((-4, -3, -2, -1))
 
   # undo hack for non multiples of 4 on C.rcout
   if added_output_channels != 0:
     ret = ret.reshape(bs, oy, ox, groups, rcout)[:, :, :, :, :-added_output_channels]
-    rcout -= added_output_channels
-    cout = groups * rcout
+    cout = groups * (rcout - added_output_channels)
 
   # NCHW output
   ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
@@ -95,9 +87,7 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
 
 from tinygrad.shape.symbolic import Node
 def to_image_idx(base_shape:Tuple[int, ...], idxy:Node, valid:Node) -> Tuple[Tuple[Node, Node], Node]:
-  idx = (idxy // 4) % base_shape[1]
-  idy = (idxy // (4 * base_shape[1]))
-
+  idx, idy = (idxy // 4) % base_shape[1], (idxy // (4 * base_shape[1]))
   # TODO: bring back the valid removal logic (correct!)
   if DEBUG>=5: print("to_image_idx", base_shape, idx.min, idx.max, idy.min, idy.max, idx, idy, valid)
   return (idx, idy), valid
