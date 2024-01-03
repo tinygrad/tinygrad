@@ -19,6 +19,11 @@ class TestMultiTensor(unittest.TestCase):
     for lb in X.lazydata.lbs:
       assert lb.shape == (128,)
 
+  def test_shard_same_device(self):
+    X = Tensor.ones(256).contiguous().realize()
+    X.shard_((d0, X.device), 0)
+    (X + X).realize()
+
   def test_numpy(self):
     X = Tensor.ones(256)
     X.shard_((d0, d1), 0)
