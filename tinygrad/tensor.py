@@ -179,9 +179,9 @@ class Tensor:
   def manual_seed(seed=0): Tensor._seed, Tensor._rng_counter = seed, Tensor([0], dtype=dtypes.uint32, requires_grad=False)
 
   @staticmethod
-  def rand(*shape, device:Optional[Union[str, Tuple[str]]]=None, dtype:Optional[DType]=None, **kwargs):
+  def rand(*shape, device:Optional[str]=None, dtype:Optional[DType]=None, **kwargs):
     if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
-    if isinstance(device, str) and Device.canonicalize(device) == "TORCH":
+    if Device.canonicalize(device) == "TORCH":
       return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, device=device, dtype=dtype, **kwargs)
     if (num := prod((shape:=argfix(*shape)))) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
     counts = (Tensor.arange(num, device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device)).realize().pad(((0,num%2),))
