@@ -135,7 +135,7 @@ class TestRealWorld(unittest.TestCase):
       #Device.DEFAULT = old_default
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
-  # @unittest.skipIf(Device.DEFAULT in ["LLVM", "CLANG"] and CI, "too long on CI LLVM and CLANG")
+  @unittest.skipIf(Device.DEFAULT in ["GPU"] and CI, "opencl on intel can't compile half")
   def test_train_cifar_hyp(self):
     dtypes.default_float = dtypes.float16
     with Tensor.train():
