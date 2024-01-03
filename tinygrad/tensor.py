@@ -180,7 +180,7 @@ class Tensor:
 
   @staticmethod
   def rand(*shape, device:Optional[Union[str, Tuple[str]]]=None, dtype:Optional[DType]=None, **kwargs):
-    assert isinstance(device, str), "rand only supports single device"
+    assert device is None or isinstance(device, str), "rand only supports single device"
     if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
     if Device.canonicalize(device) == "TORCH":
       return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, device=device, dtype=dtype, **kwargs)
@@ -195,7 +195,7 @@ class Tensor:
     for i in range(5):
       for r in rotations[i % 2]: x[0], x[1] = (x0 := x[0] + x[1]), x0 ^ ((x[1] * (2 ** r)) + (x[1] / (2 ** (32 - r))))
       x = [(x[0] + ks[i % 3]), (x[1] + ks[(i + 1) % 3] + i + 1)]
-    out = (x[0].cat(x[1])[:num].cast(dtypes.float32).contiguous() / (2 ** 32 - 1)).reshape(shape).cast(dtypes.default_float if dtype is None else dtype)
+    out = (x[0].cat(x[1])[:num].cast(dtypes.float32).realize() / (2 ** 32 - 1)).reshape(shape).cast(dtypes.default_float if dtype is None else dtype)
     out.requires_grad = kwargs.get("requires_grad")
     return out.contiguous()
 
