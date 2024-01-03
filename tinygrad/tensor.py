@@ -1,10 +1,9 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math
+import time, math, itertools
 from typing import List, Tuple, Callable, Optional, ClassVar, Type, Union, Sequence, Iterable, DefaultDict, cast
 from collections import defaultdict
 from functools import partialmethod, reduce
-from itertools import accumulate
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, least_upper_float, least_upper_dtype
@@ -426,7 +425,7 @@ class Tensor:
     catargs = [self, *args]
     assert all(t.shape for t in catargs), "zero-dimensional tensor cannot be concatenated"
     shapes = [s.shape[dim] for s in catargs]
-    shape_cumsum = [0, *accumulate(shapes)]
+    shape_cumsum = [0, *itertools.accumulate(shapes)]
     slc:List[List[Optional[Tuple[sint, sint]]]] = [[None for _ in self.shape] for _ in catargs]
     for shp,k,s in zip(shapes, shape_cumsum[:-1], slc): s[dim] = (k, shape_cumsum[-1] - k - shp)
     return reduce(Tensor.__add__, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
