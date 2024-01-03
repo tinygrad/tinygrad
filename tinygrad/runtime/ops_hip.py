@@ -1,5 +1,6 @@
+from __future__ import annotations
 import ctypes, functools, subprocess
-from typing import Tuple, TypeVar
+from typing import Tuple, TypeVar, List
 import gpuctypes.hip as hip
 from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
@@ -40,22 +41,24 @@ class HIPProgram:
 
 T = TypeVar("T")
 class HIPAllocator(LRUAllocator):
-  def __init__(self, device):
+  def __init__(self, device:HIPDevice):
     self.device = device
     super().__init__()
   def _alloc(self, size:int):
-    check(hip.hipSetDevice(self.device))
+    check(hip.hipSetDevice(self.device.device))
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
   def _free(self, opaque:T): check(hip.hipFree(opaque))
   def copyin(self, dest:T, src: memoryview):
-    check(hip.hipSetDevice(self.device))
-    # TODO: have to make sure src isn't freed to make this async
-    check(hip.hipMemcpy(dest, from_mv(src), len(src), hip.hipMemcpyHostToDevice))
+    check(hip.hipSetDevice(self.device.device))
+    host_mem = init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), len(src), 0)))
+    self.device.pending_copyin.append(host_mem)
+    ctypes.memmove(host_mem, from_mv(src), len(src))
+    check(hip.hipMemcpyAsync(dest, host_mem, len(src), hip.hipMemcpyHostToDevice, None))
   def copyout(self, dest:memoryview, src:T):
-    check(hip.hipSetDevice(self.device))
+    check(hip.hipSetDevice(self.device.device))
     check(hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
   def transfer(self, dest:T, src:T, sz:int):
-    check(hip.hipSetDevice(self.device))
+    check(hip.hipSetDevice(self.device.device))
     # TODO: hipMemcpyAsync, but you have to track the "src" buffer to not free it
     check(hip.hipMemcpy(dest, src, sz, hip.hipMemcpyDeviceToDevice))
 
@@ -63,11 +66,14 @@ class HIPDevice(Compiled):
   default_arch_name = "gfx1100"
   def __init__(self, device:str=""):
     self.device = int(device.split(":")[1]) if ":" in device else 0
+    self.pending_copyin: List[hip.hipDeviceptr_t] = []
     if self.device == 0 and not MOCKHIP: HIPDevice.default_arch_name = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode()  # noqa: E501
 
     from tinygrad.runtime.graph.hip import HIPGraph
-    super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self.device), LinearizerOptions(device="HIP"), HIPRenderer,
+    super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self), LinearizerOptions(device="HIP"), HIPRenderer,
                      compile_hip, functools.partial(HIPProgram, self.device), HIPGraph)
   def synchronize(self):
     check(hip.hipSetDevice(self.device))
     check(hip.hipDeviceSynchronize())
+    for opaque in self.pending_copyin: check(hip.hipFree(opaque))
+    self.pending_copyin.clear()
