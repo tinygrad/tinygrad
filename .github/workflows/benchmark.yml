@@ -123,21 +123,21 @@ jobs:
     - name: Run Stable Diffusion
       run: python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     # TODO: rocm 6.0 broke this
-    #- name: Run LLaMA
-    #  run: |
-    #    JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
-    #    JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+    # - name: Run LLaMA
+    #   run: |
+    #     JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+    #     JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
     - name: Run GPT2 (with HIP)
       run: |
         HIP=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
         HIP=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
     - name: Run 10 CIFAR training steps
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+    # TODO: make wino faster so we can enable both
     - name: Run 10 CIFAR training steps w winograd
-      run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
-    # TODO: fix half
-    #- name: Run 10 CIFAR training steps w WINO/HALF/HIP
-    #  run: HALF=1 HIP=1 WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
+      run: WINO=0 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
+    - name: Run 10 CIFAR training steps w WINO/HALF/HIP
+      run: HALF=1 HIP=1 WINO=0 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
     - uses: actions/upload-artifact@v3
       with:
         name: Speed (AMD)
