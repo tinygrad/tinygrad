@@ -512,8 +512,10 @@ class Tensor:
     return rolled
 
   def narrow(self, dim:int, start:Union[int, Tensor], length:int) -> Tensor:
-    dim, start = dim % self.ndim, (self._to_integral_val(start) + self.shape[dim]) % self.shape[dim] if start < 0 else self._to_integral_val(start)
-    return self[tuple(slice(None) if i != dim else slice(start, start + length) for i in range(self.ndim))]
+    _start = self._to_const_val(start)
+    if not isinstance(_start, int): raise TypeError("start must be a 0-dim integral tensor")
+    dim, _start = dim % self.ndim, (_start + self.shape[dim]) % self.shape[dim] if _start < 0 else _start
+    return self[tuple(slice(None) if i != dim else slice(_start, _start + length) for i in range(self.ndim))]
 
   # ***** reduce ops *****
 
@@ -785,11 +787,6 @@ class Tensor:
 
     broadcasted_shape = tuple(max(xi, yi) for xi, yi in zip(x.shape, y.shape))
     return x.expand(broadcasted_shape), y.expand(broadcasted_shape)
-
-  def _to_integral_val(self, x:Union[int, Tensor]) -> int:
-    const_val = self._to_const_val(x)
-    if not isinstance(const_val, int): raise TypeError("_to_integral expects an integer or 0-dim integral tensor")
-    return const_val
 
   def _to_const_val(self, x:Union[Tensor, float, int, bool]) -> Union[Tensor, float, int, bool]:
     return x.lazydata.base.arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_contiguous_const() \

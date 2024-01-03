@@ -891,6 +891,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,2)], lambda x: torch.narrow(x,-1,torch.tensor(0),2), lambda x: x.narrow(-1,Tensor(0),2), forward_only=True)
     helper_test_op([(2,2,2)], lambda x: torch.narrow(x,-1,torch.tensor(1),0), lambda x: x.narrow(-1,Tensor(1),0), forward_only=True)
 
+    with self.assertRaises(TypeError):
+      t = Tensor.empty((1,))
+      s = Tensor.empty((1,))
+      t.narrow(0,s,0) # s is not a 0-dim tensor
+
   @unittest.skip("very slow")
   def test_sd_big_conv(self):
     # internal shape (1, 1, 512, 62, 62, 512, 3, 3) overflows a int
