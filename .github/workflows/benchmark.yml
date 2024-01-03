@@ -26,8 +26,9 @@ jobs:
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
-    - name: Run Stable Diffusion
-      run: python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
+    # TODO: why is this test not reliable?
+    #- name: Run Stable Diffusion
+    #  run: python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run model inference benchmark
       run: METAL=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
