@@ -7,7 +7,7 @@ from tinygrad.helpers import prod, merge_dicts, flatten, getenv, dedup, DEBUG, a
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps, Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, Device
 from tinygrad.graph import log_lazybuffer
 from weakref import ref, WeakSet, WeakValueDictionary, ReferenceType
 
@@ -34,7 +34,7 @@ class LazyBuffer:
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                base:Optional[LazyBuffer]=None):
     assert isinstance(device, str)
-    self.device, self.st, self.dtype, self.shape = device, st, dtype, st.shape
+    self.device, self.st, self.dtype, self.shape = Device.canonicalize(device), st, dtype, st.shape
     if base is None:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
