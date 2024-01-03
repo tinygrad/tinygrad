@@ -30,7 +30,6 @@ class TestMultiTensor(unittest.TestCase):
     X.shard_([d0, d1], 0)
     (X + 1).sum().realize()
 
-  @unittest.expectedFailure
   def test_shard_plus_one_sum_d_zero(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_([d_zero, d1], 0)
