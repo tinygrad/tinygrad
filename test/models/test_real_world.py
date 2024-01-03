@@ -140,7 +140,8 @@ class TestRealWorld(unittest.TestCase):
     dtypes.default_float = dtypes.float16
     with Tensor.train():
       model = SpeedyResNet(Tensor.ones((12,3,2,2)))
-      optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['bias_decay'])
+      optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=0.8, nesterov=True, weight_decay=0.15)
+      # optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['bias_decay'])
       # initial_div_factor = hyp['opt']['initial_div_factor']
       # final_lr_ratio = hyp['opt']['final_lr_ratio']
       # pct_start = hyp['opt']['percent_start']
