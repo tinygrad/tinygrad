@@ -33,8 +33,8 @@ class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                base:Optional[LazyBuffer]=None):
-    assert isinstance(device, str)
-    self.device, self.st, self.dtype, self.shape = Device.canonicalize(device), st, dtype, st.shape
+    assert isinstance(device, str) and device == Device.canonicalize(device)
+    self.device, self.st, self.dtype, self.shape = device, st, dtype, st.shape
     if base is None:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
