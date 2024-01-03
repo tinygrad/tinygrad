@@ -42,6 +42,9 @@ class TestSymbolic(unittest.TestCase):
     expr = Node.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512,
                       (Variable("idx2", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512])
     self.helper_test_variable(expr, 0, 1, "((idx1<128) and (idx2<128))")
+    expr = Node.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 3)) < 512,
+                      (Variable("idx2", 0, 511)*4 + Variable("FLOAT8_INDEX", 0, 7)) < 512])
+    self.helper_test_variable(expr//4, 0, 0, "0")
 
   def test_lt_factors(self):
     expr = Node.ands([(Variable("idx1", 0, 511)*4 + Variable("FLOAT4_INDEX", 0, 256)) < 512])
