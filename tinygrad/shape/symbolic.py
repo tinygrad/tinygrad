@@ -291,7 +291,6 @@ class SumNode(RedNode):
   def flat_components(self): return [y for x in self.nodes for y in (x.flat_components if isinstance(x, SumNode) else [x])]
 
 class AndNode(RedNode):
-  def __floordiv__(self, b: Union[Node, int], _=True): return Node.ands([x//b for x in self.nodes])
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node:
     subed = []
     for node in self.nodes:
