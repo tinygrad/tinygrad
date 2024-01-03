@@ -4,6 +4,7 @@ from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
 import numpy as np
 
+d_zero = f"{Device.DEFAULT}:0"
 d0, d1 = f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2"
 d2, d3 = f"{Device.DEFAULT}:3", f"{Device.DEFAULT}:4"
 N = 128
@@ -23,6 +24,17 @@ class TestMultiTensor(unittest.TestCase):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_((d0, X.device), 0)
     (X + X).realize()
+
+  def test_shard_plus_one_sum(self):
+    X = Tensor.ones(256).contiguous().realize()
+    X.shard_([d0, d1], 0)
+    (X + 1).sum().realize()
+
+  @unittest.expectedFailure
+  def test_shard_plus_one_sum_d_zero(self):
+    X = Tensor.ones(256).contiguous().realize()
+    X.shard_([d_zero, d1], 0)
+    (X + 1).sum().realize()
 
   def test_numpy(self):
     X = Tensor.ones(256)
