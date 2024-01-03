@@ -37,7 +37,7 @@ def _time_program(ast:LazyOp, rdev:Compiled, lib:bytes, global_size, local_size,
   tms = []
   for _ in range(cnt):
     if clear_l2:
-      with Context(DEBUG=0): Tensor.ones(1024,1024).contiguous().realize()
+      with Context(DEBUG=0): Tensor.ones(1024,1024).realize()
     tms.append(car(rawbufs, var_vals, wait=True, do_update_stats=False)*factor)
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
