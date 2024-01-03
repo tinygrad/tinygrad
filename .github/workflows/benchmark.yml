@@ -96,7 +96,7 @@ jobs:
           gpt2_half_beam.txt
 
   testamdbenchmark:
-    name: AMD Benchmark
+    name: tinybox Benchmark
     runs-on: [self-hosted, Linux, tinybox]
     defaults:
       run:
