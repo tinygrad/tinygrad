@@ -502,22 +502,18 @@ class Tensor:
     return self.permute(order)
   def flatten(self, start_dim=0): return self.reshape(shape=self.shape[:start_dim] + (-1,))
 
-  def roll(self, shifts:Union[int, Tuple[int]], dims:Union[None, int, Tuple[int]]=None) -> Tensor:
-    shifts = (shifts,) if isinstance(shifts, int) else shifts
-    if dims is None:
-      shift = shifts[0] % self.numel()
-      return Tensor.cat(*[self.flatten()[-shift:], self.flatten()[:-shift]], dim=0).reshape(self.shape)
-    dims = (dims,) if isinstance(dims, int) else dims
-    result = self
+  def roll(self, shifts:Union[int, Tuple[int]], dims:Union[int, Tuple[int]]) -> Tensor:
+    shifts, dims = (shifts,) if isinstance(shifts, int) else shifts, (dims,) if isinstance(dims, int) else dims
+    rolled = self
     for dim, shift in zip(dims, shifts):
-      shift %= self.shape[dim % self.ndim]
-      if shift: result = Tensor.cat(*[self.narrow(dim, -shift, shift), self.narrow(dim, 0, self.shape[dim % self.ndim] - shift)], dim=dim % self.ndim)
-    return result
+      dim, shift = dim % self.ndim, shift % self.shape[dim]
+      left, right = rolled.narrow(dim, -shift, shift), rolled.narrow(dim, 0, self.shape[dim] - shift)
+      rolled = Tensor.cat(*[left, right], dim=dim) if shift else rolled
+    return rolled
 
   def narrow(self, dim:int, start:Union[int, Tensor], length:int) -> Tensor:
-    dim = dim % self.ndim
-    _start = self._to_integral_val(start) + self.shape[dim] if start < 0 else self._to_integral_val(start)
-    return self[tuple(slice(None) if i != dim else slice(_start, _start + length) for i in range(self.ndim))]
+    dim, start = dim % self.ndim, (self._to_integral_val(start) + self.shape[dim]) % self.shape[dim] if start < 0 else self._to_integral_val(start)
+    return self[tuple(slice(None) if i != dim else slice(start, start + length) for i in range(self.ndim))]
 
   # ***** reduce ops *****
 
