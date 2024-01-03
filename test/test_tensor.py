@@ -2,8 +2,8 @@ import numpy as np
 import torch
 import unittest, copy
 import mmap
-from tinygrad.tensor import Tensor, Device
-from tinygrad.helpers import dtypes, temp
+from tinygrad import Tensor, Device, dtypes
+from tinygrad.helpers import temp
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 
 x_init = np.random.randn(1,3).astype(np.float32)
@@ -156,25 +156,25 @@ class TestTinygrad(unittest.TestCase):
     for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
       a = Tensor([1, 2, 3], dtype=datatype)
       b = Tensor.zeros_like(a)
-      assert a.dtype == b.dtype, f"a.dtype and b.dtype should be {datatype}"
-      assert a.shape == b.shape, f"shape mismatch (Tensor.zeros_like){a.shape} != (torch){b.shape}"
+      assert a.dtype == b.dtype, f"dtype mismatch {a.dtype=} != {b.dtype}"
+      assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
     a = Tensor([1, 2, 3])
     b = Tensor.zeros_like(a, dtype=dtypes.int8)
-    assert a.dtype == dtypes.int32 and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
-    assert a.shape == b.shape, f"shape mismatch (Tensor.zeros_like){a.shape} != (torch){b.shape}"
+    assert a.dtype == dtypes.default_int and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
+    assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
   def test_ones_like_has_same_dtype_and_shape(self):
     for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
       a = Tensor([1, 2, 3], dtype=datatype)
       b = Tensor.ones_like(a)
-      assert a.dtype == b.dtype, f"a.dtype and b.dtype should be {datatype}"
-      assert a.shape == b.shape, f"shape mismatch (Tensor.ones_like){a.shape} != (torch){b.shape}"
+      assert a.dtype == b.dtype, f"dtype mismatch {a.dtype=} != {b.dtype}"
+      assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
     a = Tensor([1, 2, 3])
     b = Tensor.ones_like(a, dtype=dtypes.int8)
-    assert a.dtype == dtypes.int32 and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
-    assert a.shape == b.shape, f"shape mismatch (Tensor.ones_like){a.shape} != (torch){b.shape}"
+    assert a.dtype == dtypes.default_int and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
+    assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
   def test_ndim(self):
     assert Tensor(1).ndim == 0
@@ -240,7 +240,7 @@ class TestTinygrad(unittest.TestCase):
 
   def test_tensor_list_dtype(self):
     for arr in ([1], [[[1]]], [[1,1],[1,1]], [[[1,1],[1,1]],[[1,1],[1,1]]]):
-      assert Tensor(arr).dtype == dtypes.int32
+      assert Tensor(arr).dtype == dtypes.default_int
       assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
       assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
 
@@ -252,19 +252,19 @@ class TestTinygrad(unittest.TestCase):
     # empty tensor defaults
     for arr in ([], [[[]]], [[],[]]):
       t = Tensor(arr)
-      assert t.dtype == Tensor.default_type
+      assert t.dtype == dtypes.default_float
       np.testing.assert_allclose(t.numpy(), np.array(arr))
 
     # mixture of bool and int
     for arr in ([True, 3], [[True],[3]], [[[True]], [[3]]], [[True, 3], [3, True]]):
       t = Tensor(arr)
-      assert t.dtype == dtypes.int32
+      assert t.dtype == dtypes.default_int
       np.testing.assert_allclose(t.numpy(), np.array(arr))
 
     # mixture of bool, int and float
     for arr in ([[True,True],[3.,True]], [[0,1],[3.,4]], [[[0],[1]],[[3.],[4]]], [[[True],[1]],[[3.],[4]]]):
       t = Tensor(arr)
-      assert t.dtype == Tensor.default_type
+      assert t.dtype == dtypes.default_float
       np.testing.assert_allclose(t.numpy(), np.array(arr))
 
   def test_tensor_list_shapes(self):
@@ -302,6 +302,18 @@ class TestTinygrad(unittest.TestCase):
     assert not ua_arr.flags.aligned
     # force device copy - to() is opt'd away - Tensor(dev)/1 is ignored
     np.testing.assert_allclose(ua_arr, (Tensor(ua_arr)/Tensor(1)).numpy())
+
+  def test_item_to_tensor_to_item(self):
+    for a in [0, 1, 2, 3, -1, -100, 100, -101.1, 2.345, 100.1, True, False]:
+      item = Tensor(a).item()
+      assert type(item) == type(a), a
+      np.testing.assert_allclose(item, a), a
+      buffered_item = Tensor([a]).item()
+      assert type(buffered_item) == type(a), a
+      np.testing.assert_allclose(buffered_item, a), a
+      reshaped_item = Tensor([a]).reshape((1, 1, 1, 1, 1)).item()
+      assert type(reshaped_item) == type(a), a
+      np.testing.assert_allclose(reshaped_item, a), a
 
 class TestZeroShapeTensor(unittest.TestCase):
   def test_shape_stride(self):

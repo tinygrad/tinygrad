@@ -2,8 +2,8 @@ from __future__ import annotations
 from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 import importlib
 import numpy as np
-from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, DEBUG, dtypes
+from tinygrad import Tensor, dtypes
+from tinygrad.helpers import getenv, DEBUG
 from typing import List, Dict
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto # onnx 1.50 uses serialized file (see onnx/onnx-ml.proto) as descriptors
 try:
@@ -21,8 +21,7 @@ def safe_numpy(t) -> np.ndarray:
   if t not in numpy_cache:
     if DEBUG >= 3: print("numpy cache miss", t)
     tmp = t.numpy()
-    numpy_cache[t] = tmp if len(tmp.shape) else tmp.reshape(1)
-  assert len(numpy_cache[t].shape) > 0
+    numpy_cache[t] = tmp
   return numpy_cache[t]
 
 onnx_ops = importlib.import_module('extra.onnx_ops')

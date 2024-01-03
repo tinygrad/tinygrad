@@ -1,12 +1,17 @@
-from typing import Final, Dict, Callable, Any, List, Optional, Tuple
+from typing import Final, Dict, Callable, Any, List, Optional
 from llvmlite import ir
 from tinygrad.codegen.linearizer import UOps, UOp
-from tinygrad.helpers import DType, PtrDType, dtypes
+from tinygrad.dtype import DType, PtrDType, dtypes
 from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
 
 MFLAGS = ('nsz', 'arcp', 'contract', 'afn', 'reassoc') # All from fast math, but nnan and ninf
 
 def is_bool_or_unsigned(dtype: DType): return dtype == dtypes.bool or dtypes.is_unsigned(dtype)
+
+def mulacc(bb, x, y, z, input_dtype, output_dtype):
+  if dtypes.is_float(output_dtype): return bb[-1].fadd(bb[-1].fmul(x, y, flags=MFLAGS), z, flags=MFLAGS)
+  # no fast math flags for int add and mul
+  return bb[-1].add(cast(bb, bb[-1].mul(x, y), input_dtype, output_dtype), z)
 
 code_for_op: Final[Dict[Op, Callable]] = {
     UnaryOps.NEG: lambda builder, x, var_dtype: builder.xor(x, ir.Constant(ir.IntType(1), 1)) if var_dtype == dtypes.bool else builder.neg(x) if dtypes.is_int(var_dtype) else builder.fneg(x, flags=MFLAGS),  # noqa: E501
@@ -21,14 +26,13 @@ code_for_op: Final[Dict[Op, Callable]] = {
     BinaryOps.DIV: lambda builder, x, y, var_dtype:
       builder.udiv(x, y) if is_bool_or_unsigned(var_dtype) else builder.sdiv(x, y) if dtypes.is_int(var_dtype) else builder.fdiv(x, y, flags=MFLAGS),
     BinaryOps.CMPLT: lambda builder, x, y, var_dtype: builder.icmp_unsigned("<", x, y) if is_bool_or_unsigned(var_dtype) else builder.icmp_signed("<", x, y) if dtypes.is_int(var_dtype) else builder.fcmp_unordered("<", x, y, flags=MFLAGS),  # noqa: E501
+    BinaryOps.CMPEQ: lambda builder, x, y, var_dtype: builder.icmp_unsigned("==", x, y) if is_bool_or_unsigned(var_dtype) else builder.icmp_signed("==", x, y) if dtypes.is_int(var_dtype) else builder.fcmp_unordered("==", x, y, flags=MFLAGS),  # noqa: E501
     BinaryOps.MAX: lambda builder, x, y, var_dtype: builder.select(builder.icmp_unsigned(">", x, y) if is_bool_or_unsigned(var_dtype) else builder.icmp_signed(">", x, y) if dtypes.is_int(var_dtype) else builder.fcmp_unordered(">", x, y, flags=MFLAGS), x, y),  # noqa: E501
     BinaryOps.MOD: lambda builder, x, y, var_dtype:
       builder.urem(x, y) if is_bool_or_unsigned(var_dtype) else builder.srem(x, y) if dtypes.is_int(var_dtype) else builder.frem(x, y),
     BinaryOps.XOR: lambda builder, x, y, var_dtype: builder.xor(x, y),
-    TernaryOps.MULACC: lambda builder, x, y, z, var_dtype: builder.fadd(builder.fmul(x, y, flags=MFLAGS), z, flags=MFLAGS),
     TernaryOps.WHERE: lambda builder, x, y, z, var_dtype: builder.select(x, y, z),
 }
-
 
 dtype_to_llvm_dtype = { dtypes.bool:ir.IntType(1), dtypes.int8:ir.IntType(8), dtypes.uint8:ir.IntType(8), dtypes.int16:ir.IntType(16),
   dtypes.uint16:ir.IntType(16), dtypes.int32:ir.IntType(32), dtypes.uint32:ir.IntType(32), dtypes.int64:ir.IntType(64), dtypes.uint64:ir.IntType(64),
@@ -37,6 +41,13 @@ dtype_to_llvm_dtype = { dtypes.bool:ir.IntType(1), dtypes.int8:ir.IntType(8), dt
 def cast(bb, val, input_type, output_type, bitcast=False):
   if input_type == output_type: return val
   if bitcast: return bb[-1].bitcast(val, dtype_to_llvm_dtype[output_type])
+
+  if input_type == dtypes.bfloat16:
+    val = bb[-1].bitcast(bb[-1].shl(bb[-1].sext(val, ir.IntType(32)), ir.Constant(ir.IntType(32), 16)),val, ir.FloatType())
+    input_type = dtypes.float32
+  if output_type == dtypes.bfloat16:
+    val = cast(bb, val, input_type, dtypes.float32)
+    return bb[-1].trunc(bb[-1].lshr(bb[-1].bitcast(val, ir.IntType(32)), ir.Constant(ir.IntType(32), 16)), ir.IntType(16))
 
   if dtypes.is_float(input_type):
     if dtypes.is_float(output_type):
@@ -69,7 +80,7 @@ def const(args, dtype):
   # TODO: remove int from int(args) once const args conform with dtype
   return ir.Constant(dtype_to_llvm_dtype[dtype], int(args) if dtypes.is_int(dtype) else bool(args) if dtype == dtypes.bool else args)
 
-def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
+def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
   # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
 
@@ -149,8 +160,10 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> Tuple[str, Dict]:
       if len(vin) > 3:
         with bb[-1].if_then(bb[-1].trunc(lvars[vin[3]], ir.IntType(1))): store_op()
       else: store_op()
-    if uop == UOps.ALU: lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin] + [dtype if args != BinaryOps.CMPLT else vin[0].dtype])
+    if uop == UOps.ALU:
+      if args == TernaryOps.MULACC: lvars[u] = mulacc(bb, lvars[vin[0]], lvars[vin[1]], lvars[vin[2]], vin[0].dtype, dtype)
+      else: lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin] + [vin[0].dtype if args in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else dtype])
     if uop == UOps.CAST: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=isinstance(args, tuple) and args[1])
 
   bb[-1].ret_void()
-  return str(module), {}
+  return str(module)

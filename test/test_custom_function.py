@@ -4,7 +4,8 @@
 import unittest
 import numpy as np
 from typing import Optional, Tuple
-from tinygrad.helpers import prod, dtypes
+from tinygrad.helpers import prod
+from tinygrad.dtype import dtypes
 
 # *** first, we implement the atan2 op at the lowest level ***
 # `atan2_gpu` for GPUBuffers and `atan2_cpu` for CPUBuffers
@@ -15,11 +16,13 @@ from tinygrad.shape.shapetracker import ShapeTracker
 # we don't always have GPU support, so the type signature is the abstract CompiledBuffer instead of GPUBuffer
 def atan2_gpu(ret:Buffer, a:Buffer, b:Buffer):
   assert a.dtype == b.dtype and a.dtype == dtypes.float32, "gpu function only supports float32"
-  CompiledASTRunner(None, "atan2_gpu", """
-    __kernel void atan2_gpu(global float *c, global float *a, global float *b) {
-      int idx = get_global_id(0);
-      c[idx] = atan2(a[idx], b[idx]);
-    }""", global_size=[ret.size]).build(Device[ret.device].compiler, Device[ret.device].runtime).exec([ret, a, b])
+  src = """
+  __kernel void atan2_gpu(global float *c, global float *a, global float *b) {
+    int idx = get_global_id(0);
+    c[idx] = atan2(a[idx], b[idx]);
+  }"""
+  lib = Device[ret.device].compiler(src)
+  CompiledASTRunner(None, "atan2_gpu", src, lib, global_size=[ret.size]).build(Device[ret.device].runtime).exec([ret, a, b])
 
 def atan2_cpu(ret:Buffer, a:Buffer, b:Buffer): ret.copyin(np.require(np.arctan2(a._buf, b._buf), requirements='C').data)
 
@@ -27,7 +30,7 @@ def atan2_cpu(ret:Buffer, a:Buffer, b:Buffer): ret.copyin(np.require(np.arctan2(
 # NOTE: The derivative of atan2 doesn't need a custom op! https://www.liquisearch.com/atan2/derivative
 # In general, it is also optional to write a backward function, just your backward pass won't work without it
 
-from tinygrad.ops import LazyOp, LoadOps, BinaryOps
+from tinygrad.ops import LoadOps, BinaryOps
 from tinygrad.lazy import LazyBuffer
 from tinygrad.tensor import Function
 
@@ -35,8 +38,8 @@ class ATan2(Function):
   def forward(self, a:LazyBuffer, b:LazyBuffer) -> LazyBuffer:
     assert prod(a.shape) == prod(b.shape) and a.device == b.device, "shape or device mismatch"
     self.a, self.b = a, b
-    ast = LazyOp(LoadOps.CUSTOM, (a.contiguous(), b.contiguous()), {"GPU": atan2_gpu, "CPU": atan2_cpu}[a.device])
-    return create_lazybuffer(a.device, ShapeTracker.from_shape(a.shape), LoadOps, ast, max(a.dtype, b.dtype))
+    return create_lazybuffer(a.device, ShapeTracker.from_shape(a.shape), max(a.dtype, b.dtype), LoadOps.CUSTOM,
+                             arg={"GPU": atan2_gpu, "CPU": atan2_cpu}[a.device], srcs=(a.contiguous(), b.contiguous()))
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
     denom = (self.a.e(BinaryOps.MUL, self.a)).e(BinaryOps.ADD, self.b.e(BinaryOps.MUL, self.b))
     return grad_output.e(BinaryOps.MUL, self.b.e(BinaryOps.DIV, denom)) if self.needs_input_grad[0] else None, \

@@ -17,7 +17,7 @@ def expr_node_mask(view:View, idx:Node, valid:Optional[Node]=None) -> Node:
         base = ((idx//acc)%d)
         expr += [base >= x, base < y]
       acc *= d
-  return Variable.ands(expr)
+  return Node.ands(expr)
 
 # generate an expression if you have a single idx variable
 def expr_node(view:View, idx:Optional[Node]=None) -> Node:
@@ -27,15 +27,17 @@ def expr_node(view:View, idx:Optional[Node]=None) -> Node:
   for d,s,_ in reversed(_merge_dims(view.shape, view.strides)):
     ret.append(((idx//acc)%d)*s)
     acc *= d
-  return Variable.sum(ret)
+  return Node.sum(ret)
 
 # generate an expression if you have a variable or expression for each index
 def expr_idxs(view:View, idxs:Tuple[Node, ...]) -> Node:
   assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
-  return Variable.sum([NumNode(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])  # noqa: E501
+  return Node.sum([NumNode(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])  # noqa: E501
 
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
+  if vm1.contiguous and vm1.shape == vm2.shape: return vm2
+  if vm2.contiguous: return vm1
   if vm2.mask or vm1.offset != 0: return None  # this isn't supported yet
   if None in (strides := ShapeTracker((vm2, vm1)).real_strides()): return None
   return View.create(vm1.shape, cast(Tuple[sint, ...], strides), vm2.offset, vm1.mask)
@@ -47,13 +49,22 @@ def idxs_to_idx(shape:Tuple[int, ...], idxs:Tuple[Node, ...]) -> Node:
   for tidx,d in zip(reversed(idxs), reversed(shape)):
     ret.append(tidx * acc)
     acc *= d
-  return Variable.sum(ret)
+  return Node.sum(ret)
 
 @dataclass(frozen=True)
 class ShapeTracker:
   views: Tuple[View, ...]
   def __post_init__(self):
     assert isinstance(self.views, tuple) and all(isinstance(v, View) for v in self.views), "ShapeTracker must be created with a tuple of Views"
+
+  def __add__(self, st:ShapeTracker) -> ShapeTracker:
+    base = ShapeTracker(self.views)
+    for v in st.views: base = ShapeTracker(base.views + (v,)).simplify() # one view at a time = better simplification
+    return base
+
+  def invert(self, out_shape:Tuple[sint, ...]) -> Optional[ShapeTracker]:
+    ret = tuple(v.invert(s) for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]))
+    return ShapeTracker(cast(Tuple[View, ...], ret)).reshape(out_shape) if all(x is not None for x in ret) else None
 
   @staticmethod
   def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),))
@@ -107,13 +118,14 @@ class ShapeTracker:
     idxs: List[Node] = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx, valid = self.expr_idxs(idxs)
     ret: List[Optional[sint]] = [None] * len(self.views[-1].shape)
+    bad_idx_vars: Set[Variable] = set()
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
       idx_maybe, stride_maybe = (this_dim.a, this_dim.b) if isinstance(this_dim, MulNode) else (this_dim, 1)
       try: ret[idxs.index(idx_maybe)] = stride_maybe
-      except ValueError: pass
+      except ValueError: bad_idx_vars = bad_idx_vars.union(idx_maybe.vars())
     idx_vars, valid_vars = idx.vars(), valid.vars()
     for i,tidx in enumerate(idxs):
-      if tidx in valid_vars and not ignore_valid: ret[i] = None
+      if tidx in bad_idx_vars or (tidx in valid_vars and not ignore_valid): ret[i] = None
       elif tidx not in idx_vars: ret[i] = 0
     return tuple(ret)
 
@@ -148,7 +160,7 @@ class ShapeTracker:
 
   # *** under this line are the movement ops ***
 
-  def pad(self, arg: Tuple[Tuple[int, int], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].pad(arg), ))
+  def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].pad(arg), ))
   def shrink(self, arg: Tuple[Tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].shrink(arg), ))
   def expand(self, new_shape: Tuple[sint, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].expand(new_shape), ))
   def permute(self, axis: Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].permute(axis), ))

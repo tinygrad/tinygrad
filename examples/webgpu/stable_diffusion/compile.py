@@ -98,7 +98,7 @@ if __name__ == "__main__":
     run, special_names = jit_model(step, *step.input)
     functions, statements, bufs, _ = compile_net(run, special_names)
     state = get_state_dict(model)
-    weights = {id(x.lazydata.realized): name for name, x in state.items()}
+    weights = {id(x.lazydata.base.realized): name for name, x in state.items()}
     kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
     kernel_names = ', '.join([name for (name, _, _, _) in statements])
     kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
