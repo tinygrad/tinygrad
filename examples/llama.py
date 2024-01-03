@@ -3,6 +3,8 @@
 #import typeguard.importhook
 #typeguard.importhook.install_import_hook('tinygrad')
 
+#from extra.hip_gpu_driver import hip_ioctl
+
 from pathlib import Path
 import sys, argparse, json
 import numpy as np

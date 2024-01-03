@@ -1,4 +1,4 @@
-import ctypes, ctypes.util, struct, platform, pathlib, re
+import ctypes, ctypes.util, struct, platform, pathlib, re, time
 
 # *** ioctl lib ***
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
@@ -53,18 +53,38 @@ nrs = ioctls_from_header()
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p)
 def ioctl(fd, request, argp):
+  st = time.perf_counter()
   ret = libc.syscall(IOCTL_SYSCALL, ctypes.c_int(fd), ctypes.c_ulong(request), ctypes.c_void_p(argp))
+  et = time.perf_counter()-st
   idir, size, itype, nr = (request>>30), (request>>16)&0x3FFF, (request>>8)&0xFF, request&0xFF
   if nr in nrs and itype == 75:
     name, stype = nrs[nr]
     s = get_struct(argp, stype)
-    print(f"{ret:2d} = {name:40s}", ' '.join(format_struct(s)))
-  #print("ioctl", idir, size, itype, nr)
+    print(f"{et*1000.:7.2f} ms : {ret:2d} = {name:40s}", ' '.join(format_struct(s)))
+  else:
+    print("ioctl", idir, size, itype, nr, f"fd={fd} ret={ret}")
   return ret
 
 install_hook(libc.ioctl, ioctl)
 
-print("***** import tinygrad")
-from tinygrad import Tensor, Device, TinyJit
-print("***** access HIP")
-dev = Device["HIP"]
+# AMD_LOG_LEVEL=4 HSAKMT_DEBUG_LEVEL=7
+if __name__ == "__main__":
+  print("***** import tinygrad")
+  from tinygrad import Tensor, Device, TinyJit
+  print("***** access HIP")
+  dev = Device["HIP"]
+  print("***** create tensor a")
+  a = Tensor([1.,2.]*200, device="HIP").realize()
+  print("***** create tensor b")
+  b = Tensor([3.,4.]*200, device="HIP").realize()
+  @TinyJit
+  def add(a, b): return (a+b).realize()
+  for i in range(4):
+    print(f"***** add tensors {i}")
+    c = add(a, b)
+    #dev.synchronize()
+    c = add(b, a)
+    dev.synchronize()
+  print(f"***** delete")
+  del add, a, b, c, dev
+  print(f"***** done")
