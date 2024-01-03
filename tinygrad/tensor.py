@@ -179,7 +179,7 @@ class Tensor:
   def manual_seed(seed=0): Tensor._seed, Tensor._rng_counter = seed, Tensor([0], dtype=dtypes.uint32, requires_grad=False)
 
   @staticmethod
-  def rand(*shape, device:Union[str, Tuple[str], None]=None, dtype:Optional[DType]=None, **kwargs):
+  def rand(*shape, device:Optional[Union[str, Tuple[str, ...]]]=None, dtype:Optional[DType]=None, **kwargs):
     assert device is None or isinstance(device, str), "rand only supports single device"
     if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
     if Device.canonicalize(device) == "TORCH":
