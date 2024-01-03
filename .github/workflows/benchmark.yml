@@ -96,8 +96,8 @@ jobs:
           gpt2_half_beam.txt
 
   testamdbenchmark:
-    name: AMD Benchmark
-    runs-on: [self-hosted, Linux, ROCM]
+    name: tinybox Benchmark
+    runs-on: [self-hosted, Linux, tinybox]
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -107,9 +107,10 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
+    - name: Show off tinybox
+      run: /opt/rocm/bin/rocm-bandwidth-test
     - name: Symlink models and datasets
       run: |
-        ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz

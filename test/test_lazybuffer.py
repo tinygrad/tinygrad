@@ -66,5 +66,10 @@ class TestLazyBuffer(unittest.TestCase):
     cache = CacheCollector.finish()
     assert len(cache) == 2
 
+  def test_device_canonicalize(self):
+    a = Tensor([1, 2, 3], f"{Device.DEFAULT}")
+    b = Tensor([1, 2, 3], f"{Device.DEFAULT}:0")
+    assert a.device == b.device
+
 if __name__ == "__main__":
   unittest.main()

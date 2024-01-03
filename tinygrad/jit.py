@@ -5,6 +5,7 @@ from tinygrad.dtype import DType
 from tinygrad.helpers import DEBUG, merge_dicts, getenv, all_int, Context, GRAPH
 from tinygrad.device import Device, JITRunner, CompiledASTRunner, Buffer
 from tinygrad.tensor import Tensor
+from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node
 from weakref import ref, WeakKeyDictionary
@@ -50,16 +51,17 @@ class TinyJit(Generic[ReturnType]):
 
   def __call__(self, *args, **kwargs) -> ReturnType:
     # all inputs (except const) are realized
-    input_tensors: Dict[Union[int, str], Tensor] = {cast(Union[int, str], k):v.realize() for k,v in itertools.chain(enumerate(args), kwargs.items()) if v.__class__ is Tensor}  # noqa: E501
-    expected_name_sts_dtype = tuple([(k, v.lazydata.st.unbind(), v.dtype) for k,v in input_tensors.items()])
+    input_tensors: Dict[Union[int, str], LazyBuffer] = {cast(Union[int, str], k):v.realize().lazydata for k,v in itertools.chain(enumerate(args), kwargs.items()) if v.__class__ is Tensor}  # noqa: E501
+    assert all(isinstance(x, LazyBuffer) for x in input_tensors.values()), "multilazybuffer JIT isn't supported"
+    expected_name_sts_dtype = tuple([(k, v.st.unbind(), v.dtype) for k,v in input_tensors.items()])
 
     # get rawbuffers
     # TODO: why can .realized have Any type?
-    input_rawbuffers: List[Buffer] = [v.lazydata.base.realized for v in input_tensors.values() if v.lazydata.base.realized is not None]
+    input_rawbuffers: List[Buffer] = [v.base.realized for v in input_tensors.values() if v.base.realized is not None]
     assert len(set(input_rawbuffers)) == len(input_rawbuffers), "duplicate inputs to JIT"
 
     # get variables: they can either be in Tensors or passed in as arguments, and all must be bound. these are all global
-    var_vals: Dict[Variable, int] = merge_dicts([arg.lazydata.st.var_vals for arg in input_tensors.values()] + [dict(x.unbind() for x in itertools.chain(args, kwargs.values()) if isinstance(x, Variable))])  # noqa: E501
+    var_vals: Dict[Variable, int] = merge_dicts([arg.st.var_vals for arg in input_tensors.values()] + [dict(x.unbind() for x in itertools.chain(args, kwargs.values()) if isinstance(x, Variable))])  # noqa: E501
     expected_vals = tuple(var_vals.keys())
 
     if self.cnt >= 2:
