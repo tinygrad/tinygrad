@@ -2,15 +2,15 @@
 import argparse
 from tqdm import trange
 import numpy as np
-from tinygrad import Device
+from tinygrad import Device, GlobalCounters
 from typing import Optional, Union
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor, dtypes
 from tinygrad.nn import Embedding, Linear, LayerNorm
 from tinygrad.shape.symbolic import Variable
 from tinygrad.jit import TinyJit
 import tiktoken
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
-from tinygrad.helpers import GlobalCounters, Timing, DEBUG, getenv, fetch, colored, dtypes
+from tinygrad.helpers import Timing, DEBUG, getenv, fetch, colored
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 HALF = getenv("HALF")
@@ -93,9 +93,11 @@ class Transformer:
 
     for hi in self.h: h = hi(h, start_pos, mask)
 
-    logits = self.lm_head(self.ln_f(h))
-    # NOTE: temperature=0 with HALF breaks due to precision, should use argmax instead
-    ret = (logits[:, -1, :] / (temperature+1e-6)).softmax()
+    logits = self.lm_head(self.ln_f(h))[:, -1, :].flatten()
+    if temperature < 1e-6:
+      ret = (logits == logits.max())
+    else:
+      ret = (logits / temperature).softmax()
     return ret.half().realize() if HALF else ret.realize()
 
   # TODO: fix empty token

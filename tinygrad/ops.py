@@ -1,8 +1,9 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Dict, Callable
+from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Dict, Callable, ClassVar
 import functools
 from enum import Enum, auto
-from tinygrad.helpers import dtypes, prod, DType, dedup
+from tinygrad.helpers import prod, dedup
+from tinygrad.dtype import dtypes, DType
 from tinygrad.shape.symbolic import Variable
 from dataclasses import dataclass
 
@@ -64,9 +65,8 @@ class LazyOp:
   def __hash__(self): return self.hash
   @functools.cached_property
   def lazyops(self) -> List[LazyOp]: return dedup([self] + [item for x in self.src for item in x.lazyops])
-
-def vars_from_ast(ast:LazyOp) -> List[Variable]:
-  return sorted(set.union(*[x.arg.st.vars() for x in ast.lazyops if x.op in BufferOps], set()), key=lambda x: str(x.expr))
+  def vars(self) -> List[Variable]:
+    return sorted(set.union(*[x.arg.st.vars() for x in self.lazyops if x.op in BufferOps], set()), key=lambda x: str(x.expr))
 
 # **************** independent FlopCounter ****************
 
@@ -97,3 +97,14 @@ def get_lazyop_info(ast:LazyOp) -> FlopCounter:
   @functools.lru_cache(None) # NOTE: this cache needs to be recreated for new ASTs
   def run_ast(ast): return InterpretedFlopCounter[ast.op](*([run_ast(x) for x in ast.src]+([ast.arg] if ast.arg is not None else [])))
   return run_ast(ast)
+
+# **************** global state Counters ****************
+
+class GlobalCounters:
+  global_ops: ClassVar[int] = 0
+  global_mem: ClassVar[int] = 0
+  time_sum_s: ClassVar[float] = 0.0
+  kernel_count: ClassVar[int] = 0
+  mem_used: ClassVar[int] = 0   # NOTE: this is not reset
+  @staticmethod
+  def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0

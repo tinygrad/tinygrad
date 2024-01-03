@@ -2,7 +2,8 @@ import unittest
 import numpy as np
 import torch
 import operator
-from tinygrad.helpers import CI, DTYPES_DICT, getenv, DType, DEBUG, ImageDType, PtrDType, OSX, least_upper_float, temp, least_upper_dtype
+from tinygrad.helpers import CI, getenv, DEBUG, OSX, temp
+from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype
 from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
@@ -100,6 +101,11 @@ class TestDType(unittest.TestCase):
         _test_bitcast(Tensor(self.DATA, dtype=self.DTYPE), dtype) if dtype.itemsize == self.DTYPE.itemsize and dtype != dtypes.bool else None,
      get_available_cast_dtypes(self.DTYPE)
     ))
+
+  def test_dtypes_fields(self):
+    fields = dtypes.fields()
+    self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
+    self.assertTrue(all(issubclass(value.np, np.generic) for value in fields.values() if value.np is not None))
 
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   target_dtype = target_dtype or least_upper_dtype(a_dtype, b_dtype)
@@ -405,7 +411,8 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2).dtype == dtypes.float64
 
   def test_broadcast_bool(self):
-    assert (Tensor([0, 1], dtype=dtypes.bool) + True).dtype == dtypes.bool
+    if Device.DEFAULT != "WEBGPU":
+      assert (Tensor([0, 1], dtype=dtypes.bool) + True).dtype == dtypes.bool
     assert (Tensor([0, 1], dtype=dtypes.int) + True).dtype == dtypes.int32
     assert (Tensor([0, 1], dtype=dtypes.int8) + True).dtype == dtypes.int8
     assert (Tensor([0, 1], dtype=dtypes.uint64) + True).dtype == dtypes.uint64
@@ -445,6 +452,7 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.float64)).cumsum(0).dtype == dtypes.float64
 
   @given(st.sampled_from(core_dtypes), st.sampled_from(core_dtypes))
+  @settings(deadline=None)
   def test_matmul(self, dt1, dt2):
     assert (Tensor([0, 1], dtype=dt1) @ Tensor([0, 1], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
 

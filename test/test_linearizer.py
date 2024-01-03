@@ -3,15 +3,17 @@ import numpy as np
 import unittest, os
 
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
-from tinygrad.codegen.linearizer import Linearizer, UOp, UOps
+from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node
 from tinygrad.device import Compiled, Device, Buffer
 from tinygrad.ops import BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, Node, create_rednode
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
-from tinygrad.helpers import dtypes, prod
+from tinygrad.helpers import prod
+from tinygrad.dtype import dtypes
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestLinearizer(unittest.TestCase):
@@ -129,12 +131,9 @@ def helper_realized_ast(r:Tensor):
   output_buffer = Buffer(s[-1].out.device, prod((s if isinstance(s, int) else s.max for s in s[-1].out.shape)), s[-1].out.dtype)  # allocate an output buffer
   return s[-1].ast, [output_buffer] + [l.realized for l in s[-1].inputs]
 
-@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT], Compiled) and Device[Device.DEFAULT].linearizer_opts.supports_float4,
+                     "need Compiled backends that support float4")
 class TestFloat4(unittest.TestCase):
-  def setUp(self):
-    if not Device[Device.DEFAULT].linearizer_opts.supports_float4:
-      self.skipTest("Device does not support float4")
-
   @staticmethod
   def count_float4(k):
     return (len([uop for uop in k.uops if uop.uop == UOps.LOAD and uop.dtype == dtypes.float.vec(4)]),
@@ -550,6 +549,43 @@ class TestLinearizerOpts(unittest.TestCase):
       [Opt(OptOps.PADTO, 0, 32)],
       [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
     ])
+
+class TestLinearizerHelper(unittest.TestCase):
+  def test_num_node_expand(self):
+    a = NumNode(42)
+    assert expand_node(a) == [a]
+
+  def test_variable_expand(self):
+    a = Variable("a", 5, 7)
+    assert expand_node(a) == [a]
+
+  def test_variable_expand_expr_none(self):
+    a = Variable(None, 5, 7)
+    assert expand_node(a) == [NumNode(5), NumNode(6), NumNode(7)]
+
+  def test_mul_node_expand(self):
+    a = Variable(None, 5, 7)
+    m = MulNode(a, 3)
+    assert expand_node(m) == [NumNode(15), NumNode(18), NumNode(21)]
+
+    b = Variable("b", 1, 3)
+    n = MulNode(b, 3)
+    assert expand_node(n) == [Variable("b", 1, 3)*3]
+
+  def test_sum_node_expand(self):
+    a = Variable(None, 1, 3)
+    b = Variable("b", 5, 7)
+
+    s1 = create_rednode(SumNode, [a, b])
+    assert expand_node(s1) == [Node.sum([NumNode(i),b]) for i in range(1,4)]
+
+  def test_multi_expand(self):
+    a = Variable("a", 1, 3)
+    b = Variable("b", 14, 17)
+    s1 = create_rednode(SumNode, [a, b])
+    # expand increments earlier variables faster than later variables (as specified in the argument)
+    # this behavior was just copied from before, no idea why this should be true
+    assert expand_node(s1, (a, b)) == [NumNode(x + y) for x in range(b.min, b.max + 1) for y in range(a.min, a.max + 1)]
 
 if __name__ == '__main__':
   unittest.main()

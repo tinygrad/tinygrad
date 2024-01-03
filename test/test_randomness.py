@@ -3,9 +3,7 @@ import math
 import unittest
 import numpy as np
 import torch
-from tinygrad.tensor import Tensor
-import tinygrad.nn as nn
-from tinygrad.helpers import dtypes
+from tinygrad import nn, dtypes, Tensor
 from functools import partial
 
 # https://gist.github.com/devries/11405101
