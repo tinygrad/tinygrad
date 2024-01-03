@@ -110,7 +110,7 @@ def _internal_buffer_copy(dest, src):
   if hasattr(dest.allocator, 'as_buffer'):
     # fast(ish) path, uses readinto in diskbuffers
     src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
-  elif hasattr(src.allocator, 'as_buffer') and not src.device.startswith("DISK"):
+  elif hasattr(src.allocator, 'as_buffer'):
     dest.allocator.copyin(dest._buf, src.allocator.as_buffer(src._buf))
   else:
     # slow path, allocates a CPU buffer
