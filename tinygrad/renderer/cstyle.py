@@ -257,8 +257,10 @@ class CUDALanguage(CStyleLanguage):
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
+def ifndef(n: str, v: str) -> str: return f'#if !defined({n})\n#define {n} {v}\n#endif\n'
+
 class HIPLanguage(CUDALanguage):
-  kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
+  kernel_prefix = "#include <hip/hip_common.h>\n" + ifndef('INFINITY', '(__builtin_inff())') + ifndef('NAN', '(__builtin_nanf(""))') + """
   typedef float float8 __attribute__((ext_vector_type(8)));
   __device__ float8 make_float8(float x, float y, float z, float w, float a, float b, float c, float d) { return {x, y, z, w, a, b, c, d}; }
   extern "C" __global__
