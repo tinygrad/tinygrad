@@ -135,7 +135,7 @@ class TestRealWorld(unittest.TestCase):
       #Device.DEFAULT = old_default
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
-  @unittest.skipIf(Device.DEFAULT in ["LLVM", "CLANG"] and CI, "too long on CI LLVM and CLANG") 
+  @unittest.skipIf(Device.DEFAULT in ["LLVM", "CLANG"] and CI, "too long on CI LLVM and CLANG")
   def test_train_cifar_half(self):
     dtypes.default_float = dtypes.float16
     with Tensor.train():
@@ -144,7 +144,7 @@ class TestRealWorld(unittest.TestCase):
       initial_div_factor = hyp['opt']['initial_div_factor']
       final_lr_ratio = hyp['opt']['final_lr_ratio']
       pct_start = hyp['opt']['percent_start']
-      lr_scheduler = OneCycleLR(optimizer, max_lr=hyp['opt']['bias_lr'], pct_start=pct_start, div_factor=initial_div_factor, 
+      lr_scheduler = OneCycleLR(optimizer, max_lr=hyp['opt']['bias_lr'], pct_start=pct_start, div_factor=initial_div_factor,
                             final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=4)
       BS = 32 if CI else 512
 
@@ -157,7 +157,7 @@ class TestRealWorld(unittest.TestCase):
         optimizer.step()
         lr_scheduler.step()
 
-      helper_test("train_cifar_half", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 145 if CI else 157) 
+      helper_test("train_cifar_half", lambda: (Tensor.randn(BS, 3, 32, 32),), train, (1.0/48)*BS, 145 if CI else 157)
 
     dtypes.default_float = dtypes.float32
 
