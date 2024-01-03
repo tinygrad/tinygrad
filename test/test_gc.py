@@ -2,7 +2,7 @@
 import gc
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor
+from tinygrad.tensor import Tensor, Device
 
 def tensors_allocated():
   return sum([isinstance(x, Tensor) for x in gc.get_objects()])
@@ -20,7 +20,7 @@ class TestGC(unittest.TestCase):
   def test_gc_complex(self):
     a = Tensor(np.zeros((4, 4), dtype=np.float32), requires_grad=True)
     b = Tensor.rand(4, 4, requires_grad=True)
-    assert(tensors_allocated() == 4)
+    assert(tensors_allocated() == 3 if Device.DEFAULT == "TORCH" else 4) # torch rand doesn't use threefry
     (a*b).mean().backward()
     assert(tensors_allocated() == 5)
     del b
