@@ -139,7 +139,7 @@ class Variable(Node):
     assert self.val is not None, f"cannot unbind {self}"
     return Variable(self.expr, self.min, self.max), self.val
   def vars(self): return {self}
-  def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return var_vals[self] if self in var_vals else self
+  def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return var_vals.get(self, self)
 
 class NumNode(Node):
   def __init__(self, num:int):
