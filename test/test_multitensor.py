@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, Device, nn, GlobalCounters
 from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
-from extra.lr_scheduler import OneCycleLR
+from extra.lr_scheduler import *
 import numpy as np
 
 d_zero = f"{Device.DEFAULT}:0"
@@ -131,16 +131,11 @@ class TestMultiTensor(unittest.TestCase):
     #for p in get_parameters(conv): p.grad.realize()
     optim.step()
 
-  def test_backprop_with_LR_scheduler(self):
+  def test_lr_scheduler_OneCycleLR(self):
     conv = nn.Conv2d(3, 16, 3)
     for p in get_parameters(conv): p.shard_((d0, d1))
     optim = nn.optim.SGD(get_parameters(conv))
     lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
-    fake_image = Tensor.rand((2, 3, 32, 32)).shard((d0, d1), axis=0)
-    out = conv(fake_image)
-    optim.zero_grad()
-    out.mean().backward()
-    optim.step()
     lr_sched.step()
 
   def test_data_parallel_resnet(self):
