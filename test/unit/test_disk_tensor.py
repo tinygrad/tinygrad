@@ -124,7 +124,7 @@ class TestSafetensors(unittest.TestCase):
   def test_save_all_dtypes(self):
     for dtype in dtypes.fields().values():
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
-      path = temp("ones.safetensors")
+      path = temp(f"ones.{dtype}.safetensors")
       ones = Tensor.rand((10,10), dtype=dtype)
       safe_save(get_state_dict(ones), path)
       assert ones == list(safe_load(path).values())[0]
