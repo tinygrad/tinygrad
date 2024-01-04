@@ -147,7 +147,7 @@ def diskcache_put(table:str, key:Union[Dict, str, int], val:Any):
 # *** http support ***
 
 def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
-  if url.startswith("/") or url.startswith("."): return pathlib.Path(url)
+  if url.startswith(("/", ".")): return pathlib.Path(url)
   fp = pathlib.Path(name) if name is not None and (isinstance(name, pathlib.Path) or '/' in name) else pathlib.Path(_cache_dir) / "tinygrad" / "downloads" / (name if name else hashlib.md5(url.encode('utf-8')).hexdigest())  # noqa: E501
   if not fp.is_file() or not allow_caching:
     with request.urlopen(url, timeout=10) as r:
