@@ -566,9 +566,7 @@ def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int
   x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
   return ((x.float() - x_zer) * x_sc).cast(x_scale.dtype)
 
-# Needs work
-def IsNaN(x: Tensor):
-  return x < float("-inf")
+def IsNaN(x: Tensor): return x != x
 
 # copied from https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_image_decoder.py
 # without importing PIL we'll have to manually decode a bunch of image formats like PNG, JPEG, WebP, etc
