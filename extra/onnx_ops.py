@@ -10,7 +10,7 @@ import numpy as np
 
 tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
                   "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Div", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
-                  "Elu", "Celu"}
+                  "Elu", "Celu", "Xor"}
 
 # **************** Free Ops ****************
 
@@ -84,8 +84,7 @@ def Reshape(data: Tensor, shape: Tensor, allowzero=0):
 def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
 def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
-def Xor(x:Tensor, y:Tensor): return (x==y).where(False, True)
-def Not(x:Tensor): return (x==1).where(False, True)
+def Not(x:Tensor): return x.logical_not()
 
 def Asin(x): return Atan(x / Tensor.sqrt(1 - x * x))
 def Acos(x: Tensor):
