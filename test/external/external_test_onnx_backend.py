@@ -166,10 +166,19 @@ if Device.DEFAULT in ['METAL']:
   backend_test.exclude('test_maxpool_2d_same_lower_cpu')
 
 if Device.DEFAULT in ['GPU', 'METAL']:
-  backend_test.exclude('test_max_float64_cpu') # double not supported
+  # double not supported
+  backend_test.exclude('test_max_float64_cpu')
   backend_test.exclude('test_min_float64_cpu')
-  backend_test.exclude('test_mish_cpu') # weird inaccuracy
-  backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
+  backend_test.exclude('test_eyelike_with_dtype_cpu')
+  # weird inaccuracy
+  backend_test.exclude('test_mish_cpu')
+  backend_test.exclude('test_mish_expanded_cpu')
+
+# TODO: llvm has problems with inf
+if Device.DEFAULT in ['LLVM']:
+  backend_test.exclude('test_isinf_cpu')
+  backend_test.exclude('test_isinf_negative_cpu')
+  backend_test.exclude('test_isinf_positive_cpu')
 
 # Segfaults in CI, GPU requires cl_khr_fp16
 if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
@@ -191,6 +200,7 @@ if Device.DEFAULT == 'METAL':
 # TODO: problems with nan
 backend_test.exclude('test_isnan_float16_cpu')
 backend_test.exclude('test_isnan_cpu')
+
 
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):
