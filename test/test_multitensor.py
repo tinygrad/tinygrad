@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Tensor, Device, nn, GlobalCounters
 from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
-from extra.lr_scheduler import *
+from extra.lr_scheduler import OneCycleLR
 import numpy as np
 
 d_zero = f"{Device.DEFAULT}:0"
