@@ -50,12 +50,9 @@ class HIPAllocator(LRUAllocator):
   def _free(self, opaque:T): check(hip.hipFree(opaque))
   def copyin(self, dest:T, src: memoryview):
     check(hip.hipSetDevice(self.device.device))
-    from tinygrad.helpers import Timing
-    with Timing("alloc: ", lambda x: f", {len(src)/x:.2f} GB/s"):
-      host_mem = init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), len(src), 0)))
-      self.device.pending_copyin.append(host_mem)
-    with Timing("copy: ", lambda x: f", {len(src)/x:.2f} GB/s"):
-      ctypes.memmove(host_mem, from_mv(src), len(src))
+    host_mem = init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), len(src), 0)))
+    self.device.pending_copyin.append(host_mem)
+    ctypes.memmove(host_mem, from_mv(src), len(src))
     check(hip.hipMemcpyAsync(dest, host_mem, len(src), hip.hipMemcpyHostToDevice, None))
   def copyout(self, dest:memoryview, src:T):
     check(hip.hipSetDevice(self.device.device))
