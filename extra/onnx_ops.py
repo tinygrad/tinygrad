@@ -28,7 +28,7 @@ def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
 def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
 # NOTE: does not support saturate
-def Cast(x: Tensor, to, saturate=1): return x.cast(DTYPE_MAP[int(to)])
+def Cast(x: Tensor, to: int, saturate=1): return x.cast(DTYPE_MAP[to])
 def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
 
 # **************** Simple Ops ****************

@@ -179,7 +179,7 @@ if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_mish_cpu') # weird inaccuracy
   backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
 
-# TODO: double only supported with GPU on non-OSX in test_dtype
+# TODO: double only supported with GPU on non-OSX in is_dtype_supported, needs fixing
 backend_test.exclude('test_eyelike_with_dtype_cpu')
 
 # Segfaults in CI, GPU requires cl_khr_fp16
