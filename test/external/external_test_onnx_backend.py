@@ -201,7 +201,6 @@ if Device.DEFAULT == 'METAL':
 backend_test.exclude('test_isnan_float16_cpu')
 backend_test.exclude('test_isnan_cpu')
 
-
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):
   for x in backend_test.test_suite:
