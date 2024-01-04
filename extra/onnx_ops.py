@@ -3,7 +3,7 @@ from typing import Union, Tuple, Optional, List, Any
 from tinygrad import Tensor, dtypes
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import prod, flatten
-from extra.onnx import safe_numpy
+from extra.onnx import safe_numpy, DTYPE_MAP
 from onnx.helper import tensor_dtype_to_np_dtype
 from onnx import TensorProto
 import numpy as np
@@ -15,7 +15,8 @@ tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log
 # **************** Free Ops ****************
 
 def Identity(x: Tensor): return x
-def Add(x: Tensor, other: Tensor, broadcast=None, axis=None): return x + other
+# TODO: fix buffer_parse
+def Add(x: Tensor, other: Tensor, broadcast=None, axis=None): return x + other if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else (x + other).cast(x.dtype)
 def Sub(x: Union[Tensor, Any], other: Tensor): return x - other # some test has input as int
 def Less(x:Tensor,y:Tensor): return x < y
 def LessOrEqual(x:Tensor,y:Tensor): return x <= y
@@ -27,7 +28,7 @@ def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
 def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
 def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
 # NOTE: does not support saturate
-def Cast(x: Tensor, to, saturate=1): return x.cast(dtypes.from_np(tensor_dtype_to_np_dtype(to)))
+def Cast(x: Tensor, to, saturate=1): return x.cast(DTYPE_MAP[int(to)])
 def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
 
 # **************** Simple Ops ****************
@@ -543,10 +544,9 @@ def Compress(inp: Tensor, condition: Tensor, axis=None):
   con = Tensor(np.arange(condition.shape[0])[con_np]) # no boolean indexing in Tensor
   return inp.__getitem__(tuple([slice(None) if i != axis else con for i in range(inp.ndim)]))
 
-type_map = {TensorProto.DOUBLE: dtypes.double, TensorProto.FLOAT: dtypes.float32}
 def EyeLike(x: Tensor, dtype=None, k=0):
   if dtype is None: dtype = x.dtype
-  else: dtype = type_map[dtype]
+  else: dtype = DTYPE_MAP[int(dtype)]
   shape = x.shape
   dim = min(x.shape)
   if shape[0] == shape[1]:

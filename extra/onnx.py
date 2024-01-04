@@ -3,7 +3,8 @@ from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 import importlib
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.helpers import getenv, DEBUG, CI
+from tinygrad.helpers import getenv, DEBUG
+from test.test_dtype import is_dtype_supported
 from typing import List, Dict
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto # onnx 1.50 uses serialized file (see onnx/onnx-ml.proto) as descriptors
 try:
@@ -23,6 +24,15 @@ def safe_numpy(t) -> np.ndarray:
     tmp = t.numpy()
     numpy_cache[t] = tmp
   return numpy_cache[t]
+
+# src: onnx/mapping.py
+# not supported: STRING = 8 COMPLEX64 = 14, COMPLEX128 = 15
+# NOTE: 17, 18, 19, 20 are float8
+DTYPE_MAP = {1:dtypes.float, 2:dtypes.uint8, 3:dtypes.int8, 4:dtypes.uint16, 5:dtypes.int16, 6:dtypes.int32, 7:dtypes.int64,
+              9:dtypes.bool, 10:dtypes.float16, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16,
+              17:dtypes.float, 18:dtypes.float, 19:dtypes.float, 20:dtypes.float}
+# TODO: fix buffer_parse to use this and fix get_weight_and_biases to only use buffer_parse
+DTYPE_MAP = {i:dtype if Device.DEFAULT in ["TORCH", "CPU", "LLVM"] or is_dtype_supported(dtype) else dtypes.int64 if dtypes.is_int(dtype) else dtypes.float32 for i,dtype in DTYPE_MAP.items()}
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
 
@@ -49,26 +59,19 @@ def get_run_onnx(onnx_model: ModelProto):
       elif attr == 'optional_type': type_proto = getattr(type_proto, attr).elem_type
       else: raise Exception(f"unknown attr: {attr}, {type_proto}")
 
-  # NOTE: FLOAT8E4M3FN = 17, FLOAT8E4M3FNUZ = 18, FLOAT8E5M2 = 19, FLOAT8E5M2FNUZ = 20
-  # not implemented: String = 8 COMPLEX64 = 14, COMPLEX128 = 15
-  DTYPE_MAP = {1:dtypes.float, 2:dtypes.uint8, 3:dtypes.int8, 4:dtypes.uint16, 5:dtypes.int16, 6:dtypes.int32, 7:dtypes.int64,
-               9:dtypes.bool, 10:dtypes.float16, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16,
-               17:dtypes.float, 18:dtypes.float, 19:dtypes.float, 20:dtypes.float}
-  # NOTE METAL and GPU doesn't support float64
-  if Device.DEFAULT in ('METAL', 'GPU'): DTYPE_MAP[11] = dtypes.float32
-  # TODO half broken in CI for GPU and LLVM segfaults in CI
-  if Device.DEFAULT in ('GPU', 'LLVM') and CI: DTYPE_MAP[10] = dtypes.float32
   def buffer_parse(inp: TensorProto) -> Tensor:
-    if inp.data_type in (8,14,15):
-      raise Exception(f"data type not supported {inp.name} {inp.dims} {inp.data_type}")
-    if dat := list(inp.float_data) or list(inp.int32_data) or list(inp.int64_data):
-      ret = Tensor(dat, dtype=DTYPE_MAP[inp.data_type], requires_grad=False).reshape(tuple(inp.dims))
-    else:
-      # TODO half broken in CI for GPU and LLVM segfaults in CI
-      if (dtype := tensor_dtype_to_np_dtype(inp.data_type)) == np.half and CI and Device.DEFAULT in ('GPU', 'LLVM'):
-        ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
+    if inp.data_type in (1,10,6,7,5,11):
+      # TODO: this is shared with below
+      if len(inp.float_data) > 0:
+        ret = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
+      elif len(inp.int64_data) > 0:
+        ret = Tensor(np.array(inp.int64_data, dtype=np.int64).reshape(inp.dims), requires_grad=False)
+      elif len(inp.int32_data) > 0:
+        ret = Tensor(np.array(inp.int32_data, dtype=np.int32).reshape(inp.dims), requires_grad=False)
       else:
-        ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype).reshape(inp.dims).copy(), requires_grad=False)
+        ret = Tensor(np.frombuffer(inp.raw_data, dtype=tensor_dtype_to_np_dtype(inp.data_type)).reshape(inp.dims).astype(np.float32).copy(), requires_grad=False)
+    else:
+      raise Exception(f"bad data type {inp.name} {inp.dims} {inp.data_type}")
     return ret
 
   def attribute_parse(a: AttributeProto) -> float | int | str | Tensor | tuple[float] | tuple[int]:
@@ -95,7 +98,7 @@ def get_run_onnx(onnx_model: ModelProto):
     elif len(inp.int64_data) > 0:
       tensors[inp.name] = Tensor(np.array(inp.int64_data, dtype=np.int64).reshape(inp.dims), requires_grad=False)
     elif len(inp.raw_data) == 0:
-      tensors[inp.name] = Tensor(None, requires_grad=False)
+      tensors[inp.name] = Tensor(np.array([], dtype=np.float32), requires_grad=False)
     else:
       print(inp.name, inp.dims, inp.data_type, len(inp.raw_data))
       print(inp)
@@ -178,7 +181,7 @@ def get_run_onnx(onnx_model: ModelProto):
           starts, ends = inp[1:3]
           axes = safe_numpy(Tensor.arange(inp[0].ndim) if len(inp) <= 3 else inp[3]).tolist()
           steps = safe_numpy(inp[4]) if len(inp) > 4 else [1]*inp[0].ndim
-          starts, ends = safe_numpy(starts.ceil()).tolist(), safe_numpy(ends.ceil()).tolist()
+          starts, ends = safe_numpy(starts.ceil().cast(dtypes.int32)).tolist(), safe_numpy(ends.ceil().cast(dtypes.int32)).tolist()
         arg = [(0,x,1) for x in inp[0].shape]
         for i, axis in enumerate(axes):
           axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)
