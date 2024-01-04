@@ -82,7 +82,7 @@ class TinyJit(Generic[ReturnType]):
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
       # if your Device supports it, condense the items into a graph executor.
-      if (make_graph := Device[Device.DEFAULT].graph) and getenv("JIT") != 2:
+      if (make_graph := Device[Device.DEFAULT].graph) and getenv("JIT") != 2 and len(self.jit_cache) > 1:
         # Split JIT cache into batches for faster graph execution.
         # This allows the accelerator to run some batches while subsequent graphs are still being updated.
         graphed_jit_cache, current_batch = [], []

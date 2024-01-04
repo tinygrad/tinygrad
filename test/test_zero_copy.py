@@ -1,6 +1,5 @@
 import unittest
 from tinygrad import Tensor, Device
-#from tinygrad.helpers import CI
 import time
 
 def time_tensor_numpy(out:Tensor):
