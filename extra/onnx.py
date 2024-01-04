@@ -32,7 +32,7 @@ DTYPE_MAP = {1:dtypes.float, 2:dtypes.uint8, 3:dtypes.int8, 4:dtypes.uint16, 5:d
               9:dtypes.bool, 10:dtypes.float16, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16,
               17:dtypes.float, 18:dtypes.float, 19:dtypes.float, 20:dtypes.float}
 # TODO: fix buffer_parse to use this and fix get_weight_and_biases to only use buffer_parse
-DTYPE_MAP = {i:dtype if Device.DEFAULT in ["TORCH", "CPU", "LLVM"] or is_dtype_supported(dtype) else dtypes.int64 if dtypes.is_int(dtype) else dtypes.float32 for i,dtype in DTYPE_MAP.items()}
+DTYPE_MAP = {i:dtype if Device.DEFAULT == "TORCH" or is_dtype_supported(dtype) else dtypes.int64 if dtypes.is_int(dtype) else dtypes.float32 for i,dtype in DTYPE_MAP.items()}
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
 

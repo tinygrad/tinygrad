@@ -57,24 +57,16 @@ if Device.DEFAULT in ["TORCH"]:
 if Device.DEFAULT in ["METAL"]:
   backend_test.exclude('float64')
 
-# NOTE: _DTYPE_* are cast and castlike tests
-# string Tensors
 backend_test.exclude('string')
-backend_test.exclude('test_regex_*')
-backend_test.exclude('_STRING_*')
-
-# TODO: support for float8
-backend_test.exclude('_FLOAT8E4M3FNUZ_*')
-backend_test.exclude('_FLOAT8E4M3FN_*')
-backend_test.exclude('_FLOAT8E5M2FNUZ_*')
-backend_test.exclude('_FLOAT8E5M2_*')
-
-# TODO: support for bfloat16 casting
-backend_test.exclude('_BFLOAT16_*')
 
 backend_test.exclude('test_pow_types_int*')
+backend_test.exclude('test_cast_*')
+backend_test.exclude('test_castlike_*')
 backend_test.exclude('test_convinteger_*')
 backend_test.exclude('test_matmulinteger_*')
+
+backend_test.exclude('test_reduce_log_sum_exp*') # dependent on actual float64 implementation for backends
+backend_test.exclude('test_operator_add*') # dependent on float64 math. Without it values default to 0 or inf
 
 # we don't support indexes
 # backend_test.exclude('test_argmax_*') # Needs more work: select_last_index
@@ -156,6 +148,7 @@ backend_test.exclude('test_resize_upsample_scales_cubic_*') # unsure how to impl
 backend_test.exclude('test_resize_upsample_sizes_cubic_*') # unsure how to implement cubic
 
 # rest of the failing tests
+backend_test.exclude('test_regex_*') # does not support string Tensors
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
@@ -181,29 +174,21 @@ if Device.DEFAULT in ['METAL']:
   backend_test.exclude('test_maxpool_2d_same_lower_cpu')
 
 if Device.DEFAULT in ['GPU', 'METAL']:
-  # backend does not support dtype: Double
-  backend_test.exclude('test_eyelike_with_dtype_cpu')
-  backend_test.exclude('test_max_float64_cpu')
+  backend_test.exclude('test_max_float64_cpu') # double not supported
   backend_test.exclude('test_min_float64_cpu')
-  backend_test.exclude('test_reduce_log_sum_exp_*')
-  backend_test.exclude('test_operator_add_*')
-  backend_test.exclude('_DOUBLE_*')
-  # weird inaccuracy
-  backend_test.exclude('test_mish_cpu')
-  backend_test.exclude('test_mish_expanded_cpu')
+  backend_test.exclude('test_mish_cpu') # weird inaccuracy
+  backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
+
+# TODO: double only supported with GPU on non-OSX in test_dtype
+backend_test.exclude('test_eyelike_with_dtype_cpu')
 
 # Segfaults in CI, GPU requires cl_khr_fp16
-if Device.DEFAULT in ['LLVM', 'GPU'] and CI:
-  backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
+if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
   backend_test.exclude('test_max_float16_cpu')
   backend_test.exclude('test_min_float16_cpu')
-  backend_test.exclude('_FLOAT16_*')
 
-# undefined symbol: __truncdfhf2
-if Device.DEFAULT == 'CLANG' and CI:
-  backend_test.exclude('test_cast_DOUBLE_to_FLOAT16_cpu')
-  backend_test.exclude('test_castlike_DOUBLE_to_FLOAT16_cpu')
-  backend_test.exclude('test_castlike_DOUBLE_to_FLOAT16_expanded_cpu')
+# error: casting to type 'half' is not allowed
+backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 
 # TODO: this somehow passes in CI but does not pass if run locally
 if isinstance(Device[Device.DEFAULT], Compiled):
