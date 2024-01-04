@@ -1,11 +1,15 @@
 from __future__ import annotations
-import ctypes, functools, subprocess
+import os, ctypes, ctypes.util, functools, subprocess
 from typing import Tuple, TypeVar, List
 import gpuctypes.hip as hip
-from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
+from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style, round_up
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
+
+libc = ctypes.CDLL(ctypes.util.find_library("c"))
+libc.read.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t]
+libc.read.restype = ctypes.c_size_t
 
 # The default HIP stream is used for everything.
 MOCKHIP = getenv("MOCKHIP") # for CI. don't run kernels, only check if they compile
@@ -40,9 +44,12 @@ class HIPProgram:
     return hip_time_execution(lambda: check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, encode_args_cuda_style(args, vals, hip.hipDeviceptr_t, marks=(1,2,3))[0])), enable=wait)  # noqa: E501
 
 T = TypeVar("T")
+CHUNK_SIZE, PAGE_SIZE = 128*1024*1024, 0x1000
 class HIPAllocator(LRUAllocator):
   def __init__(self, device:HIPDevice):
     self.device = device
+    check(hip.hipSetDevice(self.device.device))
+    self.hb = [self._hostalloc(CHUNK_SIZE), self._hostalloc(CHUNK_SIZE)]
     super().__init__()
   def _alloc(self, size:int):
     check(hip.hipSetDevice(self.device.device))
@@ -50,6 +57,23 @@ class HIPAllocator(LRUAllocator):
   def _free(self, opaque:T): check(hip.hipFree(opaque))
   def _hostalloc(self, size:int): return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 0)))
   def _copyin_async(self, dest:T, src:T, size:int): check(hip.hipMemcpyAsync(dest, src, size, hip.hipMemcpyHostToDevice, None))
+  def _copy_from_fd(self, dest, fd, offset, size):
+    minor_offset = offset % PAGE_SIZE
+    offset -= minor_offset
+    real_size = round_up(size+minor_offset, PAGE_SIZE)
+    os.lseek(fd, offset, os.SEEK_SET)
+    copied_in = 0
+    for local_offset in range(0, size+minor_offset, CHUNK_SIZE):
+      local_size = min(real_size-local_offset, CHUNK_SIZE)
+      ret = libc.read(fd, self.hb[0], local_size)
+      assert ret == local_size, f"{ret} != {local_size}"
+      self.device.synchronize()
+      copy_size = min(local_size-minor_offset, size-copied_in)
+      self._copyin_async(ctypes.c_void_p(dest.value + copied_in), ctypes.c_void_p(self.hb[0].value + minor_offset), copy_size)
+      copied_in += copy_size
+      self.hb = self.hb[::-1]
+      minor_offset = 0 # only on the first
+    assert copied_in == size, f"{copied_in} != {size}"
   def copyin(self, dest:T, src: memoryview):
     check(hip.hipSetDevice(self.device.device))
     host_mem = self._hostalloc(len(src))

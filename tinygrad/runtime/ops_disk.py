@@ -36,7 +36,7 @@ class DiskAllocator(Allocator):
       os.close(fd)
       fd = None
     else:
-      fd = os.open(self.device, os.O_RDWR|os.O_CREAT) #|(0 if OSX else os.O_DIRECT))
+      fd = os.open(self.device, os.O_RDWR|os.O_CREAT|(0 if OSX else os.O_DIRECT))
       if os.fstat(fd).st_size < size: os.ftruncate(fd, size)
       mem = mmap.mmap(fd, size)
     if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: mem.madvise(hp) # type: ignore
