@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
+from typing import Optional, Union
 import argparse
 from tqdm import trange
 import numpy as np
-from tinygrad import Device, GlobalCounters
-from typing import Optional, Union
-from tinygrad import Tensor, dtypes
-from tinygrad.nn import Embedding, Linear, LayerNorm
-from tinygrad.shape.symbolic import Variable
-from tinygrad.jit import TinyJit
 import tiktoken
-from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
+from tinygrad import Tensor, TinyJit, Device, GlobalCounters
 from tinygrad.helpers import Timing, DEBUG, getenv, fetch, colored
+from tinygrad.nn import Embedding, Linear, LayerNorm
+from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
+from tinygrad.shape.symbolic import Variable
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 HALF = getenv("HALF")
@@ -30,8 +28,8 @@ class Attention:
 
     if HALF: x = x.half()
     xqkv = self.c_attn(x)
-    xq, xk, xv = [xqkv.shrink((None, None, (i*self.dim, (i+1)*self.dim))).reshape(xqkv.shape[0], xqkv.shape[1], self.n_heads, self.head_dim) for i in range(3)]
-    bsz, seqlen, n_heads, head_dim = xq.shape
+    xq, xk, xv = [xqkv.shrink((None, None, (i*self.dim, (i+1)*self.dim))).reshape(None, None, self.n_heads, self.head_dim) for i in range(3)]
+    bsz, seqlen, _, _ = xq.shape
 
     # create kv cache
     if not hasattr(self, "cache_kv"):
@@ -45,7 +43,7 @@ class Attention:
     self.cache_kv.assign(new_cache).realize()
 
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
-    return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).cast(dtypes.float32).transpose(1, 2).reshape(bsz, seqlen, -1))
+    return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1))
 
 class FeedForward:
   def __init__(self, dim, hidden_dim):
@@ -63,7 +61,7 @@ class TransformerBlock:
     self.ln_2 = LayerNorm(dim, norm_eps)
 
   def __call__(self, x:Tensor, start_pos:Variable, mask:Optional[Tensor]):
-    h = x + self.attn(self.ln_1(x), start_pos, mask)
+    h = x + self.attn(self.ln_1(x), start_pos, mask).float()
     return (h + self.mlp(self.ln_2(h)))
 
 class Transformer:
@@ -89,7 +87,7 @@ class Transformer:
 
     if HALF: h = h.half()
 
-    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos.val+1).realize() if seqlen > 1 else None
+    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos.val+1) if seqlen > 1 else None
 
     for hi in self.h: h = hi(h, start_pos, mask)
 
@@ -98,7 +96,7 @@ class Transformer:
       ret = (logits == logits.max())
     else:
       ret = (logits / temperature).softmax()
-    return ret.half().realize() if HALF else ret.realize()
+    return (ret.half() if HALF else ret).realize()
 
   # TODO: fix empty token
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
