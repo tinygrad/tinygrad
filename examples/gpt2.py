@@ -91,12 +91,12 @@ class Transformer:
 
     for hi in self.h: h = hi(h, start_pos, mask)
 
-    logits = self.lm_head(self.ln_f(h))[:, -1, :].flatten()
+    logits = self.lm_head(self.ln_f(h))[:, -1, :]
     if temperature < 1e-6:
-      ret = (logits == logits.max())
+      ret = logits.argmax(-1)
     else:
-      ret = (logits / temperature).softmax()
-    return (ret.half() if HALF else ret).realize()
+      ret = (logits / temperature).softmax().multinomial()
+    return ret.flatten().realize()
 
   # TODO: fix empty token
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
@@ -140,17 +140,14 @@ class GPT2:
       GlobalCounters.reset()
       if timing: print("")
       st = GlobalCounters.time_sum_s
-      with Timing("total ", enabled=timing):
-        with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
-                    f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                    (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
-          if batch_size == 1 and len(toks[0][start_pos:]) == 1:
-            tokens = Variable("tokens", 0, VOCAB_SIZE).bind(toks[0][start_pos])
-          else:
-            tokens = Tensor([x[start_pos:] for x in toks])
-          probs = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature)
-        # TODO: fix JIT rand so we can put this in the JIT
-        tok = probs.multinomial().flatten().numpy().tolist()
+      with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+                  f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                  (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
+        if batch_size == 1 and len(toks[0][start_pos:]) == 1:
+          tokens = Variable("tokens", 0, VOCAB_SIZE).bind(toks[0][start_pos])
+        else:
+          tokens = Tensor([x[start_pos:] for x in toks])
+        tok = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature).numpy().tolist()
       start_pos = len(toks[0])
       for i,t in enumerate(tok): toks[i].append(t)
     return [self.tokenizer.decode(x) for x in toks]
