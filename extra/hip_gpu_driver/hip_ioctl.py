@@ -63,6 +63,9 @@ def ioctl(fd, request, argp):
     name, stype = nrs[nr]
     s = get_struct(argp, stype)
     print(f"{(st-start)*1000:7.2f} ms +{et*1000.:7.2f} ms : {ret:2d} = {name:40s}", ' '.join(format_struct(s)))
+    if name == "AMDKFD_IOC_SVM":
+      out = ctypes.cast(s.attrs, ctypes.POINTER(kfd_ioctl.struct_kfd_ioctl_svm_attribute))
+      for i in range(s.nattr): print(f"{i}: {kfd_ioctl.kfd_ioctl_svm_attr_type__enumvalues[out[i].type]:40s}: {out[i].value:#x}")
   else:
     print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=} {ret=}", os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else "")
   return ret

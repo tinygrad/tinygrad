@@ -146,7 +146,7 @@ class TestRealWorld(unittest.TestCase):
       pct_start = hyp['opt']['percent_start']
       lr_scheduler = OneCycleLR(optimizer, max_lr=hyp['opt']['bias_lr'], pct_start=pct_start, div_factor=initial_div_factor,
                                 final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=4)
-      assert not np.isnan(lr_scheduler.min_lr.numpy()), "lr too small or initial_div_facotr too big for half"
+      assert not np.isnan(lr_scheduler.min_lr), "lr too small or initial_div_facotr too big for half"
 
     dtypes.default_float = dtypes.float32
 

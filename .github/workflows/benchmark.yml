@@ -135,11 +135,13 @@ jobs:
         HIP=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
     - name: Run 10 CIFAR training steps
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
-    # TODO: make wino faster so we can enable both
-    - name: Run 10 CIFAR training steps w winograd
-      run: WINO=0 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
-    - name: Run 10 CIFAR training steps w WINO/HALF/HIP
-      run: HALF=1 HIP=1 WINO=0 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
+    - name: Run 10 CIFAR training steps w HALF
+      run: HALF=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+    # # TODO: make wino faster so we can enable both
+    # - name: Run 10 CIFAR training steps w winograd
+    #   run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
+    # - name: Run 10 CIFAR training steps w WINO/HALF/HIP
+    #   run: HALF=1 WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
     - uses: actions/upload-artifact@v3
       with:
         name: Speed (AMD)
@@ -147,6 +149,7 @@ jobs:
           onnx_inference_speed.csv
           torch_speed.txt
           train_cifar.txt
+          train_cifar_half.txt
           train_cifar_wino.txt
           train_cifar_wino_half_hip.txt
           llama_unjitted.txt
