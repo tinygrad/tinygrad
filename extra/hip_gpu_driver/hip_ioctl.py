@@ -1,4 +1,5 @@
-import ctypes, ctypes.util, struct, platform, pathlib, re, time
+import ctypes, ctypes.util, struct, platform, pathlib, re, time, os
+start = time.perf_counter()
 
 # *** ioctl lib ***
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
@@ -46,7 +47,7 @@ def install_hook(c_function, python_function):
 from extra.hip_gpu_driver import kfd_ioctl
 def ioctls_from_header():
   hdr = (pathlib.Path(__file__).parent.parent.parent / "extra/hip_gpu_driver/kfd_ioctl.h").read_text().replace("\\\n", "")
-  pattern = r'#define\s+(AMDKFD_IOC_[A-Z0-9_]+)\s+AMDKFD_IOWR?\((0x[0-9a-fA-F]+),\s+struct\s([A-Za-z0-9_]+)\)'
+  pattern = r'#define\s+(AMDKFD_IOC_[A-Z0-9_]+)\s+AMDKFD_IOW?R?\((0x[0-9a-fA-F]+),\s+struct\s([A-Za-z0-9_]+)\)'
   matches = re.findall(pattern, hdr, re.MULTILINE)
   return {int(nr, 0x10):(name, getattr(kfd_ioctl, "struct_"+sname)) for name, nr, sname in matches}
 nrs = ioctls_from_header()
@@ -58,11 +59,12 @@ def ioctl(fd, request, argp):
   et = time.perf_counter()-st
   idir, size, itype, nr = (request>>30), (request>>16)&0x3FFF, (request>>8)&0xFF, request&0xFF
   if nr in nrs and itype == 75:
+    # /dev/kfd
     name, stype = nrs[nr]
     s = get_struct(argp, stype)
-    print(f"{et*1000.:7.2f} ms : {ret:2d} = {name:40s}", ' '.join(format_struct(s)))
+    print(f"{(st-start)*1000:7.2f} ms +{et*1000.:7.2f} ms : {ret:2d} = {name:40s}", ' '.join(format_struct(s)))
   else:
-    print("ioctl", idir, size, itype, nr, f"fd={fd} ret={ret}")
+    print("ioctl", f"{idir=} {size=} {itype=} {nr=} {fd=} {ret=}", os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else "")
   return ret
 
 install_hook(libc.ioctl, ioctl)
@@ -74,9 +76,9 @@ if __name__ == "__main__":
   print("***** access HIP")
   dev = Device["HIP"]
   print("***** create tensor a")
-  a = Tensor([1.,2.]*200, device="HIP").realize()
+  a = Tensor([1.,2.]*1024*1024, device="HIP").realize()
   print("***** create tensor b")
-  b = Tensor([3.,4.]*200, device="HIP").realize()
+  b = Tensor([3.,4.]*1024*1024, device="HIP").realize()
   @TinyJit
   def add(a, b): return (a+b).realize()
   for i in range(4):
@@ -85,6 +87,9 @@ if __name__ == "__main__":
     #dev.synchronize()
     c = add(b, a)
     dev.synchronize()
+  print(f"***** copyout")
+  nc = c.numpy()
   print(f"***** delete")
   del add, a, b, c, dev
   print(f"***** done")
+  os._exit(0)
