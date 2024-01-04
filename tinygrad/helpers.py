@@ -88,7 +88,7 @@ class Timing(contextlib.ContextDecorator):
   def __enter__(self): self.st = time.perf_counter_ns()
   def __exit__(self, *exc):
     self.et = time.perf_counter_ns() - self.st
-    if self.enabled: print(f"{self.prefix}{self.et*1e-6:.2f} ms"+(self.on_exit(self.et) if self.on_exit else ""))
+    if self.enabled: print(f"{self.prefix}{self.et*1e-6:6.2f} ms"+(self.on_exit(self.et) if self.on_exit else ""))
 
 class Profiling(contextlib.ContextDecorator):
   def __init__(self, enabled=True, sort='cumtime', frac=0.2): self.enabled, self.sort, self.frac = enabled, sort, frac

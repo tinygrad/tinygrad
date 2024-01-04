@@ -48,9 +48,11 @@ class HIPAllocator(LRUAllocator):
     check(hip.hipSetDevice(self.device.device))
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
   def _free(self, opaque:T): check(hip.hipFree(opaque))
+  def _hostalloc(self, size:int): return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 0)))
+  def _copyin_async(self, dest:T, src:T, size:int): check(hip.hipMemcpyAsync(dest, src, size, hip.hipMemcpyHostToDevice, None))
   def copyin(self, dest:T, src: memoryview):
     check(hip.hipSetDevice(self.device.device))
-    host_mem = init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), len(src), 0)))
+    host_mem = self._hostalloc(len(src))
     self.device.pending_copyin.append(host_mem)
     ctypes.memmove(host_mem, from_mv(src), len(src))
     check(hip.hipMemcpyAsync(dest, host_mem, len(src), hip.hipMemcpyHostToDevice, None))
