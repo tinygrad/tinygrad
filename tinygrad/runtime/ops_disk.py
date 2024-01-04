@@ -31,18 +31,17 @@ class DiskAllocator(Allocator):
   def _alloc(self, size):
     if str(self.device).startswith("shm:"):
       fd = _posixshmem.shm_open("/"+self.device[4:].lstrip("/"), os.O_RDWR, 0o600)
-      mmap_flags = mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED
+      mem = mmap.mmap(fd, size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
     else:
-      fd = os.open(self.device, os.O_RDWR|os.O_CREAT|(0 if OSX else os.O_DIRECT))
-      if os.fstat(fd).st_size < size: os.ftruncate(fd, size)
-      mmap_flags = mmap.MAP_SHARED
-    mem = mmap.mmap(fd, size, flags=mmap_flags)
+      fd = os.open(self.device, os.O_RDWR|os.O_CREAT) #|(0 if OSX else os.O_DIRECT))
+      mem = mmap.mmap(fd, size)
+    if os.fstat(fd).st_size < size: os.ftruncate(fd, size)
     if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: mem.madvise(hp) # type: ignore
     return DiskBuffer(UnderlyingDiskBuffer(fd, mem), size)
   def as_buffer(self, src:DiskBuffer): return src._buf()
   def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def copyout(self, dest:memoryview, src:DiskBuffer):
-    if OSX:
+    if OSX and src.ud.fd is not None:
       # OSX doesn't seem great at mmap, this is faster
       with io.FileIO(src.ud.fd, "a+b", closefd=False) as fo:
         fo.seek(src.offset)
