@@ -8,7 +8,8 @@ from tinygrad.shape.view import strides_for_shape
 
 class UnderlyingDiskBuffer:
   def __init__(self, fd, mem): self.fd, self.mem = fd, mem
-  def __del__(self): os.close(self.fd)
+  def __del__(self):
+    if self.fd is not None: os.close(self.fd)
 
 class DiskBuffer:
   def __init__(self, ud:UnderlyingDiskBuffer, size:int, dtype:DType=dtypes.uint8, offset=0):
@@ -32,10 +33,12 @@ class DiskAllocator(Allocator):
     if str(self.device).startswith("shm:"):
       fd = _posixshmem.shm_open("/"+self.device[4:].lstrip("/"), os.O_RDWR, 0o600)
       mem = mmap.mmap(fd, size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
+      os.close(fd)
+      fd = None
     else:
       fd = os.open(self.device, os.O_RDWR|os.O_CREAT) #|(0 if OSX else os.O_DIRECT))
+      if os.fstat(fd).st_size < size: os.ftruncate(fd, size)
       mem = mmap.mmap(fd, size)
-    if os.fstat(fd).st_size < size: os.ftruncate(fd, size)
     if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: mem.madvise(hp) # type: ignore
     return DiskBuffer(UnderlyingDiskBuffer(fd, mem), size)
   def as_buffer(self, src:DiskBuffer): return src._buf()
