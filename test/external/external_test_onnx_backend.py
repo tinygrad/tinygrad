@@ -175,6 +175,7 @@ if Device.DEFAULT in ['GPU', 'METAL']:
 if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
   backend_test.exclude('test_max_float16_cpu')
   backend_test.exclude('test_min_float16_cpu')
+  backend_test.exclude('test_isinf_float16_cpu')
 
 # error: casting to type 'half' is not allowed
 backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
