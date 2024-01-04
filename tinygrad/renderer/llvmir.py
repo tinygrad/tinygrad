@@ -8,11 +8,6 @@ MFLAGS = ('nsz', 'arcp', 'contract', 'afn', 'reassoc') # All from fast math, but
 
 def is_bool_or_unsigned(dtype: DType): return dtype == dtypes.bool or dtypes.is_unsigned(dtype)
 
-def mulacc(bb, x, y, z, input_dtype, output_dtype):
-  if dtypes.is_float(output_dtype): return bb[-1].fadd(bb[-1].fmul(x, y, flags=MFLAGS), z, flags=MFLAGS)
-  # no fast math flags for int add and mul
-  return bb[-1].add(cast(bb, bb[-1].mul(x, y), input_dtype, output_dtype), z)
-
 code_for_op: Final[Dict[Op, Callable]] = {
     UnaryOps.NEG: lambda builder, x, var_dtype: builder.xor(x, ir.Constant(ir.IntType(1), 1)) if var_dtype == dtypes.bool else builder.neg(x) if dtypes.is_int(var_dtype) else builder.fneg(x, flags=MFLAGS),  # noqa: E501
     UnaryOps.EXP2: lambda builder, x, var_dtype: builder.call(builder._block.module.declare_intrinsic('llvm.exp2', [x.type]), [x], fastmath=MFLAGS),
@@ -31,6 +26,8 @@ code_for_op: Final[Dict[Op, Callable]] = {
     BinaryOps.MOD: lambda builder, x, y, var_dtype:
       builder.urem(x, y) if is_bool_or_unsigned(var_dtype) else builder.srem(x, y) if dtypes.is_int(var_dtype) else builder.frem(x, y),
     BinaryOps.XOR: lambda builder, x, y, var_dtype: builder.xor(x, y),
+    TernaryOps.MULACC: lambda builder, x, y, z, var_dtype: builder.fadd(builder.fmul(x, y, flags=MFLAGS), z, flags=MFLAGS) \
+      if dtypes.is_float(var_dtype) else builder.add(builder.mul(x, y), z),
     TernaryOps.WHERE: lambda builder, x, y, z, var_dtype: builder.select(x, y, z),
 }
 
@@ -160,9 +157,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
       if len(vin) > 3:
         with bb[-1].if_then(bb[-1].trunc(lvars[vin[3]], ir.IntType(1))): store_op()
       else: store_op()
-    if uop == UOps.ALU:
-      if args == TernaryOps.MULACC: lvars[u] = mulacc(bb, lvars[vin[0]], lvars[vin[1]], lvars[vin[2]], vin[0].dtype, dtype)
-      else: lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin] + [vin[0].dtype if args in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else dtype])
+    if uop == UOps.ALU: lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin] + [dtype if args != BinaryOps.CMPLT else vin[0].dtype])
     if uop == UOps.CAST: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=isinstance(args, tuple) and args[1])
 
   bb[-1].ret_void()
