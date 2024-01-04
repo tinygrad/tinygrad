@@ -72,10 +72,16 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
     assert num_ops <= 0, "more load or alu uops than needed"
 
-  def test_tensor_cores(self):
-    if Device.DEFAULT not in tensor_cores:
-      self.skipTest("No tensor cores for device")
+  def test_sum_acc_dtype(self):
+    for tensor_dtype, acc_dtype in ((dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
+      a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
+      k = Linearizer(a.lazydata.schedule()[-1].ast)
+      k.linearize()
+      local = [uop for uop in k.uops if uop.uop == UOps.DEFINE_ACC]
+      assert local[0].dtype == acc_dtype
 
+  @unittest.skipUnless(Device.DEFAULT in tensor_cores, "No tensor cores for device")
+  def test_tensor_cores(self):
     for tc in tensor_cores[Device.DEFAULT]:
       if tc.arch is not None and tc.arch != os.uname().machine: continue
       a, b = Tensor.rand(tc.dims[0], tc.dims[2], dtype=tc.dtype_in), Tensor.rand(tc.dims[2], tc.dims[1], dtype=tc.dtype_in)
