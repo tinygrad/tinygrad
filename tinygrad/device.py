@@ -215,7 +215,9 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
     if ast.op == BufferOps.STORE: return _interpret_ast(ast.src[0])
     if TernaryOps.MULACC in fxn_for_op and ast.op == ReduceOps.SUM:
       if ast.src[0].op == BinaryOps.MUL: ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
-      if ast.src[0].op == UnaryOps.CAST and ast.src[0].src[0].op == BinaryOps.MUL: ast = LazyOp(TernaryOps.MULACC, ast.src[0].src[0].src, ast.arg)
+      if (castop:=ast.src[0]).op == UnaryOps.CAST and (mulop:=castop.src[0]).op == BinaryOps.MUL:
+        # MULACC with acc cast rewrite: MUL -> CAST -> SUM => CAST -> MULACC
+        ast = LazyOp(TernaryOps.MULACC, tuple(LazyOp(UnaryOps.CAST, (s, ), castop.arg) for s in mulop.src), ast.arg)
 
     if ast.op in BufferOps:
       if ast.op == BufferOps.CONST: tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})"
