@@ -42,7 +42,7 @@ const int WMMA_N = 16;
 const int WMMA_K = 16;
 
 
-extern "C" __global__ void wmma_example(half *a, half *b, float *c,
+extern "C" __global__ void wmma_example({'half' if FLOAT16 else 'float'} *a, {'half' if FLOAT16 else 'float'} *b, float *c,
                                         int M, int N, int K,
                                         float alpha, float beta)
 {{
@@ -53,10 +53,10 @@ extern "C" __global__ void wmma_example(half *a, half *b, float *c,
     int warpM = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
     int warpN = (blockIdx.y * blockDim.y + threadIdx.y);
 
-    wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag;
-    wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag;
-    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
-    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
+    wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, {'half' if FLOAT16 else 'wmma::precision::tf32'}, wmma::col_major> a_frag;
+    wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, {'half' if FLOAT16 else 'wmma::precision::tf32'}, wmma::col_major> b_frag;
+    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, {'half' if ACC_FLOAT16 else 'float'}> acc_frag;
+    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, {'half' if ACC_FLOAT16 else 'float'}> c_frag;
     wmma::fill_fragment(acc_frag, 0.0f);
 
     for (int i = 0; i < K; i += WMMA_K) {{
@@ -65,13 +65,11 @@ extern "C" __global__ void wmma_example(half *a, half *b, float *c,
         int bRow = i;
         int bCol = warpN * WMMA_N;
         
-        // Bounds checking
         if (aRow < M && aCol < K && bRow < K && bCol < N) {{
             // Load the inputs
             wmma::load_matrix_sync(a_frag, a + aRow + aCol * lda, lda);
             wmma::load_matrix_sync(b_frag, b + bRow + bCol * ldb, ldb);
 
-            // Perform the matrix multiplication
             wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);
         }}
     }}
