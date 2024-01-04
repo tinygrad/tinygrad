@@ -12,9 +12,9 @@ na = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32)
 nb = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32)
 nc = np.empty(N*N, np.float32)
 
-# if FLOAT16:
-#   na = na.astype(np.float16)
-#   nb = nb.astype(np.float16)
+if FLOAT16:
+  na = na.astype(np.float16)
+  nb = nb.astype(np.float16)
 
 device = CUDADevice("cuda:0")
 cudaalloc = CUDAAllocator(device)
