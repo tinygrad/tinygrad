@@ -515,9 +515,12 @@ class Tensor:
     return ret if keepdim else ret.reshape(shape=shape)
 
   def sum(self, axis=None, keepdim=False):
-    output_dtype = least_upper_dtype(self.dtype, dtypes.uint) if dtypes.is_unsigned(self.dtype) else \
-                   least_upper_dtype(self.dtype, dtypes.int) if (dtypes.is_int(self.dtype) or self.dtype==dtypes.bool) else self.dtype
-    return self.cast(output_dtype)._reduce(mlops.Sum, axis, keepdim)
+    acc_dtype = least_upper_dtype(self.dtype, dtypes.uint) if dtypes.is_unsigned(self.dtype) else \
+                least_upper_dtype(self.dtype, dtypes.int) if (dtypes.is_int(self.dtype) or self.dtype==dtypes.bool) else \
+                least_upper_dtype(self.dtype, dtypes.float)
+    # cast back to float16 or bfloat16 to match torch / jax behavior, but we use float for acc
+    output_dtype = self.dtype if self.dtype in (dtypes.float16, dtypes.bfloat16) else acc_dtype
+    return self.cast(acc_dtype)._reduce(mlops.Sum, axis, keepdim).cast(output_dtype)
 
   def max(self, axis=None, keepdim=False): return self._reduce(mlops.Max, axis, keepdim)
   def min(self, axis=None, keepdim=False): return -((-self).max(axis=axis, keepdim=keepdim))
