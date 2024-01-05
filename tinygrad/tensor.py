@@ -779,10 +779,6 @@ class Tensor:
 
     if reverse: x, y = y, x
 
-    # assume shard_ to the tensor that uses more device by default? also, need to make sure the one being broadcasted is only a constant
-    if x.device != y.device: y.shard_((x.device), axis=None)
-    # if x.device != y.device: y.shard_((x.device), axis=None) if len(x.device) > len(y.device) else x.shard_((y.device), axis=None)
-
     # left pad shape with 1s
     if len(y.shape) < len(x.shape): y = y.reshape((1,) * (len(x.shape) - len(y.shape)) + y.shape)
     elif len(x.shape) < len(y.shape): x = x.reshape((1,) * (len(y.shape) - len(x.shape)) + x.shape)
@@ -791,7 +787,7 @@ class Tensor:
     return x.expand(broadcasted_shape), y.expand(broadcasted_shape)
 
   def _to_const_val(self, x:Union[Tensor, Scalar]) -> Union[Tensor, Scalar]:
-    # TODO: update with multi
+    if self.device != x.device: x.shard_((self.device), axis=None)
     return x.lazydata.base.arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_contiguous_const() \
       and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
