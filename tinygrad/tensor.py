@@ -772,12 +772,15 @@ class Tensor:
       if isinstance(self.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
       else: y_dtype = dtypes.from_py(y)
       y = Tensor(y, self.device, y_dtype, requires_grad=False)
-
+    
     if match_dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)
       x, y = x.cast(output_dtype), y.cast(output_dtype)
 
     if reverse: x, y = y, x
+
+    # assume just to shard_ to the other device by default? also, need to make sure the one being broadcasted is only a constant
+    if x.device != y.device: y.shard_((x.device), axis=None)
 
     # left pad shape with 1s
     if len(y.shape) < len(x.shape): y = y.reshape((1,) * (len(x.shape) - len(y.shape)) + y.shape)
