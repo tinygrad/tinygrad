@@ -1,6 +1,6 @@
 import unittest
 from PIL import Image
-from tinygrad.helpers import Context, ContextVar, merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten
+from tinygrad.helpers import Context, ContextVar, merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv
 from tinygrad.shape.symbolic import Variable, NumNode
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -162,6 +162,14 @@ class TestFullyFlatten(unittest.TestCase):
     self.assertEqual(fully_flatten([[[[1], 2], 3], 4]), [1, 2, 3, 4])
     self.assertEqual(fully_flatten([[1, 2, [3, 4]], [5, 6], 7]), [1, 2, 3, 4, 5, 6, 7])
     self.assertEqual(fully_flatten([[1, "ab"], [True, None], [3.14, [5, "b"]]]), [1, "ab", True, None, 3.14, 5, "b"])
+
+class TestMemoryview(unittest.TestCase):
+  def test_from_mv_to_mv(self):
+    base = memoryview(bytearray(b"\x11\x22\x33"*40))
+    ct = from_mv(base)
+    mv = to_mv(ct, len(base))
+    mv[0] = 2
+    assert base[0] == 2
 
 if __name__ == '__main__':
   unittest.main()
