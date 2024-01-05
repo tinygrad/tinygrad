@@ -203,7 +203,7 @@ class Tensor:
 
   @staticmethod
   def eye(dim:int, **kwargs):
-    return Tensor.ones((dim,1),**kwargs).pad((None,(0,dim))).reshape(dim*(dim+1)).shrink(((0,dim*dim),)).reshape(dim, dim)
+    return Tensor.ones((dim,1),**kwargs).pad((None,(0,dim))).flatten().shrink(((0,dim*dim),)).reshape(dim, dim)
 
   def full_like(self, fill_value:Scalar, **kwargs):
     return Tensor.full(self.shape, fill_value, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
@@ -393,7 +393,7 @@ class Tensor:
     for dim in (dims_collapsed := [dim + sum(1 for d in type_dim[None] if dim >= d) for dim in reversed(type_dim[int])]): new_shape.pop(dim)
     assert all_int(new_shape), f"does not support symbolic shape {new_shape}"
 
-    ret = ret.reshape(tuple(new_shape))
+    ret = ret.reshape(new_shape)
 
     # 3. advanced indexing (copy)
     if type_dim[Tensor]:
@@ -482,7 +482,7 @@ class Tensor:
     return [self[tuple(sl)] for sl in slice_params]
 
   def squeeze(self, dim:Optional[int]=None) -> Tensor:
-    if dim is None: return self if 1 not in self.shape else self.reshape(*[dim for dim in self.shape if dim != 1])
+    if dim is None: return self.reshape(tuple(dim for dim in self.shape if dim != 1))
     if self.ndim == 0 and dim in [-1, 0]: return self  # this is to match torch behavior
     if not -self.ndim <= dim <= self.ndim-1: raise IndexError(f"{dim=} out of range {[-self.ndim, self.ndim-1] if self.ndim else [-1, 0]}")
     if dim < 0: dim += self.ndim
@@ -503,7 +503,12 @@ class Tensor:
     order = list(range(self.ndim))
     order[ax1], order[ax2] = order[ax2], order[ax1]
     return self.permute(order)
-  def flatten(self, start_dim=0): return self.reshape(shape=self.shape[:start_dim] + (-1,))
+  def flatten(self, start_dim=0, end_dim=-1):
+    start_dim, end_dim = start_dim + self.ndim if start_dim < 0 else start_dim, end_dim + self.ndim if end_dim < 0 else end_dim
+    return self.reshape(self.shape[:start_dim] + (prod(self.shape[start_dim:end_dim+1]), ) + self.shape[end_dim+1:])
+  def unflatten(self, dim:int, sizes:Tuple[int,...]):
+    if dim < 0: dim += self.ndim
+    return self.reshape(self.shape[:dim] + sizes + self.shape[dim+1:])
 
   # ***** reduce ops *****
 
@@ -613,7 +618,7 @@ class Tensor:
 
   def conv_transpose2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0) -> Tensor:
     HW, trailing = weight.shape[2:], list(range(3, len(weight.shape)+1))
-    x, w = self, weight.reshape(groups, weight.shape[0]//groups, weight.shape[1], *weight.shape[2:]).permute(0,2,1,*trailing).flip(trailing)
+    x, w = self, weight.unflatten(0, (groups, -1)).permute(0,2,1,*trailing).flip(trailing)
     stride = make_pair(stride, len(HW))
     if any(s>1 for s in stride):
       x = x.reshape(None, None, *flatten((k,1) for k in x.shape[2:]))
@@ -621,7 +626,7 @@ class Tensor:
       x = x.reshape(None, None, *[k*s for k,s in zip(x.shape[2::2], stride)])
       x = x.shrink((None, None, *[(0,k-(s-1)) for k,s in zip(x.shape[2:], stride)]))
     padding = flatten((((k-1)*d-p,(k-1)*d-p+op) for k,d,p,op in reversed(list(zip(HW, make_pair(dilation, len(HW)), make_pair(padding, len(HW)), make_pair(output_padding, len(HW)))))))  # noqa: E501
-    return x.conv2d(w.reshape(w.shape[0]*w.shape[1],*w.shape[2:]), groups=groups, bias=bias, dilation=dilation, padding=padding)
+    return x.conv2d(w.flatten(end_dim=1), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
   wino = getenv("WINO", 0)
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
@@ -692,10 +697,10 @@ class Tensor:
     SPLIT = 256
     if self.shape[axis] <= SPLIT*2: return self._cumsum(axis)
     ret = self.transpose(axis,-1).pad2d((round_up(self.shape[axis], SPLIT)-self.shape[axis], 0))
-    ret = ret.reshape(*ret.shape[0:-1], ret.shape[-1]//SPLIT, SPLIT)._cumsum(-1)
+    ret = ret.unflatten(-1, (-1, SPLIT))._cumsum(-1)
     base_add = ret[..., -1]._cumsum(-1, _first_zero=True)[..., :-1]
     base_add = base_add.unsqueeze(-1).expand(*base_add.shape, ret.shape[-1])
-    def fix(x:Tensor): return x.reshape(*ret.shape[0:-2], ret.shape[-2] * ret.shape[-1])[..., -self.shape[axis]:].transpose(axis,-1)
+    def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -self.shape[axis]:].transpose(axis,-1)
     return fix(ret) + fix(base_add)
 
   @staticmethod
