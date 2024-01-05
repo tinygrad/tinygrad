@@ -618,6 +618,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=None, keepdim=True), lambda x: Tensor.std(x, keepdim=True))
     helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=0, keepdim=True, correction=0),
                                    lambda x: Tensor.std(x, keepdim=True, correction=0, axis=0))
+  def test_softmax(self):
+    # exceed per kernel buffer limit with backward
+    forward_only = (Device.DEFAULT == "WEBGPU")
+    helper_test_op([(45,65)], lambda x: torch.nn.Softmax(dim=1)(x), Tensor.softmax, atol=1e-7, grad_atol=1e-7, forward_only=forward_only)
+    helper_test_op([()], lambda x: torch.nn.Softmax(dim=0)(x), Tensor.softmax, atol=1e-7, grad_atol=1e-7, forward_only=forward_only)
   def test_log_softmax(self):
     helper_test_op([(45,65)], lambda x: torch.nn.LogSoftmax(dim=1)(x), Tensor.log_softmax, atol=1e-7, grad_atol=1e-7)
     helper_test_op([()], lambda x: torch.nn.LogSoftmax(dim=0)(x), Tensor.log_softmax, atol=1e-7, grad_atol=1e-7)

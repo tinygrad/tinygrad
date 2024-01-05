@@ -91,16 +91,17 @@ class Transformer:
 
     for hi in self.h: h = hi(h, start_pos, mask)
 
-    logits = self.lm_head(self.ln_f(h))[:, -1, :].flatten()
+    logits = self.lm_head(self.ln_f(h))[:, -1, :]
     if temperature < 1e-6:
-      ret = (logits == logits.max())
+      ret = logits.argmax(-1)
     else:
-      ret = (logits / temperature).softmax()
-    return (ret.half() if HALF else ret).realize()
+      ret = (logits / temperature).softmax().multinomial()
+    return ret.flatten().realize()
 
   # TODO: fix empty token
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
-    return (self.forward_jit if (isinstance(tokens, Variable) or tokens.shape[1] == 1) and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
+    forward = (self.forward_jit if (isinstance(tokens, Variable) or tokens.shape[1] == 1) and getenv("JIT") else self.forward)
+    return forward(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257
 MODEL_PARAMS = {
@@ -118,14 +119,19 @@ class GPT2:
     model = Transformer(**MODEL_PARAMS[model_size])
     weights = torch_load(fetch(f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'))
     # special treatment for the Conv1D weights we need to transpose
-    transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
-    for k in weights.keys():
-      if any(k.endswith(w) for w in transposed):
-        weights[k] = weights[k].to(Device.DEFAULT).T
+    transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
+    for k in weights:
+      if k.endswith(transposed):
+        weights[k] = weights[k].T
     # lm head and wte are tied
-    weights['lm_head.weight'] = Tensor(weights['wte.weight'].numpy())
+    weights['lm_head.weight'] = weights['wte.weight']
 
     load_state_dict(model, weights)
+
+    if HALF:
+      for l in get_state_dict(model).values():
+        l.assign(l.half().realize())
+
     return GPT2(model, tokenizer)
 
   def __init__(self, model, tokenizer):
@@ -140,17 +146,14 @@ class GPT2:
       GlobalCounters.reset()
       if timing: print("")
       st = GlobalCounters.time_sum_s
-      with Timing("total ", enabled=timing):
-        with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
-                    f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                    (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
-          if batch_size == 1 and len(toks[0][start_pos:]) == 1:
-            tokens = Variable("tokens", 0, VOCAB_SIZE).bind(toks[0][start_pos])
-          else:
-            tokens = Tensor([x[start_pos:] for x in toks])
-          probs = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature)
-        # TODO: fix JIT rand so we can put this in the JIT
-        tok = probs.multinomial().flatten().numpy().tolist()
+      with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+                  f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                  (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
+        if batch_size == 1 and len(toks[0][start_pos:]) == 1:
+          tokens = Variable("tokens", 0, VOCAB_SIZE).bind(toks[0][start_pos])
+        else:
+          tokens = Tensor([x[start_pos:] for x in toks])
+        tok = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature).numpy().tolist()
       start_pos = len(toks[0])
       for i,t in enumerate(tok): toks[i].append(t)
     return [self.tokenizer.decode(x) for x in toks]
@@ -175,15 +178,11 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   if args.seed is not None:
-    Tensor._seed = args.seed
+    Tensor.manual_seed(args.seed)
     np.random.seed(args.seed)
 
   print(f"using {args.model_size}")
   gpt2 = GPT2.build(args.model_size)
-
-  if HALF:
-    for l in get_state_dict(gpt2).values():
-      l.assign(l.half().realize())
 
   if args.benchmark != -1:
     gpt2.model(Tensor.rand(args.batch_size, args.benchmark), Variable("a", 0, MAX_CONTEXT).bind(0)).realize()

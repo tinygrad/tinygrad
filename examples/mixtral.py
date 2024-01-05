@@ -50,7 +50,7 @@ if __name__ == "__main__":
   for i in range(args.count):
     GlobalCounters.reset()
     with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
-      tok = model(Tensor([toks[start_pos:]]), 0 if start_pos == 0 else Variable("start_pos", 1, 1024).bind(start_pos), args.temperature).multinomial().item()
+      tok = model(Tensor([toks[start_pos:]]), 0 if start_pos == 0 else Variable("start_pos", 1, 1024).bind(start_pos), args.temperature).item()
     toks.append(tok)
     start_pos += 1
     print(spp.decode(toks))

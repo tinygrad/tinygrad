@@ -32,7 +32,7 @@ def round_up(num, amt:int): return (num+amt-1)//amt * amt
 def merge_dicts(ds:Iterable[Dict[T,U]]) -> Dict[T,U]:
   assert len(kvs:=set([(k,v) for d in ds for k,v in d.items()])) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"  # noqa: E501
   return {k:v for d in ds for k,v in d.items()}
-def partition(lst:List[T], fxn:Callable[[T],bool]):
+def partition(lst:List[T], fxn:Callable[[T],bool]) -> Tuple[List[T], List[T]]:
   a:List[T] = []
   b:List[T] = []
   for s in lst: (a if fxn(s) else b).append(s)
@@ -172,7 +172,8 @@ def cpu_time_execution(cb, enable):
 # *** ctypes helpers
 
 # TODO: make this work with read only memoryviews (if possible)
-def from_mv(mv, to_type=ctypes.c_char): return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type))
+def from_mv(mv:memoryview, to_type=ctypes.c_char): return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type))
+def to_mv(ptr, sz) -> memoryview: return memoryview(ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint8 * sz)).contents).cast("B")
 def to_char_p_p(options: List[bytes], to_type=ctypes.c_char): return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])  # noqa: E501
 @functools.lru_cache(maxsize=None)
 def init_c_struct_t(fields: Tuple[Tuple[str, ctypes._SimpleCData], ...]):
