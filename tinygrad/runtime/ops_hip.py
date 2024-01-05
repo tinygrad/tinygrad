@@ -44,12 +44,11 @@ class HIPProgram:
     return hip_time_execution(lambda: check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, encode_args_cuda_style(args, vals, hip.hipDeviceptr_t, marks=(1,2,3))[0])), enable=wait)  # noqa: E501
 
 T = TypeVar("T")
-CHUNK_SIZE, PAGE_SIZE = 128*1024*1024, 0x1000
+CHUNK_SIZE, PAGE_SIZE = 256*1024*1024, 0x1000
 class HIPAllocator(LRUAllocator):
   def __init__(self, device:HIPDevice):
     self.device = device
     check(hip.hipSetDevice(self.device.device))
-    self.hb = [self._hostalloc(CHUNK_SIZE), self._hostalloc(CHUNK_SIZE)]
     super().__init__()
   def _alloc(self, size:int):
     check(hip.hipSetDevice(self.device.device))
@@ -58,6 +57,7 @@ class HIPAllocator(LRUAllocator):
   def _hostalloc(self, size:int): return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 0)))
   def _copyin_async(self, dest:T, src:T, size:int): check(hip.hipMemcpyAsync(dest, src, size, hip.hipMemcpyHostToDevice, None))
   def _copy_from_fd(self, dest, fd, offset, size):
+    if not hasattr(self, 'hb'): self.hb = [self._hostalloc(CHUNK_SIZE) for _ in range(2)]
     minor_offset = offset % PAGE_SIZE
     offset -= minor_offset
     real_size = round_up(size+minor_offset, PAGE_SIZE)
@@ -65,13 +65,13 @@ class HIPAllocator(LRUAllocator):
     copied_in = 0
     for local_offset in range(0, size+minor_offset, CHUNK_SIZE):
       local_size = min(real_size-local_offset, CHUNK_SIZE)
-      ret = libc.read(fd, self.hb[0], local_size)
-      assert ret == local_size, f"{ret} != {local_size}"
-      self.device.synchronize()
       copy_size = min(local_size-minor_offset, size-copied_in)
+      ret = libc.read(fd, self.hb[0], local_size)
+      assert ret >= (minor_offset+copy_size), f"{ret} < {minor_offset+copy_size}"
+      check(hip.hipDeviceSynchronize())
       self._copyin_async(ctypes.c_void_p(dest.value + copied_in), ctypes.c_void_p(self.hb[0].value + minor_offset), copy_size)
       copied_in += copy_size
-      self.hb = self.hb[::-1]
+      self.hb = self.hb[1:] + [self.hb[0]]
       minor_offset = 0 # only on the first
     assert copied_in == size, f"{copied_in} != {size}"
   def copyin(self, dest:T, src: memoryview):
