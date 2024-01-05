@@ -111,8 +111,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
   for bufname,dtype in buf_to_dtype.items():
     if not isinstance(dtype, PtrDType) and dtype == dtypes.int32: lvars[bufname] = bb[-1].sext(func.args[buf_index[bufname]], ir.IntType(32))
 
-  for u in uops:
-    uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
+  for u,uop,dtype,vin,args in [(u,u.uop,u.dtype,u.vin,u.arg) for u in uops]:
     if uop == UOps.LOOP:
       bb.append(ir.IRBuilder(func.append_basic_block(f"loop_body_{len(loop_blocks)}")))
       bb[-2].branch(bb[-1]._block)
@@ -143,19 +142,13 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
     if uop == UOps.LOAD:
       assert dtype is not None
       if len(vin) > 2:
-        gate = bb[-1].trunc(lvars[vin[2]], ir.IntType(1))
-        aug_idx = bb[-1].select(gate, lvars[vin[1]], ir.Constant(ir.IntType(32), 0))
-        val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [aug_idx], inbounds=True))
-        val = cast(bb, val, vin[0].dtype, dtype)
-        val = bb[-1].select(gate, val, lvars[vin[3]])
-      else:
-        val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
-        val = cast(bb, val, vin[0].dtype, dtype)
+        aug_idx = bb[-1].select((gate:=bb[-1].trunc(lvars[vin[2]], ir.IntType(1))), lvars[vin[1]], ir.Constant(ir.IntType(32), 0))
+        val = bb[-1].select(gate, cast(bb, bb[-1].load(bb[-1].gep(lvars[vin[0]], [aug_idx], inbounds=True)), vin[0].dtype, dtype), lvars[vin[3]])
+      else: val = cast(bb, bb[-1].load(bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True)), vin[0].dtype, dtype)
       lvars[u] = val
     if uop == UOps.PHI:
-      lvars[u] = lvars[vin[1]]
+      backward, lvars[u] = vin[0], lvars[vin[1]]
       # PHI UOps can link to other PHI Uops, backtrace this to DEFINE_ACC
-      backward = vin[0]
       while backward.uop == UOps.PHI: backward = backward.vin[0]
       lvars[backward] = lvars[u]
     if uop == UOps.STORE:
@@ -164,6 +157,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
       if len(vin) > 3:
         with bb[-1].if_then(bb[-1].trunc(lvars[vin[3]], ir.IntType(1))): store_op()
       else: store_op()
+
     if uop == UOps.ALU:
       lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin] + [dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else vin[0].dtype])
     if uop == UOps.CAST: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=isinstance(args, tuple) and args[1])

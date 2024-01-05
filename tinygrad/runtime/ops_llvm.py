@@ -33,11 +33,8 @@ class LLVM:
       #llvm.set_option(str(), '--debug')
 
       # does this do anything?
-      builder = llvm.create_pass_manager_builder()
-      builder.opt_level = 3
+      builder = llvm.create_pass_manager_builder(opt=3, loop_vectorize=True, slp_vectorize=True)
       builder.size_level = 0
-      builder.loop_vectorize = True
-      builder.slp_vectorize = True
       builder.populate(LLVM.optimizer)
 
     LLVM.target_machine.set_asm_verbosity(True)
