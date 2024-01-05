@@ -1,4 +1,4 @@
-import os, mmap, _posixshmem
+import os, mmap, _posixshmem, io
 from typing import Callable, Dict, Tuple, Optional, BinaryIO
 from tinygrad.dtype import DType, dtypes
 from tinygrad.helpers import prod, OSX
@@ -14,13 +14,13 @@ class UnderlyingDiskBuffer:
     if self._mem is not None: return self
     if str(self.device).startswith("shm:"):
       fd = _posixshmem.shm_open("/"+self.device[4:].lstrip("/"), os.O_RDWR, 0o600)
-      self._mem = mmap.mmap(fd, self.size, flags=mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
-      if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: self._mem.madvise(hp) # type: ignore
+      self._mem = mmap.mmap(fd, self.size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
       os.close(fd)
     else:
-      self._fd = open(self.device, "a+b")
-      if os.path.getsize(self.device) < self.size: os.ftruncate(self._fd.fileno(), self.size)
-      self._mem = mmap.mmap(self._fd.fileno(), self.size)
+      self._fd = os.open(self.device, os.O_RDWR|os.O_CREAT) #|(0 if OSX else os.O_DIRECT))
+      if os.fstat(fd).st_size < self.size: os.ftruncate(fd, self.size)
+      self._mem = mmap.mmap(fd, self.size)
+    if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: mem.madvise(hp) # type: ignore
     return self
   @property
   def fd(self): return self.__load()._fd
@@ -49,9 +49,11 @@ class DiskAllocator(Allocator):
   def as_buffer(self, src:DiskBuffer): return src._buf()
   def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def copyout(self, dest:memoryview, src:DiskBuffer):
-    if src.ud.fd is not None:
-      src.ud.fd.seek(src.offset)
-      src.ud.fd.readinto(dest)
+    if OSX and src.ud.fd is not None:
+      # OSX doesn't seem great at mmap, this is faster
+      with io.FileIO(src.ud.fd, "a+b", closefd=False) as fo:
+        fo.seek(src.offset)
+        fo.readinto(dest)
     else:
       dest[:] = src._buf()
 

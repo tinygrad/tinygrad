@@ -118,10 +118,12 @@ class Transformer:
     h = self.tok_embeddings(tokens)
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos+1).realize() if seqlen > 1 else None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
-    logits = self.output(self.norm(h))[:, -1, :].flatten()
+    logits = self.output(self.norm(h))[:, -1, :]
     if temperature < 1e-6:
-      return (logits == logits.max()).half().realize()
-    return (logits / temperature).softmax().half().realize()
+      ret = logits.argmax(-1)
+    else:
+      ret = (logits / temperature).softmax().multinomial()
+    return ret.realize()
 
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
     # TODO: better way to handle the first call v.s. the rest?

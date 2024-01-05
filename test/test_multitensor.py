@@ -2,8 +2,10 @@ import unittest
 from tinygrad import Tensor, Device, nn, GlobalCounters
 from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
+from extra.lr_scheduler import OneCycleLR
 import numpy as np
 
+d_zero = f"{Device.DEFAULT}:0"
 d0, d1 = f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2"
 d2, d3 = f"{Device.DEFAULT}:3", f"{Device.DEFAULT}:4"
 N = 128
@@ -18,6 +20,21 @@ class TestMultiTensor(unittest.TestCase):
     X.shard_((d0, d1), 0)
     for lb in X.lazydata.lbs:
       assert lb.shape == (128,)
+
+  def test_shard_same_device(self):
+    X = Tensor.ones(256).contiguous().realize()
+    X.shard_((d0, X.device), 0)
+    (X + X).realize()
+
+  def test_shard_plus_one_sum(self):
+    X = Tensor.ones(256).contiguous().realize()
+    X.shard_([d0, d1], 0)
+    (X + 1).sum().realize()
+
+  def test_shard_plus_one_sum_d_zero(self):
+    X = Tensor.ones(256).contiguous().realize()
+    X.shard_([d_zero, d1], 0)
+    (X + 1).sum().realize()
 
   def test_numpy(self):
     X = Tensor.ones(256)
@@ -113,6 +130,13 @@ class TestMultiTensor(unittest.TestCase):
     out.mean().backward()
     #for p in get_parameters(conv): p.grad.realize()
     optim.step()
+
+  def test_lr_scheduler_OneCycleLR(self):
+    conv = nn.Conv2d(3, 16, 3)
+    for p in get_parameters(conv): p.shard_((d0, d1))
+    optim = nn.optim.SGD(get_parameters(conv))
+    lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
+    lr_sched.step()
 
   def test_data_parallel_resnet(self):
     import sys, pathlib

@@ -111,7 +111,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
         if DEBUG >= 2: print(f"WARNING: returning Dummy for {module} {name}")
         return Dummy
       return intercept[name] if module_root == "torch" else super().find_class(module, name)
-    def persistent_load(self, pid): return deserialized_objects[pid] if pid in deserialized_objects else pid
+    def persistent_load(self, pid): return deserialized_objects.get(pid, pid)
 
   if zipfile.is_zipfile(fn):
     myzip = zipfile.ZipFile(fn, 'r')

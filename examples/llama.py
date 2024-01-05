@@ -413,9 +413,7 @@ After you are done speaking, output [EOS]. You are not Chad.
           with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                       f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                       (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
-            probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
-          # TODO: fix JIT rand so we can put this in the JIT
-          tok = probs.multinomial().item()
+            tok = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).item()
 
       # use the kv cache
       start_pos = len(toks)
