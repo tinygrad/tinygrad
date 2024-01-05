@@ -165,6 +165,16 @@ class TestBitCast(unittest.TestCase):
     with self.assertRaises(AssertionError):
       _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
 
+  def test_bitcast_float_to_int32(self):
+    a = Tensor([1.,2,3])
+    b = a.bitcast(dtypes.int32)
+    assert b.numpy()[0] == 0x3f800000
+
+  def test_bitcast_upcasted(self):
+    a = Tensor.zeros(100, 4, dtype=dtypes.int32).contiguous() + 0x3f800000
+    b = a.bitcast(dtypes.float32)
+    assert b.numpy()[0,0] == 1.
+
 class TestInt16Dtype(TestDType): DTYPE = dtypes.int16
 class TestUint16Dtype(TestDType): DTYPE = dtypes.uint16
 
