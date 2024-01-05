@@ -11,7 +11,7 @@ class MixtureFeedForward:
     self.experts = [FeedForward(dim, hidden_dim, linear) for _ in range(num_experts)]
   def __call__(self, x:Tensor) -> Tensor:
     assert x.shape[0] == 1, "only BS=1"
-    g = self.gate(x).exp()
+    g = self.gate(x).float().exp()
     choice = g.data().tolist()[0][0]
     top = sorted(enumerate(choice), key=lambda x: -x[1])
     norm = top[0][1] + top[1][1]

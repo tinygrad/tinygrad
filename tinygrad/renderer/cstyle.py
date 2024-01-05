@@ -183,7 +183,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         if isinstance(args, tuple) and args[1]:  # bitcast
           assert len(vin) == 1
           precast = ssa(None,'precast')
-          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {precast} = {r[vin[0]]};")
+          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else cast(DType, vin[0].dtype).name} {precast} = {r[vin[0]]};")
           val = lang.render_cast([precast], dtype, bitcast=True)
         else:
           val = lang.render_cast([r[x] for x in vin], dtype, bitcast=False)
