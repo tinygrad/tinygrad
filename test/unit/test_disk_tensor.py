@@ -26,9 +26,8 @@ class TestTorchLoad(unittest.TestCase):
   def test_load_convnext(self): compare_weights_both('https://dl.fbaipublicfiles.com/convnext/convnext_tiny_1k_224_ema.pth')
 
   # for GPU, cl_khr_fp16 isn't supported
-  # for LLVM, it segfaults because it can't link to the casting function
   # CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
-  @unittest.skipIf(Device.DEFAULT in ["GPU", "LLVM", "CUDA"] and CI, "fp16 broken in some backends")
+  @unittest.skipIf(Device.DEFAULT in ["GPU", "CUDA"] and CI, "fp16 broken in some backends")
   @unittest.skipIf(Device.DEFAULT == "TORCH", "torch doesn't support the way we load bfloat (cast to uint32)")
   def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/qazalin/bf16-lightweight/resolve/main/consolidated.00.pth?download=true")
 
