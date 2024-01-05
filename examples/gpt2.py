@@ -100,7 +100,8 @@ class Transformer:
 
   # TODO: fix empty token
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
-    return (self.forward_jit if (isinstance(tokens, Variable) or tokens.shape[1] == 1) and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
+    forward = (self.forward_jit if (isinstance(tokens, Variable) or tokens.shape[1] == 1) and getenv("JIT") else self.forward)
+    return forward(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257
 MODEL_PARAMS = {
@@ -118,14 +119,19 @@ class GPT2:
     model = Transformer(**MODEL_PARAMS[model_size])
     weights = torch_load(fetch(f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'))
     # special treatment for the Conv1D weights we need to transpose
-    transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
-    for k in weights.keys():
-      if any(k.endswith(w) for w in transposed):
-        weights[k] = weights[k].to(Device.DEFAULT).T
+    transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
+    for k in weights:
+      if k.endswith(transposed):
+        weights[k] = weights[k].T
     # lm head and wte are tied
-    weights['lm_head.weight'] = Tensor(weights['wte.weight'].numpy())
+    weights['lm_head.weight'] = weights['wte.weight']
 
     load_state_dict(model, weights)
+
+    if HALF:
+      for l in get_state_dict(model).values():
+        l.assign(l.half().realize())
+
     return GPT2(model, tokenizer)
 
   def __init__(self, model, tokenizer):
@@ -172,15 +178,11 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   if args.seed is not None:
-    Tensor._seed = args.seed
+    Tensor.manual_seed(args.seed)
     np.random.seed(args.seed)
 
   print(f"using {args.model_size}")
   gpt2 = GPT2.build(args.model_size)
-
-  if HALF:
-    for l in get_state_dict(gpt2).values():
-      l.assign(l.half().realize())
 
   if args.benchmark != -1:
     gpt2.model(Tensor.rand(args.batch_size, args.benchmark), Variable("a", 0, MAX_CONTEXT).bind(0)).realize()
