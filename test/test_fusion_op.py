@@ -23,7 +23,6 @@ class TestFusionOp(unittest.TestCase):
     outd = out.data().tolist()
     assert all(x == 20.0 for x in outd)
 
-  # TODO: fix this test to be fast and remove O(2^n) behavior
   def test_recursive_add(self):
     st = time.perf_counter()
     a = Tensor([1,2,3,4])

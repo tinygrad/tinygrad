@@ -2,8 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad import Device
-from tinygrad.helpers import dtypes
+from tinygrad import Device, dtypes
 
 N = 200  # has to be bigger than the cache to fail
 

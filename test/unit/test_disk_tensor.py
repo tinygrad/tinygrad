@@ -124,7 +124,7 @@ class TestSafetensors(unittest.TestCase):
   def test_save_all_dtypes(self):
     for dtype in dtypes.fields().values():
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
-      path = temp("ones.safetensors")
+      path = temp(f"ones.{dtype}.safetensors")
       ones = Tensor.rand((10,10), dtype=dtype)
       safe_save(get_state_dict(ones), path)
       assert ones == list(safe_load(path).values())[0]
@@ -146,7 +146,7 @@ class TestDiskTensor(unittest.TestCase):
   def test_write_ones(self):
     pathlib.Path(temp("dt2")).unlink(missing_ok=True)
 
-    out = Tensor.ones(10, 10, device="CPU")
+    out = Tensor.ones(10, 10, device="CPU").contiguous()
     outdisk = out.to(f"disk:{temp('dt2')}")
     print(outdisk)
     outdisk.realize()

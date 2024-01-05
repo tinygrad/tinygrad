@@ -13,8 +13,9 @@ import onnx
 from tqdm import tqdm
 from typing import Tuple, List, Optional, Dict
 from extra.onnx import get_run_onnx
-from tinygrad import Tensor, Device
-from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, fetch, getenv, ImageDType, GRAPH, DEBUG
+from tinygrad import Tensor, Device, GlobalCounters, dtypes
+from tinygrad.dtype import ImageDType
+from tinygrad.helpers import partition, Context, fetch, getenv, GRAPH, DEBUG
 from tinygrad.realize import run_schedule, lower_schedule_item
 from tinygrad.ops import LoadOps, ScheduleItem
 Device.DEFAULT = "GPU"
@@ -83,7 +84,7 @@ def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[s
     return
 
   # set inputs
-  for k,v in inputs.items(): v.lazydata.realized.copyin(new_np_inputs[k].data)
+  for k,v in inputs.items(): v.lazydata.base.realized.copyin(new_np_inputs[k].data)
 
   # run code (all buffers have been allocated)
   GlobalCounters.reset()

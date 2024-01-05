@@ -2,12 +2,12 @@ from __future__ import annotations
 import sys, math
 import numpy as np
 from typing import Union, Optional, Any, Tuple, List, Set, Dict
-from tinygrad.helpers import prod, dtypes, DType, merge_dicts, flatten, getenv, dedup, ImageDType, DEBUG, all_int, all_same
-from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps
-from tinygrad.ops import Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem, vars_from_ast
+from tinygrad.dtype import dtypes, DType, ImageDType
+from tinygrad.helpers import prod, merge_dicts, flatten, getenv, dedup, DEBUG, all_int, all_same
+from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps, Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, Device
 from tinygrad.graph import log_lazybuffer
 from weakref import ref, WeakSet, WeakValueDictionary, ReferenceType
 
@@ -33,6 +33,7 @@ class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                base:Optional[LazyBuffer]=None):
+    assert isinstance(device, str) and device == Device.canonicalize(device)
     self.device, self.st, self.dtype, self.shape = device, st, dtype, st.shape
     if base is None:
       # properties on base
@@ -86,15 +87,25 @@ class LazyBuffer:
     return ret
 
   def copy_to_device(self, device:str) -> LazyBuffer:
+    # no COPY
+    if self.device == device: return self
+
     # COPY there and back = no COPY at all
     if self.base == self and not self.realized and self.op == LoadOps.COPY and self.srcs[0].device == device: return self.srcs[0]
 
-    # TODO: const doesn't have to be copied (issues with disk tensor)
-    #if self.is_unrealized_const(): return self.const(self.base.arg)._view(self.st)
-    out = self.contiguous()
-    return create_lazybuffer(device, out.st, out.dtype, LoadOps.COPY, srcs=(out,))
+    # const doesn't have to be copied (issues with disk tensor)
+    if self.is_unrealized_const():
+      return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, device, arg=self.base.arg)._view(self.st)
 
-  def e(self:LazyBuffer, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
+    # if it's a shrink, do the shrink before the copy with CONTIGUOUS
+    # TODO: why is this required on WEBGPU?
+    if prod(self.st.shape) < prod(self.base.st.shape) or device == "WEBGPU":
+      return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, srcs=(self.contiguous(),))
+
+    # copy the base and apply the shapetracker on the new device
+    return create_lazybuffer(device, self.base.st, self.dtype, LoadOps.COPY, srcs=(self.base,))._view(self.st)
+
+  def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     srcs: List[LazyBuffer] = []
     for s in (self,)+in_srcs:
       if s == s.base and s.base.contiguous_child and (root:=s.base.contiguous_child[0]()) is not None:
@@ -102,18 +113,22 @@ class LazyBuffer:
       else:
         srcs.append(s)
     assert all_same(dts:=[x.dtype.scalar() for x in (srcs if op != TernaryOps.WHERE else srcs[1:])]), f"all dtypes must match {dts} on {op}"
-    assert op != TernaryOps.WHERE or self.device != "WEBGPU" or srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
-    output_dtype = srcs[-1].dtype if op != BinaryOps.CMPLT else (dtypes.bool if self.device != "WEBGPU" else dtypes.float32)
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), output_dtype, op, arg, tuple(srcs))
+    assert all_same([x.shape for x in srcs]), f"all shapes must be the same {[x.shape for x in srcs]}"
+    if op == TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
+    out_dtype = srcs[-1].dtype if op not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else dtypes.bool
+    ret = create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
+    return ret.cast(dtypes.float32) if (out_dtype == dtypes.bool and self.device == "WEBGPU") else ret
 
   # *** reduce ops ***
 
-  def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+  def _reduce_op(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
     unbound_new_shape = tuple(s.unbind()[0] if not isinstance(s, int) else s for s in new_shape)
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, unbound_new_shape, (self,))
 
-  def r(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+  def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+    assert len(self.shape) == len(new_shape) and all(s == ns or ns == 1 for s,ns in zip(self.shape, new_shape)), \
+      f"reduce shape lens must match {self.shape} {new_shape}"
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not all_int(self.shape) or (0 in self.shape) or prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, new_shape)
@@ -126,16 +141,16 @@ class LazyBuffer:
 
   # *** movement ops ***
 
-  def _view(self:LazyBuffer, new_st:ShapeTracker) -> LazyBuffer:
+  def _view(self, new_st:ShapeTracker) -> LazyBuffer:
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
 
-  def reshape(self:LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer: return self._view(self.st.reshape(arg))
-  def pad(self:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer: return self._view(self.st.pad(arg))
-  def expand(self:LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer: return self._view(self.st.expand(arg))
-  def permute(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer: return self._view(self.st.permute(arg))
-  def shrink(self:LazyBuffer, arg:Tuple[Tuple[sint, sint], ...]) -> LazyBuffer: return self._view(self.st.shrink(arg))
-  def stride(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer: return self._view(self.st.stride(arg))
+  def reshape(self, arg:Tuple[sint, ...]): return self._view(self.st.reshape(arg))
+  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self._view(self.st.pad(arg))
+  def expand(self, arg:Tuple[sint, ...]): return self._view(self.st.expand(arg))
+  def permute(self, arg:Tuple[int, ...]): return self._view(self.st.permute(arg))
+  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self._view(self.st.shrink(arg))
+  def stride(self, arg:Tuple[int, ...]): return self._view(self.st.stride(arg))
 
 # *** schedule creation ***
 
@@ -195,7 +210,7 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
     op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify()))
 
   return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + \
-    [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in vars_from_ast(op)})]
+    [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in op.vars()})]
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None], simple_pads:Set[LazyBuffer]):
@@ -222,7 +237,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
     realizes.add(buf.srcs[0].base)
   for x in buf.srcs: _recurse_lb(x, realizes, allbufs, simple_pads)
 
-UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
+UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
 def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   if buf in realizes or buf.realized: return True
   # NOTE: this broke to_image_idx and coder with JIT

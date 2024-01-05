@@ -1,8 +1,9 @@
 import os, atexit
-from typing import List, Any
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, LazyOp
+from collections import defaultdict
+from typing import List, Any, DefaultDict
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, LazyOp, GlobalCounters
 from tinygrad.device import Device
-from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, GlobalCounters
+from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, getenv
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.shape.symbolic import NumNode
 
@@ -28,21 +29,12 @@ def init_graph():
     os.system(f'dot -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
   atexit.register(save_graph_exit)
 
-node_count = 0
+counts: DefaultDict[type, int] = defaultdict(int)
 def nm(x):
-  global node_count
   if not hasattr(x, 'node_id'):
-    setattr(x, 'node_id', node_count)
-    node_count += 1
+    setattr(x, 'node_id', counts[type(x)])
+    counts[type(x)] += 1
   return x.node_id
-
-buf_count = 0
-def bm(x):
-  global buf_count
-  if not hasattr(x, 'buf_id'):
-    setattr(x, 'buf_id', buf_count)
-    buf_count += 1
-  return x.buf_id
 
 def get_sop(op: List[Op]):
   op = [x for x in op if x not in BufferOps]
@@ -59,7 +51,7 @@ def realized_lazybuffer(lb, num):
     init_graph()
     G.nodes[nm(lb)]['style'] = '"filled,bold"'
     G.nodes[nm(lb)]['fillcolor'] = G.nodes[nm(lb)]['fillcolor'][:-2]
-    G.nodes[nm(lb)]['label'] = '"' + G.nodes[nm(lb)]["label"].replace('"', '') + f'\nK:{num} b:{bm(lb.realized)}"'
+    G.nodes[nm(lb)]['label'] = '"' + G.nodes[nm(lb)]["label"].replace('"', '') + f'\nK:{num} b:{nm(lb.realized)}"'
 
 def log_lazybuffer(lb, scheduled=False):
   top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0",
@@ -85,17 +77,20 @@ def log_lazybuffer(lb, scheduled=False):
     else:
       if nm(lb) not in G.nodes:
         # realized but unseen?
-        G.add_node(nm(lb), label=f'"{str(lb.base.realized)[5:-1].replace(" ", chr(10))}\nb:{bm(lb.realized)}"', style='filled', fillcolor="#f0c08080")
-def _tree(lazydata, prefix=""):
-  if type(lazydata).__name__ == "LazyBuffer":
-    return [f"━━ realized {lazydata.dtype.name} {lazydata.shape}"] if (lazydata.realized) else _tree(lazydata.op, "LB ")
+        G.add_node(nm(lb), label=f'"{str(lb.base.realized)[5:-1].replace(" ", chr(10))}\nb:{nm(lb.realized)}"', style='filled', fillcolor="#f0c08080")
+
+def _tree(lazydata, cycles, cnt, prefix=""):
+  cnt[0] += 1
   if len(lazydata.src) == 0: return [f"━━ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
+  if (lid := id(lazydata)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
+    return [f"━⬆︎ goto {cycles[id(lazydata)][0]}: {lazydata.op.name}"]
+  cycles[lid] = (cnt[0], 1 if lid not in cycles else cycles[lid][1]+1)
   lines = [f"━┳ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
-  childs = [_tree(c) for c in lazydata.src[:]]
+  childs = [_tree(c, cycles, cnt) for c in lazydata.src[:]]
   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
 
-def print_tree(lazydata:LazyOp): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(lazydata))]))
+def print_tree(lazydata:LazyOp): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(lazydata, {}, [-1]))]))
 
 def graph_uops(uops:List[UOp]):
   import networkx as nx
@@ -107,6 +102,5 @@ def graph_uops(uops:List[UOp]):
     if u.uop == UOps.END: continue
     G.add_node(uops.index(u), label=f"{str(u.uop)[5:]}{(' '+str(u.arg)) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.uop, "#ffffff"))  # noqa: E501
     for v in u.vin: G.add_edge(uops.index(v), uops.index(u))
-  GRAPHPATH = "/tmp/uops"
-  nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
-  os.system(f'dot -Grankdir=LR -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
+  nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.uops.dot')
+  os.system(f'dot -Grankdir=LR -Tsvg {GRAPHPATH}.uops.dot -o {GRAPHPATH}.uops.svg')

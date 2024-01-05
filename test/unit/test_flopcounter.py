@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 import unittest
+from tinygrad import dtypes
 from tinygrad.ops import LazyOp, BinaryOps, ReduceOps, get_lazyop_info, BufferOps, MemBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.helpers import dtypes
 
 class TestFlopCounter(unittest.TestCase):
   def setUp(self):

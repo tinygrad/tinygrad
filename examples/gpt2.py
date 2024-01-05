@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
+from typing import Optional, Union
 import argparse
 from tqdm import trange
 import numpy as np
-from tinygrad import Device
-from typing import Optional, Union
-from tinygrad.tensor import Tensor
-from tinygrad.nn import Embedding, Linear, LayerNorm
-from tinygrad.shape.symbolic import Variable
-from tinygrad.jit import TinyJit
 import tiktoken
+from tinygrad import Tensor, TinyJit, Device, GlobalCounters
+from tinygrad.helpers import Timing, DEBUG, getenv, fetch, colored
+from tinygrad.nn import Embedding, Linear, LayerNorm
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
-from tinygrad.helpers import GlobalCounters, Timing, DEBUG, getenv, fetch, colored, dtypes
+from tinygrad.shape.symbolic import Variable
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 HALF = getenv("HALF")
@@ -30,8 +28,8 @@ class Attention:
 
     if HALF: x = x.half()
     xqkv = self.c_attn(x)
-    xq, xk, xv = [xqkv.shrink((None, None, (i*self.dim, (i+1)*self.dim))).reshape(xqkv.shape[0], xqkv.shape[1], self.n_heads, self.head_dim) for i in range(3)]
-    bsz, seqlen, n_heads, head_dim = xq.shape
+    xq, xk, xv = [xqkv.shrink((None, None, (i*self.dim, (i+1)*self.dim))).reshape(None, None, self.n_heads, self.head_dim) for i in range(3)]
+    bsz, seqlen, _, _ = xq.shape
 
     # create kv cache
     if not hasattr(self, "cache_kv"):
@@ -45,7 +43,7 @@ class Attention:
     self.cache_kv.assign(new_cache).realize()
 
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
-    return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).cast(dtypes.float32).transpose(1, 2).reshape(bsz, seqlen, -1))
+    return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1))
 
 class FeedForward:
   def __init__(self, dim, hidden_dim):
@@ -63,7 +61,7 @@ class TransformerBlock:
     self.ln_2 = LayerNorm(dim, norm_eps)
 
   def __call__(self, x:Tensor, start_pos:Variable, mask:Optional[Tensor]):
-    h = x + self.attn(self.ln_1(x), start_pos, mask)
+    h = x + self.attn(self.ln_1(x), start_pos, mask).float()
     return (h + self.mlp(self.ln_2(h)))
 
 class Transformer:
@@ -89,14 +87,16 @@ class Transformer:
 
     if HALF: h = h.half()
 
-    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos.val+1).realize() if seqlen > 1 else None
+    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos.val+1) if seqlen > 1 else None
 
     for hi in self.h: h = hi(h, start_pos, mask)
 
-    logits = self.lm_head(self.ln_f(h))
-    # NOTE: temperature=0 with HALF breaks due to precision, should use argmax instead
-    ret = (logits[:, -1, :] / (temperature+1e-6)).softmax()
-    return ret.half().realize() if HALF else ret.realize()
+    logits = self.lm_head(self.ln_f(h))[:, -1, :]
+    if temperature < 1e-6:
+      ret = logits.argmax(-1)
+    else:
+      ret = (logits / temperature).softmax().multinomial()
+    return ret.flatten().realize()
 
   # TODO: fix empty token
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
@@ -140,17 +140,14 @@ class GPT2:
       GlobalCounters.reset()
       if timing: print("")
       st = GlobalCounters.time_sum_s
-      with Timing("total ", enabled=timing):
-        with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
-                    f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                    (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
-          if batch_size == 1 and len(toks[0][start_pos:]) == 1:
-            tokens = Variable("tokens", 0, VOCAB_SIZE).bind(toks[0][start_pos])
-          else:
-            tokens = Tensor([x[start_pos:] for x in toks])
-          probs = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature)
-        # TODO: fix JIT rand so we can put this in the JIT
-        tok = probs.multinomial().flatten().numpy().tolist()
+      with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+                  f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                  (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
+        if batch_size == 1 and len(toks[0][start_pos:]) == 1:
+          tokens = Variable("tokens", 0, VOCAB_SIZE).bind(toks[0][start_pos])
+        else:
+          tokens = Tensor([x[start_pos:] for x in toks])
+        tok = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature).numpy().tolist()
       start_pos = len(toks[0])
       for i,t in enumerate(tok): toks[i].append(t)
     return [self.tokenizer.decode(x) for x in toks]

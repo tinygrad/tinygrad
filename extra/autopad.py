@@ -15,13 +15,11 @@ lin = Linearizer(sched[0].ast)
 
 lin.apply_opt(Opt(op=OptOps.PADTO, axis=0, amt=32))
 lin.apply_opt(Opt(op=OptOps.PADTO, axis=1, amt=32))
-lin.apply_opt(Opt(op=OptOps.PADTO, axis=2, amt=32))
 lin.hand_coded_optimizations()
 lin.linearize()
 print(f"{lin.applied_opts=}")
 
 run_linearizer(lin)
-quit()
 
 ###
 
@@ -30,11 +28,9 @@ sched = [si for si in a.lazydata.schedule() if si.ast.op not in LoadOps]
 assert len(sched) == 1
 lin = Linearizer(sched[0].ast)
 
-# lin.apply_opt(Opt(op=OptOps.LOCAL, axis=0, amt=32))
-
 lin.apply_opt(Opt(op=OptOps.PADTO, axis=0, amt=32))
-lin.apply_opt(Opt(op=OptOps.PADTO, axis=1, amt=32))
 lin.hand_coded_optimizations()
 lin.linearize()
+print(f"{lin.applied_opts=}")
 
 run_linearizer(lin)

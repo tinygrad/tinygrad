@@ -17,7 +17,7 @@ def expr_node_mask(view:View, idx:Node, valid:Optional[Node]=None) -> Node:
         base = ((idx//acc)%d)
         expr += [base >= x, base < y]
       acc *= d
-  return Variable.ands(expr)
+  return Node.ands(expr)
 
 # generate an expression if you have a single idx variable
 def expr_node(view:View, idx:Optional[Node]=None) -> Node:
@@ -27,12 +27,12 @@ def expr_node(view:View, idx:Optional[Node]=None) -> Node:
   for d,s,_ in reversed(_merge_dims(view.shape, view.strides)):
     ret.append(((idx//acc)%d)*s)
     acc *= d
-  return Variable.sum(ret)
+  return Node.sum(ret)
 
 # generate an expression if you have a variable or expression for each index
 def expr_idxs(view:View, idxs:Tuple[Node, ...]) -> Node:
   assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
-  return Variable.sum([NumNode(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])  # noqa: E501
+  return Node.sum([NumNode(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])  # noqa: E501
 
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
@@ -49,7 +49,7 @@ def idxs_to_idx(shape:Tuple[int, ...], idxs:Tuple[Node, ...]) -> Node:
   for tidx,d in zip(reversed(idxs), reversed(shape)):
     ret.append(tidx * acc)
     acc *= d
-  return Variable.sum(ret)
+  return Node.sum(ret)
 
 @dataclass(frozen=True)
 class ShapeTracker:
@@ -154,13 +154,13 @@ class ShapeTracker:
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := merge_views(self.views[-2], self.views[-1])) is not None:
-      if DEBUG >= 4: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
+      if DEBUG >= 5: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
       return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
     return self
 
   # *** under this line are the movement ops ***
 
-  def pad(self, arg: Tuple[Tuple[int, int], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].pad(arg), ))
+  def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].pad(arg), ))
   def shrink(self, arg: Tuple[Tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].shrink(arg), ))
   def expand(self, new_shape: Tuple[sint, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].expand(new_shape), ))
   def permute(self, axis: Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].permute(axis), ))

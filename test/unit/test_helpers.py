@@ -1,7 +1,6 @@
 import unittest
-import numpy as np
 from PIL import Image
-from tinygrad.helpers import Context, ContextVar, DType, dtypes, merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten
+from tinygrad.helpers import Context, ContextVar, merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten
 from tinygrad.shape.symbolic import Variable, NumNode
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -121,12 +120,6 @@ class TestMergeDicts(unittest.TestCase):
     with self.assertRaises(AssertionError):
       merge_dicts([a, d])
 
-class TestDtypes(unittest.TestCase):
-  def test_dtypes_fields(self):
-    fields = dtypes.fields()
-    self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
-    self.assertTrue(all(issubclass(value.np, np.generic) for value in fields.values() if value.np is not None))
-
 class TestStripParens(unittest.TestCase):
   def test_simple(self): self.assertEqual("1+2", strip_parens("(1+2)"))
   def test_nested(self): self.assertEqual("1+(2+3)", strip_parens("(1+(2+3))"))
@@ -155,6 +148,7 @@ class TestFetch(unittest.TestCase):
   def test_fetch_small(self):
     assert(len(fetch('https://google.com', allow_caching=False).read_bytes())>0)
 
+  @unittest.skip("test is flaky")
   def test_fetch_img(self):
     img = fetch("https://media.istockphoto.com/photos/hen-picture-id831791190", allow_caching=False)
     with Image.open(img) as pimg:

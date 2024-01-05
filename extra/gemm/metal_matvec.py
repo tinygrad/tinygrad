@@ -3,17 +3,16 @@ import os
 import numpy as np
 import time, torch, torch.mps
 
-from tinygrad.helpers import GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
-from tinygrad import Device
+from tinygrad import Device, GlobalCounters, dtypes
 from tinygrad.helpers import colored, getenv, CI, flat_mv
 
 import os
 os.environ["METAL"] = "1"
 import time
 import numpy as np
-from tinygrad.helpers import dtypes, getenv
+from tinygrad.helpers import getenv
 from tinygrad.runtime.ops_metal import MetalAllocator, MetalDevice, MetalProgram, compile_metal
 
 N = 16384

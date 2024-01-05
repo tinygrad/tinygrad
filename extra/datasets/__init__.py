@@ -1,7 +1,7 @@
 import os, gzip, tarfile, pickle
 import numpy as np
-from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes, fetch
+from tinygrad import Tensor, dtypes
+from tinygrad.helpers import fetch
 
 def fetch_mnist(tensors=False):
   parse = lambda file: np.frombuffer(gzip.open(file).read(), dtype=np.uint8).copy()

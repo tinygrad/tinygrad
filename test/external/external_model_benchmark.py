@@ -12,10 +12,10 @@ from tinygrad.tensor import Tensor
 from tinygrad import Device
 
 MODELS = {
-  "resnet50": "https://github.com/onnx/models/raw/main/archive/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
+  "resnet50": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
   "openpilot": "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx",
-  "efficientnet": "https://github.com/onnx/models/raw/main/archive/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
-  "shufflenet": "https://github.com/onnx/models/raw/main/archive/vision/classification/shufflenet/model/shufflenet-9.onnx",
+  "efficientnet": "https://github.com/onnx/models/raw/main/validated/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
+  "shufflenet": "https://github.com/onnx/models/raw/main/validated/vision/classification/shufflenet/model/shufflenet-9.onnx",
   "commavq": "https://huggingface.co/commaai/commavq-gpt2m/resolve/main/gpt2m.onnx",
 
   # broken in torch MPS
@@ -99,7 +99,6 @@ def benchmark_model(m, devices, validate_outs=False):
 
   if validate_outs:
     rtol, atol = 2e-3, 2e-3  # tolerance for fp16 models
-    if m == "openpilot" and 'CUDA' in devices: rtol, atol = 0.1, 0.1  # TODO: why is this broken?
     inputs = {k:Tensor(inp) for k,inp in np_inputs.items()}
     tinygrad_model = get_run_onnx(onnx_model)
     tinygrad_out = tinygrad_model(inputs)

@@ -1,17 +1,18 @@
-# ruff: noqa: E501
 import numpy as np
 import unittest, os
 
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
-from tinygrad.codegen.linearizer import Linearizer, UOp, UOps
+from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node
 from tinygrad.device import Compiled, Device, Buffer
 from tinygrad.ops import BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, Node, create_rednode
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
-from tinygrad.helpers import dtypes, prod
+from tinygrad.helpers import prod
+from tinygrad.dtype import dtypes
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestLinearizer(unittest.TestCase):
@@ -21,7 +22,7 @@ class TestLinearizer(unittest.TestCase):
     CacheCollector.start()
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),)))).realize()
     rawbufs = CacheCollector.finish()[0].rawbufs
-    assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.realized, b.lazydata.realized}
+    assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.lazydata.base.realized, b.lazydata.base.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     np.testing.assert_allclose(np_c, c.numpy(), atol=1e-4, rtol=1e-4)
 
@@ -71,10 +72,17 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
     assert num_ops <= 0, "more load or alu uops than needed"
 
-  def test_tensor_cores(self):
-    if Device.DEFAULT not in tensor_cores:
-      self.skipTest("No tensor cores for device")
+  def test_sum_acc_dtype(self):
+    for tensor_dtype, acc_dtype in (
+      (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
+      a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
+      k = Linearizer(a.lazydata.schedule()[-1].ast)
+      k.linearize()
+      local = [uop for uop in k.uops if uop.uop == UOps.DEFINE_ACC]
+      assert local[0].dtype == acc_dtype
 
+  @unittest.skipUnless(Device.DEFAULT in tensor_cores, "No tensor cores for device")
+  def test_tensor_cores(self):
     for tc in tensor_cores[Device.DEFAULT]:
       if tc.arch is not None and tc.arch != os.uname().machine: continue
       a, b = Tensor.rand(tc.dims[0], tc.dims[2], dtype=tc.dtype_in), Tensor.rand(tc.dims[2], tc.dims[1], dtype=tc.dtype_in)
@@ -108,8 +116,10 @@ class TestLinearizer(unittest.TestCase):
 
   def test_simplify_uop(self):
     def helper_test_simplify(uop, dtype, vin, arg=None):
-      ast = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=42, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
-      ast = LazyOp(BufferOps.STORE, (ast,), MemBuffer(0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
+      ast = LazyOp(BufferOps.CONST, (),
+                   ConstBuffer(42, dtypes.float, ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
+      ast = LazyOp(BufferOps.STORE, (ast,),
+                   MemBuffer(0, dtypes.float, ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
       lin = Linearizer(ast=ast) # this is a dummy ast
 
       lin.uops = []
@@ -120,21 +130,20 @@ class TestLinearizer(unittest.TestCase):
 
     c0 = UOp(UOps.CONST, dtypes.float, vin=(), arg=0.0)
     c1 = UOp(UOps.CONST, dtypes.float, vin=(), arg=1.0)
-    assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c1), arg=TernaryOps.WHERE).uop == UOps.ALU
+    assert helper_test_simplify(UOps.ALU, dtypes.float, vin=(UOp(UOps.CONST, dtypes.bool, vin=(), arg=True), c0, c1),
+                                arg=TernaryOps.WHERE).uop == UOps.ALU
 
 def helper_realized_ast(r:Tensor):
   s = r.lazydata.schedule()
   run_schedule(s[:-1])  # run all kernels except the last one
   # now all input LazyBuffers buffers in s[-1] should be realized
-  output_buffer = Buffer(s[-1].out.device, prod((s if isinstance(s, int) else s.max for s in s[-1].out.shape)), s[-1].out.dtype)  # allocate an output buffer
+  # allocate an output buffer
+  output_buffer = Buffer(s[-1].out.device, prod((s if isinstance(s, int) else s.max for s in s[-1].out.shape)), s[-1].out.dtype)
   return s[-1].ast, [output_buffer] + [l.realized for l in s[-1].inputs]
 
-@unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT], Compiled) and Device[Device.DEFAULT].linearizer_opts.supports_float4,
+                     "need Compiled backends that support float4")
 class TestFloat4(unittest.TestCase):
-  def setUp(self):
-    if not Device[Device.DEFAULT].linearizer_opts.supports_float4:
-      self.skipTest("Device does not support float4")
-
   @staticmethod
   def count_float4(k):
     return (len([uop for uop in k.uops if uop.uop == UOps.LOAD and uop.dtype == dtypes.float.vec(4)]),
@@ -410,8 +419,10 @@ class TestLinearizerOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2)],
       [Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.GROUPTOP, 0, 16)],
       [Opt(OptOps.LOCAL, 0, 32), Opt(OptOps.GROUPTOP, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 64)], # Checking how it works with locals + grouped reduce
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)], # Checking how it works with locals + grouped reduce + upcasts
+      # Checking how it works with locals + grouped reduce
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 64)],
+      # Checking how it works with locals + grouped reduce + upcasts
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.UPCAST, 0, 8), Opt(OptOps.UNROLL, 1, 4)],
     ])
 
   def test_upcasts(self):
@@ -458,8 +469,11 @@ class TestLinearizerOpts(unittest.TestCase):
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 32)],
       [Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 0, 32)],
       [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 8), Opt(OptOps.GROUPTOP, 0, 4)], # Checking how it works with local+grouped_reduce
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 2)], # Checking all together
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 8)], # Full global upcast + local
+      # Checking all together
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 4),
+       Opt(OptOps.UPCAST, 1, 2)],
+      # Full global upcast + local
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UPCAST, 0, 8)],
     ])
 
   def test_double_reduce(self):
@@ -480,10 +494,13 @@ class TestLinearizerOpts(unittest.TestCase):
       [Opt(OptOps.GROUPTOP, 0, 16), Opt(OptOps.GROUPTOP, 1, 2), Opt(OptOps.UNROLL, 0, 4)],
       [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 32), Opt(OptOps.UNROLL, 2, 4)], # Checking how it works with 2 grouped_reduces + upcasts.
       [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4)],
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 32), Opt(OptOps.UNROLL, 1, 4)], # Checking how it works with 2 grouped_reduces + upcasts + locals.
+      # Checking how it works with 2 grouped_reduces + upcasts + locals.
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 32), Opt(OptOps.UNROLL, 1, 4)],
       [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2)],
-      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)], # Checking how it works with 2 grouped_reduces + upcasts + locals.
-      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 0, 2)], # No globals
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 1, 2), Opt(OptOps.GROUPTOP, 0, 8), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2),
+       Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)], # Checking how it works with 2 grouped_reduces + upcasts + locals.
+      [Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4), Opt(OptOps.GROUPTOP, 0, 4), Opt(OptOps.GROUPTOP, 1, 4), Opt(OptOps.UPCAST, 0, 2),
+       Opt(OptOps.UPCAST, 0, 2)], # No globals
     ])
 
   def test_tensor_core_opts(self):
@@ -519,25 +536,74 @@ class TestLinearizerOpts(unittest.TestCase):
     helper_linearizer_opt(a@b, [
       [Opt(OptOps.PADTO, 0, 32)],
       [Opt(OptOps.PADTO, 1, 32)],
-      [Opt(OptOps.PADTO, 2, 32)],
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32)],
       # can optimize further post PADTO
-      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.PADTO, 2, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UNROLL, 0, 4)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.PADTO, 1, 32), Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 2),],
     ])
 
   def test_padto_max(self):
-    # pad uses invalid value 0, so max is not allowed
     N = 17 * 17
     a = -Tensor.ones(N, N)
+
+    helper_linearizer_opt(a.max(0), [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
+    ])
+    helper_linearizer_opt(a.max(1), [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
+    ])
+
+    # cannot pad a reduce axis
     with self.assertRaises(AssertionError):
       helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
+    with self.assertRaises(AssertionError):
+      helper_linearizer_opt(a.max(0), [[Opt(OptOps.PADTO, 1, 32)],])
 
   def test_padto_where(self):
-    # pad uses invalid value 0, so kernel with max is not allowed
     N = 17 * 17
-    a = (Tensor.rand(N, N).max(axis=0) > 1).where(1, 0)
-    with self.assertRaises(AssertionError):
-      helper_linearizer_opt(a.max(), [[Opt(OptOps.PADTO, 0, 32)],])
+    a = (Tensor.rand(N, N).max(axis=0, keepdim=True) > 1).where(1, 0)
+    helper_linearizer_opt(a.max(0), [
+      [Opt(OptOps.PADTO, 0, 32)],
+      [Opt(OptOps.PADTO, 0, 32), Opt(OptOps.UPCAST, 0, 8),],
+    ])
+
+class TestLinearizerHelper(unittest.TestCase):
+  def test_num_node_expand(self):
+    a = NumNode(42)
+    assert expand_node(a) == [a]
+
+  def test_variable_expand(self):
+    a = Variable("a", 5, 7)
+    assert expand_node(a) == [a]
+
+  def test_variable_expand_expr_none(self):
+    a = Variable(None, 5, 7)
+    assert expand_node(a) == [NumNode(5), NumNode(6), NumNode(7)]
+
+  def test_mul_node_expand(self):
+    a = Variable(None, 5, 7)
+    m = MulNode(a, 3)
+    assert expand_node(m) == [NumNode(15), NumNode(18), NumNode(21)]
+
+    b = Variable("b", 1, 3)
+    n = MulNode(b, 3)
+    assert expand_node(n) == [Variable("b", 1, 3)*3]
+
+  def test_sum_node_expand(self):
+    a = Variable(None, 1, 3)
+    b = Variable("b", 5, 7)
+
+    s1 = create_rednode(SumNode, [a, b])
+    assert expand_node(s1) == [Node.sum([NumNode(i),b]) for i in range(1,4)]
+
+  def test_multi_expand(self):
+    a = Variable("a", 1, 3)
+    b = Variable("b", 14, 17)
+    s1 = create_rednode(SumNode, [a, b])
+    # expand increments earlier variables faster than later variables (as specified in the argument)
+    # this behavior was just copied from before, no idea why this should be true
+    assert expand_node(s1, (a, b)) == [NumNode(x + y) for x in range(b.min, b.max + 1) for y in range(a.min, a.max + 1)]
 
 if __name__ == '__main__':
   unittest.main()
