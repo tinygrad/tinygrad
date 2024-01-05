@@ -1,14 +1,12 @@
 from __future__ import annotations
-import os, ctypes, ctypes.util, functools, subprocess
+import ctypes, functools, subprocess, io
 from typing import Tuple, TypeVar, List
 import gpuctypes.hip as hip
-from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style, round_up
+from tinygrad.helpers import DEBUG, getenv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
+from tinygrad.helpers import from_mv, round_up, to_mv
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
-
-libc = ctypes.CDLL(ctypes.util.find_library("c"))
-libc.read.restype, libc.read.argtypes = ctypes.c_size_t, [ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t]
 
 # The default HIP stream is used for everything.
 MOCKHIP = getenv("MOCKHIP") # for CI. don't run kernels, only check if they compile
@@ -61,13 +59,13 @@ class HIPAllocator(LRUAllocator):
     minor_offset = offset % PAGE_SIZE
     offset -= minor_offset
     real_size = round_up(size+minor_offset, PAGE_SIZE)
-    os.lseek(fd, offset, os.SEEK_SET)
+    fo = io.FileIO(fd, "a+b", closefd=False)
+    fo.seek(offset)
     copied_in = 0
     for local_offset in range(0, size+minor_offset, CHUNK_SIZE):
       local_size = min(real_size-local_offset, CHUNK_SIZE)
       copy_size = min(local_size-minor_offset, size-copied_in)
-      ret = libc.read(fd, self.hb[0], local_size)
-      assert ret >= (minor_offset+copy_size), f"{ret} < {minor_offset+copy_size}"
+      fo.readinto(to_mv(self.hb[0], local_size))
       check(hip.hipDeviceSynchronize())
       self._copyin_async(ctypes.c_void_p(dest.value + copied_in), ctypes.c_void_p(self.hb[0].value + minor_offset), copy_size)
       copied_in += copy_size
