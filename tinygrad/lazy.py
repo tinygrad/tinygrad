@@ -90,8 +90,9 @@ class LazyBuffer:
     # no COPY
     if self.device == device: return self
 
-    # COPY there and back = no COPY at all
-    if self.base == self and not self.realized and self.op == LoadOps.COPY and self.srcs[0].device == device: return self.srcs[0]
+    # double COPY = one COPY
+    if self.st.contiguous and self.st.size() == self.base.st.size() and not self.base.realized and self.base.op == LoadOps.COPY:
+      return self.base.srcs[0].copy_to_device(device).reshape(self.st.shape)
 
     # const doesn't have to be copied (issues with disk tensor)
     if self.is_unrealized_const():
