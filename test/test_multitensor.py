@@ -38,12 +38,9 @@ class TestMultiTensor(unittest.TestCase):
   
   def test_multiply_constant(self):
     X = Tensor.ones(256).contiguous().realize()
-    C1 = 2
-    C2 = Tensor([2]).realize()
+    C = Tensor([2]).realize()
     X.shard_((d0, d1), 0)
-    O1 = (X * C1).realize()
-    print(O1.numpy())
-    (X * C2).realize()
+    (X * C).realize()
 
   def test_numpy(self):
     X = Tensor.ones(256)
