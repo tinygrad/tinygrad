@@ -311,14 +311,30 @@ class Tensor:
   # TODO: figure out the exact acceptable types for indices, especially for internal list/tuple types
   # TODO: update docs
   def __getitem__(self, indices: Union[int, slice, Tensor, None, List, Tuple]) -> Tensor: # no ellipsis type...
+    def _to_list_val(t: Tensor) -> Tuple[List, List]:
+      # is this right?
+      if t.lazydata.st.contiguous and hasattr(t.lazydata, '_base'):
+        # tolist cuz damn list tensor creation uses numpy
+        if t.lazydata.base.op is LoadOps.COPY: return (list(t.shape), t.lazydata.base.srcs[0].realized._buf.tolist()) # type: ignore[union-attr]
+        if t.lazydata.base.op is LoadOps.EMPTY: return (list(t.shape), t.lazydata.realized._buf.tolist()) # type: ignore[union-attr]
+      return (list(t.shape), t.contiguous().to('CPU').realize().lazydata.base.realized.toCPU().tolist())
+    def get_shape(l):
+      if l == []: return [0]
+      if not isinstance(l[0], (tuple, list)): return [len(l)]
+      first_sublist_shape = get_shape(l[0])
+      for sublist in l:
+        if get_shape(sublist) != first_sublist_shape: raise ValueError("Inhomogeneous shape detected")
+      return [len(l)] + first_sublist_shape
+  # def get_shape(lst): return [len(lst)] + get_shape(lst[0]) if lst and isinstance(lst, list) else []
+    if isinstance(indices, list) and all_int(indices):
+      indices = [([len(indices)], indices)]
+    elif isinstance(indices, (list, tuple)):
+      indices = [(get_shape(i),fully_flatten(i)) if isinstance(i, (tuple,list)) else _to_list_val(i) if isinstance(i, Tensor) else i for i in indices]
+    elif isinstance(indices, Tensor):
+      indices = [_to_list_val(indices)]
+    else:
+      indices = [indices]
     # 1. indices normalization and validation
-    # treat internal tuples and lists as Tensors and standardize indices to list type
-    if isinstance(indices, (tuple, list)):
-      # special case <indices: List[int]>, a lil ugly
-      if isinstance(indices, list) and all_int(indices): indices = [indices]
-      else: indices = [list(i) if isinstance(i, (tuple, list)) else i for i in indices]
-    else: indices = [indices]
-    indices = [i.realize().lazydata.realized.toCPU().tolist() if isinstance(i, Tensor) else i for i in indices]
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
     ellipsis_idx = [dim for dim, i in enumerate(indices) if i is Ellipsis]
@@ -351,7 +367,7 @@ class Tensor:
     for dim in type_dim[slice]:
       s, e, st = indices_filtered[dim].indices(self.shape[dim])
       indices_filtered[dim] = ((0, 0) if (st > 0 and e < s) or (st <= 0 and e > s) else (s, e) if st > 0 else (e+1, s+1), st)
-    for dim in type_dim[list]: indices_filtered[dim] = ((0, self.shape[dim]), 1)
+    for dim in type_dim[tuple]: indices_filtered[dim] = ((0, self.shape[dim]), 1)
 
     new_slice, strides = ((),()) if not indices_filtered else zip(*indices_filtered)
     ret = self.shrink(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
@@ -366,47 +382,83 @@ class Tensor:
     new_shape = list(ret.shape)
     for dim in type_dim[None]: new_shape.insert(dim, 1)
     for dim in (dims_collapsed := [dim + sum(1 for d in type_dim[None] if dim >= d) for dim in reversed(type_dim[int])]): new_shape.pop(dim)
-    assert all_int(new_shape), f"does not support symbolic shape {new_shape}"
+    assert all(isinstance(i, int) for i in new_shape), f"does not support symbolic shape {new_shape}"
 
     ret = ret.reshape(tuple(new_shape))
 
     # 3. advanced indexing (copy)
-    if type_dim[list]:
-
+    if type_dim[tuple]:
+      # TODO uint8 and bool tensor indexing
       # extract tensors and tensor dimensions
-      idx, idim = [], []
-      for tensor_dim in type_dim[list]:
+      flat_idx, idim, idx_shapes = [], [], []
+      for tensor_dim in type_dim[tuple]:
         dims_collapsed_, dims_injected = sum(1 for d in dims_collapsed if tensor_dim >= d), sum(1 for d in type_dim[None] if tensor_dim >= d)
-        idim.append(td := tensor_dim - dims_collapsed_ + dims_injected)
-        idx.append(t := indices[tensor_dim + dims_injected])
-        # normalize the negative tensor indices
-        # idx.append(((t := indices[tensor_dim + dims_injected]) < 0).where(ret.shape[td], 0) + t)
-        # TODO uint8 and bool tensor indexing
-        # if not (dtypes.is_int(t.dtype) or t.dtype == dtypes.bool): raise IndexError("tensors used as indices must be int or bool tensors")
-      print(idx)
-      print(idim)
+        idim.append(tensor_dim - dims_collapsed_ + dims_injected)
+        idx_sh, idx_flat = indices[tensor_dim + dims_injected]
+        idx_shapes.append(idx_sh)
+        flat_idx.append([i if i >= 0 else i+ret.shape[idim[-1]] for i in idx_flat])
+        # isinstance(n, int) checks for bool
+        if not all_int(flat_idx[-1]): raise IndexError("tensors used as indices must be int or bool tensors")
 
+      # START
+      max_dim = max(len(i) for i in idx_shapes)
+      idx_shapes = [[1]*(max_dim-len(i)) + i for i in idx_shapes]
+      sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(idim)]
+      for d in zip(*idx_shapes):
+        if (1 not in d and len(set(d)) > 1) or (1 in d and len(set(d)) > 2): raise IndexError("index mismatch")
 
+      # FIRST ROUND
+      cur_shape = list(ret.shape)
+      cur_shape[idim[0]:idim[0]+1] = idx_shapes[0]
+      shrink_args = [[(n, n+1) if i == idim[0] else (0, sh) for i, sh in enumerate(ret.shape)] for n in flat_idx[0]]
+      shrunken = [ret.shrink(tuple(arg)) for arg in shrink_args]
+      ret = reduce(lambda x,y: x.cat(y, dim=idim[0]), shrunken).reshape(cur_shape)
 
-      exit()
-      # compute sum_dim, arange, and idx
-      max_dim = max(i.ndim for i in idx)
-      sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(tdim)]
-      arange = [Tensor.arange(ret.shape[d], requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, tdim))]   # noqa: E501
-      first_idx = [idx[0].reshape(*[1]*tdim[0], *[1]*(1 + max_dim - idx[0].ndim), *idx[0].shape, *[1]*(ret.ndim - tdim[0] - 1))]
-      rest_idx = [i.reshape(*[1]*tdim[0], *[1]*(max_dim - i.ndim), *i.shape, *[1]*(ret.ndim - tdim[0] - n)) for n,i in enumerate(idx[1:], 1)]
-      reshaped_idx = first_idx + rest_idx
-      ret = ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*max_dim, *ret.shape[sum_dim[0]+1:])
+      # REST ROUNDS
+      for i,(idx,idx_sh) in enumerate(zip(flat_idx[1:], idx_shapes[1:]), start=1):
+        final_shape = list(ret.shape)
+        final_shape.pop(sum_dim[i])
+        final_shape[idim[0]:idim[0]+max_dim]= [max(sh) for sh in zip(idx_sh, ret.shape[idim[0]: idim[0]+max_dim])]
 
-      # iteratively eq -> mul -> sum fancy index
-      try:
-        for a,i,sd in zip(arange, reshaped_idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
-      except AssertionError as exc: raise IndexError(f"cannot broadcast with index shapes {', '.join(str(i.shape) for i in idx)}") from exc
+        shrunken = []
+        for ii,n in enumerate(idx):
+          shrink_arg = []
+          for iii, (idx_dim,ret_dim) in enumerate(zip(idx_sh, ret.shape[idim[0]: idim[0]+max_dim]), start=idim[0]):
+            if idx_dim > ret_dim:
+              shrink_arg.append((0, 1))
+            elif idx_dim < ret_dim:
+              shrink_arg.append((0, ret_dim)) # type: ignore[arg-type]
+            else:
+              haha = prod(idx_sh[iii-idim[0]+1:])
+              lol = (ii//haha) % ret_dim
+              shrink_arg.append((lol, lol+1))
+          shrink_arg = [(0,ret_sh) for ret_sh in ret.shape[:idim[0]]] + shrink_arg + [(0,ret_sh) for ret_sh in ret.shape[idim[0]+max_dim:]] # type: ignore[assignment]
+          shrink_arg[sum_dim[i]] = (n, n+1)
+          shrinked_shape = [e-b for b,e in shrink_arg]
+          shrinked_shape.pop(sum_dim[i])
+          shrunken.append(ret.shrink(tuple(shrink_arg)).reshape(tuple(shrinked_shape)))
+
+        split, cat_dim = [], []
+        for ii, (idx_dim, ret_dim) in enumerate(zip(idx_sh, ret.shape[idim[0]: idim[0]+max_dim])):
+          if ret_dim <= idx_dim and idx_dim != 1:
+            cat_dim.append(ii+idim[0])
+            if len(cat_dim) > 1:
+              split.append(idx_dim)
+
+        for spl in split: shrunken = [shrunken[x:x+spl] for x in range(0, len(shrunken), spl)] # type: ignore[misc]
+
+        def tinycat(dat, cat_dim, depth=0):
+          if all(isinstance(t, Tensor) for t in dat): return reduce(lambda x,y: x.cat(y, dim=cat_dim[depth]), dat)
+          # pylint: disable=cell-var-from-loop
+          return reduce(lambda x,y: x.cat(y, dim=cat_dim[depth]), [tinycat(l, cat_dim, depth+1) for l in dat])
+
+        ret = tinycat(shrunken, cat_dim)
+        ret = ret.reshape(final_shape)
 
       # special permute case
-      if tdim[0] != 0 and len(tdim) != 1 and tdim != list(range(tdim[0], tdim[-1]+1)):
+      if idim[0] != 0 and len(idim) != 1 and idim != list(range(idim[0], idim[-1]+1)):
         ret_dims = list(range(ret.ndim))
-        ret = ret.permute(ret_dims[tdim[0]:tdim[0]+max_dim] + ret_dims[:tdim[0]] + ret_dims[tdim[0]+max_dim:])
+        ret = ret.permute(ret_dims[idim[0]:idim[0]+max_dim] + ret_dims[:idim[0]] + ret_dims[idim[0]+max_dim:])
     return ret
 
   def __setitem__(self,indices,v): return self.__getitem__(indices).assign(v)
