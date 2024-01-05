@@ -107,8 +107,8 @@ def _internal_buffer_copy(dest:Buffer, src:Buffer):
     if fb:
       dest.allocator.transfer(dest._buf, fb, dest.size*dest.dtype.itemsize)
       return
-  if hasattr(dest.allocator, '_copy_from_fd') and src.device.startswith("DISK") and src.size*src.dtype.itemsize >= 32768:
-    dest.allocator._copy_from_fd(dest._buf, src._buf.ud.fd, src._buf.offset, src.size*src.dtype.itemsize)
+  if hasattr(dest.allocator, 'copy_from_fd') and src.device.startswith("DISK") and src.size*src.dtype.itemsize >= 4096 and src._buf.ud.fd is not None:
+    dest.allocator.copy_from_fd(dest._buf, src._buf.ud.fd, src._buf.offset, src.size*src.dtype.itemsize)
   elif hasattr(dest.allocator, 'as_buffer'):
     # fast(ish) path, uses readinto in diskbuffers
     src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)

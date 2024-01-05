@@ -8,8 +8,7 @@ from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
-libc.read.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t]
-libc.read.restype = ctypes.c_size_t
+libc.read.restype, libc.read.argtypes = ctypes.c_size_t, [ctypes.c_int, ctypes.c_void_p, ctypes.c_size_t]
 
 # The default HIP stream is used for everything.
 MOCKHIP = getenv("MOCKHIP") # for CI. don't run kernels, only check if they compile
@@ -56,7 +55,8 @@ class HIPAllocator(LRUAllocator):
   def _free(self, opaque:T): check(hip.hipFree(opaque))
   def _hostalloc(self, size:int): return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 0)))
   def _copyin_async(self, dest:T, src:T, size:int): check(hip.hipMemcpyAsync(dest, src, size, hip.hipMemcpyHostToDevice, None))
-  def _copy_from_fd(self, dest, fd, offset, size):
+  def copy_from_fd(self, dest, fd, offset, size):
+    check(hip.hipSetDevice(self.device.device))
     if not hasattr(self, 'hb'): self.hb = [self._hostalloc(CHUNK_SIZE) for _ in range(2)]
     minor_offset = offset % PAGE_SIZE
     offset -= minor_offset
