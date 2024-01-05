@@ -6,12 +6,6 @@ from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv, DEBUG, CI, OSX
 from typing import List, Dict
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto # onnx 1.50 uses serialized file (see onnx/onnx-ml.proto) as descriptors
-try:
-  from onnx.helper import tensor_dtype_to_np_dtype
-except ImportError:
-  # for onnx < 1.13
-  from onnx.mapping import TENSOR_TYPE_TO_NP_TYPE
-  tensor_dtype_to_np_dtype = lambda x: TENSOR_TYPE_TO_NP_TYPE[x]
 
 # global numpy cache for parameters
 numpy_cache = {}
@@ -37,7 +31,7 @@ def is_dtype_supported(dtype, device: str = Device.DEFAULT):
 # not supported: STRING = 8 COMPLEX64 = 14, COMPLEX128 = 15
 # NOTE: 17, 18, 19, 20 are float8, 10 is half
 DTYPE_MAP = {1:dtypes.float, 2:dtypes.uint8, 3:dtypes.int8, 4:dtypes.uint16, 5:dtypes.int16, 6:dtypes.int32, 7:dtypes.int64,
-              9:dtypes.bool, 10:dtypes.float, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16,
+              9:dtypes.bool, 10:dtypes.float16, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16,
               17:dtypes.float, 18:dtypes.float, 19:dtypes.float, 20:dtypes.float}
 # TODO: fix buffer_parse to use this and fix get_weight_and_biases to only use buffer_parse
 

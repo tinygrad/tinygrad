@@ -15,8 +15,7 @@ tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log
 # **************** Free Ops ****************
 
 def Identity(x: Tensor): return x
-# TODO: fix buffer_parse
-def Add(x: Tensor, other: Tensor, broadcast=None, axis=None): return x + other if x.dtype == dtypes.float or isinstance(x.dtype, ImageDType) else (x + other).cast(x.dtype)
+def Add(x: Tensor, other: Tensor, broadcast=None, axis=None): return x + other
 def Sub(x: Union[Tensor, Any], other: Tensor): return x - other # some test has input as int
 def Less(x:Tensor,y:Tensor): return x < y
 def LessOrEqual(x:Tensor,y:Tensor): return x <= y
