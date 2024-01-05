@@ -3,7 +3,7 @@ import functools
 from pathlib import Path
 import numpy as np
 import nibabel as nib
-from scipy import signal
+import scipy
 import torch
 import torch.nn.functional as F
 from tinygrad.tensor import Tensor
@@ -76,7 +76,7 @@ def iterate(val=True, shuffle=False):
     yield (X, Y)
 
 def gaussian_kernel(n, std):
-  gaussian_1d = signal.gaussian(n, std)
+  gaussian_1d = scipy.signal.gaussian(n, std)
   gaussian_2d = np.outer(gaussian_1d, gaussian_1d)
   gaussian_3d = np.outer(gaussian_2d, gaussian_1d)
   gaussian_3d = gaussian_3d.reshape(n, n, n)
@@ -125,6 +125,72 @@ def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), o
   result /= norm_map
   result = result[..., paddings[4]:image_shape[0]+paddings[4], paddings[2]:image_shape[1]+paddings[2], paddings[0]:image_shape[2]+paddings[0]]
   return result, labels
+
+def rand_flip(image, label, axis=(1, 2, 3)):
+  if random.random() < 1 / len(axis):
+    image = np.flip(image, axis=axis).copy()
+    label = np.flip(label, axis=axis).copy()
+  return image, label
+
+def random_brightness_augmentation(image, factor=0.3, prob=0.1):
+  if random.random() < prob:
+    factor = np.random.uniform(low=1.0-factor, high=1.0+factor, size=1)
+    image = (image * (1 + factor)).astype(image.dtype)
+  return image
+
+def gaussian_noise(image, mean=0.0, std=0.1, prob=0.1):
+  if random.random() < prob:
+    scale = np.random.uniform(low=0.0, high=std)
+    noise = np.random.norm(loc=mean, scale=scale, size=image.shape).astype(image.dtype)
+    image += noise
+  return image
+
+def _rand_foreg_cropb(image, label, patch_size):
+  def adjust(foreg_slice, label, idx):
+    diff = patch_size[idx - 1] - (foreg_slice[idx].stop - foreg_slice[idx].start)
+    sign = -1 if diff < 0 else 1
+    diff = abs(diff)
+    ladj = 0 if diff == 0 else random.randrange(diff)
+    hadj = diff - ladj
+    low = max(0, foreg_slice[idx].start - sign * ladj)
+    high = min(label.shape[idx], foreg_slice[idx].stop + sign * hadj)
+    diff = patch_size[idx - 1] - (high - low)
+    if diff > 0 and low == 0: high += diff
+    elif diff > 0: low -= diff
+    return low, high
+
+  cl = np.random.choice(np.unique(label[label > 0]))
+  foreg_slices = scipy.ndimage.find_objects(scipy.ndimage.measurements.label(label==cl)[0])
+  foreg_slices = [x for x in foreg_slices if x is not None]
+  slice_volumes = [np.prod([s.stop - s.start for s in sl]) for sl in foreg_slices]
+  slice_idx = np.argsort(slice_volumes)[-2:]
+  foreg_slices = [foreg_slices[i] for i in slice_idx]
+  if not foreg_slices: return _rand_crop(image, label)
+  foreg_slice = foreg_slices[random.randrange(len(foreg_slices))]
+  low_x, high_x = adjust(foreg_slice, label, 1)
+  low_y, high_y = adjust(foreg_slice, label, 2)
+  low_z, high_z = adjust(foreg_slice, label, 3)
+  image = image[:, low_x:high_x, low_y:high_y, low_z:high_z]
+  label = label[:, low_x:high_x, low_y:high_y, low_z:high_z]
+  return image, label
+
+def _rand_crop(image, label, patch_size):
+  ranges = [s - p for s, p in zip(image.shape[1:], patch_size)]
+  cord = [0 if x == 0 else random.randrange(x) for x in ranges]
+  low_x, high_x = cord[0], cord[0] + patch_size[0]
+  low_y, high_y = cord[1], cord[1] + patch_size[1]
+  low_z, high_z = cord[2], cord[2] + patch_size[2]
+  image = image[:, low_x:high_x, low_y:high_y, low_z:high_z]
+  label = label[:, low_x:high_x, low_y:high_y, low_z:high_z]
+  return image, label
+
+def rand_balanced_crop(image, label, patch_size=(128, 128, 128), oversampling=0.4):
+  if random.random() < oversampling:
+    image, label = _rand_foreg_cropb(image, label, patch_size)
+  else:
+    image, label = _rand_crop(image, label, patch_size)
+  return image, label
+
 
 if __name__ == "__main__":
   for X, Y in iterate():
