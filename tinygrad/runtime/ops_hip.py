@@ -45,33 +45,27 @@ CHUNK_SIZE, PAGE_SIZE = 256*1024*1024, 0x1000
 class HIPAllocator(LRUAllocator):
   def __init__(self, device:HIPDevice):
     self.device = device
-    check(hip.hipSetDevice(self.device.device))
     super().__init__()
   def _alloc(self, size:int):
     check(hip.hipSetDevice(self.device.device))
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
   def _free(self, opaque:T): check(hip.hipFree(opaque))
   def _hostalloc(self, size:int): return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 0)))
-  def _copyin_async(self, dest:T, src:T, size:int): check(hip.hipMemcpyAsync(dest, src, size, hip.hipMemcpyHostToDevice, None))
   def copy_from_fd(self, dest, fd, offset, size):
     check(hip.hipSetDevice(self.device.device))
     if not hasattr(self, 'hb'): self.hb = [self._hostalloc(CHUNK_SIZE) for _ in range(2)]
-    minor_offset = offset % PAGE_SIZE
-    offset -= minor_offset
-    real_size = round_up(size+minor_offset, PAGE_SIZE)
     fo = io.FileIO(fd, "a+b", closefd=False)
-    fo.seek(offset)
+    fo.seek(offset - (minor_offset:=offset % PAGE_SIZE))
     copied_in = 0
     for local_offset in range(0, size+minor_offset, CHUNK_SIZE):
-      local_size = min(real_size-local_offset, CHUNK_SIZE)
-      copy_size = min(local_size-minor_offset, size-copied_in)
+      local_size = min(round_up(size+minor_offset, PAGE_SIZE)-local_offset, CHUNK_SIZE)
       fo.readinto(to_mv(self.hb[0], local_size))
       check(hip.hipDeviceSynchronize())
-      self._copyin_async(ctypes.c_void_p(dest.value + copied_in), ctypes.c_void_p(self.hb[0].value + minor_offset), copy_size)
+      check(hip.hipMemcpyAsync(ctypes.c_void_p(dest.value + copied_in), ctypes.c_void_p(self.hb[0].value + minor_offset),
+                               copy_size:=min(local_size-minor_offset, size-copied_in), hip.hipMemcpyHostToDevice, None))
       copied_in += copy_size
       self.hb = self.hb[1:] + [self.hb[0]]
       minor_offset = 0 # only on the first
-    assert copied_in == size, f"{copied_in} != {size}"
   def copyin(self, dest:T, src: memoryview):
     check(hip.hipSetDevice(self.device.device))
     host_mem = self._hostalloc(len(src))

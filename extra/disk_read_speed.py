@@ -32,6 +32,8 @@ def read_mmap(fd, sz):
     t = 0
     for i in range(0, sz, 0x1000): t += buf[i]
 
+# def _copyin_async(self, dest:T, src:T, size:int): check(hip.hipMemcpyAsync(dest, src, size, hip.hipMemcpyHostToDevice, None))
+
 def read_to_gpu_mmap(fd, sz, gpubuf):
   with Timing("gpu copyin: ", lambda x: f", {sz/x:.2f} GB/s"):
     with Timing("mmfd:       ", lambda x: f", {sz/x:.2f} GB/s"):
