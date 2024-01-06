@@ -64,7 +64,7 @@ def eval_unet3d():
     pred, label = sliding_window_inference(mdl, image, label)
     et = time.perf_counter()
     print(f"{(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model")
-    s += dice_score(pred, label).mean()
+    s += dice_score(Tensor(pred), Tensor(label)).mean().item()
     print(f"****** {s:.2f}/{i}  {s/i:.5f} Mean DICE score")
     st = time.perf_counter()
 
