@@ -1,6 +1,8 @@
 import unittest
+from test.helpers import assert_jit_cache_len
 from tinygrad import Tensor, Device, nn, GlobalCounters
 from tinygrad.helpers import CI
+from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_parameters
 from extra.lr_scheduler import OneCycleLR
 import numpy as np
@@ -53,6 +55,24 @@ class TestMultiTensor(unittest.TestCase):
   def test_simple_add_X(self): return self._test_simple_add_axis(0, None)
   def test_simple_add_W(self): return self._test_simple_add_axis(None, 0)
   def test_simple_add_XW(self): return self._test_simple_add_axis(0, 0)
+
+  def _test_simple_add_axis_jit(self, shard_x, shard_w):
+    @TinyJit
+    def add(a, b) -> Tensor:
+      return (a + b).realize()
+
+    for _ in range(5):
+      a = Tensor.ones(256).contiguous().realize()
+      b = Tensor.ones(256).contiguous().realize()
+      a.shard_((d0, d1), shard_x)
+      b.shard_((d0, d1), shard_w)
+      c = add(a, b)
+      np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
+
+  def test_simple_add_jit(self): return self._test_simple_add_axis_jit(None, None)
+  def test_simple_add_X_jit(self): return self._test_simple_add_axis_jit(0, None)
+  def test_simple_add_W_jit(self): return self._test_simple_add_axis_jit(None, 0)
+  def test_simple_add_XW_jit(self): return self._test_simple_add_axis_jit(0, 0)
 
   def test_four_add(self):
     X = Tensor.ones(256, 256).contiguous().realize()
@@ -145,17 +165,23 @@ class TestMultiTensor(unittest.TestCase):
 
     fake_image = Tensor.rand((2, 3, 224, 224))
     fake_image_sharded = fake_image.shard((d0, d1), axis=0)
-    print(fake_image_sharded.shape)
     m = ResNet18()
     m.load_from_pretrained()
     real_output = m(fake_image).numpy()
     for p in get_parameters(m): p.shard_((d0, d1)).realize()
     GlobalCounters.reset()
-    shard_output = m(fake_image_sharded).realize()
-    assert shard_output.lazydata.lbs[0].shape == (1, 1000)
-    assert shard_output.lazydata.lbs[1].shape == (1, 1000)
-    shard_output_np = shard_output.numpy()
-    np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
+
+    @TinyJit
+    def run(x):
+      return m(x).realize()
+
+    for _ in range(5):
+      shard_output = run(fake_image_sharded)
+      assert shard_output.lazydata.lbs[0].shape == (1, 1000)
+      assert shard_output.lazydata.lbs[1].shape == (1, 1000)
+      shard_output_np = shard_output.numpy()
+      np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
+    assert_jit_cache_len(run, 52)
 
 if __name__ == '__main__':
   unittest.main()
