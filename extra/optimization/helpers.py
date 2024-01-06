@@ -1,7 +1,13 @@
 # stuff needed to unpack a kernel
 from tinygrad.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer
 from tinygrad.dtype import dtypes
-from tinygrad.shape.shapetracker import ShapeTracker
+#from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.helpers import prod
+from tinygrad.shape.shapetracker import ShapeTracker as RealShapeTracker
+class ShapeTracker:
+  def __new__(cls, views, size=None): return RealShapeTracker(views, prod(views[0].shape) if size is None else size)
+  @staticmethod
+  def from_shape(shape): return RealShapeTracker.from_shape(shape)
 from tinygrad.shape.view import View
 from tinygrad.shape.symbolic import Variable, NumNode
 inf, nan = float('inf'), float('nan')

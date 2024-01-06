@@ -39,7 +39,7 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
   if vm1.contiguous and vm1.shape == vm2.shape: return vm2
   if vm2.contiguous: return vm1
   if vm2.mask or vm1.offset != 0: return None  # this isn't supported yet
-  if None in (strides := ShapeTracker((vm2, vm1), 0).real_strides()): return None
+  if None in (strides := ShapeTracker((vm2, vm1), prod(vm2.shape)).real_strides()): return None
   return View.create(vm1.shape, cast(Tuple[sint, ...], strides), vm2.offset, vm1.mask)
 
 @functools.lru_cache(maxsize=None)
