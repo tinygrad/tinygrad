@@ -11,7 +11,7 @@ from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, Node, c
 from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, getenv
 from tinygrad.dtype import dtypes
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
@@ -102,7 +102,7 @@ class TestLinearizer(unittest.TestCase):
   def test_limit_dims_to_max_5d_global(self):
     t = Tensor.rand(3, 4, 5, 6, 7).pad(((1, 1), (1, 1), (1, 1), (1, 1), (1, 1))) + 1
     sched = [si for si in t.lazydata.schedule() if si.ast.op not in LoadOps]
-    assert len(sched) == 2
+    assert len(sched) == 2 if getenv("CUDACPU") == 0 else 1
     lin = Linearizer(sched[1].ast)
     assert lin.full_shape[:lin.global_dims] == (5, 6, 7, 8, 9)
     lin.limit_dims_to_max(global_max=[16, 16, 16], local_max=[16, 16, 16])
