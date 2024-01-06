@@ -188,8 +188,8 @@ class Tensor:
     if Device.canonicalize(device) == "TORCH":
       return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, device=device, dtype=dtype, **kwargs)
     if (num := prod((shape:=argfix(*shape)))) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
-    counts = (Tensor.arange(num, device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device)).pad(((0,num%2),))
-    Tensor._rng_counter = (Tensor._rng_counter + num).realize()
+    counts = (Tensor.arange(num, device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device)).realize().pad(((0,num%2),))
+    Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
 
     rotations = [[13, 15, 26, 6], [17, 29, 16, 24]]
     ks = [0x0, Tensor._seed ^ 0x0 ^ 0x1BD11BDA, Tensor._seed]
