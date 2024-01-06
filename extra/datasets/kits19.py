@@ -24,6 +24,10 @@ mv kits extra/datasets
 """
 
 @functools.lru_cache(None)
+def get_train_files():
+  return sorted([x for x in BASEDIR.iterdir() if x.stem.startswith("case") and int(x.stem.split("_")[-1]) < 210 and x not in get_val_files()])
+
+@functools.lru_cache(None)
 def get_val_files():
   data = fetch("https://raw.githubusercontent.com/mlcommons/training/master/image_segmentation/pytorch/evaluation_cases.txt").read_text()
   return sorted([x for x in BASEDIR.iterdir() if x.stem.split("_")[-1] in data.split("\n")])
@@ -65,15 +69,27 @@ def preprocess(file_path):
   image, label = pad_to_min_shape(image, label)
   return image, label
 
-def iterate(val=True, shuffle=False):
-  if not val: raise NotImplementedError
-  files = get_val_files()
+def iterate(val=True, shuffle=False, bs=1):
+  if val: assert bs == 1, "bs has to be 1"
+  files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
-  for file in files:
-    X, Y = preprocess(file)
-    X = np.expand_dims(X, axis=0)
-    yield (X, Y)
+  from multiprocessing import Pool
+  p = Pool(16)
+  for i in range(0, len(files), bs):
+    samples = p.map(preprocess, [files[i] for i in order[i:i+bs]])
+    X, Y = [x[0] for x in samples], [x[1] for x in samples]
+    if val: yield X[0][None], Y[0]
+    else:
+      X_preprocessed, Y_preprocessed = [], []
+      for x, y in zip(X, Y):
+        x, y = rand_flip(x, y)
+        x = random_brightness_augmentation(x)
+        x = gaussian_noise(x)
+        x, y = rand_balanced_crop(x, y)
+        X_preprocessed.append(x)
+        Y_preprocessed.append(y)
+      yield np.stack(X_preprocessed, axis=0), np.stack(Y_preprocessed, axis=0)
 
 def gaussian_kernel(n, std):
   gaussian_1d = scipy.signal.gaussian(n, std)
@@ -141,7 +157,7 @@ def random_brightness_augmentation(image, factor=0.3, prob=0.1):
 def gaussian_noise(image, mean=0.0, std=0.1, prob=0.1):
   if random.random() < prob:
     scale = np.random.uniform(low=0.0, high=std)
-    noise = np.random.norm(loc=mean, scale=scale, size=image.shape).astype(image.dtype)
+    noise = np.random.normal(loc=mean, scale=scale, size=image.shape).astype(image.dtype)
     image += noise
   return image
 
