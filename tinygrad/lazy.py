@@ -63,7 +63,7 @@ class LazyBuffer:
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
 
   def contiguous(self):
-    if not self.st.contiguous or self.st.size() != self.base.st.size() or self.is_unrealized_const():
+    if not self.st.contiguous or self.is_unrealized_const():
       ret = self.e(LoadOps.CONTIGUOUS)
       sti = self.st.invert(self.base.shape)
       if sti is not None: self.base.contiguous_child = ref(ret), sti
@@ -91,7 +91,7 @@ class LazyBuffer:
     if self.device == device: return self
 
     # double COPY = one COPY
-    if self.st.contiguous and self.st.size() == self.base.st.size() and not self.base.realized and self.base.op == LoadOps.COPY:
+    if self.st.contiguous and not self.base.realized and self.base.op == LoadOps.COPY:
       return self.base.srcs[0].copy_to_device(device).reshape(self.st.shape)
 
     # const doesn't have to be copied (issues with disk tensor)
@@ -234,7 +234,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
   allbufs[buf] = None
   if buf.op in LoadOps: realizes.add(buf.base)
   if buf.op == LoadOps.COPY:
-    assert buf.srcs[0].st.contiguous and buf.srcs[0].st.size() == buf.srcs[0].base.st.size(), "can only copy contig"
+    assert buf.srcs[0].st.contiguous, "can only copy contig"
     realizes.add(buf.srcs[0].base)
   for x in buf.srcs: _recurse_lb(x, realizes, allbufs, simple_pads)
 
@@ -278,7 +278,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
           # can only have one output buffer
           # can only reduce contiguous
           # max one reduceop per kernel
-          if len(realized_children) > 1 or not st.contiguous or st.size() != r.st.size() or (tr in reduce_for_op and reduce_for_op[tr] != r):
+          if len(realized_children) > 1 or not st.contiguous or (tr in reduce_for_op and reduce_for_op[tr] != r):
             can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
             forced_realize = True
             break
@@ -304,7 +304,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
           tr_next = next(iter(tr.children))
           st_childs = dedup([s for s in tr_next.srcs if s.base == tr])
           if len(st_childs) > 1: break
-          if st.size() != st_childs[0].st.size(): break
+          if st.size != st_childs[0].st.size: break
           st = st + st_childs[0].st
           if not st.contiguous or tr_next.op in ReduceOps: break
           tr = tr_next
