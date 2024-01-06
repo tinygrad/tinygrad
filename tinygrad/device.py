@@ -285,6 +285,8 @@ class Compiled:
   def synchronize(self): pass  # override this in your device
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
+    from tinygrad.graph import print_tree
+    assert self.compiler is not None, f"compiler is None, can't build {print_tree(k.ast)}"
     k.linearize()
     src = self.renderer(to_function_name(k.name), k.uops)
     if getenv("DISABLE_COMPILER_CACHE") or '<' in self.compiler.__name__:
