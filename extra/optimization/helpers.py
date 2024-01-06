@@ -5,7 +5,8 @@ from tinygrad.dtype import dtypes
 from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker as RealShapeTracker
 class ShapeTracker:
-  def __new__(cls, views, size=None): return RealShapeTracker(views, prod(views[0].shape) if size is None else size)
+  def __new__(cls, views, size=None):
+    return RealShapeTracker(views, prod([s if st != 0 else 1 for s,st in zip(views[0].shape, views[0].strides)]) if size is None else size)
   @staticmethod
   def from_shape(shape): return RealShapeTracker.from_shape(shape)
 from tinygrad.shape.view import View
