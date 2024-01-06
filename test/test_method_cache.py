@@ -1,7 +1,7 @@
 import unittest
-from tinygrad import Tensor, Device
+from tinygrad import Tensor, Device, Variable
 from tinygrad.device import Compiled
-from examples.llama import Transformer as LLaMaTransformer
+from examples.gpt2 import Transformer
 from tinygrad.nn.state import get_state_dict
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "only test for compiled backends")
@@ -33,14 +33,14 @@ class TestMethodCache(unittest.TestCase):
     ((c+d)+(a+b)).realize()
 
   def test_small_transformer(self):
-    args_tiny = {"dim": 16, "hidden_dim": 32, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 10}
-    model = LLaMaTransformer(**args_tiny)
+    args_tiny = {"dim": 16, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 10}
+    model = Transformer(**args_tiny)
     for v in get_state_dict(model).values(): v.assign(Tensor.empty(*v.shape, dtype=v.dtype).realize())
     # NOTE: you have to do this twice due to the k-v cache
-    for i in range(3): model(Tensor([[1,2,3,4]]), i).realize()
-    for i in range(3): model(Tensor([[1,2,3,4]]), i).realize()
+    for i in range(3): model(Tensor([[1,2,3,4]]), Variable("start_pos", 0, 10).bind(i)).realize()
+    for i in range(3): model(Tensor([[1,2,3,4]]), Variable("start_pos", 0, 10).bind(i)).realize()
     Device[Device.DEFAULT].compiler = None
-    for i in range(3): model(Tensor([[1,2,3,4]]), i).realize()
+    for i in range(3): model(Tensor([[1,2,3,4]]), Variable("start_pos", 0, 10).bind(i)).realize()
 
 if __name__ == '__main__':
   unittest.main()
