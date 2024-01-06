@@ -9,7 +9,7 @@ from tinygrad import Tensor, dtypes, Device
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, prod
 
 random.seed(42)
 
@@ -27,7 +27,7 @@ def set_(reference: Tensor, shape, strides, offset):
   assert reference.lazydata.base.realized, "base has to be realized before setting it to strided's base"
   # TODO: this shouldn't directly create a LazyBuffer
   strided = Tensor(LazyBuffer(device=reference.device,
-                              st=ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),)),
+                              st=ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),), prod(shape)),
                               op=None, dtype=reference.dtype, srcs=(), base=reference.lazydata.base))
   assert strided.lazydata.st.real_strides() == strides, "real_strides should equal strides for strided"
   return strided
