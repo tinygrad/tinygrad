@@ -8,6 +8,8 @@ from tinygrad.helpers import prod, DEBUG, merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
 from tinygrad.shape.view import View, _merge_dims
 
+def shape_to_size(shape:Tuple[sint, ...]) -> int: return prod([x.max if isinstance(x, Node) else x for x in shape])
+
 def expr_node_mask(view:View, idx:Node, valid:Optional[Node]=None) -> Node:
   expr = [valid] if valid is not None else []
   if view.mask is not None:
@@ -39,7 +41,7 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
   if vm1.contiguous and vm1.shape == vm2.shape: return vm2
   if vm2.contiguous: return vm1
   if vm2.mask or vm1.offset != 0: return None  # this isn't supported yet
-  if None in (strides := ShapeTracker((vm2, vm1), prod(vm2.shape)).real_strides()): return None
+  if None in (strides := ShapeTracker((vm2, vm1), shape_to_size(vm2.shape)).real_strides()): return None
   return View.create(vm1.shape, cast(Tuple[sint, ...], strides), vm2.offset, vm1.mask)
 
 @functools.lru_cache(maxsize=None)
@@ -54,7 +56,7 @@ def idxs_to_idx(shape:Tuple[int, ...], idxs:Tuple[Node, ...]) -> Node:
 @dataclass(frozen=True)
 class ShapeTracker:
   views: Tuple[View, ...]
-  size: sint
+  size: int
 
   def __add__(self, st:ShapeTracker) -> ShapeTracker:
     base = ShapeTracker(self.views, self.size)
@@ -63,13 +65,14 @@ class ShapeTracker:
 
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[ShapeTracker]:
     ret = tuple(v.invert(s) for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]))
-    return ShapeTracker(cast(Tuple[View, ...], ret), prod(out_shape)).reshape(out_shape) if all(x is not None for x in ret) else None
+    return ShapeTracker(cast(Tuple[View, ...], ret), shape_to_size(out_shape)).reshape(out_shape) if all(x is not None for x in ret) else None
 
   @staticmethod
-  def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),), prod(shape))
+  def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),), shape_to_size(shape))
 
   @property
-  def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous and prod(self.views[0].shape) == self.size
+  def contiguous(self) -> bool:
+    return len(self.views) == 1 and self.views[0].contiguous and shape_to_size(self.views[0].shape) == self.size
 
   @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
