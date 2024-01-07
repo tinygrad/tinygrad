@@ -3,7 +3,7 @@ from tinygrad.dtype import DType
 from tinygrad.tensor import Device, Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
-from tinygrad.helpers import dtypes
+from tinygrad.dtype import dtypes
 import json
 
 EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "WEBGL", "CLANG", "CUDA", "GPU"]
