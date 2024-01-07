@@ -45,6 +45,7 @@ Scalar = Union[float, int, bool]
 class Tensor:
   __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
   __deletable__ = ('_ctx',)
+
   training: ClassVar[bool] = False
   class train:
     def __init__(self, val=True): self.val = val
@@ -52,6 +53,11 @@ class Tensor:
     def __exit__(self, exc_type, exc_value, traceback): Tensor.training = self.prev
 
   no_grad: ClassVar[bool] = False
+  class no_grad:
+    def __init__(self, val=True): self.val = val
+    def __enter__(self): self.prev, Tensor.no_grad = Tensor.no_grad, self.val
+    def __exit__(self, exc_type, exc_value, traceback): Tensor.no_grad = self.prev
+  
   def __init__(self, data:Union[None, Scalar, List, Tuple, LazyBuffer, np.ndarray, bytes, MultiLazyBuffer],
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
