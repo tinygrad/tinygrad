@@ -334,7 +334,7 @@ class Compiled:
 # workers should ignore ctrl c
 def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-def _try_compile_k_with_idx(x: Tuple[int, Linearizer], name:Optional[str], ignore_errs:bool):
+def _compile_k_with_idx(x: Tuple[int, Linearizer], name:Optional[str], ignore_errs:bool):
   try:
     dev = cast(Compiled, Device[Device.DEFAULT])  # TODO: shouldn't use Device.DEFAULT
     return (x[0], dev.compile(x[1], name))
@@ -348,7 +348,7 @@ class MultiKernelCompiler:
     self._pool = multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker) if parallel else None
 
   def compile_unordered(self, ks:List[Linearizer], name_for_all:Optional[str]=None, ignore_errs:bool=False) -> Iterator[Tuple[int, Optional[Tuple]]]:
-    compile_fn = functools.partial(_try_compile_k_with_idx, name=name_for_all, ignore_errs=ignore_errs)
+    compile_fn = functools.partial(_compile_k_with_idx, name=name_for_all, ignore_errs=ignore_errs)
     map_fn = cast(Callable, self._pool.imap_unordered if self._pool is not None else map)
     yield from map_fn(compile_fn, enumerate(ks))
 
