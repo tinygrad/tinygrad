@@ -27,6 +27,7 @@ class CStyleLanguage(NamedTuple):
   external_local_bufs: bool = False
   uses_ptr_arithmetic: bool = False
   launch_bounds: bool = False
+  type_map: Dict[DType, str] = {}
   code_for_op: Dict = {
     UnaryOps.NEG: lambda x,dtype: f"(-{x})" if dtype != dtypes.bool else f"(!{x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
@@ -38,11 +39,11 @@ class CStyleLanguage(NamedTuple):
 
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
-    if bitcast: return f"(*(({self.buffer_prefix}{var_dtype.name}*)&{x[0]}))"
-    if len(x) == 1: return f"({var_dtype.name})({x[0]})"
+    if bitcast: return f"(*(({self.buffer_prefix}{self.render_dtype(var_dtype)}*)&{x[0]}))"
+    if len(x) == 1: return f"({self.render_dtype(var_dtype)})({x[0]})"
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.float4 is not None, "vectorized cast is not supported on this platform"
-    return f"{self.float4.replace('float4', var_dtype.name)}({','.join(x)})"
+    return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}({','.join(x)})"
 
   # returns a str expression of the const with the given type
   def render_const(self, x:Union[float,int,bool], var_dtype) -> str:
@@ -76,12 +77,12 @@ class CStyleLanguage(NamedTuple):
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""  # noqa: E501
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
-                ("const " if i > 0 else "")+self.buffer_prefix+dtype.name+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
+                ("const " if i > 0 else "")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
                 self.arg_int_prefix if dtype == dtypes.int else None) for i,(name,dtype) in enumerate(bufs)]
     prg = ''.join([f"{self.kernel_prefix}void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
-    if self.half_prekernel and any(dtype == dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
+    if self.half_prekernel and any(dtype in [dtypes.float16, dtypes.bfloat16] for _,dtype in bufs): prg = ''.join((self.half_prekernel, "\n", prg))
     return prg
 
   # returns a str statement that does the store
@@ -94,6 +95,8 @@ class CStyleLanguage(NamedTuple):
     if var_dtype.sz > 1:
       return f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"  # noqa: E501
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
+
+  def render_dtype(self, var_dtype:DType) -> str: return self.type_map[var_dtype] if var_dtype in self.type_map else var_dtype.name
 
 def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> str:
   local_size: List[int] = []
@@ -175,7 +178,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
         # NOTE: this relies on the load not happening if it's in the unselected branch
         if len(vin) > 3: val = lang.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'val')} = {val};")
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.render_dtype(dtype)} {ssa(u,'val')} = {val};")
       elif uop == UOps.PHI:
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
         r[u] = r[vin[0]]
@@ -183,7 +186,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         if isinstance(args, tuple) and args[1]:  # bitcast
           assert len(vin) == 1
           precast = ssa(None,'precast')
-          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else cast(DType, vin[0].dtype).name} {precast} = {r[vin[0]]};")
+          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.render_dtype(cast(DType, vin[0].dtype))} {precast} = {r[vin[0]]};")
           val = lang.render_cast([precast], dtype, bitcast=True)
         else:
           val = lang.render_cast([r[x] for x in vin], dtype, bitcast=False)
@@ -259,11 +262,11 @@ class CUDALanguage(CStyleLanguage):
       "i": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"
   }
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
-  half_prekernel = """
-    #include <cuda_fp16.h>
+  half_prekernel ="#include <cuda_fp16.h>\n"+"#include <cuda_bf16.h>\n"+"""
     struct half4 { half x, y, z, w; };
     __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
   """
+  type_map = {dtypes.bfloat16: "nv_bfloat16"}
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 class HIPLanguage(CUDALanguage):
@@ -284,6 +287,7 @@ __device__ half16 make_half16(half x, half y, half z, half w, half a, half b, ha
                               half e, half f, half g, half h, half i, half j, half k, half l) {
                                 return {x, y, z, w, a, b, c, d, e, f, g, h, i, j, k, l}; }
   """
+  type_map = {dtypes.bfloat16: "hip_bfloat16"}
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 
 # TODO: how much of this can be merged with above?
