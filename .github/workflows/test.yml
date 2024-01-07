@@ -327,13 +327,13 @@ jobs:
         sudo apt update
         sudo apt install --no-install-recommends --allow-unauthenticated -y rocm-hip-libraries hip-dev
     - name: Install RDNA3 emulator
-      run: sudo curl -L https://github.com/Qazalin/remu/releases/download/0.0.1-alpha/libremu.so -o /usr/local/lib/libremu.so
+      run: sudo curl -L https://github.com/Qazalin/remu/releases/download/0.0.2-alpha/libremu.so -o /usr/local/lib/libremu.so
     - name: Install Python Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test HIP on RDNA3 [gfx1100]
       run: |
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
-        HIPCPU=1 HIP=1 NOOPT=1 python -m pytest test/test_ops.py::TestOps::test_add_simpler
+        HIPCPU=1 HIP=1 FORWARD_ONLY=1 python -m pytest test/test_ops.py::TestOps -k 'test_abs or test_add or test_add3 or test_add_number or test_add_simple or test_arange and not test_arange_big'
 
 
   tests:
