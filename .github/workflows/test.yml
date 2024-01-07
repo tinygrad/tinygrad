@@ -21,7 +21,7 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
     - name: Set up Python 3.8
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: 3.8
     - name: Cache python packages
@@ -75,7 +75,7 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
     - name: Set up Python 3.8
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: 3.8
     - name: Cache python packages
@@ -108,7 +108,7 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
     - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: 3.11
     - name: Cache python packages
@@ -150,7 +150,7 @@ jobs:
             intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
             intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
       - name: Set up Python 3.11
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: 3.11
       - name: Cache python packages
@@ -222,7 +222,7 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
     - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: 3.11
     - name: Cache python packages
@@ -266,7 +266,7 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
     - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: 3.11
     - name: Cache python packages
@@ -301,7 +301,7 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
     - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: 3.11
     - name: Cache python packages
@@ -349,7 +349,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
       - name: Set up Python 3.11
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: 3.11
       - name: Cache python packages
@@ -429,7 +429,7 @@ jobs:
   #    - name: Checkout Code
   #      uses: actions/checkout@v4
   #    - name: Set up Python 3.11
-  #      uses: actions/setup-python@v4
+  #      uses: actions/setup-python@v5
   #      with:
   #        python-version: 3.11
   #    - name: Cache python packages
