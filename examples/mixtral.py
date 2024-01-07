@@ -1,4 +1,4 @@
-import functools, argparse, os
+import functools, argparse, pathlib
 from tqdm import tqdm
 from tinygrad import Tensor, nn, Device, GlobalCounters, Variable
 from tinygrad.helpers import Timing
@@ -11,7 +11,7 @@ class MixtureFeedForward:
     self.experts = [FeedForward(dim, hidden_dim, linear) for _ in range(num_experts)]
   def __call__(self, x:Tensor) -> Tensor:
     assert x.shape[0] == 1, "only BS=1"
-    g = self.gate(x).exp()
+    g = self.gate(x).float().exp()
     choice = g.data().tolist()[0][0]
     top = sorted(enumerate(choice), key=lambda x: -x[1])
     norm = top[0][1] + top[1][1]
@@ -25,7 +25,8 @@ if __name__ == "__main__":
   parser.add_argument("--count", type=int, default=30, help="Max number of tokens to generate")
   parser.add_argument("--temperature", type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
-  parser.add_argument("--weights", type=str, default=os.path.expanduser("~/Downloads/mixtral-8x7b-32kseqlen/"), help="Path to the downloaded weights")
+  parser.add_argument("--weights", type=str, default=(pathlib.Path(__file__).parent.parent / "weights/mixtral-8x7b-32kseqlen").as_posix(),
+                      help="Path to the downloaded weights")
   args = parser.parse_args()
 
   state = torch_load(args.weights + "/consolidated.00.pth.b")
@@ -50,7 +51,7 @@ if __name__ == "__main__":
   for i in range(args.count):
     GlobalCounters.reset()
     with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
-      tok = model(Tensor([toks[start_pos:]]), 0 if start_pos == 0 else Variable("start_pos", 1, 1024).bind(start_pos), args.temperature).multinomial().item()
+      tok = model(Tensor([toks[start_pos:]]), 0 if start_pos == 0 else Variable("start_pos", 1, 1024).bind(start_pos), args.temperature).item()
     toks.append(tok)
     start_pos += 1
     print(spp.decode(toks))

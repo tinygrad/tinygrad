@@ -28,7 +28,7 @@ class _Device:
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None)   # type: ignore
     if device_from_env: return device_from_env
-    for device in ["METAL", "CUDA", "GPU"]:
+    for device in ["METAL", "CUDA", "HIP", "GPU"]:
       try:
         if self[device]: return device
       except Exception: pass
@@ -93,7 +93,7 @@ class Buffer:
     if self.size > 0: self.allocator.copyout(flat_mv(ret.data), self._buf)
     return ret
 
-def _internal_buffer_copy(dest, src):
+def _internal_buffer_copy(dest:Buffer, src:Buffer):
   if hasattr(dest.allocator, 'transfer') and type(dest.allocator) is type(src.allocator):  # noqa: E721
     # fast path, used on HIP between GPUs
     # NOTE: it's important we use the dest device here to ensure the transfer is ready
@@ -107,7 +107,9 @@ def _internal_buffer_copy(dest, src):
     if fb:
       dest.allocator.transfer(dest._buf, fb, dest.size*dest.dtype.itemsize)
       return
-  if hasattr(dest.allocator, 'as_buffer'):
+  if hasattr(dest.allocator, 'copy_from_fd') and src.device.startswith("DISK") and src.size*src.dtype.itemsize >= 4096 and src._buf.ud.fd is not None:
+    dest.allocator.copy_from_fd(dest._buf, src._buf.ud.fd, src._buf.offset, src.size*src.dtype.itemsize)
+  elif hasattr(dest.allocator, 'as_buffer'):
     # fast(ish) path, uses readinto in diskbuffers
     src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
   elif hasattr(src.allocator, 'as_buffer'):
@@ -179,7 +181,7 @@ class InterpretedASTRunner(JITRunner):
 
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> float:
     st = time.perf_counter()
-    rawbufs[0]._buf = self.fxn([x._buf for x in rawbufs], var_vals)
+    rawbufs[0]._buf = self.fxn([x._buf for x in rawbufs[1:]], var_vals)
     et = time.perf_counter() - st
     update_stats(f"<interpreted {rawbufs[0].size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, device=rawbufs[0].device)
     return et
@@ -215,11 +217,13 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
     if ast.op == BufferOps.STORE: return _interpret_ast(ast.src[0])
     if TernaryOps.MULACC in fxn_for_op and ast.op == ReduceOps.SUM:
       if ast.src[0].op == BinaryOps.MUL: ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
-      if ast.src[0].op == UnaryOps.CAST and ast.src[0].src[0].op == BinaryOps.MUL: ast = LazyOp(TernaryOps.MULACC, ast.src[0].src[0].src, ast.arg)
+      if (castop:=ast.src[0]).op == UnaryOps.CAST and (mulop:=castop.src[0]).op == BinaryOps.MUL:
+        # MULACC with acc cast rewrite: MUL -> CAST -> SUM => CAST -> MULACC
+        ast = LazyOp(TernaryOps.MULACC, tuple(LazyOp(UnaryOps.CAST, (s, ), castop.arg) for s in mulop.src), ast.arg)
 
     if ast.op in BufferOps:
-      if ast.op == ast.op == BufferOps.CONST: tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})"
-      else: tmp = f"{gstr(fxn_for_op[UnaryOps.CAST], UnaryOps.CAST)}(inputs[{ast.arg.idx}], ({gstr(ast.arg.dtype)}, True))"
+      if ast.op == BufferOps.CONST: tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})"
+      else: tmp = f"{gstr(fxn_for_op[UnaryOps.CAST], UnaryOps.CAST)}(inputs[{ast.arg.idx-1}], ({gstr(ast.arg.dtype)}, True))"
       for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(fxn_for_op[mop], mop)}({tmp}, {gstr(arg)})"
     else:
       tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({', '.join([_interpret_ast(src) for src in ast.src] + ([gstr(ast.arg)] if ast.arg else []))})"
@@ -281,6 +285,7 @@ class Compiled:
   def synchronize(self): pass  # override this in your device
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
+    assert self.compiler is not None, f"compiler is None, can't build {k.ast}"
     k.linearize()
     src = self.renderer(to_function_name(k.name), k.uops)
     if getenv("DISABLE_COMPILER_CACHE") or '<' in self.compiler.__name__:

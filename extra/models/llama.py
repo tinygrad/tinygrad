@@ -67,8 +67,9 @@ class Attention:
       self.cache_k = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype)
       self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype)
 
-    keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
-    values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
+    # HACK: without contiguous, the conversation mode is broken and the cache is not updated
+    keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous()
+    values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1).contiguous()
 
     # update the cache
     assert keys.dtype == self.cache_k.dtype and values.dtype == self.cache_v.dtype, f"{keys.dtype=}, {values.dtype=}, {self.cache_k.dtype=}, {self.cache_v.dtype=}"
@@ -118,10 +119,12 @@ class Transformer:
     h = self.tok_embeddings(tokens)
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos+1).realize() if seqlen > 1 else None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
-    logits = self.output(self.norm(h))[:, -1, :].flatten()
+    logits = self.output(self.norm(h))[:, -1, :]
     if temperature < 1e-6:
-      return (logits == logits.max()).half().realize()
-    return (logits / temperature).softmax().half().realize()
+      ret = logits.argmax(-1)
+    else:
+      ret = (logits / temperature).softmax().multinomial()
+    return ret.realize()
 
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0):
     # TODO: better way to handle the first call v.s. the rest?

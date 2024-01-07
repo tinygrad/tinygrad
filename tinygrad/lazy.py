@@ -7,7 +7,7 @@ from tinygrad.helpers import prod, merge_dicts, flatten, getenv, dedup, DEBUG, a
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps, Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, Device
 from tinygrad.graph import log_lazybuffer
 from weakref import ref, WeakSet, WeakValueDictionary, ReferenceType
 
@@ -33,7 +33,7 @@ class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                base:Optional[LazyBuffer]=None):
-    assert isinstance(device, str)
+    assert isinstance(device, str) and device == Device.canonicalize(device)
     self.device, self.st, self.dtype, self.shape = device, st, dtype, st.shape
     if base is None:
       # properties on base
@@ -63,7 +63,7 @@ class LazyBuffer:
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
 
   def contiguous(self):
-    if not self.st.contiguous or self.st.size() != self.base.st.size() or self.is_unrealized_const():
+    if not self.st.contiguous or self.is_unrealized_const():
       ret = self.e(LoadOps.CONTIGUOUS)
       sti = self.st.invert(self.base.shape)
       if sti is not None: self.base.contiguous_child = ref(ret), sti
@@ -90,8 +90,9 @@ class LazyBuffer:
     # no COPY
     if self.device == device: return self
 
-    # COPY there and back = no COPY at all
-    if self.base == self and not self.realized and self.op == LoadOps.COPY and self.srcs[0].device == device: return self.srcs[0]
+    # double COPY = one COPY
+    if self.st.contiguous and not self.base.realized and self.base.op == LoadOps.COPY:
+      return self.base.srcs[0].copy_to_device(device).reshape(self.st.shape)
 
     # const doesn't have to be copied (issues with disk tensor)
     if self.is_unrealized_const():
@@ -233,7 +234,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
   allbufs[buf] = None
   if buf.op in LoadOps: realizes.add(buf.base)
   if buf.op == LoadOps.COPY:
-    assert buf.srcs[0].st.contiguous and buf.srcs[0].st.size() == buf.srcs[0].base.st.size(), "can only copy contig"
+    assert buf.srcs[0].st.contiguous, "can only copy contig"
     realizes.add(buf.srcs[0].base)
   for x in buf.srcs: _recurse_lb(x, realizes, allbufs, simple_pads)
 
@@ -277,7 +278,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
           # can only have one output buffer
           # can only reduce contiguous
           # max one reduceop per kernel
-          if len(realized_children) > 1 or not st.contiguous or st.size() != r.st.size() or (tr in reduce_for_op and reduce_for_op[tr] != r):
+          if len(realized_children) > 1 or not st.contiguous or (tr in reduce_for_op and reduce_for_op[tr] != r):
             can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
             forced_realize = True
             break
@@ -303,7 +304,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
           tr_next = next(iter(tr.children))
           st_childs = dedup([s for s in tr_next.srcs if s.base == tr])
           if len(st_childs) > 1: break
-          if st.size() != st_childs[0].st.size(): break
+          if st.size != st_childs[0].st.size: break
           st = st + st_childs[0].st
           if not st.contiguous or tr_next.op in ReduceOps: break
           tr = tr_next
