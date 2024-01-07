@@ -3,7 +3,7 @@ from typing import Callable, List, Tuple, Dict, cast, Union, Optional, TypeVar, 
 import functools, itertools, operator
 from tinygrad.dtype import DType
 from tinygrad.helpers import DEBUG, merge_dicts, getenv, all_int, Context, GRAPH, flatten
-from tinygrad.device import Device, JITRunner, CompiledASTRunner, Buffer
+from tinygrad.device import Compiled, JITRunner, CompiledASTRunner, Buffer
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
@@ -54,7 +54,6 @@ class TinyJit(Generic[ReturnType]):
     # all inputs (except const) are realized
     input_tensors: Dict[Union[int, str], Union[LazyBuffer, MultiLazyBuffer]] = { cast(Union[int, str], k):v.realize().lazydata for k,v in itertools.chain(enumerate(args), kwargs.items()) if v.__class__ is Tensor }  # noqa: E501
     expected_name_sts_dtype_device = tuple([(k, v.st.unbind() if isinstance(v, LazyBuffer) else ShapeTracker.from_shape(v.shape), v.dtype, v.device) for k,v in input_tensors.items()]) #noqa: E501
-    multi = any(isinstance(v, MultiLazyBuffer) for  v in input_tensors.values())
 
     # get rawbuffers
     lbs: List[LazyBuffer] = [v for v in input_tensors.values() if isinstance(v, LazyBuffer)] + flatten([mlb.lbs for mlb in input_tensors.values() if isinstance(mlb, MultiLazyBuffer)]) #noqa: E501
@@ -84,29 +83,43 @@ class TinyJit(Generic[ReturnType]):
       assert len(set(get_input_replace(self.jit_cache, input_rawbuffers).values())) == len(input_rawbuffers), "some input tensors not found"
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
-      # if your Device supports it, condense the items into a graph executor.
-      # TODO: currently functions with MultiLazyBuffer inputs do not use the graph.
-      if (make_graph := Device[Device.DEFAULT].graph) and getenv("JIT") != 2 and len(self.jit_cache) > 1 and not multi:
+      # Condense the items into a graph executor.
+      if getenv("JIT") != 2:
         # Split JIT cache into batches for faster graph execution.
         # This allows the accelerator to run some batches while subsequent graphs are still being updated.
-        graphed_jit_cache, current_batch = [], []
+        graphed_jit_cache: List[JitItem] = []
+        current_batch: List[JitItem] = []
+        current_device: Union[Compiled, None] = None
+
+        # Flush the current batch.
+        def flush():
+          nonlocal current_batch, current_device
+          assert current_device is not None
+          try:
+            graphed_jit_cache.append(JitItem(current_device.graph(current_batch, input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers))) # noqa: E501
+            if DEBUG >= 2: print(f"\tJIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
+          except GraphException as e:
+            graphed_jit_cache.extend(current_batch)
+            if DEBUG >= 2: print(f"\tJIT GRAPHing failed batch with {len(current_batch)} kernels on device {current_device}: {e}")
+          current_batch = []
+          current_device = None
+
         for i,ji in enumerate(self.jit_cache):
           # If the jit item can potentially be graphed, put it in a batch.
-          if isinstance(ji.prg, CompiledASTRunner): current_batch.append(ji)
+          can_be_graphed = isinstance(ji.prg, CompiledASTRunner) and ji.prg.device.graph
+          if can_be_graphed:
+            assert isinstance(ji.prg, CompiledASTRunner)
+            # If the device changed we flush the batch early and append this item for the next batch.
+            if current_device is not None and ji.prg.device != current_device: flush()
+            current_device = ji.prg.device
+            current_batch.append(ji)
 
           # The flush is done when (1) ji is the last one, (2) the size of batch exceeds the maximum batch size or
           # (3) the current jit item cannot be graphed, so the current batch is flushed before such a jit item is added.
-          if len(current_batch) > 0 and (i==len(self.jit_cache)-1 or len(current_batch) >= getenv("JIT_BATCH_SIZE", 64) or not isinstance(ji.prg, CompiledASTRunner)):  # noqa: E501
-            try:
-              graphed_jit_cache.append(JitItem(make_graph(current_batch, input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers)))
-              if DEBUG >= 2: print(f"\tJIT GRAPHing batch with {len(current_batch)} kernels")
-            except GraphException as e:
-              graphed_jit_cache.extend(current_batch)
-              if DEBUG >= 2: print(f"\tJIT GRAPHing failed batch with {len(current_batch)} kernels: {e}")
-            current_batch = []
+          if len(current_batch) > 0 and (i==len(self.jit_cache)-1 or len(current_batch) >= getenv("JIT_BATCH_SIZE", 64) or not can_be_graphed): flush() # noqa: E501
 
           # If the jit item cannot be graphed, put it right into the final cache after the flush.
-          if not isinstance(ji.prg, CompiledASTRunner): graphed_jit_cache.append(ji)
+          if not can_be_graphed: graphed_jit_cache.append(ji)
 
         self.jit_cache = graphed_jit_cache
 
