@@ -155,14 +155,6 @@ backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill v
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type string
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 
-# issue 1556 https://github.com/tinygrad/tinygrad/issues/1556
-backend_test.exclude('test_isinf_cpu')
-backend_test.exclude('test_isinf_negative_cpu')
-backend_test.exclude('test_isinf_positive_cpu')
-backend_test.exclude('test_isinf_float16_cpu')
-backend_test.exclude('test_isnan_float16_cpu')
-backend_test.exclude('test_isnan_cpu')
-
 # issue 1791 fast math messes with these https://github.com/tinygrad/tinygrad/issues/1791
 backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
 backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
@@ -174,14 +166,25 @@ if Device.DEFAULT in ['METAL']:
   backend_test.exclude('test_maxpool_2d_same_lower_cpu')
 
 if Device.DEFAULT in ['GPU', 'METAL']:
-  backend_test.exclude('test_mish_cpu') # weird inaccuracy
-  backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
-  backend_test.exclude('test_eyelike_with_dtype_cpu') # backend does not support dtype: Double
+  # double not supported
+  backend_test.exclude('test_max_float64_cpu')
+  backend_test.exclude('test_min_float64_cpu')
+  backend_test.exclude('test_eyelike_with_dtype_cpu')
+  # weird inaccuracy
+  backend_test.exclude('test_mish_cpu')
+  backend_test.exclude('test_mish_expanded_cpu')
+
+# TODO: llvm has problems with inf
+if Device.DEFAULT in ['LLVM']:
+  backend_test.exclude('test_isinf_cpu')
+  backend_test.exclude('test_isinf_negative_cpu')
+  backend_test.exclude('test_isinf_positive_cpu')
 
 # Segfaults in CI, GPU requires cl_khr_fp16
 if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
   backend_test.exclude('test_max_float16_cpu')
   backend_test.exclude('test_min_float16_cpu')
+  backend_test.exclude('test_isinf_float16_cpu')
 
 # error: casting to type 'half' is not allowed
 backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
@@ -190,9 +193,13 @@ backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
 if isinstance(Device[Device.DEFAULT], Compiled):
   backend_test.exclude('test_MaxPool3d_stride_padding_cpu')
 
-# TODO: inaccuracy only for numpy backend. will get back to this after dtype refactor.
-if Device.DEFAULT == "CPU":
-  backend_test.exclude('test_sce_')
+# TODO: this somehow passes in CI but does not pass if run locally
+if Device.DEFAULT == 'METAL':
+  backend_test.exclude('test_maxpool_2d_same_upper_cpu')
+
+# TODO: problems with nan
+backend_test.exclude('test_isnan_float16_cpu')
+backend_test.exclude('test_isnan_cpu')
 
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):

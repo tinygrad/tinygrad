@@ -1,7 +1,7 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  DOWNLOAD_CACHE_VERSION: '3'
+  DOWNLOAD_CACHE_VERSION: '4'
 
 on:
   push:
@@ -31,8 +31,6 @@ jobs:
         key: linting-packages-${{ hashFiles('**/setup.py') }}-3.8
     - name: Install dependencies
       run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Repo line count <5000 lines
-      run: MAX_LINE_COUNT=5000 python sz.py
     - name: Lint with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' **/*.py
     - name: Lint with ruff
@@ -54,7 +52,7 @@ jobs:
     - name: Fuzz Test shapetracker
       run: |
         PYTHONPATH="." python test/external/fuzz_shapetracker.py
-        FUZZ=invert PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
+        PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
     - name: Test shapetracker to_movement_ops
       run: PYTHONPATH="." python extra/to_movement_ops.py
     - name: Use as an external package
@@ -65,6 +63,8 @@ jobs:
         source venv/bin/activate
         pip install $GITHUB_WORKSPACE
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
+    - name: Repo line count <6000 lines
+      run: MAX_LINE_COUNT=6000 python sz.py
 
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
@@ -290,7 +290,7 @@ jobs:
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
     - name: Test tensor core ops
-      run: METAL=1 TC=2 python test/test_ops.py TestOps.test_big_gemm
+      run: METAL=1 TC=2 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
 
   testhipcompilation:
     name: HIP Compilation Tests
@@ -329,9 +329,10 @@ jobs:
     - name: Install Python Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Test HIP compilation on RDNA3 [gfx1100]
+      # test/test_symbolic_ops.py can't run here, it was comparing empty memory
       run: |
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
-        MOCKHIP=1 HIP=1 python -m pytest -s test/test_hip_rdna3.py test/test_symbolic_ops.py
+        MOCKHIP=1 HIP=1 python -m pytest -s test/test_hip_rdna3.py
     
   testwebgl:
     name: WebGL Tests

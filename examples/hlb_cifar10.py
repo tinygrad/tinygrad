@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # setup for distributed
 from extra import dist
-from tinygrad.helpers import getenv, dtypes
+from tinygrad.helpers import getenv
 if __name__ == "__main__":
   if getenv("DIST"):
     dist.preinit()
@@ -14,12 +14,11 @@ import random, time
 import numpy as np
 from typing import Any, Dict, Optional, SupportsIndex
 from extra.datasets import fetch_cifar, cifar_mean, cifar_std
-from tinygrad import nn
+from tinygrad import nn, dtypes
 from tinygrad.nn.state import get_state_dict
 from tinygrad.nn import optim
-from tinygrad import Device
+from tinygrad import Device, GlobalCounters
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import GlobalCounters
 from tinygrad.shape.symbolic import Node
 from extra.lr_scheduler import OneCycleLR
 from tinygrad.jit import TinyJit
@@ -83,37 +82,37 @@ class SpeedyResNet:
     forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
     return forward(x) if training else forward(x)*0.5 + forward(x[..., ::-1])*0.5
 
-def train_cifar():
-
-  # hyper-parameters were exactly the same as the original repo
-  bias_scaler = 58
-  hyp: Dict[str, Any] = {
-    'seed' : 209,
-    'opt': {
-      'bias_lr':            1.76 * bias_scaler/512,
-      'non_bias_lr':        1.76 / 512,
-      'bias_decay':         1.08 * 6.45e-4 * BS/bias_scaler,
-      'non_bias_decay':     1.08 * 6.45e-4 * BS,
-      'final_lr_ratio':     0.025,
-      'initial_div_factor': 1e16,
-      'label_smoothing':    0.20,
-      'momentum':           0.85,
-      'percent_start':      0.23,
-      'loss_scale_scaler':  1./128   # (range: ~1/512 - 16+, 1/128 w/ FP16)
-    },
-    'net': {
-        'kernel_size': 2,             # kernel size for the whitening layer
-        'cutmix_size': 3,
-        'cutmix_steps': 499,
-        'pad_amount': 2
-    },
-    'ema': {
-        'steps': 399,
-        'decay_base': .95,
-        'decay_pow': 1.6,
-        'every_n_steps': 5,
-    }
+# hyper-parameters were exactly the same as the original repo
+bias_scaler = 58
+hyp: Dict[str, Any] = {
+  'seed' : 209,
+  'opt': {
+    'bias_lr':            1.76 * bias_scaler/512,
+    'non_bias_lr':        1.76 / 512,
+    'bias_decay':         1.08 * 6.45e-4 * BS/bias_scaler,
+    'non_bias_decay':     1.08 * 6.45e-4 * BS,
+    'final_lr_ratio':     0.025,
+    'initial_div_factor': 1e6,
+    'label_smoothing':    0.20,
+    'momentum':           0.85,
+    'percent_start':      0.23,
+    'loss_scale_scaler':  1./128   # (range: ~1/512 - 16+, 1/128 w/ FP16)
+  },
+  'net': {
+      'kernel_size': 2,             # kernel size for the whitening layer
+      'cutmix_size': 3,
+      'cutmix_steps': 499,
+      'pad_amount': 2
+  },
+  'ema': {
+      'steps': 399,
+      'decay_base': .95,
+      'decay_pow': 1.6,
+      'every_n_steps': 5,
   }
+}
+
+def train_cifar():
 
   def set_seed(seed):
     Tensor.manual_seed(getenv('SEED', seed))
@@ -263,7 +262,7 @@ def train_cifar():
   X_train, X_test = X_train.to(device=Device.DEFAULT).float(), X_test.to(device=Device.DEFAULT).float()
   Y_train, Y_test = Y_train.to(device=Device.DEFAULT).float(), Y_test.to(device=Device.DEFAULT).float()
   # one-hot encode labels
-  Y_train, Y_test = Tensor.eye(10)[Y_train], Tensor.eye(10)[Y_test]
+  Y_train, Y_test = Tensor.eye(10)[Y_train.cast(dtypes.int32)], Tensor.eye(10)[Y_test.cast(dtypes.int32)]
   # preprocess data
   X_train, X_test = X_train.sequential(transform), X_test.sequential(transform)
 

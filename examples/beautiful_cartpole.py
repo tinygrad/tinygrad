@@ -1,7 +1,6 @@
 from typing import Tuple
 import time
-from tinygrad import Tensor, TinyJit, nn, Variable
-from tinygrad.helpers import dtypes  # TODO: wouldn't need this if argmax returned the right dtype
+from tinygrad import Tensor, TinyJit, nn
 import gymnasium as gym
 from tqdm import trange
 import numpy as np  # TODO: remove numpy import
@@ -24,7 +23,7 @@ def evaluate(model:ActorCritic, test_env:gym.Env) -> float:
   (obs, _), terminated, truncated = test_env.reset(), False, False
   total_rew = 0.0
   while not terminated and not truncated:
-    act = model(Tensor(obs))[0].argmax().cast(dtypes.int32).item()
+    act = model(Tensor(obs))[0].argmax().item()
     obs, rew, terminated, truncated, _ = test_env.step(act)
     total_rew += float(rew)
   return total_rew
@@ -59,10 +58,10 @@ if __name__ == "__main__":
       return action_loss.realize(), entropy_loss.realize(), critic_loss.realize()
 
   @TinyJit
-  def get_action_dist(obs:Tensor) -> Tensor:
+  def get_action(obs:Tensor) -> Tensor:
     # TODO: with no_grad
     Tensor.no_grad = True
-    ret = model(obs)[0].exp().realize()
+    ret = model(obs)[0].exp().multinomial().realize()
     Tensor.no_grad = False
     return ret
 
@@ -71,16 +70,15 @@ if __name__ == "__main__":
   st, steps = time.perf_counter(), 0
   Xn, An, Rn = [], [], []
   for i in (t:=trange(40)):
-    get_action_dist.reset()   # NOTE: if you don't reset the jit here it captures the wrong model on the first run through
+    get_action.reset()   # NOTE: if you don't reset the jit here it captures the wrong model on the first run through
 
     obs:np.ndarray = env.reset()[0]
     rews, terminated, truncated = [], False, False
     # NOTE: we don't want to early stop since then the rewards are wrong for the last episode
     while not terminated and not truncated:
       # pick actions
-      # TODO: move the multinomial into jitted tinygrad when JIT rand works
       # TODO: what's the temperature here?
-      act = get_action_dist(Tensor(obs)).multinomial().item()
+      act = get_action(Tensor(obs)).item()
 
       # save this state action pair
       # TODO: don't use np.copy here on the CPU, what's the tinygrad way to do this and keep on device? need __setitem__ assignment

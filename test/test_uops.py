@@ -1,8 +1,8 @@
-# ruff: noqa: E501
 from typing import Optional, Tuple, Any, List
 import unittest, math
 import numpy as np
-from tinygrad.helpers import dtypes, getenv, DType, PtrDType
+from tinygrad.dtype import dtypes, DType, PtrDType
+from tinygrad.helpers import getenv
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.device import CompiledASTRunner, Compiled
@@ -10,10 +10,10 @@ from tinygrad.codegen.linearizer import UOps, UOp
 from test.test_dtype import is_dtype_supported
 
 def _uops_to_prg(uops):
-  src, runtime_args = Device[Device.DEFAULT].renderer("test", uops)
-  return CompiledASTRunner(None, "test", src,
-                           [1] if Device[Device.DEFAULT].linearizer_opts.has_local else None, [1] if Device[Device.DEFAULT].linearizer_opts.has_local else None,
-                           runtime_args=runtime_args).build(Device[Device.DEFAULT].compiler, Device[Device.DEFAULT].runtime)
+  src = Device[Device.DEFAULT].renderer("test", uops)
+  lib = Device[Device.DEFAULT].compiler(src)
+  return CompiledASTRunner(None, "test", src, lib, [1] if Device[Device.DEFAULT].linearizer_opts.has_local else None,
+                           [1] if Device[Device.DEFAULT].linearizer_opts.has_local else None).build(Device[Device.DEFAULT].runtime)
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(vin), arg))

@@ -16,8 +16,8 @@ from vits import Y_LENGTH_ESTIMATE_SCALARS, HParams, Synthesizer, TextMapper, ge
 from whisper import init_whisper, transcribe_waveform
 from sentencepiece import SentencePieceProcessor
 
-from tinygrad.helpers import Timing, dtypes, fetch
-from tinygrad.tensor import Tensor
+from tinygrad.helpers import Timing, fetch
+from tinygrad import Tensor, dtypes
 
 # Whisper constants
 RATE = 16000

@@ -3,17 +3,17 @@ Welcome to the tinygrad documentation
 =================
 
 this file will take you on a whirlwind journey from a Tensor all the way down
-tinygrad has been aggressively refactored in the 2.5 years it's been worked on.
+tinygrad has been aggressively refactored in the 3 years it's been worked on.
 what you see here is a refined library (with more refining to go still!)
 
-the whole tinygrad is ~2300 lines, so while it's readable in an evening or two,
+the whole tinygrad is < 5000 lines, so while it's readable in an evening or two,
 this documentation will help with entry points and understanding the abstraction stack
 """
 
 # %%
 # == Boilerplate imports for typing ==
 from __future__ import annotations
-from typing import Optional, Tuple, Union, Any, Dict, Callable, Type, List, ClassVar
+from typing import Optional, Tuple, Union, Any, Dict, Callable, Type, List
 from enum import Enum, auto
 from abc import ABC
 
@@ -67,7 +67,7 @@ class Function:
 
 # %%
 # == LazyBuffer (in tinygrad/lazy.py, code 5/10) ==
-from tinygrad.helpers import DType
+from tinygrad.dtype import DType
 
 # this is where the properties live that you thought were a part of Tensor
 # LazyBuffer is like a Tensor without derivatives, at the mlop layer
@@ -91,12 +91,12 @@ class LazyBuffer:
   # this LazyOp describes the computation needed to realize this LazyBuffer
   op: Optional[LazyOp]
 
-# LazyOp (in tinygrad/ops.py, code 4/10)
+# LazyOp (in tinygrad/ops.py, code 5/10)
 # in a tree they form an Abstract Syntax Tree for a single GPU kernel
 class LazyOp:
   op: Op                                       # the type of the compute
-  src: Tuple[Union[LazyOp, LazyBuffer], ...]   # the sources
-  arg: Optional[Any] = None                    # and an optional static argument
+  src: Tuple[LazyOp, ...]                      # the sources
+  arg: Any = None                              # and an optional static argument
 
 # there's currently 26 Ops you have to implement for an accelerator.
 class UnaryOps(Enum):    EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto();   SQRT = auto()
@@ -105,12 +105,12 @@ class ReduceOps(Enum):   SUM = auto();  MAX = auto()
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto()
 class TernaryOps(Enum):  MULACC = auto(); WHERE = auto()
 class LoadOps(Enum):     EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto()
-# NOTE: if you have a CompiledBuffer(DeviceBuffer)
+# NOTE: if you have a Compiled device
 #       you do not need to implement the MovementOps
-#       as they are handled by the ShapeTracker(in tinygrad/shape/shapetracker.py, code 7/10)
+#       as they are handled by the ShapeTracker (in tinygrad/shape/shapetracker.py, code 7/10)
 Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, TernaryOps, LoadOps]
 
-# most of tinygrad/lazy.py is concerned with fusing Ops into LazyOps ASTs that map to GPUKernels
+# most of tinygrad/lazy.py is concerned with fusing Ops into LazyOps ASTs that map to kernels
 # it's beyond the scope of this tutorial, but you can read the file if interested
 
 # %%
@@ -118,36 +118,38 @@ Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, TernaryOps, LoadOps]
 
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LazyOp, BinaryOps, LoadOps
+from tinygrad.lazy import LazyBuffer
+from tinygrad.device import Buffer
 
 # the 2+3 from before
 result = Tensor([2]) + Tensor([3])
 print(type(result.lazydata), result.lazydata)  # let's look at the lazydata of result
 
-# you'll see it has a LazyOp
 # the op type is BinaryOps.ADD
 # and it has two sources, the 2 and the 3
-lazyop: LazyOp = result.lazydata.op
+lazyop: LazyBuffer = result.lazydata
 assert lazyop.op == BinaryOps.ADD
-assert len(lazyop.src) == 2
+assert len(lazyop.srcs) == 2
 
 # the first source is the 2, it comes from the CPU
 # the source is a LazyBuffer that is a "CPU" Tensor
 # again, a LazyOp AST is like a GPU kernel. you have to copy the data on the device first
-assert lazyop.src[0].op.op == LoadOps.COPY
-assert lazyop.src[0].op.src[0].device == "CPU"
-assert lazyop.src[0].op.src[0].op.src[0].realized._buf[0] == 2, "the src of the COPY LazyOP is a LazyBuffer on the CPU holding [2.]"
-assert result.lazydata.realized is None, "the LazyBuffer is not realized yet"
+assert lazyop.srcs[0].op == LoadOps.COPY
+assert lazyop.srcs[0].srcs[0].device == "CPU"
+assert lazyop.srcs[0].srcs[0].realized._buf[0] == 2, "the src of the COPY LazyOP is a LazyBuffer on the CPU holding [2]"
+assert result.lazydata.base.realized is None, "the LazyBuffer is not realized yet"
 
 # now we realize the LazyBuffer
 result.realize()
-assert result.lazydata.realized is not None, "the LazyBuffer is realized!"
-# this brings us nicely to DeviceBuffer, of which the realized ClangBuffer is a subclass
-#assert 'RawMallocBuffer' in str(type(result.lazydata.realized))
-# getting ahead of ourselves, but we can copy the DeviceBuffer toCPU
-assert result.lazydata.realized.toCPU()[0] == 5, "when put in numpy with toCPU, it's 5"
+assert result.lazydata.base.realized is not None, "the LazyBuffer is realized!"
+# this brings us nicely to Buffer
+assert isinstance(result.lazydata.base.realized, Buffer)
+assert result.lazydata.base.realized.device == "CLANG"
+# getting ahead of ourselves, but we can move the Buffer to CPU
+assert result.lazydata.base.realized.toCPU()[0] == 5, "when put in numpy with toCPU, it's 5"
 
 # %%
-# == Union[Interpreted, Compiled] (in tinygrad/ops.py, code 5/10) ==
+# == Union[Interpreted, Compiled] (in tinygrad/device.py, code 6/10) ==
 
 # Now you have a choice, you can either write a "Interpreted" backend or "Compiled" backend
 
@@ -204,7 +206,6 @@ from tinygrad.runtime.ops_clang import ClangProgram, compile_clang
 # first we create two numpy buffers containing 2 and 3
 # then we copy the numpy in to RawMallocBuffers
 # last, we create an empty output buffer
-from tinygrad.helpers import dtypes
 input_a, input_b = MallocAllocator.alloc(4), MallocAllocator.alloc(4)
 output = MallocAllocator.alloc(4)
 
@@ -236,7 +237,6 @@ class UOp:
   dtype: Optional[DType]
   vin: Tuple[UOp, ...]
   arg: Any
-  num: int  # UOps are unique
 
 class Linearizer:
   # create the kernel with the AST
@@ -248,7 +248,7 @@ class Linearizer:
   uops: List[UOp]
 
 from tinygrad.tensor import Tensor
-result = Tensor(2).realize() + Tensor(3).realize()
+result = Tensor(2.0).realize() + Tensor(3.0).realize()
 
 # use the real Linearizer to linearize 2+3
 from tinygrad.codegen.linearizer import Linearizer
@@ -261,7 +261,7 @@ for uop in linearizer.uops: print(uop)
 
 # output:
 """
-   0 UOps.DEFINE_GLOBAL  : ptr.dtypes.float          []                               ('data0', dtypes.float)
+   0 UOps.DEFINE_GLOBAL  : ptr.dtypes.float          []                               data0
    1 UOps.CONST          : dtypes.float              []                               2.0
    2 UOps.CONST          : dtypes.float              []                               3.0
    3 UOps.ALU            : dtypes.float              [1, 2]                           BinaryOps.ADD
@@ -275,7 +275,7 @@ for uop in linearizer.uops: print(uop)
 # here, we have an example where we fetch the generated code from the JIT
 
 from tinygrad.tensor import Tensor
-result = Tensor(2) + Tensor(3)
+result = Tensor(2.0) + Tensor(3.0)
 
 # we have a global cache used by the JIT
 # from there, we can see the generated clang code
@@ -290,7 +290,6 @@ assert len(cache_saved) == 1
 # print the C Program :)
 print(cache_saved[0].prg.prg)
 
-# after some formatting (the compiler doesn't care)
 # NOTE: the 2 and 3 are constant folded
 """
 void E_n2(float* restrict data0) {

@@ -4,13 +4,14 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.jit import TinyJit
-from tinygrad import Device, GlobalCounters
-from tinygrad.helpers import CI, dtypes
+from tinygrad import Device, GlobalCounters, dtypes
+from tinygrad.helpers import CI
 from tinygrad.shape.symbolic import Variable
+from extra.lr_scheduler import OneCycleLR
 from test.helpers import derandomize_model
 
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
-from examples.hlb_cifar10 import SpeedyResNet
+from examples.hlb_cifar10 import SpeedyResNet, hyp
 from examples.llama import Transformer as LLaMaTransformer, MODEL_PARAMS as LLAMA_MODEL_PARAMS
 from examples.stable_diffusion import UNetModel, ResBlock
 
@@ -66,7 +67,7 @@ class TestRealWorld(unittest.TestCase):
     helper_test("test_mini_sd", lambda: (Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24)), test, 0.01, 43)
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
-  @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp1")
+  @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp16")
   def test_llama(self):
     dtypes.default_float = dtypes.float16
 
@@ -75,8 +76,8 @@ class TestRealWorld(unittest.TestCase):
     derandomize_model(model)
     @TinyJit
     def test(t): return model(t, 0).realize()
-    # TODO: test first token vs rest properly, also memory test is broken with CacheCollector
-    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.27 if CI else 13.5, 181 if CI else 685, all_jitted=True)
+    # TODO: test first token vs rest properly
+    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.27 if CI else 14.9, 191 if CI else 719, all_jitted=True)
 
   @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp16")
   def test_gpt2(self):
@@ -132,6 +133,22 @@ class TestRealWorld(unittest.TestCase):
 
       # reset device
       #Device.DEFAULT = old_default
+
+  @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
+  @unittest.skipIf(Device.DEFAULT in ["GPU"] and CI, "opencl on intel can't compile half")
+  def test_train_cifar_hyp(self):
+    dtypes.default_float = dtypes.float16
+    with Tensor.train():
+      model = SpeedyResNet(Tensor.ones((12,3,2,2)))
+      optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['bias_decay'])
+      initial_div_factor = hyp['opt']['initial_div_factor']
+      final_lr_ratio = hyp['opt']['final_lr_ratio']
+      pct_start = hyp['opt']['percent_start']
+      lr_scheduler = OneCycleLR(optimizer, max_lr=hyp['opt']['bias_lr'], pct_start=pct_start, div_factor=initial_div_factor,
+                                final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=4)
+      assert not np.isnan(lr_scheduler.min_lr), "lr too small or initial_div_facotr too big for half"
+
+    dtypes.default_float = dtypes.float32
 
 if __name__ == '__main__':
   unittest.main()

@@ -1,8 +1,7 @@
-import os, mmap
-try: import _posixshmem
-except Exception: pass
+import os, mmap, _posixshmem, io
 from typing import Callable, Dict, Tuple
-from tinygrad.helpers import prod, DType, OSX, dtypes
+from tinygrad.dtype import DType, dtypes
+from tinygrad.helpers import prod, OSX
 from tinygrad.device import Interpreted, Allocator
 from tinygrad.ops import Op, MovementOps, UnaryOps
 from tinygrad.shape.view import strides_for_shape
@@ -10,7 +9,7 @@ from tinygrad.shape.view import strides_for_shape
 class UnderlyingDiskBuffer:
   def __init__(self, fd, mem): self.fd, self.mem = fd, mem
   def __del__(self):
-    if self.fd: self.fd.close()
+    if self.fd is not None: os.close(self.fd)
 
 class DiskBuffer:
   def __init__(self, ud:UnderlyingDiskBuffer, size:int, dtype:DType=dtypes.uint8, offset=0):
@@ -27,33 +26,30 @@ class DiskBuffer:
 
 disk_fxn_for_op: Dict[Op, Callable] = { UnaryOps.CAST: DiskBuffer.cast, MovementOps.AS_STRIDED: DiskBuffer.as_strided }
 
-MAP_LOCKED, MAP_POPULATE = 0x2000, 0x008000
+MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class DiskAllocator(Allocator):
   def __init__(self, device): self.device = device
   def _alloc(self, size):
     if str(self.device).startswith("shm:"):
-      if OSX:
-        with open(f"/tmp/shm_{self.device[4:]}", "w+b") as f:
-          f.truncate(size)
-          shm = mmap.mmap(f.fileno(), size, flags=mmap.MAP_SHARED)
-      else:
-        fd = _posixshmem.shm_open(self.device[4:], os.O_RDWR, 0o600)
-        # TODO: these flags are somewhat platform specific, but python doesn't expose the ones we need
-        shm = mmap.mmap(fd, size, flags=mmap.MAP_SHARED | MAP_LOCKED | MAP_POPULATE)
-        shm.madvise(mmap.MADV_HUGEPAGE)     # type: ignore   # not on OSX
-        os.close(fd)
-      buf = UnderlyingDiskBuffer(None, shm)
+      fd = _posixshmem.shm_open("/"+self.device[4:].lstrip("/"), os.O_RDWR, 0o600)
+      mem = mmap.mmap(fd, size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
+      os.close(fd)
+      fd = None
     else:
-      f = open(self.device, "a+b")
-      if os.path.getsize(self.device) < size: os.ftruncate(f.fileno(), size)
-      buf = UnderlyingDiskBuffer(f, mmap.mmap(f.fileno(), size))
-    return DiskBuffer(buf, size)
+      try: fd = os.open(self.device, os.O_RDWR|os.O_CREAT|(0 if OSX else os.O_DIRECT))
+      except OSError: fd = os.open(self.device, os.O_RDWR|os.O_CREAT)
+      if os.fstat(fd).st_size < size: os.ftruncate(fd, size)
+      mem = mmap.mmap(fd, size)
+    if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: mem.madvise(hp) # type: ignore
+    return DiskBuffer(UnderlyingDiskBuffer(fd, mem), size)
   def as_buffer(self, src:DiskBuffer): return src._buf()
   def copyin(self, dest:DiskBuffer, src:memoryview): dest._buf()[:] = src
   def copyout(self, dest:memoryview, src:DiskBuffer):
-    if src.ud.fd is not None:
-      src.ud.fd.seek(src.offset)
-      src.ud.fd.readinto(dest)
+    if OSX and src.ud.fd is not None:
+      # OSX doesn't seem great at mmap, this is faster
+      with io.FileIO(src.ud.fd, "a+b", closefd=False) as fo:
+        fo.seek(src.offset)
+        fo.readinto(dest)
     else:
       dest[:] = src._buf()
 

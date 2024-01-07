@@ -1,7 +1,7 @@
 import ctypes
 from typing import ClassVar, Tuple
 from tinygrad.device import Compiled, MallocAllocator
-from tinygrad.helpers import getenv, DEBUG, diskcache, cpu_time_execution
+from tinygrad.helpers import getenv, DEBUG, cpu_time_execution
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
@@ -45,8 +45,7 @@ class LLVM:
     backing_mod.triple = llvm.get_process_triple()
     LLVM.engine = llvm.create_mcjit_compiler(backing_mod, LLVM.target_machine)
 
-@diskcache
-def compile_llvm(prg, llvmopt=LLVMOPT) -> bytes:
+def compile_llvm(prg) -> bytes:
   mod = llvm.parse_assembly(prg)
   mod.verify()
   LLVM().optimizer.run(mod)

@@ -51,10 +51,10 @@ class TestLazyBuffer(unittest.TestCase):
     a = Tensor.ones(8,8,8)
     d1 = a.sum((0))
     d2 = a.sum((0)).reshape(32,2) # noqa: F841
-    assert len(d1.lazydata.op.src[0].children) == 1
+    assert len(d1.lazydata.base.srcs[0].base.children) == 1
     in1 = d1.reshape(16,4)
     d3 = in1.reshape(8,8)
-    assert len(d3.lazydata.op.src[0].children) == 2
+    assert len(d3.lazydata.base.srcs[0].base.children) == 1
 
     CacheCollector.start()
     l = Tensor.ones(8,8)
@@ -64,10 +64,12 @@ class TestLazyBuffer(unittest.TestCase):
     de = d3 + r
     de.realize()
     cache = CacheCollector.finish()
-    assert len(cache) == 3
-    assert cache[0].prg.name.startswith("r_") # Reduce should not merged 2 times.
-    assert cache[1].prg.name.startswith("E_")
-    assert cache[2].prg.name.startswith("E_")
+    assert len(cache) == 2
+
+  def test_device_canonicalize(self):
+    a = Tensor([1, 2, 3], f"{Device.DEFAULT}")
+    b = Tensor([1, 2, 3], f"{Device.DEFAULT}:0")
+    assert a.device == b.device
 
 if __name__ == "__main__":
   unittest.main()

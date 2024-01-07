@@ -1,6 +1,6 @@
 import numpy as np
 import functools
-from tinygrad.helpers import dtypes, ImageDType
+from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.device import Compiled, Allocator
 from tinygrad.codegen.kernel import LinearizerOptions, OptOps
 from tinygrad.renderer.cstyle import uops_to_cstyle
