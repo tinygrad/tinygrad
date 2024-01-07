@@ -20,6 +20,12 @@ integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor)]
 unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (Tensor.sin, np.sin),
                     (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
 
+class MuteWarnings:
+  def __enter__(s):
+    from warnings import catch_warnings, filterwarnings
+    return (catch_warnings(), filterwarnings("ignore", category=RuntimeWarning), s)[-1]
+  def __exit__(self, exc_type, exc_val, exc_tb): pass
+
 # TODO: enable this (this is a dtype issue)
 #binary_operations.append(operator.truediv)
 
@@ -52,7 +58,8 @@ class ht:
 def universal_test(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
-  numpy_value = op[1](np.array([a]).astype(dtype.np), np.array([b]).astype(dtype.np))
+  with MuteWarnings():
+    numpy_value = op[1](np.array([a]).astype(dtype.np), np.array([b]).astype(dtype.np))
   if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
@@ -61,7 +68,8 @@ def universal_test_unary(a, dtype, op):
   out: Tensor = op[0](Tensor([a], dtype=dtype))
   ast = out.lazydata.schedule()[-1].ast
   tensor_value = out.numpy()
-  numpy_value = op[1](np.array([a]).astype(dtype.np))
+  with MuteWarnings():
+    numpy_value = op[1](np.array([a]).astype(dtype.np))
   if dtype in dtypes_float:
     atol = 2 if Device.DEFAULT == "METAL" and op[0] == Tensor.sin else 1e-3
     rtol = 2 if Device.DEFAULT == "METAL" and op[0] == Tensor.sin else 1e-4 if dtype == dtypes.float32 else 1e-2
@@ -74,7 +82,8 @@ def universal_test_unary(a, dtype, op):
 
 def universal_test_cast(a, in_dtype, dtype):
   tensor_value = Tensor([a], dtype=in_dtype).cast(dtype)
-  numpy_value = np.array([a]).astype(dtype.np)
+  with MuteWarnings():
+    numpy_value = np.array([a]).astype(dtype.np)
   np.testing.assert_equal(tensor_value, numpy_value)
 
 def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
@@ -82,8 +91,9 @@ def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   if not isinstance(op2, tuple): op2 = (op2, op2)
   at, bt, ct = Tensor([a], dtype=d1), Tensor([b], dtype=d1), Tensor([c], dtype=d2)
   an, bn, cn = np.array([a]).astype(d1.np), np.array([b]).astype(d1.np), np.array([c]).astype(d2.np)
-  tensor_value = op2[0](op1[0](at, bt).cast(d2), ct).numpy()
-  numpy_value = op2[1](op1[1](an, bn).astype(d2.np), cn)
+  with MuteWarnings():
+    tensor_value = op2[0](op1[0](at, bt).cast(d2), ct).numpy()
+    numpy_value = op2[1](op1[1](an, bn).astype(d2.np), cn)
   np.testing.assert_almost_equal(tensor_value, numpy_value)
 
 class TestDTypeALU(unittest.TestCase):
@@ -95,16 +105,15 @@ class TestDTypeALU(unittest.TestCase):
   def test_float32(self, a, b, op): universal_test(a, b, dtypes.float32, op)
 
   # GPU requires cl_khr_fp16
-  # for LLVM, it segfaults because it can't link to the casting function
   # CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
-  @unittest.skipIf((Device.DEFAULT in ["GPU", "LLVM"] and CI) or getenv("CUDACPU"), "")
+  @unittest.skipIf((Device.DEFAULT in ["GPU",] and CI) or getenv("CUDACPU"), "")
   @given(ht.float16, ht.float16, st.sampled_from(binary_operations))
   def test_float16(self, a, b, op): universal_test(a, b, dtypes.float16, op)
 
   @given(ht.float32, st.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
 
-  @unittest.skipIf((Device.DEFAULT in ["GPU", "LLVM"] and CI) or getenv("CUDACPU"), "")
+  @unittest.skipIf((Device.DEFAULT in ["GPU",] and CI) or getenv("CUDACPU"), "")
   @given(ht.float16, st.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
 
