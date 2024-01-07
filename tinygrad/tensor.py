@@ -53,7 +53,7 @@ class Tensor:
     def __exit__(self, exc_type, exc_value, traceback): Tensor.training = self.prev
 
   no_grad: ClassVar[bool] = False
-  class no_grad:
+  class set_no_grad:
     def __init__(self, val=True): self.val = val
     def __enter__(self): self.prev, Tensor.no_grad = Tensor.no_grad, self.val
     def __exit__(self, exc_type, exc_value, traceback): Tensor.no_grad = self.prev
