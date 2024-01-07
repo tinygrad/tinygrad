@@ -18,9 +18,9 @@ class UnderlyingDiskBuffer:
       os.close(fd)
     else:
       self._fd = os.open(self.device, os.O_RDWR|os.O_CREAT) #|(0 if OSX else os.O_DIRECT))
-      if os.fstat(fd).st_size < self.size: os.ftruncate(fd, self.size)
-      self._mem = mmap.mmap(fd, self.size)
-    if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: mem.madvise(hp) # type: ignore
+      if os.fstat(self._fd).st_size < self.size: os.ftruncate(self._fd, self.size)
+      self._mem = mmap.mmap(self._fd, self.size)
+    if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: self._mem.madvise(hp) # type: ignore
     return self
   @property
   def fd(self): return self.__load()._fd
