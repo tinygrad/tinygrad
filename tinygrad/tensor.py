@@ -57,7 +57,7 @@ class Tensor:
     def __init__(self, val=True): self.val = val
     def __enter__(self): self.prev, Tensor.no_grad = Tensor.no_grad, self.val
     def __exit__(self, exc_type, exc_value, traceback): Tensor.no_grad = self.prev
-  
+
   def __init__(self, data:Union[None, Scalar, List, Tuple, LazyBuffer, np.ndarray, bytes, MultiLazyBuffer],
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
