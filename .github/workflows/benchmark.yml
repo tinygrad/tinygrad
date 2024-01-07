@@ -18,7 +18,7 @@ jobs:
       PYTHONPATH: .
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -74,7 +74,7 @@ jobs:
       PYTHONPATH: .
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Run model inference benchmark
       run: CUDA=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -108,7 +108,7 @@ jobs:
       PYTHONPATH: .
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Show off tinybox
       run: /opt/rocm/bin/rocm-bandwidth-test
     - name: Symlink models and datasets
