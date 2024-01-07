@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional, cast
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters
-from tinygrad.device import Device, Buffer, BufferCopy, JITRunner, update_stats, InterpretedASTRunner
+from tinygrad.device import Device, Compiled, Buffer, BufferCopy, JITRunner, update_stats, InterpretedASTRunner, efficient_compile_many_unordered
 from tinygrad.graph import print_tree, realized_lazybuffer
 from tinygrad.helpers import colored, getenv
 from tinygrad.shape.symbolic import Variable
@@ -20,8 +20,17 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   if si.ast.op is LoadOps.CUSTOM: return CustomOp(si.ast.arg)
   return Device[si.out.device].get_runner(si.ast)
 
+def efficient_precompile(schedule:List[ScheduleItem]) -> None:
+  items = [(si.ast, si.out.device) for si in schedule if isinstance(rdev:=Device[si.out.device], Compiled)
+          and si.ast.op not in {LoadOps.EMPTY, LoadOps.COPY, LoadOps.CUSTOM} and si.ast not in rdev.excluded_from_precompilation]
+  for idx, compilation_result in efficient_compile_many_unordered(items):
+    ast, dev = items[idx]
+    rdev = cast(Compiled, Device[dev])
+    if compilation_result: rdev.precompiled_asts[ast] = compilation_result
+
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 def run_schedule(schedule:List[ScheduleItem]):
+  efficient_precompile(schedule)
   while len(schedule):
     si = schedule.pop(0)
     if logops and si.ast.op not in LoadOps: logops.write(str(si.ast)+"\n")

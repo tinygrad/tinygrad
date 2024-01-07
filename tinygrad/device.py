@@ -1,8 +1,9 @@
 from __future__ import annotations
 import numpy as np
 from collections import defaultdict
-from typing import TYPE_CHECKING, cast, Union, Any, List, Optional, Dict, Callable, Tuple, Iterator
+from typing import TYPE_CHECKING, cast, Union, Any, Sequence, List, Optional, Dict, Callable, Tuple, Iterator, Set
 import importlib, inspect, functools, pathlib, time, re, ctypes, traceback, multiprocessing, signal
+from dataclasses import dataclass
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
@@ -240,16 +241,25 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 
 # **************** for Compiled Devices ****************
 
+@dataclass(frozen=True)
+class CompiledAST:
+  ast: Optional[LazyOp]
+  name: str
+  prg: str
+  lib: bytes
+  global_size: Optional[List[int]] = None
+  local_size: Optional[List[int]] = None
+
 class CompiledASTRunner(JITRunner):
-  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, lib:bytes, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None):  # noqa: E501
+  def __init__(self, compiled_ast:CompiledAST):
     super().__init__()
-    if DEBUG >= 4: print(prg)
-    if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
-    if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
+    if DEBUG >= 4: print(compiled_ast.prg)
+    global_size = compiled_ast.global_size + [1]*(3-len(compiled_ast.global_size)) if compiled_ast.global_size is not None else None
+    local_size = compiled_ast.local_size + [1]*(3-len(compiled_ast.local_size)) if compiled_ast.local_size is not None else None
     self.name, self.display_name, self.prg, self.lib, self.global_size, self.local_size, self.first_run = \
-      to_function_name(name), name, prg, lib, global_size, local_size, True
+      to_function_name(compiled_ast.name), compiled_ast.name, compiled_ast.prg, compiled_ast.lib, global_size, local_size, True
     self.vars: List[Variable] = []
-    if ast:
+    if ast := compiled_ast.ast:
       info = get_lazyop_info(ast)
       self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
       self.vars = ast.vars()
@@ -284,7 +294,7 @@ class Compiled:
     self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph = allocator, linearizer_opts, renderer, compiler, runtime, graph  # noqa: E501
   def synchronize(self): pass  # override this in your device
 
-  def compile(self, k:Linearizer, name:Optional[str]=None):
+  def compile(self, k:Linearizer, name:Optional[str]=None) -> CompiledAST:
     assert self.compiler is not None, f"compiler is None, can't compile {k.ast}"
     k.linearize()
     src = self.renderer(name if name is not None else to_function_name(k.name), k.uops)
@@ -295,11 +305,10 @@ class Compiled:
       if lib is None:
         lib = self.compiler(src)
         diskcache_put(self.compiler.__name__, src, lib)
-    return lib, src, k.global_size, k.local_size
+    return CompiledAST(ast=k.ast, name=k.name, prg=src, lib=lib, global_size=k.global_size, local_size=k.local_size)
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
-    lib, src, global_size, local_size = self.compile(k)
-    return CompiledASTRunner(k.ast, k.name, src, lib, global_size, local_size).build(self.runtime)
+    return CompiledASTRunner(self.compile(k)).build(self.runtime)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:
@@ -326,34 +335,44 @@ class Compiled:
         k = timed[0][1]
     return k
 
-  @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.to_program(self.get_linearizer(ast))
+  precompiled_asts: Dict[LazyOp, CompiledAST] = {}
+  excluded_from_precompilation: Set[LazyOp] = set()
+
+  @functools.lru_cache(maxsize=None)    # pylint: disable=method-cache-max-size-none
+  def get_runner(self, ast:LazyOp) -> CompiledASTRunner:
+    self.excluded_from_precompilation.add(ast)
+    return CompiledASTRunner(self.precompiled_asts.pop(ast)).build(self.runtime) if ast in self.precompiled_asts \
+      else self.to_program(self.get_linearizer(ast))
 
 # **************** parallel kernel compilation ****************
+
+if TYPE_CHECKING: compilable_type = Tuple[Union[Linearizer, LazyOp], str]  # (AST, device)
+else: compilable_type = Tuple[Any, str]
+
+def _compile_ast_with_idx(x:Tuple[int, compilable_type], name:Optional[str], ignore_errs:bool):
+  idx, (tgt, dev) = x[0], x[1]
+  rdev = cast(Compiled, Device[dev if dev else Device.DEFAULT])
+  k = rdev.get_linearizer(tgt) if isinstance(tgt, LazyOp) else tgt
+  try: return (idx, rdev.compile(k, name))
+  except Exception as e:
+    if not ignore_errs: raise e
+    if DEBUG >= 4: traceback.print_exc()
+    return (idx, None)
 
 # workers should ignore ctrl c
 def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
 
-def _compile_k_with_idx(x: Tuple[int, Linearizer], name:Optional[str], ignore_errs:bool):
-  try:
-    dev = cast(Compiled, Device[Device.DEFAULT])  # TODO: shouldn't use Device.DEFAULT
-    return (x[0], dev.compile(x[1], name))
-  except Exception as e:
-    if not ignore_errs: raise e
-    if DEBUG >= 4: traceback.print_exc()
-    return (x[0], None)
-
-class MultiKernelCompiler:
-  def __init__(self, parallel:bool):
-    self._pool = multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker) if parallel else None
-
-  def compile_unordered(self, ks:List[Linearizer], name_for_all:Optional[str]=None, ignore_errs:bool=False) -> Iterator[Tuple[int, Optional[Tuple]]]:
-    compile_fn = functools.partial(_compile_k_with_idx, name=name_for_all, ignore_errs=ignore_errs)
-    map_fn = cast(Callable, self._pool.imap_unordered if self._pool is not None else map)
-    yield from map_fn(compile_fn, enumerate(ks))
-
-  def close(self):
-    if self._pool is not None: self._pool.close()
-
-  def terminate(self):
-    if self._pool is not None: self._pool.terminate()
+def efficient_compile_many_unordered(
+  items:Sequence[compilable_type],
+  name_for_all:Optional[str]=None,
+  ignore_errs:bool=False
+) -> Iterator[Tuple[int, Optional[CompiledAST]]]:
+  compile_fn = functools.partial(_compile_ast_with_idx, name=name_for_all, ignore_errs=ignore_errs)
+  # avoid the significant overhead when it's just a few items to compile
+  if len(items) < 64 or getenv('DISABLE_PARALLEL_COMPILATION'): yield from map(compile_fn, enumerate(items))
+  else:
+    with multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker) as pool:
+      try: yield from pool.imap_unordered(compile_fn, enumerate(items))
+      except KeyboardInterrupt as e:
+        pool.terminate()
+        raise e

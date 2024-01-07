@@ -1,6 +1,6 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, random, math, time
-from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner, MultiKernelCompiler
+from tinygrad.device import Device, Compiled, Buffer, CompiledAST, CompiledASTRunner, efficient_compile_many_unordered
 from tinygrad.ops import MemBuffer, LazyOp
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
@@ -33,7 +33,7 @@ def _time_program(ast:LazyOp, rdev:Compiled, lib:bytes, global_size, local_size,
   factor = 1
   if global_size is not None and max_global_size is not None:
     global_size, factor = _get_test_global_size(global_size, max_global_size, var_vals)
-  car = CompiledASTRunner(ast, name, "", lib, global_size, local_size).build(rdev.runtime)
+  car = CompiledASTRunner(CompiledAST(ast, name, "", lib, global_size, local_size)).build(rdev.runtime)
   tms = []
   for _ in range(cnt):
     if clear_l2:
@@ -84,36 +84,28 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
 
-  default_parallel = 1 if Device.DEFAULT in {"CUDA", "HIP"} else 0
-  multi_compiler = MultiKernelCompiler(parallel=getenv("PARALLEL", default_parallel))
+  var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
+  exiting, st = False, time.perf_counter()
+  dev = Device[Device.DEFAULT]
+  assert isinstance(dev, Compiled)
+  while not exiting:
+    acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam]) if len(beam) else [lin]
+    timed_lins: List[Tuple[Linearizer, float]] = []
+    for i,proc in efficient_compile_many_unordered([(lin, Device.DEFAULT) for lin in acted_lins], name_for_all='test', ignore_errs=True):
+      if proc is None: continue
+      lib, global_size, local_size = proc.lib, proc.global_size, proc.local_size
+      if lib in seen_libs: continue
+      seen_libs.add(lib)
+      tms = _time_program(lin.ast, dev, lib, global_size, local_size, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0)
+      timed_lins.append((acted_lins[i], min(tms)))
+      if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")  # noqa: E501
 
-  try:
-    var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
-    exiting, st = False, time.perf_counter()
-    dev = Device[Device.DEFAULT]
-    assert isinstance(dev, Compiled)
-    while not exiting:
-      acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam]) if len(beam) else [lin]
-      timed_lins: List[Tuple[Linearizer, float]] = []
-      for i,proc in multi_compiler.compile_unordered(acted_lins, name_for_all='test', ignore_errs=True):
-        if proc is None: continue
-        lib, _, global_size, local_size = proc
-        if lib in seen_libs: continue
-        seen_libs.add(lib)
-        tms = _time_program(lin.ast, dev, lib, global_size, local_size, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0)
-        timed_lins.append((acted_lins[i], min(tms)))
-        if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s: {timed_lins[-1][1]*1e6:12.2f} us       {len(timed_lins):4d}/{len(acted_lins):4d}         {timed_lins[-1][0].colored_shape()}\033[K", end="")  # noqa: E501
-
-      # done
-      opts = sorted(timed_lins, key=lambda x: x[1])
-      exiting = len(opts) == 0 or (len(beam) > 0 and beam[0][1] <= opts[0][1])
-      if not exiting: beam = opts[:amt]
-      assert len(beam) > 0, "no BEAM items succeeded?!?"
-      if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s:", colored(f"{beam[0][1]*1e6:12.2f} us", "green" if exiting else None), f"from {len(acted_lins):3d} -> {len(opts):3d} actions\033[K", beam[0][0].colored_shape())  # noqa: E501
-    multi_compiler.close()
-  except KeyboardInterrupt as e:
-    multi_compiler.terminate()
-    raise e
+    # done
+    opts = sorted(timed_lins, key=lambda x: x[1])
+    exiting = len(opts) == 0 or (len(beam) > 0 and beam[0][1] <= opts[0][1])
+    if not exiting: beam = opts[:amt]
+    assert len(beam) > 0, "no BEAM items succeeded?!?"
+    if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s:", colored(f"{beam[0][1]*1e6:12.2f} us", "green" if exiting else None), f"from {len(acted_lins):3d} -> {len(opts):3d} actions\033[K", beam[0][0].colored_shape())  # noqa: E501
 
   if CACHELEVEL >= 1: diskcache_put("beam_search", key, beam[0][0].applied_opts)
   if DEBUG >= 3: print(beam[0][0].applied_opts)
@@ -139,8 +131,8 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
   assert isinstance(dev, Compiled)
 
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
-  lib, _, global_size, local_size = dev.compile(lin)
-  tms = _time_program(lin.ast, dev, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))  # noqa: E501
+  compiled = dev.compile(lin)
+  tms = _time_program(lin.ast, dev, compiled.lib, compiled.global_size, compiled.local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))  # noqa: E501
 
   if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)
   return min(tms)
