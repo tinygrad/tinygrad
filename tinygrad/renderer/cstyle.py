@@ -106,9 +106,10 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
   r: Dict[UOp, str] = {}
   def ssa(u, prefix="t"):
     nonlocal c, r
-    r[u]=f"{prefix}{c[prefix]}"
+    ret = f"{prefix}{c[prefix]}"
+    if u is not None: r[u] = ret
     c[prefix] += 1
-    return r[u]
+    return ret
 
   child_count = Counter(v for ru in uops for v in ru.vin)
 
@@ -179,7 +180,13 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
         r[u] = r[vin[0]]
       elif uop == UOps.CAST:
-        val = lang.render_cast([r[x] for x in vin], dtype, bitcast=isinstance(args, tuple) and args[1])
+        if isinstance(args, tuple) and args[1]:  # bitcast
+          assert len(vin) == 1
+          precast = ssa(None,'precast')
+          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else cast(DType, vin[0].dtype).name} {precast} = {r[vin[0]]};")
+          val = lang.render_cast([precast], dtype, bitcast=True)
+        else:
+          val = lang.render_cast([r[x] for x in vin], dtype, bitcast=False)
         if child_count[u] <= 1: r[u] = val
         else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
       elif uop == UOps.DEFINE_LOCAL:

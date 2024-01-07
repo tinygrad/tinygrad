@@ -457,6 +457,7 @@ class TestOps(unittest.TestCase):
   def test_small_cumsum(self):
     helper_test_op([(10)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
   def test_simple_cumsum(self):
+    helper_test_op([(512)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
     helper_test_op([(1022)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
   def test_cumsum(self):
     helper_test_op([(20)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
@@ -465,7 +466,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(20,30,40)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2), atol=1e-6)
     helper_test_op([(20,30,40)], lambda x: torch.cumsum(x, dim=-1), lambda x: Tensor.cumsum(x, axis=-1), atol=1e-6)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"METAL", "WEBGPU"}, "fails in CI, works locally")
   def test_argmax(self):
     self.assertEqual(torch.Tensor([2,2]).argmax().numpy(), Tensor([2,2]).argmax().numpy()) # check if returns first index for same max
     helper_test_op([(10,20)], lambda x: x.argmax(), lambda x: x.argmax(), forward_only=True)
@@ -473,7 +473,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(10,20)], lambda x: x.argmax(1, False), lambda x: x.argmax(1, False), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmax(1, True), lambda x: x.argmax(1, True), forward_only=True)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"METAL", "WEBGPU"}, "fails in CI, works locally")
   def test_argmin(self):
     self.assertEqual(torch.Tensor([2, 2]).argmin().numpy(), Tensor([2, 2]).argmin().numpy())
     helper_test_op([(10,20)], lambda x: x.argmin(), lambda x: x.argmin(), forward_only=True)
@@ -866,9 +865,17 @@ class TestOps(unittest.TestCase):
 
   def test_flatten(self):
     for axis in range(3):
-      helper_test_op([(4,3,6,6)], lambda x: torch.flatten(x, start_dim=axis), lambda x: x.flatten(axis))
+      helper_test_op([(4,3,6,6)], lambda x: torch.flatten(x, start_dim=axis), lambda x: x.flatten(start_dim=axis))
+    for axis in range(3):
+      helper_test_op([(4,3,6,6)], lambda x: torch.flatten(x, end_dim=axis), lambda x: x.flatten(end_dim=axis))
+    helper_test_op([(4,3,6,6)], lambda x: torch.flatten(x, start_dim=1, end_dim=3), lambda x: x.flatten(start_dim=1, end_dim=3))
     helper_test_op([()], lambda x: x.flatten(), lambda x: x.flatten())
     helper_test_op([(1,)], lambda x: x.flatten(), lambda x: x.flatten())
+
+  def test_unflatten(self):
+    helper_test_op([(4,3,6,6)], lambda x: torch.unflatten(x, 0, (2, 2)), lambda x: x.unflatten(0, (2, 2)))
+    helper_test_op([(4,3,6,6)], lambda x: torch.unflatten(x, 3, (3, 2)), lambda x: x.unflatten(3, (3, 2)))
+    helper_test_op([(4,3,6,6)], lambda x: torch.unflatten(x, -1, (3, 2, 1)), lambda x: x.unflatten(-1, (3, 2, 1)))
 
   def test_detach(self):
     helper_test_op([(4,3,6,6)], lambda x: x.detach(), lambda x: x.detach(), forward_only=True)
@@ -1296,6 +1303,11 @@ class TestOps(unittest.TestCase):
 
   def test_clip(self):
     helper_test_op([(45,65)], lambda x: x.clip(-2.3, 1.2), lambda x: x.clip(-2.3, 1.2))
+    helper_test_op([(45,65)], lambda x: x.clip(0, 0), lambda x: x.clip(0, 0))
+    helper_test_op([(45,65)], lambda x: x.clip(10, 100), lambda x: x.clip(10, 100))
+    helper_test_op([(45,65)], lambda x: x.clip(0, 0.1), lambda x: x.clip(0, 0.1))
+    helper_test_op([(45,65)], lambda x: x.clip(-0.3, -0.2), lambda x: x.clip(-0.3, -0.2))
+    helper_test_op([(45,65)], lambda x: x.clip(3, 0), lambda x: x.clip(3, 0))
 
   def test_matvecmat(self):
     helper_test_op([(1,128), (128,128), (128,128)], lambda x,y,z: (x@y).relu()@z, atol=1e-4)

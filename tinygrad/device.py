@@ -93,7 +93,7 @@ class Buffer:
     if self.size > 0: self.allocator.copyout(flat_mv(ret.data), self._buf)
     return ret
 
-def _internal_buffer_copy(dest, src):
+def _internal_buffer_copy(dest:Buffer, src:Buffer):
   if hasattr(dest.allocator, 'transfer') and type(dest.allocator) is type(src.allocator):  # noqa: E721
     # fast path, used on HIP between GPUs
     # NOTE: it's important we use the dest device here to ensure the transfer is ready
@@ -103,7 +103,9 @@ def _internal_buffer_copy(dest, src):
   if hasattr(dest.allocator, 'load_buffer') and src.device.startswith("DISK") and "shm:" not in src.device:
     # NOTE: this doesn't work for shared memory in OSX because no file handle is created
     return dest.allocator.load_buffer(dest, src)
-  if hasattr(dest.allocator, 'as_buffer'):
+  if hasattr(dest.allocator, 'copy_from_fd') and src.device.startswith("DISK") and src.size*src.dtype.itemsize >= 4096 and src._buf.ud.fd is not None:
+    dest.allocator.copy_from_fd(dest._buf, src._buf.ud.fd, src._buf.offset, src.size*src.dtype.itemsize)
+  elif hasattr(dest.allocator, 'as_buffer'):
     # fast(ish) path, uses readinto in diskbuffers
     src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
   elif hasattr(src.allocator, 'as_buffer'):
@@ -279,6 +281,7 @@ class Compiled:
   def synchronize(self): pass  # override this in your device
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
+    assert self.compiler is not None, f"compiler is None, can't build {k.ast}"
     k.linearize()
     src = self.renderer(to_function_name(k.name), k.uops)
     if getenv("DISABLE_COMPILER_CACHE") or '<' in self.compiler.__name__:
