@@ -368,11 +368,13 @@ def efficient_compile_many_unordered(
   ignore_errs:bool=False
 ) -> Iterator[Tuple[int, Optional[CompiledAST]]]:
   compile_fn = functools.partial(_compile_ast_with_idx, name=name_for_all, ignore_errs=ignore_errs)
-  # avoid the significant overhead when it's just a few items to compile
-  if len(items) < 64 or getenv('DISABLE_PARALLEL_COMPILATION'): yield from map(compile_fn, enumerate(items))
-  else:
+  all_w_idx = set(enumerate(items))
+  parals_w_idx = {(idx, t) for idx, t in all_w_idx if getenv("PARALLEL_COMPILATION", default=1 if t[1] in {"CUDA", "HIP"} else 0)}
+  if len(parals_w_idx) < 64: parals_w_idx.clear()  # avoid the significant overhead when it's just a few items to compile
+  if parals_w_idx:
     with multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker) as pool:
-      try: yield from pool.imap_unordered(compile_fn, enumerate(items))
+      try: yield from pool.imap_unordered(compile_fn, parals_w_idx)
       except KeyboardInterrupt as e:
         pool.terminate()
         raise e
+  if sequentials_w_idx := all_w_idx-parals_w_idx: yield from map(compile_fn, sequentials_w_idx)
