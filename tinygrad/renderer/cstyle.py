@@ -264,6 +264,7 @@ class CUDALanguage(CStyleLanguage):
     struct half4 { half x, y, z, w; };
     __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
   """
+  type_map = {dtypes.bfloat16: "__nv_bfloat16"}
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 class HIPLanguage(CUDALanguage):
@@ -284,6 +285,7 @@ __device__ half16 make_half16(half x, half y, half z, half w, half a, half b, ha
                               half e, half f, half g, half h, half i, half j, half k, half l) {
                                 return {x, y, z, w, a, b, c, d, e, f, g, h, i, j, k, l}; }
   """
+  type_map = {dtypes.bfloat16: "hip_bfloat16"}
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
 
 # TODO: how much of this can be merged with above?
