@@ -1303,6 +1303,11 @@ class TestOps(unittest.TestCase):
 
   def test_clip(self):
     helper_test_op([(45,65)], lambda x: x.clip(-2.3, 1.2), lambda x: x.clip(-2.3, 1.2))
+    helper_test_op([(45,65)], lambda x: x.clip(0, 0), lambda x: x.clip(0, 0))
+    helper_test_op([(45,65)], lambda x: x.clip(10, 100), lambda x: x.clip(10, 100))
+    helper_test_op([(45,65)], lambda x: x.clip(0, 0.1), lambda x: x.clip(0, 0.1))
+    helper_test_op([(45,65)], lambda x: x.clip(-0.3, -0.2), lambda x: x.clip(-0.3, -0.2))
+    helper_test_op([(45,65)], lambda x: x.clip(3, 0), lambda x: x.clip(3, 0))
 
   def test_matvecmat(self):
     helper_test_op([(1,128), (128,128), (128,128)], lambda x,y,z: (x@y).relu()@z, atol=1e-4)
