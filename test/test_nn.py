@@ -304,17 +304,24 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-3, rtol=5e-3)
 
   def test_embedding(self):
-    B, T, C, VS = 4, 10, 20, 28
+    B, T, embed_size, vocab_size = 4, 10, 20, 28
 
     # create in tinygrad
-    layer = Embedding(VS, C)
+    layer = Embedding(vocab_size, embed_size)
 
     with torch.no_grad():
-      torch_layer = torch.nn.Embedding(VS, C).eval()
+      torch_layer = torch.nn.Embedding(vocab_size, embed_size).eval()
       torch_layer.weight[:] = torch.tensor(layer.weight.numpy(), dtype=torch.float32)
 
     # test
-    x = Tensor(np.random.randint(0, VS, (B, T)).astype(np.float32))
+    x = Tensor(np.random.randint(0, vocab_size, (B, T)))
+    z = layer(x)
+    torch_x = torch.tensor(x.numpy().astype(np.int32))
+    torch_z = torch_layer(torch_x)
+    np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
+
+    # test with empty input length
+    x = Tensor(np.random.randint(0, vocab_size, (B, 0)))
     z = layer(x)
     torch_x = torch.tensor(x.numpy().astype(np.int32))
     torch_z = torch_layer(torch_x)
@@ -326,7 +333,7 @@ class TestNN(unittest.TestCase):
       return layer(x).realize()
 
     for _ in range(3):
-      x = Tensor(np.random.randint(0, VS, (B, T)).astype(np.float32))
+      x = Tensor(np.random.randint(0, vocab_size, (B, T)).astype(np.float32))
       z = layer_jit(x)
       torch_x = torch.tensor(x.numpy().astype(np.int32))
       torch_z = torch_layer(torch_x)
