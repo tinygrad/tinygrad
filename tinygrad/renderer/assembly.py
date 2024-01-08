@@ -1,4 +1,4 @@
-from typing import Callable, DefaultDict, Dict, List, Tuple, Union, NamedTuple
+from typing import Callable, DefaultDict, Dict, List, Union, NamedTuple
 import functools, struct
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
@@ -14,16 +14,12 @@ def is_bool_or_unsigned(dtype: DType): return dtype == dtypes.bool or dtypes.is_
 class AssemblyLanguage(NamedTuple):
   kernel_prefix: str = ""
   barrier: str = ""
-  ssa: bool = False # whether the language uses ssa (ie. LLVM)
-  needs_regs: bool = True # whether registers need to be defined prior to use
-  has_pred: bool = False # whether the language supports predicates on instructions
   load_global: bool = False
   label_prefix: str = ""
   gid: List[str] = []
   gdim: List[str] = []
   lid: List[str] = []
   const_requires_mov: List[DType] = [] # list of dtypes for which creating a const requires a move
-  no_half_support: List[Op] = [] # list of opporations that don't support half
   asm_for_op: Dict[Op, Callable[...,str]] = {}
   types: Dict[DType, str] = INVERSE_DTYPES_DICT
 
@@ -43,8 +39,6 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> str
   local_size: List[int] = []
   kernel:List[str] = []
   bufs = []
-  loops: List[List[Tuple[int, UOp]]] = []
-  accs: List[UOp] = []
 
   def kk(*s: str): kernel.append("\n".join(s))
 
@@ -66,7 +60,6 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> str
     return r_label[u]
 
   def const(x:Union[float,int,bool], dtype, mov=False):
-    if lang.ssa: return lang.render_const(x, dtype)
     if mov or dtype in lang.const_requires_mov:
       kk(*lang.render_const(x, dtype, mov=(out:=ssa(None, 'const', lang.types[dtype]))))
       return out
@@ -87,14 +80,9 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> str
     elif uop == UOps.BARRIER and lang.barrier: kk(lang.barrier)
     elif uop == UOps.END:
       if vin[0].uop == UOps.LOOP:
-        kk(lang.asm_for_op[BinaryOps.ADD](upd:=f"{r[vin[0]]}_upd" if lang.ssa else r[vin[0]], r[vin[0]], "1", dtypes.int, lang.types[dtypes.int]),
-           lang.asm_for_op[BinaryOps.CMPLT](pred:=ssa(None, "pred", "pred" if lang.has_pred else lang.types[dtypes.bool]), upd, r[vin[0].vin[1]],
-                                            dtypes.int, lang.types[dtypes.int]),
-           *lang.render_bra(f"{r_label[vin[0]]}_check"), f"{r_label[vin[0]]}_check:",
-           *lang.render_bra(r_label[vin[0]], pred, f"{r_label[vin[0]]}_exit"), f"{r_label[vin[0]]}_exit:")
-        phis = loops.pop()
-        for n, acc in phis:
-          kernel[n] += f", [{r[acc]}, %{r_label[vin[0]]}_check]"
+        kk(lang.asm_for_op[BinaryOps.ADD](r[vin[0]], r[vin[0]], "1", dtypes.int, lang.types[dtypes.int]),
+           lang.asm_for_op[BinaryOps.CMPLT](pred:=ssa(None, "pred", "pred"), r[vin[0]], r[vin[0].vin[1]], dtypes.int, lang.types[dtypes.int]))
+        kk(*lang.render_bra(r_label[vin[0]], pred, f"{r_label[vin[0]]}_exit"), f"{r_label[vin[0]]}_exit:")
       else: kk(f"{r_label[vin[0]]}:")
     elif uop == UOps.STORE:
       assert vin[0].dtype is not None and vin[1].dtype is not None and vin[2].dtype is not None
@@ -105,42 +93,18 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> str
       kk(*lang.render_store(loc, r[vin[2]], vin[0].dtype, gate=pred if len(vin)>3 else None, ss='.shared' if vin[0].uop == UOps.DEFINE_LOCAL else ''))
     else:
       assert dtype is not None, f"None dtype for uop {uop}"
-      if uop == UOps.LOOP:
-        kk(*lang.render_loop(ssa(u, 'ridx'), r[vin[0]], label:=ssa_label(u, 'loop')))
-        phis = []
-        for acc in accs:
-          assert acc.dtype is not None
-          phis.append((len(kernel), acc))
-          phi = f"phi {lang.types[acc.dtype]} [{r[acc]}, %pre_{label}]"
-          kk(f"{ssa(acc)} = " + phi)
-        loops.append(phis)
+      if uop == UOps.LOOP: kk(*lang.render_loop(ssa(u, 'ridx'), r[vin[0]], ssa_label(u, 'loop')))
       elif uop == UOps.ALU:
         assert vin[0].dtype is not None
-        regs = [cast(r[x], dtypes.int16, dtypes.bool) if x.dtype == dtypes.bool else r[x] for x in vin]
         if args == BinaryOps.CMPLT or args == BinaryOps.CMPEQ:
+          regs = [cast(r[x], dtypes.int16, dtypes.bool) if x.dtype == dtypes.bool else r[x] for x in vin]
           dt = dtypes.int16 if vin[0].dtype == dtypes.bool else vin[0].dtype
-          kk(lang.asm_for_op[args](pred:=ssa(u,'lt','pred' if lang.has_pred else None), *regs, dt, lang.types[dt]))
+          kk(lang.asm_for_op[args](pred:=ssa(u,'lt','pred'), *regs, dt, lang.types[dt]))
         elif args == TernaryOps.MULACC:
           assert vin[1].dtype is not None
           kk(lang.asm_for_op[args](ssa(u, 'alu'), *[r[x] for x in vin], dtype, lang.types[vin[1].dtype]))
-        elif args == BinaryOps.MAX and BinaryOps.MAX not in lang.asm_for_op:
-          kk(lang.asm_for_op[BinaryOps.CMPLT](pred:=ssa(None, 'lt', lang.types[dtypes.bool]), r[vin[0]], r[vin[1]], dtype, lang.types[dtype]),
-            lang.asm_for_op[TernaryOps.WHERE](ssa(u, "alu"), pred, r[vin[1]], r[vin[0]], dtype, lang.types[dtype]))
-        elif args == TernaryOps.MULACC and TernaryOps.MULACC not in lang.asm_for_op:
-          assert vin[1].dtype is not None
-          kk(lang.asm_for_op[BinaryOps.MUL](tmp:=ssa(None, "tmp", lang.types[dtype]),
-                                            cast(r[vin[0]], dtype, vin[0].dtype), cast(r[vin[1]], dtype, vin[1].dtype), dtype, lang.types[dtype]),
-            lang.asm_for_op[BinaryOps.ADD](ssa(u, "alu"), tmp, r[vin[2]], dtype, lang.types[dtype]))
-        elif vin[0].dtype == dtypes.half and args in lang.no_half_support:
-          kk(lang.asm_for_op[args]((tmp:=ssa(None, "alu", lang.types[dtypes.float])), *[cast(r[x], dtypes.float, dtypes.half) for x in vin],
-                                  lang.types[dtypes.float]))
-          cast(tmp, dtypes.half, dtypes.float32, u=u)
         else: kk(lang.asm_for_op[args](ssa(u, "alu"), *[r[x] for x in vin], dtype, lang.types[dtype]))
-      elif uop == UOps.DEFINE_ACC:
-        if lang.ssa:
-          r[u] = const(args, dtype)
-          accs.append(u)
-        else: kk(f"mov.b{lang.types[dtype][1:]} {ssa(u, 'acc')}, {const(args, dtype)};")
+      elif uop == UOps.DEFINE_ACC: kk(f"mov.b{lang.types[dtype][1:]} {ssa(u, 'acc')}, {const(args, dtype)};")
       elif uop == UOps.SPECIAL:
         if args[1][0] == "i": kk(f"mov.u32 %{args[1]}, {lang.gid[args[0]]};", f"mov.u32 {(gdim:=ssa(None,'tmp','u32'))}, {lang.gdim[args[0]]};",
                                 f"mov.u32 {(lid:=ssa(None,'tmp','u32'))}, {lang.lid[args[0]]};",
@@ -157,23 +121,14 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> str
         if len(vin) > 3:
           assert vin[2].dtype is not None
           pred = cast(r[vin[2]], dtypes.bool, vin[2].dtype, pred=True)
-          if lang.has_pred: off = cast(r[vin[1]], dtypes.uint, vin[1].dtype)
-          else: kk(lang.asm_for_op[TernaryOps.WHERE](off:=ssa(None, "off", lang.types[dtypes.uint]), pred, r[vin[1]], const(0, dtypes.uint),
-                                                    dtypes.uint, lang.types[dtypes.uint]))
+          off = cast(r[vin[1]], dtypes.uint, vin[1].dtype)
         kk(*lang.render_gep(loc:=ssa(None,'loc',lang.types[dtypes.ulong]), r[vin[0]], off if len(vin)>3 else cast(r[vin[1]],
                                                                                                                   dtypes.uint, vin[1].dtype), dtype),
           *lang.render_load(loc, val, dtype, gate=pred if len(vin) > 3 else None,
                             alt=r[vin[3]] if len(vin) > 3 else None, ss='.shared' if vin[0].uop == UOps.DEFINE_LOCAL else ''))
       elif uop == UOps.PHI:
-        if lang.ssa:
-          r[u] = r[vin[1]]
-          # PHI UOps can link to other PHI Uops, backtrace this to DEFINE_ACC
-          backward = vin[0]
-          while backward.uop == UOps.PHI: backward = backward.vin[0]
-          r[backward] = r[u]
-        else:
-          kk(f"mov.b{lang.types[dtype][1:]} {r[vin[0]]}, {r[vin[1]]};")
-          r[u] = r[vin[0]]
+        kk(f"mov.b{lang.types[dtype][1:]} {r[vin[0]]}, {r[vin[1]]};")
+        r[u] = r[vin[0]]
       elif uop == UOps.CAST:
         assert vin[0].dtype is not None
         cast(r[vin[0]], dtype, vin[0].dtype, bitcast=isinstance(args, tuple) and args[1], u=u)
@@ -242,7 +197,11 @@ class PTXLanguage(AssemblyLanguage):
 
   def render_bra(self, b1, pred=None, b2=None) -> List[str]: return [f"@{pred} bra {b1};", f"@!{pred} bra {b2};"] if pred else [f"bra {b1};"]
 
-  def render_gep(self, loc, base, offset, dtype, gate=None) -> List[str]: return [f"mad.wide.u32 {loc}, {offset}, {dtype.itemsize}, {base};"]
+  def render_gep(self, loc, base, offset, dtype, gate=None) -> List[str]:
+    # this cast is only required because of ocelot
+    if "s32" in offset:
+      return [f".reg .u32 {offset}_cast;", f"cvt.u32.s32 {offset}_cast, {offset};", f"mad.wide.u32 {loc}, {offset}_cast, {dtype.itemsize}, {base};"]
+    else: return [f"mad.wide.u32 {loc}, {offset}, {dtype.itemsize}, {base};"]
 
   def mem_type(self, dtype): return 's8' if dtype.itemsize == 1 else 'b16' if dtype == dtypes.float16 else self.types[dtype]
 
