@@ -97,7 +97,7 @@ jobs:
     - name: Compile C to native
       run: clang -O2 recognize.c -lm -o recognize
     - name: Test EfficientNet
-      run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
+      run: cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
 
   testtorch:
     name: Torch Tests
