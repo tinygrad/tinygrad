@@ -46,5 +46,5 @@ def run_schedule(schedule:List[ScheduleItem]):
     # run the function (put it in JIT)
     assert all(x.realized is not None for x in si.inputs), f"can't run, some inputs aren't realized {[x for x in si.inputs if x.realized is None]}"
     if prg: prg.exec([si.out.realized] + [cast(Buffer, x.realized) for x in si.inputs], si.var_vals)
-    else: update_stats(colored(f"empty {si.out.st.size():10d} {si.out.dtype}", "yellow"), 0, 0, {}, None, 1, device=si.out.device)
+    else: update_stats(colored(f"empty {si.out.st.size:10d} {si.out.dtype}", "yellow"), 0, 0, {}, None, 1, device=si.out.device)
     realized_lazybuffer(si.out, GlobalCounters.kernel_count)

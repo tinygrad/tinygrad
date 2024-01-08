@@ -326,7 +326,7 @@ class Kernel:
           bst *= shp[j]
 
     self.sts.append(ShapeTracker((View.create(tuple(shp), tuple(stride)),)))
-    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size()))
+    self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = cast(LocalBuffer, self.bufs[-1])
 

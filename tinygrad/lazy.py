@@ -5,7 +5,7 @@ from typing import Union, Optional, Any, Tuple, List, Set, Dict
 from tinygrad.dtype import dtypes, DType, ImageDType
 from tinygrad.helpers import prod, merge_dicts, flatten, getenv, dedup, DEBUG, all_int, all_same
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps, Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem
-from tinygrad.shape.symbolic import sint, Variable, Node
+from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer, Device
 from tinygrad.graph import log_lazybuffer
@@ -34,8 +34,7 @@ class LazyBuffer:
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                base:Optional[LazyBuffer]=None):
     assert isinstance(device, str) and device == Device.canonicalize(device)
-    self.device, self.st, self.dtype, self.shape = device, st, dtype, st.shape
-    self.size = prod([x.max if isinstance(x, Node) else x for x in self.shape])
+    self.device, self.st, self.dtype, self.shape, self.size = device, st, dtype, st.shape, st.size
     if base is None:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
@@ -278,7 +277,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
           # can only have one output buffer
           # can only reduce contiguous
           # max one reduceop per kernel
-          if len(realized_children) > 1 or not st.contiguous or st.size() != r.st.size() or (tr in reduce_for_op and reduce_for_op[tr] != r):
+          if len(realized_children) > 1 or not st.contiguous or st.size != r.st.size or (tr in reduce_for_op and reduce_for_op[tr] != r):
             can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
             forced_realize = True
             break
@@ -304,7 +303,7 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
           tr_next = next(iter(tr.children))
           st_childs = dedup([s for s in tr_next.srcs if s.base == tr])
           if len(st_childs) > 1: break
-          if st.size() != st_childs[0].st.size(): break
+          if st.size != st_childs[0].st.size: break
           st = st + st_childs[0].st
           if not st.contiguous or tr_next.op in ReduceOps: break
           tr = tr_next
