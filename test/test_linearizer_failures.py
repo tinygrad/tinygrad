@@ -7,8 +7,8 @@ from tinygrad.helpers import OSX, CI
 from test.external.fuzz_linearizer import run_linearizer
 
 # stuff needed to unpack a kernel
-from extra.optimization.helpers import ShapeTracker
 from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer, get_lazyop_info
+from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 inf, nan = float('inf'), float('nan')
 
