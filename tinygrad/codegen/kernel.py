@@ -78,7 +78,6 @@ class Kernel:
     assert len(dedup(reduceops)) <= 1, "max one reduce op in an ast"
     self.reduceop = reduceops[0] if reduceops else None
 
-    # create new shapetrackers inside this kernel, we will permute them
     self.bufs: List[Union[MemBuffer, ConstBuffer, LocalBuffer]] = dedup([x.arg for x in self.ast.lazyops if x.op in BufferOps])
     assert isinstance(self.bufs[0], MemBuffer) and self.bufs[0].idx == 0, f"buffer 0 is not the store buffer {self.bufs[0]}"
 
@@ -86,7 +85,7 @@ class Kernel:
     self.earlybufs = [x.arg for x in self.reduceop.lazyops if x.op in BufferOps] if self.reduceop else []
     self.full_buf_index: int = self.bufs.index(self.earlybufs[0]) if self.earlybufs else 0
 
-    # create the (permuted) shapetrackers
+    # create new shapetrackers inside this kernel, we will permute them
     self.sts: List[ShapeTracker] = [x.st for x in cast(List[Union[MemBuffer, ConstBuffer]], self.bufs)]
 
     # move all reduce axes to the end
@@ -149,9 +148,9 @@ class Kernel:
     acc_strides = [x*(1-upcasted_i[::-1][i][2]) for i,x in enumerate(strides_for_shape(tuple(1 if r else s for s,_,r in upcasted_i[::-1])))]
     return [sum(t) for t in itertools.product(*[[y*acc_strides[i] for y in range(x[0])] for i,x in enumerate(upcasted_i[::-1])])]
 
-  def get_upcast_dim(self, i:int) -> List[int]:
-    should_upcast = self.opts.supports_float4 and (self.bufs[i].dtype in [dtypes.float32, dtypes.float16] or isinstance(self.bufs[i].dtype, ImageDType))  # noqa: E501
-    return [x for x in self.sts[i].unit_stride_axes() if should_upcast and x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1]
+  def get_float4_upcast_dim(self, i:int) -> List[int]:
+    should_upcast = self.opts.supports_float4 and (dtypes.is_float(self.bufs[i].dtype) or isinstance(self.bufs[i].dtype, ImageDType))
+    return [x for x in self.sts[i].unit_stride_axes() if x >= self.shape_len-self.upcasted and self.sts[i].shape[x] > 1] if should_upcast else []
 
   @property
   def first_reduce(self) -> int:
@@ -452,7 +451,7 @@ class Kernel:
       self.dont_use_locals = True
     elif opt.op == OptOps.PADTO:
       assert not vars_from_ast(self.ast), "does not work with symbolic shape"
-      assert all(op.op is not ReduceOps.MAX for op in self.ast.lazyops), "cannot pad with MAX"
+      assert axis < self.first_reduce, "cannot pad a reduce axis"
       padded = False
       for i,st in enumerate(self.sts):
         if self.sts[i].shape[axis] != 1:

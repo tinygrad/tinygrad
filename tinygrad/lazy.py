@@ -89,12 +89,19 @@ class LazyBuffer:
     # COPY there and back = no COPY at all
     if self.base == self and not self.realized and self.op == LoadOps.COPY and self.srcs[0].device == device: return self.srcs[0]
 
-    # TODO: const doesn't have to be copied (issues with disk tensor)
-    #if self.is_unrealized_const(): return self.const(self.base.arg)._view(self.st)
-    out = self.contiguous()
-    return create_lazybuffer(device, out.st, out.dtype, LoadOps.COPY, srcs=(out,))
+    # const doesn't have to be copied (issues with disk tensor)
+    if self.is_unrealized_const():
+      return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, device, arg=self.base.arg)._view(self.st)
 
-  def e(self:LazyBuffer, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
+    # if it's a shrink, do the shrink before the copy with CONTIGUOUS
+    # TODO: why is this required on WEBGPU?
+    if prod(self.st.shape) < prod(self.base.st.shape) or device == "WEBGPU":
+      return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, srcs=(self.contiguous(),))
+
+    # copy the base and apply the shapetracker on the new device
+    return create_lazybuffer(device, self.base.st, self.dtype, LoadOps.COPY, srcs=(self.base,))._view(self.st)
+
+  def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     srcs: List[LazyBuffer] = []
     for s in (self,)+in_srcs:
       if s == s.base and s.base.contiguous_child and (root:=s.base.contiguous_child[0]()) is not None:
@@ -103,17 +110,17 @@ class LazyBuffer:
         srcs.append(s)
     assert all_same(dts:=[x.dtype.scalar() for x in (srcs if op != TernaryOps.WHERE else srcs[1:])]), f"all dtypes must match {dts} on {op}"
     if op == TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
-    output_dtype = srcs[-1].dtype if op != BinaryOps.CMPLT else dtypes.bool
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), output_dtype, op, arg, tuple(srcs))
+    out_dtype = srcs[-1].dtype if op not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else dtypes.bool
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
 
   # *** reduce ops ***
 
-  def _reduce_op(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+  def _reduce_op(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     if self.shape == tuple(new_shape): return self
     unbound_new_shape = tuple(s.unbind()[0] if not isinstance(s, int) else s for s in new_shape)
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, unbound_new_shape, (self,))
 
-  def r(self:LazyBuffer, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+  def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not all_int(self.shape) or (0 in self.shape) or prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, new_shape)
@@ -126,16 +133,16 @@ class LazyBuffer:
 
   # *** movement ops ***
 
-  def _view(self:LazyBuffer, new_st:ShapeTracker) -> LazyBuffer:
+  def _view(self, new_st:ShapeTracker) -> LazyBuffer:
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
 
-  def reshape(self:LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer: return self._view(self.st.reshape(arg))
-  def pad(self:LazyBuffer, arg:Tuple[Tuple[int, int], ...]) -> LazyBuffer: return self._view(self.st.pad(arg))
-  def expand(self:LazyBuffer, arg:Tuple[sint, ...]) -> LazyBuffer: return self._view(self.st.expand(arg))
-  def permute(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer: return self._view(self.st.permute(arg))
-  def shrink(self:LazyBuffer, arg:Tuple[Tuple[sint, sint], ...]) -> LazyBuffer: return self._view(self.st.shrink(arg))
-  def stride(self:LazyBuffer, arg:Tuple[int, ...]) -> LazyBuffer: return self._view(self.st.stride(arg))
+  def reshape(self, arg:Tuple[sint, ...]): return self._view(self.st.reshape(arg))
+  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self._view(self.st.pad(arg))
+  def expand(self, arg:Tuple[sint, ...]): return self._view(self.st.expand(arg))
+  def permute(self, arg:Tuple[int, ...]): return self._view(self.st.permute(arg))
+  def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self._view(self.st.shrink(arg))
+  def stride(self, arg:Tuple[int, ...]): return self._view(self.st.stride(arg))
 
 # *** schedule creation ***
 
@@ -222,7 +229,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
     realizes.add(buf.srcs[0].base)
   for x in buf.srcs: _recurse_lb(x, realizes, allbufs, simple_pads)
 
-UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
+UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
 def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   if buf in realizes or buf.realized: return True
   # NOTE: this broke to_image_idx and coder with JIT
