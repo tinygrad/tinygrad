@@ -71,17 +71,6 @@ class Sqrt(Function):
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     return grad_output.e(BinaryOps.DIV, self.ret.e(BinaryOps.MUL, self.ret.const(2)))
 
-# NOTE: the implicit derivative of sigmoid is not stable
-# https://towardsdatascience.com/derivative-of-the-sigmoid-function-536880cf918e
-# TODO: have the backend automatically find this
-class Sigmoid(Function):
-  def forward(self, x:LazyBuffer) -> LazyBuffer:
-    self.ret = x.const(1).e(BinaryOps.DIV, x.const(1).e(BinaryOps.ADD, x.e(BinaryOps.MUL, x.const(-1/math.log(2))).e(UnaryOps.EXP2)))
-    return self.ret
-
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
-    return self.ret.e(BinaryOps.MUL, self.ret.const(1).e(BinaryOps.SUB, self.ret)).e(BinaryOps.MUL, grad_output)
-
 # ************* binary ops *************
 
 class Less(Function):

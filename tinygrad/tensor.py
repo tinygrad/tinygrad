@@ -721,7 +721,6 @@ class Tensor:
   def exp(self): return mlops.Exp.apply(self.cast(least_upper_float(self.dtype)))
   def exp2(self): return mlops.Exp.apply(self*math.log(2))
   def relu(self): return mlops.Relu.apply(self)
-  def sigmoid(self): return mlops.Sigmoid.apply(self.cast(least_upper_float(self.dtype)))
   def sin(self): return mlops.Sin.apply(self.cast(least_upper_float(self.dtype)))
   def sqrt(self): return mlops.Sqrt.apply(self.cast(least_upper_float(self.dtype)))
   def rsqrt(self): return self.reciprocal().sqrt()
@@ -739,6 +738,9 @@ class Tensor:
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return ((self.float()) / (self.float().abs() + 1e-12)).cast(self.dtype)
   def reciprocal(self): return 1.0/self
+  def sigmoid(self):
+    x = self.cast(least_upper_float(self.dtype))
+    return (self > 0).detach().where(((-x).exp()+1).reciprocal(), 1-(x.exp()+1).reciprocal())
 
   # ***** activation functions (unary) *****
 
