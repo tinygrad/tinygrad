@@ -7,11 +7,10 @@ from pathlib import Path
 import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
-from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes, colored
-from tinygrad import Device
+from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, colored
+from tinygrad import Device, GlobalCounters, dtypes
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
-from tinygrad.helpers import GlobalCounters
 from extra.models.llama import Transformer, convert_from_huggingface
 from sentencepiece import SentencePieceProcessor
 
@@ -371,7 +370,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
-  param_count = sum(x.lazydata.st.size() for x in get_parameters(llama.model))
+  param_count = sum(x.lazydata.st.size for x in get_parameters(llama.model))
 
   if chatbot:
     # encode pre prompt
@@ -414,9 +413,7 @@ After you are done speaking, output [EOS]. You are not Chad.
           with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                       f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                       (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
-            probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
-          # TODO: fix JIT rand so we can put this in the JIT
-          tok = probs.multinomial().item()
+            tok = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).item()
 
       # use the kv cache
       start_pos = len(toks)

@@ -7,10 +7,10 @@ from typing import List, Optional
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Compiled
-from tinygrad.helpers import DEBUG, dtypes
+from tinygrad.helpers import DEBUG
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.graph import print_tree, realized_lazybuffer
-from tinygrad import nn
+from tinygrad import nn, dtypes
 
 def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):
   seen = set()

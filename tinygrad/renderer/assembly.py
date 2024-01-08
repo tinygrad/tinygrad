@@ -3,7 +3,7 @@ import functools, struct, re
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
-from tinygrad.helpers import dtypes, DType, PtrDType, INVERSE_DTYPES_DICT
+from tinygrad.dtype import dtypes, DType, PtrDType, INVERSE_DTYPES_DICT
 
 def float_to_hex(x): return "%02X%02X%02X%02X" % tuple(struct.pack("f",x)[::-1])
 def double_to_hex(x): return "%02X%02X%02X%02X%02X%02X%02X%02X" % tuple(struct.pack("d",x)[::-1])
@@ -189,7 +189,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
         kk(*lang.render_load(args, ssa(u, 'dat', dtype=lang.types[dt]), dt, ss=".param"))
     else: raise NotImplementedError(f"no code for {uop}")
 
-  return lang.render_kernel(kernel, function_name, bufs, c.items()), {}
+  return lang.render_kernel(kernel, function_name, bufs, c.items())
 
 class PTXLanguage(AssemblyLanguage):
   kernel_prefix = """.version 7.8

@@ -2,7 +2,9 @@ import os, json, pathlib, zipfile, pickle, tarfile, struct
 from tqdm import tqdm
 from typing import Dict, Union, List, Optional, Any, Tuple
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes, prod, argsort, DEBUG, Timing, GlobalCounters, CI, unwrap
+from tinygrad.ops import GlobalCounters
+from tinygrad.dtype import dtypes
+from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap
 from tinygrad.shape.view import strides_for_shape
 
 safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64,
@@ -109,7 +111,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
         if DEBUG >= 2: print(f"WARNING: returning Dummy for {module} {name}")
         return Dummy
       return intercept[name] if module_root == "torch" else super().find_class(module, name)
-    def persistent_load(self, pid): return deserialized_objects[pid] if pid in deserialized_objects else pid
+    def persistent_load(self, pid): return deserialized_objects.get(pid, pid)
 
   if zipfile.is_zipfile(fn):
     myzip = zipfile.ZipFile(fn, 'r')

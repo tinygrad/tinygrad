@@ -5,8 +5,8 @@ from phonemizer.punctuation import Punctuation
 from functools import reduce
 from pathlib import Path
 from typing import List
-from tinygrad import nn
-from tinygrad.helpers import dtypes, fetch
+from tinygrad import nn, dtypes
+from tinygrad.helpers import fetch
 from tinygrad.nn.state import torch_load
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit

@@ -1,7 +1,7 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  DOWNLOAD_CACHE_VERSION: '3'
+  DOWNLOAD_CACHE_VERSION: '4'
 
 on:
   push:
@@ -63,8 +63,8 @@ jobs:
         source venv/bin/activate
         pip install $GITHUB_WORKSPACE
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-    - name: Repo line count <5000 lines
-      run: MAX_LINE_COUNT=5000 python sz.py
+    - name: Repo line count <6000 lines
+      run: MAX_LINE_COUNT=6000 python sz.py
 
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
@@ -290,7 +290,7 @@ jobs:
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
     - name: Test tensor core ops
-      run: METAL=1 TC=2 python test/test_ops.py TestOps.test_big_gemm
+      run: METAL=1 TC=2 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
 
   testhipcompilation:
     name: HIP Compilation Tests
