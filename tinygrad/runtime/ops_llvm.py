@@ -4,7 +4,7 @@ from tinygrad.device import Compiled, MallocAllocator
 from tinygrad.helpers import getenv, DEBUG, cpu_time_execution
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.renderer.assembly import LLVMRenderer
+from tinygrad.renderer.llvmir import uops_to_llvm_ir
 
 import llvmlite.binding as llvm
 
@@ -63,4 +63,4 @@ class LLVMProgram:
     return cpu_time_execution(lambda: self.cfunc(*bufs, *vals), enable=wait)
 
 LLVMDevice = Compiled(MallocAllocator, LinearizerOptions(supports_float4=False, has_local=False, has_shared=False),
-                      LLVMRenderer, compile_llvm, LLVMProgram)
+                      uops_to_llvm_ir, compile_llvm, LLVMProgram)

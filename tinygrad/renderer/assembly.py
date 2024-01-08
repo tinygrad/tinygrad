@@ -1,5 +1,5 @@
 from typing import Callable, DefaultDict, Dict, List, Tuple, Union, NamedTuple
-import functools, struct, re
+import functools, struct
 from collections import defaultdict
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps, Op
@@ -113,9 +113,6 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> Tup
       elif args == TernaryOps.MULACC:
         assert vin[1].dtype is not None
         kk(lang.asm_for_op[args](ssa(u, 'alu'), *[r[x] for x in vin], dtype, lang.types[vin[1].dtype]))
-      # elif args == TernaryOps.WHERE and lang.has_pred:
-      #   pred = cast(r[vin[0]], "pred", vin[0].dtype)
-      #   kk(lang.asm_for_op[args](ssa(u, "alu"), pred, *[r[x] for x in vin[1:]], dtype, lang.types[dtype]))
       elif args == BinaryOps.MAX and BinaryOps.MAX not in lang.asm_for_op:
         kk(lang.asm_for_op[BinaryOps.CMPLT](pred:=ssa(None, 'lt', lang.types[dtypes.bool]), r[vin[0]], r[vin[1]], dtype, lang.types[dtype]),
            lang.asm_for_op[TernaryOps.WHERE](ssa(u, "alu"), pred, r[vin[1]], r[vin[0]], dtype, lang.types[dtype]))
@@ -282,89 +279,3 @@ class PTXLanguage(AssemblyLanguage):
             "\n}")
 
 PTXRenderer = functools.partial(uops_to_asm, PTXLanguage())
-
-LLVM_FMATH = "nsz arcp contract afn reassoc"
-
-llvm_intrinsic_types = {dtypes.float32: "f32", dtypes.float64: "f64"}
-
-class LLVMLanguage(AssemblyLanguage):
-  kernel_prefix = """target triple = "unknown-unknown-unknown"
-define void @"""
-  ssa = True
-  needs_regs = False
-  has_max = False
-  has_mulacc = False
-  has_const_mov = False
-  types = {**{k:f"i{k.itemsize*8}" if dtypes.is_int(k) else v for k,v in AssemblyLanguage().types.items()},
-           dtypes.bool: "i1", dtypes.bfloat16: "bfloat"}
-  asm_for_op = {
-    UnaryOps.NEG: lambda d,a,dt,name: (f"{d} = {'xor' if dt == dtypes.bool else 'sub' if dtypes.is_int(dt) else f'fneg {LLVM_FMATH}'} "
-    f"{name} {'0, ' if dtypes.is_int(dt) else ''}{a}{' , 1' if dt == dtypes.bool else ''}"),
-    UnaryOps.EXP2: lambda d,a,dt,name: f"{d} = call {LLVM_FMATH} {name} @llvm.exp2.f{dt.itemsize*8}({name} {a})",
-    UnaryOps.LOG2: lambda d,a,dt,name: f"{d} = call {LLVM_FMATH} {name} @llvm.log2.f{dt.itemsize*8}({name} {a})",
-    UnaryOps.SIN: lambda d,a,dt,name: f"{d} = call {LLVM_FMATH} {name} @llvm.sin.f{dt.itemsize*8}({name} {a})",
-    UnaryOps.SQRT: lambda d,a,dt,name: f"{d} = call {LLVM_FMATH} {name} @llvm.sqrt.f{dt.itemsize*8}({name} {a})",
-    BinaryOps.ADD: lambda d,a,b,dt,name:
-      f"{d} = {'or' if dt == dtypes.bool else 'add' if dtypes.is_int(dt) else f'fadd {LLVM_FMATH}'} {name} {a}, {b}",
-    BinaryOps.SUB: lambda d,a,b,dt,name: f"{d} = {'fsub' if dtypes.is_float(dt) else 'sub'} {name} {a}, {b}",
-    BinaryOps.MUL: lambda d,a,b,dt,name: f"{d} = {f'fmul {LLVM_FMATH}' if dtypes.is_float(dt) else 'mul'} {name} {a}, {b}",
-    BinaryOps.XOR: lambda d,a,b,dt,name: f"{d} = xor {name} {a}, {b}",
-    BinaryOps.DIV: lambda d,a,b,dt,name: f"{d} = {'udiv' if is_bool_or_unsigned(dt) else 'sdiv' if dtypes.is_int(dt) else 'fdiv'} {name} {a}, {b}",
-    BinaryOps.MOD: lambda d,a,b,dt,name: f"{d} = {'urem' if is_bool_or_unsigned(dt) else 'srem' if dtypes.is_int(dt) else 'frem'} {name} {a}, {b}",
-    BinaryOps.CMPEQ: lambda d,a,b,dt,name: f"{d} = {f'fcmp {LLVM_FMATH} ueq' if dtypes.is_float(dt) else 'icmp eq'} {name} {a}, {b}",
-    BinaryOps.CMPLT:
-      lambda d,a,b,dt,name: (f"{d} = " +
-                             (f'fcmp {LLVM_FMATH} ult' if dtypes.is_float(dt) else f"icmp {'ult' if is_bool_or_unsigned(dt) else 'slt'}") +
-                             f" {name} {a}, {b}"),
-    TernaryOps.WHERE: lambda d,a,b,c,dt,name: f"{d} = select i1 {a}, {name} {b}, {name} {c};"
-  }
-
-  def render_const(self, x: Union[float,int,bool], dtype, mov=None) -> str:
-    if not dtypes.is_float(dtype): return str(bool(x)).lower() if dtype == dtypes.bool else str(int(x))
-    return f"0x{double_to_hex(x if dtype == dtypes.double else trunc_float(x, 'f') if dtype == dtypes.float else trunc_float(x, 'e'))}"
-
-  def render_loop(self, idx, start, label, acc=None) -> List[str]:
-    ret = [f"br label %pre_{label}", f"pre_{label}:", f"br label %{label}", f"{label}:",
-           f"{idx} = phi i32 [{start}, %pre_{label}], [{idx}_upd, %{label}_check]"]
-    return ret + ([f"{acc[0]} = phi {self.types[acc[2]]} [{acc[1]}, %pre_{label}], [{acc[0]}_upd, %{label}_check]"] if acc else [])
-
-  def render_bra(self, b1, pred=None, b2=None) -> List[str]: return [f"br i1 {pred}, label %{b1}, label %{b2}"] if pred else [f"br label %{b1}"]
-
-  def render_gep(self, loc, base, offset, dtype, gate=None) -> List[str]:
-    return [f"{loc} = getelementptr inbounds {self.types[dtype]}, {self.types[dtype]}* {base}, i32 {offset}"]
-
-  def render_load(self, loc, dest, dtype, gate=None, alt=None):
-    if gate: return [f"{dest}_ld = load {self.types[dtype]}, {self.types[dtype]}* {loc}",
-                     f"{dest} = select i1 {gate}, {self.types[dtype]} {dest}_ld, {self.types[dtype]} {alt}"]
-    else: return [f"{dest} = load {self.types[dtype]}, {self.types[dtype]}* {loc}"]
-
-  def render_store(self, loc, val, dtype, gate=None, ss="") -> List[str]:
-    if gate:
-      return [*self.render_bra(f"st_{loc}:"), gate, f"st_{loc}_end", f"st_{loc}:", f"store {self.types[dtype]} {val}, {self.types[dtype]}* {loc}",
-              f"st_{loc}_end:"]
-    else: return [f"store {self.types[dtype]} {val}, {self.types[dtype]}* {loc}"]
-
-  def render_cast(self, d: str, a: str, dtype: DType, atype: DType, bitcast=False, pred=False) -> List[str]:
-    instr = ""
-    if dtype == dtypes.bool:
-      return [f"{d} = {f'fcmp {LLVM_FMATH} une' if dtypes.is_float(atype) else 'icmp ne'} {self.types[atype]} {a}, {self.render_const(0, atype)}"]
-    if bitcast: instr = "bitcast"
-    elif dtypes.is_float(atype):
-      if dtypes.is_float(dtype): instr = "fptrunc" if atype.itemsize > dtype.itemsize else "fpext"
-      else: instr = "fptoui" if dtypes.is_unsigned(dtype) else "fptosi"
-    elif is_bool_or_unsigned(atype):
-      if dtypes.is_float(dtype): instr = "uitofp"
-      else: instr = "zext" if atype.itemsize < dtype.itemsize or atype == dtypes.bool else "trunc" if atype.itemsize > dtype.itemsize else "bitcast"
-    elif dtypes.is_int(atype):
-      if dtypes.is_float(dtype): instr = "sitofp"
-      else: instr = "trunc" if atype.itemsize > dtype.itemsize or dtype == dtypes.bool else "sext" if atype.itemsize < dtype.itemsize else "bitcast"
-    return [f"{d} = {instr} {self.types[atype]} {a} to {self.types[dtype]}"]
-
-  def render_kernel(self, kernel, function_name, bufs, regs) -> str:
-    def render_param(param, dtype): return f"{self.types[dtype] + '* noalias' if dtype.__class__ == PtrDType else self.types[dtype]} %{param}"
-    kernel.append("ret void;")
-    k = (f"{self.kernel_prefix}{function_name}(" + ', '.join([render_param(name, dtype) for name, dtype in bufs]) + ")\n{\n" +
-         "\n".join([line if ":" in line else "  " + line for instr in kernel for line in instr.split("\n")]) + "\n}\n\n")
-    return k + "\n".join([f"declare {intrin} %0)" for intrin in set(re.findall(r'[^ ]* @llvm\.[^ ]*', k))])
-
-LLVMRenderer = functools.partial(uops_to_asm, LLVMLanguage())
