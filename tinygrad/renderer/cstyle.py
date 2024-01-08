@@ -163,9 +163,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         if child_count[u] <= 1 and args != BinaryOps.MAX and not getenv("EXPAND_SSA"):
           r[u] = val
         else:
-          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_map[dtype] if dtype in lang.type_map else dtype.name} {ssa(u,'alu')} = {val};")
+          kk(f"{lang.generic_var_prefix or lang.type_map.get(dtype, dtype.name)} {ssa(u,'alu')} = {val};")
       elif uop == UOps.DEFINE_ACC:
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_map[dtype] if dtype in lang.type_map  else dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
+        kk(f"{lang.generic_var_prefix or lang.type_map.get(dtype, dtype.name)} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
       elif uop == UOps.SPECIAL:
         kk(f"{lang.size_prefix} {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
         if args[1].startswith("l"): local_size.append(args[2])
@@ -176,7 +176,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
         # NOTE: this relies on the load not happening if it's in the unselected branch
         if len(vin) > 3: val = lang.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.type_map[dtype] if dtype in lang.type_map else dtype.name} {ssa(u,'val')} = {val};")
+        kk(f"{lang.generic_var_prefix or lang.type_map.get(dtype, dtype.name)} {ssa(u,'val')} = {val};")
       elif uop == UOps.PHI:
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
         r[u] = r[vin[0]]
@@ -292,8 +292,10 @@ class GLSLLanguage(CStyleLanguage):
   sampler_prefix = {dtypes.float64: "d", dtypes.float: "", dtypes.half: "", dtypes.int32: "i", dtypes.uint32: "u", dtypes.bool: "i"}
   fragment_center_offset = 0.5
   code_for_workitem = {"i": lambda x, offset=fragment_center_offset:f"int(gl_FragCoord.y-{offset}) * width + int(gl_FragCoord.x-{offset})"}
-  code_for_op = {**CStyleLanguage().code_for_op, **{op: lambda a,b,dtype,charforop=charforop: f"bool(int({a}){charforop}int({b}))" if dtype == dtypes.bool else f"({a}{charforop}{b})" for op,charforop in [(BinaryOps.MUL,"*"),(BinaryOps.ADD,"+"),(BinaryOps.SUB,"-"),(BinaryOps.DIV,"/")]},
-    BinaryOps.CMPLT: lambda a,b,dtype: f"(float({a})<float({b}))" if dtype == dtypes.bool else f"({a}<{b})", BinaryOps.MOD: lambda a,b,dtype: f"(int({a})%int({b}))", TernaryOps.WHERE: lambda a,b,c,dtype: f"(float({a})!=0.0?{b}:{c})" }
+  code_for_op = {**CStyleLanguage().code_for_op, **{op: lambda a,b,dtype,charforop=charforop: f"bool(int({a}){charforop}int({b}))" \
+    if dtype == dtypes.bool else f"({a}{charforop}{b})" for op,charforop in [(BinaryOps.MUL,"*"),(BinaryOps.ADD,"+"),(BinaryOps.DIV,"/")]},
+    BinaryOps.CMPLT: lambda a,b,dtype: f"(float({a})<float({b}))" if dtype == dtypes.bool else f"({a}<{b})",
+    BinaryOps.MOD: lambda a,b,dtype: f"(int({a})%int({b}))", TernaryOps.WHERE: lambda a,b,c,dtype: f"(float({a})!=0.0?{b}:{c})"}
 
   def render_const(self, x:Union[float,int], var_dtype) -> str:
     if math.isnan(x): return "(0.0 / 0.0)"
@@ -313,7 +315,8 @@ class GLSLLanguage(CStyleLanguage):
   def render_load(self, output_dtype, buf_name, buf_dtype, idx, local=False) -> str:
     x_calc = f"float(int({idx})%textureSize({buf_name}, 0).x)"
     y_calc = f"float(int({idx})/textureSize({buf_name}, 0).x)"
-    out_val = f"texture({buf_name}, vec2(float({x_calc} + {self.fragment_center_offset}f)/float(textureSize({buf_name}, 0).x), float({y_calc} + {self.fragment_center_offset}f)/float(textureSize({buf_name}, 0).y))).r"
+    out_val = f"texture({buf_name}, vec2(float({x_calc} + {self.fragment_center_offset}f)/float(textureSize({buf_name}, 0).x),\
+    float({y_calc} + {self.fragment_center_offset}f)/float(textureSize({buf_name}, 0).y))).r"
     return f"{self.render_cast([out_val], output_dtype)}"
 
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx, local=False) -> str:

@@ -10,10 +10,14 @@ import moderngl
 ctx = moderngl.create_standalone_context()
 max_dims = 4096
 dtype_map = { dtypes.float64: "f8", dtypes.float: "f4", dtypes.half: "f2", dtypes.int32: "i4", dtypes.uint32: "u4", dtypes.bool: "i1"}
+vertex_shader="#version 330\nprecision highp float;\nin vec2 in_position;in vec2 in_uv;out vec2 uv;void main(){\
+gl_Position=vec4(in_position,0.0,1.0);uv=in_uv;}"
 class WebGLProgram:
-  def __init__(self, name: str, prg: str, bufs:int=0, vars:int=0): self.name, self.prg = name, ctx.program(vertex_shader="#version 330\nprecision highp float;\nin vec2 in_position;in vec2 in_uv;out vec2 uv;void main(){gl_Position=vec4(in_position,0.0,1.0);uv=in_uv;}", fragment_shader=prg)
+  def __init__(self, name: str, prg: str, bufs:int=0, vars:int=0):
+    self.name, self.prg = name, ctx.program(vertex_shader=vertex_shader, fragment_shader=prg)
   def __call__(self, *bufs, global_size, local_size=None, vals=(), wait=False):
-    vert, uv = ctx.buffer(np.asarray([-1, 1, -1, -1, 1, 1, 1, -1], dtype='f4').tobytes()), ctx.buffer(np.asarray([0, 1, 0, 0, 1, 1, 1, 0], dtype='f4').tobytes())
+    vert = ctx.buffer(np.asarray([-1, 1, -1, -1, 1, 1, 1, -1], dtype='f4').tobytes())
+    uv = ctx.buffer(np.asarray([0, 1, 0, 0, 1, 1, 1, 0], dtype='f4').tobytes())
     self.vao = ctx.vertex_array(self.prg, [])
     self.vao.bind(self.prg["in_position"].location if "in_position" in self.prg else 0, buffer=vert, cls='f', fmt='2f4')
     self.vao.bind(self.prg["in_uv"].location if "in_uv" in self.prg else 1, buffer=uv, cls='f', fmt='2f4')
@@ -42,5 +46,7 @@ class RawWebGLAllocator(Allocator):
 
 class WebGlDevice(Compiled):
   def __init__(self, device:str):
-    super().__init__(RawWebGLAllocator(), LinearizerOptions(device="WEBGL", global_max=[4096*4096,1,1], unsupported_opts=[OptOps.UPCAST, OptOps.UPCASTMID], supports_float4=False, supports_float4_alu=False, has_local=False, has_shared=False, dont_use_locals=True),
-                     functools.partial(uops_to_cstyle, GLSLLanguage()), lambda x: x, WebGLProgram)
+    super().__init__(RawWebGLAllocator(),
+      LinearizerOptions(device="WEBGL", global_max=[4096*4096,1,1], unsupported_opts=[OptOps.UPCAST, OptOps.UPCASTMID],
+      supports_float4=False, supports_float4_alu=False, has_local=False, has_shared=False, dont_use_locals=True),
+      functools.partial(uops_to_cstyle, GLSLLanguage()), lambda x: x, WebGLProgram)

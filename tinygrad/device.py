@@ -4,7 +4,8 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable
 import importlib, inspect, functools, pathlib, time, re, ctypes
 from tinygrad.dtype import DType, dtypes, ImageDType
-from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put, create_gl_tex_dims
+from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv,\
+diskcache_get, diskcache_put, create_gl_tex_dims
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op, GlobalCounters
 
@@ -69,7 +70,7 @@ class Buffer:
     self.device, self.size, self.dtype = device, size, dtype
     self.allocator = Device[self.device].allocator
     # TODO: image hack shouldn't be here. where should it be?
-    self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else ImageDType(None, 1, None, None, create_gl_tex_dims(max_dim=4096, width=self.size), dtype) if device == "WEBGL" else size * dtype.itemsize)
+    self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else ImageDType(None, 1, None, None, create_gl_tex_dims(max_dim=4096, width=self.size), dtype) if device == "WEBGL" else size * dtype.itemsize) # noqa: E501
     # TODO: mem_used for all devices
     if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.size * self.dtype.itemsize
   def __del__(self):
