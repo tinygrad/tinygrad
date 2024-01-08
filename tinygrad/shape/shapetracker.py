@@ -75,7 +75,6 @@ class ShapeTracker:
   @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
 
-  @functools.lru_cache(maxsize=None)   # NOTE: this keeps all ShapeTrackers alive
   def size(self) -> int:
     if 0 in self.shape: return 0
     ret = self.expr_idxs()[0].max
