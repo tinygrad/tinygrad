@@ -254,8 +254,6 @@ jobs:
   #    run: npm install puppeteer
   #  - name: Run WEBGPU Efficientnet
   #    run: node test/web/test_webgpu.js
-  #  - name: Test LLaMA compile speed
-  #    run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
 
   testmetal:
     name: Metal Tests
@@ -291,6 +289,8 @@ jobs:
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
     - name: Test tensor core ops
       run: METAL=1 TC=2 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
+    - name: Test LLaMA compile speed
+      run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
 
   testhipcompilation:
     name: HIP Compilation Tests
