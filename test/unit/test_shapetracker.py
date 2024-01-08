@@ -797,35 +797,35 @@ class TestGetContraction(unittest.TestCase):
 class TestShapeTrackerSize(unittest.TestCase):
   def test_simple_size(self):
     st = ShapeTracker.from_shape((100, 100))
-    self.assertEqual(st.size(), 100*100)
+    self.assertEqual(st.real_size(), 100*100)
 
   def test_expand_size(self):
     st = ShapeTracker.from_shape((100, 100))
     st = st.reshape((100, 100, 1))
     st = st.expand((100, 100, 100))
-    self.assertEqual(st.size(), 100*100)
+    self.assertEqual(st.real_size(), 100*100)
 
   def test_expand_size_flatten(self):
     st = ShapeTracker.from_shape((100, 100))
     st = st.reshape((100, 100, 1))
     st = st.expand((100, 100, 100))
     st = st.reshape((100*100*100,))
-    self.assertEqual(st.size(), 100*100)
+    self.assertEqual(st.real_size(), 100*100)
 
   def test_shrink_size_axis_0(self):
     st = ShapeTracker.from_shape((100, 100))
     st = st.shrink(((0, 50), (0, 100)))
-    self.assertEqual(st.size(), 50*100)
+    self.assertEqual(st.real_size(), 50*100)
 
   def test_shrink_size_axis_0_variable(self):
     st = ShapeTracker.from_shape((100, 100))
     st = st.shrink(((0, Variable("a", 0, 50)), (0, 100)))
-    self.assertEqual(st.size(), 50*100)
+    self.assertEqual(st.real_size(), 50*100)
 
   def test_shrink_size_axis_1(self):
     st = ShapeTracker.from_shape((100, 100))
     st = st.shrink(((0, 100), (0, 50)))
-    self.assertEqual(st.size(), 9950)    # careful here
+    self.assertEqual(st.real_size(), 9950)    # careful here
 
 if __name__ == '__main__':
   unittest.main()

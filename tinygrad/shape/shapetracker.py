@@ -75,7 +75,10 @@ class ShapeTracker:
   @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
 
-  def size(self) -> int:
+  @property
+  def size(self) -> int: return prod([x.max if isinstance(x, Node) else x for x in self.views[-1].shape])
+
+  def real_size(self) -> int:
     if 0 in self.shape: return 0
     ret = self.expr_idxs()[0].max
     while not isinstance(ret, int): ret = ret.max    # TODO: this is a while loop?!? it should be more clear what max does
