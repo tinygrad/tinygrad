@@ -4,8 +4,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable
 import importlib, inspect, functools, pathlib, time, re, ctypes
 from tinygrad.dtype import DType, dtypes, ImageDType
-from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv,\
-diskcache_get, diskcache_put, create_gl_tex_dims
+from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op, GlobalCounters
 
@@ -70,7 +69,7 @@ class Buffer:
     self.device, self.size, self.dtype = device, size, dtype
     self.allocator = Device[self.device].allocator
     # TODO: image hack shouldn't be here. where should it be?
-    self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else ImageDType(None, 1, None, None, create_gl_tex_dims(max_dim=4096, width=self.size), dtype) if device == "WEBGL" else size * dtype.itemsize) # noqa: E501
+    self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else size * dtype.itemsize)
     # TODO: mem_used for all devices
     if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.size * self.dtype.itemsize
   def __del__(self):
@@ -242,13 +241,13 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 # **************** for Compiled Devices ****************
 
 class CompiledASTRunner(JITRunner):
-  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, lib:bytes, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, has_local:bool=True):  # noqa: E501
+  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, lib:bytes, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None):  # noqa: E501
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
-    self.name, self.display_name, self.prg, self.lib, self.global_size, self.local_size, self.has_local, self.first_run = \
-      to_function_name(name), name, prg, lib, global_size, local_size, has_local, True
+    self.name, self.display_name, self.prg, self.lib, self.global_size, self.local_size, self.first_run = \
+      to_function_name(name), name, prg, lib, global_size, local_size, True
     self.vars: List[Variable] = []
     if ast:
       info = get_lazyop_info(ast)
@@ -267,7 +266,7 @@ class CompiledASTRunner(JITRunner):
 
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False, do_update_stats=True) -> Optional[float]:
     global_size, local_size = self.launch_dims(var_vals)
-    if global_size is not None and local_size is None and self.has_local and all_int(self.global_size): # type: ignore[arg-type]
+    if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program
       from tinygrad.features.search import optimize_local_size
       local_size = self.local_size = optimize_local_size(self.clprg, global_size, rawbufs)
@@ -296,7 +295,7 @@ class Compiled:
       if lib is None:
         lib = self.compiler(src)
         diskcache_put(self.compiler.__name__, src, lib)
-    return CompiledASTRunner(k.ast, k.name, src, lib, k.global_size, k.local_size, k.opts.has_local).build(self.runtime)
+    return CompiledASTRunner(k.ast, k.name, src, lib, k.global_size, k.local_size).build(self.runtime)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:

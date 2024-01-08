@@ -188,10 +188,6 @@ class Linearizer(Kernel):
     # global uop cache
     self.saved_exprs: Dict[Tuple, UOp] = dict()
 
-    # remove global dims where global_max is 1
-    if self.opts.global_max:
-      self.reshape_and_permute(lambda x: self.shrink_global_dims(x[:self.global_dims], self.opts.global_max) + list(x[self.global_dims:]), None)
-
     # limit dims if we need to
     if self.opts.global_max and self.opts.local_max: self.limit_dims_to_max(self.opts.global_max, self.opts.local_max)
 

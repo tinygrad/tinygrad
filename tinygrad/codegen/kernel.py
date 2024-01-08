@@ -61,8 +61,6 @@ class LinearizerOptions(NamedTuple):
   supports_float4: bool = True
   supports_float4_alu: bool = True
   has_local: bool = True
-  dont_use_locals: bool = False
-  unsupported_opts: List[OptOps] = []
   has_shared: bool = True
   # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
   global_max: Optional[List[int]] = None
@@ -104,7 +102,7 @@ class Kernel:
     self.local_dims: int = 0
     self.local_alias: Dict[int, LocalBuffer] = {}
     self.tensor_core: Optional[TensorCore] = None
-    self.dont_use_locals: bool = self.opts.dont_use_locals
+    self.dont_use_locals: bool = False
 
     # group simplifies
     self.simplify_ones()
@@ -298,13 +296,6 @@ class Kernel:
           new_shape[next_idx] = new_shape[next_idx] * 2
     return tuple(new_shape)
 
-  def shrink_global_dims(self, globals, global_max):
-    out = list(globals)
-    for i in reversed(range(1, len(out))):
-      if i >= len(global_max) or global_max[i] == 1:
-        out[i - 1] *= out.pop(i)
-    return out
-
   def limit_dims_to_max(self, global_max: List[int], local_max: List[int]):
     # Check the global allocation limit, current the global_size will be flipped during codegen
     # and then padded right with 1s if its length < 3 which makes this part a bit awkward to write
@@ -408,7 +399,6 @@ class Kernel:
     return False
 
   def apply_opt(self, opt:Opt):
-    if opt.op in self.opts.unsupported_opts: return
     assert not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.LASTLOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals"  # noqa: E501
     self.applied_opts.append(opt)
     if opt.axis is not None:
