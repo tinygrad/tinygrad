@@ -99,8 +99,7 @@ class LazyBuffer:
       return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, device, arg=self.base.arg)._view(self.st)
 
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
-    # TODO: why is this required on WEBGPU?
-    if prod(self.st.shape) < prod(self.base.st.shape) or device == "WEBGPU":
+    if prod(self.st.shape) < prod(self.base.st.shape):
       return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, srcs=(self.contiguous(),))
 
     # copy the base and apply the shapetracker on the new device
@@ -118,7 +117,7 @@ class LazyBuffer:
     if op == TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
     out_dtype = srcs[-1].dtype if op not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else dtypes.bool
     ret = create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
-    return ret.cast(dtypes.float32) if (out_dtype == dtypes.bool and self.device == "WEBGPU") else ret
+    return ret
 
   # *** reduce ops ***
 
