@@ -1,6 +1,5 @@
 import unittest
 from tinygrad import Tensor, Device, nn, GlobalCounters
-from tinygrad.nn import Embedding
 from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
 from extra.lr_scheduler import OneCycleLR
