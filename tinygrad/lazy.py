@@ -19,7 +19,7 @@ lazycache: Dict[Any, ReferenceType[LazyBuffer]] = {}
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType,
                       op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None):
-  if 0 in st.shape: st, op, arg, srcs = ShapeTracker.from_shape(st.shape), LoadOps.CONST, 0, ()
+  if 0 in st.shape: st, op, arg, srcs, base = ShapeTracker.from_shape(st.shape), LoadOps.CONST, 0, (), None
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs), ref(base) if base else None)
   if (rret := lazycache.get(cache_key, None)): return cast(LazyBuffer, rret())  # NOTE: this should always be a live reference
