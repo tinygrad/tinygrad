@@ -113,7 +113,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> str
         kk(*lang.render_cast(f"%{args[1]}", tmp, dtypes.uint, dtypes.int))
         if args[1][0] == "l": local_size.append(args[2])
         r[u] = "%" + args[1]
-        kernel = [f".reg .s32 %{args[1]};"] + kernel
+        kernel = [f".reg .u32 %{args[1]};"] + kernel
       elif uop == UOps.CONST: r[u] = const(args, dtype, mov=True)
       elif uop == UOps.LOAD:
         assert vin[1].dtype is not None
