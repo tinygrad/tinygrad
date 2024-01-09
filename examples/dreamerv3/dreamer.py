@@ -14,20 +14,17 @@ sys.path.append(str(pathlib.Path(__file__).parent))
 import envs.wrappers as wrappers
 import exploration as expl
 import models
-import tools
-import torch
-from parallel import Damy, Parallel
-from torch import distributions as torchd
-from torch import nn
+import utils
+import distributions
+from tinygrad import Tensor
 
 
 def to_np(x):
     return x.detach().cpu().numpy()
 
 
-class Dreamer(nn.Module):
+class Dreamer:
     def __init__(self, obs_space, act_space, config, logger, dataset):
-        super(Dreamer, self).__init__()
         self._config = config
         self._logger = logger
         self._should_log = tools.Every(config.log_every)

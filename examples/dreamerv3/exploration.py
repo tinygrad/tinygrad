@@ -13,7 +13,7 @@ class Random:
 
     def actor(self, feat):
         if self._config.actor["dist"] == "onehot":
-            return distributions.OneHotDist(
+            return distributions.OneHotCategorical(
                 Tensor.zeros(self._config.num_actions)
                 .repeat(self._config.envs, 1)
                 .to(self._config.device)

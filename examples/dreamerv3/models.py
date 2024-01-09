@@ -3,7 +3,7 @@ import copy
 import networks
 import utils
 
-from tinygrad import Tensor, nn
+from tinygrad import Tensor
 
 
 class RewardEMA:
@@ -13,22 +13,21 @@ class RewardEMA:
         self.device = device
         self.alpha = alpha
         self.range = Tensor([0.05, 0.95]).to(device)
+        self.ema_vals = Tensor([0.0, 1.0]).to(device)
 
-    def __call__(self, x, ema_vals):
+    def __call__(self, x):
         flat_x = Tensor.flatten(x.detach())
         x_quantile = utils.quantile(input=flat_x, q=self.range)
         # this should be in-place operation
-        ema_vals[:] = self.alpha * x_quantile + (1 - self.alpha) * ema_vals
-        scale = Tensor.clip(ema_vals[1] - ema_vals[0], min=1.0)
-        offset = ema_vals[0]
+        self.ema_vals = self.alpha * x_quantile + (1 - self.alpha) * self.ema_vals
+        scale = Tensor.maximum(self.ema_vals[1] - self.ema_vals[0], 1.0)
+        offset = self.ema_vals[0]
         return offset.detach(), scale.detach()
 
 
 class WorldModel:
     def __init__(self, obs_space, act_space, step, config):
-        super(WorldModel, self).__init__()
         self._step = step
-        self._use_amp = True if config.precision == 16 else False
         self._config = config
         shapes = {k: tuple(v.shape) for k, v in obs_space.spaces.items()}
         self.encoder = networks.MultiEncoder(shapes, **config.encoder)
@@ -171,17 +170,17 @@ class WorldModel:
     # this function is called during both rollout and training
     def preprocess(self, obs):
         obs = obs.copy()
-        obs["image"] = Tensor.Tensor(obs["image"]) / 255.0
+        obs["image"] = Tensor(obs["image"]) / 255.0
         if "discount" in obs:
             obs["discount"] *= self._config.discount
             # (batch_size, batch_length) -> (batch_size, batch_length, 1)
-            obs["discount"] = Tensor.Tensor(obs["discount"]).unsqueeze(-1)
+            obs["discount"] = Tensor(obs["discount"]).unsqueeze(-1)
         # 'is_first' is necessary to initialize hidden state at training
         assert "is_first" in obs
         # 'is_terminal' is necessary to train cont_head
         assert "is_terminal" in obs
-        obs["cont"] = Tensor.Tensor(1.0 - obs["is_terminal"]).unsqueeze(-1)
-        obs = {k: Tensor.Tensor(v).to(self._config.device) for k, v in obs.items()}
+        obs["cont"] = Tensor(1.0 - obs["is_terminal"]).unsqueeze(-1)
+        obs = {k: Tensor(v).to(self._config.device) for k, v in obs.items()}
         return obs
 
     def video_pred(self, data):
@@ -191,14 +190,12 @@ class WorldModel:
         states, _ = self.dynamics.observe(
             embed[:6, :5], data["action"][:6, :5], data["is_first"][:6, :5]
         )
-        recon = self.heads["decoder"](self.dynamics.get_feat(states))["image"].mode()[
-            :6
-        ]
-        self.heads["reward"](self.dynamics.get_feat(states)).mode()[:6]
+        recon = self.heads["decoder"](self.dynamics.get_feat(states))["image"].mode[:6]
+        self.heads["reward"](self.dynamics.get_feat(states)).mode[:6]
         init = {k: v[:, -1] for k, v in states.items()}
         prior = self.dynamics.imagine_with_action(data["action"][:6, 5:], init)
-        openl = self.heads["decoder"](self.dynamics.get_feat(prior))["image"].mode()
-        self.heads["reward"](self.dynamics.get_feat(prior)).mode()
+        openl = self.heads["decoder"](self.dynamics.get_feat(prior))["image"].mode
+        self.heads["reward"](self.dynamics.get_feat(prior)).mode
         # observed image is given until 5 steps
         model = Tensor.cat([recon[:, :5], openl], 1)
         truth = data["image"][:6]
@@ -208,10 +205,8 @@ class WorldModel:
         return Tensor.cat([truth, model, error], 2)
 
 
-class ImagBehavior(nn.Module):
+class ImagBehavior:
     def __init__(self, config, world_model):
-        super(ImagBehavior, self).__init__()
-        self._use_amp = True if config.precision == 16 else False
         self._config = config
         self._world_model = world_model
         if config.dyn_discrete:
@@ -274,8 +269,6 @@ class ImagBehavior(nn.Module):
             f"Optimizer value_opt has {sum(param.numel() for param in self.value.parameters())} variables."
         )
         if self._config.reward_EMA:
-            # register ema_vals to nn.Module for enabling Tensor.save and Tensor.load
-            self.register_buffer("ema_vals", Tensor.zeros((2,)).to(self._config.device))
             self.reward_ema = RewardEMA(device=self._config.device)
 
     def _train(
@@ -318,11 +311,11 @@ class ImagBehavior(nn.Module):
                 value_loss = -value.log_prob(target.detach())
                 slow_target = self._slow_value(value_input[:-1].detach())
                 if self._config.critic["slow_target"]:
-                    value_loss -= value.log_prob(slow_target.mode().detach())
+                    value_loss -= value.log_prob(slow_target.mode.detach())
                 # (time, batch, 1), (time, batch, 1) -> (1,)
                 value_loss = Tensor.mean(weights[:-1] * value_loss[:, :, None])
 
-        metrics.update(utils.tensorstats(value.mode(), "value"))
+        metrics.update(utils.tensorstats(value.mode, "value"))
         metrics.update(utils.tensorstats(target, "target"))
         metrics.update(utils.tensorstats(reward, "imag_reward"))
         if self._config.actor["dist"] in ["onehot"]:
@@ -368,7 +361,7 @@ class ImagBehavior(nn.Module):
             discount = self._config.discount * self._world_model.heads["cont"](inp).mean
         else:
             discount = self._config.discount * Tensor.ones_like(reward)
-        value = self.value(imag_feat).mode()
+        value = self.value(imag_feat).mode
         target = utils.lambda_return(
             reward[1:],
             value[:-1],
@@ -396,25 +389,25 @@ class ImagBehavior(nn.Module):
         # Q-val for actor is not transformed using symlog
         target = Tensor.stack(target, dim=1)
         if self._config.reward_EMA:
-            offset, scale = self.reward_ema(target, self.ema_vals)
+            offset, scale = self.reward_ema(target)
             normed_target = (target - offset) / scale
             normed_base = (base - offset) / scale
             adv = normed_target - normed_base
             metrics.update(utils.tensorstats(normed_target, "normed_target"))
-            metrics["EMA_005"] = self.ema_vals[0].numpy()
-            metrics["EMA_095"] = self.ema_vals[1].numpy()
+            metrics["EMA_005"] = self.reward_ema.ema_vals[0].numpy()
+            metrics["EMA_095"] = self.reward_ema.ema_vals[1].numpy()
 
         if self._config.imag_gradient == "dynamics":
             actor_target = adv
         elif self._config.imag_gradient == "reinforce":
             actor_target = (
                 policy.log_prob(imag_action)[:-1][:, :, None]
-                * (target - self.value(imag_feat[:-1]).mode()).detach()
+                * (target - self.value(imag_feat[:-1]).mode).detach()
             )
         elif self._config.imag_gradient == "both":
             actor_target = (
                 policy.log_prob(imag_action)[:-1][:, :, None]
-                * (target - self.value(imag_feat[:-1]).mode()).detach()
+                * (target - self.value(imag_feat[:-1]).mode).detach()
             )
             mix = self._config.imag_gradient_mix
             actor_target = mix * target + (1 - mix) * actor_target

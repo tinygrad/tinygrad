@@ -214,7 +214,8 @@ def numel(shape):
 
 
 def quantile(input, q):
-    raise NotImplementedError
+    # TODO: optimize this to not use numpy
+    return Tensor(np.quantile(input.numpy(), q.numpy()))
 
 
 def get_act(act):
@@ -226,5 +227,61 @@ def get_act(act):
     return act
 
 
+def clip_grad_norm_(parameters, max_norm):
+    grads = [p.grad for p in parameters if p.grad is not None]
+    if len(grads) == 0:
+        return Tensor(0.0)
+    l2_norm = lambda x: Tensor.sqrt(Tensor.sum(Tensor.square(x)))
+    norms = [l2_norm(g) for g in grads]
+    total_norm = l2_norm(Tensor.stack(norms))
+    clip_coef = max_norm / (total_norm + 1e-6)
+    clip_coef = Tensor.maximum(clip_coef, 1.0)
+    for g in grads:
+        g *= clip_coef
+    return total_norm
+
+
 class Optimizer:
-    pass
+    def __init__(
+        self,
+        name,
+        parameters,
+        lr,
+        eps=1e-4,
+        clip=None,
+        wd=None,
+        wd_pattern=r".*",
+        opt="adam",
+    ):
+        assert 0 <= wd < 1
+        assert not clip or 1 <= clip
+        self._name = name
+        self._parameters = parameters
+        self._clip = clip
+        self._wd = wd
+        self._wd_pattern = wd_pattern
+        self._opt: nn.optim.Optimizer = {
+            "adam": lambda: nn.optim.Adam(parameters, lr=lr, eps=eps),
+            "sgd": lambda: nn.optim.SGD(parameters, lr=lr),
+            "momentum": lambda: nn.optim.SGD(parameters, lr=lr, momentum=0.9),
+        }[opt]()
+
+    def __call__(self, loss: Tensor, params):
+        assert len(loss.shape) == 0, loss.shape
+        metrics = {}
+        metrics[f"{self._name}_loss"] = loss.detach().cpu().numpy()
+        self._opt.zero_grad()
+        loss.backward()
+        norm = clip_grad_norm_(self._parameters, self._clip)
+        self._opt.step()
+        if self._wd:
+            self._apply_weight_decay(params)
+        metrics[f"{self._name}_grad_norm"] = norm.item()
+        return metrics
+
+    def _apply_weight_decay(self, varibs):
+        nontrivial = self._wd_pattern != r".*"
+        if nontrivial:
+            raise NotImplementedError
+        for var in varibs:
+            var -= self._wd * var

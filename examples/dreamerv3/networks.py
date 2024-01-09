@@ -10,7 +10,6 @@ from tinygrad import Tensor, nn
 
 class GRUCell:
     def __init__(self, inp_size, size, norm=True):
-        super(GRUCell, self).__init__()
         self._inp_size = inp_size
         self._size = size
         self.layers = [nn.Linear(inp_size + size, 3 * size, bias=False)]
@@ -333,7 +332,6 @@ class MLP:
 
 class ImgChLayerNorm:
     def __init__(self, ch, eps=1e-03):
-        super(ImgChLayerNorm, self).__init__()
         self.norm = nn.LayerNorm(ch, eps=eps)
 
     def __call__(self, x: Tensor):
@@ -358,7 +356,6 @@ class MultiEncoder:
         mlp_units: int = 256,
         symlog_inputs: bool = False,
     ):
-        super(MultiEncoder, self).__init__()
         excluded = ("is_first", "is_last", "is_terminal", "reward")
         shapes = {
             k: (v,) if isinstance(v, int) else v
@@ -431,7 +428,6 @@ class MultiDecoder:
         vector_dist: str = "symlog_mse",
         outscale: float = 1.0,
     ):
-        super(MultiDecoder, self).__init__()
         excluded = ("is_first", "is_last", "is_terminal")
         shapes = {
             k: (v,) if isinstance(v, int) else v

@@ -15,7 +15,6 @@ defaults:
   reset_every: 0
   device: 'cuda:0'
   compile: True
-  precision: 32
   debug: False
   video_pred_log: True
 
