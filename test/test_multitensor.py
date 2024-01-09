@@ -157,18 +157,23 @@ class TestMultiTensor(unittest.TestCase):
     B, T, embed_size = 4, 10, 20
 
     layer_norm = RMSNorm(embed_size)
-    print(layer_norm.weight)
-    x = Tensor.rand((B, T, embed_size))
-    print(x)
+    x = Tensor.rand((B, T, embed_size)).contiguous().realize()
     y = layer_norm(x)
 
+    # for norm layers, the weights are duplicated
     layer_norm_sharded = RMSNorm(embed_size)
     layer_norm_sharded.weight.shard_((d0, d1), axis=None).realize()
-    print(layer_norm_sharded.weight)
-    x_sharded = x.shard((d0, d1), axis=2)
-    print(x_sharded)
-    print(x_sharded.numpy().shape)
-    # need all gather
+
+    # if x is being sharded then all reduce is involved
+    x_sharded = x.shard((d0, d1), axis=2).realize()
+    y_shard = layer_norm_sharded(x_sharded).realize()
+    np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
+
+    # if x is copyed, then the operations remain inside each GPU
+    x_sharded = x.shard((d0, d1), axis=None).realize()
+    y_shard = layer_norm_sharded(x_sharded).realize()
+    np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
+
 
   def test_data_parallel_resnet(self):
     import sys, pathlib
