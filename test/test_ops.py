@@ -1267,7 +1267,14 @@ class TestOps(unittest.TestCase):
     for dim in range(-2, 3):
       helper_test_op([(45,65,9), (45,65,9), (45,65,9)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))
 
-    with self.assertRaises(AssertionError):
+    # zero in non-cat axis
+    helper_test_op([(45,0,9), (45,0,9), (45,0,9)], lambda x,y,z: torch.cat((x,y,z), 0), lambda x,y,z: x.cat(y, z, dim=0), forward_only=True)
+
+    # zero in cat axis
+    helper_test_op([(45,0,9), (45,1,9), (45,2,9)], lambda x,y,z: torch.cat((x,y,z), 1), lambda x,y,z: x.cat(y, z, dim=1))
+    helper_test_op([(45,0,9), (45,0,9), (45,0,9)], lambda x,y,z: torch.cat((x,y,z), 1), lambda x,y,z: x.cat(y, z, dim=1), forward_only=True)
+
+    with self.assertRaises(IndexError):
       a = Tensor(3.14)
       a.cat(a)
 
