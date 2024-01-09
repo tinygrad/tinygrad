@@ -178,14 +178,23 @@ class TestMultiTensor(unittest.TestCase):
     q = Tensor.rand(32, 8, 16, 64).contiguous().realize()
     k = Tensor.rand(32, 8, 16, 64).contiguous().realize()
     v = Tensor.rand(32, 8, 16, 64).contiguous().realize()
-
     y = Tensor.scaled_dot_product_attention(q, k, v)
 
-    q_sharded = q.shard((d0, d1), axis=None)
-    k_sharded = k.shard((d0, d1), axis=1)
-    v_sharded = v.shard((d0, d1), axis=1)
+    q_sharded = q.shard((d0, d1), axis=None).realize()
+    k_sharded = k.shard((d0, d1), axis=1).realize()
+    v_sharded = v.shard((d0, d1), axis=1).realize()
     y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded)
+    np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
 
+    m = Tensor.rand(32, 8, 16, 16).contiguous().realize()
+    y = Tensor.scaled_dot_product_attention(q, k, v, attn_mask=m)
+
+    m_sharded = m.shard((d0, d1), axis=None).realize()
+    y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded, attn_mask=m_sharded)
+    np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
+
+    y = Tensor.scaled_dot_product_attention(q, k, v, is_causal=True)
+    y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded, is_causal=True)
     np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
 
 
