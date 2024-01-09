@@ -175,7 +175,19 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
   def test_scaled_product_attention(self):
-    pass
+    q = Tensor.rand(32, 8, 16, 64).contiguous().realize()
+    k = Tensor.rand(32, 8, 16, 64).contiguous().realize()
+    v = Tensor.rand(32, 8, 16, 64).contiguous().realize()
+
+    y = Tensor.scaled_dot_product_attention(q, k, v)
+
+    q_sharded = q.shard((d0, d1), axis=None)
+    k_sharded = k.shard((d0, d1), axis=1)
+    v_sharded = v.shard((d0, d1), axis=1)
+    y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded)
+
+    np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
+
 
   def test_data_parallel_resnet(self):
     import sys, pathlib
