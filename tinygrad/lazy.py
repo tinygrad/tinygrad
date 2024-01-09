@@ -49,8 +49,7 @@ class LazyBuffer:
       assert base.base == base, "base must be a base itself"
       self.base = base
 
-  def __del__(self):
-    if self.cache_key in lazycache: del lazycache[self.cache_key]
+  def __del__(self): lazycache.pop(self.cache_key, None)
 
   def __repr__(self) -> str:
     return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.st if self.base != self else (self.op, self.realized)}>"
