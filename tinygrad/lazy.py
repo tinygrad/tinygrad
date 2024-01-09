@@ -8,7 +8,7 @@ from tinygrad.helpers import prod, merge_dicts, flatten, getenv, dedup, DEBUG, a
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps, Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.device import Buffer, Device
+from tinygrad.device import Buffer
 from tinygrad.graph import log_lazybuffer
 from weakref import ref, ReferenceType
 
@@ -34,7 +34,6 @@ class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                base:Optional[LazyBuffer]=None, cache_key=None):
-    assert isinstance(device, str) and device == Device.canonicalize(device)
     self.device, self.st, self.dtype, self.shape, self.size, self.cache_key = device, st, dtype, st.shape, st.size, cache_key
     self._base: Optional[LazyBuffer] = None
     if base is None:
@@ -56,7 +55,7 @@ class LazyBuffer:
 
   # NOTE: this has to be a function to prevent self reference
   @property
-  def base(self) -> LazyBuffer: return self._base if self._base else self
+  def base(self) -> LazyBuffer: return self._base if self._base is not None else self
 
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None) -> LazyBuffer:
