@@ -57,7 +57,7 @@ class TestShapeTrackerBasics(unittest.TestCase):
 
   def test_simplify_is_correct(self):
     multiv = ShapeTracker(views=(View(shape=(15, 3), strides=(9, 1), offset=6, mask=None, contiguous=False),
-                                 View(shape=(4, 3), strides=(12, 4), offset=0, mask=None, contiguous=False)), size=15*3)
+                                 View(shape=(4, 3), strides=(12, 4), offset=0, mask=None, contiguous=False)))
     assert st_equal(multiv, multiv.simplify())
 
 class TestShapeTrackerAdd(unittest.TestCase):
@@ -104,7 +104,7 @@ class TestShapeTrackerAddVariable(unittest.TestCase):
     var_j = Variable('i', 1, 10)
     vm1 = View(shape=(var_i, var_j, 3), strides=(3, 0, 1), offset=0, mask=None, contiguous=False)
     vm2 = View(shape=(var_i, var_j, 3), strides=(var_j*3, 3, 1), offset=0, mask=None, contiguous=True)
-    ShapeTracker((vm1,), prod((var_i, var_j, 3))) + ShapeTracker((vm2,), prod((var_i, var_j, 3)))
+    ShapeTracker((vm1,)) + ShapeTracker((vm2,))
 
   @unittest.skip("two vars not supported")
   def test_merge_symbolic_views_2(self):
