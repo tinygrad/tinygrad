@@ -22,7 +22,7 @@ class Attention:
     self.head_dim = dim // n_heads
 
   def __call__(self, x:Tensor, start_pos:Variable, mask:Optional[Tensor]) -> Tensor:
-    if mask is not None:
+    if mask is not None or start_pos.val == 0:
       # no symbolic shape qkv when consuming prompts
       start_pos = start_pos.val
 
