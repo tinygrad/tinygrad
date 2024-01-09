@@ -54,4 +54,5 @@ class TestLLaMASpeed(unittest.TestCase):
     Device[Device.DEFAULT].compiler = backup_compiler
 
 if __name__ == '__main__':
-  unittest.main()
+  TestLLaMASpeed().test_llama_compile()
+  #unittest.main()
