@@ -138,6 +138,20 @@ class TestMultiTensor(unittest.TestCase):
     lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
     lr_sched.step()
 
+  def test_embedding(self):
+    B, T, embed_size, vocab_size = 4, 10, 20, 28
+
+    layer = nn.Embedding(vocab_size, embed_size)
+    x = Tensor(np.random.randint(0, vocab_size, (B, T)))
+    z = layer(x)
+
+    layer_sharded = nn.Embedding(vocab_size, embed_size)
+    layer_sharded.weight.assign(layer.weight.shard((d0, d1), axis=1)).realize()
+    x_sharded = x.shard((d0, d1), axis=None)
+    z_shard = layer_sharded(x_sharded)
+
+    np.testing.assert_allclose(z.numpy(), z_shard.numpy(), atol=1e-6, rtol=1e-6)
+
   def test_data_parallel_resnet(self):
     import sys, pathlib
     sys.path.append((pathlib.Path(__file__).parent.parent / "extra" / "models").as_posix())
