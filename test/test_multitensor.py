@@ -174,6 +174,8 @@ class TestMultiTensor(unittest.TestCase):
     y_shard = layer_norm_sharded(x_sharded).realize()
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
+  def test_scaled_product_attention(self):
+    pass
 
   def test_data_parallel_resnet(self):
     import sys, pathlib
