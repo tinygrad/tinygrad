@@ -1,7 +1,7 @@
 import math
-from typing import Optional, Union, Tuple
+from typing import Optional, Union, Tuple, cast
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod, all_int
+from tinygrad.helpers import prod
 from tinygrad.nn import optim, state  # noqa: F401
 
 class BatchNorm2d:
@@ -45,8 +45,7 @@ class Conv2d:
     self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
     self.stride, self.padding, self.dilation, self.groups = stride, padding, dilation, groups
     self.weight = self.initialize_weight(out_channels, in_channels, groups)
-    assert all_int(self.weight.shape), "does not support symbolic shape"
-    bound = 1 / math.sqrt(prod(self.weight.shape[1:]))
+    bound = 1 / math.sqrt(cast(int, prod(self.weight.shape[1:])))  # weight shape is always ints but mypy cannot tell
     self.bias = Tensor.uniform(out_channels, low=-bound, high=bound) if bias else None
 
   def __call__(self, x:Tensor):
