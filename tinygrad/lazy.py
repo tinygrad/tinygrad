@@ -239,7 +239,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
     children[x.base][buf] = None
     _recurse_lb(x, realizes, allbufs, simple_pads, children)
 
-UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
+UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2}
 def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   if buf in realizes or buf.realized: return True
   # NOTE: this broke to_image_idx and coder with JIT
