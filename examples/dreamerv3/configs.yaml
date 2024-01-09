@@ -36,11 +36,11 @@ defaults:
   dyn_discrete: 32
   dyn_rec_depth: 1
   dyn_mean_act: 'none'
-  dyn_std_act: 'sigmoid2'
+  dyn_std_act: 'sigmoid'
   dyn_min_std: 0.1
   grad_heads: ['decoder', 'reward', 'cont']
   units: 512
-  act: 'SiLU'
+  act: 'silu'
   norm: True
   encoder:
     {mlp_keys: '$^', cnn_keys: 'image', act: 'SiLU', norm: True, cnn_depth: 32, kernel_size: 4, minres: 4, mlp_layers: 2, mlp_units: 512, symlog_inputs: True}

@@ -68,7 +68,7 @@ class ConvEncoder:
         input_shape,
         depth=32,
         norm=True,
-        act=Tensor.silu,
+        act="silu",
         kernel_size=4,
         minres=4,
     ):
@@ -76,7 +76,7 @@ class ConvEncoder:
         stages = int(np.log2(h) - np.log2(minres))
         in_dim = input_ch
         out_dim = depth
-        act = getattr(nn, act) if isinstance(act, str) else act
+        act = utils.get_act(act)
 
         layers = []
         for _ in range(stages):
@@ -118,9 +118,9 @@ class ConvDecoder:
     def __init__(
         self,
         feat_size,
-        shape=(3, 64, 64),
+        shape=(64, 64, 3),
         depth=32,
-        act=Tensor.elu,
+        act="elu",
         norm=True,
         kernel_size=4,
         minres=4,
@@ -133,7 +133,7 @@ class ConvDecoder:
         self._minres = minres
         out_ch = minres**2 * depth * 2 ** (layer_num - 1)
         self._embed_size = out_ch
-        act = getattr(nn, act) if isinstance(act, str) else act
+        act = utils.get_act(act)
 
         self._linear_layer = nn.Linear(feat_size, out_ch)
         utils.uniform_weight_init(outscale)(self._linear_layer)
@@ -209,7 +209,7 @@ class MLP:
         shape,
         layers,
         units,
-        act=Tensor.silu,
+        act="silu",
         norm=True,
         dist="normal",
         std=1.0,
@@ -235,7 +235,7 @@ class MLP:
         self._unimix_ratio = unimix_ratio
         self._symlog_inputs = symlog_inputs
         self._device = device
-        act = getattr(nn, act) if isinstance(act, str) else act
+        act = utils.get_act(act)
 
         self.layers = []
         for i in range(layers):
@@ -349,19 +349,19 @@ class MultiEncoder:
         shapes,
         mlp_keys,
         cnn_keys,
-        act,
-        norm,
-        cnn_depth,
-        kernel_size,
-        minres,
-        mlp_layers,
-        mlp_units,
-        symlog_inputs,
+        act: bool = Tensor.silu,
+        norm: bool = True,
+        cnn_depth: int = 32,
+        kernel_size: int = 4,
+        minres: int = 4,
+        mlp_layers: int = 4,
+        mlp_units: int = 256,
+        symlog_inputs: bool = False,
     ):
         super(MultiEncoder, self).__init__()
         excluded = ("is_first", "is_last", "is_terminal", "reward")
         shapes = {
-            k: v
+            k: (v,) if isinstance(v, int) else v
             for k, v in shapes.items()
             if k not in excluded and not k.startswith("log_")
         }
@@ -373,15 +373,15 @@ class MultiEncoder:
             for k, v in shapes.items()
             if len(v) in (1, 2) and re.match(mlp_keys, k)
         }
-        print("Encoder CNN shapes:", self.cnn_shapes)
-        print("Encoder MLP shapes:", self.mlp_shapes)
+        # print("Encoder CNN shapes:", self.cnn_shapes)
+        # print("Encoder MLP shapes:", self.mlp_shapes)
 
         self.outdim = 0
         if self.cnn_shapes:
             input_ch = sum([v[-1] for v in self.cnn_shapes.values()])
             input_shape = tuple(self.cnn_shapes.values())[0][:2] + (input_ch,)
             self._cnn = ConvEncoder(
-                input_shape, cnn_depth, act, norm, kernel_size, minres
+                input_shape, cnn_depth, norm, act, kernel_size, minres
             )
             self.outdim += self._cnn.outdim
         if self.mlp_shapes:
@@ -401,12 +401,14 @@ class MultiEncoder:
     def __call__(self, obs):
         outputs = []
         if self.cnn_shapes:
-            inputs = Tensor.cat([obs[k] for k in self.cnn_shapes], -1)
+            cnn_inputs = [obs[k] for k in self.cnn_shapes]
+            inputs = Tensor.cat(*cnn_inputs, dim=-1)
             outputs.append(self._cnn(inputs))
         if self.mlp_shapes:
-            inputs = Tensor.cat([obs[k] for k in self.mlp_shapes], -1)
+            mlp_inputs = [obs[k] for k in self.mlp_shapes]
+            inputs = Tensor.cat(*mlp_inputs, dim=-1)
             outputs.append(self._mlp(inputs))
-        outputs = Tensor.cat(outputs, -1)
+        outputs = Tensor.cat(*outputs, dim=-1)
         return outputs
 
 
@@ -417,21 +419,25 @@ class MultiDecoder:
         shapes,
         mlp_keys,
         cnn_keys,
-        act,
-        norm,
-        cnn_depth,
-        kernel_size,
-        minres,
-        mlp_layers,
-        mlp_units,
-        cnn_sigmoid,
-        image_dist,
-        vector_dist,
-        outscale,
+        act="elu",
+        norm: bool = True,
+        cnn_depth: int = 32,
+        kernel_size: int = 4,
+        minres: int = 4,
+        mlp_layers: int = 4,
+        mlp_units: int = 256,
+        cnn_sigmoid: bool = False,
+        image_dist: str = "mse",
+        vector_dist: str = "symlog_mse",
+        outscale: float = 1.0,
     ):
         super(MultiDecoder, self).__init__()
         excluded = ("is_first", "is_last", "is_terminal")
-        shapes = {k: v for k, v in shapes.items() if k not in excluded}
+        shapes = {
+            k: (v,) if isinstance(v, int) else v
+            for k, v in shapes.items()
+            if k not in excluded
+        }
         self.cnn_shapes = {
             k: v for k, v in shapes.items() if len(v) == 3 and re.match(cnn_keys, k)
         }
@@ -440,8 +446,8 @@ class MultiDecoder:
             for k, v in shapes.items()
             if len(v) in (1, 2) and re.match(mlp_keys, k)
         }
-        print("Decoder CNN shapes:", self.cnn_shapes)
-        print("Decoder MLP shapes:", self.mlp_shapes)
+        # print("Decoder CNN shapes:", self.cnn_shapes)
+        # print("Decoder MLP shapes:", self.mlp_shapes)
 
         if self.cnn_shapes:
             some_shape = list(self.cnn_shapes.values())[0]
@@ -474,8 +480,7 @@ class MultiDecoder:
     def __call__(self, features):
         dists = {}
         if self.cnn_shapes:
-            feat = features
-            outputs = self._cnn(feat)
+            outputs = self._cnn(features)
             split_sizes = [v[-1] for v in self.cnn_shapes.values()]
             outputs = Tensor.split(outputs, split_sizes, -1)
             dists.update(
@@ -501,20 +506,20 @@ class MultiDecoder:
 class RSSM:
     def __init__(
         self,
+        num_actions,
+        embed,
         stoch=30,
         deter=200,
         hidden=200,
         rec_depth=1,
-        discrete=False,
-        act=Tensor.silu,
+        discrete=30,
+        act="silu",
         norm=True,
-        mean_act=lambda x: x,
-        std_act=Tensor.softplus,
+        mean_act="none",
+        std_act="sigmoid",
         min_std=0.1,
         unimix_ratio=0.01,
         initial="learned",
-        num_actions=None,
-        embed=None,
         device=None,
     ):
         self._stoch = stoch
@@ -530,7 +535,7 @@ class RSSM:
         self._num_actions = num_actions
         self._embed = embed
         self._device = device
-        act = getattr(nn, act) if isinstance(act, str) else act
+        act = utils.get_act(act)
 
         inp_layers = []
         if self._discrete:
@@ -601,7 +606,7 @@ class RSSM:
         if self._initial == "zeros":
             return state
         elif self._initial == "learned":
-            state["deter"] = Tensor.tanh(self.W).repeat(batch_size, 1)
+            state["deter"] = Tensor.tanh(self.W).repeat((batch_size, 1))
             state["stoch"] = self.get_stoch(state["deter"])
             return state
         else:
@@ -622,7 +627,7 @@ class RSSM:
             (state, state),
         )
 
-        # (batch, time, stoch, discrete_num) -> (batch, time, stoch, discrete_num)
+        # (time, batch, stoch, discrete_num) -> (batch, time, stoch, discrete_num)
         post = {k: swap(v) for k, v in post.items()}
         prior = {k: swap(v) for k, v in prior.items()}
         return post, prior
@@ -644,13 +649,14 @@ class RSSM:
         if self._discrete:
             shape = list(stoch.shape[:-2]) + [self._stoch * self._discrete]
             stoch = stoch.reshape(shape)
-        return Tensor.cat([stoch, state["deter"]], -1)
+        return Tensor.cat(stoch, state["deter"], dim=-1)
 
     def get_dist(self, state, dtype=None):
         if self._discrete:
             logit = state["logit"]
             dist = distributions.Independent(
-                distributions.OneHotDist(logit, unimix_ratio=self._unimix_ratio), 1
+                distributions.OneHotCategorical(logit, unimix_ratio=self._unimix_ratio),
+                1,
             )
         else:
             mean, std = state["mean"], state["std"]
@@ -660,17 +666,16 @@ class RSSM:
         return dist
 
     def obs_step(self, prev_state, prev_action, embed, is_first, sample=True):
+        B = is_first.shape[0]
         # initialize all prev_state
-        if prev_state is None or Tensor.sum(is_first) == len(is_first):
-            prev_state = self.initial(len(is_first))
-            prev_action = Tensor.zeros((len(is_first), self._num_actions)).to(
-                self._device
-            )
+        if prev_state is None or Tensor.sum(is_first) == B:
+            prev_state = self.initial(B)
+            prev_action = Tensor.zeros((B, self._num_actions)).to(self._device)
         # overwrite the prev_state only where is_first=True
         elif Tensor.sum(is_first) > 0:
             is_first = is_first[:, None]
             prev_action *= 1.0 - is_first
-            init_state = self.initial(len(is_first))
+            init_state = self.initial(B)
             for key, val in prev_state.items():
                 is_first_r = Tensor.reshape(
                     is_first,
@@ -681,15 +686,15 @@ class RSSM:
                 )
 
         prior = self.img_step(prev_state, prev_action)
-        x = Tensor.cat([prior["deter"], embed], -1)
+        x = Tensor.cat(prior["deter"], embed, dim=-1)
         # (batch_size, prior_deter + embed) -> (batch_size, hidden)
-        x = self._obs_out_layers(x)
+        x = x.sequential(self._obs_out_layers)
         # (batch_size, hidden) -> (batch_size, stoch, discrete_num)
         stats = self._suff_stats_layer("obs", x)
         if sample:
             stoch = self.get_dist(stats).sample()
         else:
-            stoch = self.get_dist(stats).mode()
+            stoch = self.get_dist(stats).mode
         post = {"stoch": stoch, "deter": prior["deter"], **stats}
         return post, prior
 
@@ -701,29 +706,29 @@ class RSSM:
             # (batch, stoch, discrete_num) -> (batch, stoch * discrete_num)
             prev_stoch = prev_stoch.reshape(shape)
         # (batch, stoch * discrete_num) -> (batch, stoch * discrete_num + action)
-        x = Tensor.cat([prev_stoch, prev_action], -1)
+        x = Tensor.cat(prev_stoch, prev_action, dim=-1)
         # (batch, stoch * discrete_num + action, embed) -> (batch, hidden)
-        x = self._img_in_layers(x)
+        x = x.sequential(self._img_in_layers)
         for _ in range(self._rec_depth):  # rec depth is not correctly implemented
             deter = prev_state["deter"]
             # (batch, hidden), (batch, deter) -> (batch, deter), (batch, deter)
             x, deter = self._cell(x, deter)
         # (batch, deter) -> (batch, hidden)
-        x = self._img_out_layers(x)
+        x = x.sequential(self._img_out_layers)
         # (batch, hidden) -> (batch_size, stoch, discrete_num)
         stats = self._suff_stats_layer("ims", x)
         if sample:
             stoch = self.get_dist(stats).sample()
         else:
-            stoch = self.get_dist(stats).mode()
+            stoch = self.get_dist(stats).mode
         prior = {"stoch": stoch, "deter": deter, **stats}
         return prior
 
     def get_stoch(self, deter):
-        x = self._img_out_layers(deter)
+        x = deter.sequential(self._img_out_layers)
         stats = self._suff_stats_layer("ims", x)
         dist = self.get_dist(stats)
-        return dist.mode()
+        return dist.mode
 
     def _suff_stats_layer(self, name, x):
         if self._discrete:
@@ -749,7 +754,7 @@ class RSSM:
 
     def kl_loss(self, post, prior, free, dyn_scale, rep_scale):
         def kld(x, y):
-            return utils.kl_divergence(x, y).mean()
+            return distributions.kl_divergence(x, y).mean(-1)
 
         def dist(x):
             return self.get_dist(x)
@@ -765,9 +770,8 @@ class RSSM:
             dist(sg(post)) if self._discrete else dist(sg(post))._dist,
             dist(prior) if self._discrete else dist(prior)._dist,
         )
-        # this is implemented using maximum at the original repo as the gradients are not backpropagated for the out of limits.
-        rep_loss = Tensor.clip(rep_loss, min=free)
-        dyn_loss = Tensor.clip(dyn_loss, min=free)
+        rep_loss = Tensor.maximum(rep_loss, free)
+        dyn_loss = Tensor.maximum(dyn_loss, free)
         loss = dyn_scale * dyn_loss + rep_scale * rep_loss
 
         return loss, value, dyn_loss, rep_loss

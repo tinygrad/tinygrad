@@ -90,13 +90,154 @@ class TestMLP(unittest.TestCase):
         outputs = mlp(inputs).log_prob(outputs)
         self.assertEqual(outputs.shape, (1, 20))
 
+    def test_mlp_output_dict(self):
+        inputs = Tensor.randn(1, 10)
+        shape = {"state": 20, "action": 20}
+        mlp = networks.MLP(10, shape, layers=2, units=2, dist="normal")
+        outputs = mlp(inputs)
+        self.assertEqual(list(outputs.keys()), ["state", "action"])
+        self.assertEqual(outputs["state"].sample().shape, (1, 20))
+        self.assertEqual(outputs["action"].sample().shape, (1, 20))
+
 
 class TestMulti(unittest.TestCase):
-    pass
+    def test_multi_encoder(self):
+        cnn_keys = "state"
+        mlp_keys = "action"
+        shapes = {"state": (64, 64, 3), "action": 10}
+        mlp = networks.MultiEncoder(shapes, mlp_keys, cnn_keys)
+        obs = {"state": Tensor.randn(1, 1, 64, 64, 3), "action": Tensor.randn(1, 1, 10)}
+        outputs = mlp(obs)
+        self.assertEqual(outputs.shape, (1, 1, mlp.outdim))
+
+    def test_multi_decoder(self):
+        cnn_keys = "state"
+        mlp_keys = "action"
+        shapes = {"state": (64, 64, 3), "action": 256}
+        mlp = networks.MultiDecoder(
+            4352, shapes, mlp_keys, cnn_keys, image_dist="normal", vector_dist="normal"
+        )
+        inputs = Tensor.randn(1, 1, 4352)
+        outputs = mlp(inputs)
+        self.assertEqual(outputs["state"].sample().shape, (1, 1, 64, 64, 3))
+        self.assertEqual(outputs["action"].sample().shape, (1, 1, 256))
+
+    def test_multi_encoder_decoder(self):
+        cnn_keys = "state"
+        mlp_keys = "action"
+        shapes = {"state": (64, 64, 3), "action": 10}
+        encoder = networks.MultiEncoder(shapes, mlp_keys, cnn_keys)
+        decoder = networks.MultiDecoder(
+            encoder.outdim,
+            shapes,
+            mlp_keys,
+            cnn_keys,
+            image_dist="normal",
+            vector_dist="normal",
+        )
+        obs = {"state": Tensor.randn(1, 1, 64, 64, 3), "action": Tensor.randn(1, 1, 10)}
+        outputs = decoder(encoder(obs))
+        self.assertEqual(outputs["state"].sample().shape, (1, 1, 64, 64, 3))
+        self.assertEqual(outputs["action"].sample().shape, (1, 1, 10))
+
+    def test_multi_encoder_decoder_B_T(self):
+        B = 2
+        T = 4
+        cnn_keys = "state"
+        mlp_keys = "action"
+        shapes = {"state": (64, 64, 3), "action": 10}
+        encoder = networks.MultiEncoder(shapes, mlp_keys, cnn_keys)
+        decoder = networks.MultiDecoder(
+            encoder.outdim,
+            shapes,
+            mlp_keys,
+            cnn_keys,
+            image_dist="normal",
+            vector_dist="normal",
+        )
+        obs = {"state": Tensor.randn(B, T, 64, 64, 3), "action": Tensor.randn(B, T, 10)}
+        outputs = decoder(encoder(obs))
+        self.assertEqual(outputs["state"].sample().shape, (B, T, 64, 64, 3))
+        self.assertEqual(outputs["action"].sample().shape, (B, T, 10))
 
 
 class TestRSSM(unittest.TestCase):
-    pass
+    def test_rssm_initial(self):
+        B = 2
+        rssm = networks.RSSM(num_actions=10, embed=20)
+        state = rssm.initial(B)
+        self.assertEqual(state["stoch"].shape, (B, 30, 30))
+        self.assertEqual(state["deter"].shape, (B, 200))
+        feat = rssm.get_feat(state)
+        self.assertEqual(feat.shape, (B, 1100))
+
+    def test_rssm_img_step(self):
+        B = 2
+        rssm = networks.RSSM(num_actions=10, embed=20)
+        prev_state = rssm.initial(B)
+        prev_action = Tensor.randn(B, 10)
+        prior = rssm.img_step(prev_state, prev_action)
+        self.assertEqual(prior["stoch"].shape, (B, 30, 30))
+        self.assertEqual(prior["deter"].shape, (B, 200))
+        prior = rssm.img_step(prior, prev_action)
+        self.assertEqual(prior["stoch"].shape, (B, 30, 30))
+        self.assertEqual(prior["deter"].shape, (B, 200))
+
+    def test_rssm_obs_step(self):
+        B = 2
+        rssm = networks.RSSM(num_actions=10, embed=20)
+        is_first = Tensor.ones(B)
+        embed = Tensor.randn(B, 20)
+        post, prior = rssm.obs_step(None, None, embed, is_first)
+        self.assertEqual(post["stoch"].shape, (B, 30, 30))
+        self.assertEqual(post["deter"].shape, (B, 200))
+        is_first = Tensor([0, 1])
+        prev_action = Tensor.randn(B, 10)
+        post, _ = rssm.obs_step(post, prev_action, embed, is_first)
+        self.assertEqual(post["stoch"].shape, (B, 30, 30))
+        self.assertEqual(post["deter"].shape, (B, 200))
+        is_first = Tensor.zeros(B)
+        post, _ = rssm.obs_step(post, prev_action, embed, is_first)
+        self.assertEqual(post["stoch"].shape, (B, 30, 30))
+        self.assertEqual(post["deter"].shape, (B, 200))
+
+    def test_rssm_imagine_with_action(self):
+        B = 2
+        rssm = networks.RSSM(num_actions=10, embed=20)
+        state = rssm.initial(B)
+        action = Tensor.randn(B, 1, 10)
+        prior = rssm.imagine_with_action(action, state)
+        self.assertEqual(prior["stoch"].shape, (B, 1, 30, 30))
+        self.assertEqual(prior["deter"].shape, (B, 1, 200))
+
+    def test_rssm_observe(self):
+        B = 2
+        T = 4
+        rssm = networks.RSSM(num_actions=10, embed=20)
+        embed = Tensor.randn(B, T, 20)
+        action = Tensor.randn(B, T, 10)
+        is_first = Tensor.ones(B, T)
+        post, prior = rssm.observe(embed, action, is_first)
+        self.assertEqual(post["stoch"].shape, (B, T, 30, 30))
+        self.assertEqual(post["deter"].shape, (B, T, 200))
+        is_first = Tensor.zeros(B, T)
+        post, prior = rssm.observe(embed, action, is_first, post)
+        self.assertEqual(post["stoch"].shape, (B, T, 30, 30))
+        self.assertEqual(post["deter"].shape, (B, T, 200))
+
+    def test_rssm_kl_loss(self):
+        B = 4
+        T = 2
+        rssm = networks.RSSM(num_actions=10, embed=20)
+        embed = Tensor.randn(B, T, 20)
+        action = Tensor.randn(B, T, 10)
+        is_first = Tensor.ones(B, T)
+        post, prior = rssm.observe(embed, action, is_first)
+        loss, value, dyn_loss, rep_loss = rssm.kl_loss(post, prior, 1.0, 0.5, 0.1)
+        self.assertEqual(loss.shape, (B, T))
+        self.assertEqual(value.shape, (B, T))
+        self.assertEqual(dyn_loss.shape, (B, T))
+        self.assertEqual(rep_loss.shape, (B, T))
 
 
 if __name__ == "__main__":

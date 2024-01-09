@@ -32,7 +32,7 @@ def static_scan_for_lambda_return(fn, inputs, start):
             outputs = last
             flag = False
         else:
-            outputs = Tensor.cat([outputs, last], dim=-1)
+            outputs = Tensor.cat(outputs, last, dim=-1)
     outputs = Tensor.reshape(outputs, [outputs.shape[0], outputs.shape[1], 1])
     outputs = Tensor.flip(outputs, [1])
     outputs = outputs[:]
@@ -54,7 +54,7 @@ def lambda_return(reward, value, pcont, bootstrap, lambda_, axis):
         pcont = pcont.permute(dims)
     if bootstrap is None:
         bootstrap = Tensor.zeros_like(value[-1])
-    next_values = Tensor.cat([value[1:], bootstrap[None]], 0)
+    next_values = Tensor.cat(value[1:], bootstrap[None], dim=0)
     inputs = reward + pcont * next_values * (1 - lambda_)
     # returns = static_scan(
     #    lambda agg, cur0, cur1: cur0 + cur1 * lambda_ * agg,
@@ -100,39 +100,32 @@ def static_scan(fn, inputs, start):
         last = fn(last, *inp(index))
         if flag:
             if type(last) == type({}):
-                outputs = {
-                    key: value.clone().unsqueeze(0) for key, value in last.items()
-                }
+                outputs = {key: value.unsqueeze(0) for key, value in last.items()}
             else:
                 outputs = []
                 for _last in last:
                     if type(_last) == type({}):
                         outputs.append(
-                            {
-                                key: value.clone().unsqueeze(0)
-                                for key, value in _last.items()
-                            }
+                            {key: value.unsqueeze(0) for key, value in _last.items()}
                         )
                     else:
-                        outputs.append(_last.clone().unsqueeze(0))
+                        outputs.append(_last.unsqueeze(0))
             flag = False
         else:
             if type(last) == type({}):
                 for key in last.keys():
                     outputs[key] = Tensor.cat(
-                        [outputs[key], last[key].unsqueeze(0)], dim=0
+                        outputs[key], last[key].unsqueeze(0), dim=0
                     )
             else:
                 for j in range(len(outputs)):
                     if type(last[j]) == type({}):
                         for key in last[j].keys():
                             outputs[j][key] = Tensor.cat(
-                                [outputs[j][key], last[j][key].unsqueeze(0)], dim=0
+                                outputs[j][key], last[j][key].unsqueeze(0), dim=0
                             )
                     else:
-                        outputs[j] = Tensor.cat(
-                            [outputs[j], last[j].unsqueeze(0)], dim=0
-                        )
+                        outputs[j] = Tensor.cat(outputs[j], last[j].unsqueeze(0), dim=0)
     if type(last) == type({}):
         outputs = [outputs]
     return outputs
@@ -220,9 +213,18 @@ def numel(shape):
     return int(np.prod(shape)) if shape else 1
 
 
-def kl_divergence(dist1, dist2):
-    raise NotImplementedError
-
-
 def quantile(input, q):
     raise NotImplementedError
+
+
+def get_act(act):
+    if isinstance(act, str):
+        if act == "none":
+            return lambda x: x
+        else:
+            act = getattr(Tensor, act)
+    return act
+
+
+class Optimizer:
+    pass

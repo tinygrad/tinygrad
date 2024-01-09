@@ -107,8 +107,7 @@ class OneHotCategorical(Categorical):
         sample = one_hot(indices, num_events)
         while len(probs.shape) < len(sample.shape):
             probs = probs[None]
-        sample += probs - probs.detach()
-        return sample
+        return sample.detach() + probs - probs.detach()
 
     def log_prob(self, value):
         indices = value.max(-1)[1]
@@ -232,32 +231,31 @@ class SymlogDist:
 
 
 class ContDist:
-    def __init__(self, dist: Distribution, absmax: int):
+    def __init__(self, dist: Distribution, absmax: int = None):
         self._dist = dist
-        self.mean = dist.mean
         self.absmax = absmax
 
-    def __getattr__(self, name):
-        return getattr(self._dist, name)
+    @property
+    def mean(self):
+        out = self._dist.mean
+        if self.absmax is not None:
+            out = Tensor.clip(out, -self.absmax, self.absmax).detach()
+        return out
+
+    @property
+    def mode(self):
+        out = self._dist.mode
+        if self.absmax is not None:
+            out = Tensor.clip(out, -self.absmax, self.absmax).detach()
+        return out
 
     def entropy(self):
         return self._dist.entropy()
 
-    @property
-    def mode(self):
-        out = self._dist.mean
-        if self.absmax is not None:
-            out *= (
-                self.absmax / Tensor.clip(Tensor.abs(out), min=self.absmax)
-            ).detach()
-        return out
-
     def sample(self, sample_shape=()):
         out = self._dist.sample(sample_shape)
         if self.absmax is not None:
-            out *= (
-                self.absmax / Tensor.clip(Tensor.abs(out), min=self.absmax)
-            ).detach()
+            out = Tensor.clip(out, -self.absmax, self.absmax).detach()
         return out
 
     def log_prob(self, x):
@@ -404,3 +402,26 @@ class Uniform(Distribution):
         lb = (self.low <= value).cast(self.low.dtype)
         ub = (self.high >= value).cast(self.low.dtype)
         return Tensor.log(lb.mul(ub)) - Tensor.log(self.high - self.low)
+
+
+def _unwrap_dist(dist):
+    if isinstance(dist, (Independent, SampleDist, ContDist)):
+        return _unwrap_dist(dist._dist)
+    else:
+        return dist
+
+
+def kl_divergence(dist1, dist2):
+    dist1 = _unwrap_dist(dist1)
+    dist2 = _unwrap_dist(dist2)
+    if isinstance(dist1, Categorical) and isinstance(dist2, Categorical):
+        return _kl_categorical_categorical(dist1, dist2)
+    else:
+        raise NotImplementedError
+
+
+def _kl_categorical_categorical(p, q):
+    t = p.probs * (p.logits - q.logits)
+    t = Tensor.where(p.probs > 0, t, Tensor.zeros_like(t))
+    t = Tensor.where(q.probs > 0, t, Tensor.full(t.shape, float("inf")))
+    return t.sum(-1)

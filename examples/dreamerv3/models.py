@@ -145,20 +145,20 @@ class WorldModel:
                 model_loss = sum(scaled.values()) + kl_loss
             metrics = self._model_opt(Tensor.mean(model_loss), self.parameters())
 
-        metrics.update({f"{name}_loss": to_np(loss) for name, loss in losses.items()})
+        metrics.update({f"{name}_loss": loss.numpy() for name, loss in losses.items()})
         metrics["kl_free"] = kl_free
         metrics["dyn_scale"] = dyn_scale
         metrics["rep_scale"] = rep_scale
-        metrics["dyn_loss"] = to_np(dyn_loss)
-        metrics["rep_loss"] = to_np(rep_loss)
-        metrics["kl"] = to_np(Tensor.mean(kl_value))
+        metrics["dyn_loss"] = dyn_loss.numpy()
+        metrics["rep_loss"] = rep_loss.numpy()
+        metrics["kl"] = kl_value.numpy()
         with Tensor.cuda.amp.autocast(self._use_amp):
-            metrics["prior_ent"] = to_np(
-                Tensor.mean(self.dynamics.get_dist(prior).entropy())
-            )
-            metrics["post_ent"] = to_np(
-                Tensor.mean(self.dynamics.get_dist(post).entropy())
-            )
+            metrics["prior_ent"] = Tensor.mean(
+                self.dynamics.get_dist(prior).entropy()
+            ).numpy()
+            metrics["post_ent"] = Tensor.mean(
+                self.dynamics.get_dist(post).entropy()
+            ).numpy()
             context = dict(
                 embed=embed,
                 feat=self.dynamics.get_feat(post),
@@ -176,9 +176,9 @@ class WorldModel:
             obs["discount"] *= self._config.discount
             # (batch_size, batch_length) -> (batch_size, batch_length, 1)
             obs["discount"] = Tensor.Tensor(obs["discount"]).unsqueeze(-1)
-        # 'is_first' is necesarry to initialize hidden state at training
+        # 'is_first' is necessary to initialize hidden state at training
         assert "is_first" in obs
-        # 'is_terminal' is necesarry to train cont_head
+        # 'is_terminal' is necessary to train cont_head
         assert "is_terminal" in obs
         obs["cont"] = Tensor.Tensor(1.0 - obs["is_terminal"]).unsqueeze(-1)
         obs = {k: Tensor.Tensor(v).to(self._config.device) for k, v in obs.items()}
@@ -333,7 +333,7 @@ class ImagBehavior(nn.Module):
             )
         else:
             metrics.update(utils.tensorstats(imag_action, "imag_action"))
-        metrics["actor_entropy"] = to_np(Tensor.mean(actor_ent))
+        metrics["actor_entropy"] = Tensor.mean(actor_ent).numpy()
         with utils.RequiresGrad(self):
             metrics.update(self._actor_opt(actor_loss, self.actor.parameters()))
             metrics.update(self._value_opt(value_loss, self.value.parameters()))
@@ -401,8 +401,8 @@ class ImagBehavior(nn.Module):
             normed_base = (base - offset) / scale
             adv = normed_target - normed_base
             metrics.update(utils.tensorstats(normed_target, "normed_target"))
-            metrics["EMA_005"] = to_np(self.ema_vals[0])
-            metrics["EMA_095"] = to_np(self.ema_vals[1])
+            metrics["EMA_005"] = self.ema_vals[0].numpy()
+            metrics["EMA_095"] = self.ema_vals[1].numpy()
 
         if self._config.imag_gradient == "dynamics":
             actor_target = adv
