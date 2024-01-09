@@ -36,6 +36,7 @@ class LazyBuffer:
                base:Optional[LazyBuffer]=None, cache_key=None):
     assert isinstance(device, str) and device == Device.canonicalize(device)
     self.device, self.st, self.dtype, self.shape, self.size, self.cache_key = device, st, dtype, st.shape, st.size, cache_key
+    self._base: Optional[LazyBuffer] = None
     if base is None:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
@@ -55,7 +56,7 @@ class LazyBuffer:
 
   # NOTE: this has to be a function to prevent self reference
   @property
-  def base(self) -> LazyBuffer: return self._base if hasattr(self, '_base') else self
+  def base(self) -> LazyBuffer: return self._base if self._base else self
 
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None) -> LazyBuffer:
