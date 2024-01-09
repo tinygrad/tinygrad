@@ -111,24 +111,6 @@ dmc_vision:
   encoder: {mlp_keys: '$^', cnn_keys: 'image'}
   decoder: {mlp_keys: '$^', cnn_keys: 'image'}
 
-crafter:
-  task: crafter_reward
-  step: 1e6
-  action_repeat: 1
-  envs: 1
-  train_ratio: 512
-  video_pred_log: true
-  dyn_hidden: 1024
-  dyn_deter: 4096
-  units: 1024
-  encoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 96, mlp_layers: 5, mlp_units: 1024}
-  decoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 96, mlp_layers: 5, mlp_units: 1024}
-  actor: {layers: 5, dist: 'onehot'}
-  value: {layers: 5}
-  reward_head: {layers: 5}
-  cont_head: {layers: 5}
-  imag_gradient: 'reinforce'
-
 atari100k:
   steps: 4e5
   envs: 1
@@ -144,37 +126,6 @@ atari100k:
   resize: opencv
   actions: needed
   time_limit: 108000
-
-minecraft:
-  task: minecraft_diamond
-  step: 1e8
-  parallel: True
-  envs: 16
-  # no eval
-  eval_episode_num: 0
-  eval_every: 1e4
-  action_repeat: 1
-  train_ratio: 16
-  video_pred_log: true
-  dyn_hidden: 1024
-  dyn_deter: 4096
-  units: 1024
-  encoder: {mlp_keys: 'inventory|inventory_max|equipped|health|hunger|breath|obs_reward', cnn_keys: 'image', cnn_depth: 96, mlp_layers: 5, mlp_units: 1024}
-  decoder: {mlp_keys: 'inventory|inventory_max|equipped|health|hunger|breath', cnn_keys: 'image', cnn_depth: 96, mlp_layers: 5, mlp_units: 1024}
-  actor: {layers: 5, dist: 'onehot'}
-  value: {layers: 5}
-  reward_head: {layers: 5}
-  cont_head: {layers: 5}
-  imag_gradient: 'reinforce'
-  break_speed: 100.0
-  time_limit: 36000
-
-memorymaze:
-  steps: 1e8
-  action_repeat: 2
-  actor: {dist: 'onehot'}
-  imag_gradient: 'reinforce'
-  task: 'memorymaze_9x9'
 
 debug:
   debug: True

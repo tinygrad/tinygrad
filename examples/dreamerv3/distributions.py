@@ -1,12 +1,19 @@
-from pytest import param
-from tinygrad import Tensor, dtypes
+from utils import _sum_rightmost, numel, one_hot, symexp, symlog
 
-from utils import one_hot, symexp, symlog
+from tinygrad import Tensor, dtypes
 
 
 class Distribution:
     def __init__(self):
         pass
+
+    @property
+    def mean(self):
+        raise NotImplementedError
+
+    @property
+    def mode(self):
+        raise NotImplementedError
 
     def sample(self, sample_shape=()):
         raise NotImplementedError
@@ -17,23 +24,16 @@ class Distribution:
     def entropy(self):
         raise NotImplementedError
 
-    @property
-    def mean(self):
-        raise NotImplementedError
-
-    @property
-    def mode(self):
-        raise NotImplementedError
-
 
 class SampleDist(Distribution):
     def __init__(self, dist: Distribution, samples=100):
         self._dist = dist
         self._samples = samples
 
+    @property
     def mean(self):
         samples = self._dist.sample(self._samples)
-        return Tensor.mean(samples, 0)
+        return samples.mean()
 
     @property
     def mode(self):
@@ -46,6 +46,12 @@ class SampleDist(Distribution):
         logprob = self.log_prob(sample)
         return -Tensor.mean(logprob, 0)
 
+    def log_prob(self, value):
+        return self._dist.log_prob(value)
+
+    def sample(self, sample_shape=()):
+        return self._dist.sample(sample_shape)
+
 
 class Categorical(Distribution):
     def __init__(self, probs=None, logits=None):
@@ -54,50 +60,59 @@ class Categorical(Distribution):
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            if probs.dim() < 1:
+            if len(probs.shape) < 1:
                 raise ValueError("`probs` parameter must be at least one-dimensional.")
             self.probs = probs / probs.sum(-1, keepdim=True)
             self.logits = Tensor.log(probs)
         else:
-            if logits.dim() < 1:
+            if len(logits.shape) < 1:
                 raise ValueError("`logits` parameter must be at least one-dimensional.")
             # Normalize
-            self.logits = logits - logits.logsumexp(dim=-1, keepdim=True)
+            self.logits = logits - logits.exp().sum(-1, keepdim=True).log()
             self.probs = Tensor.softmax(self.logits, -1)
         self._param = self.probs if probs is not None else self.logits
-        self._num_events = self._param.size()[-1]
+        self._num_events = self._param.shape[-1]
+        self._batch_shape = self._param.shape[:-1] if len(self._param.shape) > 1 else ()
 
-    def sample(self, sample_shape):
+    @property
+    def mode(self):
+        return self.probs.argmax(axis=-1)
+
+    def sample(self, sample_shape=()):
         probs_2d = self.probs.reshape(-1, self._num_events)
-        samples_2d = Tensor.multinomial(probs_2d, sample_shape.numel(), True).T
-        return samples_2d.reshape(self._extended_shape(sample_shape))
+        samples_2d = Tensor.multinomial(probs_2d, numel(sample_shape), True).T
+        output_shape = sample_shape + self._batch_shape
+        output_shape = output_shape if len(output_shape) > 0 else (1,)
+        return samples_2d.reshape(output_shape)
 
 
-class OneHotDist(Categorical):
+class OneHotCategorical(Categorical):
     def __init__(self, logits=None, probs=None, unimix_ratio=0.0):
         if logits is not None and unimix_ratio > 0.0:
-            probs = Tensor.softmax(logits, dim=-1)
+            probs = Tensor.softmax(logits, -1)
             probs = probs * (1.0 - unimix_ratio) + unimix_ratio / probs.shape[-1]
             logits = Tensor.log(probs)
-            super().__init__(logits=logits, probs=None)
-        else:
-            super().__init__(logits=logits, probs=probs)
+            probs = None
+        super().__init__(logits=logits, probs=probs)
 
+    @property
     def mode(self):
-        _mode = one_hot(
-            Tensor.argmax(super().logits, axis=-1), super().logits.shape[-1]
-        )
-        return _mode.detach() + super().logits - super().logits.detach()
+        _mode = one_hot(Tensor.argmax(self.logits, axis=-1), self.logits.shape[-1])
+        return _mode.detach() + self.logits - self.logits.detach()
 
-    def sample(self, sample_shape=(), seed=None):
-        if seed is not None:
-            raise ValueError("need to check")
-        sample = super().sample(sample_shape)
-        probs = super().probs
+    def sample(self, sample_shape=()):
+        probs = self.probs
+        num_events = self._num_events
+        indices = super().sample(sample_shape)
+        sample = one_hot(indices, num_events)
         while len(probs.shape) < len(sample.shape):
             probs = probs[None]
         sample += probs - probs.detach()
         return sample
+
+    def log_prob(self, value):
+        indices = value.max(-1)[1]
+        return super().log_prob(indices)
 
 
 class DiscDist:
@@ -114,13 +129,16 @@ class DiscDist:
         self.probs = Tensor.softmax(logits, -1)
         self.width = (high - low) / 255
         self.buckets = Tensor.arange(low, high, self.width).to(device)
+        self.num_buckets = self.buckets.shape[0]
         self.transfwd = transfwd
         self.transbwd = transbwd
 
+    @property
     def mean(self):
         _mean = self.probs * self.buckets
         return self.transbwd(Tensor.sum(_mean, dim=-1, keepdim=True))
 
+    @property
     def mode(self):
         _mode = self.probs * self.buckets
         return self.transbwd(Tensor.sum(_mode, dim=-1, keepdim=True))
@@ -129,13 +147,15 @@ class DiscDist:
     def log_prob(self, x):
         x = self.transfwd(x)
         # x(time, batch, 1)
-        below = Tensor.sum((self.buckets <= x[..., None]).to(dtypes.int32), dim=-1) - 1
-        above = len(self.buckets) - Tensor.sum(
-            (self.buckets > x[..., None]).to(dtypes.int32), dim=-1
+        below = (
+            Tensor.sum((self.buckets <= x[..., None]).cast(dtypes.int32), axis=-1) - 1
+        )
+        above = self.num_buckets - Tensor.sum(
+            (self.buckets > x[..., None]).cast(dtypes.int32), axis=-1
         )
         # this is implemented using clip at the original repo as the gradients are not backpropagated for the out of limits.
-        below = Tensor.clip(below, 0, len(self.buckets) - 1)
-        above = Tensor.clip(above, 0, len(self.buckets) - 1)
+        below = Tensor.clip(below, 0, self.num_buckets - 1)
+        above = Tensor.clip(above, 0, self.num_buckets - 1)
         equal = below == above
 
         dist_to_below = Tensor.where(equal, 1, Tensor.abs(self.buckets[below] - x))
@@ -144,13 +164,12 @@ class DiscDist:
         weight_below = dist_to_above / total
         weight_above = dist_to_below / total
         target = (
-            one_hot(below, num_classes=len(self.buckets)) * weight_below[..., None]
-            + one_hot(above, num_classes=len(self.buckets)) * weight_above[..., None]
+            one_hot(below, num_classes=self.num_buckets) * weight_below[..., None]
+            + one_hot(above, num_classes=self.num_buckets) * weight_above[..., None]
         )
         log_pred = self.logits - self.logits.exp().sum(-1, keepdim=True).log()
-        target = target.squeeze(-2)
 
-        return (target * log_pred).sum(-1)
+        return (target * log_pred.unsqueeze(-1)).sum(-1)
 
 
 class MSEDist:
@@ -158,9 +177,11 @@ class MSEDist:
         self._mode = mode
         self._agg = agg
 
+    @property
     def mode(self):
         return self._mode
 
+    @property
     def mean(self):
         return self._mode
 
@@ -183,9 +204,11 @@ class SymlogDist:
         self._agg = agg
         self._tol = tol
 
+    @property
     def mode(self):
         return symexp(self._mode)
 
+    @property
     def mean(self):
         return symexp(self._mode)
 
@@ -209,7 +232,7 @@ class SymlogDist:
 
 
 class ContDist:
-    def __init__(self, dist=None, absmax=None):
+    def __init__(self, dist: Distribution, absmax: int):
         self._dist = dist
         self.mean = dist.mean
         self.absmax = absmax
@@ -220,6 +243,7 @@ class ContDist:
     def entropy(self):
         return self._dist.entropy()
 
+    @property
     def mode(self):
         out = self._dist.mean
         if self.absmax is not None:
@@ -229,7 +253,7 @@ class ContDist:
         return out
 
     def sample(self, sample_shape=()):
-        out = self._dist.rsample(sample_shape)
+        out = self._dist.sample(sample_shape)
         if self.absmax is not None:
             out *= (
                 self.absmax / Tensor.clip(Tensor.abs(out), min=self.absmax)
@@ -240,53 +264,77 @@ class ContDist:
         return self._dist.log_prob(x)
 
 
-class Bernoulli:
-    def __init__(self, dist=None):
-        super().__init__()
-        self._dist = dist
-        self.mean = dist.mean
+class Bernoulli(Distribution):
+    def __init__(self, probs=None, logits=None):
+        if (probs is None) == (logits is None):
+            raise ValueError(
+                "Either `probs` or `logits` must be specified, but not both."
+            )
+        if probs is not None:
+            if not isinstance(probs, Tensor):
+                probs = Tensor(probs)
+            self.probs = probs
+            probs = probs.clip(min=1e-7, max=1.0 - 1e-7)
+            self.logits = Tensor.log(probs) - Tensor.log(-probs)
+        else:
+            if not isinstance(logits, Tensor):
+                logits = Tensor(logits)
+            # Normalize
+            self.logits = logits
+            self.probs = Tensor.sigmoid(self.logits)
+        self._param = self.probs if probs is not None else self.logits
+        self._batch_shape = self._param.shape
 
-    def __getattr__(self, name):
-        return getattr(self._dist, name)
+    @property
+    def mean(self):
+        return self.probs
+
+    @property
+    def mode(self):
+        _mode = Tensor.trunc(self.mean)
+        return _mode.detach() + self.mean - self.mean.detach()
 
     def entropy(self):
-        return self._dist.entropy()
-
-    def mode(self):
-        _mode = Tensor.round(self._dist.mean)
-        return _mode.detach() + self._dist.mean - self._dist.mean.detach()
+        return self.log_prob(self.probs)
 
     def sample(self, sample_shape=()):
-        return self._dist.rsample(sample_shape)
+        output_shape = sample_shape + self._batch_shape
+        output_shape = output_shape if len(output_shape) > 0 else (1,)
+        eps = Tensor.rand(output_shape)
+        return (eps < self.probs).float()
 
     def log_prob(self, x):
-        _logits = self._dist.base_dist.logits
-        log_probs0 = -Tensor.softplus(_logits)
-        log_probs1 = -Tensor.softplus(-_logits)
+        log_probs0 = -Tensor.softplus(self.logits)
+        log_probs1 = -Tensor.softplus(-self.logits)
 
-        return Tensor.sum(log_probs0 * (1 - x) + log_probs1 * x, -1)
+        return (log_probs0 * (1 - x) + log_probs1 * x).unsqueeze(-1)
 
 
 class Normal(Distribution):
     def __init__(self, loc, scale, threshold=1):
-        self.mean = loc
+        self._loc = loc
         self._scale = scale
         self._threshold = threshold
 
+    @property
+    def mean(self):
+        return self._loc
 
-class UnnormalizedHuber(Normal):
-    def __init__(self, loc, scale, threshold=1, **kwargs):
-        super().__init__(loc, scale, **kwargs)
-        self._threshold = threshold
+    @property
+    def mode(self):
+        return self._loc
+
+    def entropy(self):
+        return 0.5 * self._scale.log()
+
+    def sample(self, sample_shape=()):
+        return self._loc + self._scale * Tensor.randn(sample_shape)
 
     def log_prob(self, event):
         return -(
-            Tensor.sqrt((event - self.mean) ** 2 + self._threshold**2)
+            Tensor.sqrt((event - self._loc) ** 2 + self._threshold**2)
             - self._threshold
         )
-
-    def mode(self):
-        return self.mean
 
 
 class SafeTruncatedNormal(Normal):
@@ -309,32 +357,50 @@ class SafeTruncatedNormal(Normal):
         return event
 
 
-class TanhBijector:
-    def __init__(self, dist: Distribution):
-        self._dist = dist
-
-    def _forward(self, x):
-        return Tensor.tanh(x)
-
-    def _inverse(self, y):
-        y = Tensor.where(
-            (Tensor.abs(y) <= 1.0), Tensor.clip(y, -0.99999997, 0.99999997), y
-        )
-        y = Tensor.atanh(y)
-        return y
-
-    def _forward_log_det_jacobian(self, x):
-        log2 = Tensor.log(2.0)
-        return 2.0 * (log2 - x - Tensor.softplus(-2.0 * x))
-
-
 class Independent(Distribution):
     def __init__(self, dist, reinterpreted_batch_ndims):
         self._dist = dist
         self._reinterpreted_batch_ndims = reinterpreted_batch_ndims
 
+    @property
+    def mean(self):
+        return self._dist.mean
+
+    @property
+    def mode(self):
+        return self._dist.mode
+
     def sample(self, sample_shape=()):
         return self._dist.sample(sample_shape)
 
+    def log_prob(self, event):
+        log_prob = self._dist.log_prob(event)
+        return _sum_rightmost(log_prob, self._reinterpreted_batch_ndims)
+
+    def entropy(self):
+        entropy = self._dist.entropy()
+        return _sum_rightmost(entropy, self._reinterpreted_batch_ndims)
+
+
+class Uniform(Distribution):
+    def __init__(self, low, high):
+        self._low = low
+        self._high = high
+        self._batch_shape = self._low.shape if isinstance(low, Tensor) else ()
+
+    @property
+    def mean(self):
+        return (self._low + self._high) / 2.0
+
+    def entropy(self):
+        return Tensor.log(self._high - self._low)
+
+    def sample(self, sample_shape=()):
+        output_shape = sample_shape + self._batch_shape
+        output_shape = output_shape if len(output_shape) > 0 else (1,)
+        return self._low + (self._high - self._low) * Tensor.rand(output_shape)
+
     def log_prob(self, value):
-        return self._dist.log_prob(value)
+        lb = (self.low <= value).cast(self.low.dtype)
+        ub = (self.high >= value).cast(self.low.dtype)
+        return Tensor.log(lb.mul(ub)) - Tensor.log(self.high - self.low)

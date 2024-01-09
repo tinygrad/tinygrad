@@ -1,21 +1,18 @@
 import math
 import re
-from typing import List
-
-import numpy as np
-from tinygrad import Tensor, nn
 
 import distributions
+import numpy as np
 import utils
+
+from tinygrad import Tensor, nn
 
 
 class GRUCell:
-    def __init__(self, inp_size, size, norm=True, act=Tensor.tanh, update_bias=-1):
+    def __init__(self, inp_size, size, norm=True):
         super(GRUCell, self).__init__()
         self._inp_size = inp_size
         self._size = size
-        self._act = act
-        self._update_bias = update_bias
         self.layers = [nn.Linear(inp_size + size, 3 * size, bias=False)]
         if norm:
             self.layers.append(nn.LayerNorm(3 * size, eps=1e-03))
@@ -24,15 +21,14 @@ class GRUCell:
     def state_size(self):
         return self._size
 
-    def __call__(self, inputs: Tensor, state: List[Tensor]):
-        state = state[0]
-        parts = Tensor.cat([inputs, state], -1).sequential(self.layers)
+    def __call__(self, inputs: Tensor, state: Tensor):
+        parts = Tensor.cat(inputs, state, dim=-1).sequential(self.layers)
         reset, cand, update = Tensor.split(parts, [self._size] * 3, -1)
         reset = Tensor.sigmoid(reset)
-        cand = self._act(reset * cand)
-        update = Tensor.sigmoid(update + self._update_bias)
+        cand = Tensor.tanh(reset * cand)
+        update = Tensor.sigmoid(update - 1)
         output = update * cand + (1 - update) * state
-        return output, [output]
+        return output, output
 
 
 class Conv2dSamePad(nn.Conv2d):
@@ -40,29 +36,30 @@ class Conv2dSamePad(nn.Conv2d):
         return max((math.ceil(i / s) - 1) * s + (k - 1) * d + 1 - i, 0)
 
     def __call__(self, x):
-        ih, iw = x.size()[-2:]
+        ih, iw = x.shape[-2:]
         pad_h = self.calc_same_pad(
-            i=ih, k=self.kernel_size[0], s=self.stride[0], d=self.dilation[0]
+            i=ih, k=self.kernel_size[0], s=self.stride, d=self.dilation
         )
         pad_w = self.calc_same_pad(
-            i=iw, k=self.kernel_size[1], s=self.stride[1], d=self.dilation[1]
+            i=iw, k=self.kernel_size[1], s=self.stride, d=self.dilation
         )
 
         if pad_h > 0 or pad_w > 0:
-            x = Tensor.pad(
-                x, [pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2]
-            )
+            wleft = pad_w // 2
+            wright = pad_w - wleft
+            hleft = pad_h // 2
+            hright = pad_h - hleft
+            padding_values = ((0, 0), (0, 0), (wleft, wright), (hleft, hright))
+            x = Tensor.pad(x, padding_values)
 
-        ret = Tensor.conv2d(
-            x,
+        return x.conv2d(
             self.weight,
             self.bias,
-            self.groups,
-            self.stride,
-            self.padding,
-            self.dilation,
+            padding=self.padding,
+            stride=self.stride,
+            dilation=self.dilation,
+            groups=self.groups,
         )
-        return ret
 
 
 class ConvEncoder:
@@ -79,6 +76,8 @@ class ConvEncoder:
         stages = int(np.log2(h) - np.log2(minres))
         in_dim = input_ch
         out_dim = depth
+        act = getattr(nn, act) if isinstance(act, str) else act
+
         layers = []
         for _ in range(stages):
             layers.append(
@@ -87,13 +86,13 @@ class ConvEncoder:
                     out_channels=out_dim,
                     kernel_size=kernel_size,
                     stride=2,
-                    bias=False,
+                    bias=True,
                 )
             )
             if norm:
                 layers.append(ImgChLayerNorm(out_dim))
             if act:
-                layers.append(lambda x: act(x))
+                layers.append(act)
             in_dim = out_dim
             out_dim *= 2
             h, w = h // 2, w // 2
@@ -110,9 +109,9 @@ class ConvEncoder:
         x = x.permute(0, 3, 1, 2)
         x = x.sequential(self.layers)
         # (batch * time, ...) -> (batch * time, -1)
-        x = x.reshape([x.shape[0], np.prod(x.shape[1:])])
+        x = x.reshape(x.shape[0], -1)
         # (batch * time, -1) -> (batch, time, -1)
-        return x.reshape(list(obs.shape[:-3]) + [x.shape[-1]])
+        return x.reshape(obs.shape[:2] + (-1,))
 
 
 class ConvDecoder:
@@ -134,9 +133,10 @@ class ConvDecoder:
         self._minres = minres
         out_ch = minres**2 * depth * 2 ** (layer_num - 1)
         self._embed_size = out_ch
+        act = getattr(nn, act) if isinstance(act, str) else act
 
         self._linear_layer = nn.Linear(feat_size, out_ch)
-        self._linear_layer = utils.uniform_weight_init(outscale)(self._linear_layer)
+        utils.uniform_weight_init(outscale)(self._linear_layer)
         in_dim = out_ch // (minres**2)
         out_dim = in_dim // 2
 
@@ -168,7 +168,7 @@ class ConvDecoder:
             if norm:
                 layers.append(ImgChLayerNorm(out_dim))
             if act:
-                layers.append(lambda x: act(x))
+                layers.append(act)
             in_dim = out_dim
             out_dim //= 2
             h, w = h * 2, w * 2
@@ -227,7 +227,7 @@ class MLP:
         if self._shape is not None and len(self._shape) == 0:
             self._shape = (1,)
         self._dist = dist
-        self._std = std if isinstance(std, str) else Tensor((std,), device=device)
+        self._std = std if isinstance(std, str) else Tensor([std], device=device)
         self._min_std = min_std
         self._max_std = max_std
         self._absmax = absmax
@@ -235,6 +235,7 @@ class MLP:
         self._unimix_ratio = unimix_ratio
         self._symlog_inputs = symlog_inputs
         self._device = device
+        act = getattr(nn, act) if isinstance(act, str) else act
 
         self.layers = []
         for i in range(layers):
@@ -242,7 +243,7 @@ class MLP:
             if norm:
                 self.layers.append(nn.LayerNorm(units, eps=1e-03))
             if act:
-                self.layers.append(lambda x: act(x))
+                self.layers.append(act)
             if i == 0:
                 inp_dim = units
         [utils.weight_init(layer) for layer in self.layers]
@@ -250,27 +251,27 @@ class MLP:
         if isinstance(self._shape, dict):
             self.mean_layer = dict()
             for name, shape in self._shape.items():
-                self.mean_layer[name] = nn.Linear(inp_dim, np.prod(shape))
+                self.mean_layer[name] = nn.Linear(inp_dim, np.prod(shape).item())
                 utils.uniform_weight_init(outscale)(self.mean_layer[name])
-            if self._std == "learned":
-                assert dist in ("tanh_normal", "normal", "trunc_normal", "huber"), dist
+            if isinstance(self._std, str) and self._std == "learned":
+                assert dist in ("normal", "trunc_normal"), dist
                 self.std_layer = dict()
                 for name, shape in self._shape.items():
-                    self.std_layer[name] = nn.Linear(inp_dim, np.prod(shape))
+                    self.std_layer[name] = nn.Linear(inp_dim, np.prod(shape).item())
                     utils.uniform_weight_init(outscale)(self.std_layer[name])
         elif self._shape is not None:
-            self.mean_layer = nn.Linear(inp_dim, np.prod(self._shape))
+            self.mean_layer = nn.Linear(inp_dim, np.prod(self._shape).item())
             utils.uniform_weight_init(outscale)(self.mean_layer)
-            if self._std == "learned":
-                assert dist in ("tanh_normal", "normal", "trunc_normal", "huber"), dist
-                self.std_layer = nn.Linear(units, np.prod(self._shape))
+            if isinstance(self._std, str) and self._std == "learned":
+                assert dist in ("normal", "trunc_normal"), dist
+                self.std_layer = nn.Linear(units, np.prod(self._shape).item())
                 utils.uniform_weight_init(outscale)(self.std_layer)
 
-    def __call__(self, features, dtype=None):
+    def __call__(self, features):
         x = features
         if self._symlog_inputs:
             x = utils.symlog(x)
-        out = self.layers(x)
+        out = x.sequential(self.layers)
         # Used for encoder output
         if self._shape is None:
             return out
@@ -278,7 +279,7 @@ class MLP:
             dists = {}
             for name, shape in self._shape.items():
                 mean = self.mean_layer[name](out)
-                if self._std == "learned":
+                if isinstance(self._std, str) and self._std == "learned":
                     std = self.std_layer[name](out)
                 else:
                     std = self._std
@@ -286,21 +287,14 @@ class MLP:
             return dists
         else:
             mean = self.mean_layer(out)
-            if self._std == "learned":
+            if isinstance(self._std, str) and self._std == "learned":
                 std = self.std_layer(out)
             else:
                 std = self._std
             return self.dist(self._dist, mean, std, self._shape)
 
     def dist(self, dist, mean, std, shape):
-        if self._dist == "tanh_normal":
-            mean = Tensor.tanh(mean)
-            std = Tensor.softplus(std) + self._min_std
-            dist = distributions.Normal(mean, std)
-            dist = distributions.TanhBijector(dist)
-            dist = distributions.Independent(dist, 1)
-            dist = distributions.SampleDist(dist)
-        elif self._dist == "normal":
+        if self._dist == "normal":
             std = (self._max_std - self._min_std) * Tensor.sigmoid(
                 std + 2.0
             ) + self._min_std
@@ -321,20 +315,12 @@ class MLP:
                 distributions.Independent(dist, 1), absmax=self._absmax
             )
         elif self._dist == "onehot":
-            dist = distributions.OneHotDist(mean, unimix_ratio=self._unimix_ratio)
-        elif dist == "huber":
-            dist = distributions.ContDist(
-                distributions.Independent(
-                    distributions.UnnormalizedHuber(mean, std, 1.0),
-                    len(shape),
-                    absmax=self._absmax,
-                )
+            dist = distributions.OneHotCategorical(
+                mean, unimix_ratio=self._unimix_ratio
             )
         elif dist == "binary":
-            dist = distributions.Bernoulli(
-                distributions.Independent(
-                    distributions.Bernoulli(logits=mean), len(shape)
-                )
+            dist = distributions.Independent(
+                distributions.Bernoulli(logits=mean), len(shape)
             )
         elif dist == "symlog_disc":
             dist = distributions.DiscDist(logits=mean, device=self._device)
@@ -522,7 +508,7 @@ class RSSM:
         discrete=False,
         act=Tensor.silu,
         norm=True,
-        mean_act="none",
+        mean_act=lambda x: x,
         std_act=Tensor.softplus,
         min_std=0.1,
         unimix_ratio=0.01,
@@ -544,6 +530,7 @@ class RSSM:
         self._num_actions = num_actions
         self._embed = embed
         self._device = device
+        act = getattr(nn, act) if isinstance(act, str) else act
 
         inp_layers = []
         if self._discrete:
@@ -553,7 +540,7 @@ class RSSM:
         inp_layers.append(nn.Linear(inp_dim, self._hidden, bias=False))
         if norm:
             inp_layers.append(nn.LayerNorm(self._hidden, eps=1e-03))
-        inp_layers.append(lambda x: act(x))
+        inp_layers.append(act)
         self._img_in_layers = inp_layers
         utils.weight_init(self._img_in_layers)
         self._cell = GRUCell(self._hidden, self._deter, norm=norm)
@@ -564,7 +551,7 @@ class RSSM:
         img_out_layers.append(nn.Linear(inp_dim, self._hidden, bias=False))
         if norm:
             img_out_layers.append(nn.LayerNorm(self._hidden, eps=1e-03))
-        img_out_layers.append(lambda x: act(x))
+        img_out_layers.append(act)
         self._img_out_layers = img_out_layers
         utils.weight_init(self._img_out_layers)
 
@@ -573,7 +560,7 @@ class RSSM:
         obs_out_layers.append(nn.Linear(inp_dim, self._hidden, bias=False))
         if norm:
             obs_out_layers.append(nn.LayerNorm(self._hidden, eps=1e-03))
-        obs_out_layers.append(lambda x: act(x))
+        obs_out_layers.append(act)
         self._obs_out_layers = obs_out_layers
         utils.weight_init(self._obs_out_layers)
 
@@ -621,7 +608,9 @@ class RSSM:
             raise NotImplementedError(self._initial)
 
     def observe(self, embed, action, is_first, state=None):
-        swap = lambda x: x.permute([1, 0] + list(range(2, len(x.shape))))
+        def swap(x):
+            return x.permute([1, 0] + list(range(2, len(x.shape))))
+
         # (batch, time, ch) -> (time, batch, ch)
         embed, action, is_first = swap(embed), swap(action), swap(is_first)
         # prev_state[0] means selecting posterior of return(posterior, prior) from obs_step
@@ -639,7 +628,9 @@ class RSSM:
         return post, prior
 
     def imagine_with_action(self, action, state):
-        swap = lambda x: x.permute([1, 0] + list(range(2, len(x.shape))))
+        def swap(x):
+            return x.permute([1, 0] + list(range(2, len(x.shape))))
+
         assert isinstance(state, dict), state
         action = action
         action = swap(action)
@@ -670,7 +661,7 @@ class RSSM:
 
     def obs_step(self, prev_state, prev_action, embed, is_first, sample=True):
         # initialize all prev_state
-        if prev_state == None or Tensor.sum(is_first) == len(is_first):
+        if prev_state is None or Tensor.sum(is_first) == len(is_first):
             prev_state = self.initial(len(is_first))
             prev_action = Tensor.zeros((len(is_first), self._num_actions)).to(
                 self._device
@@ -716,8 +707,7 @@ class RSSM:
         for _ in range(self._rec_depth):  # rec depth is not correctly implemented
             deter = prev_state["deter"]
             # (batch, hidden), (batch, deter) -> (batch, deter), (batch, deter)
-            x, deter = self._cell(x, [deter])
-            deter = deter[0]  # Keras wraps the state in a list.
+            x, deter = self._cell(x, deter)
         # (batch, deter) -> (batch, hidden)
         x = self._img_out_layers(x)
         # (batch, hidden) -> (batch_size, stoch, discrete_num)
@@ -753,23 +743,19 @@ class RSSM:
             else:
                 raise NotImplementedError
             mean, std = Tensor.split(x, [self._stoch] * 2, -1)
-            mean = {
-                "none": lambda: mean,
-                "tanh5": lambda: 5.0 * Tensor.tanh(mean / 5.0),
-            }[self._mean_act]()
-            std = {
-                "softplus": lambda: Tensor.softplus(std),
-                "abs": lambda: Tensor.abs(std + 1),
-                "sigmoid": lambda: Tensor.sigmoid(std),
-                "sigmoid2": lambda: 2 * Tensor.sigmoid(std / 2),
-            }[self._std_act]()
-            std = std + self._min_std
+            mean = self._mean_act(mean)
+            std = self._std_act(std) + self._min_std
             return {"mean": mean, "std": std}
 
     def kl_loss(self, post, prior, free, dyn_scale, rep_scale):
-        kld = lambda x, y: utils.kl_divergence(x, y).mean()
-        dist = lambda x: self.get_dist(x)
-        sg = lambda x: {k: v.detach() for k, v in x.items()}
+        def kld(x, y):
+            return utils.kl_divergence(x, y).mean()
+
+        def dist(x):
+            return self.get_dist(x)
+
+        def sg(x):
+            return {k: v.detach() for k, v in x.items()}
 
         rep_loss = value = kld(
             dist(post) if self._discrete else dist(post)._dist,

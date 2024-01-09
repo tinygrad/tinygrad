@@ -12,16 +12,17 @@ import ruamel.yaml as yaml
 sys.path.append(str(pathlib.Path(__file__).parent))
 
 import envs.wrappers as wrappers
+import exploration as expl
+import models
 import tools
 import torch
 from parallel import Damy, Parallel
 from torch import distributions as torchd
 from torch import nn
 
-import exploration as expl
-import models
 
-to_np = lambda x: x.detach().cpu().numpy()
+def to_np(x):
+    return x.detach().cpu().numpy()
 
 
 class Dreamer(nn.Module):
@@ -47,7 +48,10 @@ class Dreamer(nn.Module):
         ):  # compilation is not supported on windows
             self._wm = torch.compile(self._wm)
             self._task_behavior = torch.compile(self._task_behavior)
-        reward = lambda f, s, a: self._wm.heads["reward"](f).mean()
+
+        def reward(f, s, a):
+            return self._wm.heads["reward"](f).mean()
+
         self._expl_behavior = dict(
             greedy=lambda: self._task_behavior,
             random=lambda: expl.Random(config, act_space),
@@ -118,15 +122,16 @@ class Dreamer(nn.Module):
         post, context, mets = self._wm._train(data)
         metrics.update(mets)
         start = post
-        reward = lambda f, s, a: self._wm.heads["reward"](
-            self._wm.dynamics.get_feat(s)
-        ).mode()
+
+        def reward(f, s, a):
+            return self._wm.heads["reward"](self._wm.dynamics.get_feat(s)).mode()
+
         metrics.update(self._task_behavior._train(start, reward)[-1])
         if self._config.expl_behavior != "greedy":
             mets = self._expl_behavior.train(start, context, data)[-1]
             metrics.update({"expl_" + key: value for key, value in mets.items()})
         for name, value in metrics.items():
-            if not name in self._metrics.keys():
+            if name not in self._metrics.keys():
                 self._metrics[name] = [value]
             else:
                 self._metrics[name].append(value)
@@ -233,7 +238,10 @@ def main(config):
     else:
         directory = config.evaldir
     eval_eps = tools.load_episodes(directory, limit=1)
-    make = lambda mode, id: make_env(config, mode, id)
+
+    def make(mode, id):
+        return make_env(config, mode, id)
+
     train_envs = [make("train", i) for i in range(config.envs)]
     eval_envs = [make("eval", i) for i in range(config.envs)]
     if config.parallel:

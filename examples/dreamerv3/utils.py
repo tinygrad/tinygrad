@@ -1,6 +1,7 @@
 import random
 
 import numpy as np
+
 from tinygrad import Tensor, nn
 
 
@@ -23,7 +24,9 @@ def static_scan_for_lambda_return(fn, inputs, start):
     flag = True
     for index in indices:
         # (inputs, pcont) -> (inputs[index], pcont[index])
-        inp = lambda x: (_input[x] for _input in inputs)
+        def inp(x):
+            return (_input[x] for _input in inputs)
+
         last = fn(last, *inp(index))
         if flag:
             outputs = last
@@ -90,7 +93,10 @@ def static_scan(fn, inputs, start):
     indices = range(inputs[0].shape[0])
     flag = True
     for index in indices:
-        inp = lambda x: (_input[x] for _input in inputs)
+
+        def inp(x):
+            return (_input[x] for _input in inputs)
+
         last = fn(last, *inp(index))
         if flag:
             if type(last) == type({}):
@@ -133,63 +139,54 @@ def static_scan(fn, inputs, start):
 
 
 def weight_init(m):
-    raise NotImplementedError
     if isinstance(m, nn.Linear):
-        in_num = m.in_features
-        out_num = m.out_features
+        out_num, in_num = m.weight.shape
         denoms = (in_num + out_num) / 2.0
         scale = 1.0 / denoms
         std = np.sqrt(scale) / 0.87962566103423978
-        nn.init.trunc_normal_(
-            m.weight.data, mean=0.0, std=std, a=-2.0 * std, b=2.0 * std
+        m.weight = Tensor.normal(m.weight.shape, mean=0.0, std=std).clip(
+            -2.0 * std, 2.0 * std
         )
-        if hasattr(m.bias, "data"):
-            m.bias.data.fill_(0.0)
+        if m.bias is not None:
+            m.bias = Tensor.zeros_like(m.bias)
     elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
         space = m.kernel_size[0] * m.kernel_size[1]
-        in_num = space * m.in_channels
-        out_num = space * m.out_channels
-        denoms = (in_num + out_num) / 2.0
+        out_num, in_num = m.weight.shape[:2]
+        denoms = (in_num + out_num) * space / 2.0
         scale = 1.0 / denoms
         std = np.sqrt(scale) / 0.87962566103423978
-        nn.init.trunc_normal_(
-            m.weight.data, mean=0.0, std=std, a=-2.0 * std, b=2.0 * std
+        m.weight = Tensor.normal(m.weight.shape, mean=0.0, std=std).clip(
+            -2.0 * std, 2.0 * std
         )
-        if hasattr(m.bias, "data"):
-            m.bias.data.fill_(0.0)
+        if m.bias is not None:
+            m.bias = Tensor.zeros_like(m.bias)
     elif isinstance(m, nn.LayerNorm):
-        m.weight.data.fill_(1.0)
-        if hasattr(m.bias, "data"):
-            m.bias.data.fill_(0.0)
+        m.weight = 1.0
+        m.bias = 0.0
 
 
 def uniform_weight_init(given_scale):
-    raise NotImplementedError
-
     def f(m):
         if isinstance(m, nn.Linear):
-            in_num = m.in_features
-            out_num = m.out_features
+            out_num, in_num = m.weight.shape
             denoms = (in_num + out_num) / 2.0
             scale = given_scale / denoms
             limit = np.sqrt(3 * scale)
-            nn.init.uniform_(m.weight.data, a=-limit, b=limit)
-            if hasattr(m.bias, "data"):
-                m.bias.data.fill_(0.0)
+            m.weight = Tensor.uniform(m.weight.shape, low=-limit, high=limit)
+            if m.bias is not None:
+                m.bias = Tensor.zeros_like(m.bias)
         elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
             space = m.kernel_size[0] * m.kernel_size[1]
-            in_num = space * m.in_channels
-            out_num = space * m.out_channels
-            denoms = (in_num + out_num) / 2.0
+            out_num, in_num = m.weight.shape[:2]
+            denoms = (in_num + out_num) * space / 2.0
             scale = given_scale / denoms
             limit = np.sqrt(3 * scale)
-            nn.init.uniform_(m.weight.data, a=-limit, b=limit)
-            if hasattr(m.bias, "data"):
-                m.bias.data.fill_(0.0)
+            m.weight = Tensor.uniform(m.weight.shape, low=-limit, high=limit)
+            if m.bias is not None:
+                m.bias = Tensor.zeros_like(m.bias)
         elif isinstance(m, nn.LayerNorm):
-            m.weight.data.fill_(1.0)
-            if hasattr(m.bias, "data"):
-                m.bias.data.fill_(0.0)
+            m.weight = 1.0
+            m.bias = 0.0
 
     return f
 
@@ -210,6 +207,17 @@ def set_seed_everywhere(seed):
     Tensor.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
+
+
+def _sum_rightmost(value, dim):
+    if dim == 0:
+        return value
+    required_shape = value.shape[:-dim] + (-1,)
+    return value.reshape(required_shape).sum(-1)
+
+
+def numel(shape):
+    return int(np.prod(shape)) if shape else 1
 
 
 def kl_divergence(dist1, dist2):

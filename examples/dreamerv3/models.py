@@ -1,7 +1,8 @@
 import copy
 
-import utils
 import networks
+import utils
+
 from tinygrad import Tensor, nn
 
 
@@ -193,11 +194,11 @@ class WorldModel:
         recon = self.heads["decoder"](self.dynamics.get_feat(states))["image"].mode()[
             :6
         ]
-        reward_post = self.heads["reward"](self.dynamics.get_feat(states)).mode()[:6]
+        self.heads["reward"](self.dynamics.get_feat(states)).mode()[:6]
         init = {k: v[:, -1] for k, v in states.items()}
         prior = self.dynamics.imagine_with_action(data["action"][:6, 5:], init)
         openl = self.heads["decoder"](self.dynamics.get_feat(prior))["image"].mode()
-        reward_prior = self.heads["reward"](self.dynamics.get_feat(prior)).mode()
+        self.heads["reward"](self.dynamics.get_feat(prior)).mode()
         # observed image is given until 5 steps
         model = Tensor.cat([recon[:, :5], openl], 1)
         truth = data["image"][:6]
@@ -292,7 +293,7 @@ class ImagBehavior(nn.Module):
                 )
                 reward = objective(imag_feat, imag_state, imag_action)
                 actor_ent = self.actor(imag_feat).entropy()
-                state_ent = self._world_model.dynamics.get_dist(imag_state).entropy()
+                self._world_model.dynamics.get_dist(imag_state).entropy()
                 # this target is not scaled by ema or sym_log.
                 target, weights, base = self._compute_target(
                     imag_feat, imag_state, reward
@@ -340,7 +341,10 @@ class ImagBehavior(nn.Module):
 
     def _imagine(self, start, policy, horizon):
         dynamics = self._world_model.dynamics
-        flatten = lambda x: x.reshape([-1] + list(x.shape[2:]))
+
+        def flatten(x):
+            return x.reshape([-1] + list(x.shape[2:]))
+
         start = {k: flatten(v) for k, v in start.items()}
 
         def step(prev, _):
