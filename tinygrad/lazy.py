@@ -1,40 +1,41 @@
 from __future__ import annotations
 import sys, math
 import numpy as np
-from typing import Union, Optional, Any, Tuple, List, Set, Dict
+from collections import defaultdict
+from typing import Union, Optional, Any, Tuple, List, Set, Dict, DefaultDict, cast
 from tinygrad.dtype import dtypes, DType, ImageDType
 from tinygrad.helpers import prod, merge_dicts, flatten, getenv, dedup, DEBUG, all_int, all_same
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps, Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.device import Buffer, Device
+from tinygrad.device import Buffer
 from tinygrad.graph import log_lazybuffer
-from weakref import ref, WeakSet, WeakValueDictionary, ReferenceType
+from weakref import ref, ReferenceType
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
 
-lazycache: WeakValueDictionary = WeakValueDictionary()
+lazycache: Dict[Any, ReferenceType[LazyBuffer]] = {}
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType,
                       op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None):
   if 0 in st.shape: st, op, arg, srcs = ShapeTracker.from_shape(st.shape), LoadOps.CONST, 0, ()
 
-  wop = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs), ref(base) if base else None)
-  if wop in lazycache: return lazycache[wop]
+  cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs), ref(base) if base else None)
+  if (rret := lazycache.get(cache_key, None)): return cast(LazyBuffer, rret())  # NOTE: this should always be a live reference
 
-  ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base)
+  ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base, cache_key=cache_key)
   # TODO: remove LoadOps.CONST here while keeping a pretty graph and working fusions
   # TODO: might be possible to remove LoadOps.COPY
-  if op not in {LoadOps.EMPTY, LoadOps.CUSTOM, LoadOps.CONST, LoadOps.COPY} and getenv("LAZYCACHE", 1): lazycache[wop] = ret
+  if op not in {LoadOps.EMPTY, LoadOps.CUSTOM, LoadOps.CONST, LoadOps.COPY} and getenv("LAZYCACHE", 1): lazycache[cache_key] = ref(ret)
   return ret
 
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-               base:Optional[LazyBuffer]=None):
-    assert isinstance(device, str) and device == Device.canonicalize(device)
-    self.device, self.st, self.dtype, self.shape = device, st, dtype, st.shape
+               base:Optional[LazyBuffer]=None, cache_key=None):
+    self.device, self.st, self.dtype, self.shape, self.size, self.cache_key = device, st, dtype, st.shape, st.size, cache_key
+    self._base: Optional[LazyBuffer] = None
     if base is None:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
@@ -42,18 +43,19 @@ class LazyBuffer:
       self.output_buffer: Optional[Buffer] = None
       self.forced_realize = False
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
-      self.children: WeakSet[LazyBuffer] = WeakSet()
-      for x in srcs: x.base.children.add(self.base)
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"
       self._base = base
 
-  def __repr__(self) -> str:
-    return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.st if hasattr(self, '_base') else (self.op, self.realized)}>"
+  def __del__(self): lazycache.pop(self.cache_key, None)
 
+  def __repr__(self) -> str:
+    return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.st if self.base != self else (self.op, self.realized)}>"
+
+  # NOTE: this has to be a function to prevent self reference
   @property
-  def base(self) -> LazyBuffer: return self._base if hasattr(self, '_base') else self
+  def base(self) -> LazyBuffer: return self._base if self._base is not None else self
 
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None) -> LazyBuffer:
@@ -63,7 +65,7 @@ class LazyBuffer:
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
 
   def contiguous(self):
-    if not self.st.contiguous or self.is_unrealized_const():
+    if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
       ret = self.e(LoadOps.CONTIGUOUS)
       sti = self.st.invert(self.base.shape)
       if sti is not None: self.base.contiguous_child = ref(ret), sti
@@ -91,7 +93,7 @@ class LazyBuffer:
     if self.device == device: return self
 
     # double COPY = one COPY
-    if self.st.contiguous and not self.base.realized and self.base.op == LoadOps.COPY:
+    if self.st.contiguous and self.size == self.base.size and not self.base.realized and self.base.op == LoadOps.COPY:
       return self.base.srcs[0].copy_to_device(device).reshape(self.st.shape)
 
     # const doesn't have to be copied (issues with disk tensor)
@@ -99,8 +101,7 @@ class LazyBuffer:
       return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, device, arg=self.base.arg)._view(self.st)
 
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
-    # TODO: why is this required on WEBGPU?
-    if prod(self.st.shape) < prod(self.base.st.shape) or device == "WEBGPU":
+    if prod(self.st.shape) < prod(self.base.st.shape):
       return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, srcs=(self.contiguous(),))
 
     # copy the base and apply the shapetracker on the new device
@@ -118,7 +119,7 @@ class LazyBuffer:
     if op == TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
     out_dtype = srcs[-1].dtype if op not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else dtypes.bool
     ret = create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
-    return ret.cast(dtypes.float32) if (out_dtype == dtypes.bool and self.device == "WEBGPU") else ret
+    return ret
 
   # *** reduce ops ***
 
@@ -157,37 +158,38 @@ class LazyBuffer:
 
 # recursively create a lazyop
 def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Variable, int], st:ShapeTracker,
-                      realizes:Set[LazyBuffer], first=True, cache=None) -> LazyOp:
-  if cache is None: cache = {}
+                      realizes:Set[LazyBuffer], cache, first=True) -> LazyOp:
   if (buf, st) in cache: return cache[(buf, st)]
   if buf != buf.base:
-    var_vals.update(merge_dicts([var_vals, buf.st.var_vals]))
-    st = buf.st.unbind()+st
+    st = buf.st + st
     buf = buf.base
   # all buffers here are base now
   assert buf.op is not None
 
   # consts are always fused and generated
   if buf.op == LoadOps.CONST:
-    return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.arg), buf.dtype, st.simplify()))
+    # TODO: make shapetracker unbind also return var_vals
+    var_vals.update(merge_dicts([var_vals, st.var_vals]))
+    return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.arg), buf.dtype, st.simplify().unbind()))
 
   # if we aren't fusing it, it's a load and we add it to the inputs
   if buf.realized or (buf in realizes and not first):
     if buf not in inputs: inputs.append(buf)
-    return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, st.simplify()))
+    var_vals.update(merge_dicts([var_vals, st.var_vals]))
+    return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, st.simplify().unbind()))
 
   # if a CONTIGUOUS made it all the way here, just skip it
   if buf.op == LoadOps.CONTIGUOUS:
     assert first
-    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, False, cache)
+    return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False)
 
   # if it's a reduce, we have to change the shapetracker
   if buf.op in ReduceOps:
     assert st.contiguous, "ReduceOps late fusion must be contiguous"
-    st = ShapeTracker.from_shape(buf.srcs[0].shape).unbind()
+    st = ShapeTracker.from_shape(buf.srcs[0].shape)
 
   # otherwise we fuse it like normal
-  cache[(buf, st)] = ret = LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, False, cache) for x in buf.srcs), buf.arg)
+  cache[(buf, st)] = ret = LazyOp(buf.op, tuple(_recursive_lazyop(x, inputs, var_vals, st, realizes, cache, False) for x in buf.srcs), buf.arg)
   return ret
 
 # recursively walk back in the graph to create the schedule
@@ -206,15 +208,15 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
   elif out.op == LoadOps.EMPTY:
     op = LazyOp(LoadOps.EMPTY)
   else:
-    output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape).unbind()
-    op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes)
-    op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify()))
+    output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
+    op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes, cache={})
+    op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()))
 
-  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + \
-    [ScheduleItem(op, out, tuple(inputs), {k:var_vals[k] for k in op.vars()})]
+  return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + [ScheduleItem(op, out, tuple(inputs), var_vals)]
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
-def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None], simple_pads:Set[LazyBuffer]):
+def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
+                simple_pads:Set[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]]):
   if buf in allbufs or buf.base.realized: return
   log_lazybuffer(buf)
   if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
@@ -229,16 +231,18 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
         simple_pads.add(buf.base)
       else:
         realizes.add(buf.base)
-    return _recurse_lb(buf.base, realizes, allbufs, simple_pads)
+    return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children)
   if buf.forced_realize: realizes.add(buf)
   allbufs[buf] = None
   if buf.op in LoadOps: realizes.add(buf.base)
   if buf.op == LoadOps.COPY:
-    assert buf.srcs[0].st.contiguous, "can only copy contig"
+    assert buf.srcs[0].st.contiguous and buf.srcs[0].size == buf.srcs[0].base.size, "can only copy contig"
     realizes.add(buf.srcs[0].base)
-  for x in buf.srcs: _recurse_lb(x, realizes, allbufs, simple_pads)
+  for x in buf.srcs:
+    children[x.base][buf] = None
+    _recurse_lb(x, realizes, allbufs, simple_pads, children)
 
-UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2, UnaryOps.RECIP}
+UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2}
 def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
   if buf in realizes or buf.realized: return True
   # NOTE: this broke to_image_idx and coder with JIT
@@ -253,7 +257,8 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   realizes: Set[LazyBuffer] = set([x.base for x in outs if not x.base.realized])
   allbufs: Dict[LazyBuffer, None] = {}
   simple_pads: Set[LazyBuffer] = set()
-  for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads)
+  children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
+  for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children)
 
   # check if we have to realize pads
   for p in simple_pads:
@@ -278,12 +283,12 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
           # can only have one output buffer
           # can only reduce contiguous
           # max one reduceop per kernel
-          if len(realized_children) > 1 or not st.contiguous or (tr in reduce_for_op and reduce_for_op[tr] != r):
+          if len(realized_children) > 1 or not st.contiguous or st.size != r.st.size or (tr in reduce_for_op and reduce_for_op[tr] != r):
             can_chase = tr not in reduce_for_op or reduce_for_op[tr] == r
             forced_realize = True
             break
           continue
-        for tr_next in tr.children:
+        for tr_next in children[tr].keys():
           if not tr_next.realized:
             # max one reduceop per kernel
             if tr_next.op in ReduceOps:
@@ -300,8 +305,8 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
       if can_chase:
         # can chase this down to contiguous children
         st = tr.st
-        while len(tr.children) == 1:
-          tr_next = next(iter(tr.children))
+        while len(children[tr]) == 1:
+          tr_next = next(iter(children[tr].keys()))
           st_childs = dedup([s for s in tr_next.srcs if s.base == tr])
           if len(st_childs) > 1: break
           if st.size != st_childs[0].st.size: break

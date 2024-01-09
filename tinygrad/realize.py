@@ -39,7 +39,7 @@ def run_schedule(schedule:List[ScheduleItem]):
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
     si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
-      Buffer(si.out.device, si.out.st.size, si.out.dtype,
+      Buffer(si.out.device, si.out.size, si.out.dtype,
              "PLACEHOLDER" if isinstance(prg, InterpretedASTRunner) else None)
     del si.out.srcs
 

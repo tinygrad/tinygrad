@@ -8,8 +8,6 @@ from tinygrad.helpers import prod, DEBUG, merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
 from tinygrad.shape.view import View, _merge_dims
 
-def shape_to_size(shape:Tuple[sint, ...]) -> int: return prod([x.max if isinstance(x, Node) else x for x in shape])
-
 def expr_node_mask(view:View, idx:Node, valid:Optional[Node]=None) -> Node:
   expr = [valid] if valid is not None else []
   if view.mask is not None:
@@ -41,7 +39,7 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
   if vm1.contiguous and vm1.shape == vm2.shape: return vm2
   if vm2.contiguous: return vm1
   if vm2.mask or vm1.offset != 0: return None  # this isn't supported yet
-  if None in (strides := ShapeTracker((vm2, vm1), shape_to_size(vm2.shape)).real_strides()): return None
+  if None in (strides := ShapeTracker((vm2, vm1)).real_strides()): return None
   return View.create(vm1.shape, cast(Tuple[sint, ...], strides), vm2.offset, vm1.mask)
 
 @functools.lru_cache(maxsize=None)
@@ -56,33 +54,41 @@ def idxs_to_idx(shape:Tuple[int, ...], idxs:Tuple[Node, ...]) -> Node:
 @dataclass(frozen=True)
 class ShapeTracker:
   views: Tuple[View, ...]
-  size: int
 
   def __add__(self, st:ShapeTracker) -> ShapeTracker:
-    base = ShapeTracker(self.views, self.size)
-    for v in st.views: base = ShapeTracker(base.views + (v,), self.size).simplify() # one view at a time = better simplification
+    base = ShapeTracker(self.views)
+    for v in st.views: base = ShapeTracker(base.views + (v,)).simplify() # one view at a time = better simplification
     return base
 
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[ShapeTracker]:
     ret = tuple(v.invert(s) for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]))
-    return ShapeTracker(cast(Tuple[View, ...], ret), shape_to_size(out_shape)).reshape(out_shape) if all(x is not None for x in ret) else None
+    return ShapeTracker(cast(Tuple[View, ...], ret)).reshape(out_shape) if all(x is not None for x in ret) else None
 
   @staticmethod
-  def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),), shape_to_size(shape))
+  def from_shape(shape:Tuple[sint, ...]): return ShapeTracker((View.create(shape),))
 
   @property
-  def contiguous(self) -> bool:
-    return len(self.views) == 1 and self.views[0].contiguous and shape_to_size(self.views[0].shape) == self.size
+  def contiguous(self) -> bool: return len(self.views) == 1 and self.views[0].contiguous
 
   @property
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
+
+  @property
+  def size(self) -> int: return prod([x.max if isinstance(x, Node) else x for x in self.views[-1].shape])
+
+  def real_size(self) -> int:
+    if 0 in self.shape: return 0
+    ret = self.expr_idxs()[0].max
+    while not isinstance(ret, int): ret = ret.max    # TODO: this is a while loop?!? it should be more clear what max does
+    assert isinstance(ret, int), f"ret must be integer, {ret=} isn't"
+    return ret+1
 
   def vars(self) -> Set[Variable]: return set.union(*[v.vars() for v in self.views], set())
 
   @property
   def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
 
-  def unbind(self) -> ShapeTracker: return ShapeTracker(tuple(v.unbind() for v in self.views), self.size)
+  def unbind(self) -> ShapeTracker: return ShapeTracker(tuple(v.unbind() for v in self.views))
 
   def to_movement_ops(self) -> List[Tuple[MovementOps, Tuple]]:
     to_apply:List[Tuple[MovementOps, Tuple]] = []
@@ -150,26 +156,20 @@ class ShapeTracker:
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := merge_views(self.views[-2], self.views[-1])) is not None:
       if DEBUG >= 5: print(f"st simplify : {self.views[-2]} + {self.views[-1]} = {new_view}")
-      return ShapeTracker(self.views[:-2] + (new_view,), self.size).simplify()
+      return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
     return self
 
   # *** under this line are the movement ops ***
 
-  def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> ShapeTracker:
-    return ShapeTracker(self.views[0:-1] + (self.views[-1].pad(arg), ), self.size)
-  def shrink(self, arg: Tuple[Tuple[sint, sint], ...]) -> ShapeTracker:
-    return ShapeTracker(self.views[0:-1] + (self.views[-1].shrink(arg), ), self.size)
-  def expand(self, new_shape: Tuple[sint, ...]) -> ShapeTracker:
-    return ShapeTracker(self.views[0:-1] + (self.views[-1].expand(new_shape), ), self.size)
-  def permute(self, axis: Tuple[int, ...]) -> ShapeTracker:
-    return ShapeTracker(self.views[0:-1] + (self.views[-1].permute(axis), ), self.size)
-  def stride(self, mul: Tuple[int, ...]) -> ShapeTracker:
-    return ShapeTracker(self.views[0:-1] + (self.views[-1].stride(mul), ), self.size)
+  def pad(self, arg: Tuple[Tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].pad(arg), ))
+  def shrink(self, arg: Tuple[Tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].shrink(arg), ))
+  def expand(self, new_shape: Tuple[sint, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].expand(new_shape), ))
+  def permute(self, axis: Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].permute(axis), ))
+  def stride(self, mul: Tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].stride(mul), ))
 
   def reshape(self, new_shape: Tuple[sint, ...]) -> ShapeTracker:
-    if getenv("MERGE_VIEW", 1) and (new_view := self.views[-1].reshape(new_shape)) is not None:
-      return ShapeTracker(self.views[0:-1] + (new_view,), self.size)
-    return ShapeTracker(self.views + (View.create(new_shape), ), self.size)
+    if getenv("MERGE_VIEW", 1) and (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
+    return ShapeTracker(self.views + (View.create(new_shape), ))
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 # TODO: if we remove movementops from lazy.py we can delete this

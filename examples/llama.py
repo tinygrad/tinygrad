@@ -370,7 +370,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
-  param_count = sum(x.lazydata.st.size for x in get_parameters(llama.model))
+  param_count = sum(x.lazydata.size for x in get_parameters(llama.model))
 
   if chatbot:
     # encode pre prompt

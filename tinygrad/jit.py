@@ -66,9 +66,8 @@ class TinyJit(Generic[ReturnType]):
 
     if self.cnt >= 2:
       # jit exec
-      assert self.expected_vals == expected_vals and self.expected_name_sts_dtype is not None, "missing/mismatch of var_vals"
-      assert all(x[0] == y[0] and x[1].views == y[1].views and x[2] == x[2] for x,y in zip(self.expected_name_sts_dtype, expected_name_sts_dtype)), \
-        f"mismatch of sts, expected {self.expected_name_sts_dtype} got {expected_name_sts_dtype}"
+      assert self.expected_vals == expected_vals, "mismatch of var_vals"
+      assert self.expected_name_sts_dtype == expected_name_sts_dtype, f"mismatch of sts, expected {self.expected_name_sts_dtype} got {expected_name_sts_dtype}"  # noqa: E501
       for (j,i),input_idx in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_idx]
       for ji in self.jit_cache: ji.prg(cast(List[Buffer], ji.rawbufs), var_vals, wait=DEBUG>=2, jit=True)
     elif self.cnt == 1:
@@ -79,7 +78,8 @@ class TinyJit(Generic[ReturnType]):
         self.ret = self.fxn(*args, **kwargs)
       self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
-      assert len(set(get_input_replace(self.jit_cache, input_rawbuffers).values())) == len(input_rawbuffers), "some input tensors not found"
+      if DEBUG >= 1 and len(set(get_input_replace(self.jit_cache, input_rawbuffers).values())) != len(input_rawbuffers):
+        print("WARNING: some input tensors not found")
       if DEBUG >= 1: print(f"JIT captured {len(self.jit_cache)} kernels with {len(input_rawbuffers)} inputs")
 
       # if your Device supports it, condense the items into a graph executor.
