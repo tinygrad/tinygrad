@@ -10,32 +10,32 @@ from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer, Device
 from tinygrad.graph import log_lazybuffer
-from weakref import ref, WeakValueDictionary, ReferenceType
+from weakref import ref, ReferenceType
 
 # lazy can recurse a lot
 sys.setrecursionlimit(10000)
 
-lazycache: WeakValueDictionary = WeakValueDictionary()
+lazycache: Dict[Any, ReferenceType[LazyBuffer]] = {}
 def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType,
                       op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None):
   if 0 in st.shape: st, op, arg, srcs = ShapeTracker.from_shape(st.shape), LoadOps.CONST, 0, ()
 
-  wop = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs), ref(base) if base else None)
-  if wop in lazycache: return lazycache[wop]
+  cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs), ref(base) if base else None)
+  if cache_key in lazycache and (ret := lazycache[cache_key]()): return ret  # NOTE: ret should never be None
 
-  ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base)
+  ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base, cache_key=cache_key)
   # TODO: remove LoadOps.CONST here while keeping a pretty graph and working fusions
   # TODO: might be possible to remove LoadOps.COPY
-  if op not in {LoadOps.EMPTY, LoadOps.CUSTOM, LoadOps.CONST, LoadOps.COPY} and getenv("LAZYCACHE", 1): lazycache[wop] = ret
+  if op not in {LoadOps.EMPTY, LoadOps.CUSTOM, LoadOps.CONST, LoadOps.COPY} and getenv("LAZYCACHE", 1): lazycache[cache_key] = ref(ret)
   return ret
 
 class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
-               base:Optional[LazyBuffer]=None):
+               base:Optional[LazyBuffer]=None, cache_key=None):
     assert isinstance(device, str) and device == Device.canonicalize(device)
-    self.device, self.st, self.dtype, self.shape, self.size = device, st, dtype, st.shape, st.size
+    self.device, self.st, self.dtype, self.shape, self.size, self.cache_key = device, st, dtype, st.shape, st.size, cache_key
     if base is None:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
@@ -47,6 +47,9 @@ class LazyBuffer:
       # properties on view
       assert base.base == base, "base must be a base itself"
       self._base = base
+
+  def __del__(self):
+    if self.cache_key in lazycache: del lazycache[self.cache_key]
 
   def __repr__(self) -> str:
     return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.st if hasattr(self, '_base') else (self.op, self.realized)}>"
