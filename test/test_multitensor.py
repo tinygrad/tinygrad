@@ -140,7 +140,6 @@ class TestMultiTensor(unittest.TestCase):
     lr_sched.step()
 
   def test_embedding(self):
-    # the correctness of embedding has already been tested against torch
     B, T, embed_size, vocab_size = 4, 10, 20, 28 
 
     layer = nn.Embedding(vocab_size, embed_size)
