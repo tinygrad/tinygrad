@@ -43,16 +43,19 @@ class LazyBuffer:
       self.output_buffer: Optional[Buffer] = None
       self.forced_realize = False
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
-      self.base = self
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"
-      self.base = base
+      self._base = base
 
   def __del__(self): lazycache.pop(self.cache_key, None)
 
   def __repr__(self) -> str:
     return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.st if self.base != self else (self.op, self.realized)}>"
+
+  # NOTE: this has to be a function to prevent self reference
+  @property
+  def base(self) -> LazyBuffer: return self._base if hasattr(self, '_base') else self
 
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None) -> LazyBuffer:
