@@ -2,13 +2,13 @@ from __future__ import annotations
 import sys, math
 import numpy as np
 from collections import defaultdict
-from typing import Union, Optional, Any, Tuple, List, Set, Dict, DefaultDict
+from typing import Union, Optional, Any, Tuple, List, Set, Dict, DefaultDict, cast
 from tinygrad.dtype import dtypes, DType, ImageDType
 from tinygrad.helpers import prod, merge_dicts, flatten, getenv, dedup, DEBUG, all_int, all_same
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps, Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.device import Buffer, Device
+from tinygrad.device import Buffer
 from tinygrad.graph import log_lazybuffer
 from weakref import ref, ReferenceType
 
@@ -22,7 +22,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType,
   if 0 in st.shape: st, op, arg, srcs = ShapeTracker.from_shape(st.shape), LoadOps.CONST, 0, ()
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs), ref(base) if base else None)
-  if cache_key in lazycache and (ret := lazycache[cache_key]()): return ret  # NOTE: ret should never be None
+  if (rret := lazycache.get(cache_key, None)): return cast(LazyBuffer, rret())  # NOTE: this should always be a live reference
 
   ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base, cache_key=cache_key)
   # TODO: remove LoadOps.CONST here while keeping a pretty graph and working fusions
@@ -34,8 +34,8 @@ class LazyBuffer:
   def __init__(self, device:str, st:ShapeTracker, dtype:DType,
                op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                base:Optional[LazyBuffer]=None, cache_key=None):
-    assert isinstance(device, str) and device == Device.canonicalize(device)
     self.device, self.st, self.dtype, self.shape, self.size, self.cache_key = device, st, dtype, st.shape, st.size, cache_key
+    self._base: Optional[LazyBuffer] = None
     if base is None:
       # properties on base
       self.op, self.arg, self.srcs = op, arg, srcs  # this is a LazyOp, except the src is LazyBuffers and not LazyOps
@@ -48,14 +48,14 @@ class LazyBuffer:
       assert base.base == base, "base must be a base itself"
       self._base = base
 
-  def __del__(self):
-    if self.cache_key in lazycache: del lazycache[self.cache_key]
+  def __del__(self): lazycache.pop(self.cache_key, None)
 
   def __repr__(self) -> str:
-    return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.st if hasattr(self, '_base') else (self.op, self.realized)}>"
+    return f"<LB {self.device} {self.shape} contig:{self.st.contiguous} {self.st if self.base != self else (self.op, self.realized)}>"
 
+  # NOTE: this has to be a function to prevent self reference
   @property
-  def base(self) -> LazyBuffer: return self._base if hasattr(self, '_base') else self
+  def base(self) -> LazyBuffer: return self._base if self._base is not None else self
 
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None) -> LazyBuffer:
