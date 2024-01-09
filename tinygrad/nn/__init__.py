@@ -126,7 +126,8 @@ class Embedding:
     self.weight = Tensor.glorot_uniform(vocab_size, embed_size)
 
   def __call__(self, idx:Tensor) -> Tensor:
-    if not hasattr(self, 'vocab_counter'): self.vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False).reshape(1, 1, self.vocab_size)
+    if not hasattr(self, 'vocab_counter'):
+      self.vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False, device=self.weight.device).reshape(1, 1, self.vocab_size)
     batch_size, seqlen = idx.shape
-    if seqlen == 0: return Tensor.empty(batch_size, 0, self.embed_size)
+    if seqlen == 0: return Tensor.empty(batch_size, 0, self.embed_size, device=self.weight.device)
     return (self.vocab_counter == idx.unsqueeze(2)).expand(*idx.shape, self.vocab_size) @ self.weight
