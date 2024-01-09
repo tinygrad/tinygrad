@@ -2,7 +2,7 @@ from __future__ import annotations
 import sys, math
 import numpy as np
 from collections import defaultdict
-from typing import Union, Optional, Any, Tuple, List, Set, Dict, DefaultDict
+from typing import Union, Optional, Any, Tuple, List, Set, Dict, DefaultDict, cast
 from tinygrad.dtype import dtypes, DType, ImageDType
 from tinygrad.helpers import prod, merge_dicts, flatten, getenv, dedup, DEBUG, all_int, all_same
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps, Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem
@@ -22,7 +22,7 @@ def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType,
   if 0 in st.shape: st, op, arg, srcs = ShapeTracker.from_shape(st.shape), LoadOps.CONST, 0, ()
 
   cache_key = (device, st, dtype, op, arg, tuple(ref(x) for x in srcs), ref(base) if base else None)
-  if cache_key in lazycache and (ret := lazycache[cache_key]()): return ret  # NOTE: ret should never be None
+  if (rret := lazycache.get(cache_key, None)): return cast(LazyBuffer, rret())  # NOTE: this should always be a live reference
 
   ret = LazyBuffer(device, st, dtype, op, arg, srcs, base=base, cache_key=cache_key)
   # TODO: remove LoadOps.CONST here while keeping a pretty graph and working fusions
