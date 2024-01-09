@@ -74,7 +74,7 @@ class ShapeTracker:
   def shape(self) -> Tuple[sint, ...]: return self.views[-1].shape
 
   @property
-  def size(self) -> int: return prod([x.max if isinstance(x, Node) else x for x in self.views[-1].shape])
+  def size(self) -> int: return self.views[-1].size()
 
   def real_size(self) -> int:
     if 0 in self.shape: return 0
