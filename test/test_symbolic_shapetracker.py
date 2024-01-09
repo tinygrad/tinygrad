@@ -1,5 +1,4 @@
 import unittest
-from tinygrad.helpers import prod
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import Variable, NumNode
 from tinygrad.tensor import Tensor
@@ -62,7 +61,7 @@ class TestSymbolicVarVals(unittest.TestCase):
   def test_var_vals_mask(self):
     x = Variable("x", 1, 100).bind(3)
     view = View.create(shape=(3,4), strides=(4,1), offset=0, mask=((0, x), (0, 4)))
-    st = ShapeTracker(views=(view,), size=3*4)
+    st = ShapeTracker(views=(view,))
     assert st.var_vals == {Variable("x", 1, 100): 3}
 
   def test_var_vals_complex(self):
@@ -89,13 +88,13 @@ class TestShapeTrackerUnbind(unittest.TestCase):
     v = Variable("v", 1, 100)
     bv = Variable("v", 1, 100).bind(3)
     t = Tensor.rand(3, 4).reshape(bv, 4)
-    assert t.lazydata.st.unbind() == ShapeTracker((View.create(shape=(v, 4)),), 3*4)
+    assert t.lazydata.st.unbind() == ShapeTracker((View.create(shape=(v, 4)),))
 
   def test_shrink_unbind(self):
     v = Variable("v", 1, 100)
     bv = Variable("v", 1, 100).bind(2)
     t = Tensor.rand(3, 4).shrink(((bv, bv+1), (0, 4)))
-    assert t.lazydata.st.unbind() == ShapeTracker((View.create(shape=(1, 4), offset=4*v),), 3*4)
+    assert t.lazydata.st.unbind() == ShapeTracker((View.create(shape=(1, 4), offset=4*v),))
 
 class TestSymbolicReshape(unittest.TestCase):
   def test_reshape_into_symbols_simple(self):
@@ -177,7 +176,7 @@ class TestSymbolicShapeExpr(unittest.TestCase):
     idx = (gidx0, lidx1, NumNode(1))
     shape = (i+1, 8, 4)
     strides = (1, (i*4)+4, i+1)
-    st = ShapeTracker((View.create(shape, strides), ), prod(shape))
+    st = ShapeTracker((View.create(shape, strides), ))
     idx, _valid = st.expr_idxs(idx)
     assert idx.render() == "((lidx1*((i*4)+4))+1+gidx0+i)"
 
