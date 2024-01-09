@@ -140,7 +140,7 @@ class TestMultiTensor(unittest.TestCase):
     lr_sched.step()
 
   def test_embedding(self):
-    B, T, embed_size, vocab_size = 4, 10, 20, 28 
+    B, T, embed_size, vocab_size = 4, 10, 20, 28
 
     layer = nn.Embedding(vocab_size, embed_size)
     x = Tensor(np.random.randint(0, vocab_size, (B, T)))
