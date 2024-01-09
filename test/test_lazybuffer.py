@@ -45,7 +45,7 @@ class TestLazyBuffer(unittest.TestCase):
     z = Tensor([1, np.e]).numpy()
     np.testing.assert_allclose(y, z)
 
-  def test_device_canonicalize(self):
+  def test_device_0_is_the_same_device(self):
     a = Tensor([1, 2, 3], f"{Device.DEFAULT}")
     b = Tensor([1, 2, 3], f"{Device.DEFAULT}:0")
     assert a.device == b.device
