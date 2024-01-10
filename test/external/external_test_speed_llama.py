@@ -46,7 +46,7 @@ class TestLLaMASpeed(unittest.TestCase):
     # test no compiler use for this
     Device[Device.DEFAULT].compiler = None
     run_llama("methodcache", False)
-    with Profiling(sort='time', frac=0.1, fn="/tmp/llama.prof"):
+    with Profiling(sort='time', frac=0.1, fn="/tmp/llama.prof", ts=5):
       run_llama("profile", False)
 
     Device[Device.DEFAULT].runtime = backup_program
@@ -54,4 +54,5 @@ class TestLLaMASpeed(unittest.TestCase):
     Device[Device.DEFAULT].compiler = backup_compiler
 
 if __name__ == '__main__':
-  unittest.main()
+  TestLLaMASpeed().test_llama_compile()
+  #unittest.main()

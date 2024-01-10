@@ -108,20 +108,20 @@ class TestRealDoesntSimplify(unittest.TestCase):
   def test_1(self):
     self.st = ShapeTracker((
       View.create((8, 3, 1, 2, 11, 1), (33, 11, 0, 0, 1, 0), 0, None),
-      View.create((8, 6, 11), (66, 11, 1), 0, None)), prod((8, 3, 1, 2, 11, 1)))
+      View.create((8, 6, 11), (66, 11, 1), 0, None)))
     assert self.st.real_strides() == (33, None, 1)
 
   def test_2(self):
     self.st = ShapeTracker((
       View.create((2, 2, 4, 3, 3), (72, 9, 18, -3, -1), 8, None),
-      View.create((4, 4, 3, 3), (36, 9, 3, 1), 0, None)), prod((2, 2, 4, 3, 3)))
+      View.create((4, 4, 3, 3), (36, 9, 3, 1), 0, None)))
     assert self.st.real_strides() == (None, 18, -3, -1)
 
 class TestRealStrides(unittest.TestCase):
   def test_1(self):
     self.st = ShapeTracker((
       View.create((2048,), (1,), 0, ((0, 512),)),
-      View.create((16, 32, 4), (128, 4, 1), 0, None)), prod((2048,)))
+      View.create((16, 32, 4), (128, 4, 1), 0, None)))
     st = self.st.real_strides()
     print(self.st, st)
     assert st == (None, 4, 1)
@@ -137,12 +137,12 @@ class TestRealSimplifies(unittest.TestCase):
   def test_1(self):
     self.st = ShapeTracker((
       View.create((1, 3, 2, 11, 4, 28), (0, 308, 0, 28, 0, 1), 0, None),
-      View.create((1, 3, 2, 11, 26, 1, 1, 3), (0, 2464, 0, 112, 1, 0, 0, 29), 0, None)), prod((1, 3, 2, 11, 4, 28)))
+      View.create((1, 3, 2, 11, 26, 1, 1, 3), (0, 2464, 0, 112, 1, 0, 0, 29), 0, None)))
 
   def test_2(self):
     self.st = ShapeTracker((
       View.create((8, 3, 3, 11, 2, 28), (924, 308, 0, 28, 0, 1), 0, None),
-      View.create((8, 1, 6, 10, 28, 3, 2, 1), (5544, 0, 0, 56, 1, 1848, 672, 0), 0, None)), prod((8, 3, 3, 11, 2, 28)))
+      View.create((8, 1, 6, 10, 28, 3, 2, 1), (5544, 0, 0, 56, 1, 1848, 672, 0), 0, None)))
 
 class TestIndexExpressions2d(unittest.TestCase):
 
@@ -797,38 +797,35 @@ class TestGetContraction(unittest.TestCase):
 class TestShapeTrackerSize(unittest.TestCase):
   def test_simple_size(self):
     st = ShapeTracker.from_shape((100, 100))
-    self.assertEqual(st.size, 100*100)
+    self.assertEqual(st.real_size(), 100*100)
 
   def test_expand_size(self):
     st = ShapeTracker.from_shape((100, 100))
     st = st.reshape((100, 100, 1))
     st = st.expand((100, 100, 100))
-    self.assertEqual(st.size, 100*100)
+    self.assertEqual(st.real_size(), 100*100)
 
   def test_expand_size_flatten(self):
     st = ShapeTracker.from_shape((100, 100))
     st = st.reshape((100, 100, 1))
     st = st.expand((100, 100, 100))
     st = st.reshape((100*100*100,))
-    self.assertEqual(st.size, 100*100)
+    self.assertEqual(st.real_size(), 100*100)
 
-  @unittest.skip("size is now the buffer size")
   def test_shrink_size_axis_0(self):
     st = ShapeTracker.from_shape((100, 100))
     st = st.shrink(((0, 50), (0, 100)))
-    self.assertEqual(st.size, 50*100)
+    self.assertEqual(st.real_size(), 50*100)
 
-  @unittest.skip("size is now the buffer size")
   def test_shrink_size_axis_0_variable(self):
     st = ShapeTracker.from_shape((100, 100))
     st = st.shrink(((0, Variable("a", 0, 50)), (0, 100)))
-    self.assertEqual(st.size, 50*100)
+    self.assertEqual(st.real_size(), 50*100)
 
-  @unittest.skip("size is now the buffer size")
   def test_shrink_size_axis_1(self):
     st = ShapeTracker.from_shape((100, 100))
     st = st.shrink(((0, 100), (0, 50)))
-    self.assertEqual(st.size, 9950)    # careful here
+    self.assertEqual(st.real_size(), 9950)    # careful here
 
 if __name__ == '__main__':
   unittest.main()

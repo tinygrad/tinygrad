@@ -3,6 +3,7 @@ from tinygrad import Tensor, Device, nn, GlobalCounters
 from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
 from extra.lr_scheduler import OneCycleLR
+from extra.models.llama import RMSNorm
 import numpy as np
 
 d_zero = f"{Device.DEFAULT}:0"
@@ -13,7 +14,7 @@ N = 128
 # shard_x is "data parallel"
 # shard_w is "model parallel"
 
-@unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA"}, "no GPU CI")
+@unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestMultiTensor(unittest.TestCase):
   def test_shard(self):
     X = Tensor.ones(256).contiguous().realize()
@@ -137,6 +138,65 @@ class TestMultiTensor(unittest.TestCase):
     optim = nn.optim.SGD(get_parameters(conv))
     lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
     lr_sched.step()
+
+  def test_embedding(self):
+    B, T, embed_size, vocab_size = 4, 10, 20, 28
+
+    layer = nn.Embedding(vocab_size, embed_size)
+    x = Tensor(np.random.randint(0, vocab_size, (B, T)))
+    z = layer(x)
+
+    layer_sharded = nn.Embedding(vocab_size, embed_size)
+    layer_sharded.weight.assign(layer.weight.shard((d0, d1), axis=1)).realize()
+    x_sharded = x.shard((d0, d1), axis=None)
+    z_shard = layer_sharded(x_sharded)
+
+    np.testing.assert_allclose(z.numpy(), z_shard.numpy(), atol=1e-6, rtol=1e-6)
+
+  def test_rmsnorm(self):
+    B, T, embed_size = 4, 10, 20
+
+    layer_norm = RMSNorm(embed_size)
+    x = Tensor.rand((B, T, embed_size)).contiguous().realize()
+    y = layer_norm(x)
+
+    # for norm layers, the weights are duplicated
+    layer_norm_sharded = RMSNorm(embed_size)
+    layer_norm_sharded.weight.shard_((d0, d1), axis=None).realize()
+
+    # if x is being sharded then all reduce is involved
+    x_sharded = x.shard((d0, d1), axis=2).realize()
+    y_shard = layer_norm_sharded(x_sharded).realize()
+    np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
+
+    # if x is copyed, then the operations remain inside each GPU
+    x_sharded = x.shard((d0, d1), axis=None).realize()
+    y_shard = layer_norm_sharded(x_sharded).realize()
+    np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
+
+  def test_scaled_product_attention(self):
+    q = Tensor.rand(32, 8, 16, 64).contiguous().realize()
+    k = Tensor.rand(32, 8, 16, 64).contiguous().realize()
+    v = Tensor.rand(32, 8, 16, 64).contiguous().realize()
+    y = Tensor.scaled_dot_product_attention(q, k, v)
+
+    q_sharded = q.shard((d0, d1), axis=None).realize()
+    k_sharded = k.shard((d0, d1), axis=1).realize()
+    v_sharded = v.shard((d0, d1), axis=1).realize()
+    y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded)
+    np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
+
+    m = Tensor.rand(32, 8, 16, 16).contiguous().realize()
+    y = Tensor.scaled_dot_product_attention(q, k, v, attn_mask=m)
+
+    m_sharded = m.shard((d0, d1), axis=None).realize()
+    y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded, attn_mask=m_sharded)
+    np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
+
+    y = Tensor.scaled_dot_product_attention(q, k, v, is_causal=True)
+    y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded, is_causal=True)
+    np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
+
 
   def test_data_parallel_resnet(self):
     import sys, pathlib
