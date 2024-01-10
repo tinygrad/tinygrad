@@ -47,6 +47,11 @@ class Attention:
     self.head_dim = dim // n_heads
     self.n_rep = self.n_heads // self.n_kv_heads
     self.max_context = max_context
+    print("\n init")
+    print(f"dim {dim}")
+    print(f"n_heads {n_heads}")
+    print(f"n_kv_heads {n_kv_heads}")
+    print(f"max_context {max_context}")
 
     self.wq = linear(dim, self.n_heads * self.head_dim, bias=False)
     self.wk = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
@@ -61,8 +66,9 @@ class Attention:
     xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     bsz, seqlen, n_heads, head_dim = xq.shape
-    # print("call")
-    # print(f"xq {xq}")
+    print("\n")
+    print("call")
+    print(f"xq {xq}")
     if isinstance(x.device, tuple):
       mask
 
@@ -70,22 +76,24 @@ class Attention:
     if not hasattr(self, "cache_k"):
       self.cache_k = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype)
       self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype)
-      # print(f"first call")
-      # print(f"device {x.device}")
-      # print(f"cache_k {self.cache_k}")
-      # print(f"cache_v {self.cache_v}")
+      print(f"first call")
+      print(f"device {x.device}")
+      print(f"cache_k {self.cache_k}")
+      print(f"cache_v {self.cache_v}")
       if isinstance(x.device, tuple):
         self.cache_k.contiguous().realize()
         self.cache_k.shard_(x.device, axis=2).realize()
         self.cache_v.contiguous().realize()
         self.cache_v.shard_(x.device, axis=2).realize()
 
+    print(f"before cache {xk}")
+    print(f"before cache {xv}")
     # HACK: without contiguous, the conversation mode is broken and the cache is not updated
     keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous()
     values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1).contiguous()
-    # print(f"start_pos {start_pos}")
-    # print(f"keys {keys}")
-    # print(f"values {values}")
+    print(f"start_pos {start_pos}")
+    print(f"after cache keys {keys}")
+    print(f"after cache values {values}")
 
     # update the cache
     assert keys.dtype == self.cache_k.dtype and values.dtype == self.cache_v.dtype, f"{keys.dtype=}, {values.dtype=}, {self.cache_k.dtype=}, {self.cache_v.dtype=}"
@@ -95,17 +103,18 @@ class Attention:
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
 
     xq, keys, values = xq.transpose(1, 2).contiguous().realize(), keys.transpose(1, 2).contiguous().realize(), values.transpose(1, 2).contiguous().realize()
-    # print(f"transposed xq {xq}")
-    # print(f"transposed keys {keys}")
-    # print(f"transposed values {values}")
+    print(f"transposed xq {xq}")
+    print(f"transposed keys {keys}")
+    print(f"transposed values {values}")
     attn = xq.scaled_dot_product_attention(keys, values, mask).realize()
+    print(f"atten {attn}")
     attn = attn.transpose(1, 2).contiguous().realize()
-    print("\n")
-    print(f"attn {attn}")
+    print(f"atten transposed {attn}")
     print(f"bsz {bsz}")
     print(f"seqlen {seqlen}")
     attn = attn.reshape(bsz, seqlen, -1).realize()
-    print(f"wo {self.wo.weight}")
+    print(f"attn reshaped {attn}")
+    # print(f"wo {self.wo.weight}")
     return self.wo(attn)
 
 class FeedForward:
