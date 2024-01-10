@@ -58,8 +58,6 @@ if __name__ == "__main__":
   from test.models.test_efficientnet import chicken_img, preprocess, _LABELS
   img = Tensor(preprocess(chicken_img))
 
-  Tensor.training = False
-  Tensor.no_grad = True
-
-  out = model(img).numpy()
-  print(_LABELS[out.argmax()])
+  with Tensor.train(False) and Tensor.set_no_grad():
+    out = model(img).numpy()
+    print(_LABELS[out.argmax()])

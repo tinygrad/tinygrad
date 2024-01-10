@@ -69,8 +69,8 @@ class LLaMaAdaptor(BaseLM):
     return self.llama.tokenizer.decode(tokens)
 
   def _model_call(self, inps):
-    Tensor.no_grad = True
-    return torch.Tensor(self.llama.model(Tensor(inps.numpy()), 0).numpy())
+    with Tensor.set_no_grad():
+      return torch.Tensor(self.llama.model(Tensor(inps.numpy()), 0).numpy())
 
   def greedy_until(self, requests):
     continuations = []
@@ -98,6 +98,6 @@ if __name__ == '__main__':
 
   # run eval and exit
   adaptor = LLaMaAdaptor(model_gen=args.gen, model_size=args.size, quantize=args.quantize,
-                         checkpoint_path=args.weights, tokenizer_path=args.tokenizer, device="cpu")
+                          checkpoint_path=args.weights, tokenizer_path=args.tokenizer, device="cpu")
   results = evaluator.evaluate(adaptor, tasks.get_task_dict(args.eval.split(",")), False, 0, args.limit)
   print(json.dumps(results, indent=2))
