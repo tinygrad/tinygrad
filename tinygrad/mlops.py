@@ -145,7 +145,12 @@ class Sum(Function):
     return x.r(ReduceOps.SUM, new_shape)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.expand(self.input_shape)
+class Prod(Function):
+  def forward(self, x:LazyBuffer, new_shape:Tuple[int, ...]) -> LazyBuffer:
+    self.input_shape = x.shape
+    return x.r(ReduceOps.PROD, new_shape)
 
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.expand(self.input_shape)
 class Max(Function):
   def forward(self, x:LazyBuffer, new_shape:Tuple[int, ...]) -> LazyBuffer:
     self.x, self.ret = x, x.r(ReduceOps.MAX, new_shape)
