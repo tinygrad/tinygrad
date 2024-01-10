@@ -92,7 +92,10 @@ class ShapeTracker:
   @property
   def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
 
-  def unbind(self) -> ShapeTracker: return ShapeTracker(tuple(v.unbind() for v in self.views))
+  def unbind(self) -> Tuple[ShapeTracker, Dict[Variable, int]]:
+    unbound_views = [v.unbind() for v in self.views]
+    views, var_vals = zip(*unbound_views)
+    return ShapeTracker(tuple(views)), merge_dicts(var_vals)
 
   def to_movement_ops(self) -> List[Tuple[MovementOps, Tuple]]:
     to_apply:List[Tuple[MovementOps, Tuple]] = []
