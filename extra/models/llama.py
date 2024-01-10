@@ -66,6 +66,9 @@ class Attention:
     if not hasattr(self, "cache_k"):
       self.cache_k = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype)
       self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype)
+      if len(x.device) > 1:
+        self.cache_k.contiguous().realize().shard_(x.device, axis=1).realize() 
+        self.cache_v.contiguous().realize().shard_(x.device, axis=1).realize() 
 
     # HACK: without contiguous, the conversation mode is broken and the cache is not updated
     keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous()

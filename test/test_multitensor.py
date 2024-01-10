@@ -236,6 +236,8 @@ class TestMultiTensor(unittest.TestCase):
     y_sharded = layer(x_sharded, start_pos, freqs_cis_sharded, mask)
     print(y.numpy())
 
+    np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
+
     # mask = Tensor.full((1, 1, 4, 0+4), float("-inf")).triu(0+1).realize()
 
   def test_data_parallel_resnet(self):
