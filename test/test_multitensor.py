@@ -231,7 +231,7 @@ class TestMultiTensor(unittest.TestCase):
     mask = None
     start_pos = 0
     y = layer(x, start_pos, freqs_cis, mask)
-    print(y.numpy())
+    print(f"y {y.numpy()}")
 
     layer_sharded = Attention(dim, n_heads, n_kv_heads, max_context, linear=nn.Linear)
     layer_sharded.wq.weight.assign(layer.wq.weight.shard((d0, d1), axis=1)).realize()
@@ -241,7 +241,7 @@ class TestMultiTensor(unittest.TestCase):
     x_sharded = x.shard((d0, d1), axis=None).realize()
     freqs_cis_sharded = freqs_cis.shard((d0, d1), axis=None).realize()
     y_sharded = layer_sharded(x_sharded, start_pos, freqs_cis_sharded, mask)
-    print(y.numpy())
+    print(y_sharded.numpy())
 
     np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
 
