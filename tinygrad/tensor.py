@@ -297,12 +297,12 @@ class Tensor:
     new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)])
     return mlops.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
   def expand(self, shape, *args) -> Tensor:
-    if (new_shape := argfix(shape, *args)) == self.shape: return self
-    return mlops.Expand.apply(self, shape=tuple([x if x != -1 else s for s,x in zip(self.shape, new_shape)]))
+    new_shape = tuple([x if x != -1 else s for s,x in zip(self.shape, argfix(shape, *args))])
+    return mlops.Expand.apply(self, shape=new_shape) if new_shape != self.shape else self
   def permute(self, order, *args) -> Tensor: return mlops.Permute.apply(self, order=argfix(order, *args))
   def flip(self, axis, *args) -> Tensor: return mlops.Flip.apply(self, axis=[x if x >= 0 else x+len(self.shape) for x in argfix(axis, *args)])
   def shrink(self, arg:Tuple[Optional[Tuple[sint, sint]], ...]) -> Tensor:
-    if not any(x is not None and x != (0,s) for x,s in zip(arg, self.shape)): return self
+    if all(x is None or x == (0,s) for x,s in zip(arg, self.shape)): return self
     return mlops.Shrink.apply(self, arg=tuple(x if x is not None else (0,s) for x,s in zip(arg, self.shape)))
   def pad(self, arg:Tuple[Optional[Tuple[sint, sint]], ...], value:float=0.0) -> Tensor:
     if all(x is None or x == (0,0) for x in arg): return self

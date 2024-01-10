@@ -49,11 +49,9 @@ def simplify(views:Tuple[View, ...]) -> Tuple[View, ...]:
 @functools.lru_cache(maxsize=None)
 def idxs_to_idx(shape:Tuple[int, ...], idxs:Tuple[Node, ...]) -> Node:
   assert len(idxs) == len(shape), "need an idx for all dimensions"
-  acc, ret = 1, []
-  for tidx,d in zip(reversed(idxs), reversed(shape)):
-    ret.append(tidx * acc)
-    acc *= d
-  return Node.sum(ret)
+  # idxs[-1] * 1 + idxs[-2] * shape[-1] + idxs[-3] * shape[-1] * shape[-2] + ...
+  accs = itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1)
+  return Node.sum([idx * acc for idx, acc in zip(reversed(idxs), accs)])
 
 @dataclass(frozen=True)
 class ShapeTracker:
@@ -92,7 +90,9 @@ class ShapeTracker:
   @property
   def var_vals(self) -> Dict[Variable, int]: return merge_dicts([dict([v.unbind()]) for v in self.vars()])
 
-  def unbind(self) -> ShapeTracker: return ShapeTracker(tuple(v.unbind() for v in self.views))
+  def unbind(self) -> Tuple[ShapeTracker, Dict[Variable, int]]:
+    unbound_views, var_vals = zip(*[v.unbind() for v in self.views])
+    return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
 
   def to_movement_ops(self) -> List[Tuple[MovementOps, Tuple]]:
     to_apply:List[Tuple[MovementOps, Tuple]] = []

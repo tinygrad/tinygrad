@@ -1,19 +1,19 @@
 from __future__ import annotations
-import functools, operator
+import functools, operator, itertools
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, cast
 from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, Set, sint
 
 @functools.lru_cache(maxsize=None)
-def filter_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
-  return tuple(stride if shp != 1 else 0 for stride, shp in zip(strides, shape))
+def canonicalize_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
+  return tuple(0 if s == 1 else st for s, st in zip(shape, strides))
 
 @functools.lru_cache(maxsize=None)
 def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
-  strides = [1] if shape else []
-  for d in reversed(shape[1:]): strides.append(d*strides[-1])
-  return filter_strides(shape, tuple(reversed(strides)))
+  if not shape: return ()
+  strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))
+  return canonicalize_strides(shape, strides[::-1])
 
 @functools.lru_cache(maxsize=None)
 def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]] = None) -> Tuple[Tuple[int, int, int], ...]:  # noqa: E501
@@ -81,7 +81,7 @@ class View:
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
-    strides = filter_strides(shape, strides) if strides else strides_for_shape(shape)
+    strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
     contiguous = offset == 0 and mask is None and strides == strides_for_shape(shape)
     return View(shape, strides, offset, mask, contiguous)
 
@@ -91,13 +91,14 @@ class View:
     return functools.reduce(operator.or_, [x.vars() for x in self.shape+self.strides+(self.offset,)+flatten_mask if isinstance(x, Node)], set())
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
-  def unbind(self) -> View:
-    unbound_vars:Dict[Variable,Node] = {v: v.unbind()[0] for v in self.vars() if v.val is not None}
+  def unbind(self) -> Tuple[View, Dict[Variable, int]]:
+    var_unboundvar_val = [(v, v.unbind()) for v in self.vars() if v.val is not None]
+    unbound_vars:Dict[Variable,Node] = {v:uv for v,(uv,_) in var_unboundvar_val}
     new_shape = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.shape])
     new_strides = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.strides])
     new_offset = self.offset if isinstance(self.offset, int) else self.offset.substitute(unbound_vars)
     new_mask = tuple((a if isinstance(a, int) else a.substitute(unbound_vars), b if isinstance(b, int) else b.substitute(unbound_vars)) for (a, b) in self.mask) if self.mask is not None else None  # noqa: E501
-    return View.create(new_shape, new_strides, new_offset, new_mask)
+    return View.create(new_shape, new_strides, new_offset, new_mask), dict(x[1] for x in var_unboundvar_val)
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[View]:
@@ -190,8 +191,8 @@ class View:
     else:
       strides += [0,] * (len(new_shape) - len(strides))
       mask, extra = _reshape_mask(self, new_shape)
-      fstrides = filter_strides(tuple(e-b for b,e in mask) if mask else new_shape, tuple(reversed(strides)))
-      extra_offset = (sum(m[0] * s for m,s in zip(self.mask, self.strides)) if self.mask else 0) - (sum(m[0] * s for m,s in zip(mask, fstrides)) if mask else 0) # noqa: E501
-      if not extra: return View.create(new_shape, fstrides, self.offset + extra_offset, mask)
+      cstrides = canonicalize_strides(tuple(e-b for b,e in mask) if mask else new_shape, tuple(reversed(strides)))
+      extra_offset = (sum(m[0] * s for m,s in zip(self.mask, self.strides)) if self.mask else 0) - (sum(m[0] * s for m,s in zip(mask, cstrides)) if mask else 0) # noqa: E501
+      if not extra: return View.create(new_shape, cstrides, self.offset + extra_offset, mask)
 
     return None

@@ -4,7 +4,7 @@ import numpy as np
 from collections import defaultdict
 from typing import Union, Optional, Any, Tuple, List, Set, Dict, DefaultDict, cast
 from tinygrad.dtype import dtypes, DType, ImageDType
-from tinygrad.helpers import prod, merge_dicts, flatten, getenv, dedup, DEBUG, all_int, all_same
+from tinygrad.helpers import prod, flatten, getenv, dedup, DEBUG, all_int, all_same, GRAPH
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps, Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -165,15 +165,16 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
 
   # consts are always fused and generated
   if buf.op is LoadOps.CONST:
-    # TODO: make shapetracker unbind also return var_vals
-    var_vals.update(merge_dicts([var_vals, st.var_vals]))
-    return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.arg), buf.dtype, st.simplify().unbind()))
+    unbound_st, st_var_vals = st.simplify().unbind()
+    var_vals.update(st_var_vals)
+    return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.arg), buf.dtype, unbound_st))
 
   # if we aren't fusing it, it's a load and we add it to the inputs
   if buf.realized or (buf in realizes and not first):
     if buf not in inputs: inputs.append(buf)
-    var_vals.update(merge_dicts([var_vals, st.var_vals]))
-    return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, st.simplify().unbind()))
+    unbound_st, st_var_vals = st.simplify().unbind()
+    var_vals.update(st_var_vals)
+    return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, unbound_st))
 
   # if a CONTIGUOUS made it all the way here, just skip it
   if buf.op is LoadOps.CONTIGUOUS:
@@ -207,15 +208,15 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
   else:
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
     op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes, cache={})
-    op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()))
+    op = LazyOp(BufferOps.STORE, (op, ), MemBuffer(0, out.dtype, output_st.simplify().unbind()[0]))
 
   return flatten(_recursive_schedule(x.base, seen, realizes, reduce_for_op) for x in inputs) + [ScheduleItem(op, out, tuple(inputs), var_vals)]
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
-                simple_pads:Set[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]]):
+                simple_pads:Set[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], scheduled=False):
   if buf in allbufs or buf.base.realized: return
-  log_lazybuffer(buf)
+  if GRAPH: log_lazybuffer(buf, scheduled)
   if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
                                             not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
     if DEBUG >= 3: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
@@ -248,14 +249,13 @@ def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
 
 def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) -> List[ScheduleItem]:
   if seen is None: seen = set()
-  for out in outs: log_lazybuffer(out, scheduled=True)
 
   # start by just realizing the buffers passed in
   realizes: Set[LazyBuffer] = set([x.base for x in outs if not x.base.realized])
   allbufs: Dict[LazyBuffer, None] = {}
   simple_pads: Set[LazyBuffer] = set()
   children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
-  for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children)
+  for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children, scheduled=True)
 
   # check if we have to realize pads
   for p in simple_pads:
