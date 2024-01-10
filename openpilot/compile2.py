@@ -21,34 +21,32 @@ from tinygrad.ops import LoadOps, ScheduleItem
 Device.DEFAULT = "GPU"
 
 def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
-  Tensor.no_grad = True
-  Tensor.training = False
-
-  # load the model
-  onnx_model = onnx.load(io.BytesIO(onnx_data))
-  run_onnx = get_run_onnx(onnx_model)
-  input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
-
-  # run the model
-  inputs = {k:Tensor.empty(*shp) for k,shp in input_shapes.items()}
-  ret: Tensor = next(iter(run_onnx(inputs).values())).cast(dtypes.float32).contiguous()
-  schedule = ret.lazydata.schedule()
-
-  # filter schedule that don't depend on the inputs
-  input_lb = [x.lazydata.base for x in inputs.values()]
-  depends = set(input_lb)
-  for si in schedule:
-    if any(b in depends for b in si.inputs):
-      depends.add(si.out)
-
-  # run all kernels that don't depend on the inputs
-  # NOTE: there's two extra kernels due to fusions that now happen since the weights aren't realized
-  schedule, schedule_independent = partition(schedule, lambda si: si.out in depends)
-  print(f"{len(schedule)} schedule items depend on the input, {len(schedule_independent)} don't")
-
-  # confirm no loadops in the (non independent) schedule except for the ones that load the input buffers
-  assert all(si.ast.op not in LoadOps or si.out in input_lb for si in schedule), "has loadops, can't compile to Thneed"
-  return schedule, schedule_independent, inputs
+  with Tensor.train(False) and Tensor.set_no_grad():
+    # load the model
+    onnx_model = onnx.load(io.BytesIO(onnx_data))
+    run_onnx = get_run_onnx(onnx_model)
+    input_shapes = {inp.name:tuple(x.dim_value for x in inp.type.tensor_type.shape.dim) for inp in onnx_model.graph.input}
+  
+    # run the model
+    inputs = {k:Tensor.empty(*shp) for k,shp in input_shapes.items()}
+    ret: Tensor = next(iter(run_onnx(inputs).values())).cast(dtypes.float32).contiguous()
+    schedule = ret.lazydata.schedule()
+  
+    # filter schedule that don't depend on the inputs
+    input_lb = [x.lazydata.base for x in inputs.values()]
+    depends = set(input_lb)
+    for si in schedule:
+      if any(b in depends for b in si.inputs):
+        depends.add(si.out)
+  
+    # run all kernels that don't depend on the inputs
+    # NOTE: there's two extra kernels due to fusions that now happen since the weights aren't realized
+    schedule, schedule_independent = partition(schedule, lambda si: si.out in depends)
+    print(f"{len(schedule)} schedule items depend on the input, {len(schedule_independent)} don't")
+  
+    # confirm no loadops in the (non independent) schedule except for the ones that load the input buffers
+    assert all(si.ast.op not in LoadOps or si.out in input_lb for si in schedule), "has loadops, can't compile to Thneed"
+    return schedule, schedule_independent, inputs
 
 def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[str, Tensor]):
   import onnx

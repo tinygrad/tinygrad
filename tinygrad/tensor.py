@@ -58,6 +58,12 @@ class Tensor:
     def __enter__(self): self.prev, Tensor.no_grad = Tensor.no_grad, self.val
     def __exit__(self, exc_type, exc_value, traceback): Tensor.no_grad = self.prev
 
+  wino: ClassVar[bool] = getenv("WINO", 0)
+  class set_wino:
+    def __init__(self, val=True): self.val = val
+    def __enter__(self): self.prev, Tensor.wino = Tensor.wino, self.val
+    def __exit__(self, exc_type, exc_value, traceback): Tensor.wino = self.prev
+
   def __init__(self, data:Union[None, Scalar, List, Tuple, LazyBuffer, np.ndarray, bytes, MultiLazyBuffer],
                device:Optional[Union[str, tuple, list]]=None, dtype:Optional[DType]=None, requires_grad:Optional[bool]=None):
     assert dtype is None or isinstance(dtype, DType), f"invalid dtype {dtype}"
@@ -634,7 +640,6 @@ class Tensor:
     padding = flatten((((k-1)*d-p,(k-1)*d-p+op) for k,d,p,op in reversed(list(zip(HW, make_pair(dilation, len(HW)), make_pair(padding, len(HW)), make_pair(output_padding, len(HW)))))))  # noqa: E501
     return x.conv2d(w.flatten(end_dim=1), groups=groups, bias=bias, dilation=dilation, padding=padding)
 
-  wino = getenv("WINO", 0)
   def conv2d(self, weight:Tensor, bias:Optional[Tensor]=None, groups=1, stride=1, dilation=1, padding=0) -> Tensor:
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"  # noqa: E501

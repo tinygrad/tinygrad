@@ -59,12 +59,10 @@ def spec_mrcnn():
 
 if __name__ == "__main__":
   # inference only for now
-  Tensor.training = False
-  Tensor.no_grad = True
-
-  for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,mrcnn").split(","):
-    nm = f"spec_{m}"
-    if nm in globals():
-      print(f"testing {m}")
-      globals()[nm]()
-
+  with Tensor.train(False) and Tensor.set_no_grad():
+    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,mrcnn").split(","):
+      nm = f"spec_{m}"
+      if nm in globals():
+        print(f"testing {m}")
+        globals()[nm]()
+  

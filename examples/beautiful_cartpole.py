@@ -60,9 +60,8 @@ if __name__ == "__main__":
   @TinyJit
   def get_action(obs:Tensor) -> Tensor:
     # TODO: with no_grad
-    Tensor.no_grad = True
-    ret = model(obs)[0].exp().multinomial().realize()
-    Tensor.no_grad = False
+    with Tensor.set_no_grad():
+      ret = model(obs)[0].exp().multinomial().realize()
     return ret
 
   BS = 256

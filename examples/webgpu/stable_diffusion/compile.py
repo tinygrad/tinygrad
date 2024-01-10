@@ -75,157 +75,157 @@ if __name__ == "__main__":
   args = parser.parse_args()
   Device.DEFAULT = "WEBGPU"
 
-  Tensor.no_grad = True
-  model = StableDiffusion()
-
-  # load in weights
-  load_state_dict(model, torch_load(fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', 'sd-v1-4.ckpt'))['state_dict'], strict=False)
-
-  class Step(NamedTuple):
-    name: str = ""
-    input: List[Tensor] = []
-    forward: Any = None
-
-  sub_steps = [
-    Step(name = "textModel", input = [Tensor.randn(1, 77)], forward = model.cond_stage_model.transformer.text_model),
-    Step(name = "diffusor", input = [Tensor.randn(1, 77, 768), Tensor.randn(1, 77, 768), Tensor.randn(1,4,64,64), Tensor.rand(1), Tensor.randn(1), Tensor.randn(1), Tensor.randn(1)], forward = model),
-    Step(name = "decoder", input = [Tensor.randn(1,4,64,64)], forward = model.decode)
-  ]
-
-  prg = ""
-
-  def compile_step(model, step: Step):
-    run, special_names = jit_model(step, *step.input)
-    functions, statements, bufs, _ = compile_net(run, special_names)
-    state = get_state_dict(model)
-    weights = {id(x.lazydata.base.realized): name for name, x in state.items()}
-    kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
-    kernel_names = ', '.join([name for (name, _, _, _) in statements])
-    kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
-    bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}'], '{weights[_key]}'))") + ";"  for name,(size,dtype,_key) in bufs.items()])
-    gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate(special_names.items()) if "output" not in value])
-    input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new Float32Array(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,(_,value) in enumerate(special_names.items()) if value != "output0"])
-    return f"""\n    var {step.name} = function() {{
-
-    {kernel_code}
-
-    return {{
-      "setup": async (device, safetensor) => {{
-        const metadata = getTensorMetadata(safetensor[0]);
-
-        {bufs}
-
-        {gpu_write_bufs}
-        const gpuReadBuffer = device.createBuffer({{ size: output0.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }});
-
-        const kernels = [{kernel_names}];
-        const piplines = await Promise.all(kernels.map(name => device.createComputePipelineAsync({{layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}})));
-
-        return async ({",".join([f'data{i}' for i,(k,v) in enumerate(special_names.items()) if v != "output0"])}) => {{
-            const commandEncoder = device.createCommandEncoder();
-
-            {input_writer}
-
-            {kernel_calls}
-            commandEncoder.copyBufferToBuffer(output0, 0, gpuReadBuffer, 0, output0.size);
-            const gpuCommands = commandEncoder.finish();
-            device.queue.submit([gpuCommands]);
-
-            await gpuReadBuffer.mapAsync(GPUMapMode.READ);
-            const resultBuffer = new Float32Array(gpuReadBuffer.size/4);
-            resultBuffer.set(new Float32Array(gpuReadBuffer.getMappedRange()));
-            gpuReadBuffer.unmap();
-            return resultBuffer;
+  with Tensor.set_no_grad():
+    model = StableDiffusion()
+  
+    # load in weights
+    load_state_dict(model, torch_load(fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', 'sd-v1-4.ckpt'))['state_dict'], strict=False)
+  
+    class Step(NamedTuple):
+      name: str = ""
+      input: List[Tensor] = []
+      forward: Any = None
+  
+    sub_steps = [
+      Step(name = "textModel", input = [Tensor.randn(1, 77)], forward = model.cond_stage_model.transformer.text_model),
+      Step(name = "diffusor", input = [Tensor.randn(1, 77, 768), Tensor.randn(1, 77, 768), Tensor.randn(1,4,64,64), Tensor.rand(1), Tensor.randn(1), Tensor.randn(1), Tensor.randn(1)], forward = model),
+      Step(name = "decoder", input = [Tensor.randn(1,4,64,64)], forward = model.decode)
+    ]
+  
+    prg = ""
+  
+    def compile_step(model, step: Step):
+      run, special_names = jit_model(step, *step.input)
+      functions, statements, bufs, _ = compile_net(run, special_names)
+      state = get_state_dict(model)
+      weights = {id(x.lazydata.base.realized): name for name, x in state.items()}
+      kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
+      kernel_names = ', '.join([name for (name, _, _, _) in statements])
+      kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
+      bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}'], '{weights[_key]}'))") + ";"  for name,(size,dtype,_key) in bufs.items()])
+      gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate(special_names.items()) if "output" not in value])
+      input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new Float32Array(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,(_,value) in enumerate(special_names.items()) if value != "output0"])
+      return f"""\n    var {step.name} = function() {{
+  
+      {kernel_code}
+  
+      return {{
+        "setup": async (device, safetensor) => {{
+          const metadata = getTensorMetadata(safetensor[0]);
+  
+          {bufs}
+  
+          {gpu_write_bufs}
+          const gpuReadBuffer = device.createBuffer({{ size: output0.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }});
+  
+          const kernels = [{kernel_names}];
+          const piplines = await Promise.all(kernels.map(name => device.createComputePipelineAsync({{layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}})));
+  
+          return async ({",".join([f'data{i}' for i,(k,v) in enumerate(special_names.items()) if v != "output0"])}) => {{
+              const commandEncoder = device.createCommandEncoder();
+  
+              {input_writer}
+  
+              {kernel_calls}
+              commandEncoder.copyBufferToBuffer(output0, 0, gpuReadBuffer, 0, output0.size);
+              const gpuCommands = commandEncoder.finish();
+              device.queue.submit([gpuCommands]);
+  
+              await gpuReadBuffer.mapAsync(GPUMapMode.READ);
+              const resultBuffer = new Float32Array(gpuReadBuffer.size/4);
+              resultBuffer.set(new Float32Array(gpuReadBuffer.getMappedRange()));
+              gpuReadBuffer.unmap();
+              return resultBuffer;
+          }}
         }}
       }}
     }}
-  }}
-  """
-
-  for step in sub_steps:
-    print(f'Executing step={step.name}')
-    prg += compile_step(model, step)
-
-    if step.name == "diffusor":
-      if args.remoteweights:
-        base_url = "https://huggingface.co/wpmed/tinygrad-sd-f16/resolve/main"
-      else:
-        state = get_state_dict(model)
-        safe_save(state, os.path.join(os.path.dirname(__file__), "net.safetensors"))
-        convert_f32_to_f16("./net.safetensors", "./net_conv.safetensors")
-        split_safetensor("./net_conv.safetensors")
-        os.remove("net.safetensors")
-        os.remove("net_conv.safetensors")
-        base_url = "."
-
-  prekernel = f"""
-    window.MODEL_BASE_URL= "{base_url}";
-    const getTensorMetadata = (safetensorBuffer) => {{
-      const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
-      const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
-      return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
+    """
+  
+    for step in sub_steps:
+      print(f'Executing step={step.name}')
+      prg += compile_step(model, step)
+  
+      if step.name == "diffusor":
+        if args.remoteweights:
+          base_url = "https://huggingface.co/wpmed/tinygrad-sd-f16/resolve/main"
+        else:
+          state = get_state_dict(model)
+          safe_save(state, os.path.join(os.path.dirname(__file__), "net.safetensors"))
+          convert_f32_to_f16("./net.safetensors", "./net_conv.safetensors")
+          split_safetensor("./net_conv.safetensors")
+          os.remove("net.safetensors")
+          os.remove("net_conv.safetensors")
+          base_url = "."
+  
+    prekernel = f"""
+      window.MODEL_BASE_URL= "{base_url}";
+      const getTensorMetadata = (safetensorBuffer) => {{
+        const metadataLength = Number(new DataView(safetensorBuffer.buffer).getBigUint64(0, true));
+        const metadata = JSON.parse(new TextDecoder("utf8").decode(safetensorBuffer.subarray(8, 8 + metadataLength)));
+        return Object.fromEntries(Object.entries(metadata).filter(([k, v]) => k !== "__metadata__").map(([k, v]) => [k, {{...v, data_offsets: v.data_offsets.map(x => 8 + metadataLength + x)}}]));
+      }};
+  
+    const getTensorBuffer = (safetensorParts, tensorMetadata, key) => {{
+      let selectedPart = 0;
+      let counter = 0;
+      let partStartOffsets = [1131408336, 2227518416, 3308987856, 4265298864];
+      let correctedOffsets = tensorMetadata.data_offsets;
+      let prev_offset = 0;
+  
+      for (let start of partStartOffsets) {{
+        prev_offset = (counter == 0) ? 0 : partStartOffsets[counter-1];
+  
+        if (tensorMetadata.data_offsets[0] < start) {{
+          selectedPart = counter;
+          correctedOffsets = [correctedOffsets[0]-prev_offset, correctedOffsets[1]-prev_offset];
+          break;
+        }}
+  
+        counter++;
+      }}
+  
+      let allZero = true;
+      let out = safetensorParts[selectedPart].subarray(...correctedOffsets);
+  
+      for (let i = 0; i < out.length; i++) {{
+          if (out[i] !== 0) {{
+              allZero = false;
+              break;
+          }}
+      }}
+  
+      if (allZero) {{
+          console.log("Error: weight '" + key + "' is all zero.");
+      }}
+  
+      return safetensorParts[selectedPart].subarray(...correctedOffsets);
+    }}
+  
+    const getWeight = (safetensors, key) => {{
+      let uint8Data = getTensorBuffer(safetensors, getTensorMetadata(safetensors[0])[key], key);
+      return new Float32Array(uint8Data.buffer, uint8Data.byteOffset, uint8Data.byteLength / Float32Array.BYTES_PER_ELEMENT);
+    }}
+  
+    const createEmptyBuf = (device, size) => {{
+        return device.createBuffer({{size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }});
     }};
-
-  const getTensorBuffer = (safetensorParts, tensorMetadata, key) => {{
-    let selectedPart = 0;
-    let counter = 0;
-    let partStartOffsets = [1131408336, 2227518416, 3308987856, 4265298864];
-    let correctedOffsets = tensorMetadata.data_offsets;
-    let prev_offset = 0;
-
-    for (let start of partStartOffsets) {{
-      prev_offset = (counter == 0) ? 0 : partStartOffsets[counter-1];
-
-      if (tensorMetadata.data_offsets[0] < start) {{
-        selectedPart = counter;
-        correctedOffsets = [correctedOffsets[0]-prev_offset, correctedOffsets[1]-prev_offset];
-        break;
-      }}
-
-      counter++;
-    }}
-
-    let allZero = true;
-    let out = safetensorParts[selectedPart].subarray(...correctedOffsets);
-
-    for (let i = 0; i < out.length; i++) {{
-        if (out[i] !== 0) {{
-            allZero = false;
-            break;
-        }}
-    }}
-
-    if (allZero) {{
-        console.log("Error: weight '" + key + "' is all zero.");
-    }}
-
-    return safetensorParts[selectedPart].subarray(...correctedOffsets);
-  }}
-
-  const getWeight = (safetensors, key) => {{
-    let uint8Data = getTensorBuffer(safetensors, getTensorMetadata(safetensors[0])[key], key);
-    return new Float32Array(uint8Data.buffer, uint8Data.byteOffset, uint8Data.byteLength / Float32Array.BYTES_PER_ELEMENT);
-  }}
-
-  const createEmptyBuf = (device, size) => {{
-      return device.createBuffer({{size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }});
-  }};
-
-  const createWeightBuf = (device, size, data) => {{
-    const buf = device.createBuffer({{ mappedAtCreation: true, size, usage: GPUBufferUsage.STORAGE }});
-    new Uint8Array(buf.getMappedRange()).set(data);
-    buf.unmap();
-    return buf;
-  }};
-
-  const addComputePass = (device, commandEncoder, pipeline, bufs, workgroup) => {{
-    const bindGroup = device.createBindGroup({{layout: pipeline.getBindGroupLayout(0), entries: bufs.map((buffer, index) => ({{ binding: index, resource: {{ buffer }} }}))}});
-    const passEncoder = commandEncoder.beginComputePass();
-    passEncoder.setPipeline(pipeline);
-    passEncoder.setBindGroup(0, bindGroup);
-    passEncoder.dispatchWorkgroups(...workgroup);
-    passEncoder.end();
-  }};"""
-
-  with open(os.path.join(os.path.dirname(__file__), "net.js"), "w") as text_file:
-    text_file.write(prekernel + prg)
+  
+    const createWeightBuf = (device, size, data) => {{
+      const buf = device.createBuffer({{ mappedAtCreation: true, size, usage: GPUBufferUsage.STORAGE }});
+      new Uint8Array(buf.getMappedRange()).set(data);
+      buf.unmap();
+      return buf;
+    }};
+  
+    const addComputePass = (device, commandEncoder, pipeline, bufs, workgroup) => {{
+      const bindGroup = device.createBindGroup({{layout: pipeline.getBindGroupLayout(0), entries: bufs.map((buffer, index) => ({{ binding: index, resource: {{ buffer }} }}))}});
+      const passEncoder = commandEncoder.beginComputePass();
+      passEncoder.setPipeline(pipeline);
+      passEncoder.setBindGroup(0, bindGroup);
+      passEncoder.dispatchWorkgroups(...workgroup);
+      passEncoder.end();
+    }};"""
+  
+    with open(os.path.join(os.path.dirname(__file__), "net.js"), "w") as text_file:
+      text_file.write(prekernel + prg)

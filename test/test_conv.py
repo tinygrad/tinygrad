@@ -25,12 +25,11 @@ class TestConv(unittest.TestCase):
     print(ret)
 
   def test_lazycache(self):
-    Tensor.no_grad = True
-    x = Tensor.rand(1, 32)
-    y = Tensor.rand(32)
-    out = x + y.reshape((1,32,1)).reshape((1,32)) + y.reshape((1,32,1)).reshape((1,32))
-    out.numpy()
-    Tensor.no_grad = False
+    with Tensor.set_no_grad():
+      x = Tensor.rand(1, 32)
+      y = Tensor.rand(32)
+      out = x + y.reshape((1,32,1)).reshape((1,32)) + y.reshape((1,32,1)).reshape((1,32))
+      out.numpy()
 
   def test_simple_biased(self):
     C = 8
@@ -42,87 +41,76 @@ class TestConv(unittest.TestCase):
     print(ret.numpy())
 
   def test_two_binops_no_rerun(self):
-    Tensor.no_grad = True
-    x = Tensor.randn(1,12,128,256)
-    w = Tensor.randn(32,12,3,3)
-    out = x.conv2d(w, stride=(2,2), padding=(1,1))
-    r1, r2 = out.relu(), (out-1)
-    np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0))
-    np.testing.assert_allclose(r2.numpy(), out.numpy() - 1)
-    Tensor.no_grad = False
+    with Tensor.set_no_grad():
+      x = Tensor.randn(1,12,128,256)
+      w = Tensor.randn(32,12,3,3)
+      out = x.conv2d(w, stride=(2,2), padding=(1,1))
+      r1, r2 = out.relu(), (out-1)
+      np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0))
+      np.testing.assert_allclose(r2.numpy(), out.numpy() - 1)
 
   def test_two_overlapping_binops_no_rerun(self):
-    Tensor.no_grad = True
-    x = Tensor.randn(1,12,128,256)
-    w = Tensor.randn(32,12,3,3)
-    out = x.conv2d(w, stride=(2,2), padding=(1,1))
-    r1, r2 = out.relu(), out.elu()
-    np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0))
-    np.testing.assert_allclose(r2.numpy(), np.where(out.numpy() > 0, out.numpy(), (np.exp(out.numpy()) - 1)), atol=1e-5)
-    Tensor.no_grad = False
+    with Tensor.set_no_grad():
+      x = Tensor.randn(1,12,128,256)
+      w = Tensor.randn(32,12,3,3)
+      out = x.conv2d(w, stride=(2,2), padding=(1,1))
+      r1, r2 = out.relu(), out.elu()
+      np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0))
+      np.testing.assert_allclose(r2.numpy(), np.where(out.numpy() > 0, out.numpy(), (np.exp(out.numpy()) - 1)), atol=1e-5)
 
   @unittest.skipIf(Device.DEFAULT != "TORCH", "Takes too long to compile for Compiled backends")
   def test_two_overlapping_binops_no_rerun_wino(self):
-    Tensor.no_grad = True
-    old_wino = Tensor.wino
-    Tensor.wino = True
-    x = Tensor.randn(1,4,16,16)
-    w = Tensor.randn(6,4,3,3)
-    out = x.conv2d(w, padding=(1,1))
-    r1, r2 = out.relu(), out.elu()
-    np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0))
-    np.testing.assert_allclose(r2.numpy(), np.where(out.numpy() > 0, out.numpy(), (np.exp(out.numpy()) - 1)), atol=1e-5)
-    Tensor.wino = old_wino
-    Tensor.no_grad = False
-
+    with Tensor.set_no_grad() and Tensor.set_wino():
+      x = Tensor.randn(1,4,16,16)
+      w = Tensor.randn(6,4,3,3)
+      out = x.conv2d(w, padding=(1,1))
+      r1, r2 = out.relu(), out.elu()
+      np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0))
+      np.testing.assert_allclose(r2.numpy(), np.where(out.numpy() > 0, out.numpy(), (np.exp(out.numpy()) - 1)), atol=1e-5)
   def test_first_three(self):
-    Tensor.no_grad = True
-    x = Tensor.rand(1,12,128,256)
-
-    w = Tensor.rand(32,12,3,3)
-    x = x.conv2d(w, stride=(2,2), padding=(1,1)).elu()
-
-    w = Tensor.rand(32,1,3,3)
-    x = x.conv2d(w, padding=(1,1), groups=32).elu()
-
-    w = Tensor.rand(16,32,1,1)
-    x = x.conv2d(w).elu()
-
-    x = x.numpy()
-    print(x.shape)
-    Tensor.no_grad = False
+    with Tensor.set_no_grad():
+      x = Tensor.rand(1,12,128,256)
+  
+      w = Tensor.rand(32,12,3,3)
+      x = x.conv2d(w, stride=(2,2), padding=(1,1)).elu()
+  
+      w = Tensor.rand(32,1,3,3)
+      x = x.conv2d(w, padding=(1,1), groups=32).elu()
+  
+      w = Tensor.rand(16,32,1,1)
+      x = x.conv2d(w).elu()
+  
+      x = x.numpy()
+      print(x.shape)
 
   def test_elu(self):
-    Tensor.no_grad = True
-    x = Tensor.rand(1,12,128,256)
-
-    w = Tensor.rand(32,12,3,3)
-    x = x.conv2d(w, stride=(2,2), padding=(1,1))
-
-    x = x.elu()
-
-    w = Tensor.rand(32,1,3,3)
-    x = x.conv2d(w, padding=(1,1), groups=32)
-    x.numpy()
-    Tensor.no_grad = False
+    with Tensor.set_no_grad():
+      x = Tensor.rand(1,12,128,256)
+  
+      w = Tensor.rand(32,12,3,3)
+      x = x.conv2d(w, stride=(2,2), padding=(1,1))
+  
+      x = x.elu()
+  
+      w = Tensor.rand(32,1,3,3)
+      x = x.conv2d(w, padding=(1,1), groups=32)
+      x.numpy()
 
   def test_reduce_relu(self):
-    Tensor.no_grad = True
-    x = Tensor.rand(1,12,128,256)
-    x = x.sum(keepdim=True).relu()
-    x.numpy()
-    Tensor.no_grad = False
+    with Tensor.set_no_grad():
+      x = Tensor.rand(1,12,128,256)
+      x = x.sum(keepdim=True).relu()
+      x.numpy()
 
   def test_bias(self):
-    Tensor.no_grad = True
-    from tinygrad.nn import Conv2d
-    x = Tensor.rand(1,12,128,256)
-    c = Conv2d(12, 32, 3)
-    x = c(x).relu()
-    w = Tensor.uniform(32, 1, 3, 3)
-    x = x.conv2d(w, groups=32)
-    x.numpy()
-    Tensor.no_grad = False
+    with Tensor.set_no_grad():
+      from tinygrad.nn import Conv2d
+      x = Tensor.rand(1,12,128,256)
+      c = Conv2d(12, 32, 3)
+      x = c(x).relu()
+      w = Tensor.uniform(32, 1, 3, 3)
+      x = x.conv2d(w, groups=32)
+      x.numpy()
 
   def test_multiadd(self):
     w = Tensor.rand(32)
