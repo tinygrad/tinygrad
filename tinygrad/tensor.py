@@ -521,19 +521,17 @@ class Tensor:
       return Tensor.full(tuple(1 if s == 0 else s for s in self.shape) if keepdim else shape, {mlops.Sum: 0.0, mlops.Max: -float("inf")}[fxn])
     ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else s for i,s in enumerate(self.shape)]))
     return ret if keepdim else ret.reshape(shape=shape)
-
+  def acc_dtype(self): return least_upper_dtype(self.dtype, dtypes.uint) if dtypes.is_unsigned(self.dtype) else \
+                              least_upper_dtype(self.dtype, dtypes.int) if (dtypes.is_int(self.dtype) or self.dtype==dtypes.bool) else \
+                              least_upper_dtype(self.dtype, dtypes.float)
   def sum(self, axis=None, keepdim=False):
-    acc_dtype = least_upper_dtype(self.dtype, dtypes.uint) if dtypes.is_unsigned(self.dtype) else \
-                least_upper_dtype(self.dtype, dtypes.int) if (dtypes.is_int(self.dtype) or self.dtype==dtypes.bool) else \
-                least_upper_dtype(self.dtype, dtypes.float)
+    acc_dtype = self.acc_dtype()
     # cast back to float16 or bfloat16 to match torch / jax behavior, but we use float for acc
     output_dtype = self.dtype if self.dtype in (dtypes.float16, dtypes.bfloat16) else acc_dtype
     return self.cast(acc_dtype)._reduce(mlops.Sum, axis, keepdim).cast(output_dtype)
   def prod(self, axis=None, keepdim=False):
     print('hit the prod func')
-    acc_dtype = least_upper_dtype(self.dtype, dtypes.uint) if dtypes.is_unsigned(self.dtype) else \
-                least_upper_dtype(self.dtype, dtypes.int) if (dtypes.is_int(self.dtype) or self.dtype==dtypes.bool) else \
-                least_upper_dtype(self.dtype, dtypes.float)
+    acc_dtype = self.acc_dtype()
     # cast back to float16 or bfloat16 to match torch / jax behavior, but we use float for acc
     output_dtype = self.dtype if self.dtype in (dtypes.float16, dtypes.bfloat16) else acc_dtype
     return self.cast(acc_dtype)._reduce(mlops.Prod, axis, keepdim).cast(output_dtype)
