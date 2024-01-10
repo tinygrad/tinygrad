@@ -75,6 +75,9 @@ class View:
   mask:Optional[Tuple[Tuple[sint, sint], ...]]
   contiguous:bool
 
+  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  def size(self) -> int: return prod([x.max if isinstance(x, Node) else x for x in self.shape])
+
   @staticmethod
   @functools.lru_cache(maxsize=None)
   def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
