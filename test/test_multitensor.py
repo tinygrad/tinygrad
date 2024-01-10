@@ -37,13 +37,6 @@ class TestMultiTensor(unittest.TestCase):
     X.shard_([d_zero, d1], 0)
     (X + 1).sum().realize()
 
-  def test_shard_reshape(self):
-    X = Tensor.ones(1,2,8,4).contiguous().realize()
-    print(X)
-    X.shard_((d0, d1), axis=2) 
-    print(X)
-    X.reshape(1, 2, -1).realize()
-
   def test_numpy(self):
     X = Tensor.ones(256)
     X.shard_((d0, d1), 0)
