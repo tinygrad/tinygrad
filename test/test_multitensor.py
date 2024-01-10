@@ -1,9 +1,9 @@
 import unittest
-from tinygrad import Tensor, Device, nn, GlobalCounters, dtypes
+from tinygrad import Tensor, Device, nn, GlobalCounters
 from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
 from extra.lr_scheduler import OneCycleLR
-from extra.models.llama import RMSNorm, Attention, precompute_freqs_cis
+from extra.models.llama import RMSNorm, Attention
 import numpy as np
 
 d_zero = f"{Device.DEFAULT}:0"
@@ -222,7 +222,7 @@ class TestMultiTensor(unittest.TestCase):
     x = Tensor.rand(1,2,32).half()
     freqs_cis = Tensor.rand(1,2,1,2,2).half()
     mask = None
-    start_pos = 0 
+    start_pos = 0
     y = layer(x, start_pos, freqs_cis, mask)
     print(y.numpy())
 
@@ -233,7 +233,7 @@ class TestMultiTensor(unittest.TestCase):
     layer_sharded.wo.weight.assign(layer.wo.weight.shard((d0, d1), axis=1)).realize()
     x_sharded = x.shard((d0, d1), axis=None).realize()
     freqs_cis_sharded = freqs_cis.shard((d0, d1), axis=None).realize()
-    y_sharded = layer(x_sharded, start_pos, freqs_cis_sharded, mask)
+    y_sharded = layer_sharded(x_sharded, start_pos, freqs_cis_sharded, mask)
     print(y.numpy())
 
     np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
