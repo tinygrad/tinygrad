@@ -90,16 +90,24 @@ class Timing(contextlib.ContextDecorator):
     self.et = time.perf_counter_ns() - self.st
     if self.enabled: print(f"{self.prefix}{self.et*1e-6:6.2f} ms"+(self.on_exit(self.et) if self.on_exit else ""))
 
+def _format_fcn(fcn): return f"{fcn[0]}:{fcn[2]}" if fcn[2] != "<genexpr>" else f"{fcn[0]}:{fcn[1]}"
 class Profiling(contextlib.ContextDecorator):
-  def __init__(self, enabled=True, sort='cumtime', frac=0.2, fn=None): self.enabled, self.sort, self.frac, self.fn = enabled, sort, frac, fn
+  def __init__(self, enabled=True, sort='cumtime', frac=0.2, fn=None, ts=1):
+    self.enabled, self.sort, self.frac, self.fn, self.time_scale = enabled, sort, frac, fn, 1e3/ts
   def __enter__(self):
-    self.pr = cProfile.Profile(timer=lambda: int(time.time()*1e9), timeunit=1e-6)
+    self.pr = cProfile.Profile()
     if self.enabled: self.pr.enable()
   def __exit__(self, *exc):
     if self.enabled:
       self.pr.disable()
       if self.fn: self.pr.dump_stats(self.fn)
-      pstats.Stats(self.pr).strip_dirs().sort_stats(self.sort).print_stats(self.frac)
+      stats = pstats.Stats(self.pr).strip_dirs().sort_stats(self.sort)
+      for fcn in stats.fcn_list[0:int(len(stats.fcn_list)*self.frac)]:    # type: ignore[attr-defined]
+        (_primitive_calls, num_calls, tottime, cumtime, callers) = stats.stats[fcn]    # type: ignore[attr-defined]
+        scallers = sorted(callers.items(), key=lambda x: -x[1][2])
+        print(f"n:{num_calls:8d}  tm:{tottime*self.time_scale:7.2f}ms  tot:{cumtime*self.time_scale:7.2f}ms",
+              colored(_format_fcn(fcn), "yellow") + " "*(50-len(_format_fcn(fcn))),
+              colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if len(scallers) else '')
 
 # *** universal database cache ***
 
