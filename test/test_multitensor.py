@@ -182,8 +182,8 @@ class TestMultiTensor(unittest.TestCase):
     v = Tensor.rand(bs, n_heads, seq_len, head_dim).contiguous().realize()
     y = Tensor.scaled_dot_product_attention(q, k, v)
 
-    # scaled dot product attention performs k.transpose(-2, -1) internally which 
-    # prevent you from sharding those axis but more importantly we can avoid all-reduce 
+    # scaled dot product attention performs k.transpose(-2, -1) internally which
+    # prevent you from sharding those axis but more importantly we can avoid all-reduce
     # if we shard along the n_heads axis
     q_sharded = q.shard((d0, d1), axis=None).realize()
     k_sharded = k.shard((d0, d1), axis=1).realize()
