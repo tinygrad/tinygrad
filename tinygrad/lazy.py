@@ -113,7 +113,7 @@ class LazyBuffer:
         srcs.append(s)
     assert all_same(dts:=[x.dtype.scalar() for x in (srcs if op != TernaryOps.WHERE else srcs[1:])]), f"all dtypes must match {dts} on {op}"
     assert all_same([x.shape for x in srcs]), f"all shapes must be the same {[x.shape for x in srcs]}"
-    if op == TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
+    if op is TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
     out_dtype = srcs[-1].dtype if op not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else dtypes.bool
     ret = create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
     return ret
@@ -164,7 +164,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
   assert buf.op is not None
 
   # consts are always fused and generated
-  if buf.op == LoadOps.CONST:
+  if buf.op is LoadOps.CONST:
     # TODO: make shapetracker unbind also return var_vals
     var_vals.update(merge_dicts([var_vals, st.var_vals]))
     return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.arg), buf.dtype, st.simplify().unbind()))
@@ -176,7 +176,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
     return LazyOp(BufferOps.LOAD, (), MemBuffer(inputs.index(buf)+1, buf.dtype, st.simplify().unbind()))
 
   # if a CONTIGUOUS made it all the way here, just skip it
-  if buf.op == LoadOps.CONTIGUOUS:
+  if buf.op is LoadOps.CONTIGUOUS:
     assert first
     return _recursive_lazyop(buf.srcs[0], inputs, var_vals, st, realizes, cache, False)
 
@@ -198,11 +198,11 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
 
   inputs: List[LazyBuffer] = []
   var_vals: Dict[Variable, int] = out.st.var_vals.copy()
-  if out.op == LoadOps.COPY:
+  if out.op is LoadOps.COPY:
     op, inputs = LazyOp(LoadOps.COPY, (), out.srcs[0].base), [out.srcs[0].base]
-  elif out.op == LoadOps.CUSTOM:
+  elif out.op is LoadOps.CUSTOM:
     op, inputs = LazyOp(LoadOps.CUSTOM, (), out.arg), list(out.srcs)
-  elif out.op == LoadOps.EMPTY:
+  elif out.op is LoadOps.EMPTY:
     op = LazyOp(LoadOps.EMPTY)
   else:
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
