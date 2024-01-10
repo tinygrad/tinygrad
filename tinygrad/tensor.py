@@ -706,6 +706,20 @@ class Tensor:
     def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -self.shape[axis]:].transpose(axis,-1)
     return fix(ret) + fix(base_add)
 
+  def _cumprod(self, axis:int=0, _first_zero=False) -> Tensor:
+    return self.transpose(axis,-1).pad2d((self.shape[axis]-int(not _first_zero),0),1)._pool((self.shape[axis],)).prod(-1).transpose(axis,-1)
+  def cumprod(self, axis:int=0) -> Tensor:
+    # TODO: someday the optimizer will find this on it's own
+    # for now this is a two stage cumprod
+    SPLIT = 256
+    if self.shape[axis] <= SPLIT*2: return self._cumprod(axis)
+    ret = self.transpose(axis,-1).pad2d((round_up(self.shape[axis], SPLIT)-self.shape[axis], 0))
+    ret = ret.unflatten(-1, (-1, SPLIT))._cumprod(-1)
+    base_add = ret[..., -1]._cumprod(-1, _first_zero=True)[..., :-1]
+    base_add = base_add.unsqueeze(-1).expand(*base_add.shape, ret.shape[-1])
+    def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -self.shape[axis]:].transpose(axis,-1)
+    return fix(ret) + fix(base_add)
+
   @staticmethod
   def _tri(r:sint, c:sint, k:int=0, **kwargs) -> Tensor:
     assert all_int((r,c)), "does not support symbolic"
