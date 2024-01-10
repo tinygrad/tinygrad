@@ -65,6 +65,7 @@ class Linearizer(Kernel):
   def get_reduce_acc(self, reduceop:LazyOp):
     dtype = get_lazyop_info(reduceop).dtype
     if reduceop.op == ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
+    elif reduceop.op == ReduceOps.PROD: return 1.0 if dtypes.is_float(dtype) else 1
     elif reduceop.op == ReduceOps.MAX:
       if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
       return -math.inf if dtypes.is_float(dtype) else False
@@ -550,7 +551,7 @@ class Linearizer(Kernel):
         x = LazyOp(TernaryOps.MULACC, tuple(LazyOp(UnaryOps.CAST, (s, ), castop.arg) for s in mulop.src), x.arg)
 
     values = [self.ast_parse(v, acc, offs, loaded_buffers, loop_ctx=loop_ctx, cache=cache) for v in x.src]
-    ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
+    ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC, ReduceOps.PROD:BinaryOps.MUL}
     if x.op in ops:
       ret: List[UOp] = []
       input_acc = acc[:]
