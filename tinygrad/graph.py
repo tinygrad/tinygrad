@@ -3,7 +3,7 @@ from collections import defaultdict
 from typing import List, Any, DefaultDict
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, LazyOp, GlobalCounters
 from tinygrad.device import Device
-from tinygrad.helpers import GRAPH, GRAPHPATH, DEBUG, getenv
+from tinygrad.helpers import GRAPHPATH, DEBUG, getenv
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.shape.symbolic import NumNode
 
@@ -47,37 +47,35 @@ def str_dtype(dtyp):
   return "" if ret == 'float' else f"\n{ret}"
 
 def realized_lazybuffer(lb, num):
-  if GRAPH:
-    init_graph()
-    G.nodes[nm(lb)]['style'] = '"filled,bold"'
-    G.nodes[nm(lb)]['fillcolor'] = G.nodes[nm(lb)]['fillcolor'][:-2]
-    G.nodes[nm(lb)]['label'] = '"' + G.nodes[nm(lb)]["label"].replace('"', '') + f'\nK:{num} b:{nm(lb.realized)}"'
+  init_graph()
+  G.nodes[nm(lb)]['style'] = '"filled,bold"'
+  G.nodes[nm(lb)]['fillcolor'] = G.nodes[nm(lb)]['fillcolor'][:-2]
+  G.nodes[nm(lb)]['label'] = '"' + G.nodes[nm(lb)]["label"].replace('"', '') + f'\nK:{num} b:{"FAKE" if lb.realized is None else nm(lb.realized)}"'
 
 top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0",
               MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
 def log_lazybuffer(lb, scheduled=False):
-  if GRAPH:
-    init_graph()
-    if lb.base != lb:
-      offset = lb.st.expr_node(NumNode(0))[0]
-      label = f"{lb.st.shape}\n{lb.st.real_strides()}" + (f"\n{offset}" if offset != 0 else "")
-      G.add_node(nm(lb), style='"filled,dashed"', fillcolor="#80ff8080", color="black", label=label)
-      G.add_edge(nm(lb.base), nm(lb), color='#00000060')
-      lb = lb.base
-    if lb.realized is None:
-      for x in lb.srcs:
-        if nm(x) not in G.nodes: log_lazybuffer(x)
-        G.add_edge(nm(x), nm(lb), color='#a0a0a0')
-      label = '"' + \
-        (str(set(x.shape for x in lb.srcs))+"\n"+str(lb.shape) if lb.op in ReduceOps else str(lb.shape)) + \
-        str_dtype(lb.dtype)+f"\n{lb.op}"+(f"\n{lb.arg}" if lb.op in {LoadOps.CONST, UnaryOps.CAST} else "") + \
-        (f"\n{lb.device}" if lb.device != Device.DEFAULT else "") + '"'
-      G.add_node(nm(lb), style='"filled,dashed"', fillcolor=[v for k,v in top_colors.items() if lb.op in k][0] + "80", color="black", label=label)
-      if scheduled: G.nodes[nm(lb)]['shape'] = 'box'
-    else:
-      if nm(lb) not in G.nodes:
-        # realized but unseen?
-        G.add_node(nm(lb), label=f'"{str(lb.base.realized)[5:-1].replace(" ", chr(10))}\nb:{nm(lb.realized)}"', style='filled', fillcolor="#f0c08080")
+  init_graph()
+  if lb.base != lb:
+    offset = lb.st.expr_node(NumNode(0))[0]
+    label = f"{lb.st.shape}\n{lb.st.real_strides()}" + (f"\n{offset}" if offset != 0 else "")
+    G.add_node(nm(lb), style='"filled,dashed"', fillcolor="#80ff8080", color="black", label=label)
+    G.add_edge(nm(lb.base), nm(lb), color='#00000060')
+    lb = lb.base
+  if lb.realized is None:
+    for x in lb.srcs:
+      if nm(x) not in G.nodes: log_lazybuffer(x)
+      G.add_edge(nm(x), nm(lb), color='#a0a0a0')
+    label = '"' + \
+      (str(set(x.shape for x in lb.srcs))+"\n"+str(lb.shape) if lb.op in ReduceOps else str(lb.shape)) + \
+      str_dtype(lb.dtype)+f"\n{lb.op}"+(f"\n{lb.arg}" if lb.op in {LoadOps.CONST, UnaryOps.CAST} else "") + \
+      (f"\n{lb.device}" if lb.device != Device.DEFAULT else "") + '"'
+    G.add_node(nm(lb), style='"filled,dashed"', fillcolor=[v for k,v in top_colors.items() if lb.op in k][0] + "80", color="black", label=label)
+    if scheduled: G.nodes[nm(lb)]['shape'] = 'box'
+  else:
+    if nm(lb) not in G.nodes:
+      # realized but unseen?
+      G.add_node(nm(lb), label=f'"{str(lb.base.realized)[5:-1].replace(" ", chr(10))}\nb:{nm(lb.realized)}"', style='filled', fillcolor="#f0c08080")
 
 def _tree(lazydata, cycles, cnt, prefix=""):
   cnt[0] += 1
