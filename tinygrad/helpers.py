@@ -104,10 +104,10 @@ class Profiling(contextlib.ContextDecorator):
       stats = pstats.Stats(self.pr).strip_dirs().sort_stats(self.sort)
       for fcn in stats.fcn_list[0:int(len(stats.fcn_list)*self.frac)]:    # type: ignore[attr-defined]
         (_primitive_calls, num_calls, tottime, cumtime, callers) = stats.stats[fcn]    # type: ignore[attr-defined]
-        scallers = sorted(callers.items(), key=lambda x: -x[1][2])[0]
+        scallers = sorted(callers.items(), key=lambda x: -x[1][2])
         print(f"n:{num_calls:8d}  tm:{tottime*self.time_scale:7.2f}ms  tot:{cumtime*self.time_scale:7.2f}ms",
               colored(_format_fcn(fcn), "yellow") + " "*(50-len(_format_fcn(fcn))),
-              colored(f"<- {(scallers[1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0])}", "BLACK"))
+              colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if len(scallers) else '')
 
 # *** universal database cache ***
 

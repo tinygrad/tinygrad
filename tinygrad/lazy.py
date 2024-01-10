@@ -59,7 +59,8 @@ class LazyBuffer:
 
   @staticmethod
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None) -> LazyBuffer:
-    return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else ())
+    # NOTE: loadops (except LoadOps.CONTIGUOUS created with self.e) are not cached
+    return LazyBuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else ())
 
   def const(self, val:Union[float, int]) -> LazyBuffer:
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
