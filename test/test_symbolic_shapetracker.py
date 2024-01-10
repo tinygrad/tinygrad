@@ -82,19 +82,25 @@ class TestShapeTrackerUnbind(unittest.TestCase):
   def test_view_unbind(self):
     v = Variable("v", 1, 100)
     bv = Variable("v", 1, 100).bind(3)
-    assert View.create(shape=(bv, 4)).unbind() == View.create(shape=(v, 4))
+    unbound_view, var_val = View.create(shape=(bv, 4)).unbind()
+    assert unbound_view == View.create(shape=(v, 4))
+    assert var_val == {v: 3}
 
   def test_reshape_unbind(self):
     v = Variable("v", 1, 100)
     bv = Variable("v", 1, 100).bind(3)
     t = Tensor.rand(3, 4).reshape(bv, 4)
-    assert t.lazydata.st.unbind() == ShapeTracker((View.create(shape=(v, 4)),))
+    unbound_st, var_val = t.lazydata.st.unbind()
+    assert unbound_st == ShapeTracker((View.create(shape=(v, 4)),))
+    assert var_val == {v: 3}
 
   def test_shrink_unbind(self):
     v = Variable("v", 1, 100)
     bv = Variable("v", 1, 100).bind(2)
     t = Tensor.rand(3, 4).shrink(((bv, bv+1), (0, 4)))
-    assert t.lazydata.st.unbind() == ShapeTracker((View.create(shape=(1, 4), offset=4*v),))
+    unbound_st, var_val = t.lazydata.st.unbind()
+    assert unbound_st == ShapeTracker((View.create(shape=(1, 4), offset=4*v),))
+    assert var_val == {v: 2}
 
 class TestSymbolicReshape(unittest.TestCase):
   def test_reshape_into_symbols_simple(self):
