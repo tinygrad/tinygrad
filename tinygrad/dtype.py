@@ -1,5 +1,4 @@
 from typing import NamedTuple, Final, Optional, ClassVar, Set, Tuple, Dict
-import numpy as np  # TODO: remove numpy
 import functools
 
 # TODO: migrate this from NamedTuple -> dataclass
@@ -7,7 +6,7 @@ class DType(NamedTuple):
   priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
-  np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
+  fmt: Optional[str]
   sz: int = 1
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
   def vec(self, sz:int):
@@ -17,9 +16,9 @@ class DType(NamedTuple):
 
 # dependent typing?
 class ImageDType(DType):
-  def __new__(cls, priority, itemsize, name, np, shape, base):
-    return super().__new__(cls, priority, itemsize, name, np)
-  def __init__(self, priority, itemsize, name, np, shape, base):
+  def __new__(cls, priority, itemsize, name, fmt, shape, base):
+    return super().__new__(cls, priority, itemsize, name, fmt)
+  def __init__(self, priority, itemsize, name, fmt, shape, base):
     self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
     self.base: DType = base
     super().__init__()
@@ -32,7 +31,7 @@ class ImageDType(DType):
   def __ne__(self, x): return super().__ne__(x) or self.shape != x.shape
 
 class PtrDType(DType):
-  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.np, dt.sz)
+  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.fmt, dt.sz)
   def __repr__(self): return f"ptr.{super().__repr__()}"
 
 class dtypes:
@@ -42,26 +41,24 @@ class dtypes:
   def is_int(x: DType) -> bool: return x.scalar() in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64) or dtypes.is_unsigned(x)
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
-  @staticmethod
-  def from_np(x) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod  # NOTE: isinstance(True, int) is True in python
   def from_py(x) -> DType: return dtypes.default_float if isinstance(x, float) else dtypes.bool if isinstance(x, bool) else dtypes.default_int
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
-  bool: Final[DType] = DType(0, 1, "bool", np.bool_)
-  int8: Final[DType] = DType(1, 1, "char", np.int8)
-  uint8: Final[DType] = DType(2, 1, "unsigned char", np.uint8)
-  int16: Final[DType] = DType(3, 2, "short", np.int16)
-  uint16: Final[DType] = DType(4, 2, "unsigned short", np.uint16)
-  int32: Final[DType] = DType(5, 4, "int", np.int32)
-  uint32: Final[DType] = DType(6, 4, "unsigned int", np.uint32)
-  int64: Final[DType] = DType(7, 8, "long", np.int64)
-  uint64: Final[DType] = DType(8, 8, "unsigned long", np.uint64)
-  float16: Final[DType] = DType(9, 2, "half", np.float16)
+  bool: Final[DType] = DType(0, 1, "bool", '?')
+  int8: Final[DType] = DType(1, 1, "char", 'b')
+  uint8: Final[DType] = DType(2, 1, "unsigned char", 'B')
+  int16: Final[DType] = DType(3, 2, "short", 'h')
+  uint16: Final[DType] = DType(4, 2, "unsigned short", 'H')
+  int32: Final[DType] = DType(5, 4, "int", 'i')
+  uint32: Final[DType] = DType(6, 4, "unsigned int", 'I')
+  int64: Final[DType] = DType(7, 8, "long", 'l')
+  uint64: Final[DType] = DType(8, 8, "unsigned long", 'L')
+  float16: Final[DType] = DType(9, 2, "half", 'e')
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
   bfloat16: Final[DType] = DType(10, 2, "__bf16", None)
-  float32: Final[DType] = DType(11, 4, "float", np.float32)
-  float64: Final[DType] = DType(12, 8, "double", np.float64)
+  float32: Final[DType] = DType(11, 4, "float", 'f')
+  float64: Final[DType] = DType(12, 8, "double", 'd')
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
@@ -70,9 +67,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shp, dtypes.float32)
+  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', shp, dtypes.float32)
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp, dtypes.float32)
+  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', shp, dtypes.float32)
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32

@@ -6,6 +6,7 @@ from collections import defaultdict
 from functools import partialmethod, reduce
 import numpy as np
 
+from tinygrad.runtime.ops_cpu import type_map, inverse_type_map
 from tinygrad.dtype import DType, dtypes, ImageDType, least_upper_float, least_upper_dtype
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
 from tinygrad.lazy import LazyBuffer, create_schedule
@@ -41,6 +42,11 @@ def _loadop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str,
   if isinstance(device, str): return LazyBuffer.loadop(op, shape, dtype, device, arg, src)
   return MultiLazyBuffer([LazyBuffer.loadop(op, shape, dtype, d, arg, src) for d in device], None)
 
+def _fromcpu(x: np.ndarray) -> LazyBuffer:
+  ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, type_map[x.dtype.type], "CPU")
+  ret.realized = Buffer("CPU", prod(x.shape), type_map[x.dtype.type], x.flatten())
+  return ret
+
 Scalar = Union[float, int, bool]
 
 class Tensor:
@@ -68,17 +74,17 @@ class Tensor:
     self._ctx: Optional[Function] = None
     if isinstance(data, LazyBuffer): assert dtype is None or dtype == data.dtype, "dtype doesn't match, and casting isn't supported"
     elif isinstance(data, get_args(Scalar)): data = _loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_py(data), device, data)
-    elif isinstance(data, bytes): data = LazyBuffer.fromCPU(np.frombuffer(data, np.uint8))
+    elif isinstance(data, bytes): data = _fromcpu(np.frombuffer(data, np.uint8))
     elif data is None: data = _loadop(LoadOps.EMPTY, (0,), dtype or dtypes.default_float, device)
     elif isinstance(data, list):
       if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): dtype = dtype or dtypes.bool
       elif d and all_int(d): dtype = dtype or dtypes.default_int
       else: dtype = dtype or dtypes.default_float
       # NOTE: cast at the end for the dtypes that do not have a numpy dtype
-      data = LazyBuffer.fromCPU(np.array(data, dtype.np)).cast(dtype)
+      data = _fromcpu(np.array(data, inverse_type_map[dtype])).cast(dtype)
     elif isinstance(data, np.ndarray):
-      if data.shape == (): data = _loadop(LoadOps.CONST, tuple(), dtype or dtypes.from_np(data.dtype), device, data.item())
-      else: data = LazyBuffer.fromCPU(data.astype(dtype.np) if dtype is not None and dtype.np is not None else data)
+      if data.shape == (): data = _loadop(LoadOps.CONST, tuple(), dtype or type_map[data.dtype], device, data.item())
+      else: data = _fromcpu(data.astype(inverse_type_map[dtype]) if dtype is not None and dtype in inverse_type_map else data)
 
     # data is a LazyBuffer, but it might be on the wrong device
     if not isinstance(data, (LazyBuffer, MultiLazyBuffer)): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
@@ -134,18 +140,18 @@ class Tensor:
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
 
   # TODO: these are good places to start removing numpy
+  def data(self) -> memoryview:
+    assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
+    assert self.dtype.fmt is not None, f"no memoryview dtype for {self.dtype}"
+    mv = memoryview(cast(int, self.numel()) * bytearray(self.dtype.itemsize))
+    cast(Buffer, self.contiguous().realize().lazydata.base.realized).copyout(mv)
+    return mv.cast(self.dtype.fmt, self.shape)
   def item(self) -> Scalar:
     assert self.numel() == 1, "must have one element for item"
-    return cast(Buffer, self.contiguous().realize().lazydata.base.realized).toCPU().item()
-  def data(self) -> memoryview: return self.numpy().data
+    return self.data()[0]
 
   # TODO: this should import numpy and use .data() to construct the array
-  def numpy(self) -> np.ndarray:
-    assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
-    assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
-    if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.np)
-    t = self if isinstance(self.device, str) else self.to("CPU")
-    return t.cast(self.dtype.scalar()).contiguous().realize().lazydata.base.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
+  def numpy(self) -> np.ndarray: return np.asarray(self.data())
 
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self
@@ -950,5 +956,5 @@ def custom_random(out:Buffer):
   Tensor._seed += 1
   if DEBUG >= 2: print(f"*** {out.device}   rand  seed {Tensor._seed} size {out.size:<15d} dtype {out.dtype}")
   rng = np.random.default_rng(Tensor._seed)
-  rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=out.dtype.np, copy=False)
+  rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=inverse_type_map[out.dtype], copy=False)
   out.copyin(rng_np_buffer.data)

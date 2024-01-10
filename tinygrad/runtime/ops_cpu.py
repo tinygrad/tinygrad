@@ -1,8 +1,14 @@
 import numpy as np
 from typing import Callable, Dict, Tuple
 from tinygrad.helpers import flat_mv
+from tinygrad.dtype import dtypes
 from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, TernaryOps,  ReduceOps, MovementOps, Op
 from tinygrad.device import Interpreted, Allocator
+
+type_map = {np.bool_: dtypes.bool,
+            np.int8: dtypes.int8, np.uint8: dtypes.uint8, np.int16: dtypes.int16, np.int32: dtypes.int32, np.int64: dtypes.int64,
+            np.float16: dtypes.float16, np.float32: dtypes.float32, np.float64: dtypes.float64}
+inverse_type_map = {v: k for k,v in type_map.items()}
 
 def reduce_axis(in_shape:Tuple[int, ...], out_shape:Tuple[int, ...]) -> Tuple[int, ...]:
   assert len(in_shape) == len(out_shape), "reduce shapes must have same dimensions"
