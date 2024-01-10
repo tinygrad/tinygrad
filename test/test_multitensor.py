@@ -187,7 +187,7 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
   def test_scaled_product_attention(self):
-    bs, n_heads, seq_len, head_dim = 1, 8, 4, 32
+    bs, seq_len, n_heads, head_dim = 1, 1, 32, 128
     q = Tensor.rand(bs, n_heads, seq_len, head_dim).contiguous().realize()
     k = Tensor.rand(bs, n_heads, seq_len, head_dim).contiguous().realize()
     v = Tensor.rand(bs, n_heads, seq_len, head_dim).contiguous().realize()
@@ -199,7 +199,11 @@ class TestMultiTensor(unittest.TestCase):
     q_sharded = q.shard((d0, d1), axis=None).realize()
     k_sharded = k.shard((d0, d1), axis=1).realize()
     v_sharded = v.shard((d0, d1), axis=1).realize()
+    print(f"q {q_sharded}")
+    print(f"k {k_sharded}")
+    print(f"v {v_sharded}")
     y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded, attn_mask=None)
+    print(f"attn {y_sharded}")
     np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
 
     m = Tensor.rand(bs, n_heads, seq_len, seq_len).contiguous().realize()
@@ -238,14 +242,20 @@ class TestMultiTensor(unittest.TestCase):
   # @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp16")
   @unittest.skipIf(Device.DEFAULT in ["GPU"] and CI, "GPU requires cl_khr_fp16")
   def test_llama_attention(self):
-    dim, n_heads, n_kv_heads, max_context = 32, 8, 8, 8
+    bs = 1
+    seq_len = 1
+    dim = 4096
+    n_heads = 32
+    n_kv_heads = 32
+    max_context = 4096
 
     layer = Attention(dim, n_heads, n_kv_heads, max_context, linear=nn.Linear)
-    x = Tensor.rand(1,2,32).half()
-    freqs_cis = Tensor.rand(1,2,1,2,2).half()
+    x = Tensor.rand(bs, seq_len, dim).half()
+    freqs_cis = Tensor.rand(1, 1, 1, 64, 2).half()
     mask = None
     start_pos = 0
     y = layer(x, start_pos, freqs_cis, mask)
+    print("\n unsharded {y}")
     print(f"y {y.numpy()}")
 
     layer_sharded = Attention(dim, n_heads, n_kv_heads, max_context, linear=nn.Linear)

@@ -48,61 +48,70 @@ class Attention:
     self.n_rep = self.n_heads // self.n_kv_heads
     self.max_context = max_context
     print("\n init")
-    print(f"dim {dim}")
-    print(f"n_heads {n_heads}")
-    print(f"n_kv_heads {n_kv_heads}")
-    print(f"max_context {max_context}")
+    print(f"dim         {dim}")
+    print(f"n_heads     {self.n_heads}")
+    print(f"n_kv_heads  {self.n_kv_heads}")
+    print(f"head_dim    {self.head_dim}")
+    print(f"n_rep       {self.n_rep}")
+    print(f"max_context {self.max_context}")
 
     self.wq = linear(dim, self.n_heads * self.head_dim, bias=False)
     self.wk = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
     self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
+    print(f"wq {self.wq.weight}")
+    print(f"wk {self.wk.weight}")
+    print(f"wv {self.wv.weight}")
+    print(f"wo {self.wo.weight}")
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
     x = x.half()
     xq, xk, xv = self.wq(x).half(), self.wk(x).half(), self.wv(x).half()
+    print("\n")
+    print("call")
+    print(f"x {x}")
+    print(f"freqs cis {freqs_cis}")
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
     xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     bsz, seqlen, n_heads, head_dim = xq.shape
-    print("\n")
-    print("call")
     print(f"xq {xq}")
-    if isinstance(x.device, tuple):
-      mask
+    print(f"xk {xk}")
+    print(f"xv {xv}")
 
-    # create kv cache
-    if not hasattr(self, "cache_k"):
-      self.cache_k = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype)
-      self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype)
-      print(f"first call")
-      print(f"device {x.device}")
-      print(f"cache_k {self.cache_k}")
-      print(f"cache_v {self.cache_v}")
-      if isinstance(x.device, tuple):
-        self.cache_k.contiguous().realize()
-        self.cache_k.shard_(x.device, axis=2).realize()
-        self.cache_v.contiguous().realize()
-        self.cache_v.shard_(x.device, axis=2).realize()
+    # # create kv cache
+    # if not hasattr(self, "cache_k"):
+    #   self.cache_k = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype)
+    #   self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype)
+    #   print(f"first call")
+    #   print(f"device {x.device}")
+    #   print(f"cache_k {self.cache_k}")
+    #   print(f"cache_v {self.cache_v}")
+    #   if isinstance(x.device, tuple):
+    #     self.cache_k.contiguous().realize()
+    #     self.cache_k.shard_(x.device, axis=2).realize()
+    #     self.cache_v.contiguous().realize()
+    #     self.cache_v.shard_(x.device, axis=2).realize()
 
-    print(f"before cache {xk}")
-    print(f"before cache {xv}")
-    # HACK: without contiguous, the conversation mode is broken and the cache is not updated
-    keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous()
-    values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1).contiguous()
-    print(f"start_pos {start_pos}")
-    print(f"after cache keys {keys}")
-    print(f"after cache values {values}")
+    # print(f"before cache {xk}")
+    # print(f"before cache {xv}")
+    # # HACK: without contiguous, the conversation mode is broken and the cache is not updated
+    # keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous()
+    # values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1).contiguous()
+    # print(f"start_pos {start_pos}")
+    # print(f"after cache keys {keys}")
+    # print(f"after cache values {values}")
 
-    # update the cache
-    assert keys.dtype == self.cache_k.dtype and values.dtype == self.cache_v.dtype, f"{keys.dtype=}, {values.dtype=}, {self.cache_k.dtype=}, {self.cache_v.dtype=}"
-    self.cache_k.assign(keys.pad((None,(0,self.max_context-start_pos-seqlen),None,None)).contiguous()).realize()
-    self.cache_v.assign(values.pad((None,(0,self.max_context-start_pos-seqlen),None,None)).contiguous()).realize()
+    # # update the cache
+    # assert keys.dtype == self.cache_k.dtype and values.dtype == self.cache_v.dtype, f"{keys.dtype=}, {values.dtype=}, {self.cache_k.dtype=}, {self.cache_v.dtype=}"
+    # self.cache_k.assign(keys.pad((None,(0,self.max_context-start_pos-seqlen),None,None)).contiguous()).realize()
+    # self.cache_v.assign(values.pad((None,(0,self.max_context-start_pos-seqlen),None,None)).contiguous()).realize()
 
-    keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
+    # keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
+    # xq, keys, values = xq.transpose(1, 2).contiguous().realize(), keys.transpose(1, 2).contiguous().realize(), values.transpose(1, 2).contiguous().realize()
+    xq, keys, values = xq.transpose(1, 2).contiguous().realize(), xk.transpose(1, 2).contiguous().realize(), xv.transpose(1, 2).contiguous().realize()
 
-    xq, keys, values = xq.transpose(1, 2).contiguous().realize(), keys.transpose(1, 2).contiguous().realize(), values.transpose(1, 2).contiguous().realize()
     print(f"transposed xq {xq}")
     print(f"transposed keys {keys}")
     print(f"transposed values {values}")
