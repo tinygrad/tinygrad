@@ -99,10 +99,13 @@ class Attention:
     # print(f"transposed keys {keys}")
     # print(f"transposed values {values}")
     attn = xq.scaled_dot_product_attention(keys, values, mask).realize()
-    attn = attn.transpose(1, 2).reshape(bsz, seqlen, -1).realize()
-    # print("scaled dot product works")
-    # print(f"attn {attn}")
-    # print(f"wo {self.wo.weight}")
+    attn = attn.transpose(1, 2).realize()
+    print("\n")
+    print(f"attn {attn}")
+    print(f"bsz {bsz}")
+    print(f"seqlen {seqlen}")
+    attn = attn.reshape(bsz, seqlen, -1).realize()
+    print(f"wo {self.wo.weight}")
     return self.wo(attn)
 
 class FeedForward:
