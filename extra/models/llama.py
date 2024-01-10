@@ -99,7 +99,7 @@ class Attention:
     # print(f"transposed keys {keys}")
     # print(f"transposed values {values}")
     attn = xq.scaled_dot_product_attention(keys, values, mask).realize()
-    attn = attn.transpose(1, 2).realize()
+    attn = attn.transpose(1, 2).contiguous().realize()
     print("\n")
     print(f"attn {attn}")
     print(f"bsz {bsz}")
