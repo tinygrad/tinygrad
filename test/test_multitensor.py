@@ -1,9 +1,9 @@
 import unittest
-from tinygrad import Tensor, Device, nn, GlobalCounters
+from tinygrad import Tensor, Device, nn, GlobalCounters, dtypes
 from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
 from extra.lr_scheduler import OneCycleLR
-from extra.models.llama import RMSNorm
+from extra.models.llama import RMSNorm, Attention, precompute_freqs_cis
 import numpy as np
 
 d_zero = f"{Device.DEFAULT}:0"
@@ -213,6 +213,30 @@ class TestMultiTensor(unittest.TestCase):
     y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded, is_causal=True)
     np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
 
+  # @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp16")
+  @unittest.skipIf(Device.DEFAULT in ["GPU"] and CI, "GPU requires cl_khr_fp16")
+  def test_llama_attention(self):
+    dim, n_heads, n_kv_heads, max_context = 32, 8, 8, 8
+
+    layer = Attention(dim, n_heads, n_kv_heads, max_context, linear=nn.Linear)
+    x = Tensor.rand(1,2,32).half()
+    freqs_cis = Tensor.rand(1,2,1,2,2).half()
+    mask = None
+    start_pos = 0 
+    y = layer(x, start_pos, freqs_cis, mask)
+    print(y.numpy())
+
+    layer_sharded = Attention(dim, n_heads, n_kv_heads, max_context, linear=nn.Linear)
+    layer_sharded.wq.weight.assign(layer.wq.weight.shard((d0, d1), axis=1)).realize()
+    layer_sharded.wk.weight.assign(layer.wk.weight.shard((d0, d1), axis=1)).realize()
+    layer_sharded.wv.weight.assign(layer.wv.weight.shard((d0, d1), axis=1)).realize()
+    layer_sharded.wo.weight.assign(layer.wo.weight.shard((d0, d1), axis=1)).realize()
+    x_sharded = x.shard((d0, d1), axis=None).realize()
+    freqs_cis_sharded = freqs_cis.shard((d0, d1), axis=None).realize()
+    y_sharded = layer(x_sharded, start_pos, freqs_cis_sharded, mask)
+    print(y.numpy())
+
+    # mask = Tensor.full((1, 1, 4, 0+4), float("-inf")).triu(0+1).realize()
 
   def test_data_parallel_resnet(self):
     import sys, pathlib
