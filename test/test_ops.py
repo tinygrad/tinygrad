@@ -218,7 +218,7 @@ class TestOps(unittest.TestCase):
     self.assertRaises(RuntimeError, (tt1 == tt2).sum().backward)
     tt = Tensor.randn(4, requires_grad=True)
     (tt*(tt == 0)).sum().backward()
-    t = torch.autograd.Variable(torch.Tensor(tt.numpy()), requires_grad=True)
+    t = torch.tensor(tt.numpy(), requires_grad=True)
     (t*(t == 0)).sum().backward()
     np.testing.assert_allclose(t.grad.numpy(), tt.grad.numpy(), atol=5e-4, rtol=1e-5)
 
@@ -231,7 +231,7 @@ class TestOps(unittest.TestCase):
     self.assertRaises(RuntimeError, (tt1 < tt2).sum().backward)
     tt = Tensor.randn(4, requires_grad=True)
     (tt*(tt < 0)).sum().backward()
-    t = torch.autograd.Variable(torch.Tensor(tt.numpy()), requires_grad=True)
+    t = torch.tensor(tt.numpy(), requires_grad=True)
     (t*(t < 0)).sum().backward()
     np.testing.assert_allclose(t.grad.numpy(), tt.grad.numpy(), atol=5e-4, rtol=1e-5)
 
