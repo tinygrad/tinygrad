@@ -30,12 +30,14 @@ class WorldModel:
         self._step = step
         self._config = config
         shapes = {k: tuple(v.shape) for k, v in obs_space.spaces.items()}
-        num_actions = int(act_space.n) if hasattr(act_space, "n") else act_space.shape[0]
+        self.num_actions = (
+            int(act_space.n) if hasattr(act_space, "n") else act_space.shape[0]
+        )
 
         self.encoder = networks.MultiEncoder(shapes, **config.encoder)
         self.embed_size = self.encoder.outdim
         self.dynamics = networks.RSSM(
-            num_actions,
+            self.num_actions,
             self.embed_size,
             config.dyn_stoch,
             config.dyn_deter,
@@ -108,9 +110,7 @@ class WorldModel:
         data = self.preprocess(data)
 
         embed = self.encoder(data)
-        post, prior = self.dynamics.observe(
-            embed, data["action"], data["is_first"]
-        )
+        post, prior = self.dynamics.observe(embed, data["action"], data["is_first"])
         kl_free = self._config.kl_free
         dyn_scale = self._config.dyn_scale
         rep_scale = self._config.rep_scale
@@ -134,8 +134,7 @@ class WorldModel:
             assert loss.shape == embed.shape[:2], (name, loss.shape, embed.shape[:2])
             losses[name] = loss
         scaled = {
-            key: value * self._scales.get(key, 1.0)
-            for key, value in losses.items()
+            key: value * self._scales.get(key, 1.0) for key, value in losses.items()
         }
         model_loss = (sum(scaled.values()) + kl_loss).mean()
         metrics = self._model_opt(model_loss, self.parameters())
@@ -147,38 +146,41 @@ class WorldModel:
         metrics["dyn_loss"] = dyn_loss.numpy()
         metrics["rep_loss"] = rep_loss.numpy()
         metrics["kl"] = kl_value.numpy()
-        with Tensor.cuda.amp.autocast(self._use_amp):
-            metrics["prior_ent"] = Tensor.mean(
-                self.dynamics.get_dist(prior).entropy()
-            ).numpy()
-            metrics["post_ent"] = Tensor.mean(
-                self.dynamics.get_dist(post).entropy()
-            ).numpy()
-            context = dict(
-                embed=embed,
-                feat=self.dynamics.get_feat(post),
-                kl=kl_value,
-                postent=self.dynamics.get_dist(post).entropy(),
-            )
+        metrics["prior_ent"] = Tensor.mean(
+            self.dynamics.get_dist(prior).entropy()
+        ).numpy()
+        metrics["post_ent"] = Tensor.mean(
+            self.dynamics.get_dist(post).entropy()
+        ).numpy()
+        context = dict(
+            embed=embed,
+            feat=self.dynamics.get_feat(post),
+            kl=kl_value,
+            postent=self.dynamics.get_dist(post).entropy(),
+        )
         post = {k: v.detach() for k, v in post.items()}
         return post, context, metrics
 
     # this function is called during both rollout and training
-    def preprocess(self, obs):
-        obs = obs.copy()
-        obs = {k: Tensor(v).to(self._config.device) for k, v in obs.items()}
-        if "image" in obs:
-            obs["image"] = obs["image"].float() / 255.0
-        if "discount" in obs:
-            obs["discount"] *= self._config.discount
+    def preprocess(self, data):
+        data = data.copy()
+        data = {k: Tensor(v).to(self._config.device) for k, v in data.items()}
+        # onehot encode actions if neccessary
+        if "action" in data and len(data["action"].shape) == 2:
+            data["action"] = utils.one_hot(data["action"], self.num_actions)
+        if "image" in data:
+            data["image"] = data["image"].float() / 255.0
+        if "discount" in data:
+            data["discount"] *= self._config.discount
             # (batch_size, batch_length) -> (batch_size, batch_length, 1)
-            obs["discount"] = obs["discount"].unsqueeze(-1)
+            data["discount"] = data["discount"].unsqueeze(-1)
         # 'is_first' is necessary to initialize hidden state at training
-        assert "is_first" in obs
+        assert "is_first" in data
         # 'is_terminal' is necessary to train cont_head
-        assert "is_terminal" in obs
-        obs["cont"] = 1.0 - obs["is_terminal"]
-        return obs
+        assert "is_terminal" in data
+        data["cont"] = 1.0 - data["is_terminal"]
+        return data
+
 
     def video_pred(self, data):
         data = self.preprocess(data)
@@ -188,17 +190,15 @@ class WorldModel:
             embed[:6, :5], data["action"][:6, :5], data["is_first"][:6, :5]
         )
         recon = self.heads["decoder"](self.dynamics.get_feat(states))["image"].mode[:6]
-        self.heads["reward"](self.dynamics.get_feat(states)).mode[:6]
         init = {k: v[:, -1] for k, v in states.items()}
         prior = self.dynamics.imagine_with_action(data["action"][:6, 5:], init)
         openl = self.heads["decoder"](self.dynamics.get_feat(prior))["image"].mode
-        self.heads["reward"](self.dynamics.get_feat(prior)).mode
         # observed image is given until 5 steps
-        model = Tensor.cat([recon[:, :5], openl], 1)
+        model = Tensor.cat(recon[:, :5], openl, dim=1)
         truth = data["image"][:6]
         error = (model - truth + 1.0) / 2.0
 
-        return Tensor.cat([truth, model, error], 2)
+        return Tensor.cat(truth, model, error, dim=2).numpy()
 
     def parameters(self):
         return nn.state.get_parameters(self)

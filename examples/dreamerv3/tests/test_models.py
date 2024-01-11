@@ -54,7 +54,7 @@ class TestWorldModel(unittest.TestCase):
         }
         data = world_model.preprocess(data)
 
-    def test_world_model_train(self):
+    def test_world_model_report(self):
         B = 6
         T = 6
         obs_space = gym.spaces.Dict(
@@ -75,7 +75,11 @@ class TestWorldModel(unittest.TestCase):
             "is_first": np.ones((B, T)),
             "is_terminal": np.zeros((B, T)),
         }
-        post, context, metrics = world_model._train(data)
+        video_pred = world_model.video_pred(data)
+        logger = utils.Logger(config.logdir, 0)
+        logger.offline_video("test_video_pred", video_pred, 0)
+
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -610,7 +610,7 @@ class RSSM:
 
     def observe(self, embed, action, is_first, state=None):
         def swap(x):
-            return x.transpose(1,0)
+            return x.transpose(1, 0)
 
         # (batch, time, ch) -> (time, batch, ch)
         embed, action, is_first = swap(embed), swap(action), swap(is_first)
@@ -630,7 +630,7 @@ class RSSM:
 
     def imagine_with_action(self, action, state):
         def swap(x):
-            return x.transpose(1,0)
+            return x.transpose(1, 0)
 
         assert isinstance(state, dict), state
         action = swap(action)

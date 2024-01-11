@@ -304,7 +304,7 @@ class Bernoulli(Distribution):
         log_probs0 = -Tensor.softplus(self.logits)
         log_probs1 = -Tensor.softplus(-self.logits)
 
-        return (log_probs0 * (1 - x) + log_probs1 * x)
+        return log_probs0 * (1 - x) + log_probs1 * x
 
 
 class Normal(Distribution):
