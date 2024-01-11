@@ -47,95 +47,57 @@ class Attention:
     self.head_dim = dim // n_heads
     self.n_rep = self.n_heads // self.n_kv_heads
     self.max_context = max_context
-    print("\n init")
-    print(f"dim         {dim}")
-    print(f"n_heads     {self.n_heads}")
-    print(f"n_kv_heads  {self.n_kv_heads}")
-    print(f"head_dim    {self.head_dim}")
-    print(f"n_rep       {self.n_rep}")
-    print(f"max_context {self.max_context}")
 
-    # TODO: init weights sharded for training
     self.wq = linear(dim, self.n_heads * self.head_dim, bias=False)
     self.wk = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
     self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
+  # TODO: this reshape is technically independent and can be done in parallel so we can avoid the copy of the outputs
+  def unshard_reshape_shard(self, x, shape, device, axis):
+    x = x.to(Device.DEFAULT)
+    x = x.reshape(shape)
+    return x.shard_(device, axis=axis)
+
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
-    print("\n")
-    print("call")
-
-    print(f"wq {self.wq.weight}")
-    print(f"wk {self.wk.weight}")
-    print(f"wv {self.wv.weight}")
-    print(f"wo {self.wo.weight}")
-
     x = x.half()
     xq, xk, xv = self.wq(x).half(), self.wk(x).half(), self.wv(x).half()
 
-    print(f"x {x}")
-    print(f"freqs cis {freqs_cis}")
+    if isinstance(self.wq.weight.device, tuple): 
+      xq = self.unshard_reshape_shard(xq, (xq.shape[0], xq.shape[1], self.n_heads, self.head_dim), self.wq.weight.device, 2)
+      xk = self.unshard_reshape_shard(xk, (xq.shape[0], xq.shape[1], self.n_heads, self.head_dim), self.wq.weight.device, 2)
+      xv = self.unshard_reshape_shard(xv, (xq.shape[0], xq.shape[1], self.n_heads, self.head_dim), self.wq.weight.device, 2)
+    else:
+      xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
+      xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
+      xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
 
-    div_factor = len(x.device) if isinstance(x.device, tuple) else 1
-    print(f"xq {xq}")
-    print(f"xk {xk}")
-    print(f"xv {xv}")
-
-    print(f"{xq.shape[0]} {xq.shape[1]} {self.n_heads} {self.head_dim}")
-    print(f"div factor {div_factor}")
-    xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
-    print(f"xq reshape {xq}")
-    xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads // div_factor, self.head_dim)
-    xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads // div_factor, self.head_dim)
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
-    bsz, seqlen, n_heads, head_dim = xq.shape
-    print(f"xq {xq}")
-    print(f"xk {xk}")
-    print(f"xv {xv}")
+    bsz, seqlen, _, _ = xq.shape
 
     # create kv cache
     if not hasattr(self, "cache_k"):
-      self.cache_k = Tensor.zeros(bsz, self.max_context, self.n_kv_heads // div_factor, self.head_dim, dtype=x.dtype, device=x.device)
-      self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads // div_factor, self.head_dim, dtype=x.dtype, device=x.device)
-      print(f"first call")
-      print(f"device {x.device}")
-      print(f"cache_k {self.cache_k}")
-      print(f"cache_v {self.cache_v}")
-      # if isinstance(x.device, tuple):
-        # self.cache_k.contiguous().realize()
-        # self.cache_k.shard_(x.device, axis=2).realize()
-        # self.cache_v.contiguous().realize()
-        # self.cache_v.shard_(x.device, axis=2).realize()
-# 
-    print(f"before cache {xk}")
-    print(f"before cache {xv}")
+      self.cache_k = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous()
+      self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous()
+      if isinstance(self.wq.weight.device, tuple): 
+        self.cache_k.shard_((self.wq.weight.device), axis=2)
+        self.cache_v.shard_((self.wq.weight.device), axis=2)
+
     # HACK: without contiguous, the conversation mode is broken and the cache is not updated
     keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous()
     values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1).contiguous()
-    print(f"start_pos {start_pos}")
-    print(f"after cache keys {keys}")
-    print(f"after cache values {values}")
-# 
+
     # update the cache
     assert keys.dtype == self.cache_k.dtype and values.dtype == self.cache_v.dtype, f"{keys.dtype=}, {values.dtype=}, {self.cache_k.dtype=}, {self.cache_v.dtype=}"
     self.cache_k.assign(keys.pad((None,(0,self.max_context-start_pos-seqlen),None,None)).contiguous()).realize()
     self.cache_v.assign(values.pad((None,(0,self.max_context-start_pos-seqlen),None,None)).contiguous()).realize()
-# 
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
-    xq, keys, values = xq.transpose(1, 2).contiguous().realize(), keys.transpose(1, 2).contiguous().realize(), values.transpose(1, 2).contiguous().realize()
-
-    print(f"transposed xq {xq}")
-    print(f"transposed keys {keys}")
-    print(f"transposed values {values}")
-    attn = xq.scaled_dot_product_attention(keys, values, mask).realize()
-    print(f"atten {attn}")
-    attn = attn.transpose(1, 2).contiguous().realize()
-    print(f"atten transposed {attn}")
-    print(f"bsz {bsz}")
-    print(f"seqlen {seqlen}")
-    attn = attn.reshape(bsz, seqlen, -1).realize()
-    print(f"attn reshaped {attn}")
-    # print(f"wo {self.wo.weight}")
+    xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
+    attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
+    if isinstance(self.wq.weight.device, tuple):
+      attn = self.unshard_reshape_shard(attn, (bsz, seqlen, -1), self.wq.weight.device, None) 
+    else:
+      attn = attn.reshape(bsz, seqlen, -1)
     return self.wo(attn)
 
 class FeedForward:

@@ -79,12 +79,7 @@ class MultiLazyBuffer:
     if self.axis is None: return MultiLazyBuffer([x.reshape(arg) for x in self.lbs], None)
     # TODO: this can be wrong
     st = ShapeTracker.from_shape(self.shape)
-    print(f"### multi {st}")
-    print(f"### axis {self.axis}")
     rs = st.real_strides()[self.axis]
-    print(f"### real strides {rs}")
-    print(f"### {st.reshape(arg)}")
-
     new_axis = st.reshape(arg).real_strides().index(rs)
     narg = tuple(s//len(self.lbs) if a == new_axis else s for a,s in enumerate(arg))
     return MultiLazyBuffer([x.reshape(narg) for x in self.lbs], new_axis)
