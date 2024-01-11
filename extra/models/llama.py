@@ -122,13 +122,14 @@ class TransformerBlock:
     return (h + self.feed_forward(self.ffn_norm(h).half())).realize()
 
 class Transformer:
-  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size, linear=nn.Linear, n_kv_heads=None, rope_theta=10000, max_context=1024, jit=True, feed_forward=FeedForward):
+  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size, linear=nn.Linear, n_kv_heads=None, rope_theta=10000, max_context=1024, device=Device.DEFAULT, jit=True, feed_forward=FeedForward):
     self.layers = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, max_context, linear, feed_forward=feed_forward) for _ in range(n_layers)]
     self.norm = RMSNorm(dim, norm_eps)
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
     self.output = linear(dim, vocab_size, bias=False)
     self.max_context = max_context
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, self.max_context * 2, rope_theta)
+    if isinstance(device, tuple): self.freqs_cis.shard_((device), axis=None).realize() 
     self.forward_jit = TinyJit(self.forward) if jit else None
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float=0.0):
@@ -136,9 +137,18 @@ class Transformer:
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
 
     h = self.tok_embeddings(tokens)
-    mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos+1).realize() if seqlen > 1 else None
+
+    if seqlen >  1:
+      mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos+1).realize()
+      if isinstance(tokens.device, tuple): mask.shard_(tokens.device, axis=None).realize()
+    else:
+      mask = None
+
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h))[:, -1, :]
+
+    if isinstance(tokens.device, tuple): logits = logits.to(Device.DEFAULT).realize() 
+
     if temperature < 1e-6:
       ret = logits.argmax(-1)
     else:

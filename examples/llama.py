@@ -7,12 +7,18 @@ from pathlib import Path
 import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
+from tqdm import tqdm
 from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, colored
 from tinygrad import Device, GlobalCounters, dtypes
 from tinygrad.tensor import Tensor
-from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
+from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters, get_state_dict
 from extra.models.llama import Transformer, convert_from_huggingface
 from sentencepiece import SentencePieceProcessor
+
+# TODO: make Device able to collect all devices
+d0, d1, d2 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2"
+d3, d4, d5 = f"{Device.DEFAULT}:3", f"{Device.DEFAULT}:4", f"{Device.DEFAULT}:5"
+devices_all = (d0, d1, d2, d3, d4, d5)
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
 
@@ -125,6 +131,22 @@ def load(fn:str):
   else:
     return torch_load(fn)
 
+def load_state_dict_shard(model, state_dict, devices, strict=True, verbose=True):
+  start_mem_used = GlobalCounters.mem_used
+  with Timing("loaded weights in ", lambda et_ns: f", {(GlobalCounters.mem_used-start_mem_used)/1e9:.2f} GB loaded at {(GlobalCounters.mem_used-start_mem_used)/et_ns:.2f} GB/s"):
+    model_state_dict = get_state_dict(model)
+    if DEBUG >= 1 and len(state_dict) > len(model_state_dict):
+      print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
+    for k,v in (t := tqdm(model_state_dict.items(), disable=not verbose)):
+      t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}")
+      if k not in state_dict and not strict:
+        if DEBUG >= 1: print(f"WARNING: not loading {k}")
+        continue
+      if "norm" in k: # norm layers weight are duplicated
+        v.assign(state_dict[k].shard_((devices), axis=None)).realize()
+      else: # the rests layers weight are sharded
+        v.assign(state_dict[k].shard_((devices), axis=0)).realize()
+
 class AbsmaxQuantizedLinear:
   def __init__(self, in_features, out_features, bias=False):
     assert bias == False
@@ -149,14 +171,15 @@ class AbsmaxQuantizedLinear:
 
 class LLaMa:
   @staticmethod
-  def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
+  def build(model_path, tokenizer_path, model_gen="1", model_size="7B", device=Device.DEFAULT, quantize=False):
     params = MODEL_PARAMS[model_gen][model_size]
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
 
     jit = bool(getenv("JIT", 1))
-    model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
+    model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, device=device, jit=jit)
 
+    # TODO: can't load weights using GPU as hosts due to memory overflow
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
     else:
@@ -170,7 +193,11 @@ class LLaMa:
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
       for _,v in weights.items(): v.realize()
-    load_state_dict(model, weights, strict=False)
+
+    if isinstance(device, tuple):
+      load_state_dict_shard(model, weights, device, strict=False, verbose=True)
+    else:
+      load_state_dict(model, weights, strict=False, verbose=True)
 
     return LLaMa(model, sp_model)
 
@@ -270,6 +297,7 @@ if __name__ == "__main__":
   parser.add_argument("--size", type=str, default=None, help=f"""Size of model to use {", ".join([f"{list(v.keys())} for gen '{k}'" for k, v in MODEL_PARAMS.items()])}""")
   parser.add_argument("--quantize", action="store_true", help="Quantize the weights to int8 in memory")
   parser.add_argument("--model", type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
+  parser.add_argument("--device", type=int, default=1, help="devices to load the weights to")
 
   args = parser.parse_args()
   if args.gen not in MODEL_PARAMS: raise ValueError("Invalid model generation")
@@ -369,8 +397,21 @@ After you are done speaking, output [EOS]. You are not Chad.
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
-  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
-  param_count = sum(x.lazydata.size for x in get_parameters(llama.model))
+
+  if args.device > 1:
+    devices = devices_all[:args.device]
+  else:
+    devices = Device.DEFAULT
+
+  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, device=devices, quantize=args.quantize)
+
+  if args.device > 1:
+    param_count = 0
+    for x in get_parameters(llama.model):
+      for lb in x.lazydata.lbs:
+        param_count += lb.size
+  else:
+    param_count = sum(x.lazydata.size for x in get_parameters(llama.model))
 
   if chatbot:
     # encode pre prompt
@@ -413,7 +454,10 @@ After you are done speaking, output [EOS]. You are not Chad.
           with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                       f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                       (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
-            tok = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).item()
+            x = Tensor([toks[start_pos:]])
+            if args.device > 1:
+              x.shard_(devices, axis=None)
+            tok = llama.model(x, start_pos, args.temperature).item()
 
       # use the kv cache
       start_pos = len(toks)
