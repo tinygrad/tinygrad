@@ -210,7 +210,7 @@ class Tensor:
     return Tensor.full(self.shape, fill_value, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
   def zeros_like(self, **kwargs): return self.full_like(0, **kwargs)
   def ones_like(self, **kwargs): return self.full_like(1, **kwargs)
-  
+
   @staticmethod
   def one_hot(indices:Tensor, num_classes:int=-1, **kwargs) -> Tensor:
     num_classes = indices.max().item()+1 if num_classes == -1 else num_classes
