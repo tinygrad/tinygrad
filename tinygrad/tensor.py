@@ -103,6 +103,27 @@ class Tensor:
   @property
   def dtype(self) -> DType: return self.lazydata.dtype
 
+  @staticmethod
+  def onehot(indices:Union[List, np.array], num_classes:int=-1, **kwargs):
+    assert isinstance(indices, (list, np.ndarray)), f"onehot only supports lists and np.ndarrays, not {type(indices)}"
+
+    if isinstance(indices, list):
+      indices = np.array(indices)
+
+    assert indices.ndim == 1, f"onehot only supports 1d indices, not {indices.ndim}d"
+    assert dtypes.is_int(dtypes.from_np(indices.dtype)), f"onehot only supports integer indices, not {indices.dtype}"
+
+    default_num_classes = indices.max() + 1
+
+    if num_classes == -1:
+      num_classes = default_num_classes
+
+    assert num_classes >= default_num_classes, f"num_classes must be -1 or >= {default_num_classes}, not {num_classes}"
+
+    data = np.eye(default_num_classes, num_classes)[indices]
+
+    return Tensor(data, **kwargs)
+
   # ***** data handlers ****
 
   @staticmethod
