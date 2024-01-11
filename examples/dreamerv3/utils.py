@@ -273,13 +273,13 @@ class Optimizer:
     def __call__(self, loss: Tensor, params):
         assert len(loss.shape) == 0, loss.shape
         metrics = {}
+        metrics[f"{self._name}_loss"] = loss.detach().cpu().numpy()
         self._opt.zero_grad()
         loss.backward()
         norm = clip_grad_norm_(self._parameters, self._clip)
         self._opt.step()
         if self._wd:
             self._apply_weight_decay(params)
-        metrics[f"{self._name}_loss"] = loss.detach().cpu().numpy()
         metrics[f"{self._name}_grad_norm"] = norm.item()
         return metrics
 

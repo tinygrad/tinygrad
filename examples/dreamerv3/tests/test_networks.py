@@ -200,12 +200,13 @@ class TestRSSM(unittest.TestCase):
 
     def test_rssm_imagine_with_action(self):
         B = 2
+        T = 4
         rssm = networks.RSSM(num_actions=10, embed=20)
         state = rssm.initial(B)
-        action = Tensor.randn(B, 1, 10)
+        action = Tensor.randn(B, T, 10)
         prior = rssm.imagine_with_action(action, state)
-        self.assertEqual(prior["stoch"].shape, (B, 1, 30, 30))
-        self.assertEqual(prior["deter"].shape, (B, 1, 200))
+        self.assertEqual(prior["stoch"].shape, (B, T, 30, 30))
+        self.assertEqual(prior["deter"].shape, (B, T, 200))
 
     def test_rssm_observe(self):
         B = 2

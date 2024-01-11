@@ -610,7 +610,7 @@ class RSSM:
 
     def observe(self, embed, action, is_first, state=None):
         def swap(x):
-            return x.permute([1, 0] + list(range(2, len(x.shape))))
+            return x.transpose(1,0)
 
         # (batch, time, ch) -> (time, batch, ch)
         embed, action, is_first = swap(embed), swap(action), swap(is_first)
@@ -630,10 +630,9 @@ class RSSM:
 
     def imagine_with_action(self, action, state):
         def swap(x):
-            return x.permute([1, 0] + list(range(2, len(x.shape))))
+            return x.transpose(1,0)
 
         assert isinstance(state, dict), state
-        action = action
         action = swap(action)
         prior = utils.static_scan(self.img_step, [action], state)
         prior = prior[0]
@@ -666,7 +665,7 @@ class RSSM:
         # initialize all prev_state
         if prev_state is None or Tensor.sum(is_first) == B:
             prev_state = self.initial(B)
-            prev_action = Tensor.zeros((B, self._num_actions)).to(self._device)
+            prev_action = Tensor.zeros([B, self._num_actions]).to(self._device)
         # overwrite the prev_state only where is_first=True
         elif Tensor.sum(is_first) > 0:
             is_first = is_first[:, None]

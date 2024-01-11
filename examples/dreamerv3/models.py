@@ -30,7 +30,7 @@ class WorldModel:
         self._step = step
         self._config = config
         shapes = {k: tuple(v.shape) for k, v in obs_space.spaces.items()}
-        num_actions = act_space.n if hasattr(act_space, "n") else act_space.shape[0]
+        num_actions = int(act_space.n) if hasattr(act_space, "n") else act_space.shape[0]
 
         self.encoder = networks.MultiEncoder(shapes, **config.encoder)
         self.embed_size = self.encoder.outdim

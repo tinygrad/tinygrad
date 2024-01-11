@@ -46,7 +46,7 @@ class TestWorldModel(unittest.TestCase):
         world_model = models.WorldModel(obs_space, act_space, 0, config)
         data = {
             "image": np.random.randint(0, 255, (B, T, 64, 64, 3)),
-            "action": np.random.randint(0, 3, (B, T)),
+            "action": np.random.randint(0, 3, (B, T), dtype=np.int32),
             "reward": np.random.rand(B, T),
             "discount": np.ones((B, T)),
             "is_first": np.ones((B, T)),
