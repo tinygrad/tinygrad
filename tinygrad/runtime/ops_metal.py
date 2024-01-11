@@ -80,7 +80,7 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
     from tinygrad.runtime.graph.metal import MetalGraph
-    super().__init__(MetalAllocator(self), LinearizerOptions(device="METAL"), MetalRenderer,
+    super().__init__(MetalAllocator(self), LinearizerOptions("METAL"), MetalRenderer,
                      compile_metal, functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
