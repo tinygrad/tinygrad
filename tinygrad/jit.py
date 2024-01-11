@@ -17,8 +17,8 @@ class JitItem:
   prg: JITRunner  # or a graph executor like MetalGraph
   rawbufs: List[Optional[Buffer]]
 
-def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[Node, Node]:
-  return functools.reduce(operator.__add__, [ji.prg.op_estimate for ji in jit_cache], NumNode(0)), functools.reduce(operator.__add__, [ji.prg.mem_estimate for ji in jit_cache], NumNode(0))  # noqa: E501
+def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[Node, int]:
+  return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache], NumNode(0)), functools.reduce(operator.add, [ji.prg.mem_estimate for ji in jit_cache], 0)  # noqa: E501
 def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
   input_replace: Dict[Tuple[int, int], int] = {}
   for j,ji in enumerate(jit_cache):
