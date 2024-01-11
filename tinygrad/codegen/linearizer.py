@@ -307,7 +307,7 @@ class Linearizer(Kernel):
 
       # copy in any global buffers
       if self.tensor_core:
-        wmma_sz = self.tensor_core.thread_local_sizes
+        wmma_sz, dtype_in, dtype_out = self.tensor_core.thread_local_sizes, self.tensor_core.dtype_in, self.tensor_core.dtype_out
         # calculate the number of local accumulator reduces and render WMMAs: this is bad... this needs to come from someplace else
         nx, ny, nacc = (len(locals_to_store[0][2])//wmma_sz[0]), (len(locals_to_store[1][2])//wmma_sz[1]), (len(acc)//wmma_sz[2])
         acc_reds = math.isqrt((nx*ny)//nacc)
@@ -315,14 +315,10 @@ class Linearizer(Kernel):
         for y in range(by):
           for x in range(bx):
             for j in range(acc_reds):
-              op1, op2, op3 = locals_to_store[0][2][(x+(j*bx))*wmma_sz[0]:(x+(j*bx)+1)*wmma_sz[0]], locals_to_store[1][2][(y+(j*by))*wmma_sz[1]:(y+(j*by)+1)*wmma_sz[1]], acc[i:i+wmma_sz[2]]  # noqa: E501
-              if self.opts.device != "HIP":
-                ops = tuple(op1+op2+op3)
-              else:
-                ops = (self.uop(UOps.CAST, dtypes.half.vec(16), tuple(op1)),
-                       self.uop(UOps.CAST, dtypes.half.vec(16), tuple(op2)),
-                       self.uop(UOps.CAST, dtypes.float.vec(8), tuple(op3)))
-              ret = self.uop(UOps.WMMA, dtypes.float.vec(2) if wmma_sz[2] == 2 else dtypes.float.vec(8), ops, (self.opts.device, self.tensor_core.dtype_in, self.tensor_core.dtype_out,))  # noqa: E501
+              ops = (self.uop(UOps.CAST, dtype_in.vec(wmma_sz[0]), tuple(locals_to_store[0][2][(x+(j*bx))*wmma_sz[0]:(x+(j*bx)+1)*wmma_sz[0]])),
+                     self.uop(UOps.CAST, dtype_in.vec(wmma_sz[1]), tuple(locals_to_store[1][2][(y+(j*by))*wmma_sz[1]:(y+(j*by)+1)*wmma_sz[1]])),
+                     self.uop(UOps.CAST, dtype_out.vec(wmma_sz[2]), tuple(op3:=acc[i:i+wmma_sz[2]])))
+              ret = self.uop(UOps.WMMA, dtype_out.vec(wmma_sz[2]), ops, (self.opts.device, self.tensor_core.dtype_in, self.tensor_core.dtype_out,))
               for z in range(cast(DType, ret.dtype).sz):
                 acc[i+z] = self.uop(UOps.PHI, dtypes.float, (op3[z], self.uop(UOps.GEP, dtypes.float, (ret,), z)) + loop_ctx)
             i += wmma_sz[2]
