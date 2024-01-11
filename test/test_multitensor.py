@@ -202,6 +202,14 @@ class TestMultiTensor(unittest.TestCase):
     y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded, is_causal=True)
     np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
 
+  def test_reshape_on_sharded_axis(self):
+    n_heads = 32
+    n_devices = 2
+    qx = Tensor.ones(1,1,4096).contiguous().realize()
+    qx_sharded = qx.shard((d0, d1), axis=2).realize()
+    qx = qx.reshape(1,1,n_heads,-1).realize()
+    qx_sharded = qx_sharded.reshape(1,1,n_heads//n_devices,-1).realize()
+    assert qx.shape == qx_sharded.shape
 
   def test_data_parallel_resnet(self):
     import sys, pathlib
