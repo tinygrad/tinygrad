@@ -47,8 +47,8 @@ def _compile_linearizer(rdev:Compiled, lin:Linearizer, name:Optional[str]=None) 
   src = rdev.renderer(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
   return rdev.compiler(src), lin.global_size, lin.local_size
 
-def _try_compile_linearized_w_idx(x, device:Compiled):
-  try: return (x[0], _compile_linearizer(device, x[1], "test"))
+def _try_compile_linearized_w_idx(x, device:str):
+  try: return (x[0], _compile_linearizer(cast(Compiled, Device[device]), x[1], "test"))
   except Exception:
     if DEBUG >= 4: traceback.print_exc()
     return (x[0], None)
@@ -109,7 +109,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
     while not exiting:
       acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam]) if len(beam) else [lin]
       timed_lins: List[Tuple[Linearizer, float]] = []
-      _compile_fn = functools.partial(_try_compile_linearized_w_idx, device=dev)
+      _compile_fn = functools.partial(_try_compile_linearized_w_idx, device=lin.opts.device)
       for i,proc in (pool.imap_unordered(_compile_fn, enumerate(acted_lins)) if pool is not None else map(_compile_fn, enumerate(acted_lins))):
         if proc is None: continue
         lib, global_size, local_size = proc
