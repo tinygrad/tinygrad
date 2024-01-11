@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Callable, List, Tuple, Dict, cast, Union, Optional, TypeVar, Generic
 import functools, itertools, operator
+from tinygrad.nn.state import get_parameters
 from tinygrad.dtype import DType
 from tinygrad.helpers import DEBUG, merge_dicts, getenv, all_int, Context, GRAPH
 from tinygrad.device import Device, JITRunner, CompiledASTRunner, Buffer
@@ -16,8 +17,8 @@ class JitItem:
   prg: JITRunner  # or a graph executor like MetalGraph
   rawbufs: List[Optional[Buffer]]
 
-def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[Node, Node]:
-  return functools.reduce(operator.__add__, [ji.prg.op_estimate for ji in jit_cache], NumNode(0)), functools.reduce(operator.__add__, [ji.prg.mem_estimate for ji in jit_cache], NumNode(0))  # noqa: E501
+def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[Node, int]:
+  return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache], NumNode(0)), functools.reduce(operator.add, [ji.prg.mem_estimate for ji in jit_cache], 0)  # noqa: E501
 def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
   input_replace: Dict[Tuple[int, int], int] = {}
   for j,ji in enumerate(jit_cache):
@@ -53,7 +54,7 @@ class TinyJit(Generic[ReturnType]):
     # all inputs (except const) are realized
     input_tensors: Dict[Union[int, str], LazyBuffer] = {cast(Union[int, str], k):v.realize().lazydata for k,v in itertools.chain(enumerate(args), kwargs.items()) if v.__class__ is Tensor}  # noqa: E501
     assert all(isinstance(x, LazyBuffer) for x in input_tensors.values()), "multilazybuffer JIT isn't supported"
-    expected_name_sts_dtype = tuple([(k, v.st.unbind(), v.dtype) for k,v in input_tensors.items()])
+    expected_name_sts_dtype = tuple([(k, v.st.unbind()[0], v.dtype) for k,v in input_tensors.items()])
 
     # get rawbuffers
     # TODO: why can .realized have Any type?
@@ -76,6 +77,7 @@ class TinyJit(Generic[ReturnType]):
       CacheCollector.start(var_vals)
       with Context(GRAPH=getenv("JITGRAPH", GRAPH.value)):
         self.ret = self.fxn(*args, **kwargs)
+        for p in get_parameters(self.ret): p.realize()
       self.jit_cache = CacheCollector.finish()
       assert len(self.jit_cache) != 0, "didn't JIT anything!"
       if DEBUG >= 1 and len(set(get_input_replace(self.jit_cache, input_rawbuffers).values())) != len(input_rawbuffers):

@@ -85,7 +85,7 @@ class CUDADevice(Compiled):
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
     super().__init__(CUDAAllocator(self) if not CUDACPU else MallocAllocator,
-                     LinearizerOptions(supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
+                     LinearizerOptions("CUDA", supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
                      CUDARenderer, compile_cuda, functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
   def synchronize(self):
     if not CUDACPU:

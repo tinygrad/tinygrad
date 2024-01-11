@@ -6,9 +6,8 @@ from tinygrad.jit import TinyJit
 
 
 def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=lambda out,y: out.sparse_categorical_crossentropy(y),
-        transform=lambda x: x, target_transform=lambda x: x, noloss=False):
+        transform=lambda x: x, target_transform=lambda x: x, noloss=False, allow_jit=True):
 
-  @TinyJit
   def train_step(x, y):
     # network
     out = model.forward(x) if hasattr(model, 'forward') else model(x)
@@ -21,6 +20,8 @@ def train(model, X_train, Y_train, optim, steps, BS=128, lossfn=lambda out,y: ou
     cat = out.argmax(axis=-1)
     accuracy = (cat == y).mean()
     return loss.realize(), accuracy.realize()
+
+  if allow_jit: train_step = TinyJit(train_step)
 
   with Tensor.train():
     losses, accuracies = [], []
