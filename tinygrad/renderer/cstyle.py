@@ -138,10 +138,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]))
         depth += 1
       elif uop == UOps.WMMA:
-        if args[0] == "METAL" and dtype == dtypes.float.vec(2): wmma_func = "__metal_wmma<float2,simdgroup_float8x8>"
-        elif args[0] == "HIP" and dtype == dtypes.float.vec(8): wmma_func = "__builtin_amdgcn_wmma_f32_16x16x16_f16_w32"
-        else: raise NotImplementedError(f"WMMA not implemented for {args}")
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = {wmma_func}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
       elif uop == UOps.ALU:
         # remove parens if ALU types are the same. TODO: can do more here
         if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.XOR}:
