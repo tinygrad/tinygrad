@@ -29,18 +29,21 @@ def word_error_rate(x, y):
     scores += levenshtein(h_list, r_list)
   return float(scores) / words, float(scores), words
 
-def one_hot(arr, num_classes=3):
+def one_hot(arr, num_classes=3, channel_axis=1):
+  if len(arr.shape) >= 5: arr = arr.squeeze(dim=channel_axis)
   res = Tensor.eye(num_classes)[arr.reshape(-1)]
   arr = res.reshape(list(arr.shape) + [num_classes])
   arr = arr.permute((0, 4, 1, 2, 3)).cast(dtypes.float)
   return arr
 
-def dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-6, argmax=True, one_hot_pred=True):
+def dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-6, argmax=True, to_one_hot_x=True, include_background=False):
   channel_axis, reduce_axis = 1, tuple(range(2, len(prediction.shape)))
   if argmax: prediction = prediction.argmax(axis=channel_axis)
   else: prediction = prediction.softmax(axis=channel_axis)
-  if one_hot_pred: prediction = one_hot(prediction)[:, 1:]
-  target = one_hot(target)[:, 1:]
+  if to_one_hot_x: prediction = one_hot(prediction, channel_axis=channel_axis)
+  target = one_hot(target, channel_axis=channel_axis)
+  if not include_background: prediction, target = prediction[:, 1:], target[:, 1:]
+  assert prediction.shape == target.shape, f"prediction ({prediction.shape}) and target ({target.shape}) shapes do not match"
   intersection = (prediction * target).sum(axis=reduce_axis)
   target_sum = target.sum(axis=reduce_axis)
   prediction_sum = prediction.sum(axis=reduce_axis)

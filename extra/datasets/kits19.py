@@ -75,7 +75,7 @@ def iterate(val=True, shuffle=False, bs=1):
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
   from multiprocessing import Pool
-  p = Pool(16)
+  p = Pool(8)
   for i in range(0, len(files), bs):
     samples = p.map(preprocess, [files[i] for i in order[i:i+bs]])
     X, Y = [x[0] for x in samples], [x[1] for x in samples]
