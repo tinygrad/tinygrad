@@ -135,12 +135,12 @@ class DiscDist:
     @property
     def mean(self):
         _mean = self.probs * self.buckets
-        return self.transbwd(Tensor.sum(_mean, dim=-1, keepdim=True))
+        return self.transbwd(Tensor.sum(_mean, axis=-1, keepdim=True))
 
     @property
     def mode(self):
         _mode = self.probs * self.buckets
-        return self.transbwd(Tensor.sum(_mode, dim=-1, keepdim=True))
+        return self.transbwd(Tensor.sum(_mode, axis=-1, keepdim=True))
 
     # Inside OneHotCategorical, log_prob is calculated using only max element in targets
     def log_prob(self, x):
@@ -167,8 +167,7 @@ class DiscDist:
             + one_hot(above, num_classes=self.num_buckets) * weight_above[..., None]
         )
         log_pred = self.logits - self.logits.exp().sum(-1, keepdim=True).log()
-
-        return (target * log_pred.unsqueeze(-1)).sum(-1)
+        return (target * log_pred.squeeze(-1).unsqueeze(-1)).sum(-1)
 
 
 class MSEDist:
@@ -293,19 +292,19 @@ class Bernoulli(Distribution):
         return _mode.detach() + self.mean - self.mean.detach()
 
     def entropy(self):
-        return self.log_prob(self.probs)
+        return -self.log_prob(self.probs)
 
     def sample(self, sample_shape=()):
         output_shape = sample_shape + self._batch_shape
         output_shape = output_shape if len(output_shape) > 0 else (1,)
         eps = Tensor.rand(output_shape)
-        return (eps < self.probs).float()
+        return (eps < self.probs).cast(self.probs.dtype)
 
     def log_prob(self, x):
         log_probs0 = -Tensor.softplus(self.logits)
         log_probs1 = -Tensor.softplus(-self.logits)
 
-        return (log_probs0 * (1 - x) + log_probs1 * x).unsqueeze(-1)
+        return (log_probs0 * (1 - x) + log_probs1 * x)
 
 
 class Normal(Distribution):

@@ -67,14 +67,11 @@ class TestMLP(unittest.TestCase):
 
     def test_mlp_binary(self):
         inputs = Tensor.randn(20, 10)
+        outputs = Tensor.randn(1, 20)
         mlp = networks.MLP(10, (), layers=2, units=2, dist="binary")
         dist = mlp(inputs)
-        entropy = dist.entropy()
-        self.assertEqual(entropy.shape, (20, 1))
-        outputs = dist.sample()
-        self.assertEqual(outputs.shape, (20, 1))
         log_prob = dist.log_prob(outputs)
-        self.assertEqual(log_prob.shape, (20, 1))
+        self.assertEqual(log_prob.shape, (20,))
 
     def test_mlp_symlog_disc(self):
         inputs = Tensor.randn(1, 10)

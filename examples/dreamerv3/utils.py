@@ -4,6 +4,9 @@ import numpy as np
 
 from tinygrad import Tensor, nn
 
+import yaml
+import pathlib
+import argparse
 
 def symlog(x):
     return Tensor.sign(x) * Tensor.log(Tensor.abs(x) + 1.0)
@@ -99,12 +102,12 @@ def static_scan(fn, inputs, start):
 
         last = fn(last, *inp(index))
         if flag:
-            if type(last) == type({}):
+            if isinstance(last, dict):
                 outputs = {key: value.unsqueeze(0) for key, value in last.items()}
             else:
                 outputs = []
                 for _last in last:
-                    if type(_last) == type({}):
+                    if isinstance(_last, dict):
                         outputs.append(
                             {key: value.unsqueeze(0) for key, value in _last.items()}
                         )
@@ -112,21 +115,21 @@ def static_scan(fn, inputs, start):
                         outputs.append(_last.unsqueeze(0))
             flag = False
         else:
-            if type(last) == type({}):
+            if isinstance(last, dict):
                 for key in last.keys():
                     outputs[key] = Tensor.cat(
                         outputs[key], last[key].unsqueeze(0), dim=0
                     )
             else:
                 for j in range(len(outputs)):
-                    if type(last[j]) == type({}):
+                    if isinstance(last[j], dict):
                         for key in last[j].keys():
                             outputs[j][key] = Tensor.cat(
                                 outputs[j][key], last[j][key].unsqueeze(0), dim=0
                             )
                     else:
                         outputs[j] = Tensor.cat(outputs[j], last[j].unsqueeze(0), dim=0)
-    if type(last) == type({}):
+    if isinstance(outputs, dict):
         outputs = [outputs]
     return outputs
 
@@ -231,7 +234,8 @@ def clip_grad_norm_(parameters, max_norm):
     grads = [p.grad for p in parameters if p.grad is not None]
     if len(grads) == 0:
         return Tensor(0.0)
-    l2_norm = lambda x: Tensor.sqrt(Tensor.sum(Tensor.square(x)))
+    def l2_norm(x):
+        return Tensor.sqrt(Tensor.sum(Tensor.square(x)))
     norms = [l2_norm(g) for g in grads]
     total_norm = l2_norm(Tensor.stack(norms))
     clip_coef = max_norm / (total_norm + 1e-6)
@@ -269,13 +273,13 @@ class Optimizer:
     def __call__(self, loss: Tensor, params):
         assert len(loss.shape) == 0, loss.shape
         metrics = {}
-        metrics[f"{self._name}_loss"] = loss.detach().cpu().numpy()
         self._opt.zero_grad()
         loss.backward()
         norm = clip_grad_norm_(self._parameters, self._clip)
         self._opt.step()
         if self._wd:
             self._apply_weight_decay(params)
+        metrics[f"{self._name}_loss"] = loss.detach().cpu().numpy()
         metrics[f"{self._name}_grad_norm"] = norm.item()
         return metrics
 
@@ -285,3 +289,28 @@ class Optimizer:
             raise NotImplementedError
         for var in varibs:
             var -= self._wd * var
+
+def load_config():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--configs", nargs="+")
+    args, remaining = parser.parse_known_args()
+    configs = yaml.safe_load(
+        (pathlib.Path(__file__).parent / "configs.yaml").read_text()
+    )
+
+    def recursive_update(base, update):
+        for key, value in update.items():
+            if isinstance(value, dict) and key in base:
+                recursive_update(base[key], value)
+            else:
+                base[key] = value
+
+    name_list = ["defaults", *args.configs] if args.configs else ["defaults"]
+    defaults = {}
+    for name in name_list:
+        recursive_update(defaults, configs[name])
+    parser = argparse.ArgumentParser()
+    for key, value in sorted(defaults.items(), key=lambda x: x[0]):
+        arg_type = args_type(value)
+        parser.add_argument(f"--{key}", type=arg_type, default=arg_type(value))
+    return parser.parse_args(remaining)

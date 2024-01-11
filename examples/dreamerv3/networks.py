@@ -197,7 +197,7 @@ class ConvDecoder:
         if self._cnn_sigmoid:
             mean = Tensor.sigmoid(mean)
         else:
-            mean += 0.5
+            mean = mean + 0.5
         return mean
 
 

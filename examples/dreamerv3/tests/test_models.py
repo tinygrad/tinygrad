@@ -1,6 +1,7 @@
 from tinygrad import Tensor
 import unittest
 import models
+import utils
 import gymnasium as gym
 import numpy as np
 
@@ -15,17 +16,66 @@ class TestRewardEMA(unittest.TestCase):
 
 
 class TestWorldModel(unittest.TestCase):
-    def test_world_model(self):
+    def test_world_model_init(self):
         obs_space = gym.spaces.Dict(
             {
                 "image": gym.spaces.Box(
-                    low=0, high=255, shape=(84, 84, 3), dtype=np.uint8
+                    low=0, high=255, shape=(64, 64, 3), dtype=np.uint8
                 ),
             }
         )
-        world_model = models.WorldModel(obs_space, None, 0, {})
-        world_model(Tensor([1.0, 2.0, 3.0]))
+        act_space = gym.spaces.Discrete(3)
+        config = utils.load_config()
+        world_model = models.WorldModel(obs_space, act_space, 0, config)
+        print(
+            f"DreamerV3 world model has {sum(param.numel() for param in world_model.parameters())} variables."
+        )
 
+    def test_world_model_preprocess(self):
+        B = 6
+        T = 6
+        obs_space = gym.spaces.Dict(
+            {
+                "image": gym.spaces.Box(
+                    low=0, high=255, shape=(64, 64, 3), dtype=np.uint8
+                ),
+            }
+        )
+        act_space = gym.spaces.Discrete(3)
+        config = utils.load_config()
+        world_model = models.WorldModel(obs_space, act_space, 0, config)
+        data = {
+            "image": np.random.randint(0, 255, (B, T, 64, 64, 3)),
+            "action": np.random.randint(0, 3, (B, T)),
+            "reward": np.random.rand(B, T),
+            "discount": np.ones((B, T)),
+            "is_first": np.ones((B, T)),
+            "is_terminal": np.zeros((B, T)),
+        }
+        data = world_model.preprocess(data)
+
+    def test_world_model_train(self):
+        B = 6
+        T = 6
+        obs_space = gym.spaces.Dict(
+            {
+                "image": gym.spaces.Box(
+                    low=0, high=255, shape=(64, 64, 3), dtype=np.uint8
+                ),
+            }
+        )
+        act_space = gym.spaces.Discrete(3)
+        config = utils.load_config()
+        world_model = models.WorldModel(obs_space, act_space, 0, config)
+        data = {
+            "image": np.random.randint(0, 255, (B, T, 64, 64, 3)),
+            "action": np.random.randint(0, 3, (B, T)),
+            "reward": np.random.rand(B, T),
+            "discount": np.ones((B, T)),
+            "is_first": np.ones((B, T)),
+            "is_terminal": np.zeros((B, T)),
+        }
+        post, context, metrics = world_model._train(data)
 
 if __name__ == "__main__":
     unittest.main()

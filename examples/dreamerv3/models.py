@@ -3,7 +3,7 @@ import copy
 import networks
 import utils
 
-from tinygrad import Tensor
+from tinygrad import Tensor, nn
 
 
 class RewardEMA:
@@ -30,9 +30,13 @@ class WorldModel:
         self._step = step
         self._config = config
         shapes = {k: tuple(v.shape) for k, v in obs_space.spaces.items()}
+        num_actions = act_space.n if hasattr(act_space, "n") else act_space.shape[0]
+
         self.encoder = networks.MultiEncoder(shapes, **config.encoder)
         self.embed_size = self.encoder.outdim
         self.dynamics = networks.RSSM(
+            num_actions,
+            self.embed_size,
             config.dyn_stoch,
             config.dyn_deter,
             config.dyn_hidden,
@@ -45,8 +49,6 @@ class WorldModel:
             config.dyn_min_std,
             config.unimix_ratio,
             config.initial,
-            config.num_actions,
-            self.embed_size,
             config.device,
         )
         self.heads = {}
@@ -59,7 +61,7 @@ class WorldModel:
         )
         self.heads["reward"] = networks.MLP(
             feat_size,
-            (255,) if config.reward_head["dist"] == "symlog_disc" else (),
+            (),
             config.reward_head["layers"],
             config.units,
             config.act,
@@ -91,10 +93,6 @@ class WorldModel:
             config.grad_clip,
             config.weight_decay,
             opt=config.opt,
-            use_amp=self._use_amp,
-        )
-        print(
-            f"Optimizer model_opt has {sum(param.numel() for param in self.parameters())} variables."
         )
         # other losses are scaled by 1.0.
         self._scales = dict(
@@ -109,40 +107,38 @@ class WorldModel:
         # discount (batch_size, batch_length)
         data = self.preprocess(data)
 
-        with utils.RequiresGrad(self):
-            with Tensor.cuda.amp.autocast(self._use_amp):
-                embed = self.encoder(data)
-                post, prior = self.dynamics.observe(
-                    embed, data["action"], data["is_first"]
-                )
-                kl_free = self._config.kl_free
-                dyn_scale = self._config.dyn_scale
-                rep_scale = self._config.rep_scale
-                kl_loss, kl_value, dyn_loss, rep_loss = self.dynamics.kl_loss(
-                    post, prior, kl_free, dyn_scale, rep_scale
-                )
-                assert kl_loss.shape == embed.shape[:2], kl_loss.shape
-                preds = {}
-                for name, head in self.heads.items():
-                    grad_head = name in self._config.grad_heads
-                    feat = self.dynamics.get_feat(post)
-                    feat = feat if grad_head else feat.detach()
-                    pred = head(feat)
-                    if type(pred) is dict:
-                        preds.update(pred)
-                    else:
-                        preds[name] = pred
-                losses = {}
-                for name, pred in preds.items():
-                    loss = -pred.log_prob(data[name])
-                    assert loss.shape == embed.shape[:2], (name, loss.shape)
-                    losses[name] = loss
-                scaled = {
-                    key: value * self._scales.get(key, 1.0)
-                    for key, value in losses.items()
-                }
-                model_loss = sum(scaled.values()) + kl_loss
-            metrics = self._model_opt(Tensor.mean(model_loss), self.parameters())
+        embed = self.encoder(data)
+        post, prior = self.dynamics.observe(
+            embed, data["action"], data["is_first"]
+        )
+        kl_free = self._config.kl_free
+        dyn_scale = self._config.dyn_scale
+        rep_scale = self._config.rep_scale
+        kl_loss, kl_value, dyn_loss, rep_loss = self.dynamics.kl_loss(
+            post, prior, kl_free, dyn_scale, rep_scale
+        )
+        assert kl_loss.shape == embed.shape[:2], kl_loss.shape
+        preds = {}
+        for name, head in self.heads.items():
+            grad_head = name in self._config.grad_heads
+            feat = self.dynamics.get_feat(post)
+            feat = feat if grad_head else feat.detach()
+            pred = head(feat)
+            if isinstance(pred, dict):
+                preds.update(pred)
+            else:
+                preds[name] = pred
+        losses = {}
+        for name, pred in preds.items():
+            loss = -pred.log_prob(data[name])
+            assert loss.shape == embed.shape[:2], (name, loss.shape, embed.shape[:2])
+            losses[name] = loss
+        scaled = {
+            key: value * self._scales.get(key, 1.0)
+            for key, value in losses.items()
+        }
+        model_loss = (sum(scaled.values()) + kl_loss).mean()
+        metrics = self._model_opt(model_loss, self.parameters())
 
         metrics.update({f"{name}_loss": loss.numpy() for name, loss in losses.items()})
         metrics["kl_free"] = kl_free
@@ -170,17 +166,18 @@ class WorldModel:
     # this function is called during both rollout and training
     def preprocess(self, obs):
         obs = obs.copy()
-        obs["image"] = Tensor(obs["image"]) / 255.0
+        obs = {k: Tensor(v).to(self._config.device) for k, v in obs.items()}
+        if "image" in obs:
+            obs["image"] = obs["image"].float() / 255.0
         if "discount" in obs:
             obs["discount"] *= self._config.discount
             # (batch_size, batch_length) -> (batch_size, batch_length, 1)
-            obs["discount"] = Tensor(obs["discount"]).unsqueeze(-1)
+            obs["discount"] = obs["discount"].unsqueeze(-1)
         # 'is_first' is necessary to initialize hidden state at training
         assert "is_first" in obs
         # 'is_terminal' is necessary to train cont_head
         assert "is_terminal" in obs
-        obs["cont"] = Tensor(1.0 - obs["is_terminal"]).unsqueeze(-1)
-        obs = {k: Tensor(v).to(self._config.device) for k, v in obs.items()}
+        obs["cont"] = 1.0 - obs["is_terminal"]
         return obs
 
     def video_pred(self, data):
@@ -199,10 +196,12 @@ class WorldModel:
         # observed image is given until 5 steps
         model = Tensor.cat([recon[:, :5], openl], 1)
         truth = data["image"][:6]
-        model = model
         error = (model - truth + 1.0) / 2.0
 
         return Tensor.cat([truth, model, error], 2)
+
+    def parameters(self):
+        return nn.state.get_parameters(self)
 
 
 class ImagBehavior:
@@ -215,7 +214,7 @@ class ImagBehavior:
             feat_size = config.dyn_stoch + config.dyn_deter
         self.actor = networks.MLP(
             feat_size,
-            (config.num_actions,),
+            (world_model.num_actions,),
             config.actor["layers"],
             config.units,
             config.act,
@@ -248,25 +247,19 @@ class ImagBehavior:
         kw = dict(wd=config.weight_decay, opt=config.opt, use_amp=self._use_amp)
         self._actor_opt = utils.Optimizer(
             "actor",
-            self.actor.parameters(),
+            self.actor_parameters(),
             config.actor["lr"],
             config.actor["eps"],
             config.actor["grad_clip"],
             **kw,
         )
-        print(
-            f"Optimizer actor_opt has {sum(param.numel() for param in self.actor.parameters())} variables."
-        )
         self._value_opt = utils.Optimizer(
             "value",
-            self.value.parameters(),
+            self.value_parameters(),
             config.critic["lr"],
             config.critic["eps"],
             config.critic["grad_clip"],
             **kw,
-        )
-        print(
-            f"Optimizer value_opt has {sum(param.numel() for param in self.value.parameters())} variables."
         )
         if self._config.reward_EMA:
             self.reward_ema = RewardEMA(device=self._config.device)
@@ -327,9 +320,8 @@ class ImagBehavior:
         else:
             metrics.update(utils.tensorstats(imag_action, "imag_action"))
         metrics["actor_entropy"] = Tensor.mean(actor_ent).numpy()
-        with utils.RequiresGrad(self):
-            metrics.update(self._actor_opt(actor_loss, self.actor.parameters()))
-            metrics.update(self._value_opt(value_loss, self.value.parameters()))
+        metrics.update(self._actor_opt(actor_loss, self.actor_parameters()))
+        metrics.update(self._value_opt(value_loss, self.value_parameters()))
         return imag_feat, imag_state, imag_action, weights, metrics
 
     def _imagine(self, start, policy, horizon):
@@ -424,3 +416,9 @@ class ImagBehavior:
                 for s, d in zip(self.value.parameters(), self._slow_value.parameters()):
                     d.data = mix * s.data + (1 - mix) * d.data
             self._updates += 1
+
+    def actor_parameters(self):
+        return nn.state.get_parameters(self.actor)
+
+    def value_parameters(self):
+        return nn.state.get_parameters(self.value)

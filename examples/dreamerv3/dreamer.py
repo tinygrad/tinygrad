@@ -1,38 +1,22 @@
-import argparse
 import functools
-import os
 import pathlib
-import sys
-
-os.environ["MUJOCO_GL"] = "osmesa"
-
 import numpy as np
-import ruamel.yaml as yaml
-
-sys.path.append(str(pathlib.Path(__file__).parent))
 
 import envs.wrappers as wrappers
 import exploration as expl
 import models
 import utils
-import distributions
-from tinygrad import Tensor
-
-
-def to_np(x):
-    return x.detach().cpu().numpy()
 
 
 class Dreamer:
     def __init__(self, obs_space, act_space, config, logger, dataset):
         self._config = config
         self._logger = logger
-        self._should_log = tools.Every(config.log_every)
+        self._log_every = config.log_every
         batch_steps = config.batch_size * config.batch_length
-        self._should_train = tools.Every(batch_steps / config.train_ratio)
-        self._should_pretrain = tools.Once()
-        self._should_reset = tools.Every(config.reset_every)
-        self._should_expl = tools.Until(int(config.expl_until / config.action_repeat))
+        self._num_train_steps = utils.Every(batch_steps / config.train_ratio)
+        self._should_reset = utils.Every(config.reset_every)
+        self._should_expl = utils.Until(int(config.expl_until / config.action_repeat))
         self._metrics = {}
         # this is update step
         self._step = logger.step // config.action_repeat
@@ -40,11 +24,6 @@ class Dreamer:
         self._dataset = dataset
         self._wm = models.WorldModel(obs_space, act_space, self._step, config)
         self._task_behavior = models.ImagBehavior(config, self._wm)
-        if (
-            config.compile and os.name != "nt"
-        ):  # compilation is not supported on windows
-            self._wm = torch.compile(self._wm)
-            self._task_behavior = torch.compile(self._task_behavior)
 
         def reward(f, s, a):
             return self._wm.heads["reward"](f).mean()
@@ -139,8 +118,8 @@ def count_steps(folder):
 
 
 def make_dataset(episodes, config):
-    generator = tools.sample_episodes(episodes, config.batch_length)
-    dataset = tools.from_generator(generator, config.batch_size)
+    generator = utils.sample_episodes(episodes, config.batch_length)
+    dataset = utils.from_generator(generator, config.batch_size)
     return dataset
 
 
@@ -205,9 +184,9 @@ def make_env(config, mode, id):
 
 
 def main(config):
-    tools.set_seed_everywhere(config.seed)
+    utils.set_seed_everywhere(config.seed)
     if config.deterministic_run:
-        tools.enable_deterministic_run()
+        utils.enable_deterministic_run()
     logdir = pathlib.Path(config.logdir).expanduser()
     config.traindir = config.traindir or logdir / "train_eps"
     config.evaldir = config.evaldir or logdir / "eval_eps"
@@ -222,19 +201,19 @@ def main(config):
     config.evaldir.mkdir(parents=True, exist_ok=True)
     step = count_steps(config.traindir)
     # step in logger is environmental step
-    logger = tools.Logger(logdir, config.action_repeat * step)
+    logger = utils.Logger(logdir, config.action_repeat * step)
 
     print("Create envs.")
     if config.offline_traindir:
         directory = config.offline_traindir.format(**vars(config))
     else:
         directory = config.traindir
-    train_eps = tools.load_episodes(directory, limit=config.dataset_size)
+    train_eps = utils.load_episodes(directory, limit=config.dataset_size)
     if config.offline_evaldir:
         directory = config.offline_evaldir.format(**vars(config))
     else:
         directory = config.evaldir
-    eval_eps = tools.load_episodes(directory, limit=1)
+    eval_eps = utils.load_episodes(directory, limit=1)
 
     def make(mode, id):
         return make_env(config, mode, id)
@@ -256,7 +235,7 @@ def main(config):
         prefill = max(0, config.prefill - count_steps(config.traindir))
         print(f"Prefill dataset ({prefill} steps).")
         if hasattr(acts, "discrete"):
-            random_actor = tools.OneHotDist(
+            random_actor = utils.OneHotDist(
                 torch.zeros(config.num_actions).repeat(config.envs, 1)
             )
         else:
@@ -273,7 +252,7 @@ def main(config):
             logprob = random_actor.log_prob(action)
             return {"action": action, "logprob": logprob}, None
 
-        state = tools.simulate(
+        state = utils.simulate(
             random_agent,
             train_envs,
             train_eps,
@@ -299,7 +278,7 @@ def main(config):
     if (logdir / "latest.pt").exists():
         checkpoint = torch.load(logdir / "latest.pt")
         agent.load_state_dict(checkpoint["agent_state_dict"])
-        tools.recursively_load_optim_state_dict(agent, checkpoint["optims_state_dict"])
+        utils.recursively_load_optim_state_dict(agent, checkpoint["optims_state_dict"])
         agent._should_pretrain._once = False
 
     # make sure eval will be executed once after config.steps
@@ -308,7 +287,7 @@ def main(config):
         if config.eval_episode_num > 0:
             print("Start evaluation.")
             eval_policy = functools.partial(agent, training=False)
-            tools.simulate(
+            utils.simulate(
                 eval_policy,
                 eval_envs,
                 eval_eps,
@@ -321,7 +300,7 @@ def main(config):
                 video_pred = agent._wm.video_pred(next(eval_dataset))
                 logger.video("eval_openl", to_np(video_pred))
         print("Start training.")
-        state = tools.simulate(
+        state = utils.simulate(
             agent,
             train_envs,
             train_eps,
@@ -333,7 +312,7 @@ def main(config):
         )
         items_to_save = {
             "agent_state_dict": agent.state_dict(),
-            "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
+            "optims_state_dict": utils.recursively_collect_optim_state_dict(agent),
         }
         torch.save(items_to_save, logdir / "latest.pt")
     for env in train_envs + eval_envs:
@@ -344,26 +323,5 @@ def main(config):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--configs", nargs="+")
-    args, remaining = parser.parse_known_args()
-    configs = yaml.safe_load(
-        (pathlib.Path(sys.argv[0]).parent / "configs.yaml").read_text()
-    )
-
-    def recursive_update(base, update):
-        for key, value in update.items():
-            if isinstance(value, dict) and key in base:
-                recursive_update(base[key], value)
-            else:
-                base[key] = value
-
-    name_list = ["defaults", *args.configs] if args.configs else ["defaults"]
-    defaults = {}
-    for name in name_list:
-        recursive_update(defaults, configs[name])
-    parser = argparse.ArgumentParser()
-    for key, value in sorted(defaults.items(), key=lambda x: x[0]):
-        arg_type = tools.args_type(value)
-        parser.add_argument(f"--{key}", type=arg_type, default=arg_type(value))
-    main(parser.parse_args(remaining))
+    defaults = utils.load_config()
+    main(defaults)
