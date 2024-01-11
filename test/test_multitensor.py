@@ -91,6 +91,17 @@ class TestMultiTensor(unittest.TestCase):
     O = (Xs@W1s)@W2s
     np.testing.assert_allclose((X.numpy() @ W1.numpy()) @ W2.numpy(), O.to(Device.DEFAULT).numpy(), atol=1e-5)
 
+  def test_cat_shard(self):
+    X1 = Tensor.kaiming_uniform(1,2,32,128).realize()
+    X2 = Tensor.kaiming_uniform(1,1,32,128).realize()
+    X3 = X1.cat(X2, dim=1)
+
+    X1_sharded = X1.shard((d0, d1), axis=2).realize()
+    X2_sharded = X2.shard((d0, d1), axis=2).realize()
+    X3_sharded = X1_sharded.cat(X2_sharded, dim=1)
+
+    np.testing.assert_allclose(X3.numpy(), X3_sharded.numpy(), atol=1e-6, rtol=1e-6)
+
   def test_matmul_shard_none(self): return self._test_matmul_shard_axis(None, None)
   def test_matmul_shard_X_0(self): return self._test_matmul_shard_axis(0, None)
   def test_matmul_shard_X_1(self): return self._test_matmul_shard_axis(1, None)
