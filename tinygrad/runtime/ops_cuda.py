@@ -7,7 +7,6 @@ from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, colored, cpu_ti
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.renderer.assembly import PTXRenderer
 
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
@@ -88,10 +87,8 @@ class CUDADevice(Compiled):
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
     super().__init__(CUDAAllocator(self) if not CUDACPU else MallocAllocator,
-                     LinearizerOptions(supports_float4=not PTX, supports_float4_alu=False, global_max=[65535, 65535, 2147483647],
-                                       local_max=[64, 1024, 1024]),
-                     PTXRenderer if PTX else CUDARenderer, compile_ptx if PTX else compile_cuda, functools.partial(CUDAProgram, self),
-                     graph=CUDAGraph if not CUDACPU else None)
+                     LinearizerOptions("CUDA", supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
+                     CUDARenderer, compile_cuda, functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
   def synchronize(self):
     if not CUDACPU:
       check(cuda.cuCtxSetCurrent(self.context))
