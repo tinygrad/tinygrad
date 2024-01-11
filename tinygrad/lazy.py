@@ -16,8 +16,7 @@ from weakref import ref, ReferenceType
 sys.setrecursionlimit(10000)
 
 lazycache: Dict[Any, ReferenceType[LazyBuffer]] = {}
-def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType,
-                      op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
+def create_lazybuffer(device:str, st:ShapeTracker, dtype:DType, op:Optional[Op]=None, arg:Any=None, srcs:Tuple[LazyBuffer, ...]=(),
                       base:Optional[LazyBuffer]=None, enable_cache=bool(getenv("LAZYCACHE", 1))):
   if st.size == 0: st, op, arg, srcs, base = ShapeTracker.from_shape(st.shape), LoadOps.CONST, 0, (), None
 
@@ -64,8 +63,7 @@ class LazyBuffer:
   def contiguous(self):
     if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
       ret = self.e(LoadOps.CONTIGUOUS)
-      sti = self.st.invert(self.base.shape)
-      if sti is not None: self.base.contiguous_child = ref(ret), sti
+      if (sti := self.st.invert(self.base.shape)) is not None: self.base.contiguous_child = ref(ret), sti
       return ret
     self.base.forced_realize = True
     return self
@@ -82,7 +80,7 @@ class LazyBuffer:
   @staticmethod
   def fromCPU(x: np.ndarray) -> LazyBuffer:
     ret = LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), dtypes.from_np(x.dtype), op=LoadOps.EMPTY)
-    ret.realized = Buffer("CPU", prod(x.shape), dtypes.from_np(x.dtype), x.flatten())
+    ret.realized = Buffer("CPU", x.size, dtypes.from_np(x.dtype), x.flatten())
     return ret
 
   def copy_to_device(self, device:str) -> LazyBuffer:
@@ -114,20 +112,18 @@ class LazyBuffer:
     assert all_same(dts:=[x.dtype.scalar() for x in (srcs[1:] if op is TernaryOps.WHERE else srcs)]), f"all dtypes must match {dts} on {op}"
     assert all_same([x.shape for x in srcs]), f"all shapes must be the same {[x.shape for x in srcs]}"
     if op is TernaryOps.WHERE: assert srcs[0].dtype == dtypes.bool, "TernaryOps.WHERE must have the first arg be bool"
-    out_dtype = srcs[-1].dtype if op not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else dtypes.bool
-    ret = create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
-    return ret
+    out_dtype = dtypes.bool if op in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else srcs[-1].dtype
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), out_dtype, op, arg, tuple(srcs))
 
   # *** reduce ops ***
 
   def _reduce_op(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
-    if self.shape == tuple(new_shape): return self
+    if self.shape == new_shape: return self
     unbound_new_shape = tuple(s.unbind()[0] if not isinstance(s, int) else s for s in new_shape)
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, unbound_new_shape, (self,))
 
   def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
-    assert len(self.shape) == len(new_shape) and all(s == ns or ns == 1 for s,ns in zip(self.shape, new_shape)), \
-      f"reduce shape lens must match {self.shape} {new_shape}"
+    assert len(self.shape)==len(new_shape) and all(ns in (1,s) for s,ns in zip(self.shape,new_shape)), f"not a contraction {self.shape=} {new_shape=}"
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not all_int(self.shape) or (0 in self.shape) or prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, new_shape)
@@ -220,7 +216,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
   if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
                                             not any(buf.shape[x]%4 == 0 for x in buf.st.unit_stride_axes())):
     if DEBUG >= 3: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
-    buf.dtype = dtypes.float32  # NOTE; this is what makes the dtype above not match
+    buf.dtype = dtypes.float32  # NOTE: this is what makes the dtype above not match
   if buf.base != buf:
     # realize all places where the buffer is expanded
     if prod(buf.base.st.shape) < prod(buf.st.shape):
