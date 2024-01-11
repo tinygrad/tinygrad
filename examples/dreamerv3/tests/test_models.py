@@ -106,7 +106,7 @@ class TestWorldModel(unittest.TestCase):
         self.assertEqual(post["stoch"].numpy().shape, (B, T, 32, 32))
         self.assertEqual(post["deter"].numpy().shape, (B, T, 512))
         self.assertEqual(context["embed"].numpy().shape, (B, T, 4096))
-        self.assertEqual(context["feat"].numpy().shape, (B, T, 4096))
+        self.assertEqual(context["feat"].numpy().shape, (B, T, 1536))
 
 class TestImagBehavior(unittest.TestCase):
     def test_imag_behavior_init(self):

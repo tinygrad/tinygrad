@@ -208,8 +208,8 @@ class WorldModel:
         return Tensor.cat(truth, model, error, dim=2).numpy()
 
     def state_dict(self):
-        state_dict = nn.state.get_state_dict(self)
-        state_dict = {k: v for k, v in state_dict.items() if "_model_opt" not in k}
+        models = [self.encoder, self.dynamics, *self.heads.values()]
+        state_dict = nn.state.get_state_dict(models)
         return state_dict
 
     def parameters(self):
