@@ -12,11 +12,11 @@ def train_retinanet():
 def train_unet3d():
   from examples.mlperf.losses import dice_ce_loss
   from extra.models.unet3d import UNet3D
-  from extra.datasets.kits19 import iterate
+  from extra.datasets.kits19 import iterate, get_train_files
   from tinygrad import dtypes
   from tinygrad import TinyJit
   import tinygrad.nn as nn
-  import tqdm
+  from tqdm import tqdm
 
   epochs = getenv("NUM_EPOCHS", 4000)
   bs = getenv("BS", 2)
@@ -25,28 +25,31 @@ def train_unet3d():
   lr_warmup_init_lr = getenv("LR_WARMUP_INIT_LR", 0.0001)
 
   model = UNet3D()
-  model_run = TinyJit(lambda x: model(x).realize()) if getenv("JIT") else model
   optim = nn.optim.SGD(nn.state.get_parameters(model), lr=1.0, momentum=0.9, nesterov=True)
 
   def _lr_warm_up(optim, init_lr, lr, current_epoch, warmup_epochs):
     scale = current_epoch / warmup_epochs
     optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale]))
 
+  @TinyJit
+  def _train_step(x, y):
+    y_hat = model(x)
+    loss = dice_ce_loss(y_hat, y)
+
+    optim.zero_grad()
+    loss.backward()
+    optim.step()
+
+    return loss.realize()
+
   for epoch in range(1, epochs + 1):
-    if epoch <= lr_warmup_epochs and lr_warmup_epochs > 0: _lr_warm_up(optim, lr_warmup_init_lr, lr, epoch, lr_warmup_epochs)
+    if epoch <= lr_warmup_epochs and lr_warmup_epochs > 0:
+      _lr_warm_up(optim, lr_warmup_init_lr, lr, epoch, lr_warmup_epochs)
 
-    for x, y in (t:=tqdm.tqdm(iterate(val=False, shuffle=True, bs=bs), desc=f"[Training][Epoch {epoch}]")):
-      x, y = Tensor(x, dtype=dtypes.float32).half(), Tensor(y, dtype=dtypes.uint8)
-      y_hat = model_run(x)
-      loss = dice_ce_loss(y_hat, y)
-      
-      optim.zero_grad()
-      loss.backward()
-      optim.step()
-
-      del x, y
-
-      t.set_description(f"[Training][Epoch {epoch}][Loss: {loss.realize().item():.3f}]")
+    for x, y in (t:=tqdm(iterate(val=False, shuffle=True, bs=bs), desc=f"[Epoch {epoch}]", total=len(get_train_files()))):
+      x, y = Tensor(x, dtype=dtypes.float32), Tensor(y, dtype=dtypes.uint8)
+      loss = _train_step(x, y)
+      t.set_description(f"[Epoch {epoch}][Loss: {loss.item():.3f}]")
 
 def train_rnnt():
   # TODO: RNN-T
