@@ -214,7 +214,7 @@ class Tensor:
   @staticmethod
   def one_hot(indices:Tensor, num_classes:int=-1, **kwargs) -> Tensor:
     num_classes = indices.max().item()+1 if num_classes == -1 else num_classes
-    return Tensor.where(indices[:, None] == Tensor.arange(num_classes), 1, 0, **kwargs)
+    return Tensor.where(indices[..., None] == Tensor.arange(num_classes), 1, 0, **kwargs)
 
   # ***** rng hlops *****
 
