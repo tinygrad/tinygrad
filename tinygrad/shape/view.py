@@ -183,7 +183,8 @@ class View:
     strides, r_new_shape = [], reversed(new_shape)
     for merged_dim, new_stride, real_dim in reversed(_merge_dims(self.shape, self.strides, self.mask)):
       acc = 1
-      while acc < merged_dim and (new_dim := next(r_new_shape, None)):
+      # TODO: this <= and != is for symbolic!?
+      while acc <= merged_dim and acc != merged_dim and (new_dim := next(r_new_shape, None)):
         strides.append(new_stride)
         if new_dim != 1: new_stride *= (new_dim if (acc :=  acc * new_dim) < real_dim else 0)
       if acc != merged_dim: break
