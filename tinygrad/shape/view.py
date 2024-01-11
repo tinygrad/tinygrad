@@ -16,20 +16,20 @@ def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
   return canonicalize_strides(shape, strides[::-1])
 
 @functools.lru_cache(maxsize=None)
-def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]] = None) -> Tuple[Tuple[int, int, int], ...]:  # noqa: E501
+def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tuple[Tuple[int, int], ...]]=None) -> Tuple[Tuple[int, int, int], ...]:
   # merge contiguous subparts or zero strided dims. ret = List[(merged_dims, stride, merged dims w/o zero stride), ...]
   if not shape: return tuple()
   assert len(shape) == len(strides)
   ret = [(shape[0], strides[0], shape[0] if strides[0] else 0)]
-  # state (0, 1, 2) -> (none, in-progress, done). wrt merging zero strided dimensions
-  state = 1 if mask and strides[0] == 0 and shape[0] != 1 and mask[0][1] - mask[0][0] == 1 else 0
+  # wrt merging zero strided dimensions
+  merging = (mask and strides[0] == 0 and shape[0] != 1 and mask[0][1] - mask[0][0] == 1)
   for i, (sh, st) in enumerate(zip(shape[1:], strides[1:]), start=1):
     if sh == 1: continue
-    if state == 1 or ret[-1][1] == sh * st: # mergeable
-      ret[-1] = (ret[-1][0] * sh, st, (sh if state == 1 else ret[-1][2] * sh) if st else 0)
+    if merging or ret[-1][1] == sh * st: # mergeable
+      ret[-1] = (ret[-1][0] * sh, st, (sh if merging else ret[-1][2] * sh) if st else 0)
     else: ret.append((sh, st, sh if st else 0)) # begin new
     # merging ends with either non-zero strided dim or zero strided dim with mask range > 1
-    state = 1 if (st == 0 and mask and mask[i][1] - mask[i][0] == 1) else (2 if state != 0 else 0)
+    merging = (st == 0 and mask and mask[i][1] - mask[i][0] == 1)
   return tuple(ret)
 
 @functools.lru_cache(maxsize=None)
