@@ -191,9 +191,9 @@ class View:
       strides += [0,] * (len(new_shape) - len(strides))
       new_mask, extra = _reshape_mask(self, new_shape)
       if not extra:
-        cstrides = canonicalize_strides(tuple(e-b for b,e in new_mask) if new_mask else new_shape, tuple(reversed(strides)))
+        new_strides = canonicalize_strides(tuple(e-b for b,e in new_mask) if new_mask else new_shape, tuple(reversed(strides)))
         extra_offset = (sum(m[0] * s for m,s in zip(self.mask, self.strides)) if self.mask else 0) - \
-                       (sum(m[0] * s for m,s in zip(new_mask, cstrides)) if new_mask else 0)
-        return View.create(new_shape, cstrides, self.offset + extra_offset, new_mask)
+                       (sum(m[0] * s for m,s in zip(new_mask, new_strides)) if new_mask else 0)
+        return View.create(new_shape, new_strides, self.offset + extra_offset, new_mask)
 
     return None
