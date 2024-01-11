@@ -20,6 +20,7 @@ class TestLLaMASpeed(unittest.TestCase):
   def test_llama_compile(self):
     backup_program = Device[Device.DEFAULT].runtime
     backup_allocator = Device[Device.DEFAULT].allocator
+    backup_compiler = Device[Device.DEFAULT].compiler
     Device[Device.DEFAULT].runtime = FakeProgram
     Device[Device.DEFAULT].allocator = FakeAllocator()
 
@@ -33,20 +34,25 @@ class TestLLaMASpeed(unittest.TestCase):
     def run_llama(st, empty_method_cache=True):
       if empty_method_cache: Device[Device.DEFAULT].get_runner.cache_clear()
       tms = [time.perf_counter()]
-      for i in range(10):
+      for i in range(5):
         model(Tensor([[1,2,3,4]]), i).realize()
         tms.append(time.perf_counter())
       timings = [(tms[i+1]-tms[i])*1000 for i in range(len(tms)-1)]
       print(f"{st:15s} mean runtime: {sum(timings)/len(timings):7.2f}ms, runs: ", ", ".join(f'{x:7.2f}' for x in timings))
 
-    run_llama("codegen")
-    run_llama("methodcache", False)
+    run_llama("codegen(0)")
+    run_llama("codegen(1)")
 
-    with Profiling(sort='time', frac=0.1):
-      run_llama("profile")
+    # test no compiler use for this
+    Device[Device.DEFAULT].compiler = None
+    run_llama("methodcache", False)
+    with Profiling(sort='time', frac=0.1, fn="/tmp/llama.prof", ts=5):
+      run_llama("profile", False)
 
     Device[Device.DEFAULT].runtime = backup_program
     Device[Device.DEFAULT].allocator = backup_allocator
+    Device[Device.DEFAULT].compiler = backup_compiler
 
 if __name__ == '__main__':
-  unittest.main()
+  TestLLaMASpeed().test_llama_compile()
+  #unittest.main()

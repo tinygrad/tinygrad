@@ -67,8 +67,9 @@ class Attention:
       self.cache_k = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype)
       self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype)
 
-    keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
-    values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
+    # HACK: without contiguous, the conversation mode is broken and the cache is not updated
+    keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous()
+    values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1).contiguous()
 
     # update the cache
     assert keys.dtype == self.cache_k.dtype and values.dtype == self.cache_v.dtype, f"{keys.dtype=}, {values.dtype=}, {self.cache_k.dtype=}, {self.cache_v.dtype=}"

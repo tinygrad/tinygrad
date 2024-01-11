@@ -27,6 +27,7 @@ class CStyleLanguage(NamedTuple):
   external_local_bufs: bool = False
   uses_ptr_arithmetic: bool = False
   launch_bounds: bool = False
+  type_map: Dict[DType, str] = {}
   code_for_op: Dict = {
     UnaryOps.NEG: lambda x,dtype: f"(-{x})" if dtype != dtypes.bool else f"(!{x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
@@ -38,11 +39,11 @@ class CStyleLanguage(NamedTuple):
 
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
-    if bitcast: return f"(*(({self.buffer_prefix}{var_dtype.name}*)&{x[0]}))"
-    if len(x) == 1: return f"({var_dtype.name})({x[0]})"
+    if bitcast: return f"(*(({self.buffer_prefix}{self.render_dtype(var_dtype)}*)&{x[0]}))"
+    if len(x) == 1: return f"({self.render_dtype(var_dtype)})({x[0]})"
     assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
     assert self.float4 is not None, "vectorized cast is not supported on this platform"
-    return f"{self.float4.replace('float4', var_dtype.name)}({','.join(x)})"
+    return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}({','.join(x)})"
 
   # returns a str expression of the const with the given type
   def render_const(self, x:Union[float,int,bool], var_dtype) -> str:
@@ -76,12 +77,12 @@ class CStyleLanguage(NamedTuple):
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""  # noqa: E501
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
-                ("const " if i > 0 else "")+self.buffer_prefix+dtype.name+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
+                ("const " if i > 0 else "")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
                 self.arg_int_prefix if dtype == dtypes.int else None) for i,(name,dtype) in enumerate(bufs)]
     prg = ''.join([f"{self.kernel_prefix}void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
-    if self.half_prekernel and any(dtype == dtypes.float16 for _,dtype in bufs): prg = ''.join([f"{self.half_prekernel}", "\n", prg])
+    if self.half_prekernel and any(dtype in [dtypes.float16, dtypes.bfloat16] for _,dtype in bufs): prg = ''.join((self.half_prekernel, "\n", prg))
     return prg
 
   # returns a str statement that does the store
@@ -95,6 +96,8 @@ class CStyleLanguage(NamedTuple):
       return f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{buf_dtype.name}{var_dtype.sz}*)({buf_name}+{idx})) = ({buf_dtype.name}{var_dtype.sz}){var_name};"  # noqa: E501
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
 
+  def render_dtype(self, var_dtype:DType) -> str: return self.type_map[var_dtype] if var_dtype in self.type_map else var_dtype.name
+
 def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> str:
   local_size: List[int] = []
   kernel,prekernel,bufs = [],[],[]
@@ -106,9 +109,10 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
   r: Dict[UOp, str] = {}
   def ssa(u, prefix="t"):
     nonlocal c, r
-    r[u]=f"{prefix}{c[prefix]}"
+    ret = f"{prefix}{c[prefix]}"
+    if u is not None: r[u] = ret
     c[prefix] += 1
-    return r[u]
+    return ret
 
   child_count = Counter(v for ru in uops for v in ru.vin)
 
@@ -134,22 +138,10 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]))
         depth += 1
       elif uop == UOps.WMMA:
-        if args[0] == "METAL":
-          assert dtype == dtypes.float.vec(2), "output dtype of METAL TC is _float2"
-          # ((lidx2*32)+(lidx3*4)+(lidx4*16)+(lidx5*8)+(lidx6*2))
-          output = ssa(u, 'wmma')
-          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {output};")
-          kk("{ simdgroup_float8x8 a,b,c;")
-          kk(f"a.thread_elements()[0] = {r[vin[0]]}; a.thread_elements()[1] = {r[vin[1]]};")
-          kk(f"b.thread_elements()[0] = {r[vin[2]]}; b.thread_elements()[1] = {r[vin[3]]};")
-          kk(f"c.thread_elements()[0] = {r[vin[4]]}; c.thread_elements()[1] = {r[vin[5]]};")
-          kk("simdgroup_multiply_accumulate(c, a, b, c);")
-          kk(f"{output}.x = c.thread_elements()[0]; {output}.y = c.thread_elements()[1]; }}")
-        elif args[0] == "HIP":
-          assert dtype == dtypes.float.vec(8), "output dtype of HIP TC is _float8"
-          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
-        else:
-          raise NotImplementedError(f"WMMA not implemented for {args}")
+        if args[0] == "METAL" and dtype == dtypes.float.vec(2): wmma_func = "__metal_wmma<float2,simdgroup_float8x8>"
+        elif args[0] == "HIP" and dtype == dtypes.float.vec(8): wmma_func = "__builtin_amdgcn_wmma_f32_16x16x16_f16_w32"
+        else: raise NotImplementedError(f"WMMA not implemented for {args}")
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = {wmma_func}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
       elif uop == UOps.ALU:
         # remove parens if ALU types are the same. TODO: can do more here
         if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.XOR}:
@@ -174,12 +166,18 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
         # NOTE: this relies on the load not happening if it's in the unselected branch
         if len(vin) > 3: val = lang.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'val')} = {val};")
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.render_dtype(dtype)} {ssa(u,'val')} = {val};")
       elif uop == UOps.PHI:
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
         r[u] = r[vin[0]]
       elif uop == UOps.CAST:
-        val = lang.render_cast([r[x] for x in vin], dtype, bitcast=isinstance(args, tuple) and args[1])
+        if isinstance(args, tuple) and args[1]:  # bitcast
+          assert len(vin) == 1
+          precast = ssa(None,'precast')
+          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.render_dtype(cast(DType, vin[0].dtype))} {precast} = {r[vin[0]]};")
+          val = lang.render_cast([precast], dtype, bitcast=True)
+        else:
+          val = lang.render_cast([r[x] for x in vin], dtype, bitcast=False)
         if child_count[u] <= 1: r[u] = val
         else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
       elif uop == UOps.DEFINE_LOCAL:
@@ -220,7 +218,10 @@ class OpenCLLanguage(CStyleLanguage):
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
 class MetalLanguage(CStyleLanguage):
-  kernel_prefix = "#include <metal_stdlib>\nusing namespace metal;\nkernel "
+  kernel_prefix = """#include <metal_stdlib>\nusing namespace metal;\ntemplate<typename T, typename S> T __metal_wmma(T m, T n, T o) {
+  S a,b,c; a.thread_elements()[0] = m.x; a.thread_elements()[1] = m.y; b.thread_elements()[0] = n.x; b.thread_elements()[1] = n.y;
+  c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
+  return T(c.thread_elements()[0], c.thread_elements()[1]);\n}\nkernel """
   buffer_prefix = "device "
   smem_prefix = "threadgroup "
   arg_int_prefix = "constant int&"
@@ -252,11 +253,11 @@ class CUDALanguage(CStyleLanguage):
       "i": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"
   }
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
-  half_prekernel = """
-    #include <cuda_fp16.h>
+  half_prekernel ="#include <cuda_fp16.h>\n"+"#include <cuda_bf16.h>\n"+"""
     struct half4 { half x, y, z, w; };
     __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
   """
+  type_map = {dtypes.bfloat16: "nv_bfloat16"}
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 class HIPLanguage(CUDALanguage):
@@ -277,39 +278,5 @@ __device__ half16 make_half16(half x, half y, half z, half w, half a, half b, ha
                               half e, half f, half g, half h, half i, half j, half k, half l) {
                                 return {x, y, z, w, a, b, c, d, e, f, g, h, i, j, k, l}; }
   """
+  type_map = {dtypes.bfloat16: "hip_bfloat16"}
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
-
-# TODO: how much of this can be merged with above?
-class WGSLLanguage(CStyleLanguage):
-  code_for_workitem = {"g": lambda x: f"i32(gindex.{'xyz'[x]})", "l": lambda x: f"i32(lindex.{'xyz'[x]})"}
-  size_prefix = "let"
-  barrier="workgroupBarrier();"
-  generic_var_prefix = "var "
-  external_local_bufs = True
-  code_for_op = { **CStyleLanguage().code_for_op,
-                 BinaryOps.CMPLT: lambda x,y,dtype: f"f32({x}<{y})", BinaryOps.CMPEQ: lambda x,y,dtype: f"f32({x}=={y})",
-                 TernaryOps.MULACC: lambda x,y,z,dtype: f"fma({x},{y},{z})", TernaryOps.WHERE: lambda a,b,c,dtype: f"select({c},{b},bool({a}))" }
-  # HACK: write bool as f32
-  type_map = {dtypes.float: "f32", dtypes.half: "f16", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "f32"}
-
-  def render_local(self, name: str, dtype:DType, size: int): return f"var<workgroup> {name}: array<{self.type_map[dtype]},{size}>;"
-
-  def render_const(self, x:Union[float,int], var_dtype) -> str:
-    if math.isnan(x): return "nan()"
-    elif math.isinf(x): return ("-" if x < 0 else "") + "inf(1.0)"
-    return f"({super().render_const(x, var_dtype)})"
-
-  def render_if(self, cond: str): return f"if (bool({cond})) {{"
-
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
-    local_size = local_size[::-1] if local_size else [1]
-    bind_it = iter(range(len(bufs)))
-    prg = "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\nfn inf(a: f32) -> f32 { return a/0.0; }\n"
-    prg += "\n".join(prekernel+[f"@group(0) @binding({next(bind_it)}) {'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'} {name}: {f'array<{self.type_map[dtype]}>' if isinstance(dtype, PtrDType) else 'i32'};" for name,dtype in bufs])  # noqa: E501
-    prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>, @builtin(local_invocation_id) lindex: vec3<u32>) {{\n" + "\n".join(kernel) + "\n}"  # noqa: E501
-    return prg
-
-  def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
-    if self.type_map[var_dtype]: return f"bitcast<{self.type_map[var_dtype]}>({x[0]})" if bitcast else f"{self.type_map[var_dtype]}({x[0]})"
-    raise NotImplementedError(f"no cast for {var_dtype}")
-WGSLRenderer = functools.partial(uops_to_cstyle, WGSLLanguage())

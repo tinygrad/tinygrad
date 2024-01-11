@@ -49,3 +49,4 @@ model.safetensors
 quickstart.py
 .hypothesis
 weights
+*.lprof

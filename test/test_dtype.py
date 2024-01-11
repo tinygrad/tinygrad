@@ -13,7 +13,7 @@ core_dtypes = list(DTYPES_DICT.values())
 floats = [dt for dt in core_dtypes if dtypes.is_float(dt)]
 def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   if dtype == dtypes.bfloat16: return False # numpy doesn't support bf16, tested separately in TestBFloat16DType
-  if device == "WEBGPU": return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
+  if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
   if device == "TORCH": return dtype not in [dtypes.uint16, dtypes.uint32, dtypes.uint64]
   # for CI GPU, cl_khr_fp16 isn't supported
   # for CI LLVM, it segfaults because it can't link to the casting function
@@ -90,6 +90,7 @@ class TestDType(unittest.TestCase):
       get_available_cast_dtypes(self.DTYPE)
   ))
   def test_bitcast(self):
+    if Device.DEFAULT == "WEBGL": raise unittest.SkipTest("no bitcast in WebGL GLSL")
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
     list(map(
       lambda dtype:
@@ -160,10 +161,21 @@ class TestUint8Dtype(TestDType):
   def test_uint8_to_int8_overflow(self):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
 
+@unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
   def test_shape_change_bitcast(self):
     with self.assertRaises(AssertionError):
       _test_bitcast(Tensor([100000], dtype=dtypes.float32), dtypes.uint8, [100000])
+
+  def test_bitcast_float_to_int32(self):
+    a = Tensor([1.,2,3])
+    b = a.bitcast(dtypes.int32)
+    assert b.numpy()[0] == 0x3f800000
+
+  def test_bitcast_upcasted(self):
+    a = Tensor.zeros(100, 4, dtype=dtypes.int32).contiguous() + 0x3f800000
+    b = a.bitcast(dtypes.float32)
+    assert b.numpy()[0,0] == 1.
 
 class TestInt16Dtype(TestDType): DTYPE = dtypes.int16
 class TestUint16Dtype(TestDType): DTYPE = dtypes.uint16
