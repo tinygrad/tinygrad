@@ -319,7 +319,6 @@ class Compiled:
         kb = Linearizer(ast, self.linearizer_opts)
         kb.required_optimizations()
         from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
-        # TODO: this shouldn't use Device.DEFAULT, it should get the device from the LinearizerOptions
         test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
         lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
         timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
