@@ -102,6 +102,28 @@ class TestWorldModel(unittest.TestCase):
             "is_terminal": np.zeros((B, T)),
         }
         post, context, metrics = world_model._train(data)
+        print(*list(metrics.items()), sep="\n")
+        self.assertEqual(post["stoch"].numpy().shape, (B, T, 32, 32))
+        self.assertEqual(post["deter"].numpy().shape, (B, T, 512))
+        self.assertEqual(context["embed"].numpy().shape, (B, T, 4096))
+        self.assertEqual(context["feat"].numpy().shape, (B, T, 4096))
+
+class TestImagBehavior(unittest.TestCase):
+    def test_imag_behavior_init(self):
+        B = 2
+        T = 2
+        obs_space = gym.spaces.Dict(
+            {
+                "image": gym.spaces.Box(
+                    low=0, high=255, shape=(64, 64, 3), dtype=np.uint8
+                ),
+            }
+        )
+        act_space = gym.spaces.Discrete(3)
+        config = utils.load_config()
+        world_model = models.WorldModel(obs_space, act_space, 0, config)
+        imag_behavior = models.ImagBehavior(config, world_model)
+        
 
 
 if __name__ == "__main__":

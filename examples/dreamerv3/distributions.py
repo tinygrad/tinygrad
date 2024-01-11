@@ -8,20 +8,20 @@ class Distribution:
         pass
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         raise NotImplementedError
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         raise NotImplementedError
 
-    def sample(self, sample_shape=()):
+    def sample(self, sample_shape=()) -> Tensor:
         raise NotImplementedError
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         raise NotImplementedError
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         raise NotImplementedError
 
 

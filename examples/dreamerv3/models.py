@@ -138,27 +138,23 @@ class WorldModel:
         }
         model_loss = (sum(scaled.values()) + kl_loss).mean()
         metrics = {}
-        metrics["model_loss"] = model_loss.detach().cpu().numpy()
+        metrics["model_loss"] = model_loss.item()
 
         self._model_opt.zero_grad()
         model_loss.backward()
-        total_norm = utils.clip_grad_norm_(self.parameters(), self._clip).item()
-        metrics[f"model_grad_norm"] = total_norm
+        total_norm = utils.clip_grad_norm_(self.parameters(), self._clip)
+        metrics[f"model_grad_norm"] = total_norm.item()
         self._model_opt.step()
 
-        metrics.update({f"{name}_loss": loss.numpy() for name, loss in losses.items()})
+        metrics.update({f"{name}_loss": loss.mean().item() for name, loss in losses.items()})
         metrics["kl_free"] = kl_free
         metrics["dyn_scale"] = dyn_scale
         metrics["rep_scale"] = rep_scale
-        metrics["dyn_loss"] = dyn_loss.numpy()
-        metrics["rep_loss"] = rep_loss.numpy()
-        metrics["kl"] = kl_value.numpy()
-        metrics["prior_ent"] = Tensor.mean(
-            self.dynamics.get_dist(prior).entropy()
-        ).numpy()
-        metrics["post_ent"] = Tensor.mean(
-            self.dynamics.get_dist(post).entropy()
-        ).numpy()
+        metrics["dyn_loss"] = dyn_loss.mean().item()
+        metrics["rep_loss"] = rep_loss.mean().item()
+        metrics["kl"] = kl_value.mean().item()
+        metrics["prior_ent"] = self.dynamics.get_dist(prior).entropy().mean().item()
+        metrics["post_ent"] = self.dynamics.get_dist(post).entropy().mean().item()
         context = dict(
             embed=embed,
             feat=self.dynamics.get_feat(post),
