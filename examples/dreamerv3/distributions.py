@@ -85,6 +85,10 @@ class Categorical(Distribution):
         output_shape = output_shape if len(output_shape) > 0 else (1,)
         return samples_2d.reshape(output_shape)
 
+    def entropy(self):
+        p_log_p = self.logits * self.probs
+        return -p_log_p.sum(-1)
+
 
 class OneHotCategorical(Categorical):
     def __init__(self, logits=None, probs=None, unimix_ratio=0.0):
@@ -109,9 +113,8 @@ class OneHotCategorical(Categorical):
             probs = probs[None]
         return sample.detach() + probs - probs.detach()
 
-    def log_prob(self, value):
-        indices = value.max(-1)[1]
-        return super().log_prob(indices)
+    def entropy(self):
+        return super().entropy()
 
 
 class DiscDist:
@@ -420,7 +423,4 @@ def kl_divergence(dist1, dist2):
 
 
 def _kl_categorical_categorical(p, q):
-    t = p.probs * (p.logits - q.logits)
-    t = Tensor.where(p.probs > 0, t, Tensor.zeros_like(t))
-    t = Tensor.where(q.probs > 0, t, Tensor.full(t.shape, float("inf")))
-    return t.sum(-1)
+    return (p.probs * (p.logits - q.logits)).sum(-1)

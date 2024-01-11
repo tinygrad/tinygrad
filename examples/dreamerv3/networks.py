@@ -226,7 +226,7 @@ class MLP:
         if self._shape is not None and len(self._shape) == 0:
             self._shape = (1,)
         self._dist = dist
-        self._std = std if isinstance(std, str) else Tensor([std], device=device)
+        self._std = std
         self._min_std = min_std
         self._max_std = max_std
         self._absmax = absmax
@@ -281,7 +281,7 @@ class MLP:
                 if isinstance(self._std, str) and self._std == "learned":
                     std = self.std_layer[name](out)
                 else:
-                    std = self._std
+                    std = Tensor([self._std], device=self._device)
                 dists.update({name: self.dist(self._dist, mean, std, shape)})
             return dists
         else:
@@ -289,7 +289,7 @@ class MLP:
             if isinstance(self._std, str) and self._std == "learned":
                 std = self.std_layer(out)
             else:
-                std = self._std
+                std = Tensor([self._std], device=self._device)
             return self.dist(self._dist, mean, std, self._shape)
 
     def dist(self, dist, mean, std, shape):

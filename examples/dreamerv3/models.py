@@ -3,7 +3,7 @@ import copy
 import networks
 import utils
 
-from tinygrad import Tensor, nn
+from tinygrad import Tensor, nn, dtypes
 
 
 class RewardEMA:
@@ -87,15 +87,15 @@ class WorldModel:
         )
         for name in config.grad_heads:
             assert name in self.heads, name
-        self._model_opt = utils.Optimizer(
-            "model",
-            self.parameters(),
-            config.model_lr,
-            config.opt_eps,
-            config.grad_clip,
-            config.weight_decay,
-            opt=config.opt,
-        )
+        lr = config.model_lr
+        eps = config.opt_eps
+        opt = config.opt
+        self._model_opt = {
+            "adam": lambda: nn.optim.Adam(self.parameters(), lr=lr, eps=eps),
+            "sgd": lambda: nn.optim.SGD(self.parameters(), lr=lr),
+            "momentum": lambda: nn.optim.SGD(self.parameters(), lr=lr, momentum=0.9),
+        }[opt]()
+        self._clip = config.grad_clip
         # other losses are scaled by 1.0.
         self._scales = dict(
             reward=config.reward_head["loss_scale"],
@@ -137,7 +137,14 @@ class WorldModel:
             key: value * self._scales.get(key, 1.0) for key, value in losses.items()
         }
         model_loss = (sum(scaled.values()) + kl_loss).mean()
-        metrics = self._model_opt(model_loss, self.parameters())
+        metrics = {}
+        metrics["model_loss"] = model_loss.detach().cpu().numpy()
+
+        self._model_opt.zero_grad()
+        model_loss.backward()
+        total_norm = utils.clip_grad_norm_(self.parameters(), self._clip).item()
+        metrics[f"model_grad_norm"] = total_norm
+        self._model_opt.step()
 
         metrics.update({f"{name}_loss": loss.numpy() for name, loss in losses.items()})
         metrics["kl_free"] = kl_free
@@ -164,10 +171,15 @@ class WorldModel:
     # this function is called during both rollout and training
     def preprocess(self, data):
         data = data.copy()
-        data = {k: Tensor(v).to(self._config.device) for k, v in data.items()}
+        data = {
+            k: Tensor(v, dtype=dtypes.float32).to(self._config.device)
+            for k, v in data.items()
+        }
         # onehot encode actions if neccessary
         if "action" in data and len(data["action"].shape) == 2:
-            data["action"] = utils.one_hot(data["action"], self.num_actions)
+            data["action"] = utils.one_hot(
+                data["action"].cast(dtypes.int32), self.num_actions
+            )
         if "image" in data:
             data["image"] = data["image"].float() / 255.0
         if "discount" in data:
@@ -180,7 +192,6 @@ class WorldModel:
         assert "is_terminal" in data
         data["cont"] = 1.0 - data["is_terminal"]
         return data
-
 
     def video_pred(self, data):
         data = self.preprocess(data)
@@ -200,8 +211,13 @@ class WorldModel:
 
         return Tensor.cat(truth, model, error, dim=2).numpy()
 
+    def state_dict(self):
+        state_dict = nn.state.get_state_dict(self)
+        state_dict = {k: v for k, v in state_dict.items() if "_model_opt" not in k}
+        return state_dict
+
     def parameters(self):
-        return nn.state.get_parameters(self)
+        return list(self.state_dict().values())
 
 
 class ImagBehavior:
