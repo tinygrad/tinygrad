@@ -314,6 +314,15 @@ class TestTinygrad(unittest.TestCase):
       reshaped_item = Tensor([a]).reshape((1, 1, 1, 1, 1)).item()
       assert type(reshaped_item) == type(a), a
       np.testing.assert_allclose(reshaped_item, a), a
+  def test_cumsum(self):
+    a = Tensor.ones(3, 2, 0).cumsum(axis=1)
+    b = np.ones((3, 2, 0)).cumsum(axis=1)
+    np.testing.assert_equal(a.numpy(), b)
+
+  def test_cumprod(self):
+    a = Tensor([1,2,3,4,5,6]).cumprod(axis=0)
+    b = np.array([1,2,3,4,5,6]).cumprod(axis=0)
+    np.testing.assert_equal(a.numpy(), b)
 
 class TestZeroShapeTensor(unittest.TestCase):
   def test_shape_stride(self):
@@ -430,16 +439,6 @@ class TestZeroShapeTensor(unittest.TestCase):
     a = Tensor.ones(3, 2, 0).sum(axis=2, keepdim=True)
     assert a.shape == (3, 2, 1)
     np.testing.assert_equal(a.numpy(), np.sum(np.zeros((3, 2, 0)), axis=2, keepdims=True))
-
-  def test_cumsum(self):
-    a = Tensor.ones(3, 2, 0).cumsum(axis=1)
-    b = np.ones((3, 2, 0)).cumsum(axis=1)
-    np.testing.assert_equal(a.numpy(), b)
-
-  def test_cumprod(self):
-    a = Tensor([1,2,3,4,5,6]).cumprod(axis=0)
-    b = np.array([1,2,3,4,5,6]).cumprod(axis=0)
-    np.testing.assert_equal(a.numpy(), b)
 
   def test_reduce_default(self):
     np.testing.assert_equal(Tensor([]).max().numpy(), -float("inf"))
