@@ -1,4 +1,4 @@
-from utils import _sum_rightmost, numel, one_hot, symexp, symlog
+from utils import _sum_rightmost, numel, symexp, symlog
 
 from tinygrad import Tensor, dtypes
 
@@ -93,7 +93,7 @@ class Categorical(Distribution):
         value = value.cast(dtypes.int32).unsqueeze(-1)
         # Tensor.gather uses mlops.Eq, which does not support backward() yet
         # return self.logits.gather(value, dim=-1).squeeze(-1)
-        value = one_hot(value, self._num_events)
+        value = Tensor.one_hot(value, self._num_events)
         return (self.logits * value).sum(-1)
 
 
@@ -108,14 +108,14 @@ class OneHotCategorical(Categorical):
 
     @property
     def mode(self):
-        _mode = one_hot(Tensor.argmax(self.logits, axis=-1), self.logits.shape[-1])
+        _mode = Tensor.one_hot(Tensor.argmax(self.logits, axis=-1), self.logits.shape[-1])
         return _mode.detach() + self.logits - self.logits.detach()
 
     def sample(self, sample_shape=()):
         probs = self.probs
         num_events = self._num_events
         indices = super().sample(sample_shape)
-        sample = one_hot(indices, num_events)
+        sample = Tensor.one_hot(indices, num_events)
         while len(probs.shape) < len(sample.shape):
             probs = probs[None]
         return sample.detach() + probs - probs.detach()
@@ -176,8 +176,8 @@ class DiscDist:
         weight_below = dist_to_above / total
         weight_above = dist_to_below / total
         target = (
-            one_hot(below, num_classes=self.num_buckets) * weight_below[..., None]
-            + one_hot(above, num_classes=self.num_buckets) * weight_above[..., None]
+            Tensor.one_hot(below, num_classes=self.num_buckets) * weight_below[..., None]
+            + Tensor.one_hot(above, num_classes=self.num_buckets) * weight_above[..., None]
         )
         log_pred = self.logits - self.logits.exp().sum(-1, keepdim=True).log()
         return (target * log_pred).sum(-1)

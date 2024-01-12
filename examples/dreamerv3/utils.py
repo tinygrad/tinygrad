@@ -19,10 +19,6 @@ def symexp(x):
     return Tensor.sign(x) * (Tensor.exp(Tensor.abs(x)) - 1.0)
 
 
-def one_hot(x, num_classes):
-    return Tensor.eye(num_classes)[x]
-
-
 def cumprod(x: Tensor, axis):
     dtype = x.dtype
     # why implement cumprod when you can use math instead?

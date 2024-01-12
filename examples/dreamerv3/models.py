@@ -173,7 +173,7 @@ class WorldModel:
         }
         # onehot encode actions if neccessary
         if "action" in data and len(data["action"].shape) == 2:
-            data["action"] = utils.one_hot(
+            data["action"] = Tensor.one_hot(
                 data["action"].cast(dtypes.int32), self.num_actions
             )
         if "image" in data:
