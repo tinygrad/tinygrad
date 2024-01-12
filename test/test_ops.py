@@ -890,12 +890,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3,1,6)], lambda x: x.expand(arg), lambda x: x.expand(shape=arg))
     helper_test_op([()], lambda x: x.expand([]), lambda x: x.expand(shape=[]))
 
-  def test_one_hot(self):
-    data = [1, 2, 4]
-    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 6), lambda: Tensor(data).one_hot(6), forward_only=True)
-    data = [[[1, 2, 3], [0, 3, 5]], [[1, 2, 3], [0, 3, 5]]]
-    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 8), lambda: Tensor(data).one_hot(8), forward_only=True)
-
   @unittest.skip("very slow")
   def test_sd_big_conv(self):
     # internal shape (1, 1, 512, 62, 62, 512, 3, 3) overflows a int
@@ -1493,6 +1487,12 @@ class TestOps(unittest.TestCase):
                                        lambda x,y: x.sigmoid().binary_crossentropy(y.clip(0,1)))
     helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy(x.sigmoid(),torch.clip(y,0,1)),
                                        lambda x,y: x.binary_crossentropy_logits(y.clip(0,1)))
+
+  def test_one_hot(self):
+    data = [1, 2, 4]
+    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 6), lambda: Tensor(data).one_hot(6), forward_only=True)
+    data = [[[1, 2, 3], [0, 3, 5]], [[1, 2, 3], [0, 3, 5]]]
+    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 8), lambda: Tensor(data).one_hot(8), forward_only=True)
 
 if __name__ == '__main__':
   np.random.seed(1337)
