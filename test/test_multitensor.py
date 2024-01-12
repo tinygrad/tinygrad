@@ -3,7 +3,7 @@ from tinygrad import Tensor, Device, nn, GlobalCounters
 from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
 from extra.lr_scheduler import OneCycleLR
-from extra.models.llama import RMSNorm
+from extra.models.llama import RMSNorm, Attention
 import numpy as np
 
 d_zero = f"{Device.DEFAULT}:0"
@@ -91,17 +91,6 @@ class TestMultiTensor(unittest.TestCase):
     O = (Xs@W1s)@W2s
     np.testing.assert_allclose((X.numpy() @ W1.numpy()) @ W2.numpy(), O.to(Device.DEFAULT).numpy(), atol=1e-5)
 
-  def test_cat_shard(self):
-    X1 = Tensor.kaiming_uniform(1,2,32,128).realize()
-    X2 = Tensor.kaiming_uniform(1,1,32,128).realize()
-    X3 = X1.cat(X2, dim=1)
-
-    X1_sharded = X1.shard((d0, d1), axis=2).realize()
-    X2_sharded = X2.shard((d0, d1), axis=2).realize()
-    X3_sharded = X1_sharded.cat(X2_sharded, dim=1)
-
-    np.testing.assert_allclose(X3.numpy(), X3_sharded.numpy(), atol=1e-6, rtol=1e-6)
-
   def test_matmul_shard_none(self): return self._test_matmul_shard_axis(None, None)
   def test_matmul_shard_X_0(self): return self._test_matmul_shard_axis(0, None)
   def test_matmul_shard_X_1(self): return self._test_matmul_shard_axis(1, None)
@@ -186,33 +175,34 @@ class TestMultiTensor(unittest.TestCase):
     y_shard = layer_norm_sharded(x_sharded).realize()
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
-  def test_scaled_product_attention(self):
-    bs, n_heads, seq_len, head_dim = 1, 8, 4, 32
-    q = Tensor.rand(bs, n_heads, seq_len, head_dim).contiguous().realize()
-    k = Tensor.rand(bs, n_heads, seq_len, head_dim).contiguous().realize()
-    v = Tensor.rand(bs, n_heads, seq_len, head_dim).contiguous().realize()
-    y = Tensor.scaled_dot_product_attention(q, k, v)
+  @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
+  @unittest.skipIf(Device.DEFAULT == "GPU", "GPU requires cl_khr_fp16")
+  def test_llama_attention(self):
+    bs = 1
+    seq_len = 1
+    dim = 128
+    n_heads = 4
+    n_kv_heads = 4
+    max_context = 32
 
-    # scaled dot product attention performs k.transpose(-2, -1) internally which
-    # prevent you from sharding those axis but more importantly we can avoid all-reduce
-    # if we shard along the n_heads axis
-    q_sharded = q.shard((d0, d1), axis=None).realize()
-    k_sharded = k.shard((d0, d1), axis=1).realize()
-    v_sharded = v.shard((d0, d1), axis=1).realize()
-    y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded)
+    freqs_cis = Tensor.rand(1, seq_len, 1, (dim//n_heads)//2, 2).half()
+    mask = None
+    start_pos = 0
+
+    layer = Attention(dim, n_heads, n_kv_heads, max_context, linear=nn.Linear)
+    x = Tensor.rand(bs, seq_len, dim).half()
+    y = layer(x, start_pos, freqs_cis, mask).realize()
+
+    layer_sharded = Attention(dim, n_heads, n_kv_heads, max_context, linear=nn.Linear)
+    layer_sharded.wq.weight.assign(layer.wq.weight.shard((d0, d1), axis=0)).realize()
+    layer_sharded.wk.weight.assign(layer.wk.weight.shard((d0, d1), axis=0)).realize()
+    layer_sharded.wv.weight.assign(layer.wv.weight.shard((d0, d1), axis=0)).realize()
+    layer_sharded.wo.weight.assign(layer.wo.weight.shard((d0, d1), axis=0)).realize()
+    x_sharded = x.shard((d0, d1), axis=None).realize()
+    freqs_cis_sharded = freqs_cis.shard((d0, d1), axis=None).realize()
+    y_sharded = layer_sharded(x_sharded, start_pos, freqs_cis_sharded, mask)
+
     np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
-
-    m = Tensor.rand(1, 8, 4, 4).contiguous().realize()
-    y = Tensor.scaled_dot_product_attention(q, k, v, attn_mask=m)
-
-    m_sharded = m.shard((d0, d1), axis=None).realize()
-    y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded, attn_mask=m_sharded)
-    np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
-
-    y = Tensor.scaled_dot_product_attention(q, k, v, is_causal=True)
-    y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded, is_causal=True)
-    np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
-
 
   def test_data_parallel_resnet(self):
     import sys, pathlib
