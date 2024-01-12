@@ -304,7 +304,7 @@ def load_config():
     for key, value in sorted(configs.items(), key=lambda x: x[0]):
         arg_type = args_type(value)
         parser.add_argument(f"--{key}", type=arg_type, default=arg_type(value))
-    return parser.parse_known_args()
+    return parser.parse_args()
 
 
 class Logger:

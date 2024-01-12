@@ -3,7 +3,7 @@ import copy
 import networks
 import utils
 
-from tinygrad import Tensor, TinyJit, dtypes, nn
+from tinygrad import Tensor, dtypes, nn
 
 
 class RewardEMA:
@@ -101,7 +101,6 @@ class WorldModel:
             cont=config.cont_head["loss_scale"],
         )
 
-    @TinyJit
     def _train(self, data):
         # action (batch_size, batch_length, act_dim)
         # image (batch_size, batch_length, h, w, ch)
@@ -272,7 +271,6 @@ class ImagBehavior:
         if self._config.reward_EMA:
             self.reward_ema = RewardEMA(device=self._config.device)
 
-    @TinyJit
     def _train(self, start, objective):
         self._update_slow_target()
         metrics = {}
