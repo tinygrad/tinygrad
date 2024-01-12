@@ -9,6 +9,8 @@ import numpy as np
 d_zero = f"{Device.DEFAULT}:0"
 d0, d1 = f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2"
 d2, d3 = f"{Device.DEFAULT}:3", f"{Device.DEFAULT}:4"
+even_device   = (d0, d1)
+uneven_device = (d0, d1, d2)
 N = 128
 
 # shard_x is "data parallel"
@@ -42,18 +44,18 @@ class TestMultiTensor(unittest.TestCase):
     X.shard_((d0, d1), 0)
     np.testing.assert_allclose(X.numpy(), 1)
 
-  def _test_simple_add_axis(self, shard_x, shard_w):
+  def _test_simple_add_axis(self, shard_x, shard_w, device):
     X = Tensor.ones(256).contiguous().realize()
     W = Tensor.ones(256).contiguous().realize()
-    X.shard_((d0, d1), shard_x)
-    W.shard_((d0, d1), shard_w)
+    X.shard_(device, shard_x)
+    W.shard_(device, shard_w)
     O = X + W
     np.testing.assert_allclose(O.numpy(), 2)
 
-  def test_simple_add(self): return self._test_simple_add_axis(None, None)
-  def test_simple_add_X(self): return self._test_simple_add_axis(0, None)
-  def test_simple_add_W(self): return self._test_simple_add_axis(None, 0)
-  def test_simple_add_XW(self): return self._test_simple_add_axis(0, 0)
+  def test_simple_add(self): return self._test_simple_add_axis(None, None, even_device)
+  def test_simple_add_X(self): return self._test_simple_add_axis(0, None, even_device)
+  def test_simple_add_W(self): return self._test_simple_add_axis(None, 0, even_device)
+  def test_simple_add_XW(self): return self._test_simple_add_axis(0, 0, even_device)
 
   def test_four_add(self):
     X = Tensor.ones(256, 256).contiguous().realize()
@@ -77,9 +79,7 @@ class TestMultiTensor(unittest.TestCase):
     X = Tensor.kaiming_uniform(N, N).realize()
     W = Tensor.kaiming_uniform(N, N).realize()
     Xs = X.shard((d0, d1, d2, d3), shard_x)
-    print(Xs)
     Ws = W.shard((d0, d1, d2, d3), shard_w)
-    print(Ws)
     O = (Xs@Ws)
     np.testing.assert_allclose(X.numpy() @ W.numpy(), O.to(Device.DEFAULT).numpy(), atol=1e-5)
 
@@ -87,9 +87,7 @@ class TestMultiTensor(unittest.TestCase):
     X = Tensor.kaiming_uniform(N, N).realize()
     W = Tensor.kaiming_uniform(N, N).realize()
     Xs = X.shard((d0, d1, d2), shard_x)
-    print(Xs)
     Ws = W.shard((d0, d1, d2), shard_w)
-    print(Ws)
     O = (Xs@Ws)
     np.testing.assert_allclose(X.numpy() @ W.numpy(), O.to(Device.DEFAULT).numpy(), atol=1e-5)
 
@@ -108,6 +106,9 @@ class TestMultiTensor(unittest.TestCase):
   def test_matmul_shard_X_1(self): return self._test_matmul_shard_axis(1, None)
   def test_matmul_shard_W_0(self): return self._test_matmul_shard_axis(None, 0)
   def test_matmul_shard_W_1(self): return self._test_matmul_shard_axis(None, 1)
+  def test_matmul_uneven_shard_none(self): return self._test_matmul_uneven_shard_axis(None, None)
+  def test_matmul_uneven_shard_X_0(self): return self._test_matmul_uneven_shard_axis(0, None)
+  def test_matmul_uneven_shard_X_1(self): return self._test_matmul_uneven_shard_axis(1, None)
   def test_matmul_uneven_shard_W_0(self): return self._test_matmul_uneven_shard_axis(None, 0)
   def test_matmul_uneven_shard_W_1(self): return self._test_matmul_uneven_shard_axis(None, 1)
 
