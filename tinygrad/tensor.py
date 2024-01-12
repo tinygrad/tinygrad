@@ -498,7 +498,7 @@ class Tensor:
   def pad2d(self, padding:Sequence[int], value:float=0) -> Tensor:
     slc = [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], self.shape[::-1])][::-1]
     return self.slice([(0,s) for s in self.shape[:-(len(padding)//2)]] + slc, value=value)
-  
+
   def one_hot(self, num_classes:int, **kwargs) -> Tensor: return Tensor.where(self[..., None] == Tensor.arange(num_classes), 1, 0, **kwargs)
 
   @property
