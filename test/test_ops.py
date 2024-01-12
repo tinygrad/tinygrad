@@ -555,6 +555,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
   def test_big_gemm(self):
     helper_test_op([(256,256), (256,256)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
+  @unittest.skipIf(IMAGE>0, "no 0 in shape matmul on images")
   def test_gemm_with_zeros_shape(self):
     # TODO: support backward for this
     helper_test_op([(8,8), (8,0)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-7, forward_only=True)
