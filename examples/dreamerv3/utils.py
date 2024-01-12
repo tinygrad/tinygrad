@@ -24,9 +24,11 @@ def cumprod(x: Tensor, axis):
     # why implement cumprod when you can use math instead?
     return x.log().cumsum(axis).exp().cast(dtype)
 
+
 def quantile(input, q):
     # TODO: optimize this to not use numpy
     return Tensor(np.quantile(input.numpy(), q.numpy()), dtype=input.dtype)
+
 
 def static_scan_for_lambda_return(fn, inputs, start):
     last = start
@@ -150,6 +152,7 @@ def static_scan(fn, inputs, start):
     if isinstance(outputs, dict):
         outputs = [outputs]
     return outputs
+
 
 def weight_init(m):
     if isinstance(m, nn.Linear):
@@ -301,7 +304,7 @@ def load_config():
     for key, value in sorted(configs.items(), key=lambda x: x[0]):
         arg_type = args_type(value)
         parser.add_argument(f"--{key}", type=arg_type, default=arg_type(value))
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
 class Logger:

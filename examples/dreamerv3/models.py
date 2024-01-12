@@ -3,7 +3,7 @@ import copy
 import networks
 import utils
 
-from tinygrad import Tensor, dtypes, nn, TinyJit
+from tinygrad import Tensor, TinyJit, dtypes, nn
 
 
 class RewardEMA:
@@ -210,6 +210,7 @@ class WorldModel:
     def parameters(self):
         models = [self.encoder, self.dynamics, *self.heads.values()]
         return nn.state.get_parameters(models)
+
 
 class ImagBehavior:
     def __init__(self, config, world_model):

@@ -286,7 +286,10 @@ def from_generator(generator, batch_size):
             data[key] = []
             for i in range(batch_size):
                 data[key].append(batch[i][key])
-            data[key] = np.stack(data[key], 0)
+            try:
+                data[key] = np.stack(data[key], 0)
+            except:
+                breakpoint()
         yield data
 
 

@@ -108,7 +108,9 @@ class OneHotCategorical(Categorical):
 
     @property
     def mode(self):
-        _mode = Tensor.one_hot(Tensor.argmax(self.logits, axis=-1), self.logits.shape[-1])
+        _mode = Tensor.one_hot(
+            Tensor.argmax(self.logits, axis=-1), self.logits.shape[-1]
+        )
         return _mode.detach() + self.logits - self.logits.detach()
 
     def sample(self, sample_shape=()):
@@ -176,8 +178,10 @@ class DiscDist:
         weight_below = dist_to_above / total
         weight_above = dist_to_below / total
         target = (
-            Tensor.one_hot(below, num_classes=self.num_buckets) * weight_below[..., None]
-            + Tensor.one_hot(above, num_classes=self.num_buckets) * weight_above[..., None]
+            Tensor.one_hot(below, num_classes=self.num_buckets)
+            * weight_below[..., None]
+            + Tensor.one_hot(above, num_classes=self.num_buckets)
+            * weight_above[..., None]
         )
         log_pred = self.logits - self.logits.exp().sum(-1, keepdim=True).log()
         return (target * log_pred).sum(-1)

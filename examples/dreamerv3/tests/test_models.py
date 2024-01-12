@@ -104,12 +104,19 @@ class TestWorldModel(unittest.TestCase):
             "is_first": np.ones((B, T)),
             "is_terminal": np.zeros((B, T)),
         }
+        print("Train step: 0")
         post, context, metrics = world_model._train(data)
         pprint(metrics)
         self.assertEqual(post["stoch"].numpy().shape, (B, T, 32, 32))
         self.assertEqual(post["deter"].numpy().shape, (B, T, 512))
         self.assertEqual(context["embed"].numpy().shape, (B, T, 4096))
         self.assertEqual(context["feat"].numpy().shape, (B, T, 1536))
+        print("Train step: 1")
+        post, context, metrics = world_model._train(data)
+        pprint(metrics)
+        print("Train step: 2")
+        post, context, metrics = world_model._train(data)
+        pprint(metrics)
 
 
 class TestImagBehavior(unittest.TestCase):

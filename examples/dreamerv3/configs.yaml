@@ -5,7 +5,7 @@ offline_traindir: ''
 offline_evaldir: ''
 seed: 0
 deterministic_run: False
-steps: 100000
+steps: 400000
 parallel: False
 eval_every: 1000
 eval_episode_num: 100
@@ -76,16 +76,3 @@ imag_horizon: 15
 imag_gradient: 'reinforce'
 imag_gradient_mix: 0.0
 eval_state_mean: False
-
-# Exploration
-expl_behavior: 'greedy'
-expl_until: 0
-expl_extr_scale: 0.0
-expl_intr_scale: 1.0
-disag_target: 'stoch'
-disag_log: True
-disag_models: 10
-disag_offset: 1
-disag_layers: 4
-disag_units: 400
-disag_action_cond: False

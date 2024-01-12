@@ -1,11 +1,14 @@
 import functools
 import pathlib
 
-import exploration as expl
+import distributions
 import models
 import numpy as np
 import utils
 from env import count_steps, load_episodes, make_dataset, make_envs, simulate
+
+from tinygrad import Tensor
+from tinygrad.nn.state import get_state_dict, load_state_dict, safe_load, safe_save
 
 
 class Dreamer:
@@ -17,6 +20,7 @@ class Dreamer:
         self._num_train_steps = batch_steps // config.train_ratio
         self._reset_every = config.reset_every
         self._expl_until = config.expl_until
+        self.pretrained = False
 
         self._metrics = {}
         # this is update step
@@ -25,21 +29,20 @@ class Dreamer:
         self._dataset = dataset
         self._wm = models.WorldModel(obs_space, act_space, self._step, config)
         self._task_behavior = models.ImagBehavior(config, self._wm)
+        # greedy exploration
+        self._expl_behavior = self._task_behavior
 
         def reward(f, s, a):
             return self._wm.heads["reward"](f).mean()
 
-        if config.expl_behavior == "random":
-            self._expl_behavior = expl.Random(config, act_space)
-        elif config.expl_behavior == "plan2explore":
-            self._expl_behavior = expl.Plan2Explore(config, self._wm, reward)
-        elif config.expl_behavior == "greedy":
-            self._expl_behavior = self._task_behavior
-
     def __call__(self, obs, reset, state=None, training=True):
         step = self._step
         if training:
-            for _ in range(self._num_train_steps):
+            num_steps = (
+                self._config.pretrain if not self.pretrained else self._num_train_steps
+            )
+            self.pretrained = True
+            for _ in range(num_steps):
                 self._train(next(self._dataset))
                 self._update_count += 1
                 self._metrics["update_count"] = self._update_count
@@ -93,12 +96,10 @@ class Dreamer:
         start = post
 
         def reward(f, s, a):
-            return self._wm.heads["reward"](self._wm.dynamics.get_feat(s)).mode.squeeze(-1)
+            embed = self._wm.dynamics.get_feat(s)
+            return self._wm.heads["reward"](embed).mode.squeeze(-1)
 
         metrics.update(self._task_behavior._train(start, reward)[-1])
-        if self._config.expl_behavior != "greedy":
-            mets = self._expl_behavior.train(start, context, data)[-1]
-            metrics.update({"expl_" + key: value for key, value in mets.items()})
         for name, value in metrics.items():
             if name not in self._metrics.keys():
                 self._metrics[name] = [value]
@@ -142,9 +143,26 @@ def main():
     if not config.offline_traindir:
         prefill = max(0, config.prefill - count_steps(config.traindir))
         print(f"Prefill dataset ({prefill} steps).")
-        random_actor = expl.Random(config, act_space).actor()
 
         def random_agent(o, d, s):
+            if config.actor["dist"] == "onehot":
+                random_actor = distributions.OneHotCategorical(
+                    Tensor.zeros(int(act_space.n))
+                    .repeat((config.num_envs, 1))
+                    .to(config.device)
+                )
+            else:
+                random_actor = distributions.Independent(
+                    distributions.Uniform(
+                        Tensor(act_space.low)
+                        .repeat((config.num_envs, 1))
+                        .to(config.device),
+                        Tensor(act_space.high)
+                        .repeat((config.num_envs, 1))
+                        .to(config.device),
+                    ),
+                    1,
+                )
             action = random_actor.sample()
             logprob = random_actor.log_prob(action)
             return {"action": action, "logprob": logprob}, None
@@ -171,8 +189,10 @@ def main():
         logger,
         train_dataset,
     )
-    if (logdir / "latest.checkpoint").exists():
-        raise NotImplementedError
+    if (logdir / "latest.safetensors").exists():
+        state_dict = safe_load(logdir / "latest.safetensors")
+        load_state_dict(agent, state_dict)
+        agent.pretrained = True
 
     # make sure eval will be executed once after config.steps
     while agent._step < config.steps + config.eval_every:
@@ -203,12 +223,8 @@ def main():
             steps=config.eval_every,
             state=state,
         )
-        raise NotImplementedError
-        # items_to_save = {
-        #     "agent_state_dict": agent.get_parameters(),
-        #     "optims_state_dict": utils.recursively_collect_optim_state_dict(agent),
-        # }
-        # torch.save(items_to_save, logdir / "latest.pt")
+        state_dict = get_state_dict(agent)
+        safe_save(state_dict, logdir / "latest.safetensors")
     for env in train_envs + eval_envs:
         env.close()
 
