@@ -50,5 +50,11 @@ class TestLazyBuffer(unittest.TestCase):
     b = Tensor([1, 2, 3], f"{Device.DEFAULT}:0")
     assert a.device == b.device
 
+  def test_shrink_const_into_zero(self):
+    a = Tensor.zeros(4,4,4).shrink((None, (0,0), None))
+    b = Tensor.zeros(4,1,4)
+    c = a.cat(b, dim=1)
+    np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
+
 if __name__ == "__main__":
   unittest.main()
