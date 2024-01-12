@@ -103,13 +103,6 @@ class TestOps(unittest.TestCase):
   def test_eye(self):
     helper_test_op([], lambda: torch.eye(10), lambda: Tensor.eye(10), forward_only=True)
     helper_test_op([], lambda: torch.eye(1), lambda: Tensor.eye(1), forward_only=True)
-  def test_one_hot(self):
-    data = [1, 2, 4]
-    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data)), lambda: Tensor(data).one_hot(), forward_only=True)
-    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 6), lambda: Tensor(data).one_hot(6), forward_only=True)
-    data = [[[1, 2, 3], [0, 3, 5]], [[1, 2, 3], [0, 3, 5]]]
-    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data)), lambda: Tensor(data).one_hot(), forward_only=True)
-    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 8), lambda: Tensor(data).one_hot(8), forward_only=True)
 
   def test_split(self):
     test_cases = [
@@ -896,6 +889,12 @@ class TestOps(unittest.TestCase):
     arg = (4,3,2,6)
     helper_test_op([(4,3,1,6)], lambda x: x.expand(arg), lambda x: x.expand(shape=arg))
     helper_test_op([()], lambda x: x.expand([]), lambda x: x.expand(shape=[]))
+    
+  def test_one_hot(self):
+    data = [1, 2, 4]
+    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 6), lambda: Tensor(data).one_hot(6), forward_only=True)
+    data = [[[1, 2, 3], [0, 3, 5]], [[1, 2, 3], [0, 3, 5]]]
+    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 8), lambda: Tensor(data).one_hot(8), forward_only=True)
 
   @unittest.skip("very slow")
   def test_sd_big_conv(self):

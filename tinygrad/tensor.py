@@ -211,9 +211,6 @@ class Tensor:
   def zeros_like(self, **kwargs): return self.full_like(0, **kwargs)
   def ones_like(self, **kwargs): return self.full_like(1, **kwargs)
 
-  def one_hot(self, num_classes:int=-1, **kwargs) -> Tensor:
-    num_classes = self.max().item()+1 if num_classes == -1 else num_classes
-    return Tensor.where(self[..., None] == Tensor.arange(num_classes), 1, 0, **kwargs)
 
   # ***** rng hlops *****
 
@@ -501,6 +498,8 @@ class Tensor:
   def pad2d(self, padding:Sequence[int], value:float=0) -> Tensor:
     slc = [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], self.shape[::-1])][::-1]
     return self.slice([(0,s) for s in self.shape[:-(len(padding)//2)]] + slc, value=value)
+  
+  def one_hot(self, num_classes:int, **kwargs) -> Tensor: return Tensor.where(self[..., None] == Tensor.arange(num_classes), 1, 0, **kwargs)
 
   @property
   def T(self) -> Tensor: return self.transpose()
