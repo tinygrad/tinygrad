@@ -321,7 +321,7 @@ class TestTinygrad(unittest.TestCase):
   def test_cumsum_backwards(self):
     a = Tensor.ones(3, 2, 0).cumsum(axis=1)
     a = (a+1).square().mean().backward()
-    b = torch.ones((3, 2, 0)).cumsum(axis=1)
+    b = torch.ones((3, 2, 0), requires_grad=True).cumsum(axis=1)
     b = (b+1).square().mean().backward()
     np.testing.assert_equal(a.grad.numpy(), b.grad.detach().numpy())
 
@@ -332,7 +332,7 @@ class TestTinygrad(unittest.TestCase):
   def test_cumprod_backwards(self):
     a = Tensor([1,2,3,4,5,6]).cumprod(axis=0)
     a = (a+1).square().mean().backward()
-    b = torch.tensor([1,2,3,4,5,6]).cumprod(axis=0)
+    b = torch.tensor([1,2,3,4,5,6], requires_grad=True).cumprod(axis=0)
     b = (b+1).square().mean().backward()
     np.testing.assert_equal(a.grad.numpy(), b.grad.detach().numpy())
 
