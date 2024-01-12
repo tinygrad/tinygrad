@@ -3,7 +3,7 @@ from tinygrad import Tensor, Device, nn, GlobalCounters
 from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
 from extra.lr_scheduler import OneCycleLR
-from extra.models.llama import RMSNorm
+from extra.models.llama import RMSNorm, Attention
 import numpy as np
 
 d_zero = f"{Device.DEFAULT}:0"
@@ -160,43 +160,49 @@ class TestMultiTensor(unittest.TestCase):
     x = Tensor.rand((B, T, embed_size)).contiguous().realize()
     y = layer_norm(x)
 
-    # for norm layers, the weights are duplicated
+    # for norm layers, the correct way to shard weights is duplication
     layer_norm_sharded = RMSNorm(embed_size)
     layer_norm_sharded.weight.shard_((d0, d1), axis=None).realize()
 
-    # if x is being sharded then all reduce is involved
+    # if x is being sharded, then all-reduce is involved
     x_sharded = x.shard((d0, d1), axis=2).realize()
     y_shard = layer_norm_sharded(x_sharded).realize()
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
-    # if x is copyed, then the operations remain inside each GPU
+    # if x is being duplicated, then the operations remain inside each GPU
+    # which is the common case
     x_sharded = x.shard((d0, d1), axis=None).realize()
     y_shard = layer_norm_sharded(x_sharded).realize()
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
-  def test_scaled_product_attention(self):
-    q = Tensor.rand(32, 8, 16, 64).contiguous().realize()
-    k = Tensor.rand(32, 8, 16, 64).contiguous().realize()
-    v = Tensor.rand(32, 8, 16, 64).contiguous().realize()
-    y = Tensor.scaled_dot_product_attention(q, k, v)
+  @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
+  @unittest.skipIf(Device.DEFAULT == "GPU", "GPU requires cl_khr_fp16")
+  def test_llama_attention(self):
+    bs = 1
+    seq_len = 1
+    dim = 128
+    n_heads = 4
+    n_kv_heads = 4
+    max_context = 32
 
-    q_sharded = q.shard((d0, d1), axis=None).realize()
-    k_sharded = k.shard((d0, d1), axis=1).realize()
-    v_sharded = v.shard((d0, d1), axis=1).realize()
-    y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded)
+    freqs_cis = Tensor.rand(1, seq_len, 1, (dim//n_heads)//2, 2).half()
+    mask = None
+    start_pos = 0
+
+    layer = Attention(dim, n_heads, n_kv_heads, max_context, linear=nn.Linear)
+    x = Tensor.rand(bs, seq_len, dim).half()
+    y = layer(x, start_pos, freqs_cis, mask).realize()
+
+    layer_sharded = Attention(dim, n_heads, n_kv_heads, max_context, linear=nn.Linear)
+    layer_sharded.wq.weight.assign(layer.wq.weight.shard((d0, d1), axis=0)).realize()
+    layer_sharded.wk.weight.assign(layer.wk.weight.shard((d0, d1), axis=0)).realize()
+    layer_sharded.wv.weight.assign(layer.wv.weight.shard((d0, d1), axis=0)).realize()
+    layer_sharded.wo.weight.assign(layer.wo.weight.shard((d0, d1), axis=0)).realize()
+    x_sharded = x.shard((d0, d1), axis=None).realize()
+    freqs_cis_sharded = freqs_cis.shard((d0, d1), axis=None).realize()
+    y_sharded = layer_sharded(x_sharded, start_pos, freqs_cis_sharded, mask)
+
     np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
-
-    m = Tensor.rand(32, 8, 16, 16).contiguous().realize()
-    y = Tensor.scaled_dot_product_attention(q, k, v, attn_mask=m)
-
-    m_sharded = m.shard((d0, d1), axis=None).realize()
-    y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded, attn_mask=m_sharded)
-    np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
-
-    y = Tensor.scaled_dot_product_attention(q, k, v, is_causal=True)
-    y_sharded = Tensor.scaled_dot_product_attention(q_sharded, k_sharded, v_sharded, is_causal=True)
-    np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
-
 
   def test_data_parallel_resnet(self):
     import sys, pathlib

@@ -9,7 +9,7 @@ if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once min
 T = TypeVar("T")
 U = TypeVar("U")
 # NOTE: it returns int 1 if x is empty regardless of the type of x
-def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.__mul__, x, 1)
+def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.mul, x, 1)
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX = platform.system() == "Darwin"
