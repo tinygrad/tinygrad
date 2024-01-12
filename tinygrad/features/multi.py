@@ -8,7 +8,6 @@ from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.shape.shapetracker import ShapeTracker, sint
 
 def all_reduce(lbs):
-  print("all reduce")
   # TODO: replace this with ring reduce
   return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
 
