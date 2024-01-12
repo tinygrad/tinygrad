@@ -53,7 +53,6 @@ class Attention:
     self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
-  # TODO: this reshape is technically independent and can be done inside each GPU in parallel so we can avoid the copy
   def unshard_reshape_shard(self, x, shape, device, axis):
     x = x.to(Device.DEFAULT)
     x = x.reshape(shape)
@@ -63,9 +62,10 @@ class Attention:
     x = x.half()
     xq, xk, xv = self.wq(x).half(), self.wk(x).half(), self.wv(x).half()
     if isinstance(x.device, tuple):
-      xq = self.unshard_reshape_shard(xq, (xq.shape[0], xq.shape[1], self.n_heads, self.head_dim), self.wq.weight.device, 2)
-      xk = self.unshard_reshape_shard(xk, (xq.shape[0], xq.shape[1], self.n_heads, self.head_dim), self.wq.weight.device, 2)
-      xv = self.unshard_reshape_shard(xv, (xq.shape[0], xq.shape[1], self.n_heads, self.head_dim), self.wq.weight.device, 2)
+      # TODO: this reshape is technically independent and can be done inside each GPU in parallel so we can avoid the copy
+      xq = self.unshard_reshape_shard(xq, (xq.shape[0], xq.shape[1], self.n_heads, self.head_dim), x.device, 2)
+      xk = self.unshard_reshape_shard(xk, (xq.shape[0], xq.shape[1], self.n_heads, self.head_dim), x.device, 2)
+      xv = self.unshard_reshape_shard(xv, (xq.shape[0], xq.shape[1], self.n_heads, self.head_dim), x.device, 2)
     else:
       xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
       xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
@@ -78,10 +78,10 @@ class Attention:
     if not hasattr(self, "cache_k"):
       self.cache_k = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous()
       self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous()
-      if isinstance(self.wq.weight.device, tuple): 
-        # TODO: instead of specifying how to shard, it should just follows xk and xv
-        self.cache_k.shard_((self.wq.weight.device), axis=2)
-        self.cache_v.shard_((self.wq.weight.device), axis=2)
+      if isinstance(x.device, tuple):
+        # TODO: instead of specifying how to shard, it can follow how xk and xv are being sharded
+        self.cache_k.shard_((xk.device), axis=2)
+        self.cache_v.shard_((xv.device), axis=2)
 
     # HACK: without contiguous, the conversation mode is broken and the cache is not updated
     keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous() if start_pos > 0 else xk
@@ -95,7 +95,8 @@ class Attention:
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
     if isinstance(x.device, tuple):
-      attn = self.unshard_reshape_shard(attn, (bsz, seqlen, -1), self.wq.weight.device, None) 
+      # TODO: it can follow how x was being sharded
+      attn = self.unshard_reshape_shard(attn, (bsz, seqlen, -1), x.device, None)
     else:
       attn = attn.reshape(bsz, seqlen, -1)
     return self.wo(attn)
