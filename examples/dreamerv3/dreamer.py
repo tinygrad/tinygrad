@@ -32,9 +32,6 @@ class Dreamer:
         # greedy exploration
         self._expl_behavior = self._task_behavior
 
-        def reward(f, s, a):
-            return self._wm.heads["reward"](f).mean()
-
     def __call__(self, obs, reset, state=None, training=True):
         if training:
             num_steps = (
