@@ -498,7 +498,6 @@ class Tensor:
     slc = [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], self.shape[::-1])][::-1]
     return self.slice([(0,s) for s in self.shape[:-(len(padding)//2)]] + slc, value=value)
 
-
   @property
   def T(self) -> Tensor: return self.transpose()
   def transpose(self, ax1=1, ax2=0) -> Tensor:
