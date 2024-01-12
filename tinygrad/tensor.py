@@ -784,7 +784,7 @@ class Tensor:
     if len(y.shape) < len(x.shape): y = y.reshape((1,) * (len(x.shape) - len(y.shape)) + y.shape)
     elif len(x.shape) < len(y.shape): x = x.reshape((1,) * (len(y.shape) - len(x.shape)) + x.shape)
 
-    broadcasted_shape = tuple(max(xi, yi) for xi, yi in zip(x.shape, y.shape))
+    broadcasted_shape = tuple(0 if xi==0 or yi==0 else max(xi, yi) for xi, yi in zip(x.shape, y.shape))
     return x.expand(broadcasted_shape), y.expand(broadcasted_shape)
 
   def _to_const_val(self, x:Union[Tensor, Scalar]) -> Union[Tensor, Scalar]:
