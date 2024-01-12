@@ -691,7 +691,7 @@ class Tensor:
     return (x*w).sum(-1).cast(least_upper_dtype(x.dtype, w.dtype))
 
   def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
-  
+
   def _cum(self, fxn, axis:int=0, _first_zero=False, pad_val=0) -> Tensor:
     return fxn(self.transpose(axis,-1).pad2d((self.shape[axis]-int(not _first_zero),0),pad_val)._pool((self.shape[axis],)), -1).transpose(axis,-1)
   def cum(self, fxn, axis:int=0, pad_val=0) -> Tensor:
@@ -705,7 +705,7 @@ class Tensor:
     base_add = base_add.unsqueeze(-1).expand(*base_add.shape, ret.shape[-1])
     def fix(x:Tensor): return x.flatten(start_dim=-2)[..., -self.shape[axis]:].transpose(axis,-1)
     return fix(ret) + fix(base_add)
-  
+
   def cumsum(self, axis:int=0) -> Tensor: return self.cum(Tensor.sum, axis, 0)
   def cumprod(self, axis:int=0) -> Tensor: return self.cum(Tensor.prod, axis, 1)
 
