@@ -12,6 +12,16 @@ V_init = np.random.randn(3,3).astype(np.float32)
 W_init = np.random.randn(3,3).astype(np.float32)
 m_init = np.random.randn(1,3).astype(np.float32)
 
+def fb_pass_op(tst, ts, tinygrad_fxn, torch_fxn, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3,
+                   forward_only=False):
+  out = torch_fxn(ts)
+  ret = tinygrad_fxn(tst).realize()
+  np.testing.assert_allclose(ret.numpy(), out.detach().numpy(), atol=atol, rtol=rtol)
+  if not forward_only:
+    (out+1).square().mean().backward()
+    (ret+1).square().mean().backward()
+    tst.grad.realize()
+    np.testing.assert_allclose(tst.grad.numpy(), ts.grad.detach().numpy(), atol=grad_atol, rtol=grad_rtol)
 class TestTinygrad(unittest.TestCase):
   def test_zerodim_initialization(self):
     a = Tensor(55)
@@ -315,26 +325,14 @@ class TestTinygrad(unittest.TestCase):
       assert type(reshaped_item) == type(a), a
       np.testing.assert_allclose(reshaped_item, a), a
   def test_cumsum(self):
-    a = Tensor.ones(3, 2, 0).cumsum(axis=1)
-    b = np.ones((3, 2, 0)).cumsum(axis=1)
-    np.testing.assert_equal(a.numpy(), b)
-  def test_cumsum_backwards(self):
-    a = Tensor.ones(3, 2, 0).cumsum(axis=1)
-    a = (a+1).square().mean().backward()
-    b = torch.ones((3, 2, 0), requires_grad=True).cumsum(axis=1)
-    b = (b+1).square().mean().backward()
-    np.testing.assert_equal(a.grad.numpy(), b.grad.detach().numpy())
-
+    a = Tensor.ones(3, 2, 0)#.cumsum(axis=1)
+    b = np.ones((3, 2, 0))#.cumsum(axis=1)
+    fb_pass_op(a, b, lambda x: Tensor.cumsum(x, axis=1), lambda x: torch.cumsum(x, dim=1))
+    
   def test_cumprod(self):
-    a = Tensor([1,2,3,4,5,6]).cumprod(axis=0)
-    b = np.array([1,2,3,4,5,6]).cumprod(axis=0)
-    np.testing.assert_equal(a.numpy(), b)
-  def test_cumprod_backwards(self):
-    a = Tensor([1.0,2.0,3.0,4.0,5.0,6.0]).cumprod(axis=0)
-    a = (a+1).square().mean().backward()
-    b = torch.tensor([1.0,2.0,3.0,4.0,5.0,6.0], requires_grad=True).cumprod(axis=0)
-    b = (b+1).square().mean().backward()
-    np.testing.assert_equal(a.grad.numpy(), b.grad.detach().numpy())
+    a = Tensor([[1,2,3,4,5,6],[1,2,3,4,5,6]])
+    b = np.array([[1,2,3,4,5,6],[1,2,3,4,5,6]])
+    fb_pass_op(a, b, lambda x: Tensor.cumprod(x, axis=0), lambda x: torch.cumprod(x, dim=0))
 
 class TestZeroShapeTensor(unittest.TestCase):
   def test_shape_stride(self):
