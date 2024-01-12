@@ -328,7 +328,7 @@ class TestTinygrad(unittest.TestCase):
     a = Tensor.ones(3, 2, 0)#.cumsum(axis=1)
     b = np.ones((3, 2, 0))#.cumsum(axis=1)
     fb_pass_op(a, b, lambda x: Tensor.cumsum(x, axis=1), lambda x: torch.cumsum(x, dim=1))
-    
+
   def test_cumprod(self):
     a = Tensor([[1,2,3,4,5,6],[1,2,3,4,5,6]])
     b = np.array([[1,2,3,4,5,6],[1,2,3,4,5,6]])
