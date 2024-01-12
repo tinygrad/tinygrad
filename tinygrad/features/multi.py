@@ -23,8 +23,9 @@ class MultiLazyBuffer:
     # Need to consider assert cases
     # assert all_same([(x.shape, x.dtype, x.st) for x in lbs]), "all multilazybuffer needs same shape, dtype, and st"
     self.lbs, self.axis, self.dtype, self.device = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs)
-    dim_shard = sum(lb.shape[self.axis] for lb in lbs) if self.axis is not None else 0
-    self.shape = tuple(dim_shard if a == self.axis else s for a,s in enumerate(lbs[0].shape))
+    # if reshape or permute, sharded has to be recalculated
+    sharded_dim = sum(lb.shape[self.axis] for lb in lbs) if self.axis is not None else 0
+    self.shape = tuple(sharded_dim if a == self.axis else s for a,s in enumerate(lbs[0].shape))
 
   def __repr__(self):
     return f"<MLB{chr(10)}{chr(10).join([f'{x.device} {x.st}' for x in self.lbs])}>"
@@ -36,7 +37,7 @@ class MultiLazyBuffer:
 
   def copy_to_device(self, device:str) -> LazyBuffer:
     if self.axis is None: return self.lbs[0].copy_to_device(device)
-    sz = [int(0)] + [self.lbs[i].shape[self.axis] for i in range(len(self.lbs))] + [int(0)]
+    sz = (0,) + tuple(self.lbs[i].shape[self.axis] for i in range(len(self.lbs))) + (0,)
     llbs = []
     for i,lb in enumerate([lb.copy_to_device(device) for lb in self.lbs]):
       pad_arg = tuple((0,0) if a != self.axis else (sum(sz[:i+1]), sum(sz[i-len(self.lbs):])) for a,s in enumerate(lb.shape))

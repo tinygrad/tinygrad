@@ -90,14 +90,6 @@ class TestMultiTensor(unittest.TestCase):
     O = (Xs@Ws)
     np.testing.assert_allclose(X.numpy() @ W.numpy(), O.to(Device.DEFAULT).numpy(), atol=1e-5)
 
-  # def _test_matmul_uneven_shard_axis(self, shard_x, shard_w):
-    # X = Tensor.kaiming_uniform(N, N).realize()
-    # W = Tensor.kaiming_uniform(N, N).realize()
-    # Xs = X.shard((d0, d1, d2), shard_x)
-    # Ws = W.shard((d0, d1, d2), shard_w)
-    # O = (Xs@Ws)
-    # np.testing.assert_allclose(X.numpy() @ W.numpy(), O.to(Device.DEFAULT).numpy(), atol=1e-5)
-
   def _test_double_matmul_shard_axis(self, shard_x, shard_w, device):
     X = Tensor.kaiming_uniform(N, N).realize()
     W1 = Tensor.kaiming_uniform(N, N).realize()
@@ -205,16 +197,8 @@ class TestMultiTensor(unittest.TestCase):
     y_shard = layer_norm_sharded(x_sharded).realize()
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
-  @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
-  @unittest.skipIf(Device.DEFAULT == "GPU", "GPU requires cl_khr_fp16")
-  def test_llama_attention(self):
-    bs = 1
-    seq_len = 1
-    dim = 128
-    n_heads = 4
-    n_kv_heads = 4
-    max_context = 32
-
+  def _test_llama_attention(self, device):
+    bs, seq_len, dim, n_heads, n_kv_heads, max_context = 1, 1, 128, 4, 4, 32
     freqs_cis = Tensor.rand(1, seq_len, 1, (dim//n_heads)//2, 2).half()
     mask = None
     start_pos = 0
@@ -223,31 +207,19 @@ class TestMultiTensor(unittest.TestCase):
     x = Tensor.rand(bs, seq_len, dim).half()
     y = layer(x, start_pos, freqs_cis, mask).realize()
 
-    # evenly shard weights
     layer_sharded = Attention(dim, n_heads, n_kv_heads, max_context, linear=nn.Linear)
-    layer_sharded.wq.weight.assign(layer.wq.weight.shard((d0, d1), axis=0)).realize()
-    layer_sharded.wk.weight.assign(layer.wk.weight.shard((d0, d1), axis=0)).realize()
-    layer_sharded.wv.weight.assign(layer.wv.weight.shard((d0, d1), axis=0)).realize()
-    layer_sharded.wo.weight.assign(layer.wo.weight.shard((d0, d1), axis=0)).realize()
-    x_sharded = x.shard((d0, d1), axis=None).realize()
-    freqs_cis_sharded = freqs_cis.shard((d0, d1), axis=None).realize()
+    layer_sharded.wq.weight.assign(layer.wq.weight.shard(device, axis=0)).realize()
+    layer_sharded.wk.weight.assign(layer.wk.weight.shard(device, axis=0)).realize()
+    layer_sharded.wv.weight.assign(layer.wv.weight.shard(device, axis=0)).realize()
+    layer_sharded.wo.weight.assign(layer.wo.weight.shard(device, axis=0)).realize()
+    x_sharded = x.shard(device, axis=None).realize()
+    freqs_cis_sharded = freqs_cis.shard(device, axis=None).realize()
     y_sharded = layer_sharded(x_sharded, start_pos, freqs_cis_sharded, mask)
-
     np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-5, rtol=1e-5)
 
-    # unevenly shard weights
-    layer_sharded = Attention(dim, n_heads, n_kv_heads, max_context, linear=nn.Linear)
-    x = layer.wq.weight.shard((d0, d1, d2), axis=0).realize()
-    print(x.shape)
-    # layer_sharded.wq.weight.assign(layer.wq.weight.shard((d0, d1, d2), axis=0)).realize()
-    # layer_sharded.wk.weight.assign(layer.wk.weight.shard((d0, d1, d2), axis=0)).realize()
-    # layer_sharded.wv.weight.assign(layer.wv.weight.shard((d0, d1, d2), axis=0)).realize()
-    # layer_sharded.wo.weight.assign(layer.wo.weight.shard((d0, d1, d2), axis=0)).realize()
-    # x_sharded = x.shard((d0, d1, d2), axis=None).realize()
-    # freqs_cis_sharded = freqs_cis.shard((d0, d1), axis=None).realize()
-    # y_sharded = layer_sharded(x_sharded, start_pos, freqs_cis_sharded, mask)
-
-    # np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
+  @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
+  @unittest.skipIf(Device.DEFAULT == "GPU", "GPU requires cl_khr_fp16")
+  def test_llama_attention(self): return self._test_llama_attention(even_device)
 
   def test_data_parallel_resnet(self):
     import sys, pathlib
