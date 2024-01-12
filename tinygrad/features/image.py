@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes
 
 # *** image Tensor function replacements ***
 
-def image_dot(self, w):
+def image_dot(self, w, acc_dtype=None):
   # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
   n1, n2 = len(self.shape), len(w.shape)
   assert n1 != 0 and n2 != 0, f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
@@ -17,9 +17,9 @@ def image_dot(self, w):
   cx = self.transpose(self.ndim-1, self.ndim-2).reshape((bs//groups, groups*cin, -1, 1))
   # groups*cout x cin x H, W
   cw = w.transpose(w.ndim-1, w.ndim-2).reshape((groups*cout, cin, 1, 1))
-  return image_conv2d(cx, cw, groups=groups).reshape(out_shape_t).transpose(self.ndim-1, self.ndim-2)
+  return image_conv2d(cx, cw, groups=groups, acc_dtype=acc_dtype).reshape(out_shape_t).transpose(self.ndim-1, self.ndim-2)
 
-def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
+def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, padding=0, acc_dtype=None):
   base_image_type = dtypes.imageh if getenv("FLOAT16", 0) else dtypes.imagef
 
   (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
@@ -72,7 +72,7 @@ def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, paddin
   w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *cout_expand, rcin_hi, rcin_lo, H, W))
 
   # the conv!
-  ret = (x*w).cast(base_image_type((bs*oy, ox*cout//4, 4)) if IMAGE >= 2 else dtypes.float32).sum((-4, -3, -2, -1))
+  ret = (x*w).cast(base_image_type((bs*oy, ox*cout//4, 4)) if IMAGE >= 2 else dtypes.float32).sum((-4, -3, -2, -1), acc_dtype=acc_dtype)
 
   # undo hack for non multiples of 4 on C.rcout
   if added_output_channels != 0:
