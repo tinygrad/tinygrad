@@ -56,6 +56,10 @@ class TestMultiTensor(unittest.TestCase):
   def test_simple_add_X(self): return self._test_simple_add_axis(0, None, even_device)
   def test_simple_add_W(self): return self._test_simple_add_axis(None, 0, even_device)
   def test_simple_add_XW(self): return self._test_simple_add_axis(0, 0, even_device)
+  def test_simple_uneven_add(self): return self._test_simple_add_axis(None, None, uneven_device)
+  def test_simple_uneven_add_X(self): return self._test_simple_add_axis(0, None, uneven_device)
+  def test_simple_uneven_add_W(self): return self._test_simple_add_axis(None, 0, uneven_device)
+  def test_simple_uneven_add_XW(self): return self._test_simple_add_axis(0, 0, uneven_device)
 
   def test_four_add(self):
     X = Tensor.ones(256, 256).contiguous().realize()
@@ -65,62 +69,73 @@ class TestMultiTensor(unittest.TestCase):
     O = X + W
     np.testing.assert_allclose(O.numpy(), 2)
 
-  def _test_simple_reduce_axis(self, shard_x):
+  def _test_simple_reduce_axis(self, shard_x, device):
     X = Tensor.ones(256, 256).contiguous().realize()
-    X.shard_((d0, d1), shard_x)
+    X.shard_(device, shard_x)
     O = X.sum(axis=1)
     np.testing.assert_allclose(O.numpy(), 256)
 
-  def test_simple_reduce(self): return self._test_simple_reduce_axis(None)
-  def test_simple_reduce_0(self): return self._test_simple_reduce_axis(0)
-  def test_simple_reduce_1(self): return self._test_simple_reduce_axis(1)
+  def test_simple_reduce(self): return self._test_simple_reduce_axis(None, even_device)
+  def test_simple_reduce_0(self): return self._test_simple_reduce_axis(0, even_device)
+  def test_simple_reduce_1(self): return self._test_simple_reduce_axis(1, even_device)
+  def test_simple_uneven_reduce(self): return self._test_simple_reduce_axis(None, uneven_device)
+  def test_simple_uneven_reduce_0(self): return self._test_simple_reduce_axis(0, uneven_device)
+  def test_simple_uneven_reduce_1(self): return self._test_simple_reduce_axis(1, uneven_device)
 
-  def _test_matmul_shard_axis(self, shard_x, shard_w):
+  def _test_matmul_shard_axis(self, shard_x, shard_w, device):
     X = Tensor.kaiming_uniform(N, N).realize()
     W = Tensor.kaiming_uniform(N, N).realize()
-    Xs = X.shard((d0, d1, d2, d3), shard_x)
-    Ws = W.shard((d0, d1, d2, d3), shard_w)
+    Xs = X.shard(device, shard_x)
+    Ws = W.shard(device, shard_w)
     O = (Xs@Ws)
     np.testing.assert_allclose(X.numpy() @ W.numpy(), O.to(Device.DEFAULT).numpy(), atol=1e-5)
 
-  def _test_matmul_uneven_shard_axis(self, shard_x, shard_w):
-    X = Tensor.kaiming_uniform(N, N).realize()
-    W = Tensor.kaiming_uniform(N, N).realize()
-    Xs = X.shard((d0, d1, d2), shard_x)
-    Ws = W.shard((d0, d1, d2), shard_w)
-    O = (Xs@Ws)
-    np.testing.assert_allclose(X.numpy() @ W.numpy(), O.to(Device.DEFAULT).numpy(), atol=1e-5)
+  # def _test_matmul_uneven_shard_axis(self, shard_x, shard_w):
+    # X = Tensor.kaiming_uniform(N, N).realize()
+    # W = Tensor.kaiming_uniform(N, N).realize()
+    # Xs = X.shard((d0, d1, d2), shard_x)
+    # Ws = W.shard((d0, d1, d2), shard_w)
+    # O = (Xs@Ws)
+    # np.testing.assert_allclose(X.numpy() @ W.numpy(), O.to(Device.DEFAULT).numpy(), atol=1e-5)
 
-  def _test_double_matmul_shard_axis(self, shard_x, shard_w):
+  def _test_double_matmul_shard_axis(self, shard_x, shard_w, device):
     X = Tensor.kaiming_uniform(N, N).realize()
     W1 = Tensor.kaiming_uniform(N, N).realize()
     W2 = Tensor.kaiming_uniform(N, N).realize()
-    Xs = X.shard((d0, d1), shard_x)
-    W1s = W1.shard((d0, d1), shard_w)
-    W2s = W2.shard((d0, d1), shard_w)
+    Xs = X.shard(device, shard_x)
+    W1s = W1.shard(device, shard_w)
+    W2s = W2.shard(device, shard_w)
     O = (Xs@W1s)@W2s
     np.testing.assert_allclose((X.numpy() @ W1.numpy()) @ W2.numpy(), O.to(Device.DEFAULT).numpy(), atol=1e-5)
 
-  def test_matmul_shard_none(self): return self._test_matmul_shard_axis(None, None)
-  def test_matmul_shard_X_0(self): return self._test_matmul_shard_axis(0, None)
-  def test_matmul_shard_X_1(self): return self._test_matmul_shard_axis(1, None)
-  def test_matmul_shard_W_0(self): return self._test_matmul_shard_axis(None, 0)
-  def test_matmul_shard_W_1(self): return self._test_matmul_shard_axis(None, 1)
-  def test_matmul_uneven_shard_none(self): return self._test_matmul_uneven_shard_axis(None, None)
-  def test_matmul_uneven_shard_X_0(self): return self._test_matmul_uneven_shard_axis(0, None)
-  def test_matmul_uneven_shard_X_1(self): return self._test_matmul_uneven_shard_axis(1, None)
-  def test_matmul_uneven_shard_W_0(self): return self._test_matmul_uneven_shard_axis(None, 0)
-  def test_matmul_uneven_shard_W_1(self): return self._test_matmul_uneven_shard_axis(None, 1)
+  def test_matmul_shard_none(self): return self._test_matmul_shard_axis(None, None, even_device)
+  def test_matmul_shard_X_0(self): return self._test_matmul_shard_axis(0, None, even_device)
+  def test_matmul_shard_X_1(self): return self._test_matmul_shard_axis(1, None, even_device)
+  def test_matmul_shard_W_0(self): return self._test_matmul_shard_axis(None, 0, even_device)
+  def test_matmul_shard_W_1(self): return self._test_matmul_shard_axis(None, 1, even_device)
+  def test_matmul_uneven_shard_none(self): return self._test_matmul_shard_axis(None, None, uneven_device)
+  def test_matmul_uneven_shard_X_0(self): return self._test_matmul_shard_axis(0, None, uneven_device)
+  def test_matmul_uneven_shard_X_1(self): return self._test_matmul_shard_axis(1, None, uneven_device)
+  def test_matmul_uneven_shard_W_0(self): return self._test_matmul_shard_axis(None, 0, uneven_device)
+  def test_matmul_uneven_shard_W_1(self): return self._test_matmul_shard_axis(None, 1, uneven_device)
 
-  def test_matmul_shard_0_0(self): return self._test_matmul_shard_axis(0, 0)
-  def test_matmul_shard_0_1(self): return self._test_matmul_shard_axis(0, 1)
-  def test_matmul_shard_1_0(self): return self._test_matmul_shard_axis(1, 0)
-  def test_matmul_shard_1_1(self): return self._test_matmul_shard_axis(1, 1)
+  def test_matmul_shard_0_0(self): return self._test_matmul_shard_axis(0, 0, even_device)
+  def test_matmul_shard_0_1(self): return self._test_matmul_shard_axis(0, 1, even_device)
+  def test_matmul_shard_1_0(self): return self._test_matmul_shard_axis(1, 0, even_device)
+  def test_matmul_shard_1_1(self): return self._test_matmul_shard_axis(1, 1, even_device)
+  def test_matmul_uneven_shard_0_0(self): return self._test_matmul_shard_axis(0, 0, uneven_device)
+  def test_matmul_uneven_shard_0_1(self): return self._test_matmul_shard_axis(0, 1, uneven_device)
+  def test_matmul_uneven_shard_1_0(self): return self._test_matmul_shard_axis(1, 0, uneven_device)
+  def test_matmul_uneven_shard_1_1(self): return self._test_matmul_shard_axis(1, 1, uneven_device)
 
-  def test_double_matmul_shard_X_0(self): return self._test_double_matmul_shard_axis(0, None)
-  def test_double_matmul_shard_X_1(self): return self._test_double_matmul_shard_axis(1, None)
-  def test_double_matmul_shard_W_0(self): return self._test_double_matmul_shard_axis(None, 0)
-  def test_double_matmul_shard_W_1(self): return self._test_double_matmul_shard_axis(None, 1)
+  def test_double_matmul_shard_X_0(self): return self._test_double_matmul_shard_axis(0, None, even_device)
+  def test_double_matmul_shard_X_1(self): return self._test_double_matmul_shard_axis(1, None, even_device)
+  def test_double_matmul_shard_W_0(self): return self._test_double_matmul_shard_axis(None, 0, even_device)
+  def test_double_matmul_shard_W_1(self): return self._test_double_matmul_shard_axis(None, 1, even_device)
+  def test_double_matmul_uneven_shard_X_0(self): return self._test_double_matmul_shard_axis(0, None, uneven_device)
+  def test_double_matmul_uneven_shard_X_1(self): return self._test_double_matmul_shard_axis(1, None, uneven_device)
+  def test_double_matmul_uneven_shard_W_0(self): return self._test_double_matmul_shard_axis(None, 0, uneven_device)
+  def test_double_matmul_uneven_shard_W_1(self): return self._test_double_matmul_shard_axis(None, 1, uneven_device)
 
   def test_conv_data_shard(self):
     conv = nn.Conv2d(3, 16, 3, bias=False)
