@@ -76,8 +76,20 @@ class TestMultiTensor(unittest.TestCase):
   def _test_matmul_shard_axis(self, shard_x, shard_w):
     X = Tensor.kaiming_uniform(N, N).realize()
     W = Tensor.kaiming_uniform(N, N).realize()
-    Xs = X.shard((d0, d1), shard_x)
-    Ws = W.shard((d0, d1), shard_w)
+    Xs = X.shard((d0, d1, d2, d3), shard_x)
+    print(Xs)
+    Ws = W.shard((d0, d1, d2, d3), shard_w)
+    print(Ws)
+    O = (Xs@Ws)
+    np.testing.assert_allclose(X.numpy() @ W.numpy(), O.to(Device.DEFAULT).numpy(), atol=1e-5)
+
+  def _test_matmul_uneven_shard_axis(self, shard_x, shard_w):
+    X = Tensor.kaiming_uniform(N, N).realize()
+    W = Tensor.kaiming_uniform(N, N).realize()
+    Xs = X.shard((d0, d1, d2), shard_x)
+    print(Xs)
+    Ws = W.shard((d0, d1, d2), shard_w)
+    print(Ws)
     O = (Xs@Ws)
     np.testing.assert_allclose(X.numpy() @ W.numpy(), O.to(Device.DEFAULT).numpy(), atol=1e-5)
 
@@ -96,6 +108,8 @@ class TestMultiTensor(unittest.TestCase):
   def test_matmul_shard_X_1(self): return self._test_matmul_shard_axis(1, None)
   def test_matmul_shard_W_0(self): return self._test_matmul_shard_axis(None, 0)
   def test_matmul_shard_W_1(self): return self._test_matmul_shard_axis(None, 1)
+  def test_matmul_uneven_shard_W_0(self): return self._test_matmul_uneven_shard_axis(None, 0)
+  def test_matmul_uneven_shard_W_1(self): return self._test_matmul_uneven_shard_axis(None, 1)
 
   def test_matmul_shard_0_0(self): return self._test_matmul_shard_axis(0, 0)
   def test_matmul_shard_0_1(self): return self._test_matmul_shard_axis(0, 1)
