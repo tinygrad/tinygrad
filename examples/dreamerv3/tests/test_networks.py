@@ -71,14 +71,14 @@ class TestMLP(unittest.TestCase):
         mlp = networks.MLP(10, (), layers=2, units=2, dist="binary")
         dist = mlp(inputs)
         log_prob = dist.log_prob(outputs)
-        self.assertEqual(log_prob.numpy().shape, (20,))
+        self.assertEqual(log_prob.numpy().shape, (1, 20))
 
     def test_mlp_symlog_disc(self):
         inputs = Tensor.randn(1, 10)
-        outputs = Tensor.randn(1, 20)
-        mlp = networks.MLP(10, 20, layers=2, units=2, dist="symlog_disc")
+        outputs = Tensor.randn(1, 1)
+        mlp = networks.MLP(10, (255,), layers=2, units=2, dist="symlog_disc")
         outputs = mlp(inputs).log_prob(outputs)
-        self.assertEqual(outputs.numpy().shape, (1, 20))
+        self.assertEqual(outputs.numpy().shape, (1, 1))
 
     def test_mlp_symlog_mse(self):
         inputs = Tensor.randn(1, 10)

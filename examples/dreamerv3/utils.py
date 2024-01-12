@@ -1,16 +1,14 @@
+import argparse
+import json
+import pathlib
 import random
+import time
 
 import numpy as np
+import yaml
+from tensorboardX import SummaryWriter
 
 from tinygrad import Tensor, nn
-
-import yaml
-import pathlib
-import argparse
-
-import time
-import json
-from tensorboardX import SummaryWriter
 
 
 def symlog(x):
@@ -23,6 +21,12 @@ def symexp(x):
 
 def one_hot(x, num_classes):
     return Tensor.eye(num_classes)[x]
+
+
+def cumprod(x: Tensor, axis):
+    dtype = x.dtype
+    # why implement cumprod when you can use math instead?
+    return x.log().cumsum(axis).exp().cast(dtype)
 
 
 def static_scan_for_lambda_return(fn, inputs, start):
@@ -42,7 +46,7 @@ def static_scan_for_lambda_return(fn, inputs, start):
         else:
             outputs = Tensor.cat(outputs, last, dim=-1)
     outputs = Tensor.reshape(outputs, [outputs.shape[0], outputs.shape[1], 1])
-    outputs = Tensor.flip(outputs, [1])
+    outputs = outputs.flip(1)
     outputs = outputs[:]
     return outputs
 
@@ -86,14 +90,16 @@ def args_type(default):
             return float(x) if ("e" in x or "." in x) else int(x)
         if isinstance(default, (list, tuple)):
             return tuple(args_type(default[0])(y) for y in x.split(","))
-        if "e" in default or "." in default:
+        if "e-" in default or "." in default:
+            try:
+                return float(x)
+            except ValueError:
+                pass
+        if "e" in default:
             try:
                 return int(x)
-            except:
-                try:
-                    return float(x)
-                except:
-                    pass
+            except ValueError:
+                pass
         return type(default)(x)
 
     def parse_object(x):
@@ -231,7 +237,7 @@ def numel(shape):
 
 def quantile(input, q):
     # TODO: optimize this to not use numpy
-    return Tensor(np.quantile(input.numpy(), q.numpy()))
+    return Tensor(np.quantile(input.numpy(), q.numpy()), dtype=input.dtype)
 
 
 def get_act(act):
@@ -260,30 +266,49 @@ def clip_grad_norm_(parameters, max_norm):
     return total_norm
 
 
+class Optimizer:
+    def __init__(
+        self,
+        name,
+        parameters,
+        lr: float = 1e-3,
+        eps: float = 1e-5,
+        grad_clip: float = 100,
+        opt: str = "adam",
+    ) -> None:
+        self.name = name
+        self.parameters = parameters
+        self.grad_clip = grad_clip
+        # in case we get strings e.g. 1e-5
+        lr = float(lr)
+        eps = float(eps)
+        if opt == "adam":
+            self.opt = nn.optim.Adam(self.parameters, lr=lr, eps=eps)
+        elif opt == "sgd":
+            self.opt = nn.optim.SGD(self.parameters, lr=lr)
+        elif opt == "momentum":
+            self.opt = nn.optim.SGD(self.parameters, lr=lr, momentum=0.9)
+        else:
+            raise NotImplementedError
+
+    def zero_grad(self):
+        self.opt.zero_grad()
+
+    def step(self):
+        grad_norm = clip_grad_norm_(self.parameters, self.grad_clip)
+        self.opt.step()
+        return {f"{self.name}_grad_norm": grad_norm.item()}
+
+
 def load_config():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--configs", nargs="+")
-    args, remaining = parser.parse_known_args()
     configs = yaml.safe_load(
         (pathlib.Path(__file__).parent / "configs.yaml").read_text()
     )
-
-    def recursive_update(base, update):
-        for key, value in update.items():
-            if isinstance(value, dict) and key in base:
-                recursive_update(base[key], value)
-            else:
-                base[key] = value
-
-    name_list = ["defaults", *args.configs] if args.configs else ["defaults"]
-    defaults = {}
-    for name in name_list:
-        recursive_update(defaults, configs[name])
     parser = argparse.ArgumentParser()
-    for key, value in sorted(defaults.items(), key=lambda x: x[0]):
+    for key, value in sorted(configs.items(), key=lambda x: x[0]):
         arg_type = args_type(value)
         parser.add_argument(f"--{key}", type=arg_type, default=arg_type(value))
-    return parser.parse_args(remaining)
+    return parser.parse_args()
 
 
 class Logger:

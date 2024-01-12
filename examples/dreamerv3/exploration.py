@@ -3,7 +3,7 @@ import models
 import networks
 import utils
 
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, nn
 
 
 class Random:
@@ -11,21 +11,21 @@ class Random:
         self._config = config
         self._act_space = act_space
 
-    def actor(self, feat):
+    def actor(self, feat=None):
         if self._config.actor["dist"] == "onehot":
             return distributions.OneHotCategorical(
-                Tensor.zeros(self._config.num_actions)
-                .repeat(self._config.envs, 1)
+                Tensor.zeros(int(self._act_space.n))
+                .repeat((self._config.num_envs, 1))
                 .to(self._config.device)
             )
         else:
             return distributions.Independent(
                 distributions.Uniform(
                     Tensor(self._act_space.low)
-                    .repeat(self._config.envs, 1)
+                    .repeat((self._config.num_envs, 1))
                     .to(self._config.device),
                     Tensor(self._act_space.high)
-                    .repeat(self._config.envs, 1)
+                    .repeat((self._config.num_envs, 1))
                     .to(self._config.device),
                 ),
                 1,
@@ -53,26 +53,26 @@ class Plan2Explore:
             "deter": config.dyn_deter,
             "feat": config.dyn_stoch + config.dyn_deter,
         }[self._config.disag_target]
+        inp_dim = feat_size + world_model.num_actions if config.disag_action_cond else 0
         kw = dict(
-            inp_dim=feat_size
-            + (
-                config.num_actions if config.disag_action_cond else 0
-            ),  # pytorch version
+            inp_dim=inp_dim,
             shape=size,
             layers=config.disag_layers,
             units=config.disag_units,
             act=config.act,
         )
         self._networks = [networks.MLP(**kw) for _ in range(config.disag_models)]
-        kw = dict(wd=config.weight_decay, opt=config.opt)
         self._expl_opt = utils.Optimizer(
             "explorer",
-            self._networks.parameters(),
+            self.parameters(),
             config.model_lr,
             config.opt_eps,
             config.grad_clip,
-            **kw
+            config.opt,
         )
+
+    def parameters(self):
+        return nn.state.get_parameters(self._networks)
 
     def train(self, start, context, data):
         metrics = {}
@@ -90,7 +90,7 @@ class Plan2Explore:
         inputs = context["feat"]
         if self._config.disag_action_cond:
             inputs = Tensor.cat(
-                [inputs, Tensor(data["action"]).to(self._config.device)], -1
+                inputs, Tensor(data["action"]).to(self._config.device), dim=-1
             )
         metrics.update(self._train_ensemble(inputs, target))
         metrics.update(self._behavior._train(start, self._intrinsic_reward)[-1])
@@ -99,10 +99,8 @@ class Plan2Explore:
     def _intrinsic_reward(self, feat, state, action):
         inputs = feat
         if self._config.disag_action_cond:
-            inputs = Tensor.cat([inputs, action], -1)
-        preds = Tensor.cat(
-            [head(inputs, dtypes.float32).mode()[None] for head in self._networks], 0
-        )
+            inputs = Tensor.cat(inputs, action, dim=-1)
+        preds = Tensor.cat(*[head(inputs).mode[None] for head in self._networks], dim=0)
         disag = Tensor.mean(Tensor.std(preds, 0), -1)[..., None]
         if self._config.disag_log:
             disag = Tensor.log(disag)
@@ -119,8 +117,10 @@ class Plan2Explore:
         inputs = inputs.detach()
         preds = [head(inputs) for head in self._networks]
         likes = Tensor.cat(
-            [Tensor.mean(pred.log_prob(targets))[None] for pred in preds], 0
+            *[Tensor.mean(pred.log_prob(targets))[None] for pred in preds], dim=0
         )
         loss = -Tensor.mean(likes)
-        metrics = self._expl_opt(loss, self._networks.parameters())
+        self._expl_opt.zero_grad()
+        loss.backward()
+        metrics = self._expl_opt.step()
         return metrics

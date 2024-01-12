@@ -3,7 +3,7 @@ import copy
 import networks
 import utils
 
-from tinygrad import Tensor, nn, dtypes
+from tinygrad import Tensor, dtypes, nn, TinyJit
 
 
 class RewardEMA:
@@ -63,7 +63,7 @@ class WorldModel:
         )
         self.heads["reward"] = networks.MLP(
             feat_size,
-            (),
+            (255,) if config.reward_head["dist"] == "symlog_disc" else (),
             config.reward_head["layers"],
             config.units,
             config.act,
@@ -87,21 +87,21 @@ class WorldModel:
         )
         for name in config.grad_heads:
             assert name in self.heads, name
-        lr = config.model_lr
-        eps = config.opt_eps
-        opt = config.opt
-        self._model_opt = {
-            "adam": lambda: nn.optim.Adam(self.parameters(), lr=lr, eps=eps),
-            "sgd": lambda: nn.optim.SGD(self.parameters(), lr=lr),
-            "momentum": lambda: nn.optim.SGD(self.parameters(), lr=lr, momentum=0.9),
-        }[opt]()
-        self._clip = config.grad_clip
+        self._model_opt = utils.Optimizer(
+            "model",
+            self.parameters(),
+            config.model_lr,
+            config.opt_eps,
+            config.grad_clip,
+            config.opt,
+        )
         # other losses are scaled by 1.0.
         self._scales = dict(
             reward=config.reward_head["loss_scale"],
             cont=config.cont_head["loss_scale"],
         )
 
+    @TinyJit
     def _train(self, data):
         # action (batch_size, batch_length, act_dim)
         # image (batch_size, batch_length, h, w, ch)
@@ -142,11 +142,11 @@ class WorldModel:
 
         self._model_opt.zero_grad()
         model_loss.backward()
-        total_norm = utils.clip_grad_norm_(self.parameters(), self._clip)
-        metrics[f"model_grad_norm"] = total_norm.item()
-        self._model_opt.step()
+        metrics.update(self._model_opt.step())
 
-        metrics.update({f"{name}_loss": loss.mean().item() for name, loss in losses.items()})
+        metrics.update(
+            {f"{name}_loss": loss.mean().item() for name, loss in losses.items()}
+        )
         metrics["kl_free"] = kl_free
         metrics["dyn_scale"] = dyn_scale
         metrics["rep_scale"] = rep_scale
@@ -207,14 +207,9 @@ class WorldModel:
 
         return Tensor.cat(truth, model, error, dim=2).numpy()
 
-    def state_dict(self):
-        models = [self.encoder, self.dynamics, *self.heads.values()]
-        state_dict = nn.state.get_state_dict(models)
-        return state_dict
-
     def parameters(self):
-        return list(self.state_dict().values())
-
+        models = [self.encoder, self.dynamics, *self.heads.values()]
+        return nn.state.get_parameters(models)
 
 class ImagBehavior:
     def __init__(self, config, world_model):
@@ -232,13 +227,14 @@ class ImagBehavior:
             config.act,
             config.norm,
             config.actor["dist"],
-            "learned",
+            "learned" if config.actor["dist"] == "normal" else 0.0,
             config.actor["min_std"],
             config.actor["max_std"],
             absmax=1.0,
             temp=config.actor["temp"],
             unimix_ratio=config.actor["unimix_ratio"],
             outscale=config.actor["outscale"],
+            device=config.device,
             name="Actor",
         )
         self.value = networks.MLP(
@@ -256,14 +252,13 @@ class ImagBehavior:
         if config.critic["slow_target"]:
             self._slow_value = copy.deepcopy(self.value)
             self._updates = 0
-        kw = dict(wd=config.weight_decay, opt=config.opt, use_amp=self._use_amp)
         self._actor_opt = utils.Optimizer(
             "actor",
             self.actor_parameters(),
             config.actor["lr"],
             config.actor["eps"],
             config.actor["grad_clip"],
-            **kw,
+            config.opt,
         )
         self._value_opt = utils.Optimizer(
             "value",
@@ -271,72 +266,74 @@ class ImagBehavior:
             config.critic["lr"],
             config.critic["eps"],
             config.critic["grad_clip"],
-            **kw,
+            config.opt,
         )
         if self._config.reward_EMA:
             self.reward_ema = RewardEMA(device=self._config.device)
 
-    def _train(
-        self,
-        start,
-        objective,
-    ):
+    @TinyJit
+    def _train(self, start, objective):
         self._update_slow_target()
         metrics = {}
 
-        with utils.RequiresGrad(self.actor):
-            with Tensor.cuda.amp.autocast(self._use_amp):
-                imag_feat, imag_state, imag_action = self._imagine(
-                    start, self.actor, self._config.imag_horizon
-                )
-                reward = objective(imag_feat, imag_state, imag_action)
-                actor_ent = self.actor(imag_feat).entropy()
-                self._world_model.dynamics.get_dist(imag_state).entropy()
-                # this target is not scaled by ema or sym_log.
-                target, weights, base = self._compute_target(
-                    imag_feat, imag_state, reward
-                )
-                actor_loss, mets = self._compute_actor_loss(
-                    imag_feat,
-                    imag_action,
-                    target,
-                    weights,
-                    base,
-                )
-                actor_loss -= self._config.actor["entropy"] * actor_ent[:-1, ..., None]
-                actor_loss = Tensor.mean(actor_loss)
-                metrics.update(mets)
-                value_input = imag_feat
+        imag_feat, imag_state, imag_action = self._imagine(
+            start, self.actor, self._config.imag_horizon
+        )
+        imag_feat = imag_feat.detach()
+        imag_state = {k: v.detach() for k, v in imag_state.items()}
+        reward = objective(imag_feat, imag_state, imag_action).detach()
+        actor_ent = self.actor(imag_feat).entropy()
+        # this target is not scaled by ema or sym_log.
+        target, weights, base = self._compute_target(imag_feat, imag_state, reward)
+        actor_loss, mets = self._compute_actor_loss(
+            imag_feat,
+            imag_action,
+            target.detach(),
+            weights.detach(),
+            base.detach(),
+        )
+        actor_loss = (
+            actor_loss - self._config.actor["entropy"] * actor_ent[:-1, ..., None]
+        )
+        actor_loss = Tensor.mean(actor_loss)
+        metrics.update(mets)
 
-        with utils.RequiresGrad(self.value):
-            with Tensor.cuda.amp.autocast(self._use_amp):
-                value = self.value(value_input[:-1].detach())
-                target = Tensor.stack(target, dim=1)
-                # (time, batch, 1), (time, batch, 1) -> (time, batch)
-                value_loss = -value.log_prob(target.detach())
-                slow_target = self._slow_value(value_input[:-1].detach())
-                if self._config.critic["slow_target"]:
-                    value_loss -= value.log_prob(slow_target.mode.detach())
-                # (time, batch, 1), (time, batch, 1) -> (1,)
-                value_loss = Tensor.mean(weights[:-1] * value_loss[:, :, None])
+        value = self.value(imag_feat[:-1])
+        target = target.squeeze(-1).transpose().detach()
+        # (time, batch, 1), (time, batch, 1) -> (time, batch)
+        value_loss = -value.log_prob(target)
+        if self._config.critic["slow_target"]:
+            slow_target = self._slow_value(imag_feat[:-1]).mode
+            slow_target = slow_target.squeeze(-1).detach()
+            value_loss = value_loss - value.log_prob(slow_target)
+        # (time, batch, 1), (time, batch, 1) -> (1,)
+        value_loss = Tensor.mean(weights[:-1] * value_loss[:, :, None])
 
         metrics.update(utils.tensorstats(value.mode, "value"))
         metrics.update(utils.tensorstats(target, "target"))
         metrics.update(utils.tensorstats(reward, "imag_reward"))
-        if self._config.actor["dist"] in ["onehot"]:
+        if self._config.actor["dist"] == "onehot":
             metrics.update(
-                utils.tensorstats(
-                    Tensor.argmax(imag_action, dim=-1).float(), "imag_action"
-                )
+                utils.tensorstats(Tensor.argmax(imag_action, -1).float(), "imag_action")
             )
         else:
             metrics.update(utils.tensorstats(imag_action, "imag_action"))
         metrics["actor_entropy"] = Tensor.mean(actor_ent).numpy()
-        metrics.update(self._actor_opt(actor_loss, self.actor_parameters()))
-        metrics.update(self._value_opt(value_loss, self.value_parameters()))
+
+        metrics["actor_loss"] = actor_loss.item()
+        metrics["value_loss"] = value_loss.item()
+
+        self._actor_opt.zero_grad()
+        actor_loss.backward()
+        metrics.update(self._actor_opt.step())
+
+        self._value_opt.zero_grad()
+        value_loss.backward()
+        metrics.update(self._value_opt.step())
+
         return imag_feat, imag_state, imag_action, weights, metrics
 
-    def _imagine(self, start, policy, horizon):
+    def _imagine(self, start, policy, H):
         dynamics = self._world_model.dynamics
 
         def flatten(x):
@@ -353,19 +350,21 @@ class ImagBehavior:
             return succ, feat, action
 
         succ, feats, actions = utils.static_scan(
-            step, [Tensor.arange(horizon)], (start, None, None)
+            step, [Tensor.arange(H)], (start, None, None)
         )
-        states = {k: Tensor.cat([start[k][None], v[:-1]], 0) for k, v in succ.items()}
+        states = {k: Tensor.cat(start[k][None], v[:-1], dim=0) for k, v in succ.items()}
 
         return feats, states, actions
 
     def _compute_target(self, imag_feat, imag_state, reward):
+        reward = reward.unsqueeze(-1)
         if "cont" in self._world_model.heads:
             inp = self._world_model.dynamics.get_feat(imag_state)
             discount = self._config.discount * self._world_model.heads["cont"](inp).mean
         else:
             discount = self._config.discount * Tensor.ones_like(reward)
-        value = self.value(imag_feat).mode
+        # TODO: currently need to realize value here for metrics to work
+        value = self.value(imag_feat).mode.contiguous().realize()
         target = utils.lambda_return(
             reward[1:],
             value[:-1],
@@ -374,22 +373,14 @@ class ImagBehavior:
             lambda_=self._config.discount_lambda,
             axis=0,
         )
-        weights = Tensor.cumprod(
-            Tensor.cat([Tensor.ones_like(discount[:1]), discount[:-1]], 0), 0
+        weights = utils.cumprod(
+            Tensor.cat(Tensor.ones_like(discount[:1]), discount[:-1], dim=0), 0
         ).detach()
         return target, weights, value[:-1]
 
-    def _compute_actor_loss(
-        self,
-        imag_feat,
-        imag_action,
-        target,
-        weights,
-        base,
-    ):
+    def _compute_actor_loss(self, imag_feat, imag_action, target, weights, base):
         metrics = {}
-        inp = imag_feat.detach()
-        policy = self.actor(inp)
+        policy = self.actor(imag_feat)
         # Q-val for actor is not transformed using symlog
         target = Tensor.stack(target, dim=1)
         if self._config.reward_EMA:
@@ -425,8 +416,9 @@ class ImagBehavior:
         if self._config.critic["slow_target"]:
             if self._updates % self._config.critic["slow_target_update"] == 0:
                 mix = self._config.critic["slow_target_fraction"]
-                for s, d in zip(self.value.parameters(), self._slow_value.parameters()):
-                    d.data = mix * s.data + (1 - mix) * d.data
+                for s, d in zip(self.value_parameters(), self.slow_value_parameters()):
+                    d *= 1 - mix
+                    d += mix * s.detach()
             self._updates += 1
 
     def actor_parameters(self):
@@ -434,3 +426,6 @@ class ImagBehavior:
 
     def value_parameters(self):
         return nn.state.get_parameters(self.value)
+
+    def slow_value_parameters(self):
+        return nn.state.get_parameters(self._slow_value)

@@ -89,6 +89,13 @@ class Categorical(Distribution):
         p_log_p = self.logits * self.probs
         return -p_log_p.sum(-1)
 
+    def log_prob(self, value):
+        value = value.cast(dtypes.int32).unsqueeze(-1)
+        # Tensor.gather uses mlops.Eq, which does not support backward() yet
+        # return self.logits.gather(value, dim=-1).squeeze(-1)
+        value = one_hot(value, self._num_events)
+        return (self.logits * value).sum(-1)
+
 
 class OneHotCategorical(Categorical):
     def __init__(self, logits=None, probs=None, unimix_ratio=0.0):
@@ -115,6 +122,9 @@ class OneHotCategorical(Categorical):
 
     def entropy(self):
         return super().entropy()
+
+    def log_prob(self, value):
+        return (self.logits * value).sum(-1)
 
 
 class DiscDist:
@@ -170,7 +180,7 @@ class DiscDist:
             + one_hot(above, num_classes=self.num_buckets) * weight_above[..., None]
         )
         log_pred = self.logits - self.logits.exp().sum(-1, keepdim=True).log()
-        return (target * log_pred.squeeze(-1).unsqueeze(-1)).sum(-1)
+        return (target * log_pred).sum(-1)
 
 
 class MSEDist:
@@ -257,7 +267,7 @@ class ContDist:
     def sample(self, sample_shape=()):
         out = self._dist.sample(sample_shape)
         if self.absmax is not None:
-            out = Tensor.clip(out, -self.absmax, self.absmax).detach()
+            out = Tensor.clip(out, -self.absmax, self.absmax)
         return out
 
     def log_prob(self, x):
@@ -304,6 +314,7 @@ class Bernoulli(Distribution):
         return (eps < self.probs).cast(self.probs.dtype)
 
     def log_prob(self, x):
+        x = x.unsqueeze(-1)
         log_probs0 = -Tensor.softplus(self.logits)
         log_probs1 = -Tensor.softplus(-self.logits)
 
