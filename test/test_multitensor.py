@@ -185,8 +185,7 @@ class TestMultiTensor(unittest.TestCase):
     n_kv_heads = 4
     max_context = 32
 
-    # TODO: derive the dim of freqs_cis
-    freqs_cis = Tensor.rand(1, 1, 1, 16, 2).half()
+    freqs_cis = Tensor.rand(1, seq_len, 1, (dim//n_heads)//2, 2).half()
     mask = None
     start_pos = 0
 
@@ -204,8 +203,6 @@ class TestMultiTensor(unittest.TestCase):
     y_sharded = layer_sharded(x_sharded, start_pos, freqs_cis_sharded, mask)
 
     np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-6, rtol=1e-6)
-
-    # mask = Tensor.full((1, 1, 4, 0+4), float("-inf")).triu(0+1).realize()
 
   def test_data_parallel_resnet(self):
     import sys, pathlib
