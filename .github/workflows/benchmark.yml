@@ -35,7 +35,9 @@ jobs:
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Run Tensor Core GEMM
-      run: DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
+      run: |
+        DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
+        DEBUG=2 HALF=1 python3 extra/gemm/simple_matmul.py | tee matmul_half.txt
     - name: Run LLaMA
       run: |
         JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
@@ -62,6 +64,7 @@ jobs:
           gpt2_unjitted.txt
           gpt2_jitted.txt
           matmul.txt
+          matmul_half.txt
           sd.txt
 
   testnvidiabenchmark:
