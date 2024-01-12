@@ -24,6 +24,9 @@ def cumprod(x: Tensor, axis):
     # why implement cumprod when you can use math instead?
     return x.log().cumsum(axis).exp().cast(dtype)
 
+def quantile(input, q):
+    # TODO: optimize this to not use numpy
+    return Tensor(np.quantile(input.numpy(), q.numpy()), dtype=input.dtype)
 
 def static_scan_for_lambda_return(fn, inputs, start):
     last = start
@@ -228,11 +231,6 @@ def _sum_rightmost(value, dim):
 
 def numel(shape):
     return int(np.prod(shape)) if shape else 1
-
-
-def quantile(input, q):
-    # TODO: optimize this to not use numpy
-    return Tensor(np.quantile(input.numpy(), q.numpy()), dtype=input.dtype)
 
 
 def get_act(act):
