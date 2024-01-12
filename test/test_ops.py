@@ -889,7 +889,7 @@ class TestOps(unittest.TestCase):
     arg = (4,3,2,6)
     helper_test_op([(4,3,1,6)], lambda x: x.expand(arg), lambda x: x.expand(shape=arg))
     helper_test_op([()], lambda x: x.expand([]), lambda x: x.expand(shape=[]))
-    
+
   def test_one_hot(self):
     data = [1, 2, 4]
     helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 6), lambda: Tensor(data).one_hot(6), forward_only=True)
