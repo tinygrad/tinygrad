@@ -36,7 +36,6 @@ class Dreamer:
             return self._wm.heads["reward"](f).mean()
 
     def __call__(self, obs, reset, state=None, training=True):
-        step = self._step
         if training:
             num_steps = (
                 self._config.pretrain if not self.pretrained else self._num_train_steps
@@ -46,7 +45,7 @@ class Dreamer:
                 self._train(next(self._dataset))
                 self._update_count += 1
                 self._metrics["update_count"] = self._update_count
-            if step % self._log_every == 0:
+            if self._step % self._log_every == 0:
                 for name, values in self._metrics.items():
                     self._logger.scalar(name, float(np.mean(values)))
                     self._metrics[name] = []

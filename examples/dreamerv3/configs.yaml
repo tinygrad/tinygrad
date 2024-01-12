@@ -5,7 +5,7 @@ offline_traindir: ''
 offline_evaldir: ''
 seed: 0
 deterministic_run: False
-steps: 400000
+steps: 100000
 parallel: False
 eval_every: 1000
 eval_episode_num: 100
@@ -15,6 +15,7 @@ device: 'cuda:0'
 compile: True
 debug: False
 video_pred_log: True
+expl_until: 0
 
 # Environment
 env: 'ALE/Pong-v5'
