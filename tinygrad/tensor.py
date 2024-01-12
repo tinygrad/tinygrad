@@ -211,10 +211,9 @@ class Tensor:
   def zeros_like(self, **kwargs): return self.full_like(0, **kwargs)
   def ones_like(self, **kwargs): return self.full_like(1, **kwargs)
 
-  @staticmethod
-  def one_hot(indices:Tensor, num_classes:int=-1, **kwargs) -> Tensor:
-    num_classes = indices.max().item()+1 if num_classes == -1 else num_classes
-    return Tensor.where(indices[..., None] == Tensor.arange(num_classes), 1, 0, **kwargs)
+  def one_hot(self, num_classes:int=-1, **kwargs) -> Tensor:
+    num_classes = self.max().item()+1 if num_classes == -1 else num_classes
+    return Tensor.where(self[..., None] == Tensor.arange(num_classes), 1, 0, **kwargs)
 
   # ***** rng hlops *****
 

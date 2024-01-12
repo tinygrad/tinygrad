@@ -105,11 +105,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.eye(1), lambda: Tensor.eye(1), forward_only=True)
   def test_one_hot(self):
     data = [1, 2, 4]
-    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data)), lambda: Tensor.one_hot(Tensor(data)), forward_only=True)
-    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 6), lambda: Tensor.one_hot(Tensor(data), 6), forward_only=True)
+    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data)), lambda: Tensor(data).one_hot(), forward_only=True)
+    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 6), lambda: Tensor(data).one_hot(6), forward_only=True)
     data = [[[1, 2, 3], [0, 3, 5]], [[1, 2, 3], [0, 3, 5]]]
-    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data)), lambda: Tensor.one_hot(Tensor(data)), forward_only=True)
-    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 8), lambda: Tensor.one_hot(Tensor(data), 8), forward_only=True)
+    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data)), lambda: Tensor(data).one_hot(), forward_only=True)
+    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 8), lambda: Tensor(data).one_hot(8), forward_only=True)
 
   def test_split(self):
     test_cases = [
