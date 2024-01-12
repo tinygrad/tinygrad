@@ -93,7 +93,7 @@ class Dreamer:
         start = post
 
         def reward(f, s, a):
-            return self._wm.heads["reward"](self._wm.dynamics.get_feat(s)).mode
+            return self._wm.heads["reward"](self._wm.dynamics.get_feat(s)).mode.squeeze(-1)
 
         metrics.update(self._task_behavior._train(start, reward)[-1])
         if self._config.expl_behavior != "greedy":

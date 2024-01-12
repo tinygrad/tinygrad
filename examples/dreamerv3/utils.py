@@ -152,7 +152,6 @@ def static_scan(fn, inputs, start):
         outputs = [outputs]
     return outputs
 
-
 def weight_init(m):
     if isinstance(m, nn.Linear):
         out_num, in_num = m.weight.shape
