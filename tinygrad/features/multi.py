@@ -12,16 +12,22 @@ def all_reduce(lbs):
   return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
 
 def to_sharded(lbs:List[LazyBuffer], axis:int) -> List[LazyBuffer]:
-  assert lbs[0].shape[axis] % len(lbs) == 0, f"{lbs[0].shape=} {axis=} {len(lbs)=}"
-  sz = lbs[0].shape[axis] // len(lbs)
-  return [lb.shrink(tuple((0,s) if a != axis else (sz*i,sz*(i+1)) for a,s in enumerate(lb.shape))) for i,lb in enumerate(lbs)]
+  # assert lbs[0].shape[axis] % len(lbs) == 0, f"{lbs[0].shape=} {axis=} {len(lbs)=}"
+  # sz = lbs[0].shape[axis] // len(lbs)
+  sz = [i*(lbs[0].shape[axis]//len(lbs)) for i in range(len(lbs))] + [lbs[0].shape[axis]]
+  # print(sz)
+  return [lb.shrink(tuple((0,s) if a != axis else (sz[i],sz[i+1]) for a,s in enumerate(lb.shape))) for i,lb in enumerate(lbs)]
 
 class MultiLazyBuffer:
   def __init__(self, lbs:List[LazyBuffer], axis:Optional[int]):
     assert all(isinstance(x, LazyBuffer) for x in lbs) and len(lbs) >= 2, "all lbs must be LazyBuffers, and we need at least two of them"
-    assert all_same([(x.shape, x.dtype, x.st) for x in lbs]), "all multilazybuffer needs same shape, dtype, and st"
+    # TODO: shape along the sharded axis can be different and the rest of axises has to be the same
+    # assert all_same([(x.shape, x.dtype, x.st) for x in lbs]), "all multilazybuffer needs same shape, dtype, and st"
     self.lbs, self.axis, self.dtype, self.device = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs)
-    self.shape = tuple(s*len(self.lbs) if a == self.axis else s for a,s in enumerate(lbs[0].shape))
+    # print("init")
+    # print(f"axis {self.axis}")
+    dim_shard = sum(lb.shape[self.axis] for lb in lbs) if self.axis is not None else 0
+    self.shape = tuple(dim_shard if a == self.axis else s for a,s in enumerate(lbs[0].shape))
 
   def __repr__(self):
     return f"<MLB{chr(10)}{chr(10).join([f'{x.device} {x.st}' for x in self.lbs])}>"
