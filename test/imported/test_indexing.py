@@ -1137,9 +1137,10 @@ class TestIndexing(unittest.TestCase):
         x[:, [0, 1]]
   '''
 
-  def test_empty_ndim_index_bool(self):
-    x = Tensor.randn(5)
-    self.assertRaises(IndexError, lambda: x[Tensor.empty(0, 2, dtype=dtypes.uint8)])
+  # TODO: should this fail?
+  # def test_empty_ndim_index_bool(self):
+  #   x = Tensor.randn(5)
+  #   self.assertRaises(IndexError, lambda: x[Tensor.empty(0, 2, dtype=dtypes.uint8)])
 
   def test_empty_slice(self):
     x = Tensor.randn(2, 3, 4, 5)

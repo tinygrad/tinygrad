@@ -1,9 +1,8 @@
-import torch
 import time, math, unittest
 import numpy as np
-from tinygrad.tensor import Tensor
+import torch
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI
-from tinygrad import Device, dtypes
+from tinygrad import Tensor, Device, dtypes
 
 if CI:
   import warnings
@@ -556,6 +555,16 @@ class TestOps(unittest.TestCase):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
   def test_big_gemm(self):
     helper_test_op([(256,256), (256,256)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
+  @unittest.skipIf(IMAGE>0, "no 0 in shape matmul on images")
+  def test_gemm_with_zeros_shape(self):
+    # TODO: support backward for this
+    helper_test_op([(8,8), (8,0)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-7, forward_only=True)
+    helper_test_op([(0,8), (8,8)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-7, forward_only=True)
+    helper_test_op([(0,8), (8,0)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-7, forward_only=True)
+    helper_test_op([(8,0), (0,8)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-7, forward_only=True)
+    helper_test_op([(0,0), (0,0)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-7, forward_only=True)
+    helper_test_op([(0), (0,8)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-7, forward_only=True)
+    helper_test_op([(0), (0)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-7, forward_only=True)
   def test_broadcastdot(self):
     helper_test_op([(10,45,65), (65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
     with self.assertRaises(AssertionError):
@@ -581,6 +590,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=(1,2)), lambda x: Tensor.sum(x, axis=(1,2)))
     helper_test_op([(3,4,5,6)], lambda x: x.sum(axis=1), lambda x: Tensor.sum(x, axis=1))
     helper_test_op([()], lambda x: x.sum(), Tensor.sum)
+  def test_sum_with_zeros_shape(self):
+    # TODO: support backward for this
+    helper_test_op([(4, 0)], lambda x: x.sum(axis=(0,)), lambda x: Tensor.sum(x, axis=(0,)), forward_only=True)
+    helper_test_op([(4, 0)], lambda x: x.sum(axis=(1,)), lambda x: Tensor.sum(x, axis=(1,)), forward_only=True)
+    helper_test_op([(4, 0)], lambda x: x.sum(axis=(0,1)), lambda x: Tensor.sum(x, axis=(0,1)), forward_only=True)
   def test_min(self):
     helper_test_op([(3,3)], lambda x: x.min(), Tensor.min)
     helper_test_op([(45,3)], lambda x: x.min(), Tensor.min)
