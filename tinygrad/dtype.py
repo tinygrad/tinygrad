@@ -1,5 +1,5 @@
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np  # TODO: remove numpy
 import functools
 
@@ -22,16 +22,12 @@ class DType:
 @dataclass(frozen=True)
 class ImageDType(DType):
   shape: Tuple[int, ...] = (0,)  # arbitrary arg for the dtype, used in image for the shape
-  base: Any = None
+  base: Any = field(default=None, hash=False)
   def __post_init__(self):
     if self.base is None: raise ValueError("base cannot be None!")
   def scalar(self): return self.base
   def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
-  # TODO: fix this to not need these
-  def __hash__(self): return hash((super().__hash__(), self.shape))
-  def __eq__(self, x): return super().__eq__(x) and self.shape == x.shape
-  def __ne__(self, x): return super().__ne__(x) or self.shape != x.shape
 
 class PtrDType(DType):
   def __init__(self, dt:DType): super().__init__(dt.priority, dt.itemsize, dt.name, dt.sz)
