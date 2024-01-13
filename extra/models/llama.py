@@ -65,8 +65,8 @@ class Attention:
     x = x.half()
     xq, xk, xv = self.wq(x).half(), self.wk(x).half(), self.wv(x).half()
     if isinstance(x.device, tuple):
-      # TODO: this reshape is technically independent and can be done inside each GPU in parallel so we can avoid the copy
-      xq = self.unshard_reshape_shard(xq, (xq.shape[0], xq.shape[1], self.n_heads, self.head_dim), x.device, 2)
+      # TODO: this reshape can be done independently inside each GPU in parallel so we can avoid the copy
+      xq = self.unshard_reshape_shard(xq, (xq.shape[0], xq.shape[1], self.n_heads,    self.head_dim), x.device, 2)
       xk = self.unshard_reshape_shard(xk, (xq.shape[0], xq.shape[1], self.n_kv_heads, self.head_dim), x.device, 2)
       xv = self.unshard_reshape_shard(xv, (xq.shape[0], xq.shape[1], self.n_kv_heads, self.head_dim), x.device, 2)
     else:
@@ -82,7 +82,7 @@ class Attention:
       self.cache_k = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous()
       self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous()
       if isinstance(x.device, tuple):
-        # TODO: instead of specifying how to shard, it can follow how xk and xv are being sharded
+        # TODO: to follow the pattern how xk and xv are being sharded to be able to do it at initialization
         self.cache_k.shard_((xk.device), axis=2)
         self.cache_v.shard_((xv.device), axis=2)
 
@@ -97,8 +97,9 @@ class Attention:
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
+
+    # if rotating the gpus to always sharded by 4, this is where it gets annoying
     if isinstance(x.device, tuple):
-      # TODO: it can follow how x was being sharded
       attn = self.unshard_reshape_shard(attn, (bsz, seqlen, -1), x.device, None)
     else:
       attn = attn.reshape(bsz, seqlen, -1)
@@ -136,7 +137,7 @@ class Transformer:
     self.forward_jit = TinyJit(self.forward) if jit else None
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float=0.0):
-    _bsz, seqlen = tokens.shape
+    _, seqlen = tokens.shape
 
     # TODO: fix this copy
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
