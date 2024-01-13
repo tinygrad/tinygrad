@@ -32,8 +32,6 @@ def repeat_kv(x:Tensor, n_rep:int) -> Tensor:
   device = x.device
   x = x.to(Device.DEFAULT)
   x = x.repeat((1, 1, 1, n_rep)).reshape(bs, seqlen, n_kv_heads * n_rep, head_dim)
-  # x.shard_(device, axis=2).realize()
-
   return x.shard_(device, axis=2)
 
 class RMSNorm:
@@ -96,10 +94,6 @@ class Attention:
     assert keys.dtype == self.cache_k.dtype and values.dtype == self.cache_v.dtype, f"{keys.dtype=}, {values.dtype=}, {self.cache_k.dtype=}, {self.cache_v.dtype=}"
     self.cache_k.assign(keys.pad((None,(0,self.max_context-start_pos-seqlen),None,None)).contiguous()).realize()
     self.cache_v.assign(values.pad((None,(0,self.max_context-start_pos-seqlen),None,None)).contiguous()).realize()
-    # print(f"xq {xq}")
-    # print(f"keys {keys}")
-    # print(f"values {values}")
-    # print(f"n_rep {self.n_rep}")
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
@@ -171,11 +165,6 @@ class Transformer:
         if mask is not None:
           mask = mask.to(Device.DEFAULT)
           mask.shard_(device, axis=None).realize()
-      # print(f"layer {i}")
-      # print(f"h {h}")
-      # print(f"start_pos {start_pos}")
-      # print(f"freqs_cis {freqs_cis}")
-      # print(f"mask {mask}")
       h = layer(h, start_pos, freqs_cis, mask)
 
     # device 2
