@@ -131,21 +131,50 @@ def load(fn:str):
   else:
     return torch_load(fn)
 
+device1 = (d2, d3, d4, d5)
+device2 = (d0, d1)
 def load_state_dict_shard(model, state_dict, devices, strict=True, verbose=True):
   start_mem_used = GlobalCounters.mem_used
   with Timing("loaded weights in ", lambda et_ns: f", {(GlobalCounters.mem_used-start_mem_used)/1e9:.2f} GB loaded at {(GlobalCounters.mem_used-start_mem_used)/et_ns:.2f} GB/s"):
     model_state_dict = get_state_dict(model)
     if DEBUG >= 1 and len(state_dict) > len(model_state_dict):
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
+    # print(state_dict)
     for k,v in (t := tqdm(model_state_dict.items(), disable=not verbose)):
       t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}")
-      if k not in state_dict and not strict:
-        if DEBUG >= 1: print(f"WARNING: not loading {k}")
-        continue
-      if "norm" in k: # norm layers weight are duplicated
-        v.assign(state_dict[k].shard_((devices), axis=None)).realize()
-      else: # the rests layers weight are sharded
-        v.assign(state_dict[k].shard_((devices), axis=0)).realize()
+      # TODO: clean this up
+      if len(devices) != 6:
+        if k not in state_dict and not strict:
+          if DEBUG >= 1: print(f"WARNING: not loading {k}")
+          continue
+        if "norm" in k: # norm layers weight are duplicated
+          v.assign(state_dict[k].shard_((devices), axis=None)).realize()
+        else: # the rests layers weight are sharded
+          v.assign(state_dict[k].shard_((devices), axis=0)).realize()
+      # load the llama 70B model
+      else:
+        # print(f"{k} {v}")
+        if k not in state_dict and not strict:
+          if DEBUG >= 1: print(f"WARNING: not loading {k}")
+          continue
+        # if k == "freqs_cis":
+        #   v.assign(state_dict[k].to(Device.DEFAULT)).realize()
+        if k == "tok_embeddings.weight":
+          v.assign(state_dict[k].shard_((device1), axis=0)).realize()
+        elif k == "norm.weight":
+          v.assign(state_dict[k].shard_((device2), axis=None)).realize()
+        elif k == "output.weight":
+          v.assign(state_dict[k].shard_((device2), axis=0)).realize()
+        elif int(k.split('.')[1]) < 54:
+          if "norm" in k:
+            v.assign(state_dict[k].shard_((device1), axis=None)).realize()
+          else:
+            v.assign(state_dict[k].shard_((device1), axis=0)).realize()
+        else:
+          if "norm" in k:
+            v.assign(state_dict[k].shard_((device2), axis=None)).realize()
+          else:
+            v.assign(state_dict[k].shard_((device2), axis=0)).realize()
 
 class AbsmaxQuantizedLinear:
   def __init__(self, in_features, out_features, bias=False):
@@ -177,7 +206,10 @@ class LLaMa:
     assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
 
     jit = bool(getenv("JIT", 1))
-    model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, device=device, jit=jit)
+    if quantize:
+      model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit)
+    else:
+      model = Transformer(**params["args"], max_context=MAX_CONTEXT, device=device, jit=jit)
 
     # TODO: can't load weights using GPU as hosts due to memory overflow
     if model_path.is_dir():
@@ -196,6 +228,7 @@ class LLaMa:
 
     if isinstance(device, tuple):
       load_state_dict_shard(model, weights, device, strict=False, verbose=True)
+      # load_state_dict_shard(model, weights, device, strict=False, verbose=False)
     else:
       load_state_dict(model, weights, strict=False, verbose=True)
 
@@ -455,8 +488,10 @@ After you are done speaking, output [EOS]. You are not Chad.
                       f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                       (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
             x = Tensor([toks[start_pos:]])
-            if args.device > 1:
+            if args.device > 1 and args.device < 6:
               x.shard_(devices, axis=None)
+            else:
+              x.shard_(device1, axis=None)
             tok = llama.model(x, start_pos, args.temperature).item()
 
       # use the kv cache

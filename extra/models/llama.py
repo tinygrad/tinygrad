@@ -87,6 +87,9 @@ class Attention:
     keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous() if start_pos > 0 else xk
     values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1).contiguous() if start_pos > 0 else xv
 
+    # print(f"xq {xq}")
+    # print(f"keys {keys}")
+    # print(f"values {values}")
     # update the cache
     assert keys.dtype == self.cache_k.dtype and values.dtype == self.cache_v.dtype, f"{keys.dtype=}, {values.dtype=}, {self.cache_k.dtype=}, {self.cache_v.dtype=}"
     self.cache_k.assign(keys.pad((None,(0,self.max_context-start_pos-seqlen),None,None)).contiguous()).realize()
@@ -134,17 +137,41 @@ class Transformer:
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float=0.0):
     _bsz, seqlen = tokens.shape
-    freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
 
+    # TODO: fix this copy
+    freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
+    freqs_cis = freqs_cis.to(Device.DEFAULT)
+    freqs_cis.shard_(tokens.device, axis=None).realize()
+
+    # device 1 for 6 gpus
     h = self.tok_embeddings(tokens)
 
     if seqlen >  1:
+      # Device.DEFAULT
       mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos+1).realize()
       if isinstance(tokens.device, tuple): mask.shard_(tokens.device, axis=None).realize()
     else:
       mask = None
 
-    for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
+
+    # device 1 and device 2
+    for i,layer in enumerate(self.layers):
+      if i > 53:
+        device = layer.attention.wk.weight.device
+        h = h.to(Device.DEFAULT)
+        h.shard_(device, axis=None).realize()
+        freqs_cis = freqs_cis.to(Device.DEFAULT)
+        freqs_cis.shard_(device, axis=None).realize()
+        mask = mask.to(Device.DEFAULT)
+        mask.shard_(device, axis=None).realize()
+      # print(f"layer {i}")
+      # print(f"h {h}")
+      # print(f"start_pos {start_pos}")
+      # print(f"freqs_cis {freqs_cis}")
+      # print(f"mask {mask}")
+      h = layer(h, start_pos, freqs_cis, mask)
+
+    # device 2
     logits = self.output(self.norm(h))[:, -1, :]
 
     if isinstance(tokens.device, tuple): logits = logits.to(Device.DEFAULT).realize() 
