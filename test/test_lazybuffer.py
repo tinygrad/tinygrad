@@ -2,8 +2,8 @@
 import numpy as np
 import unittest
 from tinygrad.lazy import LazyBuffer
-from tinygrad import Device
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor, Device, dtypes
+from tinygrad.device import Interpreted
 
 class TestLazyBuffer(unittest.TestCase):
   @unittest.skip("it doesn't work like this anymore")
@@ -51,10 +51,29 @@ class TestLazyBuffer(unittest.TestCase):
     assert a.device == b.device
 
   def test_shrink_const_into_zero(self):
+    # regression test to make sure the shapetracker is preserved
     a = Tensor.zeros(4,4,4).shrink((None, (0,0), None))
     b = Tensor.zeros(4,1,4)
     c = a.cat(b, dim=1)
     np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
+
+  def test_shrink_const_then_cast(self):
+    # regression test to make sure the shapetracker is preserved
+    a = Tensor.zeros(4,4,4).shrink((None, (0,0), None)).cast(dtypes.int32)
+    b = Tensor.zeros(4,1,4)
+    c = a.cat(b, dim=1)
+
+    if isinstance(Device[Device.DEFAULT], Interpreted):
+      # TODO: fix cast resets shapetracker and remove this block
+      # this is expectedFailure with a condition
+      try:
+        np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
+      except Exception:
+        pass
+      else:
+        raise ValueError("assert_allclose not failed")
+    else:
+      np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
 
 if __name__ == "__main__":
   unittest.main()
