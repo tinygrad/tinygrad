@@ -517,8 +517,8 @@ class Tensor:
     axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if isinstance(axis, int) else list(axis))
     axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
     shape = tuple(s for i,s in enumerate(self.shape) if i not in axis_)
-    if 0 in self.shape and 0 not in shape:
-      return Tensor.full(tuple(1 if s == 0 else s for s in self.shape) if keepdim else shape, {mlops.Sum: 0.0, mlops.Max: -float("inf")}[fxn])
+    if 0 in self.shape and 0 not in shape and fxn is mlops.Max:
+      return Tensor.full(tuple(1 if s == 0 else s for s in self.shape) if keepdim else shape, -float("inf"))
     ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else s for i,s in enumerate(self.shape)]))
     return ret if keepdim else ret.reshape(shape=shape)
 
