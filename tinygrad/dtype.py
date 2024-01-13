@@ -1,9 +1,10 @@
-from typing import NamedTuple, Final, Optional, ClassVar, Set, Tuple, Dict
+from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Any
+from dataclasses import dataclass
 import numpy as np  # TODO: remove numpy
 import functools
 
-# TODO: migrate this from NamedTuple -> dataclass
-class DType(NamedTuple):
+@dataclass(frozen=True, order=True)
+class DType:
   priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
@@ -18,13 +19,12 @@ class DType(NamedTuple):
   def np(self) -> Optional[type]: return DTYPES_TO_NP_MAP[self.name if self.sz == 1 else self.scalar().name]
 
 # dependent typing?
+@dataclass(frozen=True)
 class ImageDType(DType):
-  def __new__(cls, priority, itemsize, name, shape, base):
-    return super().__new__(cls, priority, itemsize, name)
-  def __init__(self, priority, itemsize, name, shape, base):
-    self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
-    self.base: DType = base
-    super().__init__()
+  shape: Tuple[int, ...] = (0,)  # arbitrary arg for the dtype, used in image for the shape
+  base: Any = None
+  def __post_init__(self):
+    if self.base is None: raise ValueError("base cannot be None!")
   def scalar(self): return self.base
   def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
@@ -34,8 +34,11 @@ class ImageDType(DType):
   def __ne__(self, x): return super().__ne__(x) or self.shape != x.shape
 
 class PtrDType(DType):
-  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.sz)
+  def __init__(self, dt:DType): super().__init__(dt.priority, dt.itemsize, dt.name, dt.sz)
   def __repr__(self): return f"ptr.{super().__repr__()}"
+  def __hash__(self): return super().__hash__()
+  def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.sz==dt.sz
+  def __ne__(self, dt): return self.priority!=dt.priority or self.itemsize!=dt.itemsize or self.name!=dt.name or self.sz==dt.sz
 
 class dtypes:
   @staticmethod
@@ -72,9 +75,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", shp, dtypes.float32)
+  def imageh(shp): return ImageDType(100, 2, "imageh", shape=shp, base=dtypes.float32)
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", shp, dtypes.float32)
+  def imagef(shp): return ImageDType(100, 4, "imagef", shape=shp, base=dtypes.float32)
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
