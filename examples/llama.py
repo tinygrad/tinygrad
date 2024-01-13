@@ -139,7 +139,6 @@ def load_state_dict_shard(model, state_dict, devices, strict=True, verbose=True)
     model_state_dict = get_state_dict(model)
     if DEBUG >= 1 and len(state_dict) > len(model_state_dict):
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
-    # print(state_dict)
     for k,v in (t := tqdm(model_state_dict.items(), disable=not verbose)):
       t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}")
       # TODO: clean this up
@@ -153,12 +152,9 @@ def load_state_dict_shard(model, state_dict, devices, strict=True, verbose=True)
           v.assign(state_dict[k].shard_((devices), axis=0)).realize()
       # load the llama 70B model
       else:
-        # print(f"{k} {v}")
         if k not in state_dict and not strict:
           if DEBUG >= 1: print(f"WARNING: not loading {k}")
           continue
-        # if k == "freqs_cis":
-        #   v.assign(state_dict[k].to(Device.DEFAULT)).realize()
         if k == "tok_embeddings.weight":
           v.assign(state_dict[k].shard_((device1), axis=0)).realize()
         elif k == "norm.weight":
@@ -200,18 +196,13 @@ class AbsmaxQuantizedLinear:
 
 class LLaMa:
   @staticmethod
-  def build(model_path, tokenizer_path, model_gen="1", model_size="7B", device=Device.DEFAULT, quantize=False):
+  def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False, device=Device.DEFAULT):
     params = MODEL_PARAMS[model_gen][model_size]
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
     assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
 
     jit = bool(getenv("JIT", 1))
-    if quantize:
-      model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit)
-    else:
-      model = Transformer(**params["args"], max_context=MAX_CONTEXT, device=device, jit=jit)
 
-    # TODO: can't load weights using GPU as hosts due to memory overflow
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
     else:
@@ -220,15 +211,18 @@ class LLaMa:
       weights = convert_from_huggingface(weights, model, params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
 
     # fix bf16, TODO: check if device supports bf16
+    # we only use one GPU to load and shard the weight but this process can be done in parallel as well
     weights = {k:v.to(Device.DEFAULT).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
 
     if quantize:
+      model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit)
       weights = AbsmaxQuantizedLinear.quantize(weights)
       for _,v in weights.items(): v.realize()
+    else:
+      model = Transformer(**params["args"], max_context=MAX_CONTEXT, device=device, jit=jit)
 
     if isinstance(device, tuple):
       load_state_dict_shard(model, weights, device, strict=False, verbose=True)
-      # load_state_dict_shard(model, weights, device, strict=False, verbose=False)
     else:
       load_state_dict(model, weights, strict=False, verbose=True)
 
@@ -330,7 +324,7 @@ if __name__ == "__main__":
   parser.add_argument("--size", type=str, default=None, help=f"""Size of model to use {", ".join([f"{list(v.keys())} for gen '{k}'" for k, v in MODEL_PARAMS.items()])}""")
   parser.add_argument("--quantize", action="store_true", help="Quantize the weights to int8 in memory")
   parser.add_argument("--model", type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
-  parser.add_argument("--device", type=int, default=1, help="devices to load the weights to")
+  parser.add_argument("--device", type=int, default=1, help="number of devices to load the weights to")
 
   args = parser.parse_args()
   if args.gen not in MODEL_PARAMS: raise ValueError("Invalid model generation")
@@ -430,13 +424,9 @@ After you are done speaking, output [EOS]. You are not Chad.
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
-
-  if args.device > 1:
-    devices = devices_all[:args.device]
-  else:
-    devices = Device.DEFAULT
-
-  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, device=devices, quantize=args.quantize)
+  devices = devices_all[:args.device]
+  print(f"loading to {devices}")
+  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, device=devices)
 
   if args.device > 1:
     param_count = 0
