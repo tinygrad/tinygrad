@@ -12,16 +12,14 @@ def all_reduce(lbs):
   return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
 
 def to_sharded(lbs:List[LazyBuffer], axis:int) -> List[LazyBuffer]:
-  # Need to consider assert cases
-  # assert lbs[0].shape[axis] % len(lbs) == 0, f"{lbs[0].shape=} {axis=} {len(lbs)=}"
   sz = [i*(lbs[0].shape[axis]//len(lbs)) for i in range(len(lbs))] + [lbs[0].shape[axis]]
   return [lb.shrink(tuple((0,s) if a != axis else (sz[i],sz[i+1]) for a,s in enumerate(lb.shape))) for i,lb in enumerate(lbs)]
 
 class MultiLazyBuffer:
   def __init__(self, lbs:List[LazyBuffer], axis:Optional[int]):
     assert all(isinstance(x, LazyBuffer) for x in lbs) and len(lbs) >= 2, "all lbs must be LazyBuffers, and we need at least two of them"
-    # Need to consider assert cases
-    # assert all_same([(x.shape, x.dtype, x.st) for x in lbs]), "all multilazybuffer needs same shape, dtype, and st"
+    # sharded dim cannot be symbolic but the rest can
+    assert all_same([(x.shape[:axis]+x.shape[axis+1:], x.dtype) for x in lbs]), "all multilazybuffer needs same shape except sharded axis, dtype"
     self.lbs, self.axis, self.dtype, self.device = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs)
     # if reshape or permute, sharded has to be recalculated
     sharded_dim = sum(lb.shape[self.axis] for lb in lbs) if self.axis is not None else 0
@@ -37,10 +35,11 @@ class MultiLazyBuffer:
 
   def copy_to_device(self, device:str) -> LazyBuffer:
     if self.axis is None: return self.lbs[0].copy_to_device(device)
-    sz = (0,) + tuple(self.lbs[i].shape[self.axis] for i in range(len(self.lbs))) + (0,)
+    # sharded dim cannot be simbolic
+    sz = [self.lbs[i].shape[self.axis] for i in range(len(self.lbs))]
     llbs = []
     for i,lb in enumerate([lb.copy_to_device(device) for lb in self.lbs]):
-      pad_arg = tuple((0,0) if a != self.axis else (sum(sz[:i+1]), sum(sz[i-len(self.lbs):])) for a,s in enumerate(lb.shape))
+      pad_arg = tuple((0,0) if a != self.axis else (sum(sz[:i]), sum(sz[::-1][:len(self.lbs)-i-1])) for a,s in enumerate(lb.shape))
       llbs.append(lb.pad(pad_arg))
     return functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), llbs)
 
