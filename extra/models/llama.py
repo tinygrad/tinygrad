@@ -29,7 +29,12 @@ def repeat_kv(x:Tensor, n_rep:int) -> Tensor:
   bs, seqlen, n_kv_heads, head_dim = x.shape
   if n_rep == 1: return x
   # NOTE: this is different from x.repeat((1, 1, n_rep, 1))
-  return x.repeat((1, 1, 1, n_rep)).reshape(bs, seqlen, n_kv_heads * n_rep, head_dim)
+  device = x.device
+  x = x.to(Device.DEFAULT)
+  x = x.repeat((1, 1, 1, n_rep)).reshape(bs, seqlen, n_kv_heads * n_rep, head_dim)
+  # x.shard_(device, axis=2).realize()
+
+  return x.shard_(device, axis=2)
 
 class RMSNorm:
   def __init__(self, dim, eps=1e-6):
@@ -87,13 +92,14 @@ class Attention:
     keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous() if start_pos > 0 else xk
     values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1).contiguous() if start_pos > 0 else xv
 
-    # print(f"xq {xq}")
-    # print(f"keys {keys}")
-    # print(f"values {values}")
     # update the cache
     assert keys.dtype == self.cache_k.dtype and values.dtype == self.cache_v.dtype, f"{keys.dtype=}, {values.dtype=}, {self.cache_k.dtype=}, {self.cache_v.dtype=}"
     self.cache_k.assign(keys.pad((None,(0,self.max_context-start_pos-seqlen),None,None)).contiguous()).realize()
     self.cache_v.assign(values.pad((None,(0,self.max_context-start_pos-seqlen),None,None)).contiguous()).realize()
+    # print(f"xq {xq}")
+    # print(f"keys {keys}")
+    # print(f"values {values}")
+    # print(f"n_rep {self.n_rep}")
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
@@ -162,8 +168,9 @@ class Transformer:
         h.shard_(device, axis=None).realize()
         freqs_cis = freqs_cis.to(Device.DEFAULT)
         freqs_cis.shard_(device, axis=None).realize()
-        mask = mask.to(Device.DEFAULT)
-        mask.shard_(device, axis=None).realize()
+        if mask is not None:
+          mask = mask.to(Device.DEFAULT)
+          mask.shard_(device, axis=None).realize()
       # print(f"layer {i}")
       # print(f"h {h}")
       # print(f"start_pos {start_pos}")
