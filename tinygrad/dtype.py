@@ -19,7 +19,7 @@ class DType:
   def np(self) -> Optional[type]: return DTYPES_TO_NP_MAP[self.name if self.sz == 1 else self.scalar().name]
 
 # dependent typing?
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class ImageDType(DType):
   shape: Tuple[int, ...] = (0,)  # arbitrary arg for the dtype, used in image for the shape
   base: Any = field(default=None, hash=False)
@@ -29,6 +29,7 @@ class ImageDType(DType):
   def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
 
+# @dataclass(frozen=True, init=False, repr=False, eq=False)
 class PtrDType(DType):
   def __init__(self, dt:DType): super().__init__(dt.priority, dt.itemsize, dt.name, dt.sz)
   def __repr__(self): return f"ptr.{super().__repr__()}"
