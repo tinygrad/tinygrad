@@ -1,10 +1,9 @@
 import pathlib
 import unittest
 import numpy as np
-from tinygrad.tensor import Tensor, Device, dtypes
+from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import CI, fetch, temp
-from tinygrad.helpers import Timing
+from tinygrad.helpers import Timing, CI, fetch, temp
 
 def compare_weights_both(url):
   import torch
