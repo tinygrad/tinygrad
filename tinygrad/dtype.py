@@ -28,6 +28,8 @@ class ImageDType(DType):
   def scalar(self): return self.base
   def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
+  @property
+  def np(self) -> Optional[type]: return DTYPES_TO_NP_MAP[self.base.name if self.sz == 1 else self.base.scalar().name]
 
 # @dataclass(frozen=True, init=False, repr=False, eq=False)
 class PtrDType(DType):
