@@ -30,9 +30,7 @@ class WorldModel:
         self._step = step
         self._config = config
         shapes = {k: tuple(v.shape) for k, v in obs_space.spaces.items()}
-        self.num_actions = (
-            int(act_space.n) if hasattr(act_space, "n") else act_space.shape[0]
-        )
+        self.num_actions = int(act_space.n) if hasattr(act_space, "n") else act_space.shape[0]
 
         self.encoder = networks.MultiEncoder(shapes, **config.encoder)
         self.embed_size = self.encoder.outdim
@@ -58,9 +56,7 @@ class WorldModel:
             feat_size = config.dyn_stoch * config.dyn_discrete + config.dyn_deter
         else:
             feat_size = config.dyn_stoch + config.dyn_deter
-        self.heads["decoder"] = networks.MultiDecoder(
-            feat_size, shapes, **config.decoder
-        )
+        self.heads["decoder"] = networks.MultiDecoder(feat_size, shapes, **config.decoder)
         self.heads["reward"] = networks.MLP(
             feat_size,
             (255,) if config.reward_head["dist"] == "symlog_disc" else (),
@@ -113,9 +109,7 @@ class WorldModel:
         kl_free = self._config.kl_free
         dyn_scale = self._config.dyn_scale
         rep_scale = self._config.rep_scale
-        kl_loss, kl_value, dyn_loss, rep_loss = self.dynamics.kl_loss(
-            post, prior, kl_free, dyn_scale, rep_scale
-        )
+        kl_loss, kl_value, dyn_loss, rep_loss = self.dynamics.kl_loss(post, prior, kl_free, dyn_scale, rep_scale)
         assert kl_loss.shape == embed.shape[:2], kl_loss.shape
         preds = {}
         for name, head in self.heads.items():
@@ -132,9 +126,7 @@ class WorldModel:
             loss = -pred.log_prob(data[name])
             assert loss.shape == embed.shape[:2], (name, loss.shape, embed.shape[:2])
             losses[name] = loss
-        scaled = {
-            key: value * self._scales.get(key, 1.0) for key, value in losses.items()
-        }
+        scaled = {key: value * self._scales.get(key, 1.0) for key, value in losses.items()}
         model_loss = (sum(scaled.values()) + kl_loss).mean()
         metrics = {}
         metrics["model_loss"] = model_loss.item()
@@ -143,9 +135,7 @@ class WorldModel:
         model_loss.backward()
         metrics.update(self._model_opt.step())
 
-        metrics.update(
-            {f"{name}_loss": loss.mean().item() for name, loss in losses.items()}
-        )
+        metrics.update({f"{name}_loss": loss.mean().item() for name, loss in losses.items()})
         metrics["kl_free"] = kl_free
         metrics["dyn_scale"] = dyn_scale
         metrics["rep_scale"] = rep_scale
@@ -166,15 +156,10 @@ class WorldModel:
     # this function is called during both rollout and training
     def preprocess(self, data):
         data = data.copy()
-        data = {
-            k: Tensor(v, dtype=dtypes.float32).to(self._config.device)
-            for k, v in data.items()
-        }
+        data = {k: Tensor(v, dtype=dtypes.float32).to(self._config.device) for k, v in data.items()}
         # onehot encode actions if neccessary
         if "action" in data and len(data["action"].shape) == 2:
-            data["action"] = Tensor.one_hot(
-                data["action"].cast(dtypes.int32), self.num_actions
-            )
+            data["action"] = Tensor.one_hot(data["action"].cast(dtypes.int32), self.num_actions)
         if "image" in data:
             data["image"] = data["image"].float() / 255.0
         if "discount" in data:
@@ -192,9 +177,7 @@ class WorldModel:
         data = self.preprocess(data)
         embed = self.encoder(data)
 
-        states, _ = self.dynamics.observe(
-            embed[:6, :5], data["action"][:6, :5], data["is_first"][:6, :5]
-        )
+        states, _ = self.dynamics.observe(embed[:6, :5], data["action"][:6, :5], data["is_first"][:6, :5])
         recon = self.heads["decoder"](self.dynamics.get_feat(states))["image"].mode[:6]
         init = {k: v[:, -1] for k, v in states.items()}
         prior = self.dynamics.imagine_with_action(data["action"][:6, 5:], init)
@@ -275,9 +258,7 @@ class ImagBehavior:
         self._update_slow_target()
         metrics = {}
 
-        imag_feat, imag_state, imag_action = self._imagine(
-            start, self.actor, self._config.imag_horizon
-        )
+        imag_feat, imag_state, imag_action = self._imagine(start, self.actor, self._config.imag_horizon)
         imag_feat = imag_feat.detach()
         imag_state = {k: v.detach() for k, v in imag_state.items()}
         reward = objective(imag_feat, imag_state, imag_action).detach()
@@ -291,9 +272,7 @@ class ImagBehavior:
             weights.detach(),
             base.detach(),
         )
-        actor_loss = (
-            actor_loss - self._config.actor["entropy"] * actor_ent[:-1, ..., None]
-        )
+        actor_loss = actor_loss - self._config.actor["entropy"] * actor_ent[:-1, ..., None]
         actor_loss = Tensor.mean(actor_loss)
         metrics.update(mets)
 
@@ -312,9 +291,7 @@ class ImagBehavior:
         metrics.update(utils.tensorstats(target, "target"))
         metrics.update(utils.tensorstats(reward, "imag_reward"))
         if self._config.actor["dist"] == "onehot":
-            metrics.update(
-                utils.tensorstats(Tensor.argmax(imag_action, -1).float(), "imag_action")
-            )
+            metrics.update(utils.tensorstats(Tensor.argmax(imag_action, -1).float(), "imag_action"))
         else:
             metrics.update(utils.tensorstats(imag_action, "imag_action"))
         metrics["actor_entropy"] = Tensor.mean(actor_ent).numpy()
@@ -348,9 +325,7 @@ class ImagBehavior:
             succ = dynamics.img_step(state, action)
             return succ, feat, action
 
-        succ, feats, actions = utils.static_scan(
-            step, [Tensor.arange(H)], (start, None, None)
-        )
+        succ, feats, actions = utils.static_scan(step, [Tensor.arange(H)], (start, None, None))
         states = {k: Tensor.cat(start[k][None], v[:-1], dim=0) for k, v in succ.items()}
 
         return feats, states, actions
@@ -372,9 +347,7 @@ class ImagBehavior:
             lambda_=self._config.discount_lambda,
             axis=0,
         )
-        weights = utils.cumprod(
-            Tensor.cat(Tensor.ones_like(discount[:1]), discount[:-1], dim=0), 0
-        ).detach()
+        weights = utils.cumprod(Tensor.cat(Tensor.ones_like(discount[:1]), discount[:-1], dim=0), 0).detach()
         return target, weights, value[:-1]
 
     def _compute_actor_loss(self, imag_feat, imag_action, target, weights, base):
@@ -394,15 +367,9 @@ class ImagBehavior:
         if self._config.imag_gradient == "dynamics":
             actor_target = adv
         elif self._config.imag_gradient == "reinforce":
-            actor_target = (
-                policy.log_prob(imag_action)[:-1][:, :, None]
-                * (target - self.value(imag_feat[:-1]).mode).detach()
-            )
+            actor_target = policy.log_prob(imag_action)[:-1][:, :, None] * (target - self.value(imag_feat[:-1]).mode).detach()
         elif self._config.imag_gradient == "both":
-            actor_target = (
-                policy.log_prob(imag_action)[:-1][:, :, None]
-                * (target - self.value(imag_feat[:-1]).mode).detach()
-            )
+            actor_target = policy.log_prob(imag_action)[:-1][:, :, None] * (target - self.value(imag_feat[:-1]).mode).detach()
             mix = self._config.imag_gradient_mix
             actor_target = mix * target + (1 - mix) * actor_target
             metrics["imag_gradient_mix"] = mix

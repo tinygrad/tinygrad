@@ -116,10 +116,7 @@ def simulate(
         obs = {k: np.stack([o[k] for o in obs]) for k in obs[0] if "log_" not in k}
         action, agent_state = agent(obs, done, agent_state)
         if isinstance(action, dict):
-            action = [
-                {k: np.array(action[k][i].detach().cpu().numpy()) for k in action}
-                for i in range(len(envs))
-            ]
+            action = [{k: np.array(action[k][i].detach().cpu().numpy()) for k in action} for i in range(len(envs))]
         else:
             action = np.array(action)
         assert len(action) == len(envs)
@@ -206,9 +203,7 @@ def sample_episodes(episodes, length, seed=0):
     while True:
         size = 0
         ret = None
-        p = np.array(
-            [len(next(iter(episode.values()))) for episode in episodes.values()]
-        )
+        p = np.array([len(next(iter(episode.values()))) for episode in episodes.values()])
         p = p / np.sum(p)
         while size < length:
             episode = np_random.choice(list(episodes.values()), p=p)
@@ -218,24 +213,14 @@ def sample_episodes(episodes, length, seed=0):
                 continue
             if not ret:
                 index = int(np_random.randint(0, total - 1))
-                ret = {
-                    k: v[index : min(index + length, total)].copy()
-                    for k, v in episode.items()
-                    if "log_" not in k
-                }
+                ret = {k: v[index : min(index + length, total)].copy() for k, v in episode.items() if "log_" not in k}
                 if "is_first" in ret:
                     ret["is_first"][0] = True
             else:
                 # 'is_first' comes after 'is_last'
                 index = 0
                 possible = length - size
-                ret = {
-                    k: np.append(
-                        ret[k], v[index : min(index + possible, total)].copy(), axis=0
-                    )
-                    for k, v in episode.items()
-                    if "log_" not in k
-                }
+                ret = {k: np.append(ret[k], v[index : min(index + possible, total)].copy(), axis=0) for k, v in episode.items() if "log_" not in k}
                 if "is_first" in ret:
                     ret["is_first"][size] = True
             size = len(next(iter(ret.values())))
@@ -311,10 +296,7 @@ def add_to_cache(cache, id, transition):
 def erase_over_episodes(cache, dataset_size):
     step_in_dataset = 0
     for key, ep in reversed(sorted(cache.items(), key=lambda x: x[0])):
-        if (
-            not dataset_size
-            or step_in_dataset + (len(ep["reward"]) - 1) <= dataset_size
-        ):
+        if not dataset_size or step_in_dataset + (len(ep["reward"]) - 1) <= dataset_size:
             step_in_dataset += len(ep["reward"]) - 1
         else:
             del cache[key]

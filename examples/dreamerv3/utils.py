@@ -73,9 +73,7 @@ def lambda_return(reward, value, pcont, bootstrap, lambda_, axis):
     #    lambda agg, cur0, cur1: cur0 + cur1 * lambda_ * agg,
     #    (inputs, pcont), bootstrap, reverse=True)
     # reimplement to optimize performance
-    returns = static_scan_for_lambda_return(
-        lambda agg, cur0, cur1: cur0 + cur1 * lambda_ * agg, (inputs, pcont), bootstrap
-    )
+    returns = static_scan_for_lambda_return(lambda agg, cur0, cur1: cur0 + cur1 * lambda_ * agg, (inputs, pcont), bootstrap)
     if axis != 0:
         returns = returns.permute(dims)
     return returns
@@ -128,25 +126,19 @@ def static_scan(fn, inputs, start):
                 outputs = []
                 for _last in last:
                     if isinstance(_last, dict):
-                        outputs.append(
-                            {key: value.unsqueeze(0) for key, value in _last.items()}
-                        )
+                        outputs.append({key: value.unsqueeze(0) for key, value in _last.items()})
                     else:
                         outputs.append(_last.unsqueeze(0))
             flag = False
         else:
             if isinstance(last, dict):
                 for key in last.keys():
-                    outputs[key] = Tensor.cat(
-                        outputs[key], last[key].unsqueeze(0), dim=0
-                    )
+                    outputs[key] = Tensor.cat(outputs[key], last[key].unsqueeze(0), dim=0)
             else:
                 for j in range(len(outputs)):
                     if isinstance(last[j], dict):
                         for key in last[j].keys():
-                            outputs[j][key] = Tensor.cat(
-                                outputs[j][key], last[j][key].unsqueeze(0), dim=0
-                            )
+                            outputs[j][key] = Tensor.cat(outputs[j][key], last[j][key].unsqueeze(0), dim=0)
                     else:
                         outputs[j] = Tensor.cat(outputs[j], last[j].unsqueeze(0), dim=0)
     if isinstance(outputs, dict):
@@ -160,9 +152,7 @@ def weight_init(m):
         denoms = (in_num + out_num) / 2.0
         scale = 1.0 / denoms
         std = np.sqrt(scale) / 0.87962566103423978
-        m.weight = Tensor.normal(m.weight.shape, mean=0.0, std=std).clip(
-            -2.0 * std, 2.0 * std
-        )
+        m.weight = Tensor.normal(m.weight.shape, mean=0.0, std=std).clip(-2.0 * std, 2.0 * std)
         if m.bias is not None:
             m.bias = Tensor.zeros_like(m.bias)
     elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
@@ -171,9 +161,7 @@ def weight_init(m):
         denoms = (in_num + out_num) * space / 2.0
         scale = 1.0 / denoms
         std = np.sqrt(scale) / 0.87962566103423978
-        m.weight = Tensor.normal(m.weight.shape, mean=0.0, std=std).clip(
-            -2.0 * std, 2.0 * std
-        )
+        m.weight = Tensor.normal(m.weight.shape, mean=0.0, std=std).clip(-2.0 * std, 2.0 * std)
         if m.bias is not None:
             m.bias = Tensor.zeros_like(m.bias)
     elif isinstance(m, nn.LayerNorm):
@@ -297,9 +285,7 @@ class Optimizer:
 
 
 def load_config():
-    configs = yaml.safe_load(
-        (pathlib.Path(__file__).parent / "configs.yaml").read_text()
-    )
+    configs = yaml.safe_load((pathlib.Path(__file__).parent / "configs.yaml").read_text())
     parser = argparse.ArgumentParser()
     for key, value in sorted(configs.items(), key=lambda x: x[0]):
         arg_type = args_type(value)

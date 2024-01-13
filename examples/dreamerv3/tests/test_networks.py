@@ -111,9 +111,7 @@ class TestMulti(unittest.TestCase):
         cnn_keys = "state"
         mlp_keys = "action"
         shapes = {"state": (64, 64, 3), "action": 256}
-        mlp = networks.MultiDecoder(
-            4352, shapes, mlp_keys, cnn_keys, image_dist="normal", vector_dist="normal"
-        )
+        mlp = networks.MultiDecoder(4352, shapes, mlp_keys, cnn_keys, image_dist="normal", vector_dist="normal")
         inputs = Tensor.randn(1, 1, 4352)
         outputs = mlp(inputs)
         self.assertEqual(outputs["state"].sample().numpy().shape, (1, 1, 64, 64, 3))

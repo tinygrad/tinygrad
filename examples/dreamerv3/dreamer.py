@@ -34,9 +34,7 @@ class Dreamer:
 
     def __call__(self, obs, reset, state=None, training=True):
         if training:
-            num_steps = (
-                self._config.pretrain if not self.pretrained else self._num_train_steps
-            )
+            num_steps = self._config.pretrain if not self.pretrained else self._num_train_steps
             self.pretrained = True
             for _ in range(num_steps):
                 self._train(next(self._dataset))
@@ -142,20 +140,12 @@ def main():
 
         def random_agent(o, d, s):
             if config.actor["dist"] == "onehot":
-                random_actor = distributions.OneHotCategorical(
-                    Tensor.zeros(int(act_space.n))
-                    .repeat((config.num_envs, 1))
-                    .to(config.device)
-                )
+                random_actor = distributions.OneHotCategorical(Tensor.zeros(int(act_space.n)).repeat((config.num_envs, 1)).to(config.device))
             else:
                 random_actor = distributions.Independent(
                     distributions.Uniform(
-                        Tensor(act_space.low)
-                        .repeat((config.num_envs, 1))
-                        .to(config.device),
-                        Tensor(act_space.high)
-                        .repeat((config.num_envs, 1))
-                        .to(config.device),
+                        Tensor(act_space.low).repeat((config.num_envs, 1)).to(config.device),
+                        Tensor(act_space.high).repeat((config.num_envs, 1)).to(config.device),
                     ),
                     1,
                 )

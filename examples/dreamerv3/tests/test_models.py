@@ -23,26 +23,20 @@ class TestWorldModel(unittest.TestCase):
     def test_world_model_init(self):
         obs_space = gym.spaces.Dict(
             {
-                "image": gym.spaces.Box(
-                    low=0, high=255, shape=(64, 64, 3), dtype=np.uint8
-                ),
+                "image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8),
             }
         )
         act_space = gym.spaces.Discrete(3)
         config = utils.load_config()
         world_model = models.WorldModel(obs_space, act_space, 0, config)
-        print(
-            f"world model parameters: {sum(param.numel() for param in world_model.parameters())}"
-        )
+        print(f"world model parameters: {sum(param.numel() for param in world_model.parameters())}")
 
     def test_world_model_preprocess(self):
         B = 8
         T = 6
         obs_space = gym.spaces.Dict(
             {
-                "image": gym.spaces.Box(
-                    low=0, high=255, shape=(64, 64, 3), dtype=np.uint8
-                ),
+                "image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8),
             }
         )
         act_space = gym.spaces.Discrete(3)
@@ -63,9 +57,7 @@ class TestWorldModel(unittest.TestCase):
         T = 6
         obs_space = gym.spaces.Dict(
             {
-                "image": gym.spaces.Box(
-                    low=0, high=255, shape=(64, 64, 3), dtype=np.uint8
-                ),
+                "image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8),
             }
         )
         act_space = gym.spaces.Discrete(3)
@@ -88,9 +80,7 @@ class TestWorldModel(unittest.TestCase):
         T = 2
         obs_space = gym.spaces.Dict(
             {
-                "image": gym.spaces.Box(
-                    low=0, high=255, shape=(64, 64, 3), dtype=np.uint8
-                ),
+                "image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8),
             }
         )
         act_space = gym.spaces.Discrete(3)
@@ -123,21 +113,15 @@ class TestImagBehavior(unittest.TestCase):
     def test_imag_behavior_init(self):
         obs_space = gym.spaces.Dict(
             {
-                "image": gym.spaces.Box(
-                    low=0, high=255, shape=(64, 64, 3), dtype=np.uint8
-                ),
+                "image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8),
             }
         )
         act_space = gym.spaces.Discrete(3)
         config = utils.load_config()
         world_model = models.WorldModel(obs_space, act_space, 0, config)
         imag_behavior = models.ImagBehavior(config, world_model)
-        print(
-            f"actor parameters: {sum(param.numel() for param in imag_behavior.actor_parameters())}"
-        )
-        print(
-            f"value parameters: {sum(param.numel() for param in imag_behavior.value_parameters())}"
-        )
+        print(f"actor parameters: {sum(param.numel() for param in imag_behavior.actor_parameters())}")
+        print(f"value parameters: {sum(param.numel() for param in imag_behavior.value_parameters())}")
 
     def test_imag_behavior_funcs(self):
         B = 8
@@ -145,9 +129,7 @@ class TestImagBehavior(unittest.TestCase):
         H = 5
         obs_space = gym.spaces.Dict(
             {
-                "image": gym.spaces.Box(
-                    low=0, high=255, shape=(64, 64, 3), dtype=np.uint8
-                ),
+                "image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8),
             }
         )
         act_space = gym.spaces.Discrete(3)
@@ -163,9 +145,7 @@ class TestImagBehavior(unittest.TestCase):
         self.assertEqual(actions.numpy().shape, (H, B * T, world_model.num_actions))
         rewards = Tensor.uniform((H, B * T))
         target, weights, base = imag_behavior._compute_target(feats, states, rewards)
-        actor_loss, metrics = imag_behavior._compute_actor_loss(
-            feats, actions, target, weights, base
-        )
+        actor_loss, metrics = imag_behavior._compute_actor_loss(feats, actions, target, weights, base)
         actor_loss.mean().backward()  # checks backward pass
         metrics["actor_loss"] = actor_loss.mean().item()
         pprint(metrics)
@@ -175,9 +155,7 @@ class TestImagBehavior(unittest.TestCase):
         T = 6
         obs_space = gym.spaces.Dict(
             {
-                "image": gym.spaces.Box(
-                    low=0, high=255, shape=(64, 64, 3), dtype=np.uint8
-                ),
+                "image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8),
             }
         )
         act_space = gym.spaces.Discrete(3)
@@ -188,9 +166,7 @@ class TestImagBehavior(unittest.TestCase):
         start = {k: v.reshape((B, T) + v.shape[1:]) for k, v in start.items()}
 
         def reward(f, s, a):
-            return world_model.heads["reward"](
-                world_model.dynamics.get_feat(s)
-            ).mode.squeeze(-1)
+            return world_model.heads["reward"](world_model.dynamics.get_feat(s)).mode.squeeze(-1)
 
         feat, state, action, weights, metrics = imag_behavior._train(start, reward)
         pprint(metrics)

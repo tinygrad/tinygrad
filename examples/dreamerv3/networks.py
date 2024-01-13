@@ -36,12 +36,8 @@ class Conv2dSamePad(nn.Conv2d):
 
     def __call__(self, x):
         ih, iw = x.shape[-2:]
-        pad_h = self.calc_same_pad(
-            i=ih, k=self.kernel_size[0], s=self.stride, d=self.dilation
-        )
-        pad_w = self.calc_same_pad(
-            i=iw, k=self.kernel_size[1], s=self.stride, d=self.dilation
-        )
+        pad_h = self.calc_same_pad(i=ih, k=self.kernel_size[0], s=self.stride, d=self.dilation)
+        pad_w = self.calc_same_pad(i=iw, k=self.kernel_size[1], s=self.stride, d=self.dilation)
 
         if pad_h > 0 or pad_w > 0:
             wleft = pad_w // 2
@@ -184,9 +180,7 @@ class ConvDecoder:
     def __call__(self, features):
         x = self._linear_layer(features)
         # (batch, time, -1) -> (batch * time, h, w, ch)
-        x = x.reshape(
-            [-1, self._minres, self._minres, self._embed_size // self._minres**2]
-        )
+        x = x.reshape([-1, self._minres, self._minres, self._embed_size // self._minres**2])
         # (batch, time, -1) -> (batch * time, ch, h, w)
         x = x.permute(0, 3, 1, 2)
         x = x.sequential(self.layers)
@@ -294,33 +288,21 @@ class MLP:
 
     def dist(self, dist, mean, std, shape):
         if self._dist == "normal":
-            std = (self._max_std - self._min_std) * Tensor.sigmoid(
-                std + 2.0
-            ) + self._min_std
+            std = (self._max_std - self._min_std) * Tensor.sigmoid(std + 2.0) + self._min_std
             dist = distributions.Normal(Tensor.tanh(mean), std)
-            dist = distributions.ContDist(
-                distributions.Independent(dist, 1), absmax=self._absmax
-            )
+            dist = distributions.ContDist(distributions.Independent(dist, 1), absmax=self._absmax)
         elif self._dist == "normal_std_fixed":
             dist = distributions.Normal(mean, self._std)
-            dist = distributions.ContDist(
-                distributions.Independent(dist, 1), absmax=self._absmax
-            )
+            dist = distributions.ContDist(distributions.Independent(dist, 1), absmax=self._absmax)
         elif self._dist == "trunc_normal":
             mean = Tensor.tanh(mean)
             std = 2 * Tensor.sigmoid(std / 2) + self._min_std
             dist = distributions.SafeTruncatedNormal(mean, std, -1, 1)
-            dist = distributions.ContDist(
-                distributions.Independent(dist, 1), absmax=self._absmax
-            )
+            dist = distributions.ContDist(distributions.Independent(dist, 1), absmax=self._absmax)
         elif self._dist == "onehot":
-            dist = distributions.OneHotCategorical(
-                mean, unimix_ratio=self._unimix_ratio
-            )
+            dist = distributions.OneHotCategorical(mean, unimix_ratio=self._unimix_ratio)
         elif dist == "binary":
-            dist = distributions.Independent(
-                distributions.Bernoulli(logits=mean), len(shape)
-            )
+            dist = distributions.Independent(distributions.Bernoulli(logits=mean), len(shape))
         elif dist == "symlog_disc":
             dist = distributions.DiscDist(logits=mean, device=self._device)
         elif dist == "symlog_mse":
@@ -357,19 +339,9 @@ class MultiEncoder:
         symlog_inputs: bool = False,
     ):
         excluded = ("is_first", "is_last", "is_terminal", "reward")
-        shapes = {
-            k: (v,) if isinstance(v, int) else v
-            for k, v in shapes.items()
-            if k not in excluded and not k.startswith("log_")
-        }
-        self.cnn_shapes = {
-            k: v for k, v in shapes.items() if len(v) == 3 and re.match(cnn_keys, k)
-        }
-        self.mlp_shapes = {
-            k: v
-            for k, v in shapes.items()
-            if len(v) in (1, 2) and re.match(mlp_keys, k)
-        }
+        shapes = {k: (v,) if isinstance(v, int) else v for k, v in shapes.items() if k not in excluded and not k.startswith("log_")}
+        self.cnn_shapes = {k: v for k, v in shapes.items() if len(v) == 3 and re.match(cnn_keys, k)}
+        self.mlp_shapes = {k: v for k, v in shapes.items() if len(v) in (1, 2) and re.match(mlp_keys, k)}
         # print("Encoder CNN shapes:", self.cnn_shapes)
         # print("Encoder MLP shapes:", self.mlp_shapes)
 
@@ -377,9 +349,7 @@ class MultiEncoder:
         if self.cnn_shapes:
             input_ch = sum([v[-1] for v in self.cnn_shapes.values()])
             input_shape = tuple(self.cnn_shapes.values())[0][:2] + (input_ch,)
-            self._cnn = ConvEncoder(
-                input_shape, cnn_depth, norm, act, kernel_size, minres
-            )
+            self._cnn = ConvEncoder(input_shape, cnn_depth, norm, act, kernel_size, minres)
             self.outdim += self._cnn.outdim
         if self.mlp_shapes:
             input_size = sum([sum(v) for v in self.mlp_shapes.values()])
@@ -429,19 +399,9 @@ class MultiDecoder:
         outscale: float = 1.0,
     ):
         excluded = ("is_first", "is_last", "is_terminal")
-        shapes = {
-            k: (v,) if isinstance(v, int) else v
-            for k, v in shapes.items()
-            if k not in excluded
-        }
-        self.cnn_shapes = {
-            k: v for k, v in shapes.items() if len(v) == 3 and re.match(cnn_keys, k)
-        }
-        self.mlp_shapes = {
-            k: v
-            for k, v in shapes.items()
-            if len(v) in (1, 2) and re.match(mlp_keys, k)
-        }
+        shapes = {k: (v,) if isinstance(v, int) else v for k, v in shapes.items() if k not in excluded}
+        self.cnn_shapes = {k: v for k, v in shapes.items() if len(v) == 3 and re.match(cnn_keys, k)}
+        self.mlp_shapes = {k: v for k, v in shapes.items() if len(v) in (1, 2) and re.match(mlp_keys, k)}
         # print("Decoder CNN shapes:", self.cnn_shapes)
         # print("Decoder MLP shapes:", self.mlp_shapes)
 
@@ -479,21 +439,14 @@ class MultiDecoder:
             outputs = self._cnn(features)
             split_sizes = [v[-1] for v in self.cnn_shapes.values()]
             outputs = Tensor.split(outputs, split_sizes, -1)
-            dists.update(
-                {
-                    key: self._make_image_dist(output)
-                    for key, output in zip(self.cnn_shapes.keys(), outputs)
-                }
-            )
+            dists.update({key: self._make_image_dist(output) for key, output in zip(self.cnn_shapes.keys(), outputs)})
         if self.mlp_shapes:
             dists.update(self._mlp(features))
         return dists
 
     def _make_image_dist(self, mean):
         if self._image_dist == "normal":
-            return distributions.ContDist(
-                distributions.Independent(distributions.Normal(mean, 1), 3)
-            )
+            return distributions.ContDist(distributions.Independent(distributions.Normal(mean, 1), 3))
         if self._image_dist == "mse":
             return distributions.MSEDist(mean)
         raise NotImplementedError(self._image_dist)
@@ -566,9 +519,7 @@ class RSSM:
         utils.weight_init(self._obs_out_layers)
 
         if self._discrete:
-            self._imgs_stat_layer = nn.Linear(
-                self._hidden, self._stoch * self._discrete
-            )
+            self._imgs_stat_layer = nn.Linear(self._hidden, self._stoch * self._discrete)
             self._obs_stat_layer = nn.Linear(self._hidden, self._stoch * self._discrete)
         else:
             self._imgs_stat_layer = nn.Linear(self._hidden, 2 * self._stoch)
@@ -584,12 +535,8 @@ class RSSM:
         deter = Tensor.zeros(batch_size, self._deter).to(self._device)
         if self._discrete:
             state = dict(
-                logit=Tensor.zeros([batch_size, self._stoch, self._discrete]).to(
-                    self._device
-                ),
-                stoch=Tensor.zeros([batch_size, self._stoch, self._discrete]).to(
-                    self._device
-                ),
+                logit=Tensor.zeros([batch_size, self._stoch, self._discrete]).to(self._device),
+                stoch=Tensor.zeros([batch_size, self._stoch, self._discrete]).to(self._device),
                 deter=deter,
             )
         else:
@@ -616,9 +563,7 @@ class RSSM:
         embed, action, is_first = swap(embed), swap(action), swap(is_first)
         # prev_state[0] means selecting posterior of return(posterior, prior) from obs_step
         post, prior = utils.static_scan(
-            lambda prev_state, prev_act, embed, is_first: self.obs_step(
-                prev_state[0], prev_act, embed, is_first
-            ),
+            lambda prev_state, prev_act, embed, is_first: self.obs_step(prev_state[0], prev_act, embed, is_first),
             (action, embed, is_first),
             (state, state),
         )
@@ -655,9 +600,7 @@ class RSSM:
             )
         else:
             mean, std = state["mean"], state["std"]
-            dist = distributions.ContDist(
-                distributions.Independent(distributions.Normal(mean, std), 1)
-            )
+            dist = distributions.ContDist(distributions.Independent(distributions.Normal(mean, std), 1))
         return dist
 
     def obs_step(self, prev_state, prev_action, embed, is_first, sample=True):
@@ -676,9 +619,7 @@ class RSSM:
                     is_first,
                     is_first.shape + (1,) * (len(val.shape) - len(is_first.shape)),
                 )
-                prev_state[key] = (
-                    val * (1.0 - is_first_r) + init_state[key] * is_first_r
-                )
+                prev_state[key] = val * (1.0 - is_first_r) + init_state[key] * is_first_r
 
         prior = self.img_step(prev_state, prev_action)
         x = Tensor.cat(prior["deter"], embed, dim=-1)
