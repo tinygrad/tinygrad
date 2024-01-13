@@ -153,28 +153,14 @@ def main():
             logprob = random_actor.log_prob(action)
             return {"action": action, "logprob": logprob}, None
 
-        state = simulate(
-            random_agent,
-            train_envs,
-            train_eps,
-            config.traindir,
-            logger,
-            limit=config.dataset_size,
-            steps=prefill,
-        )
+        state = simulate(random_agent, train_envs, train_eps, config.traindir, logger, limit=config.dataset_size, steps=prefill)
         logger.step += prefill * config.action_repeat
         print(f"Logger: ({logger.step} steps).")
 
     print("Simulate agent.")
     train_dataset = make_dataset(train_eps, config)
     eval_dataset = make_dataset(eval_eps, config)
-    agent = Dreamer(
-        train_envs[0].observation_space,
-        train_envs[0].action_space,
-        config,
-        logger,
-        train_dataset,
-    )
+    agent = Dreamer(train_envs[0].observation_space, train_envs[0].action_space, config, logger, train_dataset)
     if (logdir / "latest.safetensors").exists():
         state_dict = safe_load(logdir / "latest.safetensors")
         load_state_dict(agent, state_dict)
@@ -186,29 +172,12 @@ def main():
         if config.eval_episode_num > 0:
             print("Start evaluation.")
             eval_policy = functools.partial(agent, training=False)
-            simulate(
-                eval_policy,
-                eval_envs,
-                eval_eps,
-                config.evaldir,
-                logger,
-                is_eval=True,
-                episodes=config.eval_episode_num,
-            )
+            simulate(eval_policy, eval_envs, eval_eps, config.evaldir, logger, is_eval=True, episodes=config.eval_episode_num)
             if config.video_pred_log:
                 video_pred = agent._wm.video_pred(next(eval_dataset))
                 logger.video("eval_openl", video_pred)
         print("Start training.")
-        state = simulate(
-            agent,
-            train_envs,
-            train_eps,
-            config.traindir,
-            logger,
-            limit=config.dataset_size,
-            steps=config.eval_every,
-            state=state,
-        )
+        state = simulate(agent, train_envs, train_eps, config.traindir, logger, limit=config.dataset_size, steps=config.eval_every, state=state)
         state_dict = get_state_dict(agent)
         safe_save(state_dict, logdir / "latest.safetensors")
     for env in train_envs + eval_envs:

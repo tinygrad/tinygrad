@@ -122,14 +122,7 @@ class TestMulti(unittest.TestCase):
         mlp_keys = "action"
         shapes = {"state": (64, 64, 3), "action": 10}
         encoder = networks.MultiEncoder(shapes, mlp_keys, cnn_keys)
-        decoder = networks.MultiDecoder(
-            encoder.outdim,
-            shapes,
-            mlp_keys,
-            cnn_keys,
-            image_dist="normal",
-            vector_dist="normal",
-        )
+        decoder = networks.MultiDecoder(encoder.outdim, shapes, mlp_keys, cnn_keys, image_dist="normal", vector_dist="normal")
         obs = {"state": Tensor.randn(1, 1, 64, 64, 3), "action": Tensor.randn(1, 1, 10)}
         outputs = decoder(encoder(obs))
         self.assertEqual(outputs["state"].sample().numpy().shape, (1, 1, 64, 64, 3))
@@ -142,14 +135,7 @@ class TestMulti(unittest.TestCase):
         mlp_keys = "action"
         shapes = {"state": (64, 64, 3), "action": 10}
         encoder = networks.MultiEncoder(shapes, mlp_keys, cnn_keys)
-        decoder = networks.MultiDecoder(
-            encoder.outdim,
-            shapes,
-            mlp_keys,
-            cnn_keys,
-            image_dist="normal",
-            vector_dist="normal",
-        )
+        decoder = networks.MultiDecoder(encoder.outdim, shapes, mlp_keys, cnn_keys, image_dist="normal", vector_dist="normal")
         obs = {"state": Tensor.randn(B, T, 64, 64, 3), "action": Tensor.randn(B, T, 10)}
         outputs = decoder(encoder(obs))
         self.assertEqual(outputs["state"].sample().numpy().shape, (B, T, 64, 64, 3))

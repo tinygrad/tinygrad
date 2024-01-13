@@ -58,15 +58,7 @@ class Conv2dSamePad(nn.Conv2d):
 
 
 class ConvEncoder:
-    def __init__(
-        self,
-        input_shape,
-        depth=32,
-        norm=True,
-        act="silu",
-        kernel_size=4,
-        minres=4,
-    ):
+    def __init__(self, input_shape, depth=32, norm=True, act="silu", kernel_size=4, minres=4):
         h, w, input_ch = input_shape
         stages = int(np.log2(h) - np.log2(minres))
         in_dim = input_ch
@@ -75,15 +67,7 @@ class ConvEncoder:
 
         layers = []
         for _ in range(stages):
-            layers.append(
-                Conv2dSamePad(
-                    in_channels=in_dim,
-                    out_channels=out_dim,
-                    kernel_size=kernel_size,
-                    stride=2,
-                    bias=True,
-                )
-            )
+            layers.append(Conv2dSamePad(in_channels=in_dim, out_channels=out_dim, kernel_size=kernel_size, stride=2, bias=True))
             if norm:
                 layers.append(ImgChLayerNorm(out_dim))
             if act:
@@ -110,18 +94,7 @@ class ConvEncoder:
 
 
 class ConvDecoder:
-    def __init__(
-        self,
-        feat_size,
-        shape=(64, 64, 3),
-        depth=32,
-        act="elu",
-        norm=True,
-        kernel_size=4,
-        minres=4,
-        outscale=1.0,
-        cnn_sigmoid=False,
-    ):
+    def __init__(self, feat_size, shape=(64, 64, 3), depth=32, act="elu", norm=True, kernel_size=4, minres=4, outscale=1.0, cnn_sigmoid=False):
         self._shape = shape
         self._cnn_sigmoid = cnn_sigmoid
         layer_num = int(np.log2(shape[1]) - np.log2(minres))
@@ -149,17 +122,7 @@ class ConvDecoder:
                 in_dim = 2 ** (layer_num - (i - 1) - 2) * depth
             pad_h, outpad_h = self.calc_same_pad(k=kernel_size, s=2, d=1)
             pad_w, outpad_w = self.calc_same_pad(k=kernel_size, s=2, d=1)
-            layers.append(
-                nn.ConvTranspose2d(
-                    in_dim,
-                    out_dim,
-                    kernel_size,
-                    2,
-                    padding=(pad_h, pad_w),
-                    output_padding=(outpad_h, outpad_w),
-                    bias=bias,
-                )
-            )
+            layers.append(nn.ConvTranspose2d(in_dim, out_dim, kernel_size, 2, padding=(pad_h, pad_w), output_padding=(outpad_h, outpad_w), bias=bias))
             if norm:
                 layers.append(ImgChLayerNorm(out_dim))
             if act:
@@ -353,16 +316,7 @@ class MultiEncoder:
             self.outdim += self._cnn.outdim
         if self.mlp_shapes:
             input_size = sum([sum(v) for v in self.mlp_shapes.values()])
-            self._mlp = MLP(
-                input_size,
-                None,
-                mlp_layers,
-                mlp_units,
-                act,
-                norm,
-                symlog_inputs=symlog_inputs,
-                name="Encoder",
-            )
+            self._mlp = MLP(input_size, None, mlp_layers, mlp_units, act, norm, symlog_inputs=symlog_inputs, name="Encoder")
             self.outdim += mlp_units
 
     def __call__(self, obs):
@@ -408,29 +362,9 @@ class MultiDecoder:
         if self.cnn_shapes:
             some_shape = list(self.cnn_shapes.values())[0]
             shape = (sum(x[-1] for x in self.cnn_shapes.values()),) + some_shape[:-1]
-            self._cnn = ConvDecoder(
-                feat_size,
-                shape,
-                cnn_depth,
-                act,
-                norm,
-                kernel_size,
-                minres,
-                outscale=outscale,
-                cnn_sigmoid=cnn_sigmoid,
-            )
+            self._cnn = ConvDecoder(feat_size, shape, cnn_depth, act, norm, kernel_size, minres, outscale=outscale, cnn_sigmoid=cnn_sigmoid)
         if self.mlp_shapes:
-            self._mlp = MLP(
-                feat_size,
-                self.mlp_shapes,
-                mlp_layers,
-                mlp_units,
-                act,
-                norm,
-                vector_dist,
-                outscale=outscale,
-                name="Decoder",
-            )
+            self._mlp = MLP(feat_size, self.mlp_shapes, mlp_layers, mlp_units, act, norm, vector_dist, outscale=outscale, name="Decoder")
         self._image_dist = image_dist
 
     def __call__(self, features):
@@ -594,10 +528,7 @@ class RSSM:
     def get_dist(self, state, dtype=None):
         if self._discrete:
             logit = state["logit"]
-            dist = distributions.Independent(
-                distributions.OneHotCategorical(logit, unimix_ratio=self._unimix_ratio),
-                1,
-            )
+            dist = distributions.Independent(distributions.OneHotCategorical(logit, unimix_ratio=self._unimix_ratio), 1)
         else:
             mean, std = state["mean"], state["std"]
             dist = distributions.ContDist(distributions.Independent(distributions.Normal(mean, std), 1))

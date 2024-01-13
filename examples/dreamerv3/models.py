@@ -83,19 +83,9 @@ class WorldModel:
         )
         for name in config.grad_heads:
             assert name in self.heads, name
-        self._model_opt = utils.Optimizer(
-            "model",
-            self.parameters(),
-            config.model_lr,
-            config.opt_eps,
-            config.grad_clip,
-            config.opt,
-        )
+        self._model_opt = utils.Optimizer("model", self.parameters(), config.model_lr, config.opt_eps, config.grad_clip, config.opt)
         # other losses are scaled by 1.0.
-        self._scales = dict(
-            reward=config.reward_head["loss_scale"],
-            cont=config.cont_head["loss_scale"],
-        )
+        self._scales = dict(reward=config.reward_head["loss_scale"], cont=config.cont_head["loss_scale"])
 
     def _train(self, data):
         # action (batch_size, batch_length, act_dim)
@@ -236,20 +226,10 @@ class ImagBehavior:
             self._slow_value = copy.deepcopy(self.value)
             self._updates = 0
         self._actor_opt = utils.Optimizer(
-            "actor",
-            self.actor_parameters(),
-            config.actor["lr"],
-            config.actor["eps"],
-            config.actor["grad_clip"],
-            config.opt,
+            "actor", self.actor_parameters(), config.actor["lr"], config.actor["eps"], config.actor["grad_clip"], config.opt
         )
         self._value_opt = utils.Optimizer(
-            "value",
-            self.value_parameters(),
-            config.critic["lr"],
-            config.critic["eps"],
-            config.critic["grad_clip"],
-            config.opt,
+            "value", self.value_parameters(), config.critic["lr"], config.critic["eps"], config.critic["grad_clip"], config.opt
         )
         if self._config.reward_EMA:
             self.reward_ema = RewardEMA(device=self._config.device)
@@ -265,13 +245,7 @@ class ImagBehavior:
         actor_ent = self.actor(imag_feat).entropy()
         # this target is not scaled by ema or sym_log.
         target, weights, base = self._compute_target(imag_feat, imag_state, reward)
-        actor_loss, mets = self._compute_actor_loss(
-            imag_feat,
-            imag_action,
-            target.detach(),
-            weights.detach(),
-            base.detach(),
-        )
+        actor_loss, mets = self._compute_actor_loss(imag_feat, imag_action, target.detach(), weights.detach(), base.detach())
         actor_loss = actor_loss - self._config.actor["entropy"] * actor_ent[:-1, ..., None]
         actor_loss = Tensor.mean(actor_loss)
         metrics.update(mets)
@@ -339,14 +313,7 @@ class ImagBehavior:
             discount = self._config.discount * Tensor.ones_like(reward)
         # TODO: currently need to realize value here for metrics to work
         value = self.value(imag_feat).mode.contiguous().realize()
-        target = utils.lambda_return(
-            reward[1:],
-            value[:-1],
-            discount[1:],
-            bootstrap=value[-1],
-            lambda_=self._config.discount_lambda,
-            axis=0,
-        )
+        target = utils.lambda_return(reward[1:], value[:-1], discount[1:], bootstrap=value[-1], lambda_=self._config.discount_lambda, axis=0)
         weights = utils.cumprod(Tensor.cat(Tensor.ones_like(discount[:1]), discount[:-1], dim=0), 0).detach()
         return target, weights, value[:-1]
 

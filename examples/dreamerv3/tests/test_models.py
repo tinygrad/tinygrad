@@ -21,11 +21,7 @@ class TestRewardEMA(unittest.TestCase):
 
 class TestWorldModel(unittest.TestCase):
     def test_world_model_init(self):
-        obs_space = gym.spaces.Dict(
-            {
-                "image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8),
-            }
-        )
+        obs_space = gym.spaces.Dict({"image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8)})
         act_space = gym.spaces.Discrete(3)
         config = utils.load_config()
         world_model = models.WorldModel(obs_space, act_space, 0, config)
@@ -34,11 +30,7 @@ class TestWorldModel(unittest.TestCase):
     def test_world_model_preprocess(self):
         B = 8
         T = 6
-        obs_space = gym.spaces.Dict(
-            {
-                "image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8),
-            }
-        )
+        obs_space = gym.spaces.Dict({"image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8)})
         act_space = gym.spaces.Discrete(3)
         config = utils.load_config()
         world_model = models.WorldModel(obs_space, act_space, 0, config)
@@ -55,11 +47,7 @@ class TestWorldModel(unittest.TestCase):
     def test_world_model_video_pred(self):
         B = 8
         T = 6
-        obs_space = gym.spaces.Dict(
-            {
-                "image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8),
-            }
-        )
+        obs_space = gym.spaces.Dict({"image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8)})
         act_space = gym.spaces.Discrete(3)
         config = utils.load_config()
         world_model = models.WorldModel(obs_space, act_space, 0, config)
@@ -78,11 +66,7 @@ class TestWorldModel(unittest.TestCase):
     def test_world_model_train(self):
         B = 4
         T = 2
-        obs_space = gym.spaces.Dict(
-            {
-                "image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8),
-            }
-        )
+        obs_space = gym.spaces.Dict({"image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8)})
         act_space = gym.spaces.Discrete(3)
         config = utils.load_config()
         world_model = models.WorldModel(obs_space, act_space, 0, config)
@@ -111,11 +95,7 @@ class TestWorldModel(unittest.TestCase):
 
 class TestImagBehavior(unittest.TestCase):
     def test_imag_behavior_init(self):
-        obs_space = gym.spaces.Dict(
-            {
-                "image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8),
-            }
-        )
+        obs_space = gym.spaces.Dict({"image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8)})
         act_space = gym.spaces.Discrete(3)
         config = utils.load_config()
         world_model = models.WorldModel(obs_space, act_space, 0, config)
@@ -127,11 +107,7 @@ class TestImagBehavior(unittest.TestCase):
         B = 8
         T = 6
         H = 5
-        obs_space = gym.spaces.Dict(
-            {
-                "image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8),
-            }
-        )
+        obs_space = gym.spaces.Dict({"image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8)})
         act_space = gym.spaces.Discrete(3)
         config = utils.load_config()
         world_model = models.WorldModel(obs_space, act_space, 0, config)
@@ -153,11 +129,7 @@ class TestImagBehavior(unittest.TestCase):
     def test_imag_behavior_train(self):
         B = 8
         T = 6
-        obs_space = gym.spaces.Dict(
-            {
-                "image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8),
-            }
-        )
+        obs_space = gym.spaces.Dict({"image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8)})
         act_space = gym.spaces.Discrete(3)
         config = utils.load_config()
         world_model = models.WorldModel(obs_space, act_space, 0, config)

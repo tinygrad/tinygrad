@@ -251,15 +251,7 @@ def clip_grad_norm_(parameters, max_norm):
 
 
 class Optimizer:
-    def __init__(
-        self,
-        name,
-        parameters,
-        lr: float = 1e-3,
-        eps: float = 1e-5,
-        grad_clip: float = 100,
-        opt: str = "adam",
-    ) -> None:
+    def __init__(self, name, parameters, lr: float = 1e-3, eps: float = 1e-5, grad_clip: float = 100, opt: str = "adam") -> None:
         self.name = name
         self.parameters = parameters
         self.grad_clip = grad_clip

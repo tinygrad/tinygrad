@@ -13,13 +13,7 @@ def count_steps(folder):
 
 class AtariEnv(gym.Env):
     def __init__(self, env):
-        env = gym.make(
-            env,
-            obs_type="rgb",
-            frameskip=4,
-            repeat_action_probability=0.0,
-            render_mode="rgb_array",
-        )
+        env = gym.make(env, obs_type="rgb", frameskip=4, repeat_action_probability=0.0, render_mode="rgb_array")
         env = gym.wrappers.ResizeObservation(env, (64, 64))
         env = gym.wrappers.TimeLimit(env, 108000)
         self.env = env
@@ -75,18 +69,7 @@ def make_envs(config):
     return envs
 
 
-def simulate(
-    agent,
-    envs,
-    cache,
-    directory,
-    logger,
-    is_eval=False,
-    limit=None,
-    steps=0,
-    episodes=0,
-    state=None,
-):
+def simulate(agent, envs, cache, directory, logger, is_eval=False, limit=None, steps=0, episodes=0, state=None):
     # initialize or unpack simulation state
     if state is None:
         step, episode = 0, 0
