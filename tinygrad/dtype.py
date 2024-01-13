@@ -9,8 +9,7 @@ class DType:
   itemsize: int
   name: str
   sz: int = 1
-  def __repr__(self):
-    return f"dtypes.{INVERSE_DTYPES_DICT[self.name]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar().name]}{self.sz}"
+  def __repr__(self): return f"dtypes.{'_'*(c:=self.sz!=1)}{INVERSE_DTYPES_DICT[self.name if not c else self.scalar().name]}{str(self.sz)*(c)}"
   def vec(self, sz:int):
     assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", sz)
@@ -24,12 +23,12 @@ class ImageDType(DType):
   shape: Tuple[int, ...] = (0,)  # arbitrary arg for the dtype, used in image for the shape
   base: Any = field(default=None, hash=False)
   def __post_init__(self):
-    if self.base is None: raise ValueError("base cannot be None!")
+    if self.base is None: raise ValueError("base cannot be None")
   def scalar(self): return self.base
   def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
   @property
-  def np(self) -> Optional[type]: return DTYPES_TO_NP_MAP[self.base.name if self.sz == 1 else self.base.scalar().name]
+  def np(self) -> Optional[type]: return self.base.np
 
 # @dataclass(frozen=True, init=False, repr=False, eq=False)
 class PtrDType(DType):
@@ -98,8 +97,5 @@ def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else 
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not (k.startswith(('__', 'default')) or v.__class__ is staticmethod)}
-INVERSE_DTYPES_DICT = {v.name:k for k,v in DTYPES_DICT.items()}
-def dtype_to_np(x: DType) -> Optional[type]:
-  s="u"*dtypes.is_unsigned(x)+f"int{x.itemsize*8}" if dtypes.is_int(x) else f"float{x.itemsize*8}" if dtypes.is_float(x) else "bool"
-  return np.dtype(s).type if x is not dtypes.bfloat16 else None
-DTYPES_TO_NP_MAP = {d.name: dtype_to_np(d) for d in set(DTYPES_DICT.values())}
+def dtype_to_np(x: DType) -> Optional[type]: return np.dtype("u"*dtypes.is_unsigned(x)+f"int{x.itemsize*8}" if dtypes.is_int(x) else f"float{x.itemsize*8}" if dtypes.is_float(x) else "bool").type if x is not dtypes.bfloat16 else None  # noqa: E501
+INVERSE_DTYPES_DICT, DTYPES_TO_NP_MAP = {v.name:k for k,v in DTYPES_DICT.items()}, {d.name: dtype_to_np(d) for d in set(DTYPES_DICT.values())}
