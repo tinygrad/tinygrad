@@ -150,7 +150,7 @@ class NumNode(Node):
     assert self.b == val, f"cannot bind {val} to {self}"
     return self
   def __eq__(self, other): return self.b == other
-  def __hash__(self): return self.hash  # needed with __eq__ override
+  def __hash__(self): return hash(self.b)  # needed with __eq__ override
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return self
 
 def create_node(ret:Node):
