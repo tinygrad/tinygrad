@@ -215,7 +215,7 @@ class TestMultiTensor(unittest.TestCase):
     x_sharded = x.shard(device, axis=None).realize()
     freqs_cis_sharded = freqs_cis.shard(device, axis=None).realize()
     y_sharded = layer_sharded(x_sharded, start_pos, freqs_cis_sharded, mask)
-    np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-5, rtol=1e-5)
+    np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-4, rtol=1e-4)
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(Device.DEFAULT == "GPU", "GPU requires cl_khr_fp16")

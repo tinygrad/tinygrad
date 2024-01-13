@@ -18,12 +18,10 @@ def to_sharded(lbs:List[LazyBuffer], axis:int) -> List[LazyBuffer]:
 class MultiLazyBuffer:
   def __init__(self, lbs:List[LazyBuffer], axis:Optional[int]):
     assert all(isinstance(x, LazyBuffer) for x in lbs) and len(lbs) >= 2, "all lbs must be LazyBuffers, and we need at least two of them"
-    # sharded dim cannot be symbolic but the rest can
-    assert all_same([(x.shape[:axis]+x.shape[axis+1:], x.dtype) for x in lbs]), "all multilazybuffer needs same shape except sharded axis, dtype"
+    # shape except sharded dim needs to be the same
+    assert all_same([(tuple(a if i != axis else 0 for i,a in enumerate(x.shape)), x.dtype) for x in lbs]), "all lbs need same shape, dtype"
     self.lbs, self.axis, self.dtype, self.device = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs)
-    # if reshape or permute, sharded has to be recalculated
-    sharded_dim = sum(lb.shape[self.axis] for lb in lbs) if self.axis is not None else 0
-    self.shape = tuple(sharded_dim if a == self.axis else s for a,s in enumerate(lbs[0].shape))
+    self.shape = tuple(sum(lb.shape[self.axis] for lb in lbs) if a == self.axis else s for a,s in enumerate(lbs[0].shape))
 
   def __repr__(self):
     return f"<MLB{chr(10)}{chr(10).join([f'{x.device} {x.st}' for x in self.lbs])}>"
