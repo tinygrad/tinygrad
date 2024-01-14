@@ -273,7 +273,7 @@ class Optimizer:
     def step(self):
         grad_norm = clip_grad_norm_(self.parameters, self.grad_clip)
         self.opt.step()
-        return {f"{self.name}_grad_norm": grad_norm.item()}
+        return {f"{self.name}_grad_norm": grad_norm}
 
 
 def load_config():

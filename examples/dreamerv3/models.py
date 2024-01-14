@@ -1,9 +1,10 @@
 import copy
 
+import distributions
 import networks
 import utils
 
-from tinygrad import Tensor, dtypes, nn
+from tinygrad import Tensor, TinyJit, dtypes, nn
 
 
 class RewardEMA:
@@ -83,68 +84,16 @@ class WorldModel:
         )
         for name in config.grad_heads:
             assert name in self.heads, name
-        self._model_opt = utils.Optimizer("model", self.parameters(), config.model_lr, config.opt_eps, config.grad_clip, config.opt)
         # other losses are scaled by 1.0.
         self._scales = dict(reward=config.reward_head["loss_scale"], cont=config.cont_head["loss_scale"])
 
-    def _train(self, data):
+        self.opt = utils.Optimizer("model", self.parameters(), config.model_lr, config.opt_eps, config.grad_clip, config.opt)
+
+    def preprocess(self, data):
         # action (batch_size, batch_length, act_dim)
         # image (batch_size, batch_length, h, w, ch)
         # reward (batch_size, batch_length)
         # discount (batch_size, batch_length)
-        data = self.preprocess(data)
-
-        embed = self.encoder(data)
-        post, prior = self.dynamics.observe(embed, data["action"], data["is_first"])
-        kl_free = self._config.kl_free
-        dyn_scale = self._config.dyn_scale
-        rep_scale = self._config.rep_scale
-        kl_loss, kl_value, dyn_loss, rep_loss = self.dynamics.kl_loss(post, prior, kl_free, dyn_scale, rep_scale)
-        assert kl_loss.shape == embed.shape[:2], kl_loss.shape
-        preds = {}
-        for name, head in self.heads.items():
-            grad_head = name in self._config.grad_heads
-            feat = self.dynamics.get_feat(post)
-            feat = feat if grad_head else feat.detach()
-            pred = head(feat)
-            if isinstance(pred, dict):
-                preds.update(pred)
-            else:
-                preds[name] = pred
-        losses = {}
-        for name, pred in preds.items():
-            loss = -pred.log_prob(data[name])
-            assert loss.shape == embed.shape[:2], (name, loss.shape, embed.shape[:2])
-            losses[name] = loss
-        scaled = {key: value * self._scales.get(key, 1.0) for key, value in losses.items()}
-        model_loss = (sum(scaled.values()) + kl_loss).mean()
-        metrics = {}
-        metrics["model_loss"] = model_loss.item()
-
-        self._model_opt.zero_grad()
-        model_loss.backward()
-        metrics.update(self._model_opt.step())
-
-        metrics.update({f"{name}_loss": loss.mean().item() for name, loss in losses.items()})
-        metrics["kl_free"] = kl_free
-        metrics["dyn_scale"] = dyn_scale
-        metrics["rep_scale"] = rep_scale
-        metrics["dyn_loss"] = dyn_loss.mean().item()
-        metrics["rep_loss"] = rep_loss.mean().item()
-        metrics["kl"] = kl_value.mean().item()
-        metrics["prior_ent"] = self.dynamics.get_dist(prior).entropy().mean().item()
-        metrics["post_ent"] = self.dynamics.get_dist(post).entropy().mean().item()
-        context = dict(
-            embed=embed,
-            feat=self.dynamics.get_feat(post),
-            kl=kl_value,
-            postent=self.dynamics.get_dist(post).entropy(),
-        )
-        post = {k: v.detach() for k, v in post.items()}
-        return post, context, metrics
-
-    # this function is called during both rollout and training
-    def preprocess(self, data):
         data = data.copy()
         data = {k: Tensor(v, dtype=dtypes.float32).to(self._config.device) for k, v in data.items()}
         # onehot encode actions if neccessary
@@ -163,29 +112,91 @@ class WorldModel:
         data["cont"] = 1.0 - data["is_terminal"]
         return data
 
-    def video_pred(self, data):
-        data = self.preprocess(data)
-        embed = self.encoder(data)
+    @staticmethod
+    @TinyJit
+    def _train(model: "WorldModel", **data):
+        embed = model.encoder(data)
+        post, prior = model.dynamics.observe(embed, data["action"], data["is_first"])
+        kl_free = model._config.kl_free
+        dyn_scale = model._config.dyn_scale
+        rep_scale = model._config.rep_scale
+        kl_loss, kl_value, dyn_loss, rep_loss = model.dynamics.kl_loss(post, prior, kl_free, dyn_scale, rep_scale)
+        assert kl_loss.shape == embed.shape[:2], kl_loss.shape
+        preds = {}
+        for name, head in model.heads.items():
+            grad_head = name in model._config.grad_heads
+            feat = model.dynamics.get_feat(post)
+            feat = feat if grad_head else feat.detach()
+            pred = head(feat)
+            if isinstance(pred, dict):
+                preds.update(pred)
+            else:
+                preds[name] = pred
+        losses = {}
+        for name, pred in preds.items():
+            loss = -pred.log_prob(data[name])
+            assert loss.shape == embed.shape[:2], (name, loss.shape, embed.shape[:2])
+            losses[name] = loss
+        scaled = {key: value * model._scales.get(key, 1.0) for key, value in losses.items()}
+        model_loss = (sum(scaled.values()) + kl_loss).mean()
+        metrics = {}
+        metrics["model_loss"] = model_loss
 
-        states, _ = self.dynamics.observe(embed[:6, :5], data["action"][:6, :5], data["is_first"][:6, :5])
-        recon = self.heads["decoder"](self.dynamics.get_feat(states))["image"].mode[:6]
+        model.opt.zero_grad()
+        model_loss.backward()
+        metrics.update(model.opt.step())
+
+        metrics.update({f"{name}_loss": loss.mean() for name, loss in losses.items()})
+        metrics["dyn_loss"] = dyn_loss.mean()
+        metrics["rep_loss"] = rep_loss.mean()
+        metrics["kl"] = kl_value.mean()
+        metrics["prior_ent"] = model.dynamics.get_dist(prior).entropy().mean()
+        metrics["post_ent"] = model.dynamics.get_dist(post).entropy().mean()
+        context = dict(
+            embed=embed,
+            feat=model.dynamics.get_feat(post),
+            kl=kl_value,
+            postent=model.dynamics.get_dist(post).entropy(),
+        )
+        post = {k: v.detach().realize() for k, v in post.items()}
+        context = {k: v.detach().realize() for k, v in context.items()}
+        metrics = {k: v.realize() for k, v in metrics.items()}
+        return post, context, metrics
+
+    def train(self, data):
+        with Tensor.train():
+            data = self.preprocess(data)
+            return self._train(self, **data)
+
+    @staticmethod
+    @TinyJit
+    def _video_pred(model: "WorldModel", **data):
+        embed = model.encoder(data)
+
+        states, _ = model.dynamics.observe(embed[:6, :5], data["action"][:6, :5], data["is_first"][:6, :5])
+        recon = model.heads["decoder"](model.dynamics.get_feat(states))["image"].mode[:6]
         init = {k: v[:, -1] for k, v in states.items()}
-        prior = self.dynamics.imagine_with_action(data["action"][:6, 5:], init)
-        openl = self.heads["decoder"](self.dynamics.get_feat(prior))["image"].mode
+        prior = model.dynamics.imagine_with_action(data["action"][:6, 5:], init)
+        openl = model.heads["decoder"](model.dynamics.get_feat(prior))["image"].mode
         # observed image is given until 5 steps
         model = Tensor.cat(recon[:, :5], openl, dim=1)
         truth = data["image"][:6]
         error = (model - truth + 1.0) / 2.0
+        return Tensor.cat(truth, model, error, dim=2).realize()
 
-        return Tensor.cat(truth, model, error, dim=2).numpy()
+    def video_pred(self, data):
+        with Tensor.train(False):
+            data = self.preprocess(data)
+            pred = self._video_pred(self, **data)
+        return pred
 
     def parameters(self):
         models = [self.encoder, self.dynamics, *self.heads.values()]
         return nn.state.get_parameters(models)
 
 
-class ImagBehavior:
-    def __init__(self, config, world_model):
+class ActorCritic:
+    def __init__(self, config, world_model: WorldModel):
         self._config = config
         self._world_model = world_model
         if config.dyn_discrete:
@@ -234,28 +245,28 @@ class ImagBehavior:
         if self._config.reward_EMA:
             self.reward_ema = RewardEMA(device=self._config.device)
 
-    def _train(self, start, objective):
-        self._update_slow_target()
+    @staticmethod
+    @TinyJit
+    def _train(actor_critic: "ActorCritic", objective, **start):
         metrics = {}
-
-        imag_feat, imag_state, imag_action = self._imagine(start, self.actor, self._config.imag_horizon)
+        imag_feat, imag_state, imag_action = actor_critic._imagine(start, actor_critic.actor, actor_critic._config.imag_horizon)
         imag_feat = imag_feat.detach()
         imag_state = {k: v.detach() for k, v in imag_state.items()}
         reward = objective(imag_feat, imag_state, imag_action).detach()
-        actor_ent = self.actor(imag_feat).entropy()
+        actor_ent = actor_critic.actor(imag_feat).entropy()
         # this target is not scaled by ema or sym_log.
-        target, weights, base = self._compute_target(imag_feat, imag_state, reward)
-        actor_loss, mets = self._compute_actor_loss(imag_feat, imag_action, target.detach(), weights.detach(), base.detach())
-        actor_loss = actor_loss - self._config.actor["entropy"] * actor_ent[:-1, ..., None]
+        target, weights, base = actor_critic._compute_target(imag_feat, imag_state, reward)
+        actor_loss, mets = actor_critic._compute_actor_loss(imag_feat, imag_action, target.detach(), weights.detach(), base.detach())
+        actor_loss = actor_loss - actor_critic._config.actor["entropy"] * actor_ent[:-1, ..., None]
         actor_loss = Tensor.mean(actor_loss)
         metrics.update(mets)
 
-        value = self.value(imag_feat[:-1])
+        value = actor_critic.value(imag_feat[:-1])
         target = target.squeeze(-1).transpose().detach()
         # (time, batch, 1), (time, batch, 1) -> (time, batch)
         value_loss = -value.log_prob(target)
-        if self._config.critic["slow_target"]:
-            slow_target = self._slow_value(imag_feat[:-1]).mode
+        if actor_critic._config.critic["slow_target"]:
+            slow_target = actor_critic._slow_value(imag_feat[:-1]).mode
             slow_target = slow_target.squeeze(-1).detach()
             value_loss = value_loss - value.log_prob(slow_target)
         # (time, batch, 1), (time, batch, 1) -> (1,)
@@ -264,22 +275,22 @@ class ImagBehavior:
         metrics.update(utils.tensorstats(value.mode, "value"))
         metrics.update(utils.tensorstats(target, "target"))
         metrics.update(utils.tensorstats(reward, "imag_reward"))
-        if self._config.actor["dist"] == "onehot":
+        if actor_critic._config.actor["dist"] == "onehot":
             metrics.update(utils.tensorstats(Tensor.argmax(imag_action, -1).float(), "imag_action"))
         else:
             metrics.update(utils.tensorstats(imag_action, "imag_action"))
-        metrics["actor_entropy"] = Tensor.mean(actor_ent).numpy()
+        metrics["actor_entropy"] = Tensor.mean(actor_ent)
 
-        metrics["actor_loss"] = actor_loss.item()
-        metrics["value_loss"] = value_loss.item()
+        metrics["actor_loss"] = actor_loss
+        metrics["value_loss"] = value_loss
 
-        self._actor_opt.zero_grad()
+        actor_critic._actor_opt.zero_grad()
         actor_loss.backward()
-        metrics.update(self._actor_opt.step())
+        metrics.update(actor_critic._actor_opt.step())
 
-        self._value_opt.zero_grad()
+        actor_critic._value_opt.zero_grad()
         value_loss.backward()
-        metrics.update(self._value_opt.step())
+        metrics.update(actor_critic._value_opt.step())
 
         return imag_feat, imag_state, imag_action, weights, metrics
 
@@ -328,8 +339,8 @@ class ImagBehavior:
             normed_base = (base - offset) / scale
             adv = normed_target - normed_base
             metrics.update(utils.tensorstats(normed_target, "normed_target"))
-            metrics["EMA_005"] = self.reward_ema.ema_vals[0].numpy()
-            metrics["EMA_095"] = self.reward_ema.ema_vals[1].numpy()
+            metrics["EMA_005"] = self.reward_ema.ema_vals[0]
+            metrics["EMA_095"] = self.reward_ema.ema_vals[1]
 
         if self._config.imag_gradient == "dynamics":
             actor_target = adv
@@ -354,6 +365,10 @@ class ImagBehavior:
                     d += mix * s.detach()
             self._updates += 1
 
+    def train(self, start, objective):
+        self._update_slow_target()
+        return self._train(self, objective, **start)
+
     def actor_parameters(self):
         return nn.state.get_parameters(self.actor)
 
@@ -362,3 +377,59 @@ class ImagBehavior:
 
     def slow_value_parameters(self):
         return nn.state.get_parameters(self._slow_value)
+    
+    def _train_policy(self, obs, action, **latent):
+        embed = self._world_model.encoder({k: v[:, None] for k, v in obs.items()})[:, 0]
+        latent, _ = self._world_model.dynamics.obs_step(latent, action, embed, obs["is_first"])
+        feat = self._world_model.dynamics.get_feat(latent)
+        actor = self.actor(feat)
+        action = actor.mode
+        action = action.detach().realize()
+        logprob = actor.log_prob(action).detach()
+        policy_output = {"action": action, "logprob": logprob}
+        latent = {k: v.detach() for k, v in latent.items()}
+        state = (latent, action)
+        return policy_output, state
+
+    def _eval_policy(self, obs, action, **latent):
+        obs = self._world_model.preprocess(obs)
+        embed = self._world_model.encoder({k: v[:, None] for k, v in obs.items()})[:, 0]
+        latent, _ = self._world_model.dynamics.obs_step(latent, action, embed, obs["is_first"])
+        feat = self._world_model.dynamics.get_feat(latent)
+        actor = self.actor(feat)
+        action = actor.sample()
+        action = action.detach().realize()
+        logprob = actor.log_prob(action).detach().realize()
+        policy_output = {"action": action, "logprob": logprob}
+        latent = {k: v.detach().realize() for k, v in latent.items()}
+        state = (latent, action)
+        return policy_output, state
+    
+    def policy(self, obs, state, training: bool, explore: bool):
+        training = training and not explore
+        obs = self._world_model.preprocess(obs)
+        B = len(obs)
+        if state is None:
+            latent = self._world_model.dynamics.initial(B)
+            action = Tensor.zeros([B, self._world_model.num_actions]).to(self._config.device)
+        with Tensor.train(training):
+            if training:
+                return self._train_policy(obs, action, **latent)
+            else:
+                return self._eval_policy(obs, action, **latent)
+
+
+def random_agent(config, act_space, o, d, s):
+    if config.actor["dist"] == "onehot":
+        random_actor = distributions.OneHotCategorical(Tensor.zeros(int(act_space.n)).repeat((config.num_envs, 1)).to(config.device))
+    else:
+        random_actor = distributions.Independent(
+            distributions.Uniform(
+                Tensor(act_space.low).repeat((config.num_envs, 1)).to(config.device),
+                Tensor(act_space.high).repeat((config.num_envs, 1)).to(config.device),
+            ),
+            1,
+        )
+    action = random_actor.sample()
+    logprob = random_actor.log_prob(action)
+    return {"action": action, "logprob": logprob}, None
