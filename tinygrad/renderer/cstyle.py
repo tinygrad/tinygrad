@@ -138,10 +138,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]))
         depth += 1
       elif uop == UOps.WMMA:
-        if args[0] == "METAL" and dtype == dtypes.float.vec(2): wmma_func = "__metal_wmma<float2,simdgroup_float8x8>"
-        elif args[0] == "HIP" and dtype == dtypes.float.vec(8): wmma_func = "__builtin_amdgcn_wmma_f32_16x16x16_f16_w32"
-        else: raise NotImplementedError(f"WMMA not implemented for {args}")
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = {wmma_func}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
+        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
       elif uop == UOps.ALU:
         # remove parens if ALU types are the same. TODO: can do more here
         if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.XOR}:
@@ -218,10 +215,10 @@ class OpenCLLanguage(CStyleLanguage):
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
 class MetalLanguage(CStyleLanguage):
-  kernel_prefix = """#include <metal_stdlib>\nusing namespace metal;\ntemplate<typename T, typename S> T __metal_wmma(T m, T n, T o) {
+  kernel_prefix = """#include <metal_stdlib>\nusing namespace metal;\ntemplate<typename T, typename S, typename U> U __metal_wmma(T m, T n, U o) {
   S a,b,c; a.thread_elements()[0] = m.x; a.thread_elements()[1] = m.y; b.thread_elements()[0] = n.x; b.thread_elements()[1] = n.y;
   c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
-  return T(c.thread_elements()[0], c.thread_elements()[1]);\n}\nkernel """
+  return U(c.thread_elements()[0], c.thread_elements()[1]);\n}\nkernel """
   buffer_prefix = "device "
   smem_prefix = "threadgroup "
   arg_int_prefix = "constant int&"
