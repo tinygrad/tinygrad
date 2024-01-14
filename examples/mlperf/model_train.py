@@ -13,25 +13,29 @@ def train_unet3d():
   from examples.mlperf.losses import dice_ce_loss
   from extra.models.unet3d import UNet3D
   from extra.datasets.kits19 import iterate, get_train_files
-  from tinygrad import dtypes
-  from tinygrad import TinyJit
+  from tinygrad import dtypes, TinyJit
   import tinygrad.nn as nn
   from tqdm import tqdm
 
   epochs = getenv("NUM_EPOCHS", 4000)
   bs = getenv("BS", 2)
   lr = getenv("LR", 0.8)
+  momentum = getenv("MOMENTUM", 0.9)
   lr_warmup_epochs = getenv("LR_WARMUP_EPOCHS", 200)
   lr_warmup_init_lr = getenv("LR_WARMUP_INIT_LR", 0.0001)
 
   model = UNet3D()
-  optim = nn.optim.SGD(nn.state.get_parameters(model), lr=1.0, momentum=0.9, nesterov=True)
+  params = nn.state.get_parameters(model)
+  if (gpus:=getenv("GPUS")) > 1:
+    for p in params: p.shard_([f"GPU:{i}" for i in range(gpus)]).realize()
+  optim = nn.optim.SGD(params, lr=lr, momentum=momentum, nesterov=True)
 
   def _lr_warm_up(optim, init_lr, lr, current_epoch, warmup_epochs):
     scale = current_epoch / warmup_epochs
     optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale]))
 
-  @TinyJit
+  # TODO: enable jit when it is supported with multitensor
+  # @TinyJit
   def _train_step(x, y):
     y_hat = model(x)
     loss = dice_ce_loss(y_hat, y)
@@ -41,13 +45,16 @@ def train_unet3d():
     optim.step()
 
     return loss.realize()
-
+  
   for epoch in range(1, epochs + 1):
     if epoch <= lr_warmup_epochs and lr_warmup_epochs > 0:
       _lr_warm_up(optim, lr_warmup_init_lr, lr, epoch, lr_warmup_epochs)
 
     for x, y in (t:=tqdm(iterate(val=False, shuffle=True, bs=bs), desc=f"[Epoch {epoch}]", total=len(get_train_files()))):
       x, y = Tensor(x, dtype=dtypes.float32), Tensor(y, dtype=dtypes.uint8)
+      if (gpus:=getenv("GPUS")) > 1:
+        x.shard_([f"GPU:{i}" for i in range(gpus)], axis=0)
+        y.shard_([f"GPU:{i}" for i in range(gpus)], axis=0)
       loss = _train_step(x, y)
       t.set_description(f"[Epoch {epoch}][Loss: {loss.item():.3f}]")
 
