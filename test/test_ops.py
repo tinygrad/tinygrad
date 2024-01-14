@@ -603,10 +603,7 @@ class TestOps(unittest.TestCase):
   def test_max(self):
     helper_test_op([(45,3)], lambda x: x.max(), Tensor.max)
     helper_test_op([(45,3)], lambda x: x.max().mul(0.5), lambda x: Tensor.max(x).mul(0.5))
-    helper_test_op(None, lambda x: x.max().mul(0.5), lambda x: Tensor.max(x).mul(0.5),
-            vals=[
-                [[1.0,1.0,0.0,1.0]],
-                ])
+    helper_test_op(None, lambda x: x.max().mul(0.5), lambda x: Tensor.max(x).mul(0.5), vals=[[[1.0,1.0,0.0,1.0]],])
     helper_test_op([(3,4,5,6)], lambda x: x.max(axis=1)[0], lambda x: Tensor.max(x, axis=1))
     helper_test_op([()], lambda x: x.max(), Tensor.max)
   def test_mean(self):
@@ -614,25 +611,39 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x.mean())
   def test_mean_axis(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)), lambda x: Tensor.mean(x, axis=(1,2)))
-  @unittest.skipIf(Device.DEFAULT == "WEBGL" and CI, "Only broken on CI")
+  def test_var(self):
+    helper_test_op([(15, 25, 35)], lambda x: torch.var(x), lambda x: Tensor.var(x))
+    helper_test_op([(15, 25, 35)], lambda x: torch.var(x, dim=None, correction=0), lambda x: Tensor.var(x, correction=0))
+    helper_test_op([(15, 25, 35)], lambda x: torch.var(x, dim=None, correction=5), lambda x: Tensor.var(x, correction=5))
+  def test_var_axis(self):
+    helper_test_op([(15, 25, 35)], lambda x: torch.var(x, dim=0), lambda x: Tensor.var(x, axis=0))
+    helper_test_op([(15, 25, 35)], lambda x: torch.var(x, dim=2), lambda x: Tensor.var(x, axis=2))
+    helper_test_op([(15, 25, 35)], lambda x: torch.var(x, dim=[1, 2]), lambda x: Tensor.var(x, axis=[1, 2]))
+    helper_test_op([(15, 25, 35)], lambda x: torch.var(x, dim=None), lambda x: Tensor.var(x, axis=None))
+    helper_test_op([(15, 25, 35)], lambda x: torch.var(x, correction=0, dim=0), lambda x: Tensor.var(x, axis=0, correction=0))
+    helper_test_op([(15, 25, 35)], lambda x: torch.var(x, correction=0, dim=2), lambda x: Tensor.var(x, axis=2, correction=0))
+    helper_test_op([(15, 25, 35)], lambda x: torch.var(x, correction=0, dim=[1, 2]), lambda x: Tensor.var(x, axis=[1, 2], correction=0))
+    helper_test_op([(15, 25, 35)], lambda x: torch.var(x, correction=0, dim=None), lambda x: Tensor.var(x, axis=None, correction=0))
+  def test_var_keepdim(self):
+    helper_test_op([(15, 25, 35)], lambda x: torch.var(x, dim=None, keepdim=True), lambda x: Tensor.var(x, keepdim=True))
+    helper_test_op([(15, 25, 35)], lambda x: torch.var(x, dim=0, keepdim=True, correction=0),
+                                   lambda x: Tensor.var(x, keepdim=True, correction=0, axis=0))
   def test_std(self):
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x), lambda x: Tensor.std(x))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=None, correction=0), lambda x: Tensor.std(x, correction=0))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=None, correction=5), lambda x: Tensor.std(x, correction=5))
-  @unittest.skipIf(Device.DEFAULT == "WEBGL" and CI, "Only broken on CI")
+    helper_test_op([(15, 25, 35)], lambda x: torch.std(x), lambda x: Tensor.std(x))
+    helper_test_op([(15, 25, 35)], lambda x: torch.std(x, dim=None, correction=0), lambda x: Tensor.std(x, correction=0))
+    helper_test_op([(15, 25, 35)], lambda x: torch.std(x, dim=None, correction=5), lambda x: Tensor.std(x, correction=5))
   def test_std_axis(self):
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=0), lambda x: Tensor.std(x, axis=0))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=2), lambda x: Tensor.std(x, axis=2))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=[1, 2]), lambda x: Tensor.std(x, axis=[1, 2]))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=None), lambda x: Tensor.std(x, axis=None))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, correction=0, dim=0), lambda x: Tensor.std(x, axis=0, correction=0))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, correction=0, dim=2), lambda x: Tensor.std(x, axis=2, correction=0))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, correction=0, dim=[1, 2]), lambda x: Tensor.std(x, axis=[1, 2], correction=0))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, correction=0, dim=None), lambda x: Tensor.std(x, axis=None, correction=0))
-  @unittest.skipIf(Device.DEFAULT == "WEBGL" and CI, "Only broken on CI")
+    helper_test_op([(15, 25, 35)], lambda x: torch.std(x, dim=0), lambda x: Tensor.std(x, axis=0))
+    helper_test_op([(15, 25, 35)], lambda x: torch.std(x, dim=2), lambda x: Tensor.std(x, axis=2))
+    helper_test_op([(15, 25, 35)], lambda x: torch.std(x, dim=[1, 2]), lambda x: Tensor.std(x, axis=[1, 2]))
+    helper_test_op([(15, 25, 35)], lambda x: torch.std(x, dim=None), lambda x: Tensor.std(x, axis=None))
+    helper_test_op([(15, 25, 35)], lambda x: torch.std(x, correction=0, dim=0), lambda x: Tensor.std(x, axis=0, correction=0))
+    helper_test_op([(15, 25, 35)], lambda x: torch.std(x, correction=0, dim=2), lambda x: Tensor.std(x, axis=2, correction=0))
+    helper_test_op([(15, 25, 35)], lambda x: torch.std(x, correction=0, dim=[1, 2]), lambda x: Tensor.std(x, axis=[1, 2], correction=0))
+    helper_test_op([(15, 25, 35)], lambda x: torch.std(x, correction=0, dim=None), lambda x: Tensor.std(x, axis=None, correction=0))
   def test_std_keepdim(self):
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=None, keepdim=True), lambda x: Tensor.std(x, keepdim=True))
-    helper_test_op([(45, 65, 85)], lambda x: torch.std(x, dim=0, keepdim=True, correction=0),
+    helper_test_op([(15, 25, 35)], lambda x: torch.std(x, dim=None, keepdim=True), lambda x: Tensor.std(x, keepdim=True))
+    helper_test_op([(15, 25, 35)], lambda x: torch.std(x, dim=0, keepdim=True, correction=0),
                                    lambda x: Tensor.std(x, keepdim=True, correction=0, axis=0))
   def test_softmax(self):
     # exceed per kernel buffer limit with backward
