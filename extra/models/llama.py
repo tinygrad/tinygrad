@@ -144,7 +144,7 @@ class Transformer:
       mask = None
 
     for i,layer in enumerate(self.layers):
-      if i > 53:
+      if i >= 54:
         device = layer.attention.wk.weight.device
         h = h.to(Device.DEFAULT)
         h.shard_(device, axis=None).realize()

@@ -15,11 +15,7 @@ from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parame
 from extra.models.llama import Transformer, convert_from_huggingface
 from sentencepiece import SentencePieceProcessor
 
-# TODO: make Device able to collect all devices
-d0, d1, d2 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2"
-d3, d4, d5 = f"{Device.DEFAULT}:3", f"{Device.DEFAULT}:4", f"{Device.DEFAULT}:5"
-devices_all = (d0, d1, d2, d3, d4, d5)
-
+DEVICES = tuple(f"{Device.DEFAULT}:{i}" for i in range(6))
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
 
 # calculating params:
@@ -140,33 +136,33 @@ def load_state_dict_shard(model, state_dict, devices, strict=True, verbose=True)
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
     for k,v in (t := tqdm(model_state_dict.items(), disable=not verbose)):
       t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}")
-      if len(devices) < 6:
+      if len(model_state_dict) < 724:
         if k == "freqs_cis":
           v.shard_(devices, axis=None).realize()
-        if "norm" in k: # norm layers weight are duplicated
+        elif "norm" in k: # norm layers weight are duplicated
           v.assign(state_dict[k].shard_(devices, axis=None)).realize()
         else: # the rests layers weight are sharded evenly across given axis
           v.assign(state_dict[k].shard_(devices, axis=0)).realize()
-      else:
-        # load the llama 70B model
+      else: # load llama 70B model for now uses a special treatment
+        # TODO: a better way to shard the uneven case, best to combine with the previous
         if k == "freqs_cis":
           v.shard_(devices[:4], axis=None).realize()
         elif k == "tok_embeddings.weight":
           v.assign(state_dict[k].shard_((devices[:4]), axis=0)).realize()
-        elif k == "norm.weight":
-          v.assign(state_dict[k].shard_((devices[4:]), axis=None)).realize()
-        elif k == "output.weight":
-          v.assign(state_dict[k].shard_((devices[4:]), axis=0)).realize()
-        elif int(k.split('.')[1]) < 54:
+        elif any(s in k for s in {"attention", "feed_forward", "ffn"}) and int(k.split('.')[1]) < 54:
           if "norm" in k:
             v.assign(state_dict[k].shard_((devices[:4]), axis=None)).realize()
           else:
             v.assign(state_dict[k].shard_((devices[:4]), axis=0)).realize()
-        else:
+        elif any(s in k for s in {"attention", "feed_forward", "ffn"}) and int(k.split('.')[1]) >= 54:
           if "norm" in k:
             v.assign(state_dict[k].shard_((devices[4:]), axis=None)).realize()
           else:
             v.assign(state_dict[k].shard_((devices[4:]), axis=0)).realize()
+        elif k == "norm.weight":
+          v.assign(state_dict[k].shard_((devices[4:]), axis=None)).realize()
+        elif k == "output.weight":
+          v.assign(state_dict[k].shard_((devices[4:]), axis=0)).realize()
 
 class AbsmaxQuantizedLinear:
   def __init__(self, in_features, out_features, bias=False):
@@ -217,7 +213,7 @@ class LLaMa:
     else:
       model = Transformer(**params["args"], max_context=MAX_CONTEXT, device=device, jit=jit)
 
-    if isinstance(device, tuple):
+    if len(device) > 1:
       load_state_dict_shard(model, weights, device, strict=False, verbose=True)
     else:
       load_state_dict(model, weights, strict=False, verbose=True)
@@ -420,7 +416,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
-  devices = devices_all[:args.device]
+  devices = DEVICES[:args.device]
   print(f"loading to {devices}")
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, device=devices)
 
@@ -470,11 +466,7 @@ After you are done speaking, output [EOS]. You are not Chad.
           with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                       f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                       (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
-            x = Tensor([toks[start_pos:]])
-            if args.device > 1 and args.device < 6:
-              x.shard_(devices, axis=None)
-            else:
-              x.shard_(devices[:4], axis=None)
+            x = Tensor([toks[start_pos:]]).to(llama.model.tok_embeddings.weight.device)
             tok = llama.model(x, start_pos, args.temperature).item()
 
       # use the kv cache
