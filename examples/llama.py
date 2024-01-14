@@ -131,6 +131,7 @@ def load(fn:str):
   else:
     return torch_load(fn)
 
+# TODO: 4 GPU rotational loads
 device1 = (d2, d3, d4, d5)
 device2 = (d0, d1)
 def load_state_dict_shard(model, state_dict, devices, strict=True, verbose=True):
@@ -141,21 +142,19 @@ def load_state_dict_shard(model, state_dict, devices, strict=True, verbose=True)
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
     for k,v in (t := tqdm(model_state_dict.items(), disable=not verbose)):
       t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}")
-      # TODO: clean this up
-      if len(devices) != 6:
-        if k not in state_dict and not strict:
-          if DEBUG >= 1: print(f"WARNING: not loading {k}")
-          continue
+      # TODO: if parameters are divisible by the number of devices and if parameters are non-divisible by the devices
+      if len(devices) < 6:
+        if k == "freqs_cis":
+          v.shard_(devices, axis=None).realize()
         if "norm" in k: # norm layers weight are duplicated
-          v.assign(state_dict[k].shard_((devices), axis=None)).realize()
-        else: # the rests layers weight are sharded
-          v.assign(state_dict[k].shard_((devices), axis=0)).realize()
-      # load the llama 70B model
+          v.assign(state_dict[k].shard_(devices, axis=None)).realize()
+        else: # the rests layers weight are sharded evenly across given axis
+          v.assign(state_dict[k].shard_(devices, axis=0)).realize()
       else:
-        if k not in state_dict and not strict:
-          if DEBUG >= 1: print(f"WARNING: not loading {k}")
-          continue
-        if k == "tok_embeddings.weight":
+        # load the llama 70B model
+        if k == "freqs_cis":
+          v.shard_(device1, axis=None).realize()
+        elif k == "tok_embeddings.weight":
           v.assign(state_dict[k].shard_((device1), axis=0)).realize()
         elif k == "norm.weight":
           v.assign(state_dict[k].shard_((device2), axis=None)).realize()

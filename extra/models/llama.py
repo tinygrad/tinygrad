@@ -133,20 +133,12 @@ class Transformer:
     self.output = linear(dim, vocab_size, bias=False)
     self.max_context = max_context
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, self.max_context * 2, rope_theta)
-    if isinstance(device, tuple): self.freqs_cis.shard_((device), axis=None).realize() 
     self.forward_jit = TinyJit(self.forward) if jit else None
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float=0.0):
     _, seqlen = tokens.shape
-
-    # TODO: fix this copy
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
-    freqs_cis = freqs_cis.to(Device.DEFAULT)
-    freqs_cis.shard_(tokens.device, axis=None).realize()
-
-    # device 1 for 6 gpus
     h = self.tok_embeddings(tokens)
-
     if seqlen >  1:
       # Device.DEFAULT
       mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos+1).realize()
@@ -154,8 +146,6 @@ class Transformer:
     else:
       mask = None
 
-
-    # device 1 and device 2
     for i,layer in enumerate(self.layers):
       if i > 53:
         device = layer.attention.wk.weight.device
