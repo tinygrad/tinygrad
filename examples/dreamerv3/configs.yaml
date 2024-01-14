@@ -5,15 +5,13 @@ offline_traindir: ''
 offline_evaldir: ''
 seed: 0
 deterministic_run: False
-steps: 100000
+steps: 400000
 parallel: False
 eval_every: 1000
 eval_episode_num: 100
 log_every: 1000
 reset_every: 0
 device: 'cuda:0'
-compile: True
-debug: False
 video_pred_log: True
 expl_until: 0
 

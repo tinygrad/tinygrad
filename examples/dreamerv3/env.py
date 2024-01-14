@@ -177,7 +177,7 @@ def simulate(agent, envs, cache, directory, logger, is_eval=False, limit=None, s
 
 def make_dataset(episodes, config):
     generator = sample_episodes(episodes, config.batch_length)
-    dataset = from_generator(generator, config.batch_size)
+    dataset = from_generator(generator, config.batch_size, config.batch_length)
     return dataset
 
 
@@ -243,12 +243,15 @@ def load_episodes(directory, limit=None, reverse=True):
                 break
     return episodes
 
-
-def from_generator(generator, batch_size):
+count = 0
+def from_generator(generator, batch_size, batch_length):
     while True:
         batch = []
-        for _ in range(batch_size):
-            batch.append(next(generator))
+        while len(batch) < batch_size:
+            next_item = next(generator)
+            if len(next(iter(next_item.values()))) != batch_length:
+                continue  # discard incomplete episode
+            batch.append(next_item)
         data = {}
         for key in batch[0].keys():
             data[key] = []
@@ -257,7 +260,11 @@ def from_generator(generator, batch_size):
             try:
                 data[key] = np.stack(data[key], 0)
             except:
-                breakpoint()
+                # Mystery error!
+                global count
+                count += 1
+                print("episode generator error count:", count)
+                continue
         yield data
 
 
