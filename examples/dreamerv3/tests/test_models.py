@@ -119,7 +119,8 @@ class TestActorCritic(unittest.TestCase):
         target, weights, base = actor_critic._compute_target(feats, states, rewards)
         actor_loss, metrics = actor_critic._compute_actor_loss(feats, actions, target, weights, base)
         actor_loss.mean().backward()  # checks backward pass
-        metrics["actor_loss"] = actor_loss.mean().item()
+        metrics["actor_loss"] = actor_loss.mean()
+        metrics = {k: v.item() for k, v in metrics.items()}
         print(metrics)
 
     def test_actor_critic_train(self):

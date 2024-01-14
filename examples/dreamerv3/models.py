@@ -291,7 +291,8 @@ class ActorCritic:
         actor_critic._value_opt.zero_grad()
         value_loss.backward()
         metrics.update(actor_critic._value_opt.step())
-
+        
+        metrics = {k: v.realize() for k, v in metrics.items()}
         return imag_feat, imag_state, imag_action, weights, metrics
 
     def _imagine(self, start, policy, H):
@@ -388,9 +389,9 @@ class ActorCritic:
         actor = actor_critic.actor(feat)
         action = actor.mode
         action = action.detach().realize()
-        logprob = actor.log_prob(action).detach()
+        logprob = actor.log_prob(action).detach().realize()
         policy_output = {"action": action, "logprob": logprob}
-        latent = {k: v.detach() for k, v in latent.items()}
+        latent = {k: v.detach().realize() for k, v in latent.items()}
         state = (latent, action)
         return policy_output, state
 

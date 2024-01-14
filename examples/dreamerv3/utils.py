@@ -197,10 +197,10 @@ def uniform_weight_init(given_scale):
 
 def tensorstats(tensor, prefix=None):
     metrics = {
-        "mean": Tensor.mean(tensor).numpy(),
-        "std": Tensor.std(tensor).numpy(),
-        "min": Tensor.min(tensor).numpy(),
-        "max": Tensor.max(tensor).numpy(),
+        "mean": Tensor.mean(tensor),
+        "std": Tensor.std(tensor),
+        "min": Tensor.min(tensor),
+        "max": Tensor.max(tensor),
     }
     if prefix:
         metrics = {f"{prefix}_{k}": v for k, v in metrics.items()}
