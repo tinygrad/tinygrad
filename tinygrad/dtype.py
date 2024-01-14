@@ -8,9 +8,9 @@ class DType:
   priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
-  np: Optional[type] = field(default=None, compare=False)
+  np: Optional[type] = field(default=None, compare=False)  # TODO: someday this will be removed with the "remove numpy" project
   sz: int = 1
-  def __repr__(self): return f"dtypes.{'_'*(c:=self.sz!=1)}{INVERSE_DTYPES_DICT[self.name if not c else self.scalar().name]}{str(self.sz)*(c)}"
+  def __repr__(self): return f"dtypes.{'_'*(c:=self.sz!=1)}{INVERSE_DTYPES_DICT[self.name if not c else self.scalar().name]}{str(self.sz)*c}"
   def vec(self, sz:int):
     assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
@@ -22,7 +22,7 @@ class ImageDType(DType):
   shape: Tuple[int, ...] = (0,)  # arbitrary arg for the dtype, used in image for the shape
   base: Any = field(default=None, hash=False)
   def __post_init__(self):
-    if self.base is None: raise ValueError("base cannot be None")
+    if not isinstance(self.base, DType): raise ValueError("base is not a valid dtype")
   def scalar(self): return self.base
   def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
