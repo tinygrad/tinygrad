@@ -177,12 +177,14 @@ def simulate(agent, envs, cache, directory, logger, is_eval=False, limit=None, s
 
 def make_dataset(episodes, config):
     generator = sample_episodes(episodes, config.batch_length)
-    dataset = from_generator(generator, config.batch_size, config.batch_length)
+    dataset = from_generator(generator, config.batch_size)
     return dataset
 
 
 def sample_episodes(episodes, length, seed=0):
     np_random = np.random.RandomState(seed)
+    if len(episodes) == 0:
+        raise ValueError("No episodes passed into sample_episodes.")
     while True:
         size = 0
         ret = None
@@ -207,7 +209,20 @@ def sample_episodes(episodes, length, seed=0):
                 if "is_first" in ret:
                     ret["is_first"][size] = True
             size = len(next(iter(ret.values())))
+        if any(len(it) != length for it in ret.values()):
+            continue
         yield ret
+
+def from_generator(generator, batch_size):
+    while True:
+        batch = []
+        for _ in range(batch_size):
+            next_item = next(generator)
+            batch.append(next_item)
+        data = {}
+        for key in batch[0].keys():
+            data[key] = np.stack([item[key] for item in batch])
+        yield data
 
 
 def load_episodes(directory, limit=None, reverse=True):
@@ -242,30 +257,6 @@ def load_episodes(directory, limit=None, reverse=True):
             if limit and total >= limit:
                 break
     return episodes
-
-count = 0
-def from_generator(generator, batch_size, batch_length):
-    while True:
-        batch = []
-        while len(batch) < batch_size:
-            next_item = next(generator)
-            if len(next(iter(next_item.values()))) != batch_length:
-                continue  # discard incomplete episode
-            batch.append(next_item)
-        data = {}
-        for key in batch[0].keys():
-            data[key] = []
-            for i in range(batch_size):
-                data[key].append(batch[i][key])
-            try:
-                data[key] = np.stack(data[key], 0)
-            except:
-                # Mystery error!
-                global count
-                count += 1
-                print("episode generator error count:", count)
-                continue
-        yield data
 
 
 def add_to_cache(cache, id, transition):

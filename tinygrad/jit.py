@@ -52,7 +52,7 @@ class TinyJit(Generic[ReturnType]):
 
   def __call__(self, *args, **kwargs) -> ReturnType:
     # all inputs (except const) are realized
-    input_tensors: Dict[Union[int, str], LazyBuffer] = {cast(Union[int, str], k): cast(LazyBuffer, v.realize().lazydata) for k,v in itertools.chain(enumerate(args), kwargs.items()) if isinstance(v, Tensor)}  # noqa: E501
+    input_tensors: Dict[Union[int, str], LazyBuffer] = {cast(Union[int, str], k): cast(LazyBuffer, v.realize().lazydata) for k,v in itertools.chain(enumerate(args), sorted(kwargs.items(), key=lambda x: x[0])) if isinstance(v, Tensor)}  # noqa: E501
     assert all(isinstance(x, LazyBuffer) for x in input_tensors.values()), "multilazybuffer JIT isn't supported"
     expected_name_sts_dtype = tuple([(k, v.st.unbind()[0], v.dtype) for k,v in input_tensors.items()])
 
