@@ -99,7 +99,7 @@ def simulate(agent, envs, cache, directory, logger, is_eval=False, limit=None, s
         obs = {k: np.stack([o[k] for o in obs]) for k in obs[0] if "log_" not in k}
         action, agent_state = agent(obs, done, agent_state)
         if isinstance(action, dict):
-            action = [{k: np.array(action[k][i].detach().cpu().numpy()) for k in action} for i in range(len(envs))]
+            action = [{k: np.array(action[k][i].numpy()) for k in action} for i in range(len(envs))]
         else:
             action = np.array(action)
         assert len(action) == len(envs)

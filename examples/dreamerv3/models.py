@@ -379,7 +379,7 @@ class ActorCritic:
         return nn.state.get_parameters(self._slow_value)
     
     @staticmethod
-    @TinyJit
+    # @TinyJit
     def _train_policy(actor_critic: "ActorCritic", explore, image, is_first, action, **latent):
         obs = {"image": image, "is_first": is_first}
         embed = actor_critic._world_model.encoder({k: v[:, None] for k, v in obs.items()})[:, 0]
@@ -395,7 +395,7 @@ class ActorCritic:
         return policy_output, state
 
     @staticmethod
-    @TinyJit
+    # @TinyJit
     def _eval_policy(actor_critic: "ActorCritic", image, is_first, action, **latent):
         obs = {"image": image, "is_first": is_first}
         embed = actor_critic._world_model.encoder({k: v[:, None] for k, v in obs.items()})[:, 0]
