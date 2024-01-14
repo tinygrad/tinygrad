@@ -378,12 +378,15 @@ class ActorCritic:
     def slow_value_parameters(self):
         return nn.state.get_parameters(self._slow_value)
     
-    def _train_policy(self, obs, action, **latent):
-        embed = self._world_model.encoder({k: v[:, None] for k, v in obs.items()})[:, 0]
-        latent, _ = self._world_model.dynamics.obs_step(latent, action, embed, obs["is_first"])
-        feat = self._world_model.dynamics.get_feat(latent)
-        actor = self.actor(feat)
-        action = actor.mode
+    @staticmethod
+    @TinyJit
+    def _train_policy(actor_critic: "ActorCritic", explore, image, is_first, action, **latent):
+        obs = {"image": image, "is_first": is_first}
+        embed = actor_critic._world_model.encoder({k: v[:, None] for k, v in obs.items()})[:, 0]
+        latent, _ = actor_critic._world_model.dynamics.obs_step(latent, action, embed, obs["is_first"])
+        feat = actor_critic._world_model.dynamics.get_feat(latent)
+        actor = actor_critic.actor(feat)
+        action = Tensor.where(explore, actor.sample(), actor.mode)
         action = action.detach().realize()
         logprob = actor.log_prob(action).detach()
         policy_output = {"action": action, "logprob": logprob}
@@ -391,12 +394,14 @@ class ActorCritic:
         state = (latent, action)
         return policy_output, state
 
-    def _eval_policy(self, obs, action, **latent):
-        obs = self._world_model.preprocess(obs)
-        embed = self._world_model.encoder({k: v[:, None] for k, v in obs.items()})[:, 0]
-        latent, _ = self._world_model.dynamics.obs_step(latent, action, embed, obs["is_first"])
-        feat = self._world_model.dynamics.get_feat(latent)
-        actor = self.actor(feat)
+    @staticmethod
+    @TinyJit
+    def _eval_policy(actor_critic: "ActorCritic", image, is_first, action, **latent):
+        obs = {"image": image, "is_first": is_first}
+        embed = actor_critic._world_model.encoder({k: v[:, None] for k, v in obs.items()})[:, 0]
+        latent, _ = actor_critic._world_model.dynamics.obs_step(latent, action, embed, obs["is_first"])
+        feat = actor_critic._world_model.dynamics.get_feat(latent)
+        actor = actor_critic.actor(feat)
         action = actor.sample()
         action = action.detach().realize()
         logprob = actor.log_prob(action).detach().realize()
@@ -406,17 +411,20 @@ class ActorCritic:
         return policy_output, state
     
     def policy(self, obs, state, training: bool, explore: bool):
-        training = training and not explore
-        obs = self._world_model.preprocess(obs)
-        B = len(obs)
-        if state is None:
-            latent = self._world_model.dynamics.initial(B)
-            action = Tensor.zeros([B, self._world_model.num_actions]).to(self._config.device)
-        with Tensor.train(training):
-            if training:
-                return self._train_policy(obs, action, **latent)
+        with Tensor.train(False):
+            obs = self._world_model.preprocess(obs)
+            B = len(obs)
+            if state is None:
+                latent = self._world_model.dynamics.initial(B)
+                action = Tensor.zeros([B, self._world_model.num_actions]).to(self._config.device)
             else:
-                return self._eval_policy(obs, action, **latent)
+                latent, action = state
+            image, is_first = obs["image"], obs["is_first"]
+            if training:
+                explore = Tensor(explore).to(self._config.device)
+                return self._train_policy(self, explore, image, is_first, action, **latent)
+            else:
+                return self._eval_policy(self, image, is_first, action, **latent)
 
 
 def random_agent(config, act_space, o, d, s):
