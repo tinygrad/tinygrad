@@ -428,10 +428,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, device=devices)
 
   if args.device > 1:
-    param_count = 0
-    for x in get_parameters(llama.model):
-      for lb in x.lazydata.lbs:
-        param_count += lb.size
+    param_count = sum(lb.size for x in get_parameters(llama.model) for lb in x.lazydata.lbs)
   else:
     param_count = sum(x.lazydata.size for x in get_parameters(llama.model))
 

@@ -28,11 +28,12 @@ def apply_rotary_emb(xq, xk, freqs_cis) -> Tuple[Tensor, Tensor]:
 def repeat_kv(x:Tensor, n_rep:int) -> Tensor:
   bs, seqlen, n_kv_heads, head_dim = x.shape
   if n_rep == 1: return x
-  # NOTE: this is different from x.repeat((1, 1, n_rep, 1))
   device = x.device
+  # this device is avoidable too
   x = x.to(Device.DEFAULT)
+  # NOTE: this is different from x.repeat((1, 1, n_rep, 1))
   x = x.repeat((1, 1, 1, n_rep)).reshape(bs, seqlen, n_kv_heads * n_rep, head_dim)
-  return x.shard_(device, axis=2)
+  return x.shard_(device, axis=2) if isinstance(device, tuple) else x
 
 class RMSNorm:
   def __init__(self, dim, eps=1e-6):
@@ -82,7 +83,6 @@ class Attention:
       self.cache_k = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous()
       self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous()
       if isinstance(x.device, tuple):
-        # TODO: to follow the pattern how xk and xv are being sharded to be able to do it at initialization
         self.cache_k.shard_((xk.device), axis=2)
         self.cache_v.shard_((xv.device), axis=2)
 
@@ -98,9 +98,8 @@ class Attention:
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
 
-    # if rotating the gpus to always sharded by 4, this is where it gets annoying
     if isinstance(x.device, tuple):
-      attn = self.unshard_reshape_shard(attn, (bsz, seqlen, -1), x.device, None)
+      attn = self.unshard_reshape_shard(attn, (bsz, seqlen, -1), self.wo.weight.device, None)
     else:
       attn = attn.reshape(bsz, seqlen, -1)
     return self.wo(attn)
@@ -140,9 +139,7 @@ class Transformer:
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
     h = self.tok_embeddings(tokens)
     if seqlen >  1:
-      # Device.DEFAULT
-      mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos+1).realize()
-      if isinstance(tokens.device, tuple): mask.shard_(tokens.device, axis=None).realize()
+      mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos+1).to(tokens.device).realize()
     else:
       mask = None
 
@@ -158,7 +155,6 @@ class Transformer:
           mask.shard_(device, axis=None).realize()
       h = layer(h, start_pos, freqs_cis, mask)
 
-    # device 2
     logits = self.output(self.norm(h))[:, -1, :]
 
     if isinstance(tokens.device, tuple): logits = logits.to(Device.DEFAULT).realize() 
