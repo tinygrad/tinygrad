@@ -131,9 +131,7 @@ def load(fn:str):
   else:
     return torch_load(fn)
 
-# TODO: 4 GPU rotational loads
-device1 = (d2, d3, d4, d5)
-device2 = (d0, d1)
+# TODO: make the load more flexible
 def load_state_dict_shard(model, state_dict, devices, strict=True, verbose=True):
   start_mem_used = GlobalCounters.mem_used
   with Timing("loaded weights in ", lambda et_ns: f", {(GlobalCounters.mem_used-start_mem_used)/1e9:.2f} GB loaded at {(GlobalCounters.mem_used-start_mem_used)/et_ns:.2f} GB/s"):
@@ -142,7 +140,6 @@ def load_state_dict_shard(model, state_dict, devices, strict=True, verbose=True)
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
     for k,v in (t := tqdm(model_state_dict.items(), disable=not verbose)):
       t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}")
-      # TODO: if parameters are divisible by the number of devices and if parameters are non-divisible by the devices
       if len(devices) < 6:
         if k == "freqs_cis":
           v.shard_(devices, axis=None).realize()
@@ -153,23 +150,23 @@ def load_state_dict_shard(model, state_dict, devices, strict=True, verbose=True)
       else:
         # load the llama 70B model
         if k == "freqs_cis":
-          v.shard_(device1, axis=None).realize()
+          v.shard_(devices[:4], axis=None).realize()
         elif k == "tok_embeddings.weight":
-          v.assign(state_dict[k].shard_((device1), axis=0)).realize()
+          v.assign(state_dict[k].shard_((devices[:4]), axis=0)).realize()
         elif k == "norm.weight":
-          v.assign(state_dict[k].shard_((device2), axis=None)).realize()
+          v.assign(state_dict[k].shard_((devices[4:]), axis=None)).realize()
         elif k == "output.weight":
-          v.assign(state_dict[k].shard_((device2), axis=0)).realize()
+          v.assign(state_dict[k].shard_((devices[4:]), axis=0)).realize()
         elif int(k.split('.')[1]) < 54:
           if "norm" in k:
-            v.assign(state_dict[k].shard_((device1), axis=None)).realize()
+            v.assign(state_dict[k].shard_((devices[:4]), axis=None)).realize()
           else:
-            v.assign(state_dict[k].shard_((device1), axis=0)).realize()
+            v.assign(state_dict[k].shard_((devices[:4]), axis=0)).realize()
         else:
           if "norm" in k:
-            v.assign(state_dict[k].shard_((device2), axis=None)).realize()
+            v.assign(state_dict[k].shard_((devices[4:]), axis=None)).realize()
           else:
-            v.assign(state_dict[k].shard_((device2), axis=0)).realize()
+            v.assign(state_dict[k].shard_((devices[4:]), axis=0)).realize()
 
 class AbsmaxQuantizedLinear:
   def __init__(self, in_features, out_features, bias=False):
@@ -477,7 +474,7 @@ After you are done speaking, output [EOS]. You are not Chad.
             if args.device > 1 and args.device < 6:
               x.shard_(devices, axis=None)
             else:
-              x.shard_(device1, axis=None)
+              x.shard_(devices[:4], axis=None)
             tok = llama.model(x, start_pos, args.temperature).item()
 
       # use the kv cache

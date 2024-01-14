@@ -29,7 +29,7 @@ def repeat_kv(x:Tensor, n_rep:int) -> Tensor:
   bs, seqlen, n_kv_heads, head_dim = x.shape
   if n_rep == 1: return x
   device = x.device
-  # this device is avoidable too
+  # this copy can be avoided
   x = x.to(Device.DEFAULT)
   # NOTE: this is different from x.repeat((1, 1, n_rep, 1))
   x = x.repeat((1, 1, 1, n_rep)).reshape(bs, seqlen, n_kv_heads * n_rep, head_dim)
