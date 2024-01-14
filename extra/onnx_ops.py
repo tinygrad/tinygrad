@@ -341,9 +341,9 @@ def LRN(x: Tensor, size, alpha=1e-4, beta=0.75, bias=1.0):
   return x / x.mul(x).reshape(bs,1,c,iy*ix).pad2d((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1).reshape(bs,c,iy,ix).mul(alpha).add(bias).pow(beta)
 
 def MeanVarianceNormalization(x: Tensor, axis=(0, 2, 3)):
-  data_mean = x.mean(axis=axis, keepdim=True)
-  std = ((x**2).mean(axis=axis, keepdim=True) - data_mean**2).sqrt()
-  return (x - data_mean) / (std + 1e-9)
+  mean = x.mean(axis=axis, keepdim=True)
+  std = x.std(axis, keepdim=True, correction=0)
+  return (x - mean) / (std + 1e-9)
 
 def NegativeLogLikelihoodLoss(x: Tensor, target: Tensor, weight=None, ignore_index=None, reduction="mean"):
   N, C, i_shape = x.shape[0], x.shape[1], x.shape
