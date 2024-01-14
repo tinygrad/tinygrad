@@ -33,7 +33,7 @@ class HIPProgram:
     self.prg = init_c_var(hip.hipFunction_t(), lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
 
   def __del__(self):
-    if not MOCKHIP: check(hip.hipModuleUnload(self.module))
+    if hasattr(self, 'module'): check(hip.hipModuleUnload(self.module))
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], vals:Tuple[int, ...]=(), wait=False):
     if MOCKHIP: return float("inf")

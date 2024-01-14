@@ -544,10 +544,10 @@ class Tensor:
     ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else s for i,s in enumerate(self.shape)]))
     return ret if keepdim else ret.reshape(shape=shape)
 
-  def sum(self, axis=None, keepdim=False):
-    acc_dtype = least_upper_dtype(self.dtype, dtypes.uint) if dtypes.is_unsigned(self.dtype) else \
-                least_upper_dtype(self.dtype, dtypes.int) if (dtypes.is_int(self.dtype) or self.dtype==dtypes.bool) else \
-                least_upper_dtype(self.dtype, dtypes.float)
+  def sum(self, axis=None, keepdim=False, acc_dtype=None):
+    if acc_dtype is None: acc_dtype = least_upper_dtype(self.dtype, dtypes.uint) if dtypes.is_unsigned(self.dtype) else \
+                                      least_upper_dtype(self.dtype, dtypes.int) if (dtypes.is_int(self.dtype) or self.dtype==dtypes.bool) else \
+                                      least_upper_dtype(self.dtype, dtypes.float)
     # cast back to float16 or bfloat16 to match torch / jax behavior, but we use float for acc
     output_dtype = self.dtype if self.dtype in (dtypes.float16, dtypes.bfloat16) else acc_dtype
     return self.cast(acc_dtype)._reduce(mlops.Sum, axis, keepdim).cast(output_dtype)
@@ -702,15 +702,16 @@ class Tensor:
 
     return (ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))).contiguous().contiguous_backward()
 
-  def dot(self, w:Tensor) -> Tensor:
+  def dot(self, w:Tensor, acc_dtype=None) -> Tensor:
     n1, n2 = len(self.shape), len(w.shape)
     assert n1 != 0 and n2 != 0, f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
     assert self.shape[-1] == w.shape[-min(n2, 2)], f"Input Tensor shapes {self.shape} and {w.shape} cannot be multiplied ({self.shape[-1]} != {w.shape[-min(n2, 2)]})"  # noqa: E501
     x = self.reshape(*self.shape[0:-1], *[1]*min(n1-1, n2-1, 1), self.shape[-1])
     w = w.reshape(*w.shape[0:-2], *[1]*min(n1-1, n2-1, 1), *w.shape[-min(n2, 2):]).transpose(-1, -min(n2, 2))
-    return (x*w).sum(-1).cast(least_upper_dtype(x.dtype, w.dtype))
+    return (x*w).sum(-1, acc_dtype=acc_dtype).cast(least_upper_dtype(x.dtype, w.dtype))
 
-  def matmul(self, x:Tensor, reverse=False) -> Tensor: return x.dot(self) if reverse else self.dot(x)
+  def matmul(self, x:Tensor, reverse=False, acc_dtype:Optional[DType]=None) -> Tensor:
+    return x.dot(self, acc_dtype=acc_dtype) if reverse else self.dot(x, acc_dtype=acc_dtype)
 
   def _cumsum(self, axis:int=0, _first_zero=False) -> Tensor:
     return self.transpose(axis,-1).pad2d((self.shape[axis]-int(not _first_zero),0))._pool((self.shape[axis],)).sum(-1).transpose(axis,-1)
@@ -806,7 +807,7 @@ class Tensor:
     if len(y.shape) < len(x.shape): y = y.reshape((1,) * (len(x.shape) - len(y.shape)) + y.shape)
     elif len(x.shape) < len(y.shape): x = x.reshape((1,) * (len(y.shape) - len(x.shape)) + x.shape)
 
-    broadcasted_shape = tuple(max(xi, yi) for xi, yi in zip(x.shape, y.shape))
+    broadcasted_shape = tuple(0 if xi==0 or yi==0 else max(xi, yi) for xi, yi in zip(x.shape, y.shape))
     return x.expand(broadcasted_shape), y.expand(broadcasted_shape)
 
   def _to_const_val(self, x:Union[Tensor, Scalar]) -> Union[Tensor, Scalar]:
@@ -914,6 +915,8 @@ class Tensor:
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training or p == 0: return self
     return self * (Tensor.rand(*self.shape, requires_grad=False, device=self.device) >= p) * (1/(1.0 - p))
+
+  def one_hot(self, num_classes:int, **kwargs) -> Tensor: return Tensor.where(self[..., None] == Tensor.arange(num_classes), 1, 0, **kwargs)
 
   def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Optional[Tensor]=None, dropout_p:float=0.0, is_causal:bool=False) -> Tensor:  # noqa: E501
     # NOTE: it works if key, value have symbolic shape
