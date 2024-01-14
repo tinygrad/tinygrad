@@ -537,10 +537,12 @@ class Tensor:
     assert all_int(self.shape), "does not support symbolic shape"
     out = self.sum(axis=axis, keepdim=keepdim)
     return out.mul(prod(out.shape)/prod(self.shape)) if 0 not in self.shape else out
-  def std(self, axis=None, keepdim=False, correction=1):
+  def var(self, axis=None, keepdim=False, correction=1):
     assert all_int(self.shape), "does not support symbolic shape"
     square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
-    return square_sum.div(prod(self.shape)/prod(square_sum.shape)-correction).sqrt()
+    return square_sum.div(prod(self.shape)/prod(square_sum.shape)-correction)
+  def std(self, axis=None, keepdim=False, correction=1): return self.var(axis, keepdim, correction).sqrt()
+
   def _softmax(self, axis):
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp()
