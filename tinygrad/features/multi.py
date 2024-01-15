@@ -75,10 +75,10 @@ class MultiLazyBuffer:
   def _shape_to_single_shard(self, shape): return tuple(s//len(self.lbs) if a == self.axis else s for a,s in enumerate(shape))
 
   def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> MultiLazyBuffer:
-    if self.pads is not None: new_shape = tuple(s + self.pads[a][1] if a == self.axis else s for a,s in enumerate(new_shape))
     if self.axis is not None and new_shape[self.axis] == 1:
       # all-reduce on sharded axes
       return MultiLazyBuffer(all_reduce([x.r(op, new_shape) for x in self.lbs]), None)
+    if self.pads is not None: new_shape = tuple(s + self.pads[a][1] if a == self.axis else s for a,s in enumerate(new_shape))
     # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
     return MultiLazyBuffer([x.r(op, self._shape_to_single_shard(new_shape)) for x in self.lbs], self.axis, self.pads)
 

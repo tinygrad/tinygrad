@@ -99,6 +99,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_matmul_shard_W_0(self): return self._test_matmul_shard_axis(None, 0, devices_2)
   def test_matmul_shard_W_1(self): return self._test_matmul_shard_axis(None, 1, devices_2)
   def test_matmul_shard_uneven_X_0(self): return self._test_matmul_shard_axis(0, None, devices_3)
+  def test_matmul_shard_uneven_X_1(self): return self._test_matmul_shard_axis(1, None, devices_3)
 
   def test_matmul_shard_0_0(self): return self._test_matmul_shard_axis(0, 0, devices_2)
   def test_matmul_shard_0_1(self): return self._test_matmul_shard_axis(0, 1, devices_2)
