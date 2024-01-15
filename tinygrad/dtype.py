@@ -33,7 +33,7 @@ class PtrDType(DType):
   def __repr__(self): return f"ptr.{super().__repr__()}"
   def __hash__(self): return super().__hash__()
   def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.sz==dt.sz
-  def __ne__(self, dt): return self.priority!=dt.priority or self.itemsize!=dt.itemsize or self.name!=dt.name or self.sz==dt.sz
+  def __ne__(self, dt): return self.priority!=dt.priority or self.itemsize!=dt.itemsize or self.name!=dt.name or self.sz!=dt.sz
 
 class dtypes:
   @staticmethod
