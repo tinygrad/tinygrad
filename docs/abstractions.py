@@ -146,8 +146,7 @@ assert result.lazydata.base.realized is not None, "the LazyBuffer is realized!"
 assert isinstance(result.lazydata.base.realized, Buffer)
 assert result.lazydata.base.realized.device == "CLANG"
 # getting ahead of ourselves, but we can move the Buffer to CPU
-out = memoryview(bytearray(4))
-result.lazydata.base.realized.copyout(out)
+out = result.lazydata.base.realized.as_buffer().cast('I')
 assert out[0] == 5, "when put in numpy with toCPU, it's 5"
 
 # %%

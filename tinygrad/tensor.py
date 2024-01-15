@@ -142,9 +142,7 @@ class Tensor:
   def _data(self) -> memoryview:
     if 0 in self.shape: return memoryview(bytearray(0))
     t = self if isinstance(self.device, str) else self.to("CPU")   # deal with multitensor
-    buffer = cast(Buffer, t.contiguous().realize().lazydata.base.realized)
-    buffer.copyout(mv := memoryview(bytearray(buffer.size*buffer.dtype.itemsize)))
-    return mv
+    return cast(Buffer, t.contiguous().realize().lazydata.base.realized).as_buffer()
 
   def numpy(self) -> np.ndarray:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
