@@ -146,11 +146,11 @@ class Tensor:
   def data(self) -> memoryview:
     assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return self._data().cast(self.dtype.fmt, self.shape)
+    return self._data().cast(self.dtype.fmt, self.shape if len(self.shape) else (1,))
   def item(self) -> Scalar:
+    assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert self.numel() == 1, "must have one element for item"
-    return self.data()[0]
-
+    return self._data().cast(self.dtype.fmt)[0]
   def numpy(self) -> np.ndarray:
     assert self.dtype.np is not None, f"no np dtype for {self.dtype}"
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
