@@ -52,13 +52,12 @@ class Dreamer:
         metrics = {}
         post, context, mets = self.world_model.train(data)
         metrics.update(mets)
-        start = post
 
         def reward(f, s, a):
             embed = self.world_model.dynamics.get_feat(s)
             return self.world_model.heads["reward"](embed).mode.squeeze(-1)
 
-        metrics.update(self.actor_critic.train(start, reward)[-1])
+        metrics.update(self.actor_critic.train(post, reward)[-1])
         for name, value in metrics.items():
             value = value.item()
             if name not in self._metrics.keys():
@@ -126,7 +125,6 @@ def main():
             eval_policy = partial(agent, training=False)
             simulate(eval_policy, eval_envs, eval_eps, config.evaldir, logger, is_eval=True, episodes=config.eval_episode_num)
             if config.video_pred_log:
-                print(len(list(eval_dataset)))
                 video = agent.world_model.video_pred(next(eval_dataset)).numpy()
                 logger.video("eval_openl", video)
         print("Start training.")

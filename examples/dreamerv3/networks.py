@@ -534,22 +534,6 @@ class RSSM:
             dist = distributions.ContDist(distributions.Independent(distributions.Normal(mean, std), 1))
         return dist
 
-    @staticmethod
-    # @TinyJit
-    def _obs_step(rssm: "RSSM", prev_action, embed, sample=True, **prev_state):
-        prior = rssm.img_step(prev_state, prev_action)
-        x = Tensor.cat(prior["deter"], embed, dim=-1)
-        # (batch_size, prior_deter + embed) -> (batch_size, hidden)
-        x = x.sequential(rssm._obs_out_layers)
-        # (batch_size, hidden) -> (batch_size, stoch, discrete_num)
-        stats = rssm._suff_stats_layer("obs", x)
-        if sample:
-            stoch = rssm.get_dist(stats).sample()
-        else:
-            stoch = rssm.get_dist(stats).mode
-        post = {"stoch": stoch.realize(), "deter": prior["deter"].realize(), **stats}
-        return post, prior
-
     def obs_step(self, prev_state, prev_action, embed, is_first, sample=True):
         B = is_first.shape[0]
         # initialize all prev_state
@@ -567,7 +551,19 @@ class RSSM:
                     is_first.shape + (1,) * (len(val.shape) - len(is_first.shape)),
                 )
                 prev_state[key] = val * (1.0 - is_first_r) + init_state[key] * is_first_r
-        return self._obs_step(self, prev_action, embed, sample, **prev_state)
+
+        prior = self.img_step(prev_state, prev_action)
+        x = Tensor.cat(prior["deter"], embed, dim=-1)
+        # (batch_size, prior_deter + embed) -> (batch_size, hidden)
+        x = x.sequential(self._obs_out_layers)
+        # (batch_size, hidden) -> (batch_size, stoch, discrete_num)
+        stats = self._suff_stats_layer("obs", x)
+        if sample:
+            stoch = self.get_dist(stats).sample()
+        else:
+            stoch = self.get_dist(stats).mode
+        post = {"stoch": stoch.realize(), "deter": prior["deter"].realize(), **stats}
+        return post, prior
 
     def img_step(self, prev_state, prev_action, sample=True):
         # (batch, stoch, discrete_num)

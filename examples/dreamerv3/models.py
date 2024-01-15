@@ -178,7 +178,6 @@ class WorldModel:
         init = {k: v[:, -1] for k, v in states.items()}
         prior = model.dynamics.imagine_with_action(data["action"][:6, 5:], init)
         openl = model.heads["decoder"](model.dynamics.get_feat(prior))["image"].mode
-        # observed image is given until 5 steps
         model = Tensor.cat(recon[:, :5], openl, dim=1)
         truth = data["image"][:6]
         error = (model - truth + 1.0) / 2.0
