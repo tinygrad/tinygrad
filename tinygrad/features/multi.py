@@ -9,49 +9,42 @@ from tinygrad.shape.shapetracker import ShapeTracker, sint
 
 def all_reduce(lbs):
   # TODO: replace this with ring reduce
-  print("multi all-reduce")
   return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
 
 def to_sharded(lbs:List[LazyBuffer], axis:int) -> List[LazyBuffer]:
-  print(f"to_sharded lbs {lbs}")
-  print(f"to_sharded axis {axis}")
-  # print(f"{lbs[0].shape[axis]}")
-  # print(f"{len(lbs)}")
   assert lbs[0].shape[axis] % len(lbs) == 0, f"{lbs[0].shape=} {axis=} {len(lbs)=}"
   sz = lbs[0].shape[axis] // len(lbs)
   return [lb.shrink(tuple((0,s) if a != axis else (sz*i,sz*(i+1)) for a,s in enumerate(lb.shape))) for i,lb in enumerate(lbs)]
 
 class MultiLazyBuffer:
   # add flag
-  def __init__(self, lbs:List[LazyBuffer], axis:Optional[int], pads:Optional[List[tuple]]=None):
+  def __init__(self, lbs:List[LazyBuffer], axis:Optional[int], pads:Optional[tuple[tuple]]=None):
     assert all(isinstance(x, LazyBuffer) for x in lbs) and len(lbs) >= 2, "all lbs must be LazyBuffers, and we need at least two of them"
     assert all_same([(x.shape, x.dtype, x.st) for x in lbs]), "all multilazybuffer needs same shape, dtype, and st"
     self.lbs, self.axis, self.dtype, self.device, self.pads = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs), pads
-    # self.shape = tuple(s*len(self.lbs) if a == self.axis else s for a,s in enumerate(lbs[0].shape))
     self.shape = tuple(s*len(self.lbs) - (pads[a][1] if pads is not None else 0) if a == self.axis else s for a,s in enumerate(lbs[0].shape))
 
   def __repr__(self):
-    return f"<MLB{chr(10)}{chr(10).join([f'{x.device} {x.st} ' for x in self.lbs])}padding {self.pads}>"
+    return f"<MLB{chr(10)}{chr(10).join([f'{x.device} {x.st} ' for x in self.lbs])}pads {self.pads}>"
 
   @staticmethod
   def from_sharded(lb:LazyBuffer, devices:Tuple[str, ...], axis:Optional[int]=None):
     pads = None
     if axis is not None and lb.shape[axis] % len(devices) != 0:
-      p = len(devices)*(lb.shape[axis]//len(devices)+1) - lb.shape[axis]
+      p = len(devices) * (lb.shape[axis] // len(devices) + 1) - lb.shape[axis]
       pads = tuple((0,0) if a != axis else (0,p) for a in range(len(lb.shape)))
       lb = lb.pad(pads)
     lbs = [lb.contiguous() if lb.base != lb else lb] * len(devices)
     return MultiLazyBuffer([lb.copy_to_device(d).contiguous() for lb,d in zip(to_sharded(lbs, axis) if axis is not None else lbs, devices)], axis, pads)
 
   def copy_to_device(self, device:str) -> LazyBuffer:
-    print(f"copy to device {self.pads}")
     if self.axis is None: return self.lbs[0].copy_to_device(device)
     sz = self.lbs[0].shape[self.axis]
     llbs = []
     for i,lb in enumerate([lb.copy_to_device(device) for lb in self.lbs]):
       pad_arg = tuple((0,0) if a != self.axis else (sz*i,(s*len(self.lbs))-sz*(i+1)) for a,s in enumerate(lb.shape))
       llbs.append(lb.pad(pad_arg))
-    if self.pads is not None: 
+    if self.pads is not None:
       shrink_arg = tuple((0, s) for s in self.shape)
       return functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), llbs).shrink(shrink_arg)
     return functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), llbs)
@@ -67,10 +60,6 @@ class MultiLazyBuffer:
 
   # elementwise is simple
   def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:MultiLazyBuffer, arg:Optional[Any]=None) -> MultiLazyBuffer:
-    print("multi e")
-    print(f"multi e op {op}")
-    print(f"multi e self {self}")
-    print(f"multi e in_srcs {in_srcs}")
     if self.pads is not None: in_srcs = tuple(src.pad(self.pads) for src in in_srcs)
     msrcs = (self,)+in_srcs
     assert all(isinstance(x, MultiLazyBuffer) for x in msrcs), f"all buffers must be MultiLazyBuffer {msrcs}"
@@ -79,30 +68,17 @@ class MultiLazyBuffer:
     # NOTE: they all have to share an axis, we always choose [-1]
     axis = axes[-1] if len(axes := dedup([x.axis for x in msrcs if x.axis is not None])) else None
     srcs = []
-    print(f"multi e axis {axis}")
     for mlb in msrcs:
-      print(mlb.lbs)
-      print(mlb.axis)
       if mlb.axis == axis: srcs.append(mlb.lbs)
-      elif mlb.axis is None and axis is not None: 
+      elif mlb.axis is None and axis is not None:
         srcs.append(to_sharded(mlb.lbs, axis))
       else: srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.lbs], axis))
-    print(srcs)
     return MultiLazyBuffer([lsrcs[0].e(op, *lsrcs[1:], arg=arg) for lsrcs in zip(*srcs)], axis, self.pads)
 
-  def _shape_to_single_shard(self, shape): 
-    print(self.axis)
-    print(self.pads)
-    print(shape)
-    return tuple(s//len(self.lbs) if a == self.axis else s for a,s in enumerate(shape))
+  def _shape_to_single_shard(self, shape): return tuple(s//len(self.lbs) if a == self.axis else s for a,s in enumerate(shape))
 
   def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> MultiLazyBuffer:
-    print("multi r")
-    print(self.axis)
-    print(new_shape)
-
     if self.pads is not None: new_shape = tuple(s + self.pads[a][1] if a == self.axis else s for a,s in enumerate(new_shape))
-
     if self.axis is not None and new_shape[self.axis] == 1:
       # all-reduce on sharded axes
       return MultiLazyBuffer(all_reduce([x.r(op, new_shape) for x in self.lbs]), None)
@@ -112,9 +88,6 @@ class MultiLazyBuffer:
   # *** movement ops ***
 
   def reshape(self, arg:Tuple[sint, ...]):
-    # print(f"multi reshape self {self}")
-    # print(f"multi reshape arg {arg}")
-    # print(f"multi reshape pad {self.pad}")
     if self.axis is None: return MultiLazyBuffer([x.reshape(arg) for x in self.lbs], None)
     # TODO: this can be wrong
     new_pad = None
@@ -132,9 +105,6 @@ class MultiLazyBuffer:
     assert self.axis is None or arg[self.axis] == (0,0), "padding not supported on sharded axis"
     return MultiLazyBuffer([x.pad(arg) for x in self.lbs], self.axis)
   def expand(self, arg:Tuple[sint, ...]):
-    print(f"multi expand self {self}")
-    print(f"multi expand axis {self.axis}")
-    print(f"multi expand arg {arg}")
     if self.pads is not None:
       arg = tuple(s+self.pads[a][1] if a == self.axis else s for a,s in enumerate(arg))
     # NOTE: this assert isn't needed, sharded axis can have dim 1

@@ -164,7 +164,6 @@ class Max(Function):
 # NOTE: this is sum in reverse
 class Expand(Function):
   def forward(self, x:LazyBuffer, shape:Tuple[int, ...]) -> LazyBuffer:
-    print(f"mlops x {x}")
     self.input_shape = x.shape
     return x.expand(shape)
 
