@@ -21,11 +21,12 @@ def train_unet3d():
   epochs = getenv("NUM_EPOCHS", 4000)
   bs = getenv("BS", 2)
   lr = getenv("LR", 0.8)
+  momentum = getenv("MOMENTUM", 0.9)
   lr_warmup_epochs = getenv("LR_WARMUP_EPOCHS", 200)
   lr_warmup_init_lr = getenv("LR_WARMUP_INIT_LR", 0.0001)
 
   model = UNet3D()
-  optim = nn.optim.SGD(nn.state.get_parameters(model), lr=1.0, momentum=0.9, nesterov=True)
+  optim = nn.optim.SGD(nn.state.get_parameters(model), lr=lr, momentum=momentum, nesterov=True)
 
   def _lr_warm_up(optim, init_lr, lr, current_epoch, warmup_epochs):
     scale = current_epoch / warmup_epochs
