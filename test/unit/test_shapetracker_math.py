@@ -22,7 +22,7 @@ def st_equal(st1, st2) -> bool:
   idx = Variable("idx", 0, prod(st1.shape)-1)
   st1_idx, st1_valid = st1.expr_node(idx)
   st2_idx, st2_valid = st2.expr_node(idx)
-  for i in range(idx.min, idx.max):
+  for i in range(idx.min, idx.max + 1):
     st1_off = sym_infer(st1_idx, {idx: i})
     st2_off = sym_infer(st2_idx, {idx: i})
     st1_v = sym_infer(st1_valid, {idx: i})
@@ -57,7 +57,7 @@ class TestShapeTrackerBasics(unittest.TestCase):
 
   def test_simplify_is_correct(self):
     multiv = ShapeTracker(views=(View(shape=(15, 3), strides=(9, 1), offset=6, mask=None, contiguous=False),
-                                 View(shape=(4, 3), strides=(12, 4), offset=0, mask=None, contiguous=False)), size=15*3)
+                                 View(shape=(4, 3), strides=(12, 4), offset=0, mask=None, contiguous=False)))
     assert st_equal(multiv, multiv.simplify())
 
 class TestShapeTrackerAdd(unittest.TestCase):
@@ -84,6 +84,13 @@ class TestShapeTrackerAdd(unittest.TestCase):
     st.reshape( (4, 3) )
     assert st_equal(backup + st.sts[1], st.sts[0])
 
+  def test_off_by_one(self):
+    st1 = ShapeTracker(views=(View(shape=(5,), strides=(1,), offset=0, mask=None, contiguous=True),
+                              View(shape=(5,), strides=(1,), offset=0, mask=None, contiguous=True)))
+    st2 = ShapeTracker(views=(View(shape=(4,), strides=(1,), offset=0, mask=None, contiguous=True),
+                              View(shape=(5,), strides=(1,), offset=0, mask=None, contiguous=True)))
+    assert not (st_equal(st1, st2))
+
 class TestShapeTrackerAddVariable(unittest.TestCase):
   def test_self_add(self):
     j = Variable("j", 0, 20).bind(10)
@@ -104,7 +111,7 @@ class TestShapeTrackerAddVariable(unittest.TestCase):
     var_j = Variable('i', 1, 10)
     vm1 = View(shape=(var_i, var_j, 3), strides=(3, 0, 1), offset=0, mask=None, contiguous=False)
     vm2 = View(shape=(var_i, var_j, 3), strides=(var_j*3, 3, 1), offset=0, mask=None, contiguous=True)
-    ShapeTracker((vm1,), prod((var_i, var_j, 3))) + ShapeTracker((vm2,), prod((var_i, var_j, 3)))
+    ShapeTracker((vm1,)) + ShapeTracker((vm2,))
 
   @unittest.skip("two vars not supported")
   def test_merge_symbolic_views_2(self):

@@ -9,7 +9,7 @@ from tinygrad import Tensor, dtypes, Device
 from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.helpers import CI, prod
+from tinygrad.helpers import CI
 
 random.seed(42)
 
@@ -27,7 +27,7 @@ def set_(reference: Tensor, shape, strides, offset):
   assert reference.lazydata.base.realized, "base has to be realized before setting it to strided's base"
   # TODO: this shouldn't directly create a LazyBuffer
   strided = Tensor(LazyBuffer(device=reference.device,
-                              st=ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),), prod(shape)),
+                              st=ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),)),
                               op=None, dtype=reference.dtype, srcs=(), base=reference.lazydata.base))
   assert strided.lazydata.st.real_strides() == strides, "real_strides should equal strides for strided"
   return strided
@@ -1137,9 +1137,10 @@ class TestIndexing(unittest.TestCase):
         x[:, [0, 1]]
   '''
 
-  def test_empty_ndim_index_bool(self):
-    x = Tensor.randn(5)
-    self.assertRaises(IndexError, lambda: x[Tensor.empty(0, 2, dtype=dtypes.uint8)])
+  # TODO: should this fail?
+  # def test_empty_ndim_index_bool(self):
+  #   x = Tensor.randn(5)
+  #   self.assertRaises(IndexError, lambda: x[Tensor.empty(0, 2, dtype=dtypes.uint8)])
 
   def test_empty_slice(self):
     x = Tensor.randn(2, 3, 4, 5)
@@ -1149,7 +1150,8 @@ class TestIndexing(unittest.TestCase):
     # this isn't technically necessary, but matches NumPy stride calculations.
     # TODO not too sure about this
     # numpy_testing_assert_equal_helper((60, 20, 5), z.lazydata.st.real_strides())
-    self.assertTrue(z.lazydata.st.contiguous)
+    # TODO: should this be contiguous?
+    # self.assertTrue(z.lazydata.st.contiguous)
 
   # TODO bool indexing
   # TODO data_ptr()

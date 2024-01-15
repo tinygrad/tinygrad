@@ -87,10 +87,7 @@ class TestLinearizer(unittest.TestCase):
       if tc.arch is not None and tc.arch != os.uname().machine: continue
       a, b = Tensor.rand(tc.dims[0], tc.dims[2], dtype=tc.dtype_in), Tensor.rand(tc.dims[2], tc.dims[1], dtype=tc.dtype_in)
       np_a, np_b = a.numpy(), b.numpy()
-      if tc.dtype_out != tc.dtype_in:
-        r = (a.reshape(tc.dims[0], 1, tc.dims[2]) * b.permute(1,0).reshape(1, tc.dims[1], tc.dims[2])).cast(tc.dtype_out).sum(axis=2)
-      else:
-        r = a @ b
+      r = a.matmul(b, acc_dtype=tc.dtype_out)
       realized_ast, _ = helper_realized_ast(r)
       k = Linearizer(realized_ast)
       k.apply_tensor_cores(1)
@@ -117,9 +114,9 @@ class TestLinearizer(unittest.TestCase):
   def test_simplify_uop(self):
     def helper_test_simplify(uop, dtype, vin, arg=None):
       ast = LazyOp(BufferOps.CONST, (),
-                   ConstBuffer(42, dtypes.float, ShapeTracker((View(shape=(), strides=(), offset=0, mask=None, contiguous=True),), 1)))
+                   ConstBuffer(42, dtypes.float, ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
       ast = LazyOp(BufferOps.STORE, (ast,),
-                   MemBuffer(0, dtypes.float, ShapeTracker((View(shape=(), strides=(), offset=0, mask=None, contiguous=True),), 1)))
+                   MemBuffer(0, dtypes.float, ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),))))
       lin = Linearizer(ast=ast) # this is a dummy ast
 
       lin.uops = []
@@ -380,13 +377,13 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
     prg = to_prg(k)
     real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
     prg.exec(real_bufs)
-    np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
+    np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=1e-4, rtol=1e-4)
 
   # Get baseline, which is not optimized at all.
   k = Linearizer(realized_ast)
   prg = Device[Device.DEFAULT].to_program(k)
   prg.exec(real_bufs)
-  wanna_output = real_bufs[0].toCPU().copy()
+  wanna_output = np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np).copy()
 
   # Check correctness of handcoded optimiztions.
   k = Linearizer(realized_ast)
@@ -394,7 +391,7 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
   prg = Device[Device.DEFAULT].to_program(k)
   real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
   prg.exec(real_bufs)
-  np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
+  np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=1e-4, rtol=1e-4)
   for x in opts: # Check custom transformations if any.
     check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_program)
 

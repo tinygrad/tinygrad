@@ -79,8 +79,7 @@ def llama_generate(
   outputted = llama.tokenizer.decode(toks)
   init_length = len(outputted)
   for _ in range(max_tokens):
-    probs_np = llama.model(Tensor([toks[start_pos:]]), start_pos, temperature).numpy()
-    token = int(np.random.choice(len(probs_np), p=probs_np))
+    token = llama.model(Tensor([toks[start_pos:]]), start_pos, temperature).item()
     start_pos = len(toks)
     toks.append(token)
 
