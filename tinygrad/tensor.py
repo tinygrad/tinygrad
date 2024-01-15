@@ -154,7 +154,7 @@ class Tensor:
   def data(self) -> memoryview: return self.numpy().data
   def item(self) -> Scalar:
     assert self.numel() == 1, "must have one element for item"
-    return self.numpy().flatten()[0]
+    return self.numpy().item()
 
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self
