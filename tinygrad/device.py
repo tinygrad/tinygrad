@@ -113,12 +113,9 @@ def _internal_buffer_copy(dest:Buffer, src:Buffer):
   elif hasattr(dest.allocator, 'as_buffer'):
     # fast(ish) path, uses readinto in diskbuffers
     src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
-  elif hasattr(src.allocator, 'as_buffer'):
-    dest.allocator.copyin(dest._buf, src.allocator.as_buffer(src._buf))
   else:
-    # slow path, allocates a CPU buffer
-    src.copyout(mv := memoryview(bytearray(src.size*src.dtype.itemsize)))
-    dest.copyin(mv)
+    # may allocate a CPU buffer depending on allow_zero_copy
+    dest.copyin(src.as_buffer(allow_zero_copy=True))
 
 class _BufferCopy(JITRunner):
   # TODO: make wait work

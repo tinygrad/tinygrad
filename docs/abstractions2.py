@@ -67,10 +67,7 @@ print(fxn.prg)
 fxn.exec([out, a, b])
 
 # check the data out
-mv = memoryview(bytearray(struct.pack("I", 0))).cast('I')
-out.copyout(mv)
-print(val:=mv[0])
-assert val == 5
+assert out.as_buffer().cast('I')[0] == 5
 
 
 print("******** third, the LazyBuffer ***********")
@@ -102,9 +99,7 @@ print_tree(sched[-1].ast)
 run_schedule(sched)
 
 # check the data out
-mv = memoryview(bytearray(struct.pack("I", 0))).cast('I')
-out.realized.copyout(mv)
-assert mv[0] == 5
+assert out.realized.as_buffer().cast('I')[0] == 5
 
 
 print("******** fourth, the Tensor ***********")
