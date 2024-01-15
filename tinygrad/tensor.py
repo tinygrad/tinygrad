@@ -286,7 +286,7 @@ class Tensor:
     self.grad = Tensor(1.0, device=self.device, requires_grad=False)
 
     for t0 in reversed(self.deepwalk()):
-      assert (t0.grad is not None)
+      if t0.grad is None: raise RuntimeError("tensor has no grad")
       grads = t0._ctx.backward(t0.grad.lazydata)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
