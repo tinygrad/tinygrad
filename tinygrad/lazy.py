@@ -1,6 +1,5 @@
 from __future__ import annotations
 import sys, math
-import numpy as np
 from collections import defaultdict
 from typing import Union, Optional, Any, Tuple, List, Set, Dict, DefaultDict, cast
 from tinygrad.dtype import dtypes, DType, ImageDType
@@ -76,12 +75,6 @@ class LazyBuffer:
   def is_unrealized_contiguous_const(self): return self.base == self and not self.base.realized and self.op is LoadOps.CONST
 
   def schedule(self, seen=None): return create_schedule([self], seen)
-
-  @staticmethod
-  def fromCPU(x: np.ndarray) -> LazyBuffer:
-    ret = LazyBuffer("CPU", ShapeTracker.from_shape(x.shape), dtypes.from_np(x.dtype), op=LoadOps.EMPTY)
-    ret.realized = Buffer("CPU", x.size, dtypes.from_np(x.dtype), x.flatten())
-    return ret
 
   def copy_to_device(self, device:str) -> LazyBuffer:
     # no COPY
