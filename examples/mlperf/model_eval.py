@@ -14,13 +14,14 @@ def eval_resnet():
   # Resnet50-v1.5
   from extra.models.resnet import ResNet50
   tlog("imports")
-  Device.DEFAULT
+  GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 6))]
+  for x in GPUS: Device[x]
   tlog("got devices")    # NOTE: this is faster with rocm-smi running
 
   class ResnetRunner:
     def __init__(self, device=None):
       self.mdl = ResNet50()
-      for x in get_parameters(self.mdl) if device else []: x.shard_(device)
+      for x in get_parameters(self.mdl) if device else []: x.to_(device)
       if (fn:=getenv("RESNET_MODEL", "")): load_state_dict(self.mdl, safe_load(fn))
       else: self.mdl.load_from_pretrained()
       self.input_mean = Tensor([0.485, 0.456, 0.406], device=device).reshape(1, -1, 1, 1)
@@ -31,7 +32,6 @@ def eval_resnet():
       x /= self.input_std
       return self.mdl(x).argmax(axis=1).realize()
 
-  GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 6))]
   mdl = ResnetRunner(GPUS)
   tlog("loaded models")
 
