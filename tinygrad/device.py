@@ -79,9 +79,10 @@ class Buffer:
     if isinstance(self.dtype, ImageDType): self.allocator.free(self._buf, self.dtype)
     else: self.allocator.free(self._buf, self.size * self.dtype.itemsize)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}>"
-  def as_buffer(self, allow_zero_copy=False) -> memoryview:
+  def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
-    if allow_zero_copy and hasattr(self.allocator, 'as_buffer'): return self.allocator.as_buffer(self._buf)
+    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, 'as_buffer'): return self.allocator.as_buffer(self._buf)
+    assert not force_zero_copy, "force zero copy was passed, but copy is required"
     return self.copyout(memoryview(bytearray(self.size*self.dtype.itemsize)))
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)

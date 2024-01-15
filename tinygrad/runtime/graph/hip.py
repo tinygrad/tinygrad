@@ -1,7 +1,9 @@
 import ctypes
-from typing import Tuple
+from typing import Tuple, List, Dict, Optional
 import gpuctypes.hip as hip
 from tinygrad.helpers import init_c_var
+from tinygrad.device import Buffer
+from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_hip import check, hip_time_execution
 from tinygrad.runtime.graph.cuda import CUDAGraph
 
@@ -9,7 +11,9 @@ class HIPGraph(CUDAGraph):
   def __del__(self):
     check(hip.hipGraphDestroy(self.graph))
     check(hip.hipGraphExecDestroy(self.instance))
-
+  def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+    check(hip.hipSetDevice(self.device))
+    return super().__call__(input_rawbuffers, var_vals, wait, jit)
   def encode_args_info(self): return (hip.hipDeviceptr_t, (1,2,3))
   def graph_create(self): return init_c_var(hip.hipGraph_t(), lambda x: check(hip.hipGraphCreate(ctypes.byref(x), 0)))
   def graph_instantiate(self, graph):
