@@ -1,39 +1,39 @@
-from typing import NamedTuple, Final, Optional, ClassVar, Set, Tuple, Dict
+from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Any
+from dataclasses import dataclass, field
 import numpy as np  # TODO: remove numpy
 import functools
 
-# TODO: migrate this from NamedTuple -> dataclass
-class DType(NamedTuple):
+@dataclass(frozen=True, order=True)
+class DType:
   priority: int  # this determines when things get upcasted
   itemsize: int
   name: str
-  np: Optional[type]  # TODO: someday this will be removed with the "remove numpy" project
+  np: Optional[type] = field(default=None, compare=False)  # TODO: someday this will be removed with the "remove numpy" project
   sz: int = 1
-  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self]}" if self.sz == 1 else f"dtypes._{INVERSE_DTYPES_DICT[self.scalar()]}{self.sz}"
+  def __repr__(self): return f"dtypes.{'_'*(c:=self.sz!=1)}{INVERSE_DTYPES_DICT[self.name if not c else self.scalar().name]}{str(self.sz)*c}"
   def vec(self, sz:int):
     assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
-    return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self]}{sz}", None, sz)
+    return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
   def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
 
 # dependent typing?
+@dataclass(frozen=True, repr=False)
 class ImageDType(DType):
-  def __new__(cls, priority, itemsize, name, np, shape, base):
-    return super().__new__(cls, priority, itemsize, name, np)
-  def __init__(self, priority, itemsize, name, np, shape, base):
-    self.shape: Tuple[int, ...] = shape  # arbitrary arg for the dtype, used in image for the shape
-    self.base: DType = base
-    super().__init__()
+  shape: Tuple[int, ...] = (0,)  # arbitrary arg for the dtype, used in image for the shape
+  base: Any = field(default=None, hash=False)
+  def __post_init__(self):
+    if not isinstance(self.base, DType): raise ValueError("base is not a valid dtype")
   def scalar(self): return self.base
   def vec(self, sz:int): return self.base.vec(sz)
   def __repr__(self): return f"dtypes.{self.name}({self.shape})"
-  # TODO: fix this to not need these
-  def __hash__(self): return hash((super().__hash__(), self.shape))
-  def __eq__(self, x): return super().__eq__(x) and self.shape == x.shape
-  def __ne__(self, x): return super().__ne__(x) or self.shape != x.shape
 
+# @dataclass(frozen=True, init=False, repr=False, eq=False)
 class PtrDType(DType):
-  def __new__(cls, dt:DType): return super().__new__(cls, dt.priority, dt.itemsize, dt.name, dt.np, dt.sz)
+  def __init__(self, dt:DType): super().__init__(dt.priority, dt.itemsize, dt.name, dt.np, dt.sz)
   def __repr__(self): return f"ptr.{super().__repr__()}"
+  def __hash__(self): return super().__hash__()
+  def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.sz==dt.sz
+  def __ne__(self, dt): return self.priority!=dt.priority or self.itemsize!=dt.itemsize or self.name!=dt.name or self.sz!=dt.sz
 
 class dtypes:
   @staticmethod
@@ -70,9 +70,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shp, dtypes.float32)
+  def imageh(shp): return ImageDType(100, 2, "imageh", np.float16, shape=shp, base=dtypes.float32)
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shp, dtypes.float32)
+  def imagef(shp): return ImageDType(100, 4, "imagef", np.float32, shape=shp, base=dtypes.float32)
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32
@@ -94,4 +94,4 @@ def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else 
 
 # HACK: staticmethods are not callable in 3.8 so we have to compare the class
 DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if not (k.startswith(('__', 'default')) or v.__class__ is staticmethod)}
-INVERSE_DTYPES_DICT = {v:k for k,v in DTYPES_DICT.items()}
+INVERSE_DTYPES_DICT = {v.name:k for k,v in DTYPES_DICT.items()}
