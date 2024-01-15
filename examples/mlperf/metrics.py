@@ -30,27 +30,8 @@ def word_error_rate(x, y):
   return float(scores) / words, float(scores), words
 
 def one_hot(arr, num_classes=3, channel_axis=1):
-  def _unshard_reshape_shard(x):
-    from tinygrad.helpers import getenv
-    if (gpus:=getenv("GPUS")) > 1:
-      from tinygrad import Device
-      x = x.to(Device.DEFAULT)
-      x = x.reshape(-1)
-      return x.shard_([f"GPU:{i}" for i in range(gpus)])
-    return x
-
   if len(arr.shape) >= 5: arr = arr.squeeze(dim=channel_axis)
-  arr_reshape = _unshard_reshape_shard(arr)
-  res = Tensor.eye(num_classes)
-  from tinygrad.helpers import getenv
-  arr_reshape = arr
-  if (gpus:=getenv("GPUS")) > 1:
-    from tinygrad import Device
-    arr_reshape = arr_reshape.to(Device.DEFAULT)
-    arr_reshape = arr_reshape.reshape(-1)
-    arr_reshape.shard_([f"GPU:{i}" for i in range(gpus)])
-    res.shard_([f"GPU:{i}" for i in range(gpus)])
-  res = res[arr_reshape]
+  res = Tensor.eye(num_classes)[arr.reshape(-1)]
   arr = res.reshape(list(arr.shape) + [num_classes])
   arr = arr.permute((0, 4, 1, 2, 3)).cast(dtypes.float)
   return arr
@@ -67,12 +48,6 @@ def dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-
   target_sum = target.sum(axis=reduce_axis)
   prediction_sum = prediction.sum(axis=reduce_axis)
   result = (2.0 * intersection + smooth_nr) / (target_sum + prediction_sum + smooth_dr)
-  from tinygrad.helpers import getenv
-  if (gpus:=getenv("GPUS")) > 1:
-    from tinygrad import Device
-    result = result.to(Device.DEFAULT)
-    result = result[0]
-    result.shard_([f"GPU:{i}" for i in range(gpus)])
   return result[0]
 
 def normalize_string(s):
