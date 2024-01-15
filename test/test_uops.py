@@ -28,10 +28,12 @@ def _test_single_value(vals, op, dts):
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype)
-  buf2 = [Buffer.fromCPU(Device.DEFAULT, np.array([a], dtype=dtype.np)) for a,dtype in zip(vals, dts)]
+  buf2 = [Buffer(Device.DEFAULT, 1, dtype).copyin(np.array([a], dtype=dtype.np).data) for a,dtype in zip(vals, dts)]
   prg = _uops_to_prg(uops)
   prg.exec([buf]+buf2)
-  return buf.toCPU()[0]
+  ret = np.empty(1, output_dtype.np)
+  buf.copyout(ret.data)
+  return ret[0]
 
 def _test_single_value_const(vals, op, dts):
   uops = []
@@ -43,7 +45,9 @@ def _test_single_value_const(vals, op, dts):
   buf = Buffer(Device.DEFAULT, 1, output_dtype)
   prg = _uops_to_prg(uops)
   prg.exec([buf])
-  return buf.toCPU()[0]
+  ret = np.empty(1, output_dtype.np)
+  buf.copyout(ret.data)
+  return ret[0]
 
 class TestUOps(unittest.TestCase):
   def _equal(self, v1, v2):

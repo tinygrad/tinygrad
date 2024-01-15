@@ -146,7 +146,8 @@ assert result.lazydata.base.realized is not None, "the LazyBuffer is realized!"
 assert isinstance(result.lazydata.base.realized, Buffer)
 assert result.lazydata.base.realized.device == "CLANG"
 # getting ahead of ourselves, but we can move the Buffer to CPU
-assert result.lazydata.base.realized.toCPU()[0] == 5, "when put in numpy with toCPU, it's 5"
+out = result.lazydata.base.realized.as_buffer().cast('I')
+assert out[0] == 5, "when put in numpy with toCPU, it's 5"
 
 # %%
 # == Union[Interpreted, Compiled] (in tinygrad/device.py, code 6/10) ==

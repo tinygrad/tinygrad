@@ -139,18 +139,20 @@ class Tensor:
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
 
   # TODO: these are good places to start removing numpy
-  def item(self) -> Scalar:
-    assert self.numel() == 1, "must have one element for item"
-    return cast(Buffer, self.contiguous().realize().lazydata.base.realized).toCPU().item()
-  def data(self) -> memoryview: return self.numpy().data
+  def _data(self) -> memoryview:
+    if 0 in self.shape: return memoryview(bytearray(0))
+    t = self if isinstance(self.device, str) else self.to("CPU")   # deal with multitensor
+    return cast(Buffer, t.cast(t.dtype.scalar()).contiguous().realize().lazydata.base.realized).as_buffer()
 
-  # TODO: this should import numpy and use .data() to construct the array
   def numpy(self) -> np.ndarray:
     assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
     assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
-    if 0 in self.shape: return np.zeros(self.shape, dtype=self.dtype.np)
-    t = self if isinstance(self.device, str) else self.to("CPU")
-    return t.cast(self.dtype.scalar()).contiguous().realize().lazydata.base.realized.toCPU().astype(self.dtype.np, copy=True).reshape(self.shape)
+    return np.frombuffer(self._data(), dtype=self.dtype.np).reshape(self.shape)
+  # TODO: numpy is only used here to get the memoryview type
+  def data(self) -> memoryview: return self.numpy().data
+  def item(self) -> Scalar:
+    assert self.numel() == 1, "must have one element for item"
+    return self.numpy().item()
 
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self
