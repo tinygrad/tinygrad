@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 from typing import Dict, Callable
 from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, Op
 from tinygrad.device import Interpreted, Allocator
@@ -14,7 +13,6 @@ type_map = {torch.bool: dtypes.bool,
 inverse_type_map = {v: k for k,v in type_map.items()}
 # TODO: should unsupported types fail instead of implicit conversion?
 inverse_type_map.update({dtypes.uint16: torch.int16, dtypes.uint32: torch.int32, dtypes.uint64: torch.int64})
-def np_type_cvt(t): return {np.uint32: np.int32, np.uint64: np.int64}.get(t, t)
 
 def as_strided(x, arg):
   shape, stride, offset = arg
@@ -26,9 +24,7 @@ def as_strided(x, arg):
   return torch.as_strided(x, shape, stride, offset)
 
 torch_fxn_for_op: Dict[Op, Callable] = {
-  # TODO: torch.tensor should work here. it doesn't due to "overflow" in uint8
-  #BufferOps.CONST: lambda val, dtype: torch.tensor(val, device=device, dtype=inverse_type_map[dtype]),
-  BufferOps.CONST: lambda val, dtype: torch.from_numpy(np.array(val, dtype=np_type_cvt(dtype.np))).to(device),
+  BufferOps.CONST: lambda val, dtype: torch.tensor(val, device=device, dtype=inverse_type_map[dtype]),
   UnaryOps.EXP2: torch.exp2, UnaryOps.LOG2: torch.log2, UnaryOps.SIN: torch.sin, UnaryOps.SQRT: torch.sqrt,
   UnaryOps.CAST: lambda x,y: (x.view if y[1] else x.type)(inverse_type_map[y[0]]),
   UnaryOps.NEG: lambda x: torch.logical_not(x) if x.dtype is torch.bool else torch.neg(x),
