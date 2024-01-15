@@ -141,7 +141,8 @@ class Tensor:
   # TODO: these are good places to start removing numpy
   def _data(self) -> memoryview:
     if 0 in self.shape: return memoryview(bytearray(0))
-    buffer = cast(Buffer, self.contiguous().realize().lazydata.base.realized)
+    t = self if isinstance(self.device, str) else self.to("CPU")   # deal with multitensor
+    buffer = cast(Buffer, t.contiguous().realize().lazydata.base.realized)
     buffer.copyout(mv := memoryview(bytearray(buffer.size*buffer.dtype.itemsize)))
     return mv
 
@@ -153,7 +154,7 @@ class Tensor:
   def data(self) -> memoryview: return self.numpy().data
   def item(self) -> Scalar:
     assert self.numel() == 1, "must have one element for item"
-    return self.data()[0]
+    return self.numpy().flatten()[0]
 
   def to(self, device:Optional[str]) -> Tensor:
     if device is None or device == self.device: return self
