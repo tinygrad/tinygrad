@@ -67,8 +67,7 @@ print(fxn.prg)
 fxn.exec([out, a, b])
 
 # check the data out
-print(val:=out.toCPU().item())
-assert val == 5
+assert out.as_buffer().cast('I')[0] == 5
 
 
 print("******** third, the LazyBuffer ***********")
@@ -100,8 +99,7 @@ print_tree(sched[-1].ast)
 run_schedule(sched)
 
 # check the data out
-print(val:=out.realized.toCPU().item())
-assert val == 5
+assert out.realized.as_buffer().cast('I')[0] == 5
 
 
 print("******** fourth, the Tensor ***********")

@@ -377,13 +377,13 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
     prg = to_prg(k)
     real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
     prg.exec(real_bufs)
-    np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
+    np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=1e-4, rtol=1e-4)
 
   # Get baseline, which is not optimized at all.
   k = Linearizer(realized_ast)
   prg = Device[Device.DEFAULT].to_program(k)
   prg.exec(real_bufs)
-  wanna_output = real_bufs[0].toCPU().copy()
+  wanna_output = np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np).copy()
 
   # Check correctness of handcoded optimiztions.
   k = Linearizer(realized_ast)
@@ -391,7 +391,7 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
   prg = Device[Device.DEFAULT].to_program(k)
   real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
   prg.exec(real_bufs)
-  np.testing.assert_allclose(wanna_output, real_bufs[0].toCPU(), atol=1e-4, rtol=1e-4)
+  np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=1e-4, rtol=1e-4)
   for x in opts: # Check custom transformations if any.
     check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_program)
 

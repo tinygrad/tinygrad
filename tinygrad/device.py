@@ -1,9 +1,8 @@
 from __future__ import annotations
-import numpy as np
 from collections import defaultdict
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable
 import importlib, inspect, functools, pathlib, time, re, ctypes
-from tinygrad.dtype import DType, dtypes, ImageDType
+from tinygrad.dtype import DType, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op, GlobalCounters
@@ -80,20 +79,20 @@ class Buffer:
     if isinstance(self.dtype, ImageDType): self.allocator.free(self._buf, self.dtype)
     else: self.allocator.free(self._buf, self.size * self.dtype.itemsize)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}>"
+  def as_buffer(self, allow_zero_copy=False) -> memoryview:
+    # zero copy with as_buffer (disabled by default due to use after free)
+    if allow_zero_copy and hasattr(self.allocator, 'as_buffer'): return self.allocator.as_buffer(self._buf)
+    return self.copyout(memoryview(bytearray(self.size*self.dtype.itemsize)))
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
     assert len(mv) == self.size*self.dtype.itemsize, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
     self.allocator.copyin(self._buf, mv)
     return self
-  @staticmethod
-  def fromCPU(device:str, x:np.ndarray): return Buffer(device, x.size, dtypes.from_np(x.dtype)).copyin(x.data)
-  def toCPU(self) -> np.ndarray:
-    # zero copy with as_buffer
-    if hasattr(self.allocator, 'as_buffer'):
-      return np.frombuffer(self.allocator.as_buffer(self._buf), dtype=np.dtype(self.dtype.np, metadata={"backing": self._buf}))  # type: ignore
-    ret = np.empty(self.size, self.dtype.np)
-    if self.size > 0: self.allocator.copyout(flat_mv(ret.data), self._buf)
-    return ret
+  def copyout(self, mv:memoryview) -> memoryview:
+    mv = flat_mv(mv)
+    assert len(mv) == self.size*self.dtype.itemsize, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
+    self.allocator.copyout(mv, self._buf)
+    return mv
 
 def _internal_buffer_copy(dest:Buffer, src:Buffer):
   if hasattr(dest.allocator, 'transfer') and type(dest.allocator) is type(src.allocator):  # noqa: E721
@@ -114,11 +113,9 @@ def _internal_buffer_copy(dest:Buffer, src:Buffer):
   elif hasattr(dest.allocator, 'as_buffer'):
     # fast(ish) path, uses readinto in diskbuffers
     src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
-  elif hasattr(src.allocator, 'as_buffer'):
-    dest.allocator.copyin(dest._buf, src.allocator.as_buffer(src._buf))
   else:
-    # slow path, allocates a CPU buffer
-    dest.copyin(src.toCPU().data)
+    # may allocate a CPU buffer depending on allow_zero_copy
+    dest.copyin(src.as_buffer(allow_zero_copy=True))
 
 class _BufferCopy(JITRunner):
   # TODO: make wait work
