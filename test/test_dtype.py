@@ -208,7 +208,9 @@ class TestEqStrDType(unittest.TestCase):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     # TODO: is this the wrong behavior?
     assert PtrDType(dtypes.float32) == dtypes.float32
-    #assert PtrDType(dtypes.float32) == PtrDType(dtypes.float32)
+    assert not (PtrDType(dtypes.float32) != dtypes.float32)
+    assert PtrDType(dtypes.float32) == PtrDType(dtypes.float32)
+    assert not (PtrDType(dtypes.float32) != PtrDType(dtypes.float32))
     #assert PtrDType(dtypes.float32) != dtypes.float32
   def test_strs(self):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
