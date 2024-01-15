@@ -8,6 +8,7 @@ import utils
 from tinygrad import Tensor
 import time
 
+
 class TestRewardEMA(unittest.TestCase):
     def test_reward_ema(self):
         reward_ema = models.RewardEMA(device="cuda", alpha=0.9)
@@ -79,7 +80,7 @@ class TestWorldModel(unittest.TestCase):
         for i in range(5):
             start_time = time.time()
             post, context, metrics = world_model.train(data)
-            metrics = {k: v.item() for k, v in metrics.items()} 
+            metrics = {k: v.item() for k, v in metrics.items()}
             print(metrics)
             print(f"world model train time {i}: {time.time() - start_time}")
             print()
@@ -140,7 +141,7 @@ class TestActorCritic(unittest.TestCase):
         for i in range(5):
             start_time = time.time()
             feat, state, action, weights, metrics = actor_critic.train(start, reward_fn)
-            metrics = {k: v.item() for k, v in metrics.items()} 
+            metrics = {k: v.item() for k, v in metrics.items()}
             print(metrics)
             print(f"actor critic train time {i}: {time.time() - start_time}")
             print()

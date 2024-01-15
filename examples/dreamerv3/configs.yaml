@@ -18,7 +18,7 @@ expl_until: 0
 # Environment
 env: 'ALE/Pong-v5'
 size: [64, 64]
-num_envs: 1
+num_envs: 4
 action_repeat: 4
 time_limit: 108000
 grayscale: False

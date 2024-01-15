@@ -291,7 +291,7 @@ class ActorCritic:
         actor_critic._value_opt.zero_grad()
         value_loss.backward()
         metrics.update(actor_critic._value_opt.step())
-        
+
         metrics = {k: v.realize() for k, v in metrics.items()}
         return imag_feat, imag_state, imag_action, weights, metrics
 
@@ -323,8 +323,8 @@ class ActorCritic:
             discount = self._config.discount * self._world_model.heads["cont"](inp).mean
         else:
             discount = self._config.discount * Tensor.ones_like(reward)
-        # TODO: currently need to realize value here for metrics to work
-        value = self.value(imag_feat).mode.contiguous().realize()
+        # realize value here for metrics to work
+        value = self.value(imag_feat).mode.realize()
         target = utils.lambda_return(reward[1:], value[:-1], discount[1:], bootstrap=value[-1], lambda_=self._config.discount_lambda, axis=0)
         weights = utils.cumprod(Tensor.cat(Tensor.ones_like(discount[:1]), discount[:-1], dim=0), 0).detach()
         return target, weights, value[:-1]
@@ -378,7 +378,7 @@ class ActorCritic:
 
     def slow_value_parameters(self):
         return nn.state.get_parameters(self._slow_value)
-    
+
     @staticmethod
     @TinyJit
     def _train_policy(actor_critic: "ActorCritic", image, is_first, action, **latent):
@@ -426,7 +426,7 @@ class ActorCritic:
         latent = {k: v.detach().realize() for k, v in latent.items()}
         state = (latent, action)
         return policy_output, state
-    
+
     def policy(self, obs, state, training: bool, explore: bool):
         with Tensor.train(False):
             obs = self._world_model.preprocess(obs)

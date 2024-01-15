@@ -101,7 +101,7 @@ def simulate(agent, envs, cache, directory, logger, is_eval=False, limit=None, s
         if isinstance(action, dict):
             action = [{k: np.array(action[k][i].numpy()) for k in action} for i in range(len(envs))]
         else:
-            action = np.array(action)
+            action = action.numpy()
         assert len(action) == len(envs)
         # step envs
         results = [e.step(a) for e, a in zip(envs, action)]
@@ -209,9 +209,11 @@ def sample_episodes(episodes, length, seed=0):
                 if "is_first" in ret:
                     ret["is_first"][size] = True
             size = len(next(iter(ret.values())))
+        # TODO: I don't know why this is needed, but sometimes lengths are wonky
         if any(len(it) != length for it in ret.values()):
             continue
         yield ret
+
 
 def from_generator(generator, batch_size):
     while True:

@@ -66,6 +66,7 @@ class Dreamer:
             else:
                 self._metrics[name].append(value)
 
+
 def main():
     config = utils.load_config()
     utils.set_seed_everywhere(config.seed)
@@ -125,6 +126,7 @@ def main():
             eval_policy = partial(agent, training=False)
             simulate(eval_policy, eval_envs, eval_eps, config.evaldir, logger, is_eval=True, episodes=config.eval_episode_num)
             if config.video_pred_log:
+                print(len(list(eval_dataset)))
                 video = agent.world_model.video_pred(next(eval_dataset)).numpy()
                 logger.video("eval_openl", video)
         print("Start training.")
