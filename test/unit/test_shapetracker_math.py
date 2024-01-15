@@ -89,8 +89,8 @@ class TestShapeTrackerAdd(unittest.TestCase):
                               View(shape=(5,), strides=(1,), offset=0, mask=None, contiguous=True)))
     st2 = ShapeTracker(views=(View(shape=(4,), strides=(1,), offset=0, mask=None, contiguous=True),
                               View(shape=(5,), strides=(1,), offset=0, mask=None, contiguous=True)))
-    assert not (st_equal(st1, st2))   
-  
+    assert not (st_equal(st1, st2))
+
 class TestShapeTrackerAddVariable(unittest.TestCase):
   def test_self_add(self):
     j = Variable("j", 0, 20).bind(10)
