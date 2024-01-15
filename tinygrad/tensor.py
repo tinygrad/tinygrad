@@ -165,8 +165,7 @@ class Tensor:
   def to_(self, device:Optional[str]):
     if device is None or device == self.device: return
     if self.grad: self.grad = self.grad.to_(device)
-    _ret = Tensor(self.lazydata, device)
-    self.lazydata = _ret.lazydata
+    self.lazydata = Tensor(self.lazydata, device).lazydata
 
   def shard(self, devices:Tuple[str, ...], axis:Optional[int]=None) -> Tensor:
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
