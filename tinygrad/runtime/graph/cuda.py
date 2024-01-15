@@ -9,9 +9,8 @@ from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_
 
 class CUDAGraph:
   def __init__(self, jit_cache: List[JitItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
-    if not all(isinstance(ji.prg, CompiledASTRunner) for ji in jit_cache): raise GraphException
-    devices = [cast(CompiledASTRunner, ji.prg).clprg.device for ji in jit_cache]
-    if not all_same(devices): raise GraphException
+    devices = [ji.prg.clprg.device if isinstance(ji.prg, CompiledASTRunner) else None for ji in jit_cache]
+    if len(devices) == 0 or not all_same(devices) or devices[0] is None: raise GraphException
     self.device = devices[0]
 
     self.jit_cache = jit_cache
