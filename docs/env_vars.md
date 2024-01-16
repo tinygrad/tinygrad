@@ -41,7 +41,6 @@ TORCH               | [1]        | enable PyTorch backend
 MPS                 | [1]        | enable MPS device for TORCH backend (for Mac M1 and after)
 CLANG               | [1]        | enable Clang backend
 LLVM                | [1]        | enable LLVM backend
-LLVMOPT             | [1]        | enable slightly more expensive LLVM optimizations
 BEAM                | [#]        | number of beams in kernel beam search
 GRAPH               | [1]        | create a graph of all operations (requires graphviz)
 GRAPHUOPS           | [1]        | create a graph of uops (requires graphviz and saves at /tmp/uops.{svg,dot})
