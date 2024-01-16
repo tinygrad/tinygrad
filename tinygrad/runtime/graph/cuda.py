@@ -59,7 +59,8 @@ class CUDAGraph:
       self.graph_exec_kernel_node_set_params(self.instance, node, ctypes.byref(c_node_params))
 
     et = self.graph_launch(self.instance, None, wait=wait)
-    update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=jit, num_kernels=len(self.jit_cache))  # noqa: E501
+    update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers),
+                 jit=jit, num_kernels=len(self.jit_cache), device=f"<GPU>:{self.device}")
     return et
 
   def __del__(self):
