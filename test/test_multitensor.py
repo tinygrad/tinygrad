@@ -2,8 +2,6 @@ import unittest
 from tinygrad import Tensor, Device, nn, GlobalCounters
 from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
-from extra.lr_scheduler import OneCycleLR
-from extra.models.llama import RMSNorm, Attention
 import numpy as np
 
 d_zero = f"{Device.DEFAULT}:0"
@@ -18,6 +16,12 @@ N = 128
 
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestMultiTensor(unittest.TestCase):
+  def test_to(self):
+    X = Tensor.ones(256).contiguous().realize()
+    X.to_((d0, d1))
+    for lb in X.lazydata.lbs:
+      assert lb.shape == (256,)
+
   def test_shard(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_((d0, d1), 0)
@@ -135,6 +139,7 @@ class TestMultiTensor(unittest.TestCase):
     optim.step()
 
   def test_lr_scheduler_OneCycleLR(self):
+    from extra.lr_scheduler import OneCycleLR
     conv = nn.Conv2d(3, 16, 3)
     for p in get_parameters(conv): p.shard_((d0, d1))
     optim = nn.optim.SGD(get_parameters(conv))
@@ -156,6 +161,7 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(z.numpy(), z_shard.numpy(), atol=1e-6, rtol=1e-6)
 
   def test_rmsnorm(self):
+    from extra.models.llama import RMSNorm
     B, T, embed_size = 4, 10, 20
 
     layer_norm = RMSNorm(embed_size)
@@ -180,6 +186,7 @@ class TestMultiTensor(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(Device.DEFAULT == "GPU", "GPU requires cl_khr_fp16")
   def _test_llama_attention(self, device):
+    from extra.models.llama import Attention
     bs, seq_len, dim, n_heads, n_kv_heads, max_context = 1, 1, 128, 4, 4, 32
     freqs_cis = Tensor.rand(1, seq_len, 1, (dim//n_heads)//2, 2).half()
     mask = None
