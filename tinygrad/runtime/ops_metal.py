@@ -7,12 +7,12 @@ from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
 from tinygrad.device import Compiled, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
-def compile_metal_xcode(prg):
+def compile_metal_xcode(prg:str) -> bytes:
   # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
   air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
   return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
 
-def compile_metal(device, prg) -> bytes:
+def compile_metal(device, prg:str) -> bytes:
   options = Metal.MTLCompileOptions.new()
   library = unwrap2(device.newLibraryWithSource_options_error_(prg, options, None))
   return library.libraryDataContents().bytes().tobytes()
