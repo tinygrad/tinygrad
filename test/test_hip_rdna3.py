@@ -49,9 +49,10 @@ def compile_ast_to_hip(out: Tensor):
   lin = Linearizer(out.lazydata.schedule()[-1].ast)
   lin.hand_coded_optimizations()
   lin.linearize()
+  device = HIPDevice()
   code = HIPRenderer(to_function_name(lin.name), lin.uops)[0]
   if DEBUG >= 4: print(code)
-  compile_hip(code)
+  compile_hip(device, code)
 
 binary_operations = [operator.add, operator.sub, operator.mul]
 unary_operations = [Tensor.exp, Tensor.log, operator.neg, Tensor.sin, Tensor.sqrt, Tensor.reciprocal]
