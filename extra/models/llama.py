@@ -53,23 +53,12 @@ class Attention:
     self.wv = linear(dim, self.n_kv_heads * self.head_dim, bias=False)
     self.wo = linear(self.n_heads * self.head_dim, dim, bias=False)
 
-  def unshard_reshape_shard(self, x, shape, device, axis):
-    x = x.to(Device.DEFAULT)
-    x = x.reshape(shape)
-    return x.shard_(device, axis=axis)
-
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
     x = x.half()
     xq, xk, xv = self.wq(x).half(), self.wk(x).half(), self.wv(x).half()
-    if False and isinstance(x.device, tuple):
-      # TODO: this reshape is technically independent and can be done inside each GPU in parallel so we can avoid the copy
-      xq = self.unshard_reshape_shard(xq, (xq.shape[0], xq.shape[1], self.n_heads, self.head_dim), x.device, 2)
-      xk = self.unshard_reshape_shard(xk, (xq.shape[0], xq.shape[1], self.n_heads, self.head_dim), x.device, 2)
-      xv = self.unshard_reshape_shard(xv, (xq.shape[0], xq.shape[1], self.n_heads, self.head_dim), x.device, 2)
-    else:
-      xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
-      xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
-      xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
+    xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
+    xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
+    xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
 
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     bsz, seqlen, _, _ = xq.shape
@@ -94,11 +83,7 @@ class Attention:
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
-    if isinstance(x.device, tuple):
-      # TODO: it can follow how x was being sharded
-      attn = self.unshard_reshape_shard(attn, (bsz, seqlen, -1), x.device, None)
-    else:
-      attn = attn.reshape(bsz, seqlen, -1)
+    attn = attn.reshape(bsz, seqlen, -1)
     return self.wo(attn)
 
 class FeedForward:

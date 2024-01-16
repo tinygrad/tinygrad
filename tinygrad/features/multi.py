@@ -27,7 +27,7 @@ class MultiLazyBuffer:
   def size(self): return sum(x.size for x in self.lbs)
 
   def __repr__(self):
-    return f"<MLB{chr(10)}{chr(10).join([f'{x.device} {x.st}' for x in self.lbs])}>"
+    return f"<MLB {self.axis=}{chr(10)}{chr(10).join([f'{x.device} {x.st}' for x in self.lbs])}>"
 
   @staticmethod
   def from_sharded(lb:LazyBuffer, devices:Tuple[str, ...], axis:Optional[int]=None):
