@@ -51,7 +51,7 @@ def compile_ast_to_hip(out: Tensor):
   lin.linearize()
   code = HIPRenderer(to_function_name(lin.name), lin.uops)[0]
   if DEBUG >= 4: print(code)
-  compile_hip("gfx1100", code)
+  compile_hip(code)
 
 binary_operations = [operator.add, operator.sub, operator.mul]
 unary_operations = [Tensor.exp, Tensor.log, operator.neg, Tensor.sin, Tensor.sqrt, Tensor.reciprocal]
