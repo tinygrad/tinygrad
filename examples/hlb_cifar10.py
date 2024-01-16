@@ -12,16 +12,13 @@ if __name__ == "__main__":
 # https://siboehm.com/articles/22/CUDA-MMM
 import random, time
 import numpy as np
-from typing import Any, Dict, Optional, SupportsIndex
+from typing import Optional
 from extra.datasets import fetch_cifar, cifar_mean, cifar_std
-from tinygrad import nn, dtypes
+from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_state_dict
 from tinygrad.nn import optim
-from tinygrad import Device, GlobalCounters
-from tinygrad.tensor import Tensor
-from tinygrad.shape.symbolic import Node
 from extra.lr_scheduler import OneCycleLR
-from tinygrad.jit import TinyJit
+from tinygrad.helpers import Context, getenv
 
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 
@@ -84,7 +81,7 @@ class SpeedyResNet:
 
 # hyper-parameters were exactly the same as the original repo
 bias_scaler = 58
-hyp: Dict[str, Any] = {
+hyp = {
   'seed' : 209,
   'opt': {
     'bias_lr':            1.76 * bias_scaler/512,
@@ -109,7 +106,7 @@ hyp: Dict[str, Any] = {
       'decay_base': .95,
       'decay_pow': 1.6,
       'every_n_steps': 5,
-  }
+  },
 }
 
 def train_cifar():
@@ -128,7 +125,7 @@ def train_cifar():
     def _patches(data, patch_size=(kernel_size,kernel_size)):
       h, w = patch_size
       c = data.shape[1]
-      axis: SupportsIndex = (2, 3) # type: ignore
+      axis = (2, 3)
       return np.lib.stride_tricks.sliding_window_view(data, window_shape=(h,w), axis=axis).transpose((0,3,2,1,4,5)).reshape((-1,c,h,w))
 
     def _eigens(patches):
@@ -145,7 +142,7 @@ def train_cifar():
   # ========== Loss ==========
   def cross_entropy(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
     divisor = y.shape[1]
-    assert not isinstance(divisor, Node), "sint not supported as divisor"
+    assert isinstance(divisor, int), "only supported int divisor"
     y = (1 - label_smoothing)*y + label_smoothing / divisor
     if reduction=='none': return -x.log_softmax(axis=1).mul(y).sum(axis=1)
     if reduction=='sum': return -x.log_softmax(axis=1).mul(y).sum(axis=1).sum()
@@ -297,13 +294,12 @@ def train_cifar():
   initial_div_factor = hyp['opt']['initial_div_factor']
   final_lr_ratio = hyp['opt']['final_lr_ratio']
   pct_start = hyp['opt']['percent_start']
-  lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr']     ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
-  lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'] ,pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
+  lr_sched_bias     = OneCycleLR(opt_bias,     max_lr=hyp['opt']['bias_lr']    , pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
+  lr_sched_non_bias = OneCycleLR(opt_non_bias, max_lr=hyp['opt']['non_bias_lr'], pct_start=pct_start, div_factor=initial_div_factor, final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=STEPS)
 
-  loss_batchsize_scaler = 512/BS
-  @TinyJit
-  def train_step_jitted(model, optimizer, lr_scheduler, X, Y):
+  def train_step(model, optimizer, lr_scheduler, X, Y):
     out = model(X)
+    loss_batchsize_scaler = 512/BS
     loss = cross_entropy(out, Y, reduction='none' ,label_smoothing=hyp['opt']['label_smoothing']).mul(hyp['opt']['loss_scale_scaler']*loss_batchsize_scaler).sum().div(hyp['opt']['loss_scale_scaler'])
 
     if not getenv("DISABLE_BACKWARD"):
@@ -328,6 +324,8 @@ def train_cifar():
       lr_scheduler[0].step()
       lr_scheduler[1].step()
     return loss.realize()
+
+  train_step_jitted = TinyJit(train_step)
 
   def eval_step(model, X, Y):
     out = model(X, training=False)
@@ -406,9 +404,10 @@ def train_cifar():
       if getenv("DIST"):
         X, Y = X.chunk(world_size, 0)[rank], Y.chunk(world_size, 0)[rank]
       GlobalCounters.reset()
-      loss = train_step_jitted(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y)
-      et = time.monotonic()
-      loss_cpu = loss.numpy()
+      with Context(BEAM=getenv("LATEBEAM")):
+        loss = train_step_jitted(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y)
+        et = time.monotonic()
+        loss_cpu = loss.numpy()
       # EMA for network weights
       if i > hyp['ema']['steps'] and (i+1) % hyp['ema']['every_n_steps'] == 0:
         if model_ema is None:
@@ -417,9 +416,9 @@ def train_cifar():
       cl = time.monotonic()
       if not getenv("DIST"):
         #  53  221.74 ms run,    2.22 ms python,  219.52 ms CL,  803.39 loss, 0.000807 LR, 4.66 GB used,   3042.49 GFLOPS,    674.65 GOPS
-        print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS, {GlobalCounters.global_ops*1e-9:9.2f} GOPS")
+        print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {loss.device}, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS, {GlobalCounters.global_ops*1e-9:9.2f} GOPS")
       else:
-        print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {world_size*GlobalCounters.mem_used/1e9:.2f} GB used, {world_size*GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+        print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms {loss.device}, {loss_cpu:7.2f} loss, {opt_non_bias.lr.numpy()[0]:.6f} LR, {world_size*GlobalCounters.mem_used/1e9:.2f} GB used, {world_size*GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
       st = cl
       i += 1
 
