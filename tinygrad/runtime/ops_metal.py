@@ -7,11 +7,12 @@ from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
 from tinygrad.device import Compiled, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
-def compile_metal(device, prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
-  if use_xcode:
-    # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
-    air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
-    return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+def compile_metal_xcode(prg):
+  # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
+  air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
+  return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+
+def compile_metal(device, prg) -> bytes:
   options = Metal.MTLCompileOptions.new()
   library = unwrap2(device.newLibraryWithSource_options_error_(prg, options, None))
   return library.libraryDataContents().bytes().tobytes()
@@ -77,7 +78,8 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
     from tinygrad.runtime.graph.metal import MetalGraph
-    super().__init__(MetalAllocator(self), LinearizerOptions("METAL"), MetalRenderer, functools.partial(compile_metal, self.device), "compile_metal",
+    super().__init__(MetalAllocator(self), LinearizerOptions("METAL"), MetalRenderer,
+                     compile_metal_xcode if getenv("METAL_XCODE") else functools.partial(compile_metal, self.device), "compile_metal",
                      functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
