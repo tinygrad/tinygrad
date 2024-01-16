@@ -176,7 +176,6 @@ class MLP:
         unimix_ratio=0.01,
         outscale=1.0,
         symlog_inputs=False,
-        device="cuda",
         name="NoName",
     ):
         self._shape = (shape,) if isinstance(shape, int) else shape
@@ -190,7 +189,7 @@ class MLP:
         self._temp = temp
         self._unimix_ratio = unimix_ratio
         self._symlog_inputs = symlog_inputs
-        self._device = device
+
         act = utils.get_act(act)
 
         self.layers = []
@@ -238,7 +237,7 @@ class MLP:
                 if isinstance(self._std, str) and self._std == "learned":
                     std = self.std_layer[name](out)
                 else:
-                    std = Tensor([self._std], device=self._device)
+                    std = Tensor([self._std])
                 dists.update({name: self.dist(self._dist, mean, std, shape)})
             return dists
         else:
@@ -246,7 +245,7 @@ class MLP:
             if isinstance(self._std, str) and self._std == "learned":
                 std = self.std_layer(out)
             else:
-                std = Tensor([self._std], device=self._device)
+                std = Tensor([self._std])
             return self.dist(self._dist, mean, std, self._shape)
 
     def dist(self, dist, mean, std, shape):
@@ -267,7 +266,7 @@ class MLP:
         elif dist == "binary":
             dist = distributions.Independent(distributions.Bernoulli(logits=mean), len(shape))
         elif dist == "symlog_disc":
-            dist = distributions.DiscDist(logits=mean, device=self._device)
+            dist = distributions.DiscDist(logits=mean)
         elif dist == "symlog_mse":
             dist = distributions.SymlogDist(mean)
         else:
@@ -403,7 +402,6 @@ class RSSM:
         min_std=0.1,
         unimix_ratio=0.01,
         initial="learned",
-        device=None,
     ):
         self._stoch = stoch
         self._deter = deter
@@ -417,7 +415,7 @@ class RSSM:
         self._initial = initial
         self._num_actions = num_actions
         self._embed = embed
-        self._device = device
+
         act = utils.get_act(act)
 
         inp_layers = []
@@ -462,22 +460,22 @@ class RSSM:
         utils.uniform_weight_init(1.0)(self._imgs_stat_layer)
 
         if self._initial == "learned":
-            self.W = Tensor.zeros(1, self._deter, device=self._device)
+            self.W = Tensor.zeros(1, self._deter)
             self.W.requires_grad = True
 
     def initial(self, batch_size):
-        deter = Tensor.zeros(batch_size, self._deter).to(self._device)
+        deter = Tensor.zeros(batch_size, self._deter)
         if self._discrete:
             state = dict(
-                logit=Tensor.zeros([batch_size, self._stoch, self._discrete]).to(self._device),
-                stoch=Tensor.zeros([batch_size, self._stoch, self._discrete]).to(self._device),
+                logit=Tensor.zeros([batch_size, self._stoch, self._discrete]),
+                stoch=Tensor.zeros([batch_size, self._stoch, self._discrete]),
                 deter=deter,
             )
         else:
             state = dict(
-                mean=Tensor.zeros([batch_size, self._stoch]).to(self._device),
-                std=Tensor.zeros([batch_size, self._stoch]).to(self._device),
-                stoch=Tensor.zeros([batch_size, self._stoch]).to(self._device),
+                mean=Tensor.zeros([batch_size, self._stoch]),
+                std=Tensor.zeros([batch_size, self._stoch]),
+                stoch=Tensor.zeros([batch_size, self._stoch]),
                 deter=deter,
             )
         if self._initial == "zeros":
@@ -539,7 +537,7 @@ class RSSM:
         # initialize all prev_state
         if prev_state is None or Tensor.sum(is_first) == B:
             prev_state = self.initial(B)
-            prev_action = Tensor.zeros([B, self._num_actions]).to(self._device)
+            prev_action = Tensor.zeros([B, self._num_actions])
         # overwrite the prev_state only where is_first=True
         elif Tensor.sum(is_first) > 0:
             is_first = is_first[:, None]

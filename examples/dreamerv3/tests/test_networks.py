@@ -2,8 +2,9 @@ import unittest
 
 import networks
 
-from tinygrad import Tensor
+from tinygrad import Tensor, Device
 
+Device.DEFAULT = "TORCH"
 
 class TestGRUCell(unittest.TestCase):
     def test_gru_simple(self):

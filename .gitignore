@@ -50,4 +50,3 @@ quickstart.py
 .hypothesis
 weights
 *.lprof
-examples/dreamerv3/atari

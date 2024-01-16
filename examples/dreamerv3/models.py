@@ -10,11 +10,10 @@ from tinygrad import Tensor, TinyJit, dtypes, nn
 class RewardEMA:
     """running mean and std"""
 
-    def __init__(self, device, alpha=1e-2):
-        self.device = device
+    def __init__(self, alpha=1e-2):
         self.alpha = alpha
-        self.range = Tensor([0.05, 0.95]).to(device)
-        self.ema_vals = Tensor([0.0, 1.0]).to(device)
+        self.range = Tensor([0.05, 0.95])
+        self.ema_vals = Tensor([0.0, 1.0])
 
     def __call__(self, x):
         flat_x = Tensor.flatten(x.detach())
@@ -50,7 +49,6 @@ class WorldModel:
             config.dyn_min_std,
             config.unimix_ratio,
             config.initial,
-            config.device,
         )
         self.heads = {}
         if config.dyn_discrete:
@@ -67,7 +65,6 @@ class WorldModel:
             config.norm,
             dist=config.reward_head["dist"],
             outscale=config.reward_head["outscale"],
-            device=config.device,
             name="Reward",
         )
         self.heads["cont"] = networks.MLP(
@@ -79,7 +76,6 @@ class WorldModel:
             config.norm,
             dist="binary",
             outscale=config.cont_head["outscale"],
-            device=config.device,
             name="Cont",
         )
         for name in config.grad_heads:
@@ -95,7 +91,7 @@ class WorldModel:
         # reward (batch_size, batch_length)
         # discount (batch_size, batch_length)
         data = data.copy()
-        data = {k: Tensor(v, dtype=dtypes.float32).to(self._config.device) for k, v in data.items()}
+        data = {k: Tensor(v, dtype=dtypes.float32) for k, v in data.items()}
         # onehot encode actions if neccessary
         if "action" in data and len(data["action"].shape) == 2:
             data["action"] = Tensor.one_hot(data["action"].cast(dtypes.int32), self.num_actions)
@@ -217,7 +213,6 @@ class ActorCritic:
             temp=config.actor["temp"],
             unimix_ratio=config.actor["unimix_ratio"],
             outscale=config.actor["outscale"],
-            device=config.device,
             name="Actor",
         )
         self.value = networks.MLP(
@@ -229,7 +224,6 @@ class ActorCritic:
             config.norm,
             config.critic["dist"],
             outscale=config.critic["outscale"],
-            device=config.device,
             name="Value",
         )
         if config.critic["slow_target"]:
@@ -242,7 +236,7 @@ class ActorCritic:
             "value", self.value_parameters(), config.critic["lr"], config.critic["eps"], config.critic["grad_clip"], config.opt
         )
         if self._config.reward_EMA:
-            self.reward_ema = RewardEMA(device=self._config.device)
+            self.reward_ema = RewardEMA()
 
     @staticmethod
     @TinyJit
@@ -432,7 +426,7 @@ class ActorCritic:
             B = obs["is_first"].shape[0]
             if state is None:
                 latent = self._world_model.dynamics.initial(B)
-                action = Tensor.zeros([B, self._world_model.num_actions]).to(self._config.device)
+                action = Tensor.zeros([B, self._world_model.num_actions])
                 state = (latent, action)
             else:
                 latent, action = state
@@ -452,12 +446,12 @@ class ActorCritic:
 
 def random_agent(config, act_space, o, d, s):
     if config.actor["dist"] == "onehot":
-        random_actor = distributions.OneHotCategorical(Tensor.zeros(int(act_space.n)).repeat((config.num_envs, 1)).to(config.device))
+        random_actor = distributions.OneHotCategorical(Tensor.zeros(int(act_space.n)).repeat((config.num_envs, 1)))
     else:
         random_actor = distributions.Independent(
             distributions.Uniform(
-                Tensor(act_space.low).repeat((config.num_envs, 1)).to(config.device),
-                Tensor(act_space.high).repeat((config.num_envs, 1)).to(config.device),
+                Tensor(act_space.low).repeat((config.num_envs, 1)),
+                Tensor(act_space.high).repeat((config.num_envs, 1)),
             ),
             1,
         )

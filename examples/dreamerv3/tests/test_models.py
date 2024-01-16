@@ -5,13 +5,15 @@ import gymnasium as gym
 import models
 import numpy as np
 import utils
-from tinygrad import Tensor
+from tinygrad import Tensor, Device
 import time
+
+Device.DEFAULT = "TORCH"
 
 
 class TestRewardEMA(unittest.TestCase):
     def test_reward_ema(self):
-        reward_ema = models.RewardEMA(device="cuda", alpha=0.9)
+        reward_ema = models.RewardEMA()
         mean, std = reward_ema(Tensor([1.0, 2.0, 3.0]))
         print(mean.item(), std.item())
         mean, std = reward_ema(Tensor([1.0, 2.0, 3.0]))
@@ -136,7 +138,8 @@ class TestActorCritic(unittest.TestCase):
         start = {k: v.reshape((B, T) + v.shape[1:]) for k, v in start.items()}
 
         def reward_fn(f, s, a):
-            return world_model.heads["reward"](world_model.dynamics.get_feat(s)).mode.squeeze(-1)
+            feat = world_model.dynamics.get_feat(s)
+            return world_model.heads["reward"](feat).mode.squeeze(-1)
 
         for i in range(5):
             start_time = time.time()

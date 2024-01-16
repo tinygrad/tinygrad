@@ -7,6 +7,7 @@ import utils
 from env import count_steps, load_episodes, make_dataset, make_envs, simulate
 
 from tinygrad.nn.state import get_state_dict, load_state_dict, safe_load, safe_save
+from tinygrad import Device
 
 
 class Dreamer:
@@ -68,6 +69,7 @@ class Dreamer:
 
 def main():
     config = utils.load_config()
+    Device.DEFAULT = config.device
     utils.set_seed_everywhere(config.seed)
     logdir = pathlib.Path(config.logdir).expanduser()
     config.traindir = config.traindir or logdir / "train_eps"

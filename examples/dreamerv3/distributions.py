@@ -126,11 +126,11 @@ class OneHotCategorical(Categorical):
 
 
 class DiscDist:
-    def __init__(self, logits, low=-20.0, high=20.0, transfwd=symlog, transbwd=symexp, device="cuda"):
+    def __init__(self, logits, low=-20.0, high=20.0, transfwd=symlog, transbwd=symexp):
         self.logits = logits
         self.probs = Tensor.softmax(logits, -1)
         self.width = (high - low) / 255
-        self.buckets = Tensor.arange(low, high, self.width).to(device)
+        self.buckets = Tensor.arange(low, high, self.width)
         self.num_buckets = self.buckets.shape[0]
         self.transfwd = transfwd
         self.transbwd = transbwd
