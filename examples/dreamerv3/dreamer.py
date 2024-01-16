@@ -105,7 +105,7 @@ def main():
     if not config.offline_traindir:
         prefill = max(0, config.prefill - count_steps(config.traindir))
         print(f"Prefill dataset ({prefill} steps).")
-        random_agent = partial(models.random_agent, config, act_space)
+        random_agent = random_agent(config, act_space)
 
         state = simulate(random_agent, train_envs, train_eps, config.traindir, logger, limit=config.dataset_size, steps=prefill)
         logger.step += prefill * config.action_repeat
