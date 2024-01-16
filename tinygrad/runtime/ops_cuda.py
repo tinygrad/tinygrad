@@ -34,7 +34,7 @@ def compile_cuda(prg) -> bytes: return compile_cuda_style(prg, [f'--gpu-architec
 class CUDAProgram:
   def __init__(self, device:CUDADevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
-    if DEBUG >= 5: print(pretty_ptx(lib.decode('utf-8')))
+    if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode('utf-8')).split("\n"))]))
     if DEBUG >= 6:
       try:
         fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
