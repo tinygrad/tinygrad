@@ -11,7 +11,7 @@ eval_every: 1000
 eval_episode_num: 100
 log_every: 1000
 reset_every: 0
-device: 'CUDA' # 'CPU'|'CUDA'|`TORCH`|...
+device: 'TORCH' # 'CPU'|'CUDA'|`TORCH`|...
 video_pred_log: True
 expl_until: 0
 

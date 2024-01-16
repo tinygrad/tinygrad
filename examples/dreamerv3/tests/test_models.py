@@ -8,7 +8,7 @@ import utils
 from tinygrad import Tensor, Device
 import time
 
-Device.DEFAULT = "CUDA"
+Device.DEFAULT = "TORCH"
 
 
 class TestRewardEMA(unittest.TestCase):
