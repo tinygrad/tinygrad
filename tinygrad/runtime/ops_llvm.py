@@ -1,14 +1,12 @@
 import ctypes
 from typing import ClassVar, Tuple
 from tinygrad.device import Compiled, MallocAllocator
-from tinygrad.helpers import getenv, DEBUG, cpu_time_execution
+from tinygrad.helpers import DEBUG, cpu_time_execution
 from ctypes import CFUNCTYPE
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
 
 import llvmlite.binding as llvm
-
-LLVMOPT = bool(getenv("LLVMOPT"))
 
 class LLVM:
   target_machine: ClassVar[llvm.targets.TargetMachine] = None
@@ -25,21 +23,6 @@ class LLVM:
     LLVM.optimizer = llvm.create_module_pass_manager()
     LLVM.target_machine = target.create_target_machine(opt=2)  # this opt actually can change things. ex: opt=3 means no FMA, opt=2 means FMA
     LLVM.target_machine.add_analysis_passes(LLVM.optimizer)
-
-    # TODO: this makes compile times so much faster
-    if LLVMOPT:
-      llvm.set_option(str(), '-force-vector-interleave=4')  # this makes sum the same speed as torch, it also doubles the (slow) conv speed
-      if DEBUG >= 4: llvm.set_option(str(), '--debug-only=loop-vectorize')
-      #llvm.set_option(str(), '--debug')
-
-      # does this do anything?
-      builder = llvm.create_pass_manager_builder()
-      builder.opt_level = 3
-      builder.size_level = 0
-      builder.loop_vectorize = True
-      builder.slp_vectorize = True
-      builder.populate(LLVM.optimizer)
-
     LLVM.target_machine.set_asm_verbosity(True)
     backing_mod = llvm.parse_assembly(str())
     backing_mod.triple = llvm.get_process_triple()
