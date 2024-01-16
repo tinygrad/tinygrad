@@ -32,7 +32,7 @@ def eval_resnet():
       x /= self.input_std
       return self.mdl(x).argmax(axis=1).realize()
 
-  mdl = ResnetRunner(GPUS)
+  mdl = TinyJit(ResnetRunner(GPUS))
   tlog("loaded models")
 
   # evaluation on the mlperf classes of the validation set from imagenet

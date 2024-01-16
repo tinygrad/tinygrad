@@ -1,6 +1,9 @@
+import functools
 import unittest
 from tinygrad import Tensor, Device, nn, GlobalCounters
+from tinygrad.device import _BufferCopy
 from tinygrad.helpers import CI
+from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_parameters
 import numpy as np
 
@@ -216,7 +219,6 @@ class TestMultiTensor(unittest.TestCase):
 
     fake_image = Tensor.rand((2, 3, 224, 224))
     fake_image_sharded = fake_image.shard((d0, d1), axis=0)
-    print(fake_image_sharded.shape)
     m = ResNet18()
     m.load_from_pretrained()
     real_output = m(fake_image).numpy()
@@ -227,6 +229,71 @@ class TestMultiTensor(unittest.TestCase):
     assert shard_output.lazydata.lbs[1].shape == (1, 1000)
     shard_output_np = shard_output.numpy()
     np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
+
+  def test_multi_tensor_jit_param(self):
+    @TinyJit
+    def jf(a, b) -> Tensor:
+      return (a + b).realize()
+
+    for _ in range(5):
+      a = Tensor.ones(256).contiguous().realize()
+      b = Tensor.ones(256).contiguous().realize()
+      a.shard_((d0, d1))
+      b.shard_((d0, d1))
+      c = jf(a, b)
+      np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
+    assert len(jf.jit_cache) > 0
+
+  def test_multi_tensor_jit_body(self):
+    @TinyJit
+    def jf() -> Tensor:
+      a = Tensor.ones(256).contiguous().realize()
+      b = Tensor.ones(256).contiguous().realize()
+      a.shard_((d0, d1))
+      b.shard_((d0, d1))
+      return (a + b).realize()
+
+    for _ in range(5):
+      r = jf()
+      np.testing.assert_allclose(r.numpy(), np.ones(256)+np.ones(256), atol=1e-4, rtol=1e-5)
+    assert len(jf.jit_cache) > 0
+
+  @unittest.skipIf(CI and Device.DEFAULT=="METAL", "no ICB in CI, creation of graph fails")
+  def test_multi_device_jit_graph(self):
+    if Device[d0].graph is None or Device[d1].graph is None: raise unittest.SkipTest("only test graphs")
+
+    @TinyJit
+    def jf(a: Tensor, b: Tensor, c: Tensor, d:Tensor):
+      # Create 80 entries on device 0: 2 batches.
+      for _ in range(40):
+        a = ((a + b).realize() + (a * b).realize()).realize()
+      # Create 80 entries on device 1: 2 batches.
+      for _ in range(40):
+        c = ((c + d).realize() + (c * d).realize()).realize()
+      # Create a copy from device 0 to 1: 1 entry.
+      a = a.to(d1).realize()
+      # Creates one last entry on device 1: 1 batch.
+      return (a + c).realize()
+
+    a = Tensor.randn(10, 10, device=d0).realize()
+    b = Tensor.randn(10, 10, device=d0).realize()
+    c = Tensor.randn(10, 10, device=d1).realize()
+    d = Tensor.randn(10, 10, device=d1).realize()
+
+    ref = jf(a, b, c, d).numpy()
+    for _ in range(5):
+      o = jf(a, b, c, d).numpy()
+      np.testing.assert_allclose(ref, o, atol=1e-4, rtol=1e-5)
+
+    graph_d0 = Device[d0].graph.func if isinstance(Device[d0].graph, functools.partial) else Device[d0].graph
+    graph_d1 = Device[d1].graph.func if isinstance(Device[d1].graph, functools.partial) else Device[d1].graph
+    # Checking that 2 graphs per device, 1 copy and 1 last graph on device 1 are created.
+    assert isinstance(jf.jit_cache[0].prg, graph_d0)
+    assert isinstance(jf.jit_cache[1].prg, graph_d0)
+    assert isinstance(jf.jit_cache[2].prg, graph_d1)
+    assert isinstance(jf.jit_cache[3].prg, graph_d1)
+    assert isinstance(jf.jit_cache[4].prg, _BufferCopy)
+    assert isinstance(jf.jit_cache[5].prg, graph_d1)
 
 if __name__ == '__main__':
   unittest.main()
