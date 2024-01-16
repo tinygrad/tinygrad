@@ -89,7 +89,7 @@ class HIPDevice(Compiled):
 
     from tinygrad.runtime.graph.hip import HIPGraph
     super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self), LinearizerOptions("HIP"), HIPRenderer,
-                     compile_hip, functools.partial(HIPProgram, self.device), HIPGraph)
+                     compile_hip, "compile_hip", functools.partial(HIPProgram, self.device), HIPGraph)
   def synchronize(self):
     check(hip.hipSetDevice(self.device))
     check(hip.hipDeviceSynchronize())

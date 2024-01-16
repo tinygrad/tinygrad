@@ -7,14 +7,14 @@ from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
 from tinygrad.device import Compiled, LRUAllocator
 from tinygrad.renderer.cstyle import MetalRenderer
 
-def compile_metal(prg, use_xcode=bool(getenv("METAL_XCODE"))) -> bytes:
-  assert MetalDevice.compiler_device, "metal device creation is required for metal compile"
-  if use_xcode:
-    # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
-    air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
-    return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+def compile_metal_xcode(prg:str) -> bytes:
+  # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
+  air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
+  return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+
+def compile_metal(device, prg:str) -> bytes:
   options = Metal.MTLCompileOptions.new()
-  library = unwrap2(MetalDevice.compiler_device.newLibraryWithSource_options_error_(prg, options, None))
+  library = unwrap2(device.newLibraryWithSource_options_error_(prg, options, None))
   return library.libraryDataContents().bytes().tobytes()
 
 class MetalProgram:
@@ -72,16 +72,15 @@ class MetalAllocator(LRUAllocator):
   def copyout(self, dest:memoryview, src:Any): dest[:] = self.as_buffer(src)
 
 class MetalDevice(Compiled):
-  compiler_device = None
   def __init__(self, device:str):
     self.device = Metal.MTLCreateSystemDefaultDevice()
-    if MetalDevice.compiler_device is None: MetalDevice.compiler_device = self.device
     self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
     from tinygrad.runtime.graph.metal import MetalGraph
     super().__init__(MetalAllocator(self), LinearizerOptions("METAL"), MetalRenderer,
-                     compile_metal, functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
+                     compile_metal_xcode if getenv("METAL_XCODE") else functools.partial(compile_metal, self.device), "compile_metal",
+                     functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
     self.mv_in_metal.clear()
