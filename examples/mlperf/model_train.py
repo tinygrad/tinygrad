@@ -13,9 +13,9 @@ def train_unet3d():
   from examples.mlperf.losses import dice_ce_loss
   from extra.models.unet3d import UNet3D
   from extra.datasets.kits19 import iterate, get_train_files
-  from tinygrad import dtypes
-  from tinygrad import TinyJit
-  import tinygrad.nn as nn
+  from tinygrad import dtypes, TinyJit
+  from tinygrad.nn.optim import SGD
+  from tinygrad.nn.state import get_parameters
   from tqdm import tqdm
 
   epochs = getenv("NUM_EPOCHS", 4000)
@@ -26,7 +26,7 @@ def train_unet3d():
   lr_warmup_init_lr = getenv("LR_WARMUP_INIT_LR", 0.0001)
 
   model = UNet3D()
-  optim = nn.optim.SGD(nn.state.get_parameters(model), lr=lr, momentum=momentum, nesterov=True)
+  optim = SGD(get_parameters(model), lr=lr, momentum=momentum, nesterov=True)
 
   def _lr_warm_up(optim, init_lr, lr, current_epoch, warmup_epochs):
     scale = current_epoch / warmup_epochs
