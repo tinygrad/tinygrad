@@ -269,8 +269,9 @@ def train_cifar():
   X_train, Y_train = X_train.cast(dtypes.default_float), Y_train.cast(dtypes.default_float)
   X_test, Y_test = X_test.cast(dtypes.default_float), Y_test.cast(dtypes.default_float)
 
-  for x in get_parameters(model):
-    x.to_(GPUS)
+  if len(GPUS) > 1:
+    for x in get_parameters(model):
+      x.to_(GPUS)
 
   # parse the training params into bias and non-bias
   params_dict = get_state_dict(model)
@@ -343,7 +344,8 @@ def train_cifar():
         losses = []
         losses_ema = []
         for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
-          Xt, Yt = Xt.shard(GPUS, axis=0), Yt.shard(GPUS, axis=0)
+          if len(GPUS) > 1:
+            Xt, Yt = Xt.shard(GPUS, axis=0), Yt.shard(GPUS, axis=0)
 
           correct, loss = eval_step_jitted(model, Xt, Yt)
           losses.append(loss.numpy().tolist())
@@ -365,7 +367,8 @@ def train_cifar():
       if STEPS == 0 or i == STEPS: break
 
       X, Y = next(batcher)
-      X, Y = X.shard(GPUS, axis=0), Y.shard(GPUS, axis=0)
+      if len(GPUS) > 1:
+        X, Y = X.shard(GPUS, axis=0), Y.shard(GPUS, axis=0)
 
       GlobalCounters.reset()
       with Context(BEAM=getenv("LATEBEAM")):
