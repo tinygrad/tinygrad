@@ -61,7 +61,7 @@ class Attention:
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]) -> Tensor:
     x = x.half()
     xq, xk, xv = self.wq(x).half(), self.wk(x).half(), self.wv(x).half()
-    if isinstance(x.device, tuple):
+    if False and isinstance(x.device, tuple):
       # TODO: this reshape is technically independent and can be done inside each GPU in parallel so we can avoid the copy
       xq = self.unshard_reshape_shard(xq, (xq.shape[0], xq.shape[1], self.n_heads, self.head_dim), x.device, 2)
       xk = self.unshard_reshape_shard(xk, (xq.shape[0], xq.shape[1], self.n_heads, self.head_dim), x.device, 2)
@@ -80,8 +80,8 @@ class Attention:
       self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous()
       if isinstance(x.device, tuple):
         # TODO: instead of specifying how to shard, it can follow how xk and xv are being sharded
-        self.cache_k.shard_((xk.device), axis=2)
-        self.cache_v.shard_((xv.device), axis=2)
+        self.cache_k.shard_((xk.device), axis=None)
+        self.cache_v.shard_((xv.device), axis=None)
 
     # HACK: without contiguous, the conversation mode is broken and the cache is not updated
     keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous() if start_pos > 0 else xk

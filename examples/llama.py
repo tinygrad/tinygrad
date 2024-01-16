@@ -159,7 +159,13 @@ class LLaMa:
 
     if isinstance(device, tuple):
       for k,v in nn.state.get_state_dict(model).items():
-        v.shard_(device, axis=None)
+        if '.attention.' in k:
+          v.shard_(device, axis=1)
+        elif '.feed_forward.' in k:
+          v.shard_(device, axis=1)
+        else:
+          v.shard_(device, axis=None)
+        #print(k, v.shape, v.lazydata.axis)
 
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
