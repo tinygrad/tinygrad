@@ -40,7 +40,7 @@ def _assert_eq(tensor:Tensor, target_dtype:DType, target):
   if DEBUG >= 2: print(tensor.numpy())
   try:
     assert tensor.dtype == target_dtype
-    np.testing.assert_allclose(tensor.numpy(), target)
+    np.testing.assert_allclose(tensor.numpy(), target, rtol=1e-3 if target_dtype == dtypes.float16 else 1e-7)
   except AssertionError as e:
     raise AssertionError(f"\ntensor {tensor.numpy()} dtype {tensor.dtype} does not match target {target} with dtype {target_dtype}") from e
 

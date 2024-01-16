@@ -15,14 +15,13 @@ def check(status):
   if status != 0: raise RuntimeError(f"OpenCL Error {status}")
 def checked(ret, status): return (check(status.value), ret)[1]
 
-def compile_cl(prg:str) -> bytes:
-  assert CLDevice.compiler_context is not None, 'OpenCL requires a "compiler_context" to compile, init a device before you call this'
-  program = checked(cl.clCreateProgramWithSource(CLDevice.compiler_context.context, 1, to_char_p_p([prg_bytes := prg.encode()]),
+def compile_cl(device:CLDevice, prg:str) -> bytes:
+  program = checked(cl.clCreateProgramWithSource(device.context, 1, to_char_p_p([prg_bytes := prg.encode()]),
                                                  ctypes.byref(ctypes.c_size_t(len(prg_bytes))), ctypes.byref(status := ctypes.c_int32())), status)
-  status = cl.clBuildProgram(program, 1, ctypes.byref(CLDevice.compiler_context.device_id), None, cl.clBuildProgram.argtypes[4](), None)
+  status = cl.clBuildProgram(program, 1, ctypes.byref(device.device_id), None, cl.clBuildProgram.argtypes[4](), None)
   if status != 0:
-    cl.clGetProgramBuildInfo(program, CLDevice.compiler_context.device_id, cl.CL_PROGRAM_BUILD_LOG, 0, None, ctypes.byref(log_size := ctypes.c_size_t()))  # noqa: E501
-    cl.clGetProgramBuildInfo(program, CLDevice.compiler_context.device_id, cl.CL_PROGRAM_BUILD_LOG, log_size.value, mstr := ctypes.create_string_buffer(log_size.value), None)  # noqa: E501
+    cl.clGetProgramBuildInfo(program, device.device_id, cl.CL_PROGRAM_BUILD_LOG, 0, None, ctypes.byref(log_size := ctypes.c_size_t()))
+    cl.clGetProgramBuildInfo(program, device.device_id, cl.CL_PROGRAM_BUILD_LOG, log_size.value, mstr := ctypes.create_string_buffer(log_size.value), None)  # noqa: E501
     raise RuntimeError(f"OpenCL Compile Error\n\n{ctypes.string_at(mstr, size=log_size.value).decode()}")
   binary_sizes = init_c_var((ctypes.c_size_t * 1)(), lambda x: check(cl.clGetProgramInfo(program, cl.CL_PROGRAM_BINARY_SIZES, ctypes.sizeof(x), ctypes.byref(x), None)))  # noqa: E501
   binary = init_c_var(ctypes.create_string_buffer(binary_sizes[0]), lambda x: check(cl.clGetProgramInfo(program, cl.CL_PROGRAM_BINARIES, ctypes.sizeof(ctypes.c_void_p), ctypes.byref((ctypes.c_void_p * 1)(ctypes.addressof(x))), None)))  # noqa: E501
@@ -76,7 +75,6 @@ class CLAllocator(LRUAllocator):
 
 class CLDevice(Compiled):
   device_ids = None                 # this is global and only initted once
-  compiler_context = None           # this is the first created context. we make an assumption they are all the same for the compiler
   def __init__(self, device:str=""):
     if CLDevice.device_ids is None:
       num_platforms = init_c_var(ctypes.c_uint32(), lambda x: check(cl.clGetPlatformIDs(0, None, ctypes.byref(x))))
@@ -90,10 +88,11 @@ class CLDevice(Compiled):
 
     self.device_id = CLDevice.device_ids[0 if ":" not in device else int(device.split(":")[1])]
     self.context = checked(cl.clCreateContext(None, 1, ctypes.byref(self.device_id), cl.clCreateContext.argtypes[3](), None, ctypes.byref(status := ctypes.c_int32())), status)  # noqa: E501
-    if CLDevice.compiler_context is None: CLDevice.compiler_context = self
     self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, ctypes.byref(status)), status)
     self.pending_copyin: List[memoryview] = []
-    super().__init__(CLAllocator(self), LinearizerOptions("GPU"), OpenCLRenderer, compile_cl, functools.partial(CLProgram, self))
+    # TODO: vary the cache key based on device name
+    super().__init__(CLAllocator(self), LinearizerOptions("GPU"), OpenCLRenderer,
+                     functools.partial(compile_cl, self), "compile_cl", functools.partial(CLProgram, self))
   def synchronize(self):
     check(cl.clFinish(self.queue))
     self.pending_copyin.clear()

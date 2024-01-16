@@ -77,18 +77,18 @@ def log_lazybuffer(lb, scheduled=False):
       # realized but unseen?
       G.add_node(nm(lb), label=f'"{str(lb.base.realized)[5:-1].replace(" ", chr(10))}\nb:{nm(lb.realized)}"', style='filled', fillcolor="#f0c08080")
 
-def _tree(lazydata, cycles, cnt, prefix=""):
+def _tree(lazyop:LazyOp, cycles, cnt, prefix=""):
   cnt[0] += 1
-  if len(lazydata.src) == 0: return [f"━━ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
-  if (lid := id(lazydata)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
-    return [f"━⬆︎ goto {cycles[id(lazydata)][0]}: {lazydata.op.name}"]
+  if len(lazyop.src) == 0: return [f"━━ {prefix}{lazyop.op.name} {lazyop.arg if lazyop.arg else ''}"]
+  if (lid := id(lazyop)) in cycles and cycles[lid][1] > (tcnt := getenv("TREE_CYCLE_CNT", 5)) and tcnt >= 0:
+    return [f"━⬆︎ goto {cycles[id(lazyop)][0]}: {lazyop.op.name}"]
   cycles[lid] = (cnt[0], 1 if lid not in cycles else cycles[lid][1]+1)
-  lines = [f"━┳ {prefix}{lazydata.op.name} {lazydata.arg if lazydata.arg else ''}"]
-  childs = [_tree(c, cycles, cnt) for c in lazydata.src[:]]
+  lines = [f"━┳ {prefix}{lazyop.op.name} {lazyop.arg if lazyop.arg else ''}"]
+  childs = [_tree(c, cycles, cnt) for c in lazyop.src[:]]
   for c in childs[:-1]: lines += [f" ┣{c[0]}"] + [f" ┃{l}" for l in c[1:]]
   return lines + [" ┗"+childs[-1][0]] + ["  "+l for l in childs[-1][1:]]
 
-def print_tree(lazydata:LazyOp): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(lazydata, {}, [-1]))]))
+def print_tree(lazyop:LazyOp): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(lazyop, {}, [-1]))]))
 
 def graph_uops(uops:List[UOp]):
   import networkx as nx

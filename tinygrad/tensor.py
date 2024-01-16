@@ -138,33 +138,36 @@ class Tensor:
     return self
   def detach(self) -> Tensor: return Tensor(self.lazydata, device=self.device, requires_grad=False)
 
-  # TODO: these are good places to start removing numpy
   def _data(self) -> memoryview:
     if 0 in self.shape: return memoryview(bytearray(0))
     t = self if isinstance(self.device, str) else self.to("CPU")   # deal with multitensor
     return cast(Buffer, t.cast(t.dtype.scalar()).contiguous().realize().lazydata.base.realized).as_buffer()
 
-  def numpy(self) -> np.ndarray:
-    assert all_int(self.shape), f"no numpy if shape is symbolic, {self.shape=}"
-    assert self.dtype.np is not None, f"no numpy dtype for {self.dtype}"
-    return np.frombuffer(self._data(), dtype=self.dtype.np).reshape(self.shape)
-  # TODO: numpy is only used here to get the memoryview type
-  def data(self) -> memoryview: return self.numpy().data
+  def data(self) -> memoryview:
+    assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
+    assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
+    return self._data().cast(self.dtype.fmt, self.shape if len(self.shape) else (1,))
   def item(self) -> Scalar:
+    assert self.dtype.fmt is not None, f"no fmt dtype for {self.dtype}"
     assert self.numel() == 1, "must have one element for item"
-    return self.numpy().item()
+    return self._data().cast(self.dtype.fmt)[0]
+  def numpy(self) -> np.ndarray:
+    assert self.dtype.np is not None, f"no np dtype for {self.dtype}"
+    assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
+    return np.frombuffer(self._data(), dtype=self.dtype.np).reshape(self.shape)
 
-  def to(self, device:Optional[str]) -> Tensor:
+  def to(self, device:Optional[Union[str, Tuple[str, ...]]]) -> Tensor:
     if device is None or device == self.device: return self
+    if not isinstance(device, str): return self.shard(device)
     ret = Tensor(self.lazydata, device)
     if self.grad: ret.grad = self.grad.to(device)
     return ret
 
-  def to_(self, device:Optional[str]):
-    if device is None or device == self.device: return
-    if self.grad: self.grad = self.grad.to_(device)
-    _ret = Tensor(self.lazydata, device)
-    self.lazydata = _ret.lazydata
+  def to_(self, device:Optional[Union[str, Tuple[str, ...]]]):
+    real = self.to(device)
+    # TODO: is this assign?
+    if self.grad is not None and real.grad is not None: self.grad.lazydata = real.grad.lazydata
+    self.lazydata = real.lazydata
 
   def shard(self, devices:Tuple[str, ...], axis:Optional[int]=None) -> Tensor:
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
@@ -269,14 +272,13 @@ class Tensor:
   # ***** toposort and backward pass *****
 
   def deepwalk(self):
-    def _deepwalk(node, visited, nodes):
+    def _deepwalk(node, visited):
       visited.add(node)
       if getattr(node, "_ctx", None):
         for i in node._ctx.parents:
-          if i not in visited: _deepwalk(i, visited, nodes)
-        nodes.append(node)
-      return nodes
-    return _deepwalk(self, set(), [])
+          if i not in visited: yield from _deepwalk(i, visited)
+        yield node
+    return list(_deepwalk(self, set()))
 
   def backward(self) -> Tensor:
     assert self.shape == tuple(), f"backward can only be called for scalar tensors, but it has shape {self.shape})"
