@@ -5,7 +5,7 @@ import distributions
 import numpy as np
 import utils
 
-from tinygrad import Tensor, nn, TinyJit
+from tinygrad import Tensor, nn
 
 
 class GRUCell:

@@ -3,6 +3,9 @@ import os
 import pathlib
 from collections import OrderedDict
 
+import datetime
+import uuid
+
 import gymnasium as gym
 import numpy as np
 
@@ -16,6 +19,8 @@ class AtariEnv(gym.Env):
         env = gym.make(env, obs_type="rgb", frameskip=4, repeat_action_probability=0.0, render_mode="rgb_array")
         env = gym.wrappers.ResizeObservation(env, (64, 64))
         env = gym.wrappers.TimeLimit(env, 108000)
+        timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+        self.id = f"{timestamp}-{str(uuid.uuid4().hex)}"
         self.env = env
 
     @property
@@ -44,6 +49,8 @@ class AtariEnv(gym.Env):
         return obs, reward, done, info
 
     def reset(self):
+        timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+        self.id = f"{timestamp}-{str(uuid.uuid4().hex)}"
         obs, _ = self.env.reset()
         obs = self._wrap_obs(obs, False, False, True)
         return obs
@@ -86,20 +93,20 @@ def simulate(agent, envs, cache, directory, logger, is_eval=False, limit=None, s
             indices = [index for index, d in enumerate(done) if d]
             results = [envs[i].reset() for i in indices]
             for index, result in zip(indices, results):
-                t = result
+                t = result.copy()
                 t = {k: convert(v) for k, v in t.items()}
                 # action will be added to transition in add_to_cache
                 t["reward"] = 0.0
                 t["discount"] = 1.0
                 # initial state should be added to cache
-                add_to_cache(cache, index, t)
+                add_to_cache(cache, envs[index].id, t)
                 # replace obs with done by initial state
                 obs[index] = result
         # step agents
         obs = {k: np.stack([o[k] for o in obs]) for k in obs[0] if "log_" not in k}
         action, agent_state = agent(obs, done, agent_state)
         if isinstance(action, dict):
-            action = [{k: np.array(action[k][i].numpy()) for k in action} for i in range(len(envs))]
+            action = [{k: action[k][i].numpy() for k in action} for i in range(len(envs))]
         else:
             action = action.numpy()
         assert len(action) == len(envs)
@@ -114,7 +121,7 @@ def simulate(agent, envs, cache, directory, logger, is_eval=False, limit=None, s
         step += len(envs)
         length *= 1 - done
         # add to cache
-        for index, (a, result) in enumerate(zip(action, results)):
+        for a, result, env in zip(action, results, envs):
             o, r, d, info = result
             o = {k: convert(v) for k, v in o.items()}
             transition = o.copy()
@@ -124,22 +131,22 @@ def simulate(agent, envs, cache, directory, logger, is_eval=False, limit=None, s
                 transition["action"] = a
             transition["reward"] = r
             transition["discount"] = info.get("discount", np.array(1 - float(d)))
-            add_to_cache(cache, index, transition)
+            add_to_cache(cache, env.id, transition)
 
         if done.any():
             indices = [index for index, d in enumerate(done) if d]
             # logging for done episode
             for i in indices:
-                save_episodes(directory, {i: cache[i]})
-                length = len(cache[i]["reward"]) - 1
-                score = float(np.array(cache[i]["reward"]).sum())
-                video = cache[i]["image"]
+                save_episodes(directory, {envs[i].id: cache[envs[i].id]})
+                length = len(cache[envs[i].id]["reward"]) - 1
+                score = float(np.array(cache[envs[i].id]["reward"]).sum())
+                video = cache[envs[i].id]["image"]
                 # record logs given from environments
-                for key in list(cache[i].keys()):
+                for key in list(cache[envs[i].id].keys()):
                     if "log_" in key:
-                        logger.scalar(key, float(np.array(cache[i][key]).sum()))
+                        logger.scalar(key, float(np.array(cache[envs[i].id][key]).sum()))
                         # log items won't be used later
-                        cache[i].pop(key)
+                        cache[envs[i].id].pop(key)
 
                 if not is_eval:
                     step_in_dataset = erase_over_episodes(cache, limit)
@@ -209,9 +216,6 @@ def sample_episodes(episodes, length, seed=0):
                 if "is_first" in ret:
                     ret["is_first"][size] = True
             size = len(next(iter(ret.values())))
-        # TODO: I don't know why this is needed, but sometimes lengths are wonky
-        if any(len(it) != length for it in ret.values()):
-            continue
         yield ret
 
 
@@ -219,8 +223,7 @@ def from_generator(generator, batch_size):
     while True:
         batch = []
         for _ in range(batch_size):
-            next_item = next(generator)
-            batch.append(next_item)
+            batch.append(next(generator))
         data = {}
         for key in batch[0].keys():
             data[key] = np.stack([item[key] for item in batch])
