@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Tuple, Optional, List
-import ctypes, functools
+import ctypes, functools, hashlib
 import gpuctypes.opencl as cl
 from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG
 from tinygrad.dtype import ImageDType
@@ -92,8 +92,10 @@ class CLDevice(Compiled):
     self.context = checked(cl.clCreateContext(None, 1, ctypes.byref(self.device_id), cl.clCreateContext.argtypes[3](), None, ctypes.byref(status := ctypes.c_int32())), status)  # noqa: E501
     self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, ctypes.byref(status)), status)
     self.pending_copyin: List[memoryview] = []
+
+    compile_key = hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()
     super().__init__(CLAllocator(self), LinearizerOptions("GPU"), OpenCLRenderer,
-                     functools.partial(compile_cl, self), f"compile_cl_{self.device_name}_{self.driver_version}", functools.partial(CLProgram, self))
+                     functools.partial(compile_cl, self), f"compile_cl_{compile_key}", functools.partial(CLProgram, self))
   def synchronize(self):
     check(cl.clFinish(self.queue))
     self.pending_copyin.clear()
