@@ -1,6 +1,6 @@
 import unittest
 import pickle
-from tinygrad.helpers import diskcache_get, diskcache_put
+from tinygrad.helpers import diskcache_get, diskcache_put, diskcache
 
 def remote_get(table,q,k): q.put(diskcache_get(table, k))
 def remote_put(table,k,v): diskcache_put(table, k, v)
@@ -49,6 +49,20 @@ class DiskCache(unittest.TestCase):
     diskcache_put(table, 4, 5)
     self.assertEqual(diskcache_get(table, 4), 5)
     self.assertEqual(diskcache_get(table, "4"), 5)
+
+  def test_decorator(self):
+    calls = 0
+    @diskcache
+    def hello(x):
+      nonlocal calls
+      calls += 1
+      return "world"+x
+    self.assertEqual(hello("bob"), "worldbob")
+    self.assertEqual(hello("billy"), "worldbilly")
+    kcalls = calls
+    self.assertEqual(hello("bob"), "worldbob")
+    self.assertEqual(hello("billy"), "worldbilly")
+    self.assertEqual(kcalls, calls)
 
   def test_dict_key(self):
     table = "test_dict_key"

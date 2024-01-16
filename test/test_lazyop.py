@@ -24,7 +24,7 @@ class TestLazyOp(unittest.TestCase):
   def test_selfreferential_speed(self):
     st = time.monotonic()
     for i in range(25):
-      p = LazyBuffer.fromCPU(np.array([1]))
+      p = Tensor([1]).lazydata
       for _ in range(i): p = p.e(BinaryOps.ADD, p)
       # sanity check if caching works this should be way faster
       assert time.monotonic() -st < 0.5, f"{i}"

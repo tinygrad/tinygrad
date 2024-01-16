@@ -1,20 +1,14 @@
 #!/usr/bin/env python
 import numpy as np
 import unittest
-from tinygrad.lazy import LazyBuffer
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.device import Interpreted
 
 class TestLazyBuffer(unittest.TestCase):
-  @unittest.skip("it doesn't work like this anymore")
-  def test_fromcpu_buffer_sharing(self):
-    a = np.arange(8)
-    assert LazyBuffer.fromCPU(a).realized._buf is a
-
   def test_fromcpu_shape_tracker(self):
     def helper(a: np.ndarray):
       print(a.shape, a.strides, a.flags.c_contiguous)
-      b = LazyBuffer.fromCPU(a)
+      b = Tensor(a).lazydata
       #assert b.st.contiguous == a.flags.c_contiguous
       assert b.st.shape == a.shape
       np.testing.assert_equal(a, Tensor(b).numpy())
