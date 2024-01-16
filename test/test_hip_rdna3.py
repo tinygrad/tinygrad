@@ -44,15 +44,14 @@ class TestHIPCompilationRDNA(unittest.TestCase):
     dtypes.default_float = old_default_float
 
 def compile_ast_to_hip(out: Tensor):
-  from tinygrad.runtime.ops_hip import compile_hip, HIPDevice
+  from tinygrad.runtime.ops_hip import compile_hip
 
   lin = Linearizer(out.lazydata.schedule()[-1].ast)
   lin.hand_coded_optimizations()
   lin.linearize()
-  device = HIPDevice()
   code = HIPRenderer(to_function_name(lin.name), lin.uops)[0]
   if DEBUG >= 4: print(code)
-  compile_hip(device, code)
+  compile_hip("gfx1100", code)
 
 binary_operations = [operator.add, operator.sub, operator.mul]
 unary_operations = [Tensor.exp, Tensor.log, operator.neg, Tensor.sin, Tensor.sqrt, Tensor.reciprocal]
