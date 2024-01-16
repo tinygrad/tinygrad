@@ -350,11 +350,14 @@ class Tensor:
   def __getitem__(self, indices: Union[int, slice, Tensor, None, List, Tuple]) -> Tensor: # no ellipsis type...
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
-    if isinstance(indices, (tuple, list)):
-      # special case <indices: List[int]>, a lil ugly
-      if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, requires_grad=False, device=self.device)]
-      else: indices = [Tensor(list(i), requires_grad=False, device=self.device) if isinstance(i, (tuple, list)) else i for i in indices]
+    if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, requires_grad=False, device=self.device)]
+    elif isinstance(indices, (tuple, list)):
+      indices = [Tensor(list(i), requires_grad=False, device=self.device) if isinstance(i, (tuple, list)) else i for i in indices]
     else: indices = [indices]
+
+    # turn scalar Tensors into const val for no copy indexing
+    # TODO clean up and figure out why backward is wrong
+    indices = [self._to_const_val(i) if isinstance(i, (Scalar, Tensor)) else i for i in indices]
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
     ellipsis_idx = [dim for dim, i in enumerate(indices) if i is Ellipsis]

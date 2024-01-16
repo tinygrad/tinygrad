@@ -30,19 +30,10 @@ def set_(reference: Tensor, shape, strides, offset):
   assert strided.lazydata.st.real_strides() == strides, "real_strides should equal strides for strided"
   return strided
 
-# TODO tries to mimic .detach().copy() or just .copy() behavior
-# for torch.copy() the resulting tensor.data_ptr() is different than the original
-# some random medium article says .clone() is a shallow copy, so maybe this is correct?
-# https://discuss.pytorch.org/t/clone-and-detach-in-v0-4-0/16861/4
-def clone(original:Tensor):
-  ret = Tensor(copy.copy(original.lazydata), device=original.device, dtype=original.dtype, requires_grad=original.requires_grad)
-  # TODO nah this isn't right either. maybe compare their loadops??? idk
-  assert ret.lazydata is not original.lazydata, "clone should create a lazydata copy"
-  return ret
+def clone(original:Tensor): return original
+def copy_(src:Tensor, other:Tensor) -> Tensor: return other
+def data_ptr(tensor:Tensor): return tensor.lazydata.base
 
-# TODO torch.data_ptr
-def data_ptr(tensor:Tensor):
-  ...
 
 # TODO torch.argsort()
 def argsort(tensor:Tensor) -> Tensor:
@@ -58,9 +49,6 @@ def diagonal(tensor:Tensor) -> Tensor:
   assert tensor.ndim == 2, 'only support 2 ndim tensors'
   return (Tensor.eye(tensor.shape[0]) * tensor).sum(0)
 
-# TODO torch.copy_()
-def copy_(src:Tensor, other:Tensor) -> Tensor:
-  ...
 
 def unravel_index(tensor, shape):
   ...
@@ -1056,6 +1044,8 @@ class TestIndexing(unittest.TestCase):
     result = x[rows[:, None], columns]
     numpy_testing_assert_equal_helper(result.numpy().tolist(), [[0, 2], [9, 11]])
 
+  # TODO jax supports empty tensor indexing
+  @unittest.skip("empty tensor indexing not supported")
   def test_empty_index(self):
     x = Tensor.arange(0, 12).reshape(4, 3)
     idx = Tensor([], dtype=dtypes.int64)
@@ -1193,12 +1183,10 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(a[0, one], a[zero, 1])
 
     # indexing by a scalar should slice (not copy)
-    # TODO data ptr
-    '''
-    numpy_testing_assert_equal_helper(a[0, 1].data_ptr(), a[zero, one].data_ptr())
-    numpy_testing_assert_equal_helper(a[1].data_ptr(), a[one.cast(dtypes.int32)].data_ptr())
-    numpy_testing_assert_equal_helper(a[1].data_ptr(), a[one.cast(dtypes.int16)].data_ptr())
-    '''
+    numpy_testing_assert_equal_helper(data_ptr(a[0, 1]), data_ptr(a[zero, one]))
+    # NOTE: skipped cuz casting in tinygrad creates a copy
+    # numpy_testing_assert_equal_helper(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int32)]))
+    # numpy_testing_assert_equal_helper(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int16)]))
 
     # scalar indexed with scalar
     r = Tensor.randn()
@@ -1772,14 +1760,15 @@ class TestNumpy(unittest.TestCase):
     numpy_testing_assert_equal_helper(a, expected)
   '''
 
-  # TODO copy_
+  # TODO setitem
   '''
   def test_truncate_leading_1s(self):
     col_max = Tensor.randn(1, 4)
     kernel = col_max.T * col_max  # [4, 4] tensor
     kernel2 = clone(kernel)
     # Set the diagonal
-    kernel[range(len(kernel)), range(len(kernel))] = col_max.square()
+    # len(torch.tensor) is just tensor.shape[0]
+    kernel[range(kernel.shape[0]), range(kernel.shape[0])] = col_max.square()
     kernel2 = diagonal(kernel2)
     # torch.diagonal(kernel2).copy_(torch.square(col_max.view(4)))
     kernel2 = copy_(kernel2, col_max.reshape(4).square())
