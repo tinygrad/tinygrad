@@ -282,22 +282,22 @@ class CompiledASTRunner(JITRunner):
     return et
 
 class Compiled:
-  def __init__(self, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler, runtime, graph=None):
-    self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph = \
-      allocator, linearizer_opts, renderer, compiler, runtime, graph
+  def __init__(self, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler, compiler_cachekey, runtime, graph=None):
+    self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph, self.compiler_cachekey = \
+      allocator, linearizer_opts, renderer, compiler, runtime, graph, compiler_cachekey
   def synchronize(self): pass  # override this in your device
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     assert self.compiler is not None, f"compiler is None, can't build {k.ast}"
     k.linearize()
     src = self.renderer(to_function_name(k.name), k.uops)
-    if getenv("DISABLE_COMPILER_CACHE") or '<' in self.compiler.__name__:
+    if getenv("DISABLE_COMPILER_CACHE") or self.compiler_cachekey is None:
       lib = self.compiler(src)
     else:
-      lib = diskcache_get(self.compiler.__name__, src)
+      lib = diskcache_get(self.compiler_cachekey, src)
       if lib is None:
         lib = self.compiler(src)
-        diskcache_put(self.compiler.__name__, src, lib)
+        diskcache_put(self.compiler_cachekey, src, lib)
     return CompiledASTRunner(k.ast, k.name, src, lib, k.global_size, k.local_size).build(self.runtime)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
