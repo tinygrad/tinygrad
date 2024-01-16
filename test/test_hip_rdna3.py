@@ -44,7 +44,7 @@ class TestHIPCompilationRDNA(unittest.TestCase):
     dtypes.default_float = old_default_float
 
 def compile_ast_to_hip(out: Tensor):
-  from tinygrad.runtime.ops_hip import compile_hip
+  from tinygrad.runtime.ops_hip import compile_hip, HIPDevice
 
   lin = Linearizer(out.lazydata.schedule()[-1].ast)
   lin.hand_coded_optimizations()
