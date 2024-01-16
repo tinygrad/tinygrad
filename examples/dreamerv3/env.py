@@ -104,7 +104,7 @@ def simulate(agent, envs, cache, directory, logger, is_eval=False, limit=None, s
                 obs[index] = result
         # step agents
         obs = {k: np.stack([o[k] for o in obs]) for k in obs[0] if "log_" not in k}
-        action, agent_state = agent(obs, agent_state)
+        action, agent_state = agent(obs, done, agent_state)
         if isinstance(action, dict):
             action = [{k: action[k][i].numpy() for k in action} for i in range(len(envs))]
         else:

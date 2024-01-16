@@ -462,7 +462,7 @@ def random_agent(config, act_space):
             ),
             1,
         )
-    def random_policy(o, s):
+    def random_policy(o, d, s):
         action = random_actor.sample()
         logprob = random_actor.log_prob(action)
         return {"action": action, "logprob": logprob}, None
