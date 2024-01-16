@@ -53,7 +53,7 @@ def eval_resnet():
     try: next_proc = data_get()
     except StopIteration: next_proc = None
     nd = time.perf_counter()
-    proc = proc[0].numpy() == proc[1]
+    proc = proc[0].numpy() == proc[1]  # this realizes the models and frees the cookies
     n += proc.sum()
     d += proc.size
     et = time.perf_counter()
