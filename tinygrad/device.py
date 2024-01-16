@@ -242,13 +242,13 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 # **************** for Compiled Devices ****************
 
 class CompiledASTRunner(JITRunner):
-  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, lib:bytes, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None):
+  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, lib:bytes, device:Compiled, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None):  # noqa: E501
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
-    self.name, self.display_name, self.prg, self.lib, self.global_size, self.local_size, self.first_run = \
-      to_function_name(name), name, prg, lib, global_size, local_size, True
+    self.name, self.display_name, self.prg, self.lib, self.device, self.global_size, self.local_size, self.first_run = \
+      to_function_name(name), name, prg, lib, device, global_size, local_size, True
     self.vars: List[Variable] = []
     if ast:
       info = get_lazyop_info(ast)
@@ -298,7 +298,7 @@ class Compiled:
       if lib is None:
         lib = self.compiler(src)
         diskcache_put(self.compiler_cachekey, src, lib)
-    return CompiledASTRunner(k.ast, k.name, src, lib, k.global_size, k.local_size).build(self.runtime)
+    return CompiledASTRunner(k.ast, k.name, src, lib, self, k.global_size, k.local_size).build(self.runtime)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:

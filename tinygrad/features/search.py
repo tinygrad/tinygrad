@@ -33,7 +33,7 @@ def _time_program(ast:LazyOp, rdev:Compiled, lib:bytes, global_size, local_size,
   factor = 1
   if global_size is not None and max_global_size is not None:
     global_size, factor = _get_test_global_size(global_size, max_global_size, var_vals)
-  try: car = CompiledASTRunner(ast, name, "", lib, global_size, local_size).build(rdev.runtime)
+  try: car = CompiledASTRunner(ast, name, "", lib, rdev, global_size, local_size).build(rdev.runtime)
   except AssertionError: return [math.inf] * cnt
   tms = []
   for _ in range(cnt):

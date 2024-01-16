@@ -22,7 +22,7 @@ def atan2_gpu(ret:Buffer, a:Buffer, b:Buffer):
     c[idx] = atan2(a[idx], b[idx]);
   }"""
   lib = Device[ret.device].compiler(src)
-  CompiledASTRunner(None, "atan2_gpu", src, lib, global_size=[ret.size]).build(Device[ret.device].runtime).exec([ret, a, b])
+  CompiledASTRunner(None, "atan2_gpu", src, lib, Device[ret.device], global_size=[ret.size]).build(Device[ret.device].runtime).exec([ret, a, b])
 
 def atan2_cpu(ret:Buffer, a:Buffer, b:Buffer): ret.copyin(np.require(np.arctan2(a._buf, b._buf), requirements='C').data)
 
