@@ -6,6 +6,7 @@ from tinygrad import Tensor, Device
 
 Device.DEFAULT = "TORCH"
 
+
 class TestGRUCell(unittest.TestCase):
     def test_gru_simple(self):
         cell = networks.GRUCell(10, 20)

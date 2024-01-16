@@ -8,7 +8,7 @@ import utils
 from tinygrad import Tensor, Device
 import time
 
-Device.DEFAULT = "TORCH"
+Device.DEFAULT = "CUDA"
 
 
 class TestRewardEMA(unittest.TestCase):
@@ -105,15 +105,16 @@ class TestActorCritic(unittest.TestCase):
     def test_actor_critic_funcs(self):
         B = 8
         T = 6
-        H = 5
         obs_space = gym.spaces.Dict({"image": gym.spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8)})
         act_space = gym.spaces.Discrete(3)
         config = utils.load_config()
+        H = config.imag_horizon
         world_model = models.WorldModel(obs_space, act_space, 0, config)
         actor_critic = models.ActorCritic(config, world_model)
         start = world_model.dynamics.initial(B * T)
         start = {k: v.reshape((B, T) + v.shape[1:]) for k, v in start.items()}
-        feats, states, actions = actor_critic._imagine(start, actor_critic.actor, H)
+        feats, states, actions = actor_critic._imagine(actor_critic, **start)
+        actor_critic._imagine.reset()
         self.assertEqual(feats.numpy().shape, (H, B * T, 1536))
         self.assertEqual(states["stoch"].numpy().shape, (H, B * T, 32, 32))
         self.assertEqual(states["deter"].numpy().shape, (H, B * T, 512))

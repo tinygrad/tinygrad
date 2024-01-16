@@ -240,12 +240,8 @@ class ActorCritic:
 
     @staticmethod
     @TinyJit
-    def _train(actor_critic: "ActorCritic", objective, **start):
+    def _train(actor_critic: "ActorCritic", imag_feat, imag_action, reward, **imag_state):
         metrics = {}
-        imag_feat, imag_state, imag_action = actor_critic._imagine(start, actor_critic.actor, actor_critic._config.imag_horizon)
-        imag_feat = imag_feat.detach()
-        imag_state = {k: v.detach() for k, v in imag_state.items()}
-        reward = objective(imag_feat, imag_state, imag_action).detach()
         actor_ent = actor_critic.actor(imag_feat).entropy()
         # this target is not scaled by ema or sym_log.
         target, weights, base = actor_critic._compute_target(imag_feat, imag_state, reward)
@@ -288,8 +284,10 @@ class ActorCritic:
         metrics = {k: v.realize() for k, v in metrics.items()}
         return imag_feat, imag_state, imag_action, weights, metrics
 
-    def _imagine(self, start, policy, H):
-        dynamics = self._world_model.dynamics
+    @staticmethod
+    @TinyJit
+    def _imagine(actor_critic: "ActorCritic", **start):
+        dynamics = actor_critic._world_model.dynamics
 
         def flatten(x):
             return x.reshape([-1] + list(x.shape[2:]))
@@ -300,12 +298,16 @@ class ActorCritic:
             state, _, _ = prev
             feat = dynamics.get_feat(state)
             inp = feat.detach()
-            action = policy(inp).sample()
+            action = actor_critic.actor(inp).sample()
             succ = dynamics.img_step(state, action)
             return succ, feat, action
 
-        succ, feats, actions = utils.static_scan(step, [Tensor.arange(H)], (start, None, None))
+        succ, feats, actions = utils.static_scan(step, [Tensor.arange(actor_critic._config.imag_horizon)], (start, None, None))
         states = {k: Tensor.cat(start[k][None], v[:-1], dim=0) for k, v in succ.items()}
+
+        feats = feats.realize()
+        actions = actions.realize()
+        states = {k: v.realize() for k, v in states.items()}
 
         return feats, states, actions
 
@@ -361,7 +363,12 @@ class ActorCritic:
 
     def train(self, start, objective):
         self._update_slow_target()
-        return self._train(self, objective, **start)
+        imag_feat, imag_state, imag_action = self._imagine(self, **start)
+        imag_feat = imag_feat.detach().contiguous().realize()
+        imag_state = {k: v.detach().contiguous().realize() for k, v in imag_state.items()}
+        imag_action = imag_action.contiguous().realize()
+        imag_reward = objective(imag_feat, imag_state, imag_action).detach().contiguous().realize()
+        return self._train(self, imag_feat, imag_action, imag_reward, **imag_state)
 
     def actor_parameters(self):
         return nn.state.get_parameters(self.actor)
