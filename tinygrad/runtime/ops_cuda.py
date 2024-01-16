@@ -18,7 +18,6 @@ def pretty_ptx(s):
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
 
-PTX = getenv("PTX") == 1
 CUDACPU = getenv("CUDACPU") == 1
 if CUDACPU:
   gpuocelot_lib = ctypes.CDLL(ctypes.util.find_library("gpuocelot"))
@@ -31,7 +30,6 @@ def check(status):
 def cu_time_execution(cb, enable=False) -> Optional[float]: return time_execution_cuda_style(cb, cuda.CUevent, cuda.cuEventCreate, cuda.cuEventRecord, cuda.cuEventSynchronize, cuda.cuEventDestroy_v2, cuda.cuEventElapsedTime, enable=enable) if not CUDACPU else cpu_time_execution(cb, enable=enable)  # noqa: E501
 
 def compile_cuda(prg) -> bytes: return compile_cuda_style(prg, [f'--gpu-architecture={CUDADevice.default_arch_name}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"], cuda.nvrtcProgram, cuda.nvrtcCreateProgram, cuda.nvrtcCompileProgram, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check)  # noqa: E501
-def compile_ptx(prg) -> bytes: return prg.replace("TARGET", CUDADevice.default_arch_name).encode("utf-8")
 
 class CUDAProgram:
   def __init__(self, device:CUDADevice, name:str, lib:bytes):
