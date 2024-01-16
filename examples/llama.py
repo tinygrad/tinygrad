@@ -4,6 +4,7 @@
 #typeguard.importhook.install_import_hook('tinygrad')
 
 from pathlib import Path
+from typing import List
 import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
@@ -105,13 +106,13 @@ MODEL_PARAMS = {
 
 
 # **** helper functions ****
-def concat_weights(models):
+def concat_weights(models, device=Device.DEFAULT):
   def convert(name) -> Tensor:
-    disk_tensors = [model[name] for model in models]
+    disk_tensors: List[Tensor] = [model[name] for model in models]
     if len(disk_tensors) == 1 or len(disk_tensors[0].shape) == 1:
-      return disk_tensors[0].to(device=Device.DEFAULT)
+      return disk_tensors[0].to(device=device)
     axis = 1 if name.startswith("tok_embeddings.") or name.endswith(".attention.wo.weight") or name.endswith(".feed_forward.w2.weight") else 0
-    lazy_tensors = [data.to(device=Device.DEFAULT) for data in disk_tensors]
+    lazy_tensors = [data.to(device=device) for data in disk_tensors]
     return lazy_tensors[0].cat(*lazy_tensors[1:], dim=axis)
   return {name: convert(name) for name in {name: None for model in models for name in model}}
 
@@ -181,7 +182,7 @@ class LLaMa:
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
       for _,v in weights.items(): v.realize()
-    load_state_dict(model, weights, strict=False)
+    load_state_dict(model, weights, strict=False, consume=True)
 
     return LLaMa(model, sp_model)
 

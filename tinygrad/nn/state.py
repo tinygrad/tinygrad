@@ -57,7 +57,7 @@ def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> Dict[str, Tensor]:
   return state_dict
 def get_parameters(obj) -> List[Tensor]: return list(get_state_dict(obj).values())
 
-def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=True):
+def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=True, consume=False):
   start_mem_used = GlobalCounters.mem_used
   with Timing("loaded weights in ", lambda et_ns: f", {(GlobalCounters.mem_used-start_mem_used)/1e9:.2f} GB loaded at {(GlobalCounters.mem_used-start_mem_used)/et_ns:.2f} GB/s"):  # noqa: E501
     model_state_dict = get_state_dict(model)
@@ -70,6 +70,7 @@ def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=Tr
         continue
       if isinstance(v.lazydata, MultiLazyBuffer): v.assign(state_dict[k].shard(v.lazydata.device, v.lazydata.axis)).realize()
       else: v.assign(state_dict[k].to(v.device)).realize()
+      if consume: del state_dict[k]
 
 # torch support!
 
