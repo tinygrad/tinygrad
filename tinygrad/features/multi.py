@@ -12,6 +12,7 @@ def all_reduce(lbs):
   return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
 
 def to_sharded(lbs:List[LazyBuffer], axis:int) -> List[LazyBuffer]:
+  if axis < 0: axis += len(lbs[0].shape)
   assert lbs[0].shape[axis] % len(lbs) == 0, f"{lbs[0].shape=} {axis=} {len(lbs)=}"
   sz = lbs[0].shape[axis] // len(lbs)
   return [lb.shrink(tuple((0,s) if a != axis else (sz*i,sz*(i+1)) for a,s in enumerate(lb.shape))) for i,lb in enumerate(lbs)]
@@ -22,6 +23,9 @@ class MultiLazyBuffer:
     assert all_same([(x.shape, x.dtype, x.st) for x in lbs]), "all multilazybuffer needs same shape, dtype, and st"
     self.lbs, self.axis, self.dtype, self.device = lbs, axis, lbs[0].dtype, tuple(x.device for x in lbs)
     self.shape = tuple(s*len(self.lbs) if a == self.axis else s for a,s in enumerate(lbs[0].shape))
+
+  @property
+  def size(self): return sum(x.size for x in self.lbs)
 
   def __repr__(self):
     return f"<MLB{chr(10)}{chr(10).join([f'{x.device} {x.st}' for x in self.lbs])}>"
