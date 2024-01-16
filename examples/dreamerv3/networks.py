@@ -621,7 +621,7 @@ class RSSM:
 
     def kl_loss(self, post, prior, free, dyn_scale, rep_scale):
         def kld(x, y):
-            return distributions.kl_divergence(x, y).mean(-1)
+            return distributions.kl_divergence(x, y)
 
         def dist(x):
             return self.get_dist(x)

@@ -404,13 +404,20 @@ def _unwrap_dist(dist):
 
 
 def kl_divergence(dist1, dist2):
-    dist1 = _unwrap_dist(dist1)
-    dist2 = _unwrap_dist(dist2)
+    if isinstance(dist1, Independent) and isinstance(dist2, Independent):
+        return _kl_independent_independent(dist1, dist2)
     if isinstance(dist1, Categorical) and isinstance(dist2, Categorical):
         return _kl_categorical_categorical(dist1, dist2)
     else:
         raise NotImplementedError
 
 
-def _kl_categorical_categorical(p, q):
+def _kl_independent_independent(dist1: Independent, dist2: Independent):
+    if dist1._reinterpreted_batch_ndims != dist2._reinterpreted_batch_ndims:
+        raise NotImplementedError
+    kldiv = kl_divergence(dist1._dist, dist2._dist)
+    return _sum_rightmost(kldiv, dist1._reinterpreted_batch_ndims)
+
+
+def _kl_categorical_categorical(p: Categorical, q: Categorical):
     return (p.probs * (p.logits - q.logits)).sum(-1)
