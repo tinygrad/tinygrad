@@ -12,6 +12,7 @@ class CUDAGraph:
     devices = [ji.prg.clprg.device if isinstance(ji.prg, CompiledASTRunner) else None for ji in jit_cache]
     if len(devices) == 0 or not all_same(devices) or devices[0] is None: raise GraphException
     self.device = devices[0]
+    self.set_device()
 
     self.jit_cache = jit_cache
     self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
@@ -39,6 +40,7 @@ class CUDAGraph:
     self.instance = self.graph_instantiate(self.graph)
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+    self.set_device()
     # Update rawbuffers in the c_input_params struct.
     for (j,i),input_idx in self.input_replace.items():
       setattr(self.updatable_nodes[j][2], f'f{i}', input_rawbuffers[input_idx]._buf)
@@ -64,6 +66,7 @@ class CUDAGraph:
     check(cuda.cuGraphDestroy(self.graph))
     check(cuda.cuGraphExecDestroy(self.instance))
 
+  def set_device(self): pass
   def encode_args_info(self): return (cuda.CUdeviceptr_v2, (1,2,0))
   def graph_create(self): return init_c_var(cuda.CUgraph(), lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))
   def graph_instantiate(self, graph):
