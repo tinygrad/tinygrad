@@ -427,7 +427,7 @@ class ActorCritic:
         state = (latent, action)
         return policy_output, state
 
-    def policy(self, obs, state, training: bool, explore: bool):
+    def policy(self, obs, state, training: bool = False, explore: bool = False):
         with Tensor.train(False):
             obs = self._world_model.preprocess(obs)
             B = obs["is_first"].shape[0]
@@ -451,7 +451,7 @@ class ActorCritic:
             return policy_output, state
 
 
-def random_agent(config, act_space, o, d, s):
+def random_agent(config, act_space):
     if config.actor["dist"] == "onehot":
         random_actor = distributions.OneHotCategorical(Tensor.zeros(int(act_space.n)).repeat((config.num_envs, 1)))
     else:
@@ -462,6 +462,9 @@ def random_agent(config, act_space, o, d, s):
             ),
             1,
         )
-    action = random_actor.sample()
-    logprob = random_actor.log_prob(action)
-    return {"action": action, "logprob": logprob}, None
+    def random_policy(o, s):
+        action = random_actor.sample()
+        logprob = random_actor.log_prob(action)
+        return {"action": action, "logprob": logprob}, None
+    
+    return random_policy
