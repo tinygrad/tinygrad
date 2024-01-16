@@ -172,6 +172,7 @@ class Tensor:
   def shard(self, devices:Tuple[str, ...], axis:Optional[int]=None) -> Tensor:
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
     canonical_devices = tuple(Device.canonicalize(x) for x in devices)
+    if axis is not None and axis < 0: axis += len(self.shape)
     return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis), device=canonical_devices)
 
   def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None):
