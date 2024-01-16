@@ -8,6 +8,7 @@ from env import count_steps, load_episodes, make_dataset, make_envs, simulate
 
 from tinygrad.nn.state import get_state_dict, load_state_dict, safe_load, safe_save
 from tinygrad import Device
+import time
 
 
 class Dreamer:
@@ -124,15 +125,21 @@ def main():
         logger.write()
         if config.eval_episode_num > 0:
             print("Start evaluation.")
+            start_time = time.time()
             eval_policy = partial(agent, training=False)
             simulate(eval_policy, eval_envs, eval_eps, config.evaldir, logger, is_eval=True, episodes=config.eval_episode_num)
             if config.video_pred_log:
                 video = agent.world_model.video_pred(next(eval_dataset)).numpy()
                 logger.video("eval_openl", video)
+            print(f"Evaluation time: {time.time() - start_time:.2f} sec")
+            logger.scalar("eval_time", time.time() - start_time)
         print("Start training.")
+        start_time = time.time()
         state = simulate(agent, train_envs, train_eps, config.traindir, logger, limit=config.dataset_size, steps=config.eval_every, state=state)
         state_dict = get_state_dict(agent)
         safe_save(state_dict, logdir / "latest.safetensors")
+        print(f"Training time: {time.time() - start_time:.2f} sec")
+        logger.scalar("train_time", time.time() - start_time)
     for env in train_envs + eval_envs:
         env.close()
 
