@@ -100,8 +100,10 @@ def _internal_buffer_copy(dest:Buffer, src:Buffer):
   if hasattr(dest.allocator, 'transfer') and type(dest.allocator) is type(src.allocator):  # noqa: E721
     # fast path, used on HIP between GPUs
     # NOTE: it's important we use the dest device here to ensure the transfer is ready
-    Device[src.device].synchronize()   # TODO: async this
-    dest.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
+    #Device[src.device].synchronize()   # TODO: async this
+    evt = src.allocator.event()
+    dest.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize, evt)
+    dest.allocator.device.pending_buffers.append(src)
     return
   if getenv("FROM_BUFFER") and hasattr(dest.allocator, 'from_buffer') and hasattr(dest.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
     # fast path, used on Metal in OS X Sonoma

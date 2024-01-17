@@ -46,6 +46,9 @@ class HIPAllocator(LRUAllocator):
   def __init__(self, device:HIPDevice):
     self.device = device
     super().__init__()
+  def free_cache(self):
+    self.device.synchronize()
+    return super().free_cache()
   def _alloc(self, size:int):
     check(hip.hipSetDevice(self.device.device))
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
@@ -83,16 +86,24 @@ class HIPAllocator(LRUAllocator):
   def copyout(self, dest:memoryview, src:T):
     check(hip.hipSetDevice(self.device.device))
     check(hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
-  def transfer(self, dest:T, src:T, sz:int):
+  def event(self):
     check(hip.hipSetDevice(self.device.device))
-    # TODO: hipMemcpyAsync, but you have to track the "src" buffer to not free it
-    check(hip.hipMemcpy(dest, src, sz, hip.hipMemcpyDeviceToDevice))
+    evt = init_c_var(hip.hipEvent_t(), lambda x: check(hip.hipEventCreate(ctypes.byref(x))))
+    self.device.pending_events.append(evt)
+    check(hip.hipEventRecord(evt, None))
+    return evt
+  def transfer(self, dest:T, src:T, sz:int, evt):
+    check(hip.hipSetDevice(self.device.device))
+    if evt is not None: check(hip.hipStreamWaitEvent(None, evt, 0))
+    check(hip.hipMemcpyAsync(dest, src, sz, hip.hipMemcpyDeviceToDevice, None))
 
 class HIPDevice(Compiled):
   def __init__(self, device:str=""):
     self.device = int(device.split(":")[1]) if ":" in device else 0
     self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode() if not MOCKHIP else "gfx1100"  # noqa: E501
     self.pending_copyin: List[hip.hipDeviceptr_t] = []
+    self.pending_events = []
+    self.pending_buffers = []
 
     from tinygrad.runtime.graph.hip import HIPGraph
     super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self), LinearizerOptions("HIP"), HIPRenderer,
@@ -101,4 +112,7 @@ class HIPDevice(Compiled):
     check(hip.hipSetDevice(self.device))
     check(hip.hipDeviceSynchronize())
     for opaque in self.pending_copyin: check(hip.hipFree(opaque))
+    for opaque in self.pending_events: check(hip.hipEventDestroy(opaque))
     self.pending_copyin.clear()
+    self.pending_events.clear()
+    self.pending_buffers.clear()
