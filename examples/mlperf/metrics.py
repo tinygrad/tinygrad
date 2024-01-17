@@ -1,7 +1,7 @@
 import re
 import string
 from collections import Counter
-from tinygrad import Tensor, dtypes
+from tinygrad import dtypes, Device
 
 def levenshtein(a, b):
   n, m = len(a), len(b)
@@ -29,26 +29,37 @@ def word_error_rate(x, y):
     scores += levenshtein(h_list, r_list)
   return float(scores) / words, float(scores), words
 
-def one_hot(arr, num_classes=3, channel_axis=1):
-  if len(arr.shape) >= 5: arr = arr.squeeze(dim=channel_axis)
-  res = Tensor.eye(num_classes)[arr.reshape(-1)]
-  arr = res.reshape(list(arr.shape) + [num_classes])
-  arr = arr.permute((0, 4, 1, 2, 3)).cast(dtypes.float)
-  return arr
+def one_hot(x, gpus=[]):
+  if len(gpus) > 1:
+    x = x.to(Device.DEFAULT)
 
-def dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-6, argmax=True, to_one_hot_x=True):
+  x = x.one_hot(3) 
+  x = x.squeeze(1).permute(0, 4, 1, 2, 3)
+
+  if len(gpus) > 1:
+    return x.shard(gpus, axis=0)
+
+  return x
+
+def dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-6, argmax=True, to_one_hot_x=True, gpus=[]):
   channel_axis, reduce_axis = 1, tuple(range(2, len(prediction.shape)))
   if argmax: prediction = prediction.argmax(axis=channel_axis)
   else: prediction = prediction.softmax(axis=channel_axis)
-  if to_one_hot_x: prediction = one_hot(prediction, channel_axis=channel_axis)
-  target = one_hot(target, channel_axis=channel_axis)
+  if to_one_hot_x: prediction = one_hot(prediction, gpus=gpus)
+  target = one_hot(target, gpus=gpus)
   prediction, target = prediction[:, 1:], target[:, 1:]
   assert prediction.shape == target.shape, f"prediction ({prediction.shape}) and target ({target.shape}) shapes do not match"
   intersection = (prediction * target).sum(axis=reduce_axis)
   target_sum = target.sum(axis=reduce_axis)
   prediction_sum = prediction.sum(axis=reduce_axis)
   result = (2.0 * intersection + smooth_nr) / (target_sum + prediction_sum + smooth_dr)
-  return result[0]
+  if len(gpus) > 1:
+    result.to_(Device.DEFAULT)
+    result = result[0]
+    result.shard_(gpus, axis=0)
+  else:
+    result = result[0]
+  return result
 
 def normalize_string(s):
   s = "".join(c for c in s.lower() if c not in string.punctuation)
