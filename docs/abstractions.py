@@ -147,7 +147,7 @@ assert isinstance(result.lazydata.base.realized, Buffer)
 assert result.lazydata.base.realized.device == "CLANG"
 # getting ahead of ourselves, but we can move the Buffer to CPU
 out = result.lazydata.base.realized.as_buffer().cast('I')
-assert out[0] == 5, "when put in numpy with toCPU, it's 5"
+assert out[0] == 5, "when put in numpy, it's 5"
 
 # %%
 # == Union[Interpreted, Compiled] (in tinygrad/device.py, code 6/10) ==
@@ -186,9 +186,6 @@ class Buffer(ABC):
   # create an empty rawbuffer that holds `size` elements of type `dtype`
   # `opaque` is an opaque container class
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None): pass
-
-  # toCPU converts the RawBuffer to a numpy array with shape (size,)
-  def toCPU(self) -> np.ndarray: pass
 
 # %%
 # == Example: 2+3 in raw clang ==
