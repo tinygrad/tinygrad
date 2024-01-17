@@ -320,44 +320,43 @@ class Tensor:
 
   # ***** movement hlops *****
 
-  # - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
-  # - A slice i:j returns the elements with indices in [i, j)
-  #    - If omitted, i and j will default to 0 and N, respectively, where N is the length of the sequence
-  #    - Negative values for i and j are taken relative to the end of the sequence
-  #    - Both i and j will be clamped to the range (-N, N], where N in the length of the sequence
-  # - Indexing with None on a given axis will add a new dimension of size one before that axis
-  # - Empty slices are not allowed (tensors with 0s in shape have to be supported first, for all backends).
-  # - For a slice [i:j:k] finding the correct indices is delegated to slice.indices(len).
-  # - Strides > 1 and < 0 are now allowed!:
-  #    - This works by applying Shrink -> [[Flip -> ] Pad -> Reshape -> Shrink] -> Reshape (ops in brackets are optional)
-  #    - Idea of stride < 0 support:
-  #        - Do the slice first, flip the axes were slice.step is negative, do slice.step -> -slice.step. Go to steps below.
-  #    - Idea of stride `s` > 1 support (Pad -> Reshape -> Shrink):
-  #        - Instead of doing [::s] on axis [dim_sz], do [:, 0] on axes [dim_sz_padded // s, s].
-  #        - So pad dim_sz with as many zeros as needed (dim_sz -> dim_sz_padded) so that reshape to [dim_sz_padded // s, s]
-  #          is possible.
-  #        - Apply Shrink to do the slice [:, 0] on axes of shapes [dim_sz_padded // s, s].
-  # - Fancy indexing and combined indexing is supported
-  #    - Combined indexing works by letting regular slicing finish first -> computing the resulting dims w.r.t to Tensors passed in -> fancy indexing
-  #    - Any Tensors passed in __getitem__ will perform (CMPEQ with arange -> MUL with self -> SUM_REDUCE) iteratively
-  #        - The first iteration will expand the dim of self while consecutive iterations will reduce the dim
-  #    - There's a special case where a permute is needed at the end:
-  #        - if first Tensor passed in (expand dims) is not at dim 0
-  #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
-  # TODO: boolean indices
+  # Supported indexing options:
+  #   1. Int indexing (no copy)
+  #     - for all dims where there's int
+  #     - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
+  #     - X = Tensor.rand(4,5,9); X[2,-2] shrinks the Tensor to X.shrink(((2, 3), (3, 4), (0, 9)))
+  #     - Then we reshape (collapse) the int dim away (with 1 as dim length) such that X[2,-2].shape = (9,)
+  #   2. Slice indexing (no copy)
+  #     - for all dims where slice is start:end:stride
+  #     - first shrinks the Tensor to X.shrink(((start, end),))
+  #     - then we apply stride through Optional[flip] -> pad -> reshape -> shrink
+  #       - flip where dim value is negative
+  #       - pad 0's on dims such that reshaping [dim_size_padded] -> [dim_size_padded // stride, stride] is possible
+  #       - shrink [dim_size_padded // stride, stride] -> [dim_size_padded // stride, 1]
+  #       - reshape [dim_size_padded // stride, 1] -> [dim_size_padded // stride] and now you have your stride
+  #   3. None indexing (no copy)
+  #     - reshape (inject) a dim of value=1 at the dim where None is
+  #   4. Tensor indexing (copy)
+  #     - use Tensor.arange == tensor_index to create a mask
+  #     - apply mask to self by mask * self for dims where index is a tensor
+  #     - (mask * self).sum(dim) to reduce to original shape
+  # Tiny Things:
+  #   1. Out of bounds Tensor indexing results in 0
+  #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are OOB
+  #   2. Tensor indexing with consts are no copy (must be int)
+  #   3. Bool indexing is not supported
   # TODO: figure out the exact acceptable types for indices, especially for internal list/tuple types
-  # TODO: update docs
   def __getitem__(self, indices: Union[int, slice, Tensor, None, List, Tuple]) -> Tensor: # no ellipsis type...
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
-    if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, requires_grad=False, device=self.device)]
+    if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, self.device, requires_grad=False)]
     elif isinstance(indices, (tuple, list)):
-      indices = [Tensor(list(i), requires_grad=False, device=self.device) if isinstance(i, (tuple, list)) else i for i in indices]
+      indices = [Tensor(list(i), self.device, requires_grad=False) if isinstance(i, (tuple, list)) else i for i in indices]
     else: indices = [indices]
 
     # turn scalar Tensors into const val for no copy indexing
-    # TODO clean up and figure out why backward is wrong
-    indices = [self._to_const_val(i) if isinstance(i, (Scalar, Tensor)) else i for i in indices]
+    # TODO clean up
+    indices = [self._to_const_val(i) if isinstance(i, Tensor) else i for i in indices]
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
     ellipsis_idx = [dim for dim, i in enumerate(indices) if i is Ellipsis]
@@ -377,10 +376,11 @@ class Tensor:
     if slice in type_dim and self.ndim == 0: raise IndexError("slice cannot be applied to a 0-dim tensor.")
     if len(ellipsis_idx) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
     if float in type_dim: raise IndexError("float type is not valid index")
+    if bool in type_dim: raise IndexError("bool indexing is not supported")
     if any(isinstance(i, slice) and i.step == 0 for i in indices): raise ValueError('slice step cannot be 0')
     if num_slices > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
 
-    # 2. basic indexing (no copy)
+    # 2. basic indexing, uses only movement ops (no copy)
     # currently indices_filtered: Tuple[Union[slice, int, Tensor], ...]
     # turn indices in indices_filtered to Tuple[shrink_arg, strides]
     for dim in type_dim[int]:
@@ -390,15 +390,16 @@ class Tensor:
     for dim in type_dim[slice]:
       s, e, st = indices_filtered[dim].indices(self.shape[dim])
       indices_filtered[dim] = ((0, 0) if (st > 0 and e < s) or (st <= 0 and e > s) else (s, e) if st > 0 else (e+1, s+1), st)
+    # skip all Tensor dims
     for dim in type_dim[Tensor]: indices_filtered[dim] = ((0, self.shape[dim]), 1)
 
     new_slice, strides = ((),()) if not indices_filtered else zip(*indices_filtered)
-    ret = self.shrink(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
+    ret = self.shrink(new_slice).flip(tuple(i for i, s in enumerate(strides) if s < 0))
     # add strides by pad -> reshape -> shrink
     if any(abs(s) != 1 for s in strides):
       strides = tuple(abs(s) for s in strides)
       ret = ret.pad(tuple((0, round_up(sh, s) - sh) for s, sh in zip(strides, ret.shape)))
-      ret = ret.reshape(flatten([sh // s, s] for s, sh in zip(strides, ret.shape)))
+      ret = ret.reshape(tuple(flatten((sh // s, s) for s, sh in zip(strides, ret.shape))))
       ret = ret.shrink(tuple(flatten(((0, sh), (0, 1)) for sh in ret.shape[::2]))).reshape(ret.shape[::2])
 
     # inject 1 for dim where it's None and collapse dim for int
@@ -450,6 +451,7 @@ class Tensor:
     padding = tuple((max(0, -l), max(0, r-s)) for s,(l,r) in zip(self.shape, arg_))
     return self.pad(padding, value=value).shrink(tuple((l + pl, r + pl) for (l,r),(pl,_) in zip(arg_, padding)))
 
+  # TODO: clean this up
   def gather(self:Tensor, idx:Tensor, dim:int) -> Tensor:
     assert idx.ndim == self.ndim, "self.ndim must equal idx.ndim"
     assert all(s >= i for s,i in zip(self.shape, idx.shape)), "all dim of idx.shape must be smaller than self.shape"
