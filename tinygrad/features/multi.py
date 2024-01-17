@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Optional, Union, Any, Tuple, List
 import functools
-from tinygrad.helpers import all_same, dedup, DEBUG
+from tinygrad.helpers import all_same, dedup, round_up, DEBUG
 from tinygrad.dtype import DType
 from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
 from tinygrad.lazy import LazyBuffer, create_schedule
@@ -13,7 +13,7 @@ def all_reduce(lbs):
 
 def to_sharded(lbs:List[LazyBuffer], axis:int) -> List[LazyBuffer]:
   if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}")
-  sz = (lbs[0].shape[axis] + len(lbs) - 1) // len(lbs)
+  sz = round_up(lbs[0].shape[axis], len(lbs)) // len(lbs)
   return [lb.shrink(tuple((0,s) if a != axis else (sz*i,min(s,sz*(i+1))) for a,s in enumerate(lb.shape))) for i,lb in enumerate(lbs)]
 
 class MultiLazyBuffer:
@@ -36,7 +36,7 @@ class MultiLazyBuffer:
     sz = self.lbs[0].shape[self.axis]
     llbs = []
     for i,lb in enumerate([lb.copy_to_device(device) for lb in self.lbs]):
-      pad_arg = tuple((0,0) if a != self.axis else (sz*i,(s*len(self.lbs))-sz*(i+1)) for a,s in enumerate(lb.shape))
+      pad_arg = tuple((0,0) if a != self.axis else (sz*i, max(0, self.shape[self.axis]-sz*(i+1))) for a in range(len(lb.shape)))
       llbs.append(lb.pad(pad_arg))
     return functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), llbs)
 
