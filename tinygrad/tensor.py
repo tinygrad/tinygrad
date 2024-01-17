@@ -362,8 +362,8 @@ class Tensor:
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
     ellipsis_idx = [dim for dim, i in enumerate(indices) if i is Ellipsis]
     fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
-    num_slices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
-    indices[fill_idx:fill_idx+1] = [slice(None)] * (len(self.shape) - num_slices)
+    num_indices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
+    indices[fill_idx:fill_idx+1] = [slice(None)] * (len(self.shape) - num_indices)
 
     # use Dict[type, List[dimension]] to track elements in indices
     type_dim: DefaultDict[Union[type, None], List[int]] = defaultdict(list)
@@ -379,7 +379,7 @@ class Tensor:
     if float in type_dim: raise IndexError("float type is not valid index")
     if bool in type_dim: raise IndexError("bool indexing is not supported")
     if any(isinstance(i, slice) and i.step == 0 for i in indices): raise ValueError('slice step cannot be 0')
-    if num_slices > len(self.shape): raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+    if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
 
     # 2. basic indexing, uses only movement ops (no copy)
     # currently indices_filtered: Tuple[Union[slice, int, Tensor], ...]
@@ -406,7 +406,7 @@ class Tensor:
     # inject 1 for dim where it's None and collapse dim for int
     new_shape = list(ret.shape)
     for dim in type_dim[None]: new_shape.insert(dim, 1)
-    for dim in (dims_collapsed := [dim + sum(1 for d in type_dim[None] if dim >= d) for dim in reversed(type_dim[int])]): new_shape.pop(dim)
+    for dim in (dims_collapsed := tuple(dim + sum(1 for d in type_dim[None] if dim >= d) for dim in reversed(type_dim[int]))): new_shape.pop(dim)
     assert all_int(new_shape), f"does not support symbolic shape {new_shape}"
 
     ret = ret.reshape(new_shape)
@@ -418,25 +418,23 @@ class Tensor:
       idx, tdim = [], []
       for tensor_dim in type_dim[Tensor]:
         dims_collapsed_, dims_injected = sum(1 for d in dims_collapsed if tensor_dim >= d), sum(1 for d in type_dim[None] if tensor_dim >= d)
-        tdim.append(td := tensor_dim - dims_collapsed_ + dims_injected)
+        tdim.append(dim := tensor_dim - dims_collapsed_ + dims_injected)
         # normalize the negative tensor indices
-        idx.append(((t := indices[tensor_dim + dims_injected]) < 0).where(ret.shape[td], 0) + t)
-        # TODO uint8 and bool tensor indexing
-        if not dtypes.is_int(t.dtype): raise IndexError("tensors used as indices must be int tensors")
+        idx.append(((index := indices[tensor_dim + dims_injected]) < 0).where(ret.shape[dim], 0) + index)
+        # TODO is uint supported??? or is that binary
+        if not dtypes.is_int(index.dtype): raise IndexError(f"{index.dtype=} not supported, only int indexing is supported")
 
       # compute sum_dim, arange, and idx
       max_dim = max(i.ndim for i in idx)
-      sum_dim = [d if n==0 else d+max_dim-n for n,d in enumerate(tdim)]
-      arange = [Tensor.arange(ret.shape[d], requires_grad=False, device=self.device).reshape(*[1]*sd, ret.shape[d], *[1]*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, tdim))]   # noqa: E501
-      first_idx = [idx[0].reshape(*[1]*tdim[0], *[1]*(1 + max_dim - idx[0].ndim), *idx[0].shape, *[1]*(ret.ndim - tdim[0] - 1))]
-      rest_idx = [i.reshape(*[1]*tdim[0], *[1]*(max_dim - i.ndim), *i.shape, *[1]*(ret.ndim - tdim[0] - n)) for n,i in enumerate(idx[1:], 1)]
-      reshaped_idx = first_idx + rest_idx
-      ret = ret.reshape(*ret.shape[:sum_dim[0]+1], *[1]*max_dim, *ret.shape[sum_dim[0]+1:])
+      sum_dim = tuple(d if n==0 else d+max_dim-n for n,d in enumerate(tdim))
+      arange = [Tensor.arange(ret.shape[d], requires_grad=False, device=self.device).reshape(ret.shape[d:d+1] + (1,)*(ret.ndim + max_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, tdim))]   # noqa: E501
+      reshaped_idx = [i.reshape(i.shape + (1,)*(ret.ndim - tdim[0] - (n or 1))) for n,i in enumerate(idx)]
+      ret = ret.reshape(ret.shape[:tdim[0]+1] + (1,)*max_dim + ret.shape[tdim[0]+1:])
 
       # iteratively eq -> mul -> sum fancy index
       try:
         for a,i,sd in zip(arange, reshaped_idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
-      except AssertionError as exc: raise IndexError(f"cannot broadcast with index shapes {', '.join(str(i.shape) for i in idx)}") from exc
+      except AssertionError as exc: raise IndexError("cannot broadcast indices") from exc
 
       # special permute case
       if tdim[0] != 0 and len(tdim) != 1 and tdim != list(range(tdim[0], tdim[-1]+1)):
@@ -454,8 +452,8 @@ class Tensor:
 
   # TODO: clean this up
   def gather(self:Tensor, idx:Tensor, dim:int) -> Tensor:
-    assert idx.ndim == self.ndim, "self.ndim must equal idx.ndim"
-    assert all(s >= i for s,i in zip(self.shape, idx.shape)), "all dim of idx.shape must be smaller than self.shape"
+    assert idx.ndim == self.ndim, f"{idx.ndim=} must equal {self.ndim=}"
+    assert all(s >= i for s,i in zip(self.shape, idx.shape)), f"{idx.shape=} cannot be larger than {self.shape=}"
     if dim < 0: dim += self.ndim
     idx = idx.transpose(ax1=dim, ax2=0).unsqueeze(-1)
     permarg = list(range(self.ndim))
