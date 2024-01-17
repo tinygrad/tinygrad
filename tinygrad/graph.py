@@ -1,7 +1,7 @@
 import os, atexit, functools
 from collections import defaultdict
 from typing import List, Any, DefaultDict
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, LazyOp, GlobalCounters
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, LazyOp, GlobalCounters
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPHPATH, DEBUG, getenv
 from tinygrad.codegen.linearizer import UOps, UOp
@@ -38,16 +38,6 @@ def nm(x):
     counts[type(x)] += 1
   return x.node_id
 
-def get_sop(op: List[Op]):
-  op = [x for x in op if x not in BufferOps]
-  if len(op) <= 2: return '.'.join([str(y).split(".")[1] for y in op][::-1])
-  if len(op) <= 6: return '.'.join([str(y).split(".")[1][0:3] for y in op][::-1])
-  return str(len(op))
-
-def str_dtype(dtyp):
-  ret = str(dtyp)[7:]
-  return "" if ret == 'float' else f"\n{ret}"
-
 def realized_lazybuffer(lb, num):
   init_graph()
   G.nodes[nm(lb)]['style'] = '"filled,bold"'
@@ -70,7 +60,7 @@ def log_lazybuffer(lb, scheduled=False):
       G.add_edge(nm(x), nm(lb), color='#a0a0a0')
     label = '"' + \
       (str(set(x.shape for x in lb.srcs))+"\n"+str(lb.shape) if lb.op in ReduceOps else str(lb.shape)) + \
-      str_dtype(lb.dtype)+f"\n{lb.op}"+(f"\n{lb.arg}" if lb.op in {LoadOps.CONST, UnaryOps.CAST} else "") + \
+      (f"\n{lb.dtype.name}" if lb.dtype.name != "float" else "")+f"\n{lb.op}"+(f"\n{lb.arg}" if lb.op in {LoadOps.CONST, UnaryOps.CAST} else "") + \
       (f"\n{lb.device}" if lb.device != Device.DEFAULT else "") + '"'
     G.add_node(nm(lb), style='"filled,dashed"', fillcolor=[v for k,v in top_colors.items() if lb.op in k][0] + "80", color="black", label=label)
     if scheduled: G.nodes[nm(lb)]['shape'] = 'box'
