@@ -31,25 +31,25 @@ def clone(original:Tensor): return copy.copy(original)
 def copy_(src:Tensor, other:Tensor) -> Tensor: return copy.copy(src)
 def data_ptr(tensor:Tensor): return tensor.lazydata
 
-
-# TODO torch.argsort()
+# https://pytorch.org/docs/stable/generated/torch.argsort.html
 def argsort(tensor:Tensor) -> Tensor:
   ...
 
-# TODO torch.all()
-# not sure if this is right
+# https://pytorch.org/docs/stable/generated/torch.all.html
 def all_(tensor:Tensor) -> Tensor:
   return tensor != 0
 
+# https://pytorch.org/docs/stable/generated/torch.diagonal.html
 def diagonal(tensor:Tensor) -> Tensor:
   assert all(sh == sh[0] for sh in tensor.shape), "matrix should be square"
   assert tensor.ndim == 2, 'only support 2 ndim tensors'
   return (Tensor.eye(tensor.shape[0]) * tensor).sum(0)
 
-
+# https://numpy.org/doc/stable/reference/generated/numpy.unravel_index.html
 def unravel_index(tensor, shape):
   ...
 
+# TODO: find source
 def make_tensor(shape, dtype:dtypes, noncontiguous) -> Tensor:
   r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
   values uniformly drawn from ``[low, high)``.

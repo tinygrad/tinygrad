@@ -320,22 +320,23 @@ class Tensor:
 
   # ***** movement hlops *****
 
-  # Supported indexing options:
+  # NOTE: follows https://data-apis.org/array-api/2022.12/API_specification/indexing.html
+  # Supported indexing implementations:
   #   1. Int indexing (no copy)
-  #     - for all dims where there's int
+  #     - for all dims where there's int, shrink
   #     - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
   #     - X = Tensor.rand(4,5,9); X[2,-2] shrinks the Tensor to X.shrink(((2, 3), (3, 4), (0, 9)))
   #     - Then we reshape (collapse) the int dim away (with 1 as dim length) such that X[2,-2].shape = (9,)
   #   2. Slice indexing (no copy)
-  #     - for all dims where slice is start:end:stride
-  #     - first shrinks the Tensor to X.shrink(((start, end),))
+  #     - for all dims where slice is start:end:stride, shrink -> Optional[flip] -> pad -> reshape -> shrink
+  #     - first shrink the Tensor to X.shrink(((start, end),))
   #     - then we apply stride through Optional[flip] -> pad -> reshape -> shrink
   #       - flip where dim value is negative
   #       - pad 0's on dims such that reshaping [dim_size_padded] -> [dim_size_padded // stride, stride] is possible
   #       - shrink [dim_size_padded // stride, stride] -> [dim_size_padded // stride, 1]
   #       - reshape [dim_size_padded // stride, 1] -> [dim_size_padded // stride] and now you have your stride
   #   3. None indexing (no copy)
-  #     - reshape (inject) a dim of value=1 at the dim where None is
+  #     - reshape (inject) a dim of value=1 at the dim where there's None
   #   4. Tensor indexing (copy)
   #     - use Tensor.arange == tensor_index to create a mask
   #     - apply mask to self by mask * self for dims where index is a tensor
@@ -421,7 +422,7 @@ class Tensor:
         # normalize the negative tensor indices
         idx.append(((t := indices[tensor_dim + dims_injected]) < 0).where(ret.shape[td], 0) + t)
         # TODO uint8 and bool tensor indexing
-        if not (dtypes.is_int(t.dtype) or t.dtype == dtypes.bool): raise IndexError("tensors used as indices must be int or bool tensors")
+        if not dtypes.is_int(t.dtype): raise IndexError("tensors used as indices must be int tensors")
 
       # compute sum_dim, arange, and idx
       max_dim = max(i.ndim for i in idx)
