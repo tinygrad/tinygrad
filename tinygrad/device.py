@@ -130,7 +130,7 @@ class _BufferCopy(JITRunner):
     if wait or DEBUG >= 2:
       Device[dest.device].synchronize()
       et = time.perf_counter() - st
-    update_stats(colored(f"copy {dest.size:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", "yellow"),
+    update_stats(colored(f"copy {dest.size*dest.dtype.itemsize:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", "yellow"),
                  0, dest.size*dest.dtype.itemsize, {}, et, 2, jit, device=dest.device)
 BufferCopy = _BufferCopy()
 
@@ -153,7 +153,7 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
     if len(c := self.cache[size]): return c.pop()
     try:
       return super().alloc(size)
-    except MemoryError:
+    except (RuntimeError, MemoryError):
       self.free_cache()
       return super().alloc(size)
   def free_cache(self):

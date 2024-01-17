@@ -4,7 +4,7 @@ from PIL import Image
 from tqdm import tqdm
 import pickle
 from tinygrad import dtypes, Tensor
-from tinygrad.helpers import getenv, prod, Timing
+from tinygrad.helpers import getenv, prod, Timing, Context
 from multiprocessing import Queue, Process, shared_memory, connection, Lock
 
 class MyQueue:
@@ -33,30 +33,31 @@ def shuffled_indices(n):
     del indices[i]
 
 def loader_process(q_in, q_out, X:Tensor):
-  while (_recv := q_in.get()) is not None:
-    idx, fn = _recv
-    img = Image.open(fn)
-    img = img.convert('RGB') if img.mode != "RGB" else img
+  with Context(DEBUG=0):
+    while (_recv := q_in.get()) is not None:
+      idx, fn = _recv
+      img = Image.open(fn)
+      img = img.convert('RGB') if img.mode != "RGB" else img
 
-    # eval: 76.08%, load in 0m7.366s (0m5.301s with simd)
-    # sudo apt-get install libjpeg-dev
-    # CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
-    rescale = min(img.size) / 256
-    crop_left = (img.width - 224*rescale) / 2.0
-    crop_top = (img.height - 224*rescale) / 2.0
-    img = img.resize((224, 224), Image.BILINEAR, box=(crop_left, crop_top, crop_left+224*rescale, crop_top+224*rescale))
+      # eval: 76.08%, load in 0m7.366s (0m5.301s with simd)
+      # sudo apt-get install libjpeg-dev
+      # CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
+      rescale = min(img.size) / 256
+      crop_left = (img.width - 224*rescale) / 2.0
+      crop_top = (img.height - 224*rescale) / 2.0
+      img = img.resize((224, 224), Image.BILINEAR, box=(crop_left, crop_top, crop_left+224*rescale, crop_top+224*rescale))
 
-    # broken out
-    #img_tensor = Tensor(img.tobytes(), device='CPU')
-    #storage_tensor = X[idx].contiguous().realize().lazydata.realized
-    #storage_tensor._copyin(img_tensor.numpy())
+      # broken out
+      #img_tensor = Tensor(img.tobytes(), device='CPU')
+      #storage_tensor = X[idx].contiguous().realize().lazydata.realized
+      #storage_tensor._copyin(img_tensor.numpy())
 
-    # faster
-    X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+      # faster
+      X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
 
-    # ideal
-    #X[idx].assign(img.tobytes())   # NOTE: this is slow!
-    q_out.put(idx)
+      # ideal
+      #X[idx].assign(img.tobytes())   # NOTE: this is slow!
+      q_out.put(idx)
 
 def batch_load_resnet(batch_size=64, val=False, shuffle=True):
   from extra.datasets.imagenet import get_train_files, get_val_files

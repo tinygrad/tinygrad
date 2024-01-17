@@ -122,7 +122,7 @@ class View:
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def pad(self, arg: Tuple[Tuple[int, int], ...]) -> View:
-    assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape)
+    assert all((b>=0 and e>=0) for b,e in arg) and len(arg) == len(self.shape), f"{self.shape=}, {arg=}"
     if any(b or e for b, e in arg):
       zvarg = tuple([(-b,s+e) for s,(b,e) in zip(self.shape, arg)])
       mask = tuple([(b,s+b) for s,(b,_) in zip(self.shape, arg)])

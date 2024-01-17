@@ -53,18 +53,26 @@ class HIPAllocator(LRUAllocator):
   def _hostalloc(self, size:int): return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 0)))
   def copy_from_fd(self, dest, fd, offset, size):
     check(hip.hipSetDevice(self.device.device))
-    if not hasattr(self, 'hb'): self.hb = [self._hostalloc(CHUNK_SIZE) for _ in range(2)]
+    if not hasattr(self, 'hb'):
+      self.hb = [self._hostalloc(CHUNK_SIZE) for _ in range(2)]
+      self.hb_events = [None, None]
+      self.hb_polarity = 0
     fo = io.FileIO(fd, "a+b", closefd=False)
     fo.seek(offset - (minor_offset:=offset % PAGE_SIZE))
     copied_in = 0
     for local_offset in range(0, size+minor_offset, CHUNK_SIZE):
       local_size = min(round_up(size+minor_offset, PAGE_SIZE)-local_offset, CHUNK_SIZE)
-      fo.readinto(to_mv(self.hb[0], local_size))
-      check(hip.hipDeviceSynchronize())
-      check(hip.hipMemcpyAsync(ctypes.c_void_p(dest.value + copied_in), ctypes.c_void_p(self.hb[0].value + minor_offset),
+      if self.hb_events[self.hb_polarity] is not None:
+        check(hip.hipEventSynchronize(self.hb_events[self.hb_polarity]))
+        check(hip.hipEventDestroy(self.hb_events[self.hb_polarity]))
+        self.hb_events[self.hb_polarity] = None
+      fo.readinto(to_mv(self.hb[self.hb_polarity], local_size))
+      check(hip.hipMemcpyAsync(ctypes.c_void_p(dest.value + copied_in), ctypes.c_void_p(self.hb[self.hb_polarity].value + minor_offset),
                                copy_size:=min(local_size-minor_offset, size-copied_in), hip.hipMemcpyHostToDevice, None))
+      self.hb_events[self.hb_polarity] = init_c_var(hip.hipEvent_t(), lambda x: check(hip.hipEventCreate(ctypes.byref(x))))
+      check(hip.hipEventRecord(self.hb_events[self.hb_polarity], None))
       copied_in += copy_size
-      self.hb = self.hb[1:] + [self.hb[0]]
+      self.hb_polarity = (self.hb_polarity+1) % len(self.hb)
       minor_offset = 0 # only on the first
   def copyin(self, dest:T, src: memoryview):
     check(hip.hipSetDevice(self.device.device))
