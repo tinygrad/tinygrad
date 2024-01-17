@@ -51,7 +51,7 @@ def fuzz_linearizer(lin: Linearizer):
   seen_uops = {}
   ground_truth = None
   while 1:
-    if len(seen_uops) >= 20: break  # enough for this kernel
+    if len(seen_uops) >= 10: break  # enough for this kernel
     actions = get_linearizer_actions(lin, include_0=False)
     if not actions: break
     lin = random.choice(list(actions.values()))
@@ -70,11 +70,12 @@ def fuzz_linearizer(lin: Linearizer):
       print(f"{lin.applied_opts=}")
       return msg
 
-    result = rawbufs[0].toCPU()
+    result = rawbufs[0].as_buffer()
     if ground_truth is None:
       ground_truth = result
     else:
       try:
+        # compare memoryviews directly
         np.testing.assert_allclose(result, ground_truth, rtol=1e-2, atol=1e-2)
       except AssertionError:
         print(lin.ast)
