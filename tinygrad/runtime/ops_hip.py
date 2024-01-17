@@ -64,6 +64,7 @@ class HIPAllocator(LRUAllocator):
       local_size = min(round_up(size+minor_offset, PAGE_SIZE)-local_offset, CHUNK_SIZE)
       if self.hb_events[self.hb_polarity] is not None:
         check(hip.hipEventSynchronize(self.hb_events[self.hb_polarity]))
+        check(hip.hipEventDestroy(self.hb_events[self.hb_polarity]))
         self.hb_events[self.hb_polarity] = None
       fo.readinto(to_mv(self.hb[self.hb_polarity], local_size))
       check(hip.hipMemcpyAsync(ctypes.c_void_p(dest.value + copied_in), ctypes.c_void_p(self.hb[self.hb_polarity].value + minor_offset),
