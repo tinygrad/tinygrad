@@ -295,5 +295,17 @@ class TestMultiTensor(unittest.TestCase):
     assert isinstance(jf.jit_cache[4].prg, _BufferCopy)
     assert isinstance(jf.jit_cache[5].prg, graph_d1)
 
+  def test_uneven_shard(self):
+    for N in range(1, 6):
+      X = Tensor.rand(4, 1, 257).contiguous().realize()
+      n = X.numpy()
+      devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
+      X.shard_(devices, 2)
+      np.testing.assert_equal(X.numpy(), n)
+      np.testing.assert_equal(X.reshape(2, 2, 257).numpy(), n.reshape((2, 2, 257)))
+      np.testing.assert_equal(X.shrink(((0,2), (0, 1), (0,257))).numpy(), n[0:2, 0:1, 0:257])
+      np.testing.assert_equal(X.expand((4, 4, 257)).numpy(), np.tile(n, (1, 4, 1)))
+      np.testing.assert_equal(X.permute((0, 2, 1)).numpy(), np.transpose(n, (0, 2, 1)))
+
 if __name__ == '__main__':
   unittest.main()
