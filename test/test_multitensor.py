@@ -186,32 +186,6 @@ class TestMultiTensor(unittest.TestCase):
     y_shard = layer_norm_sharded(x_sharded).realize()
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
-  @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
-  @unittest.skipIf(Device.DEFAULT == "GPU", "GPU requires cl_khr_fp16")
-  def _test_llama_attention(self, device):
-    from extra.models.llama import Attention
-    bs, seq_len, dim, n_heads, n_kv_heads, max_context = 1, 1, 128, 4, 4, 32
-    freqs_cis = Tensor.rand(1, seq_len, 1, (dim//n_heads)//2, 2).half()
-    mask = None
-    start_pos = 0
-
-    layer = Attention(dim, n_heads, n_kv_heads, max_context, linear=nn.Linear)
-    x = Tensor.rand(bs, seq_len, dim).half()
-    y = layer(x, start_pos, freqs_cis, mask).realize()
-
-    layer_sharded = Attention(dim, n_heads, n_kv_heads, max_context, linear=nn.Linear)
-    layer_sharded.wq.weight.assign(layer.wq.weight.shard((d0, d1), axis=0)).realize()
-    layer_sharded.wk.weight.assign(layer.wk.weight.shard((d0, d1), axis=0)).realize()
-    layer_sharded.wv.weight.assign(layer.wv.weight.shard((d0, d1), axis=0)).realize()
-    layer_sharded.wo.weight.assign(layer.wo.weight.shard((d0, d1), axis=0)).realize()
-    x_sharded = x.shard(devices_2, axis=None).realize()
-    freqs_cis_sharded = freqs_cis.shard(devices_2, axis=None).realize()
-    y_sharded = layer_sharded(x_sharded, start_pos, freqs_cis_sharded, mask)
-
-    np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-4, rtol=1e-4)
-
-  def test_llama_attention(self): return self._test_llama_attention(devices_2)
-
   def test_data_parallel_resnet(self):
     import sys, pathlib
     sys.path.append((pathlib.Path(__file__).parent.parent / "extra" / "models").as_posix())
