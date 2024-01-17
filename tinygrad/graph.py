@@ -1,4 +1,4 @@
-import os, atexit
+import os, atexit, functools
 from collections import defaultdict
 from typing import List, Any, DefaultDict
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, Op, LazyOp, GlobalCounters
@@ -6,6 +6,9 @@ from tinygrad.device import Device
 from tinygrad.helpers import GRAPHPATH, DEBUG, getenv
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.shape.symbolic import NumNode
+
+try: import networkx as nx
+except ImportError: pass
 
 # **** debugging and graphing ****
 
@@ -16,18 +19,17 @@ if DEBUG >= 2:
           f"{' '*10}total: {GlobalCounters.kernel_count:5d} kernels {GlobalCounters.global_ops*1e-9:8.2f} GOPS {GlobalCounters.global_mem*1e-9:8.2f} GB {GlobalCounters.time_sum_s*1e3:8.2f} ms")  # noqa: E501
   atexit.register(print_globalcounters)
 
+def save_graph(G, fn, opt=""):
+  print("saving", G, f"to {fn}.svg")
+  nx.drawing.nx_pydot.write_dot(G, f'{fn}.dot')
+  os.system(f'dot {opt} -Tsvg {fn}.dot -o {fn}.svg')
+
 G:Any = None
 def init_graph():
   global G
   if G is not None: return
-  import networkx as nx
   G = nx.DiGraph()
-  def save_graph_exit():
-    print("saving", G, f"to {GRAPHPATH}.svg")
-    nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.dot')
-    # -Gnslimit=100 can make it finish, but you won't like results
-    os.system(f'dot -Tsvg {GRAPHPATH}.dot -o {GRAPHPATH}.svg')
-  atexit.register(save_graph_exit)
+  atexit.register(functools.partial(save_graph, G, GRAPHPATH)) # -Gnslimit=100 can make it finish, but you won't like results
 
 counts: DefaultDict[type, int] = defaultdict(int)
 def nm(x):
@@ -91,7 +93,6 @@ def _tree(lazyop:LazyOp, cycles, cnt, prefix=""):
 def print_tree(lazyop:LazyOp): print("\n".join([f"{str(i).rjust(3)} {s}" for i,s in enumerate(_tree(lazyop, {}, [-1]))]))
 
 def graph_uops(uops:List[UOp]):
-  import networkx as nx
   colors = {UOps.ALU: "#ffffc0", UOps.LOAD: "#ffc0c0", UOps.STORE: "#c0ffc0", UOps.SPECIAL: "#c0c0ff", UOps.CONST: "#e0e0e0",
             UOps.DEFINE_GLOBAL: "#ffe0b0", UOps.DEFINE_LOCAL: "#ffe0d0", UOps.DEFINE_ACC: "#f0ffe0",
             UOps.LOOP: "#c8a0e0", UOps.PHI: "#e0ffc0", UOps.BARRIER: "#ff8080", UOps.IF: "#c8b0c0"}
@@ -100,5 +101,4 @@ def graph_uops(uops:List[UOp]):
     if u.uop == UOps.END: continue
     G.add_node(uops.index(u), label=f"{str(u.uop)[5:]}{(' '+str(u.arg)) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.uop, "#ffffff"))  # noqa: E501
     for v in u.vin: G.add_edge(uops.index(v), uops.index(u))
-  nx.drawing.nx_pydot.write_dot(G, f'{GRAPHPATH}.uops.dot')
-  os.system(f'dot -Grankdir=LR -Tsvg {GRAPHPATH}.uops.dot -o {GRAPHPATH}.uops.svg')
+  save_graph(G, f'{GRAPHPATH}.uops', '-Grankdir=LR')
