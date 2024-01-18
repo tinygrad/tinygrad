@@ -107,7 +107,10 @@ class View:
     ret = ret.stride(tuple(-1 if x < 0 else 1 for x in self.strides)).permute(argsort(tuple(-x if x > 0 else x for x in self.strides)))
     return ret if prod(ret.shape) == prod(out_shape) else None   # don't support shrink, expand, or stride != (-1, 1)
 
-  # MovementOps live here now
+  @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
+  def minify(self):
+    min_shape = tuple(x[0] for x in _merge_dims(self.shape, self.strides, self.mask))
+    return nv if (nv := self.reshape(min_shape)) else self
 
   def __unsafe_resize(self, arg: Tuple[Tuple[sint, sint], ...], mask=None) -> View:
     offset = sum([s * x[0] for s, x in zip(self.strides,arg)])
