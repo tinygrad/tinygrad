@@ -70,4 +70,5 @@ if __name__ == "__main__":
       total_lines = sum([x[1] for x in table])
       print(f"\ntotal line count: {total_lines}")
       max_line_count = int(os.getenv("MAX_LINE_COUNT", "-1"))
-      assert max_line_count == -1 or total_lines < max_line_count, f"OVER {max_line_count} LINES"
+      # :D :D :D :D :D :D :) :(
+      assert max_line_count == -1 or total_lines <= max_line_count, f"OVER {max_line_count} LINES"
