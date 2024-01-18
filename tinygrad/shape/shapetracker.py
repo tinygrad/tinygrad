@@ -42,10 +42,6 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
   if None in (strides := ShapeTracker((vm2, vm1)).real_strides()): return None
   return View.create(vm1.shape, cast(Tuple[sint, ...], strides), vm2.offset, vm1.mask)
 
-def simplify(views:Tuple[View, ...]) -> Tuple[View, ...]:
-  if len(views) >= 2 and (new_view := merge_views(views[-2], views[-1])) is not None: return simplify(views[:-2] + (new_view,))
-  return views
-
 @functools.lru_cache(maxsize=None)
 def idxs_to_idx(shape:Tuple[int, ...], idxs:Tuple[Node, ...]) -> Node:
   assert len(idxs) == len(shape), "need an idx for all dimensions"
@@ -58,9 +54,9 @@ class ShapeTracker:
   views: Tuple[View, ...]
 
   def __add__(self, st:ShapeTracker) -> ShapeTracker:
-    new_views = self.views
-    for v in st.views: new_views = simplify(new_views + (v,)) # one view at a time = better simplification
-    return ShapeTracker(new_views)
+    ret = self
+    for v in st.views: ret = ShapeTracker(ret.views + (v,)).simplify() # one view at a time = better simplification
+    return ret
 
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[ShapeTracker]:
     ret = tuple(v.invert(s) for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]))
@@ -157,7 +153,10 @@ class ShapeTracker:
     _, valid = self.expr_idxs()
     return f'idx{axis}' in [v.expr for v in valid.vars()]
 
-  def simplify(self) -> ShapeTracker: return ShapeTracker(simplify(self.views))
+  def simplify(self) -> ShapeTracker:
+    if len(self.views) >= 2 and (new_view := merge_views(self.views[-2], self.views[-1])) is not None:
+      return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
+    return self
 
   # *** under this line are the movement ops ***
 
