@@ -452,11 +452,10 @@ class Tensor:
   def gather(self:Tensor, idx:Tensor, dim:int) -> Tensor:
     assert idx.ndim == self.ndim, f"{idx.ndim=} must equal {self.ndim=}"
     assert all(s >= i for s,i in zip(self.shape, idx.shape)), f"{idx.shape=} cannot be larger than {self.shape=}"
-    if dim < 0: dim += self.ndim
-    idx = idx.transpose(dim, 0).unsqueeze(-1)
-    permarg, shrinkarg = list(range(self.ndim)), tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])
-    arange = Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)
-    return ((idx == arange) * self.permute(*permarg).shrink(shrinkarg).unsqueeze(0)).sum(-1).transpose(0, dim)
+    idx = idx.transpose(ax1=dim, ax2=0).unsqueeze(-1)
+    permarg = list(range(self.ndim))
+    permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
+    return ((idx == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])).unsqueeze(0)).sum(-1).transpose(ax1=0, ax2=dim)  # noqa: E501
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     if dim < 0: dim += self.ndim
