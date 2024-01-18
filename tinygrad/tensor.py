@@ -452,6 +452,7 @@ class Tensor:
   def gather(self:Tensor, idx:Tensor, dim:int) -> Tensor:
     assert idx.ndim == self.ndim, f"{idx.ndim=} must equal {self.ndim=}"
     assert all(s >= i for s,i in zip(self.shape, idx.shape)), f"{idx.shape=} cannot be larger than {self.shape=}"
+    if dim < 0: dim += self.ndim
     idx = idx.transpose(ax1=dim, ax2=0).unsqueeze(-1)
     permarg = list(range(self.ndim))
     permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
