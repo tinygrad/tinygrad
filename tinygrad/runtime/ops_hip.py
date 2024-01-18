@@ -92,9 +92,11 @@ class HIPAllocator(LRUAllocator):
     self.device.pending_events.append(evt)
     check(hip.hipEventRecord(evt, None))
     return evt
-  def transfer(self, dest:T, src:T, sz:int, evt):
+  def block(self, evt):
     check(hip.hipSetDevice(self.device.device))
-    if evt is not None: check(hip.hipStreamWaitEvent(None, evt, 0))
+    check(hip.hipStreamWaitEvent(None, evt, 0))
+  def transfer(self, dest:T, src:T, sz:int):
+    check(hip.hipSetDevice(self.device.device))
     check(hip.hipMemcpyAsync(dest, src, sz, hip.hipMemcpyDeviceToDevice, None))
 
 class HIPDevice(Compiled):
@@ -103,7 +105,6 @@ class HIPDevice(Compiled):
     self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode() if not MOCKHIP else "gfx1100"  # noqa: E501
     self.pending_copyin: List[hip.hipDeviceptr_t] = []
     self.pending_events = []
-    self.pending_buffers = []
 
     from tinygrad.runtime.graph.hip import HIPGraph
     super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self), LinearizerOptions("HIP"), HIPRenderer,
@@ -115,4 +116,3 @@ class HIPDevice(Compiled):
     for opaque in self.pending_events: check(hip.hipEventDestroy(opaque))
     self.pending_copyin.clear()
     self.pending_events.clear()
-    self.pending_buffers.clear()
