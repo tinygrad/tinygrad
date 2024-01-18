@@ -323,10 +323,10 @@ class Tensor:
 
   # Supported Indexing Implementations:
   #   1. Int indexing (no copy)
-  #     - for all dims where there's int, shrink -> reshape (collapse dim)
+  #     - for all dims where there's int, shrink -> reshape
   #     - negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
-  #     - X = Tensor.rand(4,5,9); X[2,-2] shrinks the Tensor to X.shrink(((2, 3), (3, 4), (0, 9)))
-  #     - Then we reshape (collapse) the int dim away (with 1 as dim length) such that X[2,-2].shape = (9,)
+  #     - X = Tensor.rand(4,5,9); X[2,-2] shrinks the Tensor to X.shrink(((2, 3), (3, 4), (0, 9))) -> X.shape=(1,1,9)
+  #     - Then we reshape (collapse) the int dim away such that for X: (1,1,9) -> (9,)
   #   2. Slice indexing (no copy)
   #     - for all dims where slice is start:end:stride, shrink -> Optional[flip] -> pad -> reshape -> shrink
   #     - first shrink the Tensor to X.shrink(((start, end),))
@@ -336,7 +336,7 @@ class Tensor:
   #       - shrink [dim_size_padded // stride, stride] -> [dim_size_padded // stride, 1]
   #       - reshape [dim_size_padded // stride, 1] -> [dim_size_padded // stride] and now you have your stride
   #   3. None indexing (no copy)
-  #     - reshape (inject) a dim of value=1 at the dim where there's None
+  #     - reshape (inject) a dim at the dim where there's None
   #   4. Tensor indexing (copy)
   #     - use Tensor.arange == tensor_index to create a mask
   #     - apply mask to self by mask * self for dims where index is a tensor
@@ -416,10 +416,11 @@ class Tensor:
 
     # 3. advanced indexing (copy)
     if type_dim[Tensor]:
-      # calculate dim of current ret by subtracting dims collapsed until tensor_dim and adding dims injected until tensor_dim
+      # calculate dim of current ret by subtracting dims collapsed and adding dims injected until tensor_dim
       def calc_dim(tensor_dim:int) -> int:
         return tensor_dim - sum(1 for d in dims_collapsed if tensor_dim >= d) + sum(1 for d in type_dim[None] if tensor_dim >= d)
 
+      # track tensor_dim and tensor_index using a dict
       # calc_dim to get dim and use that to normalize the negative tensor indices
       idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor],tensor_index)}
 

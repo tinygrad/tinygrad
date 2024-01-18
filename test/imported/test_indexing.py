@@ -808,72 +808,6 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(a[0, -1], 1)
   '''
 
-  # TODO device tests
-  @unittest.skip("pytorch device specific test")
-  def test_index_put_accumulate_expanded_values(self, device):
-    # checks the issue with cuda: https://github.com/pytorch/pytorch/issues/39227
-    # and verifies consistency with CPU result
-    t = Tensor.zeros((5, 2))
-    t_dev = t.to(device)
-    indices = [
-      Tensor([0, 1, 2, 3]),
-      Tensor([1, ]),
-    ]
-    indices_dev = [i.to(device) for i in indices]
-    values0d = Tensor(1.0)
-    values1d = Tensor([1.0, ])
-
-    out_cuda = index_put_(t_dev, indices_dev, values0d.to(device), accumulate=True)
-    out_cpu = index_put_(t, indices, values0d, accumulate=True)
-    numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
-
-    out_cuda = index_put_(t_dev, indices_dev, values1d.to(device), accumulate=True)
-    out_cpu = index_put_(t, indices, values1d, accumulate=True)
-    numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
-
-    t = Tensor.zeros(4, 3, 2)
-    t_dev = t.to(device)
-
-    indices = [
-      Tensor([0, ]),
-      Tensor.arange(3)[:, None],
-      Tensor.arange(2)[None, :],
-    ]
-    indices_dev = [i.to(device) for i in indices]
-    values1d = np.array([-1.0, -2.0])
-    values2d = np.array([[-1.0, -2.0], ])
-
-    out_cuda = index_put_(t_dev, indices_dev, values1d.to(device), accumulate=True)
-    out_cpu = index_put_(t, indices, values1d, accumulate=True)
-    numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
-
-    out_cuda = index_put_(t_dev, indices_dev, values2d.to(device), accumulate=True)
-    out_cpu = index_put_(t, indices, values2d, accumulate=True)
-    numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
-
-  # TODO setitem
-  # TODO device tests
-  '''
-  @unittest.skip("pytorch device specific test")
-  def test_index_put_accumulate_non_contiguous(self, device):
-    t = Tensor.zeros((5, 2, 2))
-    t_dev = t.to(device)
-    t1 = t_dev[:, 0, :]
-    t2 = t[:, 0, :]
-    self.assertTrue(not t1.lazydata.st.contiguous)
-    self.assertTrue(not t2.lazydata.st.contiguous)
-
-    indices = [Tensor([0, 1]), ]
-    indices_dev = [i.to(device) for i in indices]
-    value = Tensor.randn(2, 2)
-    out_cuda = index_put_(t1, indices_dev, value.to(device), accumulate=True)
-    out_cpu = index_put_(t2, indices, value, accumulate=True)
-    self.assertTrue(not t1.lazydata.st.contiguous)
-    self.assertTrue(not t2.lazydata.st.contiguous)
-
-    numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
-  '''
-
   # TODO setitem
   '''
   def test_index_put_accumulate_with_optional_tensors(self):
@@ -1285,31 +1219,33 @@ class TestIndexing(unittest.TestCase):
                                                                      [6, 7, 8]])
 
   # TODO unravel_index
-  # def test_unravel_index_errors(self):
-  #   with self.assertRaises(TypeError):
-  #     unravel_index(
-  #       Tensor(0.5),
-  #       (2, 2))
+  '''
+  def test_unravel_index_errors(self):
+    with self.assertRaises(TypeError):
+      unravel_index(
+        Tensor(0.5),
+        (2, 2))
 
-  #   with self.assertRaises(TypeError):
-  #     unravel_index(
-  #       Tensor([]),
-  #       (10, 3, 5))
+    with self.assertRaises(TypeError):
+      unravel_index(
+        Tensor([]),
+        (10, 3, 5))
 
-  #   with self.assertRaises(TypeError):
-  #     unravel_index(
-  #       Tensor([1], dtype=dtypes.int64),
-  #       Tensor([1, 2, 3]))
+    with self.assertRaises(TypeError):
+      unravel_index(
+        Tensor([1], dtype=dtypes.int64),
+        Tensor([1, 2, 3]))
 
-  #   with self.assertRaises(TypeError):
-  #     unravel_index(
-  #       Tensor([1], dtype=dtypes.int64),
-  #       (1, 2, 2.0))
+    with self.assertRaises(TypeError):
+      unravel_index(
+        Tensor([1], dtype=dtypes.int64),
+        (1, 2, 2.0))
 
-  #   with self.assertRaises(ValueError)"):
-  #     unravel_index(
-  #       Tensor(0),
-  #       (2, -3))
+    with self.assertRaises(ValueError):
+      unravel_index(
+        Tensor(0),
+        (2, -3))
+  '''
 
   def test_invalid_index(self):
     x = Tensor.arange(0, 16).reshape(4, 4)
@@ -1519,7 +1455,6 @@ class TestNumpy(unittest.TestCase):
     index = Tensor([False] * 6)
     self.assertRaises(IndexError, lambda: arr[index])
 
-    # index = torch.ByteTensor(4, 4).to(device).zero_()
     index = Tensor.zeros(4, 4, dtype=dtypes.uint8)
     self.assertRaises(IndexError, lambda: arr[index])
     self.assertRaises(IndexError, lambda: arr[(slice(None), index)])
