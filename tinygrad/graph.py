@@ -1,11 +1,12 @@
 import os, atexit, functools
 from collections import defaultdict
-from typing import List, Any, DefaultDict
+from typing import List, Any, DefaultDict, TYPE_CHECKING
 from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, LazyOp, GlobalCounters
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPHPATH, DEBUG, getenv
 from tinygrad.codegen.linearizer import UOps, UOp
 from tinygrad.shape.symbolic import NumNode
+if TYPE_CHECKING: from tinygrad.lazy import LazyBuffer
 
 try: import networkx as nx
 except ImportError: pass
@@ -38,7 +39,7 @@ def nm(x):
     counts[type(x)] += 1
   return x.node_id
 
-def realized_lazybuffer(lb, num):
+def realized_lazybuffer(lb:'LazyBuffer', num):
   init_graph()
   G.nodes[nm(lb)]['style'] = '"filled,bold"'
   G.nodes[nm(lb)]['fillcolor'] = G.nodes[nm(lb)]['fillcolor'][:-2]
@@ -46,7 +47,7 @@ def realized_lazybuffer(lb, num):
 
 top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0",
               MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
-def log_lazybuffer(lb, scheduled=False):
+def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
   init_graph()
   if lb.base != lb:
     offset = lb.st.expr_node(NumNode(0))[0]
