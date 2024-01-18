@@ -55,7 +55,7 @@ def train_unet3d():
       x, y = Tensor(x, dtype=dtypes.float32), Tensor(y, dtype=dtypes.uint8)
       if len(GPUS) > 1: x, y = x.shard(GPUS, axis=0), y.shard(GPUS, axis=0)
 
-      loss = _train_step(x, y, iter)
+      loss = _train_step(x, y)
       loss = loss / GA_STEPS
       loss.backward()
 
