@@ -340,7 +340,7 @@ class Tensor:
   #   4. Tensor indexing (copy)
   #     - use Tensor.arange == tensor_index to create a mask
   #     - apply mask to self by mask * self for dims where index is a tensor
-  #     - (mask * self).sum(dim) to reduce to original shape
+  #     - (mask * self).sum(dim) to reduce to correct shape
   # Tiny Things:
   #   1. Out of bounds Tensor indexing results in 0
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are OOB
@@ -374,10 +374,10 @@ class Tensor:
     for dim,i in enumerate(indices_filtered): type_dim[type(i)].append(dim)
 
     # validation! raise Errors
-    if slice in type_dim and self.ndim == 0: raise IndexError("slice cannot be applied to a 0-dim tensor.")
+    for index_type in type_dim:
+      if index_type not in (supported := [None, int, slice, Tensor]): raise IndexError(f"{index_type=} not supported, {supported=}")
     if len(ellipsis_idx) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
-    if float in type_dim: raise IndexError("float type is not valid index")
-    if bool in type_dim: raise IndexError("bool indexing is not supported")
+    if slice in type_dim and self.ndim == 0: raise IndexError("slice cannot be applied to a 0-dim tensor.")
     if any(isinstance(i, slice) and i.step == 0 for i in indices): raise ValueError('slice step cannot be 0')
     if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
 
@@ -421,8 +421,7 @@ class Tensor:
         tdim.append(dim := tensor_dim - dims_collapsed_ + dims_injected)
         # normalize the negative tensor indices
         idx.append(((index := indices[tensor_dim + dims_injected]) < 0).where(ret.shape[dim], 0) + index)
-        # TODO is uint supported??? or is that binary
-        if not dtypes.is_int(index.dtype): raise IndexError(f"{index.dtype=} not supported, only int indexing is supported")
+        if not dtypes.is_int(index.dtype): raise IndexError(f"{index.dtype=} not supported, only int tensor indexing is supported")
 
       # compute sum_dim, arange, and idx
       max_dim = max(i.ndim for i in idx)
@@ -450,15 +449,14 @@ class Tensor:
     padding = tuple((max(0, -l), max(0, r-s)) for s,(l,r) in zip(self.shape, arg_))
     return self.pad(padding, value=value).shrink(tuple((l + pl, r + pl) for (l,r),(pl,_) in zip(arg_, padding)))
 
-  # TODO: clean this up
   def gather(self:Tensor, idx:Tensor, dim:int) -> Tensor:
     assert idx.ndim == self.ndim, f"{idx.ndim=} must equal {self.ndim=}"
     assert all(s >= i for s,i in zip(self.shape, idx.shape)), f"{idx.shape=} cannot be larger than {self.shape=}"
     if dim < 0: dim += self.ndim
-    idx = idx.transpose(ax1=dim, ax2=0).unsqueeze(-1)
-    permarg = list(range(self.ndim))
-    permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
-    return ((idx == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])).unsqueeze(0)).sum(-1).transpose(ax1=0, ax2=dim)  # noqa: E501
+    idx = idx.transpose(dim, 0).unsqueeze(-1)
+    permarg, shrinkarg = list(range(self.ndim)), tuple([*[(0,sh) for sh in idx.shape[1:-1]], (0,self.shape[dim])])
+    arange = Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)
+    return ((idx == arange) * self.permute(*permarg).shrink(shrinkarg).unsqueeze(0)).sum(-1).transpose(0, dim)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     if dim < 0: dim += self.ndim

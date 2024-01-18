@@ -49,7 +49,7 @@ def diagonal(tensor:Tensor) -> Tensor:
 def unravel_index(tensor, shape):
   ...
 
-# TODO: find source
+# https://github.com/pytorch/pytorch/blob/79811e765c23242210ebdc623539d2103a166463/torch/testing/_creation.py#L38
 def make_tensor(shape, dtype:dtypes, noncontiguous) -> Tensor:
   r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
   values uniformly drawn from ``[low, high)``.
@@ -211,7 +211,9 @@ class TestIndexing(unittest.TestCase):
 
     # setting values
     # TODO: setitem
-    # validate_setting(reference)
+    '''
+    validate_setting(reference)
+    '''
 
     # Tensor with stride != 1
     # strided is [1, 3, 5, 7]
@@ -754,7 +756,6 @@ class TestIndexing(unittest.TestCase):
     v = Tensor([1.])
     numpy_testing_assert_equal_helper(v[v == 0], Tensor([]))
 
-  # TODO setitem
   @unittest.skip("bool indexing not supported")
   def test_byte_mask_accumulate(self):
     mask = Tensor.zeros(size=(10, ), dtype=dtypes.uint8)
