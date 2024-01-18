@@ -48,6 +48,15 @@ def idxs_to_idx(shape:Tuple[int, ...], idxs:Tuple[Node, ...]) -> Node:
   accs = itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1)
   return Node.sum([idx * acc for idx, acc in zip(reversed(idxs), accs)])
 
+def _expr_view(view:View, idxs:List[Node], valid:Optional[Node]=None) -> Tuple[Node, Node]:
+  assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
+  iexpr: List[Node] = [NumNode(view.offset) if isinstance(view.offset, int) else view.offset]
+  vexpr: List[Node] = [valid] if valid is not None else []
+  for idx,sh,st,m in zip(idxs, view.shape, view.strides, view.mask if view.mask is not None else [None]*len(view.shape)):
+    if sh != 1 and st != 0: iexpr.append(idx*st)
+    if m is not None: vexpr += [idx >= m[0], idx < m[1]]
+  return Node.sum(iexpr), Node.ands(vexpr)
+
 @dataclass(frozen=True)
 class ShapeTracker:
   views: Tuple[View, ...]
@@ -109,16 +118,53 @@ class ShapeTracker:
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
   def _expr_idx(self, idx:Node, valid:Node) -> Tuple[Node, Node]:
-    for v in reversed(self.views[0:-1]):
+    for view in reversed(self.views[0:-1]):
       if valid.max == 0: return NumNode(-1), valid
-      valid = expr_node_mask(v, idx, valid)
-      idx = expr_node(v, idx)
+      """
+      view = view.reshape(tuple(x[0] for x in _merge_dims(view.shape, view.strides, view.mask)))
+      acc = 1
+      iexpr: List[Node] = [NumNode(view.offset) if isinstance(view.offset, int) else view.offset]
+      vexpr: List[Node] = [valid]
+      for merged_dim, new_stride, real_dim in reversed(_merge_dims(view.shape, view.strides, view.mask)):
+        print(merged_dim, new_stride, real_dim)
+        base = (idx//acc)%merged_dim
+        iexpr.append(base * new_stride)
+        if view.mask is not None: vexpr += [base >= view.mask[real_dim][0], base < view.mask[real_dim][1]]
+        acc *= merged_dim
+      idx, valid = Node.sum(iexpr), Node.ands(vexpr)
+      """
+      valid = expr_node_mask(view, idx, valid)
+      idx = expr_node(view, idx)
     return idx, valid
 
   def expr_idxs(self, idxs:Optional[Iterable[Node]]=None): # -> Tuple[Node, Node]:
-    if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
-    idx = expr_idxs(self.views[-1], tuple(idxs))
-    valid = expr_node_mask(self.views[-1], idxs_to_idx(self.views[-1].shape, tuple(idxs)))
+    idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)] if idxs is None else list(idxs)
+    idx, valid = _expr_view(self.views[-1], idxs)
+
+    """
+    print(self.views)
+    idx, valid = _expr_view(self.views[-1], idxs)
+    for view in reversed(self.views[0:-1]):
+      #view = view.reshape(tuple(x[0] for x in _merge_dims(view.shape, view.strides, view.mask)))
+      acc, idxs = 1, []
+      for s in reversed(view.shape):
+        idxs.append((idx//acc)%s)
+        acc *= s
+      idx, valid = _expr_view(view, idxs, valid)
+    return idx if valid.max == 1 else NumNode(-1), valid
+    """
+
+    """
+    view = self.views[-1]
+    assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
+    iexpr: List[Node] = [NumNode(view.offset) if isinstance(view.offset, int) else view.offset]
+    vexpr: List[Node] = []
+    for idx,sh,st,m in zip(idxs, view.shape, view.strides, view.mask if view.mask is not None else [None]*len(view.shape)):
+      if sh != 1: iexpr.append(idx*st)
+      if m is not None: vexpr += [idx >= m[0], idx < m[1]]
+    return self._expr_idx(Node.sum(iexpr), Node.ands(vexpr))
+    """
+
     return self._expr_idx(idx, valid)
 
   def axis_is_masked(self, axis:int) -> bool:
