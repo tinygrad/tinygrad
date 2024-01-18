@@ -68,8 +68,8 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:int, var_vals: Optiona
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
     assert isinstance(dtype, DType)
-    self.device, self.size, self.dtype = device, size, dtype
-    self.allocator = Device[self.device].allocator
+    self.device, self.size, self.dtype, self.d = device, size, dtype, Device[device]
+    self.allocator = self.d.allocator
     # TODO: image hack shouldn't be here. where should it be?
     self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else size * dtype.itemsize)
     # TODO: mem_used for all devices
@@ -97,11 +97,11 @@ class Buffer:
     return mv
 
 def _internal_buffer_copy(dest:Buffer, src:Buffer):
-  if hasattr(dest.allocator, 'transfer') and type(dest.allocator) is type(src.allocator):  # noqa: E721
+  if hasattr(src.allocator, 'transfer') and type(dest.allocator) is type(src.allocator):  # noqa: E721
     # fast path, used on HIP between GPUs
     # NOTE: it's important we use the dest device here to ensure the transfer is ready
-    Device[src.device].synchronize()   # TODO: async this
-    dest.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
+    src.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
+    if hasattr(dest.d, "block") and hasattr(src.d, "event"): dest.d.block(src.d.event())
     return
   if getenv("FROM_BUFFER") and hasattr(dest.allocator, 'from_buffer') and hasattr(dest.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
     # fast path, used on Metal in OS X Sonoma
@@ -128,7 +128,7 @@ class _BufferCopy(JITRunner):
     _internal_buffer_copy(dest, src)
     et = None
     if wait or DEBUG >= 2:
-      Device[dest.device].synchronize()
+      dest.d.synchronize()
       et = time.perf_counter() - st
     update_stats(colored(f"copy {dest.size*dest.dtype.itemsize:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", "yellow"),
                  0, dest.size*dest.dtype.itemsize, {}, et, 2, jit, device=dest.device)

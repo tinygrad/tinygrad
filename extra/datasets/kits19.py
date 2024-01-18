@@ -19,7 +19,7 @@ cd kits19
 pip3 install -r requirements.txt
 python3 -m starter_code.get_imaging
 cd ..
-mv kits extra/datasets
+mv kits19 extra/datasets
 ```
 """
 
