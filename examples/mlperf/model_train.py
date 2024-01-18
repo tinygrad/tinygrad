@@ -26,6 +26,9 @@ def train_unet3d():
   LR_WARMUP_INIT_LR = getenv("LR_WARMUP_INIT_LR", 0.0001)
   GA_STEPS = getenv("GA_STEPS", 1)
 
+  if getenv("FP16"):
+    dtypes.default_float = dtypes.half
+
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}"
   for x in GPUS: Device[x]
@@ -52,7 +55,7 @@ def train_unet3d():
     optim.zero_grad()
 
     for iter, (x, y) in enumerate((t:=tqdm(iterate(val=False, shuffle=True, bs=BS), desc=f"[Epoch {epoch}]", total=len(get_train_files()) // BS))):
-      x, y = Tensor(x, dtype=dtypes.float32), Tensor(y, dtype=dtypes.uint8)
+      x, y = Tensor(x), Tensor(y, dtype=dtypes.uint8)
       if len(GPUS) > 1: x, y = x.shard(GPUS, axis=0), y.shard(GPUS, axis=0)
 
       loss = _train_step(x, y)
