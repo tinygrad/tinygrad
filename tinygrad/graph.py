@@ -50,7 +50,7 @@ top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", Bin
 def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
   init_graph()
   if lb.base != lb:
-    offset = lb.st.expr_node(NumNode(0))[0]
+    offset = lb.st.expr_idxs([NumNode(0)] * len(lb.st.shape))[0]
     label = f"{lb.st.shape}\n{lb.st.real_strides()}" + (f"\n{offset}" if offset != 0 else "")
     G.add_node(nm(lb), style='"filled,dashed"', fillcolor="#80ff8080", color="black", label=label)
     G.add_edge(nm(lb.base), nm(lb), color='#00000060')

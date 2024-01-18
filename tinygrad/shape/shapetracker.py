@@ -2,7 +2,7 @@
 from __future__ import annotations
 import functools, itertools, operator
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, cast, Union, Iterable
+from typing import Tuple, List, Optional, Dict, Set, cast, Iterable
 from tinygrad.helpers import prod, merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
 from tinygrad.shape.view import View, _merge_dims
@@ -115,15 +115,11 @@ class ShapeTracker:
       idx = expr_node(v, idx)
     return idx, valid
 
-  def expr_idxs(self, idxs:Optional[Iterable[Node]]=None):
+  def expr_idxs(self, idxs:Optional[Iterable[Node]]=None): # -> Tuple[Node, Node]:
     if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
     idx = expr_idxs(self.views[-1], tuple(idxs))
     valid = expr_node_mask(self.views[-1], idxs_to_idx(self.views[-1].shape, tuple(idxs)))
     return self._expr_idx(idx, valid)
-
-  def expr_node(self, idx:Union[Node,str]='idx'):
-    if isinstance(idx, str): idx = Variable(idx, 0, prod(self.shape)-1)
-    return self._expr_idx(expr_node(self.views[-1], idx), expr_node_mask(self.views[-1], idx))
 
   def axis_is_masked(self, axis:int) -> bool:
     _, valid = self.expr_idxs()
