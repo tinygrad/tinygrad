@@ -17,7 +17,7 @@ def check(status):
 # TODO: remove these helpers, they increase complexity
 def hip_time_execution(cb, enable=False): return time_execution_cuda_style(cb, hip.hipEvent_t, hip.hipEventCreate, hip.hipEventRecord, hip.hipEventSynchronize, hip.hipEventDestroy, hip.hipEventElapsedTime, enable=enable)  # noqa: E501
 
-def compile_hip(prg) -> bytes: return compile_cuda_style(prg, [f'--offload-arch={HIPDevice.default_arch_name}', '-I/opt/rocm/include'], hip.hiprtcProgram, hip.hiprtcCreateProgram, hip.hiprtcCompileProgram, hip.hiprtcGetCode, hip.hiprtcGetCodeSize, hip.hiprtcGetProgramLog, hip.hiprtcGetProgramLogSize, check)  # noqa: E501
+def compile_hip(prg:str, arch="gfx1100") -> bytes: return compile_cuda_style(prg, [f'--offload-arch={arch}', '-I/opt/rocm/include'], hip.hiprtcProgram, hip.hiprtcCreateProgram, hip.hiprtcCompileProgram, hip.hiprtcGetCode, hip.hiprtcGetCodeSize, hip.hiprtcGetProgramLog, hip.hiprtcGetProgramLogSize, check)  # noqa: E501
 
 class HIPProgram:
   def __init__(self, device:int, name:str, lib:bytes):
@@ -53,18 +53,26 @@ class HIPAllocator(LRUAllocator):
   def _hostalloc(self, size:int): return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 0)))
   def copy_from_fd(self, dest, fd, offset, size):
     check(hip.hipSetDevice(self.device.device))
-    if not hasattr(self, 'hb'): self.hb = [self._hostalloc(CHUNK_SIZE) for _ in range(2)]
+    if not hasattr(self, 'hb'):
+      self.hb = [self._hostalloc(CHUNK_SIZE) for _ in range(2)]
+      self.hb_events = [None, None]
+      self.hb_polarity = 0
     fo = io.FileIO(fd, "a+b", closefd=False)
     fo.seek(offset - (minor_offset:=offset % PAGE_SIZE))
     copied_in = 0
     for local_offset in range(0, size+minor_offset, CHUNK_SIZE):
       local_size = min(round_up(size+minor_offset, PAGE_SIZE)-local_offset, CHUNK_SIZE)
-      fo.readinto(to_mv(self.hb[0], local_size))
-      check(hip.hipDeviceSynchronize())
-      check(hip.hipMemcpyAsync(ctypes.c_void_p(dest.value + copied_in), ctypes.c_void_p(self.hb[0].value + minor_offset),
+      if self.hb_events[self.hb_polarity] is not None:
+        check(hip.hipEventSynchronize(self.hb_events[self.hb_polarity]))
+        check(hip.hipEventDestroy(self.hb_events[self.hb_polarity]))
+        self.hb_events[self.hb_polarity] = None
+      fo.readinto(to_mv(self.hb[self.hb_polarity], local_size))
+      check(hip.hipMemcpyAsync(ctypes.c_void_p(dest.value + copied_in), ctypes.c_void_p(self.hb[self.hb_polarity].value + minor_offset),
                                copy_size:=min(local_size-minor_offset, size-copied_in), hip.hipMemcpyHostToDevice, None))
+      self.hb_events[self.hb_polarity] = init_c_var(hip.hipEvent_t(), lambda x: check(hip.hipEventCreate(ctypes.byref(x))))
+      check(hip.hipEventRecord(self.hb_events[self.hb_polarity], None))
       copied_in += copy_size
-      self.hb = self.hb[1:] + [self.hb[0]]
+      self.hb_polarity = (self.hb_polarity+1) % len(self.hb)
       minor_offset = 0 # only on the first
   def copyin(self, dest:T, src: memoryview):
     check(hip.hipSetDevice(self.device.device))
@@ -81,15 +89,14 @@ class HIPAllocator(LRUAllocator):
     check(hip.hipMemcpy(dest, src, sz, hip.hipMemcpyDeviceToDevice))
 
 class HIPDevice(Compiled):
-  default_arch_name = "gfx1100"
   def __init__(self, device:str=""):
     self.device = int(device.split(":")[1]) if ":" in device else 0
+    self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode() if not MOCKHIP else "gfx1100"  # noqa: E501
     self.pending_copyin: List[hip.hipDeviceptr_t] = []
-    if self.device == 0 and not MOCKHIP: HIPDevice.default_arch_name = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode()  # noqa: E501
 
     from tinygrad.runtime.graph.hip import HIPGraph
     super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self), LinearizerOptions("HIP"), HIPRenderer,
-                     compile_hip, "compile_hip", functools.partial(HIPProgram, self.device), HIPGraph)
+                     functools.partial(compile_hip,arch=self.arch), f"compile_hip_{self.arch}", functools.partial(HIPProgram, self.device), HIPGraph)
   def synchronize(self):
     check(hip.hipSetDevice(self.device))
     check(hip.hipDeviceSynchronize())

@@ -1,6 +1,9 @@
+import functools
 import unittest
 from tinygrad import Tensor, Device, nn, GlobalCounters
+from tinygrad.device import _BufferCopy
 from tinygrad.helpers import CI
+from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_parameters
 import numpy as np
 
@@ -21,12 +24,14 @@ class TestMultiTensor(unittest.TestCase):
     X.to_((d0, d1))
     for lb in X.lazydata.lbs:
       assert lb.shape == (256,)
+    (X + X).realize()
 
   def test_shard(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_((d0, d1), 0)
     for lb in X.lazydata.lbs:
       assert lb.shape == (128,)
+    (X + X).realize()
 
   def test_shard_same_device(self):
     X = Tensor.ones(256).contiguous().realize()
@@ -183,32 +188,6 @@ class TestMultiTensor(unittest.TestCase):
     y_shard = layer_norm_sharded(x_sharded).realize()
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
-  @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
-  @unittest.skipIf(Device.DEFAULT == "GPU", "GPU requires cl_khr_fp16")
-  def _test_llama_attention(self, device):
-    from extra.models.llama import Attention
-    bs, seq_len, dim, n_heads, n_kv_heads, max_context = 1, 1, 128, 4, 4, 32
-    freqs_cis = Tensor.rand(1, seq_len, 1, (dim//n_heads)//2, 2).half()
-    mask = None
-    start_pos = 0
-
-    layer = Attention(dim, n_heads, n_kv_heads, max_context, linear=nn.Linear)
-    x = Tensor.rand(bs, seq_len, dim).half()
-    y = layer(x, start_pos, freqs_cis, mask).realize()
-
-    layer_sharded = Attention(dim, n_heads, n_kv_heads, max_context, linear=nn.Linear)
-    layer_sharded.wq.weight.assign(layer.wq.weight.shard((d0, d1), axis=0)).realize()
-    layer_sharded.wk.weight.assign(layer.wk.weight.shard((d0, d1), axis=0)).realize()
-    layer_sharded.wv.weight.assign(layer.wv.weight.shard((d0, d1), axis=0)).realize()
-    layer_sharded.wo.weight.assign(layer.wo.weight.shard((d0, d1), axis=0)).realize()
-    x_sharded = x.shard(devices_2, axis=None).realize()
-    freqs_cis_sharded = freqs_cis.shard(devices_2, axis=None).realize()
-    y_sharded = layer_sharded(x_sharded, start_pos, freqs_cis_sharded, mask)
-
-    np.testing.assert_allclose(y.numpy(), y_sharded.numpy(), atol=1e-4, rtol=1e-4)
-
-  def test_llama_attention(self): return self._test_llama_attention(devices_2)
-
   def test_data_parallel_resnet(self):
     import sys, pathlib
     sys.path.append((pathlib.Path(__file__).parent.parent / "extra" / "models").as_posix())
@@ -216,7 +195,6 @@ class TestMultiTensor(unittest.TestCase):
 
     fake_image = Tensor.rand((2, 3, 224, 224))
     fake_image_sharded = fake_image.shard((d0, d1), axis=0)
-    print(fake_image_sharded.shape)
     m = ResNet18()
     m.load_from_pretrained()
     real_output = m(fake_image).numpy()
@@ -227,6 +205,83 @@ class TestMultiTensor(unittest.TestCase):
     assert shard_output.lazydata.lbs[1].shape == (1, 1000)
     shard_output_np = shard_output.numpy()
     np.testing.assert_allclose(real_output, shard_output_np, atol=1e-6, rtol=1e-6)
+
+  def test_multi_tensor_jit_param(self):
+    @TinyJit
+    def jf(a, b) -> Tensor:
+      return (a + b).realize()
+
+    for _ in range(5):
+      a = Tensor.ones(256).contiguous().realize()
+      b = Tensor.ones(256).contiguous().realize()
+      a.shard_((d0, d1))
+      b.shard_((d0, d1))
+      c = jf(a, b)
+      np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
+    assert len(jf.jit_cache) > 0
+
+  def test_multi_tensor_jit_body(self):
+    @TinyJit
+    def jf() -> Tensor:
+      a = Tensor.ones(256).contiguous().realize()
+      b = Tensor.ones(256).contiguous().realize()
+      a.shard_((d0, d1))
+      b.shard_((d0, d1))
+      return (a + b).realize()
+
+    for _ in range(5):
+      r = jf()
+      np.testing.assert_allclose(r.numpy(), np.ones(256)+np.ones(256), atol=1e-4, rtol=1e-5)
+    assert len(jf.jit_cache) > 0
+
+  @unittest.skipIf(CI and Device.DEFAULT=="METAL", "no ICB in CI, creation of graph fails")
+  def test_multi_device_jit_graph(self):
+    if Device[d0].graph is None or Device[d1].graph is None: raise unittest.SkipTest("only test graphs")
+
+    @TinyJit
+    def jf(a: Tensor, b: Tensor, c: Tensor, d:Tensor):
+      # Create 80 entries on device 0: 2 batches.
+      for _ in range(40):
+        a = ((a + b).realize() + (a * b).realize()).realize()
+      # Create 80 entries on device 1: 2 batches.
+      for _ in range(40):
+        c = ((c + d).realize() + (c * d).realize()).realize()
+      # Create a copy from device 0 to 1: 1 entry.
+      a = a.to(d1).realize()
+      # Creates one last entry on device 1: 1 batch.
+      return (a + c).realize()
+
+    a = Tensor.randn(10, 10, device=d0).realize()
+    b = Tensor.randn(10, 10, device=d0).realize()
+    c = Tensor.randn(10, 10, device=d1).realize()
+    d = Tensor.randn(10, 10, device=d1).realize()
+
+    ref = jf(a, b, c, d).numpy()
+    for _ in range(5):
+      o = jf(a, b, c, d).numpy()
+      np.testing.assert_allclose(ref, o, atol=1e-4, rtol=1e-5)
+
+    graph_d0 = Device[d0].graph.func if isinstance(Device[d0].graph, functools.partial) else Device[d0].graph
+    graph_d1 = Device[d1].graph.func if isinstance(Device[d1].graph, functools.partial) else Device[d1].graph
+    # Checking that 2 graphs per device, 1 copy and 1 last graph on device 1 are created.
+    assert isinstance(jf.jit_cache[0].prg, graph_d0)
+    assert isinstance(jf.jit_cache[1].prg, graph_d0)
+    assert isinstance(jf.jit_cache[2].prg, graph_d1)
+    assert isinstance(jf.jit_cache[3].prg, graph_d1)
+    assert isinstance(jf.jit_cache[4].prg, _BufferCopy)
+    assert isinstance(jf.jit_cache[5].prg, graph_d1)
+
+  def test_uneven_shard(self):
+    for N in range(1, 6):
+      X = Tensor.rand(4, 1, 257).contiguous().realize()
+      n = X.numpy()
+      devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(N))
+      X.shard_(devices, 2)
+      np.testing.assert_equal(X.numpy(), n)
+      np.testing.assert_equal(X.reshape(2, 2, 257).numpy(), n.reshape((2, 2, 257)))
+      np.testing.assert_equal(X.shrink(((0,2), (0, 1), (0,257))).numpy(), n[0:2, 0:1, 0:257])
+      np.testing.assert_equal(X.expand((4, 4, 257)).numpy(), np.tile(n, (1, 4, 1)))
+      np.testing.assert_equal(X.permute((0, 2, 1)).numpy(), np.transpose(n, (0, 2, 1)))
 
 if __name__ == '__main__':
   unittest.main()
