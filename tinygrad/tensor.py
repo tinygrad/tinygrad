@@ -372,12 +372,10 @@ class Tensor:
     indices_filtered = [v for v in indices if v is not None]
     for dim,i in enumerate(indices_filtered): type_dim[type(i)].append(dim)
 
-    # validation! raise Errors
     for index_type in type_dim:
       if index_type not in (supported := [None, int, slice, Tensor]): raise IndexError(f"{index_type=} not supported, {supported=}")
-    if len(ellipsis_idx) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
     if slice in type_dim and self.ndim == 0: raise IndexError("slice cannot be applied to a 0-dim tensor.")
-    if any(isinstance(i, slice) and i.step == 0 for i in indices): raise ValueError('slice step cannot be 0')
+    if len(ellipsis_idx) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
     if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
 
     # 2. basic indexing, uses only movement ops (no copy)
@@ -385,16 +383,17 @@ class Tensor:
     # turn indices in indices_filtered to Tuple[shrink_arg, strides]
     for dim in type_dim[int]:
       if (index := indices_filtered[dim]) >= (size := self.shape[dim]) or index < -size:
-        raise IndexError(f"{index=} is out of bounds for dimension {dim} with {size=}")
+        raise IndexError(f"{index=} is out of bounds on {dim=} with {size=}")
       indices_filtered[dim] = ((index, index+1), 1) if index >= 0 else ((size+index, size+index+1), 1)
     for dim in type_dim[slice]:
-      s, e, st = indices_filtered[dim].indices(self.shape[dim])
+      if (index := indices_filtered[dim]).step == 0: raise ValueError(f"{index=} on {dim=} cannot have 0 as step")
+      s, e, st = index.indices(self.shape[dim])
       indices_filtered[dim] = ((0, 0) if (st * (e - s)) < 0 else (s, e) if st > 0 else (e+1, s+1), st)
     # record tensors and skip all Tensor dims for basic indexing
     tensor_index: List[Tensor] = []
     for dim in type_dim[Tensor]:
       tensor_index.append(index := indices_filtered[dim])
-      if not dtypes.is_int(index.dtype): raise IndexError(f"tensor {index.dtype=} not supported, only int tensor indexing is supported")
+      if not dtypes.is_int(index.dtype): raise IndexError(f"{index.dtype=} on {dim=} is not supported, only int tensor indexing is supported")
       indices_filtered[dim] = ((0, self.shape[dim]), 1)
 
     new_slice, strides = ((),()) if not indices_filtered else zip(*indices_filtered)

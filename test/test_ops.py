@@ -728,8 +728,10 @@ class TestOps(unittest.TestCase):
       a[0]
 
   def test_slice_int_indexing(self):
-    helper_test_op([(3)], lambda x: x[1], lambda x: x[1])
-    helper_test_op([(3)], lambda x: x[-2], lambda x: x[-2])
+    helper_test_op([(3)], lambda x: x[0], lambda x: x[0])
+    helper_test_op([(3)], lambda x: x[2], lambda x: x[2])
+    helper_test_op([(3)], lambda x: x[-1], lambda x: x[-1])
+    helper_test_op([(3)], lambda x: x[-3], lambda x: x[-3])
     helper_test_op([(10,10)], lambda x: x[1], lambda x: x[1])
     helper_test_op([(3,3,3)], lambda x: x[1,1,1], lambda x: x[1,1,1])
 
@@ -792,8 +794,8 @@ class TestOps(unittest.TestCase):
     a = Tensor.ones(4, 3)
     b = Tensor(2)
     with self.assertRaises(IndexError): a[1, 77, 77, 77] # IndexError: (finds too many indices before the out of bounds)
-    with self.assertRaises(IndexError): a[1, 77] # IndexError: (out of bounds).
-    with self.assertRaises(IndexError): a[1, -77]
+    with self.assertRaises(IndexError): a[1, 3] # IndexError: (out of bounds).
+    with self.assertRaises(IndexError): a[1, -4]
     with self.assertRaises(IndexError): a[..., ...] # IndexError: only single ellipsis
     with self.assertRaises(ValueError): a[::0, 1] # no 0 strides
     with self.assertRaises(IndexError): b[:] # slice cannot be applied to a 0-dim tensor
