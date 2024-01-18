@@ -34,11 +34,11 @@ def data_ptr(tensor:Tensor): return tensor.lazydata
 # https://pytorch.org/docs/stable/generated/torch.Tensor.index_put_.html
 # TODO this is setitem
 def index_put_(tensor:Tensor, indices, values, accumulate) -> Tensor:
-  ...
+  pass
 
 # https://pytorch.org/docs/stable/generated/torch.argsort.html
 def argsort(tensor:Tensor) -> Tensor:
-  ...
+  pass
 
 # https://pytorch.org/docs/stable/generated/torch.all.html
 def all_(tensor:Tensor) -> Tensor:
@@ -46,13 +46,12 @@ def all_(tensor:Tensor) -> Tensor:
 
 # https://pytorch.org/docs/stable/generated/torch.diagonal.html
 def diagonal(tensor:Tensor) -> Tensor:
-  assert all(sh == sh[0] for sh in tensor.shape), "matrix should be square"
-  assert tensor.ndim == 2, 'only support 2 ndim tensors'
+  assert tensor.ndim == 2 and all(sh == sh[0] for sh in tensor.shape), 'only support 2 ndim square tensors'
   return (Tensor.eye(tensor.shape[0]) * tensor).sum(0)
 
 # https://numpy.org/doc/stable/reference/generated/numpy.unravel_index.html
 def unravel_index(tensor, shape):
-  ...
+  pass
 
 # https://github.com/pytorch/pytorch/blob/79811e765c23242210ebdc623539d2103a166463/torch/testing/_creation.py#L38
 def make_tensor(shape, dtype:dtypes, noncontiguous) -> Tensor:
@@ -442,7 +441,7 @@ class TestIndexing(unittest.TestCase):
     for err_idx in (10, -11):
       with self.assertRaises(IndexError):
         reference[err_idx]
-      # cannot check for out of bounds with Tensor indexing
+      # NOTE cannot check for out of bounds with Tensor indexing
       # see tensor.py: __getitem__ (Tiny Things)
       '''
       with self.assertRaises(IndexError):
@@ -1093,7 +1092,7 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper((2, 0, 4), z.shape)
     # this isn't technically necessary, but matches NumPy stride calculations.
     numpy_testing_assert_equal_helper((60, 20, 5), z.lazydata.st.real_strides())
-    # TODO not contiguous
+    # NOTE tinygrad's int slicing implementation makes this not contiguous
     # self.assertTrue(z.lazydata.st.contiguous)
 
   @unittest.skip("bool indexing not supported")
@@ -1111,7 +1110,7 @@ class TestIndexing(unittest.TestCase):
       numpy_testing_assert_equal_helper(data_ptr(a), data_ptr(a[None]))
       numpy_testing_assert_equal_helper(data_ptr(a), data_ptr(a[...]))
 
-  @unittest.skip("bool indexing and setitem not supported")
+  @unittest.skip("bool indexing not supported")
   def test_index_setitem_bools_slices(self):
     true = Tensor(1, dtype=dtypes.uint8)
     false = Tensor(0, dtype=dtypes.uint8)
@@ -1182,7 +1181,7 @@ class TestIndexing(unittest.TestCase):
 
     # indexing by a scalar should slice (not copy)
     numpy_testing_assert_equal_helper(data_ptr(a[0, 1]), data_ptr(a[zero, one]))
-    # NOTE: skipped cuz casting in tinygrad creates a copy
+    # NOTE: skipped cuz casting in tinygrad makes _to_const_val not work
     # numpy_testing_assert_equal_helper(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int32)]))
     # numpy_testing_assert_equal_helper(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int16)]))
 
@@ -1229,7 +1228,6 @@ class TestIndexing(unittest.TestCase):
 
     # Check that it is a copy
     unmodified = clone(x)
-    # x[1:2, [1, 2]].zero_()
     x[1:2, [1, 2]].zeros_like()
     numpy_testing_assert_equal_helper(x, unmodified)
 
@@ -1349,14 +1347,6 @@ class TestIndexing(unittest.TestCase):
   '''
 
   def test_take_along_dim(self):
-    '''
-    def _test_against_numpy(t, indices, dim):
-        actual = torch.take_along_dim(t, indices, dim=dim)
-        t_np = t.cpu().numpy()
-        indices_np = indices.cpu().numpy()
-        expected = np.take_along_axis(t_np, indices_np, axis=dim)
-        numpy_testing_assert_equal_helper(actual, expected)
-    '''
     def _test_against_numpy(t: Tensor, indices: Tensor, dim):
       actual = t.gather(indices, dim=dim)
       t_np = t.numpy()
@@ -1421,29 +1411,6 @@ class TestIndexing(unittest.TestCase):
       with self.assertRaises(IndexError):
         t.gather(t, indices, dim=7)
   '''
-
-  # TODO Exception for different devices
-  # TODO argsort
-  '''
-  def test_gather_take_along_dim_cross_device(self, dtype=dtypes.float32):
-    shape = (2, 3, 1, 4)
-    dim = 0
-    t = make_tensor(shape, dtype=dtype)
-    indices = argsort(t, dim=dim)
-
-    with self.assertRaises(RuntimeError):
-      torch.gather(t, 0, indices.cpu())
-
-    with self.assertRaises(RuntimeError):
-      torch.take_along_dim(t, indices.cpu(), dim=0)
-
-    with self.assertRaises(RuntimeError):
-      torch.gather(t.cpu(), 0, indices)
-
-    with self.assertRaises(RuntimeError):
-      torch.take_along_dim(t.cpu(), indices, dim=0)
-  '''
-
 
 class TestNumpy(unittest.TestCase):
   def test_index_no_floats(self):
@@ -1557,7 +1524,6 @@ class TestNumpy(unittest.TestCase):
     self.assertRaises(IndexError, lambda: arr[index])
     self.assertRaises(IndexError, lambda: arr[(slice(None), index)])
 
-  # TODO setitem
   @unittest.skip("bool indexing not supported")
   def test_boolean_indexing_onedim(self):
     # Indexing a 2-dimensional array with
@@ -1569,7 +1535,6 @@ class TestNumpy(unittest.TestCase):
     a[b] = 1.
     numpy_testing_assert_equal_helper(a, Tensor([[1., 1., 1.]]))
 
-  # TODO setitem
   @unittest.skip("bool indexing not supported")
   def test_boolean_assignment_value_mismatch(self):
     # A boolean assignment should fail when the shape of the values
@@ -1583,7 +1548,6 @@ class TestNumpy(unittest.TestCase):
     self.assertRaises(Exception, f, a, [1, 2, 3])
     self.assertRaises(Exception, f, a[:1], [1, 2, 3])
 
-  # TODO setitem
   @unittest.skip("bool indexing not supported")
   def test_boolean_indexing_twodim(self):
     # Indexing a 2-dimensional array with

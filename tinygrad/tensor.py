@@ -321,11 +321,10 @@ class Tensor:
 
   # ***** movement hlops *****
 
-  # NOTE: follows https://data-apis.org/array-api/2022.12/API_specification/indexing.html
   # Supported Indexing Implementations:
   #   1. Int indexing (no copy)
-  #     - for all dims where there's int, shrink
-  #     - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
+  #     - for all dims where there's int, shrink -> reshape (collapse dim)
+  #     - negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
   #     - X = Tensor.rand(4,5,9); X[2,-2] shrinks the Tensor to X.shrink(((2, 3), (3, 4), (0, 9)))
   #     - Then we reshape (collapse) the int dim away (with 1 as dim length) such that X[2,-2].shape = (9,)
   #   2. Slice indexing (no copy)
@@ -343,12 +342,14 @@ class Tensor:
   #     - apply mask to self by mask * self for dims where index is a tensor
   #     - (mask * self).sum(dim) to reduce to correct shape
   # Tiny Things:
-  #   1. Out of bounds Tensor indexing results in 0
+  #   1. Supported indices: Union[int, slice, Tensor, None, List, Tuple, Ellipsis]
+  #     - for any list, List[Union[List, Tuple, int]], must have homogeneous shape
+  #     - for any tuple, Tuple[Union[List, Tuple, int]], must have homogeneous shape
+  #   2. Bool indexing is not supported
+  #   3. Tensor indexing with consts are no copy (must be int)
+  #   4. Out of bounds Tensor indexing results in 0
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are OOB
-  #   2. Tensor indexing with consts are no copy (must be int)
-  #   3. Bool indexing is not supported
-  # TODO: figure out the exact acceptable types for indices, especially for internal list/tuple types
-  def __getitem__(self, indices: Union[int, slice, Tensor, None, List, Tuple]) -> Tensor: # no ellipsis type...
+  def __getitem__(self, indices) -> Tensor:
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, self.device, requires_grad=False)]
@@ -374,9 +375,8 @@ class Tensor:
     for dim,i in enumerate(indices_filtered): type_dim[type(i)].append(dim)
 
     for index_type in type_dim:
-      if index_type not in (supported := [None, int, slice, Tensor]): raise IndexError(f"{index_type=} not supported, {supported=}")
-    if slice in type_dim and self.ndim == 0: raise IndexError("slice cannot be applied to a 0-dim tensor.")
-    if len(ellipsis_idx) > 1: raise IndexError("an index can only have a single ellipsis ('...')")
+      if index_type not in [None, int, slice, Tensor]: raise IndexError(f"{index_type=} not supported")
+    if len(ellipsis_idx) > 1: raise IndexError("indices can only have a single ellipsis ('...')")
     if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
 
     # 2. basic indexing, uses only movement ops (no copy)
