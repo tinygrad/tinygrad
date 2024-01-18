@@ -422,17 +422,10 @@ class Tensor:
     # 3. advanced indexing (copy)
     if type_dim[Tensor]:
       # calculate dim of current ret by subtracting dims collapsed until tensor_dim and adding dims injected until tensor_dim
-      # calc_dim: Callable[[int], int] =
-      # lambda tensor_dim: tensor_dim - sum(1 for d in dims_collapsed if tensor_dim >= d) + sum(1 for d in type_dim[None] if tensor_dim >= d)
       def calc_dim(tensor_dim:int) -> int:
         return tensor_dim - sum(1 for d in dims_collapsed if tensor_dim >= d) + sum(1 for d in type_dim[None] if tensor_dim >= d)
 
-      # normalize the negative tensor indices
-      # normalize_tensor: Callable[[Tensor, int], Tensor] = lambda tensor_index, dim: (tensor_index < 0).where(ret.shape[dim], 0) + tensor_index
-      # def normalize_tensor(tensor_index:Tensor, dim:int) -> Tensor: return (tensor_index < 0).where(ret.shape[dim], 0) + tensor_index
-
-
-      idx: Dict[int, Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + td for td,tensor in zip(type_dim[Tensor], tensor_index)}
+      idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor], tensor_index)}
 
       # compute sum_dim, arange, and idx
       max_idx_dim, first_dim, last_dim = max(i.ndim for i in idx.values()), min(idx.keys()), max(idx.keys())
