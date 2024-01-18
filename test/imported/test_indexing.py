@@ -795,7 +795,6 @@ class TestIndexing(unittest.TestCase):
     indices1 = np.array([-2, -1, 0, 1], dtype=dtypes.int64)
     values = np.array([12, 13, 10, 11], dtype=dt)
 
-    a.index_put_((indices0, indices1), values, accumulate=True)
     index_put_(a, (indices0, indices1), values, accumulate=True)
 
     numpy_testing_assert_equal_helper(a[0, 0], 11)
@@ -855,6 +854,7 @@ class TestIndexing(unittest.TestCase):
 
   # TODO setitem
   # TODO device tests
+  '''
   @unittest.skip("pytorch device specific test")
   def test_index_put_accumulate_non_contiguous(self, device):
     t = Tensor.zeros((5, 2, 2))
@@ -873,6 +873,7 @@ class TestIndexing(unittest.TestCase):
     self.assertTrue(not t2.lazydata.st.contiguous)
 
     numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
+  '''
 
   # TODO setitem
   '''
@@ -1095,9 +1096,7 @@ class TestIndexing(unittest.TestCase):
     # TODO not contiguous
     # self.assertTrue(z.lazydata.st.contiguous)
 
-  # TODO bool indexing
-  # TODO data_ptr()
-  '''
+  @unittest.skip("bool indexing not supported")
   def test_index_getitem_copy_bools_slices(self):
     true = Tensor(1, dtype=dtypes.uint8)
     false = Tensor(0, dtype=dtypes.uint8)
@@ -1105,17 +1104,14 @@ class TestIndexing(unittest.TestCase):
     tensors = [Tensor.randn(2, 3), Tensor(3.)]
 
     for a in tensors:
-      self.assertNotEqual(a.data_ptr(), a[True].data_ptr())
+      self.assertNotEqual(data_ptr(a), data_ptr(a[True]))
       numpy_testing_assert_equal_helper(Tensor.empty(0, *a.shape), a[False])
-      self.assertNotEqual(a.data_ptr(), a[true].data_ptr())
+      self.assertNotEqual(data_ptr(a), data_ptr(a[true]))
       numpy_testing_assert_equal_helper(Tensor.empty(0, *a.shape), a[false])
-      numpy_testing_assert_equal_helper(a.data_ptr(), a[None].data_ptr())
-      numpy_testing_assert_equal_helper(a.data_ptr(), a[...].data_ptr())
-  '''
+      numpy_testing_assert_equal_helper(data_ptr(a), data_ptr(a[None]))
+      numpy_testing_assert_equal_helper(data_ptr(a), data_ptr(a[...]))
 
-  # TODO setitem
-  # TODO bool indexing
-  '''
+  @unittest.skip("bool indexing and setitem not supported")
   def test_index_setitem_bools_slices(self):
     true = Tensor(1, dtype=dtypes.uint8)
     false = Tensor(0, dtype=dtypes.uint8)
@@ -1142,7 +1138,6 @@ class TestIndexing(unittest.TestCase):
       if a.dim() == 0:
           with self.assertRaises(IndexError):
               a[:] = neg_ones_expanded * 5
-  '''
 
   @unittest.skip("bool indexing not supported")
   def test_index_scalar_with_bool_mask(self):
@@ -1156,9 +1151,7 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(a[uintMask], a[boolMask])
     numpy_testing_assert_equal_helper(a[uintMask].dtype, a[boolMask].dtype)
 
-  # TODO setitem
-  # TODO bool indexing
-  '''
+  @unittest.skip("bool indexing not supported")
   def test_setitem_expansion_error(self):
     true = Tensor(True)
     a = Tensor.randn(2, 3)
@@ -1170,7 +1163,6 @@ class TestIndexing(unittest.TestCase):
       a[True] = a_expanded
     with self.assertRaises(RuntimeError):
       a[true] = a_expanded
-  '''
 
   def test_getitem_scalars_simple(self):
     src = Tensor([[[1.,2.],[3.,4.]], [[1,1],[1,1]]])
@@ -1278,14 +1270,12 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(x[3], Tensor.arange(12., 16))
   '''
 
-  # TODO tensor unpacking
-  '''
+  @unittest.skip("Tensor unpacking not supported")
   def test_variable_slicing(self):
     x = Tensor.arange(0, 16).reshape(4, 4)
     indices = Tensor([0, 1], dtype=dtypes.int32)
     i, j = indices
     numpy_testing_assert_equal_helper(x[i:j], x[0:1])
-  '''
 
   def test_ellipsis_tensor(self):
     x = Tensor.arange(0, 9).reshape(3, 3)
@@ -1454,48 +1444,6 @@ class TestIndexing(unittest.TestCase):
       torch.take_along_dim(t.cpu(), indices, dim=0)
   '''
 
-  # TODO another torch specific test...
-  '''
-  def test_cuda_broadcast_index_use_deterministic_algorithms(self):
-    with DeterministicGuard(True):
-      idx1 = np.array([0])
-      idx2 = np.array([2, 6])
-      idx3 = np.array([1, 5, 7])
-
-      tensor_a = torch.rand(13, 11, 12, 13, 12).cpu()
-      tensor_b = tensor_a.to(device=device)
-      tensor_a[idx1] = 1.0
-      tensor_a[idx1, :, idx2, idx2, :] = 2.0
-      tensor_a[:, idx1, idx3, :, idx3] = 3.0
-      tensor_b[idx1] = 1.0
-      tensor_b[idx1, :, idx2, idx2, :] = 2.0
-      tensor_b[:, idx1, idx3, :, idx3] = 3.0
-      numpy_testing_assert_equal_helper(tensor_a, tensor_b.cpu())
-
-      tensor_a = torch.rand(10, 11).cpu()
-      tensor_b = tensor_a.to(device=device)
-      tensor_a[idx3] = 1.0
-      tensor_a[idx2, :] = 2.0
-      tensor_a[:, idx2] = 3.0
-      tensor_a[:, idx1] = 4.0
-      tensor_b[idx3] = 1.0
-      tensor_b[idx2, :] = 2.0
-      tensor_b[:, idx2] = 3.0
-      tensor_b[:, idx1] = 4.0
-      numpy_testing_assert_equal_helper(tensor_a, tensor_b.cpu())
-
-      tensor_a = torch.rand(10, 10).cpu()
-      tensor_b = tensor_a.to(device=device)
-      tensor_a[[8]] = 1.0
-      tensor_b[[8]] = 1.0
-      numpy_testing_assert_equal_helper(tensor_a, tensor_b.cpu())
-
-      tensor_a = torch.rand(10).cpu()
-      tensor_b = tensor_a.to(device=device)
-      tensor_a[6] = 1.0
-      tensor_b[6] = 1.0
-      numpy_testing_assert_equal_helper(tensor_a, tensor_b.cpu())
-  '''
 
 class TestNumpy(unittest.TestCase):
   def test_index_no_floats(self):
@@ -1533,13 +1481,10 @@ class TestNumpy(unittest.TestCase):
     # Empty tuple index creates a view
     a = Tensor([1, 2, 3])
     numpy_testing_assert_equal_helper(a[()], a)
-    # TODO data_ptr
-    '''
-    numpy_testing_assert_equal_helper(a[()].data_ptr(), a.data_ptr())
-    '''
+    numpy_testing_assert_equal_helper(data_ptr(a[()]), data_ptr(a))
 
-  # TODO empty fancy index
-  '''
+  # TODO jax supports empty tensor indexing
+  @unittest.skip("empty tensor indexing not supported")
   def test_empty_fancy_index(self):
     # Empty list index creates an empty array
     a = Tensor([1, 2, 3])
@@ -1548,10 +1493,8 @@ class TestNumpy(unittest.TestCase):
     b = Tensor([]).cast(dtypes.int64)
     numpy_testing_assert_equal_helper(a[[]], np.array([]))
 
-    # TODO fancy index dtype error
     b = Tensor([]).float()
     self.assertRaises(IndexError, lambda: a[b])
-  '''
 
   def test_ellipsis_index(self):
     a = Tensor([[1, 2, 3],
@@ -1560,10 +1503,7 @@ class TestNumpy(unittest.TestCase):
     self.assertIsNot(a[...], a)
     numpy_testing_assert_equal_helper(a[...], a)
     # `a[...]` was `a` in numpy <1.9.
-    # TODO data_ptr
-    '''
-    numpy_testing_assert_equal_helper(a[...].data_ptr(), a.data_ptr())
-    '''
+    numpy_testing_assert_equal_helper(data_ptr(a[...]), data_ptr(a))
 
     # Slicing with ellipsis can skip an
     # arbitrary number of dimensions
@@ -1618,8 +1558,7 @@ class TestNumpy(unittest.TestCase):
     self.assertRaises(IndexError, lambda: arr[(slice(None), index)])
 
   # TODO setitem
-  # TODO bool indexing
-  '''
+  @unittest.skip("bool indexing not supported")
   def test_boolean_indexing_onedim(self):
     # Indexing a 2-dimensional array with
     # boolean array of length one
@@ -1629,11 +1568,9 @@ class TestNumpy(unittest.TestCase):
     # boolean assignment
     a[b] = 1.
     numpy_testing_assert_equal_helper(a, Tensor([[1., 1., 1.]]))
-  '''
 
   # TODO setitem
-  # TODO bool indexing
-  '''
+  @unittest.skip("bool indexing not supported")
   def test_boolean_assignment_value_mismatch(self):
     # A boolean assignment should fail when the shape of the values
     # cannot be broadcast to the subscription. (see also gh-3458)
@@ -1645,11 +1582,9 @@ class TestNumpy(unittest.TestCase):
     self.assertRaises(Exception, f, a, [])
     self.assertRaises(Exception, f, a, [1, 2, 3])
     self.assertRaises(Exception, f, a[:1], [1, 2, 3])
-  '''
 
   # TODO setitem
-  # TODO bool indexing
-  '''
+  @unittest.skip("bool indexing not supported")
   def test_boolean_indexing_twodim(self):
     # Indexing a 2-dimensional array with
     # 2-dimensional boolean array
@@ -1668,7 +1603,6 @@ class TestNumpy(unittest.TestCase):
     numpy_testing_assert_equal_helper(a, Tensor([[0, 2, 0],
                                                   [4, 0, 6],
                                                   [0, 8, 0]]))
-  '''
 
   @unittest.skip("bool indexing not supported")
   def test_boolean_indexing_weirdness(self):
