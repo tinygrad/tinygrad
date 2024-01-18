@@ -321,7 +321,7 @@ class Tensor:
   # ***** movement hlops *****
 
   # NOTE: follows https://data-apis.org/array-api/2022.12/API_specification/indexing.html
-  # Supported indexing implementations:
+  # Supported Indexing Implementations:
   #   1. Int indexing (no copy)
   #     - for all dims where there's int, shrink
   #     - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
@@ -348,7 +348,6 @@ class Tensor:
   #   3. Bool indexing is not supported
   # TODO: figure out the exact acceptable types for indices, especially for internal list/tuple types
   def __getitem__(self, indices: Union[int, slice, Tensor, None, List, Tuple]) -> Tensor: # no ellipsis type...
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, list) and all_int(indices): indices = [Tensor(indices, self.device, requires_grad=False)]
@@ -385,21 +384,17 @@ class Tensor:
     # currently indices_filtered: Tuple[Union[slice, int, Tensor], ...]
     # turn indices in indices_filtered to Tuple[shrink_arg, strides]
     for dim in type_dim[int]:
-      assert isinstance(index := indices_filtered[dim], int)
-      if index >= (size := self.shape[dim]) or index < -size:
+      if (index := indices_filtered[dim]) >= (size := self.shape[dim]) or index < -size:
         raise IndexError(f"{index=} is out of bounds for dimension {dim} with {size=}")
       indices_filtered[dim] = ((index, index+1), 1) if index >= 0 else ((size+index, size+index+1), 1)
     for dim in type_dim[slice]:
-      assert isinstance(index := indices_filtered[dim], slice)
-      s, e, st = index.indices(self.shape[dim])
+      s, e, st = indices_filtered[dim].indices(self.shape[dim])
       indices_filtered[dim] = ((0, 0) if (st > 0 and e < s) or (st <= 0 and e > s) else (s, e) if st > 0 else (e+1, s+1), st)
-    # record tensors
+    # record tensors and skip all Tensor dims for basic indexing
     tensor_index: List[Tensor] = []
     for dim in type_dim[Tensor]:
-      assert isinstance(index := indices_filtered[dim], Tensor)
+      tensor_index.append(index := indices_filtered[dim])
       if not dtypes.is_int(index.dtype): raise IndexError(f"tensor {index.dtype=} not supported, only int tensor indexing is supported")
-      tensor_index.append(index)
-      # skip all Tensor dims for basic indexing
       indices_filtered[dim] = ((0, self.shape[dim]), 1)
 
     new_slice, strides = ((),()) if not indices_filtered else zip(*indices_filtered)
@@ -425,6 +420,7 @@ class Tensor:
       def calc_dim(tensor_dim:int) -> int:
         return tensor_dim - sum(1 for d in dims_collapsed if tensor_dim >= d) + sum(1 for d in type_dim[None] if tensor_dim >= d)
 
+      # calc_dim to get dim and use that to normalize the negative tensor indices
       idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor],tensor_index)}
 
       # compute sum_dim, arange, and idx

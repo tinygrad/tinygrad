@@ -442,8 +442,8 @@ class TestIndexing(unittest.TestCase):
     for err_idx in (10, -11):
       with self.assertRaises(IndexError):
         reference[err_idx]
-      # TODO: cannot check for out of bounds with Tensor indexing
-      # see test_ops.py: test_slice_fancy_indexing_errors()
+      # cannot check for out of bounds with Tensor indexing
+      # see tensor.py: __getitem__ (Tiny Things)
       '''
       with self.assertRaises(IndexError):
         reference[Tensor([err_idx], dtype=dtypes.int64)]

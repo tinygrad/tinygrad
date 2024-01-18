@@ -1479,9 +1479,6 @@ class TestOps(unittest.TestCase):
     # shape mismatch
     with self.assertRaises(IndexError): a[Tensor.randint(3,1,1,1), Tensor.randint(1,4,1,1), Tensor.randint(2,4,4,1)]
     with self.assertRaises(IndexError): a[Tensor.randint(3,1,1,1), Tensor.randint(1,4,1,1,1)]
-    # TODO: currently we do not support IndexError for out of bounds idx values
-    # any out of bounds in fancy indexing returns 0
-    # ex: Tensor([1,2])[Tensor([1,2,55])].numpy() -> array([2., 0., 0.], dtype=float32)
     # TODO: currently we do not support tensor indexing for list of list tensor
     # ex: torch.tensor([1,2])[[[[torch.tensor(1)]]]] -> tensor([[2]])
     # currently we return ValueError: setting an array element with a sequence.
