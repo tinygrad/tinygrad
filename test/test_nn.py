@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit
-from tinygrad.helpers import CI
+from tinygrad.helpers import CI, Context
 from tinygrad.nn import BatchNorm2d, Conv1d,ConvTranspose1d, Conv2d,ConvTranspose2d, Linear, GroupNorm, LayerNorm,LayerNorm2d, Embedding, InstanceNorm
 
 @unittest.skipIf(CI and Device.DEFAULT == "CUDA", "slow")
@@ -141,10 +141,8 @@ class TestNN(unittest.TestCase):
     # test
     x = Tensor.uniform(BS, C1, H, W, requires_grad=True)
 
-    old_wino = Tensor.wino
-    Tensor.wino = True
-    z = layer(x)
-    Tensor.wino = old_wino
+    with Context(WINO=1):
+      z = layer(x)
 
     torch_x = torch.tensor(x.numpy(), requires_grad=True)
     torch_z = torch_layer(torch_x)

@@ -2,8 +2,8 @@
 # ruff: noqa: E501
 import unittest
 import numpy as np
-from tinygrad.helpers import prod, DEBUG
-from tinygrad.shape.shapetracker import ShapeTracker, View, get_contraction
+from tinygrad.helpers import prod, DEBUG, get_contraction
+from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import Variable, NumNode
 from itertools import product
 

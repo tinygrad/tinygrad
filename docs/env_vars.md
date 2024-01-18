@@ -30,28 +30,24 @@ These control the behavior of core tinygrad even when used as a library.
 
 Variable | Possible Value(s) | Description
 ---|---|---
-DEBUG               | [1-4]      | enable debugging output, with 4 you get operations, timings, speed, generated code and more
+DEBUG               | [1-6]      | enable debugging output, with 4 you get operations, timings, speed, generated code and more
 GPU                 | [1]        | enable the GPU backend
 CUDA                | [1]        | enable CUDA backend
+HIP                 | [1]        | enable HIP backend
 CPU                 | [1]        | enable CPU backend
-MPS                 | [1]        | enable MPS device (for Mac M1 and after)
 METAL               | [1]        | enable Metal backend (for Mac M1 and after)
 METAL_XCODE         | [1]        | enable Metal using macOS Xcode SDK
 TORCH               | [1]        | enable PyTorch backend
+MPS                 | [1]        | enable MPS device for TORCH backend (for Mac M1 and after)
 CLANG               | [1]        | enable Clang backend
 LLVM                | [1]        | enable LLVM backend
-LLVMOPT             | [1]        | enable slightly more expensive LLVM optimizations
-OPT                 | [1-3]      | optimization level
 BEAM                | [#]        | number of beams in kernel beam search
 GRAPH               | [1]        | create a graph of all operations (requires graphviz)
 GRAPHUOPS           | [1]        | create a graph of uops (requires graphviz and saves at /tmp/uops.{svg,dot})
 GRAPHPATH           | [/path/to] | where to put the generated graph
-IMAGE               | [1]        | enable 2d specific optimizations
+IMAGE               | [1-2]      | enable 2d specific optimizations
 FLOAT16             | [1]        | use float16 for images instead of float32
 DISALLOW_ASSIGN     | [1]        | disallow assignment of tensors
-CL_EXCLUDE          | [name0,name1] | comma-separated list of device names to exclude when using OpenCL GPU backend (like `CL_EXCLUDE=gfx1036`)
-CL_PLATFORM         | [# >= 0]   | index of the OpenCL [platform](https://documen.tician.de/pyopencl/runtime_platform.html#pyopencl.Platform) to run on. Defaults to 0.
-RDNA                | [1]        | enable the specialized [RDNA 3](https://en.wikipedia.org/wiki/RDNA_3) assembler for AMD 7000-series GPUs. If not set, defaults to generic OpenCL codegen backend.
 PTX                 | [1]        | enable the specialized [PTX](https://docs.nvidia.com/cuda/parallel-thread-execution/) assembler for Nvidia GPUs. If not set, defaults to generic CUDA codegen backend.
 
 ## File Specific Variables
@@ -78,22 +74,6 @@ Variable | Possible Value(s) | Description
 ---|---|---
 DEBUGCL      | [1-4] | enable Debugging for OpenCL
 PRINT_KERNEL | [1]   | Print OpenCL Kernels
-
-### extra/kernel_search.py
-
-Variable | Possible Value(s) | Description
----|---|---
-OP            | [1-3] | different operations
-NOTEST        | [1]   | enable not testing AST
-DUMP          | [1]   | enable dumping of intervention cache
-REDUCE        | [1]   | enable reduce operations
-SIMPLE_REDUCE | [1]   | enable simpler reduce operations
-BC            | [1]   | enable big conv operations
-CONVW         | [1]   | enable convw operations
-FASTCONV      | [1]   | enable faster conv operations
-GEMM          | [1]   | enable general matrix multiply operations
-BROKEN        | [1]   | enable a kind of operation
-BROKEN3       | [1]   | enable a kind of operation
 
 ### examples/vit.py
 

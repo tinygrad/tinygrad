@@ -139,8 +139,8 @@ jobs:
         HIP=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
     - name: Run 10 CIFAR training steps
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
-    - name: Run 10 CIFAR training steps w HALF
-      run: HALF=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+    - name: Run full CIFAR training w HALF
+      run: time HALF=1 STEPS=1000 python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
     # # TODO: make wino faster so we can enable both
     # - name: Run 10 CIFAR training steps w winograd
     #   run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
