@@ -389,7 +389,7 @@ class Tensor:
       indices_filtered[dim] = ((index, index+1), 1) if index >= 0 else ((size+index, size+index+1), 1)
     for dim in type_dim[slice]:
       s, e, st = indices_filtered[dim].indices(self.shape[dim])
-      indices_filtered[dim] = ((0, 0) if (st > 0 and e < s) or (st <= 0 and e > s) else (s, e) if st > 0 else (e+1, s+1), st)
+      indices_filtered[dim] = ((0, 0) if (st * (e - s)) < 0 else (s, e) if st > 0 else (e+1, s+1), st)
     # record tensors and skip all Tensor dims for basic indexing
     tensor_index: List[Tensor] = []
     for dim in type_dim[Tensor]:
