@@ -2,7 +2,7 @@
 from __future__ import annotations
 import functools
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, cast, Iterable
+from typing import Tuple, List, Optional, Dict, Set, cast, Iterable, Union
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
 from tinygrad.shape.view import View
@@ -51,7 +51,7 @@ class ShapeTracker:
 
   def real_size(self) -> int:
     if 0 in self.shape: return 0
-    ret = self.expr_idxs()[0].max
+    ret = cast(Union[int, Node], self.expr_idxs()[0].max)   # TODO: this is due to typing issues in symbolic!
     while not isinstance(ret, int): ret = ret.max    # TODO: this is a while loop?!? it should be more clear what max does
     assert isinstance(ret, int), f"ret must be integer, {ret=} isn't"
     return ret+1
@@ -84,7 +84,7 @@ class ShapeTracker:
 
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
-  def expr_idxs(self, idxs:Optional[Iterable[Node]]=None): # -> Tuple[Node, Node]:
+  def expr_idxs(self, idxs:Optional[Iterable[Node]]=None) -> Tuple[Node, Node]:
     idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)] if idxs is None else list(idxs)
     idx, valid = _expr_view(self.views[-1], idxs)
     for view in reversed(self.views[0:-1]):
