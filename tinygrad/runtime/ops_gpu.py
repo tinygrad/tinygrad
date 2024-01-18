@@ -39,8 +39,8 @@ class CLProgram:
     self.kernel = checked(cl.clCreateKernel(self.program, name.encode(), ctypes.byref(status := ctypes.c_int32())), status)
 
   def __del__(self):
-    check(cl.clReleaseKernel(self.kernel))
-    check(cl.clReleaseProgram(self.program))
+    if hasattr(self, 'kernel'): check(cl.clReleaseKernel(self.kernel))
+    if hasattr(self, 'program'): check(cl.clReleaseProgram(self.program))
 
   def __call__(self, *bufs:cl.cl_mem, global_size:Tuple[int,...], local_size:Optional[Tuple[int,...]]=None, vals:Tuple[int, ...]=(), wait=False) -> Optional[float]:  # noqa: E501
     for i,b in enumerate(bufs): cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b), ctypes.byref(b))

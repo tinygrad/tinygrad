@@ -7,8 +7,8 @@ from tinygrad.runtime.graph.cuda import CUDAGraph
 
 class HIPGraph(CUDAGraph):
   def __del__(self):
-    check(hip.hipGraphDestroy(self.graph))
-    check(hip.hipGraphExecDestroy(self.instance))
+    if hasattr(self, 'graph'): check(hip.hipGraphDestroy(self.graph))
+    if hasattr(self, 'instance'): check(hip.hipGraphExecDestroy(self.instance))
   def set_device(self): check(hip.hipSetDevice(self.device))
   def encode_args_info(self): return (hip.hipDeviceptr_t, (1,2,3))
   def graph_create(self): return init_c_var(hip.hipGraph_t(), lambda x: check(hip.hipGraphCreate(ctypes.byref(x), 0)))

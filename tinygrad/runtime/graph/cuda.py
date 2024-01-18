@@ -64,8 +64,8 @@ class CUDAGraph:
     return et
 
   def __del__(self):
-    check(cuda.cuGraphDestroy(self.graph))
-    check(cuda.cuGraphExecDestroy(self.instance))
+    if hasattr(self, 'graph'): check(cuda.cuGraphDestroy(self.graph))
+    if hasattr(self, 'instance'): check(cuda.cuGraphExecDestroy(self.instance))
 
   def set_device(self): pass
   def encode_args_info(self): return (cuda.CUdeviceptr_v2, (1,2,0))
