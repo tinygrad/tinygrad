@@ -7,7 +7,7 @@ import scipy
 import torch
 import torch.nn.functional as F
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import fetch
+from tinygrad.helpers import fetch, getenv
 
 BASEDIR = Path(__file__).parent / "kits19" / "data"
 
@@ -62,14 +62,15 @@ def pad_to_min_shape(image, label, roi_shape=(128, 128, 128)):
   label = np.pad(label, paddings, mode="edge")
   return image, label
 
-def preprocess(file_path):
+def preprocess(file_path, roi_shape):
   image, label, image_spacings = load_pair(file_path)
   image, label = resample3d(image, label, image_spacings)
   image = normal_intensity(image.copy())
-  image, label = pad_to_min_shape(image, label)
+  image, label = pad_to_min_shape(image, label, roi_shape=roi_shape)
   return image, label
 
 def iterate(val=True, shuffle=False, bs=1):
+  size = (64, 64, 64) if getenv("SMALL") else (128, 128, 128)
   if val: assert bs == 1, "bs has to be 1"
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
@@ -77,7 +78,7 @@ def iterate(val=True, shuffle=False, bs=1):
   from multiprocessing import Pool
   p = Pool(8)
   for i in range(0, len(files), bs):
-    samples = p.map(preprocess, [files[i] for i in order[i:i+bs]])
+    samples = p.map(functools.partial(preprocess, roi_shape=size), [files[i] for i in order[i:i+bs]])
     X, Y = [x[0] for x in samples], [x[1] for x in samples]
     if val: yield X[0][None], Y[0]
     else:
@@ -86,7 +87,7 @@ def iterate(val=True, shuffle=False, bs=1):
         x, y = rand_flip(x, y)
         x = random_brightness_augmentation(x)
         x = gaussian_noise(x)
-        x, y = rand_balanced_crop(x, y)
+        x, y = rand_balanced_crop(x, y, patch_size=size)
         X_preprocessed.append(x)
         Y_preprocessed.append(y)
       yield np.stack(X_preprocessed, axis=0), np.stack(Y_preprocessed, axis=0)
