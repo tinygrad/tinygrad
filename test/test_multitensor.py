@@ -1,9 +1,8 @@
-import functools
-import unittest
-from tinygrad import Tensor, Device, nn, GlobalCounters
+import unittest, functools
+from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit
 from tinygrad.device import _BufferCopy
+from tinygrad.ops import LoadOps
 from tinygrad.helpers import CI
-from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_parameters
 import numpy as np
 
@@ -282,6 +281,23 @@ class TestMultiTensor(unittest.TestCase):
       np.testing.assert_equal(X.shrink(((0,2), (0, 1), (0,257))).numpy(), n[0:2, 0:1, 0:257])
       np.testing.assert_equal(X.expand((4, 4, 257)).numpy(), np.tile(n, (1, 4, 1)))
       np.testing.assert_equal(X.permute((0, 2, 1)).numpy(), np.transpose(n, (0, 2, 1)))
+
+  def test_bn_ast_on_devices(self):
+    devices = (d0, d1, d2, d3)
+    t = Tensor.empty((16, 64, 112, 112)).shard(devices, axis=0)
+    bn = nn.BatchNorm2d(64)
+    for p in get_parameters(bn): p.shard_(devices).realize()
+
+    out = bn(t)
+    scheds = [sched for sched in out.lazydata.schedule() if sched.out.device in devices and sched.ast.op is not LoadOps.COPY]
+    assert set(sched.out.device for sched in scheds) == set(devices), "should have ast on each shard device"
+    asts = [sched.ast for sched in scheds]
+    assert len(asts) == 4, len(asts)
+    # test case to show that ast can be different on devices
+    # TODO: make ast identical on devices
+    assert len(set(asts)) == 4, len(asts)
+    # for i, ast in enumerate(asts):
+    #   print(f"{i} {ast}")
 
 if __name__ == '__main__':
   unittest.main()
