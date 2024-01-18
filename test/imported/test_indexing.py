@@ -1,6 +1,6 @@
 # test cases are modified from pytorch test_indexing.py https://github.com/pytorch/pytorch/blob/597d3fb86a2f3b8d6d8ee067e769624dcca31cdb/test/test_indexing.py
 
-import math, unittest, random, copy, warnings, torch
+import math, unittest, random, copy, warnings
 import numpy as np
 
 from tinygrad import Tensor, dtypes, Device, TinyJit
@@ -1486,11 +1486,11 @@ class TestNumpy(unittest.TestCase):
   @unittest.skip("bool indexing not supported")
   def test_boolean_indexing_weirdness_tensors(self):
     # Weird boolean indexing things
-    false = np.array(False)
-    true = np.array(True)
-    a = torch.ones((2, 3, 4))
+    false = Tensor(False)
+    true = Tensor(True)
+    a = Tensor.ones((2, 3, 4))
     numpy_testing_assert_equal_helper((0, 2, 3, 4), a[False, True, ...].shape)
-    numpy_testing_assert_equal_helper(torch.ones(1, 2), a[true, [0, 1], true, true, [1], [[2]]])
+    numpy_testing_assert_equal_helper(Tensor.ones(1, 2), a[true, [0, 1], true, true, [1], [[2]]])
     self.assertRaises(IndexError, lambda: a[false, [0, 1], ...])
 
   @unittest.skip("bool indexing not supported")

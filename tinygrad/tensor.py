@@ -346,8 +346,7 @@ class Tensor:
   #     - for any list, List[Union[List, Tuple, int]], must have homogeneous shape
   #     - for any tuple, Tuple[Union[List, Tuple, int]], must have homogeneous shape
   #   2. Bool indexing is not supported
-  #   3. Tensor indexing with consts are no copy (must be int)
-  #   4. Out of bounds Tensor indexing results in 0
+  #   3. Out of bounds Tensor indexing results in 0
   #     - e.g: Tensor([1, 2, 3])[Tensor([4, 3, 2])] -> [0, 0, 3] index 4 and 3 are OOB
   def __getitem__(self, indices) -> Tensor:
     # 1. indices normalization and validation
@@ -357,7 +356,7 @@ class Tensor:
       indices = [Tensor(list(i), self.device, requires_grad=False) if isinstance(i, (tuple, list)) else i for i in indices]
     else: indices = [indices]
 
-    # turn scalar Tensors into const val for int indexing
+    # turn scalar Tensors into const val for int indexing if possible
     indices = [self._to_const_val(i) if isinstance(i, Tensor) else i for i in indices]
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
