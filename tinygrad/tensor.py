@@ -276,9 +276,9 @@ class Tensor:
     def _deepwalk(node, visited):
       visited.add(node)
       if getattr(node, "_ctx", None):
+        yield node
         for i in node._ctx.parents:
           if i not in visited: yield from _deepwalk(i, visited)
-        yield node
     return list(_deepwalk(self, set()))
 
   def backward(self) -> Tensor:
@@ -288,7 +288,7 @@ class Tensor:
     # this is "implicit gradient creation"
     self.grad = Tensor(1.0, device=self.device, requires_grad=False)
 
-    for t0 in reversed(self.deepwalk()):
+    for t0 in self.deepwalk():
       if t0.grad is None: raise RuntimeError("tensor has no grad")
       grads = t0._ctx.backward(t0.grad.lazydata)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
