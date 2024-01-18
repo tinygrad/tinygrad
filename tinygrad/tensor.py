@@ -357,7 +357,7 @@ class Tensor:
       indices = [Tensor(list(i), self.device, requires_grad=False) if isinstance(i, (tuple, list)) else i for i in indices]
     else: indices = [indices]
 
-    # turn scalar Tensors into const val for no copy indexing
+    # turn scalar Tensors into const val for int indexing
     indices = [self._to_const_val(i) if isinstance(i, Tensor) else i for i in indices]
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)

@@ -29,6 +29,8 @@ def set_(reference: Tensor, shape, strides, offset):
 
 def clone(original:Tensor): return copy.copy(original)
 def copy_(src:Tensor, other:Tensor) -> Tensor: return copy.copy(src)
+# this is fine for tested usecases since as geohotstan understands,
+# data_ptr is used to compare if operations needed between tensors is the same
 def data_ptr(tensor:Tensor): return tensor.lazydata
 
 # https://pytorch.org/docs/stable/generated/torch.Tensor.index_put_.html
@@ -810,36 +812,6 @@ class TestIndexing(unittest.TestCase):
 
   # TODO setitem
   '''
-  def test_index_put_accumulate_with_optional_tensors(self):
-    # TODO: replace with a better solution.
-    # Currently, here using torchscript to put None into indices.
-    # on C++ it gives indices as a list of 2 optional tensors: first is null and
-    # the second is a valid tensor.
-    @TinyJit
-    def func(x, i, v):
-      idx = [None, i]
-      index_put_(x, idx, v, accumulate=True)
-      return x
-
-    n = 4
-    t = Tensor.arange(n * 2, dtype=dtypes.float32).reshape(n, 2)
-    t_dev = t.to(device)
-    indices = Tensor([1, 0])
-    indices_dev = indices.to(device)
-    value0d = Tensor(10.0)
-    value1d = Tensor([1.0, 2.0])
-
-    out_cuda = func(t_dev, indices_dev, value0d.cuda())
-    out_cpu = func(t, indices, value0d)
-    numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
-
-    out_cuda = func(t_dev, indices_dev, value1d.cuda())
-    out_cpu = func(t, indices, value1d)
-    numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
-  '''
-
-  # TODO setitem
-  '''
   def test_index_put_accumulate_duplicate_indices(self):
     for i in range(1, 512):
       # generate indices by random walk, this will create indices with
@@ -1041,8 +1013,8 @@ class TestIndexing(unittest.TestCase):
       numpy_testing_assert_equal_helper(Tensor.empty(0, *a.shape), a[False])
       self.assertNotEqual(data_ptr(a), data_ptr(a[true]))
       numpy_testing_assert_equal_helper(Tensor.empty(0, *a.shape), a[false])
-      numpy_testing_assert_equal_helper(data_ptr(a), data_ptr(a[None]))
-      numpy_testing_assert_equal_helper(data_ptr(a), data_ptr(a[...]))
+      self.assertEqual(data_ptr(a), data_ptr(a[None]))
+      self.assertEqual(data_ptr(a), data_ptr(a[...]))
 
   @unittest.skip("bool indexing not supported")
   def test_index_setitem_bools_slices(self):
@@ -1114,10 +1086,10 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(a[0, one], a[zero, 1])
 
     # indexing by a scalar should slice (not copy)
-    numpy_testing_assert_equal_helper(data_ptr(a[0, 1]), data_ptr(a[zero, one]))
+    self.assertEqual(data_ptr(a[0, 1]), data_ptr(a[zero, one]))
     # NOTE: skipped cuz casting in tinygrad makes _to_const_val not work
-    # numpy_testing_assert_equal_helper(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int32)]))
-    # numpy_testing_assert_equal_helper(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int16)]))
+    # self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int32)]))
+    # self.assertEqual(data_ptr(a[1]), data_ptr(a[one.cast(dtypes.int16)]))
 
     # scalar indexed with scalar
     r = Tensor.randn()
@@ -1384,7 +1356,7 @@ class TestNumpy(unittest.TestCase):
     # Empty tuple index creates a view
     a = Tensor([1, 2, 3])
     numpy_testing_assert_equal_helper(a[()], a)
-    numpy_testing_assert_equal_helper(data_ptr(a[()]), data_ptr(a))
+    self.assertEqual(data_ptr(a[()]), data_ptr(a))
 
   # TODO jax supports empty tensor indexing
   @unittest.skip("empty tensor indexing not supported")
