@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools, itertools, operator
 from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Set, cast, Union, Iterable
-from tinygrad.ops import MovementOps
 from tinygrad.helpers import prod, merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
 from tinygrad.shape.view import View, _merge_dims
@@ -42,10 +41,6 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
   if None in (strides := ShapeTracker((vm2, vm1)).real_strides()): return None
   return View.create(vm1.shape, cast(Tuple[sint, ...], strides), vm2.offset, vm1.mask)
 
-def simplify(views:Tuple[View, ...]) -> Tuple[View, ...]:
-  if len(views) >= 2 and (new_view := merge_views(views[-2], views[-1])) is not None: return simplify(views[:-2] + (new_view,))
-  return views
-
 @functools.lru_cache(maxsize=None)
 def idxs_to_idx(shape:Tuple[int, ...], idxs:Tuple[Node, ...]) -> Node:
   assert len(idxs) == len(shape), "need an idx for all dimensions"
@@ -58,9 +53,9 @@ class ShapeTracker:
   views: Tuple[View, ...]
 
   def __add__(self, st:ShapeTracker) -> ShapeTracker:
-    new_views = self.views
-    for v in st.views: new_views = simplify(new_views + (v,)) # one view at a time = better simplification
-    return ShapeTracker(new_views)
+    ret = self
+    for v in st.views: ret = ShapeTracker(ret.views + (v,)).simplify() # one view at a time = better simplification
+    return ret
 
   def invert(self, out_shape:Tuple[sint, ...]) -> Optional[ShapeTracker]:
     ret = tuple(v.invert(s) for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]))
@@ -93,29 +88,6 @@ class ShapeTracker:
   def unbind(self) -> Tuple[ShapeTracker, Dict[Variable, int]]:
     unbound_views, var_vals = zip(*[v.unbind() for v in self.views])
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
-
-  def to_movement_ops(self) -> List[Tuple[MovementOps, Tuple]]:
-    to_apply:List[Tuple[MovementOps, Tuple]] = []
-    for v in self.views:
-      real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
-      real_offset = 0 if 0 in real_shape else (v.offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0))
-      # first, we apply the offset
-      # then, we make it the correct shape
-      # then, we apply permutations
-      to_apply.append((MovementOps.AS_STRIDED, (tuple([s if st != 0 else 1 for s,st in zip(real_shape, v.strides)]), v.strides, real_offset)))
-      # then, we apply pre expand pads
-      if v.mask is not None:
-        pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
-        post_expand_pads = tuple((x,s-y) if st == 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
-        if any(x != (0,0) for x in pre_expand_pads):
-          to_apply.append((MovementOps.PAD, pre_expand_pads))
-          real_shape = tuple(x+s[0]+s[1] for x,s in zip(real_shape, pre_expand_pads))
-      # then, we do any expands
-      # NOTE: this is a good idea even without masks, since torch doesn't support negative strides and has to make a copy
-      if any(s != 1 and st == 0 for s,st in zip(real_shape, v.strides)): to_apply.append((MovementOps.EXPAND, real_shape))
-      # lastly, we apply post expand pads
-      if v.mask is not None and any(x != (0,0) for x in post_expand_pads): to_apply.append((MovementOps.PAD, post_expand_pads))
-    return to_apply
 
   # NOTE: if a stride is not always valid, it will be None
   def real_strides(self, ignore_valid=False) -> Tuple[Optional[sint], ...]:
@@ -157,7 +129,10 @@ class ShapeTracker:
     _, valid = self.expr_idxs()
     return f'idx{axis}' in [v.expr for v in valid.vars()]
 
-  def simplify(self) -> ShapeTracker: return ShapeTracker(simplify(self.views))
+  def simplify(self) -> ShapeTracker:
+    if len(self.views) >= 2 and (new_view := merge_views(self.views[-2], self.views[-1])) is not None:
+      return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
+    return self
 
   # *** under this line are the movement ops ***
 
@@ -170,11 +145,3 @@ class ShapeTracker:
   def reshape(self, new_shape: Tuple[sint, ...]) -> ShapeTracker:
     if getenv("MERGE_VIEW", 1) and (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
     return ShapeTracker(self.views + (View.create(new_shape), ))
-
-# returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
-# TODO: if we remove movementops from lazy.py we can delete this
-def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> Optional[List[List[int]]]:
-  acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
-  try: split = [acc_old.index(acc)+1 if acc != 1 else 0 for acc in acc_new]
-  except ValueError: return None
-  return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]

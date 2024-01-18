@@ -24,12 +24,14 @@ class TestMultiTensor(unittest.TestCase):
     X.to_((d0, d1))
     for lb in X.lazydata.lbs:
       assert lb.shape == (256,)
+    (X + X).realize()
 
   def test_shard(self):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_((d0, d1), 0)
     for lb in X.lazydata.lbs:
       assert lb.shape == (128,)
+    (X + X).realize()
 
   def test_shard_same_device(self):
     X = Tensor.ones(256).contiguous().realize()

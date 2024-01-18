@@ -11,7 +11,7 @@ from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.nn import optim
 from extra.lr_scheduler import OneCycleLR
-from tinygrad.helpers import Context, getenv
+from tinygrad.helpers import Context, BEAM, WINO, getenv
 
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
 GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))]
@@ -371,7 +371,7 @@ def train_cifar():
         X, Y = X.shard(GPUS, axis=0), Y.shard(GPUS, axis=0)
 
       GlobalCounters.reset()
-      with Context(BEAM=getenv("LATEBEAM")):
+      with Context(BEAM=getenv("LATEBEAM", BEAM.value), WINO=getenv("LATEWINO", WINO.value)):
         loss = train_step_jitted(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y)
         et = time.monotonic()
         loss_cpu = loss.numpy()
