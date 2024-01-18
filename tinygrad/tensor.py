@@ -398,7 +398,6 @@ class Tensor:
 
     new_slice, strides = ((),()) if not indices_filtered else zip(*indices_filtered)
     ret = self.shrink(new_slice).flip(tuple(i for i, s in enumerate(strides) if s < 0))
-    # add strides by pad -> reshape -> shrink
     if any(abs(s) != 1 for s in strides):
       strides = tuple(abs(s) for s in strides)
       ret = ret.pad(tuple((0, round_up(sh, s) - sh) for s, sh in zip(strides, ret.shape)))
@@ -415,7 +414,7 @@ class Tensor:
 
     # 3. advanced indexing (copy)
     if type_dim[Tensor]:
-      # calculate dim of current ret by subtracting dims collapsed and adding dims injected until tensor_dim
+      # calculate dim of current ret by subtracting dims collapsed and adding dims injected up until tensor_dim
       def calc_dim(tensor_dim:int) -> int:
         return tensor_dim - sum(1 for d in dims_collapsed if tensor_dim >= d) + sum(1 for d in type_dim[None] if tensor_dim >= d)
 
