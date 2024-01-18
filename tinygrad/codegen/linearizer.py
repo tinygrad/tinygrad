@@ -166,11 +166,11 @@ class Linearizer(Kernel):
       store_offset = store_offset_new
 
     stores = []
-    for idx, var in store_offset.items():
-      idx, valid = self.sts[i].expr_idxs(idx)
+    for _idx, var in store_offset.items():
+      idx, valid = self.sts[i].expr_idxs(_idx)
       if isinstance(buf.dtype, ImageDType):
-        idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
-        rendered_idx = self.uop(UOps.CAST, dtypes.int.vec(2), tuple(x.render(self.render_ops, self) for x in idx))
+        image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
+        rendered_idx = self.uop(UOps.CAST, dtypes.int.vec(2), tuple(x.render(self.render_ops, self) for x in image_idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
       if valid.min == 1: stores.append(self.uop(UOps.STORE, None, (buf_uop, rendered_idx, var)))
