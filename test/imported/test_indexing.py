@@ -31,6 +31,11 @@ def clone(original:Tensor): return copy.copy(original)
 def copy_(src:Tensor, other:Tensor) -> Tensor: return copy.copy(src)
 def data_ptr(tensor:Tensor): return tensor.lazydata
 
+# https://pytorch.org/docs/stable/generated/torch.Tensor.index_put_.html
+# TODO this is setitem
+def index_put_(tensor:Tensor, indices, values, accumulate) -> Tensor:
+  ...
+
 # https://pytorch.org/docs/stable/generated/torch.argsort.html
 def argsort(tensor:Tensor) -> Tensor:
   ...
@@ -733,7 +738,7 @@ class TestIndexing(unittest.TestCase):
   def test_bool_indices_accumulate(self):
     mask = Tensor.zeros(size=(10, ), dtype=dtypes.bool)
     y = Tensor.ones(size=(10, 10))
-    y.index_put_((mask, ), y[mask], accumulate=True)
+    index_put_(y, (mask, ), y[mask], accumulate=True)
     numpy_testing_assert_equal_helper(y, Tensor.ones(size=(10, 10)))
 
   @unittest.skip("bool indexing not supported")
@@ -762,7 +767,7 @@ class TestIndexing(unittest.TestCase):
     y = Tensor.ones(size=(10, 10))
     with warnings.catch_warnings(record=True) as w:
       warnings.simplefilter("always")
-      y.index_put_((mask, ), y[mask], accumulate=True)
+      index_put_(y, (mask, ), y[mask], accumulate=True)
       numpy_testing_assert_equal_helper(y, Tensor.ones(size=(10, 10)))
       numpy_testing_assert_equal_helper(len(w), 2)
 
@@ -776,7 +781,7 @@ class TestIndexing(unittest.TestCase):
     indices = Tensor([-2, 0, -2, -1, 0, -1, 1], dtype=dtypes.int64)
     values = Tensor([6, 5, 6, 6, 5, 7, 11], dtype=dt)
 
-    a.index_put_((indices, ), values, accumulate=True)
+    index_put_(a, (indices, ), values, accumulate=True)
 
     numpy_testing_assert_equal_helper(a[0], 11)
     numpy_testing_assert_equal_helper(a[1], 12)
@@ -791,6 +796,7 @@ class TestIndexing(unittest.TestCase):
     values = np.array([12, 13, 10, 11], dtype=dt)
 
     a.index_put_((indices0, indices1), values, accumulate=True)
+    index_put_(a, (indices0, indices1), values, accumulate=True)
 
     numpy_testing_assert_equal_helper(a[0, 0], 11)
     numpy_testing_assert_equal_helper(a[0, 1], 1)
@@ -804,6 +810,7 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper(a[0, -1], 1)
   '''
 
+  # TODO device tests
   @unittest.skip("pytorch device specific test")
   def test_index_put_accumulate_expanded_values(self, device):
     # checks the issue with cuda: https://github.com/pytorch/pytorch/issues/39227
@@ -818,12 +825,12 @@ class TestIndexing(unittest.TestCase):
     values0d = Tensor(1.0)
     values1d = Tensor([1.0, ])
 
-    out_cuda = t_dev.index_put_(indices_dev, values0d.to(device), accumulate=True)
-    out_cpu = t.index_put_(indices, values0d, accumulate=True)
+    out_cuda = index_put_(t_dev, indices_dev, values0d.to(device), accumulate=True)
+    out_cpu = index_put_(t, indices, values0d, accumulate=True)
     numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
 
-    out_cuda = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
-    out_cpu = t.index_put_(indices, values1d, accumulate=True)
+    out_cuda = index_put_(t_dev, indices_dev, values1d.to(device), accumulate=True)
+    out_cpu = index_put_(t, indices, values1d, accumulate=True)
     numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
 
     t = Tensor.zeros(4, 3, 2)
@@ -838,15 +845,16 @@ class TestIndexing(unittest.TestCase):
     values1d = np.array([-1.0, -2.0])
     values2d = np.array([[-1.0, -2.0], ])
 
-    out_cuda = t_dev.index_put_(indices_dev, values1d.to(device), accumulate=True)
-    out_cpu = t.index_put_(indices, values1d, accumulate=True)
+    out_cuda = index_put_(t_dev, indices_dev, values1d.to(device), accumulate=True)
+    out_cpu = index_put_(t, indices, values1d, accumulate=True)
     numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
 
-    out_cuda = t_dev.index_put_(indices_dev, values2d.to(device), accumulate=True)
-    out_cpu = t.index_put_(indices, values2d, accumulate=True)
+    out_cuda = index_put_(t_dev, indices_dev, values2d.to(device), accumulate=True)
+    out_cpu = index_put_(t, indices, values2d, accumulate=True)
     numpy_testing_assert_equal_helper(out_cuda.cpu(), out_cpu)
 
   # TODO setitem
+  # TODO device tests
   @unittest.skip("pytorch device specific test")
   def test_index_put_accumulate_non_contiguous(self, device):
     t = Tensor.zeros((5, 2, 2))
@@ -859,8 +867,8 @@ class TestIndexing(unittest.TestCase):
     indices = [Tensor([0, 1]), ]
     indices_dev = [i.to(device) for i in indices]
     value = Tensor.randn(2, 2)
-    out_cuda = t1.index_put_(indices_dev, value.to(device), accumulate=True)
-    out_cpu = t2.index_put_(indices, value, accumulate=True)
+    out_cuda = index_put_(t1, indices_dev, value.to(device), accumulate=True)
+    out_cpu = index_put_(t2, indices, value, accumulate=True)
     self.assertTrue(not t1.lazydata.st.contiguous)
     self.assertTrue(not t2.lazydata.st.contiguous)
 
@@ -876,7 +884,7 @@ class TestIndexing(unittest.TestCase):
     @TinyJit
     def func(x, i, v):
       idx = [None, i]
-      x.index_put_(idx, v, accumulate=True)
+      index_put_(x, idx, v, accumulate=True)
       return x
 
     n = 4
@@ -909,7 +917,7 @@ class TestIndexing(unittest.TestCase):
       input = Tensor.randn(indices.abs().max().item() + 1)
       # values = torch.randn(indices.size(0))
       values = Tensor.randn(indices.shape(0))
-      output = input.index_put((indices,), values, accumulate=True)
+      output = index_put_(input, (indices,), values, accumulate=True)
 
       input_list = input.numpy().tolist()
       indices_list = indices.numpy().tolist()
@@ -946,8 +954,8 @@ class TestIndexing(unittest.TestCase):
     for accum in (True, False):
       inp_ref = clone(x)
       inp_res = clone(x)
-      torch.index_put_(inp_ref, (ind_long, ind_long), src, accum)
-      torch.index_put_(inp_res, (ind_int, ind_int), src, accum)
+      index_put_(inp_ref, (ind_long, ind_long), src, accum)
+      index_put_(inp_res, (ind_int, ind_int), src, accum)
       numpy_testing_assert_equal_helper(inp_ref, inp_res)
     '''
 
@@ -957,7 +965,7 @@ class TestIndexing(unittest.TestCase):
     # Regression test for https://github.com/pytorch/pytorch/issues/94667
     input = Tensor.rand([], dtype=dtypes.float32)
     with self.assertRaises(RuntimeError):
-      input.index_put([], np.array([1.0]), True)
+      index_put_(input, [], np.array([1.0]), True)
   '''
 
   @unittest.skip("bool indexing not supported")
@@ -1011,7 +1019,7 @@ class TestIndexing(unittest.TestCase):
     src = Tensor.ones(3, 2, 4, dtype=dtype)
     vals = Tensor.ones(3, 2, 4, dtype=dtype)
     indices = (np.array([0, 2, 1]),)
-    res = src.index_put_(indices, vals, accumulate=True)
+    res = index_put_(src, indices, vals, accumulate=True)
     numpy_testing_assert_equal_helper(res.shape, src.shape)
   '''
 
@@ -1335,15 +1343,6 @@ class TestIndexing(unittest.TestCase):
       return x[0]
 
     self.assertRaises(IndexError, runner)
-
-  @unittest.skip("torch specific test")
-  def test_invalid_device(self):
-    idx = Tensor([0, 1])
-    b = Tensor.zeros(5)
-    c = Tensor([1., 2.], device="CPU")
-
-    for accumulate in [True, False]:
-      self.assertRaises(RuntimeError, lambda: torch.index_put_(b, (idx,), c, accumulate=accumulate))
 
   # TODO setitem
   '''
