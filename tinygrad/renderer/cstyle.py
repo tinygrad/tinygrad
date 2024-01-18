@@ -7,7 +7,7 @@ from tinygrad.helpers import prod, strip_parens, getenv
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 
 class CStyleLanguage(NamedTuple):
-  size_prefix: str = "ptrdiff_t"
+  size_prefix: str = "int"
   generic_var_prefix: str = ""
   kernel_prefix: str = ""
   buffer_prefix: str = ""
@@ -255,7 +255,6 @@ class CUDALanguage(CStyleLanguage):
     __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
   """
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
-  launch_bounds = True
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 class HIPLanguage(CUDALanguage):
