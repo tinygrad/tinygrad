@@ -65,6 +65,8 @@ def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+str
 def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
 def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posix()
 
+class GraphException(Exception): pass
+
 class Context(contextlib.ContextDecorator):
   stack: ClassVar[List[dict[str, int]]] = [{}]
   def __init__(self, **kwargs): self.kwargs = kwargs

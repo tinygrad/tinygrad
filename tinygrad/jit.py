@@ -3,7 +3,7 @@ from typing import Callable, List, Tuple, Dict, cast, Union, Optional, TypeVar, 
 import functools, itertools, operator
 from tinygrad.nn.state import get_parameters
 from tinygrad.dtype import DType
-from tinygrad.helpers import DEBUG, merge_dicts, getenv, all_int, Context, GRAPH, flatten
+from tinygrad.helpers import DEBUG, merge_dicts, getenv, all_int, Context, GRAPH, flatten, GraphException
 from tinygrad.device import Compiled, JITRunner, CompiledASTRunner, Buffer
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
@@ -31,8 +31,6 @@ def get_jc_idxs_with_updatable_launch_dims(jit_cache: List[JitItem]) -> List[int
   return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledASTRunner) and ((ji.prg.global_size and not all_int(ji.prg.global_size)) or (ji.prg.local_size and not all_int(ji.prg.local_size)))]  # noqa: E501
 def get_jc_idxs_with_updatable_var_vals(jit_cache: List[JitItem]) -> List[int]:
   return [j for j,ji in enumerate(jit_cache) if isinstance(ji.prg, CompiledASTRunner) and ji.prg.vars]
-
-class GraphException(Exception): pass
 
 ReturnType = TypeVar('ReturnType')
 class TinyJit(Generic[ReturnType]):
