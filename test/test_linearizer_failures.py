@@ -1,5 +1,5 @@
 # ruff: noqa: E501
-import unittest
+import unittest, random
 import numpy as np
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import Opt, OptOps
