@@ -5,14 +5,27 @@ from collections import Counter
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
+from tinygrad.tensor import Tensor
 from tinygrad.graph import print_tree
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, Context
 from tinygrad.device import Device, Compiled, Interpreted
 from tinygrad.codegen.linearizer import UOp
 
 def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
 
 device = Device[Device.DEFAULT]
+
+def get_fuzz_rawbufs(lin):
+  rawbufs = bufs_from_lin(lin)
+
+  # Reallocate output buffer with additional area to detect out-of-bounds writes.
+  RED_AREA_SIZE = 1024
+  rawbufs[0] = type(rawbufs[0])(Device.DEFAULT, rawbufs[0].size + RED_AREA_SIZE, rawbufs[0].dtype)
+  with Context(DEBUG=0):
+    for rawbuf in rawbufs[1:]:
+      t = Tensor.randn((rawbuf.size,), dtype=rawbuf.dtype)
+      rawbuf.copyin(t.realize().lazydata.realized.as_buffer())
+  return rawbufs
 
 def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
   if rawbufs is None: rawbufs = bufs_from_lin(lin)
@@ -46,7 +59,7 @@ def fuzz_linearizer(lin: Linearizer):
   np.random.seed(42)
   print_tree(lin.ast)
   print(lin.colored_shape())
-  rawbufs = bufs_from_lin(lin)
+  rawbufs = get_fuzz_rawbufs(lin)
 
   seen_uops = {}
   ground_truth = None

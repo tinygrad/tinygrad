@@ -1,10 +1,11 @@
 # ruff: noqa: E501
 import unittest
+import numpy as np
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import Opt, OptOps
 from tinygrad import Device, dtypes
 from tinygrad.helpers import OSX, CI
-from test.external.fuzz_linearizer import run_linearizer
+from test.external.fuzz_linearizer import run_linearizer, get_fuzz_rawbufs
 
 # stuff needed to unpack a kernel
 from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer, get_lazyop_info
@@ -13,16 +14,24 @@ from tinygrad.shape.view import View
 inf, nan = float('inf'), float('nan')
 
 def helper_test_lin(lin: Linearizer, opts, failed_platforms):
+  rawbufs = get_fuzz_rawbufs(lin)
+  var_vals = {v: random.randint(v.min, v.max) for v in lin.ast.vars()}
+
+  assert run_linearizer(lin, rawbufs, var_vals) == "PASS" or Device.DEFAULT in failed_platforms, "Failed running non-optimized ast"
+  ground_truth = rawbufs[0].as_buffer()
+
   for opt in opts:
     try:
       lin.apply_opt(opt)
     except AssertionError:
       # it's considered fixed if we invalidated the opts
       assert Device.DEFAULT not in failed_platforms
+
+  rawbufs[0] = type(rawbufs[0])(Device.DEFAULT, rawbufs[0].size, rawbufs[0].dtype)
   if Device.DEFAULT not in failed_platforms:
-    assert run_linearizer(lin) == "PASS"
+    assert run_linearizer(lin, rawbufs, var_vals) == "PASS" and np.allclose(rawbufs[0].as_buffer(), ground_truth, rtol=1e-2, atol=1e-2)
   else:
-    assert run_linearizer(lin) != "PASS"
+    assert run_linearizer(lin, rawbufs, var_vals) != "PASS" or not np.allclose(rawbufs[0].as_buffer(), ground_truth, rtol=1e-2, atol=1e-2)
 
 def helper_add_store(op):
   info = get_lazyop_info(op)
