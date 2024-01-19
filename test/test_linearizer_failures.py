@@ -3,7 +3,7 @@ import unittest, random
 import numpy as np
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import Opt, OptOps
-from tinygrad import Device, dtypes
+from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import OSX, CI
 from test.external.fuzz_linearizer import run_linearizer, get_fuzz_rawbufs, get_fuzz_rawbuf_like
 
@@ -41,6 +41,11 @@ def helper_add_store(op):
 
 @unittest.skipIf(CI and Device.DEFAULT=="CUDA", "failed on CUDA CI")
 class TestLinearizerFailures(unittest.TestCase):
+  def setUp(self):
+    random.seed(42)
+    np.random.seed(42)
+    Tensor.manual_seed(42)
+
   def test_failure_1(self):
     ast = LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(32, 16, 16), strides=(16, 1, 0), offset=0, mask=None, contiguous=False),)))),), arg=(32, 16, 1)), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(32, 16, 1), strides=(0, 1, 0), offset=0, mask=None, contiguous=False),))))), arg=None), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(32, 16, 1), strides=(16, 1, 0), offset=0, mask=None, contiguous=True),))))), arg=None)
     ast = helper_add_store(ast)
