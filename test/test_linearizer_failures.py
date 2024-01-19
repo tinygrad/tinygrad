@@ -1,10 +1,11 @@
 # ruff: noqa: E501
-import unittest
+import unittest, random
+import numpy as np
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import Opt, OptOps
-from tinygrad import Device, dtypes
+from tinygrad import Device, dtypes, Tensor
 from tinygrad.helpers import OSX, CI
-from test.external.fuzz_linearizer import run_linearizer
+from test.external.fuzz_linearizer import run_linearizer, get_fuzz_rawbufs, get_fuzz_rawbuf_like
 
 # stuff needed to unpack a kernel
 from tinygrad.ops import LazyOp, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer, get_lazyop_info
@@ -13,16 +14,26 @@ from tinygrad.shape.view import View
 inf, nan = float('inf'), float('nan')
 
 def helper_test_lin(lin: Linearizer, opts, failed_platforms):
+  rawbufs = get_fuzz_rawbufs(lin)
+  var_vals = {v: random.randint(v.min, v.max) for v in lin.ast.vars()}
+
+  assert run_linearizer(lin, rawbufs, var_vals) == "PASS" or Device.DEFAULT in failed_platforms, "Failed running non-optimized ast"
+  ground_truth = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np)
+
   for opt in opts:
     try:
       lin.apply_opt(opt)
     except AssertionError:
       # it's considered fixed if we invalidated the opts
       assert Device.DEFAULT not in failed_platforms
+
+  rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True)
+  linearizer_passed = (run_linearizer(lin, rawbufs, var_vals) == "PASS")
+  output_passed = np.allclose(ground_truth, np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np), rtol=1e-2, atol=1e-2)
   if Device.DEFAULT not in failed_platforms:
-    assert run_linearizer(lin) == "PASS"
+    assert linearizer_passed and output_passed
   else:
-    assert run_linearizer(lin) != "PASS"
+    assert not linearizer_passed or not output_passed
 
 def helper_add_store(op):
   info = get_lazyop_info(op)
@@ -30,6 +41,11 @@ def helper_add_store(op):
 
 @unittest.skipIf(CI and Device.DEFAULT=="CUDA", "failed on CUDA CI")
 class TestLinearizerFailures(unittest.TestCase):
+  def setUp(self):
+    random.seed(42)
+    np.random.seed(42)
+    Tensor.manual_seed(42)
+
   def test_failure_1(self):
     ast = LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=ReduceOps.SUM, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(32, 16, 16), strides=(16, 1, 0), offset=0, mask=None, contiguous=False),)))),), arg=(32, 16, 1)), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(32, 16, 1), strides=(0, 1, 0), offset=0, mask=None, contiguous=False),))))), arg=None), LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(32, 16, 1), strides=(16, 1, 0), offset=0, mask=None, contiguous=True),))))), arg=None)
     ast = helper_add_store(ast)
