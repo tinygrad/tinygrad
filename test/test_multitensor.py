@@ -87,8 +87,8 @@ class TestMultiTensor(unittest.TestCase):
   def test_sum_0(self): return self._test_sum_axis(0)
   def test_sum_1(self): return self._test_sum_axis(1)
 
-  def _test_max_axis(self, shard_x):
-    X = Tensor.arange(16).reshape(4, 4)
+  def _test_max_axis(self, shard_x, sign=1):
+    X = Tensor.arange(16).reshape(4, 4) * sign
     n = X.numpy()
     X.shard_((d0, d1), shard_x)
     O = X.max(axis=0)
@@ -101,6 +101,9 @@ class TestMultiTensor(unittest.TestCase):
   def test_max(self): return self._test_max_axis(None)
   def test_max_0(self): return self._test_max_axis(0)
   def test_max_1(self): return self._test_max_axis(1)
+  def test_max_neg(self): return self._test_max_axis(None, sign=-1)
+  def test_max_0_neg(self): return self._test_max_axis(0, sign=-1)
+  def test_max_1_neg(self): return self._test_max_axis(1, sign=-1)
 
   def _test_matmul_shard_axis(self, shard_x, shard_w, device):
     X = Tensor.kaiming_uniform(N, N).realize()
