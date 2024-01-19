@@ -1,10 +1,14 @@
 import unittest, functools
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit
 from tinygrad.device import _BufferCopy
-from tinygrad.ops import LoadOps
+from tinygrad.ops import LoadOps, ReduceOps
 from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
 import numpy as np
+from hypothesis import given, strategies as strat, settings
+
+settings.register_profile("my_profile", max_examples=200, deadline=None)
+settings.load_profile("my_profile")
 
 d_zero = f"{Device.DEFAULT}:0"
 d0, d1 = f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2"
@@ -73,37 +77,20 @@ class TestMultiTensor(unittest.TestCase):
     O = X + W
     np.testing.assert_allclose(O.numpy(), 2)
 
-  def _test_sum_axis(self, shard_x):
-    X = Tensor.ones(256, 256).contiguous().realize()
-    X.shard_((d0, d1), shard_x)
-    O = X.sum(axis=0)
-    np.testing.assert_allclose(O.numpy(), 256)
-    O = X.sum(axis=1)
-    np.testing.assert_allclose(O.numpy(), 256)
-    O = X.sum()
-    np.testing.assert_allclose(O.numpy(), 256*256)
-
-  def test_sum(self): return self._test_sum_axis(None)
-  def test_sum_0(self): return self._test_sum_axis(0)
-  def test_sum_1(self): return self._test_sum_axis(1)
-
-  def _test_max_axis(self, shard_x, sign=1):
-    X = Tensor.arange(16).reshape(4, 4) * sign
+  @given(strat.sampled_from((devices_2, devices_3)), strat.sampled_from((ReduceOps.SUM, ReduceOps.MAX)),
+         strat.sampled_from((None, 0, 1)), strat.sampled_from((None, 0, 1)), strat.sampled_from((1, 0, -1)))
+  def test_simple_reduce(self, devices, rop, shard_axis, reduce_axis, sign):
+    X = Tensor.rand(16).reshape(4, 4).mul(sign)
     n = X.numpy()
-    X.shard_((d0, d1), shard_x)
-    O = X.max(axis=0)
-    np.testing.assert_allclose(O.numpy(), n.max(0))
-    O = X.max(axis=1)
-    np.testing.assert_allclose(O.numpy(), n.max(1))
-    O = X.max()
-    np.testing.assert_allclose(O.numpy(), n.max())
+    X.shard_(devices, shard_axis)
+    f = {ReduceOps.SUM: lambda x: x.sum(reduce_axis), ReduceOps.MAX: lambda x: x.max(reduce_axis)}[rop]
+    fX = f(X)
+    fn = f(n)
 
-  def test_max(self): return self._test_max_axis(None)
-  def test_max_0(self): return self._test_max_axis(0)
-  def test_max_1(self): return self._test_max_axis(1)
-  def test_max_neg(self): return self._test_max_axis(None, sign=-1)
-  def test_max_0_neg(self): return self._test_max_axis(0, sign=-1)
-  def test_max_1_neg(self): return self._test_max_axis(1, sign=-1)
+    # TODO: fix reduce with uneven shards
+    if devices == devices_3 and shard_axis in (0, 1): return
+
+    np.testing.assert_allclose(fX.numpy(), fn, rtol=1e-6, atol=1e-6)
 
   def _test_matmul_shard_axis(self, shard_x, shard_w, device):
     X = Tensor.kaiming_uniform(N, N).realize()
