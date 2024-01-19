@@ -56,8 +56,8 @@ def apply_graph_to_jit(jit_cache: List[JitItem], input_rawbuffers: List[Buffer],
   for i,ji in enumerate(jit_cache):
     # If the jit item can potentially be graphed, put it in a batch.
     #can_be_graphed = isinstance(ji.prg, CompiledASTRunner, BufferCopy, SyncEvent, BlockEvent) and ji.prg.device.graph
-    #can_be_graphed = isinstance(ji.prg, (CompiledASTRunner, BufferCopy)) and ji.prg.device.graph
-    can_be_graphed = isinstance(ji.prg, CompiledASTRunner) and ji.prg.device.graph
+    can_be_graphed = isinstance(ji.prg, (CompiledASTRunner, BufferCopy, SyncEvent, BlockEvent)) and ji.prg.device.graph
+    #can_be_graphed = isinstance(ji.prg, CompiledASTRunner) and ji.prg.device.graph
     if can_be_graphed:
       # If the device changed we flush the batch early and append this item for the next batch.
       if current_device is not None and ji.prg.device != current_device: flush()

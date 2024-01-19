@@ -2,7 +2,7 @@ import ctypes
 from typing import Any, Optional, Tuple, Dict, List, cast
 import gpuctypes.cuda as cuda
 import gpuctypes.hip as hip
-from tinygrad.device import Device, BufferCopy
+from tinygrad.device import Device, BufferCopy, BlockEvent, SyncEvent
 from tinygrad.helpers import init_c_var, encode_args_cuda_style, all_same, GraphException
 from tinygrad.device import CompiledASTRunner, update_stats, Buffer
 from tinygrad.runtime.ops_cuda import check, cu_time_execution
@@ -29,9 +29,9 @@ class CUDAGraph:
 
     for (j,i),input_name in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name]
     for j,ji in enumerate(self.jit_cache):
+      c_deps = (type(graph_node)*1)(*(graph_node,)) if graph_node is not None else None
       if isinstance(ji.prg, CompiledASTRunner):
         prg: CompiledASTRunner = ji.prg
-        c_deps = (type(graph_node)*1)(*(graph_node,)) if graph_node is not None else None
         c_kernel_input_config, c_input_params = encode_args_cuda_style([cast(Buffer, x)._buf for x in ji.rawbufs], [var_vals[x] for x in prg.vars], *self.encode_args_info())  # noqa: E501
         c_node_params = self.build_kernel_node_params(prg, *cast(Tuple[List[int], List[int]], prg.launch_dims(var_vals)), c_kernel_input_config)
         graph_node = self.graph_add_kernel_node(self.graph, c_deps, c_node_params)
@@ -40,10 +40,17 @@ class CUDAGraph:
           self.updatable_nodes[j] = (graph_node, c_node_params, c_input_params)
       elif isinstance(ji.prg, BufferCopy):
         assert all(x not in input_rawbuffers for x in ji.rawbufs), "BufferCopy can't be updated if the copy uses an input buffer"
-        c_deps = (type(graph_node)*1)(*(graph_node,)) if graph_node is not None else None
         graph_node = init_c_var(hip.hipGraphNode_t(), lambda x: check(hip.hipGraphAddMemcpyNode1D(ctypes.byref(x),
           self.graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0,
           ji.rawbufs[0]._buf, ji.rawbufs[1]._buf, ji.rawbufs[0].size * ji.rawbufs[0].dtype.itemsize, hip.hipMemcpyDeviceToDevice)))
+      elif isinstance(ji.prg, SyncEvent):
+        graph_node = init_c_var(hip.hipGraphNode_t(), lambda x: check(hip.hipGraphAddEventRecordNode(ctypes.byref(x),
+          self.graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, \
+          ji.prg.event)))
+      elif isinstance(ji.prg, BlockEvent):
+        graph_node = init_c_var(hip.hipGraphNode_t(), lambda x: check(hip.hipGraphAddEventWaitNode(ctypes.byref(x),
+          self.graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, \
+          ji.prg.se.event)))
 
     self.instance = self.graph_instantiate(self.graph)
 
