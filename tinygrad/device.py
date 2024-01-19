@@ -129,7 +129,8 @@ def _internal_buffer_copy(dest:Buffer, src:Buffer):
     # may allocate a CPU buffer depending on allow_zero_copy
     dest.copyin(src.as_buffer(allow_zero_copy=True))
 
-class _BufferCopy(JITRunner):
+class BufferCopy(JITRunner):
+  def __init__(self, device): self.device = Device[device]
   # TODO: make wait work
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
     dest, src = rawbufs
@@ -142,7 +143,6 @@ class _BufferCopy(JITRunner):
       et = time.perf_counter() - st
     update_stats(colored(f"copy {dest.size*dest.dtype.itemsize:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", "yellow"),
                  0, dest.size*dest.dtype.itemsize, {}, et, 2, jit, device=dest.device)
-BufferCopy = _BufferCopy()
 
 class SyncEvent(JITRunner):
   def __init__(self, device):

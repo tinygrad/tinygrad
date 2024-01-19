@@ -1,6 +1,7 @@
 import ctypes
 from typing import Any, Optional, Tuple, Dict, List, cast
 import gpuctypes.cuda as cuda
+from tinygrad.device import Device
 from tinygrad.helpers import init_c_var, encode_args_cuda_style, all_same, GraphException
 from tinygrad.device import CompiledASTRunner, update_stats, Buffer
 from tinygrad.runtime.ops_cuda import check, cu_time_execution
@@ -9,9 +10,9 @@ from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_
 
 class CUDAGraph:
   def __init__(self, jit_cache: List[JitItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
-    devices = [ji.prg.clprg.device if isinstance(ji.prg, CompiledASTRunner) else None for ji in jit_cache]
+    devices = [ji.prg.device for ji in jit_cache]
     if len(devices) == 0 or not all_same(devices) or devices[0] is None: raise GraphException
-    self.device = devices[0]
+    self.device = devices[0].device
     self.set_device()
 
     self.jit_cache = jit_cache
@@ -27,15 +28,15 @@ class CUDAGraph:
 
     for (j,i),input_name in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name]
     for j,ji in enumerate(self.jit_cache):
-      prg: CompiledASTRunner = cast(CompiledASTRunner, ji.prg)
+      if isinstance(ji.prg, CompiledASTRunner):
+        prg: CompiledASTRunner = ji.prg
+        c_deps = (type(graph_node)*1)(*(graph_node,)) if graph_node is not None else None
+        c_kernel_input_config, c_input_params = encode_args_cuda_style([cast(Buffer, x)._buf for x in ji.rawbufs], [var_vals[x] for x in prg.vars], *self.encode_args_info())  # noqa: E501
+        c_node_params = self.build_kernel_node_params(prg, *cast(Tuple[List[int], List[int]], prg.launch_dims(var_vals)), c_kernel_input_config)
+        graph_node = self.graph_add_kernel_node(self.graph, c_deps, c_node_params)
 
-      c_deps = (type(graph_node)*1)(*(graph_node,)) if graph_node is not None else None
-      c_kernel_input_config, c_input_params = encode_args_cuda_style([cast(Buffer, x)._buf for x in ji.rawbufs], [var_vals[x] for x in prg.vars], *self.encode_args_info())  # noqa: E501
-      c_node_params = self.build_kernel_node_params(prg, *cast(Tuple[List[int], List[int]], prg.launch_dims(var_vals)), c_kernel_input_config)
-      graph_node = self.graph_add_kernel_node(self.graph, c_deps, c_node_params)
-
-      if j in self.jc_idxs_with_updatable_launch_dims or j in self.jc_idxs_with_updatable_var_vals or j in self.jc_idxs_with_updatable_rawbufs:
-        self.updatable_nodes[j] = (graph_node, c_node_params, c_input_params)
+        if j in self.jc_idxs_with_updatable_launch_dims or j in self.jc_idxs_with_updatable_var_vals or j in self.jc_idxs_with_updatable_rawbufs:
+          self.updatable_nodes[j] = (graph_node, c_node_params, c_input_params)
 
     self.instance = self.graph_instantiate(self.graph)
 
@@ -47,12 +48,14 @@ class CUDAGraph:
 
     # Update var_vals in the c_input_params struct.
     for j in self.jc_idxs_with_updatable_var_vals:
-      for i,v in enumerate(cast(CompiledASTRunner, self.jit_cache[j].prg).vars):
-        setattr(self.updatable_nodes[j][2], f'f{len(self.jit_cache[j].rawbufs) + i}', var_vals[v])
+      if isinstance(self.jit_cache[j], CompiledASTRunner):
+        for i,v in enumerate(cast(CompiledASTRunner, self.jit_cache[j].prg).vars):
+          setattr(self.updatable_nodes[j][2], f'f{len(self.jit_cache[j].rawbufs) + i}', var_vals[v])
 
     # Update launch dims in the c_node_params struct.
     for j in self.jc_idxs_with_updatable_launch_dims:
-      self.set_kernel_node_launch_dims(self.updatable_nodes[j][1], *cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals))
+      if isinstance(self.jit_cache[j], CompiledASTRunner):
+        self.set_kernel_node_launch_dims(self.updatable_nodes[j][1], *cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals))
 
     # Update graph nodes with the updated structs.
     for node, c_node_params, _ in self.updatable_nodes.values():
@@ -60,7 +63,7 @@ class CUDAGraph:
 
     et = self.graph_launch(self.instance, None, wait=wait)
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers),
-                 jit=jit, num_kernels=len(self.jit_cache), device=f"GPU:{self.device}")
+                 jit=jit, num_kernels=len(self.jit_cache), device=f"HIP:{self.device}")
     return et
 
   def __del__(self):

@@ -1,6 +1,6 @@
 import unittest, functools
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit
-from tinygrad.device import _BufferCopy
+from tinygrad.device import BufferCopy
 from tinygrad.ops import LoadOps
 from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
@@ -141,6 +141,21 @@ class TestMultiTensor(unittest.TestCase):
   def test_double_matmul_shard_X_1(self): return self._test_double_matmul_shard_axis(1, None, devices_2)
   def test_double_matmul_shard_W_0(self): return self._test_double_matmul_shard_axis(None, 0, devices_2)
   def test_double_matmul_shard_W_1(self): return self._test_double_matmul_shard_axis(None, 1, devices_2)
+  def test_double_matmul_shard_W_1_jit(self):
+    X = Tensor.kaiming_uniform(N, N).realize()
+    W1 = Tensor.kaiming_uniform(N, N).realize()
+    W2 = Tensor.kaiming_uniform(N, N).realize()
+    correct_value = (X.numpy() @ W1.numpy()) @ W2.numpy()
+    Xs = X.shard(devices_2, None).realize()
+    W1s = W1.shard(devices_2, 1).realize()
+    W2s = W2.shard(devices_2, 1).realize()
+
+    @TinyJit
+    def fxn(Xs, W1s, W2s): return ((Xs@W1s)@W2s).realize()
+    for _ in range(3):
+      GlobalCounters.reset()
+      O = fxn(Xs, W1s, W2s)
+      np.testing.assert_allclose(correct_value, O.numpy(), atol=1e-5)
 
   def test_conv_data_shard(self):
     conv = nn.Conv2d(3, 16, 3, bias=False)
@@ -292,7 +307,7 @@ class TestMultiTensor(unittest.TestCase):
     assert isinstance(jf.jit_cache[1].prg, graph_d0)
     assert isinstance(jf.jit_cache[2].prg, graph_d1)
     assert isinstance(jf.jit_cache[3].prg, graph_d1)
-    assert isinstance(jf.jit_cache[4].prg, _BufferCopy)
+    assert isinstance(jf.jit_cache[4].prg, BufferCopy)
     assert isinstance(jf.jit_cache[5].prg, graph_d1)
 
   def test_uneven_shard(self):

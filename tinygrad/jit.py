@@ -4,7 +4,7 @@ import functools, itertools, operator
 from tinygrad.nn.state import get_parameters
 from tinygrad.dtype import DType
 from tinygrad.helpers import DEBUG, merge_dicts, getenv, all_int, Context, GRAPH, flatten, GraphException
-from tinygrad.device import Compiled, JITRunner, CompiledASTRunner, Buffer
+from tinygrad.device import Compiled, JITRunner, CompiledASTRunner, Buffer, BufferCopy, SyncEvent, BlockEvent
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
@@ -19,7 +19,8 @@ class JitItem:
   rawbufs: List[Optional[Buffer]]
 
 def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[Node, int]:
-  return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache], NumNode(0)), functools.reduce(operator.add, [ji.prg.mem_estimate for ji in jit_cache], 0)  # noqa: E501
+  return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], NumNode(0)), \
+         functools.reduce(operator.add, [ji.prg.mem_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], 0)  # noqa: E501
 def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
   input_replace: Dict[Tuple[int, int], int] = {}
   for j,ji in enumerate(jit_cache):
@@ -54,9 +55,10 @@ def apply_graph_to_jit(jit_cache: List[JitItem], input_rawbuffers: List[Buffer],
 
   for i,ji in enumerate(jit_cache):
     # If the jit item can potentially be graphed, put it in a batch.
+    #can_be_graphed = isinstance(ji.prg, CompiledASTRunner, BufferCopy, SyncEvent, BlockEvent) and ji.prg.device.graph
+    #can_be_graphed = isinstance(ji.prg, (CompiledASTRunner, BufferCopy)) and ji.prg.device.graph
     can_be_graphed = isinstance(ji.prg, CompiledASTRunner) and ji.prg.device.graph
     if can_be_graphed:
-      assert isinstance(ji.prg, CompiledASTRunner)
       # If the device changed we flush the batch early and append this item for the next batch.
       if current_device is not None and ji.prg.device != current_device: flush()
       current_device = ji.prg.device

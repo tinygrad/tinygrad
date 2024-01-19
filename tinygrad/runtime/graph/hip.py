@@ -16,6 +16,19 @@ class HIPGraph(CUDAGraph):
     return init_c_var(hip.hipGraphExec_t(), lambda x: check(hip.hipGraphInstantiate(ctypes.byref(x), graph, None, None, 0)))
   def graph_add_kernel_node(self, graph, c_deps, c_params):
     return init_c_var(hip.hipGraphNode_t(), lambda x: check(hip.hipGraphAddKernelNode(ctypes.byref(x), graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, ctypes.byref(c_params))))  # noqa: E501
+
+  def graph_add_memcpy_node(self):
+    # hipGraphAddMemcpyNode
+    pass
+
+  def graph_add_event_record_node(self):
+    # hipGraphAddEventRecordNode
+    pass
+
+  def graph_add_event_wait_node(self):
+    # hipGraphAddEventWaitNode
+    pass
+
   def graph_launch(self, *args, wait=False): return hip_time_execution(lambda: check(hip.hipGraphLaunch(*args)), enable=wait)
   def graph_exec_kernel_node_set_params(self, *args): return check(hip.hipGraphExecKernelNodeSetParams(*args))
   def build_kernel_node_params(self, prg, global_size, local_size, c_config):
