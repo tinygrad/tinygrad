@@ -99,9 +99,7 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(O.numpy(), n.max())
 
   def test_max(self): return self._test_max_axis(None)
-  @unittest.expectedFailure
   def test_max_0(self): return self._test_max_axis(0)
-  @unittest.expectedFailure
   def test_max_1(self): return self._test_max_axis(1)
 
   def _test_matmul_shard_axis(self, shard_x, shard_w, device):
