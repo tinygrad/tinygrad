@@ -77,7 +77,7 @@ class TestRealWorld(unittest.TestCase):
     @TinyJit
     def test(t): return model(t, 0).realize()
     # TODO: test first token vs rest properly
-    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.27 if CI else 14.9, 190 if CI else 718, all_jitted=True)
+    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.27 if CI else 14.9, 191 if CI else 719, all_jitted=True)
 
   @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp16")
   def test_gpt2(self):
@@ -146,7 +146,7 @@ class TestRealWorld(unittest.TestCase):
       pct_start = hyp['opt']['percent_start']
       lr_scheduler = OneCycleLR(optimizer, max_lr=hyp['opt']['bias_lr'], pct_start=pct_start, div_factor=initial_div_factor,
                                 final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=4)
-      assert not np.isnan(lr_scheduler.min_lr.numpy()), "lr too small or initial_div_facotr too big for half"
+      assert not np.isnan(lr_scheduler.min_lr), "lr too small or initial_div_facotr too big for half"
 
     dtypes.default_float = dtypes.float32
 

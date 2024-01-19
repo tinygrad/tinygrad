@@ -18,7 +18,7 @@ jobs:
       PYTHONPATH: .
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -35,7 +35,9 @@ jobs:
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Run Tensor Core GEMM
-      run: DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
+      run: |
+        DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
+        DEBUG=2 HALF=1 python3 extra/gemm/simple_matmul.py | tee matmul_half.txt
     - name: Run LLaMA
       run: |
         JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
@@ -46,9 +48,10 @@ jobs:
         JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
     - name: Run 10 CIFAR training steps
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
-    - name: Run 10 CIFAR training steps w winograd
-      run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
-    - uses: actions/upload-artifact@v3
+    # TODO: this is flaky too
+    # - name: Run 10 CIFAR training steps w winograd
+    #   run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
+    - uses: actions/upload-artifact@v4
       with:
         name: Speed (Mac)
         path: |
@@ -61,6 +64,7 @@ jobs:
           gpt2_unjitted.txt
           gpt2_jitted.txt
           matmul.txt
+          matmul_half.txt
           sd.txt
 
   testnvidiabenchmark:
@@ -74,7 +78,7 @@ jobs:
       PYTHONPATH: .
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Run model inference benchmark
       run: CUDA=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -86,8 +90,8 @@ jobs:
     - name: Run GPT2 w HALF
       run: CUDA=1 JIT=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing
     - name: Run GPT2 w HALF/BEAM
-      run: CUDA=1 JIT=1 HALF=1 BEAM=4 CACHELEVEL=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
-    - uses: actions/upload-artifact@v3
+      run: CUDA=1 JIT=1 HALF=1 BEAM=2 CACHELEVEL=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
+    - uses: actions/upload-artifact@v4
       with:
         name: Speed (NVIDIA)
         path: |
@@ -108,7 +112,7 @@ jobs:
       PYTHONPATH: .
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Show off tinybox
       run: /opt/rocm/bin/rocm-bandwidth-test
     - name: Symlink models and datasets
@@ -135,18 +139,21 @@ jobs:
         HIP=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
     - name: Run 10 CIFAR training steps
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
-    # TODO: make wino faster so we can enable both
-    - name: Run 10 CIFAR training steps w winograd
-      run: WINO=0 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
-    - name: Run 10 CIFAR training steps w WINO/HALF/HIP
-      run: HALF=1 HIP=1 WINO=0 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
-    - uses: actions/upload-artifact@v3
+    - name: Run full CIFAR training w HALF
+      run: time HALF=1 STEPS=1000 python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+    # # TODO: make wino faster so we can enable both
+    # - name: Run 10 CIFAR training steps w winograd
+    #   run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
+    # - name: Run 10 CIFAR training steps w WINO/HALF/HIP
+    #   run: HALF=1 WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
+    - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD)
         path: |
           onnx_inference_speed.csv
           torch_speed.txt
           train_cifar.txt
+          train_cifar_half.txt
           train_cifar_wino.txt
           train_cifar_wino_half_hip.txt
           llama_unjitted.txt

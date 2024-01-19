@@ -166,11 +166,11 @@ class Linearizer(Kernel):
       store_offset = store_offset_new
 
     stores = []
-    for idx, var in store_offset.items():
-      idx, valid = self.sts[i].expr_idxs(idx)
+    for _idx, var in store_offset.items():
+      idx, valid = self.sts[i].expr_idxs(_idx)
       if isinstance(buf.dtype, ImageDType):
-        idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
-        rendered_idx = self.uop(UOps.CAST, dtypes.int.vec(2), tuple(x.render(self.render_ops, self) for x in idx))
+        image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
+        rendered_idx = self.uop(UOps.CAST, dtypes.int.vec(2), tuple(x.render(self.render_ops, self) for x in image_idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
       if valid.min == 1: stores.append(self.uop(UOps.STORE, None, (buf_uop, rendered_idx, var)))
@@ -206,14 +206,14 @@ class Linearizer(Kernel):
       self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, (), var.expr)
     # define local buffers
     for lb in self.local_alias.values():
-      self.buf_uops[self.bufs.index(lb)] = self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), (lb.name, self.sts[self.bufs.index(lb)].size()))
+      self.buf_uops[self.bufs.index(lb)] = self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), (lb.name, self.sts[self.bufs.index(lb)].size))
     # add a local buffer for multistage reduce. # TODO: use local alias
     if self.group_for_reduce:
       # TODO: the strides of this can be controlled
       self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+len(self.group_for_reduce)]) + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
       temp_dtype = self.get_base_dtype(get_lazyop_info(self.reduceop).dtype)
-      self.bufs.append(LocalBuffer("temp", self.sts[-1].size(), temp_dtype))
-      self.buf_uops.append(self.uop(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), ("temp", self.sts[-1].size())))
+      self.bufs.append(LocalBuffer("temp", self.sts[-1].size, temp_dtype))
+      self.buf_uops.append(self.uop(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), ("temp", self.sts[-1].size)))
 
     # kernel name (before late upcast)
     self.name = ("r_" if self.reduceop else "E_") + colored('_', 'BLACK').join([colored(str(x), c) for x,c in zip(self.full_shape, self.colors())])
@@ -265,7 +265,7 @@ class Linearizer(Kernel):
       # define accumulator
       acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
 
-      if self.tensor_core:
+      if (tc:=self.tensor_core):
         def calc_tc_idxs(local_size: int, aliases: List[List[int]]):
           replace_idxs = []
           for alias in aliases:
@@ -277,11 +277,11 @@ class Linearizer(Kernel):
                 full_var_sz *= next_var.max+1
             replace_idxs.append(full_var)
           return replace_idxs
-        replace_acc_idxs = calc_tc_idxs(self.tensor_core.thread_local_sizes[2], self.tensor_core.thread_local_aliases[2])
-        for n in range(len(self.tensor_core.threads)):
-          local_idxs[self.local_dims-len(self.tensor_core.threads)+n] = replace_acc_idxs[n] # replace locals
-        for n in range(len(replace_acc_idxs)-len(self.tensor_core.threads)):
-          upcast_idxs[n] = replace_acc_idxs[len(self.tensor_core.threads)+n] # replace upcasts
+        replace_acc_idxs = calc_tc_idxs(tc.thread_local_sizes[2], tc.thread_local_aliases[2])
+        for n in range(len(tc.threads)):
+          local_idxs[self.local_dims-len(tc.threads)+n] = replace_acc_idxs[n] # replace locals
+        for n in range(len(replace_acc_idxs)-len(tc.threads)):
+          upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
 
       # reduce loop
       loop_ctx = render_loop(reduce_idxs)
@@ -306,8 +306,8 @@ class Linearizer(Kernel):
         locals_to_store.append((localbuf_idx, buf_idxs, ll))
 
       # copy in any global buffers
-      if self.tensor_core:
-        wmma_sz = self.tensor_core.thread_local_sizes
+      if (tc:=self.tensor_core):
+        wmma_sz = tc.thread_local_sizes
         # calculate the number of local accumulator reduces and render WMMAs: this is bad... this needs to come from someplace else
         nx, ny, nacc = (len(locals_to_store[0][2])//wmma_sz[0]), (len(locals_to_store[1][2])//wmma_sz[1]), (len(acc)//wmma_sz[2])
         acc_reds = math.isqrt((nx*ny)//nacc)
@@ -315,16 +315,12 @@ class Linearizer(Kernel):
         for y in range(by):
           for x in range(bx):
             for j in range(acc_reds):
-              op1, op2, op3 = locals_to_store[0][2][(x+(j*bx))*wmma_sz[0]:(x+(j*bx)+1)*wmma_sz[0]], locals_to_store[1][2][(y+(j*by))*wmma_sz[1]:(y+(j*by)+1)*wmma_sz[1]], acc[i:i+wmma_sz[2]]  # noqa: E501
-              if self.opts.device != "HIP":
-                ops = tuple(op1+op2+op3)
-              else:
-                ops = (self.uop(UOps.CAST, dtypes.half.vec(16), tuple(op1)),
-                       self.uop(UOps.CAST, dtypes.half.vec(16), tuple(op2)),
-                       self.uop(UOps.CAST, dtypes.float.vec(8), tuple(op3)))
-              ret = self.uop(UOps.WMMA, dtypes.float.vec(2) if wmma_sz[2] == 2 else dtypes.float.vec(8), ops, (self.opts.device, self.tensor_core.dtype_in, self.tensor_core.dtype_out,))  # noqa: E501
-              for z in range(cast(DType, ret.dtype).sz):
-                acc[i+z] = self.uop(UOps.PHI, dtypes.float, (op3[z], self.uop(UOps.GEP, dtypes.float, (ret,), z)) + loop_ctx)
+              ops = (self.uop(UOps.CAST, tc.dtype_in.vec(wmma_sz[0]), tuple(locals_to_store[0][2][(x+(j*bx))*wmma_sz[0]:(x+(j*bx)+1)*wmma_sz[0]])),
+                     self.uop(UOps.CAST, tc.dtype_in.vec(wmma_sz[1]), tuple(locals_to_store[1][2][(y+(j*by))*wmma_sz[1]:(y+(j*by)+1)*wmma_sz[1]])),
+                     self.uop(UOps.CAST, tc.dtype_out.vec(wmma_sz[2]), tuple(op3:=acc[i:i+wmma_sz[2]])))
+              ret = self.uop(UOps.WMMA, tc.dtype_out.vec(wmma_sz[2]), ops, tc.wmma_func)
+              for z in range(wmma_sz[2]):
+                acc[i+z] = self.uop(UOps.PHI, tc.dtype_out, (op3[z], self.uop(UOps.GEP, tc.dtype_out, (ret,), z)) + loop_ctx)
             i += wmma_sz[2]
       else:
         if locals_to_store:
@@ -545,7 +541,10 @@ class Linearizer(Kernel):
     # MULACC fusion. TODO: this is copied from Interpreted
     if x.op == ReduceOps.SUM:
       if x.src[0].op == BinaryOps.MUL: x = LazyOp(TernaryOps.MULACC, x.src[0].src, x.arg)
-      if x.src[0].op == UnaryOps.CAST and x.src[0].src[0].op == BinaryOps.MUL: x = LazyOp(TernaryOps.MULACC, x.src[0].src[0].src, x.arg)
+      if (castop:=x.src[0]).op == UnaryOps.CAST and (mulop:=castop.src[0]).op == BinaryOps.MUL:
+        # MULACC with acc cast rewrite: MUL -> CAST -> SUM => CAST -> MULACC
+        x = LazyOp(TernaryOps.MULACC, tuple(LazyOp(UnaryOps.CAST, (s, ), castop.arg) for s in mulop.src), x.arg)
+
     values = [self.ast_parse(v, acc, offs, loaded_buffers, loop_ctx=loop_ctx, cache=cache) for v in x.src]
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     if x.op in ops:

@@ -1,14 +1,15 @@
 import unittest
-from tinygrad.helpers import Timing, CI, Profiling
+from tinygrad.helpers import Timing, CI, Profiling, WINO
 from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
 from tinygrad.codegen.linearizer import Linearizer
 
 class TestWinograd(unittest.TestCase):
   def setUp(self):
-    self.old = Tensor.wino
-    Tensor.wino = 1
-  def tearDown(self): Tensor.wino = self.old
+    self.old = WINO.value
+    WINO.value = 1
+  def tearDown(self):
+    WINO.value = self.old
 
   def test_speed(self):
     x = Tensor.empty(1,4,9,9)

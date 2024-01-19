@@ -28,15 +28,16 @@ disk_fxn_for_op: Dict[Op, Callable] = { UnaryOps.CAST: DiskBuffer.cast, Movement
 
 MAP_LOCKED, MAP_POPULATE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000)
 class DiskAllocator(Allocator):
-  def __init__(self, device): self.device = device
-  def _alloc(self, size):
-    if str(self.device).startswith("shm:"):
+  def __init__(self, device:str): self.device = device
+  def _alloc(self, size:int):
+    if self.device.startswith("shm:"):
       fd = _posixshmem.shm_open("/"+self.device[4:].lstrip("/"), os.O_RDWR, 0o600)
       mem = mmap.mmap(fd, size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
       os.close(fd)
       fd = None
     else:
-      fd = os.open(self.device, os.O_RDWR|os.O_CREAT) #|(0 if OSX else os.O_DIRECT))
+      try: fd = os.open(self.device, os.O_RDWR|os.O_CREAT|(0 if OSX else os.O_DIRECT))
+      except OSError: fd = os.open(self.device, os.O_RDWR|os.O_CREAT)
       if os.fstat(fd).st_size < size: os.ftruncate(fd, size)
       mem = mmap.mmap(fd, size)
     if (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None: mem.madvise(hp) # type: ignore
@@ -53,4 +54,4 @@ class DiskAllocator(Allocator):
       dest[:] = src._buf()
 
 class DiskDevice(Interpreted):
-  def __init__(self, device): super().__init__(DiskAllocator(device[5:]), disk_fxn_for_op)
+  def __init__(self, device:str): super().__init__(DiskAllocator(device[len("disk:"):]), disk_fxn_for_op)
