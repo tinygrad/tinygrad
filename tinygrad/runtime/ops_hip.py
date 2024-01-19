@@ -106,9 +106,9 @@ class HIPDevice(Compiled):
     check(hip.hipSetDevice(self.device))
     check(hip.hipDeviceSynchronize())
     for opaque in self.pending_copyin: check(hip.hipFree(opaque))
-    for opaque in self.pending_events: check(hip.hipEventDestroy(opaque))
+    #for opaque in self.pending_events: check(hip.hipEventDestroy(opaque))
     self.pending_copyin.clear()
-    self.pending_events.clear()
+    #self.pending_events.clear()
   def event(self):
     check(hip.hipSetDevice(self.device))
     evt = init_c_var(hip.hipEvent_t(), lambda x: check(hip.hipEventCreate(ctypes.byref(x))))

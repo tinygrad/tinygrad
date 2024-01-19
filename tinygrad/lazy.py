@@ -36,6 +36,7 @@ class LazyBuffer:
       self.realized: Optional[Buffer] = None
       self.output_buffer: Optional[Buffer] = None
       self.forced_realize = False
+      self.does_synchronize = False
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
     else:
       # properties on view
@@ -58,6 +59,11 @@ class LazyBuffer:
 
   def const(self, val:Union[float, int]) -> LazyBuffer:
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
+
+  def synchronize(self):
+    assert self._base is None
+    self.does_synchronize = True
+    return self
 
   def contiguous(self):
     if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
@@ -90,10 +96,10 @@ class LazyBuffer:
 
     # if it's a shrink, do the shrink before the copy with CONTIGUOUS
     if prod(self.st.shape) < prod(self.base.st.shape):
-      return LazyBuffer.loadop(LoadOps.COPY, self.shape, self.dtype, device, src=self.contiguous())
+      return LazyBuffer.loadop(LoadOps.COPY, self.shape, self.dtype, device, src=self.contiguous().synchronize())
 
     # copy the base and apply the shapetracker on the new device
-    return LazyBuffer.loadop(LoadOps.COPY, self.base.shape, self.dtype, device, src=self.base)._view(self.st)
+    return LazyBuffer.loadop(LoadOps.COPY, self.base.shape, self.dtype, device, src=self.base.synchronize())._view(self.st)
 
   def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     srcs: List[LazyBuffer] = []

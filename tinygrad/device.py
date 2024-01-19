@@ -100,12 +100,18 @@ def _internal_buffer_copy(dest:Buffer, src:Buffer):
   if hasattr(src.allocator, 'transfer') and type(dest.allocator) is type(src.allocator):  # noqa: E721
     # fast path, used on HIP between GPUs
     # NOTE: we have to block here so the data isn't copied too early. this is probably due to buffer reuse
-    if hasattr(src.d, "block") and hasattr(dest.d, "event"): src.d.block(dest.d.event())
-    else: dest.d.synchronize()
-    src.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
+    #if hasattr(dest.d, "block") and hasattr(src.d, "event"): dest.d.block(src.d.event())
+    #else: src.d.synchronize()
+    dest.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
+
+    # NOTE: this is wrong because src can overwrite it
+    #dest.d.block(src.d.event())
     # NOTE: we have to block here so the data is ready on dest when dest needs it
-    if hasattr(dest.d, "block") and hasattr(src.d, "event"): dest.d.block(src.d.event())
-    else: src.d.synchronize()
+    #from tinygrad.helpers import Timing
+    #with Timing():
+    #src.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
+    #if hasattr(dest.d, "block") and hasattr(src.d, "event"): dest.d.block(src.d.event())
+    #else: src.d.synchronize()
     return
   if getenv("FROM_BUFFER") and hasattr(dest.allocator, 'from_buffer') and hasattr(dest.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
     # fast path, used on Metal in OS X Sonoma

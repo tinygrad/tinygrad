@@ -23,6 +23,7 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
 
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 def run_schedule(schedule:List[ScheduleItem]):
+  synced_buffers = {}
   while len(schedule):
     si = schedule.pop(0)
     if logops and si.ast.op not in LoadOps: logops.write(str(si.ast)+"\n")
@@ -43,8 +44,25 @@ def run_schedule(schedule:List[ScheduleItem]):
       Buffer(si.out.device, si.out.size, si.out.dtype, "PLACEHOLDER" if isinstance(prg, InterpretedASTRunner) else None)
     del si.out.srcs
 
+    # should we wait?
+    if prg == BufferCopy:
+      if si.inputs[0] in synced_buffers:
+        sync_num, evt = synced_buffers[si.inputs[0]]
+        update_stats(colored(f"block {sync_num}", "RED"), 0, 0, {}, None, 1, device=si.out.device)
+        Device[si.out.device].block(evt)
+      else:
+        # if we don't have a sync point, we have to sync the whole device
+        Device[si.inputs[0].device].synchronize()
+
     # run the function (put it in JIT)
     assert all(x.realized is not None for x in si.inputs), f"can't run, some inputs aren't realized {[x for x in si.inputs if x.realized is None]}"
     if prg: prg.exec([si.out.realized] + [cast(Buffer, x.realized) for x in si.inputs], si.var_vals)
     else: update_stats(colored(f"empty {si.out.st.size:10d} {si.out.dtype}", "yellow"), 0, 0, {}, None, 1, device=si.out.device)
     if GRAPH: realized_lazybuffer(si.out, GlobalCounters.kernel_count)
+
+    # should we sync?
+    if si.out.does_synchronize:
+      sync_num = len(synced_buffers)
+      synced_buffers[si.out] = (sync_num, Device[si.out.device].event())
+      update_stats(colored(f"event {sync_num}", "red"), 0, 0, {}, None, 1, device=si.out.device)
+

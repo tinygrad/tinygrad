@@ -100,7 +100,7 @@ class Timing(contextlib.ContextDecorator):
     self.et = time.perf_counter_ns() - self.st
     if self.enabled: print(f"{self.prefix}{self.et*1e-6:6.2f} ms"+(self.on_exit(self.et) if self.on_exit else ""))
 
-def _format_fcn(fcn): return f"{fcn[0]}:{fcn[2]}" if fcn[2] != "<genexpr>" else f"{fcn[0]}:{fcn[1]}"
+def _format_fcn(fcn): return f"{fcn[0]}:{fcn[1]}:{fcn[2]}"
 class Profiling(contextlib.ContextDecorator):
   def __init__(self, enabled=True, sort='cumtime', frac=0.2, fn=None, ts=1):
     self.enabled, self.sort, self.frac, self.fn, self.time_scale = enabled, sort, frac, fn, 1e3/ts
