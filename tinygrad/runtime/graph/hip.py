@@ -2,10 +2,12 @@ import ctypes
 from typing import Tuple
 import gpuctypes.hip as hip
 from tinygrad.helpers import init_c_var
+from tinygrad.device import CompiledASTRunner, BufferCopy, BlockEvent, SyncEvent
 from tinygrad.runtime.ops_hip import check, hip_time_execution
 from tinygrad.runtime.graph.cuda import CUDAGraph
 
 class HIPGraph(CUDAGraph):
+  supported_jititems = (CompiledASTRunner, BufferCopy, BlockEvent, SyncEvent)
   def __del__(self):
     if hasattr(self, 'graph'): check(hip.hipGraphDestroy(self.graph))
     if hasattr(self, 'instance'): check(hip.hipGraphExecDestroy(self.instance))
@@ -14,19 +16,22 @@ class HIPGraph(CUDAGraph):
   def graph_create(self): return init_c_var(hip.hipGraph_t(), lambda x: check(hip.hipGraphCreate(ctypes.byref(x), 0)))
   def graph_instantiate(self, graph):
     return init_c_var(hip.hipGraphExec_t(), lambda x: check(hip.hipGraphInstantiate(ctypes.byref(x), graph, None, None, 0)))
+
   def graph_add_kernel_node(self, graph, c_deps, c_params):
-    return init_c_var(hip.hipGraphNode_t(), lambda x: check(hip.hipGraphAddKernelNode(ctypes.byref(x), graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, ctypes.byref(c_params))))  # noqa: E501
+    return init_c_var(hip.hipGraphNode_t(), lambda x: check(hip.hipGraphAddKernelNode(ctypes.byref(x),
+      graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, ctypes.byref(c_params))))  # noqa: E501
 
-  def graph_add_memcpy_node(self, graph, c_deps, c_params):
-    return init_c_var(hip.hipGraphNode_t(), lambda x: check(hip.hipGraphAddMemcpyNode(ctypes.byref(x), graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, ctypes.byref(c_params))))  # noqa: E501
+  def graph_add_memcpy_node(self, graph, c_deps, dest, src, count, kind):
+    return init_c_var(hip.hipGraphNode_t(), lambda x: check(hip.hipGraphAddMemcpyNode1D(ctypes.byref(x),
+      graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, dest, src, count, kind)))
 
-  def graph_add_event_record_node(self):
-    # hipGraphAddEventRecordNode
-    pass
+  def graph_add_event_record_node(self, graph, c_deps, evt):
+    return init_c_var(hip.hipGraphNode_t(), lambda x: check(hip.hipGraphAddEventRecordNode(ctypes.byref(x),
+      graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, evt)))
 
-  def graph_add_event_wait_node(self):
-    # hipGraphAddEventWaitNode
-    pass
+  def graph_add_event_wait_node(self, graph, c_deps, evt):
+    return init_c_var(hip.hipGraphNode_t(), lambda x: check(hip.hipGraphAddEventWaitNode(ctypes.byref(x),
+      graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, evt)))
 
   def graph_launch(self, *args, wait=False): return hip_time_execution(lambda: check(hip.hipGraphLaunch(*args)), enable=wait)
   def graph_exec_kernel_node_set_params(self, *args): return check(hip.hipGraphExecKernelNodeSetParams(*args))

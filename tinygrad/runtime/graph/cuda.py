@@ -2,14 +2,14 @@ import ctypes
 from typing import Any, Optional, Tuple, Dict, List, cast
 import gpuctypes.cuda as cuda
 import gpuctypes.hip as hip
-from tinygrad.device import Device, BufferCopy, BlockEvent, SyncEvent
+from tinygrad.device import CompiledASTRunner, BufferCopy, BlockEvent, SyncEvent, update_stats, Buffer
 from tinygrad.helpers import init_c_var, encode_args_cuda_style, all_same, GraphException
-from tinygrad.device import CompiledASTRunner, update_stats, Buffer
 from tinygrad.runtime.ops_cuda import check, cu_time_execution
 from tinygrad.shape.symbolic import Variable
 from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, get_jc_idxs_with_updatable_var_vals
 
 class CUDAGraph:
+  supported_jititems = (CompiledASTRunner, )
   def __init__(self, jit_cache: List[JitItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]):
     devices = [ji.prg.device for ji in jit_cache]
     if len(devices) == 0 or not all_same(devices) or devices[0] is None: raise GraphException
@@ -39,18 +39,11 @@ class CUDAGraph:
         if j in self.jc_idxs_with_updatable_launch_dims or j in self.jc_idxs_with_updatable_var_vals or j in self.jc_idxs_with_updatable_rawbufs:
           self.updatable_nodes[j] = (graph_node, c_node_params, c_input_params)
       elif isinstance(ji.prg, BufferCopy):
-        assert all(x not in input_rawbuffers for x in ji.rawbufs), "BufferCopy can't be updated if the copy uses an input buffer"
-        graph_node = init_c_var(hip.hipGraphNode_t(), lambda x: check(hip.hipGraphAddMemcpyNode1D(ctypes.byref(x),
-          self.graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0,
-          ji.rawbufs[0]._buf, ji.rawbufs[1]._buf, ji.rawbufs[0].size * ji.rawbufs[0].dtype.itemsize, hip.hipMemcpyDeviceToDevice)))
-      elif isinstance(ji.prg, SyncEvent):
-        graph_node = init_c_var(hip.hipGraphNode_t(), lambda x: check(hip.hipGraphAddEventRecordNode(ctypes.byref(x),
-          self.graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, \
-          ji.prg.event)))
-      elif isinstance(ji.prg, BlockEvent):
-        graph_node = init_c_var(hip.hipGraphNode_t(), lambda x: check(hip.hipGraphAddEventWaitNode(ctypes.byref(x),
-          self.graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, \
-          ji.prg.se.event)))
+        if not all(x not in input_rawbuffers for x in ji.rawbufs): raise GraphException("BufferCopy inputs cannot be dynamic")
+        self.graph_add_memcpy_node(self.graph, c_deps, ji.rawbufs[0]._buf, ji.rawbufs[1]._buf,
+                                   ji.rawbufs[0].size * ji.rawbufs[0].dtype.itemsize, hip.hipMemcpyDeviceToDevice)
+      elif isinstance(ji.prg, SyncEvent): self.graph_add_event_record_node(self.graph, c_deps, ji.prg.event)
+      elif isinstance(ji.prg, BlockEvent): self.graph_add_event_wait_node(self.graph, c_deps, ji.prg.se.event)
 
     self.instance = self.graph_instantiate(self.graph)
 
@@ -89,6 +82,9 @@ class CUDAGraph:
     return init_c_var(cuda.CUgraphExec(), lambda x: check(cuda.cuGraphInstantiate_v2(ctypes.byref(x), graph, None, None, 0)))
   def graph_add_kernel_node(self, graph, c_deps, c_node_params):
     return init_c_var(cuda.CUgraphNode(), lambda x: check(cuda.cuGraphAddKernelNode(ctypes.byref(x), graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0, ctypes.byref(c_node_params))))  # noqa: E501
+  def graph_add_memcpy_node(self, graph, c_deps, dest, src, count, kind): raise NotImplementedError
+  def graph_add_event_record_node(self, graph, c_deps, evt): raise NotImplementedError
+  def graph_add_event_wait_node(self, graph, c_deps, evt): raise NotImplementedError
   def graph_launch(self, *args, wait=False): return cu_time_execution(lambda: check(cuda.cuGraphLaunch(*args)), enable=wait)
   def graph_exec_kernel_node_set_params(self, *args): return check(cuda.cuGraphExecKernelNodeSetParams(*args))
   def build_kernel_node_params(self, prg, global_size, local_size, c_kernel_config):
