@@ -55,14 +55,12 @@ class CUDAGraph:
 
     # Update var_vals in the c_input_params struct.
     for j in self.jc_idxs_with_updatable_var_vals:
-      if isinstance(self.jit_cache[j], CompiledASTRunner):
-        for i,v in enumerate(cast(CompiledASTRunner, self.jit_cache[j].prg).vars):
-          setattr(self.updatable_nodes[j][2], f'f{len(self.jit_cache[j].rawbufs) + i}', var_vals[v])
+      for i,v in enumerate(cast(CompiledASTRunner, self.jit_cache[j].prg).vars):
+        setattr(self.updatable_nodes[j][2], f'f{len(self.jit_cache[j].rawbufs) + i}', var_vals[v])
 
     # Update launch dims in the c_node_params struct.
     for j in self.jc_idxs_with_updatable_launch_dims:
-      if isinstance(self.jit_cache[j], CompiledASTRunner):
-        self.set_kernel_node_launch_dims(self.updatable_nodes[j][1], *cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals))
+      self.set_kernel_node_launch_dims(self.updatable_nodes[j][1], *cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals))
 
     # Update graph nodes with the updated structs.
     for node, c_node_params, _ in self.updatable_nodes.values():
