@@ -20,15 +20,15 @@ def get_fuzz_rawbufs(lin):
 
   # Reallocate output buffer with additional area to detect out-of-bounds writes.
   RED_AREA_SIZE = 1024 if isinstance(device, Compiled) else 0
-  rawbufs[0] = type(rawbufs[0])(Device.DEFAULT, rawbufs[0].size + RED_AREA_SIZE, rawbufs[0].dtype)
+  rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True, size=rawbufs[0].size+RED_AREA_SIZE)
   with Context(DEBUG=0):
     for rawbuf in rawbufs[1:]:
       t = Tensor.uniform((rawbuf.size,), dtype=rawbuf.dtype)
       rawbuf.copyin(t.realize().lazydata.realized.as_buffer())
   return rawbufs
 
-def get_fuzz_rawbuf_like(rawbuf, zero=False, dev=Device.DEFAULT):
-  rawbuf = type(rawbuf)(dev, rawbuf.size, rawbuf.dtype)
+def get_fuzz_rawbuf_like(rawbuf, zero=False, size=None):
+  rawbuf = type(rawbuf)(Device.DEFAULT, rawbuf.size if size is None else size, rawbuf.dtype)
   if zero:
     with Context(DEBUG=0):
       mv = memoryview(bytearray(rawbuf.size * rawbuf.dtype.itemsize))
