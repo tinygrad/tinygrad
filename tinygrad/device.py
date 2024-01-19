@@ -144,24 +144,21 @@ class _BufferCopy(JITRunner):
                  0, dest.size*dest.dtype.itemsize, {}, et, 2, jit, device=dest.device)
 BufferCopy = _BufferCopy()
 
-event_num = 0
 class SyncEvent(JITRunner):
   def __init__(self, device):
-    global event_num
-    self.event_num = event_num
-    event_num += 1
-    self.device = device
-    self.event = Device[device].event_create()
+    self.event_num = GlobalCounters.kernel_count+1
+    self.device, self.d = device, Device[device]
+    self.event = self.d.event_create()
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
-    update_stats(colored(f"event {self.event_num}", "red"), 0, 0, {}, None, 1, device=self.device)
-    Device[self.device].event_record(self.event)
+    update_stats(colored(f"event {self.event_num}", "red"), 0, 0, {}, None, 0, jit=jit, device=self.device)
+    self.d.event_record(self.event)
 
 class BlockEvent(JITRunner):
-  def __init__(self, device, se):
-    self.device, self.se = device, se
+  def __init__(self, device, se:SyncEvent):
+    self.device, self.d, self.se = device, Device[device], se
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
-    update_stats(colored(f"block {self.se.event_num}", "RED"), 0, 0, {}, None, 1, device=self.device)
-    Device[self.device].block(self.se.event)
+    update_stats(colored(f"block {self.se.event_num} @ {self.se.device}", "RED"), 0, 0, {}, None, 0, jit=jit, device=self.device)
+    self.d.block(self.se.event)
 
 # TODO: size, dest, src are the same type. can we enforce this?
 sz_type = Union[ImageDType, int]
