@@ -1,7 +1,8 @@
 import ctypes
 from typing import Any, Optional, Tuple, Dict, List, cast
 import gpuctypes.cuda as cuda
-from tinygrad.device import Device
+import gpuctypes.hip as hip
+from tinygrad.device import Device, BufferCopy
 from tinygrad.helpers import init_c_var, encode_args_cuda_style, all_same, GraphException
 from tinygrad.device import CompiledASTRunner, update_stats, Buffer
 from tinygrad.runtime.ops_cuda import check, cu_time_execution
@@ -37,6 +38,12 @@ class CUDAGraph:
 
         if j in self.jc_idxs_with_updatable_launch_dims or j in self.jc_idxs_with_updatable_var_vals or j in self.jc_idxs_with_updatable_rawbufs:
           self.updatable_nodes[j] = (graph_node, c_node_params, c_input_params)
+      elif isinstance(ji.prg, BufferCopy):
+        assert all(x not in input_rawbuffers for x in ji.rawbufs), "BufferCopy can't be updated if the copy uses an input buffer"
+        c_deps = (type(graph_node)*1)(*(graph_node,)) if graph_node is not None else None
+        graph_node = init_c_var(hip.hipGraphNode_t(), lambda x: check(hip.hipGraphAddMemcpyNode1D(ctypes.byref(x),
+          self.graph, c_deps, ctypes.sizeof(c_deps)//8 if c_deps else 0,
+          ji.rawbufs[0]._buf, ji.rawbufs[1]._buf, ji.rawbufs[0].size * ji.rawbufs[0].dtype.itemsize, hip.hipMemcpyDeviceToDevice)))
 
     self.instance = self.graph_instantiate(self.graph)
 
