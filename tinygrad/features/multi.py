@@ -7,7 +7,7 @@ from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
 from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.shape.shapetracker import sint
 
-def all_reduce(op:ReduceOps, lbs):
+def all_reduce(op:ReduceOps, lbs:List[LazyBuffer]) -> List[LazyBuffer]:
   # TODO: replace this with ring reduce
   bop = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[op]
   return [functools.reduce(lambda x,y: x.e(bop, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
