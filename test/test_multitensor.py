@@ -73,15 +73,34 @@ class TestMultiTensor(unittest.TestCase):
     O = X + W
     np.testing.assert_allclose(O.numpy(), 2)
 
-  def _test_simple_reduce_axis(self, shard_x):
+  def _test_sum_axis(self, shard_x):
     X = Tensor.ones(256, 256).contiguous().realize()
     X.shard_((d0, d1), shard_x)
+    O = X.sum(axis=0)
+    np.testing.assert_allclose(O.numpy(), 256)
     O = X.sum(axis=1)
     np.testing.assert_allclose(O.numpy(), 256)
+    O = X.sum()
+    np.testing.assert_allclose(O.numpy(), 256*256)
 
-  def test_simple_reduce(self): return self._test_simple_reduce_axis(None)
-  def test_simple_reduce_0(self): return self._test_simple_reduce_axis(0)
-  def test_simple_reduce_1(self): return self._test_simple_reduce_axis(1)
+  def test_sum(self): return self._test_sum_axis(None)
+  def test_sum_0(self): return self._test_sum_axis(0)
+  def test_sum_1(self): return self._test_sum_axis(1)
+
+  def _test_max_axis(self, shard_x):
+    X = Tensor.arange(16).reshape(4, 4)
+    n = X.numpy()
+    X.shard_((d0, d1), shard_x)
+    O = X.max(axis=0)
+    np.testing.assert_allclose(O.numpy(), n.max(0))
+    O = X.max(axis=1)
+    np.testing.assert_allclose(O.numpy(), n.max(1))
+    O = X.max()
+    np.testing.assert_allclose(O.numpy(), n.max())
+
+  def test_max(self): return self._test_max_axis(None)
+  def test_max_0(self): return self._test_max_axis(0)
+  def test_max_1(self): return self._test_max_axis(1)
 
   def _test_matmul_shard_axis(self, shard_x, shard_w, device):
     X = Tensor.kaiming_uniform(N, N).realize()

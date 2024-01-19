@@ -7,9 +7,10 @@ from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
 from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.shape.shapetracker import ShapeTracker, sint
 
-def all_reduce(lbs):
+def all_reduce(op:ReduceOps, lbs):
   # TODO: replace this with ring reduce
-  return [functools.reduce(lambda x,y: x.e(BinaryOps.ADD, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
+  bop = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}[op]
+  return [functools.reduce(lambda x,y: x.e(bop, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
 
 def to_sharded(lbs:List[LazyBuffer], axis:int) -> List[LazyBuffer]:
   if DEBUG >= 3 and lbs[0].shape[axis] % len(lbs) != 0: print(f"multi axis uneven: {lbs[0].shape=} {axis=} {len(lbs)=}")
@@ -73,7 +74,7 @@ class MultiLazyBuffer:
   def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> MultiLazyBuffer:
     if self.axis is not None and new_shape[self.axis] == 1:
       # all-reduce on sharded axes
-      return MultiLazyBuffer(all_reduce([x.r(op, new_shape) for x in self.lbs]), None)
+      return MultiLazyBuffer(all_reduce(op, [x.r(op, new_shape) for x in self.lbs]), None)
     # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
     return MultiLazyBuffer([x.r(op, self._shape_to_single_shard(new_shape, x)) for x in self.lbs], self.axis)
 
