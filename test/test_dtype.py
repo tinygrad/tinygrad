@@ -9,6 +9,9 @@ from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
 from hypothesis import given, settings, strategies as strat
 
+settings.register_profile("my_profile", max_examples=200, deadline=None)
+settings.load_profile("my_profile")
+
 core_dtypes = list(DTYPES_DICT.values())
 floats = [dt for dt in core_dtypes if dtypes.is_float(dt)]
 def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
@@ -377,7 +380,6 @@ class TestAutoCastType(unittest.TestCase):
     dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
 
   @given(strat.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_int(d) and is_dtype_supported(d)]))
-  @settings(deadline=None)
   def test_int_to_float_unary_func(self, dtype):
     for func in [
       lambda t: t.exp(),
@@ -461,7 +463,6 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.float64)).cumsum(0).dtype == dtypes.float64
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
-  @settings(deadline=None)
   def test_matmul(self, dt1, dt2):
     assert (Tensor([0, 1], dtype=dt1) @ Tensor([0, 1], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
 
