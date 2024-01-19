@@ -19,7 +19,7 @@ def get_fuzz_rawbufs(lin):
   rawbufs = bufs_from_lin(lin)
 
   # Reallocate output buffer with additional area to detect out-of-bounds writes.
-  RED_AREA_SIZE = 1024
+  RED_AREA_SIZE = 1024 if isinstance(device, Compiled) else 0
   rawbufs[0] = type(rawbufs[0])(Device.DEFAULT, rawbufs[0].size + RED_AREA_SIZE, rawbufs[0].dtype)
   with Context(DEBUG=0):
     for rawbuf in rawbufs[1:]:
