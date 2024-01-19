@@ -40,10 +40,10 @@ class CUDAGraph:
           self.updatable_nodes[j] = (graph_node, c_node_params, c_input_params)
       elif isinstance(ji.prg, BufferCopy):
         if not all(x not in input_rawbuffers for x in ji.rawbufs): raise GraphException("BufferCopy inputs cannot be dynamic")
-        self.graph_add_memcpy_node(self.graph, c_deps, ji.rawbufs[0]._buf, ji.rawbufs[1]._buf,
-                                   ji.rawbufs[0].size * ji.rawbufs[0].dtype.itemsize, hip.hipMemcpyDeviceToDevice)
-      elif isinstance(ji.prg, SyncEvent): self.graph_add_event_record_node(self.graph, c_deps, ji.prg.event)
-      elif isinstance(ji.prg, BlockEvent): self.graph_add_event_wait_node(self.graph, c_deps, ji.prg.se.event)
+        graph_node = self.graph_add_memcpy_node(self.graph, c_deps, ji.rawbufs[0]._buf, ji.rawbufs[1]._buf,
+                                                ji.rawbufs[0].size * ji.rawbufs[0].dtype.itemsize, hip.hipMemcpyDeviceToDevice)
+      elif isinstance(ji.prg, SyncEvent): graph_node = self.graph_add_event_record_node(self.graph, c_deps, ji.prg.event)
+      elif isinstance(ji.prg, BlockEvent): graph_node = self.graph_add_event_wait_node(self.graph, c_deps, ji.prg.se.event)
 
     self.instance = self.graph_instantiate(self.graph)
 
