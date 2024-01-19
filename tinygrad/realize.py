@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional, cast
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters
-from tinygrad.device import Device, Buffer, BufferCopy, JITRunner, update_stats, InterpretedASTRunner
+from tinygrad.device import Device, Buffer, BufferCopy, JITRunner, update_stats, InterpretedASTRunner, SyncEvent, BlockEvent
 from tinygrad.graph import print_tree, realized_lazybuffer
 from tinygrad.helpers import colored, getenv, GRAPH
 from tinygrad.shape.symbolic import Variable
@@ -47,9 +47,10 @@ def run_schedule(schedule:List[ScheduleItem]):
     # should we wait?
     if prg == BufferCopy:
       if si.inputs[0] in synced_buffers:
-        sync_num, evt = synced_buffers[si.inputs[0]]
-        update_stats(colored(f"block {sync_num}", "RED"), 0, 0, {}, None, 1, device=si.out.device)
-        Device[si.out.device].block(evt)
+        BlockEvent(si.out.device, synced_buffers[si.inputs[0]]).exec([])
+        #sync_num, evt = synced_buffers[si.inputs[0]]
+        #update_stats(colored(f"block {sync_num}", "RED"), 0, 0, {}, None, 1, device=si.out.device)
+        #Device[si.out.device].block(evt)
       else:
         # if we don't have a sync point, we have to sync the whole device
         Device[si.inputs[0].device].synchronize()
@@ -61,8 +62,11 @@ def run_schedule(schedule:List[ScheduleItem]):
     if GRAPH: realized_lazybuffer(si.out, GlobalCounters.kernel_count)
 
     # should we sync?
-    if si.out.does_synchronize:
-      sync_num = len(synced_buffers)
-      synced_buffers[si.out] = (sync_num, Device[si.out.device].event())
-      update_stats(colored(f"event {sync_num}", "red"), 0, 0, {}, None, 1, device=si.out.device)
+    if si.out.does_synchronize and hasattr(Device[si.out.device], 'event_create'):
+      synced_buffers[si.out] = SyncEvent(si.out.device)
+      synced_buffers[si.out].exec([])
+
+      #sync_num = len(synced_buffers)
+      #synced_buffers[si.out] = (sync_num, Device[si.out.device].event())
+      #update_stats(colored(f"event {sync_num}", "red"), 0, 0, {}, None, 1, device=si.out.device)
 

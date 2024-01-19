@@ -109,12 +109,14 @@ class HIPDevice(Compiled):
     #for opaque in self.pending_events: check(hip.hipEventDestroy(opaque))
     self.pending_copyin.clear()
     #self.pending_events.clear()
-  def event(self):
+  def event_create(self):
     check(hip.hipSetDevice(self.device))
     evt = init_c_var(hip.hipEvent_t(), lambda x: check(hip.hipEventCreate(ctypes.byref(x))))
-    self.pending_events.append(evt)
-    check(hip.hipEventRecord(evt, None))
+    #self.pending_events.append(evt)
     return evt
+  def event_record(self, evt):
+    check(hip.hipSetDevice(self.device))
+    check(hip.hipEventRecord(evt, None))
   def block(self, evt):
     check(hip.hipSetDevice(self.device))
     check(hip.hipStreamWaitEvent(None, evt, 0))
