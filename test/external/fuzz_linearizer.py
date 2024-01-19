@@ -1,4 +1,4 @@
-import random, traceback
+import random, traceback, ctypes
 from typing import List, Tuple
 import numpy as np
 from collections import Counter
@@ -7,7 +7,7 @@ from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
 from tinygrad.tensor import Tensor
 from tinygrad.graph import print_tree
-from tinygrad.helpers import getenv, Context
+from tinygrad.helpers import getenv, from_mv, Context
 from tinygrad.device import Device, Compiled, Interpreted
 from tinygrad.codegen.linearizer import UOp
 
@@ -23,9 +23,18 @@ def get_fuzz_rawbufs(lin):
   rawbufs[0] = type(rawbufs[0])(Device.DEFAULT, rawbufs[0].size + RED_AREA_SIZE, rawbufs[0].dtype)
   with Context(DEBUG=0):
     for rawbuf in rawbufs[1:]:
-      t = Tensor.randn((rawbuf.size,), dtype=rawbuf.dtype)
+      t = Tensor.uniform((rawbuf.size,), dtype=rawbuf.dtype)
       rawbuf.copyin(t.realize().lazydata.realized.as_buffer())
   return rawbufs
+
+def get_fuzz_rawbuf_like(rawbuf, zero=False, dev=Device.DEFAULT):
+  rawbuf = type(rawbuf)(dev, rawbuf.size, rawbuf.dtype)
+  if zero:
+    with Context(DEBUG=0):
+      mv = memoryview(bytearray(rawbuf.size * rawbuf.dtype.itemsize))
+      ctypes.memset(from_mv(mv), 0, len(mv))
+      rawbuf.copyin(mv)
+  return rawbuf
 
 def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
   if rawbufs is None: rawbufs = bufs_from_lin(lin)
@@ -77,13 +86,13 @@ def fuzz_linearizer(lin: Linearizer):
 
     print(lin.colored_shape())
     # get a new output buffer
-    rawbufs[0] = type(rawbufs[0])(Device.DEFAULT, rawbufs[0].size, rawbufs[0].dtype)
+    rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True)
     var_vals = {v: random.randint(v.min, v.max) for v in lin.ast.vars()}
     if (msg := run_linearizer(lin, rawbufs, var_vals)) != "PASS":
       print(f"{lin.applied_opts=}")
       return msg
 
-    result = rawbufs[0].as_buffer()
+    result = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np)
     if ground_truth is None:
       ground_truth = result
     else:
