@@ -137,7 +137,7 @@ def Transpose(x: Tensor, perm=None): return x.permute(order=list(range(len(x.sha
 def ConstantOfShape(x, value:Tensor=None):
   if value is None: value=Tensor([0.0])
   shape = [int(x) for x in safe_numpy(x)]
-  return Tensor.ones(*shape, dtype=value.dtype) * (value if shape[0]!=0 else 1)
+  return Tensor.ones(*shape, dtype=value.dtype) * (value if shape and shape[0]!=0 else 1)
 
 # TODO: abstract out the broadcast logic in tensor
 def Expand(x: Tensor, shape):

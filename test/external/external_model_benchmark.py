@@ -11,20 +11,15 @@ from tinygrad.helpers import OSX, DEBUG, fetch
 from tinygrad import Tensor, Device
 
 MODELS = {
-  "resnet50": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
   "openpilot": "https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx",
+  "commavq": "https://huggingface.co/commaai/commavq-gpt2m/resolve/main/gpt2m.onnx",
+  "resnet50": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet50-caffe2-v1-9.onnx",
   "efficientnet": "https://github.com/onnx/models/raw/main/validated/vision/classification/efficientnet-lite4/model/efficientnet-lite4-11.onnx",
   "shufflenet": "https://github.com/onnx/models/raw/main/validated/vision/classification/shufflenet/model/shufflenet-9.onnx",
-  "commavq": "https://huggingface.co/commaai/commavq-gpt2m/resolve/main/gpt2m.onnx",
-
-  # broken in torch MPS
-  # "zfnet": "https://github.com/onnx/models/raw/main/archive/vision/classification/zfnet-512/model/zfnet512-9.onnx",
-  # TypeError: BatchNormalization() got an unexpected keyword argument 'is_test'
-  # "densenet": "https://github.com/onnx/models/raw/main/archive/vision/classification/densenet-121/model/densenet-3.onnx",
-  # AssertionError: only onnx version >= 10 supported for slice
-  # "bert": "https://github.com/onnx/models/raw/main/archive/text/machine_comprehension/bert-squad/model/bertsquad-8.onnx",
-  # really slow
-  # "resnet18": "https://github.com/onnx/models/raw/main/archive/vision/classification/resnet/model/resnet18-v2-7.onnx",
+  "densenet": "https://github.com/onnx/models/raw/main/Computer_Vision/densenet121_Opset18_timm/densenet121_Opset18.onnx",
+  "bert": "https://github.com/onnx/models/raw/main/Natural_Language_Processing/bert_Opset18_transformers/bert_Opset18.onnx",
+  "resnet18": "https://github.com/onnx/models/raw/main/validated/vision/classification/resnet/model/resnet18-v2-7.onnx",
+  # "gpt2": "https://github.com/onnx/models/raw/main/Generative_AI/gpt2_Opset18_transformers/gpt2_Opset18.onnx"
 }
 
 CSV = {}
@@ -125,7 +120,9 @@ def assert_allclose(tiny_out:dict, onnx_out:dict, rtol=1e-5, atol=1e-5):
   for k in tiny_out.keys():
     tiny_v, onnx_v = tiny_out[k], onnx_out[k]
     if tiny_v is None: assert tiny_v == onnx_v
-    else: np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
+    else:
+      assert (tiny_v := tiny_v.numpy()).dtype == onnx_v.dtype, f"tiny={tiny_v.dtype} onnx={onnx_v.dtype}"
+      np.testing.assert_allclose(tiny_v, onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tiny_out.keys()}")
 
 if __name__ == "__main__":
   devices = [Device.DEFAULT] if getenv("NOCLANG") else [Device.DEFAULT, "CLANG"]
