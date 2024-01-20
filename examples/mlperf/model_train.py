@@ -30,6 +30,15 @@ def train_unet3d():
   CHECKPOINT_EVERY = getenv("CHECKPOINT_EVERY", 10)
   JIT = getenv("JIT")
   CHECKPOINT_FN = getenv("CHECKPOINT_FN")
+  WANDB = getenv("WANDB")
+  PROJ_NAME = getenv("PROJ_NAME", "tinygrad_unet3d_mlperf")
+  SIZE = (64, 64, 64) if getenv("SMALL") else (128, 128, 128)
+
+  if WANDB:
+    try:
+      import wandb
+    except ImportError:
+      raise "Need to install wandb to use it"
 
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}"
@@ -71,32 +80,40 @@ def train_unet3d():
     score = dice_score(Tensor(y_hat), Tensor(y)).mean().item()
     return score
 
+  if WANDB: wandb.init(project=PROJ_NAME)
+
   for epoch in range(1, NUM_EPOCHS + 1):
     if epoch <= LR_WARMUP_EPOCHS and LR_WARMUP_EPOCHS > 0:
       _lr_warm_up(optim, LR_WARMUP_INIT_LR, LR, epoch, LR_WARMUP_EPOCHS)
 
-    for x, y in (t:=tqdm(iterate(val=False, shuffle=True, bs=BS), desc=f"[Training][{epoch}/{NUM_EPOCHS}]", total=len(get_train_files()) // BS)):
+    for x, y in (t:=tqdm(iterate(val=False, shuffle=True, bs=BS, size=SIZE), desc=f"[Training][Epoch: {epoch}/{NUM_EPOCHS}]", total=len(get_train_files()) // BS)):
       x, y = Tensor(x), Tensor(y, dtype=dtypes.uint8)
       if len(GPUS) > 1: x, y = x.shard(GPUS, axis=0), y.shard(GPUS, axis=0)
       loss = _train_step(model_run, x, y)
-      t.set_description(f"[Training][{epoch}/{NUM_EPOCHS}][Loss: {loss.item():.3f}]")
+      t.set_description(f"[Training][Epoch: {epoch}/{NUM_EPOCHS}][Loss: {loss.item():.3f}]")
+      if WANDB: wandb.log({"train_loss": loss.item()})
 
     if epoch % CHECKPOINT_EVERY == 0:
       state_dict = get_state_dict(model)
-      safe_save(state_dict, f"unet3d_mlperf_epoch{epoch}.safetensors")
+      safe_save(state_dict, f"unet3d_mlperf_epoch_{epoch}.safetensors")
       print(f"Saved checkpoint at epoch {epoch}")
 
     if epoch % EVAL_AT == 0:
       with Tensor.train(val=False):
         scores = 0
 
-        for i, (x, y) in enumerate((t:=tqdm(iterate(), desc="[Validation]", total=len(get_val_files()))), start=1):
-          scores += _eval_step(model_run, x, y)
+        for i, (x, y) in enumerate((t:=tqdm(iterate(), desc=f"[Validation][Epoch: {epoch}/{NUM_EPOCHS}]", total=len(get_val_files()))), start=1):
+          scores += _eval_step(model , x, y) # NOTE: passing in model instead since it is jitted
+          t.set_description(f"[Validation][Epoch: {epoch}/{NUM_EPOCHS}][Mean DICE: {scores / i:.3f}]")
 
         scores /= i
 
+        if WANDB: wandb.log({"val_mean_dice": scores})
+
         if scores >= TARGET_METRIC:
           print(f"Target metric ({TARGET_METRIC:.3f}) has been reached with validation metric of {scores:.3f}")
+          print("Training complete")
+          break
         else:
           print(f"Target metric ({TARGET_METRIC:.3f}) has not been reached with validation metric of {scores:.3f}")
 

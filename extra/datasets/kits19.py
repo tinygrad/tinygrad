@@ -69,8 +69,7 @@ def preprocess(file_path, roi_shape):
   image, label = pad_to_min_shape(image, label, roi_shape=roi_shape)
   return image, label
 
-def iterate(val=True, shuffle=False, bs=1):
-  size = (64, 64, 64) if getenv("SMALL") else (128, 128, 128)
+def iterate(val=True, shuffle=False, bs=1, size=(128, 128, 128)):
   if val: assert bs == 1, "bs has to be 1"
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
