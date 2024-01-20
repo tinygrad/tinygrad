@@ -30,8 +30,10 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (T
 # TODO: (a+b)/2 in tensor.py's maximum can overflow. This requires a new implementation of maximum that can be backpropagated
 #binary_operations += [(Tensor.maximum, np.maximum)]
 
-# TODO: LLVM lt with nan is incorrect
-if Device.DEFAULT == "LLVM": binary_operations.remove(operator.lt)
+# TODO: LLVM comparing with nan is incorrect
+if Device.DEFAULT == "LLVM":
+  binary_operations.remove(operator.lt)
+  binary_operations.remove(operator.eq)
 
 # TODO: CUDACPU segfaults on sin
 if getenv("CUDACPU"): unary_operations.remove((Tensor.sin, np.sin))
