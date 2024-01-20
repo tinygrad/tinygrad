@@ -102,7 +102,8 @@ def _internal_buffer_copy(dest:Buffer, src:Buffer):
     # NOTE: we have to block here so the data isn't copied too early. this is probably due to buffer reuse
     #if hasattr(dest.d, "block") and hasattr(src.d, "event"): dest.d.block(src.d.event())
     #else: src.d.synchronize()
-    dest.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
+
+    dest.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize, src.d.device)
 
     # NOTE: this is wrong because src can overwrite it
     #dest.d.block(src.d.event())

@@ -40,6 +40,8 @@ class HIPProgram:
     check(hip.hipSetDevice(self.device))
     return hip_time_execution(lambda: check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, encode_args_cuda_style(args, vals, hip.hipDeviceptr_t, marks=(1,2,3))[0])), enable=wait)  # noqa: E501
 
+enabled_peer = set()
+
 T = TypeVar("T")
 CHUNK_SIZE, PAGE_SIZE = 256*1024*1024, 0x1000
 class HIPAllocator(LRUAllocator):
@@ -88,8 +90,13 @@ class HIPAllocator(LRUAllocator):
     self.device.synchronize()
     check(hip.hipSetDevice(self.device.device))
     check(hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
-  def transfer(self, dest:T, src:T, sz:int):
+  def transfer(self, dest:T, src:T, sz:int, peer_device:int):
+    global enabled_peer
     check(hip.hipSetDevice(self.device.device))
+    if (self.device.device, peer_device) not in enabled_peer:
+      print("enable peer", self.device.device, peer_device)
+      check(hip.hipDeviceEnablePeerAccess(peer_device, 0))
+      enabled_peer.add((self.device.device, peer_device))
     check(hip.hipMemcpyAsync(dest, src, sz, hip.hipMemcpyDeviceToDevice, None))
 
 class HIPDevice(Compiled):
