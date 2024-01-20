@@ -139,7 +139,7 @@ class BufferCopy(JITRunner):
     st = time.perf_counter()
     _internal_buffer_copy(dest, src)
     et = None
-    if wait or DEBUG >= 2:
+    if (wait or DEBUG >= 2) and not getenv("NO_TIMING"):
       dest.d.synchronize()
       et = time.perf_counter() - st
     update_stats(colored(f"copy {dest.size*dest.dtype.itemsize:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", "yellow"),
@@ -151,16 +151,16 @@ class SyncEvent(JITRunner):
     self.dname, self.device = device, Device[device]
     self.event = self.device.event_create()
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
-    update_stats(colored(f"event {self.event_num}", "red"), 0, 0, {}, None, 0, jit=jit, device=self.dname)
     self.device.event_record(self.event)
+    update_stats(colored(f"event {self.event_num}", "red"), 0, 0, {}, None, 0, jit=jit, device=self.dname)
 
 class BlockEvent(JITRunner):
   def __init__(self, device, se:SyncEvent):
     self.se = se
     self.dname, self.device = device, Device[device]
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
-    update_stats(colored(f"block {self.se.event_num} @ {self.se.dname}", "RED"), 0, 0, {}, None, 0, jit=jit, device=self.dname)
     self.device.block(self.se.event)
+    update_stats(colored(f"block {self.se.event_num} @ {self.se.dname}", "RED"), 0, 0, {}, None, 0, jit=jit, device=self.dname)
 
 # TODO: size, dest, src are the same type. can we enforce this?
 sz_type = Union[ImageDType, int]
