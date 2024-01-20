@@ -1,6 +1,6 @@
 import unittest, functools
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit
-from tinygrad.device import _BufferCopy
+from tinygrad.device import BufferCopy
 from tinygrad.ops import LoadOps, ReduceOps
 from tinygrad.helpers import CI
 from tinygrad.nn.state import get_parameters
@@ -276,7 +276,7 @@ class TestMultiTensor(unittest.TestCase):
     assert isinstance(jf.jit_cache[1].prg, graph_d0)
     assert isinstance(jf.jit_cache[2].prg, graph_d1)
     assert isinstance(jf.jit_cache[3].prg, graph_d1)
-    assert isinstance(jf.jit_cache[4].prg, _BufferCopy)
+    assert isinstance(jf.jit_cache[4].prg, BufferCopy)
     assert isinstance(jf.jit_cache[5].prg, graph_d1)
 
   def test_uneven_shard(self):

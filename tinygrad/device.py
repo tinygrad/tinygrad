@@ -60,7 +60,7 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:int, var_vals: Optiona
   if et is not None: GlobalCounters.time_sum_s += et
   if DEBUG >= 2:
     ptm = (colored(f"{et*1e3:9.2f}ms", "yellow") if et > 0.01 else f"{et*1e6:9.2f}us") if et is not None else ""
-    print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', ('magenta' if num_kernels == 1 else 'CYAN') if jit else ('green' if first_run else None))} {name+' '*(37-ansilen(name))} arg {buf_count:3d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
+    print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', ('magenta' if num_kernels == 1 else 'CYAN') if jit else ('green' if first_run else None))} {name+' '*(38-ansilen(name))} arg {buf_count:3d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
           (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))  # noqa: E501
 
 # **************** Buffer / Allocator ****************
@@ -71,14 +71,16 @@ class Buffer:
     self.device, self.size, self.dtype, self.d = device, size, dtype, Device[device]
     self.allocator = self.d.allocator
     # TODO: image hack shouldn't be here. where should it be?
-    self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else size * dtype.itemsize)
+    self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else self.nbytes)
     # TODO: mem_used for all devices
-    if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.size * self.dtype.itemsize
+    if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
+  @property
+  def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
     if not hasattr(self, '_buf'): return # happens when __init__ has raised exception
-    if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.size * self.dtype.itemsize
+    if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
     if isinstance(self.dtype, ImageDType): self.allocator.free(self._buf, self.dtype)
-    else: self.allocator.free(self._buf, self.size * self.dtype.itemsize)
+    else: self.allocator.free(self._buf, self.nbytes)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}>"
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
@@ -87,17 +89,40 @@ class Buffer:
     return self.copyout(memoryview(bytearray(self.size*self.dtype.itemsize)))
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
-    assert len(mv) == self.size*self.dtype.itemsize, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
+    assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
     self.allocator.copyin(self._buf, mv)
     return self
   def copyout(self, mv:memoryview) -> memoryview:
     mv = flat_mv(mv)
-    assert len(mv) == self.size*self.dtype.itemsize, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
+    assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
     self.allocator.copyout(mv, self._buf)
     return mv
 
-def _internal_buffer_copy(dest:Buffer, src:Buffer):
-  if hasattr(src.allocator, 'transfer') and type(dest.allocator) is type(src.allocator):  # noqa: E721
+class BufferCopy(JITRunner):
+  def copy(self, dest, src): dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
+    dest, src = rawbufs
+    assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
+    st = time.perf_counter()
+    self.copy(dest, src)
+    et = None
+    if wait or DEBUG >= 2:
+      dest.d.synchronize()
+      et = time.perf_counter() - st
+    update_stats(colored(f"{type(self).__name__[6:].lower()} {dest.size*dest.dtype.itemsize:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}",
+                         "yellow"), 0, dest.size*dest.dtype.itemsize, {}, et, 2, jit, device=dest.device)
+
+class BufferRead(BufferCopy):
+  def copy(self, dest, src):
+    if hasattr(dest.allocator, 'copy_from_fd') and src.device.startswith("DISK") and src.nbytes >= 4096 and src._buf.ud.fd is not None:
+      dest.allocator.copy_from_fd(dest._buf, src._buf.ud.fd, src._buf.offset, src.nbytes)
+    elif hasattr(dest.allocator, 'as_buffer'):
+      # fast(ish) path, uses readinto in diskbuffers
+      src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
+    else: super().copy(dest, src)
+
+class BufferXfer(BufferCopy):
+  def copy(self, dest, src):
     # fast path, used on HIP between GPUs
     # NOTE: we have to block here so the data isn't copied too early. this is probably due to buffer reuse
     if hasattr(src.d, "block") and hasattr(dest.d, "event"): src.d.block(dest.d.event())
@@ -106,37 +131,6 @@ def _internal_buffer_copy(dest:Buffer, src:Buffer):
     # NOTE: we have to block here so the data is ready on dest when dest needs it
     if hasattr(dest.d, "block") and hasattr(src.d, "event"): dest.d.block(src.d.event())
     else: src.d.synchronize()
-    return
-  if getenv("FROM_BUFFER") and hasattr(dest.allocator, 'from_buffer') and hasattr(dest.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
-    # fast path, used on Metal in OS X Sonoma
-    # NOTE: this is *only* faster if the pages from disk are already loaded into memory
-    fb = dest.allocator.from_buffer(src.allocator.as_buffer(src._buf))
-    if fb:
-      dest.allocator.transfer(dest._buf, fb, dest.size*dest.dtype.itemsize)
-      return
-  if hasattr(dest.allocator, 'copy_from_fd') and src.device.startswith("DISK") and src.size*src.dtype.itemsize >= 4096 and src._buf.ud.fd is not None:
-    dest.allocator.copy_from_fd(dest._buf, src._buf.ud.fd, src._buf.offset, src.size*src.dtype.itemsize)
-  elif hasattr(dest.allocator, 'as_buffer'):
-    # fast(ish) path, uses readinto in diskbuffers
-    src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
-  else:
-    # may allocate a CPU buffer depending on allow_zero_copy
-    dest.copyin(src.as_buffer(allow_zero_copy=True))
-
-class _BufferCopy(JITRunner):
-  # TODO: make wait work
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
-    dest, src = rawbufs
-    assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
-    st = time.perf_counter()
-    _internal_buffer_copy(dest, src)
-    et = None
-    if wait or DEBUG >= 2:
-      dest.d.synchronize()
-      et = time.perf_counter() - st
-    update_stats(colored(f"copy {dest.size*dest.dtype.itemsize:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", "yellow"),
-                 0, dest.size*dest.dtype.itemsize, {}, et, 2, jit, device=dest.device)
-BufferCopy = _BufferCopy()
 
 # TODO: size, dest, src are the same type. can we enforce this?
 sz_type = Union[ImageDType, int]
