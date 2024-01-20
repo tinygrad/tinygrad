@@ -7,6 +7,7 @@ from tinygrad.helpers import from_mv, round_up, to_mv
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
+if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401
 
 # The default HIP stream is used for everything.
 MOCKHIP = getenv("MOCKHIP") # for CI. don't run kernels, only check if they compile
