@@ -24,7 +24,7 @@ def train_unet3d():
   BS = getenv("BS", 2)
   LR = getenv("LR", 1.0)
   MOMENTUM = getenv("MOMENTUM", 0.9)
-  LR_WARMUP_EPOCHS = getenv("LR_WARMUP_EPOCHS", 200)
+  LR_WARMUP_EPOCHS = getenv("LR_WARMUP_EPOCHS")
   LR_WARMUP_INIT_LR = getenv("LR_WARMUP_INIT_LR", 0.0001)
   EVAL_AT = getenv("EVAL_AT", 20)
   CHECKPOINT_EVERY = getenv("CHECKPOINT_EVERY", 10)
