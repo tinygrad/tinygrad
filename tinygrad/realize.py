@@ -18,7 +18,8 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
     f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
   if si.ast.op is LoadOps.EMPTY: return None
   if si.ast.op is LoadOps.COPY:
-    if hasattr(Device[si.out.device].allocator, 'transfer') and type(Device[si.out.device]) is type(Device[si.inputs[0].device]): return BufferXfer()
+    if hasattr(Device[si.out.device].allocator, 'transfer') and type(Device[si.out.device]) is type(Device[si.inputs[0].device]):
+      return BufferXfer(Device[si.inputs[0].device])
     if si.inputs[0].device.startswith("DISK"): return BufferRead()
     return BufferCopy()
   if si.ast.op is LoadOps.CUSTOM: return CustomOp(si.ast.arg)

@@ -126,6 +126,22 @@ class TestMultiTensor(unittest.TestCase):
   def test_double_matmul_shard_W_0(self): return self._test_double_matmul_shard_axis(None, 0, devices_2)
   def test_double_matmul_shard_W_1(self): return self._test_double_matmul_shard_axis(None, 1, devices_2)
 
+  def test_double_matmul_shard_W_1_jit(self):
+    X = Tensor.kaiming_uniform(N, N).realize()
+    W1 = Tensor.kaiming_uniform(N, N).realize()
+    W2 = Tensor.kaiming_uniform(N, N).realize()
+    correct_value = (X.numpy() @ W1.numpy()) @ W2.numpy()
+    Xs = X.shard(devices_2, None).realize()
+    W1s = W1.shard(devices_2, 1).realize()
+    W2s = W2.shard(devices_2, 1).realize()
+
+    @TinyJit
+    def fxn(Xs, W1s, W2s): return ((Xs@W1s)@W2s).realize()
+    for _ in range(3):
+      GlobalCounters.reset()
+      O = fxn(Xs, W1s, W2s)
+      np.testing.assert_allclose(correct_value, O.numpy(), atol=1e-5)
+
   def test_conv_data_shard(self):
     conv = nn.Conv2d(3, 16, 3, bias=False)
     for p in get_parameters(conv): p.shard_((d0, d1))

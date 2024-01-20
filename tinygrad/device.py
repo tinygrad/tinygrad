@@ -122,15 +122,22 @@ class BufferRead(BufferCopy):
     else: super().copy(dest, src)
 
 class BufferXfer(BufferCopy):
+  def __init__(self, src_device):
+    self.src_device = src_device
+    self.evt = src_device.event_create() if hasattr(src_device, "event_create") else None
+    super().__init__()
+  def __del__(self):
+    if self.evt is not None: self.src_device.event_destroy(self.evt)
   def copy(self, dest, src):
     # fast path, used on HIP between GPUs
     # NOTE: we have to block here so the data isn't copied too early. this is probably due to buffer reuse
-    if hasattr(src.d, "block") and hasattr(dest.d, "event"): src.d.block(dest.d.event())
-    else: dest.d.synchronize()
-    src.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
+    if self.evt is None: dest.d.synchronize()
+    src.allocator.transfer(dest._buf, src._buf, dest.nbytes)
     # NOTE: we have to block here so the data is ready on dest when dest needs it
-    if hasattr(dest.d, "block") and hasattr(src.d, "event"): dest.d.block(src.d.event())
-    else: src.d.synchronize()
+    if self.evt is None: src.d.synchronize()
+    else:
+      src.d.event_record(self.evt)
+      dest.d.block(self.evt)
 
 # TODO: size, dest, src are the same type. can we enforce this?
 sz_type = Union[ImageDType, int]
