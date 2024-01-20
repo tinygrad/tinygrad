@@ -116,6 +116,8 @@ class LazyBuffer:
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, unbound_new_shape, (self,))
 
   def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+    if 0 in self.shape and 0 not in new_shape:
+      return LazyBuffer.loadop(LoadOps.CONST, new_shape, self.dtype, self.device, {ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[op])
     assert len(self.shape)==len(new_shape) and all(ns in (1,s) for s,ns in zip(self.shape,new_shape)), f"not a contraction {self.shape=} {new_shape=}"
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not all_int(self.shape) or (0 in self.shape) or prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):

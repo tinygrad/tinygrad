@@ -86,10 +86,6 @@ class TestMultiTensor(unittest.TestCase):
     f = {ReduceOps.SUM: lambda x: x.sum(reduce_axis), ReduceOps.MAX: lambda x: x.max(reduce_axis)}[rop]
     fX = f(X)
     fn = f(n)
-
-    # TODO: fix reduce with uneven shards
-    if devices == devices_3 and shard_axis in (0, 1): return
-
     np.testing.assert_allclose(fX.numpy(), fn, rtol=1e-6, atol=1e-6)
 
   def _test_matmul_shard_axis(self, shard_x, shard_w, device):
