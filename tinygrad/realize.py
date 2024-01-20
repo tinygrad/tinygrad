@@ -26,6 +26,15 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 def run_schedule(schedule:List[ScheduleItem]):
   synced_buffers = {}
+  device_start = {}
+  # see if we copy from any unsynced buffers
+  for si in schedule:
+    if si.out.does_synchronize:
+      synced_buffers[si.out] = None
+    if si.ast.op is LoadOps.COPY and si.inputs[0] not in synced_buffers:
+      if si.inputs[0].device not in device_start and hasattr(Device[si.inputs[0].device], 'event_create'):
+        device_start[si.inputs[0].device] = SyncEvent(si.inputs[0].device)
+
   while len(schedule):
     si = schedule.pop(0)
     if logops and si.ast.op not in LoadOps: logops.write(str(si.ast)+"\n")
@@ -48,15 +57,16 @@ def run_schedule(schedule:List[ScheduleItem]):
 
     # should we wait?
     if isinstance(prg, BufferCopy):
-      if si.inputs[0] in synced_buffers:
-        BlockEvent(si.out.device, synced_buffers[si.inputs[0]]).exec([])
-        #sync_num, evt = synced_buffers[si.inputs[0]]
-        #update_stats(colored(f"block {sync_num}", "RED"), 0, 0, {}, None, 1, device=si.out.device)
-        #Device[si.out.device].block(evt)
+      if si.inputs[0] in synced_buffers and (evt:=synced_buffers[si.inputs[0]]) is not None and hasattr(Device[si.out.device], 'block'):
+        BlockEvent(si.out.device, evt).exec([])
       else:
-        # if we don't have a sync point, we have to sync the whole device
-        update_stats(colored("synchronize", "RED"), 0, 0, {}, None, 0, device=si.inputs[0].device)
-        Device[si.inputs[0].device].synchronize()
+        if si.inputs[0].device in device_start and hasattr(Device[si.out.device], 'block'):
+          # use the start sync point
+          BlockEvent(si.out.device, device_start[si.inputs[0].device]).exec([])
+        else:
+          # if we don't have a sync point, we have to sync the whole device
+          update_stats(colored("synchronize", "RED"), 0, 0, {}, None, 0, device=si.inputs[0].device)
+          Device[si.inputs[0].device].synchronize()
 
     # run the function (put it in JIT)
     assert all(x.realized is not None for x in si.inputs), f"can't run, some inputs aren't realized {[x for x in si.inputs if x.realized is None]}"
