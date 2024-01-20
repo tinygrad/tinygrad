@@ -55,7 +55,7 @@ def run_schedule(schedule:List[ScheduleItem]):
         #Device[si.out.device].block(evt)
       else:
         # if we don't have a sync point, we have to sync the whole device
-        update_stats(colored("synchronize", "RED"), 0, 0, {}, None, 0, device=si.out.device)
+        update_stats(colored("synchronize", "RED"), 0, 0, {}, None, 0, device=si.inputs[0].device)
         Device[si.inputs[0].device].synchronize()
 
     # run the function (put it in JIT)
