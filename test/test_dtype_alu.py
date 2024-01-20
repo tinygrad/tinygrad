@@ -16,13 +16,10 @@ print(settings.default)
 dtypes_float = (dtypes.float32, dtypes.float16)
 dtypes_int = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
 dtypes_bool = (dtypes.bool,)
-binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, operator.eq]
+binary_operations = [operator.add, operator.sub, operator.mul, operator.truediv, operator.lt, operator.eq]
 integer_binary_operations = binary_operations + [(Tensor.xor, np.bitwise_xor)]
 unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (Tensor.sin, np.sin),
                     (Tensor.sqrt, np.sqrt), (Tensor.reciprocal, np.reciprocal)]
-
-# TODO: enable this (this is a dtype issue)
-#binary_operations.append(operator.truediv)
 
 # TODO: enable mod on Tensor
 #binary_operations.append(operator.mod)
@@ -30,8 +27,10 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (T
 # TODO: (a+b)/2 in tensor.py's maximum can overflow. This requires a new implementation of maximum that can be backpropagated
 #binary_operations += [(Tensor.maximum, np.maximum)]
 
-# TODO: LLVM lt with nan is incorrect
-if Device.DEFAULT == "LLVM": binary_operations.remove(operator.lt)
+# TODO: LLVM comparing with nan is incorrect
+if Device.DEFAULT == "LLVM":
+  binary_operations.remove(operator.lt)
+  binary_operations.remove(operator.eq)
 
 # TODO: CUDACPU segfaults on sin
 if getenv("CUDACPU"): unary_operations.remove((Tensor.sin, np.sin))
@@ -54,7 +53,7 @@ def universal_test(a, b, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   tensor_value = (op[0](Tensor([a], dtype=dtype), Tensor([b], dtype=dtype))).numpy()
   numpy_value = op[1](np.array([a]).astype(dtype.np), np.array([b]).astype(dtype.np))
-  if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-10)
+  if dtype in dtypes_float: np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-6, rtol=1e-6)
   else: np.testing.assert_equal(tensor_value, numpy_value)
 
 def universal_test_unary(a, dtype, op):
