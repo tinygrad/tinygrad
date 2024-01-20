@@ -77,10 +77,10 @@ class TestMultiTensor(unittest.TestCase):
     O = X + W
     np.testing.assert_allclose(O.numpy(), 2)
 
-  @given(strat.sampled_from((devices_2, devices_3)), strat.sampled_from((ReduceOps.SUM, ReduceOps.MAX)),
+  @given(strat.sampled_from((4, 5)), strat.sampled_from((devices_2, devices_3)), strat.sampled_from((ReduceOps.SUM, ReduceOps.MAX)),
          strat.sampled_from((None, 0, 1)), strat.sampled_from((None, 0, 1)), strat.sampled_from((1, 0, -1)))
-  def test_simple_reduce(self, devices, rop, shard_axis, reduce_axis, sign):
-    X = Tensor.rand(16).reshape(4, 4).mul(sign)
+  def test_simple_reduce(self, N, devices, rop, shard_axis, reduce_axis, sign):
+    X = Tensor.rand(N*N).reshape(N, N).mul(sign)
     n = X.numpy()
     X.shard_(devices, shard_axis)
     f = {ReduceOps.SUM: lambda x: x.sum(reduce_axis), ReduceOps.MAX: lambda x: x.max(reduce_axis)}[rop]
