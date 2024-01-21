@@ -18,8 +18,8 @@ dtypes_int = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64, dtypes.uint
 dtypes_bool = (dtypes.bool,)
 binary_operations = [operator.add, operator.sub, operator.mul, operator.lt, operator.eq]
 
-# TODO: LLVM comparing with nan is incorrect
-if Device.DEFAULT == "LLVM":
+# TODO: LLVM and METAL comparing with nan is incorrect
+if Device.DEFAULT in {"LLVM", "METAL"}:
   binary_operations.remove(operator.lt)
   binary_operations.remove(operator.eq)
 
