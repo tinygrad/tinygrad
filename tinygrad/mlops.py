@@ -121,7 +121,7 @@ class Mul(Function):
 class Div(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     self.x, self.y = x, y
-    if dtypes.is_int(x.dtype) and dtypes.is_int(y.dtype): self.x, self.y = ((x := x.cast(dtypes.float32)), (y := y.cast(dtypes.float32))) # float result for true division of two ints
+    if dtypes.is_int(x.dtype) and dtypes.is_int(y.dtype): self.x, self.y = ((x := x.cast(dtypes.float32)), (y := y.cast(dtypes.float32)))
     return x.e(BinaryOps.DIV, y)
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
