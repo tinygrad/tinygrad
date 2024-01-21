@@ -312,7 +312,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(), ()], lambda x,y: x/y)
     helper_test_op(None, lambda x,y: x/y, Tensor.div, forward_only=True, vals=np.array([[5],[1]], dtype=np.int32))
   def test_div_int(self):
-    helper_test_op(None, lambda x: (x/2).to(torch.int), lambda x: x/2, forward_only=True, vals=np.array([[3]], dtype=np.int32))
+    helper_test_op(None, lambda x: x/2, lambda x: x/2, forward_only=True, vals=np.array([[3]], dtype=np.int32))
   def test_div_const(self):
     helper_test_op([(45,65)], lambda x: x/255)
     helper_test_op([(45,65)], lambda x: x/1)

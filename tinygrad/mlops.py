@@ -1,7 +1,7 @@
 import math
 from typing import Tuple, Optional
 from tinygrad.helpers import argsort
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, dtypes
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps, ReduceOps
 from tinygrad.tensor import Function
 from tinygrad.lazy import LazyBuffer
@@ -121,6 +121,7 @@ class Mul(Function):
 class Div(Function):
   def forward(self, x:LazyBuffer, y:LazyBuffer) -> LazyBuffer:
     self.x, self.y = x, y
+    if dtypes.is_int(x.dtype) and dtypes.is_int(y.dtype): self.x, self.y = ((x := x.cast(dtypes.float32)), (y := y.cast(dtypes.float32))) # float result for true division of two ints
     return x.e(BinaryOps.DIV, y)
 
   def backward(self, grad_output:LazyBuffer) -> Tuple[Optional[LazyBuffer], Optional[LazyBuffer]]:
