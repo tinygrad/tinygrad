@@ -14,7 +14,6 @@ settings.load_profile("my_profile")
 
 core_dtypes = list(DTYPES_DICT.values())
 floats = [dt for dt in core_dtypes if dtypes.is_float(dt)]
-non_floats = [dt for dt in core_dtypes if not dtypes.is_float(dt)]
 def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   if dtype == dtypes.bfloat16: return False # numpy doesn't support bf16, tested separately in TestBFloat16DType
   if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
