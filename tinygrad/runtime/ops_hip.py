@@ -53,7 +53,10 @@ class HIPAllocator(LRUAllocator):
   def _alloc(self, size:int):
     check(hip.hipSetDevice(self.device.device))
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
-  def _free(self, opaque:T): check(hip.hipFree(opaque))
+  def _free(self, opaque:T):
+    #print("free")
+    check(hip.hipFree(opaque))
+    pass
   def _hostalloc(self, size:int): return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 0)))
   def copy_from_fd(self, dest, fd, offset, size):
     check(hip.hipSetDevice(self.device.device))
@@ -110,10 +113,11 @@ class HIPDevice(Compiled):
     for opaque in self.pending_events: check(hip.hipEventDestroy(opaque))
     self.pending_copyin.clear()
     self.pending_events.clear()
-  def event(self):
+  def event_create(self):
     check(hip.hipSetDevice(self.device))
-    evt = init_c_var(hip.hipEvent_t(), lambda x: check(hip.hipEventCreate(ctypes.byref(x))))
-    self.pending_events.append(evt)
+    return init_c_var(hip.hipEvent_t(), lambda x: check(hip.hipEventCreate(ctypes.byref(x))))
+  def event_record(self, evt):
+    check(hip.hipSetDevice(self.device))
     check(hip.hipEventRecord(evt, None))
     return evt
   def block(self, evt):

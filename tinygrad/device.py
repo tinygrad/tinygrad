@@ -110,7 +110,7 @@ class BufferCopy(JITRunner):
       dest.d.synchronize()
       et = time.perf_counter() - st
     update_stats(colored(f"{type(self).__name__[6:].lower()} {dest.size*dest.dtype.itemsize:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}",
-                         "yellow"), 0, dest.size*dest.dtype.itemsize, {}, et, 2, jit, device=dest.device)
+                         "yellow"), 0, dest.size*dest.dtype.itemsize, {}, et, 2, jit, device=src.device)
 
 class BufferRead(BufferCopy):
   def copy(self, dest, src):
@@ -125,12 +125,16 @@ class BufferXfer(BufferCopy):
   def copy(self, dest, src):
     # fast path, used on HIP between GPUs
     # NOTE: we have to block here so the data isn't copied too early. this is probably due to buffer reuse
-    if hasattr(src.d, "block") and hasattr(dest.d, "event"): src.d.block(dest.d.event())
-    else: dest.d.synchronize()
+    #if hasattr(src.d, "block") and hasattr(dest.d, "event"): src.d.block(dest.d.event())
+    #else: dest.d.synchronize()
+    #src.d.synchronize()
+
+    #dest.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
     src.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
+
     # NOTE: we have to block here so the data is ready on dest when dest needs it
-    if hasattr(dest.d, "block") and hasattr(src.d, "event"): dest.d.block(src.d.event())
-    else: src.d.synchronize()
+    #if hasattr(dest.d, "block") and hasattr(src.d, "event"): dest.d.block(src.d.event())
+    #else: src.d.synchronize()
 
 # TODO: size, dest, src are the same type. can we enforce this?
 sz_type = Union[ImageDType, int]
