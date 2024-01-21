@@ -54,6 +54,10 @@ def _test_cast(a:Tensor, target_dtype:DType):
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(target_dtype.np).tolist())
 
+def where_alternate_input_other(input_, other, data_type):
+  assert (Tensor([True, False]).where(input_, other)).dtype == data_type
+  assert (Tensor([True, False]).where(other, input_)).dtype == data_type
+
 class TestDType(unittest.TestCase):
   DTYPE: Any = None
   DATA: Any = None
@@ -471,40 +475,29 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([True, False]).where(Tensor(2, dtype=dt1), Tensor(3, dtype=dt2))).dtype == least_upper_dtype(dt1, dt2)
 
   @given(strat.sampled_from(core_dtypes))
-  def test_where_one_const(self, dt):
+  def test_where_scalar(self, dt):
     t = Tensor(2, dtype=dt)
     if dtypes.is_float(dt):
-      assert (Tensor([True, False]).where(t, 3.2)).dtype == dt
-      assert (Tensor([True, False]).where(3.2, t)).dtype == dt
-      assert (Tensor([True, False]).where(t, 3)).dtype == dt
-      assert (Tensor([True, False]).where(3, t)).dtype == dt
-      assert (Tensor([True, False]).where(t, True)).dtype == dt
-      assert (Tensor([True, False]).where(True, t)).dtype == dt
+      where_alternate_input_other(t, 3.2, dt)
+      where_alternate_input_other(t, 3, dt)
+      where_alternate_input_other(t, True, dt)
     elif dtypes.is_int(dt):
-      assert (Tensor([True, False]).where(t, 3.2)).dtype == dtypes.default_float
-      assert (Tensor([True, False]).where(3.2, t)).dtype == dtypes.default_float
-      assert (Tensor([True, False]).where(t, 3)).dtype == dt
-      assert (Tensor([True, False]).where(3, t)).dtype == dt
-      assert (Tensor([True, False]).where(t, True)).dtype == dt
-      assert (Tensor([True, False]).where(True, t)).dtype == dt
+      where_alternate_input_other(t, 3.2, dtypes.default_float)
+      where_alternate_input_other(t, 3, dt)
+      where_alternate_input_other(t, True, dt)
     else:
-      assert (Tensor([True, False]).where(t, 3.2)).dtype == dtypes.default_float
-      assert (Tensor([True, False]).where(3.2, t)).dtype == dtypes.default_float
-      assert (Tensor([True, False]).where(t, 3)).dtype == dtypes.default_int
-      assert (Tensor([True, False]).where(3, t)).dtype == dtypes.default_int
-      assert (Tensor([True, False]).where(t, True)).dtype == dt
-      assert (Tensor([True, False]).where(True, t)).dtype == dt
+      where_alternate_input_other(t, 3.2, dtypes.default_float)
+      where_alternate_input_other(t, 3, dtypes.default_int)
+      where_alternate_input_other(t, True, dt)
 
-  def test_where_two_consts(self):
-    assert (Tensor([True, False]).where(3.1, 3.2)).dtype == dtypes.default_float
-    assert (Tensor([True, False]).where(3, 3.2)).dtype == dtypes.default_float
-    assert (Tensor([True, False]).where(3.2, 3)).dtype == dtypes.default_float
-    assert (Tensor([True, False]).where(True, 3.2)).dtype == dtypes.default_float
-    assert (Tensor([True, False]).where(3.2, True)).dtype == dtypes.default_float
-    assert (Tensor([True, False]).where(2, 3)).dtype == dtypes.default_int
-    assert (Tensor([True, False]).where(True, 3)).dtype == dtypes.default_int
-    assert (Tensor([True, False]).where(3, True)).dtype == dtypes.default_int
-    assert (Tensor([True, False]).where(False, True)).dtype == dtypes.bool
+
+  def where_where_two_consts(self):
+    where_alternate_input_other(3.1, 3.2, dtypes.default_float)
+    where_alternate_input_other(3.1, 3, dtypes.default_float)
+    where_alternate_input_other(3.1, True, dtypes.default_float)
+    where_alternate_input_other(3, 2, dtypes.default_int)
+    where_alternate_input_other(3, True, dtypes.default_int)
+    where_alternate_input_other(False, True, dtypes.bool)
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_maximum(self, dt1, dt2):
