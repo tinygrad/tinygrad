@@ -383,7 +383,7 @@ class Kernel:
             s0_div = [upc for upc in [5,4,3,2,1] if self.full_shape[s0]%upc == 0][0]
             if s0_div != 1: fix(self.apply_opt(Opt(OptOps.UPCAST, s0, s0_div)), s0)
           if self.tensor_core and s0_exists:
-            for upc in [4,2]:
+            for upc in [2]:
               if self.full_shape[s0] % upc == 0:
                 self.apply_opt(Opt(OptOps.LASTLOCAL, s0, upc))
                 break
