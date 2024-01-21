@@ -8,6 +8,7 @@ from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401
+hipDeviceMallocUncached = 3
 
 # The default HIP stream is used for everything.
 MOCKHIP = getenv("MOCKHIP") # for CI. don't run kernels, only check if they compile
@@ -50,13 +51,13 @@ class HIPAllocator(LRUAllocator):
   def free_cache(self):
     self.device.synchronize()
     return super().free_cache()
-  def _alloc(self, size:int):
+  def _alloc(self, size:int, uncached=False):
     check(hip.hipSetDevice(self.device.device))
-    return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
-  def _free(self, opaque:T):
-    #print("free")
-    check(hip.hipFree(opaque))
-    pass
+    if uncached: return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipExtMallocWithFlags(ctypes.byref(x), size, hipDeviceMallocUncached)))
+    else:
+      #print("HERE")
+      return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
+  def _free(self, opaque:T): check(hip.hipFree(opaque))
   def _hostalloc(self, size:int): return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 0)))
   def copy_from_fd(self, dest, fd, offset, size):
     check(hip.hipSetDevice(self.device.device))

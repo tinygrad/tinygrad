@@ -66,12 +66,13 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:int, var_vals: Optiona
 # **************** Buffer / Allocator ****************
 
 class Buffer:
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, **kwargs):
     assert isinstance(dtype, DType)
+    self.kwargs = kwargs
     self.device, self.size, self.dtype, self.d = device, size, dtype, Device[device]
     self.allocator = self.d.allocator
     # TODO: image hack shouldn't be here. where should it be?
-    self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else self.nbytes)
+    self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else self.nbytes, **kwargs)
     # TODO: mem_used for all devices
     if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
   @property
@@ -139,9 +140,9 @@ class BufferXfer(BufferCopy):
 # TODO: size, dest, src are the same type. can we enforce this?
 sz_type = Union[ImageDType, int]
 class Allocator:
-  def alloc(self, size:sz_type):
+  def alloc(self, size:sz_type, **kwargs):
     assert not isinstance(size, int) or size > 0, f"alloc size must be positve, getting {size}"
-    return self._alloc_image(size) if isinstance(size, ImageDType) else self._alloc(size)
+    return self._alloc_image(size) if isinstance(size, ImageDType) else self._alloc(size, **kwargs)
   def _alloc(self, size:int): raise NotImplementedError("need alloc")
   def _alloc_image(self, dtype:ImageDType): raise RuntimeError("need alloc image")
   def free(self, opaque, size:sz_type): self._free(opaque) # if you are returning a Python object, you don't need a free
@@ -151,9 +152,9 @@ class Allocator:
 
 class LRUAllocator(Allocator):  # pylint: disable=abstract-method
   def __init__(self): self.cache: Dict[sz_type, Any] = defaultdict(list)
-  def alloc(self, size:sz_type):
+  def alloc(self, size:sz_type, **kwargs):
     if len(c := self.cache[size]): return c.pop()
-    try: return super().alloc(size)
+    try: return super().alloc(size, **kwargs)
     except (RuntimeError, MemoryError):
       self.free_cache()
       return super().alloc(size)

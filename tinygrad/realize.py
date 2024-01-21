@@ -65,14 +65,29 @@ from gpuctypes import hip
 from tinygrad.runtime.ops_hip import check
 class CopyKernel(CompiledASTRunner):
   def __init__(self, dest_device, src_device, sz):
-    prg = f"""
-    extern "C" __global__ void copy(char* a, volatile char* b) {{
-      const int gx = blockIdx.x*blockDim.x + threadIdx.x;
-      a[gx] = b[gx];
-    }}"""
-    super().__init__(None, "copy", prg, compile_hip_cached(prg), Device[dest_device], [sz,1,1], [1,1,1])
-    self.build(Device[dest_device].runtime)
-    enable_peer(Device[dest_device].device, Device[src_device].device)
+    mem_estimate = sz
+    if sz%4 == 0:
+      prg = f"""
+      extern "C" __global__ void copy4(int* a, int* b) {{
+        const int gx = blockIdx.x*blockDim.x + threadIdx.x;
+        a[gx] = b[gx];
+      }}"""
+      sz //= 4
+      div = 1
+      while div < 128 and sz%2 == 0:
+        sz //= 2
+        div *= 2
+      super().__init__(None, colored("copy4", "yellow"), prg, compile_hip_cached(prg), Device[src_device], [sz,1,1], [div,1,1])
+    else:
+      prg = f"""
+      extern "C" __global__ void copy(char* a, char* b) {{
+        const int gx = blockIdx.x*blockDim.x + threadIdx.x;
+        a[gx] = b[gx];
+      }}"""
+      super().__init__(None, colored("copy", "yellow"), prg, compile_hip_cached(prg), Device[src_device], [sz,1,1], [1,1,1])
+    self.build(Device[src_device].runtime)
+    enable_peer(Device[src_device].device, Device[dest_device].device)
+    self.mem_estimate = mem_estimate
 
 class CustomOp(JITRunner):
   def __init__(self, fxn):
@@ -115,8 +130,11 @@ def run_schedule(schedule:List[ScheduleItem]):
             break
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
+    #kwargs = {"uncached": True} if si.out.device.startswith("HIP") else {} #if isinstance(prg, (BufferXfer, CopyKernel)) or si.out.does_synchronize else {}
+    kwargs = {"uncached": True} if isinstance(prg, (BufferXfer, CopyKernel)) or si.out.does_synchronize else {}
+    #if len(kwargs): assert si.out.output_buffer is None
     si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
-      Buffer(si.out.device, si.out.size, si.out.dtype, "PLACEHOLDER" if isinstance(prg, InterpretedASTRunner) else None)
+      Buffer(si.out.device, si.out.size, si.out.dtype, "PLACEHOLDER" if isinstance(prg, InterpretedASTRunner) else None, **kwargs)
     del si.out.srcs
 
     #if isinstance(prg, (BufferXfer, CopyKernel)) and si.out.device.startswith("HIP"):
@@ -133,7 +151,7 @@ def run_schedule(schedule:List[ScheduleItem]):
     if GRAPH: realized_lazybuffer(si.out, GlobalCounters.kernel_count)
 
     if isinstance(prg, (BufferXfer, CopyKernel)) and si.out.device.startswith("HIP"):
-      evt = SyncEvent(si.inputs[0].device, GlobalCounters.kernel_count)
+      evt = SyncEvent(si.inputs[0].device, GlobalCounters.kernel_count+1)
       evt.exec([])
       BlockEvent(si.out.device, evt).exec([])
 
