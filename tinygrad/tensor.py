@@ -842,9 +842,12 @@ class Tensor:
   def minimum(self, x:Union[Tensor, Scalar]) -> Tensor: return -((-self).maximum(-x))
 
   def where(self:Tensor, input_:Union[Tensor, Scalar], other:Union[Tensor, Scalar]):
+    if isinstance(input_, Tensor): input_,other = input_._broadcasted(other)
+    elif isinstance(other, Tensor): other,input_ = other._broadcasted(input_)
+    else: input_,other = Tensor(input_, self.device, dtypes.from_py(input_), False)._broadcasted(other)
     x_,y = self._broadcasted(input_, match_dtype=False)
     x,z = x_._broadcasted(other, match_dtype=False)
-    return mlops.Where.apply(x.cast(dtypes.bool), *y._broadcasted(z))
+    return mlops.Where.apply(x.cast(dtypes.bool), y, z)
 
   # ***** op wrappers (wasted lines to make the typechecker happy) *****
 

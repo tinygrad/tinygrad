@@ -14,6 +14,7 @@ settings.load_profile("my_profile")
 
 core_dtypes = list(DTYPES_DICT.values())
 floats = [dt for dt in core_dtypes if dtypes.is_float(dt)]
+non_floats = [dt for dt in core_dtypes if not dtypes.is_float(dt)]
 def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   if dtype == dtypes.bfloat16: return False # numpy doesn't support bf16, tested separately in TestBFloat16DType
   if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
@@ -465,6 +466,47 @@ class TestAutoCastType(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_matmul(self, dt1, dt2):
     assert (Tensor([0, 1], dtype=dt1) @ Tensor([0, 1], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
+
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
+  def test_where(self, dt1, dt2):
+    assert (Tensor([True, False]).where(Tensor(2, dtype=dt1), Tensor(3, dtype=dt2))).dtype == least_upper_dtype(dt1, dt2)
+
+  @given(strat.sampled_from(core_dtypes))
+  def test_where_one_const(self, dt):
+    t = Tensor(2, dtype=dt)
+    # TODO is this right?
+    if dtypes.is_float(dt):
+      assert (Tensor([True, False]).where(t, 3.2)).dtype == dt
+      assert (Tensor([True, False]).where(3.2, t)).dtype == dt
+      assert (Tensor([True, False]).where(t, 3)).dtype == dt
+      assert (Tensor([True, False]).where(3, t)).dtype == dt
+      assert (Tensor([True, False]).where(t, True)).dtype == dt
+      assert (Tensor([True, False]).where(True, t)).dtype == dt
+    elif dtypes.is_int(dt):
+      assert (Tensor([True, False]).where(t, 3.2)).dtype == dtypes.default_float
+      assert (Tensor([True, False]).where(3.2, t)).dtype == dtypes.default_float
+      assert (Tensor([True, False]).where(t, 3)).dtype == dt
+      assert (Tensor([True, False]).where(3, t)).dtype == dt
+      assert (Tensor([True, False]).where(t, True)).dtype == dt
+      assert (Tensor([True, False]).where(True, t)).dtype == dt
+    else:
+      assert (Tensor([True, False]).where(t, 3.2)).dtype == dtypes.default_float
+      assert (Tensor([True, False]).where(3.2, t)).dtype == dtypes.default_float
+      assert (Tensor([True, False]).where(t, 3)).dtype == dtypes.default_int
+      assert (Tensor([True, False]).where(3, t)).dtype == dtypes.default_int
+      assert (Tensor([True, False]).where(t, True)).dtype == dt
+      assert (Tensor([True, False]).where(True, t)).dtype == dt
+
+  def test_where_two_consts(self):
+    assert (Tensor([True, False]).where(3.1, 3.2)).dtype == dtypes.default_float
+    assert (Tensor([True, False]).where(3, 3.2)).dtype == dtypes.default_float
+    assert (Tensor([True, False]).where(3.2, 3)).dtype == dtypes.default_float
+    assert (Tensor([True, False]).where(True, 3.2)).dtype == dtypes.default_float
+    assert (Tensor([True, False]).where(3.2, True)).dtype == dtypes.default_float
+    assert (Tensor([True, False]).where(2, 3)).dtype == dtypes.default_int
+    assert (Tensor([True, False]).where(True, 3)).dtype == dtypes.default_int
+    assert (Tensor([True, False]).where(3, True)).dtype == dtypes.default_int
+    assert (Tensor([True, False]).where(False, True)).dtype == dtypes.bool
 
 if __name__ == '__main__':
   unittest.main()
