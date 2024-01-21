@@ -4,12 +4,9 @@ from typing import Tuple, TypeVar, List
 import gpuctypes.hip as hip
 from tinygrad.helpers import DEBUG, getenv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
 from tinygrad.helpers import from_mv, round_up, to_mv
-from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
+from tinygrad.device import Compiled, LRUAllocator
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
-
-# The default HIP stream is used for everything.
-MOCKHIP = getenv("MOCKHIP") # for CI. don't run kernels, only check if they compile
 
 def check(status):
   if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
@@ -27,7 +24,6 @@ class HIPProgram:
       asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
-    if MOCKHIP: return
     check(hip.hipSetDevice(self.device))
     self.module = init_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))
     self.prg = init_c_var(hip.hipFunction_t(), lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
@@ -36,7 +32,6 @@ class HIPProgram:
     if hasattr(self, 'module'): check(hip.hipModuleUnload(self.module))
 
   def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], vals:Tuple[int, ...]=(), wait=False):
-    if MOCKHIP: return float("inf")
     check(hip.hipSetDevice(self.device))
     return hip_time_execution(lambda: check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, encode_args_cuda_style(args, vals, hip.hipDeviceptr_t, marks=(1,2,3))[0])), enable=wait)  # noqa: E501
 
@@ -95,12 +90,12 @@ class HIPAllocator(LRUAllocator):
 class HIPDevice(Compiled):
   def __init__(self, device:str=""):
     self.device = int(device.split(":")[1]) if ":" in device else 0
-    self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode() if not MOCKHIP else "gfx1100"  # noqa: E501
+    self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode()
     self.pending_copyin: List[hip.hipDeviceptr_t] = []
     self.pending_events: List[hip.hipEvent_t] = []
 
     from tinygrad.runtime.graph.hip import HIPGraph
-    super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self), LinearizerOptions("HIP"), HIPRenderer,
+    super().__init__(HIPAllocator(self), LinearizerOptions("HIP"), HIPRenderer,
                      functools.partial(compile_hip,arch=self.arch), f"compile_hip_{self.arch}", functools.partial(HIPProgram, self.device), HIPGraph)
   def synchronize(self):
     check(hip.hipSetDevice(self.device))
@@ -118,3 +113,7 @@ class HIPDevice(Compiled):
   def block(self, evt):
     check(hip.hipSetDevice(self.device))
     check(hip.hipStreamWaitEvent(None, evt, 0))
+
+if getenv("HIPCPU"):
+  from extra.backends.ops_emulatedhip import EmulatedHIPDevice
+  HIPDevice = EmulatedHIPDevice # type:ignore
