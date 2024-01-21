@@ -22,7 +22,7 @@ class Attention:
     self.head_dim = dim // n_heads
 
   def __call__(self, x:Tensor, start_pos:Variable, mask:Optional[Tensor]) -> Tensor:
-    if mask is not None:
+    if mask is not None or start_pos.val == 0:
       # no symbolic shape qkv when consuming prompts
       start_pos = start_pos.val
 
@@ -35,15 +35,19 @@ class Attention:
     if not hasattr(self, "cache_kv"):
       self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim, dtype=x.dtype)
 
-    keys = self.cache_kv[0].shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
-    values = self.cache_kv[1].shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
+    if start_pos > 0:
+      keys = self.cache_kv[0].shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
+      values = self.cache_kv[1].shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
+    else:
+      keys = xk
+      values = xv
 
     # update the cache
     new_cache = Tensor.stack([keys, values]).pad((None, None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()
     self.cache_kv.assign(new_cache).realize()
 
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
-    return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1))
+    return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, self.dim))
 
 class FeedForward:
   def __init__(self, dim, hidden_dim):
@@ -66,6 +70,7 @@ class TransformerBlock:
 
 class Transformer:
   def __init__(self, dim, n_heads, n_layers, norm_eps, vocab_size, max_seq_len=1024):
+    self.vocab_size = vocab_size
     self.wte = Embedding(vocab_size, dim)
     self.wpe = Embedding(max_seq_len, dim)
     self.h = [TransformerBlock(dim, n_heads, norm_eps) for _ in range(n_layers)]
@@ -91,14 +96,20 @@ class Transformer:
 
     for hi in self.h: h = hi(h, start_pos, mask)
 
-    logits = self.lm_head(self.ln_f(h))[:, -1, :]
+    logits = self.lm_head(self.ln_f(h))
+
+    if logits.shape[1] == 0:
+      # special case for empty prompt
+      logits = Tensor.ones((logits.shape[0], self.vocab_size), dtype=logits.dtype, device=logits.device)
+    else:
+      logits = logits[:, -1, :]
+
     if temperature < 1e-6:
       ret = logits.argmax(-1)
     else:
       ret = (logits / temperature).softmax().multinomial()
     return ret.flatten().realize()
 
-  # TODO: fix empty token
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
     forward = (self.forward_jit if (isinstance(tokens, Variable) or tokens.shape[1] == 1) and getenv("JIT") else self.forward)
     return forward(tokens, start_pos, temperature)

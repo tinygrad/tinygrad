@@ -4,8 +4,8 @@ from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.device import Device, Compiled
 from tinygrad.dtype import dtypes, ImageDType, DType
-from tinygrad.helpers import dedup, colored, ansilen, getenv, prod, DEBUG, round_up, all_int
-from tinygrad.shape.shapetracker import ShapeTracker, get_contraction
+from tinygrad.helpers import dedup, colored, ansilen, getenv, prod, DEBUG, round_up, all_int, get_contraction
+from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import sint
 from tinygrad.shape.view import View, strides_for_shape
 from dataclasses import dataclass
@@ -33,18 +33,18 @@ class TensorCore:
   upcast_dim: int # which TC dim to upcast
   thread_local_aliases: List[List[List[int]]] # a list of [threads_1, ..., threads_n, upcast_1(unrolled), upcast_2(upcast)] defining the alias (-1 is upcast, 1-n is warp threads) for each TC dim # noqa: E501
   thread_local_sizes: List[int] # in each thread, the number of elements stored in registers for each TC dim
+  wmma_func: str # name of wmma function to call
   arch: Optional[str] = None
   def __str__(self): return f"tensor_core<{self.device}, {self.dims}, {self.dtype_in}, {self.dtype_out}>"
 
 tensor_cores: Dict[str, List[TensorCore]] = {
   "METAL": [
-    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.float, dtype_out=dtypes.float, upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"), # noqa: E501
-    # TODO: enable half @ half -> half tensor core with correct dtypes in uop
-    # TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.half,  upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"), # noqa: E501
+    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.float, dtype_out=dtypes.float, wmma_func="__metal_wmma<float2,simdgroup_float8x8,float2>", upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"), # noqa: E501
+    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.float, wmma_func="__metal_wmma<half2,simdgroup_float8x8,float2>",  upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"), # noqa: E501
+    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.half,  wmma_func="__metal_wmma<half2,simdgroup_half8x8,half2>",    upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"), # noqa: E501
   ],
   "HIP": [
-    TensorCore(device="HIP", dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, upcast_dim=1, threads=[(0,16),(1,2)], thread_local_sizes=[16,16,8], thread_local_aliases=[ [[0],[0],[-1],[1]], [[0],[1],[-1],[0]], [[0],[1],[0],[2,-1]] ]),  # noqa: E501
-    TensorCore(device="HIP", dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.half,  upcast_dim=1, threads=[(0,16),(1,2)], thread_local_sizes=[16,16,8], thread_local_aliases=[ [[0],[0],[-1],[1]], [[0],[1],[-1],[0]], [[0],[1],[0],[2,-1]] ]),  # noqa: E501
+    TensorCore(device="HIP", dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="__builtin_amdgcn_wmma_f32_16x16x16_f16_w32", upcast_dim=1, threads=[(0,16),(1,2)], thread_local_sizes=[16,16,8], thread_local_aliases=[ [[0],[0],[-1],[1]], [[0],[1],[-1],[0]], [[0],[1],[0],[2,-1]] ]),  # noqa: E501
   ]
 }
 
@@ -68,7 +68,7 @@ class LinearizerOptions(NamedTuple):
 
 class Kernel:
   def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None):
-    self.opts = opts or (device.linearizer_opts if isinstance(device:=Device[Device.DEFAULT], Compiled) else LinearizerOptions())
+    self.opts = opts or (device.linearizer_opts if isinstance(device:=Device[Device.DEFAULT], Compiled) else LinearizerOptions(Device.DEFAULT))
     self.ast = ast
     assert ast.op == BufferOps.STORE, f"kernels must have a store as the output, got {ast.op}"
 
@@ -281,35 +281,32 @@ class Kernel:
     # do the reshapes
     for i,x in enumerate(rets[:len(self.sts)]): self.sts[i] = self.sts[i].reshape(tuple([y[0] for y in x]))
 
-  # ******************** GPU simplifiers ********************
+  # ******************** helpers ********************
 
-  def _limit_size(self, x: Tuple[int], max_size: List) -> Tuple[int, ...]:
-    new_shape,dims = list(x), len(x)
-    for i in range(dims):
-      next_idx = (i + 1) % dims
+  def _limit_size(self, x: Tuple[int], max_size: List[Union[int,float]]) -> Tuple[int, ...]:
+    new_shape = list(x)
+    for i in range(len(new_shape)):
+      next_idx = (i + 1) % len(new_shape)
       while new_shape[i] > max_size[i]:
+        # TODO: what if new_shape[i] is not a multiple of 2??
         new_shape[i] = new_shape[i] // 2
-        if (new_shape[next_idx] <= max_size[next_idx]):
-          new_shape[next_idx] = new_shape[next_idx] * 2
-        else:
-          next_idx = (next_idx + 1) % dims
-          new_shape[next_idx] = new_shape[next_idx] * 2
+        next_idx = next_idx if new_shape[next_idx] <= max_size[next_idx] else (next_idx + 1) % len(new_shape)
+        new_shape[next_idx] = new_shape[next_idx] * 2
     return tuple(new_shape)
 
   def limit_dims_to_max(self, global_max: List[int], local_max: List[int]):
     # Check the global allocation limit, current the global_size will be flipped during codegen
     # and then padded right with 1s if its length < 3 which makes this part a bit awkward to write
-    global_dims = self.first_reduce-self.local_dims
-    if global_dims > 0:
+    if self.global_dims > 0:
       if global_max:
-        tmp = global_max[:global_dims] + (local_max[:self.local_dims] if local_max else [])
-        if max(global_max) < max(self.full_shape[:global_dims]):
+        tmp = global_max[:self.global_dims] + (local_max[:self.local_dims] if local_max else [])
+        if max(global_max) < max(self.full_shape[:self.global_dims]):
           self.reshape_and_permute(lambda x: self._limit_size(x, tmp + [math.inf] * (len(self.full_shape)-len(tmp))), None)
-        assert max(global_max) >= max(self.full_shape[:global_dims]), f"device max allocation {max(self.full_shape[:global_dims])} exceeds global dim maximum {max(global_max)}"  # noqa: E501
-      for i in range(global_dims-1):
+        assert max(global_max) >= max(self.full_shape[:self.global_dims]), f"device max allocation {max(self.full_shape[:self.global_dims])} exceeds global dim maximum {max(global_max)}"  # noqa: E501
+      for i in range(self.global_dims-1):
         if i < len(global_max) and self.full_shape[i] > global_max[i]:
           order = list(range(len(self.full_shape)))
-          order[i], order[global_dims-1] = order[global_dims-1], order[i]
+          order[i], order[self.global_dims-1] = order[self.global_dims-1], order[i]
           self.reshape_and_permute(None, order)
           if DEBUG >= 3: print("permuted global dim", order, "due to allocation exceeds global limit")
 
@@ -325,7 +322,7 @@ class Kernel:
           stride[j] = bst
           bst *= shp[j]
 
-    self.sts.append(ShapeTracker((View.create(tuple(shp), tuple(stride)),), prod(shp)))
+    self.sts.append(ShapeTracker((View.create(tuple(shp), tuple(stride)),)))
     self.bufs.append(LocalBuffer(name=f"ldata{i}", size=self.sts[-1].size))
     if DEBUG >= 4: print("aliasing buffer", self.sts[i])
     self.local_alias[i] = cast(LocalBuffer, self.bufs[-1])

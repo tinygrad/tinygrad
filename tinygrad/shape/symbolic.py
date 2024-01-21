@@ -150,7 +150,7 @@ class NumNode(Node):
     assert self.b == val, f"cannot bind {val} to {self}"
     return self
   def __eq__(self, other): return self.b == other
-  def __hash__(self): return self.hash  # needed with __eq__ override
+  def __hash__(self): return hash(self.b)  # needed with __eq__ override
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return self
 
 def create_node(ret:Node):
@@ -308,7 +308,7 @@ def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if
 def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
   if isinstance(a, (int, float)): return a
   ret = a.substitute({k:NumNode(v) for k, v in var_vals.items()})
-  assert isinstance(ret, NumNode), f"sym_infer didn't produce NumNode from {a} with {var_vals}, it produced {ret}"
+  assert isinstance(ret, NumNode), f"sym_infer didn't produce NumNode from {a} with {var_vals}"
   return ret.b
 
 # symbolic int

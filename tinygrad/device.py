@@ -1,12 +1,12 @@
 from __future__ import annotations
-import numpy as np
 from collections import defaultdict
-from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable
+from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple, cast
 import importlib, inspect, functools, pathlib, time, re, ctypes
-from tinygrad.dtype import DType, dtypes, ImageDType
+from tinygrad.dtype import DType, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
+from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
-from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op, GlobalCounters
+from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op, GlobalCounters, MovementOps
 
 if TYPE_CHECKING:
   from tinygrad.codegen.linearizer import Linearizer
@@ -15,18 +15,21 @@ if TYPE_CHECKING:
 # **************** Device ****************
 
 class _Device:
-  def __init__(self) -> None: self._buffers: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]  # noqa: E501
-  def canonicalize(self, device:Optional[str]) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "") if device is not None else self.DEFAULT  # noqa: E501
+  def __init__(self) -> None: self._devices: List[str] = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]  # noqa: E501
+  @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
+  def _canonicalize(self, device:str) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")   # noqa: E501
+  # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
+  def canonicalize(self, device:Optional[str]) -> str: return self._canonicalize(device) if device is not None else Device.DEFAULT
   def __getitem__(self, ix:str) -> Union[Interpreted, Compiled]: return self.__get_canonicalized_item(self.canonicalize(ix))
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Union[Interpreted, Compiled]:
     x = ix.split(":")[0].upper()
-    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._buffers][0]  # noqa: E501
+    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0]  # noqa: E501
     if isinstance(ret, type): ret = ret(ix)
     return ret
   @functools.cached_property
   def DEFAULT(self) -> str:
-    device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._buffers, None)   # type: ignore
+    device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
     if device_from_env: return device_from_env
     for device in ["METAL", "CUDA", "HIP", "GPU"]:
       try:
@@ -38,8 +41,7 @@ Device = _Device()
 # **************** base Runner + helpers ****************
 
 class JITRunner:
-  def __init__(self):
-    self.op_estimate, self.mem_estimate = 0, 0
+  def __init__(self): self.op_estimate, self.mem_estimate = 0, 0
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     var_vals = var_vals if var_vals is not None else {}
     from tinygrad.jit import CacheCollector
@@ -49,16 +51,16 @@ class JITRunner:
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
-def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count:int, jit=False, num_kernels=1, lra: Optional[Dict]=None, device:str="", first_run=False):  # noqa: E501
+def update_stats(name:str, op_estimate:sint, mem_estimate:int, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count:int, jit=False, num_kernels=1, lra: Optional[Dict]=None, device:str="", first_run=False):  # noqa: E501
   if var_vals is None: var_vals = {}
-  op_estimate, mem_estimate = sym_infer(op_estimate, var_vals), sym_infer(mem_estimate, var_vals)
+  op_estimate = sym_infer(op_estimate, var_vals)
   GlobalCounters.kernel_count += num_kernels
   GlobalCounters.global_ops += op_estimate
   GlobalCounters.global_mem += mem_estimate
   if et is not None: GlobalCounters.time_sum_s += et
   if DEBUG >= 2:
     ptm = (colored(f"{et*1e3:9.2f}ms", "yellow") if et > 0.01 else f"{et*1e6:9.2f}us") if et is not None else ""
-    print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', ('magenta' if num_kernels == 1 else 'CYAN') if jit else ('green' if first_run else None))} {name+' '*(37-ansilen(name))} arg {buf_count:3d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
+    print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', ('magenta' if num_kernels == 1 else 'CYAN') if jit else ('green' if first_run else None))} {name+' '*(38-ansilen(name))} arg {buf_count:3d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
           (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))  # noqa: E501
 
 # **************** Buffer / Allocator ****************
@@ -66,72 +68,69 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Option
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
     assert isinstance(dtype, DType)
-    self.device, self.size, self.dtype = device, size, dtype
-    self.allocator = Device[self.device].allocator
+    self.device, self.size, self.dtype, self.d = device, size, dtype, Device[device]
+    self.allocator = self.d.allocator
     # TODO: image hack shouldn't be here. where should it be?
-    self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else size * dtype.itemsize)
+    self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else self.nbytes)
     # TODO: mem_used for all devices
-    if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.size * self.dtype.itemsize
+    if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
+  @property
+  def nbytes(self): return self.size*self.dtype.itemsize
   def __del__(self):
     if not hasattr(self, '_buf'): return # happens when __init__ has raised exception
-    if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.size * self.dtype.itemsize
+    if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
     if isinstance(self.dtype, ImageDType): self.allocator.free(self._buf, self.dtype)
-    else: self.allocator.free(self._buf, self.size * self.dtype.itemsize)
+    else: self.allocator.free(self._buf, self.nbytes)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}>"
+  def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
+    # zero copy with as_buffer (disabled by default due to use after free)
+    if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, 'as_buffer'): return self.allocator.as_buffer(self._buf)
+    assert not force_zero_copy, "force zero copy was passed, but copy is required"
+    return self.copyout(memoryview(bytearray(self.size*self.dtype.itemsize)))
   def copyin(self, mv:memoryview):
     mv = flat_mv(mv)
-    assert len(mv) == self.size*self.dtype.itemsize, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
+    assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
     self.allocator.copyin(self._buf, mv)
     return self
-  @staticmethod
-  def fromCPU(device:str, x:np.ndarray): return Buffer(device, x.size, dtypes.from_np(x.dtype)).copyin(x.data)
-  def toCPU(self) -> np.ndarray:
-    # zero copy with as_buffer
-    if hasattr(self.allocator, 'as_buffer'):
-      return np.frombuffer(self.allocator.as_buffer(self._buf), dtype=np.dtype(self.dtype.np, metadata={"backing": self._buf}))  # type: ignore
-    ret = np.empty(self.size, self.dtype.np)
-    if self.size > 0: self.allocator.copyout(flat_mv(ret.data), self._buf)
-    return ret
+  def copyout(self, mv:memoryview) -> memoryview:
+    mv = flat_mv(mv)
+    assert len(mv) == self.nbytes, f"size mismatch, {len(mv)=} != {self.dtype=} {self.size=}"
+    self.allocator.copyout(mv, self._buf)
+    return mv
 
-def _internal_buffer_copy(dest:Buffer, src:Buffer):
-  if hasattr(dest.allocator, 'transfer') and type(dest.allocator) is type(src.allocator):  # noqa: E721
-    # fast path, used on HIP between GPUs
-    # NOTE: it's important we use the dest device here to ensure the transfer is ready
-    Device[src.device].synchronize()   # TODO: async this
-    dest.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
-    return
-  if getenv("FROM_BUFFER") and hasattr(dest.allocator, 'from_buffer') and hasattr(dest.allocator, 'transfer') and hasattr(src.allocator, 'as_buffer'):
-    # fast path, used on Metal in OS X Sonoma
-    # NOTE: this is *only* faster if the pages from disk are already loaded into memory
-    fb = dest.allocator.from_buffer(src.allocator.as_buffer(src._buf))
-    if fb:
-      dest.allocator.transfer(dest._buf, fb, dest.size*dest.dtype.itemsize)
-      return
-  if hasattr(dest.allocator, 'copy_from_fd') and src.device.startswith("DISK") and src.size*src.dtype.itemsize >= 4096 and src._buf.ud.fd is not None:
-    dest.allocator.copy_from_fd(dest._buf, src._buf.ud.fd, src._buf.offset, src.size*src.dtype.itemsize)
-  elif hasattr(dest.allocator, 'as_buffer'):
-    # fast(ish) path, uses readinto in diskbuffers
-    src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
-  elif hasattr(src.allocator, 'as_buffer'):
-    dest.allocator.copyin(dest._buf, src.allocator.as_buffer(src._buf))
-  else:
-    # slow path, allocates a CPU buffer
-    dest.copyin(src.toCPU().data)
-
-class _BufferCopy(JITRunner):
-  # TODO: make wait work
+class BufferCopy(JITRunner):
+  def copy(self, dest, src): dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
     dest, src = rawbufs
-    assert dest.size == src.size, f"buffer copy size mismatch, {dest.size} != {src.size}"
-    assert dest.dtype == src.dtype, f"buffer copy dtype mismatch, {dest.dtype} != {src.dtype}"
+    assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
     st = time.perf_counter()
-    _internal_buffer_copy(dest, src)
+    self.copy(dest, src)
     et = None
     if wait or DEBUG >= 2:
-      Device[dest.device].synchronize()
+      dest.d.synchronize()
       et = time.perf_counter() - st
-    update_stats(colored(f"copy {dest.size:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", "yellow"), 0, dest.size*dest.dtype.itemsize, {}, et, 2, jit, device=dest.device)  # noqa: E501
-BufferCopy = _BufferCopy()
+    update_stats(colored(f"{type(self).__name__[6:].lower()} {dest.size*dest.dtype.itemsize:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}",
+                         "yellow"), 0, dest.size*dest.dtype.itemsize, {}, et, 2, jit, device=dest.device)
+
+class BufferRead(BufferCopy):
+  def copy(self, dest, src):
+    if hasattr(dest.allocator, 'copy_from_fd') and src.device.startswith("DISK") and src.nbytes >= 4096 and src._buf.ud.fd is not None:
+      dest.allocator.copy_from_fd(dest._buf, src._buf.ud.fd, src._buf.offset, src.nbytes)
+    elif hasattr(dest.allocator, 'as_buffer'):
+      # fast(ish) path, uses readinto in diskbuffers
+      src.allocator.copyout(dest.allocator.as_buffer(dest._buf), src._buf)
+    else: super().copy(dest, src)
+
+class BufferXfer(BufferCopy):
+  def copy(self, dest, src):
+    # fast path, used on HIP between GPUs
+    # NOTE: we have to block here so the data isn't copied too early. this is probably due to buffer reuse
+    if hasattr(src.d, "block") and hasattr(dest.d, "event"): src.d.block(dest.d.event())
+    else: dest.d.synchronize()
+    src.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
+    # NOTE: we have to block here so the data is ready on dest when dest needs it
+    if hasattr(dest.d, "block") and hasattr(src.d, "event"): dest.d.block(src.d.event())
+    else: src.d.synchronize()
 
 # TODO: size, dest, src are the same type. can we enforce this?
 sz_type = Union[ImageDType, int]
@@ -150,9 +149,8 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
   def __init__(self): self.cache: Dict[sz_type, Any] = defaultdict(list)
   def alloc(self, size:sz_type):
     if len(c := self.cache[size]): return c.pop()
-    try:
-      return super().alloc(size)
-    except MemoryError:
+    try: return super().alloc(size)
+    except (RuntimeError, MemoryError):
       self.free_cache()
       return super().alloc(size)
   def free_cache(self):
@@ -224,7 +222,31 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
     if ast.op in BufferOps:
       if ast.op == BufferOps.CONST: tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})"
       else: tmp = f"{gstr(fxn_for_op[UnaryOps.CAST], UnaryOps.CAST)}(inputs[{ast.arg.idx-1}], ({gstr(ast.arg.dtype)}, True))"
-      for mop,arg in ast.arg.st.to_movement_ops(): tmp = f"{gstr(fxn_for_op[mop], mop)}({tmp}, {gstr(arg)})"
+
+      # convert ShapeTracker to MovementOps
+      to_apply:List[Tuple[MovementOps, Tuple]] = []
+      for v in cast(ShapeTracker, ast.arg.st).views:
+        real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
+        real_offset = 0 if 0 in real_shape else (v.offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0))
+        # first, we apply the offset
+        # then, we make it the correct shape
+        # then, we apply permutations
+        to_apply.append((MovementOps.AS_STRIDED, (tuple([s if st != 0 else 1 for s,st in zip(real_shape, v.strides)]), v.strides, real_offset)))
+        # then, we apply pre expand pads
+        if v.mask is not None:
+          pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
+          post_expand_pads = tuple((x,s-y) if st == 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
+          if any(x != (0,0) for x in pre_expand_pads):
+            to_apply.append((MovementOps.PAD, pre_expand_pads))
+            real_shape = tuple(x+s[0]+s[1] for x,s in zip(real_shape, pre_expand_pads))
+        # then, we do any expands
+        # NOTE: this is a good idea even without masks, since torch doesn't support negative strides and has to make a copy
+        if any(s != 1 and st == 0 for s,st in zip(real_shape, v.strides)): to_apply.append((MovementOps.EXPAND, real_shape))
+        # lastly, we apply post expand pads
+        if v.mask is not None and any(x != (0,0) for x in post_expand_pads): to_apply.append((MovementOps.PAD, post_expand_pads))
+
+      # apply those MovementOps
+      for mop,arg in to_apply: tmp = f"{gstr(fxn_for_op[mop], mop)}({tmp}, {gstr(arg)})"
     else:
       tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({', '.join([_interpret_ast(src) for src in ast.src] + ([gstr(ast.arg)] if ast.arg else []))})"
 
@@ -241,13 +263,13 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 # **************** for Compiled Devices ****************
 
 class CompiledASTRunner(JITRunner):
-  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, lib:bytes, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None):  # noqa: E501
+  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, lib:bytes, device:Compiled, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None):  # noqa: E501
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
-    self.name, self.display_name, self.prg, self.lib, self.global_size, self.local_size, self.first_run = \
-      to_function_name(name), name, prg, lib, global_size, local_size, True
+    self.name, self.display_name, self.prg, self.lib, self.device, self.global_size, self.local_size, self.first_run = \
+      to_function_name(name), name, prg, lib, device, global_size, local_size, True
     self.vars: List[Variable] = []
     if ast:
       info = get_lazyop_info(ast)
@@ -275,27 +297,29 @@ class CompiledASTRunner(JITRunner):
     if global_size: lra['global_size'] = global_size
     if local_size: lra['local_size'] = local_size
     et = self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.vars), wait=wait or DEBUG>=2)
-    if do_update_stats: update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, lra=lra, device=rawbufs[0].device, first_run=self.first_run)  # noqa: E501
+    if do_update_stats: update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit,
+                                     lra=lra, device=rawbufs[0].device, first_run=self.first_run)
     self.first_run = False
     return et
 
 class Compiled:
-  def __init__(self, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler, runtime, graph=None):
-    self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph = allocator, linearizer_opts, renderer, compiler, runtime, graph  # noqa: E501
+  def __init__(self, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler, compiler_cachekey, runtime, graph=None):
+    self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph, self.compiler_cachekey = \
+      allocator, linearizer_opts, renderer, compiler, runtime, graph, compiler_cachekey
   def synchronize(self): pass  # override this in your device
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     assert self.compiler is not None, f"compiler is None, can't build {k.ast}"
     k.linearize()
     src = self.renderer(to_function_name(k.name), k.uops)
-    if getenv("DISABLE_COMPILER_CACHE") or '<' in self.compiler.__name__:
+    if getenv("DISABLE_COMPILER_CACHE") or self.compiler_cachekey is None:
       lib = self.compiler(src)
     else:
-      lib = diskcache_get(self.compiler.__name__, src)
+      lib = diskcache_get(self.compiler_cachekey, src)
       if lib is None:
         lib = self.compiler(src)
-        diskcache_put(self.compiler.__name__, src, lib)
-    return CompiledASTRunner(k.ast, k.name, src, lib, k.global_size, k.local_size).build(self.runtime)
+        diskcache_put(self.compiler_cachekey, src, lib)
+    return CompiledASTRunner(k.ast, k.name, src, lib, self, k.global_size, k.local_size).build(self.runtime)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:
@@ -314,7 +338,6 @@ class Compiled:
         kb = Linearizer(ast, self.linearizer_opts)
         kb.required_optimizations()
         from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
-        # TODO: this shouldn't use Device.DEFAULT, it should get the device from the LinearizerOptions
         test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
         lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
         timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])

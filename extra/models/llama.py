@@ -59,27 +59,31 @@ class Attention:
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
     xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
+
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
-    bsz, seqlen, n_heads, head_dim = xq.shape
+    bsz, seqlen, _, _ = xq.shape
 
     # create kv cache
     if not hasattr(self, "cache_k"):
-      self.cache_k = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype)
-      self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype)
+      self.cache_k = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous()
+      self.cache_v = Tensor.zeros(bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous()
+      if isinstance(x.device, tuple):
+        # TODO: instead of specifying how to shard, it can follow how xk and xv are being sharded
+        self.cache_k.shard_((xk.device), axis=None)
+        self.cache_v.shard_((xv.device), axis=None)
 
     # HACK: without contiguous, the conversation mode is broken and the cache is not updated
-    keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous()
-    values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1).contiguous()
+    keys = self.cache_k.shrink((None, (0, start_pos), None, None)).cat(xk, dim=1).contiguous() if start_pos > 0 else xk
+    values = self.cache_v.shrink((None, (0, start_pos), None, None)).cat(xv, dim=1).contiguous() if start_pos > 0 else xv
 
     # update the cache
     assert keys.dtype == self.cache_k.dtype and values.dtype == self.cache_v.dtype, f"{keys.dtype=}, {values.dtype=}, {self.cache_k.dtype=}, {self.cache_v.dtype=}"
     self.cache_k.assign(keys.pad((None,(0,self.max_context-start_pos-seqlen),None,None)).contiguous()).realize()
     self.cache_v.assign(values.pad((None,(0,self.max_context-start_pos-seqlen),None,None)).contiguous()).realize()
-
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
-
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
-    attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, -1)
+    attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
+    attn = attn.reshape(bsz, seqlen, -1)
     return self.wo(attn)
 
 class FeedForward:
@@ -117,7 +121,7 @@ class Transformer:
     freqs_cis = self.freqs_cis.shrink((None, (start_pos, start_pos+seqlen),None,None,None))
 
     h = self.tok_embeddings(tokens)
-    mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos+1).realize() if seqlen > 1 else None
+    mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1).realize() if seqlen > 1 else None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h))[:, -1, :]
     if temperature < 1e-6:

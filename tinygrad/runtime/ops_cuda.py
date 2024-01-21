@@ -29,17 +29,17 @@ def check(status):
 
 def cu_time_execution(cb, enable=False) -> Optional[float]: return time_execution_cuda_style(cb, cuda.CUevent, cuda.cuEventCreate, cuda.cuEventRecord, cuda.cuEventSynchronize, cuda.cuEventDestroy_v2, cuda.cuEventElapsedTime, enable=enable) if not CUDACPU else cpu_time_execution(cb, enable=enable)  # noqa: E501
 
-def compile_cuda(prg) -> bytes: return compile_cuda_style(prg, [f'--gpu-architecture={CUDADevice.default_arch_name}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"], cuda.nvrtcProgram, cuda.nvrtcCreateProgram, cuda.nvrtcCompileProgram, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check)  # noqa: E501
+def compile_cuda(prg:str, arch="sm_35") -> bytes: return compile_cuda_style(prg, [f'--gpu-architecture={arch}', "-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include/"], cuda.nvrtcProgram, cuda.nvrtcCreateProgram, cuda.nvrtcCompileProgram, cuda.nvrtcGetPTX, cuda.nvrtcGetPTXSize, cuda.nvrtcGetProgramLog, cuda.nvrtcGetProgramLogSize, check)  # noqa: E501
 
 class CUDAProgram:
   def __init__(self, device:CUDADevice, name:str, lib:bytes):
     self.device, self.name, self.lib = device, name, lib
-    if DEBUG >= 5: print(pretty_ptx(lib.decode('utf-8')))
+    if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode('utf-8')).split("\n"))]))
     if DEBUG >= 6:
       try:
         fn = (Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
         with open(fn + ".ptx", "wb") as f: f.write(lib)
-        subprocess.run(["ptxas", f"-arch={CUDADevice.default_arch_name}", "-o", fn, fn+".ptx"], check=True)
+        subprocess.run(["ptxas", f"-arch={device.arch}", "-o", fn, fn+".ptx"], check=True)
         print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
       except Exception as e: print("failed to generate SASS", str(e))
 
@@ -50,7 +50,7 @@ class CUDAProgram:
     self.prg = prg if not CUDACPU else lib
 
   def __del__(self):
-    if not CUDACPU: check(cuda.cuModuleUnload(self.module))
+    if hasattr(self, 'module'): check(cuda.cuModuleUnload(self.module))
 
   def __call__(self, *bufs, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], vals:Tuple[int, ...]=(), wait=False):
     if not CUDACPU: check(cuda.cuCtxSetCurrent(self.device.context))
@@ -73,7 +73,6 @@ class CUDAAllocator(LRUAllocator):
     check(cuda.cuMemcpyDtoH_v2(from_mv(dest), src, len(dest)))
 
 class CUDADevice(Compiled):
-  default_arch_name = "sm_35"
   def __init__(self, device:str):
     device_id = int(device.split(":")[1]) if ":" in device else 0
     if not CUDACPU:
@@ -81,12 +80,13 @@ class CUDADevice(Compiled):
       check(cuda.cuDeviceGet(ctypes.byref(device := cuda.CUdevice()), device_id))
       self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, device)))
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
-      if device_id == 0: CUDADevice.default_arch_name = f"sm_{major.value}{minor.value}"
+    self.arch = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
     super().__init__(CUDAAllocator(self) if not CUDACPU else MallocAllocator,
-                     LinearizerOptions(supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
-                     CUDARenderer, compile_cuda, functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
+                     LinearizerOptions("CUDA", supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
+                     CUDARenderer, functools.partial(compile_cuda,arch=self.arch), f"compile_cuda_{self.arch}", functools.partial(CUDAProgram, self),
+                     graph=CUDAGraph if not CUDACPU else None)
   def synchronize(self):
     if not CUDACPU:
       check(cuda.cuCtxSetCurrent(self.context))

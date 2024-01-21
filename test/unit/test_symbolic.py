@@ -70,6 +70,15 @@ class TestSymbolic(unittest.TestCase):
     assert idx1+idx2 != idx2
     assert idx1*idx2 == idx2*idx1
 
+  def test_numnode_eq_int(self):
+    n1 = NumNode(1)
+    n2 = NumNode(2)
+    assert n1 == 1
+    assert n2 == 2
+    assert n1 != n2
+    assert hash(n1) == hash(1)
+    assert hash(n2) == hash(2)
+
   def test_factorize(self):
     a = Variable("a", 0, 8)
     self.helper_test_variable(a*2+a*3, 0, 8*5, "(a*5)")
