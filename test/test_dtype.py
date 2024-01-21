@@ -473,7 +473,6 @@ class TestAutoCastType(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes))
   def test_where_one_const(self, dt):
     t = Tensor(2, dtype=dt)
-    # TODO is this right?
     if dtypes.is_float(dt):
       assert (Tensor([True, False]).where(t, 3.2)).dtype == dt
       assert (Tensor([True, False]).where(3.2, t)).dtype == dt
