@@ -516,9 +516,9 @@ class TestAutoCastType(unittest.TestCase):
     assert Tensor([1, 2], dtype=dtypes.float64).maximum(3.1).dtype == dtypes.float64
     assert Tensor([1, 2], dtype=dtypes.float16).maximum(3).dtype == dtypes.float16
     assert Tensor([1, 2], dtype=dtypes.float64).maximum(3).dtype == dtypes.float64
-    assert Tensor([1, 2], dtype=dtypes.int32).maximum(3).dtype == dtypes.int32
+    assert Tensor([1, 2], dtype=dtypes.int64).maximum(3).dtype == dtypes.int64
     assert Tensor([1, 2], dtype=dtypes.int16).maximum(3).dtype == dtypes.int16
-    assert Tensor([1, 2], dtype=dtypes.int32).maximum(3.1).dtype == dtypes.default_float
+    assert Tensor([1, 2], dtype=dtypes.int64).maximum(3.1).dtype == dtypes.default_float
     assert Tensor([1, 2], dtype=dtypes.int16).maximum(3.1).dtype == dtypes.default_float
 
 if __name__ == '__main__':
