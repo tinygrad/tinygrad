@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, math, itertools
-from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
+from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union, Callable
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.device import Device, Compiled
 from tinygrad.dtype import dtypes, ImageDType, DType
@@ -30,7 +30,7 @@ class TensorCore:
   dtype_in: DType
   dtype_out: DType
   ops: List[Tuple[str,int,int]] # list of (op,TC dim,amt) that construct the warp thread structure
-  thread_local_aliases: List[List[List[int]]] # a list of [threads_1, ..., threads_n, upcast_1(unrolled), upcast_2(upcast)] defining the alias (-1 is upcast, 1-n is warp threads) for each TC dim # noqa: E501
+  thread_local_aliases: Callable # lambda that returns a list of [threads_1, ..., threads_n, upcast_1(unrolled), upcast_2(upcast)] defining the alias for each TC dim given local and upcast indexes # noqa: E501
   thread_local_sizes: List[int] # in each thread, the number of elements stored in registers for each TC dim
   wmma_func: str # name of wmma function to call
   arch: Optional[str] = None
@@ -39,12 +39,12 @@ class TensorCore:
 
 tensor_cores: Dict[str, List[TensorCore]] = {
   "METAL": [
-    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.float, dtype_out=dtypes.float, wmma_func="__metal_wmma<float2,simdgroup_float8x8,float2>", ops=[("U",0,2),("L",0,2),("L",1,4),("L",0,2),("L",1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"), # noqa: E501
-    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.float, wmma_func="__metal_wmma<half2,simdgroup_float8x8,float2>",  ops=[("U",0,2),("L",0,2),("L",1,4),("L",0,2),("L",1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"), # noqa: E501
-    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.half,  wmma_func="__metal_wmma<half2,simdgroup_half8x8,half2>",    ops=[("U",0,2),("L",0,2),("L",1,4),("L",0,2),("L",1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"), # noqa: E501
+    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.float, dtype_out=dtypes.float, wmma_func="__metal_wmma<float2,simdgroup_float8x8,float2>", ops=[("U",0,2),("L",0,2),("L",1,4),("L",0,2),("L",1,2)], thread_local_sizes=[2,2,2], thread_local_aliases=lambda l4,l3,l2,l1,u0,u1,u2,z: [ [l4,z,l2,z,u0+l1*2+l3*4,z],[z,l3,z,l1,l2+l4*4,u1],[l4,l3,l2,l1,z,u2] ], arch="arm64"), # noqa: E501
+    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.float, wmma_func="__metal_wmma<half2,simdgroup_float8x8,float2>",  ops=[("U",0,2),("L",0,2),("L",1,4),("L",0,2),("L",1,2)], thread_local_sizes=[2,2,2], thread_local_aliases=lambda l4,l3,l2,l1,u0,u1,u2,z: [ [l4,z,l2,z,u0+l1*2+l3*4,z],[z,l3,z,l1,l2+l4*4,u1],[l4,l3,l2,l1,z,u2] ], arch="arm64"), # noqa: E501
+    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.half,  wmma_func="__metal_wmma<half2,simdgroup_half8x8,half2>",    ops=[("U",0,2),("L",0,2),("L",1,4),("L",0,2),("L",1,2)], thread_local_sizes=[2,2,2], thread_local_aliases=lambda l4,l3,l2,l1,u0,u1,u2,z: [ [l4,z,l2,z,u0+l1*2+l3*4,z],[z,l3,z,l1,l2+l4*4,u1],[l4,l3,l2,l1,z,u2] ], arch="arm64"), # noqa: E501
   ],
   "HIP": [
-    TensorCore(device="HIP", dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="__builtin_amdgcn_wmma_f32_16x16x16_f16_w32", ops=[("U",1,8),("L",0,16),("L",1,2)], thread_local_sizes=[16,16,8], thread_local_aliases=[ [[0],[0],[-1],[1]], [[0],[1],[-1],[0]], [[0],[1],[0],[2,-1]] ]),  # noqa: E501
+    TensorCore(device="HIP", dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="__builtin_amdgcn_wmma_f32_16x16x16_f16_w32", ops=[("U",1,8),("L",0,16),("L",1,2)], thread_local_sizes=[16,16,8], thread_local_aliases=lambda l2,l1,u0,u1,u2,z: [ [l1%2,z,u0,l1//2], [z,l1,u1,z], [l2,l1,z,u2] ]),  # noqa: E501
   ]
 }
 

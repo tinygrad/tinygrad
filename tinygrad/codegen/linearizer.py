@@ -266,22 +266,12 @@ class Linearizer(Kernel):
       acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
 
       if (tc:=self.tensor_core):
-        def calc_tc_idxs(local_size: int, aliases: List[List[int]]):
-          replace_idxs = []
-          for alias in aliases:
-            full_var, full_var_sz = NumNode(0), 1
-            if alias[0] != 0:
-              for i in alias:
-                next_var = local_idxs[-i] if i > 0 else Variable("_uidx_tc", 0, local_size-1)
-                full_var += next_var * full_var_sz
-                full_var_sz *= next_var.max+1
-            replace_idxs.append(full_var)
-          return replace_idxs
-        replace_acc_idxs = calc_tc_idxs(tc.thread_local_sizes[2], tc.thread_local_aliases[2])
+        tc_replace_idxs = tc.thread_local_aliases(*local_idxs[-tc.num_threads():],
+                                                  *[Variable("_uidx_tc", 0, lsz-1) for lsz in tc.thread_local_sizes], NumNode(0))
         for n in range(tc.num_threads()):
-          local_idxs[self.local_dims-tc.num_threads()+n] = replace_acc_idxs[n] # replace locals
-        for n in range(len(replace_acc_idxs)-tc.num_threads()):
-          upcast_idxs[n] = replace_acc_idxs[tc.num_threads()+n] # replace upcasts
+          local_idxs[self.local_dims-tc.num_threads()+n] = tc_replace_idxs[2][n] # replace locals
+        for n in range(len(tc_replace_idxs[2])-tc.num_threads()):
+          upcast_idxs[n] = tc_replace_idxs[2][tc.num_threads()+n] # replace upcasts
 
       # reduce loop
       loop_ctx = render_loop(reduce_idxs)
@@ -296,11 +286,10 @@ class Linearizer(Kernel):
         buf_idxs = [idx*0 if s == 0 else idx for idx,s in zip(global_idxs+local_idxs+reduce_idxs+full_upcast_idxs,self.sts[i].real_strides())]
         if self.tensor_core:
           min_alias_idx = min(self.local_alias.keys())
-          replace_input_idxs = calc_tc_idxs(self.tensor_core.thread_local_sizes[i-min_alias_idx], self.tensor_core.thread_local_aliases[i-min_alias_idx])  # noqa: E501
           for n in range(self.tensor_core.num_threads()):
-            buf_idxs[self.first_reduce-self.tensor_core.num_threads()+n] = replace_input_idxs[n] # replace locals
-          for n in range(len(replace_input_idxs)-self.tensor_core.num_threads()):
-            buf_idxs[self.shape_len-self.upcasted+n] = replace_input_idxs[self.tensor_core.num_threads()+n] # replace upcasts
+            buf_idxs[self.first_reduce-self.tensor_core.num_threads()+n] = tc_replace_idxs[i-min_alias_idx][n] # replace locals
+          for n in range(len(tc_replace_idxs[i-min_alias_idx])-self.tensor_core.num_threads()):
+            buf_idxs[self.shape_len-self.upcasted+n] = tc_replace_idxs[i-min_alias_idx][self.tensor_core.num_threads()+n] # replace upcasts
         if DEBUG >= 3: print(f"{localbuf_idx} alias {i}: idxs=", buf_idxs)
         ll = self.global_load(i, buf_idxs)
         locals_to_store.append((localbuf_idx, buf_idxs, ll))
