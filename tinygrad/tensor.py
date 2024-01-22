@@ -832,7 +832,7 @@ class Tensor:
     # inject nan if the base is negative and the power is not an integer
     to_nan = (((x - x.trunc()) * 1e10).abs().clip(0, 1) if isinstance(x, Tensor) else int(bool(x - int(x))) if not reverse else ((self - self.trunc()) * 1e10).abs().clip(0, 1)) * base_sign  # noqa: E501
     inject_nan = ((((-to_nan) * 2) + 1)).log().add(1) if isinstance(to_nan, Tensor) else 1 if not to_nan else float("nan")
-    return ar.mul(sign * base_sign + (1 - base_sign)).mul(inject_nan).cast(least_upper_dtype(self.dtype, x.dtype) if isinstance(x, Tensor) else self.dtype)
+    return ar.mul(sign * base_sign + (1 - base_sign)).mul(inject_nan).cast(least_upper_dtype(self.dtype, x.dtype) if isinstance(x, Tensor) else self.dtype)  # noqa: E501
   def xor(self, x:Tensor, reverse=False) -> Tensor: return mlops.Xor.apply(*self._broadcasted(x, reverse))
 
   # TODO: this implicitly changes dtype with /2
