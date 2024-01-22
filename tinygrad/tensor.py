@@ -615,13 +615,13 @@ class Tensor:
       xup = xup.reshape(noop_ + flatten((k,o,s) for k,o,s in zip(k_, o_, s_)))
       xup = xup.slice(noop_ + flatten(((0,k), (0,o), (0,1)) for k,o in zip(k_, o_)))
       xup = xup.reshape(noop_ + flatten((k,o) for k,o in zip(k_, o_)))
-      return xup.permute(*range(len(noop_)), *[len(noop_)+i*2+1 for i in range(len(k_))], *[len(noop_)+i*2 for i in range(len(k_))])
+      return xup.permute(*range(len(noop_)), *[len(noop_)+i*2+1 for i in range(len(i_))], *[len(noop_)+i*2 for i in range(len(i_))])
     # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
     o_ = [(i+(s-k))//s for i,s,k in zip(i_, s_, k_)]
     xup = self.slice(noop_ + [(0,o*s) for o,s in zip(o_, s_)])
     xup = xup.reshape(noop_ + flatten(((o,s) for o,s in zip(o_, s_))))
     xup = xup.slice(noop_ + flatten(((0,o), (0,k)) for o,k in zip(o_, k_)))
-    return xup.permute(*range(len(noop_)), *[len(noop_)+i*2 for i in range(len(k_))], *[len(noop_)+i*2+1 for i in range(len(k_))])
+    return xup.permute(*range(len(noop_)), *[len(noop_)+i*2 for i in range(len(i_))], *[len(noop_)+i*2+1 for i in range(len(i_))])
 
   # NOTE: these work for more than 2D
   def avg_pool2d(self, kernel_size=(2,2), stride=None, dilation=1): return self._pool(make_pair(kernel_size), stride if stride is not None else kernel_size, dilation).mean(axis=tuple(range(0-len(make_pair(kernel_size)), 0)))  # noqa: E501
