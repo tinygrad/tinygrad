@@ -189,7 +189,6 @@ def train_cifar():
     mask = make_square_mask(X.shape, mask_size)
     order = list(range(0, X.shape[0]))
     random.shuffle(order)
-    # NOTE: Memory access fault if use getitem directly
     X_patch = Tensor(X.numpy()[order,...])
     Y_patch = Tensor(Y.numpy()[order])
     X_cutmix = Tensor.where(mask, X_patch, X)
@@ -206,9 +205,14 @@ def train_cifar():
       order = list(range(0, X.shape[0]))
       random.shuffle(order)
       if is_train:
-        X = random_crop(X, crop_size=32)
-        X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < 0.5, X[..., ::-1], X) # flip LR
-        if step >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
+        # TODO: these are not jitted
+        if getenv("RANDOM_CROP", 1):
+          X = random_crop(X, crop_size=32)
+        if getenv("RANDOM_FLIP", 1):
+          X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < 0.5, X[..., ::-1], X) # flip LR
+        if getenv("CUTMIX", 1):
+          if step >= hyp['net']['cutmix_steps']:
+            X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
       X, Y = X.numpy(), Y.numpy()
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({cnt})")
