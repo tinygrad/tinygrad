@@ -87,14 +87,13 @@ class Linearizer(Kernel):
     localtype = self.get_base_dtype(buf.dtype if acc is None else get_lazyop_info(self.reduceop).dtype)
     const = buf.val if isinstance(buf, ConstBuffer) else acc
 
-    # upcast expansion in order that upcast variables first appear. only one upcast variable allowed per index position
     expand_vars = expand_idxs(idxs)
 
-    dim, amt, f4idx = None, 1, cast(Node, NumNode(0))
+    dim, amt = None, 1
     # float 4 grouping, only for unit-stride dim and unit-stride idx
-    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and isinstance(idxs[upcast_dim[0]], Variable) and \
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and idxs[upcast_dim[0]] in expand_vars and \
         len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [4,2]:
-      dim, amt, f4idx = upcast_dim[0], len(float4_expand), idxs[upcast_dim[0]]
+      dim, amt = upcast_dim[0], len(float4_expand)
       g_idx, g_valid = self.sts[i].expr_idxs(idxs[:dim] + [float4_expand[0]] + idxs[dim+1:])
       # do not use float4 if idx is not aligned
       if g_idx != (g_idx//amt*amt): dim, amt = None, 1
@@ -102,11 +101,11 @@ class Linearizer(Kernel):
       g_idx, g_valid = self.sts[i].expr_idxs(idxs)
 
     if amt > 1: localtype = localtype.vec(amt)
-    e_idxs, e_valids, e_f4idx = expand_node(g_idx, expand_vars), expand_node(g_valid, expand_vars), expand_node(f4idx, expand_vars)
+    e_idxs, e_valids = expand_node(g_idx, expand_vars), expand_node(g_valid, expand_vars)
 
     ret = []
     invalid_value = 0 if dtypes.is_int(buf.dtype) else 0.0
-    for idx, valid, f4_off in zip(e_idxs, e_valids, e_f4idx):
+    for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, NumNode(0), NumNode(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
@@ -139,7 +138,7 @@ class Linearizer(Kernel):
           rendered_idx = idx.render(self.render_ops, self)
           valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
           self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
-      ret.append(self.uop(UOps.GEP, localtype.scalar(), (self.load_cache[key],), f4_off.b) if dim is not None else self.load_cache[key])
+      ret.append(self.uop(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[expand_vars.index(idxs[dim])]) if dim is not None else self.load_cache[key])
     return ret
 
   def global_store(self, i:int, idxs:List[Node], store:List[UOp]) -> List[UOp]:
@@ -152,7 +151,7 @@ class Linearizer(Kernel):
     store_offset = dict(zip(_idxs, store))
 
     # float 4 grouping, only for unit-stride dim and unit-stride idx
-    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and isinstance(idxs[upcast_dim[0]], Variable) and \
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and idxs[upcast_dim[0]] in expand_vars and \
         len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [2,4]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
