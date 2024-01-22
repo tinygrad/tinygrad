@@ -4,8 +4,6 @@ from tinygrad import Tensor, dtypes
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import prod, flatten
 from extra.onnx import safe_numpy, DTYPE_MAP
-from onnx.helper import tensor_dtype_to_np_dtype
-from onnx import TensorProto
 import numpy as np
 
 tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
@@ -210,7 +208,7 @@ def _format_padding(onnx_pads, ndims=None, axes=None):
 def _padding(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
   if auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
   elif ceil_mode and auto_pad=="NOTSET": # stupid ceil_mode case
-    if strides is not None: strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
+    if strides is not None: strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides or [1]*len(kernel_shape)
     if dilations is not None: dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
     out_spatial_shape = [math.ceil((sh - dil * (ker-1)-1)/st + 1) if ceil_mode else math.floor((sh - dil * (ker-1)-1)/st + 1) for sh, st, ker, dil in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
     pad_shape = [(osh-1)*st+((ks-1)*dil+1)-ish for osh, st, ks, dil, ish in zip(out_spatial_shape, strides, kernel_shape, dilations, X.shape[-len(kernel_shape):])]
@@ -221,7 +219,7 @@ def _padding(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=
   return X.pad(tuple(pads), value=constant_value)
 
 def _auto_pad(X: Tensor, auto_pad, strides, kernel_shape, dilations):
-  strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
+  strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides or [1]*len(kernel_shape)
   dilations = [1]*len(kernel_shape) if dilations == 1 else dilations
   if auto_pad == "SAME_UPPER" or auto_pad == "SAME_LOWER":
     pad_shape = [(math.ceil(sh/st)-1)*st+((ks-1)*di+1)-sh for sh, st, ks, di in zip(X.shape[-len(kernel_shape):], strides, kernel_shape, dilations)]
@@ -473,8 +471,8 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
       scale = max(scales)
       sizes = _round(Tensor(list(X.shape[-2:]))*scale, 0.5, "round_up")
       sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
-  output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)]
-  output_shape_ = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
+  output_shape = sizes or [math.floor(x*s) for x,s in zip(X.shape, scales)]
+  output_shape_ = sizes or [x*s for x,s in zip(X.shape, scales)]
   scales_ = [os/xs for xs, os in zip(X.shape, output_shape)]
   x_out = Tensor.arange(output_shape[-1], dtype=dtypes.default_float)
   y_out = Tensor.arange(output_shape[-2], dtype=dtypes.default_float)

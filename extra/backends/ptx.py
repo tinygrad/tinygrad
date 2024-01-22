@@ -46,7 +46,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> str
   r: Dict[UOp, str] = {}
   def ssa(u, prefix="t", dtype=None) -> str:
     nonlocal c, r
-    prefix += f"_{dtype if dtype else lang.types[u.dtype]}_"
+    prefix += f"_{dtype or lang.types[u.dtype]}_"
     c[prefix] += 1
     if u: r[u] = f"%{prefix}{c[prefix]-1}"
     return f"%{prefix}{c[prefix]-1}"

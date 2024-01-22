@@ -200,7 +200,7 @@ def clip_boxes(boxes, shape):
   return boxes
 
 def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None):
-  gain = ratio_pad if ratio_pad else min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])
+  gain = ratio_pad or min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])
   pad = ((img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2)
   boxes_np = boxes.numpy() if isinstance(boxes, Tensor) else boxes
   boxes_np[..., [0, 2]] -= pad[0]
