@@ -87,7 +87,7 @@ class Linearizer(Kernel):
     localtype = self.get_base_dtype(buf.dtype if acc is None else get_lazyop_info(self.reduceop).dtype)
     const = buf.val if isinstance(buf, ConstBuffer) else acc
 
-    expand_vars = expand_idxs(idxs)  # upcast expansion depends on order that upcast variables appear
+    expand_vars = expand_idxs(idxs)  # upcast expansion in order that upcast variables appear
 
     dim, amt, f4idx = None, 1, cast(Node, NumNode(0))
     # float 4 grouping, only for unit-stride dim and unit-stride idx
