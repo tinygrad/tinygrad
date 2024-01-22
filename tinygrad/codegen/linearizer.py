@@ -151,7 +151,8 @@ class Linearizer(Kernel):
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
-    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [2,4]:
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and isinstance(idxs[upcast_dim[0]], Variable) and \
+        len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [2,4]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
         _idx = k[:upcast_dim[0]] + (float4_expand[0],) + k[upcast_dim[0]+1:]
