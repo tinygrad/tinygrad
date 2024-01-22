@@ -605,10 +605,8 @@ class Tensor:
     noop_, i_ = [None] * len(self.shape[:-len(k_)]), self.shape[-len(k_):]
     if any(k > s for k,s in zip(k_, s_)) or any(d != 1 for d in d_):
       o_ = [(i - d * (k-1) - 1)//s + 1 for i,d,k,s in zip(i_, d_, k_, s_)]
-      # expands such that we don't need padding
-      e_ = [math.ceil(k*(i+d) / i) for k,i,d in zip(k_, i_, d_)]
-      xup = self.reshape(noop_ + flatten((1,i) for i in i_))
-      xup = xup.expand(noop_ + flatten((e,i) for e,i in zip(e_, i_))).reshape(noop_ + [e*i for e,i in zip(e_, i_)])
+      # repeats such that we don't need padding
+      xup = self.repeat([1]*len(noop_) + [math.ceil(k*(i+d) / i) for k,i,d in zip(k_, i_, d_)])
       # slice by dilation
       xup = xup.slice(noop_ + [(0,k*(i+d)) for k,i,d in zip(k_, i_, d_)]).reshape(noop_ + flatten((k,i+d) for k,i,d in zip(k_, i_, d_)))
       # handle stride
