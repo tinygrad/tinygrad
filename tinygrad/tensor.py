@@ -605,16 +605,16 @@ class Tensor:
     noop_, i_ = [None] * len(self.shape[:-len(k_)]), self.shape[-len(k_):]
     if any(k > s for k,s in zip(k_, s_)) or any(d != 1 for d in d_):
       o_ = [(i - d * (k-1) - 1)//s + 1 for i,d,k,s in zip(i_, d_, k_, s_)]
-      e_ = [math.ceil(k*(i+d) / i) for k,i,d in zip(k_, i_, d_)]  # expands such that we don't need padding
-      xup = self.reshape(noop_ + flatten((1,i) for i in i_)).expand(noop_ + flatten((e,i) for e,i in zip(e_, i_))).reshape(noop_ + [e*i for e,i in zip(e_, i_)])  # noqa: E501
-      # slide by dilation
-      xup = xup.slice(noop_ + [(0,k*(i+d)) for k,i,d in zip(k_, i_, d_)])
-      xup = xup.reshape(noop_ + flatten((k,i+d) for k,i,d in zip(k_, i_, d_)))
-      xup = xup.slice(noop_ + flatten(((0,k), (0,o*s)) for k,o,s in zip(k_, o_, s_)))
-      # handle stride, and permute to move reduce to the end
-      xup = xup.reshape(noop_ + flatten((k,o,s) for k,o,s in zip(k_, o_, s_)))
-      xup = xup.slice(noop_ + flatten(((0,k), (0,o), (0,1)) for k,o in zip(k_, o_)))
-      xup = xup.reshape(noop_ + flatten((k,o) for k,o in zip(k_, o_)))
+      # expands such that we don't need padding
+      e_ = [math.ceil(k*(i+d) / i) for k,i,d in zip(k_, i_, d_)]
+      xup = self.reshape(noop_ + flatten((1,i) for i in i_))
+      xup = xup.expand(noop_ + flatten((e,i) for e,i in zip(e_, i_))).reshape(noop_ + [e*i for e,i in zip(e_, i_)])
+      # slice by dilation
+      xup = xup.slice(noop_ + [(0,k*(i+d)) for k,i,d in zip(k_, i_, d_)]).reshape(noop_ + flatten((k,i+d) for k,i,d in zip(k_, i_, d_)))
+      # handle stride
+      xup = xup.slice(noop_ + flatten(((0,k), (0,o*s)) for k,o,s in zip(k_, o_, s_))).reshape(noop_ + flatten((k,o,s) for k,o,s in zip(k_, o_, s_)))
+      xup = xup.slice(noop_ + flatten(((0,k), (0,o), (0,1)) for k,o in zip(k_, o_))).reshape(noop_ + flatten((k,o) for k,o in zip(k_, o_)))
+      # permute to move reduce to the end
       return xup.permute(*range(len(noop_)), *[len(noop_)+i*2+1 for i in range(len(i_))], *[len(noop_)+i*2 for i in range(len(i_))])
     # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
     o_ = [(i+(s-k))//s for i,s,k in zip(i_, s_, k_)]
