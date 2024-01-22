@@ -279,7 +279,7 @@ class Linearizer(Kernel):
         buf_idxs = [idx*0 if s == 0 else idx for idx,s in zip(global_idxs+local_idxs+reduce_idxs+full_upcast_idxs,self.sts[i].real_strides())]
         if (tc:=self.tensor_core):
           tc_replace_idxs = tc.thread_local_aliases(*local_idxs[-tc.num_threads():],
-                                                    *[Variable("_uidx_tc", 0, lsz - 1) for lsz in tc.thread_local_sizes], NumNode(0))
+                                                    *[Variable("_uidx_tc", 0, lsz - 1) for lsz in tc.thread_local_sizes[:-1]], NumNode(0))
           min_alias_idx = min(self.local_alias.keys())
           for n in range(tc.num_threads()):
             buf_idxs[self.first_reduce-tc.num_threads()+n] = tc_replace_idxs[i-min_alias_idx][n] # replace locals
