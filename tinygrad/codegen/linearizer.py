@@ -105,7 +105,7 @@ class Linearizer(Kernel):
 
     ret = []
     invalid_value = 0 if dtypes.is_int(buf.dtype) else 0.0
-    for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
+    for idx, valid, f4pos in zip(e_idxs, e_valids, expand_node(NumNode(0) if dim is None else idxs[dim], expand_vars)):
       this_const, idx, valid = (invalid_value, NumNode(0), NumNode(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
@@ -138,7 +138,7 @@ class Linearizer(Kernel):
           rendered_idx = idx.render(self.render_ops, self)
           valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
           self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
-      ret.append(self.uop(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[expand_vars.index(idxs[dim])]) if dim is not None else self.load_cache[key])
+      ret.append(self.uop(UOps.GEP, localtype.scalar(), (self.load_cache[key],), f4pos.b) if dim is not None else self.load_cache[key])
     return ret
 
   def global_store(self, i:int, idxs:List[Node], store:List[UOp]) -> List[UOp]:
