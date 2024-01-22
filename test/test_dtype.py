@@ -397,40 +397,12 @@ class TestAutoCastType(unittest.TestCase):
       # float16 can have larger precision errors
       np.testing.assert_allclose(func(Tensor(a, dtype=dtype)).numpy(), func(torch.tensor(a)), rtol=1e-3, atol=1e-3)
 
-  @given(strat.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
-  def test_broadcast_float(self, default_float):
-    dtypes.default_float = default_float
-    assert (Tensor.rand(4, 4, dtype=dtypes.bool) + 2.3).dtype == dtypes.default_float
-    assert (Tensor.rand(4, 4, dtype=dtypes.int) + 2.3).dtype == dtypes.default_float
-    assert (Tensor.rand(4, 4, dtype=dtypes.int8) + 2.3).dtype == dtypes.default_float
-    assert (Tensor.rand(4, 4, dtype=dtypes.uint64) + 2.3).dtype == dtypes.default_float
-    assert (Tensor.rand(4, 4, dtype=dtypes.float16) + 2.3).dtype == dtypes.float16
-    assert (Tensor.rand(4, 4, dtype=dtypes.bfloat16) + 2.3).dtype == dtypes.bfloat16
-    assert (Tensor.rand(4, 4, dtype=dtypes.float32) + 2.3).dtype == dtypes.float32
-    assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2.3).dtype == dtypes.float64
-
-  @given(strat.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]))
-  def test_broadcast_int(self, default_int):
-    dtypes.default_int = default_int
-    assert (Tensor.rand(4, 4, dtype=dtypes.bool) + 2).dtype == dtypes.default_int
-    assert (Tensor.rand(4, 4, dtype=dtypes.int) + 2).dtype == dtypes.int
-    assert (Tensor.rand(4, 4, dtype=dtypes.int8) + 2).dtype == dtypes.int8
-    assert (Tensor.rand(4, 4, dtype=dtypes.uint64) + 2).dtype == dtypes.uint64
-    assert (Tensor.rand(4, 4, dtype=dtypes.float16) + 2).dtype == dtypes.float16
-    assert (Tensor.rand(4, 4, dtype=dtypes.bfloat16) + 2).dtype == dtypes.bfloat16
-    assert (Tensor.rand(4, 4, dtype=dtypes.float32) + 2).dtype == dtypes.float32
-    assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2).dtype == dtypes.float64
-
-  def test_broadcast_bool(self):
-    if Device.DEFAULT != "WEBGPU":
-      assert (Tensor([0, 1], dtype=dtypes.bool) + True).dtype == dtypes.bool
-    assert (Tensor([0, 1], dtype=dtypes.int) + True).dtype == dtypes.int32
-    assert (Tensor([0, 1], dtype=dtypes.int8) + True).dtype == dtypes.int8
-    assert (Tensor([0, 1], dtype=dtypes.uint64) + True).dtype == dtypes.uint64
-    assert (Tensor([0, 1], dtype=dtypes.float16) + True).dtype == dtypes.float16
-    assert (Tensor([0, 1], dtype=dtypes.bfloat16) + True).dtype == dtypes.bfloat16
-    assert (Tensor([0, 1], dtype=dtypes.float32) + True).dtype == dtypes.float32
-    assert (Tensor([0, 1], dtype=dtypes.float64) + True).dtype == dtypes.float64
+  @given(strat.sampled_from(core_dtypes))
+  def test_broadcast(self, dt):
+    assert(Tensor.rand(4, 4, dtype=dt) + 2.3).dtype == (dt if dt >= dtypes.float16 else dtypes.default_float)
+    assert(Tensor.rand(4, 4, dtype=dt) + 2).dtype == (dt if dt >= dtypes.int8 else dtypes.default_int)
+    if Device.DEFAULT != "WEBGPU" and dt != dtypes.bool:
+      assert(Tensor.rand(4, 4, dtype=dt) + True).dtype == dt
 
   def test_sum(self):
     assert (Tensor([0, 1], dtype=dtypes.bool)).sum().dtype == dtypes.int32
