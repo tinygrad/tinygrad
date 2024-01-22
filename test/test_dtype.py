@@ -492,14 +492,17 @@ class TestAutoCastType(unittest.TestCase):
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_maximum(self, dt1, dt2):
-    Tensor([0, 1, 2], dtype=dt1).maximum(Tensor([2, 0, 5], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
+    # TODO bool and bool casts to int
+    if dt1 != dtypes.bool and dt2 != dtypes.bool:
+      assert Tensor([0, 1, 2], dtype=dt1).maximum(Tensor([2, 0, 5], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
 
   @given(strat.sampled_from(core_dtypes))
   def test_maximum_const(self, dt):
     assert Tensor([1, 2], dtype=dt).maximum(3.1).dtype == (dt if dt >= dtypes.float16 else dtypes.default_float)
     assert Tensor([1, 2], dtype=dt).maximum(3).dtype == (dt if dt >= dtypes.int8 else dtypes.default_int)
-    # TODO :D
-    # assert Tensor([1, 2], dtype=dt).maximum(True).dtype == dt
+    # TODO bool and bool casts to int
+    if dt != dtypes.bool:
+      assert Tensor([1, 2], dtype=dt).maximum(True).dtype == dt
 
 if __name__ == '__main__':
   unittest.main()
