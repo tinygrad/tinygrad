@@ -398,7 +398,7 @@ class TestAutoCastType(unittest.TestCase):
       np.testing.assert_allclose(func(Tensor(a, dtype=dtype)).numpy(), func(torch.tensor(a)), rtol=1e-3, atol=1e-3)
 
   @given(strat.sampled_from(core_dtypes))
-  def test_broadcast(self, dt):
+  def test_broadcast_scalar(self, dt):
     assert(Tensor.rand(4, 4, dtype=dt) + 2.3).dtype == (dt if dt >= dtypes.float16 else dtypes.default_float)
     assert(Tensor.rand(4, 4, dtype=dt) + 2).dtype == (dt if dt >= dtypes.int8 else dtypes.default_int)
     if Device.DEFAULT != "WEBGPU" and dt != dtypes.bool:
@@ -444,11 +444,11 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([True, False]).where(other, input_)).dtype == data_type
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
-  def test_where(self, dt1, dt2):
+  def test_where_no_scalar(self, dt1, dt2):
     self.check_where_alternate_input_other(Tensor(2, dtype=dt1), Tensor(3, dtype=dt2), least_upper_dtype(dt1, dt2))
 
   @given(strat.sampled_from(core_dtypes))
-  def test_where_scalar(self, dt):
+  def test_where_one_scalar(self, dt):
     t = Tensor(2, dtype=dt)
     self.check_where_alternate_input_other(t, 3.2, (dt if dt >= dtypes.float16 else dtypes.default_float))
     self.check_where_alternate_input_other(t, 3, (dt if dt >= dtypes.int8 else dtypes.default_int))
