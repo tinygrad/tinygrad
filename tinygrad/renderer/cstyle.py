@@ -138,7 +138,16 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]))
         depth += 1
       elif uop == UOps.WMMA:
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
+        if args == "__hmma_m16n16k16_mma_f32f32":
+          a_frag = ssa(u, 'a_frag')
+          b_frag = ssa(u, 'b_frag')
+          kk(f"half8 {a_frag} = {r[vin[0]]};")
+          kk(f"half8 {b_frag} = {r[vin[1]]};")
+          acc = ssa(u, 'wmma')
+          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {acc} = {r[vin[2]]};")
+          kk(f"{args}((float*)&{acc}, (int *)&{a_frag}, (int *)&{b_frag}, (const float*)&{acc}, 0, 0);")
+        else:
+          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
       elif uop == UOps.ALU:
         # remove parens if ALU types are the same. TODO: can do more here
         if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.XOR}:
@@ -194,7 +203,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       else:
         raise RuntimeError(f"failed to render {uop}")
 
-  return lang.render_kernel(function_name, kernel, bufs, local_size, prekernel)
+  code = lang.render_kernel(function_name, kernel, bufs, local_size, prekernel)
+  print(code)
+  return code
 
 class OpenCLLanguage(CStyleLanguage):
   kernel_prefix = "__kernel "
@@ -251,8 +262,27 @@ class CUDALanguage(CStyleLanguage):
   }
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
   half_prekernel ="#include <cuda_fp16.h>\n"+"#include <cuda_bf16.h>\n"+"""
-    struct half4 { half x, y, z, w; };
-    __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
+    typedef union {
+      struct __align__(8) half4 {
+        half x, y, z, w;
+      };
+      half data[4];
+    } half4;
+    __device__ half4 make_half4(half x, half y, half z, half w) { return {x, y, z, w}; }
+    typedef union {
+      struct __align__(16) half8 {
+        half x, y, z, w, a, b, c, d;
+      };
+      half data[8];
+    } half8;
+    __device__ half8 make_half8(half x, half y, half z, half w, half a, half b, half c, half d) { return {x, y, z, w, a, b, c, d}; };
+    typedef union {
+      struct __align__(16) float8 {
+        float x, y, z, w, a, b, c, d;
+      };
+      float data[8];
+    } float8;
+    __device__ float8 make_float8(float x, float y, float z, float w, float a, float b, float c, float d) { return {x, y, z, w, a, b, c, d}; };
   """
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
