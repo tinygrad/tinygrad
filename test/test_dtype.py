@@ -54,10 +54,6 @@ def _test_cast(a:Tensor, target_dtype:DType):
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or a.numpy().view(target_dtype.np).tolist())
 
-def where_alternate_input_other(input_, other, data_type):
-  assert (Tensor([True, False]).where(input_, other)).dtype == data_type
-  assert (Tensor([True, False]).where(other, input_)).dtype == data_type
-
 class TestDType(unittest.TestCase):
   DTYPE: Any = None
   DATA: Any = None
@@ -470,34 +466,38 @@ class TestAutoCastType(unittest.TestCase):
   def test_matmul(self, dt1, dt2):
     assert (Tensor([0, 1], dtype=dt1) @ Tensor([0, 1], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
 
+  @staticmethod
+  def check_where_alternate_input_other(input_, other, data_type):
+    assert (Tensor([True, False]).where(input_, other)).dtype == data_type
+    assert (Tensor([True, False]).where(other, input_)).dtype == data_type
+
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_where(self, dt1, dt2):
-    assert (Tensor([True, False]).where(Tensor(2, dtype=dt1), Tensor(3, dtype=dt2))).dtype == least_upper_dtype(dt1, dt2)
+    self.check_where_alternate_input_other(Tensor(2, dtype=dt1), Tensor(3, dtype=dt2), least_upper_dtype(dt1, dt2))
 
   @given(strat.sampled_from(core_dtypes))
   def test_where_scalar(self, dt):
     t = Tensor(2, dtype=dt)
     if dtypes.is_float(dt):
-      where_alternate_input_other(t, 3.2, dt)
-      where_alternate_input_other(t, 3, dt)
-      where_alternate_input_other(t, True, dt)
+      self.check_where_alternate_input_other(t, 3.2, dt)
+      self.check_where_alternate_input_other(t, 3, dt)
+      self.check_where_alternate_input_other(t, True, dt)
     elif dtypes.is_int(dt):
-      where_alternate_input_other(t, 3.2, dtypes.default_float)
-      where_alternate_input_other(t, 3, dt)
-      where_alternate_input_other(t, True, dt)
+      self.check_where_alternate_input_other(t, 3.2, dtypes.default_float)
+      self.check_where_alternate_input_other(t, 3, dt)
+      self.check_where_alternate_input_other(t, True, dt)
     else:
-      where_alternate_input_other(t, 3.2, dtypes.default_float)
-      where_alternate_input_other(t, 3, dtypes.default_int)
-      where_alternate_input_other(t, True, dt)
+      self.check_where_alternate_input_other(t, 3.2, dtypes.default_float)
+      self.check_where_alternate_input_other(t, 3, dtypes.default_int)
+      self.check_where_alternate_input_other(t, True, dt)
 
-
-  def where_where_two_consts(self):
-    where_alternate_input_other(3.1, 3.2, dtypes.default_float)
-    where_alternate_input_other(3.1, 3, dtypes.default_float)
-    where_alternate_input_other(3.1, True, dtypes.default_float)
-    where_alternate_input_other(3, 2, dtypes.default_int)
-    where_alternate_input_other(3, True, dtypes.default_int)
-    where_alternate_input_other(False, True, dtypes.bool)
+  def test_where_two_scalars(self):
+    self.check_where_alternate_input_other(3.1, 3.2, dtypes.default_float)
+    self.check_where_alternate_input_other(3.1, 3, dtypes.default_float)
+    self.check_where_alternate_input_other(3.1, True, dtypes.default_float)
+    self.check_where_alternate_input_other(3, 2, dtypes.default_int)
+    self.check_where_alternate_input_other(3, True, dtypes.default_int)
+    self.check_where_alternate_input_other(False, True, dtypes.bool)
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_maximum(self, dt1, dt2):
