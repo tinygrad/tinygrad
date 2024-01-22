@@ -572,11 +572,11 @@ class TestLinearizerHelper(unittest.TestCase):
     assert expand_node(a) == [a]
 
   def test_variable_expand_expr_none(self):
-    a = Variable(None, 5, 7)
+    a = Variable("_uidx0", 5, 7)
     assert expand_node(a) == [NumNode(5), NumNode(6), NumNode(7)]
 
   def test_mul_node_expand(self):
-    a = Variable(None, 5, 7)
+    a = Variable("_uidx0", 5, 7)
     m = MulNode(a, 3)
     assert expand_node(m) == [NumNode(15), NumNode(18), NumNode(21)]
 
@@ -585,7 +585,7 @@ class TestLinearizerHelper(unittest.TestCase):
     assert expand_node(n) == [Variable("b", 1, 3)*3]
 
   def test_sum_node_expand(self):
-    a = Variable(None, 1, 3)
+    a = Variable("_uidx0", 1, 3)
     b = Variable("b", 5, 7)
 
     s1 = create_rednode(SumNode, [a, b])

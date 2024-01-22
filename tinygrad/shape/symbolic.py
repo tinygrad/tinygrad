@@ -124,7 +124,7 @@ class Variable(Node):
     if nmin == nmax: return NumNode(nmin)
     return super().__new__(cls)
 
-  def __init__(self, expr:Optional[str], nmin:int, nmax:int):
+  def __init__(self, expr:str, nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
     self._val: Optional[int] = None
   @property
