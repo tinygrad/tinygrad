@@ -7,8 +7,12 @@ from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import time_linearizer, beam_search, bufs_from_lin
 from tinygrad.helpers import ansilen, DEBUG, getenv
 from tinygrad.shape.symbolic import sym_infer
+from tinygrad.dtype import dtypes
 
 if __name__ == "__main__":
+  if getenv("HALF"):
+    dtypes.default_float = dtypes.half
+
   mdl = ResNet50()
   seen = set()
 
