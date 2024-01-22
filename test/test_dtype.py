@@ -478,18 +478,9 @@ class TestAutoCastType(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes))
   def test_where_scalar(self, dt):
     t = Tensor(2, dtype=dt)
-    if dtypes.is_float(dt):
-      self.check_where_alternate_input_other(t, 3.2, dt)
-      self.check_where_alternate_input_other(t, 3, dt)
-      self.check_where_alternate_input_other(t, True, dt)
-    elif dtypes.is_int(dt):
-      self.check_where_alternate_input_other(t, 3.2, dtypes.default_float)
-      self.check_where_alternate_input_other(t, 3, dt)
-      self.check_where_alternate_input_other(t, True, dt)
-    else:
-      self.check_where_alternate_input_other(t, 3.2, dtypes.default_float)
-      self.check_where_alternate_input_other(t, 3, dtypes.default_int)
-      self.check_where_alternate_input_other(t, True, dt)
+    self.check_where_alternate_input_other(t, 3.2, (dt if dt >= dtypes.float16 else dtypes.default_float))
+    self.check_where_alternate_input_other(t, 3, (dt if dt >= dtypes.int8 else dtypes.default_int))
+    self.check_where_alternate_input_other(t, True, dt)
 
   def test_where_two_scalars(self):
     self.check_where_alternate_input_other(3.1, 3.2, dtypes.default_float)
@@ -503,15 +494,12 @@ class TestAutoCastType(unittest.TestCase):
   def test_maximum(self, dt1, dt2):
     Tensor([0, 1, 2], dtype=dt1).maximum(Tensor([2, 0, 5], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
 
-  def test_maximum_const(self):
-    assert Tensor([1, 2], dtype=dtypes.float16).maximum(3.1).dtype == dtypes.float16
-    assert Tensor([1, 2], dtype=dtypes.float64).maximum(3.1).dtype == dtypes.float64
-    assert Tensor([1, 2], dtype=dtypes.float16).maximum(3).dtype == dtypes.float16
-    assert Tensor([1, 2], dtype=dtypes.float64).maximum(3).dtype == dtypes.float64
-    assert Tensor([1, 2], dtype=dtypes.int64).maximum(3.1).dtype == dtypes.default_float
-    assert Tensor([1, 2], dtype=dtypes.int16).maximum(3.1).dtype == dtypes.default_float
-    assert Tensor([1, 2], dtype=dtypes.int64).maximum(3).dtype == dtypes.int64
-    assert Tensor([1, 2], dtype=dtypes.int16).maximum(3).dtype == dtypes.int16
+  @given(strat.sampled_from(core_dtypes))
+  def test_maximum_const(self, dt):
+    assert Tensor([1, 2], dtype=dt).maximum(3.1).dtype == (dt if dt >= dtypes.float16 else dtypes.default_float)
+    assert Tensor([1, 2], dtype=dt).maximum(3).dtype == (dt if dt >= dtypes.int8 else dtypes.default_int)
+    # TODO :D
+    # assert Tensor([1, 2], dtype=dt).maximum(True).dtype == dt
 
 if __name__ == '__main__':
   unittest.main()
