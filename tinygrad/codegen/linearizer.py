@@ -279,10 +279,10 @@ class Linearizer(Kernel):
             replace_idxs.append(full_var)
           return replace_idxs
         replace_acc_idxs = calc_tc_idxs(tc.thread_local_sizes[2], tc.thread_local_aliases[2])
-        for n in range(len(tc.threads)):
-          local_idxs[self.local_dims-len(tc.threads)+n] = replace_acc_idxs[n] # replace locals
-        for n in range(len(replace_acc_idxs)-len(tc.threads)):
-          upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
+        for n in range(tc.num_threads()):
+          local_idxs[self.local_dims-tc.num_threads()+n] = replace_acc_idxs[n] # replace locals
+        for n in range(len(replace_acc_idxs)-tc.num_threads()):
+          upcast_idxs[n] = replace_acc_idxs[tc.num_threads()+n] # replace upcasts
 
       # reduce loop
       loop_ctx = render_loop(reduce_idxs)
@@ -298,10 +298,10 @@ class Linearizer(Kernel):
         if self.tensor_core:
           min_alias_idx = min(self.local_alias.keys())
           replace_input_idxs = calc_tc_idxs(self.tensor_core.thread_local_sizes[i-min_alias_idx], self.tensor_core.thread_local_aliases[i-min_alias_idx])  # noqa: E501
-          for n in range(len(self.tensor_core.threads)):
-            buf_idxs[self.first_reduce-len(self.tensor_core.threads)+n] = replace_input_idxs[n] # replace locals
-          for n in range(len(replace_input_idxs)-len(self.tensor_core.threads)):
-            buf_idxs[self.shape_len-self.upcasted+n] = replace_input_idxs[len(self.tensor_core.threads)+n] # replace upcasts
+          for n in range(self.tensor_core.num_threads()):
+            buf_idxs[self.first_reduce-self.tensor_core.num_threads()+n] = replace_input_idxs[n] # replace locals
+          for n in range(len(replace_input_idxs)-self.tensor_core.num_threads()):
+            buf_idxs[self.shape_len-self.upcasted+n] = replace_input_idxs[self.tensor_core.num_threads()+n] # replace upcasts
         if DEBUG >= 3: print(f"{localbuf_idx} alias {i}: idxs=", buf_idxs)
         ll = self.global_load(i, buf_idxs)
         locals_to_store.append((localbuf_idx, buf_idxs, ll))
