@@ -23,7 +23,7 @@ def get_fuzz_rawbufs(lin):
   rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True, size=rawbufs[0].size+RED_AREA_SIZE)
   with Context(DEBUG=0):
     for rawbuf in rawbufs[1:]:
-      t = Tensor.uniform((rawbuf.size,), dtype=rawbuf.dtype)
+      t = Tensor(np.random.uniform((rawbuf.size,)), dtype=rawbuf.dtype)
       rawbuf.copyin(t.realize().lazydata.realized.as_buffer())
   return rawbufs
 
