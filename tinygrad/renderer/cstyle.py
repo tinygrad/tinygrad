@@ -8,7 +8,6 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 
 class CStyleLanguage(NamedTuple):
   size_prefix: str = "int"
-  generic_var_prefix: str = ""
   kernel_prefix: str = ""
   buffer_prefix: str = ""
   buffer_suffix: str = ""
@@ -70,7 +69,7 @@ class CStyleLanguage(NamedTuple):
     return self.smem_align + self.smem_prefix + f"{dtype.name} {name}[{size}];"
 
   def render_for(self, expr: str, _min:Union[int,str], _max:Union[int,str]) -> str:
-    return f"for ({self.generic_var_prefix if self.generic_var_prefix else 'int'} {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
+    return f"for (int {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
 
   def render_if(self, cond: str): return f"if ({cond}) {{"
 
@@ -122,8 +121,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
     if uop == UOps.IF:
       kk(lang.render_if(r[vin[0]]))
       depth += 1
-    elif uop == UOps.BARRIER:
-      kk(lang.barrier)
+    elif uop == UOps.BARRIER: kk(lang.barrier)
     elif uop == UOps.END:
       depth -= 1
       kk("}")
@@ -137,8 +135,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       if uop == UOps.LOOP:
         kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]))
         depth += 1
-      elif uop == UOps.WMMA:
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")  # noqa: E501
+      elif uop == UOps.WMMA: kk(f"{dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
+      elif uop == UOps.DEFINE_ACC: kk(f"{dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
+      elif uop == UOps.CONST: r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
       elif uop == UOps.ALU:
         # remove parens if ALU types are the same. TODO: can do more here
         if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.XOR}:
@@ -150,20 +149,16 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         if child_count[u] <= 1 and args != BinaryOps.MAX and not getenv("EXPAND_SSA"):
           r[u] = val
         else:
-          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'alu')} = {val};")
-      elif uop == UOps.DEFINE_ACC:
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
+          kk(f"{dtype.name} {ssa(u,'alu')} = {val};")
       elif uop == UOps.SPECIAL:
         kk(f"{lang.size_prefix} {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
         if args[1].startswith("l"): local_size.append(args[2])
         r[u] = args[1]
-      elif uop == UOps.CONST:
-        r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
       elif uop == UOps.LOAD:
         val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
         # NOTE: this relies on the load not happening if it's in the unselected branch
         if len(vin) > 3: val = lang.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
-        kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.render_dtype(dtype)} {ssa(u,'val')} = {val};")
+        kk(f"{lang.render_dtype(dtype)} {ssa(u,'val')} = {val};")
       elif uop == UOps.PHI:
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
         r[u] = r[vin[0]]
@@ -171,12 +166,12 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         if isinstance(args, tuple) and args[1]:  # bitcast
           assert len(vin) == 1
           precast = ssa(None,'precast')
-          kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else lang.render_dtype(cast(DType, vin[0].dtype))} {precast} = {r[vin[0]]};")
+          kk(f"{lang.render_dtype(cast(DType, vin[0].dtype))} {precast} = {r[vin[0]]};")
           val = lang.render_cast([precast], dtype, bitcast=True)
         else:
           val = lang.render_cast([r[x] for x in vin], dtype, bitcast=False)
         if child_count[u] <= 1: r[u] = val
-        else: kk(f"{lang.generic_var_prefix if lang.generic_var_prefix else dtype.name} {ssa(u,'cast')} = {val};")
+        else: kk(f"{dtype.name} {ssa(u,'cast')} = {val};")
       elif uop == UOps.DEFINE_LOCAL:
         if lang.external_local_bufs:
           prekernel.append(lang.render_local(args[0], dtype, args[1]))
