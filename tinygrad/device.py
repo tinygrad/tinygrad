@@ -7,6 +7,7 @@ from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_i
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op, GlobalCounters, MovementOps
+from dataclasses import dataclass
 
 if TYPE_CHECKING:
   from tinygrad.codegen.linearizer import Linearizer
@@ -65,13 +66,18 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:int, var_vals: Optiona
 
 # **************** Buffer / Allocator ****************
 
+@dataclass(frozen=True, eq=True)
+class BufferOptions:
+  image: Optional[ImageDType] = None
+  uncached: bool = False
+
 class Buffer:
-  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None):
+  def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None):
     assert isinstance(dtype, DType)
-    self.device, self.size, self.dtype, self.d = device, size, dtype, Device[device]
+    if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
+    self.device, self.size, self.dtype, self.d, self.options = device, size, dtype, Device[device], options
     self.allocator = self.d.allocator
-    # TODO: image hack shouldn't be here. where should it be?
-    self._buf = opaque if opaque is not None else self.allocator.alloc(dtype if isinstance(dtype, ImageDType) else self.nbytes)
+    self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, options)
     # TODO: mem_used for all devices
     if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
   @property
@@ -79,8 +85,7 @@ class Buffer:
   def __del__(self):
     if not hasattr(self, '_buf'): return # happens when __init__ has raised exception
     if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
-    if isinstance(self.dtype, ImageDType): self.allocator.free(self._buf, self.dtype)
-    else: self.allocator.free(self._buf, self.nbytes)
+    self.allocator.free(self._buf, self.nbytes, self.options)
   def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}>"
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
@@ -133,32 +138,31 @@ class BufferXfer(BufferCopy):
     else: src.d.synchronize()
 
 # TODO: size, dest, src are the same type. can we enforce this?
-sz_type = Union[ImageDType, int]
 class Allocator:
-  def alloc(self, size:sz_type):
+  def alloc(self, size:int, options:Optional[BufferOptions]=None):
     assert not isinstance(size, int) or size > 0, f"alloc size must be positve, getting {size}"
-    return self._alloc_image(size) if isinstance(size, ImageDType) else self._alloc(size)
+    return self._alloc_with_options(size, options) if options is not None else self._alloc(size)
   def _alloc(self, size:int): raise NotImplementedError("need alloc")
-  def _alloc_image(self, dtype:ImageDType): raise RuntimeError("need alloc image")
-  def free(self, opaque, size:sz_type): self._free(opaque) # if you are returning a Python object, you don't need a free
-  def _free(self, opaque): pass
+  def _alloc_with_options(self, size:int, options:BufferOptions): return self._alloc(size)  # TODO: override this if you support options
+  def free(self, opaque, size:int, options:Optional[BufferOptions]=None): self._free(opaque)
+  def _free(self, opaque): pass  # if opaque is a Python object, you don't need a free
   def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
   def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
 
 class LRUAllocator(Allocator):  # pylint: disable=abstract-method
-  def __init__(self): self.cache: Dict[sz_type, Any] = defaultdict(list)
-  def alloc(self, size:sz_type):
-    if len(c := self.cache[size]): return c.pop()
-    try: return super().alloc(size)
+  def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
+  def alloc(self, size:int, options:Optional[BufferOptions]=None):
+    if len(c := self.cache[(size, options)]): return c.pop()
+    try: return super().alloc(size, options)
     except (RuntimeError, MemoryError):
       self.free_cache()
-      return super().alloc(size)
+      return super().alloc(size, options)
   def free_cache(self):
     for opaques in self.cache.values():
       for opaque in opaques: self._free(opaque)
       opaques.clear()
-  def free(self, opaque:Any, size:sz_type):
-    if getenv("LRU", 1): self.cache[size].append(opaque)
+  def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
+    if getenv("LRU", 1): self.cache[(size, options)].append(opaque)
     else: self._free(opaque)
 
 class _MallocAllocator(LRUAllocator):

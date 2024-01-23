@@ -4,7 +4,7 @@ from typing import Tuple, TypeVar, List
 import gpuctypes.hip as hip
 from tinygrad.helpers import DEBUG, getenv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
 from tinygrad.helpers import from_mv, round_up, to_mv
-from tinygrad.device import Compiled, LRUAllocator, MallocAllocator
+from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, BufferOptions
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 
@@ -52,6 +52,10 @@ class HIPAllocator(LRUAllocator):
   def _alloc(self, size:int):
     check(hip.hipSetDevice(self.device.device))
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
+  def _alloc_with_options(self, size:int, options:BufferOptions):
+    assert options.uncached
+    check(hip.hipSetDevice(self.device.device))
+    return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipExtMallocWithFlags(ctypes.byref(x), size, 3)))  # hipDeviceMallocUncached = 3
   def _free(self, opaque:T): check(hip.hipFree(opaque))
   def _hostalloc(self, size:int): return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 0)))
   def copy_from_fd(self, dest, fd, offset, size):

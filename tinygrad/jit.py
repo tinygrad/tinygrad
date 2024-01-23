@@ -140,14 +140,15 @@ class TinyJit(Generic[ReturnType]):
     return cast(ReturnType, self.ret)
 
 class PlaceHolder:
-  def __init__(self, buf:Buffer): self.size, self.dtype, self.device, self.ref, self.bufid = buf.size, buf.dtype, buf.device, ref(buf), id(buf._buf)
-  def to_tuple(self): return (self.size, self.dtype, self.device, self.bufid)
+  def __init__(self, buf:Buffer):
+    self.size, self.dtype, self.device, self.ref, self.bufid, self.options = buf.size, buf.dtype, buf.device, ref(buf), id(buf._buf), buf.options
+  def to_tuple(self): return (self.size, self.dtype, self.device, self.bufid, self.options)
   def __hash__(self): return hash(self.to_tuple())
   def __eq__(self, x): return isinstance(x, PlaceHolder) and self.to_tuple() == x.to_tuple()
   def alloc_if_needed(self, buffer_cache: Dict[PlaceHolder, Buffer]) -> Buffer:
     ret = self.ref()
     if ret: return ret
-    if self not in buffer_cache: buffer_cache[self] = Buffer(self.device, self.size, self.dtype)
+    if self not in buffer_cache: buffer_cache[self] = Buffer(self.device, self.size, self.dtype, options=self.options)
     return buffer_cache[self]
 
 class _CacheCollector:
