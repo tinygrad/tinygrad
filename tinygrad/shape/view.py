@@ -36,10 +36,10 @@ def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tu
 def _reshape_mask(view: View, new_shape:Tuple[sint, ...]) -> Tuple[Optional[Tuple[Tuple[sint, sint], ...]], bool]:
   if view.mask is None: return view.mask, False
   if any(not isinstance(m[0], int) or not isinstance(m[1], int) for m in view.mask): return view.mask, True
-  new_mask: List[Tuple[int, int]] = []
+  new_mask: List[Tuple[sint, sint]] = []
 
   r_masks, r_shape, r_new_shape = reversed(view.mask), reversed(view.shape), reversed(new_shape)
-  curr_stride, old_dim, new_dim, mask = 1, next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
+  curr_stride, old_dim, new_dim, mask = cast(sint, 1), next(r_shape, 1), next(r_new_shape, 1), next(r_masks, (0,1))
   if mask[1] - mask[0] < 1: return ((0, 0),) * len(new_shape), False # invalid mask
 
   while len(new_mask) < len(new_shape):

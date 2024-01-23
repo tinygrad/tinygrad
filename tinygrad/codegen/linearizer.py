@@ -254,7 +254,7 @@ class Linearizer(Kernel):
     self.load_cache: Dict[str, UOp] = {}
 
     # reduce op
-    fake_reduce_idxs: List[Variable] = []
+    fake_reduce_idxs: List[Node] = []
     if self.reduceop is not None:
       # define indexes
       reduce_idxs = [Variable(f"ridx{i}", 0, self.full_shape[i]-1) for i in range(self.first_reduce+len(self.group_for_reduce), self.shape_len-self.upcasted)]  # noqa: E501
