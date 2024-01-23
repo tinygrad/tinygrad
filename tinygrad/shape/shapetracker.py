@@ -1,37 +1,11 @@
 # ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
-import functools, itertools, operator
+import functools
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, cast, Union, Iterable
-from tinygrad.helpers import prod, merge_dicts, getenv
+from typing import Tuple, List, Optional, Dict, Set, cast, Iterable, Union
+from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.shape.symbolic import Variable, MulNode, Node, SumNode, NumNode, sint
-from tinygrad.shape.view import View, _merge_dims
-
-def expr_node_mask(view:View, idx:Node, valid:Optional[Node]=None) -> Node:
-  expr = [valid] if valid is not None else []
-  if view.mask is not None:
-    acc = 1
-    for d,(x,y) in zip(reversed(view.shape), reversed(view.mask)):
-      if (x,y) != (0,d):
-        base = ((idx//acc)%d)
-        expr += [base >= x, base < y]
-      acc *= d
-  return Node.ands(expr)
-
-# generate an expression if you have a single idx variable
-def expr_node(view:View, idx:Optional[Node]=None) -> Node:
-  if idx is None: idx = Variable('idx', 0, prod(view.shape)-1)
-  ret: List[Node] = [NumNode(view.offset) if isinstance(view.offset, int) else view.offset] if view.offset else []
-  acc = 1
-  for d,s,_ in reversed(_merge_dims(view.shape, view.strides)):
-    ret.append(((idx//acc)%d)*s)
-    acc *= d
-  return Node.sum(ret)
-
-# generate an expression if you have a variable or expression for each index
-def expr_idxs(view:View, idxs:Tuple[Node, ...]) -> Node:
-  assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
-  return Node.sum([NumNode(view.offset) if isinstance(view.offset, int) else view.offset] + [idx*st for idx,sh,st in zip(idxs, view.shape, view.strides) if sh != 1 and st != 0])  # noqa: E501
+from tinygrad.shape.view import View
 
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
@@ -41,12 +15,14 @@ def merge_views(vm2:View, vm1:View) -> Optional[View]:
   if None in (strides := ShapeTracker((vm2, vm1)).real_strides()): return None
   return View.create(vm1.shape, cast(Tuple[sint, ...], strides), vm2.offset, vm1.mask)
 
-@functools.lru_cache(maxsize=None)
-def idxs_to_idx(shape:Tuple[int, ...], idxs:Tuple[Node, ...]) -> Node:
-  assert len(idxs) == len(shape), "need an idx for all dimensions"
-  # idxs[-1] * 1 + idxs[-2] * shape[-1] + idxs[-3] * shape[-1] * shape[-2] + ...
-  accs = itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1)
-  return Node.sum([idx * acc for idx, acc in zip(reversed(idxs), accs)])
+def _expr_view(view:View, idxs:List[Node], valid:Optional[Node]=None) -> Tuple[Node, Node]:
+  assert len(idxs) == len(view.shape), f"need an idx for all dimensions {idxs} vs {view.shape}"
+  iexpr: List[Node] = [NumNode(view.offset) if isinstance(view.offset, int) else view.offset]
+  vexpr: List[Node] = [valid] if valid is not None else []
+  for idx,sh,st,m in zip(idxs, view.shape, view.strides, view.mask if view.mask is not None else [None]*len(view.shape)):
+    if sh != 1 and st != 0: iexpr.append(idx*st)
+    if m is not None: vexpr += [idx >= m[0], idx < m[1]]
+  return Node.sum(iexpr), Node.ands(vexpr)
 
 @dataclass(frozen=True)
 class ShapeTracker:
@@ -75,7 +51,7 @@ class ShapeTracker:
 
   def real_size(self) -> int:
     if 0 in self.shape: return 0
-    ret = self.expr_idxs()[0].max
+    ret = cast(Union[int, Node], self.expr_idxs()[0].max)   # TODO: this is due to typing issues in symbolic!
     while not isinstance(ret, int): ret = ret.max    # TODO: this is a while loop?!? it should be more clear what max does
     assert isinstance(ret, int), f"ret must be integer, {ret=} isn't"
     return ret+1
@@ -108,22 +84,18 @@ class ShapeTracker:
 
   def unit_stride_axes(self, ignore_valid=False) -> List[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
-  def _expr_idx(self, idx:Node, valid:Node) -> Tuple[Node, Node]:
-    for v in reversed(self.views[0:-1]):
+  def expr_idxs(self, idxs:Optional[Iterable[Node]]=None) -> Tuple[Node, Node]:
+    idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)] if idxs is None else list(idxs)
+    idx, valid = _expr_view(self.views[-1], idxs)
+    for view in reversed(self.views[0:-1]):
       if valid.max == 0: return NumNode(-1), valid
-      valid = expr_node_mask(v, idx, valid)
-      idx = expr_node(v, idx)
+      view = view.minify()
+      acc, idxs = 1, []
+      for d in reversed(view.shape):
+        idxs.append((idx//acc)%d)
+        acc *= d
+      idx, valid = _expr_view(view, idxs[::-1], valid)
     return idx, valid
-
-  def expr_idxs(self, idxs:Optional[Iterable[Node]]=None):
-    if idxs is None: idxs = [Variable(f"idx{i}", 0, s-1) for i,s in enumerate(self.shape)]
-    idx = expr_idxs(self.views[-1], tuple(idxs))
-    valid = expr_node_mask(self.views[-1], idxs_to_idx(self.views[-1].shape, tuple(idxs)))
-    return self._expr_idx(idx, valid)
-
-  def expr_node(self, idx:Union[Node,str]='idx'):
-    if isinstance(idx, str): idx = Variable(idx, 0, prod(self.shape)-1)
-    return self._expr_idx(expr_node(self.views[-1], idx), expr_node_mask(self.views[-1], idx))
 
   def axis_is_masked(self, axis:int) -> bool:
     _, valid = self.expr_idxs()

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Sequence, Final, Set, Iterator
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Set, Iterator
 import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
@@ -40,7 +40,7 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
     local_idxs = local_idxs[0:maxdim-1] + nli[::-1]
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
-def expand_idx(node:Node) -> Union[Variable, NumNode]: return next((v for v in node.vars() if v.expr is None), NumNode(0))
+def expand_idx(node:Node) -> Union[Variable, NumNode]: return next((v for v in node.vars() if v.expr.startswith("_uidx")), NumNode(0))
 def iter_idxs(idxs:Tuple[Union[Variable, NumNode], ...]) -> Iterator[Tuple[int,...]]:
   yield from (x[::-1] for x in itertools.product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
 
@@ -82,24 +82,22 @@ class Linearizer(Kernel):
     AndNode: lambda self,ops,ctx:
       functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
-  def global_load(self, i:int, idxs:Sequence[Node], acc=None, barrier:Optional[UOp]=None) -> List[UOp]:
+  def global_load(self, i:int, idxs:List[Node], acc=None, barrier:Optional[UOp]=None) -> List[UOp]:
     buf = self.bufs[i]
     localtype = self.get_base_dtype(buf.dtype if acc is None else get_lazyop_info(self.reduceop).dtype)
     const = buf.val if isinstance(buf, ConstBuffer) else acc
 
-    def rename_var(v: Union[Variable, NumNode], expr: str): return v if isinstance(v, NumNode) else Variable(expr, v.min, v.max)
-    expand_vars = tuple([rename_var(expand_idx(idx), f"_uidx{j}") for j, idx in enumerate(idxs)])
-    fake_idxs = [idx.substitute({eidx: ev}) if isinstance(eidx:=expand_idx(idx), Variable) else idx for idx, ev in zip(idxs, expand_vars)]
+    expand_vars = tuple([expand_idx(idx) for j, idx in enumerate(idxs)])
 
     dim, amt = None, 1
     # float 4 grouping
     if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [4,2]:
       dim, amt = upcast_dim[0], len(float4_expand)
-      g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs[:dim] + [float4_expand[0]] + fake_idxs[dim+1:])
+      g_idx, g_valid = self.sts[i].expr_idxs(idxs[:dim] + [float4_expand[0]] + idxs[dim+1:])
       # do not use float4 if idx is not aligned
       if g_idx != (g_idx//amt*amt): dim, amt = None, 1
     if dim is None:
-      g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
+      g_idx, g_valid = self.sts[i].expr_idxs(idxs)
 
     if amt > 1: localtype = localtype.vec(amt)
     e_idxs, e_valids = expand_node(g_idx, expand_vars), expand_node(g_valid, expand_vars)
@@ -166,11 +164,11 @@ class Linearizer(Kernel):
       store_offset = store_offset_new
 
     stores = []
-    for idx, var in store_offset.items():
-      idx, valid = self.sts[i].expr_idxs(idx)
+    for _idx, var in store_offset.items():
+      idx, valid = self.sts[i].expr_idxs(_idx)
       if isinstance(buf.dtype, ImageDType):
-        idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
-        rendered_idx = self.uop(UOps.CAST, dtypes.int.vec(2), tuple(x.render(self.render_ops, self) for x in idx))
+        image_idx, valid = to_image_idx(buf.dtype.shape, idx, valid)
+        rendered_idx = self.uop(UOps.CAST, dtypes.int.vec(2), tuple(x.render(self.render_ops, self) for x in image_idx))
       else:
         rendered_idx = idx.render(self.render_ops, self)
       if valid.min == 1: stores.append(self.uop(UOps.STORE, None, (buf_uop, rendered_idx, var)))
@@ -226,8 +224,8 @@ class Linearizer(Kernel):
     # define indexes
     global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)
     local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+len(self.group_for_reduce)], 3 if self.opts.has_local else 0)  # noqa: E501
-    full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[self.shape_len-self.upcasted:]]
-    upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
+    full_upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.full_shape[self.shape_len-self.upcasted:])]
+    upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.output_shape[self.shape_len-self.upcasted:])]
 
     # global and local loops
     def render_loop(xx:List[Variable]) -> Tuple[UOp, ...]:
@@ -272,7 +270,7 @@ class Linearizer(Kernel):
             full_var, full_var_sz = NumNode(0), 1
             if alias[0] != 0:
               for i in alias:
-                next_var = local_idxs[-i] if i > 0 else Variable(None, 0, local_size-1)
+                next_var = local_idxs[-i] if i > 0 else Variable("_uidx_tc", 0, local_size-1)
                 full_var += next_var * full_var_sz
                 full_var_sz *= next_var.max+1
             replace_idxs.append(full_var)
@@ -360,7 +358,7 @@ class Linearizer(Kernel):
           local_idxs = local_idxs[:-1]
           end_local_idxs = end_local_idxs[:-1]
           # regenerate upcast_idxs
-          upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
+          upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.output_shape[self.shape_len-self.upcasted:])]
 
         # NOTE: this structure is the same as the reduce op above
 
@@ -378,6 +376,10 @@ class Linearizer(Kernel):
 
         # end the late reduce loop
         self.load_cache.clear()
+
+        # all local indices which were used for group_for_reduce are not valid any more and should be replaced with fake NumNode(0), since they have
+        # been rewritten with fake end_local_idxs.
+        local_idxs = local_idxs[:self.local_dims] + [NumNode(0) for i in range(len(self.group_for_reduce))]
 
     # load latebufs
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})  # noqa: E501

@@ -16,12 +16,12 @@ class MultiShapeTracker:
   def stride(self, arg): self.sts = [x.stride(arg) for x in self.sts]
   def pad(self, arg): self.sts = [x.pad(arg) for x in self.sts]
 
-def st_equal(st1, st2) -> bool:
+def st_equal(st1:ShapeTracker, st2:ShapeTracker) -> bool:
   if st1.shape != st2.shape: return False
   if st1 == st2: return True
   idx = Variable("idx", 0, prod(st1.shape)-1)
-  st1_idx, st1_valid = st1.expr_node(idx)
-  st2_idx, st2_valid = st2.expr_node(idx)
+  st1_idx, st1_valid = st1.reshape((st1.size,)).expr_idxs([idx])
+  st2_idx, st2_valid = st2.reshape((st2.size,)).expr_idxs([idx])
   for i in range(idx.min, idx.max + 1):
     st1_off = sym_infer(st1_idx, {idx: i})
     st2_off = sym_infer(st2_idx, {idx: i})

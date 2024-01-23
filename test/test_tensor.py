@@ -437,5 +437,12 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_equal(Tensor([]).sum().numpy(), 0)
     np.testing.assert_equal(Tensor([]).mean().numpy(), 0)
 
+class TestTensorCreationDevice(unittest.TestCase):
+  # test auxiliary tensors are created on the same device
+  def test_one_hot(self):
+    y = Tensor([1, 2, 3]).to("CPU")
+    x = y.one_hot(10)
+    x.realize()
+
 if __name__ == '__main__':
   unittest.main()

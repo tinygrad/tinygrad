@@ -56,8 +56,9 @@ class LazyBuffer:
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None) -> LazyBuffer:
     return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else (), enable_cache=False)
 
-  def const(self, val:Union[float, int]) -> LazyBuffer:
-    return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(self.shape)).expand(self.shape)
+  def const(self, val:Union[float, int], shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
+    shape = self.shape if shape is None else shape
+    return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(shape)).expand(shape)
 
   def contiguous(self):
     if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
@@ -116,6 +117,7 @@ class LazyBuffer:
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, unbound_new_shape, (self,))
 
   def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+    if self.size == 0 and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[op], new_shape)
     assert len(self.shape)==len(new_shape) and all(ns in (1,s) for s,ns in zip(self.shape,new_shape)), f"not a contraction {self.shape=} {new_shape=}"
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not all_int(self.shape) or (0 in self.shape) or prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
