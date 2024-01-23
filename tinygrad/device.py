@@ -27,6 +27,7 @@ class _Device:
     x = ix.split(":")[0].upper()
     ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0]  # noqa: E501
     if isinstance(ret, type): ret = ret(ix)
+    setattr(ret, "dname", ix)
     return ret
   @functools.cached_property
   def DEFAULT(self) -> str:
@@ -70,6 +71,7 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:int, var_vals: Optiona
 class BufferOptions:
   image: Optional[ImageDType] = None
   uncached: bool = False
+  host: bool = False
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None):
@@ -86,7 +88,9 @@ class Buffer:
     if not hasattr(self, '_buf'): return # happens when __init__ has raised exception
     if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
     self.allocator.free(self._buf, self.nbytes, self.options)
-  def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}>"
+  def __repr__(self):
+    if self.options is not None: return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype} options:{self.options}>"
+    else: return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}>"
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, 'as_buffer'): return self.allocator.as_buffer(self._buf)
@@ -154,7 +158,7 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
       for opaque in opaques: self._free(opaque)
       opaques.clear()
   def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
-    if getenv("LRU", 1): self.cache[(size, options)].append(opaque)
+    if getenv("LRU", 1) and (options is None or not options.uncached): self.cache[(size, options)].append(opaque)
     else: self._free(opaque)
 
 class _MallocAllocator(LRUAllocator):
@@ -294,7 +298,7 @@ class CompiledASTRunner(JITRunner):
     if local_size: lra['local_size'] = local_size
     et = self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.vars), wait=wait or DEBUG>=2)
     if do_update_stats: update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit,
-                                     lra=lra, device=rawbufs[0].device, first_run=self.first_run)
+                                     lra=lra, device=self.device.dname, first_run=self.first_run)
     self.first_run = False
     return et
 

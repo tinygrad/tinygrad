@@ -1,11 +1,28 @@
 from typing import List, Dict, Optional, cast
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters
-from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, InterpretedASTRunner
+from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, InterpretedASTRunner, CompiledASTRunner, BufferOptions, Compiled
 from tinygrad.graph import print_tree, realized_lazybuffer
-from tinygrad.helpers import colored, getenv, GRAPH
+from tinygrad.helpers import colored, getenv, GRAPH, diskcache, to_mv
 from tinygrad.shape.symbolic import Variable
 
 # *** schedule running ***
+
+from tinygrad.runtime.ops_hip import compile_hip
+
+@diskcache
+def compile_hip_cached(x): return compile_hip(x)
+
+class HIPSyncOp(CompiledASTRunner):
+  def __init__(self, device):
+    prg = 'extern "C" __global__ void hip_sync(int *sem, void *data) { atomicExch_system(sem, 1); }'
+    super().__init__(None, colored("hip_sync", "red"), prg, compile_hip_cached(prg), Device[device], [1,1,1], [1,1,1])
+    self.build(Device[device].runtime)
+
+class HIPWaitOp(CompiledASTRunner):
+  def __init__(self, device):
+    prg = 'extern "C" __global__ void hip_wait(int *sem) { while (!atomicCAS_system(sem, 1, 0)); }'
+    super().__init__(None, colored("hip_wait", "RED"), prg, compile_hip_cached(prg), Device[device], [1,1,1], [1,1,1])
+    self.build(Device[device].runtime)
 
 class SyncOp(JITRunner):
   def __init__(self, device):
@@ -30,8 +47,12 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
     if si.inputs[0].device.startswith("DISK"): return BufferRead()
     return BufferCopy()
   if si.ast.op is LoadOps.CUSTOM: return CustomOp(si.ast.arg)
-  if si.ast.op is LoadOps.SYNC: return SyncOp(si.out.device)
-  if si.ast.op is LoadOps.WAIT: return None
+  if si.out.device.startswith("HIP") and all(x.device.startswith("HIP") for x in si.inputs):
+    if si.ast.op is LoadOps.SYNC: return HIPSyncOp(si.out.device)
+    if si.ast.op is LoadOps.WAIT: return HIPWaitOp(si.out.device)
+  else:
+    if si.ast.op is LoadOps.SYNC: return SyncOp(si.out.device) if isinstance(Device[si.out.device], Compiled) else None
+    if si.ast.op is LoadOps.WAIT: return None
   return Device[si.out.device].get_runner(si.ast)
 
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
@@ -53,8 +74,14 @@ def run_schedule(schedule:List[ScheduleItem]):
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
     if si.out.size > 0:
+      if si.ast.op is LoadOps.SYNC: options = BufferOptions(host=True)
+      elif si.out.uncached: options = BufferOptions(uncached=True)
+      else: options = None
       si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
-        Buffer(si.out.device, si.out.size, si.out.dtype, "PLACEHOLDER" if isinstance(prg, InterpretedASTRunner) else None)
+        Buffer(si.out.device, si.out.size, si.out.dtype, "PLACEHOLDER" if isinstance(prg, InterpretedASTRunner) else None, options=options)
+      if si.ast.op is LoadOps.SYNC and isinstance(prg, HIPSyncOp):
+        to_mv(si.out.realized._buf, 4).cast("I")[0] = 0
+        prg._lru_defeat = si.out.realized
     del si.out.srcs
 
     # run the function (put it in JIT)

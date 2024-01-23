@@ -53,9 +53,11 @@ class HIPAllocator(LRUAllocator):
     check(hip.hipSetDevice(self.device.device))
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
   def _alloc_with_options(self, size:int, options:BufferOptions):
-    assert options.uncached
     check(hip.hipSetDevice(self.device.device))
-    return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipExtMallocWithFlags(ctypes.byref(x), size, 3)))  # hipDeviceMallocUncached = 3
+    if options.uncached:
+      return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipExtMallocWithFlags(ctypes.byref(x), size, 3)))  # hipDeviceMallocUncached = 3
+    elif options.host: return self._hostalloc(size)
+    else: raise RuntimeError("no options")
   def _free(self, opaque:T): check(hip.hipFree(opaque))
   def _hostalloc(self, size:int): return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 0)))
   def copy_from_fd(self, dest, fd, offset, size):
