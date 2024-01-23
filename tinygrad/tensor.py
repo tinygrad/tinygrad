@@ -836,7 +836,7 @@ class Tensor:
   def xor(self, x:Tensor, reverse=False) -> Tensor: return mlops.Xor.apply(*self._broadcasted(x, reverse))
 
   def maximum(self, x:Union[Tensor, Scalar]) -> Tensor: return (self<x).detach().where(x, (self>x).detach().where(self, ((self+x)*0.5).cast(self.dtype))) # noqa: E501
-  def minimum(self, x:Union[Tensor, Scalar]) -> Tensor: return -((-self).maximum(-x))
+  def minimum(self, x:Union[Tensor, Scalar]) -> Tensor: return (self>x).detach().where(x, (self<x).detach().where(self, ((self+x)*0.5).cast(self.dtype))) # noqa: E501
 
   def where(self:Tensor, input_:Union[Tensor, Scalar], other:Union[Tensor, Scalar]):
     if isinstance(input_, Tensor): input_, other = input_._broadcasted(other)
