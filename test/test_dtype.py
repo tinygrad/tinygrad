@@ -466,5 +466,11 @@ class TestAutoCastType(unittest.TestCase):
   def test_matmul(self, dt1, dt2):
     assert (Tensor([0, 1], dtype=dt1) @ Tensor([0, 1], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
 
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
+  def test_pow(self, dt1, dt2):
+    a = (Tensor.rand((100,)) * 20 - 10).cast(dt1)
+    b = (Tensor.rand((100,)) * 20 - 10).cast(dt2)
+    self.assertEqual((a ** b).dtype, least_upper_dtype(dt1, dt2))
+
 if __name__ == '__main__':
   unittest.main()

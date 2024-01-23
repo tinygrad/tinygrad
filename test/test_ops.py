@@ -364,18 +364,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: 2.0**x, lambda x: 2.0**x)
     helper_test_op([()], lambda x: x**2.0, lambda x: x**2.0)
     helper_test_op([()], lambda x: 2.0**x, lambda x: 2.0**x)
-  def test_pow_dtype_cast(self):
-    x = Tensor.arange(-10, 10)
-    y = Tensor.randint((20,))
-    int_x = x.cast(dtypes.default_int)
-    float_x = x.cast(dtypes.default_float)
-    int_y = y.cast(dtypes.default_int)
-    float_y = y.cast(dtypes.default_float)
-
-    self.assertEqual((int_x ** int_y).dtype, dtypes.default_int)
-    self.assertEqual((int_x ** float_y).dtype, dtypes.default_float)
-    self.assertEqual((float_x ** int_y).dtype, dtypes.default_float)
-    self.assertEqual((float_x ** float_y).dtype, dtypes.default_float)
 
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt(), a=0)
