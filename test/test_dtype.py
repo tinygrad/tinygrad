@@ -399,8 +399,8 @@ class TestAutoCastType(unittest.TestCase):
 
   @given(strat.sampled_from(core_dtypes))
   def test_broadcast_scalar(self, dt):
-    assert(Tensor.rand(4, 4, dtype=dt) + 2.3).dtype == (dt if dt >= dtypes.float16 else dtypes.default_float)
-    assert(Tensor.rand(4, 4, dtype=dt) + 2).dtype == (dt if dt >= dtypes.int8 else dtypes.default_int)
+    assert(Tensor.rand(4, 4, dtype=dt) + 2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
+    assert(Tensor.rand(4, 4, dtype=dt) + 2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
     if Device.DEFAULT != "WEBGPU" and dt != dtypes.bool:
       assert(Tensor.rand(4, 4, dtype=dt) + True).dtype == dt
 
@@ -450,8 +450,8 @@ class TestAutoCastType(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes))
   def test_where_one_scalar(self, dt):
     t = Tensor(2, dtype=dt)
-    self.check_where_alternate_input_other(t, 3.2, (dt if dt >= dtypes.float16 else dtypes.default_float))
-    self.check_where_alternate_input_other(t, 3, (dt if dt >= dtypes.int8 else dtypes.default_int))
+    self.check_where_alternate_input_other(t, 3.2, (dt if dtypes.is_float(dt) else dtypes.default_float))
+    self.check_where_alternate_input_other(t, 3, (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int))
     self.check_where_alternate_input_other(t, True, dt)
 
   def test_where_two_scalars(self):
@@ -464,17 +464,13 @@ class TestAutoCastType(unittest.TestCase):
 
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_maximum(self, dt1, dt2):
-    # TODO bool maximum with bool casts to int
-    if dt1 != dtypes.bool and dt2 != dtypes.bool:
-      assert Tensor([0, 1, 2], dtype=dt1).maximum(Tensor([2, 0, 5], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
+    assert Tensor([0, 1, 2], dtype=dt1).maximum(Tensor([2, 0, 5], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
 
   @given(strat.sampled_from(core_dtypes))
   def test_maximum_const(self, dt):
-    assert Tensor([1, 2], dtype=dt).maximum(3.1).dtype == (dt if dt >= dtypes.float16 else dtypes.default_float)
-    assert Tensor([1, 2], dtype=dt).maximum(3).dtype == (dt if dt >= dtypes.int8 else dtypes.default_int)
-    # TODO bool maximum with bool casts to int
-    if dt != dtypes.bool:
-      assert Tensor([1, 2], dtype=dt).maximum(True).dtype == dt
+    assert Tensor([1, 2], dtype=dt).maximum(3.1).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
+    assert Tensor([1, 2], dtype=dt).maximum(3).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
+    assert Tensor([1, 2], dtype=dt).maximum(True).dtype == dt
 
 if __name__ == '__main__':
   unittest.main()

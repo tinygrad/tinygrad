@@ -835,8 +835,7 @@ class Tensor:
     return ar.mul(sign * base_sign + (1 - base_sign)).mul(inject_nan)
   def xor(self, x:Tensor, reverse=False) -> Tensor: return mlops.Xor.apply(*self._broadcasted(x, reverse))
 
-  # TODO: this implicitly changes dtype with /2
-  def maximum(self, x:Union[Tensor, Scalar]) -> Tensor: return (self<x).detach().where(x, (self>x).detach().where(self, (self+x)/2))
+  def maximum(self, x:Union[Tensor, Scalar]) -> Tensor: return (self<x).detach().where(x, (self>x).detach().where(self, ((self+x)*0.5).cast(self.dtype))) # noqa: E501
   def minimum(self, x:Union[Tensor, Scalar]) -> Tensor: return -((-self).maximum(-x))
 
   def where(self:Tensor, input_:Union[Tensor, Scalar], other:Union[Tensor, Scalar]):
