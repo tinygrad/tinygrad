@@ -74,9 +74,9 @@ class BufferOptions:
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None):
     assert isinstance(dtype, DType)
+    if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     self.device, self.size, self.dtype, self.d, self.options = device, size, dtype, Device[device], options
     self.allocator = self.d.allocator
-    if isinstance(dtype, ImageDType): options = BufferOptions(image=dtype) # TODO: image hack shouldn't be here. where should it be?
     self._buf = opaque if opaque is not None else self.allocator.alloc(self.nbytes, options)
     # TODO: mem_used for all devices
     if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
