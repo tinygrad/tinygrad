@@ -143,7 +143,7 @@ class Allocator:
     assert not isinstance(size, int) or size > 0, f"alloc size must be positve, getting {size}"
     return self._alloc_with_options(size, options) if options is not None else self._alloc(size)
   def _alloc(self, size:int): raise NotImplementedError("need alloc")
-  def _alloc_with_options(self, size:int, options:BufferOptions): raise RuntimeError("need alloc_with_options if you are calling with options")
+  def _alloc_with_options(self, size:int, options:BufferOptions): return self._alloc(size)  # TODO: override this if you support options
   def free(self, opaque, size:int, options:Optional[BufferOptions]=None): self._free(opaque)
   def _free(self, opaque): pass  # if opaque is a Python object, you don't need a free
   def copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
