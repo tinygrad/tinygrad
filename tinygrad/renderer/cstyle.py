@@ -128,9 +128,6 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       if uop == UOps.LOOP:
         kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]))
         depth += 1
-      elif uop == UOps.WMMA: kk(f"{dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
-      elif uop == UOps.DEFINE_ACC: kk(f"{dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
-      elif uop == UOps.CONST: r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
       elif uop == UOps.ALU:
         # remove parens if ALU types are the same. TODO: can do more here
         if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.XOR}:
@@ -169,11 +166,11 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       elif uop == UOps.DEFINE_GLOBAL:
         bufs.append((args, dtype))
         r[u] = args
-      elif uop == UOps.GEP:
-        if cast(DType, vin[0].dtype).sz > 4: r[u] = f"({r[vin[0]]})[{args}]"  # this is correct for HIP
-        else: r[u] = f"({r[vin[0]]}).{'xyzw'[args]}"
-      else:
-        raise RuntimeError(f"failed to render {uop}")
+      elif uop == UOps.WMMA: kk(f"{dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
+      elif uop == UOps.DEFINE_ACC: kk(f"{dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
+      elif uop == UOps.CONST: r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
+      elif uop == UOps.GEP: r[u] = f"({r[vin[0]]})[{args}]" if cast(DType, vin[0].dtype).sz > 4 else f"({r[vin[0]]}).{'xyzw'[args]}"
+      else: raise RuntimeError(f"failed to render {uop}")
 
   return lang.render_kernel(function_name, kernel, bufs, local_size)
 
