@@ -326,7 +326,7 @@ def train_cifar():
   with Tensor.train():
     st = time.monotonic()
     while i <= STEPS:
-      if i % getenv("EVAL_STEPS", STEPS) == 0 and i > 1:
+      if i % getenv("EVAL_STEPS", STEPS) == 0 and i > 1 and not getenv("DISABLE_BACKWARD"):
         # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
         corrects = []
         corrects_ema = []
