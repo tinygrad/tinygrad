@@ -21,30 +21,26 @@ from tinygrad.runtime.ops_hip import compile_hip
 @diskcache
 def compile_hip_cached(x): return compile_hip(x)
 
-class HIPSyncOp(CompiledASTRunner):
-  def __init__(self, device):
-    prg = 'extern "C" __global__ void hip_sync(int *sem, void *data) { atomicExch_system(sem, 1); }'
-    super().__init__(None, colored("hip_sync", "red"), prg, compile_hip_cached(prg), Device[device], [1,1,1], [1,1,1])
-    self.build(Device[device].runtime)
-
 class HIPWaitOp(CompiledASTRunner):
   def __init__(self, device):
     prg = 'extern "C" __global__ void hip_wait(int *sem) { while (!atomicCAS_system(sem, 1, 0)); }'
     super().__init__(None, colored("hip_wait", "RED"), prg, compile_hip_cached(prg), Device[device], [1,1,1], [1,1,1])
     self.build(Device[device].runtime)
 
+# TODO: these can go in the Linearizer
+class HIPSyncOp(CompiledASTRunner):
+  def __init__(self, device):
+    prg = 'extern "C" __global__ void hip_sync(int *sem, void *data) { sem[0] = 1; }'
+    super().__init__(None, colored("hip_sync", "red"), prg, compile_hip_cached(prg), Device[device], [1,1,1], [1,1,1])
+    self.build(Device[device].runtime)
+
 class HIPCopyOp(CompiledASTRunner):
   def __init__(self, dest_device, src_device, dtype, sz):
     enable_peer(Device[dest_device].device, Device[src_device].device)
-    prg = f"""
-      extern "C" __global__ void hip_copy({dtype.name}* a, {dtype.name}* b) {{
-        const int gx = blockIdx.x*blockDim.x + threadIdx.x;
-        a[gx] = b[gx];
-      }}"""
+    prg = f'extern "C" __global__ void hip_copy({dtype.name}* a, {dtype.name}* b)' + \
+      '{ const int gx = blockIdx.x*blockDim.x + threadIdx.x; a[gx] = b[gx]; }'
     gsz, lsz = sz, 1
-    while lsz < 128 and gsz%2 == 0:
-      gsz //= 2
-      lsz *= 2
+    while lsz < 128 and gsz%2 == 0: gsz, lsz = gsz//2, lsz*2
     super().__init__(None, colored("hip_copy", "yellow"), prg, compile_hip_cached(prg), Device[dest_device], [gsz,1,1], [lsz,1,1])
     self.build(Device[dest_device].runtime)
     self.mem_estimate = dtype.itemsize*sz
