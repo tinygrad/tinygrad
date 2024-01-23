@@ -127,15 +127,7 @@ class BufferRead(BufferCopy):
     else: super().copy(dest, src)
 
 class BufferXfer(BufferCopy):
-  def copy(self, dest, src):
-    # fast path, used on HIP between GPUs
-    # NOTE: we have to block here so the data isn't copied too early. this is probably due to buffer reuse
-    if hasattr(src.d, "block") and hasattr(dest.d, "event"): src.d.block(dest.d.event())
-    else: dest.d.synchronize()
-    src.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
-    # NOTE: we have to block here so the data is ready on dest when dest needs it
-    if hasattr(dest.d, "block") and hasattr(src.d, "event"): dest.d.block(src.d.event())
-    else: src.d.synchronize()
+  def copy(self, dest, src): dest.allocator.transfer(dest._buf, src._buf, dest.nbytes)
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
