@@ -1,11 +1,44 @@
 from typing import List, Dict, Optional, cast
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters
-from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, InterpretedASTRunner
+from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, InterpretedASTRunner, BufferOptions
 from tinygrad.graph import print_tree, realized_lazybuffer
-from tinygrad.helpers import colored, getenv, GRAPH
+from tinygrad.helpers import colored, getenv, GRAPH, diskcache, to_mv
+from tinygrad.dtype import dtypes
 from tinygrad.shape.symbolic import Variable
 
 # *** schedule running ***
+
+from tinygrad.runtime.ops_hip import compile_hip
+from tinygrad.device import CompiledASTRunner
+
+@diskcache
+def compile_hip_cached(x): return compile_hip(x)
+
+class BufferXferHip(BufferCopy):
+  def __init__(self, dest, src):
+    self.dest, self.src = dest, src
+
+    prg = 'extern "C" __global__ void sync(int *sem) { atomicExch_system(sem, 1); }'
+    self.sync = CompiledASTRunner(None, "sync", prg, compile_hip_cached(prg), Device[self.src], [1,1,1], [1,1,1]).build(Device[self.src].runtime)
+
+    prg = 'extern "C" __global__ void block(int *sem) { while (!atomicCAS_system(sem, 1, 1)); }'
+    self.block = CompiledASTRunner(None, "block", prg, compile_hip_cached(prg), Device[self.dest], [1,1,1], [1,1,1]).build(Device[self.dest].runtime)
+
+    self.sem = Buffer(self.dest, 4, dtypes.uint32, options=BufferOptions(host=True))
+
+    self.mv = to_mv(self.sem._buf, 4).cast("I")
+    self.mv[0] = 0
+    super().__init__()
+
+  def copy(self, dest:Buffer, src:Buffer):
+    assert self.dest == dest.device
+    assert self.src == src.device
+    self.mv[0] = 0
+    src.allocator.transfer(dest._buf, src._buf, dest.nbytes)
+    #self.sync([self.sem], {})
+    #self.block([self.sem], {})
+    self.sync.clprg(self.sem._buf, global_size=[1,1,1], local_size=[1,1,1])
+    self.block.clprg(self.sem._buf, global_size=[1,1,1], local_size=[1,1,1])
 
 class CustomOp(JITRunner):
   def __init__(self, fxn):
@@ -18,7 +51,9 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
     f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
   if si.ast.op is LoadOps.EMPTY: return None
   if si.ast.op is LoadOps.COPY:
-    if hasattr(Device[si.out.device].allocator, 'transfer') and type(Device[si.out.device]) is type(Device[si.inputs[0].device]): return BufferXfer()
+    if hasattr(Device[si.out.device].allocator, 'transfer') and type(Device[si.out.device]) is type(Device[si.inputs[0].device]):
+      return BufferXferHip(si.out.device, si.inputs[0].device)
+      #return BufferXfer()
     if si.inputs[0].device.startswith("DISK"): return BufferRead()
     return BufferCopy()
   if si.ast.op is LoadOps.CUSTOM: return CustomOp(si.ast.arg)

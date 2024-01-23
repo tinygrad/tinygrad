@@ -70,6 +70,7 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:int, var_vals: Optiona
 class BufferOptions:
   image: Optional[ImageDType] = None
   uncached: bool = False
+  host: bool = False
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None):

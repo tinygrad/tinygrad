@@ -53,15 +53,18 @@ class HIPAllocator(LRUAllocator):
     check(hip.hipSetDevice(self.device.device))
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
   def _alloc_with_options(self, size:int, options:BufferOptions):
-    assert options.uncached
     check(hip.hipSetDevice(self.device.device))
-    return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipExtMallocWithFlags(ctypes.byref(x), size, 3)))  # hipDeviceMallocUncached = 3
+    if options.uncached:
+      return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipExtMallocWithFlags(ctypes.byref(x), size, 3)))  # hipDeviceMallocUncached = 3
+    elif options.host:
+      return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 0)))
+    else:
+      raise RuntimeError("why use options?")
   def _free(self, opaque:T): check(hip.hipFree(opaque))
-  def _hostalloc(self, size:int): return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 0)))
   def copy_from_fd(self, dest, fd, offset, size):
     check(hip.hipSetDevice(self.device.device))
     if not hasattr(self, 'hb'):
-      self.hb = [self._hostalloc(CHUNK_SIZE) for _ in range(2)]
+      self.hb = [self._alloc_with_options(CHUNK_SIZE, BufferOptions(host=True)) for _ in range(2)]
       self.hb_events = [None, None]
       self.hb_polarity = 0
     fo = io.FileIO(fd, "a+b", closefd=False)
@@ -84,7 +87,7 @@ class HIPAllocator(LRUAllocator):
       minor_offset = 0 # only on the first
   def copyin(self, dest:T, src: memoryview):
     check(hip.hipSetDevice(self.device.device))
-    host_mem = self._hostalloc(len(src))
+    host_mem = self._alloc_with_options(len(src), BufferOptions(host=True))
     self.device.pending_copyin.append(host_mem)
     ctypes.memmove(host_mem, from_mv(src), len(src))
     check(hip.hipMemcpyAsync(dest, host_mem, len(src), hip.hipMemcpyHostToDevice, None))
