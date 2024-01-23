@@ -472,5 +472,12 @@ class TestAutoCastType(unittest.TestCase):
     b = (Tensor.rand((100,)) * 20 - 10).cast(dt2)
     self.assertEqual((a ** b).dtype, least_upper_dtype(dt1, dt2))
 
+  @given(strat.sampled_from(core_dtypes))
+  def test_pow_scalar(self, tensor_dt):
+    a = (Tensor.rand((100,)) * 20 - 10).cast(tensor_dt)
+    scalers = [(5, dtypes.from_py(5)), (5.546, dtypes.from_py(5.546))]
+    for scalar, scalar_dt in scalers:
+      self.assertEqual((a ** scalar).dtype, least_upper_dtype(tensor_dt, scalar_dt))
+
 if __name__ == '__main__':
   unittest.main()
