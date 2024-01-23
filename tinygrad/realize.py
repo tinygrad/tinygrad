@@ -23,14 +23,15 @@ def compile_hip_cached(x): return compile_hip(x)
 
 class HIPWaitOp(CompiledASTRunner):
   def __init__(self, device):
-    prg = 'extern "C" __global__ void hip_wait(int *sem) { while (!atomicCAS_system(sem, 1, 0)); }'
+    prg = 'extern "C" __global__ void hip_wait(int *str, int *sem) { int v = str[0]+1; while (atomicCAS_system(sem, v, v) != v); str[0] = v; }'
+    #prg = 'extern "C" __global__ void hip_wait(int *str, int *sem) { while (!atomicCAS_system(sem, 1, 0)); }'
     super().__init__(None, colored("hip_wait", "RED"), prg, compile_hip_cached(prg), Device[device], [1,1,1], [1,1,1])
     self.build(Device[device].runtime)
 
 # TODO: these can go in the Linearizer
 class HIPSyncOp(CompiledASTRunner):
   def __init__(self, device):
-    prg = 'extern "C" __global__ void hip_sync(int *sem, void *data) { sem[0] = 1; }'
+    prg = 'extern "C" __global__ void hip_sync(int *sem, void *data) { atomicAdd_system(sem, 1); }'
     super().__init__(None, colored("hip_sync", "red"), prg, compile_hip_cached(prg), Device[device], [1,1,1], [1,1,1])
     self.build(Device[device].runtime)
 
@@ -104,7 +105,7 @@ def run_schedule(schedule:List[ScheduleItem]):
       si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
         Buffer(si.out.device, si.out.size, si.out.dtype, "PLACEHOLDER" if isinstance(prg, InterpretedASTRunner) else None, options=options)
 
-      if si.ast.op is LoadOps.SYNC and isinstance(prg, HIPSyncOp):
+      if si.ast.op in {LoadOps.SYNC, LoadOps.WAIT}:
         to_mv(si.out.realized._buf, 4).cast("I")[0] = 0
         prg._lru_defeat = si.out.realized
     del si.out.srcs

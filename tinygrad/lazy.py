@@ -54,8 +54,8 @@ class LazyBuffer:
   def base(self) -> LazyBuffer: return self._base if self._base is not None else self
 
   @staticmethod
-  def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None) -> LazyBuffer:
-    return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else (), enable_cache=False)
+  def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None, enable_cache=False) -> LazyBuffer:
+    return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else (), enable_cache=enable_cache)
 
   def const(self, val:Union[float, int], shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
     shape = self.shape if shape is None else shape
@@ -79,13 +79,13 @@ class LazyBuffer:
   def schedule(self, seen=None): return create_schedule([self], seen)
 
   def _copy(self, device:str) -> LazyBuffer:
-    if self.device.startswith("HIP"):
+    if self.device.startswith("HIP") and device.startswith("HIP"):
       self.uncached = True
-      sync = LazyBuffer.loadop(LoadOps.SYNC, (1,), dtypes.uint32, self.device, src=self)
+      sync = LazyBuffer.loadop(LoadOps.SYNC, (1,), dtypes.uint32, self.device, src=self, enable_cache=True)
+      wait = LazyBuffer.loadop(LoadOps.WAIT, (1,), dtypes.uint32, device, src=sync, enable_cache=True)
+      return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self, wait), enable_cache=False)
     else:
-      sync = LazyBuffer.loadop(LoadOps.SYNC, (0,), dtypes.uint32, self.device, src=self)
-    wait = LazyBuffer.loadop(LoadOps.WAIT, (0,), dtypes.uint32, device, src=sync)
-    return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self, wait), enable_cache=False)
+      return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self,), enable_cache=False)
 
   def copy_to_device(self, device:str) -> LazyBuffer:
     # no COPY
