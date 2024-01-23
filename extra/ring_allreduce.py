@@ -7,19 +7,18 @@ from tinygrad.features.multi import MultiLazyBuffer, to_sharded
 from tinygrad.helpers import Timing
 import numpy as np
 
-# N = 4
-N = 1024
-GPUS = 4
-ds = tuple([f"{Device.DEFAULT}:{i+1}" for i in range(GPUS)])
+GPUS = 6
+N = 128 * 6
+ds = tuple([Device.canonicalize(f"{Device.DEFAULT}:{i}") for i in range(GPUS)])
 t = Tensor.rand(N, N, N).shard(ds, 0)
 n = t.numpy()
 
 @TinyJit
-def allreduce(t) -> Tensor:
+def allreduce(t:Tensor) -> Tensor:
   return t.sum(0)
 
 @TinyJit
-def ring_allreduce(t) -> Tensor:
+def ring_allreduce(t:Tensor) -> Tensor:
   lbs = t.lazydata.lbs
   rlbs = [lb.r(ReduceOps.SUM, (1, N, N)) for lb in t.lazydata.lbs]
   shlbs = [to_sharded([rlb] * GPUS, 1) for rlb in rlbs]
@@ -47,13 +46,15 @@ def ring_allreduce(t) -> Tensor:
   final = MultiLazyBuffer(list(catted.values()), None)
   return Tensor(final)
 
-for i in range(5):
+T = 10
+
+for _ in range(T):
   GlobalCounters.reset()
   with Timing(" ring:"):
     tn = ring_allreduce(t).numpy()
   np.testing.assert_allclose(tn, n.sum(0), atol=1e-4, rtol=1e-4)
 
-for i in range(5):
+for _ in range(T):
   GlobalCounters.reset()
   with Timing("naive:"):
     tn = allreduce(t).numpy()
