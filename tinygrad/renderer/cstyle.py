@@ -23,7 +23,6 @@ class CStyleLanguage(NamedTuple):
   float4: Optional[str] = None
   half_prekernel: Optional[str] = None
   uses_vload: bool = False
-  external_local_bufs: bool = False
   uses_ptr_arithmetic: bool = False
   launch_bounds: bool = False
   type_map: Dict[DType, str] = {}
@@ -62,18 +61,13 @@ class CStyleLanguage(NamedTuple):
       out_val = f"*(({self.smem_prefix if local and self.smem_prefix_for_cast else self.buffer_prefix}{buf_dtype.name}{output_dtype.sz}*)({buf_name}+{idx}))"  # noqa: E501
     else:
       out_val = f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
-
     return self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val
 
-  def render_local(self, name:str, dtype:DType, size:int):
-    return self.smem_align + self.smem_prefix + f"{dtype.name} {name}[{size}];"
-
-  def render_for(self, expr: str, _min:Union[int,str], _max:Union[int,str]) -> str:
-    return f"for (int {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
-
+  def render_local(self, name:str, dtype:DType, size:int): return self.smem_align + self.smem_prefix + f"{dtype.name} {name}[{size}];"
+  def render_for(self, expr: str, _min:Union[int,str], _max:Union[int,str]) -> str: return f"for (int {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
   def render_if(self, cond: str): return f"if ({cond}) {{"
 
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], prekernel:List[str]) -> str:
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int]) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""  # noqa: E501
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
                 ("const " if i > 0 else "")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
@@ -99,7 +93,7 @@ class CStyleLanguage(NamedTuple):
 
 def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> str:
   local_size: List[int] = []
-  kernel,prekernel,bufs = [],[],[]
+  kernel,bufs = [],[]
   #pend_close = None
   depth = 1
   def kk(s): kernel.append("  "*depth+s)
@@ -173,23 +167,18 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         if child_count[u] <= 1: r[u] = val
         else: kk(f"{dtype.name} {ssa(u,'cast')} = {val};")
       elif uop == UOps.DEFINE_LOCAL:
-        if lang.external_local_bufs:
-          prekernel.append(lang.render_local(args[0], dtype, args[1]))
-        else:
-          kk(lang.render_local(args[0], dtype, args[1]))
+        kk(lang.render_local(args[0], dtype, args[1]))
         r[u] = args[0]
       elif uop == UOps.DEFINE_GLOBAL:
         bufs.append((args, dtype))
         r[u] = args
       elif uop == UOps.GEP:
-        if cast(DType, vin[0].dtype).sz > 4:
-          r[u] = f"({r[vin[0]]})[{args}]"  # this is correct for HIP
-        else:
-          r[u] = f"({r[vin[0]]}).{'xyzw'[args]}"
+        if cast(DType, vin[0].dtype).sz > 4: r[u] = f"({r[vin[0]]})[{args}]"  # this is correct for HIP
+        else: r[u] = f"({r[vin[0]]}).{'xyzw'[args]}"
       else:
         raise RuntimeError(f"failed to render {uop}")
 
-  return lang.render_kernel(function_name, kernel, bufs, local_size, prekernel)
+  return lang.render_kernel(function_name, kernel, bufs, local_size)
 
 class OpenCLLanguage(CStyleLanguage):
   kernel_prefix = "__kernel "
@@ -219,7 +208,7 @@ class MetalLanguage(CStyleLanguage):
   arg_int_prefix = "constant int&"
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
-  uses_ptr_arithmetic=True
+  uses_ptr_arithmetic = True
   code_for_workitem = {"g": lambda x: f"gid.{chr(120+x)}", "l": lambda x: f"lid.{chr(120+x)}"}
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
@@ -259,7 +248,7 @@ class HIPLanguage(CUDALanguage):
   extern "C" __global__
   """
   launch_bounds = True
-  uses_ptr_arithmetic=True
+  uses_ptr_arithmetic = True
   half_prekernel = "#include <hip/hip_fp16.h>\n" + """
 typedef union { struct { half x, y, z, w; } __attribute__((aligned(8))); half data[4]; } half4;
 __device__ half4 make_half4(half x, half y, half z, half w) { return {x, y, z, w}; }
