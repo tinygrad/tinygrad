@@ -100,8 +100,10 @@ def run_schedule(schedule:List[ScheduleItem]):
       if si.ast.op is LoadOps.SYNC: options = BufferOptions(host=True)
       elif si.out.uncached: options = BufferOptions(uncached=True)
       else: options = None
+
       si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
         Buffer(si.out.device, si.out.size, si.out.dtype, "PLACEHOLDER" if isinstance(prg, InterpretedASTRunner) else None, options=options)
+
       if si.ast.op is LoadOps.SYNC and isinstance(prg, HIPSyncOp):
         to_mv(si.out.realized._buf, 4).cast("I")[0] = 0
         prg._lru_defeat = si.out.realized

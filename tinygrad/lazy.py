@@ -79,8 +79,11 @@ class LazyBuffer:
   def schedule(self, seen=None): return create_schedule([self], seen)
 
   def _copy(self, device:str) -> LazyBuffer:
-    if self.device.startswith("HIP"): self.uncached = True
-    sync = LazyBuffer.loadop(LoadOps.SYNC, (1,), dtypes.uint32, self.device, src=self)
+    if self.device.startswith("HIP"):
+      self.uncached = True
+      sync = LazyBuffer.loadop(LoadOps.SYNC, (1,), dtypes.uint32, self.device, src=self)
+    else:
+      sync = LazyBuffer.loadop(LoadOps.SYNC, (0,), dtypes.uint32, self.device, src=self)
     wait = LazyBuffer.loadop(LoadOps.WAIT, (0,), dtypes.uint32, device, src=sync)
     return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self, wait), enable_cache=False)
 
