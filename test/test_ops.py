@@ -262,6 +262,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(), ()], torch.maximum, Tensor.maximum)
     helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1., 0., 3., 4.], [1., 2., 3., 0.]])
     helper_test_op(None, torch.maximum, Tensor.maximum, vals=np.array([[1, 0, 3, 4], [1, 2, 3, 0]], dtype=np.int32), forward_only=True)
+    helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[True, False, False], [True, True, False]], forward_only=True)
   def test_minimum(self):
     helper_test_op([(45,65), (45,65)], torch.minimum, Tensor.minimum)
     helper_test_op([(), ()], torch.minimum, Tensor.minimum)
