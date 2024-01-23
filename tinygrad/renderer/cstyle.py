@@ -225,7 +225,23 @@ class CUDALanguage(CStyleLanguage):
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
   half_prekernel ="#include <cuda_fp16.h>\n"+"#include <cuda_bf16.h>\n"+"""
     struct half4 { half x, y, z, w; };
-    __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
+    __device__ half4 make_half4(half x, half y, half z, half w) { return {x, y, z, w}; }
+    struct half8 { half x, y, z, w, a, b, c, d; };
+    __device__ half8 make_half8(half x, half y, half z, half w, half a, half b, half c, half d) { return {x, y, z, w, a, b, c, d}; }
+    __device__ float4 __mma_m16n8k16_f16_f32(half8 a, half4 b, float4 c) {
+      int *a_packed = reinterpret_cast<int *>(&a), *b_packed = reinterpret_cast<int *>(&b);
+      asm(
+        "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32"
+        " { %0, %1, %2, %3 },"
+        " { %4, %5, %6, %7 },"
+        " { %8, %9 },"
+        " { %0, %1, %2, %3 };"
+        : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w)
+        : "r"(a_packed[0]), "r"(a_packed[1]), "r"(a_packed[2]),  "r"(a_packed[3]),
+          "r"(b_packed[0]), "r"(b_packed[1])
+      );
+      return c;
+    }
   """
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())

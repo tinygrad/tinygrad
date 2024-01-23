@@ -47,7 +47,7 @@ tensor_cores: Dict[str, List[TensorCore]] = {
     TensorCore(device="HIP", dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="__builtin_amdgcn_wmma_f32_16x16x16_f16_w32", ops=[("U",1,8),("L",0,16),("L",1,2)], thread_local_sizes=[16,16,8], thread_local_aliases=lambda l2,l1,u0,u1,z: [ [l1%2,z,u0,l1//2], [z,l1,u1,z] ]),  # noqa: E501
   ],
   "CUDA": [
-   TensorCore(device="CUDA", dims=[8,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="", ops=[("U",0,2),("L",0,4),("L",1,8),("U",1,2)], thread_local_sizes=[8,4,4], thread_local_aliases=lambda l2,l1,u0,u1,z:[ [l2,z,u0%4+l1*4,z,u0//4], [z,l2//2,u1+l1*4,l2%2,z]])
+   TensorCore(device="CUDA", dims=[8,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="__mma_m16n8k16_f16_f32", ops=[("U",0,2),("L",0,4),("L",1,8),("U",1,2)], thread_local_sizes=[8,4,4], thread_local_aliases=lambda l2,l1,u0,u1,z:[ [l2,z,u0%2+l1*2+u0//4*8,z,(u0//2)%2], [z,l2//2,u1%2+l1*2+(u1//2)*8,l2%2,z]])
   ]
 }
 
