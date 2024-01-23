@@ -26,7 +26,7 @@ class Opt:
 @dataclass(frozen=True)
 class TensorCore:
   device: str
-  dims: List[int]
+  dims: List[int]  # mxk@kxn: this is n, m, k
   dtype_in: DType
   dtype_out: DType
   ops: List[Tuple[str,int,int]] # list of (op,TC dim,amt) that construct the warp thread structure
@@ -45,6 +45,9 @@ tensor_cores: Dict[str, List[TensorCore]] = {
   ],
   "HIP": [
     TensorCore(device="HIP", dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="__builtin_amdgcn_wmma_f32_16x16x16_f16_w32", ops=[("U",1,8),("L",0,16),("L",1,2)], thread_local_sizes=[16,16,8], thread_local_aliases=lambda l2,l1,u0,u1,z: [ [l1%2,z,u0,l1//2], [z,l1,u1,z] ]),  # noqa: E501
+  ],
+  "CUDA": [
+   TensorCore(device="CUDA", dims=[8,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="", ops=[("U",0,2),("L",0,4),("L",1,8),("U",1,2)], thread_local_sizes=[8,4,4], thread_local_aliases=lambda l2,l1,u0,u1,z:[ [l2,z,u0%4+l1*4,z,u0//4], [z,l2//2,u1+l1*4,l2%2,z]])
   ]
 }
 
@@ -342,6 +345,7 @@ class Kernel:
         if not (mul_op.src[1].op == BufferOps.LOAD and mul_op.src[1].arg.dtype == tc.dtype_in): continue
         buf0, buf1 = self.bufs.index(cast(MemBuffer, mul_op.src[0].arg)), self.bufs.index(cast(MemBuffer, mul_op.src[1].arg))
         buf0_strides, buf1_strides = self.sts[buf0].real_strides(), self.sts[buf1].real_strides()
+        # mxk @ kxm, s0 is dimension of n, s1 is dimension of m
         axis_buf0 = [(i,self.full_shape[i],buf1_strides[i]) for i,s in enumerate(buf0_strides[:self.first_reduce]) if s == 0 and self.full_shape[i]%tc.dims[0] == 0]  # noqa: E501
         axis_buf1 = [(i,self.full_shape[i],buf0_strides[i]) for i,s in enumerate(buf1_strides[:self.first_reduce]) if s == 0 and self.full_shape[i]%tc.dims[1] == 0]  # noqa: E501
 
