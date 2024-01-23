@@ -3,10 +3,9 @@ from typing import Tuple, Optional, List
 import ctypes, functools, hashlib
 import gpuctypes.opencl as cl
 from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG
-from tinygrad.dtype import ImageDType
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import OpenCLRenderer
-from tinygrad.device import Compiled, LRUAllocator
+from tinygrad.device import Compiled, LRUAllocator, BufferOptions
 
 # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0
@@ -61,10 +60,11 @@ class CLAllocator(LRUAllocator):
     super().__init__()
   def _alloc(self, size:int) -> cl.cl_mem:
     return checked(cl.clCreateBuffer(self.device.context, cl.CL_MEM_READ_WRITE, size, None, ctypes.byref(status := ctypes.c_int32())), status)
-  def _alloc_image(self, dtype:ImageDType) -> cl.cl_mem:
+  def _alloc_with_options(self, size:int, options:BufferOptions) -> cl.cl_mem:
+    assert options.image is not None
     return checked(cl.clCreateImage2D(self.device.context, cl.CL_MEM_READ_WRITE,
-                                      cl.cl_image_format(cl.CL_RGBA, {2: cl.CL_HALF_FLOAT, 4: cl.CL_FLOAT}[dtype.itemsize]),
-                                      dtype.shape[1], dtype.shape[0], 0, None, ctypes.byref(status := ctypes.c_int32())), status)
+                                      cl.cl_image_format(cl.CL_RGBA, {2: cl.CL_HALF_FLOAT, 4: cl.CL_FLOAT}[options.image.itemsize]),
+                                      options.image.shape[1], options.image.shape[0], 0, None, ctypes.byref(status := ctypes.c_int32())), status)
   def _free(self, buf:cl.cl_mem): check(cl.clReleaseMemObject(buf))
   def copyin(self, dest:cl.cl_mem, src:memoryview):
     check(cl.clEnqueueWriteBuffer(self.device.queue, dest, False, 0, len(src)*src.itemsize, from_mv(src), 0, None, None))
