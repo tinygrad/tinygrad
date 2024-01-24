@@ -57,7 +57,7 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:int, var_vals: Optiona
   GlobalCounters.global_ops += op_estimate
   GlobalCounters.global_mem += mem_estimate
   if et is not None: GlobalCounters.time_sum_s += et
-  if DEBUG >= 2:
+  if DEBUG >= 1:
     ptm = (colored(f"{et*1e3:9.2f}ms", "yellow") if et > 0.01 else f"{et*1e6:9.2f}us") if et is not None else ""
     print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', ('magenta' if num_kernels == 1 else 'CYAN') if jit else ('green' if first_run else None))} {name+' '*(38-ansilen(name))} arg {buf_count:3d} mem {GlobalCounters.mem_used/1e9:5.2f} GB " +  # noqa: E501
           (str() if et is None else f"tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({op_estimate/((et or 1e-20)*1e9):8.2f} GFLOPS, {mem_estimate/((et or 1e-20)*1e9):7.2f} GB/s)"))  # noqa: E501
@@ -84,7 +84,7 @@ class Buffer:
     if not hasattr(self, '_buf'): return # happens when __init__ has raised exception
     if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
     self.allocator.free(self._buf, self.nbytes, self.options)
-  def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}>"
+  def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}" + (">" if self.options is None else f"{self.options=}>")
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, 'as_buffer'): return self.allocator.as_buffer(self._buf)
@@ -104,7 +104,7 @@ class Buffer:
 class BufferCopy(JITRunner):
   def copy(self, dest, src): dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
-    dest, src = rawbufs
+    dest, src = rawbufs[0:2]
     assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
     st = time.perf_counter()
     self.copy(dest, src)
@@ -126,14 +126,10 @@ class BufferRead(BufferCopy):
 
 class BufferXfer(BufferCopy):
   def copy(self, dest, src):
-    # fast path, used on HIP between GPUs
-    # NOTE: we have to block here so the data isn't copied too early. this is probably due to buffer reuse
-    if hasattr(src.d, "block") and hasattr(dest.d, "event"): src.d.block(dest.d.event())
-    else: dest.d.synchronize()
-    src.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
-    # NOTE: we have to block here so the data is ready on dest when dest needs it
-    if hasattr(dest.d, "block") and hasattr(src.d, "event"): dest.d.block(src.d.event())
-    else: src.d.synchronize()
+    if hasattr(dest.allocator.device, "track_cross_buffer") and hasattr(src.allocator, "track_cross_device"):
+      dest.allocator.device.track_cross_buffer.append(src)
+      src.allocator.track_cross_device.append(dest.allocator.device)
+    dest.allocator.transfer(dest._buf, src._buf, dest.nbytes)
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
