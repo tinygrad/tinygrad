@@ -290,8 +290,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: 2-x)
 
   def test_neg(self):
-    helper_test_op([(45,65)], lambda x: -x)
-    helper_test_op([()], lambda x: -x)
+    helper_test_op([(45,65)], lambda x: x.neg())
+    helper_test_op([()], lambda x: x.neg())
   def test_logical_not(self):
     helper_test_op(None, torch.logical_not, Tensor.logical_not, vals=[True], forward_only=True)
     helper_test_op(None, torch.logical_not, Tensor.logical_not, vals=[[True, False, True]], forward_only=True)
