@@ -407,6 +407,7 @@ def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
     x = (x > b).where(b+1-n, b-n)
     return x
 
+# TODO: this is different from Tensor.round?
 def Round(X:Tensor): return _round(X, 0.5, "round_to_even")
 
 # TODO clean this up, it's taking the longest in CI
