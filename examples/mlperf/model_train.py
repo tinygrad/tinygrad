@@ -14,17 +14,20 @@ def train_unet3d():
   from examples.mlperf.metrics import dice_score
   from extra.models.unet3d import UNet3D
   from extra.datasets.kits19 import iterate, get_train_files, get_val_files, sliding_window_inference
-  from tinygrad import dtypes, Device, TinyJit
+  from tinygrad import dtypes, Device, TinyJit, Tensor
   from tinygrad.nn.optim import SGD
   from tinygrad.nn.state import get_parameters, get_state_dict, safe_save, safe_load, load_state_dict
   from tqdm import tqdm
 
+  import numpy as np
+  import random
+
   TARGET_METRIC = 0.908
   NUM_EPOCHS = getenv("NUM_EPOCHS", 4000)
   BS = getenv("BS", 2)
-  LR = getenv("LR", 1.0)
+  LR = getenv("LR", 0.8)
   MOMENTUM = getenv("MOMENTUM", 0.9)
-  LR_WARMUP_EPOCHS = getenv("LR_WARMUP_EPOCHS")
+  LR_WARMUP_EPOCHS = getenv("LR_WARMUP_EPOCHS", 200)
   LR_WARMUP_INIT_LR = getenv("LR_WARMUP_INIT_LR", 0.0001)
   EVAL_AT = getenv("EVAL_AT", 20)
   CHECKPOINT_EVERY = getenv("CHECKPOINT_EVERY", 10)
@@ -33,6 +36,13 @@ def train_unet3d():
   WANDB = getenv("WANDB")
   PROJ_NAME = getenv("PROJ_NAME", "tinygrad_unet3d_mlperf")
   SIZE = (64, 64, 64) if getenv("SMALL") else (128, 128, 128)
+  SEED = getenv("SEED")
+
+  if SEED:
+    assert 1 <= SEED <= 9, "seed must be between 1-9"
+    Tensor.manual_seed(SEED)
+    np.random.seed(SEED)
+    random.seed(SEED)
 
   if WANDB:
     try:
@@ -73,7 +83,7 @@ def train_unet3d():
     loss.backward()
     optim.step()
 
-    return loss.realize()
+    return loss
   
   def _eval_step(model, x, y):
     y_hat, y = sliding_window_inference(model, x, y)

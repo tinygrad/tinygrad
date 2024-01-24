@@ -74,10 +74,8 @@ def iterate(val=True, shuffle=False, bs=1, size=(128, 128, 128)):
   files = get_val_files() if val else get_train_files()
   order = list(range(0, len(files)))
   if shuffle: random.shuffle(order)
-  from multiprocessing import Pool
-  p = Pool(8)
   for i in range(0, len(files), bs):
-    samples = p.map(functools.partial(preprocess, roi_shape=size), [files[i] for i in order[i:i+bs]])
+    samples = [preprocess(files[i], roi_shape=size) for i in order[i:i+bs]]
     X, Y = [x[0] for x in samples], [x[1] for x in samples]
     if val: yield X[0][None], Y[0]
     else:
