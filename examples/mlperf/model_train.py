@@ -38,6 +38,9 @@ def train_unet3d():
   SIZE = (64, 64, 64) if getenv("SMALL") else (128, 128, 128)
   SEED = getenv("SEED")
 
+  if getenv("FLOAT16"):
+    dtypes.default_float = dtypes.half
+
   if SEED:
     assert 1 <= SEED <= 9, "seed must be between 1-9"
     Tensor.manual_seed(SEED)
@@ -67,7 +70,9 @@ def train_unet3d():
   else:
     model_run = model
 
-  if len(GPUS) > 1: model.shard_(GPUS)
+  if len(GPUS) > 1:
+    for p in get_parameters(model):
+      p.to_(GPUS)
 
   optim = SGD(get_parameters(model), lr=LR, momentum=MOMENTUM, nesterov=True)
 

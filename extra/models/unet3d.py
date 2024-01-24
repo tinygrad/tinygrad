@@ -54,10 +54,6 @@ class UNet3D:
       assert obj.shape == v.shape, (k, obj.shape, v.shape)
       obj.assign(v.numpy())
 
-  def shard_(self, gpus):
-    for x in nn.state.get_parameters(self):
-      x.shard_(gpus)
-
 if __name__ == "__main__":
   mdl = UNet3D()
   mdl.load_from_pretrained()
