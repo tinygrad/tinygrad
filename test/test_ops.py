@@ -292,6 +292,10 @@ class TestOps(unittest.TestCase):
   def test_neg(self):
     helper_test_op([(45,65)], lambda x: -x)
     helper_test_op([()], lambda x: -x)
+  def test_logical_not(self):
+    helper_test_op(None, torch.logical_not, Tensor.logical_not, vals=[[True, False]], forward_only=True)
+    helper_test_op(None, torch.logical_not, Tensor.logical_not, vals=[True], forward_only=True)
+    helper_test_op(None, torch.logical_not, Tensor.logical_not, vals=[False], forward_only=True)
 
   def test_mul(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x*y, Tensor.mul)
