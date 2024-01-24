@@ -68,6 +68,8 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:int, var_vals: Optiona
 class BufferOptions:
   image: Optional[ImageDType] = None
   uncached: bool = False
+  host: bool = False
+  signal: bool = False
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None):
@@ -156,7 +158,7 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
       for opaque in opaques: self._free(opaque)
       opaques.clear()
   def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
-    if getenv("LRU", 1): self.cache[(size, options)].append(opaque)
+    if getenv("LRU", 1) and (options is None or not options.signal): self.cache[(size, options)].append(opaque)
     else: self._free(opaque)
 
 class _MallocAllocator(LRUAllocator):

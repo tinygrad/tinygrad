@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional, cast
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters
-from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, InterpretedASTRunner, Compiled
+from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, InterpretedASTRunner, Compiled, BufferOptions
 from tinygrad.graph import print_tree, realized_lazybuffer
 from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG
 from tinygrad.shape.symbolic import Variable
@@ -21,26 +21,6 @@ class SyncOp(JITRunner):
     et = cpu_time_execution(self.device.synchronize, enable=wait or DEBUG >= 1)
     update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=self.dname)
 
-class SyncEvent(JITRunner):
-  def __init__(self, lb):
-    self.lb, self.device, self.dname = lb, Device[lb.device], lb.device
-    assert hasattr(self.device, "event_create")
-    setattr(self.lb, "event", self.device.event_create())
-    super().__init__()
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
-    assert hasattr(self.device, "event_record")
-    self.device.event_record(self.lb.event)
-    update_stats(colored("sync", "red"), 0, 0, {}, None, 1, device=self.dname)
-
-class WaitEvent(JITRunner):
-  def __init__(self, device, lb_sync):
-    self.lb_sync, self.device, self.dname = lb_sync, Device[device], device
-    super().__init__()
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
-    assert hasattr(self.device, "event_wait")
-    self.device.event_wait(self.lb_sync.event)
-    update_stats(colored("wait", "RED"), 0, 0, {}, None, 1, device=self.dname)
-
 def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   assert all(si.out.device == x.device for x in si.inputs) or si.ast.op in {LoadOps.COPY, LoadOps.WAIT}, \
     f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
@@ -52,8 +32,9 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   if si.ast.op is LoadOps.CUSTOM: return CustomOp(si.ast.arg)
   # TODO: this doesn't have to be only HIP, check if it has the event functions
   if si.ast.op in {LoadOps.SYNC, LoadOps.WAIT} and si.out.device.startswith("HIP") and si.inputs[0].device.startswith("HIP"):
+    from tinygrad.runtime.ops_hip import SyncEvent, WaitEvent
     if si.ast.op is LoadOps.SYNC: return SyncEvent(si.out)
-    if si.ast.op is LoadOps.WAIT: return WaitEvent(si.out.device, si.inputs[0])
+    if si.ast.op is LoadOps.WAIT: return WaitEvent(si.out.device)
   else:
     if si.ast.op is LoadOps.SYNC: return SyncOp(si.out.device) if isinstance(Device[si.out.device], Compiled) else None
     if si.ast.op is LoadOps.WAIT: return None
@@ -78,8 +59,9 @@ def run_schedule(schedule:List[ScheduleItem]):
 
     # we don't have an output buffer, we have to create it, and create to max size if it has symbolic shape
     if si.out.size > 0:
+      options = BufferOptions(host=True, signal=True) if si.ast.op is LoadOps.SYNC else None
       si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
-        Buffer(si.out.device, si.out.size, si.out.dtype, "PLACEHOLDER" if isinstance(prg, InterpretedASTRunner) else None)
+        Buffer(si.out.device, si.out.size, si.out.dtype, "PLACEHOLDER" if isinstance(prg, InterpretedASTRunner) else None, options=options)
       del si.out.srcs
 
     # run the function (put it in JIT)
