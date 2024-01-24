@@ -1,6 +1,7 @@
-import ctypes
+import ctypes, functools
 import gpuctypes.hsa as hsa
 from tinygrad.helpers import init_c_var
+from tinygrad.helpers import Timing, from_mv
 
 def check(status: hsa.hsa_status_t):
   assert status == 0, f"has status is {status}"
@@ -29,6 +30,59 @@ def filter_shared_memtype(region, data):
     ret[0] = region
     return hsa.HSA_STATUS_INFO_BREAK
   return hsa.HSA_STATUS_SUCCESS
+
+@functools.lru_cache(None)
+def find_agent(typ, device_id):
+  @ctypes.CFUNCTYPE(hsa.hsa_status_t, hsa.hsa_agent_t, ctypes.c_void_p)
+  def __filter_amdgpu_agent(agent, data):
+    status = hsa.hsa_agent_get_info(agent, hsa.HSA_AGENT_INFO_DEVICE, ctypes.byref(device_type := hsa.hsa_device_type_t()))
+    if status == 0 and device_type.value == typ:
+      ret = ctypes.cast(data, ctypes.POINTER(hsa.hsa_agent_t))
+      print(ret[0].handle)
+      if ret[0].handle < device_id:
+        ret[0].handle = ret[0].handle + 1
+        return hsa.HSA_STATUS_SUCCESS
+
+      ret = ctypes.cast(data, ctypes.POINTER(hsa.hsa_agent_t))
+      ret[0] = agent
+      return hsa.HSA_STATUS_INFO_BREAK
+    return hsa.HSA_STATUS_SUCCESS
+
+  agent = hsa.hsa_agent_t()
+  agent.handle = 0
+  hsa.hsa_iterate_agents(__filter_amdgpu_agent, ctypes.byref(agent))
+  return agent
+
+# @functools.lru_cache(None)
+def get_amd_memory_pool(agent, segtyp=-1, flags=-1, location=-1):
+  @ctypes.CFUNCTYPE(hsa.hsa_status_t, hsa.hsa_amd_memory_pool_t, ctypes.c_void_p)
+  def __filter_amd_memory_pools(mem_pool, data):
+    if segtyp != -1:
+      check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_SEGMENT, ctypes.byref(segment := hsa.hsa_amd_segment_t())))
+      if segment.value != segtyp:
+        return hsa.HSA_STATUS_SUCCESS
+
+    if flags != -1:
+      check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, ctypes.byref(fgs := hsa.hsa_amd_memory_pool_global_flag_t())))
+      # print(fgs.value, flags)
+      if fgs.value != flags:
+        return hsa.HSA_STATUS_SUCCESS
+
+    if location != -1:
+      check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_LOCATION, ctypes.byref(loc := hsa.hsa_amd_memory_pool_location_t())))
+      # print(fgs.value, flags)
+      if loc.value != location:
+        return hsa.HSA_STATUS_SUCCESS
+
+    # print("")
+    ret = ctypes.cast(data, ctypes.POINTER(hsa.hsa_amd_memory_pool_t))
+    ret[0] = mem_pool
+    return hsa.HSA_STATUS_INFO_BREAK
+
+  region = hsa.hsa_amd_memory_pool_t()
+  region.handle = 0
+  hsa.hsa_amd_agent_iterate_memory_pools(agent, __filter_amd_memory_pools, ctypes.byref(region))
+  return region
 
   # // Get the kernel code handle
   # hsa_status_t hsaStatus;
@@ -82,8 +136,8 @@ class Kernel():
   def handle(self): return self.kernel_handle
 
   def get_binary_info(self, binary):
-    with open("/home/nimlgen/amd.elf", 'wb') as file:
-      file.write(binary)
+    # with open("/home/nimlgen/amd.elf", 'wb') as file:
+    #   file.write(binary)
 
     from io import BytesIO
     from elftools.elf.elffile import ELFFile
@@ -106,11 +160,6 @@ class Kernel():
 
       assert kern_info is not None
       return kern_info
-
-def launch_kernel(kernel, extra):
-  # Set args from extra
-
-  extra
 
 class GPUBuffer():
   def __init__(self, sz, agent):
@@ -150,15 +199,35 @@ if __name__ == "__main__":
   from tinygrad import Tensor, Device, TinyJit
   print("***** init HSA")
   check(hsa.hsa_init())
+
+  # print("***** call HSAKMT")
+  # hsa.hsaKmtGetVersion(ctypes.byref(hsakmt_ver := hsa.struct__HsaVersionInfo()))
+  # print(hsakmt_ver)
+
   print("***** agent HSA")
-  hsa.hsa_iterate_agents(filter_amdgpu_agent, ctypes.byref(agent := hsa.hsa_agent_t()))
+  agent_cpu = find_agent(hsa.HSA_DEVICE_TYPE_CPU, device_id=0)
+  agent = agent_0 = find_agent(hsa.HSA_DEVICE_TYPE_GPU, device_id=0)
+  agent_1 = find_agent(hsa.HSA_DEVICE_TYPE_GPU, device_id=1)
+
+  # Check that we got different devs with real handle ptr
+  assert agent_0.handle != agent_1.handle and agent_0.handle > 0xffff and agent_1.handle > 0xffff
+
+
   check(hsa.hsa_agent_get_info(agent, hsa.HSA_AGENT_INFO_NAME, ctypes.byref(buf := ctypes.create_string_buffer(256))))
   print("dev:", ctypes.string_at(buf).decode()) # gfx1100 is here!
 
   check(hsa.hsa_agent_get_info(agent, hsa.HSA_AGENT_INFO_QUEUE_MAX_SIZE, ctypes.byref(queue_size := ctypes.c_uint32())))
+  check(hsa.hsa_agent_get_info(agent, hsa.HSA_AMD_AGENT_INFO_COOPERATIVE_QUEUES, ctypes.byref(coop_queues := ctypes.c_uint32())))
   print("max queue size:", queue_size.value)
+  print("support coop queues:", coop_queues.value) # gfx1100 supports coops queue
 
-  UINT32_MAX = (2 << 32) - 1
+  check(hsa.hsa_agent_get_info(agent, hsa.HSA_AMD_AGENT_INFO_NUM_SDMA_ENG, ctypes.byref(num_sdma := ctypes.c_uint32())))
+  print("num_sdma", num_sdma.value) # 2
+
+  check(hsa.hsa_agent_get_info(agent, hsa.HSA_AMD_AGENT_INFO_NUM_SDMA_XGMI_ENG, ctypes.byref(num_xdgi_sdma := ctypes.c_uint32())))
+  print("num_xdgi_sdma", num_xdgi_sdma.value) # 0 -- seems this is CDNA only
+
+  UINT32_MAX = (1 << 32) - 1
   hsa_queue_ptr_t = ctypes.POINTER(hsa.hsa_queue_t)
   null_func = ctypes.CFUNCTYPE(None, hsa.hsa_status_t, ctypes.POINTER(hsa.struct_hsa_queue_s), ctypes.POINTER(None))()
   check(hsa.hsa_queue_create(agent, queue_size, hsa.HSA_QUEUE_TYPE_SINGLE, null_func, None, UINT32_MAX, UINT32_MAX, ctypes.byref(queue := hsa_queue_ptr_t())))
@@ -180,6 +249,83 @@ if __name__ == "__main__":
   #   check(hsa.hsa_memory_register())
   #   return 
 
+  print("***** prep buffers")
+  # hsa_memory_allocate -> (internal)MemoryRegion::AllocateImpl -> hsaKmtAllocMemory.
+  # They seem to use caching allocator (fragment_allocator_, 2MB blocks) to reduce number of calls to hsaKmtAllocMemory.
+
+  # hsa_memory_copy -- bad, use amd ext
+  # CPU-CPU is memcpy
+  # Same GPU is DmaCopy, BlitDevToDev always engages a Blit Kernel.
+  #   BlitDevToDev always engages a Blit Kernel
+  #   BlitHostToDev (H2D) engage either a Blit Kernel or sDMA.
+  #   BlitDevToHost (D2H and P2P) engage either a Blit Kernel or sDMA.
+  #   XGMI engines
+  # GPU-GPU using host memory here.
+  sz = 4 << 30
+  agents_cnt = 3
+  agents = (hsa.hsa_agent_t * agents_cnt)(agent_cpu, agent_0, agent_1)
+
+  gpu_0_memory_pool = get_amd_memory_pool(agent_0, segtyp=hsa.HSA_AMD_SEGMENT_GLOBAL, location=hsa.HSA_AMD_MEMORY_POOL_LOCATION_GPU)
+  print("memory pool 0", gpu_0_memory_pool.handle)
+
+  gpu_1_memory_pool = get_amd_memory_pool(agent_1, segtyp=hsa.HSA_AMD_SEGMENT_GLOBAL, location=hsa.HSA_AMD_MEMORY_POOL_LOCATION_GPU)
+  print("memory pool 1", gpu_1_memory_pool.handle)
+
+  cpu_memory_pool = get_amd_memory_pool(agent_cpu, segtyp=hsa.HSA_AMD_SEGMENT_GLOBAL, location=hsa.HSA_AMD_MEMORY_POOL_LOCATION_CPU)
+  print("memory pool cpu", cpu_memory_pool.handle)
+
+  check(hsa.hsa_amd_memory_pool_allocate(gpu_0_memory_pool, sz, 0, ctypes.byref(buf0 := ctypes.c_void_p())))
+  check(hsa.hsa_amd_agents_allow_access(agents_cnt, agents, None, buf0))
+  # print(buf0)
+
+  check(hsa.hsa_amd_memory_pool_allocate(gpu_0_memory_pool, sz, 0, ctypes.byref(buf01 := ctypes.c_void_p())))
+  check(hsa.hsa_amd_agents_allow_access(agents_cnt, agents, None, buf01))
+  # print(buf01)
+
+  check(hsa.hsa_amd_memory_pool_allocate(gpu_1_memory_pool, sz, 0, ctypes.byref(buf1 := ctypes.c_void_p())))
+  check(hsa.hsa_amd_agents_allow_access(agents_cnt, agents, None, buf1))
+  # print(buf1)
+
+  check(hsa.hsa_amd_memory_pool_allocate(cpu_memory_pool, sz, 0, ctypes.byref(cpu_buf := ctypes.c_void_p())))
+  check(hsa.hsa_amd_agents_allow_access(agents_cnt, agents, None, cpu_buf))
+  
+  # cpu_memory = memoryview(bytearray(sz))
+  # check(hsa.hsa_amd_memory_lock(from_mv(cpu_memory), sz, agents, agents_cnt, ctypes.byref(cpu_buf := ctypes.c_void_p())))
+  # # print("cpu", cpu_buf)
+
+  for i in range(3):
+    with Timing("transfer copy (p2p) ", lambda x: f" {sz/x:.2f} GB/s"): # 19.19 GB/s
+      check(hsa.hsa_signal_create(1, 0, None, ctypes.byref(copy_signal := hsa.hsa_signal_t())))
+      check(hsa.hsa_amd_memory_async_copy(buf1, agent_1, buf0, agent_0, sz, 0, None, copy_signal))
+      sigval = hsa.hsa_signal_wait_acquire(copy_signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_BLOCKED)
+
+  for i in range(3):
+    with Timing("engine copy (p2p) ", lambda x: f" {sz/x:.2f} GB/s"): # 19.19 GB/s
+      check(hsa.hsa_signal_create(1, 0, None, ctypes.byref(copy_signal := hsa.hsa_signal_t())))
+      check(hsa.hsa_amd_memory_async_copy_on_engine(buf1, agent_1, buf0, agent_0, sz, 0, None, copy_signal, hsa.HSA_AMD_SDMA_ENGINE_1, True))
+      sigval = hsa.hsa_signal_wait_acquire(copy_signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_BLOCKED)
+
+  for i in range(3):
+    with Timing("bidirectional engine copy (p2p) ", lambda x: f" {sz/x:.2f} GB/s"): # ~ 37.55 GB/s
+      first_half = sz // 2
+      second_half = sz - first_half
+
+      second_buf0 = ctypes.c_void_p(buf0.value + first_half)
+      second_buf1 = ctypes.c_void_p(buf1.value + first_half)
+
+      check(hsa.hsa_signal_create(1, 0, None, ctypes.byref(copy_signal0 := hsa.hsa_signal_t())))     
+      check(hsa.hsa_signal_create(1, 0, None, ctypes.byref(copy_signal1 := hsa.hsa_signal_t())))
+      check(hsa.hsa_amd_memory_async_copy_on_engine(buf1, agent_1, buf0, agent_0, first_half, 0, None, copy_signal0, hsa.HSA_AMD_SDMA_ENGINE_0, True))
+      check(hsa.hsa_amd_memory_async_copy_on_engine(second_buf0, agent_0, second_buf1, agent_1, second_half, 0, None, copy_signal1, hsa.HSA_AMD_SDMA_ENGINE_0, True))
+      sigval = hsa.hsa_signal_wait_acquire(copy_signal0, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_BLOCKED)
+      sigval = hsa.hsa_signal_wait_acquire(copy_signal1, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_BLOCKED)
+
+
+  print("***** play with copies")
+  ca = Tensor([1.,2.]*128, device="HIP:0").realize()
+  cb = Tensor([6.,5.]*128, device="HIP:1").realize()
+
+  # hsa.hsa_amd_agents_allow_access(agent_0)
 
   print("***** prep kernel")
   check(hsa.hsa_signal_create(1, 0, None, ctypes.byref(signal := hsa.hsa_signal_t())))
@@ -238,7 +384,7 @@ if __name__ == "__main__":
 
   print("***** waiting kernel")
 
-  sigval = hsa.hsa_signal_wait_acquire(signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (2 << 64) - 1, hsa.HSA_WAIT_STATE_BLOCKED)
+  sigval = hsa.hsa_signal_wait_acquire(signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_BLOCKED)
 
   
   ans = memoryview(bytearray(2 * 32 * 4 * 4))
