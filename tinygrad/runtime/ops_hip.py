@@ -103,7 +103,6 @@ class HIPDevice(Compiled):
     self.device = int(device.split(":")[1]) if ":" in device else 0
     self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode() if not MOCKHIP else "gfx1100"  # noqa: E501
     self.pending_copyin: List[hip.hipDeviceptr_t] = []
-    self.pending_events: List[hip.hipEvent_t] = []
     self.track_cross_buffer: List[Any] = []
 
     from tinygrad.runtime.graph.hip import HIPGraph
@@ -113,16 +112,14 @@ class HIPDevice(Compiled):
     check(hip.hipSetDevice(self.device))
     check(hip.hipDeviceSynchronize())
     for opaque in self.pending_copyin: check(hip.hipFree(opaque))
-    for opaque in self.pending_events: check(hip.hipEventDestroy(opaque))
     self.track_cross_buffer.clear()
     self.pending_copyin.clear()
-    self.pending_events.clear()
-  def event(self):
+  def event_create(self):
     check(hip.hipSetDevice(self.device))
-    evt = init_c_var(hip.hipEvent_t(), lambda x: check(hip.hipEventCreate(ctypes.byref(x))))
-    self.pending_events.append(evt)
+    return init_c_var(hip.hipEvent_t(), lambda x: check(hip.hipEventCreate(ctypes.byref(x))))
+  def event_record(self, evt):
+    check(hip.hipSetDevice(self.device))
     check(hip.hipEventRecord(evt, None))
-    return evt
-  def block(self, evt):
+  def event_wait(self, evt):
     check(hip.hipSetDevice(self.device))
     check(hip.hipStreamWaitEvent(None, evt, 0))
