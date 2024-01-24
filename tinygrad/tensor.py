@@ -742,6 +742,7 @@ class Tensor:
   def trunc(self: Tensor) -> Tensor: return self.cast(dtypes.int32).cast(self.dtype)
   def ceil(self: Tensor) -> Tensor: return (self > (b := self.trunc())).where(b+1, b)
   def floor(self: Tensor) -> Tensor: return (self < (b := self.trunc())).where(b-1, b)
+  def round(self: Tensor) -> Tensor: return (self + 0.5).floor()
 
   def square(self): return self*self
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
