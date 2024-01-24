@@ -846,7 +846,7 @@ class Tensor:
 
   # ***** op wrappers (wasted lines to make the typechecker happy) *****
 
-  def __neg__(self) -> Tensor: return self.neg()
+  def __neg__(self) -> Tensor: return self.neg() if self.dtype != dtypes.bool else self.logical_not()
 
   def __add__(self, x) -> Tensor: return self.add(x)
   def __sub__(self, x) -> Tensor: return self.sub(x)
