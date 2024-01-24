@@ -33,7 +33,8 @@ dtype_to_llvm_dtype = { dtypes.bool:ir.IntType(1), dtypes.int8:ir.IntType(8), dt
 
 def cast(bb, val, input_type, output_type, bitcast=False):
   if input_type == output_type: return val
-  if bitcast: return bb[-1].bitcast(val, dtype_to_llvm_dtype[output_type])
+  llvm_type = dtype_to_llvm_dtype[output_type]
+  if bitcast: return bb[-1].bitcast(val, llvm_type)
 
   if input_type == dtypes.bfloat16:
     val = bb[-1].bitcast(bb[-1].shl(bb[-1].sext(val, ir.IntType(32)), ir.Constant(ir.IntType(32), 16)),val, ir.FloatType())
@@ -44,27 +45,20 @@ def cast(bb, val, input_type, output_type, bitcast=False):
 
   if dtypes.is_float(input_type):
     if dtypes.is_float(output_type):
-      if output_type.itemsize > input_type.itemsize: return bb[-1].fpext(val, dtype_to_llvm_dtype[output_type])
-      return bb[-1].fptrunc(val, dtype_to_llvm_dtype[output_type])
-    if dtypes.is_int(output_type):
-      if dtypes.is_unsigned(output_type): return bb[-1].fptoui(val, dtype_to_llvm_dtype[output_type])
-      return bb[-1].fptosi(val, dtype_to_llvm_dtype[output_type])
+      return bb[-1].fpext(val, llvm_type) if output_type.itemsize > input_type.itemsize else bb[-1].fptrunc(val, llvm_type)
+    if dtypes.is_int(output_type): return bb[-1].fptoui(val, llvm_type) if dtypes.is_unsigned(output_type) else bb[-1].fptosi(val, llvm_type)
     if output_type == dtypes.bool: return bb[-1].fcmp_unordered('!=', cast(bb, val, input_type, dtypes.float32), ir.Constant(ir.FloatType(), 0))
 
   if dtypes.is_unsigned(input_type) or input_type == dtypes.bool:
     if output_type == dtypes.float16: return bb[-1].fptrunc(bb[-1].uitofp(val, ir.FloatType()), ir.HalfType())
     if dtypes.is_float(output_type): return bb[-1].uitofp(val, dtype_to_llvm_dtype[output_type])
-    if dtypes.is_int(output_type):
-      if input_type.itemsize > output_type.itemsize: return bb[-1].trunc(val, dtype_to_llvm_dtype[output_type])
-      return bb[-1].zext(val, dtype_to_llvm_dtype[output_type])
+    if dtypes.is_int(output_type): return bb[-1].trunc(val, llvm_type) if input_type.itemsize > output_type.itemsize else bb[-1].zext(val, llvm_type)
     if output_type == dtypes.bool: return bb[-1].icmp_unsigned('!=', val, ir.Constant(val.type, 0))
 
   if dtypes.is_int(input_type):
     if output_type == dtypes.float16: return bb[-1].fptrunc(bb[-1].sitofp(val, ir.FloatType()), ir.HalfType())
-    if dtypes.is_float(output_type): return bb[-1].sitofp(val, dtype_to_llvm_dtype[output_type])
-    if dtypes.is_int(output_type):
-      if input_type.itemsize > output_type.itemsize: return bb[-1].trunc(val, dtype_to_llvm_dtype[output_type])
-      return bb[-1].sext(val, dtype_to_llvm_dtype[output_type])
+    if dtypes.is_float(output_type): return bb[-1].sitofp(val, llvm_type)
+    if dtypes.is_int(output_type): return bb[-1].trunc(val, llvm_type) if input_type.itemsize > output_type.itemsize else bb[-1].sext(val, llvm_type)
     if output_type == dtypes.bool: return bb[-1].icmp_signed('!=', val, ir.Constant(val.type, 0))
 
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
@@ -102,60 +96,59 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
 
   for u in uops:
     uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
-    if uop == UOps.LOOP:
-      bb.append(ir.IRBuilder(func.append_basic_block(f"loop_body_{len(loop_blocks)}")))
-      bb[-2].branch(bb[-1]._block)
-
-      phis = []
-      for rp in reduce_phis:
-        incoming = lvars[rp]
-        lvars[rp] = bb[-1].phi(dtype_to_llvm_dtype[rp.dtype])
-        lvars[rp].add_incoming(incoming, bb[-2]._block)
-        phis.append((rp, lvars[rp]))
-
-      lvars[u] = bb[-1].phi(ir.IntType(32), name=f"loop{len(loop_blocks)}")
-      lvars[u].add_incoming(lvars[vin[0]], bb[-2]._block)
-      loop_blocks.append((bb[-1], phis))
-    if uop == UOps.END:
+    if uop == UOps.STORE:
+      element = cast(bb, lvars[vin[2]], vin[2].dtype, vin[0].dtype)
+      def store_op(): bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
+      if len(vin) > 3:
+        with bb[-1].if_then(lvars[vin[3]]): store_op()
+      else: store_op()
+    elif uop == UOps.END:
       block, phis = loop_blocks.pop()
       idx_p1 = bb[-1].add(lvars[vin[0]], ir.Constant(ir.IntType(32), 1))
       lvars[vin[0]].add_incoming(idx_p1, bb[-1]._block)
       for n,phi in phis: phi.add_incoming(lvars[n], bb[-1]._block)
       bb.append(ir.IRBuilder(func.append_basic_block(f"loop_exit_{len(loop_blocks)}")))
       bb[-2].cbranch(bb[-2].icmp_unsigned("<", idx_p1, lvars[vin[0].vin[1]]), block._block, bb[-1]._block)
-    if uop == UOps.DEFINE_GLOBAL: lvars[u] = func.args[buf_index[args]]
-    if uop == UOps.DEFINE_ACC:
-      lvars[u] = const(args, dtype)
-      reduce_phis.append(u)
-    if uop == UOps.SPECIAL: lvars[u] = lvars[args.expr]
-    if uop == UOps.CONST: lvars[u] = const(args, dtype)
-    if uop == UOps.LOAD:
-      assert dtype is not None
-      if len(vin) > 2:
-        gate = bb[-1].trunc(lvars[vin[2]], ir.IntType(1))
-        aug_idx = bb[-1].select(gate, lvars[vin[1]], ir.Constant(ir.IntType(32), 0))
-        val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [aug_idx], inbounds=True))
-        val = cast(bb, val, vin[0].dtype, dtype)
-        val = bb[-1].select(gate, val, lvars[vin[3]])
-      else:
-        val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
-        val = cast(bb, val, vin[0].dtype, dtype)
-      lvars[u] = val
-    if uop == UOps.PHI:
-      lvars[u] = lvars[vin[1]]
-      # PHI UOps can link to other PHI Uops, backtrace this to DEFINE_ACC
-      backward = vin[0]
-      while backward.uop == UOps.PHI: backward = backward.vin[0]
-      lvars[backward] = lvars[u]
-    if uop == UOps.STORE:
-      element = cast(bb, lvars[vin[2]], vin[2].dtype, vin[0].dtype)
-      def store_op(): bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
-      if len(vin) > 3:
-        with bb[-1].if_then(bb[-1].trunc(lvars[vin[3]], ir.IntType(1))): store_op()
-      else: store_op()
-    if uop == UOps.ALU:
-      lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin] + [dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else vin[0].dtype])
-    if uop == UOps.CAST: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=isinstance(args, tuple) and args[1])
+    else:
+      assert dtype is not None, f"None dtype for uop {uop}"
+      if uop == UOps.LOOP:
+        bb.append(ir.IRBuilder(func.append_basic_block(f"loop_body_{len(loop_blocks)}")))
+        bb[-2].branch(bb[-1]._block)
+
+        phis = []
+        for rp in reduce_phis:
+          incoming = lvars[rp]
+          lvars[rp] = bb[-1].phi(dtype_to_llvm_dtype[rp.dtype])
+          lvars[rp].add_incoming(incoming, bb[-2]._block)
+          phis.append((rp, lvars[rp]))
+
+        lvars[u] = bb[-1].phi(ir.IntType(32), name=f"loop{len(loop_blocks)}")
+        lvars[u].add_incoming(lvars[vin[0]], bb[-2]._block)
+        loop_blocks.append((bb[-1], phis))
+      elif uop == UOps.DEFINE_ACC:
+        lvars[u] = const(args, dtype)
+        reduce_phis.append(u)
+      elif uop == UOps.LOAD:
+        if len(vin) > 2:
+          aug_idx = bb[-1].select(lvars[vin[2]], lvars[vin[1]], ir.Constant(ir.IntType(32), 0))
+          val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [aug_idx], inbounds=True))
+          val = bb[-1].select(lvars[vin[2]], val, lvars[vin[3]])
+        else:
+          val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
+        lvars[u] = val
+      elif uop == UOps.PHI:
+        lvars[u] = lvars[vin[1]]
+        # PHI UOps can link to other PHI Uops, backtrace this to DEFINE_ACC
+        backward = vin[0]
+        while backward.uop == UOps.PHI: backward = backward.vin[0]
+        lvars[backward] = lvars[u]
+      elif uop == UOps.ALU:
+        lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else vin[0].dtype)
+      elif uop == UOps.CAST: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=isinstance(args, tuple) and args[1])
+      elif uop == UOps.DEFINE_GLOBAL: lvars[u] = func.args[buf_index[args]]
+      elif uop == UOps.SPECIAL: lvars[u] = lvars[args.expr]
+      elif uop == UOps.CONST: lvars[u] = const(args, dtype)
+      else: raise RuntimeError(f"failed to render {uop}")
 
   bb[-1].ret_void()
   return str(module)
