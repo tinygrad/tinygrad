@@ -234,21 +234,17 @@ class TestOps(unittest.TestCase):
     np.testing.assert_allclose(t.grad.numpy(), tt.grad.numpy(), atol=5e-4, rtol=1e-5)
 
   def test_trunc(self):
-    helper_test_op([(45,65)], lambda x: x.trunc(), forward_only=True)
-    a, b = Tensor([1.0, 2.1, 0.0, -5.0, -2.5]), torch.tensor([1.0, 2.1, 0.0, -5.0, -2.5])
-    helper_test_op([], lambda: torch.trunc(b), lambda: Tensor.trunc(a), forward_only=True)
+    helper_test_op([(45,35)], lambda x: x.trunc(), forward_only=True)
+    helper_test_op(None, lambda x: x.trunc(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
   def test_floor(self):
-    helper_test_op([(45,65)], lambda x: x.floor(), forward_only=True)
-    a, b = Tensor([1.0, 2.1, 0.0, -5.0, -2.5]), torch.tensor([1.0, 2.1, 0.0, -5.0, -2.5])
-    helper_test_op([], lambda: torch.floor(b), lambda: Tensor.floor(a), forward_only=True)
+    helper_test_op([(45,35)], lambda x: x.floor(), forward_only=True)
+    helper_test_op(None, lambda x: x.floor(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
   def test_ceil(self):
-    helper_test_op([(45,65)], lambda x: x.ceil(), forward_only=True)
-    a, b = Tensor([1.0, 2.1, 0.0, -5.0, -2.5]), torch.tensor([1.0, 2.1, 0.0, -5.0, -2.5])
-    helper_test_op([], lambda: torch.ceil(b), lambda: Tensor.ceil(a), forward_only=True)
+    helper_test_op([(45,35)], lambda x: x.ceil(), forward_only=True)
+    helper_test_op(None, lambda x: x.ceil(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
   def test_round(self):
-    helper_test_op([(45,65)], lambda x: x.round(), forward_only=True)
-    a, b = Tensor([1.0, 2.1, 0.0, -5.0, -2.5]), torch.tensor([1.0, 2.1, 0.0, -5.0, -2.5])
-    helper_test_op([], lambda: torch.round(b), lambda: Tensor.round(a), forward_only=True)
+    helper_test_op([(45,35)], lambda x: x.round(), forward_only=True)
+    helper_test_op(None, lambda x: x.round(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
   def test_tril(self):
     helper_test_op([(3,3)], lambda x: x.tril())
     helper_test_op([(3,3)], lambda x: x.tril(1))

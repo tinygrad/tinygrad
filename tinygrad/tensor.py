@@ -721,8 +721,8 @@ class Tensor:
 
   # ***** mlops (unary) *****
 
-  def neg(self): return mlops.Neg.apply(self)
   def logical_not(self): return mlops.Eq.apply(*self._broadcasted(False))
+  def neg(self): return mlops.Neg.apply(self) if self.dtype != dtypes.bool else self.logical_not()
   def contiguous(self): return mlops.Contiguous.apply(self)
   def contiguous_backward(self): return mlops.ContiguousBackward.apply(self)
   def log(self): return mlops.Log.apply(self.cast(least_upper_float(self.dtype)))
@@ -847,7 +847,7 @@ class Tensor:
 
   # ***** op wrappers (wasted lines to make the typechecker happy) *****
 
-  def __neg__(self) -> Tensor: return self.neg() if self.dtype != dtypes.bool else self.logical_not()
+  def __neg__(self) -> Tensor: return self.neg()
 
   def __add__(self, x) -> Tensor: return self.add(x)
   def __sub__(self, x) -> Tensor: return self.sub(x)
