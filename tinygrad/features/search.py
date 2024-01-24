@@ -33,13 +33,13 @@ def _time_program(ast:LazyOp, rdev:Compiled, lib:bytes, global_size, local_size,
   factor = 1
   if global_size is not None and max_global_size is not None:
     global_size, factor = _get_test_global_size(global_size, max_global_size, var_vals)
-  try: car = CompiledASTRunner(ast, name, "", lib, rdev, global_size, local_size).build(rdev.runtime)
+  try: car = CompiledASTRunner(ast, name, "", rdev, global_size, local_size, precompiled=lib)
   except AssertionError: return [math.inf] * cnt
   tms = []
   for _ in range(cnt):
     if clear_l2:
       with Context(DEBUG=0): Tensor.rand(1024,1024).realize()
-    tms.append(car(rawbufs, var_vals, wait=True, do_update_stats=False)*factor)
+    tms.append(cast(float, car(rawbufs, var_vals, wait=True, do_update_stats=False))*factor)
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
 
