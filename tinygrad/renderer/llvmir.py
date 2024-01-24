@@ -133,11 +133,9 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
           gate = bb[-1].trunc(lvars[vin[2]], ir.IntType(1))
           aug_idx = bb[-1].select(gate, lvars[vin[1]], ir.Constant(ir.IntType(32), 0))
           val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [aug_idx], inbounds=True))
-          val = cast(bb, val, vin[0].dtype, dtype)
           val = bb[-1].select(gate, val, lvars[vin[3]])
         else:
           val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
-          val = cast(bb, val, vin[0].dtype, dtype)
         lvars[u] = val
       elif uop == UOps.PHI:
         lvars[u] = lvars[vin[1]]
@@ -146,7 +144,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
         while backward.uop == UOps.PHI: backward = backward.vin[0]
         lvars[backward] = lvars[u]
       elif uop == UOps.ALU:
-        lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin] + [dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else vin[0].dtype])
+        lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else vin[0].dtype)
       elif uop == UOps.CAST: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=isinstance(args, tuple) and args[1])
       elif uop == UOps.DEFINE_GLOBAL: lvars[u] = func.args[buf_index[args]]
       elif uop == UOps.SPECIAL: lvars[u] = lvars[args.expr]
