@@ -37,7 +37,6 @@ class LazyBuffer:
       self.output_buffer: Optional[Buffer] = None
       self.contiguous_child: Optional[Tuple[ReferenceType[LazyBuffer], ShapeTracker]] = None
       self.forced_realize = False
-      self.uncached = False
     else:
       # properties on view
       assert base.base == base, "base must be a base itself"
@@ -79,7 +78,6 @@ class LazyBuffer:
   def schedule(self, seen=None): return create_schedule([self], seen)
 
   def _copy(self, device:str) -> LazyBuffer:
-    self.uncached = True
     sync = LazyBuffer.loadop(LoadOps.SYNC, (0,), dtypes.uint32, self.device, src=self, enable_cache=True)
     return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self, sync), enable_cache=False)
 

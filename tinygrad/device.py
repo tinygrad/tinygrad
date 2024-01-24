@@ -125,7 +125,11 @@ class BufferRead(BufferCopy):
     else: super().copy(dest, src)
 
 class BufferXfer(BufferCopy):
-  def copy(self, dest, src): dest.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
+  def copy(self, dest, src):
+    if hasattr(dest.allocator.device, "track_cross_buffer") and hasattr(src.allocator, "track_cross_device"):
+      dest.allocator.device.track_cross_buffer.append(src)
+      src.allocator.track_cross_device.append(dest.allocator.device)
+    dest.allocator.transfer(dest._buf, src._buf, dest.nbytes)
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
@@ -152,7 +156,7 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
       for opaque in opaques: self._free(opaque)
       opaques.clear()
   def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
-    if getenv("LRU", 1) and (options is None or not options.uncached): self.cache[(size, options)].append(opaque)
+    if getenv("LRU", 1): self.cache[(size, options)].append(opaque)
     else: self._free(opaque)
 
 class _MallocAllocator(LRUAllocator):
