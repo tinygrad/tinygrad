@@ -722,7 +722,7 @@ class Tensor:
   # ***** mlops (unary) *****
 
   def neg(self): return mlops.Neg.apply(self)
-  def logical_not(self): return self == 0
+  def logical_not(self): return mlops.Eq.apply(*self._broadcasted(False))
   def contiguous(self): return mlops.Contiguous.apply(self)
   def contiguous_backward(self): return mlops.ContiguousBackward.apply(self)
   def log(self): return mlops.Log.apply(self.cast(least_upper_float(self.dtype)))
