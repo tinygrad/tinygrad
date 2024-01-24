@@ -85,7 +85,7 @@ class TestLinearizer(unittest.TestCase):
   def test_tensor_cores(self):
     for tc in tensor_cores[Device.DEFAULT]:
       if tc.arch is not None and tc.arch != os.uname().machine: continue
-      a, b = Tensor.rand(tc.dims[0], tc.dims[2], dtype=tc.dtype_in), Tensor.rand(tc.dims[2], tc.dims[1], dtype=tc.dtype_in)
+      a, b = Tensor.rand(tc.dims[1], tc.dims[2], dtype=tc.dtype_in), Tensor.rand(tc.dims[2], tc.dims[0], dtype=tc.dtype_in)
       np_a, np_b = a.numpy(), b.numpy()
       r = a.matmul(b, acc_dtype=tc.dtype_out)
       realized_ast, _ = helper_realized_ast(r)
@@ -498,7 +498,7 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
   def test_tensor_core_opts(self):
-    if not not Device[Device.DEFAULT].linearizer_opts.has_local:
+    if not Device[Device.DEFAULT].linearizer_opts.has_local:
       self.skipTest("Only Compiled uses linearizer with locals")
     if Device.DEFAULT not in tensor_cores:
       self.skipTest("No tensor cores for device")
@@ -572,11 +572,11 @@ class TestLinearizerHelper(unittest.TestCase):
     assert expand_node(a) == [a]
 
   def test_variable_expand_expr_none(self):
-    a = Variable(None, 5, 7)
+    a = Variable("_uidx0", 5, 7)
     assert expand_node(a) == [NumNode(5), NumNode(6), NumNode(7)]
 
   def test_mul_node_expand(self):
-    a = Variable(None, 5, 7)
+    a = Variable("_uidx0", 5, 7)
     m = MulNode(a, 3)
     assert expand_node(m) == [NumNode(15), NumNode(18), NumNode(21)]
 
@@ -585,7 +585,7 @@ class TestLinearizerHelper(unittest.TestCase):
     assert expand_node(n) == [Variable("b", 1, 3)*3]
 
   def test_sum_node_expand(self):
-    a = Variable(None, 1, 3)
+    a = Variable("_uidx0", 1, 3)
     b = Variable("b", 5, 7)
 
     s1 = create_rednode(SumNode, [a, b])

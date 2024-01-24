@@ -19,7 +19,8 @@ class JitItem:
   rawbufs: List[Optional[Buffer]]
 
 def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[Node, int]:
-  return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache], NumNode(0)), functools.reduce(operator.add, [ji.prg.mem_estimate for ji in jit_cache], 0)  # noqa: E501
+  return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], NumNode(0)), \
+         functools.reduce(operator.add, [ji.prg.mem_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], 0)
 def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
   input_replace: Dict[Tuple[int, int], int] = {}
   for j,ji in enumerate(jit_cache):
@@ -44,6 +45,7 @@ def apply_graph_to_jit(jit_cache: List[JitItem], input_rawbuffers: List[Buffer],
     nonlocal current_batch, current_device
     assert current_device is not None
     try:
+      if len(current_batch) <= 1: raise GraphException("only one kernel doesn't graph")
       graphed_jit_cache.append(JitItem(current_device.graph(current_batch, input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers))) # noqa: E501
       if DEBUG >= 2: print(f"\tJIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
     except GraphException as e:
@@ -139,14 +141,15 @@ class TinyJit(Generic[ReturnType]):
     return cast(ReturnType, self.ret)
 
 class PlaceHolder:
-  def __init__(self, buf:Buffer): self.size, self.dtype, self.device, self.ref, self.bufid = buf.size, buf.dtype, buf.device, ref(buf), id(buf._buf)
-  def to_tuple(self): return (self.size, self.dtype, self.device, self.bufid)
+  def __init__(self, buf:Buffer):
+    self.size, self.dtype, self.device, self.ref, self.bufid, self.options = buf.size, buf.dtype, buf.device, ref(buf), id(buf._buf), buf.options
+  def to_tuple(self): return (self.size, self.dtype, self.device, self.bufid, self.options)
   def __hash__(self): return hash(self.to_tuple())
   def __eq__(self, x): return isinstance(x, PlaceHolder) and self.to_tuple() == x.to_tuple()
   def alloc_if_needed(self, buffer_cache: Dict[PlaceHolder, Buffer]) -> Buffer:
     ret = self.ref()
     if ret: return ret
-    if self not in buffer_cache: buffer_cache[self] = Buffer(self.device, self.size, self.dtype)
+    if self not in buffer_cache: buffer_cache[self] = Buffer(self.device, self.size, self.dtype, options=self.options)
     return buffer_cache[self]
 
 class _CacheCollector:
