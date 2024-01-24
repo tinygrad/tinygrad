@@ -835,10 +835,8 @@ class Tensor:
     return ar.mul(sign * base_sign + (1 - base_sign)).mul(inject_nan)
   def xor(self, x:Tensor, reverse=False) -> Tensor: return mlops.Xor.apply(*self._broadcasted(x, reverse))
 
-  def maximum(self, x:Union[Tensor, Scalar]) -> Tensor:
-    return (self<x).detach().where(x, (self>x).detach().where(self, (self+x)/2) if self.requires_grad and self.is_floating_point() else self)
-  def minimum(self, x:Union[Tensor, Scalar]) -> Tensor:
-    return (self>x).detach().where(x, (self<x).detach().where(self, (self+x)/2) if self.requires_grad and self.is_floating_point() else self)
+  def maximum(self, x:Union[Tensor, Scalar]) -> Tensor: return (self<x).detach().where(x, (self>x).detach().where(self, ((self+x)/2).cast(self.dtype)))
+  def minimum(self, x:Union[Tensor, Scalar]) -> Tensor: return -((-self).maximum(-x))
 
   def where(self:Tensor, input_:Union[Tensor, Scalar], other:Union[Tensor, Scalar]):
     if isinstance(input_, Tensor): input_, other = input_._broadcasted(other)
