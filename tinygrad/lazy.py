@@ -196,12 +196,8 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
 
   inputs: List[LazyBuffer] = []
   var_vals: Dict[Variable, int] = out.st.var_vals.copy()
-  if out.op is LoadOps.COPY:
-    op, inputs = LazyOp(LoadOps.COPY, (), out.srcs[0]), list(out.srcs)
-  elif out.op in {LoadOps.CUSTOM, LoadOps.SYNC, LoadOps.WAIT}:
+  if out.op in {LoadOps.CUSTOM, LoadOps.SYNC, LoadOps.WAIT, LoadOps.COPY, LoadOps.EMPTY}:
     op, inputs = LazyOp(out.op, (), out.arg), list(out.srcs)
-  elif out.op is LoadOps.EMPTY:
-    op = LazyOp(LoadOps.EMPTY)
   else:
     output_st = ShapeTracker.from_shape(reduce_for_op[out].shape if out in reduce_for_op else out.shape)
     op = _recursive_lazyop(out, inputs, var_vals, output_st, realizes, cache={})

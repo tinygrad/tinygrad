@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, functools, subprocess, io
-from typing import Tuple, TypeVar, List, Any, cast
+from typing import Tuple, TypeVar, List, Any, cast, Set
 import gpuctypes.hip as hip
 from tinygrad.helpers import DEBUG, getenv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
 from tinygrad.helpers import from_mv, round_up, to_mv, colored
@@ -107,6 +107,7 @@ class HIPDevice(Compiled):
     self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode() if not MOCKHIP else "gfx1100"  # noqa: E501
     self.pending_copyin: List[hip.hipDeviceptr_t] = []
     self.track_cross_buffer: List[Any] = []
+    self.peers: Set[int] = set()
 
     from tinygrad.runtime.graph.hip import HIPGraph
     super().__init__(device, MallocAllocator if MOCKHIP else HIPAllocator(self), LinearizerOptions("HIP"), HIPRenderer,
@@ -117,8 +118,13 @@ class HIPDevice(Compiled):
     for opaque in self.pending_copyin: check(hip.hipFree(opaque))
     self.track_cross_buffer.clear()
     self.pending_copyin.clear()
+  def enable_peer(self, dnum):
+    if self.device == dnum or dnum in self.peers: return
+    check(hip.hipSetDevice(self.device))
+    check(hip.hipDeviceEnablePeerAccess(dnum, 0))
+    self.peers.add(dnum)
 
-class SyncEvent(JITRunner):
+class HIPSyncEvent(JITRunner):
   def __init__(self, lb):
     self.lb, self.device, self.dname = lb, cast(HIPDevice, Device[lb.device]), lb.device
     super().__init__()
@@ -128,7 +134,7 @@ class SyncEvent(JITRunner):
     check(hip.hipStreamWriteValue32(None, rawbufs[0]._buf, 1, 0))
     update_stats(colored("sync", "red"), 0, 0, {}, None, 1, device=self.dname)
 
-class WaitEvent(JITRunner):
+class HIPWaitEvent(JITRunner):
   def __init__(self, device):
     self.device, self.dname = cast(HIPDevice, Device[device]), device
     super().__init__()
