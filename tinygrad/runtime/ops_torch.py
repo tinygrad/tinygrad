@@ -42,4 +42,5 @@ class TorchAllocator(Allocator):
   def copyin(self, dest:torch.Tensor, src:memoryview): dest.copy_(torch.frombuffer(src, dtype=dest.dtype))
   def copyout(self, dest:memoryview, src:torch.Tensor): torch.frombuffer(dest, dtype=src.dtype).copy_(src.flatten())
 
-TorchDevice = Interpreted(TorchAllocator(), torch_fxn_for_op)
+class TorchDevice(Interpreted):
+  def __init__(self, device:str): super().__init__(device, TorchAllocator(), torch_fxn_for_op)

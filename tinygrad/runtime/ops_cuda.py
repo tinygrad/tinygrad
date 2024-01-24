@@ -83,7 +83,7 @@ class CUDADevice(Compiled):
     self.arch = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    super().__init__(CUDAAllocator(self) if not CUDACPU else MallocAllocator,
+    super().__init__(device, CUDAAllocator(self) if not CUDACPU else MallocAllocator,
                      LinearizerOptions("CUDA", supports_float4_alu=False, global_max=[65535, 65535, 2147483647], local_max=[64, 1024, 1024]),
                      CUDARenderer, functools.partial(compile_cuda,arch=self.arch), f"compile_cuda_{self.arch}", functools.partial(CUDAProgram, self),
                      graph=CUDAGraph if not CUDACPU else None)

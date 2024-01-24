@@ -25,9 +25,7 @@ class _Device:
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Union[Interpreted, Compiled]:
     x = ix.split(":")[0].upper()
-    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0]  # noqa: E501
-    if isinstance(ret, type): ret = ret(ix)
-    return ret
+    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
   @functools.cached_property
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
@@ -189,8 +187,8 @@ class InterpretedASTRunner(JITRunner):
     return et
 
 class Interpreted:
-  def __init__(self, allocator: Allocator, fxn_for_op:Dict[Op, Callable]):
-    self.allocator, self.fxn_for_op = allocator, fxn_for_op
+  def __init__(self, device:str, allocator: Allocator, fxn_for_op:Dict[Op, Callable]):
+    self.dname, self.allocator, self.fxn_for_op = device, allocator, fxn_for_op
     self.synchronize, self.codegen, self.graph = lambda: None, None, None
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
@@ -305,21 +303,20 @@ class CompiledASTRunner(JITRunner):
     if local_size: lra['local_size'] = local_size
     et = self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.vars), wait=wait or DEBUG>=2)
     if do_update_stats: update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit,
-                                     lra=lra, device=rawbufs[0].device, first_run=self.first_run)
+                                     lra=lra, device=self.device.dname, first_run=self.first_run)
     self.first_run = False
     return et
 
 class Compiled:
-  def __init__(self, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler, compiler_cachekey, runtime, graph=None):
-    self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph, self.compiler_cachekey = \
-      allocator, linearizer_opts, renderer, compiler, runtime, graph, None if getenv("DISABLE_COMPILER_CACHE") else compiler_cachekey
+  def __init__(self, device:str, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler, compiler_cachekey, runtime, graph=None):
+    self.dname, self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph, self.compiler_cachekey = \
+      device, allocator, linearizer_opts, renderer, compiler, runtime, graph, None if getenv("DISABLE_COMPILER_CACHE") else compiler_cachekey
   def synchronize(self): pass  # override this in your device
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     assert self.compiler is not None, f"compiler is None, can't build {k.ast}"
     k.linearize()
-    src = self.renderer(to_function_name(k.name), k.uops)
-    return CompiledASTRunner(k.ast, k.name, src, self, k.global_size, k.local_size)
+    return CompiledASTRunner(k.ast, k.name, self.renderer(to_function_name(k.name), k.uops), self, k.global_size, k.local_size)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:

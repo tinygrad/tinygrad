@@ -54,4 +54,4 @@ class DiskAllocator(Allocator):
       dest[:] = src._buf()
 
 class DiskDevice(Interpreted):
-  def __init__(self, device:str): super().__init__(DiskAllocator(device[len("disk:"):]), disk_fxn_for_op)
+  def __init__(self, device:str): super().__init__(device, DiskAllocator(device[len("disk:"):]), disk_fxn_for_op)
