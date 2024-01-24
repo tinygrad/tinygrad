@@ -159,7 +159,7 @@ class Tensor:
   def to(self, device:Optional[Union[str, Tuple[str, ...]]]) -> Tensor:
     if device is None or device == self.device: return self
     if not isinstance(device, str): return self.shard(device)
-    ret = Tensor(self.lazydata, device)
+    ret = Tensor(self.lazydata, device, requires_grad=self.requires_grad)
     if self.grad: ret.grad = self.grad.to(device)
     return ret
 
@@ -173,7 +173,7 @@ class Tensor:
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
     canonical_devices = tuple(Device.canonicalize(x) for x in devices)
     if axis is not None and axis < 0: axis += len(self.shape)
-    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis), device=canonical_devices)
+    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis), device=canonical_devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None):
     self.lazydata = self.shard(devices, axis).lazydata

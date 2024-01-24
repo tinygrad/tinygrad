@@ -104,7 +104,7 @@ class HIPDevice(Compiled):
     self.pending_events: List[hip.hipEvent_t] = []
 
     from tinygrad.runtime.graph.hip import HIPGraph
-    super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self), LinearizerOptions("HIP"), HIPRenderer,
+    super().__init__(device, MallocAllocator if MOCKHIP else HIPAllocator(self), LinearizerOptions("HIP"), HIPRenderer,
                      functools.partial(compile_hip,arch=self.arch), f"compile_hip_{self.arch}", functools.partial(HIPProgram, self.device), HIPGraph)
   def synchronize(self):
     check(hip.hipSetDevice(self.device))

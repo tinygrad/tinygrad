@@ -42,4 +42,5 @@ class NumpyAllocator(Allocator):
   def copyin(self, dest:np.ndarray, src:memoryview): np.copyto(dest, np.frombuffer(src, dest.dtype).reshape(dest.shape))
   def copyout(self, dest:memoryview, src:np.ndarray): np.copyto(np.frombuffer(dest, src.dtype).reshape(src.shape), src)
 
-CPUDevice = Interpreted(NumpyAllocator(), numpy_fxn_for_op)
+class CPUDevice(Interpreted):
+  def __init__(self, device:str): super().__init__(device, NumpyAllocator(), numpy_fxn_for_op)

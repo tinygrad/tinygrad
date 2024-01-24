@@ -94,7 +94,7 @@ class CLDevice(Compiled):
     self.pending_copyin: List[memoryview] = []
 
     compile_key = hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()
-    super().__init__(CLAllocator(self), LinearizerOptions("GPU"), OpenCLRenderer,
+    super().__init__(device, CLAllocator(self), LinearizerOptions("GPU"), OpenCLRenderer,
                      functools.partial(compile_cl, self), f"compile_cl_{compile_key}", functools.partial(CLProgram, self))
   def synchronize(self):
     check(cl.clFinish(self.queue))
