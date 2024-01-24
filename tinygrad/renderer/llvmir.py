@@ -100,7 +100,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
       element = cast(bb, lvars[vin[2]], vin[2].dtype, vin[0].dtype)
       def store_op(): bb[-1].store(element, bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
       if len(vin) > 3:
-        with bb[-1].if_then(bb[-1].trunc(lvars[vin[3]], ir.IntType(1))): store_op()
+        with bb[-1].if_then(lvars[vin[3]]): store_op()
       else: store_op()
     elif uop == UOps.END:
       block, phis = loop_blocks.pop()
@@ -130,10 +130,9 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
         reduce_phis.append(u)
       elif uop == UOps.LOAD:
         if len(vin) > 2:
-          gate = bb[-1].trunc(lvars[vin[2]], ir.IntType(1))
-          aug_idx = bb[-1].select(gate, lvars[vin[1]], ir.Constant(ir.IntType(32), 0))
+          aug_idx = bb[-1].select(lvars[vin[2]], lvars[vin[1]], ir.Constant(ir.IntType(32), 0))
           val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [aug_idx], inbounds=True))
-          val = bb[-1].select(gate, val, lvars[vin[3]])
+          val = bb[-1].select(lvars[vin[2]], val, lvars[vin[3]])
         else:
           val = bb[-1].load(bb[-1].gep(lvars[vin[0]], [lvars[vin[1]]], inbounds=True))
         lvars[u] = val
