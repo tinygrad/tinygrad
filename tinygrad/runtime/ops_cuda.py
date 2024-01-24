@@ -77,8 +77,8 @@ class CUDADevice(Compiled):
     device_id = int(device.split(":")[1]) if ":" in device else 0
     if not CUDACPU:
       check(cuda.cuInit(0))
-      check(cuda.cuDeviceGet(ctypes.byref(device := cuda.CUdevice()), device_id))
-      self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, device)))
+      check(cuda.cuDeviceGet(ctypes.byref(cu_device := cuda.CUdevice()), device_id))
+      self.context = init_c_var(cuda.CUcontext(), lambda x: check(cuda.cuCtxCreate_v2(ctypes.byref(x), 0, cu_device)))
       check(cuda.cuDeviceComputeCapability(ctypes.byref(major := ctypes.c_int()), ctypes.byref(minor := ctypes.c_int()), device_id))
     self.arch = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
 
