@@ -21,8 +21,27 @@ class SyncOp(JITRunner):
     et = cpu_time_execution(Device[self.device].synchronize, enable=wait or DEBUG >= 1)
     update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=self.device)
 
+class HipSyncEvent(JITRunner):
+  def __init__(self, lb):
+    self.lb = lb
+    self.device = lb.device
+    setattr(self.lb, "event", Device[self.device].event_create())
+    super().__init__()
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
+    Device[self.device].event_record(self.lb.event)
+    update_stats(colored("sync", "red"), 0, 0, {}, None, 1, device=self.device)
+
+class HipWaitEvent(JITRunner):
+  def __init__(self, device, lb_sync):
+    self.lb_sync = lb_sync
+    self.device = device
+    super().__init__()
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
+    Device[self.device].event_wait(self.lb_sync.event)
+    update_stats(colored("wait", "RED"), 0, 0, {}, None, 1, device=self.device)
+
 def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
-  assert all(si.out.device == x.device for x in si.inputs) or si.ast.op is LoadOps.COPY, \
+  assert all(si.out.device == x.device for x in si.inputs) or si.ast.op in {LoadOps.COPY, LoadOps.WAIT}, \
     f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
   if si.ast.op is LoadOps.EMPTY: return None
   if si.ast.op is LoadOps.COPY:
@@ -30,7 +49,12 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
     if si.inputs[0].device.startswith("DISK"): return BufferRead()
     return BufferCopy()
   if si.ast.op is LoadOps.CUSTOM: return CustomOp(si.ast.arg)
-  if si.ast.op is LoadOps.SYNC: return SyncOp(si.out.device) if isinstance(Device[si.out.device], Compiled) else None
+  if si.ast.op in {LoadOps.SYNC, LoadOps.WAIT} and si.out.device.startswith("HIP") and si.inputs[0].device.startswith("HIP"):
+    if si.ast.op is LoadOps.SYNC: return HipSyncEvent(si.out)
+    if si.ast.op is LoadOps.WAIT: return HipWaitEvent(si.out.device, si.inputs[0])
+  else:
+    if si.ast.op is LoadOps.SYNC: return SyncOp(si.out.device) if isinstance(Device[si.out.device], Compiled) else None
+    if si.ast.op is LoadOps.WAIT: return None
   return Device[si.out.device].get_runner(si.ast)
 
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
