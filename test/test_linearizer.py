@@ -85,7 +85,7 @@ class TestLinearizer(unittest.TestCase):
   def test_tensor_cores(self):
     for tc in tensor_cores[Device.DEFAULT]:
       if tc.arch is not None and tc.arch != os.uname().machine: continue
-      a, b = Tensor.rand(tc.dims[0], tc.dims[2], dtype=tc.dtype_in), Tensor.rand(tc.dims[2], tc.dims[1], dtype=tc.dtype_in)
+      a, b = Tensor.rand(tc.dims[1], tc.dims[2], dtype=tc.dtype_in), Tensor.rand(tc.dims[2], tc.dims[0], dtype=tc.dtype_in)
       np_a, np_b = a.numpy(), b.numpy()
       r = a.matmul(b, acc_dtype=tc.dtype_out)
       realized_ast, _ = helper_realized_ast(r)
@@ -498,7 +498,7 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
   def test_tensor_core_opts(self):
-    if not not Device[Device.DEFAULT].linearizer_opts.has_local:
+    if not Device[Device.DEFAULT].linearizer_opts.has_local:
       self.skipTest("Only Compiled uses linearizer with locals")
     if Device.DEFAULT not in tensor_cores:
       self.skipTest("No tensor cores for device")

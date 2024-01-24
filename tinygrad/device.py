@@ -267,23 +267,26 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 # **************** for Compiled Devices ****************
 
 class CompiledASTRunner(JITRunner):
-  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, lib:bytes, device:Compiled, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None):  # noqa: E501
+  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, device:Compiled, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, precompiled:Optional[bytes]=None):  # noqa: E501
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
-    self.name, self.display_name, self.prg, self.lib, self.device, self.global_size, self.local_size, self.first_run = \
-      to_function_name(name), name, prg, lib, device, global_size, local_size, True
+    self.name, self.display_name, self.prg, self.device, self.global_size, self.local_size, self.first_run = \
+      to_function_name(name), name, prg, device, global_size, local_size, True
+    lib: Optional[bytes] = precompiled
+    if lib is None:
+      if self.device.compiler_cachekey is not None: lib = diskcache_get(self.device.compiler_cachekey, prg)
+      if lib is None:
+        lib = self.device.compiler(prg)
+        if self.device.compiler_cachekey is not None: diskcache_put(self.device.compiler_cachekey, prg, lib)
+    self.lib, self.clprg = lib, self.device.runtime(self.name, lib)
     self.vars: List[Variable] = []
     if ast:
       info = get_lazyop_info(ast)
       self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
       self.vars = ast.vars()
       assert all(v._val is None for v in self.vars), f"ASTRunner contains bound Variable {self.vars}"
-
-  def build(self, runtime):
-    self.clprg = runtime(self.name, self.lib)
-    return self
 
   def launch_dims(self, var_vals):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else self.global_size
@@ -309,21 +312,14 @@ class CompiledASTRunner(JITRunner):
 class Compiled:
   def __init__(self, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler, compiler_cachekey, runtime, graph=None):
     self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph, self.compiler_cachekey = \
-      allocator, linearizer_opts, renderer, compiler, runtime, graph, compiler_cachekey
+      allocator, linearizer_opts, renderer, compiler, runtime, graph, None if getenv("DISABLE_COMPILER_CACHE") else compiler_cachekey
   def synchronize(self): pass  # override this in your device
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     assert self.compiler is not None, f"compiler is None, can't build {k.ast}"
     k.linearize()
     src = self.renderer(to_function_name(k.name), k.uops)
-    if getenv("DISABLE_COMPILER_CACHE") or self.compiler_cachekey is None:
-      lib = self.compiler(src)
-    else:
-      lib = diskcache_get(self.compiler_cachekey, src)
-      if lib is None:
-        lib = self.compiler(src)
-        diskcache_put(self.compiler_cachekey, src, lib)
-    return CompiledASTRunner(k.ast, k.name, src, lib, self, k.global_size, k.local_size).build(self.runtime)
+    return CompiledASTRunner(k.ast, k.name, src, self, k.global_size, k.local_size)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:
