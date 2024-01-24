@@ -1,8 +1,8 @@
 from typing import List, Dict, Optional, cast
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters
-from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, InterpretedASTRunner
+from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, InterpretedASTRunner, Compiled
 from tinygrad.graph import print_tree, realized_lazybuffer
-from tinygrad.helpers import colored, getenv, GRAPH
+from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG
 from tinygrad.shape.symbolic import Variable
 
 # *** schedule running ***
@@ -18,8 +18,8 @@ class SyncOp(JITRunner):
     self.device = device
     super().__init__()
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
-    Device[self.device].synchronize()
-    update_stats(colored("synchronize", "RED"), 0, 0, {}, None, 1, device=self.device)
+    et = cpu_time_execution(Device[self.device].synchronize, enable=wait or DEBUG >= 1)
+    update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=self.device)
 
 def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   assert all(si.out.device == x.device for x in si.inputs) or si.ast.op is LoadOps.COPY, \
@@ -30,7 +30,7 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
     if si.inputs[0].device.startswith("DISK"): return BufferRead()
     return BufferCopy()
   if si.ast.op is LoadOps.CUSTOM: return CustomOp(si.ast.arg)
-  if si.ast.op is LoadOps.SYNC: return SyncOp(si.out.device)
+  if si.ast.op is LoadOps.SYNC: return SyncOp(si.out.device) if isinstance(Device[si.out.device], Compiled) else None
   return Device[si.out.device].get_runner(si.ast)
 
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
