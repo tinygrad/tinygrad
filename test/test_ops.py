@@ -245,11 +245,7 @@ class TestOps(unittest.TestCase):
   def test_round(self):
     helper_test_op([(45,35)], lambda x: x.round(), forward_only=True)
     helper_test_op(None, lambda x: x.round(), vals=[[1.499, 1.5, 1.501, 1.0, 2.1, 0.0, -5.0, -2.499, -2.5, -2.501]], forward_only=True)
-    # TODO: implement round to even
-    with self.assertRaises(Exception):
-      helper_test_op(None, lambda x: x.round(), vals=[[2.5]], forward_only=True)
-    with self.assertRaises(Exception):
-      helper_test_op(None, lambda x: x.round(), vals=[[-1.5]], forward_only=True)
+    helper_test_op(None, lambda x: x.round(), vals=[[2.5, -1.5]], forward_only=True)
 
   def test_tril(self):
     helper_test_op([(3,3)], lambda x: x.tril())
