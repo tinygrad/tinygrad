@@ -4,8 +4,6 @@ from tinygrad import Tensor, dtypes
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import prod, flatten
 from extra.onnx import safe_numpy, DTYPE_MAP
-from onnx.helper import tensor_dtype_to_np_dtype
-from onnx import TensorProto
 import numpy as np
 
 tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
@@ -25,8 +23,8 @@ def GreaterOrEqual(x:Tensor,y:Tensor): return x >= y
 def Equal(x:Tensor,y:Tensor): return x == y
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
-def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
-def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
+def Sum(*data_0): return functools.reduce(Tensor.add, data_0)
+def Mean(*data_0): return functools.reduce(Tensor.add, data_0) / len(data_0)
 # NOTE: does not support saturate
 def Cast(x: Tensor, to: int, saturate=1): return x.cast(DTYPE_MAP[to])
 def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
@@ -497,7 +495,7 @@ def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
   for s, x in zip(shape, axes):
     tx = t.shape[x]
     if s < tx: shrink_arg[x] = (tx//2 - (s+1)//2, tx//2 + s//2)
-    elif s > tx: pad_arg[x] = ((s - tx)//2, (s - tx + 1)//2)
+    elif s > tx: pad_arg[x] = ((s-tx)//2, (s-tx+1)//2)
   return t.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
 def OneHot(indices: Tensor, depth: Tensor, values: Tensor, axis=-1):
