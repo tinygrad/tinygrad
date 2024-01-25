@@ -6,6 +6,7 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import temp, CI
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
+import pickle
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
@@ -467,6 +468,12 @@ class TestTensorCreationDevice(unittest.TestCase):
     y = Tensor([1, 2, 3]).to("CPU")
     x = y.one_hot(10)
     x.realize()
+
+class TestTensorPickle(unittest.TestCase):
+  def test_pickle(self):
+    y = Tensor([1, 2, 3]).to("CPU")
+    x = pickle.loads(pickle.dumps(y))
+    np.testing.assert_equal(y.numpy(), x.numpy())
 
 if __name__ == '__main__':
   unittest.main()
