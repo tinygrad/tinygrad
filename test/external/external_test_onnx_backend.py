@@ -48,14 +48,15 @@ backend_test.exclude('test_adam_multiple_cpu')
 backend_test.exclude('test_nesterov_momentum_cpu')
 
 # about different dtypes
-backend_test.exclude('int8')  #  OverflowError: cannot convert float infinity to integer
-
 if Device.DEFAULT in ["TORCH"]:
   backend_test.exclude('uint16')
   backend_test.exclude('uint32')
   backend_test.exclude('uint64')
 if Device.DEFAULT in ["METAL"]:
   backend_test.exclude('float64')
+# no float16, LLVM segfaults in CI, GPU requires cl_khr_fp16
+if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
+  backend_test.exclude('float16')
 
 backend_test.exclude('string')
 
@@ -64,8 +65,6 @@ backend_test.exclude('test_cast_*')
 backend_test.exclude('test_castlike_*')
 backend_test.exclude('test_convinteger_*')
 backend_test.exclude('test_matmulinteger_*')
-
-backend_test.exclude('test_operator_add*') # dependent on float64 math. Without it values default to 0 or inf
 
 # we don't support indexes
 # backend_test.exclude('test_argmax_*') # Needs more work: select_last_index
@@ -163,6 +162,7 @@ backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
 if Device.DEFAULT in ['METAL']:
   backend_test.exclude('test_maxpool_2d_pads_cpu')
   backend_test.exclude('test_maxpool_2d_same_lower_cpu')
+  backend_test.exclude('test_maxpool_2d_same_upper_cpu')
 
 if Device.DEFAULT in ['GPU', 'METAL']:
   # double not supported
@@ -170,6 +170,8 @@ if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_min_float64_cpu')
   backend_test.exclude('test_eyelike_with_dtype_cpu')
   backend_test.exclude('test_reduce_log_sum_exp*')
+  backend_test.exclude('test_operator_add*') # dependent on float64 math. Without it values default to 0 or inf
+
   # weird inaccuracy
   backend_test.exclude('test_mish_cpu')
   backend_test.exclude('test_mish_expanded_cpu')
@@ -180,26 +182,10 @@ if Device.DEFAULT in ['LLVM']:
   backend_test.exclude('test_isinf_negative_cpu')
   backend_test.exclude('test_isinf_positive_cpu')
 
-# Segfaults in CI, GPU requires cl_khr_fp16
-if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
-  backend_test.exclude('test_max_float16_cpu')
-  backend_test.exclude('test_min_float16_cpu')
-  backend_test.exclude('test_isinf_float16_cpu')
-
-# error: casting to type 'half' is not allowed
-backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
-
-# TODO: this somehow passes in CI but does not pass if run locally
-if isinstance(Device[Device.DEFAULT], Compiled):
-  backend_test.exclude('test_MaxPool3d_stride_padding_cpu')
-
-# TODO: this somehow passes in CI but does not pass if run locally
-if Device.DEFAULT == 'METAL':
-  backend_test.exclude('test_maxpool_2d_same_upper_cpu')
-
-# TODO: problems with nan
-backend_test.exclude('test_isnan_float16_cpu')
-backend_test.exclude('test_isnan_cpu')
+# # TODO: problems with nan
+if Device.DEFAULT in ['LLVM', 'METAL']:
+  backend_test.exclude('test_isnan_float16_cpu')
+  backend_test.exclude('test_isnan_cpu')
 
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):
