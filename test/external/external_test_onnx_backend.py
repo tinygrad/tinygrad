@@ -65,7 +65,6 @@ backend_test.exclude('test_castlike_*')
 backend_test.exclude('test_convinteger_*')
 backend_test.exclude('test_matmulinteger_*')
 
-backend_test.exclude('test_reduce_log_sum_exp*') # dependent on actual float64 implementation for backends
 backend_test.exclude('test_operator_add*') # dependent on float64 math. Without it values default to 0 or inf
 
 # we don't support indexes
@@ -170,6 +169,7 @@ if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_max_float64_cpu')
   backend_test.exclude('test_min_float64_cpu')
   backend_test.exclude('test_eyelike_with_dtype_cpu')
+  backend_test.exclude('test_reduce_log_sum_exp*')
   # weird inaccuracy
   backend_test.exclude('test_mish_cpu')
   backend_test.exclude('test_mish_expanded_cpu')
