@@ -205,7 +205,7 @@ def _format_padding(onnx_pads, ndims=None, axes=None):
     np_pads[axes[i]] = (onnx_pads[i], onnx_pads[i + num_axes])
   return np_pads
 
-def _padding(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
+def _padded(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
   if auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
   elif ceil_mode and auto_pad=="NOTSET": # stupid ceil_mode case
     if strides is not None: strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
@@ -242,59 +242,62 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
   if mode == "reflect":
     for i,s in enumerate(x.shape):
       if pads[i] != (0,0):
-        pL, pR = pads[i]
-        xL = x.flip(i).shrink(tuple((s-pL-1, s_-1) if i_ == i else None for i_,s_ in enumerate(x.shape)))
-        xR = x.flip(i).shrink(tuple((1, pR+1) if i_ == i else None for i_ in range(x.ndim)))
+        xL = x.flip(i).shrink(tuple((s-pads[i][0]-1, s_-1) if i_ == i else None for i_,s_ in enumerate(x.shape)))
+        xR = x.flip(i).shrink(tuple((1, pads[i][1]+1) if i_ == i else None for i_ in range(x.ndim)))
         x = xL.cat(x, xR, dim=i)
     return x
   if mode == "edge":
     for i,s in enumerate(x.shape):      
       if pads[i] != (0,0):
-        pL, pR = pads[i]
-        xL = x.shrink(tuple((0,1) if i_ == i else None for i_ in range(x.ndim))).expand([pL if i_ == i else None for i_ in range(x.ndim)])
-        xR = x.shrink(tuple((s_-1, s_) if i_ == i else None for i_,s_ in enumerate(x.shape))).expand([pR if i_ == i else None for i_ in range(x.ndim)])
+        xL = x.shrink(tuple((0,1) if i_ == i else None for i_ in range(x.ndim))).expand([pads[i][0] if i_ == i else None for i_ in range(x.ndim)])
+        xR = x.shrink(tuple((s_-1, s_) if i_ == i else None for i_,s_ in enumerate(x.shape))).expand([pads[i][1] if i_ == i else None for i_ in range(x.ndim)])
         x = xL.cat(x, xR, dim=i)
     return x
   if mode == "constant":
-    return _padding(x, seq_pads, axes=seq_axes, constant_value=constant_value)
+    return _padded(x, seq_pads, axes=seq_axes, constant_value=constant_value)
 
 def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
-  pixel_axes = tuple(range(len(X.shape)))[2:]
-  ret = _padding(X, pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode).avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
-  if count_include_pad:
-    return ret
-  div = _padding(Tensor.ones(*X.shape), pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode).avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
+  pixel_axes = tuple(range(2, X.ndim))
+  ret = _padded(X, pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
+  ret = ret.avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
+  if count_include_pad: return ret
+  div = _padded(Tensor.ones(X.shape), pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode).avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
   return ret / div
 
 def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
-  ret = _padding(X, pads, auto_pad, constant_value=float("-inf"), axes=tuple(range(len(X.shape)))[2:], strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
+  pixel_axes = tuple(range(2, X.ndim))
+  ret = _padded(X, pads, auto_pad, constant_value=-math.inf, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
   ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations)
   ret_len, X_len = ret.numel(), X.numel()
-  indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().reshape(1, X_len).expand(ret_len, X_len)) * Tensor.arange(X_len, dtype=dtypes.int64).reshape(1, X_len).expand(ret_len, X_len)).sum(1).reshape(ret.shape)
-  if storage_order: indices = indices.transpose(indices.ndim-2, indices.ndim-1)
+  indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().unsqueeze(0).expand(ret_len, X_len)) * \
+             Tensor.arange(X_len, dtype=dtypes.int64).unsqueeze(0).expand(ret_len, X_len)).sum(1).reshape(ret.shape)
+  if storage_order: indices = indices.transpose(-2, -1)
   return ret, indices
 
-def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Tensor=None, kernel_shape=None, pads=None, strides=None):
+def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=None, strides=None):
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
   outlength = prod(out_sh)
-  xI = xI.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
+  xI = xI.flatten().unsqueeze(1).expand(None, outlength)
   arange = Tensor.arange(outlength, requires_grad=False).reshape(1, outlength).expand(xI.shape)
-  xT = xT.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
+  xT = xT.flatten().unsqueeze(1).expand(None, outlength)
   ret = ((xI == arange) * xT).sum(0).reshape([1, 1] + out_sh)
   if outshape is not None:
-    outshape = safe_numpy(outshape).tolist()
+    outshape = tuple(safe_numpy(outshape).tolist())
     if outshape != ret.shape:
       diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
       pad_args = [diff[0]//2, diff[1]//2, diff[0]-diff[0]//2, diff[1]-diff[1]//2]
       ret = ret.pad2d((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
   return ret
 
-def Conv(X: Tensor, W: Tensor, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
-  if auto_pad != "NOTSET": padding = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
-  else: padding = [p for ps in zip(pads[:len(pads)//2][::-1], pads[len(pads)//2:][::-1]) for p in ps] if pads is not None else 0 # reorder padding
+def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
+  if auto_pad != "NOTSET":
+    padding = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
+  else:
+    # reorder padding
+    padding = [p for ps in zip(pads[:len(pads)//2][::-1], pads[len(pads)//2:][::-1]) for p in ps] if pads is not None else 0
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=padding)
 
-def ConvTranspose(X: Tensor, W: Tensor, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, output_shape=None, output_padding=0, strides=1):
+def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, output_shape=None, output_padding=0, strides=1):
   if kernel_shape is None: kernel_shape = W.shape[2:]
   if isinstance(strides, int): strides = [strides]*(W.ndim-2)
   if isinstance(dilations, int): dilations = [dilations]*(W.ndim-2)
@@ -316,10 +319,10 @@ def ConvTranspose(X: Tensor, W: Tensor, B=None, auto_pad="NOTSET", dilations=1, 
 def Dropout(data: Tensor, ratio=0.5, training_mode=False, seed=None):
   if isinstance(ratio, Tensor) and not ratio.shape: ratio = safe_numpy(ratio) # ratio and tensor is passed in as Tensor with shape: ()
   if isinstance(training_mode, Tensor) and not training_mode.shape: training_mode = safe_numpy(training_mode)
-  if not training_mode: return data, Tensor.ones(*data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
+  if not training_mode: return data, Tensor.ones(data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
   rng = np.random.RandomState(seed)
-  ratio = ratio.item() if isinstance(ratio, Tensor) else ratio
-  mask = Tensor((rng.random(data.shape) >= ratio), requires_grad=False, device=data.device)
+  if isinstance(ratio, Tensor): ratio = ratio.item()
+  mask = Tensor(rng.random(data.shape) >= ratio, requires_grad=False, device=data.device)
   return data * mask * (1/(1.0 - ratio)), mask
 
 def LRN(x: Tensor, size, alpha=1e-4, beta=0.75, bias=1.0):
