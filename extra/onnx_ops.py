@@ -396,15 +396,9 @@ def GatherElements(x: Tensor, indices: Tensor, axis):
 
 def _round(x:Tensor, equidistant_case = "round_down") -> Tensor:
   if equidistant_case == "round_down": return (x - 0.5).ceil()
-  if equidistant_case == "round_up": return x.round()
+  if equidistant_case == "round_up": return (x + 0.5).floor()
   if equidistant_case == "round_to_even":
-    b = x.trunc()
-    b = (b >= 0).where(b + 0.5, b - 0.5)
-    x_ceil_fraction = x.ceil()/2
-    cond_ceil_even = x_ceil_fraction.ceil() == x_ceil_fraction
-    x = (And(x == b, cond_ceil_even)).where(x + 0.5, x)
-    x = (x - 0.5).ceil()
-    return x
+    return ((x > 0) == ((lol := x.trunc() / 2.0).cast(dtypes.default_int) == lol)).where((x-0.5).ceil(), (x+0.5).floor())
 
 def Round(X:Tensor): return _round(X, "round_to_even")
 
