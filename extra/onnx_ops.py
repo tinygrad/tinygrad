@@ -396,18 +396,17 @@ def GatherElements(x: Tensor, indices: Tensor, axis):
 
 def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
   assert n <= 1, f"n:{n} shouldn't be larger than 1"
-  b = x.trunc()
-  b = (b >= 0).where(b+n, b-n)
-  if equidistant_case == "round_down": return (x > b).where(b+1-n, b-n)
-  if equidistant_case == "round_up": return (x >= b).where(b+1-n, b-n)
+  if equidistant_case == "round_down": return (x - n).ceil()
+  if equidistant_case == "round_up": return (x + (1 - n)).floor()
   if equidistant_case == "round_to_even":
+    b = x.trunc()
+    b = (b >= 0).where(b+n, b-n)
     x_ceil_fraction = x.ceil()/2
     cond_ceil_even = x_ceil_fraction.ceil() == x_ceil_fraction
     x = (And(x == b, cond_ceil_even)).where(x+1-n, x)
-    x = (x > b).where(b+1-n, b-n)
+    x = (x - n).ceil()
     return x
 
-# TODO: this is different from Tensor.round?
 def Round(X:Tensor): return _round(X, 0.5, "round_to_even")
 
 # TODO clean this up, it's taking the longest in CI
