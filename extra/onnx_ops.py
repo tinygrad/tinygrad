@@ -394,12 +394,7 @@ def GatherElements(x: Tensor, indices: Tensor, axis):
   indices = (indices < 0).where(x.shape[axis], 0) + indices
   return x.gather(indices, axis)
 
-def _round(x:Tensor, equidistant_case = "round_down") -> Tensor:
-  if equidistant_case == "round_down": return (x - 0.5).ceil()
-  if equidistant_case == "round_up": return (x + 0.5).floor()
-  if equidistant_case == "round_to_even": return x.round()
-
-def Round(X:Tensor): return _round(X, "round_to_even")
+def Round(X:Tensor): return X.round()
 
 # TODO clean this up, it's taking the longest in CI
 def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, coordinate_transformation_mode='half_pixel',
@@ -407,8 +402,8 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
            mode='nearest', nearest_mode='round_prefer_floor'):
   def _nearest_gather(X: Tensor, x_out, y_out): return X[:,:,y_out,:][:,:,:,x_out]
   def _nearest_mode(x_resized: Tensor, nearest_mode: str, x_len):
-    if nearest_mode == "round_prefer_floor": ret = _round(x_resized, "round_down")
-    elif nearest_mode == "round_prefer_ceil": ret = _round(x_resized, "round_up")
+    if nearest_mode == "round_prefer_floor": ret = (x_resized - 0.5).ceil()
+    elif nearest_mode == "round_prefer_ceil": ret = (x_resized + 0.5).floor()
     elif nearest_mode == "floor": ret = x_resized.floor()
     elif nearest_mode == "ceil": ret = x_resized.ceil()
     return ret.cast(dtypes.int32).clip(0, x_len-1)
@@ -459,12 +454,10 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     else: scales = [si/xs for xs, si in zip(X.shape, sizes)]
     if keep_aspect_ratio_policy == "not_larger":
       scale = min(scales)
-      sizes = _round(Tensor(list(X.shape[-2:]))*scale, "round_up")
-      sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
+      sizes = list(X.shape[:-2]) + [math.ceil(sh*scale) for sh in X.shape[-2:]]
     elif keep_aspect_ratio_policy == "not_smaller":
       scale = max(scales)
-      sizes = _round(Tensor(list(X.shape[-2:]))*scale, "round_up")
-      sizes = list(X.shape[:-2]) + [int(i) for i in safe_numpy(sizes)]
+      sizes = list(X.shape[:-2]) + [math.ceil(sh*scale) for sh in X.shape[-2:]]
   output_shape = sizes if sizes else [math.floor(x*s) for x,s in zip(X.shape, scales)]
   output_shape_ = sizes if sizes else [x*s for x,s in zip(X.shape, scales)]
   scales_ = [os/xs for xs, os in zip(X.shape, output_shape)]
