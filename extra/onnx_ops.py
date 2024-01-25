@@ -397,8 +397,7 @@ def GatherElements(x: Tensor, indices: Tensor, axis):
 def _round(x:Tensor, equidistant_case = "round_down") -> Tensor:
   if equidistant_case == "round_down": return (x - 0.5).ceil()
   if equidistant_case == "round_up": return (x + 0.5).floor()
-  if equidistant_case == "round_to_even":
-    return ((x > 0) == ((lol := x.trunc() / 2.0).cast(dtypes.default_int) == lol)).where((x-0.5).ceil(), (x+0.5).floor())
+  if equidistant_case == "round_to_even": return x.round()
 
 def Round(X:Tensor): return _round(X, "round_to_even")
 
