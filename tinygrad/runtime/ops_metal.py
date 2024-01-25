@@ -78,7 +78,7 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
     from tinygrad.runtime.graph.metal import MetalGraph
-    super().__init__(MetalAllocator(self), LinearizerOptions("METAL"), MetalRenderer,
+    super().__init__(device, MetalAllocator(self), LinearizerOptions("METAL"), MetalRenderer,
                      compile_metal_xcode if getenv("METAL_XCODE") else functools.partial(compile_metal, self.device), "compile_metal",
                      functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
   def synchronize(self):

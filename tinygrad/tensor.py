@@ -159,7 +159,7 @@ class Tensor:
   def to(self, device:Optional[Union[str, Tuple[str, ...]]]) -> Tensor:
     if device is None or device == self.device: return self
     if not isinstance(device, str): return self.shard(device)
-    ret = Tensor(self.lazydata, device)
+    ret = Tensor(self.lazydata, device, requires_grad=self.requires_grad)
     if self.grad: ret.grad = self.grad.to(device)
     return ret
 
@@ -173,7 +173,7 @@ class Tensor:
     assert isinstance(self.lazydata, LazyBuffer), "can't shard a MultiLazyBuffer"
     canonical_devices = tuple(Device.canonicalize(x) for x in devices)
     if axis is not None and axis < 0: axis += len(self.shape)
-    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis), device=canonical_devices)
+    return Tensor(MultiLazyBuffer.from_sharded(self.lazydata, canonical_devices, axis), device=canonical_devices, requires_grad=self.requires_grad)
 
   def shard_(self, devices:Tuple[str, ...], axis:Optional[int]=None):
     self.lazydata = self.shard(devices, axis).lazydata
@@ -743,8 +743,8 @@ class Tensor:
 
   # ***** mlops (unary) *****
 
-  def neg(self): return mlops.Neg.apply(self)
-  def logical_not(self): return self.neg() if self.dtype == dtypes.bool else (1.0-self)
+  def logical_not(self): return mlops.Eq.apply(*self._broadcasted(False))
+  def neg(self): return mlops.Neg.apply(self) if self.dtype != dtypes.bool else self.logical_not()
   def contiguous(self): return mlops.Contiguous.apply(self)
   def contiguous_backward(self): return mlops.ContiguousBackward.apply(self)
   def log(self): return mlops.Log.apply(self.cast(least_upper_float(self.dtype)))
@@ -764,6 +764,7 @@ class Tensor:
   def trunc(self: Tensor) -> Tensor: return self.cast(dtypes.int32).cast(self.dtype)
   def ceil(self: Tensor) -> Tensor: return (self > (b := self.trunc())).where(b+1, b)
   def floor(self: Tensor) -> Tensor: return (self < (b := self.trunc())).where(b-1, b)
+  def round(self: Tensor) -> Tensor: return (self + 0.5).floor()
 
   def square(self): return self*self
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
