@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional, List, cast
 import ctypes, functools, hashlib
 import gpuctypes.opencl as cl
 from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG
@@ -41,10 +41,10 @@ class CLProgram:
     if hasattr(self, 'kernel'): check(cl.clReleaseKernel(self.kernel))
     if hasattr(self, 'program'): check(cl.clReleaseProgram(self.program))
 
-  def __call__(self, *bufs:cl.cl_mem, global_size:Tuple[int,...], local_size:Optional[Tuple[int,...]]=None, vals:Tuple[int, ...]=(), wait=False) -> Optional[float]:  # noqa: E501
+  def __call__(self, *bufs:cl.cl_mem, global_size:Tuple[int,int,int]=(1,1,1), local_size:Optional[Tuple[int,int,int]]=None, vals:Tuple[int, ...]=(), wait=False) -> Optional[float]:  # noqa: E501
     for i,b in enumerate(bufs): cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b), ctypes.byref(b))
     for i,b in enumerate(vals,start=len(bufs)): cl.clSetKernelArg(self.kernel, i, 4, ctypes.byref(ctypes.c_int32(b)))
-    if local_size is not None: global_size = tuple(int(g*l) for g,l in zip(global_size, local_size))
+    if local_size is not None: global_size = cast(Tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size)))
     event = cl.cl_event() if wait else None
     check(cl.clEnqueueNDRangeKernel(self.device.queue, self.kernel, len(global_size), None, (ctypes.c_size_t * len(global_size))(*global_size), (ctypes.c_size_t * len(local_size))(*local_size) if local_size else None, 0, None, event))  # noqa: E501
     if wait:
