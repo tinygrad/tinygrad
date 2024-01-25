@@ -237,35 +237,23 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
   if mode == "wrap":
     repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(pads, base_shape)]
     new_shape = [s*r for s,r in zip(base_shape, repeat_args)]
-    shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh) if dim[1]%sh != 0 else nsh) for dim, sh, nsh in zip(pads, base_shape, new_shape)]
+    shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh if dim[1]%sh != 0 else 0)) for dim, sh, nsh in zip(pads, base_shape, new_shape)]
     return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
   if mode == "reflect":
     for i,s in enumerate(x.shape):
-      if pads[i] == (0,0): continue
-      elif pads[i][0] and not pads[i][1]:
-        x = x.flip(i).shrink(tuple([(0,s_) if i_ != i else (s-pads[i][0]-1, s_-1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (0,s) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
-      elif not pads[i][0] and pads[i][1]:
-        x = x.flip(i).shrink(tuple([(0,s_) if i_ != i else (1, pads[i][1]+1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (s,0) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
-      else:
-        x = x.flip(i).shrink(tuple([(0,s_) if i_ != i else (s-pads[i][0]-1, s_-1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (0,s+pads[i][1]) for i_ in range(x.ndim)])) + \
-            x.flip(i).shrink(tuple([(0,s_) if i_ != i else (1, pads[i][1]+1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+      if pads[i] != (0,0):
+        pL, pR = pads[i]
+        xL = x.flip(i).shrink(tuple((s-pL-1, s_-1) if i_ == i else None for i_,s_ in enumerate(x.shape)))
+        xR = x.flip(i).shrink(tuple((1, pR+1) if i_ == i else None for i_ in range(x.ndim)))
+        x = xL.cat(x, xR, dim=i)
     return x
   if mode == "edge":
-    for i,s in enumerate(x.shape):
-      if pads[i] == (0,0): continue
-      elif pads[i][0] and not pads[i][1]:
-        x = x.shrink(tuple([(0,s_) if i_ != i else (0,1) for i_,s_ in enumerate(x.shape)])).expand([pads[i][0] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (0,s) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
-      elif not pads[i][0] and pads[i][1]:
-        x = x.shrink(tuple([(0,s_) if i_ != i else (s_-1, s_) for i_,s_ in enumerate(x.shape)])).expand([pads[i][0] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
-      else:
-        x = x.shrink(tuple([(0,s_) if i_ != i else (0,1) for i_,s_ in enumerate(x.shape)])).expand([pads[i][0] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (0,s+pads[i][1]) for i_ in range(x.ndim)])) + \
-            x.shrink(tuple([(0,s_) if i_ != i else (s_-1, s_) for i_,s_ in enumerate(x.shape)])).expand([pads[i][1] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+    for i,s in enumerate(x.shape):      
+      if pads[i] != (0,0):
+        pL, pR = pads[i]
+        xL = x.shrink(tuple((0,1) if i_ == i else None for i_ in range(x.ndim))).expand([pL if i_ == i else None for i_ in range(x.ndim)])
+        xR = x.shrink(tuple((s_-1, s_) if i_ == i else None for i_,s_ in enumerate(x.shape))).expand([pR if i_ == i else None for i_ in range(x.ndim)])
+        x = xL.cat(x, xR, dim=i)
     return x
   if mode == "constant":
     return _padding(x, seq_pads, axes=seq_axes, constant_value=constant_value)
@@ -471,7 +459,7 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
         x_floor, y_floor = int(x), int(y)
         y_shrink = (0, X.shape[2]) if X.shape[2] == 1 else (y_floor, y_floor+2) if y != y_floor else (y_floor, y_floor+1)
         x_shrink = (x_floor, x_floor+2) if x != x_floor else (x_floor, x_floor+1)
-        shrink_args = ((0, X.shape[0]), (0, X.shape[1]), y_shrink, x_shrink)
+        shrink_args = (None, None, y_shrink, x_shrink)
         corners = safe_numpy(X.shrink(shrink_args))
         x1, x2, y1, y2 = x_floor, x_floor+1, y_floor, y_floor+1
         if x == x_floor and y == y_floor: # TODO https://en.wikipedia.org/wiki/Bilinear_interpolation#Weighted_mean maybe do weighted mean?
