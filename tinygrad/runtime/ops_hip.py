@@ -2,8 +2,8 @@ from __future__ import annotations
 import ctypes, functools, subprocess, io
 from typing import Tuple, TypeVar, List, Any, cast, Set
 import gpuctypes.hip as hip
-from tinygrad.helpers import DEBUG, getenv, init_c_var, compile_cuda_style, time_execution_cuda_style
-from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t
+from tinygrad.helpers import DEBUG, getenv, init_c_var
+from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t, to_char_p_p, get_bytes
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, BufferOptions, JITRunner, Device, Buffer, update_stats
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
@@ -21,10 +21,12 @@ def hip_set_device(d:int):
 def check(status):
   if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
 
-# TODO: remove these helpers, they increase complexity
-def hip_time_execution(cb, enable=False): return time_execution_cuda_style(cb, hip.hipEvent_t, hip.hipEventCreate, hip.hipEventRecord, hip.hipEventSynchronize, hip.hipEventDestroy, hip.hipEventElapsedTime, enable=enable)  # noqa: E501
-
-def compile_hip(prg:str, arch="gfx1100") -> bytes: return compile_cuda_style(prg, [f'--offload-arch={arch}', '-I/opt/rocm/include'], hip.hiprtcProgram, hip.hiprtcCreateProgram, hip.hiprtcCompileProgram, hip.hiprtcGetCode, hip.hiprtcGetCodeSize, hip.hiprtcGetProgramLog, hip.hiprtcGetProgramLogSize, check)  # noqa: E501
+def compile_hip(prg:str, arch="gfx1100") -> bytes:
+  check(hip.hiprtcCreateProgram(ctypes.byref(prog := hip.hiprtcProgram()), prg.encode(), "<null>".encode(), 0, None, None))
+  compile_options = [f'--offload-arch={arch}', '-I/opt/rocm/include']
+  status = hip.hiprtcCompileProgram(prog, len(compile_options), to_char_p_p([o.encode() for o in compile_options]))
+  if status != 0: raise RuntimeError(f"compile failed: {get_bytes(prog, hip.hiprtcGetProgramLogSize, hip.hiprtcGetProgramLog, check).decode()}")
+  return get_bytes(prog, hip.hiprtcGetCodeSize, hip.hiprtcGetCode, check)
 
 class HIPProgram:
   def __init__(self, device:int, name:str, lib:bytes):
