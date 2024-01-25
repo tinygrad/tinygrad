@@ -4,8 +4,8 @@ from onnx.backend.base import Backend, BackendRep
 import onnx.backend.test
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, CI
-from tinygrad.device import Device, Compiled
+from tinygrad.helpers import getenv, CI, OSX
+from tinygrad.device import Device
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
@@ -52,17 +52,30 @@ if Device.DEFAULT in ["TORCH"]:
   backend_test.exclude('uint16')
   backend_test.exclude('uint32')
   backend_test.exclude('uint64')
-if Device.DEFAULT in ["METAL"]:
+
+if Device.DEFAULT in ["METAL"] or (OSX and Device.DEFAULT == "GPU"):
   backend_test.exclude('float64')
+  backend_test.exclude('DOUBLE')
+  # these have float64 inputs
+  backend_test.exclude('test_eyelike_with_dtype_cpu')
+  backend_test.exclude('test_reduce_log_sum_exp*')
+  backend_test.exclude('test_operator_add*')
+
 # no float16, LLVM segfaults in CI, GPU requires cl_khr_fp16
 if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
   backend_test.exclude('float16')
 
 backend_test.exclude('string')
 
+# dtype cast
+backend_test.exclude('STRING')
+backend_test.exclude('FLOAT8')
+backend_test.exclude('BFLOAT16')  # not supported in numpy
+# TODO: fix these with true onnx float16
+backend_test.exclude('to_FLOAT16')
+backend_test.exclude('cast_no_saturate')
+
 backend_test.exclude('test_pow_types_int*')
-backend_test.exclude('test_cast_*')
-backend_test.exclude('test_castlike_*')
 backend_test.exclude('test_convinteger_*')
 backend_test.exclude('test_matmulinteger_*')
 
@@ -164,14 +177,7 @@ if Device.DEFAULT in ['METAL']:
   backend_test.exclude('test_maxpool_2d_same_lower_cpu')
   backend_test.exclude('test_maxpool_2d_same_upper_cpu')
 
-if Device.DEFAULT in ['GPU', 'METAL']:
-  # double not supported
-  backend_test.exclude('test_max_float64_cpu')
-  backend_test.exclude('test_min_float64_cpu')
-  backend_test.exclude('test_eyelike_with_dtype_cpu')
-  backend_test.exclude('test_reduce_log_sum_exp*')
-  backend_test.exclude('test_operator_add*') # dependent on float64 math. Without it values default to 0 or inf
-
+if Device.DEFAULT == "METAL" or (OSX and Device.DEFAULT == "GPU"):
   # weird inaccuracy
   backend_test.exclude('test_mish_cpu')
   backend_test.exclude('test_mish_expanded_cpu')
