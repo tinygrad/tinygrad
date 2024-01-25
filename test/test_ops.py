@@ -1357,6 +1357,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.clip(-0.3, -0.2))
     helper_test_op([(45,65)], lambda x: x.clip(3, 0))
 
+  def test_isnan(self):
+    x = np.array([[float('nan'), float('inf'), 8], [float('-inf'), 0, float('nan')]])
+    helper_test_op(None, lambda x: x.isnan(), vals=[x], forward_only=True)
+
   def test_matvecmat(self):
     helper_test_op([(1,128), (128,128), (128,128)], lambda x,y,z: (x@y).relu()@z, atol=1e-4)
 

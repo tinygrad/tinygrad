@@ -749,6 +749,7 @@ class Tensor:
   def abs(self): return self.relu() + (-self).relu()
   def sign(self): return ((self.float()) / (self.float().abs() + 1e-12)).cast(self.dtype)
   def reciprocal(self): return 1.0/self
+  def isnan(self): return self != self
 
   # ***** activation functions (unary) *****
 
