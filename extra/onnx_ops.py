@@ -456,19 +456,21 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     for y in safe_numpy(y_out):
       for x in safe_numpy(x_out):
         x_floor, y_floor = int(x), int(y)
-        y_shrink = (0, X.shape[2]) if X.shape[2] == 1 else (y_floor, y_floor+2) if y != y_floor else (y_floor, y_floor+1)
-        x_shrink = (x_floor, x_floor+2) if x != x_floor else (x_floor, x_floor+1)
-        shrink_args = (None, None, y_shrink, x_shrink)
-        corners = safe_numpy(X.shrink(shrink_args))
-        x1, x2, y1, y2 = x_floor, x_floor+1, y_floor, y_floor+1
-        if x == x_floor and y == y_floor: # TODO https://en.wikipedia.org/wiki/Bilinear_interpolation#Weighted_mean maybe do weighted mean?
-          ret.append(corners[0,0,0,0])
+        y_shrink = (y_floor, math.ceil(y)+1)
+        x_shrink = (x_floor, math.ceil(x)+1)
+        corners = safe_numpy(X.shrink((None, None, y_shrink, x_shrink)))
+
+        wx, wy = math.ceil(x) - x, math.ceil(y) - y
+        if x == x_floor and y == y_floor:
+          weighted = corners[0,0,0,0]
         elif x == x_floor:
-          ret.append((corners[0,0,0,0] * (y2 - y) + corners[0,0,1,0] * (y - y1)) / (y2 - y1))
+          weighted = corners[0,0,0,0] * wy + corners[0,0,1,0] * (1-wy)
         elif y == y_floor:
-          ret.append((corners[0,0,0,0] * (x2 - x) + corners[0,0,0,1] * (x - x1)) / (x2 - x1))
+          weighted = corners[0,0,0,0] * wx + corners[0,0,0,1] * (1-wx)
         else:
-          ret.append((corners[0,0,0,0] * (x2 - x) * (y2 - y) + corners[0,0,0,1] * (x - x1) * (y2 - y) + corners[0,0,1,0] * (x2 - x) * (y - y1) + corners[0,0,1,1] * (x - x1) * (y - y1)) / ((x2 - x1) * (y2 - y1)))
+          weighted = (corners[0,0,0,0] * wx + corners[0,0,0,1] * (1-wx)) * wy + \
+                     (corners[0,0,1,0] * (wx) + corners[0,0,1,1] * (1-wx)) * (1-wy)
+        ret.append(weighted)
     return Tensor(ret).reshape(output_shape)
   if mode == "cubic":
     raise NotImplementedError("cubic interpolation is not implemented")
