@@ -92,16 +92,12 @@ def Acos(x: Tensor):
   ret = ret - 2 * negate * ret
   return negate * math.pi + ret
 def Atan(y: Tensor):
-  x = Tensor.ones(y.shape)
-  t3 = x
   t1 = y.abs()
-  t0 = (t3 > t1).where(t3, t1)
-  t1 = (t3 < t1).where(t3, t1)
-  t3 = t1 / t0
+  t3 = (1 > t1).where(t1, t1.reciprocal())
   t4 = t3 * t3
   t0 = ((((-0.013480470 * t4 + 0.057477314) * t4 - 0.121239071) * t4 + 0.195635925) * t4 - 0.332994597) * t4 + 0.999995630
   t3 = t0 * t3
-  t3 = (y.abs() > x.abs()).where(1.570796327 - t3, t3)
+  t3 = (y.abs() > 1).where(1.570796327 - t3, t3)
   return (y < 0).where(-t3, t3)
 
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
