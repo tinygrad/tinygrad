@@ -491,12 +491,13 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
 
 def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
   if not axes: axes = list(range(t.ndim))
-  shrink_arg = [(0,i) for i in t.shape]
-  pad_arg = [(0,0)] * t.ndim
+  shrink_arg = [None] * t.ndim
+  pad_arg = [None] * t.ndim
   shape = safe_numpy(shape).tolist()
   for s, x in zip(shape, axes):
-    if s < t.shape[x]: shrink_arg[x] = (t.shape[x]//2 - s//2, t.shape[x]//2 + s//2) if s%2 == 0 else (t.shape[x]//2 - s//2 - 1, t.shape[x]//2 + s//2)
-    elif s > t.shape[x]: pad_arg[x] = ((s - t.shape[x])//2, (s - t.shape[x])//2) if (s - t.shape[x])% 2 == 0 else ((s - t.shape[x])//2, (s - t.shape[x])//2 + 1)
+    tx = t.shape[x]
+    if s < tx: shrink_arg[x] = (tx//2 - (s+1)//2, tx//2 + s//2)
+    elif s > tx: pad_arg[x] = ((s - tx)//2, (s - tx + 1)//2)
   return t.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
 def OneHot(indices: Tensor, depth: Tensor, values: Tensor, axis=-1):
