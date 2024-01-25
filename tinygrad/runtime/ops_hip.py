@@ -46,15 +46,14 @@ class HIPProgram:
     if MOCKHIP: return float("inf")
     hip_set_device(self.device)
     if not hasattr(self, "vargs"):
-      self.c_args_type = init_c_struct_t(tuple([(f'f{i}', hip.hipDeviceptr_t) for i in range(len(args))] +
-                                    [(f'f{i}', ctypes.c_int) for i in range(len(args), len(args)+len(vals))]))
-      c_args = self.c_args_type(*args, *vals)
-      self.vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p),
-                                        ctypes.c_void_p(2), ctypes.cast(ctypes.byref(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p),
-                                        ctypes.c_void_p(3))
+      self.c_args = init_c_struct_t(tuple([(f'f{i}', hip.hipDeviceptr_t) for i in range(len(args))] +
+                                          [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))(*args, *vals)
+      self.vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p),
+                                         ctypes.c_void_p(2), ctypes.cast(ctypes.byref(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p),
+                                         ctypes.c_void_p(3))
     else:
-      c_args = self.c_args_type(*args, *vals)
-      self.vargs[1] = ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p)
+      for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
+      for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
     if wait:
       evs = [init_c_var(hip.hipEvent_t(), lambda x: hip.hipEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
       check(hip.hipEventRecord(evs[0], None))
