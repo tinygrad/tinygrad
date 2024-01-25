@@ -402,7 +402,7 @@ def _round(x:Tensor, equidistant_case = "round_down") -> Tensor:
     b = (b >= 0).where(b + 0.5, b - 0.5)
     x_ceil_fraction = x.ceil()/2
     cond_ceil_even = x_ceil_fraction.ceil() == x_ceil_fraction
-    x = (And(x == b, cond_ceil_even)).where(x + (1 - 0.5), x)
+    x = (And(x == b, cond_ceil_even)).where(x + 0.5, x)
     x = x.round()
     return x
 
