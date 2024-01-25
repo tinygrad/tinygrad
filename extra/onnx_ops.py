@@ -400,10 +400,10 @@ def _round(x:Tensor, n:float, equidistant_case = "round_down") -> Tensor:
   if equidistant_case == "round_up": return (x + (1 - n)).floor()
   if equidistant_case == "round_to_even":
     b = x.trunc()
-    b = (b >= 0).where(b+n, b-n)
+    b = (b >= 0).where(b + n, b - n)
     x_ceil_fraction = x.ceil()/2
     cond_ceil_even = x_ceil_fraction.ceil() == x_ceil_fraction
-    x = (And(x == b, cond_ceil_even)).where(x+1-n, x)
+    x = (And(x == b, cond_ceil_even)).where(x + (1 - n), x)
     x = (x - n).ceil()
     return x
 
