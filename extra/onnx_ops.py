@@ -78,7 +78,7 @@ def Tile(x: Tensor, repeats): return x.repeat([int(x) for x in safe_numpy(repeat
 def Range(start: Tensor, limit, delta): return Tensor.arange(start=safe_numpy(start).item(), stop=safe_numpy(limit).item(), step=safe_numpy(delta).item())
 def Shape(data: Tensor, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int64)
 def Size(data: Tensor): return prod(data if isinstance(data, list) else data.shape)
-def Flatten(x: Tensor, axis=1): return x.reshape(prod((1,) + x.shape[0:axis]), -1)
+def Flatten(x: Tensor, axis=1): return x.reshape(prod(x.shape[0:axis]), -1)
 def Reshape(data: Tensor, shape: Tensor, allowzero=0):
   return data.reshape([int(x) if x != 0 else (0 if allowzero else data.shape[i]) for i,x in enumerate(safe_numpy(shape))])
 def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
@@ -86,13 +86,13 @@ def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
 def Not(x:Tensor): return x.logical_not()
 
-def Asin(x): return Atan(x / Tensor.sqrt(1 - x * x))
+def Asin(x): return Atan(x * (1 - x * x).rsqrt())
 def Acos(x: Tensor):
   negate = (x < 0)
   x = x.abs()
-  ret = ((((-0.0187293 * x) + 0.0742610)*x - 0.2121144) * x + 1.5707288) * Tensor.sqrt(1.0 - x)
+  ret = ((((-0.0187293 * x) + 0.0742610)*x - 0.2121144) * x + 1.5707288) * (1.0 - x).sqrt()
   ret = ret - 2 * negate * ret
-  return negate * 3.14159265358979 + ret
+  return negate * math.pi + ret
 def Atan(y: Tensor):
   x = Tensor.ones(y.shape)
   t3 = x
