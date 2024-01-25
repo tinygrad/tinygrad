@@ -346,7 +346,7 @@ def NegativeLogLikelihoodLoss(x: Tensor, target: Tensor, weight=None, ignore_ind
   if ignore_index is not None:
     cond = target == ignore_index
     weight = cond.where(0, weight) if weight is not None else cond.where(0, 1)
-  mask = target[:, None, :] ==  Tensor.arange(C).reshape([1, C] + [1]*(len(x.shape) -2))
+  mask = target[:, None, :] == Tensor.arange(C).reshape([1, C] + [1]*(len(x.shape) -2))
   loss = -(mask * x).sum(axis=1) * (1 if weight is None else weight)
   if reduction == "mean": return loss.mean() if weight is None else loss.sum() / weight.sum()
   if reduction == "sum": return loss.sum()
@@ -504,7 +504,7 @@ def Erf(x: Tensor):
   term4 = -1.453152027 * t ** 4
   term5 = 1.061405429 * t ** 5
   y = (term1 + term2 + term3 + term4 + term5)
-  z = 1.0 - y * Tensor.exp(-x * x)
+  z = 1.0 - y * (-x * x).exp()
   return (x > 0).where(z, -z)
 
 def Compress(inp: Tensor, condition: Tensor, axis=None):
@@ -512,21 +512,19 @@ def Compress(inp: Tensor, condition: Tensor, axis=None):
     inp = inp.flatten()
     axis = 0
 
-  axis = axis + inp.ndim if axis < 0 else axis
+  if axis < 0: axis += inp.ndim
 
   con_np = safe_numpy(condition)
   con = Tensor(np.arange(condition.shape[0])[con_np]) # no boolean indexing in Tensor
-  return inp[tuple([slice(None) if i != axis else con for i in range(inp.ndim)])]
+  return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
 
 def EyeLike(x: Tensor, dtype=None, k=0):
   if dtype is None: dtype = x.dtype
   else: dtype = DTYPE_MAP[int(dtype)]
-  shape = x.shape
   dim = min(x.shape)
-  if shape[0] == shape[1]:
+  if x.shape[0] == x.shape[1]:
     return Tensor.eye(dim=dim, dtype=dtype)
-  diff = (shape[0]-dim, shape[1]-dim)
-  padarg = tuple([(d, d) if d == 0 else (k, d-k) for d in diff])
+  padarg = tuple(None if d == dim else (k, d-dim-k) for d in x.shape)
   return Tensor.eye(dim=dim, dtype=dtype).pad(padarg)
 
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
@@ -535,7 +533,7 @@ def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
   return (x == float("inf")) * bool(detect_positive) + (x == float("-inf")) * bool(detect_negative)
 
 def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1):
-  axis = axis + x.ndim if axis < 0 else axis
+  if axis < 0: axis += x.ndim
   x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
   x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
   return ((x.float() - x_zer) * x_sc).cast(x_scale.dtype)
@@ -602,7 +600,7 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
   assert (mask is None) is (mask_index_type is None)
   assert mask is None, "functionality not supported yet"  # TODO
   input_shape = input_ids.shape
-  _bsz, seq_length = input_shape[0], input_shape[1]
+  seq_length = input_shape[1]
   compute_seg_emb = (segment_embedding is not None and segment_ids is not None)
   vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
 
