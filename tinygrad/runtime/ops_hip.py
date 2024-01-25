@@ -21,7 +21,45 @@ def hip_set_device(d:int):
 def check(status):
   if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
 
+def check_comgr(status):
+  if status != 0:
+    hip.amd_comgr_status_string(status, ctypes.byref(status_str := ctypes.POINTER(ctypes.c_char)()))
+    raise RuntimeError(f"comgr fail {status}, {ctypes.string_at(status_str).decode()}")
+
+# AMD_COMGR_SAVE_TEMPS=1 AMD_COMGR_REDIRECT_LOGS=stdout AMD_COMGR_EMIT_VERBOSE_LOGS=1
+def _get_comgr_data(data_set, data_type):
+  check_comgr(hip.amd_comgr_action_data_get_data(data_set, data_type, 0, ctypes.byref(data_exec := hip.amd_comgr_data_t())))
+  check_comgr(hip.amd_comgr_get_data(data_exec, ctypes.byref(sz := ctypes.c_uint64()), None))
+  check_comgr(hip.amd_comgr_get_data(data_exec, ctypes.byref(sz), (dat := ctypes.create_string_buffer(sz.value))))
+  return bytes(dat)
+
 def compile_hip(prg:str, arch="gfx1100") -> bytes:
+  rprg = prg.encode()
+  action_info = init_c_var(hip.amd_comgr_action_info_t(), lambda x: check_comgr(hip.amd_comgr_create_action_info(ctypes.byref(x))))
+  data_src = init_c_var(hip.amd_comgr_data_t(), lambda x: check_comgr(hip.amd_comgr_create_data(hip.AMD_COMGR_DATA_KIND_SOURCE, ctypes.byref(x))))
+  data_set_src = init_c_var(hip.amd_comgr_data_set_t(), lambda x: check_comgr(hip.amd_comgr_create_data_set(ctypes.byref(x))))
+  data_set_bc = init_c_var(hip.amd_comgr_data_set_t(), lambda x: check_comgr(hip.amd_comgr_create_data_set(ctypes.byref(x))))
+  data_set_reloc = init_c_var(hip.amd_comgr_data_set_t(), lambda x: check_comgr(hip.amd_comgr_create_data_set(ctypes.byref(x))))
+  data_set_exec = init_c_var(hip.amd_comgr_data_set_t(), lambda x: check_comgr(hip.amd_comgr_create_data_set(ctypes.byref(x))))
+  check_comgr(hip.amd_comgr_set_data(data_src, len(rprg), rprg))
+  check_comgr(hip.amd_comgr_set_data_name(data_src, b"<null>"))
+  check_comgr(hip.amd_comgr_data_set_add(data_set_src, data_src))
+  check_comgr(hip.amd_comgr_action_info_set_language(action_info, hip.AMD_COMGR_LANGUAGE_HIP))
+  check_comgr(hip.amd_comgr_action_info_set_isa_name(action_info, b"amdgcn-amd-amdhsa--" + arch.encode()))
+  check_comgr(hip.amd_comgr_action_info_set_logging(action_info, True))
+  # -include hiprtc_runtime.h was removed
+  check_comgr(hip.amd_comgr_action_info_set_options(action_info, b"-O3 -mcumode --hip-version=6.0.32830 -DHIP_VERSION_MAJOR=6 -DHIP_VERSION_MINOR=0 -DHIP_VERSION_PATCH=32830 -D__HIPCC_RTC__ -std=c++14 -nogpuinc -Wno-gnu-line-marker -Wno-missing-prototypes --offload-arch=gfx1100 -I/opt/rocm/include -Xclang -disable-llvm-passes")) # noqa: E501
+  status = hip.amd_comgr_do_action(hip.AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, action_info, data_set_src, data_set_bc)
+  if status != 0:
+    print(_get_comgr_data(data_set_bc, hip.AMD_COMGR_DATA_KIND_LOG).decode())
+    raise RuntimeError("compile failed")
+  check_comgr(hip.amd_comgr_action_info_set_options(action_info, b"-O3 -mllvm -amdgpu-internalize-symbols"))
+  check_comgr(hip.amd_comgr_do_action(hip.AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, action_info, data_set_bc, data_set_reloc))
+  check_comgr(hip.amd_comgr_action_info_set_options(action_info, b""))
+  check_comgr(hip.amd_comgr_do_action(hip.AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE, action_info, data_set_reloc, data_set_exec))
+  return _get_comgr_data(data_set_exec, hip.AMD_COMGR_DATA_KIND_EXECUTABLE)
+
+def compile_hip_rtc(prg:str, arch="gfx1100") -> bytes:
   check(hip.hiprtcCreateProgram(ctypes.byref(prog := hip.hiprtcProgram()), prg.encode(), "<null>".encode(), 0, None, None))
   compile_options = [f'--offload-arch={arch}', '-I/opt/rocm/include']
   status = hip.hiprtcCompileProgram(prog, len(compile_options), to_char_p_p([o.encode() for o in compile_options]))
