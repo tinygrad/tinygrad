@@ -370,12 +370,11 @@ def SoftmaxCrossEntropyLoss(scores: Tensor, labels: Tensor, weights=None, ignore
   if weights is not None:
     weights = weights[labels, ...]
     loss = loss * weights
-  if reduction == "mean": loss = loss.sum() / (loss == 0).where(0, 1).sum() if weights is None else loss.sum() / weights.sum()
+  if reduction == "mean": loss = loss.sum() / ((loss != 0).sum() if weights is None else weights.sum())
   elif reduction == "sum": loss = loss.sum()
   return loss, y
 
-def ArrayFeatureExtractor(x: Tensor, indices: Tensor):
-  return x[tuple([slice(None) if i != (x.ndim-1) else indices for i in range(x.ndim)])]
+def ArrayFeatureExtractor(x: Tensor, indices: Tensor): return x[..., indices]
 
 def Gather(x: Tensor, indices: Tensor, axis=0):
   if indices.numel() < 9: # NOTE lessor kernels for smaller indices but kernel number increases depending on size of indices
