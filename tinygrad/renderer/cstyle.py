@@ -7,7 +7,6 @@ from tinygrad.helpers import prod, strip_parens, getenv
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 
 class CStyleLanguage(NamedTuple):
-  size_prefix: str = "int"
   kernel_prefix: str = ""
   buffer_prefix: str = ""
   buffer_suffix: str = ""
@@ -27,7 +26,7 @@ class CStyleLanguage(NamedTuple):
   launch_bounds: bool = False
   type_map: Dict[DType, str] = {}
   code_for_op: Dict = {
-    UnaryOps.NEG: lambda x,dtype: f"(-{x})" if dtype != dtypes.bool else f"(!{x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
+    UnaryOps.NEG: lambda x,dtype: f"(-{x})", UnaryOps.SQRT: lambda x,dtype: f"sqrt({x})",
     UnaryOps.EXP2: lambda x,dtype: f"exp2({x})", UnaryOps.LOG2: lambda x,dtype: f"log2({x})", UnaryOps.SIN: lambda x,dtype: f"sin({x})",
     BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})",
     BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
@@ -86,8 +85,6 @@ class CStyleLanguage(NamedTuple):
     return f"*({buf_name}+{idx}) = {var_name};" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}] = {var_name};"
 
   def render_local(self, name:str, dtype:DType, size:int): return self.smem_align + self.smem_prefix + f"{dtype.name} {name}[{size}];"
-  def render_for(self, expr: str, _min:Union[int,str], _max:Union[int,str]) -> str: return f"for (int {expr} = {_min}; {expr} < {_max}; {expr}++) {{"
-  def render_if(self, cond: str): return f"if ({cond}) {{"
   def render_dtype(self, var_dtype:DType) -> str: return self.type_map[var_dtype] if var_dtype in self.type_map else var_dtype.name
 
 def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> str:
@@ -112,7 +109,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
     uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
     # these four uops don't have output dtypes
     if uop == UOps.IF:
-      kk(lang.render_if(r[vin[0]]))
+      kk(f"if ({r[vin[0]]}) {{")
       depth += 1
     elif uop == UOps.BARRIER: kk(lang.barrier)
     elif uop == UOps.END:
@@ -120,13 +117,13 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       kk("}")
     elif uop == UOps.STORE:
       assert vin[0].dtype is not None and vin[2].dtype is not None
-      if len(vin) > 3: kk(lang.render_if(r[vin[3]]))
+      if len(vin) > 3: kk(f"if ({r[vin[3]]}) {{")
       kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
       if len(vin) > 3: kk("}")
     else:
       assert dtype is not None, f"None dtype for uop {uop}"
       if uop == UOps.LOOP:
-        kk(lang.render_for(ssa(u,'ridx'), r[vin[0]], r[vin[1]]))
+        kk(f"for (int {(expr := ssa(u,'ridx'))} = {r[vin[0]]}; {expr} < {r[vin[1]]}; {expr}++) {{")
         depth += 1
       elif uop == UOps.ALU:
         # remove parens if ALU types are the same. TODO: can do more here
@@ -139,7 +136,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         if child_count[u] <= 1 and args != BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
         else: kk(f"{dtype.name} {ssa(u,'alu')} = {val};")
       elif uop == UOps.SPECIAL:
-        kk(f"{lang.size_prefix} {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
+        kk(f"int {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
         if args[1].startswith("l"): local_size.append(args[2])
         r[u] = args[1]
       elif uop == UOps.LOAD:
@@ -182,7 +179,7 @@ class OpenCLLanguage(CStyleLanguage):
   half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable"
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
   float4 = "(float4)"
-  code_for_workitem ={ "g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})" }
+  code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
   uses_vload = True
   # NOTE: mad is used so the loads aren't reordered into the math on 845
   code_for_op = {**CStyleLanguage().code_for_op,
@@ -223,10 +220,8 @@ class CUDALanguage(CStyleLanguage):
   smem_prefix_for_cast = False
   barrier = "__syncthreads();"
   float4 = "make_float4"
-  code_for_workitem = {
-      "g": lambda x: f"blockIdx.{chr(120+x)}", "l": lambda x: f"threadIdx.{chr(120+x)}",
-      "i": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"
-  }
+  code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+x)}", "l": lambda x: f"threadIdx.{chr(120+x)}",
+                       "i": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
   half_prekernel ="#include <cuda_fp16.h>\n"+"#include <cuda_bf16.h>\n"+"""
     struct half4 { half x, y, z, w; };

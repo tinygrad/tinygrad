@@ -25,9 +25,7 @@ class _Device:
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Union[Interpreted, Compiled]:
     x = ix.split(":")[0].upper()
-    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0]  # noqa: E501
-    if isinstance(ret, type): ret = ret(ix)
-    return ret
+    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
   @functools.cached_property
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
@@ -70,6 +68,8 @@ def update_stats(name:str, op_estimate:sint, mem_estimate:int, var_vals: Optiona
 class BufferOptions:
   image: Optional[ImageDType] = None
   uncached: bool = False
+  host: bool = False
+  signal: bool = False
 
 class Buffer:
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:Optional[BufferOptions]=None):
@@ -86,7 +86,7 @@ class Buffer:
     if not hasattr(self, '_buf'): return # happens when __init__ has raised exception
     if not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
     self.allocator.free(self._buf, self.nbytes, self.options)
-  def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}>"
+  def __repr__(self): return f"<buf device:{self.device} size:{self.size} dtype:{self.dtype}" + (">" if self.options is None else f"{self.options=}>")
   def as_buffer(self, allow_zero_copy=False, force_zero_copy=False) -> memoryview:
     # zero copy with as_buffer (disabled by default due to use after free)
     if (force_zero_copy or allow_zero_copy) and hasattr(self.allocator, 'as_buffer'): return self.allocator.as_buffer(self._buf)
@@ -106,7 +106,7 @@ class Buffer:
 class BufferCopy(JITRunner):
   def copy(self, dest, src): dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
-    dest, src = rawbufs
+    dest, src = rawbufs[0:2]
     assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
     st = time.perf_counter()
     self.copy(dest, src)
@@ -128,14 +128,10 @@ class BufferRead(BufferCopy):
 
 class BufferXfer(BufferCopy):
   def copy(self, dest, src):
-    # fast path, used on HIP between GPUs
-    # NOTE: we have to block here so the data isn't copied too early. this is probably due to buffer reuse
-    if hasattr(src.d, "block") and hasattr(dest.d, "event"): src.d.block(dest.d.event())
-    else: dest.d.synchronize()
-    src.allocator.transfer(dest._buf, src._buf, dest.size*dest.dtype.itemsize)
-    # NOTE: we have to block here so the data is ready on dest when dest needs it
-    if hasattr(dest.d, "block") and hasattr(src.d, "event"): dest.d.block(src.d.event())
-    else: src.d.synchronize()
+    if hasattr(dest.allocator.device, "track_cross_buffer") and hasattr(src.allocator, "track_cross_device"):
+      dest.allocator.device.track_cross_buffer.append(src)
+      src.allocator.track_cross_device.append(dest.allocator.device)
+    dest.allocator.transfer(dest._buf, src._buf, dest.nbytes)
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
@@ -162,7 +158,7 @@ class LRUAllocator(Allocator):  # pylint: disable=abstract-method
       for opaque in opaques: self._free(opaque)
       opaques.clear()
   def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
-    if getenv("LRU", 1): self.cache[(size, options)].append(opaque)
+    if getenv("LRU", 1) and (options is None or not options.signal): self.cache[(size, options)].append(opaque)
     else: self._free(opaque)
 
 class _MallocAllocator(LRUAllocator):
@@ -189,8 +185,8 @@ class InterpretedASTRunner(JITRunner):
     return et
 
 class Interpreted:
-  def __init__(self, allocator: Allocator, fxn_for_op:Dict[Op, Callable]):
-    self.allocator, self.fxn_for_op = allocator, fxn_for_op
+  def __init__(self, device:str, allocator: Allocator, fxn_for_op:Dict[Op, Callable]):
+    self.dname, self.allocator, self.fxn_for_op = device, allocator, fxn_for_op
     self.synchronize, self.codegen, self.graph = lambda: None, None, None
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
@@ -267,23 +263,26 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 # **************** for Compiled Devices ****************
 
 class CompiledASTRunner(JITRunner):
-  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, lib:bytes, device:Compiled, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None):  # noqa: E501
+  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, device:Compiled, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, precompiled:Optional[bytes]=None):  # noqa: E501
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
-    self.name, self.display_name, self.prg, self.lib, self.device, self.global_size, self.local_size, self.first_run = \
-      to_function_name(name), name, prg, lib, device, global_size, local_size, True
+    self.name, self.display_name, self.prg, self.device, self.global_size, self.local_size, self.first_run = \
+      to_function_name(name), name, prg, device, global_size, local_size, True
+    lib: Optional[bytes] = precompiled
+    if lib is None:
+      if self.device.compiler_cachekey is not None: lib = diskcache_get(self.device.compiler_cachekey, prg)
+      if lib is None:
+        lib = self.device.compiler(prg)
+        if self.device.compiler_cachekey is not None: diskcache_put(self.device.compiler_cachekey, prg, lib)
+    self.lib, self.clprg = lib, self.device.runtime(self.name, lib)
     self.vars: List[Variable] = []
     if ast:
       info = get_lazyop_info(ast)
       self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
       self.vars = ast.vars()
       assert all(v._val is None for v in self.vars), f"ASTRunner contains bound Variable {self.vars}"
-
-  def build(self, runtime):
-    self.clprg = runtime(self.name, self.lib)
-    return self
 
   def launch_dims(self, var_vals):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else self.global_size
@@ -302,28 +301,20 @@ class CompiledASTRunner(JITRunner):
     if local_size: lra['local_size'] = local_size
     et = self.clprg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k] for k in self.vars), wait=wait or DEBUG>=2)
     if do_update_stats: update_stats(self.display_name, self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit,
-                                     lra=lra, device=rawbufs[0].device, first_run=self.first_run)
+                                     lra=lra, device=self.device.dname, first_run=self.first_run)
     self.first_run = False
     return et
 
 class Compiled:
-  def __init__(self, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler, compiler_cachekey, runtime, graph=None):
-    self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph, self.compiler_cachekey = \
-      allocator, linearizer_opts, renderer, compiler, runtime, graph, compiler_cachekey
+  def __init__(self, device:str, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler, compiler_cachekey, runtime, graph=None):
+    self.dname, self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph, self.compiler_cachekey = \
+      device, allocator, linearizer_opts, renderer, compiler, runtime, graph, None if getenv("DISABLE_COMPILER_CACHE") else compiler_cachekey
   def synchronize(self): pass  # override this in your device
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     assert self.compiler is not None, f"compiler is None, can't build {k.ast}"
     k.linearize()
-    src = self.renderer(to_function_name(k.name), k.uops)
-    if getenv("DISABLE_COMPILER_CACHE") or self.compiler_cachekey is None:
-      lib = self.compiler(src)
-    else:
-      lib = diskcache_get(self.compiler_cachekey, src)
-      if lib is None:
-        lib = self.compiler(src)
-        diskcache_put(self.compiler_cachekey, src, lib)
-    return CompiledASTRunner(k.ast, k.name, src, lib, self, k.global_size, k.local_size).build(self.runtime)
+    return CompiledASTRunner(k.ast, k.name, self.renderer(to_function_name(k.name), k.uops), self, k.global_size, k.local_size)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:

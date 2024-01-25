@@ -172,8 +172,8 @@ def train_cifar():
     mask = make_square_mask(X.shape, mask_size)
     order = list(range(0, X.shape[0]))
     random.shuffle(order)
-    X_patch = Tensor(X.numpy()[order,...])
-    Y_patch = Tensor(Y.numpy()[order])
+    X_patch = Tensor(X.numpy()[order], device=X.device)
+    Y_patch = Tensor(Y.numpy()[order], device=Y.device)
     X_cutmix = mask.where(X_patch, X)
     mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
@@ -185,8 +185,6 @@ def train_cifar():
     while True:
       st = time.monotonic()
       X, Y = X_in, Y_in
-      order = list(range(0, X.shape[0]))
-      random.shuffle(order)
       if is_train:
         # TODO: these are not jitted
         if getenv("RANDOM_CROP", 1):
@@ -196,14 +194,18 @@ def train_cifar():
         if getenv("CUTMIX", 1):
           if step >= hyp['net']['cutmix_steps']:
             X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
-      X, Y = X.numpy(), Y.numpy()
+        order = list(range(0, X.shape[0]))
+        random.shuffle(order)
+        X, Y = X.numpy()[order], Y.numpy()[order]
+      else:
+        X, Y = X.numpy(), Y.numpy()
       et = time.monotonic()
       print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
       for i in range(0, X.shape[0], BS):
         # pad the last batch  # TODO: not correct for test
         batch_end = min(i+BS, Y.shape[0])
-        x = Tensor(X[order[batch_end-BS:batch_end],:])
-        y = Tensor(Y[order[batch_end-BS:batch_end]])
+        x = Tensor(X[batch_end-BS:batch_end], device=X_in.device)
+        y = Tensor(Y[batch_end-BS:batch_end], device=Y_in.device)
         step += 1
         yield x, y
       epoch += 1
@@ -324,7 +326,7 @@ def train_cifar():
   with Tensor.train():
     st = time.monotonic()
     while i <= STEPS:
-      if i % getenv("EVAL_STEPS", STEPS) == 0 and i > 1:
+      if i % getenv("EVAL_STEPS", STEPS) == 0 and i > 1 and not getenv("DISABLE_BACKWARD"):
         # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
         corrects = []
         corrects_ema = []
@@ -332,7 +334,8 @@ def train_cifar():
         losses_ema = []
         for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
           if len(GPUS) > 1:
-            Xt, Yt = Xt.shard(GPUS, axis=0), Yt.shard(GPUS, axis=0)
+            Xt.shard_(GPUS, axis=0)
+            Yt.shard_(GPUS, axis=0)
 
           correct, loss = eval_step_jitted(model, Xt, Yt)
           losses.append(loss.numpy().tolist())
@@ -353,11 +356,12 @@ def train_cifar():
 
       if STEPS == 0 or i == STEPS: break
 
+      GlobalCounters.reset()
       X, Y = next(batcher)
       if len(GPUS) > 1:
-        X, Y = X.shard(GPUS, axis=0), Y.shard(GPUS, axis=0)
+        X.shard_(GPUS, axis=0)
+        Y.shard_(GPUS, axis=0)
 
-      GlobalCounters.reset()
       with Context(BEAM=getenv("LATEBEAM", BEAM.value), WINO=getenv("LATEWINO", WINO.value)):
         loss = train_step_jitted(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y)
         et = time.monotonic()

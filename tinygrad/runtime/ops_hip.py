@@ -1,10 +1,10 @@
 from __future__ import annotations
 import ctypes, functools, subprocess, io
-from typing import Tuple, TypeVar, List
+from typing import Tuple, TypeVar, List, Any, cast, Set
 import gpuctypes.hip as hip
 from tinygrad.helpers import DEBUG, getenv, init_c_var, compile_cuda_style, encode_args_cuda_style, time_execution_cuda_style
-from tinygrad.helpers import from_mv, round_up, to_mv
-from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, BufferOptions
+from tinygrad.helpers import from_mv, round_up, to_mv, colored
+from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, BufferOptions, JITRunner, Device, Buffer, update_stats
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 
@@ -45,23 +45,28 @@ CHUNK_SIZE, PAGE_SIZE = 256*1024*1024, 0x1000
 class HIPAllocator(LRUAllocator):
   def __init__(self, device:HIPDevice):
     self.device = device
+    self.track_cross_device: List[HIPDevice] = []
     super().__init__()
   def free_cache(self):
     self.device.synchronize()
+    for x in self.track_cross_device: x.synchronize()
     return super().free_cache()
   def _alloc(self, size:int):
     check(hip.hipSetDevice(self.device.device))
     return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
   def _alloc_with_options(self, size:int, options:BufferOptions):
-    assert options.uncached
     check(hip.hipSetDevice(self.device.device))
-    return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipExtMallocWithFlags(ctypes.byref(x), size, 3)))  # hipDeviceMallocUncached = 3
+    if options.uncached:
+      return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipExtMallocWithFlags(ctypes.byref(x), size, 3)))  # hipDeviceMallocUncached = 3
+    elif options.host:
+      return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 2 if options.signal else 0)))
+    else:
+      raise Exception("no options")
   def _free(self, opaque:T): check(hip.hipFree(opaque))
-  def _hostalloc(self, size:int): return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 0)))
   def copy_from_fd(self, dest, fd, offset, size):
     check(hip.hipSetDevice(self.device.device))
     if not hasattr(self, 'hb'):
-      self.hb = [self._hostalloc(CHUNK_SIZE) for _ in range(2)]
+      self.hb = [self._alloc_with_options(CHUNK_SIZE, BufferOptions(host=True)) for _ in range(2)]
       self.hb_events = [None, None]
       self.hb_polarity = 0
     fo = io.FileIO(fd, "a+b", closefd=False)
@@ -84,7 +89,7 @@ class HIPAllocator(LRUAllocator):
       minor_offset = 0 # only on the first
   def copyin(self, dest:T, src: memoryview):
     check(hip.hipSetDevice(self.device.device))
-    host_mem = self._hostalloc(len(src))
+    host_mem = self._alloc_with_options(len(src), BufferOptions(host=True))
     self.device.pending_copyin.append(host_mem)
     ctypes.memmove(host_mem, from_mv(src), len(src))
     check(hip.hipMemcpyAsync(dest, host_mem, len(src), hip.hipMemcpyHostToDevice, None))
@@ -101,24 +106,39 @@ class HIPDevice(Compiled):
     self.device = int(device.split(":")[1]) if ":" in device else 0
     self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode() if not MOCKHIP else "gfx1100"  # noqa: E501
     self.pending_copyin: List[hip.hipDeviceptr_t] = []
-    self.pending_events: List[hip.hipEvent_t] = []
+    self.track_cross_buffer: List[Any] = []
+    self.peers: Set[int] = set()
 
     from tinygrad.runtime.graph.hip import HIPGraph
-    super().__init__(MallocAllocator if MOCKHIP else HIPAllocator(self), LinearizerOptions("HIP"), HIPRenderer,
+    super().__init__(device, MallocAllocator if MOCKHIP else HIPAllocator(self), LinearizerOptions("HIP"), HIPRenderer,
                      functools.partial(compile_hip,arch=self.arch), f"compile_hip_{self.arch}", functools.partial(HIPProgram, self.device), HIPGraph)
   def synchronize(self):
     check(hip.hipSetDevice(self.device))
     check(hip.hipDeviceSynchronize())
     for opaque in self.pending_copyin: check(hip.hipFree(opaque))
-    for opaque in self.pending_events: check(hip.hipEventDestroy(opaque))
+    self.track_cross_buffer.clear()
     self.pending_copyin.clear()
-    self.pending_events.clear()
-  def event(self):
+  def enable_peer(self, dnum):
+    if self.device == dnum or dnum in self.peers: return
     check(hip.hipSetDevice(self.device))
-    evt = init_c_var(hip.hipEvent_t(), lambda x: check(hip.hipEventCreate(ctypes.byref(x))))
-    self.pending_events.append(evt)
-    check(hip.hipEventRecord(evt, None))
-    return evt
-  def block(self, evt):
-    check(hip.hipSetDevice(self.device))
-    check(hip.hipStreamWaitEvent(None, evt, 0))
+    check(hip.hipDeviceEnablePeerAccess(dnum, 0))
+    self.peers.add(dnum)
+
+class HIPSyncEvent(JITRunner):
+  def __init__(self, lb):
+    self.lb, self.device, self.dname = lb, cast(HIPDevice, Device[lb.device]), lb.device
+    super().__init__()
+  def __call__(self, rawbufs:List[Buffer], var_vals, wait=False, jit=False):
+    to_mv(rawbufs[0]._buf, 4).cast("I")[0] = 0
+    check(hip.hipSetDevice(self.device.device))
+    check(hip.hipStreamWriteValue32(None, rawbufs[0]._buf, 1, 0))
+    update_stats(colored("sync", "red"), 0, 0, {}, None, 1, device=self.dname)
+
+class HIPWaitEvent(JITRunner):
+  def __init__(self, device):
+    self.device, self.dname = cast(HIPDevice, Device[device]), device
+    super().__init__()
+  def __call__(self, rawbufs:List[Buffer], var_vals, wait=False, jit=False):
+    check(hip.hipSetDevice(self.device.device))
+    check(hip.hipStreamWaitValue32(None, rawbufs[0]._buf, 1, 1, 0xFFFFFFFF))
+    update_stats(colored("wait", "RED"), 0, 0, {}, None, 1, device=self.dname)
