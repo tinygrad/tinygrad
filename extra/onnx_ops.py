@@ -86,7 +86,7 @@ def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
 def Not(x:Tensor): return x.logical_not()
 
-def Asin(x): return Atan(x * (1 - x * x).rsqrt())
+def Asin(x): return Atan(x / (1 - x * x).sqrt())
 def Acos(x: Tensor):
   negate = (x < 0)
   x = x.abs()
@@ -407,20 +407,20 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     return ret.cast(dtypes.int32).clip(0, x_len-1)
   def _coordinate_transformation(x_out, y_out, output_shape, scales_, roi=None):
     if coordinate_transformation_mode == "half_pixel":
-      x_out = (x_out + 0.5)/Tensor(scales_[-1]) - 0.5
-      y_out = (y_out + 0.5)/Tensor(scales_[-2]) - 0.5
+      x_out = (x_out + 0.5) / scales_[-1] - 0.5
+      y_out = (y_out + 0.5) / scales_[-2] - 0.5
     elif coordinate_transformation_mode == "align_corners":
       x_out = x_out * (X.shape[-1] - 1) / (output_shape[-1] - 1)
       y_out = y_out * (X.shape[-2] - 1) / (output_shape[-2] - 1)
     elif coordinate_transformation_mode == "asymmetric":
-      x_out = x_out/scales_[-1]
-      y_out = y_out/scales_[-2]
+      x_out = x_out / scales_[-1]
+      y_out = y_out / scales_[-2]
     elif coordinate_transformation_mode == "half_pixel_symmetric":
       x_out = X.shape[-1] / 2 * (1 - int(output_shape[-1]) / output_shape[-1]) + (x_out + 0.5) / scales_[-1] - 0.5
       y_out = X.shape[-2] / 2 * (1 - int(output_shape[-2]) / output_shape[-2]) + (y_out + 0.5) / scales_[-2] - 0.5
     elif coordinate_transformation_mode == "pytorch_half_pixel":
-      x_out = (x_out + 0.5)/scales_[-1] - 0.5 if output_shape[-1] > 1 else Tensor([0])
-      y_out = (y_out + 0.5)/scales_[-2] - 0.5 if output_shape[-2] > 1 else Tensor([0])
+      x_out = (x_out + 0.5) / scales_[-1] - 0.5 if output_shape[-1] > 1 else Tensor([0])
+      y_out = (y_out + 0.5) / scales_[-2] - 0.5 if output_shape[-2] > 1 else Tensor([0])
     elif coordinate_transformation_mode == "tf_crop_and_resize":
       x_out = roi[-1][0] * (X.shape[-1] - 1) + x_out * ((roi[-1][1] - roi[-1][0]) * (X.shape[-1] - 1) / (output_shape[-1] - 1)) if output_shape[-1] > 1 else Tensor([0.5 * (roi[-1][0] + roi[-1][1]) * (X.shape[-1] - 1)])
       y_out = roi[-2][0] * (X.shape[-2] - 1) + y_out * ((roi[-2][1] - roi[-2][0]) * (X.shape[-2] - 1) / (output_shape[-2] - 1)) if output_shape[-2] > 1 else Tensor([0.5 * (roi[-2][0] + roi[-2][1]) * (X.shape[-2] - 1)])
