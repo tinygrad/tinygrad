@@ -26,7 +26,10 @@ class LLVMProgram:
 
 class LLVMDevice(Compiled):
   def __init__(self, device:str):
-    llvm.initialize(); llvm.initialize_native_target(); llvm.initialize_native_asmprinter(); llvm.initialize_native_asmparser()  # noqa: E702
+    llvm.initialize()
+    llvm.initialize_native_target()
+    llvm.initialize_native_asmprinter()
+    llvm.initialize_native_asmparser()
     self.optimizer: llvm.passmanagers.ModulePassManager = llvm.create_module_pass_manager()
     # this opt actually can change things. ex: opt=3 means no FMA, opt=2 means FMA
     self.target_machine: llvm.targets.TargetMachine = llvm.Target.from_triple(llvm.get_process_triple()).create_target_machine(opt=2)
