@@ -742,7 +742,8 @@ class Tensor:
   def trunc(self: Tensor) -> Tensor: return self.cast(dtypes.int32).cast(self.dtype)
   def ceil(self: Tensor) -> Tensor: return (self > (b := self.trunc())).where(b+1, b)
   def floor(self: Tensor) -> Tensor: return (self < (b := self.trunc())).where(b-1, b)
-  def round(self: Tensor) -> Tensor: return (self + 0.5).floor()
+  def round(self: Tensor) -> Tensor:
+    return ((self > 0) == ((b := self.cast(dtypes.int32) / 2.0).cast(dtypes.int32) == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
 
   def square(self): return self*self
   def clip(self, min_, max_): return self.maximum(min_).minimum(max_)
@@ -836,11 +837,13 @@ class Tensor:
     return ar.mul(sign * base_sign + (1 - base_sign)).mul(inject_nan)
   def xor(self, x:Tensor, reverse=False) -> Tensor: return mlops.Xor.apply(*self._broadcasted(x, reverse))
 
-  # TODO: this implicitly changes dtype with /2
-  def maximum(self, x:Union[Tensor, Scalar]) -> Tensor: return (self<x).detach().where(x, (self>x).detach().where(self, (self+x)/2))
+  def maximum(self, x:Union[Tensor, Scalar]) -> Tensor:
+    return (self<x).detach().where(x, (self==x).detach().where(((self * 0.5 + x * 0.5).cast(self.dtype)), self))
   def minimum(self, x:Union[Tensor, Scalar]) -> Tensor: return -((-self).maximum(-x))
 
   def where(self:Tensor, input_:Union[Tensor, Scalar], other:Union[Tensor, Scalar]):
+    if isinstance(input_, Tensor): input_, other = input_._broadcasted(other)
+    elif isinstance(other, Tensor): other, input_ = other._broadcasted(input_)
     x_,y = self._broadcasted(input_, match_dtype=False)
     x,z = x_._broadcasted(other, match_dtype=False)
     return mlops.Where.apply(x.cast(dtypes.bool), *y._broadcasted(z))
