@@ -1,13 +1,17 @@
-#!/bin/bash
+#!/bin/bash -e
 
 # setup instructions for clang2py
-
-#sudo apt-get install -y --no-install-recommends clang
-#pip install clang==14.0.6
-#git clone https://github.com/geohot/ctypeslib.git
-#cd ctypeslib
-#pip install .
-#clang2py -V
+if [[ ! $(clang2py -V) ]]; then
+  pushd .
+  cd /tmp
+  sudo apt-get install -y --no-install-recommends clang
+  pip install clang==14.0.6
+  git clone https://github.com/geohot/ctypeslib.git
+  cd ctypeslib
+  pip install --user .
+  clang2py -V
+  popd
+fi
 
 generate_opencl() {
   clang2py /usr/include/CL/cl.h -o autogen/opencl.py -l /usr/lib/x86_64-linux-gnu/libOpenCL.so.1 -k cdefstum
