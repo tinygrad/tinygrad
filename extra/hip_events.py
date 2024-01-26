@@ -1,5 +1,5 @@
 import ctypes
-import tinygrad.autogen.hip as hip
+import tinygrad.runtime.autogen.hip as hip
 from tinygrad.runtime.ops_hip import check
 from tinygrad.helpers import init_c_var
 

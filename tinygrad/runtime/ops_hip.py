@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, functools, subprocess, io
 from typing import Tuple, TypeVar, List, Any, cast, Set
-import tinygrad.autogen.hip as hip
+import tinygrad.runtime.autogen.hip as hip
 from tinygrad.helpers import DEBUG, getenv, init_c_var
 from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t, to_char_p_p, get_bytes
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, BufferOptions, JITRunner, Device, Buffer, update_stats

@@ -330,11 +330,11 @@ jobs:
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Verify HIP autogen
       run: |
-        cp tinygrad/autogen/hip.py /tmp/hip.py.bak
-        cp tinygrad/autogen/comgr.py /tmp/comgr.py.bak
+        cp tinygrad/runtime/autogen/hip.py /tmp/hip.py.bak
+        cp tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
         ./autogen_stubs.sh hip
-        diff /tmp/hip.py.bak tinygrad/autogen/hip.py
-        diff /tmp/comgr.py.bak tinygrad/autogen/comgr.py
+        diff /tmp/hip.py.bak tinygrad/runtime/autogen/hip.py
+        diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
     - name: Test HIP compilation on RDNA3 [gfx1100]
       # test/test_symbolic_ops.py can't run here, it was comparing empty memory
       run: |
@@ -453,15 +453,15 @@ jobs:
       - name: Verify OpenCL autogen
         if: matrix.backend == 'gpu'
         run: |
-          cp tinygrad/autogen/opencl.py /tmp/opencl.py.bak
+          cp tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
           ./autogen_stubs.sh opencl
-          diff /tmp/opencl.py.bak tinygrad/autogen/opencl.py
+          diff /tmp/opencl.py.bak tinygrad/runtime/autogen/opencl.py
       - name: Verify CUDA autogen
         if: matrix.backend == 'cuda'
         run: |
-          cp tinygrad/autogen/cuda.py /tmp/cuda.py.bak
+          cp tinygrad/runtime/autogen/cuda.py /tmp/cuda.py.bak
           ./autogen_stubs.sh cuda
-          diff /tmp/cuda.py.bak tinygrad/autogen/cuda.py
+          diff /tmp/cuda.py.bak tinygrad/runtime/autogen/cuda.py
       - name: Run pytest (not cuda)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
         run: python -m pytest -n=auto test/ --durations=20
