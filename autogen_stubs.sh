@@ -13,47 +13,49 @@ if [[ ! $(clang2py -V) ]]; then
   popd
 fi
 
+BASE=tinygrad/runtime/autogen/
+
 generate_opencl() {
-  clang2py /usr/include/CL/cl.h -o autogen/opencl.py -l /usr/lib/x86_64-linux-gnu/libOpenCL.so.1 -k cdefstum
-  sed -i '1s/^/# mypy: ignore-errors\n/' autogen/opencl.py
-  grep FIXME_STUB autogen/opencl.py || true
+  clang2py /usr/include/CL/cl.h -o $BASE/opencl.py -l /usr/lib/x86_64-linux-gnu/libOpenCL.so.1 -k cdefstum
+  sed -i '1s/^/# mypy: ignore-errors\n/' $BASE/opencl.py
+  grep FIXME_STUB $BASE/opencl.py || true
   # hot patches
-  sed -i "s\import ctypes\import ctypes, ctypes.util\g" autogen/opencl.py
-  sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libOpenCL.so.1')\ctypes.CDLL(ctypes.util.find_library('OpenCL'))\g" autogen/opencl.py
-  python3 -c "import autogen.opencl"
+  sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/opencl.py
+  sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libOpenCL.so.1')\ctypes.CDLL(ctypes.util.find_library('OpenCL'))\g" $BASE/opencl.py
+  python3 -c "import tinygrad.runtime.autogen.opencl"
 }
 
 generate_hip() {
   clang2py /opt/rocm/include/hip/hip_ext.h /opt/rocm/include/hip/hiprtc.h \
   /opt/rocm/include/hip/hip_runtime_api.h /opt/rocm/include/hip/driver_types.h \
-  --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o autogen/hip.py -l /opt/rocm/lib/libamdhip64.so
-  echo "hipDeviceProp_t = hipDeviceProp_tR0600" >> autogen/hip.py
-  echo "hipGetDeviceProperties = hipGetDevicePropertiesR0600" >> autogen/hip.py
-  sed -i '1s/^/# mypy: ignore-errors\n/' autogen/hip.py
-  grep FIXME_STUB autogen/hip.py || true
+  --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/hip.py -l /opt/rocm/lib/libamdhip64.so
+  echo "hipDeviceProp_t = hipDeviceProp_tR0600" >> $BASE/hip.py
+  echo "hipGetDeviceProperties = hipGetDevicePropertiesR0600" >> $BASE/hip.py
+  sed -i '1s/^/# mypy: ignore-errors\n/' $BASE/hip.py
+  grep FIXME_STUB $BASE/hip.py || true
   # we can trust HIP is always at /opt/rocm/lib
-  #sed -i "s\import ctypes\import ctypes, ctypes.util\g" autogen/hip.py
-  #sed -i "s\ctypes.CDLL('/opt/rocm/lib/libhiprtc.so')\ctypes.CDLL(ctypes.util.find_library('hiprtc'))\g" autogen/hip.py
-  #sed -i "s\ctypes.CDLL('/opt/rocm/lib/libamdhip64.so')\ctypes.CDLL(ctypes.util.find_library('amdhip64'))\g" autogen/hip.py
-  python3 -c "import autogen.hip"
+  #sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/hip.py
+  #sed -i "s\ctypes.CDLL('/opt/rocm/lib/libhiprtc.so')\ctypes.CDLL(ctypes.util.find_library('hiprtc'))\g" $BASE/hip.py
+  #sed -i "s\ctypes.CDLL('/opt/rocm/lib/libamdhip64.so')\ctypes.CDLL(ctypes.util.find_library('amdhip64'))\g" $BASE/hip.py
+  python3 -c "import tinygrad.runtime.autogen.hip"
 
   clang2py /opt/rocm/include/amd_comgr/amd_comgr.h \
-  --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o autogen/comgr.py -l /opt/rocm/lib/libamd_comgr.so
-  sed -i '1s/^/# mypy: ignore-errors\n/' autogen/comgr.py
-  grep FIXME_STUB autogen/comgr.py || true
-  python3 -c "import autogen.comgr"
+  --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/comgr.py -l /opt/rocm/lib/libamd_comgr.so
+  sed -i '1s/^/# mypy: ignore-errors\n/' $BASE/comgr.py
+  grep FIXME_STUB $BASE/comgr.py || true
+  python3 -c "import tinygrad.runtime.autogen.comgr"
 }
 
 generate_cuda() {
-  clang2py /usr/include/cuda.h /usr/include/nvrtc.h -o autogen/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so -l /usr/lib/x86_64-linux-gnu/libnvrtc.so
-  sed -i "s\import ctypes\import ctypes, ctypes.util\g" autogen/cuda.py
-  sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libcuda.so')\ctypes.CDLL(ctypes.util.find_library('cuda'))\g" autogen/cuda.py
-  sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libnvrtc.so')\ctypes.CDLL(ctypes.util.find_library('nvrtc'))\g" autogen/cuda.py
-  sed -i '1s/^/# mypy: ignore-errors\n/' autogen/cuda.py
-  grep FIXME_STUB autogen/cuda.py || true
+  clang2py /usr/include/cuda.h /usr/include/nvrtc.h -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so -l /usr/lib/x86_64-linux-gnu/libnvrtc.so
+  sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/cuda.py
+  sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libcuda.so')\ctypes.CDLL(ctypes.util.find_library('cuda'))\g" $BASE/cuda.py
+  sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libnvrtc.so')\ctypes.CDLL(ctypes.util.find_library('nvrtc'))\g" $BASE/cuda.py
+  sed -i '1s/^/# mypy: ignore-errors\n/' $BASE/cuda.py
+  grep FIXME_STUB $BASE/cuda.py || true
+  python3 -c "import tinygrad.runtime.autogen.cuda"
 }
 
-cd tinygrad
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "cuda" ]; then generate_cuda
