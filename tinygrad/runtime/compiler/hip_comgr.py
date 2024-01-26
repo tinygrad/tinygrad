@@ -1,5 +1,5 @@
 import ctypes
-import gpuctypes.comgr as comgr
+import tinygrad.runtime.autogen.comgr as comgr
 
 def check(status):
   if status != 0:
