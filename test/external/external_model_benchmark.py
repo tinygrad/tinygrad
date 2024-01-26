@@ -103,7 +103,9 @@ def benchmark_model(m, devices, validate_outs=False):
     tinygrad_model = get_run_onnx(onnx_model)
     tinygrad_out = tinygrad_model(inputs)
 
-    ort_sess = ort.InferenceSession(str(fn), ort_options, ["CPUExecutionProvider"])
+    # https://github.com/microsoft/onnxruntime/issues/15977
+    provider = ("CUDA" if not OSX else "CoreML") + "ExecutionProvider"
+    ort_sess = ort.InferenceSession(str(fn), ort_options, [provider])
     onnx_out = ort_sess.run(output_names, np_inputs)
     onnx_out = dict([*[(name,x) for name, x in zip(output_names, onnx_out)]])
 

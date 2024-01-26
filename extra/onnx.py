@@ -131,6 +131,7 @@ def get_run_onnx(onnx_model: ModelProto):
       if x != "": return input_tensors[x]
       return None
 
+    if debug >= 1: ops = set()
     for num,n in enumerate(onnx_model.graph.node):
       inp: List[Tensor] = []
       if debug >= 3: print("inputs:")
@@ -139,7 +140,9 @@ def get_run_onnx(onnx_model: ModelProto):
         if debug >= 3: print(f"\t{x} - {t}")
         inp.append(t)
       opt: Dict = attribute_dict[num]
-      if debug >= 1: print(f"{num}: op {n.op_type} shape {[x.shape if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
+      if debug >= 1:
+        print(f"{num}: op {n.op_type} tensor {[(x.shape, x.dtype) if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
+        ops.add(n.op_type)
 
       # NOTE some ops live here because they require access to some local variables
       # have to use n.output for cases when num_outputs is absent
@@ -213,5 +216,6 @@ def get_run_onnx(onnx_model: ModelProto):
         output_tensor_names = n.output
         break
 
+    if debug >= 1: print(ops)
     return {outp:intermediate_tensors[outp] for outp in output_tensor_names}
   return run_onnx
