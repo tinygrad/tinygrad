@@ -456,7 +456,7 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     assert isinstance(b, NumNode)
 
   def test_substitute(self):
-    a = Variable(None, 1, 3)
+    a = Variable("idx0", 1, 3)
     b = a + 1
     c = b.substitute({a: NumNode(1)})
     assert c == NumNode(2)

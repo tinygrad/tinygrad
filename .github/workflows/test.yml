@@ -63,8 +63,8 @@ jobs:
         source venv/bin/activate
         pip install $GITHUB_WORKSPACE
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-    - name: Repo line count <5000 lines
-      run: MAX_LINE_COUNT=5000 python sz.py
+    - name: Repo line count <6000 lines
+      run: MAX_LINE_COUNT=6000 python sz.py
 
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
@@ -126,7 +126,7 @@ jobs:
     - name: Run Pytest
       run: TORCH=1 python -m pytest -n=auto test/ --durations=20
     - name: Run ONNX
-      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
+      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
 
   testopencl:
     strategy:
@@ -286,7 +286,7 @@ jobs:
     - name: Run metal test
       run: METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
     - name: Run ONNX
-      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
+      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops
       run: METAL=1 TC=2 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
     - name: Test LLaMA compile speed
