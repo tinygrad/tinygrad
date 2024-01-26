@@ -350,10 +350,10 @@ class MambaBlock:
         # - B is discretized using a simplified Euler discretization instead of ZOH. From a discussion with authors:
         #   "A is the more important term and the performance doesn't change much with the simplification on B"
         
-        # deltaA = Tensor.einsum('b l d_in, d_in n -> b l d_in n', delta, A).exp()
-        deltaA = Tensor.exp(einsum(delta, A, 'b l d_in, d_in n -> b l d_in n'))
-        # deltaB_u = Tensor.einsum( 'b l d_in, b l n, b l d_in -> b l d_in n', delta, B, u)
-        deltaB_u = einsum(delta, B, u, 'b l d_in, b l n, b l d_in -> b l d_in n')
+        deltaA = Tensor.einsum('bld,dn->bldn', delta, A).exp()
+        # deltaA = Tensor.exp(einsum(delta, A, 'b l d_in, d_in n -> b l d_in n'))
+        deltaB_u = Tensor.einsum( 'bld,bln,bld->bldn', delta, B, u)
+        # deltaB_u = einsum(delta, B, u, 'b l d_in, b l n, b l d_in -> b l d_in n')
         
         # Perform selective scan (see scan_SSM() in The Annotated S4 [2])
         # Note that the below is sequential, while the official implementation does a much faster parallel scan that
@@ -362,8 +362,8 @@ class MambaBlock:
         ys = []    
         for i in range(l):
             x = deltaA[:, i] * x + deltaB_u[:, i]
-            # y = Tensor.einsum('b d_in n, b n -> b d_in', x, C[:, i, :])
-            y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
+            y = Tensor.einsum('bdn,bn->bd', x, C[:, i, :])
+            # y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
             ys.append(y)
         y = Tensor.stack(ys, dim=1)  # shape (b, l, d_in)
         y = y + u * D
@@ -420,7 +420,7 @@ def generate(model,
     return output_completions
         
 if __name__ == '__main__':
-    model = Mamba.from_pretrained('130m')
+    model = Mamba.from_pretrained('370m')
     tokenizer = AutoTokenizer.from_pretrained('EleutherAI/gpt-neox-20b')
     prompt = 'The sky is blue '
     s = time.time()

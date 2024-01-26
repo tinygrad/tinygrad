@@ -444,7 +444,7 @@ if __name__ == "__main__":
   parser.add_argument(
     "--size",
     type=str,
-    default="130m",
+    default="370m",
     help=f"Size of model to use [{', '.join([k for k in MODELS.keys()])}]",
   )
   args = parser.parse_args()
@@ -462,14 +462,15 @@ if __name__ == "__main__":
 #   prompt = 'John: Hi!\nSally:'
   prompt = 'The sky is blue '
 
-  tks = tokenizer(prompt)["input_ids"]
-  print('Generating')
+  
+  # print('Generating')
   
   # s = time.time()
   # print(generate(model, tokenizer, prompt))
   # print('TIME: ', time.time() - s)
   
   s = time.time()
+  tks = tokenizer(prompt)["input_ids"]
 #   print(tks)
   print('\n' + prompt, end='', flush=True)
 

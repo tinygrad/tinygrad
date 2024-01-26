@@ -375,7 +375,7 @@ def generate(model,
     return output_completions
         
 if __name__ == '__main__':
-    model = Mamba.from_pretrained('state-spaces/mamba-130m').to('cuda:0')
+    model = Mamba.from_pretrained('state-spaces/mamba-370m').to('cuda:0')
     tokenizer = AutoTokenizer.from_pretrained('EleutherAI/gpt-neox-20b')
     prompt = 'The sky is blue '
     s = time.time()
