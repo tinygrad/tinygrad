@@ -5,7 +5,7 @@
 # https://siboehm.com/articles/22/CUDA-MMM
 import random, time
 import numpy as np
-from typing import Optional
+from typing import Optional, List
 from extra.datasets import fetch_cifar, cifar_mean, cifar_std
 from extra.lr_scheduler import OneCycleLR
 from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
@@ -27,11 +27,26 @@ else:
   dtypes.default_float = dtypes.float32
   np_dtype = np.float32
 
-class BatchNorm(nn.BatchNorm2d):
+class BatchNorm:
   def __init__(self, num_features):
-    super().__init__(num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
-    self.weight.requires_grad = False
-    self.bias.requires_grad = True
+    self.bns:List[nn.BatchNorm2d] = []
+    for _ in GPUS:
+      bn = nn.BatchNorm2d(num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
+      bn.weight.requires_grad = False
+      bn.bias.requires_grad = True
+      self.bns.append(bn)
+
+  def __call__(self, x:Tensor):
+    if len(self.bns) == 1: return self.bns[0](x)
+
+    bn_ts = []
+    for bound, bn in zip(x.lazydata.bounds, self.bns):
+      # TODO: having issue with getitem?
+      xi = x.shrink((bound, None, None, None))
+      bni = bn(xi)
+      bn_ts.append(bni)
+
+    return bn_ts[0].cat(*bn_ts[1:])
 
 class ConvGroup:
   def __init__(self, channels_in, channels_out):
@@ -262,7 +277,7 @@ def train_cifar():
 
   if len(GPUS) > 1:
     for x in get_parameters(model):
-      x.to_(GPUS)
+      x.shard_(GPUS)
 
   # parse the training params into bias and non-bias
   params_dict = get_state_dict(model)
