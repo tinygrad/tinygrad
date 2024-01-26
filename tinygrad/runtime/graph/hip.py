@@ -1,6 +1,6 @@
 import ctypes
 from typing import Tuple
-import gpuctypes.hip as hip
+import tinygrad.runtime.autogen.hip as hip
 from tinygrad.helpers import init_c_var, time_execution_cuda_style
 from tinygrad.runtime.ops_hip import check
 from tinygrad.runtime.graph.cuda import CUDAGraph
