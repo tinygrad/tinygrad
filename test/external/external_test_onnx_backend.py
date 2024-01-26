@@ -64,6 +64,7 @@ if Device.DEFAULT in ["METAL"] or (OSX and Device.DEFAULT == "GPU"):
 # no float16 in CI, LLVM segfaults, GPU requires cl_khr_fp16
 if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
   backend_test.exclude('float16')
+  backend_test.exclude('FLOAT16')
 
 backend_test.exclude('string')
 

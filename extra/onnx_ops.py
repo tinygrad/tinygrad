@@ -243,7 +243,7 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
         x = xL.cat(x, xR, dim=i)
     return x
   if mode == "edge":
-    for i,s in enumerate(x.shape):      
+    for i,s in enumerate(x.shape):
       if pads[i] != (0,0):
         xL = x.shrink(tuple((0,1) if i_ == i else None for i_ in range(x.ndim))).expand([pads[i][0] if i_ == i else None for i_ in range(x.ndim)])
         xR = x.shrink(tuple((s_-1, s_) if i_ == i else None for i_,s_ in enumerate(x.shape))).expand([pads[i][1] if i_ == i else None for i_ in range(x.ndim)])
