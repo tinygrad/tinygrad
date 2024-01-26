@@ -253,7 +253,7 @@ class HIPLanguage(CUDALanguage):
   extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_size(unsigned int);
 
   typedef signed int int2 __attribute__((ext_vector_type(2)));
-  static inline __attribute__((device)) int2 make_int2(signed int x, signed int y) { int2 r{x, y}; return r; };
+  static inline __attribute__((device)) int2 make_int2(signed int x, signed int y) { return {x, y}; };
 
   typedef float float2 __attribute__((ext_vector_type(2)));
   static inline __attribute__((device)) float2 make_float2(float x, float y) { return {x, y}; };
@@ -301,6 +301,9 @@ class HIPLanguage(CUDALanguage):
   __attribute__((device)) _Float16 __ocml_sin_f16(_Float16);
   __attribute__((device)) __attribute__((const)) _Float16 __ocml_sqrt_f16(_Float16);
   }
+  struct hip_bfloat16 {
+    unsigned short data;
+  };
   """
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
