@@ -60,13 +60,13 @@ if Device.DEFAULT in ["METAL"] or (OSX and Device.DEFAULT == "GPU"):
   backend_test.exclude('test_eyelike_with_dtype_cpu')
   backend_test.exclude('test_reduce_log_sum_exp*')
   backend_test.exclude('test_operator_add*')
+  backend_test.exclude('test_einsum_*')
+  backend_test.exclude('test_cumsum_*')
 
 # no float16 in CI, LLVM segfaults, GPU requires cl_khr_fp16
 if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
   backend_test.exclude('float16')
   backend_test.exclude('FLOAT16')
-
-backend_test.exclude('string')
 
 # dtype cast
 backend_test.exclude('STRING')
@@ -90,6 +90,11 @@ backend_test.exclude('test_mod_*')
 
 # no boolean ops (2d, 3d, 4d)
 backend_test.exclude('test_bitshift_*')
+
+# no string ops
+backend_test.exclude('string')
+backend_test.exclude('test_strnorm_*')
+backend_test.exclude('test_regex_*')
 
 # no scatternd gathernd
 backend_test.exclude('test_gathernd_*')
@@ -122,7 +127,6 @@ backend_test.exclude('test_range_int32_type_negative_delta_expanded_cpu')
 backend_test.exclude('test_bitwise_*')
 backend_test.exclude('test_blackmanwindow_*')
 backend_test.exclude('test_bernoulli_*')
-backend_test.exclude('test_cumsum_*')
 backend_test.exclude('test_det_*')
 
 backend_test.exclude('test_tril_zero_cpu') # TODO: zero array tril support
@@ -134,8 +138,8 @@ backend_test.exclude('test_hannwindow_*')
 backend_test.exclude('test_hardmax_*')
 backend_test.exclude('test_gridsample_*')
 backend_test.exclude('test_dft_*')
-backend_test.exclude('test_einsum_*')
-backend_test.exclude('test_strnorm_*')
+backend_test.exclude('test_einsum_batch_diagonal_cpu*') # TODO: equation = '...ii ->...i'
+backend_test.exclude('test_einsum_inner_prod_cpu*') # TODO: equation = 'i,i'
 backend_test.exclude('test_unique_*')
 backend_test.exclude('test_sequence_*')
 backend_test.exclude('test_nonmaxsuppression_*')
@@ -150,8 +154,6 @@ backend_test.exclude('test_melweightmatrix_*')
 backend_test.exclude('test_basic_deform_conv_*')
 backend_test.exclude('test_deform_conv_*')
 backend_test.exclude('test_lppool_*')
-backend_test.exclude('test_depthtospace_*')
-backend_test.exclude('test_spacetodepth_*')
 backend_test.exclude('test_scan*')
 backend_test.exclude('test_split_to_sequence_*')
 backend_test.exclude('test_resize_downsample_scales_cubic_*') # unsure how to implement cubic
@@ -160,7 +162,6 @@ backend_test.exclude('test_resize_upsample_scales_cubic_*') # unsure how to impl
 backend_test.exclude('test_resize_upsample_sizes_cubic_*') # unsure how to implement cubic
 
 # rest of the failing tests
-backend_test.exclude('test_regex_*') # does not support string Tensors
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip

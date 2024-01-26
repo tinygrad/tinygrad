@@ -126,7 +126,7 @@ jobs:
     - name: Run Pytest
       run: TORCH=1 python -m pytest -n=auto test/ --durations=20
     - name: Run ONNX
-      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
+      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
 
   testopencl:
     strategy:
@@ -286,7 +286,7 @@ jobs:
     - name: Run metal test
       run: METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
     - name: Run ONNX
-      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
+      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops
       run: METAL=1 TC=2 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
     - name: Test LLaMA compile speed
