@@ -34,9 +34,7 @@ jobs:
     - name: Lint with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' **/*.py
     - name: Lint with ruff
-      run: |
-        pip3 install --upgrade --force-reinstall ruff
-        python3 -m ruff . --preview
+      run: python3 -m ruff . --preview
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
