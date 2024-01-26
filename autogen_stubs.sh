@@ -49,6 +49,7 @@ generate_cuda() {
   grep FIXME_STUB autogen/cuda.py || true
 }
 
+cd tinygrad
 if [ "$1" == "opencl" ]; then generate_opencl
 elif [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "cuda" ]; then generate_cuda

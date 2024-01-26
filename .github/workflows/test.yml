@@ -326,6 +326,11 @@ jobs:
         sudo apt install --no-install-recommends --allow-unauthenticated -y rocm-hip-libraries hip-dev
     - name: Install Python Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Verify HIP autogen
+      run: |
+        cp tinygrad/autogen/hip.py /tmp/hip.py.bak
+        ./autogen_stubs.sh hip
+        diff /tmp/hip.py.bak tinygrad/autogen/hip.py
     - name: Test HIP compilation on RDNA3 [gfx1100]
       # test/test_symbolic_ops.py can't run here, it was comparing empty memory
       run: |
