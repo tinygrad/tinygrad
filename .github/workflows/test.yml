@@ -328,6 +328,13 @@ jobs:
         sudo apt install --no-install-recommends --allow-unauthenticated -y rocm-hip-libraries hip-dev
     - name: Install Python Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Verify HIP autogen
+      run: |
+        cp tinygrad/autogen/hip.py /tmp/hip.py.bak
+        cp tinygrad/autogen/comgr.py /tmp/comgr.py.bak
+        ./autogen_stubs.sh hip
+        diff /tmp/hip.py.bak tinygrad/autogen/hip.py
+        diff /tmp/comgr.py.bak tinygrad/autogen/comgr.py
     - name: Test HIP compilation on RDNA3 [gfx1100]
       # test/test_symbolic_ops.py can't run here, it was comparing empty memory
       run: |
@@ -374,7 +381,7 @@ jobs:
         backend: [llvm, clang, gpu, cuda] #, triton] #, ptx]
 
     name: Tests on (${{ matrix.backend }})
-    runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
@@ -402,7 +409,7 @@ jobs:
           echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
           sudo apt update
-          sudo apt install --allow-unauthenticated -y --no-install-recommends \
+          sudo apt install --allow-unauthenticated -y --no-install-recommends opencl-headers \
             intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
             intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
             intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
@@ -443,6 +450,18 @@ jobs:
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: Verify OpenCL autogen
+        if: matrix.backend == 'gpu'
+        run: |
+          cp tinygrad/autogen/opencl.py /tmp/opencl.py.bak
+          ./autogen_stubs.sh opencl
+          diff /tmp/opencl.py.bak tinygrad/autogen/opencl.py
+      - name: Verify CUDA autogen
+        if: matrix.backend == 'cuda'
+        run: |
+          cp tinygrad/autogen/cuda.py /tmp/cuda.py.bak
+          ./autogen_stubs.sh cuda
+          diff /tmp/cuda.py.bak tinygrad/autogen/cuda.py
       - name: Run pytest (not cuda)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
         run: python -m pytest -n=auto test/ --durations=20
