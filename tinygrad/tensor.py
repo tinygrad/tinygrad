@@ -99,7 +99,8 @@ class Tensor:
   # Python has a non moving GC, so this should be okay
   def __hash__(self): return id(self)
 
-  def __reduce__(self) -> Tuple[Type, Tuple[List, Optional[Union[str, tuple, list]], Optional[DType], Optional[bool]]]: return self.__class__, (self.data().tolist(), self.device, self.dtype, self.requires_grad)
+  def __reduce__(self) -> Tuple[Type, Tuple[List, Optional[Union[str, tuple, list]], Optional[DType], Optional[bool]]]:
+    return self.__class__, (self.data().tolist(), self.device, self.dtype, self.requires_grad)
 
   @property
   def device(self) -> Union[str, Tuple[str, ...]]: return self.lazydata.device
