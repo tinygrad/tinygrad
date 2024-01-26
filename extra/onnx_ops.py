@@ -4,8 +4,6 @@ from tinygrad import Tensor, dtypes
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import prod, flatten
 from extra.onnx import safe_numpy, DTYPE_MAP
-from onnx.helper import tensor_dtype_to_np_dtype
-from onnx import TensorProto
 import numpy as np
 
 tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
@@ -25,8 +23,8 @@ def GreaterOrEqual(x:Tensor,y:Tensor): return x >= y
 def Equal(x:Tensor,y:Tensor): return x == y
 def Max(*data_0): return functools.reduce(Tensor.maximum, data_0)
 def Min(*data_0): return functools.reduce(Tensor.minimum, data_0)
-def Sum(*data_0): return functools.reduce(Tensor.__add__, data_0)
-def Mean(*data_0): return functools.reduce(Tensor.__add__, data_0) / len(data_0)
+def Sum(*data_0): return functools.reduce(Tensor.add, data_0)
+def Mean(*data_0): return functools.reduce(Tensor.add, data_0) / len(data_0)
 # NOTE: does not support saturate
 def Cast(x: Tensor, to: int, saturate=1): return x.cast(DTYPE_MAP[to])
 def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
@@ -53,7 +51,7 @@ def Softmax_1(x: Tensor, axis=1): return x.softmax(axis)
 def Softmax_13(x: Tensor, axis=-1): return x.softmax(axis)
 Softmax = {1: Softmax_1, 13: Softmax_13}   # Softmax default axis changed
 def LogSoftmax(x: Tensor, axis=-1): return x.log_softmax(axis)
-def Clip(x: Tensor, min=None, max=None): return x.clip(float('-inf') if min is None else min, float('inf') if max is None else max)
+def Clip(x: Tensor, min=None, max=None): return x.clip(float('-inf') if min is None else min, float('inf') if max is None else max).cast(x.dtype)
 
 # NOTE ReduceProd would require a new llop
 def _axes(axes, noop_with_empty_axes):
@@ -63,11 +61,11 @@ def ReduceMax(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): retu
 def ReduceMin(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.min(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 def ReduceSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
 def ReduceMean(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.mean(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
-def ReduceSumSquare(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
-def ReduceL1(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.abs().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims)
-def ReduceL2(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.square().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).sqrt()
-def ReduceLogSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
-def ReduceLogSumExp(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return data.exp().sum(_axes(axes, noop_with_empty_axes), keepdim=keepdims).log()
+def ReduceSumSquare(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return ReduceSum(data.square(), axes, keepdims, noop_with_empty_axes)
+def ReduceL1(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return ReduceSum(data.abs(), axes, keepdims, noop_with_empty_axes)
+def ReduceL2(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return ReduceSumSquare(data, axes, keepdims, noop_with_empty_axes).sqrt()
+def ReduceLogSum(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return ReduceSum(data, axes, keepdims, noop_with_empty_axes).log()
+def ReduceLogSumExp(data: Tensor, axes=None, keepdims=1, noop_with_empty_axes=0): return ReduceSum(data.exp(), axes, keepdims, noop_with_empty_axes).log()
 
 def GlobalAveragePool(X: Tensor): return X.mean(axis=tuple(range(2, len(X.shape))), keepdim=True)
 def GlobalMaxPool(X: Tensor): return X.max(axis=tuple(range(2, len(X.shape))), keepdim=True)
@@ -78,7 +76,7 @@ def Tile(x: Tensor, repeats): return x.repeat([int(x) for x in safe_numpy(repeat
 def Range(start: Tensor, limit, delta): return Tensor.arange(start=safe_numpy(start).item(), stop=safe_numpy(limit).item(), step=safe_numpy(delta).item())
 def Shape(data: Tensor, end=None, start=0): return Tensor(list(data.shape)[start:end], dtype=dtypes.int64)
 def Size(data: Tensor): return prod(data if isinstance(data, list) else data.shape)
-def Flatten(x: Tensor, axis=1): return x.reshape(prod((1,) + x.shape[0:axis]), -1)
+def Flatten(x: Tensor, axis=1): return x.reshape(prod(x.shape[0:axis]), -1)
 def Reshape(data: Tensor, shape: Tensor, allowzero=0):
   return data.reshape([int(x) if x != 0 else (0 if allowzero else data.shape[i]) for i,x in enumerate(safe_numpy(shape))])
 def Shrink(x: Tensor, bias=0.0, lambd=0.5): return (x < -lambd)*(x+bias) + (x > lambd)*(x-bias)
@@ -86,24 +84,20 @@ def And(x:Tensor, y:Tensor): return (x==y).where(x, False)
 def Or(x:Tensor, y:Tensor): return (x==y).where(x, True)
 def Not(x:Tensor): return x.logical_not()
 
-def Asin(x): return Atan(x / Tensor.sqrt(1 - x * x))
+def Asin(x): return Atan(x / (1 - x * x).sqrt())
 def Acos(x: Tensor):
   negate = (x < 0)
   x = x.abs()
-  ret = ((((-0.0187293 * x) + 0.0742610)*x - 0.2121144) * x + 1.5707288) * Tensor.sqrt(1.0 - x)
+  ret = ((((-0.0187293 * x) + 0.0742610)*x - 0.2121144) * x + 1.5707288) * (1.0 - x).sqrt()
   ret = ret - 2 * negate * ret
-  return negate * 3.14159265358979 + ret
+  return negate * math.pi + ret
 def Atan(y: Tensor):
-  x = Tensor.ones(y.shape)
-  t3 = x
   t1 = y.abs()
-  t0 = (t3 > t1).where(t3, t1)
-  t1 = (t3 < t1).where(t3, t1)
-  t3 = t1 / t0
+  t3 = (1 > t1).where(t1, t1.reciprocal())
   t4 = t3 * t3
   t0 = ((((-0.013480470 * t4 + 0.057477314) * t4 - 0.121239071) * t4 + 0.195635925) * t4 - 0.332994597) * t4 + 0.999995630
   t3 = t0 * t3
-  t3 = (y.abs() > x.abs()).where(1.570796327 - t3, t3)
+  t3 = (y.abs() > 1).where(1.570796327 - t3, t3)
   return (y < 0).where(-t3, t3)
 
 def Trilu(x: Tensor, k: Union[Tensor, int]=0, upper=1):
@@ -207,7 +201,7 @@ def _format_padding(onnx_pads, ndims=None, axes=None):
     np_pads[axes[i]] = (onnx_pads[i], onnx_pads[i + num_axes])
   return np_pads
 
-def _padding(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
+def _padded(X: Tensor, pads=None, auto_pad="NOTSET", axes=None, constant_value=0., strides=None, kernel_shape=None, dilations=None, ceil_mode=0):
   if auto_pad != "NOTSET": pads = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
   elif ceil_mode and auto_pad=="NOTSET": # stupid ceil_mode case
     if strides is not None: strides = [strides]*len(kernel_shape) if isinstance(strides, int) else strides if strides else [1]*len(kernel_shape)
@@ -239,76 +233,67 @@ def Pad(x: Tensor, pads: Union[Tensor, Tuple[int, ...]], constant_value: Tensor=
   if mode == "wrap":
     repeat_args = [math.ceil(dim[0]/sh) + math.ceil(dim[1]/sh) + 1 for dim, sh in zip(pads, base_shape)]
     new_shape = [s*r for s,r in zip(base_shape, repeat_args)]
-    shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh) if dim[1]%sh != 0 else nsh) for dim, sh, nsh in zip(pads, base_shape, new_shape)]
+    shrink_args = [(sh-dim[0]%sh if dim[0]%sh != 0 else 0, nsh-(sh-dim[1]%sh if dim[1]%sh != 0 else 0)) for dim, sh, nsh in zip(pads, base_shape, new_shape)]
     return x.repeat(tuple(repeat_args)).shrink(tuple(shrink_args))
   if mode == "reflect":
     for i,s in enumerate(x.shape):
-      if pads[i] == (0,0): continue
-      elif pads[i][0] and not pads[i][1]:
-        x = x.flip(i).shrink(tuple([(0,s_) if i_ != i else (s-pads[i][0]-1, s_-1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (0,s) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
-      elif not pads[i][0] and pads[i][1]:
-        x = x.flip(i).shrink(tuple([(0,s_) if i_ != i else (1, pads[i][1]+1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (s,0) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
-      else:
-        x = x.flip(i).shrink(tuple([(0,s_) if i_ != i else (s-pads[i][0]-1, s_-1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (0,s+pads[i][1]) for i_ in range(x.ndim)])) + \
-            x.flip(i).shrink(tuple([(0,s_) if i_ != i else (1, pads[i][1]+1) for i_,s_ in enumerate(x.shape)])).pad(tuple([(0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+      if pads[i] != (0,0):
+        xL = x.flip(i).shrink(tuple((s-pads[i][0]-1, s_-1) if i_ == i else None for i_,s_ in enumerate(x.shape)))
+        xR = x.flip(i).shrink(tuple((1, pads[i][1]+1) if i_ == i else None for i_ in range(x.ndim)))
+        x = xL.cat(x, xR, dim=i)
     return x
   if mode == "edge":
     for i,s in enumerate(x.shape):
-      if pads[i] == (0,0): continue
-      elif pads[i][0] and not pads[i][1]:
-        x = x.shrink(tuple([(0,s_) if i_ != i else (0,1) for i_,s_ in enumerate(x.shape)])).expand([pads[i][0] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (0,s) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
-      elif not pads[i][0] and pads[i][1]:
-        x = x.shrink(tuple([(0,s_) if i_ != i else (s_-1, s_) for i_,s_ in enumerate(x.shape)])).expand([pads[i][0] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
-      else:
-        x = x.shrink(tuple([(0,s_) if i_ != i else (0,1) for i_,s_ in enumerate(x.shape)])).expand([pads[i][0] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (0,s+pads[i][1]) for i_ in range(x.ndim)])) + \
-            x.shrink(tuple([(0,s_) if i_ != i else (s_-1, s_) for i_,s_ in enumerate(x.shape)])).expand([pads[i][1] if i_ == i else s_ for i_,s_ in enumerate(x.shape)]).pad(tuple([(0,0) if i_ != i else (s+pads[i][0],0) for i_ in range(x.ndim)])) + \
-            x.pad(tuple([(0,0) if i_ != i else pads[i] for i_ in range(x.ndim)]))
+      if pads[i] != (0,0):
+        xL = x.shrink(tuple((0,1) if i_ == i else None for i_ in range(x.ndim))).expand([pads[i][0] if i_ == i else None for i_ in range(x.ndim)])
+        xR = x.shrink(tuple((s_-1, s_) if i_ == i else None for i_,s_ in enumerate(x.shape))).expand([pads[i][1] if i_ == i else None for i_ in range(x.ndim)])
+        x = xL.cat(x, xR, dim=i)
     return x
   if mode == "constant":
-    return _padding(x, seq_pads, axes=seq_axes, constant_value=constant_value)
+    return _padded(x, seq_pads, axes=seq_axes, constant_value=constant_value)
 
 def AveragePool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, count_include_pad=0, dilations=1, pads=None, strides=1):
-  pixel_axes = tuple(range(len(X.shape)))[2:]
-  ret = _padding(X, pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode).avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
-  if count_include_pad:
-    return ret
-  div = _padding(Tensor.ones(*X.shape), pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode).avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
+  pixel_axes = tuple(range(2, X.ndim))
+  ret = _padded(X, pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
+  ret = ret.avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
+  if count_include_pad: return ret
+  div = _padded(Tensor.ones(X.shape), pads, auto_pad, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode).avg_pool2d(kernel_shape, stride=strides, dilation=dilations)
   return ret / div
 
 def MaxPool(X: Tensor, kernel_shape, auto_pad="NOTSET", ceil_mode=0, dilations=1, pads=None, storage_order=0, strides=1):
-  ret = _padding(X, pads, auto_pad, constant_value=float("-inf"), axes=tuple(range(len(X.shape)))[2:], strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
-  ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations)
+  pixel_axes = tuple(range(2, X.ndim))
+  ret = _padded(X, pads, auto_pad, constant_value=-math.inf, axes=pixel_axes, strides=strides, kernel_shape=kernel_shape, dilations=dilations, ceil_mode=ceil_mode)
+  ret = ret.max_pool2d(kernel_shape, stride=strides, dilation=dilations).cast(X.dtype)
   ret_len, X_len = ret.numel(), X.numel()
-  indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().reshape(1, X_len).expand(ret_len, X_len)) * Tensor.arange(X_len, dtype=dtypes.int64).reshape(1, X_len).expand(ret_len, X_len)).sum(1).reshape(ret.shape)
-  if storage_order: indices = indices.transpose(indices.ndim-2, indices.ndim-1)
+  indices = ((ret.flatten().unsqueeze(1).expand(ret_len, X_len) == X.flatten().unsqueeze(0).expand(ret_len, X_len)) * \
+             Tensor.arange(X_len, dtype=dtypes.int64).unsqueeze(0).expand(ret_len, X_len)).sum(1).reshape(ret.shape)
+  if storage_order: indices = indices.transpose(-2, -1)
   return ret, indices
 
-def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Tensor=None, kernel_shape=None, pads=None, strides=None):
+def MaxUnpool(xT: Tensor, xI: Tensor, outshape: Optional[Tensor]=None, kernel_shape=None, pads=None, strides=None):
   out_sh = [(ks//2)*2 + st * inps for inps, st, ks in zip(xI.shape, strides, kernel_shape)]
   outlength = prod(out_sh)
-  xI = xI.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
+  xI = xI.flatten().unsqueeze(1).expand(None, outlength)
   arange = Tensor.arange(outlength, requires_grad=False).reshape(1, outlength).expand(xI.shape)
-  xT = xT.flatten().unsqueeze(1).expand(prod(xT.shape), outlength)
+  xT = xT.flatten().unsqueeze(1).expand(None, outlength)
   ret = ((xI == arange) * xT).sum(0).reshape([1, 1] + out_sh)
   if outshape is not None:
-    outshape = safe_numpy(outshape).tolist()
+    outshape = tuple(safe_numpy(outshape).tolist())
     if outshape != ret.shape:
       diff = [outshape[2] - ret.shape[2], outshape[3] - ret.shape[3]]
       pad_args = [diff[0]//2, diff[1]//2, diff[0]-diff[0]//2, diff[1]-diff[1]//2]
       ret = ret.pad2d((pad_args[1], pad_args[3], pad_args[0], pad_args[2]))
   return ret
 
-def Conv(X: Tensor, W: Tensor, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
-  if auto_pad != "NOTSET": padding = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
-  else: padding = [p for ps in zip(pads[:len(pads)//2][::-1], pads[len(pads)//2:][::-1]) for p in ps] if pads is not None else 0 # reorder padding
+def Conv(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, strides=1):
+  if auto_pad != "NOTSET":
+    padding = _auto_pad(X, auto_pad, strides, kernel_shape, dilations)
+  else:
+    # reorder padding
+    padding = [p for ps in zip(pads[:len(pads)//2][::-1], pads[len(pads)//2:][::-1]) for p in ps] if pads is not None else 0
   return X.conv2d(W, B, stride=strides, groups=group, dilation=dilations, padding=padding)
 
-def ConvTranspose(X: Tensor, W: Tensor, B=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, output_shape=None, output_padding=0, strides=1):
+def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSET", dilations=1, group=1, kernel_shape=None, pads=None, output_shape=None, output_padding=0, strides=1):
   if kernel_shape is None: kernel_shape = W.shape[2:]
   if isinstance(strides, int): strides = [strides]*(W.ndim-2)
   if isinstance(dilations, int): dilations = [dilations]*(W.ndim-2)
@@ -330,10 +315,10 @@ def ConvTranspose(X: Tensor, W: Tensor, B=None, auto_pad="NOTSET", dilations=1, 
 def Dropout(data: Tensor, ratio=0.5, training_mode=False, seed=None):
   if isinstance(ratio, Tensor) and not ratio.shape: ratio = safe_numpy(ratio) # ratio and tensor is passed in as Tensor with shape: ()
   if isinstance(training_mode, Tensor) and not training_mode.shape: training_mode = safe_numpy(training_mode)
-  if not training_mode: return data, Tensor.ones(*data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
+  if not training_mode: return data, Tensor.ones(data.shape, dtype=dtypes.bool)  # if mask is requested as output it will contain all True's.
   rng = np.random.RandomState(seed)
-  ratio = ratio.item() if isinstance(ratio, Tensor) else ratio
-  mask = Tensor((rng.random(data.shape) >= ratio), requires_grad=False, device=data.device)
+  if isinstance(ratio, Tensor): ratio = ratio.item()
+  mask = Tensor(rng.random(data.shape) >= ratio, requires_grad=False, device=data.device)
   return data * mask * (1/(1.0 - ratio)), mask
 
 def LRN(x: Tensor, size, alpha=1e-4, beta=0.75, bias=1.0):
@@ -357,7 +342,7 @@ def NegativeLogLikelihoodLoss(x: Tensor, target: Tensor, weight=None, ignore_ind
   if ignore_index is not None:
     cond = target == ignore_index
     weight = cond.where(0, weight) if weight is not None else cond.where(0, 1)
-  mask = target[:, None, :] ==  Tensor.arange(C).reshape([1, C] + [1]*(len(x.shape) -2))
+  mask = target[:, None, :] == Tensor.arange(C).reshape([1, C] + [1]*(len(x.shape) -2))
   loss = -(mask * x).sum(axis=1) * (1 if weight is None else weight)
   if reduction == "mean": return loss.mean() if weight is None else loss.sum() / weight.sum()
   if reduction == "sum": return loss.sum()
@@ -372,12 +357,11 @@ def SoftmaxCrossEntropyLoss(scores: Tensor, labels: Tensor, weights=None, ignore
   if weights is not None:
     weights = weights[labels, ...]
     loss = loss * weights
-  if reduction == "mean": loss = loss.sum() / (loss == 0).where(0, 1).sum() if weights is None else loss.sum() / weights.sum()
+  if reduction == "mean": loss = loss.sum() / ((loss != 0).sum() if weights is None else weights.sum())
   elif reduction == "sum": loss = loss.sum()
   return loss, y
 
-def ArrayFeatureExtractor(x: Tensor, indices: Tensor):
-  return x[tuple([slice(None) if i != (x.ndim-1) else indices for i in range(x.ndim)])]
+def ArrayFeatureExtractor(x: Tensor, indices: Tensor): return x[..., indices]
 
 def Gather(x: Tensor, indices: Tensor, axis=0):
   if indices.numel() < 9: # NOTE lessor kernels for smaller indices but kernel number increases depending on size of indices
@@ -407,20 +391,20 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     return ret.cast(dtypes.int32).clip(0, x_len-1)
   def _coordinate_transformation(x_out, y_out, output_shape, scales_, roi=None):
     if coordinate_transformation_mode == "half_pixel":
-      x_out = (x_out + 0.5)/Tensor(scales_[-1]) - 0.5
-      y_out = (y_out + 0.5)/Tensor(scales_[-2]) - 0.5
+      x_out = (x_out + 0.5) / scales_[-1] - 0.5
+      y_out = (y_out + 0.5) / scales_[-2] - 0.5
     elif coordinate_transformation_mode == "align_corners":
       x_out = x_out * (X.shape[-1] - 1) / (output_shape[-1] - 1)
       y_out = y_out * (X.shape[-2] - 1) / (output_shape[-2] - 1)
     elif coordinate_transformation_mode == "asymmetric":
-      x_out = x_out/scales_[-1]
-      y_out = y_out/scales_[-2]
+      x_out = x_out / scales_[-1]
+      y_out = y_out / scales_[-2]
     elif coordinate_transformation_mode == "half_pixel_symmetric":
       x_out = X.shape[-1] / 2 * (1 - int(output_shape[-1]) / output_shape[-1]) + (x_out + 0.5) / scales_[-1] - 0.5
       y_out = X.shape[-2] / 2 * (1 - int(output_shape[-2]) / output_shape[-2]) + (y_out + 0.5) / scales_[-2] - 0.5
     elif coordinate_transformation_mode == "pytorch_half_pixel":
-      x_out = (x_out + 0.5)/scales_[-1] - 0.5 if output_shape[-1] > 1 else Tensor([0])
-      y_out = (y_out + 0.5)/scales_[-2] - 0.5 if output_shape[-2] > 1 else Tensor([0])
+      x_out = (x_out + 0.5) / scales_[-1] - 0.5 if output_shape[-1] > 1 else Tensor([0])
+      y_out = (y_out + 0.5) / scales_[-2] - 0.5 if output_shape[-2] > 1 else Tensor([0])
     elif coordinate_transformation_mode == "tf_crop_and_resize":
       x_out = roi[-1][0] * (X.shape[-1] - 1) + x_out * ((roi[-1][1] - roi[-1][0]) * (X.shape[-1] - 1) / (output_shape[-1] - 1)) if output_shape[-1] > 1 else Tensor([0.5 * (roi[-1][0] + roi[-1][1]) * (X.shape[-1] - 1)])
       y_out = roi[-2][0] * (X.shape[-2] - 1) + y_out * ((roi[-2][1] - roi[-2][0]) * (X.shape[-2] - 1) / (output_shape[-2] - 1)) if output_shape[-2] > 1 else Tensor([0.5 * (roi[-2][0] + roi[-2][1]) * (X.shape[-2] - 1)])
@@ -472,31 +456,34 @@ def Resize(X:Tensor, roi=None, scales=None, sizes=None, antialias=0, axes=None, 
     for y in safe_numpy(y_out):
       for x in safe_numpy(x_out):
         x_floor, y_floor = int(x), int(y)
-        y_shrink = (0, X.shape[2]) if X.shape[2] == 1 else (y_floor, y_floor+2) if y != y_floor else (y_floor, y_floor+1)
-        x_shrink = (x_floor, x_floor+2) if x != x_floor else (x_floor, x_floor+1)
-        shrink_args = ((0, X.shape[0]), (0, X.shape[1]), y_shrink, x_shrink)
-        corners = safe_numpy(X.shrink(shrink_args))
-        x1, x2, y1, y2 = x_floor, x_floor+1, y_floor, y_floor+1
-        if x == x_floor and y == y_floor: # TODO https://en.wikipedia.org/wiki/Bilinear_interpolation#Weighted_mean maybe do weighted mean?
-          ret.append(corners[0,0,0,0])
+        y_shrink = (y_floor, math.ceil(y)+1)
+        x_shrink = (x_floor, math.ceil(x)+1)
+        corners = safe_numpy(X.shrink((None, None, y_shrink, x_shrink)))
+
+        wx, wy = math.ceil(x) - x, math.ceil(y) - y
+        if x == x_floor and y == y_floor:
+          weighted = corners[0,0,0,0]
         elif x == x_floor:
-          ret.append((corners[0,0,0,0] * (y2 - y) + corners[0,0,1,0] * (y - y1)) / (y2 - y1))
+          weighted = corners[0,0,0,0] * wy + corners[0,0,1,0] * (1-wy)
         elif y == y_floor:
-          ret.append((corners[0,0,0,0] * (x2 - x) + corners[0,0,0,1] * (x - x1)) / (x2 - x1))
+          weighted = corners[0,0,0,0] * wx + corners[0,0,0,1] * (1-wx)
         else:
-          ret.append((corners[0,0,0,0] * (x2 - x) * (y2 - y) + corners[0,0,0,1] * (x - x1) * (y2 - y) + corners[0,0,1,0] * (x2 - x) * (y - y1) + corners[0,0,1,1] * (x - x1) * (y - y1)) / ((x2 - x1) * (y2 - y1)))
+          weighted = (corners[0,0,0,0] * wx + corners[0,0,0,1] * (1-wx)) * wy + \
+                     (corners[0,0,1,0] * (wx) + corners[0,0,1,1] * (1-wx)) * (1-wy)
+        ret.append(weighted)
     return Tensor(ret).reshape(output_shape)
   if mode == "cubic":
     raise NotImplementedError("cubic interpolation is not implemented")
 
 def CenterCropPad(t: Tensor, shape: Tensor, axes=None):
   if not axes: axes = list(range(t.ndim))
-  shrink_arg = [(0,i) for i in t.shape]
-  pad_arg = [(0,0)] * t.ndim
+  shrink_arg = [None] * t.ndim
+  pad_arg = [None] * t.ndim
   shape = safe_numpy(shape).tolist()
   for s, x in zip(shape, axes):
-    if s < t.shape[x]: shrink_arg[x] = (t.shape[x]//2 - s//2, t.shape[x]//2 + s//2) if s%2 == 0 else (t.shape[x]//2 - s//2 - 1, t.shape[x]//2 + s//2)
-    elif s > t.shape[x]: pad_arg[x] = ((s - t.shape[x])//2, (s - t.shape[x])//2) if (s - t.shape[x])% 2 == 0 else ((s - t.shape[x])//2, (s - t.shape[x])//2 + 1)
+    tx = t.shape[x]
+    if s < tx: shrink_arg[x] = (tx//2 - (s+1)//2, tx//2 + s//2)
+    elif s > tx: pad_arg[x] = ((s-tx)//2, (s-tx+1)//2)
   return t.shrink(tuple(shrink_arg)).pad(tuple(pad_arg))
 
 def OneHot(indices: Tensor, depth: Tensor, values: Tensor, axis=-1):
@@ -515,7 +502,7 @@ def Erf(x: Tensor):
   term4 = -1.453152027 * t ** 4
   term5 = 1.061405429 * t ** 5
   y = (term1 + term2 + term3 + term4 + term5)
-  z = 1.0 - y * Tensor.exp(-x * x)
+  z = 1.0 - y * (-x * x).exp()
   return (x > 0).where(z, -z)
 
 def Compress(inp: Tensor, condition: Tensor, axis=None):
@@ -523,21 +510,19 @@ def Compress(inp: Tensor, condition: Tensor, axis=None):
     inp = inp.flatten()
     axis = 0
 
-  axis = axis + inp.ndim if axis < 0 else axis
+  if axis < 0: axis += inp.ndim
 
   con_np = safe_numpy(condition)
   con = Tensor(np.arange(condition.shape[0])[con_np]) # no boolean indexing in Tensor
-  return inp[tuple([slice(None) if i != axis else con for i in range(inp.ndim)])]
+  return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
 
 def EyeLike(x: Tensor, dtype=None, k=0):
   if dtype is None: dtype = x.dtype
   else: dtype = DTYPE_MAP[int(dtype)]
-  shape = x.shape
   dim = min(x.shape)
-  if shape[0] == shape[1]:
+  if x.shape[0] == x.shape[1]:
     return Tensor.eye(dim=dim, dtype=dtype)
-  diff = (shape[0]-dim, shape[1]-dim)
-  padarg = tuple([(d, d) if d == 0 else (k, d-k) for d in diff])
+  padarg = tuple(None if d == dim else (k, d-dim-k) for d in x.shape)
   return Tensor.eye(dim=dim, dtype=dtype).pad(padarg)
 
 def Upsample(X, scales, mode): return Resize(X=X, scales=scales, mode=mode)
@@ -546,7 +531,7 @@ def IsInf(x: Tensor, detect_negative=1, detect_positive=1):
   return (x == float("inf")) * bool(detect_positive) + (x == float("-inf")) * bool(detect_negative)
 
 def DequantizeLinear(x: Tensor, x_scale: Tensor, x_zero_point: Union[Tensor, int] = 0, axis=1):
-  axis = axis + x.ndim if axis < 0 else axis
+  if axis < 0: axis += x.ndim
   x_sc = x_scale.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim))
   x_zer = x_zero_point.reshape(*[1]*axis, *x_scale.shape, *[1]*(x.ndim - axis - x_scale.ndim)) if isinstance(x_zero_point, Tensor) else x_zero_point
   return ((x.float() - x_zer) * x_sc).cast(x_scale.dtype)
@@ -613,7 +598,7 @@ def EmbedLayerNormalization(input_ids: Tensor, segment_ids:Optional[Tensor]=None
   assert (mask is None) is (mask_index_type is None)
   assert mask is None, "functionality not supported yet"  # TODO
   input_shape = input_ids.shape
-  _bsz, seq_length = input_shape[0], input_shape[1]
+  seq_length = input_shape[1]
   compute_seg_emb = (segment_embedding is not None and segment_ids is not None)
   vocab_size, max_position_embeddings, type_vocab_size = word_embedding.shape[0], position_embedding.shape[0], (segment_embedding.shape[0] if compute_seg_emb else None)
 
