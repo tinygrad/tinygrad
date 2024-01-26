@@ -156,7 +156,7 @@ class PTXLanguage(AssemblyLanguage):
   gdim = [f'%nctaid.{chr(120+i)}' for i in range(3)]
   lid = [f'%tid.{chr(120+i)}' for i in range(3)]
   asm_for_op = {
-    UnaryOps.NEG: lambda d,a,dt,name: f"not.pred {d}, {a};" if dt == dtypes.bool else f"neg.{name} {d}, {a};",
+    UnaryOps.NEG: lambda d,a,dt,name: f"neg.{name} {d}, {a};",
     UnaryOps.EXP2: lambda d,a,dt,name: f"ex2.approx.{name} {d}, {a};", UnaryOps.LOG2: lambda d,a,dt,name: f"lg2.approx.{name} {d}, {a};",
     UnaryOps.SIN: lambda d,a,dt,name: f"sin.approx.{name} {d}, {a};",
     UnaryOps.SQRT: lambda d,a,dt,name: f"sqrt.approx.{name} {d}, {a};",

@@ -1,18 +1,40 @@
-import random, traceback
+import random, traceback, ctypes
 from typing import List, Tuple
 import numpy as np
 from collections import Counter
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
+from tinygrad.tensor import Tensor
 from tinygrad.graph import print_tree
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, from_mv, Context
 from tinygrad.device import Device, Compiled, Interpreted
 from tinygrad.codegen.linearizer import UOp
 
 def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
 
 device = Device[Device.DEFAULT]
+
+def get_fuzz_rawbufs(lin):
+  rawbufs = bufs_from_lin(lin)
+
+  # Reallocate output buffer with additional area to detect out-of-bounds writes.
+  RED_AREA_SIZE = 1024 if isinstance(device, Compiled) else 0
+  rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True, size=rawbufs[0].size+RED_AREA_SIZE)
+  with Context(DEBUG=0):
+    for rawbuf in rawbufs[1:]:
+      t = Tensor.uniform((rawbuf.size,), dtype=rawbuf.dtype)
+      rawbuf.copyin(t.realize().lazydata.realized.as_buffer())
+  return rawbufs
+
+def get_fuzz_rawbuf_like(rawbuf, zero=False, size=None):
+  rawbuf = type(rawbuf)(Device.DEFAULT, rawbuf.size if size is None else size, rawbuf.dtype)
+  if zero:
+    with Context(DEBUG=0):
+      mv = memoryview(bytearray(rawbuf.size * rawbuf.dtype.itemsize))
+      ctypes.memset(from_mv(mv), 0, len(mv))
+      rawbuf.copyin(mv)
+  return rawbuf
 
 def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
   if rawbufs is None: rawbufs = bufs_from_lin(lin)
@@ -46,7 +68,7 @@ def fuzz_linearizer(lin: Linearizer):
   np.random.seed(42)
   print_tree(lin.ast)
   print(lin.colored_shape())
-  rawbufs = bufs_from_lin(lin)
+  rawbufs = get_fuzz_rawbufs(lin)
 
   seen_uops = {}
   ground_truth = None
@@ -64,13 +86,13 @@ def fuzz_linearizer(lin: Linearizer):
 
     print(lin.colored_shape())
     # get a new output buffer
-    rawbufs[0] = type(rawbufs[0])(Device.DEFAULT, rawbufs[0].size, rawbufs[0].dtype)
+    rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True)
     var_vals = {v: random.randint(v.min, v.max) for v in lin.ast.vars()}
     if (msg := run_linearizer(lin, rawbufs, var_vals)) != "PASS":
       print(f"{lin.applied_opts=}")
       return msg
 
-    result = rawbufs[0].as_buffer()
+    result = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np)
     if ground_truth is None:
       ground_truth = result
     else:

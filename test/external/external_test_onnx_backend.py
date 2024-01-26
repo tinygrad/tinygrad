@@ -4,8 +4,8 @@ from onnx.backend.base import Backend, BackendRep
 import onnx.backend.test
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, CI
-from tinygrad.device import Device, Compiled
+from tinygrad.helpers import getenv, CI, OSX
+from tinygrad.device import Device
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
@@ -48,25 +48,37 @@ backend_test.exclude('test_adam_multiple_cpu')
 backend_test.exclude('test_nesterov_momentum_cpu')
 
 # about different dtypes
-backend_test.exclude('int8')  #  OverflowError: cannot convert float infinity to integer
-
 if Device.DEFAULT in ["TORCH"]:
   backend_test.exclude('uint16')
   backend_test.exclude('uint32')
   backend_test.exclude('uint64')
-if Device.DEFAULT in ["METAL"]:
+
+if Device.DEFAULT in ["METAL"] or (OSX and Device.DEFAULT == "GPU"):
   backend_test.exclude('float64')
+  backend_test.exclude('DOUBLE')
+  # these have float64 inputs
+  backend_test.exclude('test_eyelike_with_dtype_cpu')
+  backend_test.exclude('test_reduce_log_sum_exp*')
+  backend_test.exclude('test_operator_add*')
+
+# no float16 in CI, LLVM segfaults, GPU requires cl_khr_fp16
+if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
+  backend_test.exclude('float16')
+  backend_test.exclude('FLOAT16')
 
 backend_test.exclude('string')
 
+# dtype cast
+backend_test.exclude('STRING')
+backend_test.exclude('FLOAT8')
+backend_test.exclude('BFLOAT16')  # not supported in numpy
+# TODO: fix these with true onnx float16
+backend_test.exclude('to_FLOAT16')
+backend_test.exclude('cast_no_saturate')
+
 backend_test.exclude('test_pow_types_int*')
-backend_test.exclude('test_cast_*')
-backend_test.exclude('test_castlike_*')
 backend_test.exclude('test_convinteger_*')
 backend_test.exclude('test_matmulinteger_*')
-
-backend_test.exclude('test_reduce_log_sum_exp*') # dependent on actual float64 implementation for backends
-backend_test.exclude('test_operator_add*') # dependent on float64 math. Without it values default to 0 or inf
 
 # we don't support indexes
 # backend_test.exclude('test_argmax_*') # Needs more work: select_last_index
@@ -164,13 +176,10 @@ backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
 if Device.DEFAULT in ['METAL']:
   backend_test.exclude('test_maxpool_2d_pads_cpu')
   backend_test.exclude('test_maxpool_2d_same_lower_cpu')
+  backend_test.exclude('test_maxpool_2d_same_upper_cpu')
 
-if Device.DEFAULT in ['GPU', 'METAL']:
-  # double not supported
-  backend_test.exclude('test_max_float64_cpu')
-  backend_test.exclude('test_min_float64_cpu')
-  backend_test.exclude('test_eyelike_with_dtype_cpu')
-  # weird inaccuracy
+if Device.DEFAULT == "METAL" or (OSX and Device.DEFAULT == "GPU"):
+  # numerical inaccuracy
   backend_test.exclude('test_mish_cpu')
   backend_test.exclude('test_mish_expanded_cpu')
 
@@ -180,26 +189,10 @@ if Device.DEFAULT in ['LLVM']:
   backend_test.exclude('test_isinf_negative_cpu')
   backend_test.exclude('test_isinf_positive_cpu')
 
-# Segfaults in CI, GPU requires cl_khr_fp16
-if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
-  backend_test.exclude('test_max_float16_cpu')
-  backend_test.exclude('test_min_float16_cpu')
-  backend_test.exclude('test_isinf_float16_cpu')
-
-# error: casting to type 'half' is not allowed
-backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
-
-# TODO: this somehow passes in CI but does not pass if run locally
-if isinstance(Device[Device.DEFAULT], Compiled):
-  backend_test.exclude('test_MaxPool3d_stride_padding_cpu')
-
-# TODO: this somehow passes in CI but does not pass if run locally
-if Device.DEFAULT == 'METAL':
-  backend_test.exclude('test_maxpool_2d_same_upper_cpu')
-
-# TODO: problems with nan
-backend_test.exclude('test_isnan_float16_cpu')
-backend_test.exclude('test_isnan_cpu')
+# # TODO: problems with nan
+if Device.DEFAULT in ['LLVM', 'METAL']:
+  backend_test.exclude('test_isnan_float16_cpu')
+  backend_test.exclude('test_isnan_cpu')
 
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):

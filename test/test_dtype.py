@@ -7,7 +7,10 @@ from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper
 from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
-from hypothesis import given, settings, strategies as st
+from hypothesis import given, settings, strategies as strat
+
+settings.register_profile("my_profile", max_examples=200, deadline=None)
+settings.load_profile("my_profile")
 
 core_dtypes = list(DTYPES_DICT.values())
 floats = [dt for dt in core_dtypes if dtypes.is_float(dt)]
@@ -222,20 +225,20 @@ class TestHelpers(unittest.TestCase):
   uints = (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   floats = (dtypes.float16, dtypes.float32, dtypes.float64)
 
-  @given(st.sampled_from(signed_ints+uints), st.integers(min_value=1, max_value=8))
+  @given(strat.sampled_from(signed_ints+uints), strat.integers(min_value=1, max_value=8))
   def test_is_int(self, dtype, amt):
     assert dtypes.is_int(dtype.vec(amt) if amt > 1 else dtype)
     assert not dtypes.is_float(dtype.vec(amt) if amt > 1 else dtype)
 
-  @given(st.sampled_from(uints), st.integers(min_value=1, max_value=8))
+  @given(strat.sampled_from(uints), strat.integers(min_value=1, max_value=8))
   def test_is_unsigned_uints(self, dtype, amt):
     assert dtypes.is_unsigned(dtype.vec(amt) if amt > 1 else dtype)
 
-  @given(st.sampled_from(signed_ints), st.integers(min_value=1, max_value=8))
+  @given(strat.sampled_from(signed_ints), strat.integers(min_value=1, max_value=8))
   def test_is_unsigned_signed_ints(self, dtype, amt):
     assert not dtypes.is_unsigned(dtype.vec(amt) if amt > 1 else dtype)
 
-  @given(st.sampled_from(floats), st.integers(min_value=1, max_value=8))
+  @given(strat.sampled_from(floats), strat.integers(min_value=1, max_value=8))
   def test_is_float(self, dtype, amt):
     assert dtypes.is_float(dtype.vec(amt) if amt > 1 else dtype)
     assert not dtypes.is_int(dtype.vec(amt) if amt > 1 else dtype)
@@ -244,7 +247,7 @@ class TestHelpers(unittest.TestCase):
   def test_bf16_is_float(self):
     assert dtypes.is_float(dtypes.bfloat16)
 
-  @given(st.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_float(d) or dtypes.is_int(d)]), st.integers(min_value=2, max_value=8))
+  @given(strat.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_float(d) or dtypes.is_int(d)]), strat.integers(min_value=2, max_value=8))
   def test_scalar(self, dtype, amt):
     assert dtype.vec(amt).scalar() == dtype
 
@@ -266,7 +269,7 @@ class TestTypeSpec(unittest.TestCase):
     dtypes.default_float = dtypes.float64
     assert dtypes.default_float == dtypes.float64
 
-  @given(st.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), st.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
+  @given(strat.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), strat.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
   def test_creation(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
     assert Tensor(True).dtype == dtypes.bool
@@ -284,7 +287,7 @@ class TestTypeSpec(unittest.TestCase):
     assert Tensor.eye(3, dtype=dtypes.int64).dtype == dtypes.int64
 
 
-  @given(st.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), st.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
+  @given(strat.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), strat.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
   def test_full(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
 
@@ -311,7 +314,7 @@ class TestTypeSpec(unittest.TestCase):
     assert Tensor.ones([2,3,0]).sum(2).dtype ==  dtypes.default_float
     # assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int  # requires reduceop acc fix
 
-  @given(st.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), st.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
+  @given(strat.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), strat.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
   def test_arange(self, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
 
@@ -324,12 +327,12 @@ class TestTypeSpec(unittest.TestCase):
     assert Tensor.arange(3, 8.5, 3).dtype == dtypes.default_float
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't follow the bool ops spec")
-  @given(st.sampled_from(core_dtypes), st.sampled_from([operator.gt, operator.ge, operator.le, operator.lt, operator.eq, operator.ne]))
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from([operator.gt, operator.ge, operator.le, operator.lt, operator.eq, operator.ne]))
   def test_bool_ops(self, dtype, op):
     assert op(Tensor.rand(4, 4, dtype=dtype), Tensor.rand(4, 4, dtype=dtype)).dtype == dtypes.bool
 
-  @given(st.sampled_from(core_dtypes),
-         st.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), st.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
+  @given(strat.sampled_from(core_dtypes),
+         strat.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), strat.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
   def test_functions_return_index(self, dtype, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
     assert Tensor([0, 1], dtype=dtype).argmax().dtype == dtypes.default_int
@@ -337,13 +340,13 @@ class TestTypeSpec(unittest.TestCase):
     assert Tensor([0, 1], dtype=dtype).multinomial().dtype == dtypes.default_int
 
 class TestTypePromotion(unittest.TestCase):
-  @given(st.sampled_from(core_dtypes))
+  @given(strat.sampled_from(core_dtypes))
   def test_self_promo_to_self(self, dtype):
     assert least_upper_dtype(dtype) == dtype
     assert least_upper_dtype(dtype, dtype) == dtype
     assert least_upper_dtype(dtype, dtype, dtype) == dtype
 
-  @given(st.sampled_from(core_dtypes), st.sampled_from(core_dtypes))
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_promo_resulted_higher_than_inputs(self, dtype1, dtype2):
     result = least_upper_dtype(dtype1, dtype2)
     assert result >= dtype1 and result >= dtype2
@@ -366,7 +369,7 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.float16, dtypes.int64) == dtypes.float16
     assert least_upper_dtype(dtypes.float16, dtypes.uint64) == dtypes.float16
 
-  @given(st.sampled_from(floats))
+  @given(strat.sampled_from(floats))
   def test_float_to_float(self, dt):
     assert least_upper_float(dt) == dt
 
@@ -376,8 +379,7 @@ class TestAutoCastType(unittest.TestCase):
   def tearDown(self):
     dtypes.default_int, dtypes.default_float = self.old_default_int, self.old_default_float
 
-  @given(st.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_int(d) and is_dtype_supported(d)]))
-  @settings(deadline=None)
+  @given(strat.sampled_from([d for d in DTYPES_DICT.values() if dtypes.is_int(d) and is_dtype_supported(d)]))
   def test_int_to_float_unary_func(self, dtype):
     for func in [
       lambda t: t.exp(),
@@ -395,40 +397,12 @@ class TestAutoCastType(unittest.TestCase):
       # float16 can have larger precision errors
       np.testing.assert_allclose(func(Tensor(a, dtype=dtype)).numpy(), func(torch.tensor(a)), rtol=1e-3, atol=1e-3)
 
-  @given(st.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
-  def test_broadcast_float(self, default_float):
-    dtypes.default_float = default_float
-    assert (Tensor.rand(4, 4, dtype=dtypes.bool) + 2.3).dtype == dtypes.default_float
-    assert (Tensor.rand(4, 4, dtype=dtypes.int) + 2.3).dtype == dtypes.default_float
-    assert (Tensor.rand(4, 4, dtype=dtypes.int8) + 2.3).dtype == dtypes.default_float
-    assert (Tensor.rand(4, 4, dtype=dtypes.uint64) + 2.3).dtype == dtypes.default_float
-    assert (Tensor.rand(4, 4, dtype=dtypes.float16) + 2.3).dtype == dtypes.float16
-    assert (Tensor.rand(4, 4, dtype=dtypes.bfloat16) + 2.3).dtype == dtypes.bfloat16
-    assert (Tensor.rand(4, 4, dtype=dtypes.float32) + 2.3).dtype == dtypes.float32
-    assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2.3).dtype == dtypes.float64
-
-  @given(st.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]))
-  def test_broadcast_int(self, default_int):
-    dtypes.default_int = default_int
-    assert (Tensor.rand(4, 4, dtype=dtypes.bool) + 2).dtype == dtypes.default_int
-    assert (Tensor.rand(4, 4, dtype=dtypes.int) + 2).dtype == dtypes.int
-    assert (Tensor.rand(4, 4, dtype=dtypes.int8) + 2).dtype == dtypes.int8
-    assert (Tensor.rand(4, 4, dtype=dtypes.uint64) + 2).dtype == dtypes.uint64
-    assert (Tensor.rand(4, 4, dtype=dtypes.float16) + 2).dtype == dtypes.float16
-    assert (Tensor.rand(4, 4, dtype=dtypes.bfloat16) + 2).dtype == dtypes.bfloat16
-    assert (Tensor.rand(4, 4, dtype=dtypes.float32) + 2).dtype == dtypes.float32
-    assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2).dtype == dtypes.float64
-
-  def test_broadcast_bool(self):
-    if Device.DEFAULT != "WEBGPU":
-      assert (Tensor([0, 1], dtype=dtypes.bool) + True).dtype == dtypes.bool
-    assert (Tensor([0, 1], dtype=dtypes.int) + True).dtype == dtypes.int32
-    assert (Tensor([0, 1], dtype=dtypes.int8) + True).dtype == dtypes.int8
-    assert (Tensor([0, 1], dtype=dtypes.uint64) + True).dtype == dtypes.uint64
-    assert (Tensor([0, 1], dtype=dtypes.float16) + True).dtype == dtypes.float16
-    assert (Tensor([0, 1], dtype=dtypes.bfloat16) + True).dtype == dtypes.bfloat16
-    assert (Tensor([0, 1], dtype=dtypes.float32) + True).dtype == dtypes.float32
-    assert (Tensor([0, 1], dtype=dtypes.float64) + True).dtype == dtypes.float64
+  @given(strat.sampled_from(core_dtypes))
+  def test_broadcast_scalar(self, dt):
+    assert (Tensor.rand(4, 4, dtype=dt) + 2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
+    assert (Tensor.rand(4, 4, dtype=dt) + 2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
+    if Device.DEFAULT != "WEBGPU" and dt != dtypes.bool:
+      assert (Tensor.rand(4, 4, dtype=dt) + True).dtype == dt
 
   def test_sum(self):
     assert (Tensor([0, 1], dtype=dtypes.bool)).sum().dtype == dtypes.int32
@@ -460,10 +434,43 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.float32)).cumsum(0).dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).cumsum(0).dtype == dtypes.float64
 
-  @given(st.sampled_from(core_dtypes), st.sampled_from(core_dtypes))
-  @settings(deadline=None)
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_matmul(self, dt1, dt2):
     assert (Tensor([0, 1], dtype=dt1) @ Tensor([0, 1], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
+
+  @staticmethod
+  def check_where_alternate_input_other(input_, other, data_type):
+    assert (Tensor([True, False]).where(input_, other)).dtype == data_type
+    assert (Tensor([True, False]).where(other, input_)).dtype == data_type
+
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
+  def test_where_no_scalar(self, dt1, dt2):
+    self.check_where_alternate_input_other(Tensor(2, dtype=dt1), Tensor(3, dtype=dt2), least_upper_dtype(dt1, dt2))
+
+  @given(strat.sampled_from(core_dtypes))
+  def test_where_one_scalar(self, dt):
+    t = Tensor(2, dtype=dt)
+    self.check_where_alternate_input_other(t, 3.2, (dt if dtypes.is_float(dt) else dtypes.default_float))
+    self.check_where_alternate_input_other(t, 3, (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int))
+    self.check_where_alternate_input_other(t, True, dt)
+
+  def test_where_two_scalars(self):
+    self.check_where_alternate_input_other(3.1, 3.2, dtypes.default_float)
+    self.check_where_alternate_input_other(3.1, 3, dtypes.default_float)
+    self.check_where_alternate_input_other(3.1, True, dtypes.default_float)
+    self.check_where_alternate_input_other(3, 2, dtypes.default_int)
+    self.check_where_alternate_input_other(3, True, dtypes.default_int)
+    self.check_where_alternate_input_other(False, True, dtypes.bool)
+
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
+  def test_maximum(self, dt1, dt2):
+    assert Tensor([0, 1, 2], dtype=dt1).maximum(Tensor([2, 0, 5], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
+
+  @given(strat.sampled_from(core_dtypes))
+  def test_maximum_const(self, dt):
+    assert Tensor([1, 2], dtype=dt).maximum(3.1).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
+    assert Tensor([1, 2], dtype=dt).maximum(3).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
+    assert Tensor([1, 2], dtype=dt).maximum(True).dtype == dt
 
 if __name__ == '__main__':
   unittest.main()

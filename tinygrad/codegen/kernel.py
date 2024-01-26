@@ -59,7 +59,6 @@ class LinearizerOptions(NamedTuple):
   device: str = ""
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
-  supports_float4_alu: bool = True
   has_local: bool = True
   has_shared: bool = True
   # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered

@@ -8,7 +8,7 @@ from tinygrad.renderer.cstyle import HIPRenderer
 from examples.beautiful_mnist import Model as MNIST
 from examples.hlb_cifar10 import SpeedyResNet
 
-from hypothesis import given, strategies as st, settings
+from hypothesis import given, strategies as strat, settings
 settings.register_profile("my_profile", deadline=None)
 settings.load_profile("my_profile")
 print(settings.default)
@@ -59,13 +59,13 @@ float_dtypes = [dtypes.float16, dtypes.float32]
 
 @unittest.skipIf(Device.DEFAULT != "HIP", reason="testing HIP->rdna3 compilation needs HIP=1")
 class TestHIPALUCompilation(unittest.TestCase):
-  @given(st.sampled_from(unary_operations), st.sampled_from(float_dtypes))
+  @given(strat.sampled_from(unary_operations), strat.sampled_from(float_dtypes))
   def test_unary_ops(self, op, dtype):
     a = Tensor.randn(4,4, dtype=dtype)
     out = op(a)
     compile_ast_to_hip(out)
 
-  @given(st.sampled_from(binary_operations), st.sampled_from(float_dtypes))
+  @given(strat.sampled_from(binary_operations), strat.sampled_from(float_dtypes))
   def test_binary_ops(self, op, dtype):
     a = Tensor.randn(4,4, dtype=dtype)
     b = Tensor.randn(4,4, dtype=dtype)
