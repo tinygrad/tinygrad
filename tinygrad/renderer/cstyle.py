@@ -229,17 +229,9 @@ class CUDALanguage(CStyleLanguage):
     struct half8 { half x, y, z, w, a, b, c, d; };
     __device__ half8 make_half8(half x, half y, half z, half w, half a, half b, half c, half d) { return {x, y, z, w, a, b, c, d}; }
     __device__ float4 __mma_m16n8k16_f16_f32(half8 a, half4 b, float4 c) {
-      int *a_packed = reinterpret_cast<int *>(&a), *b_packed = reinterpret_cast<int *>(&b);
-      asm(
-        "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32"
-        " { %0, %1, %2, %3 },"
-        " { %4, %5, %6, %7 },"
-        " { %8, %9 },"
-        " { %0, %1, %2, %3 };"
-        : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w)
-        : "r"(a_packed[0]), "r"(a_packed[1]), "r"(a_packed[2]),  "r"(a_packed[3]),
-          "r"(b_packed[0]), "r"(b_packed[1])
-      );
+      int *a_pk = reinterpret_cast<int *>(&a), *b_pk = reinterpret_cast<int *>(&b);
+      asm( "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 { %0, %1, %2, %3 }, { %4, %5, %6, %7 }, { %8, %9 }, { %0, %1, %2, %3 };"
+        : "+f"(c.x), "+f"(c.y), "+f"(c.z), "+f"(c.w) : "r"(a_pk[0]), "r"(a_pk[1]), "r"(a_pk[2]),  "r"(a_pk[3]), "r"(b_pk[0]), "r"(b_pk[1]) );
       return c;
     }
   """
