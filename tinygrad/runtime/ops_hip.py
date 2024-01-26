@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, functools, subprocess, io
 from typing import Tuple, TypeVar, List, Any, cast, Set
-import gpuctypes.hip as hip
+import tinygrad.autogen.hip as hip
 from tinygrad.helpers import DEBUG, getenv, init_c_var
 from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t, to_char_p_p, get_bytes
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, BufferOptions, JITRunner, Device, Buffer, update_stats
@@ -133,7 +133,7 @@ class HIPDevice(Compiled):
   def __init__(self, device:str=""):
     self.device = int(device.split(":")[1]) if ":" in device else 0
     self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode() if not MOCKHIP else "gfx1100"  # noqa: E501
-    self.pending_copyin: List[hip.hipDeviceptr_t] = []
+    self.pending_copyin: List[ctypes.c_void_p] = []
     self.track_cross_buffer: List[Any] = []
     self.peers: Set[int] = set()
 

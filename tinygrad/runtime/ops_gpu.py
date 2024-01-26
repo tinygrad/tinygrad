@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Tuple, Optional, List, cast
 import ctypes, functools, hashlib
-import gpuctypes.opencl as cl
+import tinygrad.autogen.opencl as cl
 from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.cstyle import OpenCLRenderer
