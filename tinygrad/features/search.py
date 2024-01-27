@@ -1,6 +1,6 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
-from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner
+from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner, Compiler
 from tinygrad.ops import MemBuffer, LazyOp
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
@@ -43,13 +43,13 @@ def _time_program(ast:LazyOp, rdev:Compiled, lib:bytes, global_size, local_size,
     if early_stop is not None and early_stop < tms[-1]: break
   return tms
 
-def _compile_linearizer(rdev:Compiled, lin:Linearizer, name:Optional[str]=None) -> Tuple[bytes, Optional[List[int]], Optional[List[int]]]:
+def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=None) -> Tuple[bytes, Optional[List[int]], Optional[List[int]]]:
   lin.linearize()
-  src = rdev.renderer(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
-  return rdev.compiler(src), lin.global_size, lin.local_size
+  src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
+  return compiler.compile(src), lin.global_size, lin.local_size
 
-def _try_compile_linearized_w_idx(x, device:str):
-  try: return (x[0], _compile_linearizer(cast(Compiled, Device[device]), x[1], "test"))
+def _try_compile_linearized_w_idx(x, compiler:Compiler):
+  try: return (x[0], _compile_linearizer(compiler, x[1], "test"))
   except Exception:
     if DEBUG >= 4: traceback.print_exc()
     return (x[0], None)
@@ -110,7 +110,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
     while not exiting:
       acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam]) if len(beam) else [lin]
       timed_lins: List[Tuple[Linearizer, float]] = []
-      _compile_fn = functools.partial(_try_compile_linearized_w_idx, device=lin.opts.device)
+      _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=cast(Compiled, Device[lin.opts.device]).compiler)
       for i,proc in (pool.imap_unordered(_compile_fn, enumerate(acted_lins)) if pool is not None else map(_compile_fn, enumerate(acted_lins))):
         if proc is None: continue
         lib, global_size, local_size = proc
@@ -155,7 +155,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
   assert isinstance(dev, Compiled)
 
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
-  lib, global_size, local_size = _compile_linearizer(dev, lin)
+  lib, global_size, local_size = _compile_linearizer(dev.compiler, lin)
   tms = _time_program(lin.ast, dev, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))  # noqa: E501
 
   if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)

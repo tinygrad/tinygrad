@@ -198,7 +198,7 @@ from tinygrad.device import MallocAllocator
 # ClangProgram is the simplest runtime (in tinygrad/runtime/ops_clang.py, code 7/10)
 # __init__ calls clang, and __call__ calls the function in the *.so outputted by clang
 # in CLANG, global_size and local_size are ignored
-from tinygrad.runtime.ops_clang import ClangProgram, compile_clang
+from tinygrad.runtime.ops_clang import ClangProgram, ClangCompiler
 
 # a concrete example looks like this, this adds two size 1 RawBuffer
 # first we create two numpy buffers containing 2 and 3
@@ -213,7 +213,7 @@ MallocAllocator.copyin(input_a, numpy_a.data.cast("B"))
 MallocAllocator.copyin(input_b, numpy_b.data.cast("B"))
 
 # compile the program, run it, and 2+3 does indeed equal 5
-program = ClangProgram("add", compile_clang(f"void add(float *a, float *b, float *c) {{ *a = *b + *c; }}"))
+program = ClangProgram("add", ClangCompiler().compile(f"void add(float *a, float *b, float *c) {{ *a = *b + *c; }}"))
 program(output, input_a, input_b)
 numpy_out = np.empty(1, dtype=np.float32)
 MallocAllocator.copyout(numpy_out.data.cast("B"), output)
@@ -251,7 +251,7 @@ result = Tensor(2.0).realize() + Tensor(3.0).realize()
 # use the real Linearizer to linearize 2+3
 from tinygrad.codegen.linearizer import Linearizer
 sched = result.lazydata.schedule()
-linearizer = Linearizer(sched[-1].ast)
+linearizer = Linearizer(sched[-1].ast, ClangCompiler.linearizer_opts)
 linearizer.linearize()
 
 # print the uops
