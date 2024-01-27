@@ -605,10 +605,10 @@ class TestLinearizerHelper(unittest.TestCase):
     assert expand_node(n, (a,)) == [n, n, n]
 
   def test_expand_idxs(self):
-    uidx0 = Variable("_uidx0", 0, 1)
+    uidx0 = Variable("_uidx0", 0, 6)
     uidx1 = Variable("_uidx1", 0, 1)
     idxs = (uidx0 // 5, uidx0 * 5, uidx1)
-    assert expand_idxs(idxs) == (uidx0, uidx1)
+    assert expand_idxs(idxs) == (uidx0, NumNode(0), uidx1)
 
 if __name__ == '__main__':
   unittest.main()
