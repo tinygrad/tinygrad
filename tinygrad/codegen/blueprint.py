@@ -21,8 +21,9 @@ class OptOps(Enum):
 # upcast ~= vectorize
 # local ~= bind
 class UOptOps(Enum):
-  SPLIT = auto()    # arg is axis + amount to split
-  REORDER = auto()  # arg is axis + place to insert it
+  SPLIT = auto()    # arg is axis + amount to split (NOTE: amt=1 or amt=shape is a no-op and not valid)
+  REORDER = auto()  # arg is axis + place to insert it (NOTE: place to insert as where it is a no-op and not valid)
+  FUSE = auto()     # arg is (first) axis of the two to fuse
   UPCAST = auto()   # no args
   LOCAL = auto()    # no args
 
