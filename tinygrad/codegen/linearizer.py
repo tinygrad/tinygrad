@@ -43,7 +43,7 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
 def expand_idx(node:Node) -> Union[Variable, NumNode]: return next((v for v in node.vars() if v.expr.startswith("_uidx")), NumNode(0))
 def expand_idxs(nodes:Sequence[Node]) -> Tuple[Union[Variable, NumNode], ...]:
   eidxs = [expand_idx(node) for node in nodes]
-  return tuple([v if v not in eidxs[:j] else NumNode(0) for j, v in enumerate(eidxs)])
+  return tuple([v if v not in eidxs[:j] else NumNode(0) for j, v in enumerate(eidxs)])  # take only first occurrence of expand variable
 def iter_idxs(idxs:Tuple[Union[Variable, NumNode], ...]) -> Iterator[Tuple[int,...]]:
   yield from (x[::-1] for x in itertools.product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
 
