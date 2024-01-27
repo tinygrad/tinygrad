@@ -3,10 +3,11 @@ import ctypes, functools, subprocess, io
 from typing import Tuple, TypeVar, List, Any, cast, Set
 import tinygrad.runtime.autogen.hip as hip
 from tinygrad.helpers import DEBUG, getenv, init_c_var
-from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t, to_char_p_p, get_bytes
+from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t
 from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, BufferOptions, JITRunner, Device, Buffer, update_stats
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
+from tinygrad.runtime.compiler.hip_comgr import compile_hip
 
 # The default HIP stream is used for everything.
 MOCKHIP = getenv("MOCKHIP") # for CI. don't run kernels, only check if they compile
@@ -20,13 +21,6 @@ def hip_set_device(d:int):
 
 def check(status):
   if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
-
-def compile_hip(prg:str, arch="gfx1100") -> bytes:
-  check(hip.hiprtcCreateProgram(ctypes.byref(prog := hip.hiprtcProgram()), prg.encode(), "<null>".encode(), 0, None, None))
-  compile_options = [f'--offload-arch={arch}', '-I/opt/rocm/include']
-  status = hip.hiprtcCompileProgram(prog, len(compile_options), to_char_p_p([o.encode() for o in compile_options]))
-  if status != 0: raise RuntimeError(f"compile failed: {get_bytes(prog, hip.hiprtcGetProgramLogSize, hip.hiprtcGetProgramLog, check).decode()}")
-  return get_bytes(prog, hip.hiprtcGetCodeSize, hip.hiprtcGetCode, check)
 
 class HIPProgram:
   def __init__(self, device:int, name:str, lib:bytes):
