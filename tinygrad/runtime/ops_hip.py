@@ -160,7 +160,7 @@ class HIPSyncEvent(JITRunner):
     to_mv(rawbufs[0]._buf, 4).cast("I")[0] = 0
     hip_set_device(self.device.device)
     check(hip.hipStreamWriteValue32(None, rawbufs[0]._buf, 1, 0))
-    update_stats(colored("sync", "red"), 0, 0, {}, None, 1, device=self.dname)
+    update_stats(colored("sync", "red"), 0, 0, {}, None, 1, jit, device=self.dname)
 
 class HIPWaitEvent(JITRunner):
   def __init__(self, device):
@@ -169,4 +169,4 @@ class HIPWaitEvent(JITRunner):
   def __call__(self, rawbufs:List[Buffer], var_vals, wait=False, jit=False):
     hip_set_device(self.device.device)
     check(hip.hipStreamWaitValue32(None, rawbufs[0]._buf, 1, 1, 0xFFFFFFFF))
-    update_stats(colored("wait", "RED"), 0, 0, {}, None, 1, device=self.dname)
+    update_stats(colored("wait", "RED"), 0, 0, {}, None, 1, jit, device=self.dname)
