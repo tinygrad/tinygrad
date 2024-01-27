@@ -14,6 +14,11 @@ class TestDeviceSpeed(unittest.TestCase):
     with Timing("compiler "):
       self.dev.compiler(self.empty)
 
+  def test_empty_compile_twice(self):
+    self.dev.compiler(self.empty)
+    with Timing("compiler "):
+      self.dev.compiler(self.empty)
+
   def test_launch_speed(self):
     prg_bin = self.dev.compiler(self.empty)
     prg = self.dev.runtime("test", prg_bin)
