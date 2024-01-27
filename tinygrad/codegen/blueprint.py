@@ -7,10 +7,24 @@ from tinygrad.shape.symbolic import sint
 from dataclasses import dataclass
 from enum import Enum, auto
 
+# split (factor = bottom, nparts = top)
+# reorder
+# bind (this is implied by the location of the axis and a few counters)
+# fuse (this is only possible with the correct strides)
+# tile (isn't this just syntax around split and reorder?)
 class OptOps(Enum):
   UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); LASTLOCAL = auto() # noqa: E702
   GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
+
+# global > local > group > reduce > upcast > unroll
+# upcast ~= vectorize
+# local ~= bind
+class UOptOps(Enum):
+  SPLIT = auto()    # arg is axis + amount to split
+  REORDER = auto()  # arg is axis + place to insert it
+  UPCAST = auto()   # no args
+  LOCAL = auto()    # no args
 
 @dataclass(frozen=True, order=True)
 class Opt:
@@ -27,7 +41,13 @@ class Blueprint:
     self.bufs: List[Union[MemBuffer, ConstBuffer]] = dedup([x.arg for x in self.ast.lazyops if x.op in BufferOps])
     self.sts: List[ShapeTracker] = [x.st for x in self.bufs]
 
+    # move all reduce axes to the end
+    reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))
+    permute = tuple([i for i,(s,n) in reduce if s == n] + [i for i,(s,n) in reduce if s != n])
+    self.reshape_and_permute(None, permute)
+
     self.applied_opts: List[Opt] = []
+
     self.upcasted: int = 0
     self.local_dims: int = 0
 

@@ -4,10 +4,9 @@ from tinygrad.ops import LazyOp, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.graph import print_tree
 from tinygrad.helpers import flatten, dedup
-from tinygrad.shape.shapetracker import ShapeTracker
 
 # Linearizer replacement
-# 1. add "groups" and LocalBuffers to the LazyOp, still not a list (can skip for now)
+# 1. add "groups" and LocalBuffers to the LazyOp, still not a list (can skip for now). this can split into multiple blueprints. pad lives here?
 # 2. create a ShapeTracker "Blueprint"
 # 3. Linearize
 # 4. generate UOps from the Ops
@@ -15,23 +14,6 @@ from tinygrad.shape.shapetracker import ShapeTracker
 # this is a subset of "OptOps"
 # at start, axes are either "global" or "reduce"
 # these loads exist apart from the actual implementation
-class Blueprint:
-  def __init__(self, ast:LazyOp):
-    # TODO: LocalBuffer should look like MemBuffer and ConstBuffer
-    self.bufs: List[Union[MemBuffer, ConstBuffer]] = dedup([x.arg for x in self.ast.lazyops if x.op in BufferOps])
-    self.sts: List[ShapeTracker] = [x.st for x in self.bufs]
-
-  @property
-  def output_shape(self) -> Tuple[sint, ...]: return self.sts[0].shape
-
-  # TOOD: add grouped_shape
-
-  @property
-  def full_shape(self) -> Tuple[sint, ...]: return self.sts[self.full_buf_index].shape
-
-  @property
-  def shape_len(self) -> int: return len(self.sts[0].shape)
-
 
 # "Linearizer" actually does three things
 #    "grouping" = this changes the LazyOp structure
@@ -51,10 +33,12 @@ def linearize_lazyop(x:LazyOp) -> List[LazyOp]:
 # split
 # A  = (256, 64)
 # Al = (256, 1)
+#  TODO: this should be two blueprints in one kernel
 #  LOAD MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(256, 64), strides=(1,), offset=0, mask=None, contiguous=True),)))
 #  SUM (256, 1)
 #  STORE LocalBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(256, 1), strides=(1,0), offset=0, mask=None, contiguous=True),)))
 #  BARRIER (note: 256 is now a reduce)
+#  NOTE: UPCASTMID is just an UPCAST on this LOAD
 #  LOAD LocalBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(256, 1), strides=(1,0), offset=0, mask=None, contiguous=True),)))
 #  SUM (1, 1)
 #  STORE MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(1,1), strides=(0,0), offset=0, mask=None, contiguous=True),)))
