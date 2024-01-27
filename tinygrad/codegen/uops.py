@@ -1,8 +1,26 @@
-from typing import List, Set
+from __future__ import annotations
+from typing import List, Set, Optional, Tuple, Any
 from tinygrad.helpers import DEBUG, flatten
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.codegen.linearizer import UOp, UOps
+from enum import Enum, auto
+from dataclasses import dataclass
+
+# bottom ones are asm only
+class UOps(Enum):
+  LOOP = auto(); IF = auto(); END = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
+  DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
+  LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto(); PHI = auto() # noqa: E702
+  ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
+
+@dataclass(eq=False)
+class UOp:
+  uop: UOps
+  dtype: Optional[DType]
+  vin: Tuple[UOp, ...]
+  arg: Any
+  def __repr__(self):
+    return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
 
 def get_recursive_children(uops:List[UOp], x:UOp) -> Set[UOp]:
   deps = set([x])

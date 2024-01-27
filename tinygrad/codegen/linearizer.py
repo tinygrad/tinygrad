@@ -2,8 +2,6 @@ from __future__ import annotations
 from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Set, Iterator
 import itertools, math, functools
 from collections import defaultdict
-from enum import Enum, auto
-from dataclasses import dataclass
 
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.helpers import colored, DEBUG, prod, getenv, all_same, to_function_name
@@ -13,23 +11,7 @@ from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, D
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.features.image import to_image_idx
 
-# bottom ones are asm only
-class UOps(Enum):
-  LOOP = auto(); IF = auto(); END = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
-  DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
-  LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto(); PHI = auto() # noqa: E702
-  ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
-
-@dataclass(eq=False)
-class UOp:
-  uop: UOps
-  dtype: Optional[DType]
-  vin: Tuple[UOp, ...]
-  arg: Any
-  def __repr__(self):
-    return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
-
-from tinygrad.codegen.uoptimizer import get_recursive_children, remove_childless_uops, fix_loop_scope, uops_type_verify
+from tinygrad.codegen.uops import UOps, UOp, get_recursive_children, remove_childless_uops, fix_loop_scope, uops_type_verify
 
 def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
   local_idxs = loop_local_idxs = [Variable(f"{prefix}{start_dim+i}", 0, s-1) for i,s in enumerate(local_dims[0:maxdim-1] + (prod(local_dims[maxdim-1:]),) if len(local_dims) > maxdim else local_dims)]  # noqa: E501
