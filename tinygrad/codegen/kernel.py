@@ -91,7 +91,7 @@ class Kernel:
     self.sts: List[ShapeTracker] = [x.st for x in cast(List[Union[MemBuffer, ConstBuffer]], self.bufs)]
 
     # move all reduce axes to the end
-    reduce = list(enumerate(zip(self.full_shape, self.sts[0].shape)))
+    reduce = list(enumerate(zip(self.full_shape, self.output_shape)))
     permute = tuple([i for i,(s,n) in reduce if s == n] + [i for i,(s,n) in reduce if s != n])
     self.reshape_and_permute(None, permute)
 
