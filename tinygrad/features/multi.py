@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Union, Any, Tuple, List
 import functools
 from tinygrad.helpers import all_same, dedup, round_up, DEBUG
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, Scalar
 from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
 from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.shape.shapetracker import ShapeTracker, sint
@@ -50,7 +50,7 @@ class MultiLazyBuffer:
   # passthroughs
   def schedule(self, seen=None): return create_schedule(self.lbs, seen)
   def cast(self, dtype:DType, bitcast:bool=False): return MultiLazyBuffer([x.cast(dtype, bitcast) for x in self.lbs], self.axis)
-  def const(self, val:Union[float, int]) -> MultiLazyBuffer: return MultiLazyBuffer([x.const(val) for x in self.lbs], self.axis)
+  def const(self, val:Scalar) -> MultiLazyBuffer: return MultiLazyBuffer([x.const(val) for x in self.lbs], self.axis)
   def contiguous(self): return MultiLazyBuffer([x.contiguous() for x in self.lbs], self.axis)
 
   # elementwise is simple
