@@ -33,21 +33,21 @@ class TensorCore:
   thread_local_aliases: Callable # lambda that returns a list of [threads_1, ..., threads_n, upcast_1(unrolled), upcast_2(upcast)] defining the alias for each TC dim given local and upcast indexes # noqa: E501
   thread_local_sizes: List[int] # in each thread, the number of elements stored in registers for each TC dim
   wmma_func: str # name of wmma function to call
-  arch: Optional[str] = None
+  arch: Optional[int] = None
   def __str__(self): return f"tensor_core<{self.device}, {self.dims}, {self.dtype_in}, {self.dtype_out}>"
   def num_threads(self): return len([1 for (op, _, _) in self.ops if op == "L"])
 
 tensor_cores: Dict[str, List[TensorCore]] = {
   "METAL": [
-    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.float, dtype_out=dtypes.float, wmma_func="__metal_wmma<float2,simdgroup_float8x8,float2>", ops=[("U",0,2),("L",0,2),("L",1,4),("L",0,2),("L",1,2)], thread_local_sizes=[2,2,2], thread_local_aliases=lambda l4,l3,l2,l1,u0,u1,z: [ [l4,z,l2,z,u0+l1*2+l3*4,z],[z,l3,z,l1,l2+l4*4,u1] ], arch="arm64"), # noqa: E501
-    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.float, wmma_func="__metal_wmma<half2,simdgroup_float8x8,float2>",  ops=[("U",0,2),("L",0,2),("L",1,4),("L",0,2),("L",1,2)], thread_local_sizes=[2,2,2], thread_local_aliases=lambda l4,l3,l2,l1,u0,u1,z: [ [l4,z,l2,z,u0+l1*2+l3*4,z],[z,l3,z,l1,l2+l4*4,u1] ], arch="arm64"), # noqa: E501
-    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.half,  wmma_func="__metal_wmma<half2,simdgroup_half8x8,half2>",    ops=[("U",0,2),("L",0,2),("L",1,4),("L",0,2),("L",1,2)], thread_local_sizes=[2,2,2], thread_local_aliases=lambda l4,l3,l2,l1,u0,u1,z: [ [l4,z,l2,z,u0+l1*2+l3*4,z],[z,l3,z,l1,l2+l4*4,u1] ], arch="arm64"), # noqa: E501
+    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.float, dtype_out=dtypes.float, wmma_func="__metal_wmma<float2,simdgroup_float8x8,float2>", ops=[("U",0,2),("L",0,2),("L",1,4),("L",0,2),("L",1,2)], thread_local_sizes=[2,2,2], thread_local_aliases=lambda l4,l3,l2,l1,u0,u1,z: [ [l4,z,l2,z,u0+l1*2+l3*4,z],[z,l3,z,l1,l2+l4*4,u1] ], arch=1), # noqa: E501
+    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.float, wmma_func="__metal_wmma<half2,simdgroup_float8x8,float2>",  ops=[("U",0,2),("L",0,2),("L",1,4),("L",0,2),("L",1,2)], thread_local_sizes=[2,2,2], thread_local_aliases=lambda l4,l3,l2,l1,u0,u1,z: [ [l4,z,l2,z,u0+l1*2+l3*4,z],[z,l3,z,l1,l2+l4*4,u1] ], arch=1), # noqa: E501
+    TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.half,  wmma_func="__metal_wmma<half2,simdgroup_half8x8,half2>",    ops=[("U",0,2),("L",0,2),("L",1,4),("L",0,2),("L",1,2)], thread_local_sizes=[2,2,2], thread_local_aliases=lambda l4,l3,l2,l1,u0,u1,z: [ [l4,z,l2,z,u0+l1*2+l3*4,z],[z,l3,z,l1,l2+l4*4,u1] ], arch=1), # noqa: E501
   ],
   "HIP": [
     TensorCore(device="HIP", dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="__builtin_amdgcn_wmma_f32_16x16x16_f16_w32", ops=[("U",1,8),("L",0,16),("L",1,2)], thread_local_sizes=[16,16,8], thread_local_aliases=lambda l2,l1,u0,u1,z: [ [l1%2,z,u0,l1//2], [z,l1,u1,z] ]),  # noqa: E501
   ],
   "CUDA": [
-   TensorCore(device="CUDA", dims=[8,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="__mma_m16n8k16_f16_f32", ops=[("U",0,2),("L",0,4),("L",1,8),("U",1,2)], thread_local_sizes=[8,4,4], thread_local_aliases=lambda l2,l1,u0,u1,z:[ [l2,z,u0%2+l1*2+u0//4*8,z,(u0//2)%2], [z,l2//2,u1%2+l1*2+(u1//2)*8,l2%2,z]]),  # noqa: E501
+    TensorCore(device="CUDA", dims=[8,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="__mma_m16n8k16_f16_f32", ops=[("U",0,2),("L",0,4),("L",1,8),("U",1,2)], thread_local_sizes=[8,4,4], thread_local_aliases=lambda l2,l1,u0,u1,z:[ [l2,z,u0%2+l1*2+u0//4*8,z,(u0//2)%2], [z,l2//2,u1%2+l1*2+(u1//2)*8,l2%2,z]], arch=80),  # noqa: E501
   ]
 }
 
@@ -67,6 +67,7 @@ class LinearizerOptions(NamedTuple):
   # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
   global_max: Optional[List[int]] = None
   local_max: Optional[List[int]] = None
+  target_arch: int = 0  # minimum supported version, arbitrary mapping from target arch name to integer
 
 class Kernel:
   def __init__(self, ast:LazyOp, opts:Optional[LinearizerOptions]=None):
@@ -334,7 +335,8 @@ class Kernel:
   def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None) -> bool:
     if use_tensor_cores and self.opts.has_local and self.reduceop and self.reduceop.op == ReduceOps.SUM and self.opts.device in tensor_cores:
       for tc in tensor_cores[self.opts.device]:
-        if not (use_tensor_cores==2 or (tc.arch is None or tc.arch == os.uname().machine)): continue
+        print(tc.arch, self.opts.target_arch)
+        if not (use_tensor_cores==2 or (tc.arch is None or tc.arch <= self.opts.target_arch)): continue
         has_cast = tc.dtype_in != tc.dtype_out
 
         if has_cast and not(self.reduceop.src[0].op == UnaryOps.CAST and self.reduceop.src[0].arg[0] == tc.dtype_out): continue
