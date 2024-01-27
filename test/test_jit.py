@@ -250,8 +250,8 @@ class TestJit(unittest.TestCase):
     # save [2] in the caches
     cache.good(zero, two)
     cache.bad(zero, two)
-    np.testing.assert_equal([2], cache.good_cache)
-    np.testing.assert_equal([2], cache.bad_cache)
+    np.testing.assert_equal([2], cache.good_cache.numpy())
+    np.testing.assert_equal([2], cache.bad_cache.numpy())
 
     # verify the jitted calls read 2 from the cache
     np.testing.assert_equal([2], cache.good_jitted(zero).numpy())

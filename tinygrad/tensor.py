@@ -6,7 +6,7 @@ from collections import defaultdict
 from functools import partialmethod, reduce
 import numpy as np
 
-from tinygrad.dtype import DType, dtypes, ImageDType, least_upper_float, least_upper_dtype
+from tinygrad.dtype import DType, dtypes, ImageDType, Scalar, least_upper_float, least_upper_dtype
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, WINO, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
 from tinygrad.lazy import LazyBuffer, create_schedule
 from tinygrad.features.multi import MultiLazyBuffer
@@ -45,8 +45,6 @@ def _fromcpu(x: np.ndarray) -> LazyBuffer:
   ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "CPU")
   ret.realized = Buffer("CPU", prod(x.shape), dtypes.from_np(x.dtype), x.flatten())
   return ret
-
-Scalar = Union[float, int, bool]
 
 class Tensor:
   __slots__ = "lazydata", "requires_grad", "grad", "_ctx"
@@ -779,7 +777,7 @@ class Tensor:
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
-      if 0 in self.shape: return self, self.full_like(y)
+      assert isinstance(y, (float, int, bool)), f"{type(y)=}, {y=}"
       if isinstance(self.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
       else: y_dtype = dtypes.from_py(y)
       y = Tensor(y, self.device, y_dtype, requires_grad=False)

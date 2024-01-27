@@ -1,7 +1,9 @@
-from typing import Final, Optional, ClassVar, Set, Tuple, Dict
+from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union
 from dataclasses import dataclass
 import numpy as np  # TODO: remove numpy
 import functools
+
+Scalar = Union[float, int, bool]
 
 @dataclass(frozen=True, order=True)
 class DType:
