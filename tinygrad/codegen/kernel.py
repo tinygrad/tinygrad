@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, math, itertools
+import math, itertools
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union, Callable
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.device import Device, Compiled

@@ -1,5 +1,5 @@
 import numpy as np
-import unittest, os
+import unittest
 
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node, expand_idxs
