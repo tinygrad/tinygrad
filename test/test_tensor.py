@@ -488,6 +488,11 @@ class TestTensorCreationDevice(unittest.TestCase):
 
 
 class TestTensorPickle(unittest.TestCase):
+  def test_pickle_scalar(self):
+    y = Tensor(1).to("CPU")
+    x = pickle.loads(pickle.dumps(y))
+    np.testing.assert_equal(y.numpy(), x.numpy())
+
   def test_pickle_one_dim(self):
     y = Tensor([1, 2, 3]).to("CPU")
     x = pickle.loads(pickle.dumps(y))
