@@ -8,13 +8,13 @@ class LSTMCell:
 
     k = hidden_size ** -0.5
 
-    self.weights_ih = Tensor.uniform(hidden_size * 4, input_size)*k
+    self.weights_ih = Tensor.uniform(input_size, hidden_size * 4)*k
     self.bias_ih = Tensor.uniform(hidden_size * 4)*k
-    self.weights_hh = Tensor.uniform(hidden_size * 4, hidden_size)*k
+    self.weights_hh = Tensor.uniform(hidden_size, hidden_size * 4)*k
     self.bias_hh = Tensor.uniform(hidden_size * 4)*k
 
-  def __call__(self, x, hc):
-    gates = x.linear(self.weights_ih.T, self.bias_ih) + hc[:x.shape[0]].linear(self.weights_hh.T, self.bias_hh)
+  def __call__(self, x:Tensor, hc:Tensor):
+    gates = x.linear(self.weights_ih, self.bias_ih) + hc[:x.shape[0]].linear(self.weights_hh, self.bias_hh)
 
     i, f, g, o = gates.chunk(4, 1)
     i, f, g, o = i.sigmoid(), f.sigmoid(), g.tanh(), o.sigmoid()
@@ -32,50 +32,40 @@ class LSTM:
 
     self.cells = [LSTMCell(input_size, hidden_size, dropout) if i == 0 else LSTMCell(hidden_size, hidden_size, dropout if i != layers - 1 else 0) for i in range(layers)]
 
-  def __call__(self, x, hc):
-
-    def _do_step(x_, hc_):
-      return self.do_step(x_, hc_)
-
-    if hc is None:
-      hc = Tensor.zeros(self.layers, 2 * x.shape[1], self.hidden_size, requires_grad=False)
-
-    output = None
-    for t in range(x.shape[0]):
-      hc = _do_step(x[t] + 1 - 1, hc) # TODO: why do we need to do this?
-      if output is None:
-        output = hc[-1:, :x.shape[1]]
-      else:
-        output = output.cat(hc[-1:, :x.shape[1]], dim=0).realize()
-
-    return output, hc
-
-  def do_step(self, x, hc):
-    new_hc = [x]
-    for i, cell in enumerate(self.cells):
-      new_hc.append(cell(new_hc[i][:x.shape[0]], hc[i]))
-    return Tensor.stack(new_hc[1:]).realize()
+  def __call__(self,x:Tensor,hc=  None):
+    if hc is None: hc = [Tensor.zeros(x.shape[1]*2,self.hidden_size,requires_grad = False) for _ in range(self.layers)]
+    res = []
+    for t in range(int(x.shape[0])):
+      c = x[t]
+      for l in range(self.layers):
+        cell =  self.cells[l]
+        hc[l] = cell(c,hc[l])
+        c = hc[l][:x.shape[1],:self.hidden_size]
+      res.append(c)
+    return Tensor.stack(res),hc
 
 class StackTime:
   def __init__(self, factor):
     self.factor = factor
 
-  def __call__(self, x, x_lens):
+  def __call__(self, x):
     x = x.pad(((0, (-x.shape[0]) % self.factor), (0, 0), (0, 0)))
     x = x.reshape(x.shape[0] // self.factor, x.shape[1], x.shape[2] * self.factor)
-    return x, x_lens / self.factor if x_lens is not None else None
+    return x
 
+
+STACKFACTOR = 2
 class Encoder:
-  def __init__(self, input_size, hidden_size, pre_layers, post_layers, stack_time_factor, dropout):
+  def __init__(self, input_size, hidden_size, pre_layers, post_layers, dropout):
     self.pre_rnn = LSTM(input_size, hidden_size, pre_layers, dropout)
-    self.stack_time = StackTime(stack_time_factor)
-    self.post_rnn = LSTM(stack_time_factor * hidden_size, hidden_size, post_layers, dropout)
+    self.stack_time = StackTime(STACKFACTOR)
+    self.post_rnn = LSTM(STACKFACTOR * hidden_size, hidden_size, post_layers, dropout)
 
-  def __call__(self, x, x_lens):
-    x, _ = self.pre_rnn(x, None)
-    x, x_lens = self.stack_time(x, x_lens)
-    x, _ = self.post_rnn(x, None)
-    return x.transpose(0, 1), x_lens
+  def __call__(self, x):
+    x, _ = self.pre_rnn(x)
+    x = self.stack_time(x)
+    x, _ = self.post_rnn(x)
+    return x.transpose(0, 1)
 
 class Prediction:
   def __init__(self, vocab_size, hidden_size, layers, dropout):
@@ -110,8 +100,8 @@ class Joint:
 
 
 class RNNT:
-  def __init__(self, input_features=240, vocab_size=29, enc_hidden_size=1024, pred_hidden_size=320, joint_hidden_size=512, pre_enc_layers=2, post_enc_layers=3, pred_layers=2, stack_time_factor=2, dropout=0.32):
-    self.encoder = Encoder(input_features, enc_hidden_size, pre_enc_layers, post_enc_layers, stack_time_factor, dropout)
+  def __init__(self, input_features=240, vocab_size=29, enc_hidden_size=1024, pred_hidden_size=320, joint_hidden_size=512, pre_enc_layers=2, post_enc_layers=3, pred_layers=2, dropout=0.32):
+    self.encoder = Encoder(input_features, enc_hidden_size, pre_enc_layers, post_enc_layers, dropout)
     self.prediction = Prediction(vocab_size, pred_hidden_size, pred_layers, dropout)
     self.joint = Joint(vocab_size, pred_hidden_size, enc_hidden_size, joint_hidden_size, dropout)
 
@@ -121,8 +111,8 @@ class RNNT:
     out = self.joint(f, g)
     return out.realize()
 
-  def decode(self, x, x_lens):
-    logits, logit_lens = self.encoder(x, x_lens)
+  def decode(self, x):
+    logits, logit_lens = self.encoder(x)
     outputs = []
     for b in range(logits.shape[0]):
       inseq = logits[b, :, :].unsqueeze(1)

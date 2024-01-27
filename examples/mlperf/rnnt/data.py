@@ -20,8 +20,20 @@ Then this [file](https://github.com/mlcommons/inference/blob/master/speech_recog
 #%%
 
 BASEDIR = pathlib.Path(__file__).parent/"../../../extra/datasets/librispeech/"
+
+maxX = maxY = 0
 with open(BASEDIR / "dev-clean-wav.json") as f:
   ci = json.load(f)
+  ci = list(filter(lambda x: x['files'][0]['duration'] < 5,ci)) # filtering for samples under 15s as is allowed in reference
+  
+  feature_rate = 0.03
+  ci_ = []
+  for item in ci:
+    maxX = max(maxX, round(item['files'][0]['duration'] / feature_rate + 1))
+    maxY = max(maxY, len(item["transcript"]))
+    ci_.append(item)
+  ci = ci_
+  print(len(ci))
 
 FILTER_BANK = np.expand_dims(librosa.filters.mel(sr=16000, n_fft=512, n_mels=80, fmin=0, fmax=8000), 0)
 WINDOW = librosa.filters.get_window("hann", 320)
