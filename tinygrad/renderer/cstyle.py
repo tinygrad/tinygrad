@@ -223,7 +223,7 @@ class CUDALanguage(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+x)}", "l": lambda x: f"threadIdx.{chr(120+x)}",
                        "i": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
-  half_prekernel ="#include <cuda_fp16.h>\n"+"#include <cuda_bf16.h>\n"+"""
+  half_prekernel = "#include <cuda_fp16.h>\n"+"#include <cuda_bf16.h>\n"+"""
     struct half4 { half x, y, z, w; };
     __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
   """
@@ -238,7 +238,13 @@ code_for_op_hip = {
   UnaryOps.EXP2: lambda x,dtype: f"__ocml_exp2_f32({x})" if dtype != dtypes.half else f"__ocml_exp2_f16({x})",
 }
 
-class HIPLanguage(CUDALanguage):
+def _make_hip_dtype(base_type, name, cnt):
+  nms = "xyzwabcdefghijkl"[:cnt]
+  return f"typedef {base_type} {name}{cnt} __attribute__((ext_vector_type({cnt})));\n" + \
+         f"static inline __attribute__((device)) {name}{cnt} make_{name}{cnt}(" + ', '.join([f"{base_type} {x}" for x in nms]) + \
+         ") { return {" + ', '.join(nms) + "}; }"
+
+class HIPLanguage(CStyleLanguage):
   kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
   #define launch_bounds_impl0(requiredMaxThreadsPerBlock)                                       \
     __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock)))
@@ -247,21 +253,12 @@ class HIPLanguage(CUDALanguage):
   #define select_impl_(_1, _2, impl_, ...) impl_
   #define __launch_bounds__(...) select_impl_(__VA_ARGS__, launch_bounds_impl1, launch_bounds_impl0)(__VA_ARGS__)
   typedef long unsigned int size_t;
+  #define half _Float16
+  struct hip_bfloat16 { unsigned short data; };
 
   extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_id(unsigned int);
   extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_group_id(unsigned int);
   extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_size(unsigned int);
-
-  typedef signed int int2 __attribute__((ext_vector_type(2)));
-  static inline __attribute__((device)) int2 make_int2(signed int x, signed int y) { return {x, y}; };
-
-  typedef float float2 __attribute__((ext_vector_type(2)));
-  static inline __attribute__((device)) float2 make_float2(float x, float y) { return {x, y}; };
-  typedef float float4 __attribute__((ext_vector_type(4)));
-  static inline __attribute__((device)) float4 make_float4(float x, float y, float z, float w) { return {x, y, z, w}; };
-  typedef float float8 __attribute__((ext_vector_type(8)));
-  static inline __attribute__((device)) float8 make_float8(float x, float y, float z, float w, float a, float b, float c, float d)
-  { return {x, y, z, w, a, b, c, d}; }
 
   extern "C" {
   __attribute__((device)) __attribute__((const)) float __ocml_fmax_f32(float, float);
@@ -269,41 +266,23 @@ class HIPLanguage(CUDALanguage):
   __attribute__((device)) __attribute__((pure)) float __ocml_log2_f32(float);
   __attribute__((device)) float __ocml_sin_f32(float);
   __attribute__((device)) __attribute__((const)) float __ocml_sqrt_f32(float);
-  }
-
-  extern "C" __attribute__((global))
-  """
+  __attribute__((device)) __attribute__((const)) _Float16 __ocml_fmax_f16(_Float16, _Float16);
+  __attribute__((device)) __attribute__((pure)) _Float16 __ocml_exp2_f16(_Float16);
+  __attribute__((device)) __attribute__((pure)) _Float16 __ocml_log2_f16(_Float16);
+  __attribute__((device)) _Float16 __ocml_sin_f16(_Float16);
+  __attribute__((device)) __attribute__((const)) _Float16 __ocml_sqrt_f16(_Float16);
+  }\n""" + '\n'.join([_make_hip_dtype(*x) for x in [("signed int", "int", 2),
+                     ("_Float16", "half", 2), ("_Float16", "half", 4), ("_Float16", "half", 8), ("_Float16", "half", 16),
+                     ("float", "float", 2), ("float", "float", 4), ("float", "float", 8)]]) + \
+  'extern "C" __attribute__((global))'
   code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_hip}
   smem_prefix = "__attribute__((shared))"
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
+  float4 = "make_float4"
   launch_bounds = True
   uses_ptr_arithmetic = True
-  half_prekernel = """
-  #define half _Float16
-  typedef _Float16 half2 __attribute__((ext_vector_type(2)));
-  __attribute__((device)) half2 make_half2(half x, half y) { return {x, y}; }
-  typedef _Float16 half4 __attribute__((ext_vector_type(4)));
-  __attribute__((device)) half4 make_half4(half x, half y, half z, half w) { return {x, y, z, w}; }
-  typedef _Float16 half8 __attribute__((ext_vector_type(8)));
-  __attribute__((device)) half8 make_half8(half x, half y, half z, half w, half a, half b, half c, half d) { return {x, y, z, w, a, b, c, d}; }
-  typedef _Float16 half16 __attribute__((ext_vector_type(16)));
-  __attribute__((device)) half16 make_half16(half x, half y, half z, half w, half a, half b, half c, half d,
-                                             half e, half f, half g, half h, half i, half j, half k, half l) {
-                                             return {x, y, z, w, a, b, c, d, e, f, g, h, i, j, k, l}; }
-
-  extern "C" {
-  __attribute__((device)) __attribute__((const)) _Float16 __ocml_fmax_f16(_Float16, _Float16);
-  __attribute__((device)) __attribute__((pure)) _Float16 __ocml_exp2_f16(_Float16);
-  __attribute__((device)) __attribute__((pure)) _Float16 __ocml_log2_f16(_Float16);
-  __attribute__((device)) _Float16 __ocml_sin_f16(_Float16);
-  __attribute__((device)) __attribute__((const)) _Float16 __ocml_sqrt_f16(_Float16);
-  }
-  struct hip_bfloat16 {
-    unsigned short data;
-  };
-  """
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
