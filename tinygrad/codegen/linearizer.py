@@ -91,9 +91,8 @@ class Linearizer(Kernel):
     expand_vars = tuple([v if v not in expand_vars_[:j] else NumNode(0) for j, v in enumerate(expand_vars_)])  # take only first appearance of each
 
     dim, amt = None, 1
-    # float 4 grouping, only for unit-stride dim and unit-stride idx
-    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and idxs[upcast_dim[0]] in expand_vars and \
-        len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [4,2]:
+    # float 4 grouping
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [4, 2]:
       dim, amt = upcast_dim[0], len(float4_expand)
       g_idx, g_valid = self.sts[i].expr_idxs(idxs[:dim] + [float4_expand[0]] + idxs[dim+1:])
       # do not use float4 if idx is not aligned
@@ -152,9 +151,8 @@ class Linearizer(Kernel):
     _idxs = zip(*[expand_node(idx, expand_vars) for idx in idxs]) if idxs else [tuple()]  # transpose
     store_offset = dict(zip(_idxs, store))
 
-    # float 4 grouping, only for unit-stride dim and unit-stride idx
-    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and idxs[upcast_dim[0]] in expand_vars and \
-        len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [2,4]:
+    # float4 grouping
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [2,4]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
         _idx = k[:upcast_dim[0]] + (float4_expand[0],) + k[upcast_dim[0]+1:]
