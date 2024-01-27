@@ -8,7 +8,6 @@ from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Compiled
 from tinygrad.helpers import DEBUG, GRAPH
-from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.graph import print_tree, realized_lazybuffer
 from tinygrad import nn, dtypes
@@ -33,7 +32,7 @@ def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=N
   # test the (non loadops) ops linearize
   for s in sched:
     if s.ast.op in LoadOps: continue
-    l = Linearizer(s.ast, LinearizerOptions())
+    l = Linearizer(s.ast)
     l.hand_coded_optimizations()
     l.linearize()
 
