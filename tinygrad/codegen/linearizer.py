@@ -1,12 +1,12 @@
 from __future__ import annotations
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Set, Iterator, Sequence
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Set, Iterator
 import itertools, math, functools
 from collections import defaultdict
 from enum import Enum, auto
 from dataclasses import dataclass
 
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
-from tinygrad.helpers import colored, DEBUG, prod, getenv, all_same, to_function_name, flatten, dedup
+from tinygrad.helpers import colored, DEBUG, prod, getenv, all_same, to_function_name, flatten
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
@@ -40,7 +40,7 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
     local_idxs = local_idxs[0:maxdim-1] + nli[::-1]
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
-def expand_idxs(nodes:Sequence[Node]) -> Tuple[NumNode]: return tuple(dedup([v for node in nodes for v in node.vars() if v.expr.startswith("_uidx")]))
+def expand_idx(node:Node) -> Union[Variable, NumNode]: return next((v for v in node.vars() if v.expr.startswith("_uidx")), NumNode(0))
 def iter_idxs(idxs:Tuple[Union[Variable, NumNode], ...]) -> Iterator[Tuple[int,...]]:
   yield from (x[::-1] for x in itertools.product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
 
@@ -48,7 +48,7 @@ def iter_idxs(idxs:Tuple[Union[Variable, NumNode], ...]) -> Iterator[Tuple[int,.
 # expand increments earlier variables faster than later variables (as specified in the argument)
 @functools.lru_cache(maxsize=None)
 def expand_node(node:Node, idxs:Optional[Tuple[Union[Variable, NumNode], ...]]=None) -> List[Node]:
-  if idxs is None: idxs = expand_idxs((node,))
+  if idxs is None: idxs = (expand_idx(node),)
   return [node.substitute({k:v for k,v in zip(idxs, (NumNode(x) for x in rep)) if isinstance(k, Variable)}) for rep in iter_idxs(idxs)]
 
 class Linearizer(Kernel):
@@ -87,7 +87,8 @@ class Linearizer(Kernel):
     localtype = self.get_base_dtype(buf.dtype if acc is None else get_lazyop_info(self.reduceop).dtype)
     const = buf.val if isinstance(buf, ConstBuffer) else acc
 
-    expand_vars = expand_idxs(idxs)
+    expand_vars_ = [expand_idx(idx) for j, idx in enumerate(idxs)]
+    expand_vars = tuple([v if v not in expand_vars_[:j] else NumNode(0) for j, v in enumerate(expand_vars_)])  # take only first appearance of each
 
     dim, amt = None, 1
     # float 4 grouping, only for unit-stride dim and unit-stride idx
@@ -105,7 +106,7 @@ class Linearizer(Kernel):
 
     ret = []
     invalid_value = 0 if dtypes.is_int(buf.dtype) else 0.0
-    for idx, valid, f4pos in zip(e_idxs, e_valids, expand_node(NumNode(0) if dim is None else idxs[dim], expand_vars)):
+    for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, NumNode(0), NumNode(1)) if valid.max == 0 else (const, idx, valid)
       key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
@@ -138,7 +139,7 @@ class Linearizer(Kernel):
           rendered_idx = idx.render(self.render_ops, self)
           valid_tuple = (valid.render(self.render_ops, self), self.const(invalid_value, localtype)) if valid.min == 0 else tuple()
           self.load_cache[key] = self.uop(UOps.LOAD, localtype, (buf_uop, rendered_idx) + valid_tuple + ((barrier,) if barrier else ()))
-      ret.append(self.uop(UOps.GEP, localtype.scalar(), (self.load_cache[key],), f4pos.b) if dim is not None else self.load_cache[key])
+      ret.append(self.uop(UOps.GEP, localtype.scalar(), (self.load_cache[key],), rep_idx[dim]) if dim is not None else self.load_cache[key])
     return ret
 
   def global_store(self, i:int, idxs:List[Node], store:List[UOp]) -> List[UOp]:
@@ -146,8 +147,9 @@ class Linearizer(Kernel):
     buf_uop = self.buf_uops[i]
     assert buf_uop is not None, f"buffer {i} wasn't UOped"
 
-    expand_vars = expand_idxs(idxs)
-    _idxs = zip(*[expand_node(idx, expand_vars) for idx in idxs]) if idxs else [tuple()]
+    expand_vars_ = [expand_idx(idx) for j, idx in enumerate(idxs)]
+    expand_vars = tuple([v if v not in expand_vars_[:j] else NumNode(0) for j, v in enumerate(expand_vars_)])  # take only first appearance of each
+    _idxs = zip(*[expand_node(idx, expand_vars) for idx in idxs]) if idxs else [tuple()]  # transpose
     store_offset = dict(zip(_idxs, store))
 
     # float 4 grouping, only for unit-stride dim and unit-stride idx
