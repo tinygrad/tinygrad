@@ -69,7 +69,6 @@ def get_run_onnx(onnx_model: ModelProto):
     if len(inp.raw_data) > 0:
       ret = Tensor(np.frombuffer(inp.raw_data, dtype=dtype.np).copy(), requires_grad=False).reshape(tuple(inp.dims))
       return ret
-      return ret.cast(dtypes.float32) if dtype == dtypes.float16 else ret
     return Tensor(None, requires_grad=False)
 
   def attribute_parse(a: AttributeProto) -> float | int | str | Tensor | tuple[float] | tuple[int]:
@@ -131,7 +130,8 @@ def get_run_onnx(onnx_model: ModelProto):
       if x != "": return input_tensors[x]
       return None
 
-    if debug >= 1: ops = set()
+    from collections import defaultdict
+    if debug >= 1: ops = defaultdict(int)
     for num,n in enumerate(onnx_model.graph.node):
       inp: List[Tensor] = []
       if debug >= 3: print("inputs:")
@@ -142,7 +142,7 @@ def get_run_onnx(onnx_model: ModelProto):
       opt: Dict = attribute_dict[num]
       if debug >= 1:
         print(f"{num}: op {n.op_type} tensor {[(x.shape, x.dtype) if isinstance(x, Tensor) else x for x in inp]} opt {opt}")
-        ops.add(n.op_type)
+        ops[n.op_type] += 1
 
       # NOTE some ops live here because they require access to some local variables
       # have to use n.output for cases when num_outputs is absent
