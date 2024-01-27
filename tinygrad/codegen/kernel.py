@@ -335,7 +335,6 @@ class Kernel:
   def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None) -> bool:
     if use_tensor_cores and self.opts.has_local and self.reduceop and self.reduceop.op == ReduceOps.SUM and self.opts.device in tensor_cores:
       for tc in tensor_cores[self.opts.device]:
-        print(tc.arch, self.opts.target_arch)
         if not (use_tensor_cores==2 or (tc.arch is None or tc.arch <= self.opts.target_arch)): continue
         has_cast = tc.dtype_in != tc.dtype_out
 
