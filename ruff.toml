@@ -31,5 +31,6 @@ exclude = [
   "examples/",
   "extra/",
   "openpilot/",
+  "tinygrad/runtime/autogen",
 ]
 

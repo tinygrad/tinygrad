@@ -133,6 +133,7 @@ class TinyJit(Generic[ReturnType]):
     elif self.cnt == 0:
       # jit ignore
       self.ret = self.fxn(*args, **kwargs)
+      for p in get_parameters(self.ret): p.realize()
 
     # clear jit inputs
     for (j,i) in self.input_replace.keys(): self.jit_cache[j].rawbufs[i] = None

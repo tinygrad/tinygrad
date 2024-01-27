@@ -1,6 +1,6 @@
 from __future__ import annotations
 from collections import defaultdict
-from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple, cast
+from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple, cast, ClassVar
 import importlib, inspect, functools, pathlib, time, re, ctypes
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
@@ -262,6 +262,18 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 
 # **************** for Compiled Devices ****************
 
+class Compiler:
+  linearizer_opts: ClassVar[LinearizerOptions]
+  def __init__(self, cachekey=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
+  def render(self, name:str, uops) -> str: raise NotImplementedError("need a render function")
+  def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
+  def compile_cached(self, src:str) -> bytes:
+    if self.cachekey is not None: lib = diskcache_get(self.cachekey, src)
+    if lib is None:
+      lib = self.compile(src)
+      if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
+    return lib
+
 class CompiledASTRunner(JITRunner):
   def __init__(self, ast:Optional[LazyOp], name:str, prg:str, device:Compiled, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, precompiled:Optional[bytes]=None):  # noqa: E501
     super().__init__()
@@ -270,12 +282,7 @@ class CompiledASTRunner(JITRunner):
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
     self.name, self.display_name, self.prg, self.device, self.global_size, self.local_size, self.first_run = \
       to_function_name(name), name, prg, device, global_size, local_size, True
-    lib: Optional[bytes] = precompiled
-    if lib is None:
-      if self.device.compiler_cachekey is not None: lib = diskcache_get(self.device.compiler_cachekey, prg)
-      if lib is None:
-        lib = self.device.compiler(prg)
-        if self.device.compiler_cachekey is not None: diskcache_put(self.device.compiler_cachekey, prg, lib)
+    lib:bytes = precompiled if precompiled is not None else self.device.compiler.compile_cached(prg)
     self.lib, self.clprg = lib, self.device.runtime(self.name, lib)
     self.vars: List[Variable] = []
     if ast:
@@ -306,31 +313,29 @@ class CompiledASTRunner(JITRunner):
     return et
 
 class Compiled:
-  def __init__(self, device:str, allocator:Allocator, linearizer_opts:LinearizerOptions, renderer, compiler, compiler_cachekey, runtime, graph=None):
-    self.dname, self.allocator, self.linearizer_opts, self.renderer, self.compiler, self.runtime, self.graph, self.compiler_cachekey = \
-      device, allocator, linearizer_opts, renderer, compiler, runtime, graph, None if getenv("DISABLE_COMPILER_CACHE") else compiler_cachekey
+  def __init__(self, device:str, allocator:Allocator, compiler:Compiler, runtime, graph=None):
+    self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
   def synchronize(self): pass  # override this in your device
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
-    assert self.compiler is not None, f"compiler is None, can't build {k.ast}"
     k.linearize()
-    return CompiledASTRunner(k.ast, k.name, self.renderer(to_function_name(k.name), k.uops), self, k.global_size, k.local_size)
+    return CompiledASTRunner(k.ast, k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:
       from tinygrad.graph import print_tree
       print_tree(ast)
     from tinygrad.codegen.linearizer import Linearizer
-    k = Linearizer(ast, self.linearizer_opts)
+    k = Linearizer(ast, self.compiler.linearizer_opts)
     k.required_optimizations()
     if not NOOPT:
       if not (used_tensor_cores:=k.apply_tensor_cores(getenv("TC", 1))): k.hand_coded_optimizations()
       if BEAM >= 1:
         lins = [(("tc" if used_tensor_cores else "hc"), k)]
         if used_tensor_cores:
-          lins.append(("hc", Linearizer(ast, self.linearizer_opts)))
+          lins.append(("hc", Linearizer(ast, self.compiler.linearizer_opts)))
           lins[-1][1].hand_coded_optimizations()
-        kb = Linearizer(ast, self.linearizer_opts)
+        kb = Linearizer(ast, self.compiler.linearizer_opts)
         kb.required_optimizations()
         from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
         test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization

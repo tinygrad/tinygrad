@@ -7,7 +7,7 @@
 
 print("******** first, the runtime ***********")
 
-from tinygrad.runtime.ops_clang import ClangProgram, compile_clang, MallocAllocator
+from tinygrad.runtime.ops_clang import ClangProgram, ClangCompiler, MallocAllocator
 
 # allocate some buffers
 out = MallocAllocator.alloc(4)
@@ -19,7 +19,7 @@ MallocAllocator.copyin(a, bytearray([2,0,0,0]))
 MallocAllocator.copyin(b, bytearray([3,0,0,0]))
 
 # compile a program to a binary
-lib = compile_clang("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
+lib = ClangCompiler().compile("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
 
 # create a runtime for the program (ctypes.CDLL)
 fxn = ClangProgram("add", lib)
