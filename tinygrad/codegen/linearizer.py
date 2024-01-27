@@ -374,6 +374,25 @@ class Linearizer(Kernel):
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
+    # optimize the uops
+    self.uoptimize()
+
+    # maybe graph the uops
+    if DEBUG >= 5:
+      for u in self.uops:
+        print(f"{self.uops.index(u):4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} {str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")  # noqa: E501
+    if getenv("GRAPHUOPS"):
+      from tinygrad.graph import graph_uops
+      graph_uops(self.uops)
+
+    # restore backups
+    self.sts, self.group_for_reduce, self.upcasted = sts_backup, gfr_backup, upc_backup
+
+    # set cache and return
+    self.applied_opts_cache = self.applied_opts[:]
+    return self
+
+  def uoptimize(self):
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
     acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     for u in self.uops:
@@ -422,21 +441,6 @@ class Linearizer(Kernel):
 
     # verify the uop types
     uops_type_verify(self.uops)
-
-    # maybe graph the uops
-    if DEBUG >= 5:
-      for u in self.uops:
-        print(f"{self.uops.index(u):4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} {str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")  # noqa: E501
-    if getenv("GRAPHUOPS"):
-      from tinygrad.graph import graph_uops
-      graph_uops(self.uops)
-
-    # restore backups
-    self.sts, self.group_for_reduce, self.upcasted = sts_backup, gfr_backup, upc_backup
-
-    # set cache and return
-    self.applied_opts_cache = self.applied_opts[:]
-    return self
 
   def uop(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None, simplify=True) -> UOp:  # noqa: E501
     if simplify:
