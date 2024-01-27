@@ -1,4 +1,4 @@
-"""Simple, minimal implementation of Mamba in one file of PyTorch.
+"""Simple, minimal implementation of Mamba in one file of Tinygrad.
 
 Suggest reading the following before/while reading the code:
     [1] Mamba: Linear-Time Sequence Modeling with Selective State Spaces (Albert Gu and Tri Dao)
@@ -411,7 +411,7 @@ def generate(model,
              top_k: int = None):
     inference_params = InferenceParams(max_seqlen=1, max_batch_size=1, seqlen_offset=0)
     toks = tokenizer(prompt)["input_ids"]
-    for token_n in tqdm(range(n_tokens_to_gen)):
+    for token_n in tqdm(range(n_tokens_to_gen), desc='Tiny Gen'):
         next_token_logits = model(Tensor([toks]))[:, -1]
         probs = next_token_logits.softmax()
         next_indicies = probs.argmax(axis=-1).item()

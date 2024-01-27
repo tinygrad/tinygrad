@@ -1,5 +1,5 @@
 import os, sys, math, argparse
-
+from tqdm import tqdm
 sys.path.append(os.getcwd())
 from typing import Any, Optional
 from dataclasses import dataclass, field
@@ -412,6 +412,14 @@ class Mamba:
       return self.forward_jit(input_ids, inference_params, num_last_tokens)
     else:
       return self.forward(input_ids, inference_params, num_last_tokens)
+  @staticmethod
+  def from_pretrained(model_name: str):
+    weights = fetch_weights(model_name)
+    # tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
+    model = Mamba(**MODELS[model_name])
+    load_state_dict(model, weights)
+
+    return model
 
 @dataclass
 class InferenceParams:
@@ -432,7 +440,25 @@ class InferenceParams:
     if self.lengths_per_sample is not None:
       self.lengths_per_sample.zero_()
  
-  
+def generate(model,
+             tokenizer,
+             prompt: str,
+             n_tokens_to_gen: int = 10,
+             sample: bool = False,
+             top_k: int = None):
+  tks = tokenizer(prompt)["input_ids"]
+  temperature = 0.5
+  start_pos = 0
+  inference_params = InferenceParams(max_seqlen=1, max_batch_size=1, seqlen_offset=0)
+  for i in tqdm(range(n_tokens_to_gen), desc="Speed Gen"):
+    logits = model(Tensor([tks[start_pos:]]), inference_params, start_pos, jit=False)
+    inference_params.seqlen_offset = len(tks)
+    tok = (logits[:, -1, :]).softmax().argmax(axis=-1).item()
+    start_pos = len(tks)
+    tks.append(tok)
+  output_completions = ''.join([tokenizer.decode(output) for output in tks])
+  return output_completions
+
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(
     description="Run Mamba in tinygrad",
@@ -448,50 +474,13 @@ if __name__ == "__main__":
     help=f"Size of model to use [{', '.join([k for k in MODELS.keys()])}]",
   )
   args = parser.parse_args()
-
-  weights = fetch_weights(args.size)
+  
   tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
-
-  model = Mamba(**MODELS[args.size])
-  load_state_dict(model, weights)
-
-  #for k, v in get_state_dict(model).items():
-  #  print(f"{k}: {v.shape}")
-
-  # prompt = "So here's what"
-#   prompt = 'John: Hi!\nSally:'
+  model = Mamba.from_pretrained(args.size)
   prompt = 'The sky is blue '
-
-  
-  # print('Generating')
-  
-  # s = time.time()
-  # print(generate(model, tokenizer, prompt))
-  # print('TIME: ', time.time() - s)
-  
   s = time.time()
-  tks = tokenizer(prompt)["input_ids"]
-#   print(tks)
-  print('\n' + prompt, end='', flush=True)
-
-  temperature = 0.5
-  start_pos = 0
-  inference_params = InferenceParams(max_seqlen=1, max_batch_size=1, seqlen_offset=0)
-  for i in range(10):
-    logits = model(Tensor([tks[start_pos:]]), inference_params, start_pos, jit=False)
-    # logits = model(Tensor([tks]), jit=False)
-
-    inference_params.seqlen_offset = len(tks)
-    # tok = (logits[:, -1, :]).softmax().flatten().multinomial().item()
-    tok = (logits[:, -1, :]).softmax().argmax(axis=-1).item()
-
-    start_pos = len(tks)
-    # start_pos += 1
-    tks.append(tok)
-    print(tokenizer.decode(tok), end='', flush=True)
-  print()
+  print(generate(model, tokenizer, prompt))
   print('TIME: ', time.time() - s)
-  
-  
+
   
  

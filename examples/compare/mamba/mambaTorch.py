@@ -95,7 +95,9 @@ class Mamba(nn.Module):
 
     
     @staticmethod
-    def from_pretrained(pretrained_model_name: str):
+    def from_pretrained(pretrained_model_name: str, device = 'cuda'):
+        pretrained_model_name = 'state-spaces/mamba-'+pretrained_model_name
+        
         """Load pretrained weights from HuggingFace into model.
     
         Args:
@@ -120,10 +122,10 @@ class Mamba(nn.Module):
             return json.load(open(resolved_archive_file))
         
         
-        def load_state_dict_hf(model_name, device=None, dtype=None):
+        def load_state_dict_hf(model_name, device=device, dtype=None):
             resolved_archive_file = cached_file(model_name, WEIGHTS_NAME,
                                                 _raise_exceptions_for_missing_entries=False)
-            return torch.load(resolved_archive_file, weights_only=True, map_location='cuda:0')#, mmap=True)
+            return torch.load(resolved_archive_file, weights_only=True, map_location=device)#, mmap=True)
         
         config_data = load_config_hf(pretrained_model_name)
         args = ModelArgs(
@@ -139,6 +141,7 @@ class Mamba(nn.Module):
             new_key = key.replace('backbone.', '')
             new_state_dict[new_key] = state_dict[key]
         model.load_state_dict(new_state_dict)
+        model.to(device)
         
         return model
 
@@ -347,12 +350,13 @@ def generate(model,
              prompt: str,
              n_tokens_to_gen: int = 10,
              sample: bool = False,
-             top_k: int = None):
+             top_k: int = None,
+             device='cuda'):
     model.eval()
     input_ids = tokenizer(prompt, return_tensors='pt').input_ids
-    input_ids = input_ids.to('cuda:0')
+    input_ids = input_ids.to(device)
     # print(input_ids.cpu().numpy())
-    for token_n in tqdm(range(n_tokens_to_gen)):
+    for token_n in tqdm(range(n_tokens_to_gen), desc='Torch Gen'):
         # print('Generating token', token_n)
         with torch.no_grad():
             indices_to_input = input_ids
@@ -375,9 +379,10 @@ def generate(model,
     return output_completions
         
 if __name__ == '__main__':
-    model = Mamba.from_pretrained('state-spaces/mamba-370m').to('cuda:0')
+    device = 'cuda'
+    model = Mamba.from_pretrained('370m', device=device)
     tokenizer = AutoTokenizer.from_pretrained('EleutherAI/gpt-neox-20b')
     prompt = 'The sky is blue '
     s = time.time()
-    print(generate(model, tokenizer, prompt))
+    print(generate(model, tokenizer, prompt, device=device))
     print('TIME: ', time.time() - s)
