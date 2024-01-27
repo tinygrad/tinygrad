@@ -470,23 +470,23 @@ class TestTensorCreationDevice(unittest.TestCase):
     x.realize()
 
 class TestTensorPickle(unittest.TestCase):
-    def test_pickle_scalar(self):
-      y = Tensor(1).to("CPU")
+  def test_pickle_scalar(self):
+    y = Tensor(1).to("CPU")
+    x = pickle.loads(pickle.dumps(y))
+    np.testing.assert_equal(y.numpy(), x.numpy())
+
+  def test_pickle_one_dim(self):
+    y = Tensor([1, 2, 3]).to("CPU")
+    x = pickle.loads(pickle.dumps(y))
+    np.testing.assert_equal(y.numpy(), x.numpy())
+
+  def test_pickle_multi_dim(self):
+    shape = [2]
+    for i in range(1, 10):  # (2,), (2,2), (2,2,2), ...
+      shape.append(2)
+      y = Tensor.randn(shape).to("CPU")
       x = pickle.loads(pickle.dumps(y))
       np.testing.assert_equal(y.numpy(), x.numpy())
-
-    def test_pickle_one_dim(self):
-      y = Tensor([1, 2, 3]).to("CPU")
-      x = pickle.loads(pickle.dumps(y))
-      np.testing.assert_equal(y.numpy(), x.numpy())
-
-    def test_pickle_multi_dim(self):
-      shape = [2]
-      for i in range(1, 10):  # (2,), (2,2), (2,2,2), ...
-        shape.append(2)
-        y = Tensor.randn(shape).to("CPU")
-        x = pickle.loads(pickle.dumps(y))
-        np.testing.assert_equal(y.numpy(), x.numpy())
 
 if __name__ == '__main__':
   unittest.main()
