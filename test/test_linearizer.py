@@ -12,7 +12,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.jit import CacheCollector
 from tinygrad.realize import run_schedule
 from tinygrad.helpers import prod, Context
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import DType, dtypes
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestLinearizer(unittest.TestCase):
@@ -81,6 +81,28 @@ class TestLinearizer(unittest.TestCase):
       local = [uop for uop in k.uops if uop.uop == UOps.DEFINE_ACC]
       assert local[0].dtype == acc_dtype
 
+  def test_arg_acc_dtype(self):
+    def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
+      k = Linearizer(c.lazydata.schedule()[-1].ast)
+      k.linearize()
+      local = [uop for uop in k.uops if uop.uop == UOps.DEFINE_ACC]
+      assert local[0].dtype == expected_dtype
+
+    tests = (
+      (dtypes.float16, None, dtypes.float),
+      (dtypes.bfloat16, None, dtypes.float),
+      (dtypes.float, None, dtypes.float),
+      (dtypes.float16, dtypes.float16, dtypes.float16),
+      (dtypes.bfloat16, dtypes.bfloat16, dtypes.bfloat16),
+      (dtypes.float, dtypes.float16, dtypes.float16),
+    )
+    for tensor_dtype, acc_dtype, expected_dtype in tests:
+      a, b = Tensor.rand(8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, dtype=tensor_dtype)
+      helper_arg_acc_dtype(a.sum(acc_dtype=acc_dtype), expected_dtype)
+      helper_arg_acc_dtype(a.matmul(b, acc_dtype=acc_dtype), expected_dtype)
+      d, w = Tensor.rand(4, 8, 8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, 2, 2, dtype=tensor_dtype)
+      helper_arg_acc_dtype(d.conv2d(w, acc_dtype=acc_dtype), expected_dtype)
+
   @unittest.skipUnless(Device.DEFAULT in tensor_cores, "No tensor cores for device")
   def test_tensor_cores(self):
     for tc in tensor_cores[Device.DEFAULT]:
@@ -138,7 +160,7 @@ def helper_realized_ast(r:Tensor):
   output_buffer = Buffer(s[-1].out.device, prod((s if isinstance(s, int) else s.max for s in s[-1].out.shape)), s[-1].out.dtype)
   return s[-1].ast, [output_buffer] + [l.realized for l in s[-1].inputs]
 
-@unittest.skipUnless(isinstance(Device[Device.DEFAULT], Compiled) and Device[Device.DEFAULT].linearizer_opts.supports_float4,
+@unittest.skipUnless(isinstance(Device[Device.DEFAULT], Compiled) and Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4,
                      "need Compiled backends that support float4")
 class TestFloat4(unittest.TestCase):
   @staticmethod
@@ -345,7 +367,7 @@ class TestHandCodedOpts(unittest.TestCase):
     assert prod(k.full_shape[k.shape_len-k.upcasted:k.shape_len]) <= 49
 
   def test_matvec(self):
-    if not Device[Device.DEFAULT].linearizer_opts.has_local:
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local:
       self.skipTest("Only devices with locals")
     N = 128
     a = Tensor.rand(1, N).realize()
@@ -395,7 +417,7 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestLinearizerOpts(unittest.TestCase):
   def test_local_and_grouped_reduce(self):
-    if not Device[Device.DEFAULT].linearizer_opts.has_local or not Device[Device.DEFAULT].linearizer_opts.has_shared:
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared:
       self.skipTest("Only Compiled uses linearizer with locals and shared")
 
     N = 128
@@ -441,7 +463,7 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
   def test_matmul(self):
-    if not Device[Device.DEFAULT].linearizer_opts.has_local or not Device[Device.DEFAULT].linearizer_opts.has_shared:
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared:
       self.skipTest("Only Compiled uses linearizer with locals and shared")
 
     N = 128
@@ -471,7 +493,7 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
   def test_double_reduce(self):
-    if not Device[Device.DEFAULT].linearizer_opts.has_local or not Device[Device.DEFAULT].linearizer_opts.has_shared:
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local or not Device[Device.DEFAULT].compiler.linearizer_opts.has_shared:
       self.skipTest("Only Compiled uses linearizer with locals and shared")
 
     N = 128
@@ -498,7 +520,7 @@ class TestLinearizerOpts(unittest.TestCase):
     ])
 
   def test_tensor_core_opts(self):
-    if not Device[Device.DEFAULT].linearizer_opts.has_local:
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local:
       self.skipTest("Only Compiled uses linearizer with locals")
     if Device.DEFAULT not in tensor_cores:
       self.skipTest("No tensor cores for device")

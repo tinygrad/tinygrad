@@ -15,10 +15,15 @@ fi
 
 BASE=tinygrad/runtime/autogen/
 
+fixup() {
+  sed -i '1s/^/# mypy: ignore-errors\n/' $1
+  sed -i 's/ *$//' $1
+  grep FIXME_STUB $1 || true
+}
+
 generate_opencl() {
   clang2py /usr/include/CL/cl.h -o $BASE/opencl.py -l /usr/lib/x86_64-linux-gnu/libOpenCL.so.1 -k cdefstum
-  sed -i '1s/^/# mypy: ignore-errors\n/' $BASE/opencl.py
-  grep FIXME_STUB $BASE/opencl.py || true
+  fixup $BASE/opencl.py
   # hot patches
   sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/opencl.py
   sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libOpenCL.so.1')\ctypes.CDLL(ctypes.util.find_library('OpenCL'))\g" $BASE/opencl.py
@@ -31,8 +36,7 @@ generate_hip() {
   --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/hip.py -l /opt/rocm/lib/libamdhip64.so
   echo "hipDeviceProp_t = hipDeviceProp_tR0600" >> $BASE/hip.py
   echo "hipGetDeviceProperties = hipGetDevicePropertiesR0600" >> $BASE/hip.py
-  sed -i '1s/^/# mypy: ignore-errors\n/' $BASE/hip.py
-  grep FIXME_STUB $BASE/hip.py || true
+  fixup $BASE/hip.py
   # we can trust HIP is always at /opt/rocm/lib
   #sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/hip.py
   #sed -i "s\ctypes.CDLL('/opt/rocm/lib/libhiprtc.so')\ctypes.CDLL(ctypes.util.find_library('hiprtc'))\g" $BASE/hip.py
@@ -41,8 +45,7 @@ generate_hip() {
 
   clang2py /opt/rocm/include/amd_comgr/amd_comgr.h \
   --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/comgr.py -l /opt/rocm/lib/libamd_comgr.so
-  sed -i '1s/^/# mypy: ignore-errors\n/' $BASE/comgr.py
-  grep FIXME_STUB $BASE/comgr.py || true
+  fixup $BASE/comgr.py
   python3 -c "import tinygrad.runtime.autogen.comgr"
 }
 
@@ -51,8 +54,7 @@ generate_cuda() {
   sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/cuda.py
   sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libcuda.so')\ctypes.CDLL(ctypes.util.find_library('cuda'))\g" $BASE/cuda.py
   sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libnvrtc.so')\ctypes.CDLL(ctypes.util.find_library('nvrtc'))\g" $BASE/cuda.py
-  sed -i '1s/^/# mypy: ignore-errors\n/' $BASE/cuda.py
-  grep FIXME_STUB $BASE/cuda.py || true
+  fixup $BASE/cuda.py
   python3 -c "import tinygrad.runtime.autogen.cuda"
 }
 

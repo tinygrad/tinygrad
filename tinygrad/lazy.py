@@ -2,7 +2,7 @@ from __future__ import annotations
 import sys, math
 from collections import defaultdict
 from typing import Union, Optional, Any, Tuple, List, Set, Dict, DefaultDict, cast
-from tinygrad.dtype import dtypes, DType, ImageDType
+from tinygrad.dtype import dtypes, DType, ImageDType, Scalar
 from tinygrad.helpers import prod, flatten, getenv, dedup, DEBUG, all_int, all_same, GRAPH
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, BufferOps, Op, LazyOp, ConstBuffer, MemBuffer, ScheduleItem
 from tinygrad.shape.symbolic import sint, Variable
@@ -56,7 +56,7 @@ class LazyBuffer:
   def loadop(op, shape:Tuple[sint,...], dtype:DType, device:str, arg=None, src:Optional[LazyBuffer]=None, enable_cache=False) -> LazyBuffer:
     return create_lazybuffer(device, ShapeTracker.from_shape(shape), dtype, op, arg, (src,) if src is not None else (), enable_cache=enable_cache)
 
-  def const(self, val:Union[float, int], shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
+  def const(self, val:Scalar, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
     shape = self.shape if shape is None else shape
     return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(shape)).expand(shape)
 
