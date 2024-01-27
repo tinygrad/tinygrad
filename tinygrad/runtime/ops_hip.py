@@ -4,13 +4,21 @@ from typing import Tuple, TypeVar, List, Any, cast, Set
 import tinygrad.runtime.autogen.hip as hip
 from tinygrad.helpers import DEBUG, getenv, init_c_var
 from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t
-from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, BufferOptions, JITRunner, Device, Buffer, update_stats
+from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, BufferOptions, JITRunner, Device, Buffer, update_stats, Compiler
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.runtime.compiler.hip_comgr import compile_hip
 
 # The default HIP stream is used for everything.
 MOCKHIP = getenv("MOCKHIP") # for CI. don't run kernels, only check if they compile
+
+class HIPCompiler(Compiler):
+  linearizer_opts = LinearizerOptions("HIP")
+  def __init__(self, arch:str):
+    self.arch = arch
+    super().__init__(f"compile_hip_{self.arch}")
+  def render(self, name:str, uops) -> str: return HIPRenderer(name, uops)
+  def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
 
 hip_current_device = None
 def hip_set_device(d:int):
@@ -132,8 +140,8 @@ class HIPDevice(Compiled):
     self.peers: Set[int] = set()
 
     from tinygrad.runtime.graph.hip import HIPGraph
-    super().__init__(device, MallocAllocator if MOCKHIP else HIPAllocator(self), LinearizerOptions("HIP"), HIPRenderer,
-                     functools.partial(compile_hip,arch=self.arch), f"compile_hip_{self.arch}", functools.partial(HIPProgram, self.device), HIPGraph)
+    super().__init__(device, MallocAllocator if MOCKHIP else HIPAllocator(self), HIPCompiler(self.arch),
+                     functools.partial(HIPProgram, self.device), HIPGraph)
   def synchronize(self):
     hip_set_device(self.device)
     check(hip.hipDeviceSynchronize())
