@@ -456,7 +456,7 @@ Because it's the only'''
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
   )
   parser.add_argument(
-    "--prompt", type=str, default='The sky is blue ', help="Prompt for LLM completion"
+    "--prompt", type=str, default='Why is gravity ', help="Prompt for LLM completion"
   )
   parser.add_argument(
     "--size",
