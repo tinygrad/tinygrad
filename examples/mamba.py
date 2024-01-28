@@ -426,7 +426,7 @@ class InferenceParams:
     self.seqlen_offset = 0
     if self.lengths_per_sample is not None:
       self.lengths_per_sample.zero_()
- 
+
 def generate(model,
              tokenizer,
              prompt: str,
@@ -447,10 +447,8 @@ def generate(model,
   return output_completions
 
 if __name__ == "__main__":
-  TORCHOUTPUT = '''Why is gravity 
-so important?
-Because it's the only'''
-  
+  TORCHOUTPUT = '''Why is gravity \nso important?\nBecause it's the only'''
+ 
   parser = argparse.ArgumentParser(
     description="Run Mamba in tinygrad",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -471,7 +469,7 @@ Because it's the only'''
     help="Number of tokens to generate",
   )
   args = parser.parse_args()
-  
+
   tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
   model = Mamba.from_pretrained(args.size)
   prompt = args.prompt
@@ -481,6 +479,3 @@ Because it's the only'''
   print(tinyoutput)
   print('TIME: ', time.time() - s)
   print('Outputs Match:', tinyoutput == TORCHOUTPUT)
-
-  
- 
