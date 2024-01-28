@@ -448,7 +448,7 @@ def generate(model,
 
 if __name__ == "__main__":
   TORCHOUTPUT = '''Why is gravity \nso important?\nBecause it's the only'''
- 
+
   parser = argparse.ArgumentParser(
     description="Run Mamba in tinygrad",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
