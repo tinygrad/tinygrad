@@ -122,7 +122,7 @@ def eval_retinanet():
     n += len(targets)
     print(f"[{n}/{len(coco.imgs)}] == {(mt-st)*1000:.2f} ms loading data, {(et-mt)*1000:.2f} ms to run model, {(ext-et)*1000:.2f} ms for postprocessing")
     img_ids = [t["image_id"] for t in targets]
-    coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box, "score": score}
+    coco_results  = [{"image_id": targets[i]["image_id"], "category_id": label, "bbox": box.tolist(), "score": score}
       for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
     with redirect_stdout(None):
       coco_eval.cocoDt = coco.loadRes(coco_results)
