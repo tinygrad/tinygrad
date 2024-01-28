@@ -237,16 +237,9 @@ class MambaMixer:
       x = self.conv1d(x)[..., :seqlen].swish()
 
     x_dbl = self.x_proj(rearrange(x, "b d l -> (b l) d"))
-    # dt = x_dbl[:, : self.dt_rank]
-    # B = x_dbl[:, self.dt_rank : (self.dt_rank + self.d_state)]
-    # C = x_dbl[:, (self.dt_rank + self.d_state) :]
     dt, B, C = Tensor.split(x_dbl, [self.dt_rank, self.d_state, self.d_state], dim=-1)
-    #print(f"dt before: {dt.shape}")
     dt = self.dt_proj.weight @ dt.T
-    #print(f"dt mul: {dt.shape}")
     dt = rearrange(dt, "d (b l) -> b d l", l=seqlen)
-    #print(f"dt rearranged: {dt.shape}")
-
     B = rearrange(B, "(b l) dstate -> b dstate l", l=seqlen).contiguous()
     C = rearrange(C, "(b l) dstate -> b dstate l", l=seqlen).contiguous()
 
@@ -273,7 +266,6 @@ class MambaMixer:
     return out
 
   def step(self, hidden_states, conv_state, ssm_state):
-    #print(f"hidden_states is {hidden_states.shape}")
     assert (
       hidden_states.shape[1] == 1
     ), f"Only support decoding with 1 token at a time for now, attempted {hidden_states.shape[1]}"
@@ -281,7 +273,6 @@ class MambaMixer:
     x, z = xz.chunk(2, dim=-1)  # (B D)
 
     # Conv step
-    # conv_state = conv_state[:, :, 1:].cat(x.unsqueeze(-1), dim=-1)
     conv_state.assign(conv_state[:, :, 1:].cat(x.unsqueeze(-1), dim=-1))
     x = (conv_state * rearrange(self.conv1d.weight, "d 1 w -> d w")).sum(-1)
     if self.conv1d.bias is not None:
@@ -293,16 +284,13 @@ class MambaMixer:
     B = x_db[:, self.dt_rank : (self.dt_rank + self.d_state)]
     C = x_db[:, (self.dt_rank + self.d_state) :]
     # Don't add dt_bias here
-    #print(f"dt before: {dt.shape}")
     dt = self.dt_proj.weight @ dt.T
     A = -self.A_log.exp()
 
-    #print(f"dt matmul: {dt.shape}")
-    #print(f"dt_proj.bias: {self.dt_proj.bias.shape}")
+
     # SSM step
     dt = (dt + self.dt_proj.bias.unsqueeze(-1)).softplus()
     # TODO: Tensor.einsum?
-    #print(f"dt: {dt.shape}, A: {A.shape}, B: {B.shape}")
     dA = Tensor.einsum("db,dn->bdn", dt, A).exp()
     dB = Tensor.einsum("db,bn->bdn", dt, B)
     ssm_state.assign(ssm_state * dA + rearrange(x, "b d -> b d 1") * dB)
@@ -415,7 +403,6 @@ class Mamba:
   @staticmethod
   def from_pretrained(model_name: str):
     weights = fetch_weights(model_name)
-    # tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
     model = Mamba(**MODELS[model_name])
     load_state_dict(model, weights)
 
@@ -460,12 +447,16 @@ def generate(model,
   return output_completions
 
 if __name__ == "__main__":
+  TORCHOUTPUT = '''Why is gravity 
+so important?
+Because it's the only'''
+  
   parser = argparse.ArgumentParser(
     description="Run Mamba in tinygrad",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
   )
   parser.add_argument(
-    "--prompt", type=str, default=None, help="Prompt for LLM completion"
+    "--prompt", type=str, default='The sky is blue ', help="Prompt for LLM completion"
   )
   parser.add_argument(
     "--size",
@@ -473,14 +464,23 @@ if __name__ == "__main__":
     default="370m",
     help=f"Size of model to use [{', '.join([k for k in MODELS.keys()])}]",
   )
+  parser.add_argument(
+    "--n_tokens_to_gen",
+    type=int,
+    default=10,
+    help="Number of tokens to generate",
+  )
   args = parser.parse_args()
   
   tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
   model = Mamba.from_pretrained(args.size)
-  prompt = 'The sky is blue '
+  prompt = args.prompt
+  num_toks = args.n_tokens_to_gen
   s = time.time()
-  print(generate(model, tokenizer, prompt))
+  tinyoutput = generate(model, tokenizer, prompt, n_tokens_to_gen=num_toks)
+  print(tinyoutput)
   print('TIME: ', time.time() - s)
+  print('Outputs Match:', tinyoutput == TORCHOUTPUT)
 
   
  
