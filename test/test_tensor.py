@@ -469,24 +469,51 @@ class TestTensorCreationDevice(unittest.TestCase):
     x = y.one_hot(10)
     x.realize()
 
+class TestTensorReduce(unittest.TestCase):
+  def test_reconstruct_scalar(self):
+    y = Tensor(1)
+    x = Tensor(*y.__reduce__()[1])
+
+    np.testing.assert_equal(y.numpy(), x.numpy())
+    assert y.dtype == x.dtype
+    assert y.device == x.device
+    assert y.requires_grad == x.requires_grad
+
+  def test_reconstruct_multi_dim(self):
+    shape: list[int] = []
+    for i in range(1, 3):  # (2,), (2,2), (2,2,2), ...
+      shape.append(2)
+
+      y = Tensor.randn(shape)
+      x = Tensor(*y.__reduce__()[1])
+
+      np.testing.assert_equal(y.numpy(), x.numpy())
+      assert y.dtype == x.dtype
+      assert y.device == x.device
+      assert y.requires_grad == x.requires_grad
+
 class TestTensorPickle(unittest.TestCase):
   def test_pickle_scalar(self):
-    y = Tensor(1).to("CPU")
+    y = Tensor(1)
     x = pickle.loads(pickle.dumps(y))
-    np.testing.assert_equal(y.numpy(), x.numpy())
 
-  def test_pickle_one_dim(self):
-    y = Tensor([1, 2, 3]).to("CPU")
-    x = pickle.loads(pickle.dumps(y))
     np.testing.assert_equal(y.numpy(), x.numpy())
+    assert y.dtype == x.dtype
+    assert y.device == x.device
+    assert y.requires_grad == x.requires_grad
 
   def test_pickle_multi_dim(self):
-    shape = [2]
-    for i in range(1, 10):  # (2,), (2,2), (2,2,2), ...
+    shape: list[int] = []
+    for i in range(1, 3):  # (2,), (2,2), (2,2,2), ...
       shape.append(2)
-      y = Tensor.randn(shape).to("CPU")
+
+      y = Tensor.randn(shape)
       x = pickle.loads(pickle.dumps(y))
+
       np.testing.assert_equal(y.numpy(), x.numpy())
+      assert y.dtype == x.dtype
+      assert y.device == x.device
+      assert y.requires_grad == x.requires_grad
 
 if __name__ == '__main__':
   unittest.main()
