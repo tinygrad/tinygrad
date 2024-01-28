@@ -7,10 +7,10 @@ import random, time
 import numpy as np
 from typing import Optional
 from extra.datasets import fetch_cifar, cifar_mean, cifar_std
+from extra.lr_scheduler import OneCycleLR
 from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.nn import optim
-from extra.lr_scheduler import OneCycleLR
 from tinygrad.helpers import Context, BEAM, WINO, getenv
 
 BS, EVAL_BS, STEPS = getenv("BS", 512), getenv('EVAL_BS', 500), getenv("STEPS", 1000)
@@ -18,7 +18,7 @@ GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))]
 assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}"
 for x in GPUS: Device[x]
 
-if getenv("HALF", 0):
+if getenv("HALF"):
   dtypes.default_float = dtypes.float16
   np_dtype = np.float16
 else:
@@ -66,14 +66,14 @@ class SpeedyResNet:
       ConvGroup(256, 512),
       lambda x: x.max((2,3)),
       nn.Linear(512, 10, bias=False),
-      lambda x: x.mul(1./9)
+      lambda x: x / 9.,
     ]
 
   def __call__(self, x, training=True):
     # pad to 32x32 because whitening conv creates 31x31 images that are awfully slow to compute with
     # TODO: remove the pad but instead let the kernel optimize itself
     forward = lambda x: x.conv2d(self.whitening).pad2d((1,0,0,1)).sequential(self.net)
-    return forward(x) if training else forward(x)*0.5 + forward(x[..., ::-1])*0.5
+    return forward(x) if training else (forward(x) + forward(x[..., ::-1])) / 2.
 
 # hyper-parameters were exactly the same as the original repo
 bias_scaler = 58
@@ -108,8 +108,8 @@ hyp = {
 def train_cifar():
 
   def set_seed(seed):
-    Tensor.manual_seed(getenv('SEED', seed))
-    random.seed(getenv('SEED', seed))
+    Tensor.manual_seed(seed)
+    random.seed(seed)
 
   # ========== Model ==========
   # NOTE: np.linalg.eigh only supports float32 so the whitening layer weights need to be converted to float16 manually
@@ -146,37 +146,20 @@ def train_cifar():
     raise NotImplementedError(reduction)
 
   # ========== Preprocessing ==========
-  # TODO currently this only works for RGB in format of NxCxHxW and pads the HxW
-  # implemented in recursive fashion but figuring out how to switch indexing dim
-  # during the loop was a bit tricky
+  # NOTE: this only works for RGB in format of NxCxHxW and pads the HxW
   def pad_reflect(X, size=2) -> Tensor:
-    padding = ((0,0),(0,0),(size,size),(size,size))
-    p = padding[3]
-    s = X.shape[3]
-
-    X_lr = X[...,:,1:1+p[0]].flip(3).pad(((0,0),(0,0),(0,0),(0,s+p[0]))) + X[...,:,-1-p[1]:-1].flip(3).pad(((0,0),(0,0),(0,0),(s+p[1],0)))
-    X = X.pad(((0,0),(0,0),(0,0),p)) + X_lr
-
-    p = padding[2]
-    s = X.shape[2]
-    X_lr = X[...,1:1+p[0],:].flip(2).pad(((0,0),(0,0),(0,s+p[0]),(0,0))) + X[...,-1-p[1]:-1,:].flip(2).pad(((0,0),(0,0),(s+p[1],0),(0,0)))
-    X = X.pad(((0,0),(0,0),p,(0,0))) + X_lr
-
+    X = X[...,:,1:size+1].flip(-1).cat(X, X[...,:,-(size+1):-1].flip(-1), dim=-1)
+    X = X[...,1:size+1,:].flip(-2).cat(X, X[...,-(size+1):-1,:].flip(-2), dim=-2)
     return X
 
   # return a binary mask in the format of BS x C x H x W where H x W contains a random square mask
   def make_square_mask(shape, mask_size) -> Tensor:
-    is_even = int(mask_size % 2 == 0)
-    center_max = shape[-2]-mask_size//2-is_even
-    center_min = mask_size//2-is_even
-    center_x = Tensor.randint(shape[0], low=center_min, high=center_max)
-    center_y = Tensor.randint(shape[0], low=center_min, high=center_max)
-    d_x = Tensor.arange(0, shape[-1]).reshape((1,1,1,shape[-1])) - center_x.reshape((-1,1,1,1))
-    d_y = Tensor.arange(0, shape[-2]).reshape((1,1,shape[-2],1)) - center_y.reshape((-1,1,1,1))
-    d_x = (d_x >= -(mask_size // 2) + is_even) * (d_x <= mask_size // 2)
-    d_y = (d_y >= -(mask_size // 2) + is_even) * (d_y <= mask_size // 2)
-    mask = d_y * d_x
-    return mask.cast(dtypes.bool)
+    BS, _, H, W = shape
+    low_x = Tensor.randint(BS, low=0, high=W-mask_size).reshape(BS,1,1,1)
+    low_y = Tensor.randint(BS, low=0, high=H-mask_size).reshape(BS,1,1,1)
+    idx_x = Tensor.arange(W).reshape((1,1,1,W))
+    idx_y = Tensor.arange(H).reshape((1,1,H,1))
+    return (idx_x >= low_x) * (idx_x < (low_x + mask_size)) * (idx_y >= low_y) * (idx_y < (low_y + mask_size))
 
   def random_crop(X:Tensor, crop_size=32):
     mask = make_square_mask(X.shape, crop_size)
@@ -189,37 +172,43 @@ def train_cifar():
     mask = make_square_mask(X.shape, mask_size)
     order = list(range(0, X.shape[0]))
     random.shuffle(order)
-    # NOTE: Memory access fault if use getitem directly
-    X_patch = Tensor(X.numpy()[order,...])
-    Y_patch = Tensor(Y.numpy()[order])
-    X_cutmix = Tensor.where(mask, X_patch, X)
+    X_patch = Tensor(X.numpy()[order], device=X.device)
+    Y_patch = Tensor(Y.numpy()[order], device=Y.device)
+    X_cutmix = mask.where(X_patch, X)
     mix_portion = float(mask_size**2)/(X.shape[-2]*X.shape[-1])
     Y_cutmix = mix_portion * Y_patch + (1. - mix_portion) * Y
     return X_cutmix, Y_cutmix
 
   # the operations that remain inside batch fetcher is the ones that involves random operations
   def fetch_batches(X_in:Tensor, Y_in:Tensor, BS:int, is_train:bool):
-    step, cnt = 0, 0
+    step, epoch = 0, 0
     while True:
       st = time.monotonic()
       X, Y = X_in, Y_in
-      order = list(range(0, X.shape[0]))
-      random.shuffle(order)
       if is_train:
-        X = random_crop(X, crop_size=32)
-        X = Tensor.where(Tensor.rand(X.shape[0],1,1,1) < 0.5, X[..., ::-1], X) # flip LR
-        if step >= hyp['net']['cutmix_steps']: X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
-      X, Y = X.numpy(), Y.numpy()
+        # TODO: these are not jitted
+        if getenv("RANDOM_CROP", 1):
+          X = random_crop(X, crop_size=32)
+        if getenv("RANDOM_FLIP", 1):
+          X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X) # flip LR
+        if getenv("CUTMIX", 1):
+          if step >= hyp['net']['cutmix_steps']:
+            X, Y = cutmix(X, Y, mask_size=hyp['net']['cutmix_size'])
+        order = list(range(0, X.shape[0]))
+        random.shuffle(order)
+        X, Y = X.numpy()[order], Y.numpy()[order]
+      else:
+        X, Y = X.numpy(), Y.numpy()
       et = time.monotonic()
-      print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({cnt})")
+      print(f"shuffling {'training' if is_train else 'test'} dataset in {(et-st)*1e3:.2f} ms ({epoch=})")
       for i in range(0, X.shape[0], BS):
         # pad the last batch  # TODO: not correct for test
         batch_end = min(i+BS, Y.shape[0])
-        x = Tensor(X[order[batch_end-BS:batch_end],:])
-        y = Tensor(Y[order[batch_end-BS:batch_end]])
+        x = Tensor(X[batch_end-BS:batch_end], device=X_in.device)
+        y = Tensor(Y[batch_end-BS:batch_end], device=Y_in.device)
         step += 1
         yield x, y
-      cnt += 1
+      epoch += 1
       if not is_train: break
 
   transform = [
@@ -245,7 +234,7 @@ def train_cifar():
           net_ema_param.assign(net_ema_param.detach()*decay + net_param.detach()*(1.-decay)).realize()
       Tensor.no_grad = False
 
-  set_seed(hyp['seed'])
+  set_seed(getenv('SEED', hyp['seed']))
 
   X_train, Y_train, X_test, Y_test = fetch_cifar()
   # load data and label into GPU and convert to dtype accordingly
@@ -337,7 +326,7 @@ def train_cifar():
   with Tensor.train():
     st = time.monotonic()
     while i <= STEPS:
-      if i % getenv("EVAL_STEPS", STEPS) == 0 and i > 1:
+      if i % getenv("EVAL_STEPS", STEPS) == 0 and i > 1 and not getenv("DISABLE_BACKWARD"):
         # Use Tensor.training = False here actually bricks batchnorm, even with track_running_stats=True
         corrects = []
         corrects_ema = []
@@ -345,7 +334,8 @@ def train_cifar():
         losses_ema = []
         for Xt, Yt in fetch_batches(X_test, Y_test, BS=EVAL_BS, is_train=False):
           if len(GPUS) > 1:
-            Xt, Yt = Xt.shard(GPUS, axis=0), Yt.shard(GPUS, axis=0)
+            Xt.shard_(GPUS, axis=0)
+            Yt.shard_(GPUS, axis=0)
 
           correct, loss = eval_step_jitted(model, Xt, Yt)
           losses.append(loss.numpy().tolist())
@@ -366,11 +356,12 @@ def train_cifar():
 
       if STEPS == 0 or i == STEPS: break
 
+      GlobalCounters.reset()
       X, Y = next(batcher)
       if len(GPUS) > 1:
-        X, Y = X.shard(GPUS, axis=0), Y.shard(GPUS, axis=0)
+        X.shard_(GPUS, axis=0)
+        Y.shard_(GPUS, axis=0)
 
-      GlobalCounters.reset()
       with Context(BEAM=getenv("LATEBEAM", BEAM.value), WINO=getenv("LATEWINO", WINO.value)):
         loss = train_step_jitted(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y)
         et = time.monotonic()

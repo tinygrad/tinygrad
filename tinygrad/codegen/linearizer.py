@@ -1,33 +1,17 @@
 from __future__ import annotations
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Sequence, Final, Set, Iterator
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Set, Iterator
 import itertools, math, functools
 from collections import defaultdict
-from enum import Enum, auto
-from dataclasses import dataclass
 
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
-from tinygrad.helpers import colored, DEBUG, prod, getenv, all_same, to_function_name, flatten
+from tinygrad.helpers import colored, DEBUG, prod, getenv, all_same, to_function_name
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.features.image import to_image_idx
 
-# bottom ones are asm only
-class UOps(Enum):
-  LOOP = auto(); IF = auto(); END = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
-  DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
-  LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto(); PHI = auto() # noqa: E702
-  ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
-
-@dataclass(eq=False)
-class UOp:
-  uop: UOps
-  dtype: Optional[DType]
-  vin: Tuple[UOp, ...]
-  arg: Any
-  def __repr__(self):
-    return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
+from tinygrad.codegen.uops import UOps, UOp, get_recursive_children, remove_childless_uops, fix_loop_scope, uops_type_verify
 
 def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
   local_idxs = loop_local_idxs = [Variable(f"{prefix}{start_dim+i}", 0, s-1) for i,s in enumerate(local_dims[0:maxdim-1] + (prod(local_dims[maxdim-1:]),) if len(local_dims) > maxdim else local_dims)]  # noqa: E501
@@ -40,7 +24,7 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
     local_idxs = local_idxs[0:maxdim-1] + nli[::-1]
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
-def expand_idx(node:Node) -> Union[Variable, NumNode]: return next((v for v in node.vars() if v.expr is None), NumNode(0))
+def expand_idx(node:Node) -> Union[Variable, NumNode]: return next((v for v in node.vars() if v.expr.startswith("_uidx")), NumNode(0))
 def iter_idxs(idxs:Tuple[Union[Variable, NumNode], ...]) -> Iterator[Tuple[int,...]]:
   yield from (x[::-1] for x in itertools.product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
 
@@ -82,24 +66,22 @@ class Linearizer(Kernel):
     AndNode: lambda self,ops,ctx:
       functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
-  def global_load(self, i:int, idxs:Sequence[Node], acc=None, barrier:Optional[UOp]=None) -> List[UOp]:
+  def global_load(self, i:int, idxs:List[Node], acc=None, barrier:Optional[UOp]=None) -> List[UOp]:
     buf = self.bufs[i]
     localtype = self.get_base_dtype(buf.dtype if acc is None else get_lazyop_info(self.reduceop).dtype)
     const = buf.val if isinstance(buf, ConstBuffer) else acc
 
-    def rename_var(v: Union[Variable, NumNode], expr: str): return v if isinstance(v, NumNode) else Variable(expr, v.min, v.max)
-    expand_vars = tuple([rename_var(expand_idx(idx), f"_uidx{j}") for j, idx in enumerate(idxs)])
-    fake_idxs = [idx.substitute({eidx: ev}) if isinstance(eidx:=expand_idx(idx), Variable) else idx for idx, ev in zip(idxs, expand_vars)]
+    expand_vars = tuple([expand_idx(idx) for j, idx in enumerate(idxs)])
 
     dim, amt = None, 1
     # float 4 grouping
     if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [4,2]:
       dim, amt = upcast_dim[0], len(float4_expand)
-      g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs[:dim] + [float4_expand[0]] + fake_idxs[dim+1:])
+      g_idx, g_valid = self.sts[i].expr_idxs(idxs[:dim] + [float4_expand[0]] + idxs[dim+1:])
       # do not use float4 if idx is not aligned
       if g_idx != (g_idx//amt*amt): dim, amt = None, 1
     if dim is None:
-      g_idx, g_valid = self.sts[i].expr_idxs(fake_idxs)
+      g_idx, g_valid = self.sts[i].expr_idxs(idxs)
 
     if amt > 1: localtype = localtype.vec(amt)
     e_idxs, e_valids = expand_node(g_idx, expand_vars), expand_node(g_valid, expand_vars)
@@ -226,8 +208,8 @@ class Linearizer(Kernel):
     # define indexes
     global_idxs, loop_global_idxs = get_grouped_dims("gidx", 0, self.full_shape[:self.global_dims], 3 if self.opts.has_local else 0)
     local_idxs, loop_local_idxs = get_grouped_dims("lidx", self.global_dims, self.full_shape[self.global_dims:self.first_reduce+len(self.group_for_reduce)], 3 if self.opts.has_local else 0)  # noqa: E501
-    full_upcast_idxs = [Variable(None, 0, s-1) for s in self.full_shape[self.shape_len-self.upcasted:]]
-    upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
+    full_upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.full_shape[self.shape_len-self.upcasted:])]
+    upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.output_shape[self.shape_len-self.upcasted:])]
 
     # global and local loops
     def render_loop(xx:List[Variable]) -> Tuple[UOp, ...]:
@@ -272,7 +254,7 @@ class Linearizer(Kernel):
             full_var, full_var_sz = NumNode(0), 1
             if alias[0] != 0:
               for i in alias:
-                next_var = local_idxs[-i] if i > 0 else Variable(None, 0, local_size-1)
+                next_var = local_idxs[-i] if i > 0 else Variable("_uidx_tc", 0, local_size-1)
                 full_var += next_var * full_var_sz
                 full_var_sz *= next_var.max+1
             replace_idxs.append(full_var)
@@ -360,7 +342,7 @@ class Linearizer(Kernel):
           local_idxs = local_idxs[:-1]
           end_local_idxs = end_local_idxs[:-1]
           # regenerate upcast_idxs
-          upcast_idxs = [Variable(None, 0, s-1) for s in self.output_shape[self.shape_len-self.upcasted:]]
+          upcast_idxs = [Variable(f"_uidx{i}", 0, s-1) for i, s in enumerate(self.output_shape[self.shape_len-self.upcasted:])]
 
         # NOTE: this structure is the same as the reduce op above
 
@@ -392,89 +374,8 @@ class Linearizer(Kernel):
     # store
     self.global_store(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, val)
 
-    # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
-    acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
-    for u in self.uops:
-      if u.uop == UOps.PHI:
-        acc_scope[u.vin[0]] += u.vin[2:]
-
-    # graph helper functions
-    @functools.lru_cache(None)
-    def get_recursive_parents(x:UOp, with_phi=False) -> Set[UOp]:
-      return set.union(set(x.vin), *[get_recursive_parents(p, with_phi) for p in x.vin], set(acc_scope[x]) if with_phi else set())
-
-    def get_recursive_children(x:UOp) -> Set[UOp]:
-      deps = set([x])
-      ssize = 0
-      while ssize != len(deps):
-        ssize = len(deps)
-        for u in self.uops:
-          if len(deps.intersection([x for x in u.vin if x.uop != UOps.PHI])):
-            deps.add(u)
-      return deps
-
-    def replace_op(old:UOp, new:UOp):
-      for u in self.uops:
-        u.vin = tuple(new if x is old else x for x in u.vin)
-      self.uops.remove(old)
-
-    # fix loop scope, push uops upward out of loop if it does not depend on the loop
-    loop_stack: List[List[UOp]] = [[]]
-    for u in self.uops:
-      if not loop_stack[-1]: loop_stack[-1].append(u)
-      elif u.uop == UOps.LOOP: loop_stack.append([u])
-      elif u.uop not in [UOps.CONST, UOps.ALU, UOps.CAST, UOps.LOAD]: loop_stack[-1].append(u)
-      else:
-        parents = get_recursive_parents(u, with_phi=True)
-        # don't push any local buffer because there might have STORE and BARRIER (not considered as parent) between DEFINE_LOCAL and here
-        if any(u.uop == UOps.DEFINE_LOCAL for u in parents): loop_stack[-1].append(u)
-        else:
-          for i in reversed(range(len(loop_stack))):
-            # check backwards and put the uop in the first encounter with some dependency
-            if any(x in parents for x in loop_stack[i]) or i == 0:
-              loop_stack[i].append(u)
-              break
-    self.uops = flatten(loop_stack)
-
-    # uops optimization
-    changed_something = True
-    while changed_something:
-      changed_something = False
-      for u in self.uops:
-        if u.uop == UOps.PHI and len(u.vin) == 3:
-          # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
-          # TODO: ADD becomes a MUL, MAX can just become nothing
-          if all(x.uop != UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) and u.vin[1].arg == BinaryOps.ADD:
-            if DEBUG >= 4: print(f"removing PHI node {u}")
-            del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
-            # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
-            loop_len = self.uop(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB, insert_before=self.uops.index(u))
-            if loop_len.dtype != u.dtype: loop_len = self.uop(UOps.CAST, u.dtype, (loop_len,), insert_before=self.uops.index(u))
-            replace_op(u, self.uop(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u)))
-            changed_something = True
-
-    # (recursively) remove childless uops
-    # NOTE: DEFINE_GLOBAL should be removable, but we'd have to propagate that
-    UOPS_W_SIDE_EFFECTS = {UOps.STORE, UOps.BARRIER, UOps.DEFINE_GLOBAL}
-    while 1:
-      has_child: Set[UOp] = set()
-      for ru in self.uops:
-        for vu in ru.vin:
-          has_child.add(vu)
-      nu: List[UOp] = [x for x in self.uops if x in has_child or x.uop in UOPS_W_SIDE_EFFECTS]
-      if len(nu) == len(self.uops): break
-      if DEBUG >= 4: print(f"reduced UOp count from {len(self.uops)} to {len(nu)}")
-      self.uops = nu
-      del nu
-
-    # add UOps.END
-    for u in self.uops:
-      if u.uop == UOps.LOOP:
-        # add END of loops after the last thing that (recursively) depends on them
-        self.uop(UOps.END, None, (u,), cachable=False, insert_before=self.uops.index(sorted(list(get_recursive_children(u)), key=self.uops.index)[-1])+1)  # noqa: E501
-      elif u.uop == UOps.IF:
-        # END any if statements at the end of the uops
-        self.uop(UOps.END, None, (u,), cachable=False)
+    # optimize the uops
+    self.uoptimize()
 
     # maybe graph the uops
     if DEBUG >= 5:
@@ -491,19 +392,57 @@ class Linearizer(Kernel):
     self.applied_opts_cache = self.applied_opts[:]
     return self
 
-  def uop(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None, simplify=True) -> UOp:  # noqa: E501
-    if uop == UOps.ALU:
-      if arg in UnaryOps:
-        assert dtype == vin[0].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=}"
-      elif arg in (BinaryOps.CMPLT, BinaryOps.CMPEQ):
-        assert dtype == dtypes.bool, f"{arg} output dtype mismatch {dtype=} != {dtypes.bool}"
-        assert vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
-      elif arg in BinaryOps:
-        assert dtype == vin[0].dtype == vin[1].dtype, f"{arg} dtype mismatch {dtype=} != {vin[0].dtype=} != {vin[1].dtype=}"
-      elif arg == TernaryOps.WHERE:
-        assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
-        assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
+  def uoptimize(self):
+    # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
+    acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
+    for u in self.uops:
+      if u.uop == UOps.PHI:
+        acc_scope[u.vin[0]] += u.vin[2:]
 
+    # graph helper functions
+    @functools.lru_cache(None)
+    def get_recursive_parents(x:UOp, with_phi=False) -> Set[UOp]:
+      return set.union(set(x.vin), *[get_recursive_parents(p, with_phi) for p in x.vin], set(acc_scope[x]) if with_phi else set())
+
+    # fix loop scope, push uops upward out of loop if it does not depend on the loop
+    self.uops = fix_loop_scope(get_recursive_parents, self.uops)
+
+    # uops optimization
+    changed_something = True
+    while changed_something:
+      changed_something = False
+      for u in self.uops:
+        if u.uop == UOps.PHI and len(u.vin) == 3:
+          # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
+          # TODO: ADD becomes a MUL, MAX can just become nothing
+          if all(x.uop != UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) and u.vin[1].arg == BinaryOps.ADD:
+            if DEBUG >= 4: print(f"removing PHI node {u}")
+            del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
+            # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
+            loop_len = self.uop(UOps.ALU, u.vin[2].vin[1].dtype, (u.vin[2].vin[1], u.vin[2].vin[0]), BinaryOps.SUB, insert_before=self.uops.index(u))
+            if loop_len.dtype != u.dtype: loop_len = self.uop(UOps.CAST, u.dtype, (loop_len,), insert_before=self.uops.index(u))
+            new = self.uop(UOps.ALU, u.dtype, (u.vin[1], loop_len,), BinaryOps.MUL, insert_before=self.uops.index(u))
+            # replace u with new
+            for v in self.uops: v.vin = tuple(new if x is u else x for x in v.vin)
+            self.uops.remove(u)
+            changed_something = True
+
+    # (recursively) remove childless uops
+    self.uops = remove_childless_uops(self.uops)
+
+    # add UOps.END
+    for u in self.uops:
+      if u.uop == UOps.LOOP:
+        # add END of loops after the last thing that (recursively) depends on them
+        self.uop(UOps.END, None, (u,), cachable=False, insert_before=self.uops.index(sorted(list(get_recursive_children(self.uops, u)), key=self.uops.index)[-1])+1)  # noqa: E501
+      elif u.uop == UOps.IF:
+        # END any if statements at the end of the uops
+        self.uop(UOps.END, None, (u,), cachable=False)
+
+    # verify the uop types
+    uops_type_verify(self.uops)
+
+  def uop(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None, simplify=True) -> UOp:  # noqa: E501
     if simplify:
       if uop == UOps.PHI and len(vin) == 2: return vin[1]   # a phi without loops is a noop
       if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype, insert_before)

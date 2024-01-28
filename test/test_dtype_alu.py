@@ -37,7 +37,8 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (T
 #binary_operations += [(Tensor.maximum, np.maximum)]
 
 # TODO: CUDACPU segfaults on sin
-if getenv("CUDACPU"): unary_operations.remove((Tensor.sin, np.sin))
+# TODO: METAL sin can't handle infinity
+if getenv("CUDACPU") or Device.DEFAULT == "METAL": unary_operations.remove((Tensor.sin, np.sin))
 
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
