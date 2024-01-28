@@ -531,6 +531,7 @@ class TestLinearizerOpts(unittest.TestCase):
     b = Tensor.rand(N, N)
     r = a@b
     helper_linearizer_opt(r, [
+      [],
       [Opt(OptOps.UPCAST, 0, 4)],
       [Opt(OptOps.UPCAST, 1, 4)],
       [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
