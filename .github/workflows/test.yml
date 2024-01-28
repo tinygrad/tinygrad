@@ -293,7 +293,7 @@ jobs:
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
 
   testhipcompilation:
-    name: HIP Compilation Tests
+    name: HIP / RDNA3 Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -326,6 +326,11 @@ jobs:
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
         sudo apt update
         sudo apt install --no-install-recommends --allow-unauthenticated -y rocm-hip-libraries hip-dev
+    - name: Install RDNA3 emulator
+      run: |
+        curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
+        jq -r '.assets[] | select(.name == "libremu.so").browser_download_url' | \
+        sudo xargs curl -L -o /usr/local/lib/libremu.so
     - name: Install Python Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Verify HIP autogen
@@ -335,11 +340,10 @@ jobs:
         ./autogen_stubs.sh hip
         diff /tmp/hip.py.bak tinygrad/runtime/autogen/hip.py
         diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
-    - name: Test HIP compilation on RDNA3 [gfx1100]
-      # test/test_symbolic_ops.py can't run here, it was comparing empty memory
+    - name: Test HIP on RDNA3 [gfx1100]
       run: |
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
-        MOCKHIP=1 HIP=1 python -m pytest -s test/test_hip_rdna3.py
+        CI=1 HIPCPU=1 HIP=1 python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py
 
 #  testwebgl:
 #    name: WebGL Tests
