@@ -1,6 +1,6 @@
 import unittest
+from tinygrad import Tensor, GlobalCounters
 from tinygrad.helpers import Timing, CI, Profiling, WINO
-from tinygrad.tensor import Tensor
 from tinygrad.ops import LoadOps
 from tinygrad.codegen.linearizer import Linearizer
 
@@ -33,6 +33,13 @@ class TestWinograd(unittest.TestCase):
     x,w = Tensor.rand(1,4,9,9).realize(), Tensor.rand(4,4,3,3).realize()
     with Profiling(enabled=not CI, sort='time'):
       out = Tensor.conv2d(x,w).realize()
+    out.numpy()
+
+  def test_four_kernels(self):
+    x,w = Tensor.rand(1,4,9,9).realize(), Tensor.rand(4,4,3,3).realize()
+    GlobalCounters.reset()
+    out = Tensor.conv2d(x,w).realize()
+    assert GlobalCounters.kernel_count == 4
     out.numpy()
 
 if __name__ == '__main__':
