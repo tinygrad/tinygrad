@@ -343,7 +343,7 @@ jobs:
     - name: Test HIP on RDNA3 [gfx1100]
       run: |
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
-        FORWARD_ONLY=1 HIPCPU=1 HIP=1 python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py
+        HIPCPU=1 HIP=1 python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py
 
 #  testwebgl:
 #    name: WebGL Tests
