@@ -21,19 +21,20 @@ Then this [file](https://github.com/mlcommons/inference/blob/master/speech_recog
 
 BASEDIR = pathlib.Path(__file__).parent/"../../../extra/datasets/librispeech/"
 
-maxX = maxY = 0
-with open(BASEDIR / "dev-clean-wav.json") as f:
-  ci = json.load(f)
-  ci = list(filter(lambda x: x['files'][0]['duration'] < 5,ci)) # filtering for samples under 15s as is allowed in reference
-  
-  feature_rate = 0.03
-  ci_ = []
-  for item in ci:
-    maxX = max(maxX, round(item['files'][0]['duration'] / feature_rate + 1))
-    maxY = max(maxY, len(item["transcript"]))
-    ci_.append(item)
-  ci = ci_
-  print(len(ci))
+def load_data(max_s = 15):
+  maxX = maxY = 0
+  with open(BASEDIR / "dev-clean-wav.json") as f:
+    ci = json.load(f)
+    ci = list(filter(lambda x: x['files'][0]['duration'] < max_s,ci)) # filtering for samples under 15s as is allowed in reference
+    
+    feature_rate = 0.03
+    ci_ = []
+    for item in ci:
+      maxX = max(maxX, round(item['files'][0]['duration'] / feature_rate + 1))
+      maxY = max(maxY, len(item["transcript"]))
+      ci_.append(item)
+    ci = ci_
+  return ci, maxX, maxY
 
 FILTER_BANK = np.expand_dims(librosa.filters.mel(sr=16000, n_fft=512, n_mels=80, fmin=0, fmax=8000), 0)
 WINDOW = librosa.filters.get_window("hann", 320)
@@ -80,8 +81,8 @@ def load_wav(file):
   sample = soundfile.read(file)[0].astype(np.float32)
   return sample, sample.shape[0]
 
-def iterate(bs=1, start=0):
-  print(f"there are {len(ci)} samples in the dataset")
+def iterate(ci, bs=1, start=0):
+
   for i in range(start, len(ci), bs):
     samples, sample_lens = zip(*[load_wav(BASEDIR / v["files"][0]["fname"]) for v in ci[i : i + bs]])
     samples = list(samples)
@@ -90,8 +91,10 @@ def iterate(bs=1, start=0):
     for j in range(len(samples)):
       samples[j] = np.pad(samples[j], (0, max_len - sample_lens[j]), "constant")
     samples, sample_lens = np.array(samples), np.array(sample_lens)
-
-    yield feature_extract(samples, sample_lens), np.array([v["transcript"] for v in ci[i : i + bs]])
+    files = ci[i:i+bs]
+    if (len(files)< bs): return
+    yield feature_extract(samples, sample_lens), np.array([v["transcript"] for v in files])
+    
 
 if __name__ == "__main__":
   X, Y = next(iterate())
