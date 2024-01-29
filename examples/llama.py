@@ -4,123 +4,115 @@
 #typeguard.importhook.install_import_hook('tinygrad')
 
 from pathlib import Path
+from typing import List
 import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
-from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes
-from tinygrad import Device
+from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, colored
+from tinygrad import Device, GlobalCounters, dtypes, nn
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
-from tinygrad.helpers import GlobalCounters
 from extra.models.llama import Transformer, convert_from_huggingface
+from sentencepiece import SentencePieceProcessor
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 4096)
 
-# **** files and arguments ****
+# calculating params:
+# traditionally, the MLP in the transformer architecture has hidden_dim = dim*4 [arxiv/1706.03762, 3.3]
+# however, Llama uses SwiGLU. in order to preserve param count to original transformer arch, hidden_dim must be = 2/3 * (dim*4) [arxiv/2002.05202]
+# for models using MQA (n_kv_heads != n_heads), preserving param count means hidden dim must be further multiplied by 1.3 [arxiv/2307.09288, A.2.1]
 MODEL_PARAMS = {
   "1": {
     "7B": {
-      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": 32000},
+      "args": {"dim": 4096, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-06, "vocab_size": 32000, "hidden_dim": 11008},
       "files": 1,
     },
     "13B": {
-      "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": 32000},
+      "args": {"dim": 5120, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-06, "vocab_size": 32000, "hidden_dim": 13824},
       "files": 2,
     },
     "30B": {
-      "args": {"dim": 6656, "multiple_of": 256, "n_heads": 52, "n_layers": 60, "norm_eps": 1e-06, "vocab_size": 32000},
+      "args": {"dim": 6656, "n_heads": 52, "n_layers": 60, "norm_eps": 1e-06, "vocab_size": 32000, "hidden_dim": 17920},
       "files": 4,
     },
     "65B": {
-      "args": {"dim": 8192, "multiple_of": 256, "n_heads": 64, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": 32000},
+      "args": {"dim": 8192, "n_heads": 64, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": 32000, "hidden_dim": 22016},
       "files": 8,
     },
   },
   "2": {
     "7B": {
-      "args": {"dim": 4096, "multiple_of": 256, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-05, "vocab_size": 32000},
+      "args": {"dim": 4096, "n_heads": 32, "n_layers": 32, "norm_eps": 1e-05, "vocab_size": 32000, "hidden_dim": 11008},
       "files": 1,
     },
     "13B": {
-      "args": {"dim": 5120, "multiple_of": 256, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-05, "vocab_size": 32000},
+      "args": {"dim": 5120, "n_heads": 40, "n_layers": 40, "norm_eps": 1e-05, "vocab_size": 32000, "hidden_dim": 13824},
       "files": 2,
     },
     "70B": {
-      "args": {"dim": 8192, "multiple_of": 4096, "ffn_dim_multiplier": 1.3, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": 32000},
+      "args": {"dim": 8192, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-05, "vocab_size": 32000, "hidden_dim": 28672},
       "files": 8,
     },
   },
   "code": {
     "7B": {
-      "args": {"dim": 4096, "n_layers": 32, "n_heads": 32, "multiple_of": 256, "ffn_dim_multiplier": 1.0, "norm_eps": 1e-5, "rope_theta": 1000000, "vocab_size": 32016},
+      "args": {"dim": 4096, "n_layers": 32, "n_heads": 32, "norm_eps": 1e-05, "rope_theta": 1000000, "vocab_size": 32016, "hidden_dim": 11008},
       "files": 1,
     },
     "7B-Python": {
-      "args": {"dim": 4096, "n_layers": 32, "n_heads": 32, "multiple_of": 256, "ffn_dim_multiplier": 1.0, "norm_eps": 1e-5, "rope_theta": 1000000, "vocab_size": 32000},
+      "args": {"dim": 4096, "n_layers": 32, "n_heads": 32, "norm_eps": 1e-05, "rope_theta": 1000000, "vocab_size": 32000, "hidden_dim": 11008},
       "files": 1,
     },
     "7B-Instruct": {
-      "args": {"dim": 4096, "n_layers": 32, "n_heads": 32, "multiple_of": 256, "ffn_dim_multiplier": 1.0, "norm_eps": 1e-5, "rope_theta": 1000000, "vocab_size": 32016},
+      "args": {"dim": 4096, "n_layers": 32, "n_heads": 32, "norm_eps": 1e-05, "rope_theta": 1000000, "vocab_size": 32016, "hidden_dim": 11008},
       "files": 1,
     },
     "13B": {
-      "args": {"dim": 5120, "n_layers": 40, "n_heads": 40, "multiple_of": 256, "ffn_dim_multiplier": 1.0, "norm_eps": 1e-5, "rope_theta": 1000000, "vocab_size": 32016},
+      "args": {"dim": 5120, "n_layers": 40, "n_heads": 40, "norm_eps": 1e-05, "rope_theta": 1000000, "vocab_size": 32016, "hidden_dim": 13824},
       "files": 2,
     },
     "13B-Python": {
-      "args": {"dim": 5120, "n_layers": 40, "n_heads": 40, "multiple_of": 256, "ffn_dim_multiplier": 1.0, "norm_eps": 1e-5, "rope_theta": 1000000, "vocab_size": 32000},
+      "args": {"dim": 5120, "n_layers": 40, "n_heads": 40, "norm_eps": 1e-05, "rope_theta": 1000000, "vocab_size": 32000, "hidden_dim": 13824},
       "files": 2,
     },
     "13B-Instruct": {
-      "args": {"dim": 5120, "n_layers": 40, "n_heads": 40, "multiple_of": 256, "ffn_dim_multiplier": 1.0, "norm_eps": 1e-5, "rope_theta": 1000000, "vocab_size": 32016},
+      "args": {"dim": 5120, "n_layers": 40, "n_heads": 40, "norm_eps": 1e-05, "rope_theta": 1000000, "vocab_size": 32016, "hidden_dim": 13824},
       "files": 2,
     },
     "34B": {
-      "args": {"dim": 8192, "n_layers": 48, "n_heads": 64, "n_kv_heads": 8, "multiple_of": 256, "ffn_dim_multiplier": 1.0, "norm_eps": 1e-5, "rope_theta": 1000000, "vocab_size": 32000},
+      "args": {"dim": 8192, "n_layers": 48, "n_heads": 64, "n_kv_heads": 8, "norm_eps": 1e-05, "rope_theta": 1000000, "vocab_size": 32000, "hidden_dim": 22016},
       "files": 4,
     },
     "34B-Python": {
-      "args": {"dim": 8192, "n_layers": 48, "n_heads": 64, "n_kv_heads": 8, "multiple_of": 256, "ffn_dim_multiplier": 1.0, "norm_eps": 1e-5, "rope_theta": 1000000, "vocab_size": 32000},
+      "args": {"dim": 8192, "n_layers": 48, "n_heads": 64, "n_kv_heads": 8, "norm_eps": 1e-05, "rope_theta": 1000000, "vocab_size": 32000, "hidden_dim": 22016},
       "files": 4,
     },
     "34B-Instruct": {
-      "args": {"dim": 8192, "n_layers": 48, "n_heads": 64, "n_kv_heads": 8, "multiple_of": 256, "ffn_dim_multiplier": 1.0, "norm_eps": 1e-5, "rope_theta": 1000000, "vocab_size": 32000},
+      "args": {"dim": 8192, "n_layers": 48, "n_heads": 64, "n_kv_heads": 8, "norm_eps": 1e-05, "rope_theta": 1000000, "vocab_size": 32000, "hidden_dim": 22016},
       "files": 4,
     },
   },
   "tiny": {
     "1B": {
-      "args": {"dim": 2048, "n_layers": 22, "n_heads": 32, "n_kv_heads": 4, "multiple_of": 256, "norm_eps": 1e-05, "vocab_size": 32000},
+      "args": {"dim": 2048, "n_layers": 22, "n_heads": 32, "n_kv_heads": 4, "norm_eps": 1e-05, "vocab_size": 32000, "hidden_dim": 5632},
+      "files": 1,
+    },
+    "1B-Chat": {
+      "args": {"dim": 2048, "n_layers": 22, "n_heads": 32, "n_kv_heads": 4, "norm_eps": 1e-05, "vocab_size": 32003, "hidden_dim": 5632},
       "files": 1,
     }
   }
 }
 
-# fix up MODEL_PARAMS to have hidden_dim
-for model_gen in MODEL_PARAMS.values():
-  for model_type in model_gen.values():
-    model_args = model_type['args']
-    hidden_dim = model_args['dim'] * 4
-    multiple_of = model_args['multiple_of']
-    # TODO: what is this?
-    hidden_dim = int(2 * hidden_dim / 3)
-    # custom dim factor multiplier
-    ffn_dim_multiplier = getattr(model_args, 'ffn_dim_multiplier', None)
-    if ffn_dim_multiplier is not None:
-      hidden_dim = int(ffn_dim_multiplier * hidden_dim)
-      del model_args['ffn_dim_multiplier']
-    hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
-    model_args['hidden_dim'] = hidden_dim
-    del model_args['multiple_of']
 
 # **** helper functions ****
-def concat_weights(models):
+def concat_weights(models, device=Device.DEFAULT):
   def convert(name) -> Tensor:
-    disk_tensors = [model[name] for model in models]
+    disk_tensors: List[Tensor] = [model[name] for model in models]
     if len(disk_tensors) == 1 or len(disk_tensors[0].shape) == 1:
-      return disk_tensors[0].to(device=Device.DEFAULT)
+      return disk_tensors[0].to(device=device)
     axis = 1 if name.startswith("tok_embeddings.") or name.endswith(".attention.wo.weight") or name.endswith(".feed_forward.w2.weight") else 0
-    lazy_tensors = [data.to(device=Device.DEFAULT) for data in disk_tensors]
+    lazy_tensors = [data.to(device=device) for data in disk_tensors]
     return lazy_tensors[0].cat(*lazy_tensors[1:], dim=axis)
   return {name: convert(name) for name in {name: None for model in models for name in model}}
 
@@ -158,31 +150,45 @@ class AbsmaxQuantizedLinear:
 
 class LLaMa:
   @staticmethod
-  def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False):
-    from sentencepiece import SentencePieceProcessor
-    sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
-    assert sp_model.vocab_size() == MODEL_PARAMS[model_gen][model_size]["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {MODEL_PARAMS[model_gen][model_size]['args']['vocab_size']}"
-
+  def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False, device=None):
     params = MODEL_PARAMS[model_gen][model_size]
-    model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT)
+    sp_model = SentencePieceProcessor(model_file=str(tokenizer_path))
+    assert sp_model.vocab_size() == params["args"]["vocab_size"], f"{sp_model.vocab_size()=} not equal to {params['args']['vocab_size']}"
+
+    jit = bool(getenv("JIT", 1))
+    model = Transformer(**params["args"], linear=AbsmaxQuantizedLinear, max_context=MAX_CONTEXT, jit=jit) if quantize else Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
+
+    if isinstance(device, tuple):
+      for k,v in nn.state.get_state_dict(model).items():
+        if '.attention.' in k: v.shard_(device, axis=-1)
+        elif '.feed_forward.' in k: v.shard_(device, axis=-1)
+        elif 'tok_embeddings.weight' in k: v.shard_(device, axis=-1)
+        elif 'output.weight' in k: v.shard_(device, axis=-1)
+        #elif k.endswith('.weight'): v.shard_(device, axis=-1)
+        #elif 'norm.' in k: v.shard_(device, axis=-1)
+        else: v.shard_(device, axis=None)
+        #print(k, v.shape, v.lazydata.axis)
 
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
     else:
       weights = load(str(model_path))
     if "model.embed_tokens.weight" in weights:
-      weights = convert_from_huggingface(weights, model, model_args["n_heads"], model_args.get("n_kv_heads", model_args["n_heads"]))
+      weights = convert_from_huggingface(weights, model, params["args"]["n_heads"], params["args"].get("n_kv_heads", params["args"]["n_heads"]))
+
+    # fix bf16, TODO: check if device supports bf16
+    weights = {k:v.to(Device.DEFAULT).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
 
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights)
       for _,v in weights.items(): v.realize()
-    load_state_dict(model, weights, strict=False)
+    load_state_dict(model, weights, strict=False, consume=True)
 
     return LLaMa(model, sp_model)
 
   def __init__(self, model, tokenizer):
     self.model = model
-    self.tokenizer = tokenizer
+    self.tokenizer: SentencePieceProcessor = tokenizer
 
   def greedy_until(self, prompt:str, until, max_length, temperature):
     toks = [self.tokenizer.bos_id()] + self.tokenizer.encode(prompt)
@@ -201,7 +207,7 @@ class LLaMa:
     return output
 
 # **** main code ****
-"""
+r"""
 test:
 python3 examples/llama.py  --temperature=0 --count=50 --prompt="Hello."
 output:
@@ -276,6 +282,7 @@ if __name__ == "__main__":
   parser.add_argument("--size", type=str, default=None, help=f"""Size of model to use {", ".join([f"{list(v.keys())} for gen '{k}'" for k, v in MODEL_PARAMS.items()])}""")
   parser.add_argument("--quantize", action="store_true", help="Quantize the weights to int8 in memory")
   parser.add_argument("--model", type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
+  parser.add_argument("--shard", type=int, default=1, help="number of devices to load the weights to")
 
   args = parser.parse_args()
   if args.gen not in MODEL_PARAMS: raise ValueError("Invalid model generation")
@@ -375,8 +382,9 @@ After you are done speaking, output [EOS]. You are not Chad.
   MODEL_PATH = args.model or Path(__file__).parents[1] / f"weights/LLaMA{LLAMA_SUFFIX}/{args.size}"
   TOKENIZER_PATH = (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
-  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize)
-  param_count = sum(x.lazydata.st.size() for x in get_parameters(llama.model))
+  device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
+  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, device=device)
+  param_count = sum(x.lazydata.size for x in get_parameters(llama.model))
 
   if chatbot:
     # encode pre prompt
@@ -416,12 +424,11 @@ After you are done speaking, output [EOS]. You are not Chad.
       st = GlobalCounters.time_sum_s
       with Profiling(enabled=args.profile):
         with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
-          with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+          with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                       f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                       (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
-            probs = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature).realize()
-          # TODO: fix JIT rand so we can put this in the JIT
-          tok = probs.multinomial().item()
+            tok_tensor = llama.model(Tensor([toks[start_pos:]], device=device), start_pos, args.temperature)
+          tok = tok_tensor.item()
 
       # use the kv cache
       start_pos = len(toks)
@@ -438,3 +445,17 @@ After you are done speaking, output [EOS]. You are not Chad.
       # stop after you have your answer
       if chatbot and outputted.endswith(end_delim): break
     if not chatbot: break
+
+  # validate output!
+  if args.temperature == 0 and args.count == 10 and args.prompt == "Hello." and not args.quantize:
+    text = llama.tokenizer.decode(toks)
+    key = (args.gen, args.size)
+    expected = {
+      ("1", "7B"): "Hello. I'm a 20 year old male",
+      ("2", "7B"): "Hello. I'm a 20 year old girl",
+    }
+    try:
+      assert text == expected[key], "invalid output: " + colored(text, "red")
+      print("\n" + colored("output validated", "green"))  # NOTE: "\n" iside colored does not render the color in github action
+    except KeyError:
+      pass

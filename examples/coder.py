@@ -4,7 +4,7 @@ sys.path.append(os.getcwd())
 
 from io import StringIO
 from contextlib import redirect_stdout
-from tinygrad import Tensor, nn
+from tinygrad import Tensor, nn, Device, dtypes
 from tinygrad.helpers import Timing, colored, getenv, fetch
 from extra.models.llama import Transformer, convert_from_huggingface
 from sentencepiece import SentencePieceProcessor
@@ -19,35 +19,26 @@ def create_fixed_tokenizer(output_file):
   with open(output_file, "wb") as f:
     f.write(mp.SerializeToString())
 
-# TODO: make loading bf16 fast so we can remove this
-def create_model_cache(output_file, model):
-  print(f"creating model cache at {output_file}")
-  # TODO: add read only Tensors
-  with Timing("download weights: "):
-    part1 = nn.state.torch_load(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/pytorch_model-00001-of-00002.bin?download=true"))
-    part2 = nn.state.torch_load(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/pytorch_model-00002-of-00002.bin?download=true"))
-
-  with Timing("weights -> model: "):
-    nn.state.load_state_dict(model, convert_from_huggingface(part1, model, 32, 8), strict=False)
-    nn.state.load_state_dict(model, convert_from_huggingface(part2, model, 32, 8), strict=False)
-
-  with Timing("saving float16 cache: "):
-    nn.state.safe_save(nn.state.get_state_dict(model), output_file)
-
-  print("cache created, rerun to use")
-  exit(0)
+# example:
+# echo -en "write 2+2\nwrite hello world\ny\n" | TEMP=0 python3 examples/coder.py
 
 if __name__ == "__main__":
   Tensor.no_grad = True
 
   # https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/blob/main/config.json
   with Timing("create model: "):
-    model = Transformer(4096, 14336, n_heads=32, n_layers=32, norm_eps=1e-5, vocab_size=32002, n_kv_heads=8, max_context=4096)
+    model = Transformer(4096, 14336, n_heads=32, n_layers=32, norm_eps=1e-5, vocab_size=32002, n_kv_heads=8, max_context=4096, jit=getenv("JIT", 1))
 
-  cached_model = "/tmp/cached_openhermes.safetensors"
-  if not os.path.isfile(cached_model): create_model_cache(cached_model, model)
-  with Timing("loading float16 cache: "):
-    nn.state.load_state_dict(model, nn.state.safe_load(cached_model))
+  with Timing("download weights: "):
+    part1 = nn.state.torch_load(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/pytorch_model-00001-of-00002.bin?download=true"))
+    part2 = nn.state.torch_load(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/pytorch_model-00002-of-00002.bin?download=true"))
+
+  # fix bf16, TODO: check if device supports bf16
+  def fix_bf16(weights): return {k:v.to(Device.DEFAULT).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
+
+  with Timing("weights -> model: "):
+    nn.state.load_state_dict(model, fix_bf16(convert_from_huggingface(part1, model, 32, 8)), strict=False)
+    nn.state.load_state_dict(model, fix_bf16(convert_from_huggingface(part2, model, 32, 8)), strict=False)
 
   if not os.path.isfile("/tmp/tokenizer.model"): create_fixed_tokenizer("/tmp/tokenizer.model")
   spp = SentencePieceProcessor(model_file="/tmp/tokenizer.model")
@@ -83,7 +74,7 @@ if __name__ == "__main__":
       turn = not turn
     old_output_len = len(outputted)
     while 1:
-      tok = model(Tensor([toks[start_pos:]]), start_pos, temperature).multinomial().item()
+      tok = model(Tensor([toks[start_pos:]]), start_pos, temperature).item()
       start_pos = len(toks)
       toks.append(tok)
       outputted = output(outputted, toks, "blue" if not turn else "cyan")

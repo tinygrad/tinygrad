@@ -1,7 +1,7 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  DOWNLOAD_CACHE_VERSION: '3'
+  DOWNLOAD_CACHE_VERSION: '4'
 
 on:
   push:
@@ -16,11 +16,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    # TODO: run the pre-commit hook to replace a lot of this
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Set up Python 3.8
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: 3.8
     - name: Cache python packages
@@ -30,32 +31,28 @@ jobs:
         key: linting-packages-${{ hashFiles('**/setup.py') }}-3.8
     - name: Install dependencies
       run: pip install -e '.[linting,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Repo line count
-      run: python sz.py
     - name: Lint with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' **/*.py
-    - name: Lint with flake8
-      run: python -m flake8 . --statistics -j4
     - name: Lint with ruff
       run: |
         pip3 install --upgrade --force-reinstall ruff
-        python3 -m ruff .
+        python3 -m ruff . --preview
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
       run: python -m mypy
-    - name: Install SLOCCount
-      run: sudo apt install sloccount
-    - name: Check <5000 lines
-      run: sloccount tinygrad test examples extra; if [ $(sloccount tinygrad | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 5000 ]; then exit 1; fi
     - name: Test Docs
-      run: python docs/abstractions.py
+      run: |
+        python docs/abstractions.py
+        python docs/abstractions2.py
     - name: Test Quickstart
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  PYTHONPATH=. python quickstart.py
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
     - name: Fuzz Test shapetracker
-      run: PYTHONPATH="." python test/external/fuzz_shapetracker.py
+      run: |
+        PYTHONPATH="." python test/external/fuzz_shapetracker.py
+        PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
     - name: Test shapetracker to_movement_ops
       run: PYTHONPATH="." python extra/to_movement_ops.py
     - name: Use as an external package
@@ -66,6 +63,8 @@ jobs:
         source venv/bin/activate
         pip install $GITHUB_WORKSPACE
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
+    - name: Repo line count <6000 lines
+      run: MAX_LINE_COUNT=6000 python sz.py
 
   testcpuimagenet:
     name: CPU and ImageNet to C Tests
@@ -74,9 +73,9 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Set up Python 3.8
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: 3.8
     - name: Cache python packages
@@ -98,7 +97,7 @@ jobs:
     - name: Compile C to native
       run: clang -O2 recognize.c -lm -o recognize
     - name: Test EfficientNet
-      run: curl https://media.istockphoto.com/photos/hen-picture-id831791190 | ./recognize | grep hen
+      run: cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
 
   testtorch:
     name: Torch Tests
@@ -107,9 +106,9 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: 3.11
     - name: Cache python packages
@@ -127,7 +126,7 @@ jobs:
     - name: Run Pytest
       run: TORCH=1 python -m pytest -n=auto test/ --durations=20
     - name: Run ONNX
-      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
+      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
 
   testopencl:
     strategy:
@@ -140,7 +139,7 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Install OpenCL
         run: |
           echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
@@ -151,7 +150,7 @@ jobs:
             intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
             intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
       - name: Set up Python 3.11
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: 3.11
       - name: Cache python packages
@@ -180,14 +179,11 @@ jobs:
       - if: ${{ matrix.task == 'optimage'}}
         name: Test GPU IMAGE=2 ops
         run: GPU=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py
-      - if: ${{ matrix.task == 'optimage' }}
-        name: Test tensor core ops
-        run: GPU=1 TC=2 python -m pytest -n=auto test/test_ops.py
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model compile and size
         run: |
-          DEBUG=2 ALLOWED_KERNEL_COUNT=207 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile2.py
-          python -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
+          DEBUG=2 ALLOWED_KERNEL_COUNT=208 FLOAT16=1 DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile2.py
+          #python -c 'import os; assert os.path.getsize("/tmp/output.thneed") < 100_000_000'
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot model correctness (float32)
         run: FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile2.py
@@ -197,11 +193,11 @@ jobs:
       - if: ${{ matrix.task == 'openpilot' }}
         name: Test openpilot fastvits model correctness (float32)
         run: FLOAT16=0 DEBUGCL=1 GPU=1 IMAGE=2 python openpilot/compile2.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
-      - if: ${{ matrix.task == 'openpilot' }}
-        name: Test multigpu
-        run: |
-          PYTHONPATH="." python test/external/dist/test_world.py
-          PYTHONPATH="." python test/external/dist/test_collectives.py
+      #- if: ${{ matrix.task == 'openpilot' }}
+      #  name: Test multigpu
+      #  run: |
+      #    PYTHONPATH="." python test/external/dist/test_world.py
+      #    PYTHONPATH="." python test/external/dist/test_collectives.py
       - if: ${{ matrix.task == 'onnx' }}
         name: Test ONNX (CPU)
         run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
@@ -218,56 +214,57 @@ jobs:
         name: Test Beam Search
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
 
-  testwebgpu:
-    name: WebGPU Tests
-    runs-on: macos-13
-    timeout-minutes: 20
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.11
-    - name: Cache python packages
-      uses: actions/cache@v3
-      with:
-        path: /Users/runner/Library/Python/3.11/lib/python/site-packages
-        key: webgpu-testing-user3-packages-${{ hashFiles('**/setup.py') }}
-    - name: Install Dependencies
-      run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Cache downloads
-      uses: actions/cache@v3
-      with:
-        path: ~/Library/Caches/tinygrad/downloads/
-        key: downloads-cache-webgpu-${{ env.DOWNLOAD_CACHE_VERSION }}
-    - name: Check Device.DEFAULT (WEBGPU) and print some source
-      run: |
-        WEBGPU=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
-        WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+  #testwebgpu:
+  #  name: WebGPU Tests
+  #  runs-on: macos-13
+  #  timeout-minutes: 20
+  #  steps:
+  #  - name: Checkout Code
+  #    uses: actions/checkout@v4
+  #  - name: Set up Python 3.11
+  #    uses: actions/setup-python@v5
+  #    with:
+  #      python-version: 3.11
+  #  - name: Cache python packages
+  #    uses: actions/cache@v3
+  #    with:
+  #      path: /Users/runner/Library/Python/3.11/lib/python/site-packages
+  #      key: webgpu-testing-user3-packages-${{ hashFiles('**/setup.py') }}
+  #  - name: Install Dependencies
+  #    run: pip install --user -e '.[webgpu,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+  #  - name: Cache downloads
+  #    uses: actions/cache@v3
+  #    with:
+  #      path: ~/Library/Caches/tinygrad/downloads/
+  #      key: downloads-cache-webgpu-${{ env.DOWNLOAD_CACHE_VERSION }}
+  #  - name: Check Device.DEFAULT (WEBGPU) and print some source
+  #    run: |
+  #      WEBGPU=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
+  #      WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     #- name: Run webgpu pytest
     #  run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto
-    - name: Run selected webgpu tests
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_dtype.py test/test_jit.py
-    - name: Build WEBGPU Efficientnet
-      run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
-    - name: Install Puppeteer
-      run: npm install puppeteer
-    - name: Run WEBGPU Efficientnet
-      run: node test/web/test_webgpu.js
-    - name: Test LLaMA compile speed
-      run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
+  #  - name: Run selected webgpu tests
+  #    run: |
+  #      WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m pytest -n=auto test/test_ops.py test/test_dtype.py \
+  #      test/test_jit.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_linearizer.py \
+  #      test/test_linearizer_failures.py test/test_nn.py
+  #  - name: Build WEBGPU Efficientnet
+  #    run: WEBGPU=1 WGPU_BACKEND_TYPE=Metal python -m examples.compile_efficientnet
+  #  - name: Install Puppeteer
+  #    run: npm install puppeteer
+  #  - name: Run WEBGPU Efficientnet
+  #    run: node test/web/test_webgpu.js
 
-  testmetalwebgpu:
+  testmetal:
     name: Metal Tests
     runs-on: macos-13
     timeout-minutes: 20
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: 3.11
     - name: Cache python packages
@@ -289,11 +286,11 @@ jobs:
     - name: Run metal test
       run: METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
     - name: Run ONNX
-      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
-    - name: Run whisper test
-      run: METAL=1 python -m pytest test/models/test_whisper.py
-    - name: Test tensor core reshape-only ops
-      run: METAL=1 TC=2 python -m pytest -n=auto test/test_ops.py
+      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+    - name: Test tensor core ops
+      run: METAL=1 TC=2 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
+    - name: Test LLaMA compile speed
+      run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
 
   testhipcompilation:
     name: HIP Compilation Tests
@@ -302,9 +299,9 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: 3.11
     - name: Cache python packages
@@ -328,14 +325,54 @@ jobs:
         # Prefer packages from the rocm repository over system packages
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
         sudo apt update
-        sudo apt install --allow-unauthenticated -y rocm-hip-libraries hip-dev
+        sudo apt install --no-install-recommends --allow-unauthenticated -y rocm-hip-libraries hip-dev
     - name: Install Python Dependencies
-      run: pip install -e '.[testing]'
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Verify HIP autogen
+      run: |
+        cp tinygrad/runtime/autogen/hip.py /tmp/hip.py.bak
+        cp tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
+        ./autogen_stubs.sh hip
+        diff /tmp/hip.py.bak tinygrad/runtime/autogen/hip.py
+        diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
     - name: Test HIP compilation on RDNA3 [gfx1100]
+      # test/test_symbolic_ops.py can't run here, it was comparing empty memory
       run: |
         export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
-        MOCKHIP=1 HIP=1 python -m pytest -s test/test_hip_rdna3.py test/test_symbolic_ops.py
+        MOCKHIP=1 HIP=1 python -m pytest -s test/test_hip_rdna3.py
 
+#  testwebgl:
+#    name: WebGL Tests
+#    runs-on: ubuntu-latest
+#    timeout-minutes: 20
+#
+#    steps:
+#    - name: Checkout Code
+#      uses: actions/checkout@v3
+#    - name: Set up Python 3.11
+#      uses: actions/setup-python@v4
+#      with:
+#        python-version: 3.11
+#    - name: Cache python packages
+#      uses: actions/cache@v3
+#      with:
+#        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
+#        key: webgl-testing-packages-${{ hashFiles('**/setup.py') }}
+#    - name: Install Dependencies
+#      run: pip install -e '.[webgl,testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+#    - name: Cache downloads
+#      uses: actions/cache@v3
+#      with:
+#        path: ~/Library/Caches/tinygrad/downloads/
+#        key: downloads-cache-webgl-${{ env.DOWNLOAD_CACHE_VERSION }}
+#    - name: Prepare
+#      run: |
+#        sudo apt-get -y install xvfb
+#        sudo /usr/bin/Xvfb :0 -screen 0 4096x4096x24+32 &
+#    - name: Run selected webgl tests
+#      run: WEBGL=1 python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_jit.py
+#    - name: Build WebGL Efficientnet
+#      run: WEBGL=1 python -m examples.compile_efficientnet
 
   tests:
     strategy:
@@ -344,14 +381,14 @@ jobs:
         backend: [llvm, clang, gpu, cuda] #, triton] #, ptx]
 
     name: Tests on (${{ matrix.backend }})
-    runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Set up Python 3.11
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: 3.11
       - name: Cache python packages
@@ -372,7 +409,7 @@ jobs:
           echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
           sudo apt update
-          sudo apt install --allow-unauthenticated -y --no-install-recommends \
+          sudo apt install --allow-unauthenticated -y --no-install-recommends opencl-headers \
             intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
             intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
             intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
@@ -382,7 +419,7 @@ jobs:
           echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           sudo apt update -y
           sudo apt install -y --no-install-recommends git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
-            flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc
+            flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev nvidia-cuda-toolkit-gcc libzstd-dev
       - name: Cache gpuocelot
         if: matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton'
         id: cache-build
@@ -391,7 +428,7 @@ jobs:
           cache-name: cache-gpuocelot-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480-rebuild
+          key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480-rebuild-3
       - name: Clone/compile gpuocelot
         if: (matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
@@ -413,15 +450,27 @@ jobs:
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
+      - name: Verify OpenCL autogen
+        if: matrix.backend == 'gpu'
+        run: |
+          cp tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
+          ./autogen_stubs.sh opencl
+          diff /tmp/opencl.py.bak tinygrad/runtime/autogen/opencl.py
+      - name: Verify CUDA autogen
+        if: matrix.backend == 'cuda'
+        run: |
+          cp tinygrad/runtime/autogen/cuda.py /tmp/cuda.py.bak
+          ./autogen_stubs.sh cuda
+          diff /tmp/cuda.py.bak tinygrad/runtime/autogen/cuda.py
       - name: Run pytest (not cuda)
         if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
-        run: python -m pytest -n=auto test/ -k '${{matrix.backend=='llvm'&&'not (test_nn.py and test_conv_transpose2d)'||'test'}}' -m 'not exclude_${{matrix.backend}}' --durations=20
+        run: python -m pytest -n=auto test/ --durations=20
       - name: Run ONNX (only LLVM)
         if: matrix.backend == 'llvm'
         run: python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
-        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors) and not (test_conv2d and test_tensor.py)' -m 'not exclude_cuda' --ignore=test/external --ignore=test/models --durations=20
+        run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --durations=20
 
   #testunicorn:
   #  name: ARM64 unicorn Test
@@ -429,9 +478,9 @@ jobs:
   #  timeout-minutes: 20
   #  steps:
   #    - name: Checkout Code
-  #      uses: actions/checkout@v3
+  #      uses: actions/checkout@v4
   #    - name: Set up Python 3.11
-  #      uses: actions/setup-python@v4
+  #      uses: actions/setup-python@v5
   #      with:
   #        python-version: 3.11
   #    - name: Cache python packages

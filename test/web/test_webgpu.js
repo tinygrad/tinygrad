@@ -19,14 +19,14 @@ function cleanup(err) {
 async function waitForText(selector, text) {
     let n = 0;
     let ready = false;
-    while (n < 10) {
+    while (n < 30) {
         const res = await (await selector.getProperty("textContent")).jsonValue();
         console.log(`waiting for text ${text} got ${res}`);
         if(res == text) {
             ready = true;
             break
         }
-        await timeout(2000);
+        await timeout(1000);
         n += 1
     }
     return ready;

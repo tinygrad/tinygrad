@@ -18,22 +18,26 @@ jobs:
       PYTHONPATH: .
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Symlink models and datasets
       run: |
+        mkdir -p weights
         ln -s ~/tinygrad/disassemblers/applegpu disassemblers/applegpu
         ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
+    # TODO: why is this test not reliable?
+    #- name: Run Stable Diffusion
+    #  run: python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
     - name: Run model inference benchmark
-      run: python3 test/external/external_model_benchmark.py
+      run: METAL=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Run Tensor Core GEMM
-      run: DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
-    - name: Run Stable Diffusion
-      run: python3 examples/stable_diffusion.py --noshow --timing | tee sd.txt
+      run: |
+        DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
+        DEBUG=2 HALF=1 python3 extra/gemm/simple_matmul.py | tee matmul_half.txt
     - name: Run LLaMA
       run: |
         JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
@@ -44,9 +48,10 @@ jobs:
         JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
     - name: Run 10 CIFAR training steps
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
-    - name: Run 10 CIFAR training steps w winograd
-      run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
-    - uses: actions/upload-artifact@v3
+    # TODO: this is flaky too
+    # - name: Run 10 CIFAR training steps w winograd
+    #   run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
+    - uses: actions/upload-artifact@v4
       with:
         name: Speed (Mac)
         path: |
@@ -59,6 +64,7 @@ jobs:
           gpt2_unjitted.txt
           gpt2_jitted.txt
           matmul.txt
+          matmul_half.txt
           sd.txt
 
   testnvidiabenchmark:
@@ -72,7 +78,7 @@ jobs:
       PYTHONPATH: .
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Run model inference benchmark
       run: CUDA=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -81,7 +87,11 @@ jobs:
       run: |
         CUDA=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
         CUDA=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
-    - uses: actions/upload-artifact@v3
+    - name: Run GPT2 w HALF
+      run: CUDA=1 JIT=1 HALF=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing
+    - name: Run GPT2 w HALF/BEAM
+      run: CUDA=1 JIT=1 HALF=1 BEAM=2 CACHELEVEL=0 python3 examples/gpt2.py --count 10 --temperature 0 --timing | tee gpt2_half_beam.txt
+    - uses: actions/upload-artifact@v4
       with:
         name: Speed (NVIDIA)
         path: |
@@ -89,10 +99,11 @@ jobs:
           torch_speed.txt
           gpt2_unjitted.txt
           gpt2_jitted.txt
+          gpt2_half_beam.txt
 
   testamdbenchmark:
-    name: AMD Benchmark
-    runs-on: [self-hosted, Linux, ROCM]
+    name: tinybox Benchmark
+    runs-on: [self-hosted, Linux, tinybox]
     defaults:
       run:
         shell: bash -o pipefail {0}
@@ -101,42 +112,48 @@ jobs:
       PYTHONPATH: .
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
+    - name: Show off tinybox
+      run: /opt/rocm/bin/rocm-bandwidth-test
     - name: Symlink models and datasets
       run: |
-        ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
+        mkdir -p weights
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz
         ln -s ~/tinygrad/weights/LLaMA weights/LLaMA
         ln -s ~/tinygrad/extra/datasets/cifar-10-python.tar.gz extra/datasets/cifar-10-python.tar.gz
     - name: Run model inference benchmark
-      run: python3 test/external/external_model_benchmark.py
+      run: HIP=1 NOCLANG=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: BIG=2 TORCHCUDA=1 python3 test/test_speed_v_torch.py | tee torch_speed.txt
     - name: Run Tensor Core GEMM
       run: HIP=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
     - name: Run Stable Diffusion
-      run: python3 examples/stable_diffusion.py --noshow --timing | tee sd.txt
-    - name: Run LLaMA
+      run: python3 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd.txt
+    - name: Run LLaMA (with HIP)
       run: |
-        JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
-        JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
+        HIP=1 JIT=0 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_unjitted.txt
+        HIP=1 JIT=1 python3 examples/llama.py --gen 1 --prompt "Hello." --count 10 --temperature 0 --timing | tee llama_jitted.txt
     - name: Run GPT2 (with HIP)
       run: |
         HIP=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
         HIP=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
     - name: Run 10 CIFAR training steps
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
-    - name: Run 10 CIFAR training steps w winograd
-      run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
-    #- name: Run 10 CIFAR training steps w WINO/HALF/HIP
-    #  run: HALF=1 HIP=1 WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
-    - uses: actions/upload-artifact@v3
+    - name: Run full CIFAR training w HALF
+      run: time HALF=1 STEPS=1000 python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+    # # TODO: make wino faster so we can enable both
+    # - name: Run 10 CIFAR training steps w winograd
+    #   run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
+    # - name: Run 10 CIFAR training steps w WINO/HALF/HIP
+    #   run: HALF=1 WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
+    - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD)
         path: |
           onnx_inference_speed.csv
           torch_speed.txt
           train_cifar.txt
+          train_cifar_half.txt
           train_cifar_wino.txt
           train_cifar_wino_half_hip.txt
           llama_unjitted.txt

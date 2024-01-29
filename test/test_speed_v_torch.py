@@ -9,15 +9,11 @@ torch.set_num_threads(1)
 import time
 import numpy as np
 np.set_printoptions(linewidth=160)
-from tinygrad import Device
-from tinygrad.helpers import GlobalCounters
+from tinygrad import Device, GlobalCounters
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
 from tinygrad.helpers import colored, getenv, CI
 from tinygrad.jit import TinyJit
-import pytest
-
-pytestmark = [pytest.mark.exclude_cuda, pytest.mark.exclude_gpu, pytest.mark.exclude_clang]
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 
@@ -106,7 +102,7 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
   desc = "faster" if et_torch > et_tinygrad else "slower"
   flops = save_ops*1e-6
   mem = save_mem*1e-6
-  print(("\r" if not CI else "")+f"{name:42s} {et_torch:7.2f} ms ({flops/et_torch:8.2f} GFLOPS {mem/et_torch:8.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:8.2f} GFLOPS {mem/et_tinygrad:8.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:10.2f} MOPS {mem:8.2f} MB")
+  print(("\r" if not CI else "")+f"{name:42s} {et_torch:7.2f} ms ({flops/et_torch:8.2f} GFLOPS {mem/et_torch:8.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:8.2f} GFLOPS {mem/et_tinygrad:8.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:10.2f} MOPS {mem:8.2f} MB")  # noqa: E501
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=1e-3, rtol=1e-3)
 
 def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_x):
@@ -123,6 +119,7 @@ def helper_test_conv(bs, in_chans, out_chans, kernel_size, img_size_y, img_size_
   helper_test_generic(f"conv bs:{bs:3d} chans:{in_chans:3d} -> {out_chans:3d} k:{kernel_size}", f1, (torch_dat,), TinyJit(f2), (tiny_dat,))
 
 @unittest.skipIf(getenv("BIG") == 0, "no big tests")
+@unittest.skipIf(getenv("CUDACPU"), "no CUDACPU")
 class TestBigSpeed(unittest.TestCase):
   def test_add(self):
     def f(a, b): return a+b
@@ -143,6 +140,7 @@ class TestBigSpeed(unittest.TestCase):
   def test_matvec_16384_4096(self): helper_test_matvec('matvec_16384_4096', 16384, 4096)
 
 @unittest.skipIf(getenv("BIG") == 1, "only big tests")
+@unittest.skipIf(getenv("CUDACPU"), "no CUDACPU")
 class TestSpeed(unittest.TestCase):
   def test_sub(self):
     def f(a, b): return a-b

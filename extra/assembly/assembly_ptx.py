@@ -2,7 +2,7 @@ from typing import List
 import struct
 from tinygrad.codegen.assembly import uops_to_asmstyle, AssemblyLanguage
 from tinygrad.codegen.linearizer import UOps, UOp
-from tinygrad.helpers import dtypes
+from tinygrad import dtypes
 from tinygrad.ops import BinaryOps, UnaryOps, TernaryOps
 from tinygrad.runtime.ops_cuda import arch
 

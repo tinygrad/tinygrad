@@ -1,19 +1,19 @@
-import pathlib
-import unittest
+import pathlib, unittest
 import numpy as np
-from tinygrad.tensor import Tensor, Device
+from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import dtypes, fetch, temp
-from tinygrad.runtime.ops_disk import RawDiskBuffer
-from tinygrad.helpers import Timing
+from tinygrad.helpers import Timing, CI, fetch, temp
 
 def compare_weights_both(url):
   import torch
   fn = fetch(url)
   tg_weights = get_state_dict(torch_load(fn))
-  torch_weights = get_state_dict(torch.load(fn), tensor_type=torch.Tensor)
+  torch_weights = get_state_dict(torch.load(fn, map_location=torch.device('cpu')), tensor_type=torch.Tensor)
   assert list(tg_weights.keys()) == list(torch_weights.keys())
   for k in tg_weights:
+    if tg_weights[k].dtype == dtypes.bfloat16: tg_weights[k] = torch_weights[k].float() # numpy doesn't support bfloat16
+    if torch_weights[k].dtype == torch.bfloat16: torch_weights[k] = torch_weights[k].float() # numpy doesn't support bfloat16
+    if torch_weights[k].requires_grad: torch_weights[k] = torch_weights[k].detach()
     np.testing.assert_equal(tg_weights[k].numpy(), torch_weights[k].numpy(), err_msg=f"mismatch at {k}, {tg_weights[k].shape}")
   print(f"compared {len(tg_weights)} weights")
 
@@ -24,8 +24,16 @@ class TestTorchLoad(unittest.TestCase):
   def test_load_enet_alt(self): compare_weights_both("https://download.pytorch.org/models/efficientnet_b0_rwightman-3dd342df.pth")
   # pytorch zip format
   def test_load_convnext(self): compare_weights_both('https://dl.fbaipublicfiles.com/convnext/convnext_tiny_1k_224_ema.pth')
-  # TODO: support pytorch tar format with minimal lines
-  #def test_load_resnet(self): compare_weights_both('https://download.pytorch.org/models/resnet50-19c8e357.pth')
+
+  # for GPU, cl_khr_fp16 isn't supported
+  # for LLVM, it segfaults because it can't link to the casting function
+  # CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
+  @unittest.skipIf(Device.DEFAULT in ["GPU", "LLVM", "CUDA"] and CI, "fp16 broken in some backends")
+  @unittest.skipIf(Device.DEFAULT == "TORCH", "torch doesn't support the way we load bfloat (cast to uint32)")
+  def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/qazalin/bf16-lightweight/resolve/main/consolidated.00.pth?download=true")
+
+  # pytorch tar format
+  def test_load_resnet(self): compare_weights_both('https://download.pytorch.org/models/resnet50-19c8e357.pth')
 
 test_fn = pathlib.Path(__file__).parents[2] / "weights/LLaMA/7B/consolidated.00.pth"
 #test_size = test_fn.stat().st_size
@@ -40,11 +48,6 @@ class TestRawDiskBuffer(unittest.TestCase):
       with Timing("copy in ", lambda et_ns: f" {test_size/et_ns:.2f} GB/s"):
         f.readinto(tst)
 
-  def test_mmap_read_speed(self):
-    db = RawDiskBuffer(test_size, dtype=dtypes.uint8, device=test_fn)
-    tst = np.empty(test_size, np.uint8)
-    with Timing("copy in ", lambda et_ns: f" {test_size/et_ns:.2f} GB/s"):
-      np.copyto(tst, db.toCPU())
 @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu doesn't support uint8 datatype")
 class TestSafetensors(unittest.TestCase):
   def test_real_safetensors(self):
@@ -68,20 +71,32 @@ class TestSafetensors(unittest.TestCase):
     ret2 = safe_load(temp("model.safetensors_alt"))
     for k,v in tensors.items(): np.testing.assert_array_equal(ret2[k].numpy(), v.numpy())
 
+  def test_real_safetensors_open(self):
+    fn = temp("real_safe")
+    state_dict = {"tmp": Tensor.rand(10,10)}
+    safe_save(state_dict, fn)
+    import os
+    assert os.path.getsize(fn) == 8+0x40+(10*10*4)
+    from safetensors import safe_open
+    with safe_open(fn, framework="pt", device="cpu") as f:
+      assert sorted(f.keys()) == sorted(state_dict.keys())
+      for k in f.keys():
+        np.testing.assert_array_equal(f.get_tensor(k).numpy(), state_dict[k].numpy())
+
   def test_efficientnet_safetensors(self):
     from extra.models.efficientnet import EfficientNet
     model = EfficientNet(0)
     state_dict = get_state_dict(model)
     safe_save(state_dict, temp("eff0"))
     state_dict_loaded = safe_load(temp("eff0"))
-    assert sorted(list(state_dict_loaded.keys())) == sorted(list(state_dict.keys()))
+    assert sorted(state_dict_loaded.keys()) == sorted(state_dict.keys())
     for k,v in state_dict.items():
       np.testing.assert_array_equal(v.numpy(), state_dict_loaded[k].numpy())
 
     # load with the real safetensors
     from safetensors import safe_open
     with safe_open(temp("eff0"), framework="pt", device="cpu") as f:
-      assert sorted(list(f.keys())) == sorted(list(state_dict.keys()))
+      assert sorted(f.keys()) == sorted(state_dict.keys())
       for k in f.keys():
         np.testing.assert_array_equal(f.get_tensor(k).numpy(), state_dict[k].numpy())
 
@@ -104,6 +119,14 @@ class TestSafetensors(unittest.TestCase):
     import json
     assert json.loads(dat[8:8+sz])['__metadata__']['hello'] == 'world'
 
+  def test_save_all_dtypes(self):
+    for dtype in dtypes.fields().values():
+      if dtype in [dtypes.bfloat16]: continue # not supported in numpy
+      path = temp(f"ones.{dtype}.safetensors")
+      ones = Tensor.rand((10,10), dtype=dtype)
+      safe_save(get_state_dict(ones), path)
+      assert ones == list(safe_load(path).values())[0]
+
 def helper_test_disk_tensor(fn, data, np_fxn, tinygrad_fxn=None):
   if tinygrad_fxn is None: tinygrad_fxn = np_fxn
   pathlib.Path(temp(fn)).unlink(missing_ok=True)
@@ -121,20 +144,20 @@ class TestDiskTensor(unittest.TestCase):
   def test_write_ones(self):
     pathlib.Path(temp("dt2")).unlink(missing_ok=True)
 
-    out = Tensor.ones(10, 10, device="CPU")
+    out = Tensor.ones(10, 10, device="CPU").contiguous()
     outdisk = out.to(f"disk:{temp('dt2')}")
     print(outdisk)
     outdisk.realize()
     del out, outdisk
 
+    import struct
     # test file
     with open(temp("dt2"), "rb") as f:
-      assert f.read() == b"\x00\x00\x80\x3F" * 100
+      assert f.read() == struct.pack('<f', 1.0) * 100 == b"\x00\x00\x80\x3F" * 100
 
     # test load alt
     reloaded = Tensor.empty(10, 10, device=f"disk:{temp('dt2')}")
-    out = reloaded.numpy()
-    assert np.all(out == 1.)
+    np.testing.assert_almost_equal(reloaded.numpy(), np.ones((10, 10)))
 
   def test_assign_slice(self):
     def assign(x,s,y): x[s] = y

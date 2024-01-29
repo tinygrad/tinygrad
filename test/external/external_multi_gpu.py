@@ -3,54 +3,58 @@
 # LD_PRELOAD=$PWD/disassemblers/cuda_ioctl_sniffer/out/sniff.so GPU=1 python3 test/external/external_multi_gpu.py
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import colored
-from tinygrad.helpers import Timing
-from tinygrad.runtime.ops_gpu import CL
+from tinygrad.helpers import colored, Timing, getenv
+from tinygrad.device import Device
 
-# TODO: support multidevice in cuda
-device = 'gpu'
+d0, d1 = f'{Device.DEFAULT}:0', f'{Device.DEFAULT}:1'
+
+def sync():
+  Device[d0].synchronize()
+  Device[d1].synchronize()
 
 if __name__ == "__main__":
-  sz = 1024*1024*256  # 1 GB
-  #sz = 1024*64
+  print("GPU devices", d0, d1)
+  sz = getenv("N", 1024*1024*256)  # 1 GB
+
+  with Timing("GPU initial sync: "): sync()
 
   with Timing("CPU creation: ", on_exit=lambda x: f", {(sz*4*2)/x:.2f} GB/sec"):
-    c0 = Tensor.ones(sz, device="cpu").realize()
-    c1 = (Tensor.ones(sz, device="cpu")/2).realize()
+    c0 = (Tensor.ones(sz, device="clang")/2).realize()
+    c1 = (Tensor.ones(sz, device="clang")/4).realize()
+    print(c0.lazydata.base.realized)
+    print(c1.lazydata.base.realized)
 
   with Timing("CPU -> 0: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
-    a0 = c0.to(f'{device}:0').realize()
-    CL.synchronize()
+    a0 = c0.to(d0).realize()
+    sync()
   with Timing("CPU -> 1: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
-    b1 = c1.to(f'{device}:1').realize()
-    CL.synchronize()
+    b1 = c1.to(d1).realize()
+    sync()
 
-  # cross copy. this is going through the CPU
-  with Timing("0 -> CPU -> 1: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
-    a1 = a0.to(f'{device}:1').realize()
-    CL.synchronize()
-  with Timing("1 -> CPU -> 0: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
-    b0 = b1.to(f'{device}:0').realize()
-    CL.synchronize()
+  # cross copy. this is (sometimes) going through the CPU
+  with Timing("0 -> 1: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
+    a1 = a0.to(d1).realize()
+    sync()
+  with Timing("1 -> 0: ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
+    b0 = b1.to(d0).realize()
+    sync()
 
   # sum
   with Timing("0+0 -> 0 (sum): ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
     ab0 = (a0 + b0).realize()
-    CL.synchronize()
+    sync()
   with Timing("1+1 -> 1 (sum): ", on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
     ab1 = (a1 + b1).realize()
-    CL.synchronize()
+    sync()
 
   # cross device sum (does this work?)
-  # is this making a copy first? is that copy through the CPU?
-  # the slowness comes from the *blocking* clprg call, is this pyopencl?
   with Timing(colored("0+1 -> 0 (sum): ", "red"), on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
-    abx0 = (a0 + b1).realize()
-    CL.synchronize()
+    abx0 = (a0 + b1.to(d0)).realize()
+    sync()
 
   with Timing(colored("1+0 -> 1 (sum): ", "red"), on_exit=lambda x: f", {(sz*4)/x:.2f} GB/sec"):
-    abx1 = (b1 + a0).realize()
-    CL.synchronize()
+    abx1 = (b1 + a0.to(d1)).realize()
+    sync()
 
   # copy back
   # NOTE: half of this slowness is caused by allocating memory on the CPU
@@ -62,6 +66,11 @@ if __name__ == "__main__":
   # same
   print("testing")
   np.testing.assert_allclose(cc0, cc1)
+
+  # same (cross)
+  print("testing (cross)")
+  np.testing.assert_allclose(cc0, abx0.numpy())
+  np.testing.assert_allclose(cc0, abx1.numpy())
 
   # devices
   print(ab0)

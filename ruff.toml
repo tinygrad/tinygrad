@@ -12,13 +12,18 @@ select = [
   "E272",
   # "E303",
   # "E304",
+  "E501",
   # "E502",
   "E702",
   "E703",
   "E731",
   "W191",
+  "W291",
+  "W293",
   "UP039",  # unnecessary-class-parentheses
 ]
+
+line-length = 150
 
 exclude = [
   "disassemblers/",
@@ -26,5 +31,6 @@ exclude = [
   "examples/",
   "extra/",
   "openpilot/",
+  "tinygrad/runtime/autogen",
 ]
 

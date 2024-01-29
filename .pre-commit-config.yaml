@@ -7,15 +7,15 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
-      - id: mypy
-        name: mypy
-        entry: mypy tinygrad/ extra/helpers.py
+      - id: ruff
+        name: ruff
+        entry: ruff . --preview
         language: system
         always_run: true
         pass_filenames: false
-      - id: ruff
-        name: ruff
-        entry: ruff .
+      - id: mypy
+        name: mypy
+        entry: mypy tinygrad/
         language: system
         always_run: true
         pass_filenames: false
@@ -25,9 +25,15 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
-      - id: flake8
-        name: flake8
-        entry: flake8 --statistics -j4
+      - id: docs2
+        name: docs2
+        entry: python3 docs/abstractions2.py
+        language: system
+        always_run: true
+        pass_filenames: false
+      - id: devicetests
+        name: select GPU tests
+        entry: env GPU=1 PYTHONPATH="." pytest test/test_uops.py test/test_custom_function.py test/test_search.py
         language: system
         always_run: true
         pass_filenames: false
@@ -39,7 +45,7 @@ repos:
         pass_filenames: false
       - id: example
         name: multi device tests
-        entry: python3 test/external/test_example.py
+        entry: python3 test/external/external_test_example.py
         language: system
         always_run: true
         pass_filenames: false

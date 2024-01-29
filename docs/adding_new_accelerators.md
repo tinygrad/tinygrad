@@ -11,7 +11,7 @@ unary_op  (NOOP, EXP2, LOG2, CAST, SIN, SQRT)                # A -> A
 reduce_op (SUM, MAX)                                         # A -> B (smaller size, B has 1 in shape)
 binary_op (ADD, SUB, MUL, DIV, CMPEQ, MAX)                   # A + A -> A (all the same size)
 movement_op (EXPAND, RESHAPE, PERMUTE, PAD, SHRINK, STRIDE)  # A -> B (different size)
-load_op   (EMPTY, RAND, CONST, FROM, CONTIGUOUS, CUSTOM)     # -> A   (initialize data on device)
+load_op   (EMPTY, CONST, FROM, CONTIGUOUS, CUSTOM)           # -> A   (initialize data on device)
 ternary_op (WHERE)                                           # A, A, A -> A
 ternary_op [[optional]] (MULACC)                             # A * A -> B
 ```

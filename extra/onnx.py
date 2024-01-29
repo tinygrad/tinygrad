@@ -2,8 +2,8 @@ from __future__ import annotations
 from google.protobuf.internal.containers import RepeatedCompositeFieldContainer
 import importlib
 import numpy as np
-from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, DEBUG, dtypes
+from tinygrad import Tensor, dtypes
+from tinygrad.helpers import getenv, DEBUG
 from typing import List, Dict
 from onnx import AttributeProto, ModelProto, TensorProto, TypeProto # onnx 1.50 uses serialized file (see onnx/onnx-ml.proto) as descriptors
 try:
@@ -21,9 +21,16 @@ def safe_numpy(t) -> np.ndarray:
   if t not in numpy_cache:
     if DEBUG >= 3: print("numpy cache miss", t)
     tmp = t.numpy()
-    numpy_cache[t] = tmp if len(tmp.shape) else tmp.reshape(1)
-  assert len(numpy_cache[t].shape) > 0
+    numpy_cache[t] = tmp
   return numpy_cache[t]
+
+# src: onnx/mapping.py
+# not supported: STRING = 8 COMPLEX64 = 14, COMPLEX128 = 15
+# NOTE: 17, 18, 19, 20 are float8, 10 is half
+DTYPE_MAP = {1:dtypes.float, 2:dtypes.uint8, 3:dtypes.int8, 4:dtypes.uint16, 5:dtypes.int16, 6:dtypes.int32, 7:dtypes.int64,
+              9:dtypes.bool, 10:dtypes.float, 11:dtypes.double, 12:dtypes.uint32, 13:dtypes.uint64, 16:dtypes.bfloat16,
+              17:dtypes.float, 18:dtypes.float, 19:dtypes.float, 20:dtypes.float}
+# TODO: fix buffer_parse to use this and fix get_weight_and_biases to only use buffer_parse
 
 onnx_ops = importlib.import_module('extra.onnx_ops')
 
@@ -35,11 +42,11 @@ def get_run_onnx(onnx_model: ModelProto):
     while True:
       attr = type_proto.WhichOneof('value')
       if attr == 'tensor_type':
-        if "dim_value" not in getattr(type_proto, attr).shape.dim.__dir__(): return () # variable type, unable to determine shape
+        if "dim_value" not in type_proto.tensor_type.shape.dim.__dir__(): return () # variable type, unable to determine shape
         elif not ret:
-          return tuple([x.dim_value for x in getattr(type_proto, attr).shape.dim])
+          return tuple([x.dim_value for x in type_proto.tensor_type.shape.dim])
         else:
-          ret.extend([(x.dim_value,) for x in getattr(type_proto, attr).shape.dim])
+          ret.extend([(x.dim_value,) for x in type_proto.tensor_type.shape.dim])
           return tuple(ret)
       elif attr == 'sequence_type':
         type_proto = getattr(type_proto, attr).elem_type
@@ -51,7 +58,7 @@ def get_run_onnx(onnx_model: ModelProto):
       else: raise Exception(f"unknown attr: {attr}, {type_proto}")
 
   def buffer_parse(inp: TensorProto) -> Tensor:
-    if inp.data_type in (1,10,6,7,5):
+    if inp.data_type in (1,10,6,7,5,11):
       # TODO: this is shared with below
       if len(inp.float_data) > 0:
         ret = Tensor(np.array(inp.float_data, dtype=np.float32).reshape(inp.dims), requires_grad=False)
@@ -132,7 +139,7 @@ def get_run_onnx(onnx_model: ModelProto):
     def fetch_tensor(x: str):
       if x in tensors: return tensors[x]
       if x in intermediate_tensors: return intermediate_tensors[x]
-      if x != str(): return input_tensors[x]
+      if x != "": return input_tensors[x]
       return None
 
     for num,n in enumerate(onnx_model.graph.node):
@@ -157,7 +164,7 @@ def get_run_onnx(onnx_model: ModelProto):
           for i in range(inp[0].shape[axis] % len(n.output)):
             split[i] += 1
         i, ret = 0, []
-        arg = [(0,x) for x in inp[0].shape]
+        arg = [None] * inp[0].ndim
         for s in split:
           arg[axis] = (i,i+s)
           ret.append(inp[0].shrink(arg=tuple(arg)))
@@ -170,19 +177,20 @@ def get_run_onnx(onnx_model: ModelProto):
           axes, ends, starts, steps = list(opt.get("axes", range(inp[0].ndim))), list(opt["ends"]), list(opt["starts"]), [1]*inp[0].ndim
         else:
           starts, ends = inp[1:3]
-          axes = safe_numpy(Tensor.arange(inp[0].ndim, dtype=dtypes.int32) if len(inp) <= 3 else inp[3]).tolist()
+          axes = safe_numpy(Tensor.arange(inp[0].ndim) if len(inp) <= 3 else inp[3]).tolist()
           steps = safe_numpy(inp[4]) if len(inp) > 4 else [1]*inp[0].ndim
           starts, ends = safe_numpy(starts.ceil().cast(dtypes.int32)).tolist(), safe_numpy(ends.ceil().cast(dtypes.int32)).tolist()
         arg = [(0,x,1) for x in inp[0].shape]
         for i, axis in enumerate(axes):
           axis = int(axis) + inp[0].ndim if axis < 0 else int(axis)
-          starts[i], ends[i] = starts[i] + inp[0].shape[axis] if starts[i] < 0 else starts[i], ends[i] + inp[0].shape[axis] if ends[i] < 0 else ends[i]
+          if starts[i] < 0: starts[i] += inp[0].shape[axis]
+          if ends[i] < 0: ends[i] += inp[0].shape[axis]
           starts[i], ends[i] = max(0, min(starts[i], inp[0].shape[axis])), max(0, min(ends[i], inp[0].shape[axis]))
           if starts[i] > ends[i] and steps[i] >= 0: steps[i] = -steps[i]
           arg[axis] = (starts[i], ends[i], steps[i])
         new_shape = tuple((s, e) if st > 0 else (e+1, s+1) for s, e, st in arg)
         if any(s==e for s,e in new_shape): ret = inp[0].shrink(new_shape)
-        else: ret = inp[0].__getitem__(tuple([slice(s,e,st) for s,e,st in arg]))
+        else: ret = inp[0][tuple([slice(s,e,st) for s,e,st in arg])]
 
       # need to call backward on intermediate_tensors
       elif n.op_type == "Gradient":

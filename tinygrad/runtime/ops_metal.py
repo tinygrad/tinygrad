@@ -1,7 +1,9 @@
-import os, subprocess, pathlib, ctypes, tempfile
+from __future__ import annotations
+import os, subprocess, pathlib, ctypes, tempfile, functools
 import Metal, libdispatch
-from typing import List, Any, Tuple, Dict, cast, Optional
+from typing import List, Any, Tuple, Optional
 from tinygrad.codegen.kernel import LinearizerOptions
+
 from tinygrad.helpers import prod, getenv, DEBUG, DType, dtypes, diskcache, dedup
 from tinygrad.ops import Compiled, CompiledASTRunner, update_stats
 from tinygrad.renderer.metal import MetalRenderer
@@ -67,28 +69,31 @@ class MetalProgram:
       data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
       self.library = unwrap(METAL.device.newLibraryWithData_error_(data, None))
     self.fxn = self.library.newFunctionWithName_(name)
+
     if DEBUG >= 6:
       with tempfile.NamedTemporaryFile(delete=True) as shader:
         shader.write(lib)
         shader.flush()
         os.system(f"cd {pathlib.Path(__file__).parents[2]}/disassemblers/applegpu && python3 compiler_explorer.py {shader.name}")
-    self.pipeline_state = unwrap(METAL.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
+    data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
+    self.library = unwrap2(self.device.device.newLibraryWithData_error_(data, None))
+    self.fxn = self.library.newFunctionWithName_(name)
+    self.pipeline_state = unwrap2(self.device.device.newComputePipelineStateWithFunction_error_(self.fxn, None))
 
-  def __call__(self, *bufs, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
-    assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(), f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"
-    command_buffer = METAL.mtl_queue.commandBuffer()
+  def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+    assert prod(local_size) <= self.pipeline_state.maxTotalThreadsPerThreadgroup(),f"local size {local_size} bigger than {self.pipeline_state.maxTotalThreadsPerThreadgroup()} with exec width {self.pipeline_state.threadExecutionWidth()} memory length {self.pipeline_state.staticThreadgroupMemoryLength()}"  # noqa: E501
+    command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.computeCommandEncoder()
     encoder.setComputePipelineState_(self.pipeline_state)
-    for i,a in enumerate(bufs):
-      if isinstance(a, RawMetalBuffer): encoder.setBuffer_offset_atIndex_(a._buf, 0, i)
-      elif isinstance(a, int): encoder.setBytes_length_atIndex_((arg:=ctypes.c_int32(a)), ctypes.sizeof(arg), i)
-      else: raise RuntimeError(f"arg at index {i} has unsupported type {type(a)}")
+    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex_(a, 0, i)
+    for i,a in enumerate(vals,start=len(bufs)): encoder.setBytes_length_atIndex_(ctypes.c_int32(a), 4, i)
     encoder.dispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.commit()
     if wait:
       command_buffer.waitUntilCompleted()
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
+
     METAL.mtl_buffers_in_flight.append(command_buffer)
 
 class MetalGraph:
@@ -133,31 +138,33 @@ class MetalGraph:
     self.command_buffer: Any = None
     self.int_buf_view = self.int_buf.buffer_view()    # TODO: this is metal syncing when it doesn't need to
 
-  def __call__(self, input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
-    # NOTE: you at least can't update the ints if this is running
-    if self.command_buffer is not None and self.command_buffer in METAL.mtl_buffers_in_flight: self.command_buffer.waitUntilCompleted()
-    all_read_resources = self.read_resources + [x._buf for x in input_rawbuffers]
-    for (j,i),input_idx in self.input_replace.items():
-      self.icb.indirectComputeCommandAtIndex_(j).setKernelBuffer_offset_atIndex_(input_rawbuffers[input_idx]._buf, 0, i)
-    for j in self.jc_idx_with_updatable_launch_dims:
-      global_size, local_size = cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals)
-      self.icb.indirectComputeCommandAtIndex_(j).concurrentDispatchThreadgroups_threadsPerThreadgroup_(Metal.MTLSize(*global_size), Metal.MTLSize(*local_size))
-    self.int_buf_view[:] = list(var_vals.values())
-    command_buffer = METAL.mtl_queue.commandBuffer()
-    encoder = command_buffer.computeCommandEncoder()
-    encoder.executeCommandsInBuffer_withRange_(self.icb, Metal.MTLIndirectCommandBufferExecutionRangeMake(0,len(self.jit_cache)))
-    encoder.useResources_count_usage_(all_read_resources, len(all_read_resources), Metal.MTLResourceUsageRead)
-    encoder.useResources_count_usage_(self.write_resources, len(self.write_resources), Metal.MTLResourceUsageWrite)
+
+class MetalAllocator(LRUAllocator):
+  def __init__(self, device:MetalDevice):
+    self.device:MetalDevice = device
+    super().__init__()
+  def _alloc(self, size:int) -> Any:
+    ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
+    if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
+    return ret
+  def transfer(self, dest:Any, src:Any, sz:int):
+    command_buffer = self.device.mtl_queue.commandBuffer()
+    encoder = command_buffer.blitCommandEncoder()
+    encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src, 0, dest, 0, sz)
     encoder.endEncoding()
     command_buffer.commit()
-    self.command_buffer = command_buffer
-    if wait:
-      command_buffer.waitUntilCompleted()
-      et = command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
-    else:
-      METAL.mtl_buffers_in_flight.append(command_buffer)
-      et = None
-    update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=jit, num_kernels=len(self.jit_cache))
-    return et
+    self.device.mtl_buffers_in_flight.append(command_buffer)
+  def from_buffer(self, src:memoryview) -> Optional[Any]:
+    ret = self.device.device.newBufferWithBytesNoCopy_length_options_deallocator_(src, len(src), Metal.MTLResourceStorageModeShared, None)
+    if ret: self.device.mv_in_metal.append(src)
+    return ret
+  def _free(self, opaque:Any): opaque.release()
+  def as_buffer(self, src:Any) -> memoryview:
+    self.device.synchronize()
+    return src.contents().as_buffer(src.length())
+  def copyin(self, dest:Any, src:memoryview): self.as_buffer(dest)[:] = src
+  def copyout(self, dest:memoryview, src:Any): dest[:] = self.as_buffer(src)
+
 
 MetalBuffer = Compiled(RawMetalBuffer, LinearizerOptions(device="METAL"), MetalRenderer, compile_metal, MetalProgram, METAL.synchronize, graph=MetalGraph)
+

@@ -6,10 +6,11 @@ import gzip, argparse, math, re
 from functools import lru_cache
 from collections import namedtuple
 
+from PIL import Image
+import numpy as np
 from tqdm import tqdm
-from tinygrad.tensor import Tensor
-from tinygrad import Device
-from tinygrad.helpers import dtypes, GlobalCounters, Timing, Context, getenv, fetch
+from tinygrad import Device, GlobalCounters, dtypes, Tensor
+from tinygrad.helpers import Timing, Context, getenv, fetch, colored
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
 from tinygrad.jit import TinyJit
@@ -250,7 +251,8 @@ class Upsample:
 
 def timestep_embedding(timesteps, dim, max_period=10000):
   half = dim // 2
-  freqs = (-math.log(max_period) * Tensor.arange(half) / half).exp()
+  # TODO: remove explicit dtypes after broadcast fix
+  freqs = (-math.log(max_period) * Tensor.arange(half, dtype=dtypes.float32) / half).exp()
   args = timesteps * freqs
   return Tensor.cat(args.cos(), args.sin()).reshape(1, -1)
 
@@ -573,9 +575,10 @@ class StableDiffusion:
 # cond_stage_model.transformer.text_model
 
 if __name__ == "__main__":
+  default_prompt = "a horse sized cat eating a bagel"
   parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--steps', type=int, default=5, help="Number of steps in diffusion")
-  parser.add_argument('--prompt', type=str, default="a horse sized cat eating a bagel", help="Phrase to render")
+  parser.add_argument('--prompt', type=str, default=default_prompt, help="Phrase to render")
   parser.add_argument('--out', type=str, default=Path(tempfile.gettempdir()) / "rendered.png", help="Output filename")
   parser.add_argument('--noshow', action='store_true', help="Don't show the image")
   parser.add_argument('--fp16', action='store_true', help="Cast the weights to float16")
@@ -635,10 +638,15 @@ if __name__ == "__main__":
   print(x.shape)
 
   # save image
-  from PIL import Image
-  import numpy as np
   im = Image.fromarray(x.numpy().astype(np.uint8, copy=False))
   print(f"saving {args.out}")
   im.save(args.out)
   # Open image.
   if not args.noshow: im.show()
+
+  # validation!
+  if args.prompt == default_prompt and args.steps == 5 and args.seed == 0 and args.guidance == 7.5:
+    ref_image = Tensor(np.array(Image.open(Path(__file__).parent / "stable_diffusion_seed0.png")))
+    distance = (((x - ref_image).cast(dtypes.float) / ref_image.max())**2).mean().item()
+    assert distance < 3e-4, f"validation failed with {distance=}"
+    print(colored(f"output validated with {distance=}", "green"))

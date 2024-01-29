@@ -1,144 +1,174 @@
-import numpy as np
-import ctypes
-import extra.hip_wrapper as hip
-from typing import Tuple, List, Any, Dict, cast, Optional, Callable
-from tinygrad.helpers import DEBUG, getenv, diskcache
-from tinygrad.device import Compiled, CompiledASTRunner, update_stats
-from tinygrad.renderer.hip import HIPRenderer
-from tinygrad.runtime.lib import RawBufferCopyInOut, LRUAllocator, RawBufferTransfer, RawBuffer, RawMallocBuffer
+from __future__ import annotations
+import ctypes, functools, subprocess, io
+from typing import Tuple, TypeVar, List, Any, cast, Set
+import tinygrad.runtime.autogen.hip as hip
+from tinygrad.helpers import DEBUG, getenv, init_c_var
+from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t
+from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, BufferOptions, JITRunner, Device, Buffer, update_stats, Compiler
+from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.shape.symbolic import Variable
-from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims, get_jc_idxs_with_updatable_var_vals, GraphException
-
-# TODO: if you fork and exit the child process after creating anything with cl on AMD, it hangs on e.wait()
-if DEBUG >= 6:
-  from extra.helpers import enable_early_exec
-  early_exec = enable_early_exec()
+from tinygrad.runtime.compiler.hip_comgr import compile_hip
 
 # The default HIP stream is used for everything.
-
-class HIPAllocator(LRUAllocator):
-  def _do_alloc(self, size, dtype, device, **kwargs):
-    hip.hipSetDevice(device)
-    return hip.hipMalloc(size * dtype.itemsize)
-  def _do_free(self, buf): hip.hipFree(buf)
-  def _cached_bufkey(self, size, dtype, device): return (device, size*dtype.itemsize) # Buffers of the same length could be reused, no matter what dtype.
-
 MOCKHIP = getenv("MOCKHIP") # for CI. don't run kernels, only check if they compile
 
-class _HIP:
-  def __init__(self, device=None):
-    self.default_device = device or getenv("HIP_DEFAULT_DEVICE")
-    self.device_count = 0 if MOCKHIP else hip.hipGetDeviceCount()
-    if not MOCKHIP: hip.hipSetDevice(self.default_device)
-    self.allocator = None if MOCKHIP else HIPAllocator(hip.hipGetDeviceProperties(self.default_device).totalGlobalMem)
-HIP = _HIP()
+class HIPCompiler(Compiler):
+  linearizer_opts = LinearizerOptions("HIP")
+  def __init__(self, arch:str):
+    self.arch = arch
+    super().__init__(f"compile_hip_{self.arch}")
+  def render(self, name:str, uops) -> str: return HIPRenderer(name, uops)
+  def compile(self, src:str) -> bytes: return compile_hip(src, self.arch)
 
-class RawHIPBuffer(RawBufferCopyInOut, RawBufferTransfer):
-  def __init__(self, size, dtype, device=HIP.default_device, buf=None, allocator=HIP.allocator): super().__init__(size, dtype, buf=buf, allocator=allocator, **{'device': int(device)})
-  def _copyin(self, x:np.ndarray):
-    hip.hipSetDevice(self._device)
-    hip.hipMemcpyAsync(self._buf, np.require(x, requirements='C').ctypes.data_as(ctypes.c_void_p), self.size * self.dtype.itemsize, hip.hipMemcpyHostToDevice, 0)
-  def _copyout(self, x:np.ndarray):
-    hip.hipSetDevice(self._device)
-    hip.hipMemcpy(x.ctypes.data, self._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToHost)
-  def _transfer(self, x:RawBuffer):
-    hip.hipSetDevice(x._device)
-    hip.hipMemcpy(self._buf, x._buf, self.size * self.dtype.itemsize, hip.hipMemcpyDeviceToDevice)
+hip_current_device = None
+def hip_set_device(d:int):
+  global hip_current_device
+  if d == hip_current_device: return
+  check(hip.hipSetDevice(d))
+  hip_current_device = d
 
-@diskcache
-def compile_hip(prg) -> bytes:
-  prog = hip.hiprtcCreateProgram(prg, "<null>", [], [])
-  arch = "gfx1100" if MOCKHIP else hip.hipGetDeviceProperties(HIP.default_device).gcnArchName
-  hip.hiprtcCompileProgram(prog, [f'--offload-arch={arch}'])
-  return hip.hiprtcGetCode(prog)
-
-def time_execution(cb, enable=False):
-  if enable:
-    start, end = hip.hipEventCreate(), hip.hipEventCreate()
-    hip.hipEventRecord(start)
-  cb()
-  if enable:
-    hip.hipEventRecord(end)
-    hip.hipEventSynchronize(end)
-    ret = hip.hipEventElapsedTime(start, end)*1e-3
-    hip.hipEventDestroy(start)
-    hip.hipEventDestroy(end)
-    return ret
+def check(status):
+  if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
 
 class HIPProgram:
-  def __init__(self, name:str, prg:bytes):
-    self.modules, self.prgs, self.c_struct_t = [], [], None
+  def __init__(self, device:int, name:str, lib:bytes):
+    self.device, self.name, self.lib = device, name, lib
 
     if DEBUG >= 6:
-      asm = early_exec((["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], prg))
+      asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
-    for i in range(HIP.device_count):
-      hip.hipSetDevice(i)
-      self.modules.append(hip.hipModuleLoadData(prg))
-      self.prgs.append(hip.hipModuleGetFunction(self.modules[-1], name))
-
-  def __call__(self, *args, global_size:Tuple[int,int,int], local_size:Tuple[int,int,int], wait=False):
     if MOCKHIP: return
-    hip.hipSetDevice(args[0]._device)
-    if self.c_struct_t is None: self.c_struct_t = hip.getCStructForType([(ctypes.c_void_p if not isinstance(x, int) else ctypes.c_int) for x in args])
-    c_params = cast(Callable, self.c_struct_t)(*[x._buf if not isinstance(x, int) else x for x in args])
-    return time_execution(lambda: hip.hipModuleLaunchKernel(self.prgs[args[0]._device], *global_size, *local_size, 0, 0, c_params), enable=wait)
+    hip_set_device(self.device)
+    self.module = init_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))
+    self.prg = init_c_var(hip.hipFunction_t(), lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
 
   def __del__(self):
-    for module in self.modules: hip.hipModuleUnload(module)
+    if hasattr(self, 'module'): check(hip.hipModuleUnload(self.module))
 
-class HIPGraph:
-  def __init__(self, jit_cache: List[JitItem], input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int]):
-    # TODO: Only HIPProgram can be captured for now.
-    if not all(isinstance(ji.prg, CompiledASTRunner) and isinstance(ji.prg.clprg, HIPProgram) for ji in jit_cache): raise GraphException
+  def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
+    if MOCKHIP: return float("inf")
+    hip_set_device(self.device)
+    if not hasattr(self, "vargs"):
+      self.c_args = init_c_struct_t(tuple([(f'f{i}', hip.hipDeviceptr_t) for i in range(len(args))] +
+                                          [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))(*args, *vals)
+      self.vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p),
+                                         ctypes.c_void_p(2), ctypes.cast(ctypes.byref(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p),
+                                         ctypes.c_void_p(3))
+    else:
+      for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
+      for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
+    if wait:
+      evs = [init_c_var(hip.hipEvent_t(), lambda x: hip.hipEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
+      check(hip.hipEventRecord(evs[0], None))
+    check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, self.vargs))
+    if wait:
+      check(hip.hipEventRecord(evs[1], None))
+      check(hip.hipEventSynchronize(evs[1]))
+      check(hip.hipEventElapsedTime(ctypes.byref(ret := ctypes.c_float()), evs[0], evs[1]))
+      for ev in evs: check(hip.hipEventDestroy(ev))
+      return ret.value * 1e-3
+    return None
 
-    self.jit_cache = jit_cache
-    self.input_replace = get_input_replace(jit_cache, input_rawbuffers)
-    self.op_estimate, self.mem_estimate = get_jit_stats(jit_cache)
-    self.jc_idxs_with_updatable_launch_dims = get_jc_idxs_with_updatable_launch_dims(jit_cache)
-    self.jc_idxs_with_updatable_var_vals = get_jc_idxs_with_updatable_var_vals(jit_cache)
-    self.jc_idxs_with_updatable_rawbufs = list(set([x[0] for x in self.input_replace.keys()]))
+T = TypeVar("T")
+CHUNK_SIZE, PAGE_SIZE = 256*1024*1024, 0x1000
+class HIPAllocator(LRUAllocator):
+  def __init__(self, device:HIPDevice):
+    self.device = device
+    self.track_cross_device: List[HIPDevice] = []
+    super().__init__()
+  def free_cache(self):
+    self.device.synchronize()
+    for x in self.track_cross_device: x.synchronize()
+    return super().free_cache()
+  def _alloc(self, size:int):
+    hip_set_device(self.device.device)
+    return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipMalloc(ctypes.byref(x), size)))
+  def _alloc_with_options(self, size:int, options:BufferOptions):
+    hip_set_device(self.device.device)
+    if options.uncached:
+      return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipExtMallocWithFlags(ctypes.byref(x), size, 3)))  # hipDeviceMallocUncached = 3
+    elif options.host:
+      return init_c_var(hip.hipDeviceptr_t(), lambda x: check(hip.hipHostMalloc(ctypes.byref(x), size, 2 if options.signal else 0)))
+    else:
+      raise Exception("no options")
+  def _free(self, opaque:T): check(hip.hipFree(opaque))
+  def copy_from_fd(self, dest, fd, offset, size):
+    hip_set_device(self.device.device)
+    if not hasattr(self, 'hb'):
+      self.hb = [self._alloc_with_options(CHUNK_SIZE, BufferOptions(host=True)) for _ in range(2)]
+      self.hb_events = [None, None]
+      self.hb_polarity = 0
+    fo = io.FileIO(fd, "a+b", closefd=False)
+    fo.seek(offset - (minor_offset:=offset % PAGE_SIZE))
+    copied_in = 0
+    for local_offset in range(0, size+minor_offset, CHUNK_SIZE):
+      local_size = min(round_up(size+minor_offset, PAGE_SIZE)-local_offset, CHUNK_SIZE)
+      if self.hb_events[self.hb_polarity] is not None:
+        # NOTE: block doesn't work here because we modify the CPU memory
+        check(hip.hipEventSynchronize(self.hb_events[self.hb_polarity]))
+        check(hip.hipEventDestroy(self.hb_events[self.hb_polarity]))
+        self.hb_events[self.hb_polarity] = None
+      fo.readinto(to_mv(self.hb[self.hb_polarity], local_size))
+      check(hip.hipMemcpyAsync(ctypes.c_void_p(dest.value + copied_in), ctypes.c_void_p(self.hb[self.hb_polarity].value + minor_offset),
+                               copy_size:=min(local_size-minor_offset, size-copied_in), hip.hipMemcpyHostToDevice, None))
+      self.hb_events[self.hb_polarity] = init_c_var(hip.hipEvent_t(), lambda x: check(hip.hipEventCreate(ctypes.byref(x))))
+      check(hip.hipEventRecord(self.hb_events[self.hb_polarity], None))
+      copied_in += copy_size
+      self.hb_polarity = (self.hb_polarity+1) % len(self.hb)
+      minor_offset = 0 # only on the first
+  def copyin(self, dest:T, src: memoryview):
+    hip_set_device(self.device.device)
+    host_mem = self._alloc_with_options(len(src), BufferOptions(host=True))
+    self.device.pending_copyin.append(host_mem)
+    ctypes.memmove(host_mem, from_mv(src), len(src))
+    check(hip.hipMemcpyAsync(dest, host_mem, len(src), hip.hipMemcpyHostToDevice, None))
+  def copyout(self, dest:memoryview, src:T):
+    self.device.synchronize()
+    hip_set_device(self.device.device)
+    check(hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
+  def transfer(self, dest:T, src:T, sz:int):
+    hip_set_device(self.device.device)
+    check(hip.hipMemcpyAsync(dest, src, sz, hip.hipMemcpyDeviceToDevice, None))
 
-    self.graph, graph_node = hip.hipGraphCreate(), None
-    self.updatable_nodes: Dict[int, Tuple[Any, hip.kernelNodeParamsWrapper]] = {} # Dict[jc index] = tuple(graph_node, node_params)
+class HIPDevice(Compiled):
+  def __init__(self, device:str=""):
+    self.device = int(device.split(":")[1]) if ":" in device else 0
+    self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode() if not MOCKHIP else "gfx1100"  # noqa: E501
+    self.pending_copyin: List[ctypes.c_void_p] = []
+    self.track_cross_buffer: List[Any] = []
+    self.peers: Set[int] = set()
 
-    for (j,i),input_name in self.input_replace.items(): self.jit_cache[j].rawbufs[i] = input_rawbuffers[input_name]
-    for j,ji in enumerate(self.jit_cache):
-      prg: CompiledASTRunner = cast(CompiledASTRunner, ji.prg)
-      assert all(x is not None for x in ji.rawbufs) and ji.rawbufs[0] is not None, "buffers could not be None" # for linters
+    from tinygrad.runtime.graph.hip import HIPGraph
+    super().__init__(device, MallocAllocator if MOCKHIP else HIPAllocator(self), HIPCompiler(self.arch),
+                     functools.partial(HIPProgram, self.device), HIPGraph)
+  def synchronize(self):
+    hip_set_device(self.device)
+    check(hip.hipDeviceSynchronize())
+    for opaque in self.pending_copyin: check(hip.hipFree(opaque))
+    self.track_cross_buffer.clear()
+    self.pending_copyin.clear()
+  def enable_peer(self, dnum):
+    if self.device == dnum or dnum in self.peers: return
+    hip_set_device(self.device)
+    check(hip.hipDeviceEnablePeerAccess(dnum, 0))
+    self.peers.add(dnum)
 
-      args = [cast(RawBuffer, x)._buf for x in ji.rawbufs] + [var_vals[x] for x in prg.vars]
-      types = [ctypes.c_void_p] * len(ji.rawbufs) + [ctypes.c_int] * len(prg.vars)
-      c_params = hip.buildKernelNodeParams(args, types, prg.clprg.prgs[ji.rawbufs[0]._device], *prg.launch_dims(var_vals))
-      graph_node = hip.hipGraphAddKernelNode(self.graph, [graph_node] if graph_node else [], c_params)
+class HIPSyncEvent(JITRunner):
+  def __init__(self, lb):
+    self.lb, self.device, self.dname = lb, cast(HIPDevice, Device[lb.device]), lb.device
+    super().__init__()
+  def __call__(self, rawbufs:List[Buffer], var_vals, wait=False, jit=False):
+    to_mv(rawbufs[0]._buf, 4).cast("I")[0] = 0
+    hip_set_device(self.device.device)
+    check(hip.hipStreamWriteValue32(None, rawbufs[0]._buf, 1, 0))
+    update_stats(colored("sync", "red"), 0, 0, {}, None, 1, jit, device=self.dname)
 
-      if j in self.jc_idxs_with_updatable_launch_dims or j in self.jc_idxs_with_updatable_var_vals or j in self.jc_idxs_with_updatable_rawbufs:
-        self.updatable_nodes[j] = (graph_node, c_params)
-
-    self.instance = hip.hipGraphInstantiate(self.graph)
-
-  def __del__(self):
-    hip.hipGraphExecDestroy(self.instance)
-    hip.hipGraphDestroy(self.graph)
-
-  def __call__(self, input_rawbuffers: List[RawBuffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
-    # Update cached params structs with the new values.
-    for (j,i),input_idx in self.input_replace.items():
-      hip.setKernelNodeParams(self.updatable_nodes[j][1], [input_rawbuffers[input_idx]._buf], [i])
-    for j in self.jc_idxs_with_updatable_launch_dims:
-      hip.setKernelNodeLaunchDims(self.updatable_nodes[j][1], *cast(CompiledASTRunner, self.jit_cache[j].prg).launch_dims(var_vals))
-    for j in self.jc_idxs_with_updatable_var_vals:
-      prg: CompiledASTRunner = cast(CompiledASTRunner, self.jit_cache[j].prg)
-      hip.setKernelNodeParams(self.updatable_nodes[j][1], [var_vals[x] for x in prg.vars], list(range(len(self.jit_cache[j].rawbufs), len(self.jit_cache[j].rawbufs) + len(prg.vars))))
-
-    # Update graph nodes with the updated structs.
-    for node, params in self.updatable_nodes.values():
-      hip.hipGraphExecKernelNodeSetParams(self.instance, node, params)
-
-    et = time_execution(lambda: hip.hipGraphLaunch(self.instance), enable=wait)
-    update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers), jit=jit, num_kernels=len(self.jit_cache))
-    return et
-
-HIPDevice = Compiled(RawHIPBuffer if not MOCKHIP else RawMallocBuffer, LinearizerOptions(device="HIP"), HIPRenderer, compile_hip, HIPProgram, hip.hipDeviceSynchronize, graph=HIPGraph)
+class HIPWaitEvent(JITRunner):
+  def __init__(self, device):
+    self.device, self.dname = cast(HIPDevice, Device[device]), device
+    super().__init__()
+  def __call__(self, rawbufs:List[Buffer], var_vals, wait=False, jit=False):
+    hip_set_device(self.device.device)
+    check(hip.hipStreamWaitValue32(None, rawbufs[0]._buf, 1, 1, 0xFFFFFFFF))
+    update_stats(colored("wait", "RED"), 0, 0, {}, None, 1, jit, device=self.dname)
