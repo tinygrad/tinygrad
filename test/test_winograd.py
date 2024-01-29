@@ -28,10 +28,11 @@ class TestWinograd(unittest.TestCase):
         l = Linearizer(s.ast)
         l.hand_coded_optimizations()
         l.linearize()
+      if DEBUG >= 2: print(f"{len(l.sts):4d} shapetrackers")
       for st in l.sts:
         assert len(st.views) <= 2, "too many views in winograd"
         if DEBUG >= 3:
-          print(len(st.views))
+          print(f"{len(st.views):3d} views")
           for v in st.views: print(v)
 
   def test_profile(self):
