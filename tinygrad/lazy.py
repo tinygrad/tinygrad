@@ -138,6 +138,7 @@ class LazyBuffer:
   # *** movement ops ***
 
   def _view(self, new_st:ShapeTracker) -> LazyBuffer:
+    if self.st.size == 0: return self.const(0, new_st.shape)
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
 
@@ -218,7 +219,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
     # realize all places where the buffer is expanded
     if prod(buf.base.st.shape) < prod(buf.st.shape):
       if len(buf.st.views) == 1 and buf.st.views[-1].mask and all_int(buf.base.st.shape) and \
-          prod(buf.base.st.shape) == prod([y-x for x,y in buf.st.views[-1].mask]):
+          prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
         simple_pads.add(buf.base)
       else:
         realizes.add(buf.base)
