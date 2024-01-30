@@ -4,13 +4,11 @@ from typing import Tuple, TypeVar, List, Any, cast, Set
 import tinygrad.runtime.autogen.hip as hip
 from tinygrad.helpers import DEBUG, getenv, init_c_var
 from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t
-from tinygrad.device import Compiled, LRUAllocator, MallocAllocator, BufferOptions, JITRunner, Device, Buffer, update_stats, Compiler
+from tinygrad.device import Compiled, LRUAllocator, BufferOptions, JITRunner, Device, Buffer, MallocAllocator, update_stats, Compiler
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.runtime.compiler.hip_comgr import compile_hip
 
-# The default HIP stream is used for everything.
-MOCKHIP = getenv("MOCKHIP") # for CI. don't run kernels, only check if they compile
 
 class HIPCompiler(Compiler):
   linearizer_opts = LinearizerOptions("HIP")
@@ -38,7 +36,6 @@ class HIPProgram:
       asm = subprocess.check_output(["/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
-    if MOCKHIP: return
     hip_set_device(self.device)
     self.module = init_c_var(hip.hipModule_t(), lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))
     self.prg = init_c_var(hip.hipFunction_t(), lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
@@ -47,7 +44,6 @@ class HIPProgram:
     if hasattr(self, 'module'): check(hip.hipModuleUnload(self.module))
 
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
-    if MOCKHIP: return float("inf")
     hip_set_device(self.device)
     if not hasattr(self, "vargs"):
       self.c_args = init_c_struct_t(tuple([(f'f{i}', hip.hipDeviceptr_t) for i in range(len(args))] +
@@ -134,13 +130,13 @@ class HIPAllocator(LRUAllocator):
 class HIPDevice(Compiled):
   def __init__(self, device:str=""):
     self.device = int(device.split(":")[1]) if ":" in device else 0
-    self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode() if not MOCKHIP else "gfx1100"  # noqa: E501
+    self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode()
     self.pending_copyin: List[ctypes.c_void_p] = []
     self.track_cross_buffer: List[Any] = []
     self.peers: Set[int] = set()
 
     from tinygrad.runtime.graph.hip import HIPGraph
-    super().__init__(device, MallocAllocator if MOCKHIP else HIPAllocator(self), HIPCompiler(self.arch),
+    super().__init__(device, HIPAllocator(self), HIPCompiler(self.arch),
                      functools.partial(HIPProgram, self.device), HIPGraph)
   def synchronize(self):
     hip_set_device(self.device)
@@ -172,3 +168,18 @@ class HIPWaitEvent(JITRunner):
     hip_set_device(self.device.device)
     check(hip.hipStreamWaitValue32(None, rawbufs[0]._buf, 1, 1, 0xFFFFFFFF))
     update_stats(colored("wait", "RED"), 0, 0, {}, None, 1, jit, device=self.dname)
+
+if getenv("HIPCPU"):
+  hip = ctypes.CDLL("/usr/local/lib/libremu.so") # type: ignore[assignment]
+
+  class HIPProgram: # type: ignore[no-redef]
+    def __init__(self, name:str, lib:bytes):
+      self.name, self.lib = name, lib
+    def __call__(self, *args, global_size, local_size, vals=(), wait=False):
+      args = (*args, *vals)
+      hip.hipModuleLaunchKernel(self.lib, len(self.lib), *global_size, *local_size, 0, None, None,
+                                len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]))
+
+  class HIPDevice(Compiled): # type: ignore[no-redef]
+    def __init__(self, device=""):
+      super().__init__(device, MallocAllocator, HIPCompiler("gfx1100"), HIPProgram)
