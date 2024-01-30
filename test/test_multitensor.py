@@ -381,6 +381,41 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       np.testing.assert_allclose(a.reshape((2, 1, 8)).expand((2, 5, 8)).numpy(), b.reshape((2, 1, 8)).expand((2, 5, 8)).numpy(), rtol=1e-7, atol=1e-3)
       np.testing.assert_allclose(a.flip(-1).numpy(), b.flip(-1).numpy(), rtol=1e-7, atol=1e-3)
 
+  def test_uneven(self):
+    t = Tensor.arange(24).reshape(3, 8).contiguous().realize()
+    t.shard_([f"{Device.DEFAULT}:{i}" for i in range(2)], axis=0)
+
+    a = t.shrink(((0, 2), None))
+    b = t.shrink(((2, 3), None))
+    na = t.numpy()[0:2]
+    nb = t.numpy()[2:3]
+    np.testing.assert_equal(a.numpy(), na)
+    np.testing.assert_equal(b.numpy(), nb)
+    np.testing.assert_equal((a+1).numpy(), na+1)
+    np.testing.assert_equal((b+1).numpy(), nb+1)
+    np.testing.assert_equal((1+a).numpy(), 1+na)
+    np.testing.assert_equal((1+b).numpy(), 1+nb)
+    np.testing.assert_equal((a+a).numpy(), na+na)
+    np.testing.assert_equal((b+b).numpy(), nb+nb)
+
+  def test_add_two_partitions(self):
+    t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
+    t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
+
+    a = t.shrink(((2, 4), None))
+    b = t.shrink(((6, 8), None))
+    na = t.numpy()[2:4]
+    nb = t.numpy()[6:8]
+    np.testing.assert_equal(a.numpy(), na)
+    np.testing.assert_equal(b.numpy(), nb)
+    with self.assertRaises(AssertionError):
+      # cannot add directly
+      c = a + b
+
+    c = a.pad(((2, 4), None)) + b.pad(((6, 0), None))
+    expected = np.concatenate([np.zeros_like(t.numpy()[0:2]), na, np.zeros_like(t.numpy()[4:6]), nb])
+    np.testing.assert_equal(c, expected)
+
   def test_add_different_tensors(self):
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
     x = Tensor.arange(64).reshape(8, 8).contiguous().realize().shard(devices, axis=0)
@@ -479,9 +514,26 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
       bn_ts[0].cat(*bn_ts[1:]).numpy()
 
-# TODO: test synced / unsynced batchnorm cross device kernel and copies
-# TODO: test uneven
-# TODO: test 2 partial can be added
+  def test_synced_vs_unsynced_bn(self):
+    from examples.hlb_cifar10 import BatchNorm, UnsyncedBatchNorm
+    devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
+    x = Tensor.ones(8, 8, 8, 8).contiguous().realize().shard(devices, axis=0)
+
+    with Tensor.train():
+      synced_bn = BatchNorm(8)
+      unsynced_bn = UnsyncedBatchNorm(8)
+
+      for p in get_parameters([synced_bn, unsynced_bn]):
+        p.shard_(devices)
+
+      synced_out = synced_bn(x)
+      synced_si = [si for si in synced_out.lazydata.schedule()]
+      unsynced_out = unsynced_bn(x)
+      unsynced_si = [si for si in unsynced_out.lazydata.schedule()]
+
+    # TODO: test synced / unsynced batchnorm cross device kernel and copies
+    assert synced_si
+    assert unsynced_si
 
 if __name__ == '__main__':
   unittest.main()

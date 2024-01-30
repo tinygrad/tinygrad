@@ -73,11 +73,13 @@ class MultiLazyBuffer:
     srcs = []
     not_all_real = any(not all(mlb.real) for mlb in msrcs)
     new_real = [all(transposed) for transposed in zip(*[mlb.real for mlb in msrcs])] if not_all_real else self.real
+    assert any(new_real), "output contains no real lb"
     for mlb in msrcs:
       if mlb.axis == axis or not_all_real: srcs.append(mlb.lbs)
       elif mlb.axis is None and axis is not None: srcs.append(to_sharded(mlb.lbs, axis))
       else: srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.lbs], axis))
-    return MultiLazyBuffer([lsrcs[0].e(op, *lsrcs[1:], arg=arg) for lsrcs in zip(*srcs)], axis, new_real)
+    # NOTE: lsrcs[-1].const(0) is correct for where
+    return MultiLazyBuffer([lsrcs[0].e(op, *lsrcs[1:], arg=arg) if r else lsrcs[-1].const(0) for lsrcs,r in zip(zip(*srcs),new_real)], axis, new_real)
 
   def _shape_to_single_shard(self, shape:Tuple[sint, ...], lb:LazyBuffer) -> Tuple[sint, ...]:
     return tuple(lb.shape[self.axis] if a == self.axis else s for a,s in enumerate(shape))
@@ -85,7 +87,7 @@ class MultiLazyBuffer:
   def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> MultiLazyBuffer:
     if self.axis is not None and new_shape[self.axis] == 1:
       # all-reduce on sharded axes
-      reduced_parts = [x.r(op, new_shape) for x in self.lbs]
+      reduced_parts = [x.r(op, new_shape) if r else x.const(0, shape=new_shape) for x,r in zip(self.lbs, self.real)]
       if all(self.real): return MultiLazyBuffer(all_reduce(op, reduced_parts), None)
       return MultiLazyBuffer(reduced_parts, None, self.real)
     # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
