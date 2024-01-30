@@ -83,6 +83,10 @@ class View:
   def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
     strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
     contiguous = offset == 0 and mask is None and strides == strides_for_shape(shape)
+    if mask and any(elim := [b+1 >= e for b,e in mask]):
+      if any(b >= e for b,e in mask): strides, offset, mask = (0,) * len(shape), 0, ((0,0),) * len(shape)
+      offset += sum((strides[i] * mask[i][0]) if e else 0 for i, e in enumerate(elim))
+      strides = tuple(0 if e else st for st,e in zip(strides, elim))
     return View(shape, strides, offset, mask, contiguous)
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
