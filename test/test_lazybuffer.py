@@ -2,7 +2,6 @@
 import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.device import Interpreted
 
 class TestLazyBuffer(unittest.TestCase):
   def test_fromcpu_shape_tracker(self):
@@ -56,18 +55,7 @@ class TestLazyBuffer(unittest.TestCase):
     a = Tensor.zeros(4,4,4).shrink((None, (0,0), None)).cast(dtypes.int32)
     b = Tensor.zeros(4,1,4)
     c = a.cat(b, dim=1)
-
-    if isinstance(Device[Device.DEFAULT], Interpreted):
-      # TODO: fix cast resets shapetracker and remove this block
-      # this is expectedFailure with a condition
-      try:
-        np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
-      except Exception:
-        pass
-      else:
-        raise ValueError("assert_allclose not failed")
-    else:
-      np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
+    np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
 
 if __name__ == "__main__":
   unittest.main()
