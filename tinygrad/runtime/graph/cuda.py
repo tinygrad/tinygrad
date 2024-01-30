@@ -1,6 +1,6 @@
 import ctypes
 from typing import Any, Optional, Tuple, Dict, List, cast
-import gpuctypes.cuda as cuda
+import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.helpers import init_c_var, encode_args_cuda_style, all_same, GraphException
 from tinygrad.device import CompiledASTRunner, update_stats, Buffer
 from tinygrad.runtime.ops_cuda import check, cu_time_execution

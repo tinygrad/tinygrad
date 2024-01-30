@@ -1,18 +1,24 @@
 from __future__ import annotations
 import ctypes, functools
 from typing import Tuple
-from tinygrad.device import Compiled, MallocAllocator
+from tinygrad.device import Compiled, MallocAllocator, Compiler
 from tinygrad.helpers import DEBUG, cpu_time_execution
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.renderer.llvmir import uops_to_llvm_ir
 import llvmlite.binding as llvm
 
-def compile_llvm(device, prg) -> bytes:
-  mod = llvm.parse_assembly(prg)
-  mod.verify()
-  device.optimizer.run(mod)
-  if DEBUG >= 5: print(device.target_machine.emit_assembly(mod))
-  return device.target_machine.emit_object(mod)
+class LLVMCompiler(Compiler):
+  linearizer_opts = LinearizerOptions("LLVM", supports_float4=False, has_local=False, has_shared=False)
+  def __init__(self, device:LLVMDevice):
+    self.device = device
+    super().__init__("compile_llvm")
+  def render(self, name:str, uops) -> str: return uops_to_llvm_ir(name, uops)
+  def compile(self, src:str) -> bytes:
+    mod = llvm.parse_assembly(src)
+    mod.verify()
+    self.device.optimizer.run(mod)
+    if DEBUG >= 5: print(self.device.target_machine.emit_assembly(mod))
+    return self.device.target_machine.emit_object(mod)
 
 class LLVMProgram:
   def __init__(self, device:LLVMDevice, name:str, lib:bytes):
@@ -38,5 +44,4 @@ class LLVMDevice(Compiled):
     backing_mod = llvm.parse_assembly(str())
     backing_mod.triple = llvm.get_process_triple()
     self.engine: llvm.executionengine.ExecutionEngine = llvm.create_mcjit_compiler(backing_mod, self.target_machine)
-    super().__init__(MallocAllocator, LinearizerOptions("LLVM", supports_float4=False, has_local=False, has_shared=False),
-                     uops_to_llvm_ir, functools.partial(compile_llvm, self), "compile_llvm", functools.partial(LLVMProgram, self))
+    super().__init__(device, MallocAllocator, LLVMCompiler(self), functools.partial(LLVMProgram, self))
