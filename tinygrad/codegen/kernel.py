@@ -44,7 +44,7 @@ tensor_cores: Dict[str, List[TensorCore]] = {
     TensorCore(device="METAL", dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.half,  wmma_func="__metal_wmma<half2,simdgroup_half8x8,half2>",    ops=[("U",0,2),("L",0,2),("L",1,4),("L",0,2),("L",1,2)], thread_local_sizes=[2,2,2], thread_local_aliases=lambda l4,l3,l2,l1,u0,u1,z: [ [l4,z,l2,z,u0+l1*2+l3*4,z],[z,l3,z,l1,l2+l4*4,u1] ], arch="arm64"), # noqa: E501
   ],
   "HIP": [
-    TensorCore(device="HIP", dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="__builtin_amdgcn_wmma_f32_16x16x16_f16_w32", ops=[("U",1,8),("L",0,16),("L",1,2)], thread_local_sizes=[16,16,8], thread_local_aliases=lambda l2,l1,u0,u1,z: [ [l1%2,z,u0,l1//2], [z,l1,u1,z] ]),  # noqa: E501
+    TensorCore(device="HIP", dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="__builtin_amdgcn_wmma_f32_16x16x16_f16_w32", ops=[("L",0,16),("L",1,2),("U",1,8)], thread_local_sizes=[16,16,8], thread_local_aliases=lambda l2,l1,u0,u1,z: [ [l1%2,z,u0,l1//2], [z,l1,u1,z] ]),  # noqa: E501
   ]
 }
 
