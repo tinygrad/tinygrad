@@ -138,15 +138,12 @@ class LazyBuffer:
   # *** movement ops ***
 
   def _view(self, new_st:ShapeTracker) -> LazyBuffer:
+    if self.st.size == 0: return self.const(0, new_st.shape)
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
 
   def reshape(self, arg:Tuple[sint, ...]): return self._view(self.st.reshape(arg))
-  def pad(self, arg:Tuple[Tuple[sint, sint], ...]):
-    new_st = self.st.pad(arg)
-    # if we are padding a 0 sized Tensor, we can create a new const Tensor, no mask required
-    if self.st.size == 0: return self.const(0, new_st.shape)
-    return self._view(new_st)
+  def pad(self, arg:Tuple[Tuple[sint, sint], ...]): return self._view(self.st.pad(arg))
   def expand(self, arg:Tuple[sint, ...]): return self._view(self.st.expand(arg))
   def permute(self, arg:Tuple[int, ...]): return self._view(self.st.permute(arg))
   def shrink(self, arg:Tuple[Tuple[sint, sint], ...]): return self._view(self.st.shrink(arg))
