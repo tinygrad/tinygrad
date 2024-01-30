@@ -4,10 +4,11 @@ from typing import Tuple, TypeVar, List, Any, cast, Set
 import tinygrad.runtime.autogen.hip as hip
 from tinygrad.helpers import DEBUG, getenv, init_c_var
 from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t
-from tinygrad.device import Compiled, LRUAllocator, BufferOptions, JITRunner, Device, Buffer, update_stats, Compiler
+from tinygrad.device import Compiled, LRUAllocator, BufferOptions, JITRunner, Device, Buffer, MallocAllocator, update_stats, Compiler
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.runtime.compiler.hip_comgr import compile_hip
+
 
 class HIPCompiler(Compiler):
   linearizer_opts = LinearizerOptions("HIP")
@@ -169,5 +170,15 @@ class HIPWaitEvent(JITRunner):
     update_stats(colored("wait", "RED"), 0, 0, {}, None, 1, jit, device=self.dname)
 
 if getenv("HIPCPU"):
-  from extra.backends.ops_emulatedhip import EmulatedHIPDevice
-  HIPDevice = EmulatedHIPDevice # type:ignore
+  hip = ctypes.CDLL("/usr/local/lib/libremu.so")
+
+  class HIPProgram:
+    def __init__(self, name:str, lib:bytes):
+      self.name, self.lib = name, lib
+    def __call__(self, *args, global_size, local_size, vals=(), wait=False):
+      args = (*args, *vals)
+      hip.hipModuleLaunchKernel(self.lib, len(self.lib), *global_size, *local_size, 0, None, None, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]))
+
+  class HIPDevice(Compiled):
+    def __init__(self, device=""):
+      super().__init__(device, MallocAllocator, HIPCompiler("gfx1100"), HIPProgram)
