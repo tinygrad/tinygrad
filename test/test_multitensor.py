@@ -307,18 +307,18 @@ class TestMultiTensor(unittest.TestCase):
     #   print(f"{i} {ast}")
 
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
-class TestShrinkMultiTensor(unittest.TestCase):
+class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
   # shrink a multitensor on sharded axis
   def test_shrink(self):
     t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
 
     with self.assertRaises(AssertionError):
-      # non-clean shrink is not allowed
-      a = t.shrink(((0, 7), (0, 8)))
-    # with self.assertRaises(AssertionError):
-    #   # cannot shrink shard axis and non-shard axis  # TODO: maybe it's fine?
-    #   a = t.shrink(((0, 8), (2, 4)))
+      # sharded axis shrink on non-device boundry is not allowed
+      a = t.shrink(((0, 3), (0, 8)))
+    with self.assertRaises(AssertionError):
+      # cannot shrink sharded and non-sharded axis at the same time
+      a = t.shrink(((0, 2), (2, 4)))
 
     for i in range(4):
       print(f"{i=}")
@@ -458,6 +458,8 @@ class TestShrinkMultiTensor(unittest.TestCase):
         bn_ts.append(bni)
 
       bn_ts[0].cat(*bn_ts[1:]).numpy()
+
+# TODO: test synced / unsynced batchnorm cross device kernel and copies
 
 if __name__ == '__main__':
   unittest.main()

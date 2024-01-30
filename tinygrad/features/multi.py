@@ -119,9 +119,9 @@ class MultiLazyBuffer:
   def shrink(self, arg:Tuple[Tuple[sint, sint], ...]):
     assert self.axis is None or arg[self.axis] == (0, self.shape[self.axis]) or arg[self.axis] in self.bounds, f"shrinking not supported for {arg=}"
     if self.axis is not None and arg[self.axis] in self.bounds and arg[self.axis] != (0, self.shape[self.axis]):
-      assert all(arg[a] == (0, self.shape[a]) or a == self.axis for a in range(len(self.shape))), "cannot other axes when shrinking on shard axis"
+      assert all(arg[i] == (0, s) or i == self.axis for i,s in enumerate(self.shape)), "cannot shrink sharded and non-sharded axis at the same time"
       idx = self.bounds.index(arg[self.axis])
-      # zero out other lbs to not create unfreeable reference
+      # zero out other lbs to not create lb reference
       return MultiLazyBuffer([lb if i==idx else lb.const(0) for i,lb in enumerate(self.lbs)], self.axis, [i==idx for i in range(len(self.lbs))])
     return MultiLazyBuffer([x.shrink(tuple((0, x.shape[self.axis]) if a == self.axis else s for a,s in enumerate(arg))) for x in self.lbs],
                            self.axis, self.real)
