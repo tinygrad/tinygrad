@@ -28,22 +28,22 @@ class TensorCore:
   dims: List[int]
   dtype_in: DType
   dtype_out: DType
-  threads: List[Tuple[int,int]] # list of (TC dim,amt) that construct the warp thread structure
-  upcast_dim: int # which TC dim to upcast
+  ops: List[Tuple[OptOps, int, int]]  # list of (op,TC dim,amt) that construct the warp thread structure
   thread_local_aliases: List[List[List[int]]] # a list of [threads_1, ..., threads_n, upcast_1(unrolled), upcast_2(upcast)] defining the alias (-1 is upcast, 1-n is warp threads) for each TC dim # noqa: E501
   thread_local_sizes: List[int] # in each thread, the number of elements stored in registers for each TC dim
   wmma_func: str # name of wmma function to call
   arch: Optional[str] = None
   def __str__(self): return f"tensor_core<{self.dims}, {self.dtype_in}, {self.dtype_out}>"
+  def num_threads(self): return len([1 for (op, _, _) in self.ops if op in [OptOps.LOCAL, OptOps.LASTLOCAL]])
 
 tensor_cores: Dict[str, List[TensorCore]] = {
   "METAL": [
-    TensorCore(dims=[8,8,8], dtype_in=dtypes.float, dtype_out=dtypes.float, wmma_func="__metal_wmma<float2,simdgroup_float8x8,float2>", upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"), # noqa: E501
-    TensorCore(dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.float, wmma_func="__metal_wmma<half2,simdgroup_float8x8,float2>",  upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"), # noqa: E501
-    TensorCore(dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.half,  wmma_func="__metal_wmma<half2,simdgroup_half8x8,half2>",    upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"), # noqa: E501
+    TensorCore(dims=[8,8,8], dtype_in=dtypes.float, dtype_out=dtypes.float, wmma_func="__metal_wmma<float2,simdgroup_float8x8,float2>", ops=[(OptOps.UPCAST,0,2),(OptOps.LASTLOCAL,0,2),(OptOps.LASTLOCAL,1,4),(OptOps.LASTLOCAL,0,2),(OptOps.LASTLOCAL,1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]] ], arch="arm64"), # noqa: E501
+    TensorCore(dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.float, wmma_func="__metal_wmma<half2,simdgroup_float8x8,float2>",  ops=[(OptOps.UPCAST,0,2),(OptOps.LASTLOCAL,0,2),(OptOps.LASTLOCAL,1,4),(OptOps.LASTLOCAL,0,2),(OptOps.LASTLOCAL,1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]] ], arch="arm64"), # noqa: E501
+    TensorCore(dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.half,  wmma_func="__metal_wmma<half2,simdgroup_half8x8,half2>",    ops=[(OptOps.UPCAST,0,2),(OptOps.LASTLOCAL,0,2),(OptOps.LASTLOCAL,1,4),(OptOps.LASTLOCAL,0,2),(OptOps.LASTLOCAL,1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]] ], arch="arm64"), # noqa: E501
   ],
   "HIP": [
-    TensorCore(dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="__builtin_amdgcn_wmma_f32_16x16x16_f16_w32", upcast_dim=1, threads=[(0,16),(1,2)], thread_local_sizes=[16,16,8], thread_local_aliases=[ [[0],[0],[-1],[1]], [[0],[1],[-1],[0]], [[0],[1],[0],[2,-1]] ]),  # noqa: E501
+    TensorCore(dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="__builtin_amdgcn_wmma_f32_16x16x16_f16_w32", ops=[(OptOps.LASTLOCAL,0,2),(OptOps.LASTLOCAL,0,8),(OptOps.LASTLOCAL,1,2),(OptOps.UPCAST,1,8)], thread_local_sizes=[16,16,8], thread_local_aliases=[ [[1],[0],[0],[-1],[2]], [[0],[2],[1],[-1],[0]] ]),  # noqa: E501
   ]
 }
 
@@ -364,9 +364,8 @@ class Kernel:
 
         # tensor core -- unroll the reduce dim, upcast input, then create the correct thread pattern
         self.apply_opt(Opt(OptOps.UNROLL, 0, tc.dims[2]))
-        self.apply_opt(Opt(OptOps.UPCAST, s0 if tc.upcast_dim == 0 else s1, (tc.dims[0]*tc.dims[2])//prod([a[1] for a in tc.threads])))
-        for (tc_dim, tc_amt) in tc.threads:
-          fix(self.apply_opt(Opt(OptOps.LASTLOCAL, s0 if tc_dim == 0 else s1, tc_amt)), s0 if tc_dim == 0 else s1)
+        for (op, tc_dim, tc_amt) in tc.ops:
+          fix(self.apply_opt(Opt(op, s0 if tc_dim == 0 else s1, tc_amt)), s0 if tc_dim == 0 else s1)
 
         # assert tensor core and prevent extra_opts from altering the key shape structure
         if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
@@ -388,7 +387,7 @@ class Kernel:
                 break
 
         # alias buffer
-        alias_pattern = [0]*(self.global_dims+(self.local_dims-len(tc.threads))) + [2]*(len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
+        alias_pattern = [0]*(self.global_dims+(self.local_dims-tc.num_threads())) + [2]*(tc.num_threads()) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
         self.alias_buffer(buf0, alias_pattern)
         self.alias_buffer(buf1, alias_pattern)
         return True
