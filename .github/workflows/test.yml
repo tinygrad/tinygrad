@@ -292,55 +292,6 @@ jobs:
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
 
-  testhipcompilation:
-    name: HIP Compilation Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: 3.11
-    - name: Cache python packages
-      uses: actions/cache@v3
-      with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-        key: testing-packages-${{ hashFiles('**/setup.py') }}
-    - name: Cache downloads
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/tinygrad/downloads/
-        key: downloads-cache-hipcompilation-${{ env.DOWNLOAD_CACHE_VERSION }}
-    - name: Install HIP tools
-      run: |
-        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
-        # ROCm repository for jammy
-        sudo tee /etc/apt/sources.list.d/rocm.list <<'EOF'
-        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian jammy main
-        EOF
-        # Prefer packages from the rocm repository over system packages
-        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
-        sudo apt update
-        sudo apt install --no-install-recommends --allow-unauthenticated -y rocm-hip-libraries hip-dev
-    - name: Install Python Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Verify HIP autogen
-      run: |
-        cp tinygrad/runtime/autogen/hip.py /tmp/hip.py.bak
-        cp tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
-        ./autogen_stubs.sh hip
-        diff /tmp/hip.py.bak tinygrad/runtime/autogen/hip.py
-        diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
-    - name: Test HIP compilation on RDNA3 [gfx1100]
-      # test/test_symbolic_ops.py can't run here, it was comparing empty memory
-      run: |
-        export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
-        MOCKHIP=1 HIP=1 python -m pytest -s test/test_hip_rdna3.py
-
 #  testwebgl:
 #    name: WebGL Tests
 #    runs-on: ubuntu-latest
@@ -378,7 +329,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, cuda] #, triton] #, ptx]
+        backend: [llvm, clang, gpu, cuda, hip] #, triton] #, ptx]
 
     name: Tests on (${{ matrix.backend }})
     runs-on: ubuntu-latest
@@ -402,7 +353,7 @@ jobs:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas'}}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'hip' && 'HIP=1\nHIPCPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Install OpenCL
         if: matrix.backend == 'gpu'
         run: |
@@ -444,11 +395,25 @@ jobs:
         run: |
           cd ${{ github.workspace }}/gpuocelot/ocelot/build
           sudo ninja install -d explain
+      - name: Install packages (hip)
+        if: matrix.backend == 'hip'
+        run: |
+          echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
+          wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+          sudo tee /etc/apt/sources.list.d/rocm.list <<'EOF'
+          deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian jammy main
+          EOF
+          echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
+          sudo apt update
+          sudo apt install --no-install-recommends --allow-unauthenticated -y rocm-hip-libraries hip-dev
+          curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
+          jq -r '.assets[] | select(.name == "libremu.so").browser_download_url' | \
+          sudo xargs curl -L -o /usr/local/lib/libremu.so
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT and print some source
         run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU', 'HIP'], Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
       - name: Verify OpenCL autogen
         if: matrix.backend == 'gpu'
@@ -462,8 +427,16 @@ jobs:
           cp tinygrad/runtime/autogen/cuda.py /tmp/cuda.py.bak
           ./autogen_stubs.sh cuda
           diff /tmp/cuda.py.bak tinygrad/runtime/autogen/cuda.py
-      - name: Run pytest (not cuda)
-        if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
+      - name: Verify HIP autogen
+        if: matrix.backend == 'hip'
+        run: |
+          cp tinygrad/runtime/autogen/hip.py /tmp/hip.py.bak
+          cp tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
+          ./autogen_stubs.sh hip
+          diff /tmp/hip.py.bak tinygrad/runtime/autogen/hip.py
+          diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
+      - name: Run pytest (not cuda or hip)
+        if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'hip'
         run: python -m pytest -n=auto test/ --durations=20
       - name: Run ONNX (only LLVM)
         if: matrix.backend == 'llvm'
@@ -471,6 +444,9 @@ jobs:
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --durations=20
+      - name: Run pytest (hip)
+        if: matrix.backend=='hip'
+        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py --durations=20
 
   #testunicorn:
   #  name: ARM64 unicorn Test
