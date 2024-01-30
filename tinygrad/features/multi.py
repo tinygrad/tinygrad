@@ -105,8 +105,10 @@ class MultiLazyBuffer:
     assert self.axis is None or arg[self.axis] == (0,0) or not all(self.real), f"padding not supported for {arg=}"
     # pad on shard axis -> fill others with zeros and set real to all True
     if self.axis is not None and arg[self.axis] != (0,0):
-      # pad back to full, remove real mask
-      # TODO: assert here to make sure it's only padding to full
+      # pad back to whole axis, remove real mask
+      assert all(arg[i] == (0, 0) or i == self.axis for i in range(len(self.shape))), "cannot pad sharded and non-sharded axis at the same time"
+      assert arg[self.axis] == (sum(lb.shape[self.axis] for i,lb in enumerate(self.lbs) if i < self.real.index(True)), \
+                                sum(lb.shape[self.axis] for i,lb in enumerate(self.lbs) if i > self.real.index(True))), "can only pad to whole axis"
       return MultiLazyBuffer([x if r else x.const(0) for x,r in zip(self.lbs, self.real)], self.axis)
     return MultiLazyBuffer([x.pad(arg) for x in self.lbs], self.axis, self.real)
   def expand(self, arg:Tuple[sint, ...]):

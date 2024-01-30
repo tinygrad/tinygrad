@@ -309,7 +309,7 @@ class TestMultiTensor(unittest.TestCase):
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
   # shrink a multitensor on sharded axis
-  def test_shrink(self):
+  def test_shrink_bad_args(self):
     t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
 
@@ -320,11 +320,31 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       # cannot shrink sharded and non-sharded axis at the same time
       a = t.shrink(((0, 2), (2, 4)))
 
+    a = t.shrink(((0, 2), (0, 8)))
+    assert a.shape == (2, 8)
+    assert a.lazydata.real == [True, False, False, False]
+
+    with self.assertRaises(AssertionError):
+      # cannot pad sharded and non-sharded axis at the same time
+      p = a.pad(((0, 6), (0, 1)))
+
+    with self.assertRaises(AssertionError):
+      # can only pad to whole axis
+      p = a.pad(((1, 5), (0, 0)))
+
+    p = a.pad(((0, 6), (0, 0)))
+    assert p.shape == (8, 8)
+    assert p.lazydata.real == [True, True, True, True]
+
+  def test_ops(self):
+    t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
+    t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
     for i in range(4):
       print(f"{i=}")
       a = t.shrink(((0+2*i,2+2*i),None))
       b = Tensor(t.numpy()[0+2*i:2+2*i])
       assert a.shape == b.shape == (2, 8)
+      assert a.lazydata.real == [i==j for j in range(4)]
       np.testing.assert_allclose(a.numpy(), b.numpy())
       # cast
       np.testing.assert_allclose(a.float().numpy(), b.float().numpy())
@@ -460,6 +480,8 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       bn_ts[0].cat(*bn_ts[1:]).numpy()
 
 # TODO: test synced / unsynced batchnorm cross device kernel and copies
+# TODO: test uneven
+# TODO: test 2 partial can be added
 
 if __name__ == '__main__':
   unittest.main()
