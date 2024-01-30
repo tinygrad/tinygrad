@@ -170,15 +170,16 @@ class HIPWaitEvent(JITRunner):
     update_stats(colored("wait", "RED"), 0, 0, {}, None, 1, jit, device=self.dname)
 
 if getenv("HIPCPU"):
-  hip = ctypes.CDLL("/usr/local/lib/libremu.so")
+  hip = ctypes.CDLL("/usr/local/lib/libremu.so") # type: ignore[assignment]
 
-  class HIPProgram:
+  class HIPProgram: # type: ignore[no-redef]
     def __init__(self, name:str, lib:bytes):
       self.name, self.lib = name, lib
     def __call__(self, *args, global_size, local_size, vals=(), wait=False):
       args = (*args, *vals)
-      hip.hipModuleLaunchKernel(self.lib, len(self.lib), *global_size, *local_size, 0, None, None, len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]))
+      hip.hipModuleLaunchKernel(self.lib, len(self.lib), *global_size, *local_size, 0, None, None,
+                                len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]))
 
-  class HIPDevice(Compiled):
+  class HIPDevice(Compiled): # type: ignore[no-redef]
     def __init__(self, device=""):
       super().__init__(device, MallocAllocator, HIPCompiler("gfx1100"), HIPProgram)
