@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from tinygrad.helpers import BEAM, Timing, CI
+from tinygrad.helpers import BEAM, Context, Timing, CI
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
 from tinygrad.nn import Conv2d
@@ -62,7 +62,9 @@ class TestBeamSearch(unittest.TestCase):
     np.testing.assert_allclose(actual, desired)
 
   def test_conv_beam(self):
-    c = Conv2d(3, 16, (3,3))
+    if CI:
+      with Context(BEAM=0): c = Conv2d(3, 16, (3,3))
+    else: c = Conv2d(3, 16, (3,3))
     x = rand(1,3,32,32)
     with Timing():
       c(x).realize()
