@@ -27,7 +27,13 @@ else:
   dtypes.default_float = dtypes.float32
   np_dtype = np.float32
 
-class BatchNorm:
+class BatchNorm(nn.BatchNorm2d):
+  def __init__(self, num_features):
+    super().__init__(num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
+    self.weight.requires_grad = False
+    self.bias.requires_grad = True
+
+class UnsyncedBatchNorm:
   def __init__(self, num_features):
     self.bns:List[nn.BatchNorm2d] = []
     for _ in GPUS:
@@ -41,7 +47,8 @@ class BatchNorm:
 
     bn_ts = []
     for bound, bn in zip(x.lazydata.bounds, self.bns):
-      # TODO: having issue with getitem?
+      # TODO: __getitem__ does not work
+      # xi = x[bound]
       xi = x.shrink((bound, None, None, None))
       bni = bn(xi)
       bn_ts.append(bni)
@@ -53,8 +60,12 @@ class ConvGroup:
     self.conv1 = nn.Conv2d(channels_in,  channels_out, kernel_size=3, padding=1, bias=False)
     self.conv2 = nn.Conv2d(channels_out, channels_out, kernel_size=3, padding=1, bias=False)
 
-    self.norm1 = BatchNorm(channels_out)
-    self.norm2 = BatchNorm(channels_out)
+    if getenv("SYNCBN"):
+      self.norm1 = BatchNorm(channels_out)
+      self.norm2 = BatchNorm(channels_out)
+    else:
+      self.norm1 = UnsyncedBatchNorm(channels_out)
+      self.norm2 = UnsyncedBatchNorm(channels_out)
 
   def __call__(self, x):
     x = self.conv1(x)
@@ -277,7 +288,7 @@ def train_cifar():
 
   if len(GPUS) > 1:
     for x in get_parameters(model):
-      x.shard_(GPUS)
+      x.to_(GPUS)
 
   # parse the training params into bias and non-bias
   params_dict = get_state_dict(model)
