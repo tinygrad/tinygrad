@@ -85,10 +85,11 @@ class View:
     contiguous = offset == 0 and mask is None and strides == strides_for_shape(shape)
     # if any dimension has size >1, but is masked such that only one index in the dimension is unmasked
     # then its stride can also be set to 0, albeit with a corresponding adjustment required to the offset
-    #if mask and any(elim := [isinstance(b, int) and isinstance(e, int) and b+1 >= e for b,e in mask]):
-    #  if any(b >= e for b,e in mask): strides, offset, mask = (0,) * len(shape), 0, ((0,0),) * len(shape)
-    #  offset += sum((strides[i] * mask[i][0]) if e else 0 for i, e in enumerate(elim))
-    #  strides = tuple(0 if e else st for st,e in zip(strides, elim))
+    if mask and any(elim := [not (b+1 < e) for b,e in mask]):
+      if any(not (b < e) for b,e in mask):
+        strides, offset, mask = (0,) * len(shape), 0, ((0,0),) * len(shape)
+      offset += sum((strides[i] * mask[i][0]) if e else 0 for i, e in enumerate(elim))
+      strides = tuple(0 if e else st for st,e in zip(strides, elim))
     return View(shape, strides, offset, mask, contiguous)
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
