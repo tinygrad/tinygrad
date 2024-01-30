@@ -34,12 +34,10 @@ class BatchNorm(nn.BatchNorm2d):
     self.bias.requires_grad = True
 
 class UnsyncedBatchNorm:
-  def __init__(self, num_features):
+  def __init__(self, num_features, num_devices=len(GPUS)):
     self.bns:List[nn.BatchNorm2d] = []
-    for _ in GPUS:
-      bn = nn.BatchNorm2d(num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
-      bn.weight.requires_grad = False
-      bn.bias.requires_grad = True
+    for _ in range(num_devices):
+      bn = BatchNorm(num_features)
       self.bns.append(bn)
 
   def __call__(self, x:Tensor):
