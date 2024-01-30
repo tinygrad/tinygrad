@@ -102,8 +102,11 @@ class ShapeTracker:
     return f'idx{axis}' in [v.expr for v in valid.vars()]
 
   def simplify(self) -> ShapeTracker:
-    if len(self.views) >= 2 and (new_view := merge_views(self.views[-2], self.views[-1])) is not None:
-      return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
+    i = 0
+    while i < len(self.views) - 1:
+        if (newview := merge_views(self.views[i], self.views[i+1])):
+            return ShapeTracker(self.views[0:i] + (newview,) + self.views[i+2:]).simplify()
+        i+=1
     return self
 
   # *** under this line are the movement ops ***

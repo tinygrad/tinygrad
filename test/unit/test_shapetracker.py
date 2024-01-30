@@ -396,7 +396,50 @@ class TestSimplifyingShapeTracker(unittest.TestCase):
     self.st = self.st.simplify()
     print(self.st.views)
     assert(len(self.st.views) == 2)
+  
+  def test_canonical_simplify(self):
+    # Unsimplified ShapeTracker of 6 views simplified into 1
+    a = ShapeTracker.from_shape((10,10)); a = a.permute((1,0)) # 1
+    a = a.reshape((25,4)); a = a.permute((1,0)) # 2
+    assert(len(a.views) == 2)
+    a = a.reshape((50,2)); a = a.permute((1,0)) # 3
+    assert(len(a.views) == 3)
 
+    a = a.reshape((25,4)) # 4
+    assert(len(a.views) == 4)
+
+    a = a.reshape((2,50)); a = a.permute((1,0)) # 4
+    assert(len(a.views) == 4)
+    a = a.reshape((4,25)); a = a.permute((1,0)) # 5
+    assert(len(a.views) == 5)
+    a = a.reshape((10,10)); a = a.permute((1,0)) # 6
+    assert(len(a.views) == 6)
+    a = a.simplify()
+
+    # Equivalent to distributing the simplify over all opposite operations, ie. 1 -> 4 -> 1 views
+    ap = ShapeTracker.from_shape((10,10)); ap = ap.permute((1,0)) # 1
+    assert(len(ap.views)==1)
+    ap = ap.reshape((25,4)); ap = ap.permute((1,0)) # 2
+    assert(len(ap.views)==2)
+    ap = ap.reshape((50,2)); ap = ap.permute((1,0)) # 3
+    assert(len(ap.views)==3)
+
+    ap = ap.reshape((25,4)) # 4
+    assert(len(ap.views)==4)
+
+    ap = ap.reshape((2,50)); ap = ap.simplify(); ap = ap.permute((1,0)) # 3
+    assert(len(ap.views)==3)
+    ap = ap.reshape((4,25)); ap = ap.simplify(); ap = ap.permute((1,0)) # 2
+    assert(len(ap.views)==2)
+    ap = ap.reshape((10,10)); ap = ap.simplify(); ap = ap.permute((1,0)) # 1  
+    assert(len(ap.views)==1)
+
+    print([v.shape for v in a.views])
+    print([v.shape for v in ap.views])
+
+    # ShapeTrackers are equal if their simplified ShapeTrackers are equal
+    assert(a.views == ap.views)
+  
 # Tensor.zeros(2, 4).permute(1,0).reshape(2, 4)
 # (d1*4 + d0%4), d1=x//4, d0=x%4 = ((x//4)*4) + (x%4)%4
 
