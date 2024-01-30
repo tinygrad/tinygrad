@@ -81,8 +81,6 @@ backend_test.exclude('test_convinteger_*')
 backend_test.exclude('test_matmulinteger_*')
 
 # we don't support indexes
-# backend_test.exclude('test_argmax_*') # Needs more work: select_last_index
-# backend_test.exclude('test_argmin_*') # Needs more work: select_last_index
 backend_test.exclude('test_nonzero_*')
 
 # no support for mod
