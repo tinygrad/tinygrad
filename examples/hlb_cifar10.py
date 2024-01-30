@@ -12,6 +12,7 @@ from tinygrad import nn, dtypes, Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_state_dict, get_parameters
 from tinygrad.nn import optim
 from tinygrad.helpers import Context, BEAM, WINO, getenv
+from tinygrad.features.multi import MultiLazyBuffer
 
 BS, STEPS = getenv("BS", 512), getenv("STEPS", 1000)
 EVAL_BS = getenv("EVAL_BS", BS)
@@ -35,7 +36,7 @@ class BatchNorm(nn.BatchNorm2d):
 
 class UnsyncedBatchNorm:
   def __init__(self, num_features, num_devices=len(GPUS)):
-    self.bns:List[nn.BatchNorm2d] = []
+    self.bns:List[BatchNorm] = []
     for _ in range(num_devices):
       bn = BatchNorm(num_features)
       self.bns.append(bn)
@@ -44,13 +45,15 @@ class UnsyncedBatchNorm:
     if len(self.bns) == 1: return self.bns[0](x)
 
     bn_ts = []
+    assert isinstance(x.lazydata, MultiLazyBuffer)
     for bound, bn in zip(x.lazydata.bounds, self.bns):
       # TODO: __getitem__ does not work
       # xi = x[bound]
       xi = x.shrink((bound, None, None, None))
       bni = bn(xi)
       bn_ts.append(bni)
-
+    # TODO: what do we want to do for inference? average weight? pick any one?
+    # a good start would be to check each mean/std are similar
     return bn_ts[0].cat(*bn_ts[1:])
 
 class ConvGroup:
