@@ -81,8 +81,6 @@ backend_test.exclude('test_convinteger_*')
 backend_test.exclude('test_matmulinteger_*')
 
 # we don't support indexes
-# backend_test.exclude('test_argmax_*') # Needs more work: select_last_index
-# backend_test.exclude('test_argmin_*') # Needs more work: select_last_index
 backend_test.exclude('test_nonzero_*')
 
 # no support for mod
@@ -128,10 +126,6 @@ backend_test.exclude('test_bitwise_*')
 backend_test.exclude('test_blackmanwindow_*')
 backend_test.exclude('test_bernoulli_*')
 backend_test.exclude('test_det_*')
-
-backend_test.exclude('test_tril_zero_cpu') # TODO: zero array tril support
-backend_test.exclude('test_triu_zero_cpu') # TODO: zero array triu support
-
 backend_test.exclude('test_col2im_*')
 backend_test.exclude('test_hammingwindow_*')
 backend_test.exclude('test_hannwindow_*')

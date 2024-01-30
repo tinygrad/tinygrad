@@ -120,10 +120,8 @@ def Unsqueeze(data: Tensor, axes):
 def Binarizer(x, threshold=0.0): return (x > threshold).float()
 
 def ArgMax(x: Tensor, axis=0, keepdims=1, select_last_index=0):
-  axis = axis + x.ndim if axis < 0 else axis
-  m = x == (x.max(axis=axis, keepdim=keepdims) if keepdims else x.max(axis=axis, keepdim=keepdims).unsqueeze(axis))
-  c = Tensor.arange(x.shape[axis]).reshape(*[1]*(axis), x.shape[axis], *[1]*(x.ndim - axis-1)) * m
-  return c.max(axis=axis,keepdim=keepdims).cast(dtypes.int64)
+  if select_last_index: return ((x.shape[axis]-1) - x.flip(axis).argmax(axis, keepdim=keepdims)).cast(dtypes.int64)
+  return x.argmax(axis, keepdim=keepdims).cast(dtypes.int64)
 def ArgMin(x, axis=0, keepdims=1, select_last_index=0): return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
 
 def Concat(*xs: List[Tensor], axis): return xs[0].cat(*xs[1:], dim=axis)
