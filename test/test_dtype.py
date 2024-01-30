@@ -343,7 +343,6 @@ class TestTypeSpec(unittest.TestCase):
 
   @given(strat.sampled_from(core_dtypes),
          strat.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), strat.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
-  @settings(deadline=3000) # The timing is flaky
   def test_functions_return_index(self, dtype, default_int, default_float):
     dtypes.default_int, dtypes.default_float = default_int, default_float
     assert Tensor([0, 1], dtype=dtype).argmax().dtype == dtypes.default_int
@@ -409,7 +408,6 @@ class TestAutoCastType(unittest.TestCase):
       np.testing.assert_allclose(func(Tensor(a, dtype=dtype)).numpy(), func(torch.tensor(a)), rtol=1e-3, atol=1e-3)
 
   @given(strat.sampled_from(core_dtypes))
-  @settings(deadline=3000) # The timing is flaky
   def test_broadcast_scalar(self, dt):
     assert (Tensor.rand(4, 4, dtype=dt) + 2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
     assert (Tensor.rand(4, 4, dtype=dt) + 2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
