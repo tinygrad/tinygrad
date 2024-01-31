@@ -713,6 +713,7 @@ class Tensor:
   @staticmethod
   def _tri(r:sint, c:sint, k:int=0, **kwargs) -> Tensor:
     assert all_int((r,c)), "does not support symbolic"
+    if r == 0: return Tensor.zeros((r, c), **kwargs)
     return Tensor.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= Tensor.arange(-k, c-k, **kwargs).unsqueeze(0).expand(r,c)
   def triu(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k, device=self.device).where(self, 0)
   def tril(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, device=self.device).where(0, self)
@@ -894,10 +895,11 @@ class Tensor:
     return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
 
   def batchnorm(self, weight:Optional[Tensor], bias:Optional[Tensor], mean:Tensor, invstd:Tensor) -> Tensor:
-    x = (self - mean.reshape(shape=[1, -1, 1, 1]))
-    if weight: x = x * weight.reshape(shape=[1, -1, 1, 1])
-    ret = x.mul(invstd.reshape(shape=[1, -1, 1, 1]) if len(invstd.shape) == 1 else invstd)
-    return (ret + bias.reshape(shape=[1, -1, 1, 1])) if bias else ret
+    shape = (1, -1) + (1,) * (self.ndim-2)
+    x = self - mean.reshape(shape)
+    if weight: x = x * weight.reshape(shape)
+    ret = x.mul(invstd.reshape(shape) if len(invstd.shape) == 1 else invstd)
+    return (ret + bias.reshape(shape)) if bias else ret
 
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training or p == 0: return self
