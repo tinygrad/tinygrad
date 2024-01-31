@@ -42,19 +42,19 @@ if __name__ == "__main__":
     lins:List[Linearizer] = []
 
     # always try hand coded opt
-    lin = Linearizer(si.ast, device.linearizer_opts)
+    lin = Linearizer(si.ast, device.compiler.linearizer_opts)
     lin.hand_coded_optimizations()
     lins.append(lin)
 
     # maybe try tensor cores
-    lin = Linearizer(si.ast, device.linearizer_opts)
+    lin = Linearizer(si.ast, device.compiler.linearizer_opts)
     if lin.apply_tensor_cores():
       lins.append(lin)
 
     # try a beam search
-    if getenv("BEAM"):
-      lin = Linearizer(si.ast, device.linearizer_opts)
-      lin = beam_search(lin, rawbufs, getenv("BEAM"), bool(getenv("BEAM_ESTIMATE", 1)))
+    if beam:=getenv("BEAM"):
+      lin = Linearizer(si.ast, device.compiler.linearizer_opts)
+      lin = beam_search(lin, rawbufs, beam, bool(getenv("BEAM_ESTIMATE", 1)))
       lins.append(lin)
 
     # benchmark the programs
@@ -67,7 +67,7 @@ if __name__ == "__main__":
       # print all kernels
       if DEBUG >= 1: print(f"                 kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS")
     tm, gflops, lin = sorted(choices, key=lambda x: x[0])[0]
-    print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS")
     total_tm += tm
     running_gflops += gflops * tm
+    print(f"*** {total_tm*1000:7.2f} ms : kernel {i:2d} {lin.name+' '*(37-ansilen(lin.name))} {str(lin.global_size):18s} {str(lin.local_size):12s} takes {tm*1000:7.2f} ms, {gflops:6.0f} GFLOPS")
   print(f"******* total {total_tm*1000:.2f} ms, {running_gflops/total_tm:6.0f} GFLOPS")
