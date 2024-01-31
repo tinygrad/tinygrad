@@ -8,7 +8,7 @@ from tinygrad.device import Compiled, LRUAllocator, Compiler
 from tinygrad.renderer.cstyle import MetalRenderer
 
 class MetalCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("METAL")
+  linearizer_opts = LinearizerOptions("METAL", target_arch=1 if os.uname().machine == "aarch64" else 0)
   def __init__(self, device:Optional[MetalDevice]):
     self.device = device
     super().__init__("compile_metal")

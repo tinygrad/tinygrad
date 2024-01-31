@@ -92,6 +92,7 @@ class CUDADevice(Compiled):
     self.arch = f"sm_{major.value}{minor.value}" if not CUDACPU else "sm_35"
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
+    CUDACompiler.linearizer_opts = CUDACompiler.linearizer_opts._replace(target_arch=int(self.arch[3:]))
     super().__init__(device, CUDAAllocator(self) if not CUDACPU else MallocAllocator, CUDACompiler(self.arch),
                      functools.partial(CUDAProgram, self), graph=CUDAGraph if not CUDACPU else None)
   def synchronize(self):
