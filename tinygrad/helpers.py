@@ -62,7 +62,11 @@ def get_contraction(old_shape:Tuple[sint, ...], new_shape:Tuple[sint, ...]) -> O
 @functools.lru_cache(maxsize=None)
 def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])
 @functools.lru_cache(maxsize=None)
-def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
+def getenv(key:str, default=0):
+  try:
+    return type(default)(os.getenv(key, default))
+  except ValueError:
+    raise ValueError(f"environment variable '{key}' cannot be casted to {type(default)}. Please check docs/env_vars.md for reference.") from None
 def temp(x:str) -> str: return (pathlib.Path(tempfile.gettempdir()) / x).as_posix()
 
 class GraphException(Exception): pass
