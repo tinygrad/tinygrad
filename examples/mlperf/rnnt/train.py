@@ -10,14 +10,16 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad import Tensor
 from tinygrad.nn.state import get_parameters
 from tinygrad.device import Device
+from tinygrad.helpers import getenv
 
-from matplotlib import pyplot as plt
 
 from data import load_data, iterate
 from model import RNNT
-import numpy as np
 
-from tinygrad.helpers import getenv
+from matplotlib import pyplot as plt
+import numpy as np
+import time
+
 
 
 GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS"))]
@@ -106,13 +108,6 @@ class TransducerLoss(Function):
 
         return (-Tensor.cat(self.p_grad,self.skg.unsqueeze(-1), dim=-1)).transpose(1,2).realize().lazydata,None
 
-# %%
-# rnnt = RNNT()
-# opt = Adam(get_parameters(rnnt))
-# X = Tensor.uniform(20,5,240)
-# X_lens = Tensor.ones(5)*20
-# Y = Tensor.randint(5,15,high=29)
-
 i2c = list("abcdefghijklmnopqrstuvwxyz' ")+["<pad>"]
 c2i = dict(map(reversed,enumerate(i2c)))
 C = len(i2c) # the last index stands for either the skip or pad. thesee are different.
@@ -150,8 +145,7 @@ if (GPUS):
     for x in get_parameters(rnnt):
         x.to_(GPUS)
 
-def step(iter, maxX, maxY):
-    X,labels = next(iter)
+def step(X,labels, maxX, maxY):
     X,X_lens = X
     labels,Y_lens = text_encode(labels)
     X_lens = Tensor(X_lens)
@@ -159,7 +153,7 @@ def step(iter, maxX, maxY):
     # print(X_lens.numpy(),Y_lens.numpy())
     X = Tensor(X).pad(((0,maxX-X.shape[0]),(0,0),(0,0))).contiguous().realize()
     labels = Tensor(labels).pad(((0,0),(0,maxY - labels.shape[1]))).contiguous().realize()
-    return fb_pass(X,labels,X_lens, Y_lens)/(X_lens.sum() + Y_lens.sum(), maxX, maxY)
+    return fb_pass(X,labels,X_lens, Y_lens, maxX,maxY)/(X_lens.sum())
 
 @TinyJit
 def fb_pass(X:Tensor,labels, X_lens, Y_lens, maxX, maxY):
@@ -175,6 +169,7 @@ def fb_pass(X:Tensor,labels, X_lens, Y_lens, maxX, maxY):
 
     L = TransducerLoss.apply(md, labels)
     L.backward()
+    for p in opt.params: p.grad.realize()
     opt.step()
     return L.realize()
 
@@ -209,19 +204,26 @@ def test():
     Tensor.no_grad = False
     return L / int(len(test_set) / B)
 
-def timestring(s:int): return f"{int(s//3600)}:{int(s%3600//60)}:{int(s%60)}"
+def timestring(s:int): return f"{int(s//3600)}:{int(s//60%60)}:{s%60:.4}"
 
 
-B = 1
+
+
+B = 2
+
+rnnt.load("rnnt_e_1")
+
 if __name__ == "__main__":
 
-    ci, maxX, maxY = load_data(15)
+    ci, maxX, maxY = load_data(5)
     train_set = ci[:-(2*B)]
     test_set = ci[-(2*B):]
+    print(f"eval: {test()}")
 
-    # for e in range(10):
-    #     iter = iterate(train_set, B)
-    #     L = step(iter,maxX, maxY).numpy().item()
-    #     print(end = f"\r{L}")
-
-
+    for e in range(1,10):
+        st = time.time()
+        for i,sample in enumerate(iterate(train_set, B)):
+            L = step(*sample,maxX, maxY).numpy().item()
+            print( end = f"\r {i}/{int(len(train_set)/B)} L:{L:.4}", flush = True)
+        print (f"\nepoch {e+1} finished in {timestring(time.time() - st )} val:{test()}")
+        rnnt.save(f"rnnt_e_{e+1}")

@@ -96,8 +96,7 @@ class Joint:
     t = t.dropout(self.dropout)
     return self.l2(t)
 
-
-
+from tinygrad.nn.state import get_state_dict, load_state_dict, safe_save, safe_load
 
 class RNNT:
   def __init__(self, input_features=240, vocab_size=29, enc_hidden_size=1024, pred_hidden_size=320, joint_hidden_size=512, pre_enc_layers=2, post_enc_layers=3, pred_layers=2, dropout=0.32):
@@ -149,6 +148,11 @@ class RNNT:
     j = j.pad(((0, 1), (0, 1), (0, 0)))
     out = j.cat(hc, dim=2)
     return out.realize()
+
+  def save(self,fname): safe_save(get_state_dict(self),fname)
+
+  def load(self,fname:str): load_state_dict(self, safe_load(fname))
+
 
   def load_from_pretrained(self):
     fn = Path(__file__).parents[1] / "weights/rnnt.pt"
