@@ -251,13 +251,15 @@ class Linearizer(Kernel):
       acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
 
       if self.tensor_core:
-        def calc_tc_idxs(local_size: int, aliases: List[List[int]]):
+        def calc_tc_idxs(local_size: Union[int,Tuple[int,...]], aliases: List[List[int]]):
           replace_idxs = []
+          uidx_tc = Variable("_uidx_tc", 0, prod(local_size)-1 if isinstance(local_size, tuple) else local_size-1)
+          tc_uidxs = [uidx_tc // prod(local_size[:j]) % s for j, s in enumerate(local_size)] if isinstance(local_size, tuple) else [uidx_tc]
           for alias in aliases:
             full_var, full_var_sz = NumNode(0), 1
             if alias[0] != 0:
               for i in alias:
-                next_var = local_idxs[-i] if i > 0 else Variable("_uidx_tc", 0, local_size-1)
+                next_var = local_idxs[-i] if i > 0 else tc_uidxs[-i-1]
                 full_var += next_var * full_var_sz
                 full_var_sz *= next_var.max+1
             replace_idxs.append(full_var)

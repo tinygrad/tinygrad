@@ -30,7 +30,7 @@ class TensorCore:
   dtype_out: DType
   ops: List[Tuple[OptOps, int, int]]  # list of (op,TC dim,amt) that construct the warp thread structure
   thread_local_aliases: List[List[List[int]]] # a list of [threads_1, ..., threads_n, upcast_1(unrolled), upcast_2(upcast)] defining the alias (-1 is upcast, 1-n is warp threads) for each TC dim # noqa: E501
-  thread_local_sizes: List[int] # in each thread, the number of elements stored in registers for each TC dim
+  thread_local_sizes: List[Union[int, Tuple[int,...]]] # in each thread, the number of elements stored in registers for each TC dim, perhaps split up
   wmma_func: str # name of wmma function to call
   arch: Optional[str] = None
   def __str__(self): return f"tensor_core<{self.dims}, {self.dtype_in}, {self.dtype_out}>"
