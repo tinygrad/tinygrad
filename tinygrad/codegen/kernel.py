@@ -35,6 +35,7 @@ class TensorCore:
   arch: Optional[str] = None
   def __str__(self): return f"tensor_core<{self.dims}, {self.dtype_in}, {self.dtype_out}>"
   def num_threads(self): return len([1 for (op, _, _) in self.ops if op in [OptOps.LOCAL, OptOps.LASTLOCAL]])
+  def num_upcasts(self): return len([1 for (op, _, _) in self.ops if op in [OptOps.UPCAST]])
 
 tensor_cores: Dict[str, List[TensorCore]] = {
   "METAL": [

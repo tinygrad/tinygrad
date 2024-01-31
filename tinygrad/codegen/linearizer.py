@@ -289,7 +289,7 @@ class Linearizer(Kernel):
 
       # copy in any global buffers
       if (tc:=self.tensor_core):
-        wmma_sz, num_tc_upcast = tc.thread_local_sizes, 2 # 2 is for UNROLL and one UPCAST
+        wmma_sz, num_tc_upcast = [x if isinstance(x, int) else prod(x) for x in tc.thread_local_sizes], tc.num_upcasts() + 1  # one extra for unroll
         def upcast_strides(buf:int):
           strides, next = [], 1
           for (sz, stride, reduce) in self.upcasted_axis(buf)[num_tc_upcast:]:
