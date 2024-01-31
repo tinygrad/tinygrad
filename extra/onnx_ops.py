@@ -161,14 +161,6 @@ def CumSum(X:Tensor, axis:Tensor, exclusive=0, reverse=0):
   if reverse: return X.cumsum(axis).flip(axis)
   return X.cumsum(axis)
 
-# works with Tensors.ndim != 4
-def _batchnorm(self:Tensor, weight:Optional[Tensor], bias:Optional[Tensor], mean:Tensor, invstd:Tensor):
-  shape = [1, -1] + [1] * (self.ndim-2)
-  x = (self - mean.reshape(shape=shape))
-  if weight: x = x * weight.reshape(shape=shape)
-  ret = x.mul(invstd.reshape(shape=shape) if len(invstd.shape) == 1 else invstd)
-  return (ret + bias.reshape(shape=shape)) if bias else ret
-
 # TODO: this is copied from tinygrad/nn/__init__.py
 # spatial is from opset 7 and has since been removed
 def BatchNormalization(X: Tensor, scale, B, input_mean, input_var, epsilon=1e-05, momentum=0.9, training_mode=0, spatial=1, is_test=0):
@@ -182,9 +174,9 @@ def BatchNormalization(X: Tensor, scale, B, input_mean, input_var, epsilon=1e-05
     running_mean = input_mean * momentum + current_mean * (1 - momentum)
     running_var = input_var * momentum + current_var * (1 - momentum)
 
-    return _batchnorm(X, scale, B, current_mean, current_invstd), running_mean, running_var
+    return X.batchnorm(scale, B, current_mean, current_invstd), running_mean, running_var
   invstd = (input_var + epsilon)**-0.5
-  return _batchnorm(X, scale, B, input_mean, invstd)
+  return X.batchnorm(scale, B, input_mean, invstd)
 
 def InstanceNormalization(x: Tensor, scale: Tensor, bias: Tensor, epsilon=1e-05):
   axis = tuple(range(2, len(x.shape)))
