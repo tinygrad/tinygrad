@@ -655,8 +655,8 @@ class Tensor:
     # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
     def apply_matrix(mat, t):
       t_ = t.reshape(t.shape[:len(HW)]+(1,)*len(HW)+t.shape[len(HW):]).expand(t.shape[:len(HW)]+(len(mat),)*len(HW)+t.shape[len(HW):])
-      matcols = [[Tensor.cat(*[Tensor(float(m[k])).reshape((1,) * len(t.shape)).expand(tuple(1 if k == dim else len(mat) for k in range(len(HW))) + t.shape[len(HW):]) for m in mat], dim=dim) for k in range(len(mat[0]))] for dim in range(len(HW))]
-      return sum(prod([matcols[dim][mat_is[dim]] for dim in range(len(HW))]) * t_[mat_is] for mat_is in itertools.product(*[range(len(mat[0])) for _ in range(len(HW))]))
+      matcols = [[Tensor.cat(*[Tensor(float(m[k])).reshape((1,) * len(t.shape)).expand(tuple(1 if k == dim else len(mat) for k in range(len(HW))) + t.shape[len(HW):]) for m in mat], dim=dim) for k in range(len(mat[0]))] for dim in range(len(HW))]  # noqa: E501
+      return sum(prod([matcols[dim][mat_is[dim]] for dim in range(len(HW))]) * t_[mat_is] for mat_is in itertools.product(*[range(len(mat[0])) for _ in range(len(HW))]))  # noqa: E501
     HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
     winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
     winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
