@@ -7,7 +7,7 @@
 
 print("******** first, the runtime ***********")
 
-from tinygrad.runtime.ops_clang import ClangProgram, compile_clang, MallocAllocator
+from tinygrad.runtime.ops_clang import ClangProgram, ClangCompiler, MallocAllocator
 
 # allocate some buffers
 out = MallocAllocator.alloc(4)
@@ -19,7 +19,7 @@ MallocAllocator.copyin(a, bytearray([2,0,0,0]))
 MallocAllocator.copyin(b, bytearray([3,0,0,0]))
 
 # compile a program to a binary
-lib = compile_clang("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
+lib = ClangCompiler().compile("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
 
 # create a runtime for the program (ctypes.CDLL)
 fxn = ClangProgram("add", lib)
@@ -37,7 +37,7 @@ print("******** second, the Device ***********")
 DEVICE = "CLANG"   # NOTE: you can change this!
 
 import struct
-from tinygrad.helpers import dtypes
+from tinygrad.dtype import dtypes
 from tinygrad.device import Buffer, Device
 from tinygrad.ops import LazyOp, BufferOps, MemBuffer, BinaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -67,20 +67,21 @@ print(fxn.prg)
 fxn.exec([out, a, b])
 
 # check the data out
-print(val:=out.toCPU().item())
-assert val == 5
+assert out.as_buffer().cast('I')[0] == 5
 
 
 print("******** third, the LazyBuffer ***********")
 
-from tinygrad.lazy import LazyBuffer
+from tinygrad.lazy import LazyBuffer, LoadOps
 from tinygrad.realize import run_schedule
 
 # allocate some values + load in values
 # TODO: remove numpy here
 import numpy as np
-a = LazyBuffer.fromCPU(np.array([2], np.int32)).copy_to_device(DEVICE)
-b = LazyBuffer.fromCPU(np.array([3], np.int32)).copy_to_device(DEVICE)
+a = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, "CPU")
+b = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, "CPU")
+a.realized = Buffer("CPU", 1, dtypes.int32, np.array([2], np.int32).flatten())
+b.realized = Buffer("CPU", 1, dtypes.int32, np.array([3], np.int32).flatten())
 
 # describe the computation
 out = a.e(BinaryOps.ADD, b)
@@ -98,8 +99,7 @@ print_tree(sched[-1].ast)
 run_schedule(sched)
 
 # check the data out
-print(val:=out.realized.toCPU().item())
-assert val == 5
+assert out.realized.as_buffer().cast('I')[0] == 5
 
 
 print("******** fourth, the Tensor ***********")

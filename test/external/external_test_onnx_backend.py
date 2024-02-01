@@ -4,8 +4,8 @@ from onnx.backend.base import Backend, BackendRep
 import onnx.backend.test
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, CI
-from tinygrad.device import Device, Compiled
+from tinygrad.helpers import getenv, CI, OSX
+from tinygrad.device import Device
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
@@ -48,25 +48,37 @@ backend_test.exclude('test_adam_multiple_cpu')
 backend_test.exclude('test_nesterov_momentum_cpu')
 
 # about different dtypes
-backend_test.exclude('int8')  #  OverflowError: cannot convert float infinity to integer
-
 if Device.DEFAULT in ["TORCH"]:
   backend_test.exclude('uint16')
   backend_test.exclude('uint32')
   backend_test.exclude('uint64')
-if Device.DEFAULT in ["METAL"]:
-  backend_test.exclude('float64')
 
-backend_test.exclude('string')
+if Device.DEFAULT in ["METAL"] or (OSX and Device.DEFAULT == "GPU"):
+  backend_test.exclude('float64')
+  backend_test.exclude('DOUBLE')
+  # these have float64 inputs
+  backend_test.exclude('test_eyelike_with_dtype_cpu')
+  backend_test.exclude('test_reduce_log_sum_exp*')
+  backend_test.exclude('test_operator_add*')
+  backend_test.exclude('test_einsum_*')
+  backend_test.exclude('test_cumsum_*')
+
+# no float16 in CI, LLVM segfaults, GPU requires cl_khr_fp16
+if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
+  backend_test.exclude('float16')
+  backend_test.exclude('FLOAT16')
+
+# dtype cast
+backend_test.exclude('STRING')
+backend_test.exclude('FLOAT8')
+backend_test.exclude('BFLOAT16')  # not supported in numpy
+# TODO: fix these with true onnx float16
+backend_test.exclude('to_FLOAT16')
+backend_test.exclude('cast_no_saturate')
 
 backend_test.exclude('test_pow_types_int*')
-backend_test.exclude('test_cast_*')
-backend_test.exclude('test_castlike_*')
 backend_test.exclude('test_convinteger_*')
 backend_test.exclude('test_matmulinteger_*')
-
-backend_test.exclude('test_reduce_log_sum_exp*') # dependent on actual float64 implementation for backends
-backend_test.exclude('test_operator_add*') # dependent on float64 math. Without it values default to 0 or inf
 
 # we don't support indexes
 # backend_test.exclude('test_argmax_*') # Needs more work: select_last_index
@@ -78,6 +90,11 @@ backend_test.exclude('test_mod_*')
 
 # no boolean ops (2d, 3d, 4d)
 backend_test.exclude('test_bitshift_*')
+
+# no string ops
+backend_test.exclude('string')
+backend_test.exclude('test_strnorm_*')
+backend_test.exclude('test_regex_*')
 
 # no scatternd gathernd
 backend_test.exclude('test_gathernd_*')
@@ -110,7 +127,6 @@ backend_test.exclude('test_range_int32_type_negative_delta_expanded_cpu')
 backend_test.exclude('test_bitwise_*')
 backend_test.exclude('test_blackmanwindow_*')
 backend_test.exclude('test_bernoulli_*')
-backend_test.exclude('test_cumsum_*')
 backend_test.exclude('test_det_*')
 
 backend_test.exclude('test_tril_zero_cpu') # TODO: zero array tril support
@@ -122,8 +138,8 @@ backend_test.exclude('test_hannwindow_*')
 backend_test.exclude('test_hardmax_*')
 backend_test.exclude('test_gridsample_*')
 backend_test.exclude('test_dft_*')
-backend_test.exclude('test_einsum_*')
-backend_test.exclude('test_strnorm_*')
+backend_test.exclude('test_einsum_batch_diagonal_cpu*') # TODO: equation = '...ii ->...i'
+backend_test.exclude('test_einsum_inner_prod_cpu*') # TODO: equation = 'i,i'
 backend_test.exclude('test_unique_*')
 backend_test.exclude('test_sequence_*')
 backend_test.exclude('test_nonmaxsuppression_*')
@@ -138,8 +154,6 @@ backend_test.exclude('test_melweightmatrix_*')
 backend_test.exclude('test_basic_deform_conv_*')
 backend_test.exclude('test_deform_conv_*')
 backend_test.exclude('test_lppool_*')
-backend_test.exclude('test_depthtospace_*')
-backend_test.exclude('test_spacetodepth_*')
 backend_test.exclude('test_scan*')
 backend_test.exclude('test_split_to_sequence_*')
 backend_test.exclude('test_resize_downsample_scales_cubic_*') # unsure how to implement cubic
@@ -148,20 +162,11 @@ backend_test.exclude('test_resize_upsample_scales_cubic_*') # unsure how to impl
 backend_test.exclude('test_resize_upsample_sizes_cubic_*') # unsure how to implement cubic
 
 # rest of the failing tests
-backend_test.exclude('test_regex_*') # does not support string Tensors
 backend_test.exclude('test_resize_downsample_scales_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_downsample_sizes_linear_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill value after clip
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type string
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
-
-# issue 1556 https://github.com/tinygrad/tinygrad/issues/1556
-backend_test.exclude('test_isinf_cpu')
-backend_test.exclude('test_isinf_negative_cpu')
-backend_test.exclude('test_isinf_positive_cpu')
-backend_test.exclude('test_isinf_float16_cpu')
-backend_test.exclude('test_isnan_float16_cpu')
-backend_test.exclude('test_isnan_cpu')
 
 # issue 1791 fast math messes with these https://github.com/tinygrad/tinygrad/issues/1791
 backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
@@ -172,27 +177,23 @@ backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
 if Device.DEFAULT in ['METAL']:
   backend_test.exclude('test_maxpool_2d_pads_cpu')
   backend_test.exclude('test_maxpool_2d_same_lower_cpu')
-
-if Device.DEFAULT in ['GPU', 'METAL']:
-  backend_test.exclude('test_mish_cpu') # weird inaccuracy
-  backend_test.exclude('test_mish_expanded_cpu') # weird inaccuracy
-  backend_test.exclude('test_eyelike_with_dtype_cpu') # backend does not support dtype: Double
-
-# Segfaults in CI, GPU requires cl_khr_fp16
-if Device.DEFAULT in ['LLVM', 'CUDA', 'GPU'] and CI:
-  backend_test.exclude('test_max_float16_cpu')
-  backend_test.exclude('test_min_float16_cpu')
-
-# error: casting to type 'half' is not allowed
-backend_test.exclude('test_dequantizelinear_e4m3fn_float16_cpu')
-
-# TODO: this somehow passes in CI but does not pass if run locally
-if isinstance(Device[Device.DEFAULT], Compiled):
-  backend_test.exclude('test_MaxPool3d_stride_padding_cpu')
-
-# TODO: this somehow passes in CI but does not pass if run locally
-if Device.DEFAULT == 'METAL':
   backend_test.exclude('test_maxpool_2d_same_upper_cpu')
+
+if Device.DEFAULT == "METAL" or (OSX and Device.DEFAULT == "GPU"):
+  # numerical inaccuracy
+  backend_test.exclude('test_mish_cpu')
+  backend_test.exclude('test_mish_expanded_cpu')
+
+# TODO: llvm has problems with inf
+if Device.DEFAULT in ['LLVM']:
+  backend_test.exclude('test_isinf_cpu')
+  backend_test.exclude('test_isinf_negative_cpu')
+  backend_test.exclude('test_isinf_positive_cpu')
+
+# # TODO: problems with nan
+if Device.DEFAULT in ['LLVM', 'METAL']:
+  backend_test.exclude('test_isnan_float16_cpu')
+  backend_test.exclude('test_isnan_cpu')
 
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):

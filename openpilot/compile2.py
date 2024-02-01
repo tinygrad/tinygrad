@@ -13,8 +13,9 @@ import onnx
 from tqdm import tqdm
 from typing import Tuple, List, Optional, Dict
 from extra.onnx import get_run_onnx
-from tinygrad import Tensor, Device
-from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, fetch, getenv, ImageDType, GRAPH, DEBUG
+from tinygrad import Tensor, Device, GlobalCounters, dtypes
+from tinygrad.dtype import ImageDType
+from tinygrad.helpers import partition, Context, fetch, getenv, GRAPH, DEBUG
 from tinygrad.realize import run_schedule, lower_schedule_item
 from tinygrad.ops import LoadOps, ScheduleItem
 Device.DEFAULT = "GPU"
@@ -89,8 +90,8 @@ def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[s
   GlobalCounters.reset()
   for si in schedule: lower_schedule_item(si)([si.out.realized] + [x.realized for x in si.inputs], {})
 
-  new_tinygrad_out = schedule[-1].out.realized.toCPU()
-  np.testing.assert_allclose(new_torch_out.flatten(), new_tinygrad_out, atol=1e-4, rtol=1e-2)
+  new_tinygrad_out = Tensor(schedule[-1].out).numpy()
+  np.testing.assert_allclose(new_torch_out, new_tinygrad_out, atol=1e-4, rtol=1e-2)
   print("semi-thneed self-test passed!")
 
 if __name__ == "__main__":

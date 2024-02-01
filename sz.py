@@ -12,12 +12,12 @@ def gen_stats(base_path="."):
   for path, _, files in os.walk(os.path.join(base_path, "tinygrad")):
     for name in files:
       if not name.endswith(".py"): continue
+      if 'tinygrad/runtime/autogen' in path: continue
       filepath = os.path.join(path, name)
       relfilepath = os.path.relpath(filepath, base_path)
       with tokenize.open(filepath) as file_:
         tokens = [t for t in tokenize.generate_tokens(file_.readline) if t.type in TOKEN_WHITELIST]
-        #token_count, line_count = len(tokens), len(set([x for t in tokens for x in range(t.start[0], t.end[0]+1)]))
-        token_count, line_count = len(tokens), len(set([t.start[0] for t in tokens]))
+        token_count, line_count = len(tokens), len(set([x for t in tokens for x in range(t.start[0], t.end[0]+1)]))
         table.append([relfilepath, line_count, token_count/line_count])
   return table
 
@@ -39,7 +39,8 @@ def gen_diff(table_old, table_new):
       file_stat_old = [stats for stats in table_old if file in stats]
       file_stat_new = [stats for stats in table_new if file in stats]
       if file_stat_new[0][1]-file_stat_old[0][1] != 0 or file_stat_new[0][2]-file_stat_old[0][2] != 0:
-        table.append([file_stat_new[0][0], file_stat_new[0][1], file_stat_new[0][1]-file_stat_old[0][1], file_stat_new[0][2], file_stat_new[0][2]-file_stat_old[0][2]])  # noqa: E501
+        table.append([file_stat_new[0][0], file_stat_new[0][1], file_stat_new[0][1]-file_stat_old[0][1], file_stat_new[0][2],
+                      file_stat_new[0][2]-file_stat_old[0][2]])
   return table
 
 def display_diff(diff): return "+"+str(diff) if diff > 0 else str(diff)
@@ -59,7 +60,8 @@ if __name__ == "__main__":
     if len(sys.argv) == 3:
       print("### Changes")
       print("```")
-      print(tabulate([headers] + sorted(table, key=lambda x: -x[1]), headers="firstrow", intfmt=(..., "d", "+d"), floatfmt=(..., ..., ..., ".1f", "+.1f"))+"\n")  # noqa: E501
+      print(tabulate([headers] + sorted(table, key=lambda x: -x[1]), headers="firstrow", intfmt=(..., "d", "+d"),
+                     floatfmt=(..., ..., ..., ".1f", "+.1f"))+"\n")
       print(f"\ntotal lines changes: {display_diff(sum([x[2] for x in table]))}")
       print("```")
     else:

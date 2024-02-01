@@ -1,23 +1,15 @@
 # stuff needed to unpack a kernel
 from tinygrad.ops import LazyOp, TernaryOps, BinaryOps, UnaryOps, ReduceOps, BufferOps, MemBuffer, ConstBuffer
-from tinygrad.helpers import dtypes
+from tinygrad.dtype import dtypes
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.shape.symbolic import Variable
+from tinygrad.shape.symbolic import Variable, NumNode
 inf, nan = float('inf'), float('nan')
-
-# HACK: it used to be called MEM
-setattr(BufferOps, "MEM", BufferOps.LOAD)
-# HACK: no more NOOP
-setattr(UnaryOps, "NOOP", UnaryOps.NEG)
 
 # kernel unpacker
 from tinygrad.codegen.linearizer import Linearizer
 def ast_str_to_ast(ast_str:str) -> LazyOp: return eval(ast_str)
-def ast_str_to_lin(ast_str:str):
-  # HACK: it used to not have stores
-  from test.test_linearizer_failures import helper_add_store
-  return Linearizer(helper_add_store(ast_str_to_ast(ast_str)))
+def ast_str_to_lin(ast_str:str): return Linearizer(ast_str_to_ast(ast_str))
 
 # load worlds, a dataset of about 12k kernels
 import gzip
@@ -27,8 +19,6 @@ from tinygrad.helpers import dedup
 def load_worlds(filter_reduce=True, filter_noimage=True, filter_novariable=True):
   fn = Path(__file__).parent.parent / "datasets/sops.gz"
   ast_strs = dedup(gzip.open(fn).read().decode('utf-8').strip().split("\n"))
-  # HACK: TernaryOps.WHERE has vin[0] as non-bool in the data set
-  ast_strs = [x for x in ast_strs if "TernaryOps.WHERE" not in x]
   if filter_reduce: ast_strs = [x for x in ast_strs if "ReduceOps" in x]
   if filter_noimage: ast_strs = [x for x in ast_strs if "dtypes.image" not in x]
   if filter_novariable: ast_strs = [x for x in ast_strs if "Variable" not in x]

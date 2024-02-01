@@ -67,7 +67,7 @@ class Function:
 
 # %%
 # == LazyBuffer (in tinygrad/lazy.py, code 5/10) ==
-from tinygrad.helpers import DType
+from tinygrad.dtype import DType
 
 # this is where the properties live that you thought were a part of Tensor
 # LazyBuffer is like a Tensor without derivatives, at the mlop layer
@@ -146,7 +146,8 @@ assert result.lazydata.base.realized is not None, "the LazyBuffer is realized!"
 assert isinstance(result.lazydata.base.realized, Buffer)
 assert result.lazydata.base.realized.device == "CLANG"
 # getting ahead of ourselves, but we can move the Buffer to CPU
-assert result.lazydata.base.realized.toCPU()[0] == 5, "when put in numpy with toCPU, it's 5"
+out = result.lazydata.base.realized.as_buffer().cast('I')
+assert out[0] == 5, "when put in numpy, it's 5"
 
 # %%
 # == Union[Interpreted, Compiled] (in tinygrad/device.py, code 6/10) ==
@@ -186,9 +187,6 @@ class Buffer(ABC):
   # `opaque` is an opaque container class
   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None): pass
 
-  # toCPU converts the RawBuffer to a numpy array with shape (size,)
-  def toCPU(self) -> np.ndarray: pass
-
 # %%
 # == Example: 2+3 in raw clang ==
 
@@ -200,7 +198,7 @@ from tinygrad.device import MallocAllocator
 # ClangProgram is the simplest runtime (in tinygrad/runtime/ops_clang.py, code 7/10)
 # __init__ calls clang, and __call__ calls the function in the *.so outputted by clang
 # in CLANG, global_size and local_size are ignored
-from tinygrad.runtime.ops_clang import ClangProgram, compile_clang
+from tinygrad.runtime.ops_clang import ClangProgram, ClangCompiler
 
 # a concrete example looks like this, this adds two size 1 RawBuffer
 # first we create two numpy buffers containing 2 and 3
@@ -215,7 +213,7 @@ MallocAllocator.copyin(input_a, numpy_a.data.cast("B"))
 MallocAllocator.copyin(input_b, numpy_b.data.cast("B"))
 
 # compile the program, run it, and 2+3 does indeed equal 5
-program = ClangProgram("add", compile_clang(f"void add(float *a, float *b, float *c) {{ *a = *b + *c; }}"))
+program = ClangProgram("add", ClangCompiler().compile(f"void add(float *a, float *b, float *c) {{ *a = *b + *c; }}"))
 program(output, input_a, input_b)
 numpy_out = np.empty(1, dtype=np.float32)
 MallocAllocator.copyout(numpy_out.data.cast("B"), output)
@@ -253,7 +251,7 @@ result = Tensor(2.0).realize() + Tensor(3.0).realize()
 # use the real Linearizer to linearize 2+3
 from tinygrad.codegen.linearizer import Linearizer
 sched = result.lazydata.schedule()
-linearizer = Linearizer(sched[-1].ast)
+linearizer = Linearizer(sched[-1].ast, ClangCompiler.linearizer_opts)
 linearizer.linearize()
 
 # print the uops

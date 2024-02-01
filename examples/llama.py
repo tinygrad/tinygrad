@@ -4,14 +4,14 @@
 #typeguard.importhook.install_import_hook('tinygrad')
 
 from pathlib import Path
+from typing import List
 import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
-from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, dtypes, colored
-from tinygrad import Device
+from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, colored
+from tinygrad import Device, GlobalCounters, dtypes, nn
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
-from tinygrad.helpers import GlobalCounters
 from extra.models.llama import Transformer, convert_from_huggingface
 from sentencepiece import SentencePieceProcessor, sentencepiece_model_pb2
 import gguf
@@ -108,13 +108,13 @@ MODEL_PARAMS = {
 
 
 # **** helper functions ****
-def concat_weights(models):
+def concat_weights(models, device=Device.DEFAULT):
   def convert(name) -> Tensor:
-    disk_tensors = [model[name] for model in models]
+    disk_tensors: List[Tensor] = [model[name] for model in models]
     if len(disk_tensors) == 1 or len(disk_tensors[0].shape) == 1:
-      return disk_tensors[0].to(device=Device.DEFAULT)
+      return disk_tensors[0].to(device=device)
     axis = 1 if name.startswith("tok_embeddings.") or name.endswith(".attention.wo.weight") or name.endswith(".feed_forward.w2.weight") else 0
-    lazy_tensors = [data.to(device=Device.DEFAULT) for data in disk_tensors]
+    lazy_tensors = [data.to(device=device) for data in disk_tensors]
     return lazy_tensors[0].cat(*lazy_tensors[1:], dim=axis)
   return {name: convert(name) for name in {name: None for model in models for name in model}}
 
@@ -124,8 +124,8 @@ def dequantize_q4_0(tensor: gguf.ReaderTensor):
   blks = tensor.data.reshape(-1,type_sz)
   scales  = Tensor(blks[:,:2].flatten().view(np.float16)).repeat((block_sz,1)).transpose().cast(dtypes.float16)
   weights = Tensor(blks)[:,2:]
-  div = (weights / 16)
-  return ((Tensor.cat(weights - (div * 16), div, dim=1).cast(dtypes.int8) - 8) * scales).reshape(np.flip(tensor.shape).tolist())
+  div = (weights * 16**-1).cast(dtypes.uint32)
+  return (Tensor.cat((weights - div * 16).cast(dtypes.int32)-8, div.cast(dtypes.int32)-8, dim=1) * scales).reshape(np.flip(tensor.shape).tolist())
 
 def get_weight_and_scale_from_q4_0(tensor):
   blocks = tensor.reshape(-1, 18)
@@ -278,17 +278,17 @@ class QK4_0Linear:
 
   def dequantize(self):
     # https://github.com/ggerganov/llama.cpp/blob/master/ggml-quants.c#L1074
-    div = (self.weight / 16)
+    div = (self.weight * 16**-1).cast(dtypes.uint32)
     return (
-        (Tensor.cat(self.weight - (div * 16), div, dim=1).cast(dtypes.int8) - 8).half() * self.scale
+        Tensor.cat(((self.weight - div * 16).cast(dtypes.int32)-8)* self.scale, (div.cast(dtypes.int32)-8)* self.scale, dim=1)
       ).reshape((self.out_features, self.in_features))
 
   def __call__(self, x):
-    return x.dot(self.dequantize().realize().T)
+    return x.dot(self.dequantize().T)
 
 class LLaMa:
   @staticmethod
-  def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False, use_4bit=False):
+  def build(model_path, tokenizer_path, model_gen="1", model_size="7B", quantize=False, use_4bit=False, device=None):
     params = MODEL_PARAMS[model_gen][model_size]
     if str(model_path).endswith('.gguf'): gguf_reader = gguf.GGUFReader(model_path)
     sp_model = SentencePieceProcessor(model_file=str(tokenizer_path)) if tokenizer_path != '' else load_gguf_tokenizer(gguf_reader)
@@ -301,6 +301,17 @@ class LLaMa:
       model = Transformer(**params["args"], linear=QK4_0Linear, max_context=MAX_CONTEXT, jit=jit)
     else:
       model = Transformer(**params["args"], max_context=MAX_CONTEXT, jit=jit)
+
+    if isinstance(device, tuple):
+      for k,v in nn.state.get_state_dict(model).items():
+        if '.attention.' in k: v.shard_(device, axis=-1)
+        elif '.feed_forward.' in k: v.shard_(device, axis=-1)
+        elif 'tok_embeddings.weight' in k: v.shard_(device, axis=-1)
+        elif 'output.weight' in k: v.shard_(device, axis=-1)
+        #elif k.endswith('.weight'): v.shard_(device, axis=-1)
+        #elif 'norm.' in k: v.shard_(device, axis=-1)
+        else: v.shard_(device, axis=None)
+        #print(k, v.shape, v.lazydata.axis)
 
     if model_path.is_dir():
       weights = concat_weights([load(filename) for filename in [f"{model_path}/consolidated.{i:02d}.pth" for i in range(params["files"])]])
@@ -317,7 +328,7 @@ class LLaMa:
     if quantize:
       weights = AbsmaxQuantizedLinear.quantize(weights) if not use_4bit else QK4_0Linear.quantize(weights)
       for _,v in weights.items(): v.realize()
-    load_state_dict(model, weights, strict=False)
+    load_state_dict(model, weights, strict=False, consume=True)
 
     return LLaMa(model, sp_model)
 
@@ -419,6 +430,7 @@ if __name__ == "__main__":
   parser.add_argument("--quantize", action="store_true", help="Quantize the weights to int8 in memory")
   parser.add_argument("--use_4bit", action="store_true", help='Quantize using 4 bits')
   parser.add_argument("--model", type=Path, default=None, help="Folder with the original weights to load, or single .index.json, .safetensors or .bin file")
+  parser.add_argument("--shard", type=int, default=1, help="number of devices to load the weights to")
 
   args = parser.parse_args()
   if args.gen not in MODEL_PARAMS: raise ValueError("Invalid model generation")
@@ -519,8 +531,9 @@ After you are done speaking, output [EOS]. You are not Chad.
   TOKENIZER_PATH = '' if str(args.model).endswith('.gguf') else (MODEL_PATH if MODEL_PATH.is_dir() else MODEL_PATH.parent) / "tokenizer.model"
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   use_4bit = args.use_4bit or str(args.model).endswith('.gguf')
-  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, use_4bit=use_4bit)
-  param_count = sum(x.lazydata.st.size() for x in get_parameters(llama.model))
+  device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
+  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize,use_4bit=use_4bit, device=device)
+  param_count = sum(x.lazydata.size for x in get_parameters(llama.model))
 
   if chatbot:
     # encode pre prompt
@@ -560,13 +573,11 @@ After you are done speaking, output [EOS]. You are not Chad.
       st = GlobalCounters.time_sum_s
       with Profiling(enabled=args.profile):
         with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/sec"):
-          with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+          with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
                       f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
                       (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
-            logits = llama.model(Tensor([toks[start_pos:]]), start_pos, args.temperature)
-            probs = (logits[:, -1, :] / (args.temperature+1e-6)).softmax().flatten().realize()
-          # TODO: fix JIT rand so we can put this in the JIT
-          tok = probs.multinomial().item()
+            tok_tensor = llama.model(Tensor([toks[start_pos:]], device=device), start_pos, args.temperature)
+          tok = tok_tensor.item()
 
       # use the kv cache
       start_pos = len(toks)
