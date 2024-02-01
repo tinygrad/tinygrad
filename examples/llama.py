@@ -124,8 +124,8 @@ def dequantize_q4_0(tensor: gguf.ReaderTensor):
   blks = tensor.data.reshape(-1,type_sz)
   scales  = Tensor(blks[:,:2].flatten().view(np.float16)).repeat((block_sz,1)).transpose().cast(dtypes.float16)
   weights = Tensor(blks)[:,2:]
-  div = (weights / 16)
-  return ((Tensor.cat(weights - (div * 16), div, dim=1).cast(dtypes.int8) - 8) * scales).reshape(np.flip(tensor.shape).tolist())
+  div = (weights * 16**-1).cast(dtypes.uint32)
+  return (Tensor.cat((weights - div * 16).cast(dtypes.int32)-8, div.cast(dtypes.int32)-8, dim=1) * scales).reshape(np.flip(tensor.shape).tolist())
 
 def get_weight_and_scale_from_q4_0(tensor):
   blocks = tensor.reshape(-1, 18)
@@ -278,13 +278,13 @@ class QK4_0Linear:
 
   def dequantize(self):
     # https://github.com/ggerganov/llama.cpp/blob/master/ggml-quants.c#L1074
-    div = (self.weight / 16)
+    div = (self.weight * 16**-1).cast(dtypes.uint32)
     return (
-        (Tensor.cat(self.weight - (div * 16), div, dim=1).cast(dtypes.int8) - 8).half() * self.scale
+        Tensor.cat(((self.weight - div * 16).cast(dtypes.int32)-8)* self.scale, (div.cast(dtypes.int32)-8)* self.scale, dim=1)
       ).reshape((self.out_features, self.in_features))
 
   def __call__(self, x):
-    return x.dot(self.dequantize().realize().T)
+    return x.dot(self.dequantize().T)
 
 class LLaMa:
   @staticmethod
@@ -532,7 +532,7 @@ After you are done speaking, output [EOS]. You are not Chad.
   print(f"using LLaMA{LLAMA_SUFFIX}-{args.size} model")
   use_4bit = args.use_4bit or str(args.model).endswith('.gguf')
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(args.shard)) if args.shard > 1 else Device.DEFAULT
-  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize, device=device)
+  llama = LLaMa.build(MODEL_PATH, TOKENIZER_PATH, model_gen=args.gen, model_size=args.size, quantize=args.quantize,use_4bit=use_4bit, device=device)
   param_count = sum(x.lazydata.size for x in get_parameters(llama.model))
 
   if chatbot:
