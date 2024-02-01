@@ -1,4 +1,5 @@
 import unittest, functools
+from typing import List
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit
 from tinygrad.device import BufferCopy
 from tinygrad.ops import LoadOps, ReduceOps
@@ -304,6 +305,235 @@ class TestMultiTensor(unittest.TestCase):
     #assert len(set(asts)) == 4, len(asts)
     # for i, ast in enumerate(asts):
     #   print(f"{i} {ast}")
+
+@unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
+  # shrink a multitensor on sharded axis
+  def test_shrink_bad_args(self):
+    t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
+    t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
+
+    with self.assertRaises(AssertionError):
+      # sharded axis shrink on non-device boundry is not allowed
+      a = t.shrink(((0, 3), (0, 8)))
+    with self.assertRaises(AssertionError):
+      # cannot shrink sharded and non-sharded axis at the same time
+      a = t.shrink(((0, 2), (2, 4)))
+
+    a = t.shrink(((0, 2), (0, 8)))
+    assert a.shape == (2, 8)
+    assert a.lazydata.real == [True, False, False, False]
+
+    with self.assertRaises(AssertionError):
+      # cannot pad sharded and non-sharded axis at the same time
+      p = a.pad(((0, 6), (0, 1)))
+
+    with self.assertRaises(AssertionError):
+      # can only pad to whole axis
+      p = a.pad(((1, 5), (0, 0)))
+
+    p = a.pad(((0, 6), (0, 0)))
+    assert p.shape == (8, 8)
+    assert p.lazydata.real == [True, True, True, True]
+
+  def test_ops(self):
+    t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
+    t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
+    for i in range(4):
+      print(f"{i=}")
+      a = t.shrink(((0+2*i,2+2*i),None))
+      b = Tensor(t.numpy()[0+2*i:2+2*i])
+      assert a.shape == b.shape == (2, 8)
+      assert a.lazydata.real == [i==j for j in range(4)]
+      np.testing.assert_allclose(a.numpy(), b.numpy())
+      # cast
+      np.testing.assert_allclose(a.float().numpy(), b.float().numpy())
+
+      # elementwise
+      np.testing.assert_allclose(a.exp().numpy(), b.exp().numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose(a.reciprocal().numpy(), b.reciprocal().numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose(a.pow(-0.5).numpy(), b.pow(-0.5).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose((a+a).numpy(), (b+b).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_equal((a+1).numpy(), (b+1).numpy())
+      np.testing.assert_equal((1+a).numpy(), (1+b).numpy())
+      np.testing.assert_allclose((a.where(a+a, a)).numpy(), (b.where(b+b, b)).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose((a.where(1, 0)).numpy(), (b.where(1, 0)).numpy(), rtol=1e-7, atol=1e-3)
+
+      # reduce
+      np.testing.assert_allclose(a.max().numpy(), b.max().numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose(a.sum().numpy(), b.sum().numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose(a.mean().numpy(), b.mean().numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose(a.max(0).numpy(), b.max(0).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose(a.sum(0).numpy(), b.sum(0).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose(a.mean(0).numpy(), b.mean(0).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose(a.max(1).numpy(), b.max(1).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose(a.sum(1).numpy(), b.sum(1).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose(a.mean(1).numpy(), b.mean(1).numpy(), rtol=1e-7, atol=1e-3)
+
+      # pad it back
+      np.testing.assert_allclose(a.pad(((2*i, 2*(4-i-1)), None)).numpy(), b.pad(((2*i, 2*(4-i-1)), None)).numpy(), rtol=1e-7, atol=1e-3)
+
+      # other movement
+      np.testing.assert_allclose(a.pad((None, (1, 1))).numpy(), b.pad((None, (1, 1))).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose(a.shrink((None, (1, 3))).numpy(), b.shrink((None, (1, 3))).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose(a.permute((1, 0)).numpy(), b.permute((1, 0)).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose(a.reshape((2, 2, 4)).numpy(), b.reshape((2, 2, 4)).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose(a.reshape((2, 1, 8)).expand((2, 5, 8)).numpy(), b.reshape((2, 1, 8)).expand((2, 5, 8)).numpy(), rtol=1e-7, atol=1e-3)
+      np.testing.assert_allclose(a.flip(-1).numpy(), b.flip(-1).numpy(), rtol=1e-7, atol=1e-3)
+
+  def test_uneven(self):
+    t = Tensor.arange(24).reshape(3, 8).contiguous().realize()
+    t.shard_([f"{Device.DEFAULT}:{i}" for i in range(2)], axis=0)
+
+    a = t.shrink(((0, 2), None))
+    b = t.shrink(((2, 3), None))
+    na = t.numpy()[0:2]
+    nb = t.numpy()[2:3]
+    np.testing.assert_equal(a.numpy(), na)
+    np.testing.assert_equal(b.numpy(), nb)
+    np.testing.assert_equal((a+1).numpy(), na+1)
+    np.testing.assert_equal((b+1).numpy(), nb+1)
+    np.testing.assert_equal((1+a).numpy(), 1+na)
+    np.testing.assert_equal((1+b).numpy(), 1+nb)
+    np.testing.assert_equal((a+a).numpy(), na+na)
+    np.testing.assert_equal((b+b).numpy(), nb+nb)
+
+  def test_add_two_partitions(self):
+    t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
+    t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
+
+    a = t.shrink(((2, 4), None))
+    b = t.shrink(((6, 8), None))
+    na = t.numpy()[2:4]
+    nb = t.numpy()[6:8]
+    np.testing.assert_equal(a.numpy(), na)
+    np.testing.assert_equal(b.numpy(), nb)
+    with self.assertRaises(AssertionError):
+      # cannot add directly
+      c = a + b
+
+    c = a.pad(((2, 4), None)) + b.pad(((6, 0), None))
+    expected = np.concatenate([np.zeros_like(t.numpy()[0:2]), na, np.zeros_like(t.numpy()[4:6]), nb])
+    np.testing.assert_equal(c, expected)
+
+  def test_add_different_tensors(self):
+    devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
+    x = Tensor.arange(64).reshape(8, 8).contiguous().realize().shard(devices, axis=0)
+
+    to_add = []
+    for i in range(len(devices)):
+      to_add.append((Tensor.ones(2, 8) * i).shard(devices))
+
+    added:List[Tensor] = []
+    for bound, a in zip(x.lazydata.bounds, to_add):
+      added.append(x[bound[0]:bound[1]] + a)
+
+    output = added[0].cat(*added[1:])
+    expected = np.arange(64).reshape((8,8)) + np.array([[0,0,1,1,2,2,3,3] for _ in range(8)]).T
+    np.testing.assert_allclose(output.numpy(), expected)
+
+  def test_unsynced_backprop_conv_bn(self):
+    from extra.lr_scheduler import OneCycleLR
+
+    convs = [nn.Conv2d(3, 16, 3), nn.Conv2d(3, 16, 3)]
+    bns = [nn.BatchNorm2d(16), nn.BatchNorm2d(16)]
+
+    for p in get_parameters(convs + bns):
+      p.shard_((d1, d2))
+    optim = nn.optim.Adam(get_parameters(convs + bns))
+    lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
+    lr_sched.step()
+
+    fake_image = Tensor.rand((8, 3, 32, 32)).shard((d1, d2), axis=0)
+
+    f1 = fake_image.shrink(((0, 4), None, None, None))
+    f2 = fake_image.shrink(((4, 8), None, None, None))
+
+    out1 = bns[0](convs[0](f1))
+    out2 = bns[1](convs[1](f2))
+    out = out1.cat(out2)
+    optim.zero_grad()
+    out.mean().backward()
+    optim.step()
+
+  def test_unsynced_backprop_standalone_bn(self):
+    from extra.lr_scheduler import OneCycleLR
+    GPUS = (d1, d2)
+
+    class BatchNorm:
+      def __init__(self, num_features):
+        self.bns:List[nn.BatchNorm2d] = []
+        for _ in GPUS:
+          bn = nn.BatchNorm2d(num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
+          self.bns.append(bn)
+
+      def __call__(self, x:Tensor):
+        bn_ts = []
+        for bound, bn in zip(x.lazydata.bounds, self.bns):
+          xi = x.shrink((bound, None, None, None))
+          bni = bn(xi)
+          bn_ts.append(bni)
+        return bn_ts[0].cat(*bn_ts[1:])
+
+    with Tensor.train():
+      conv = nn.Conv2d(3, 16, 3)
+      bn = BatchNorm(16)
+
+      for p in get_parameters([conv, bn]):
+        p.shard_(GPUS)
+      optim = nn.optim.Adam(get_parameters([conv, bn]))
+      lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
+      lr_sched.step()
+
+      fake_image = Tensor.rand((8, 3, 32, 32)).shard(GPUS, axis=0)
+
+      out = bn(conv(fake_image))
+      optim.zero_grad()
+      out.mean().backward()
+      optim.step()
+
+  @given(strat.sampled_from((False, True)))
+  def test_batchnorm(self, is_training):
+    devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
+    x = Tensor.arange(4096).reshape(8, 8, 8, 8).contiguous().realize().shard(devices, axis=0)
+
+    with Tensor.train(is_training):
+      bns = []
+      for _ in range(len(devices)):
+        bn = nn.BatchNorm2d(8)
+        for p in get_parameters(bn):
+          p.shard_(devices)
+        bn.weight.requires_grad = True
+        bn.bias.requires_grad = True
+        bns.append(bn)
+
+      bn_ts = []
+      for bound, bn in zip(x.lazydata.bounds, bns):
+        bni = bn(x[bound[0]:bound[1]])
+        bn_ts.append(bni)
+
+      bn_ts[0].cat(*bn_ts[1:]).numpy()
+
+  def test_synced_vs_unsynced_bn(self):
+    from examples.hlb_cifar10 import BatchNorm, UnsyncedBatchNorm
+    devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
+    x = Tensor.ones(8, 8, 8, 8).contiguous().realize().shard(devices, axis=0)
+
+    with Tensor.train():
+      synced_bn = BatchNorm(8)
+      unsynced_bn = UnsyncedBatchNorm(8)
+
+      for p in get_parameters([synced_bn, unsynced_bn]):
+        p.shard_(devices)
+
+      synced_out = synced_bn(x)
+      synced_si = [si for si in synced_out.lazydata.schedule()]
+      unsynced_out = unsynced_bn(x)
+      unsynced_si = [si for si in unsynced_out.lazydata.schedule()]
+
+    # TODO: test synced / unsynced batchnorm cross device kernel and copies
+    assert synced_si
+    assert unsynced_si
 
 if __name__ == '__main__':
   unittest.main()
