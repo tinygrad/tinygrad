@@ -654,19 +654,9 @@ class Tensor:
 
     # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
     def apply_matrix(mat, t):
-      r = None
-      t_ = t.reshape((1,1)+t.shape).expand((len(mat),len(mat))+t.shape)
-      for k in range(len(mat[0])):
-        dim=0
-        matcol1 = Tensor.cat(*[Tensor(float(m[k]), requires_grad=False).reshape((1,) * len(t.shape)).expand((1,len(mat))+t.shape[2:]) for m in mat], dim=dim)
-        for j in range(len(mat[0])):
-          dim=1
-          matcol2 = Tensor.cat(*[Tensor(float(m[j]), requires_grad=False).reshape((1,)*len(t.shape)).expand((len(mat),1)+t.shape[2:]) for m in mat],dim=dim)
-          tcol = t_.shrink((None,)*2+((k,k+1),(j,j+1))+(None,)*len(t.shape[2:])).reshape((len(mat),len(mat))+t.shape[2:])
-          p = matcol1 * matcol2 * tcol
-          if r is None: r = p
-          else: r = r + p
-      return r
+      t_ = t.reshape(t.shape[:len(HW)]+(1,)*len(HW)+t.shape[len(HW):]).expand(t.shape[:len(HW)]+(len(mat),)*len(HW)+t.shape[len(HW):])
+      matcols = [[Tensor.cat(*[Tensor(float(m[k])).reshape((1,) * len(t.shape)).expand(tuple(1 if k == dim else len(mat) for k in range(len(HW))) + t.shape[len(HW):]) for m in mat], dim=dim) for k in range(len(mat[0]))] for dim in range(len(HW))]
+      return sum(prod([matcols[dim][mat_is[dim]] for dim in range(len(HW))]) * t_[mat_is] for mat_is in itertools.product(*[range(len(mat[0])) for _ in range(len(HW))]))
     HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
     winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
     winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
