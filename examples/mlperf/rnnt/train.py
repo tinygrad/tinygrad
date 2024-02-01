@@ -208,10 +208,9 @@ def timestring(s:int): return f"{int(s//3600)}:{int(s//60%60)}:{s%60:.4}"
 
 
 
-
 B = 2
 
-rnnt.load("rnnt_e_1")
+rnnt.load("rnnt_e_5")
 
 if __name__ == "__main__":
 
@@ -219,11 +218,18 @@ if __name__ == "__main__":
     train_set = ci[:-(2*B)]
     test_set = ci[-(2*B):]
     print(f"eval: {test()}")
-
-    for e in range(1,10):
+    interrupt = False
+    for e in range(5,20):
         st = time.time()
         for i,sample in enumerate(iterate(train_set, B)):
-            L = step(*sample,maxX, maxY).numpy().item()
-            print( end = f"\r {i}/{int(len(train_set)/B)} L:{L:.4}", flush = True)
+            try:
+                L = step(*sample,maxX, maxY).numpy().item()
+                print( end = f"\r {i}/{int(len(train_set)/B)} L:{L:.4}", flush = True)
+            except KeyboardInterrupt:
+                rnnt.save(f"rnnt_e_{e+1}_i_{i+1}")
+                interrupt = True
+                break
+        if interrupt: break
         print (f"\nepoch {e+1} finished in {timestring(time.time() - st )} val:{test()}")
         rnnt.save(f"rnnt_e_{e+1}")
+
