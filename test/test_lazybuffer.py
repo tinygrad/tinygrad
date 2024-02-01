@@ -1,21 +1,14 @@
 #!/usr/bin/env python
 import numpy as np
 import unittest
-from tinygrad.lazy import LazyBuffer
-from tinygrad import Device
-from tinygrad.tensor import Tensor
-from tinygrad.jit import CacheCollector
+from tinygrad import Tensor, Device, dtypes
+from tinygrad.device import Interpreted
 
 class TestLazyBuffer(unittest.TestCase):
-  @unittest.skip("it doesn't work like this anymore")
-  def test_fromcpu_buffer_sharing(self):
-    a = np.arange(8)
-    assert LazyBuffer.fromCPU(a).realized._buf is a
-
   def test_fromcpu_shape_tracker(self):
     def helper(a: np.ndarray):
       print(a.shape, a.strides, a.flags.c_contiguous)
-      b = LazyBuffer.fromCPU(a)
+      b = Tensor(a).lazydata
       #assert b.st.contiguous == a.flags.c_contiguous
       assert b.st.shape == a.shape
       np.testing.assert_equal(a, Tensor(b).numpy())
@@ -46,25 +39,35 @@ class TestLazyBuffer(unittest.TestCase):
     z = Tensor([1, np.e]).numpy()
     np.testing.assert_allclose(y, z)
 
-  @unittest.skipUnless(Device.DEFAULT in ["METAL", "CUDA", "GPU"], "Only GPU backends supports cache")
-  def test_children_count(self):
-    a = Tensor.ones(8,8,8)
-    d1 = a.sum((0))
-    d2 = a.sum((0)).reshape(32,2) # noqa: F841
-    assert len(d1.lazydata.base.srcs[0].base.children) == 1
-    in1 = d1.reshape(16,4)
-    d3 = in1.reshape(8,8)
-    assert len(d3.lazydata.base.srcs[0].base.children) == 1
+  def test_device_0_is_the_same_device(self):
+    a = Tensor([1, 2, 3], f"{Device.DEFAULT}")
+    b = Tensor([1, 2, 3], f"{Device.DEFAULT}:0")
+    assert a.device == b.device
 
-    CacheCollector.start()
-    l = Tensor.ones(8,8)
-    r = Tensor.ones(8,8)
-    dd = d1 + l
-    dd.realize()
-    de = d3 + r
-    de.realize()
-    cache = CacheCollector.finish()
-    assert len(cache) == 2
+  def test_shrink_const_into_zero(self):
+    # regression test to make sure the shapetracker is preserved
+    a = Tensor.zeros(4,4,4).shrink((None, (0,0), None))
+    b = Tensor.zeros(4,1,4)
+    c = a.cat(b, dim=1)
+    np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
+
+  def test_shrink_const_then_cast(self):
+    # regression test to make sure the shapetracker is preserved
+    a = Tensor.zeros(4,4,4).shrink((None, (0,0), None)).cast(dtypes.int32)
+    b = Tensor.zeros(4,1,4)
+    c = a.cat(b, dim=1)
+
+    if isinstance(Device[Device.DEFAULT], Interpreted):
+      # TODO: fix cast resets shapetracker and remove this block
+      # this is expectedFailure with a condition
+      try:
+        np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
+      except Exception:
+        pass
+      else:
+        raise ValueError("assert_allclose not failed")
+    else:
+      np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
 
 if __name__ == "__main__":
   unittest.main()

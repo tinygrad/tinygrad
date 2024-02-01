@@ -9,9 +9,8 @@ from collections import namedtuple
 from PIL import Image
 import numpy as np
 from tqdm import tqdm
-from tinygrad.tensor import Tensor
-from tinygrad import Device
-from tinygrad.helpers import dtypes, GlobalCounters, Timing, Context, getenv, fetch, colored
+from tinygrad import Device, GlobalCounters, dtypes, Tensor
+from tinygrad.helpers import Timing, Context, getenv, fetch, colored
 from tinygrad.nn import Conv2d, Linear, GroupNorm, LayerNorm, Embedding
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
 from tinygrad.jit import TinyJit

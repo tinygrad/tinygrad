@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
+from typing import Optional, Union
 import argparse
 from tqdm import trange
 import numpy as np
-from tinygrad import Device
-from typing import Optional, Union
-from tinygrad.tensor import Tensor
-from tinygrad.nn import Embedding, Linear, LayerNorm
-from tinygrad.shape.symbolic import Variable
-from tinygrad.jit import TinyJit
 import tiktoken
+from tinygrad import Tensor, TinyJit, Device, GlobalCounters
+from tinygrad.helpers import Timing, DEBUG, getenv, fetch, colored
+from tinygrad.nn import Embedding, Linear, LayerNorm
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
-from tinygrad.helpers import GlobalCounters, Timing, DEBUG, getenv, fetch, colored, dtypes
+from tinygrad.shape.symbolic import Variable
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)
 HALF = getenv("HALF")
@@ -24,28 +22,32 @@ class Attention:
     self.head_dim = dim // n_heads
 
   def __call__(self, x:Tensor, start_pos:Variable, mask:Optional[Tensor]) -> Tensor:
-    if mask is not None:
+    if mask is not None or start_pos.val == 0:
       # no symbolic shape qkv when consuming prompts
       start_pos = start_pos.val
 
     if HALF: x = x.half()
     xqkv = self.c_attn(x)
-    xq, xk, xv = [xqkv.shrink((None, None, (i*self.dim, (i+1)*self.dim))).reshape(xqkv.shape[0], xqkv.shape[1], self.n_heads, self.head_dim) for i in range(3)]
-    bsz, seqlen, n_heads, head_dim = xq.shape
+    xq, xk, xv = [xqkv.shrink((None, None, (i*self.dim, (i+1)*self.dim))).reshape(None, None, self.n_heads, self.head_dim) for i in range(3)]
+    bsz, seqlen, _, _ = xq.shape
 
     # create kv cache
     if not hasattr(self, "cache_kv"):
       self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim, dtype=x.dtype)
 
-    keys = self.cache_kv[0].shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
-    values = self.cache_kv[1].shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
+    if start_pos > 0:
+      keys = self.cache_kv[0].shrink((None, (0, start_pos), None, None)).cat(xk, dim=1)
+      values = self.cache_kv[1].shrink((None, (0, start_pos), None, None)).cat(xv, dim=1)
+    else:
+      keys = xk
+      values = xv
 
     # update the cache
     new_cache = Tensor.stack([keys, values]).pad((None, None,(0,MAX_CONTEXT-start_pos-seqlen),None,None)).contiguous()
     self.cache_kv.assign(new_cache).realize()
 
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
-    return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).cast(dtypes.float32).transpose(1, 2).reshape(bsz, seqlen, -1))
+    return self.c_proj(xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2).reshape(bsz, seqlen, self.dim))
 
 class FeedForward:
   def __init__(self, dim, hidden_dim):
@@ -63,11 +65,12 @@ class TransformerBlock:
     self.ln_2 = LayerNorm(dim, norm_eps)
 
   def __call__(self, x:Tensor, start_pos:Variable, mask:Optional[Tensor]):
-    h = x + self.attn(self.ln_1(x), start_pos, mask)
+    h = x + self.attn(self.ln_1(x), start_pos, mask).float()
     return (h + self.mlp(self.ln_2(h)))
 
 class Transformer:
   def __init__(self, dim, n_heads, n_layers, norm_eps, vocab_size, max_seq_len=1024):
+    self.vocab_size = vocab_size
     self.wte = Embedding(vocab_size, dim)
     self.wpe = Embedding(max_seq_len, dim)
     self.h = [TransformerBlock(dim, n_heads, norm_eps) for _ in range(n_layers)]
@@ -89,18 +92,27 @@ class Transformer:
 
     if HALF: h = h.half()
 
-    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos.val+1).realize() if seqlen > 1 else None
+    mask = Tensor.full((1, 1, seqlen, start_pos.val+seqlen), float("-inf"), dtype=h.dtype).triu(start_pos.val+1) if seqlen > 1 else None
 
     for hi in self.h: h = hi(h, start_pos, mask)
 
     logits = self.lm_head(self.ln_f(h))
-    # NOTE: temperature=0 with HALF breaks due to precision, should use argmax instead
-    ret = (logits[:, -1, :] / (temperature+1e-6)).softmax()
-    return ret.half().realize() if HALF else ret.realize()
 
-  # TODO: fix empty token
+    if logits.shape[1] == 0:
+      # special case for empty prompt
+      logits = Tensor.ones((logits.shape[0], self.vocab_size), dtype=logits.dtype, device=logits.device)
+    else:
+      logits = logits[:, -1, :]
+
+    if temperature < 1e-6:
+      ret = logits.argmax(-1)
+    else:
+      ret = (logits / temperature).softmax().multinomial()
+    return ret.flatten().realize()
+
   def __call__(self, tokens:Tensor, start_pos:Variable, temperature:float=0.0) -> Tensor:
-    return (self.forward_jit if (isinstance(tokens, Variable) or tokens.shape[1] == 1) and getenv("JIT") else self.forward)(tokens, start_pos, temperature)
+    forward = (self.forward_jit if (isinstance(tokens, Variable) or tokens.shape[1] == 1) and getenv("JIT") else self.forward)
+    return forward(tokens, start_pos, temperature)
 
 VOCAB_SIZE = 50257
 MODEL_PARAMS = {
@@ -118,14 +130,19 @@ class GPT2:
     model = Transformer(**MODEL_PARAMS[model_size])
     weights = torch_load(fetch(f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'))
     # special treatment for the Conv1D weights we need to transpose
-    transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
-    for k in weights.keys():
-      if any(k.endswith(w) for w in transposed):
-        weights[k] = weights[k].to(Device.DEFAULT).T
+    transposed = ('attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight')
+    for k in weights:
+      if k.endswith(transposed):
+        weights[k] = weights[k].T
     # lm head and wte are tied
-    weights['lm_head.weight'] = Tensor(weights['wte.weight'].numpy())
+    weights['lm_head.weight'] = weights['wte.weight']
 
     load_state_dict(model, weights)
+
+    if HALF:
+      for l in get_state_dict(model).values():
+        l.assign(l.half().realize())
+
     return GPT2(model, tokenizer)
 
   def __init__(self, model, tokenizer):
@@ -140,17 +157,14 @@ class GPT2:
       GlobalCounters.reset()
       if timing: print("")
       st = GlobalCounters.time_sum_s
-      with Timing("total ", enabled=timing):
-        with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
-                    f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
-                    (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
-          if batch_size == 1 and len(toks[0][start_pos:]) == 1:
-            tokens = Variable("tokens", 0, VOCAB_SIZE).bind(toks[0][start_pos])
-          else:
-            tokens = Tensor([x[start_pos:] for x in toks])
-          probs = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature)
-        # TODO: fix JIT rand so we can put this in the JIT
-        tok = probs.multinomial().flatten().numpy().tolist()
+      with Timing("ran model in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "")+
+                  f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB"+
+                  (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=timing):
+        if batch_size == 1 and len(toks[0][start_pos:]) == 1:
+          tokens = Variable("tokens", 0, VOCAB_SIZE).bind(toks[0][start_pos])
+        else:
+          tokens = Tensor([x[start_pos:] for x in toks])
+        tok = self.model(tokens, Variable("start_pos", 1 if start_pos else 0, MAX_CONTEXT).bind(start_pos), temperature).numpy().tolist()
       start_pos = len(toks[0])
       for i,t in enumerate(tok): toks[i].append(t)
     return [self.tokenizer.decode(x) for x in toks]
@@ -175,15 +189,11 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   if args.seed is not None:
-    Tensor._seed = args.seed
+    Tensor.manual_seed(args.seed)
     np.random.seed(args.seed)
 
   print(f"using {args.model_size}")
   gpt2 = GPT2.build(args.model_size)
-
-  if HALF:
-    for l in get_state_dict(gpt2).values():
-      l.assign(l.half().realize())
 
   if args.benchmark != -1:
     gpt2.model(Tensor.rand(args.batch_size, args.benchmark), Variable("a", 0, MAX_CONTEXT).bind(0)).realize()

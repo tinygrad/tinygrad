@@ -1,13 +1,12 @@
 import unittest
 from tinygrad import Tensor, Device
-#from tinygrad.helpers import CI
 import time
 
 def time_tensor_numpy(out:Tensor):
   times = []
   for _ in range(5):
     st = time.perf_counter()
-    out.lazydata.base.realized.toCPU()
+    out.lazydata.base.realized.as_buffer(allow_zero_copy=True)
     et = time.perf_counter() - st
     times.append(et)
   return min(times)

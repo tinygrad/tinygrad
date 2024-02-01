@@ -1,7 +1,6 @@
 import math
 from typing import Optional, Tuple
-from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes
+from tinygrad import Tensor, dtypes
 import librosa
 import soundfile
 import numpy as np

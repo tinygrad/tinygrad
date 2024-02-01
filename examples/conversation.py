@@ -16,8 +16,8 @@ from vits import Y_LENGTH_ESTIMATE_SCALARS, HParams, Synthesizer, TextMapper, ge
 from whisper import init_whisper, transcribe_waveform
 from sentencepiece import SentencePieceProcessor
 
-from tinygrad.helpers import Timing, dtypes, fetch
-from tinygrad.tensor import Tensor
+from tinygrad.helpers import Timing, fetch
+from tinygrad import Tensor, dtypes
 
 # Whisper constants
 RATE = 16000
@@ -79,8 +79,7 @@ def llama_generate(
   outputted = llama.tokenizer.decode(toks)
   init_length = len(outputted)
   for _ in range(max_tokens):
-    probs_np = llama.model(Tensor([toks[start_pos:]]), start_pos, temperature).numpy()
-    token = int(np.random.choice(len(probs_np), p=probs_np))
+    token = llama.model(Tensor([toks[start_pos:]]), start_pos, temperature).item()
     start_pos = len(toks)
     toks.append(token)
 

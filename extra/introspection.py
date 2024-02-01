@@ -4,7 +4,7 @@ from tinygrad.helpers import prod
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.device import Buffer
-from tinygrad.helpers import GlobalCounters
+from tinygrad import GlobalCounters
 
 def print_objects():
   #gc.collect()

@@ -74,7 +74,7 @@ if __name__ == "__main__":
       turn = not turn
     old_output_len = len(outputted)
     while 1:
-      tok = model(Tensor([toks[start_pos:]]), start_pos, temperature).multinomial().item()
+      tok = model(Tensor([toks[start_pos:]]), start_pos, temperature).item()
       start_pos = len(toks)
       toks.append(tok)
       outputted = output(outputted, toks, "blue" if not turn else "cyan")
