@@ -653,7 +653,17 @@ class Tensor:
       return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
 
     # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
-    def apply_matrix(mat, t, dim=0): return t if dim == len(HW) else Tensor.stack([apply_matrix(mat, sum(mm*t[j] for j,mm in enumerate(m) if mm), dim=dim+1) for m in mat])  # noqa: E501
+    def apply_matrix(mat, t):
+      for dim in range(2):
+        r = None
+        for j in range(len(mat[0])):
+          matcol = Tensor.cat(*[Tensor(m[j]).reshape((1,)*len(t.shape)).expand(t.shape[:dim]+(1,)+t.shape[dim+1:]) for m in mat],dim=dim)
+          tcol = t.reshape(t.shape[:dim]+(1,)+t.shape[dim:]).expand(t.shape[:dim]+(len(mat),)+t.shape[dim:]).shrink((None,)*dim+(None,(j,j+1))+(None,)*(2-dim-1)+(None,)*len(t.shape[2:])).reshape(t.shape[:dim]+(len(mat),)+t.shape[dim+1:])
+          p = matcol * tcol
+          if r is None: r = p
+          else: r = r + p
+        t = r
+      return r
     HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
     winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
     winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
