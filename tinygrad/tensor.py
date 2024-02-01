@@ -654,15 +654,18 @@ class Tensor:
 
     # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
     def apply_matrix(mat, t):
-      for dim in range(2):
-        r = None
+      r = None
+      t_ = t.reshape((1,1)+t.shape).expand((len(mat),len(mat))+t.shape)
+      for k in range(len(mat[0])):
+        dim=0
+        matcol1 = Tensor.cat(*[Tensor(float(m[k]), requires_grad=False).reshape((1,) * len(t.shape)).expand((1,len(mat))+t.shape[2:]) for m in mat], dim=dim)
         for j in range(len(mat[0])):
-          matcol = Tensor.cat(*[Tensor(m[j]).reshape((1,)*len(t.shape)).expand(t.shape[:dim]+(1,)+t.shape[dim+1:]) for m in mat],dim=dim)
-          tcol = t.reshape(t.shape[:dim]+(1,)+t.shape[dim:]).expand(t.shape[:dim]+(len(mat),)+t.shape[dim:]).shrink((None,)*dim+(None,(j,j+1))+(None,)*(2-dim-1)+(None,)*len(t.shape[2:])).reshape(t.shape[:dim]+(len(mat),)+t.shape[dim+1:])
-          p = matcol * tcol
+          dim=1
+          matcol2 = Tensor.cat(*[Tensor(float(m[j]), requires_grad=False).reshape((1,)*len(t.shape)).expand((len(mat),1)+t.shape[2:]) for m in mat],dim=dim)
+          tcol = t_.shrink((None,)*2+((k,k+1),(j,j+1))+(None,)*len(t.shape[2:])).reshape((len(mat),len(mat))+t.shape[2:])
+          p = matcol1 * matcol2 * tcol
           if r is None: r = p
           else: r = r + p
-        t = r
       return r
     HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
     winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
