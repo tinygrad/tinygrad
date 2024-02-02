@@ -93,13 +93,6 @@ def selective_scan_ref(
   batch, dim, dstate = u.shape[0], A.shape[0], A.shape[1]
   is_variable_B = len(B.shape) >= 3
   is_variable_C = len(C.shape) >= 3
-  # if A.is_complex():
-  #     if is_variable_B:
-  #         B = torch.view_as_complex(rearrange(B.float(), "... (L two) -> ... L two", two=2))
-  #     if is_variable_C:
-  #         C = torch.view_as_complex(rearrange(C.float(), "... (L two) -> ... L two", two=2))
-  # else:
-
   x = Tensor.zeros(batch, dim, dstate)
   ys = []
   deltaA = Tensor.einsum("bdl,dn->bdln", delta, A).exp()
@@ -109,11 +102,9 @@ def selective_scan_ref(
     if len(B.shape) == 3:
       deltaB_u = Tensor.einsum("bdl,bnl,bdl->bdln", delta, B, u)
     else:
-      # B = repeat(B, "B G N L -> B (G H) N L", H=dim // B.shape[1])
       B = B.repeat((1,dim//B.shape[1],1,1))
       deltaB_u = Tensor.einsum("bdl,bdnl,bdl->bdln", delta, B, u)
   if is_variable_C and len(C.shape) == 4:
-    # C = repeat(C, "B G N L -> B (G H) N L", H=dim // C.shape[1])
     C = C.repeat((1,dim//C.shape[1],1,1))
   last_state = None
   for i in range(u.shape[2]):
@@ -127,11 +118,8 @@ def selective_scan_ref(
         y = Tensor.einsum("bdn,bdn->bd", x, C[:, :, :, i])
     if i == u.shape[2] - 1:
       last_state = x
-    # if y.is_complex():
-    #     y = y.real * 2
     ys.append(y)
   y = Tensor.stack(ys, dim=2)  # (batch dim L)
-  # out = y if D is None else y + u * rearrange(D, "d -> d 1")
   out = y if D is None else y + u * D.reshape((D.numel(), 1))
   if z is not None:
     out = out * z.silu()
@@ -198,7 +186,7 @@ class MambaMixer:
     )
     inv_dt = (
       dt + (-((-dt).exp() - Tensor.ones(*dt.shape))).log()
-    )  # TODO: implement torch.expm1?
+    )
 
     self.dt_proj.bias.assign(inv_dt)
 
@@ -223,17 +211,10 @@ class MambaMixer:
         out, _, _ = self.step(hidden_states[:, -1:, :], conv_state, ssm_state)
         return out
 
-    # xz = rearrange(
-    #   self.in_proj.weight @ rearrange(hidden_states, "b l d -> d (b l)"),
-    #   "d (b l) -> b d l",
-    #   l=seqlen,
-    # )
     xz = self.in_proj.weight @ hidden_states.permute(2,0,1).reshape(hidden_states.shape[2],hidden_states.shape[1]*hidden_states.shape[0])
     xz = xz.reshape(xz.shape[0],xz.shape[1]//seqlen, seqlen).permute(1,0,2)
-    # print('SEQLEN __call__ int:', seqlen, hidden_states.shape, xz.shape)
 
     if self.in_proj.bias is not None:
-      # xz = xz + rearrange(self.in_proj.bias, "d -> d 1")
       xz = xz + self.in_proj.bias.reshape((self.in_proj.bias.numel(), 1))
 
     A = -self.A_log.exp()
@@ -243,15 +224,11 @@ class MambaMixer:
       conv_state.assign(x[:, :, -self.d_conv :])  # Update state (B D W)
       x = self.conv1d(x)[..., :seqlen].swish()
 
-    # x_dbl = self.x_proj(rearrange(x, "b d l -> (b l) d"))
     x_dbl = self.x_proj(x.permute(0,2,1).reshape(x.shape[0]*x.shape[2], x.shape[1]))
     dt, B, C = Tensor.split(x_dbl, [self.dt_rank, self.d_state, self.d_state], dim=-1)
     dt = self.dt_proj.weight @ dt.T
-    # dt = rearrange(dt, "d (b l) -> b d l", l=seqlen)
     dt = dt.reshape(dt.shape[0], dt.shape[1]//seqlen, seqlen).permute(1,0,2)
-    # B = rearrange(B, "(b l) dstate -> b dstate l", l=seqlen).contiguous()
     B = B.reshape(B.shape[0]//seqlen, seqlen, B.shape[1]).permute(0,2,1).contiguous()
-    # C = rearrange(C, "(b l) dstate -> b dstate l", l=seqlen).contiguous()
     C = C.reshape(C.shape[0]//seqlen, seqlen, C.shape[1]).permute(0,2,1).contiguous()
 
     y = selective_scan_ref(  # TODO: actually implement selective_scan_fn
@@ -271,7 +248,6 @@ class MambaMixer:
       y, last_state = y
       ssm_state.assign(last_state)
 
-    # y = rearrange(y, "b d l -> b l d")
     y = y.permute(0,2,1)
     out = self.out_proj(y)
 
@@ -286,7 +262,6 @@ class MambaMixer:
 
     # Conv step
     conv_state.assign(conv_state[:, :, 1:].cat(x.unsqueeze(-1), dim=-1))
-    # x = (conv_state * rearrange(self.conv1d.weight, "d 1 w -> d w")).sum(-1)
     x = (conv_state * self.conv1d.weight.reshape(self.conv1d.weight.shape[0],self.conv1d.weight.shape[2])).sum(-1)
     if self.conv1d.bias is not None:
       x = x + self.conv1d.bias
@@ -306,7 +281,6 @@ class MambaMixer:
     # TODO: Tensor.einsum?
     dA = Tensor.einsum("db,dn->bdn", dt, A).exp()
     dB = Tensor.einsum("db,bn->bdn", dt, B)
-    # ssm_state.assign(ssm_state * dA + rearrange(x, "b d -> b d 1") * dB)
     ssm_state.assign(ssm_state * dA + x.reshape(x.shape[0],x.shape[1], 1) * dB)
     y = Tensor.einsum("bdn,bn->bd", ssm_state, C)
     y = y + self.D * x
@@ -477,7 +451,7 @@ if __name__ == "__main__":
     help=f"Size of model to use [{', '.join([k for k in MODELS.keys()])}]",
   )
   parser.add_argument(
-    "--n_tokens_to_gen",
+    "--n_tokens",
     type=int,
     default=10,
     help="Number of tokens to generate",
@@ -487,7 +461,7 @@ if __name__ == "__main__":
   tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
   model = Mamba.from_pretrained(args.size)
   prompt = args.prompt
-  num_toks = args.n_tokens_to_gen
+  num_toks = args.n_tokens
   s = time.time()
   tinyoutput = generate(model, tokenizer, prompt, n_tokens_to_gen=num_toks)
   print(tinyoutput)
