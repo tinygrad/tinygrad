@@ -588,7 +588,7 @@ class TestOps(unittest.TestCase):
       a = Tensor(3.14)
       a.matmul(a)
   def test_dot_with_const_buffer(self):
-    helper_test_op([], lambda: torch.ones((2,3)).matmul(torch.full((3,4), 2.0)), lambda: Tensor.ones((2,3)).dot(Tensor.full((3,4), 2.0)), forward_only=True)
+    helper_test_op([], lambda: torch.ones((2,3)).matmul(torch.full((3,4), 2.0)), lambda: Tensor.ones((2,3)).dot(Tensor.full((3,4), 2.0)), forward_only=True)  # noqa: E501
 
   def test_matmul_simple(self):
     helper_test_op([(4), (4,4)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
