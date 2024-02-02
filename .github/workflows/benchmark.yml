@@ -140,7 +140,7 @@ jobs:
     - name: Run 10 CIFAR training steps
       run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w WINO/HALF/HIP
-      run: HIP=1 HALF=1 WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
+      run: HIP=1 HALF=1 LATEWINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
     # # TODO: enable this. it took 3 minutes in CI and made the full training one more than 5 minutes
     # - name: Run 10 CIFAR training steps w HALF and 6 GPUS
     #   run: time HALF=1 STEPS=10 BS=1536 GPUS=6 python3 examples/hlb_cifar10.py
