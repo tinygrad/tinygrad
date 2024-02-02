@@ -83,7 +83,7 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       for s,c in zip(lin2.full_shape, lin2.colors()):
         if c in {"magenta", "yellow"}: up *= s
         if c in {"cyan", "green", "white"}: lcl *= s
-      if up > 256 or lcl > 256: continue
+      if up > 256 or lcl > 256 or ("green" in lin2.colors() and up*lcl > 2 ** 15): continue
       acted_lins[i+1] = lin2
     except Exception:
       pass
