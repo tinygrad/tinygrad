@@ -214,7 +214,7 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
     # TODO: shortcutted store won't work with strides
     if ast.op == BufferOps.STORE: return _interpret_ast(ast.src[0])
     if TernaryOps.MULACC in fxn_for_op and ast.op == ReduceOps.SUM:
-      if ast.src[0].op == BinaryOps.MUL: ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
+      if ast.src[0].op == BinaryOps.MUL and not all(src.op == BufferOps.CONST for src in ast.src[0].src): ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)  # noqa: E501
       if (castop:=ast.src[0]).op == UnaryOps.CAST and (mulop:=castop.src[0]).op == BinaryOps.MUL:
         # MULACC with acc cast rewrite: MUL -> CAST -> SUM => CAST -> MULACC
         ast = LazyOp(TernaryOps.MULACC, tuple(LazyOp(UnaryOps.CAST, (s, ), castop.arg) for s in mulop.src), ast.arg)
