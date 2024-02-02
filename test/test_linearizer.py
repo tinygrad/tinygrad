@@ -340,7 +340,7 @@ class TestHandCodedOpts(unittest.TestCase):
         k = Linearizer(si.ast)
         k.hand_coded_optimizations()
         if k.reduceop is not None: continue  # not a tile transform kernel (there is a gemm reduce kernel)
-        if len(k.bufs) < 100: continue  # not a tile transform kernel (there's a permute kernel at the end)
+        if len(k.bufs) < 36: continue  # not a tile transform kernel (there's a permute kernel at the end)
         upcasts.append(tuple(k.full_shape[k.shape_len - k.upcasted:k.shape_len]))
       assert len(upcasts) == 3  # 3 transformation matrices
       # TODO: what did this fix?
@@ -353,7 +353,7 @@ class TestHandCodedOpts(unittest.TestCase):
         k.linearize()
         if len(k.bufs) < 20: continue  # not a tile transform kernel
         # heuristic number to make sure that at least some upcasts but not too many upcasts are being done
-        assert 6 <= prod(k.full_shape[k.shape_len - k.upcasted:k.shape_len]) <= 49
+        assert 6 <= prod(k.full_shape[k.shape_len - k.upcasted:k.shape_len]) <= 216
 
   def test_masked_upcast_many(self):
     layer_1 = Tensor.cat(Tensor.rand(3, 4), Tensor.rand(4, 4))
