@@ -578,7 +578,6 @@ After you are done speaking, output [EOS]. You are not Chad.
                       (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
             tok_tensor = llama.model(Tensor([toks[start_pos:]], device=device), start_pos, args.temperature)
           tok = tok_tensor.item()
-        #   exit()
 
       # use the kv cache
       start_pos = len(toks)
