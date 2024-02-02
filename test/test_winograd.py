@@ -28,6 +28,7 @@ class TestWinograd(unittest.TestCase):
         l = Linearizer(s.ast)
         l.hand_coded_optimizations()
         l.linearize()
+      assert len(l.sts) <= 256  # just the current value to prevent regression
       if DEBUG >= 2: print(f"{len(l.sts):4d} shapetrackers with max {max(len(x.views) for x in l.sts)} views")
       for st in l.sts:
         assert len(st.views) <= 2, "too many views in winograd"
