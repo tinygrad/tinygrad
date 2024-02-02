@@ -268,7 +268,7 @@ class Compiler:
   def render(self, name:str, uops) -> str: raise NotImplementedError("need a render function")
   def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
   def compile_cached(self, src:str) -> bytes:
-    if self.cachekey is not None: lib = diskcache_get(self.cachekey, src)
+    lib = diskcache_get(self.cachekey, src) if self.cachekey is not None else None
     if lib is None:
       lib = self.compile(src)
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
