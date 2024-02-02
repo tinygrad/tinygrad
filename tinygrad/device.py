@@ -189,7 +189,6 @@ class InterpretedASTRunner(JITRunner):
 class CompileTicket(NamedTuple):
   ast: LazyOp
   lin: Linearizer
-  is_async: bool
 beam_pool = None
 import signal
 # workers should ignore ctrl c
@@ -370,16 +369,15 @@ class Compiled:
         k = timed[0][1]
     return k
 
+  # functools.lru_cache ensures each function runs only once per input
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def get_compile_ticket(self, ast: LazyOp, lin:Linearizer=None) -> CompileTicket:
-    beam_pool = get_beam_pool()
-    if beam_pool is not None:
-      self.compiler_cache[CompileTicket(ast, lin, True)] = beam_pool.apply_async(_compile_program, (self.compiler, self.get_linearizer(ast) if lin is None else lin))
-      return CompileTicket(ast, lin, True)
-    else:
-      return CompileTicket(ast, lin, False)
+    if lin is None: lin = self.get_linearizer(ast)
+    compile_fn = functools.partial(_compile_program, self.compiler, lin)
+    self.compiler_cache[CompileTicket(ast, lin)] = compile_fn if (beam_pool := get_beam_pool()) is None else beam_pool.apply_async(compile_fn).get
+    return CompileTicket(ast, lin)
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_compiled(self, ticket: CompileTicket): return self.to_ast_runner(*self.compiler_cache.pop(ticket).get()) if ticket[2] else self.to_program(self.get_linearizer(ticket[0]) if ticket[1] is None else ticket[1])
+  def get_compiled(self, ticket: CompileTicket): return self.to_ast_runner(*self.compiler_cache.pop(ticket)())
 
   def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.get_compiled(self.get_compile_ticket(ast))
