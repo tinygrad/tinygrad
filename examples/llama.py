@@ -8,7 +8,7 @@ from typing import List
 import sys, argparse, json
 import numpy as np
 np.set_printoptions(linewidth=200)
-from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, colored
+from tinygrad.helpers import Timing, Profiling, getenv, DEBUG, colored, Context
 from tinygrad import Device, GlobalCounters, dtypes, nn
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
@@ -125,7 +125,7 @@ def dequantize_q4_0(tensor: gguf.ReaderTensor):
   scales  = Tensor(blks[:,:2].flatten().view(np.float16)).repeat((block_sz,1)).transpose().cast(dtypes.float16)
   weights = Tensor(blks)[:,2:]
   div = (weights * 16**-1).cast(dtypes.uint32)
-  return (Tensor.cat((weights - div * 16).cast(dtypes.int32)-8, div.cast(dtypes.int32)-8, dim=1) * scales).reshape(np.flip(tensor.shape).tolist())
+  return ((Tensor.cat((weights - div * 16).cast(dtypes.int32), div.cast(dtypes.int32), dim=1)-8) * scales).reshape(np.flip(tensor.shape).tolist())
 
 def get_weight_and_scale_from_q4_0(tensor):
   blocks = tensor.reshape(-1, 18)
@@ -280,8 +280,8 @@ class QK4_0Linear:
     # https://github.com/ggerganov/llama.cpp/blob/master/ggml-quants.c#L1074
     div = (self.weight * 16**-1).cast(dtypes.uint32)
     return (
-        Tensor.cat(((self.weight - div * 16).cast(dtypes.int32)-8)* self.scale, (div.cast(dtypes.int32)-8)* self.scale, dim=1)
-      ).reshape((self.out_features, self.in_features))
+       (Tensor.cat((self.weight - div * 16).cast(dtypes.int32), div.cast(dtypes.int32), dim=1) -8) * self.scale
+     ).reshape((self.out_features, self.in_features))
 
   def __call__(self, x):
     return x.dot(self.dequantize().T)
@@ -578,6 +578,7 @@ After you are done speaking, output [EOS]. You are not Chad.
                       (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_count*1e-9*2/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
             tok_tensor = llama.model(Tensor([toks[start_pos:]], device=device), start_pos, args.temperature)
           tok = tok_tensor.item()
+        #   exit()
 
       # use the kv cache
       start_pos = len(toks)
