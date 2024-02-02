@@ -1,6 +1,6 @@
 from __future__ import annotations
 from collections import defaultdict
-from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple, cast, ClassVar
+from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple, cast, ClassVar, NamedTuple
 import importlib, inspect, functools, pathlib, time, re, ctypes
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
@@ -8,6 +8,8 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op, GlobalCounters, MovementOps
 from dataclasses import dataclass
+import multiprocessing
+from multiprocessing.pool import AsyncResult
 
 if TYPE_CHECKING:
   from tinygrad.codegen.linearizer import Linearizer
@@ -184,12 +186,27 @@ class InterpretedASTRunner(JITRunner):
     update_stats(f"<interpreted {rawbufs[0].size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, device=rawbufs[0].device)
     return et
 
+class CompileTicket(NamedTuple):
+  ast: LazyOp
+  lin: Linearizer
+  is_async: bool
+beam_pool = None
+import signal
+# workers should ignore ctrl c
+def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
+def get_beam_pool():
+  global beam_pool
+  default_parallel = 1 if Device.DEFAULT in {"CUDA", "HIP"} else 0
+  if beam_pool is None and getenv("PARALLEL", default_parallel): beam_pool = multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker)
+  return beam_pool
+
 class Interpreted:
   def __init__(self, device:str, allocator: Allocator, fxn_for_op:Dict[Op, Callable]):
     self.dname, self.allocator, self.fxn_for_op = device, allocator, fxn_for_op
     self.synchronize, self.codegen, self.graph = lambda: None, None, None
 
-  @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
+  def get_compile_ticket(self, ast: LazyOp) -> CompileTicket: return CompileTicket(ast,)
+  def get_compiled(self, ticket: CompileTicket) -> InterpretedASTRunner: return _get_interpreted_fxn(self.fxn_for_op, ticket[0])
   def get_runner(self, ast:LazyOp) -> InterpretedASTRunner: return _get_interpreted_fxn(self.fxn_for_op, ast)
 
 def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> InterpretedASTRunner:
@@ -311,14 +328,23 @@ class CompiledASTRunner(JITRunner):
     self.first_run = False
     return et
 
+
+def _compile_program(compiler, k:Linearizer):
+  k.linearize()
+  src = compiler.render(to_function_name(k.name), k.uops)   # NOTE: these all have the same name for deduping
+  return k, src, compiler.compile(src)
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Compiler, runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
+    self.compiler_cache = {}
   def synchronize(self): pass  # override this in your device
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     k.linearize()
     return CompiledASTRunner(k.ast, k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size)
+
+  def to_ast_runner(self, k:Linearizer, src, prg):
+    return CompiledASTRunner(k.ast, k.name, src, self, k.global_size, k.local_size, precompiled=prg)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:
@@ -345,4 +371,15 @@ class Compiled:
     return k
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.to_program(self.get_linearizer(ast))
+  def get_compile_ticket(self, ast: LazyOp, lin:Linearizer=None) -> CompileTicket:
+    beam_pool = get_beam_pool()
+    if beam_pool is not None:
+      self.compiler_cache[CompileTicket(ast, lin, True)] = beam_pool.apply_async(_compile_program, (self.compiler, self.get_linearizer(ast) if lin is None else lin))
+      return CompileTicket(ast, lin, True)
+    else:
+      return CompileTicket(ast, lin, False)
+
+  @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
+  def get_compiled(self, ticket: CompileTicket): return self.to_ast_runner(*self.compiler_cache.pop(ticket).get()) if ticket[2] else self.to_program(self.get_linearizer(ticket[0]) if ticket[1] is None else ticket[1])
+
+  def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.get_compiled(self.get_compile_ticket(ast))

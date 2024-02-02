@@ -1,6 +1,6 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
-from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner, Compiler
+from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner, Compiler, get_beam_pool
 from tinygrad.ops import MemBuffer, LazyOp
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
@@ -54,9 +54,6 @@ def _try_compile_linearized_w_idx(x, compiler:Compiler):
     if DEBUG >= 4: traceback.print_exc()
     return (x[0], None)
 
-# workers should ignore ctrl c
-def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
-
 # *** external API ***
 
 # get (scrap) buffers for timing the linearizer
@@ -89,9 +86,7 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       pass
   return acted_lins
 
-beam_pool = None
 def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linearizer:
-  global beam_pool
   key = {"ast": str(lin.ast), "amt": amt, "allow_test_size": allow_test_size, "device": lin.opts.device}
   if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE") and CACHELEVEL >= 1:
     ret = lin.copy()
@@ -101,8 +96,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
 
-  default_parallel = 1 if lin.opts.device in {"CUDA", "HIP"} else 0
-  if beam_pool is None and getenv("PARALLEL", default_parallel): beam_pool = multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker)
+  beam_pool = get_beam_pool()
 
   try:
     var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}

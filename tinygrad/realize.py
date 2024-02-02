@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional, cast
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters
-from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, InterpretedASTRunner, Compiled, BufferOptions
+from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, InterpretedASTRunner, Compiled, BufferOptions, CompileTicket
 from tinygrad.graph import print_tree, realized_lazybuffer
 from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG
 from tinygrad.shape.symbolic import Variable
@@ -36,16 +36,16 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   if si.ast.op is LoadOps.CUSTOM: return CustomOp(si.ast.arg)
   if si.ast.op is LoadOps.SYNC: return SyncOp(si.out.device) if isinstance(Device[si.out.device], Compiled) else None
   if si.ast.op is LoadOps.WAIT: return None
-  return Device[si.out.device].get_runner(si.ast)
+  return Device[si.out.device].get_compile_ticket(si.ast)
 
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 def run_schedule(schedule:List[ScheduleItem]):
+  prgs = [lower_schedule_item(si) for si in schedule]
   while len(schedule):
-    si = schedule.pop(0)
+    si, prg = schedule.pop(0), prgs.pop(0)
     if logops and si.ast.op not in LoadOps: logops.write(str(si.ast)+"\n")
 
-    # get the program
-    prg = lower_schedule_item(si)
+    if isinstance(prg, CompileTicket): prg = Device[si.out.device].get_compiled(prg)
 
     # invalidate the output buffer if there's a non contig usage of it in inputs
     if si.out.output_buffer is not None:
