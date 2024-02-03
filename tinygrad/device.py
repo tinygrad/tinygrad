@@ -1,7 +1,4 @@
 from __future__ import annotations
-import multiprocessing
-from multiprocessing.pool import AsyncResult
-import signal
 from collections import defaultdict
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple, cast, ClassVar, NamedTuple
 import importlib, inspect, functools, pathlib, time, re, ctypes
@@ -192,10 +189,13 @@ class CompileTicket(NamedTuple):
   ast: LazyOp
 
 # workers should ignore ctrl c
-def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
+def _init_worker():
+  import signal
+  signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 @functools.lru_cache
 def get_beam_pool():
+  import multiprocessing
   default_parallel = 1 if Device.DEFAULT in {"CUDA", "HIP"} else 0
   return multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker) if getenv("PARALLEL", default_parallel) else None
 
