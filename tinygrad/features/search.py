@@ -91,7 +91,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
 
-  beam_pool = get_beam_pool(Device[lin.opts.device])
+  beam_pool = get_beam_pool(lin.opts.device)
 
   try:
     var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
