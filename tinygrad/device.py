@@ -194,9 +194,9 @@ def _init_worker():
   signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 @functools.lru_cache
-def get_beam_pool():
+def get_beam_pool(device=None):
   import multiprocessing
-  default_parallel = 1 if Device.DEFAULT in {"CUDA", "HIP"} else 0
+  default_parallel = 1 if (device or Device.DEFAULT) in {"CUDA", "HIP"} else 0
   return multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker) if getenv("PARALLEL", default_parallel) else None
 
 class Interpreted:
@@ -204,7 +204,7 @@ class Interpreted:
     self.dname, self.allocator, self.fxn_for_op = device, allocator, fxn_for_op
     self.synchronize, self.codegen, self.graph = lambda: None, None, None
 
-  def get_compile_ticket(self, ast: LazyOp) -> CompileTicket: return CompileTicket(ast,)
+  def start_compile(self, ast: LazyOp) -> CompileTicket: return CompileTicket(ast,)
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def get_runner(self, ast:LazyOp) -> InterpretedASTRunner: return _get_interpreted_fxn(self.fxn_for_op, ast)
@@ -338,7 +338,7 @@ class Compiled:
     self.compiler_futures: Dict[Union[LazyOp, Any], Callable] = {}
   def synchronize(self): pass  # override this in your device
 
-  def to_program(self, k:Linearizer): return self.to_ast_runner(self.compiler.compile_linearizer(k))
+  def to_program(self, k:Linearizer): return self.to_ast_runner(*self.compiler.compile_linearizer(k))
   def to_ast_runner(self, ast, name, global_size, local_size, src, prg):
     if DEBUG >= 3:
       from tinygrad.graph import print_tree
@@ -370,7 +370,7 @@ class Compiled:
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def start_compile(self, ast: LazyOp):
     compile_fn = functools.partial(self.compiler.compile_linearizer, self.get_linearizer(ast))
-    self.compiler_futures[CompileTicket(ast)] = compile_fn if DEBUG >= 4 or get_beam_pool() is None else get_beam_pool().apply_async(compile_fn).get
+    self.compiler_futures[CompileTicket(ast)] = compile_fn if DEBUG >= 4 or (beam_pool := get_beam_pool(self.dname)) is None else beam_pool.apply_async(compile_fn).get
     return CompileTicket(ast)
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none

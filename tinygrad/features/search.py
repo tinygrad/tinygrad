@@ -1,5 +1,5 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
-import itertools, functools, random, math, time, multiprocessing, traceback, signal
+import itertools, functools, random, math, time, traceback
 from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner, Compiler, get_beam_pool
 from tinygrad.ops import MemBuffer, LazyOp
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
@@ -91,7 +91,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
 
-  beam_pool = get_beam_pool()
+  beam_pool = get_beam_pool(Device[lin.opts.device])
 
   try:
     var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}

@@ -1,6 +1,6 @@
-from typing import List, Dict, Optional, cast
+from typing import List, Dict, Optional, cast, Union
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters
-from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, InterpretedASTRunner, Compiled, BufferOptions, CompileTicket
+from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, InterpretedASTRunner, Compiled, BufferOptions, CompileTicket  # noqa: E501
 from tinygrad.graph import print_tree, realized_lazybuffer
 from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG
 from tinygrad.shape.symbolic import Variable
@@ -21,7 +21,7 @@ class SyncOp(JITRunner):
     et = cpu_time_execution(self.device.synchronize, enable=wait or DEBUG >= 1)
     update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=self.dname)
 
-def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
+def lower_schedule_item(si:ScheduleItem) -> Optional[Union[JITRunner, CompileTicket]]:
   assert all(si.out.device == x.device for x in si.inputs) or si.ast.op in {LoadOps.COPY, LoadOps.WAIT}, \
     f"all devices must be the same, {si.out.device} != {[x.device for x in si.inputs]} {print_tree(si.ast) or ''}"
   if si.ast.op is LoadOps.EMPTY: return None
