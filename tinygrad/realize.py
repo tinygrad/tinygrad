@@ -36,7 +36,7 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   if si.ast.op is LoadOps.CUSTOM: return CustomOp(si.ast.arg)
   if si.ast.op is LoadOps.SYNC: return SyncOp(si.out.device) if isinstance(Device[si.out.device], Compiled) else None
   if si.ast.op is LoadOps.WAIT: return None
-  return Device[si.out.device].get_compile_ticket(si.ast)
+  return Device[si.out.device].start_compile(si.ast)
 
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 def run_schedule(schedule:List[ScheduleItem]):
@@ -45,7 +45,7 @@ def run_schedule(schedule:List[ScheduleItem]):
     si, prg = schedule.pop(0), prgs.pop(0)
     if logops and si.ast.op not in LoadOps: logops.write(str(si.ast)+"\n")
 
-    if isinstance(prg, CompileTicket): prg = Device[si.out.device].get_compiled(prg)
+    if isinstance(prg, CompileTicket): prg = Device[si.out.device].get_runner(prg.lin)
 
     # invalidate the output buffer if there's a non contig usage of it in inputs
     if si.out.output_buffer is not None:

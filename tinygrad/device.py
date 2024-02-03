@@ -186,9 +186,9 @@ class InterpretedASTRunner(JITRunner):
     update_stats(f"<interpreted {rawbufs[0].size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, device=rawbufs[0].device)
     return et
 
+# eventually this will be (ast, opts)
 class CompileTicket(NamedTuple):
-  ast: LazyOp
-  lin: Linearizer
+  lin: Union[Linearizer, LazyOp]
 beam_pool = None
 import signal
 # workers should ignore ctrl c
@@ -205,7 +205,6 @@ class Interpreted:
     self.synchronize, self.codegen, self.graph = lambda: None, None, None
 
   def get_compile_ticket(self, ast: LazyOp) -> CompileTicket: return CompileTicket(ast,)
-  def get_compiled(self, ticket: CompileTicket) -> InterpretedASTRunner: return _get_interpreted_fxn(self.fxn_for_op, ticket[0])
   def get_runner(self, ast:LazyOp) -> InterpretedASTRunner: return _get_interpreted_fxn(self.fxn_for_op, ast)
 
 def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> InterpretedASTRunner:
@@ -328,27 +327,24 @@ class CompiledASTRunner(JITRunner):
     return et
 
 
-def _compile_program(compiler, k:Linearizer):
+def _compile_linearizer(compiler, k:Linearizer, name:Optional[str]=None):
   k.linearize()
-  src = compiler.render(to_function_name(k.name), k.uops)   # NOTE: these all have the same name for deduping
-  return k, src, compiler.compile(src)
+  src = compiler.render(to_function_name(k.name if name is None else name), k.uops)   # NOTE: these all have the same name for deduping
+  return k.ast, k.name, k.global_size, k.local_size, src, compiler.compile(src)
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Compiler, runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
     self.compiler_cache = {}
   def synchronize(self): pass  # override this in your device
 
-  def to_program(self, k:Linearizer) -> CompiledASTRunner:
-    k.linearize()
-    return CompiledASTRunner(k.ast, k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size)
-
-  def to_ast_runner(self, k:Linearizer, src, prg):
-    return CompiledASTRunner(k.ast, k.name, src, self, k.global_size, k.local_size, precompiled=prg)
-
-  def get_linearizer(self, ast:LazyOp) -> Linearizer:
+  def to_program(self, k:Linearizer): return self.to_ast_runner(_compile_linearizer(self.compiler, k))
+  def to_ast_runner(self, ast, name, global_size, local_size, src, prg):
     if DEBUG >= 3:
       from tinygrad.graph import print_tree
       print_tree(ast)
+    return CompiledASTRunner(ast, name, src, self, global_size, local_size, precompiled=prg)
+
+  def get_linearizer(self, ast:LazyOp) -> Linearizer:
     from tinygrad.codegen.linearizer import Linearizer
     k = Linearizer(ast, self.compiler.linearizer_opts)
     k.required_optimizations()
@@ -371,13 +367,10 @@ class Compiled:
 
   # functools.lru_cache ensures each function runs only once per input
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_compile_ticket(self, ast: LazyOp, lin:Linearizer=None) -> CompileTicket:
-    if lin is None: lin = self.get_linearizer(ast)
-    compile_fn = functools.partial(_compile_program, self.compiler, lin)
-    self.compiler_cache[CompileTicket(ast, lin)] = compile_fn if (beam_pool := get_beam_pool()) is None else beam_pool.apply_async(compile_fn).get
-    return CompileTicket(ast, lin)
+  def start_compile(self, lin: Union[Linearizer, LazyOp], parallel=True):
+    compile_fn = functools.partial(_compile_linearizer, self.compiler, self.get_linearizer(lin) if isinstance(lin, LazyOp) else lin)
+    self.compiler_cache[CompileTicket(lin)] = compile_fn if not parallel or DEBUG >= 4 or get_beam_pool() is None else get_beam_pool().apply_async(compile_fn).get
+    return CompileTicket(lin)
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_compiled(self, ticket: CompileTicket): return self.to_ast_runner(*self.compiler_cache.pop(ticket)())
-
-  def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.get_compiled(self.get_compile_ticket(ast))
+  def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.to_ast_runner(*self.compiler_cache.pop(self.start_compile(ast))())
