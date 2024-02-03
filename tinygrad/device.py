@@ -370,7 +370,7 @@ class Compiled:
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def start_compile(self, ast: LazyOp):
     compile_fn = functools.partial(self.compiler.compile_linearizer, self.get_linearizer(ast))
-    self.compiler_futures[CompileTicket(ast)] = compile_fn if DEBUG >= 4 or (beam_pool := get_beam_pool(self.dname)) is None else beam_pool.apply_async(compile_fn).get
+    self.compiler_futures[CompileTicket(ast)] = compile_fn if DEBUG >= 3 or (beam_pool := get_beam_pool(self.dname)) is None else beam_pool.apply_async(compile_fn).get
     return CompileTicket(ast)
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
