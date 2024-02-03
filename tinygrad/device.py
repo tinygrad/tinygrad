@@ -205,6 +205,8 @@ class Interpreted:
     self.synchronize, self.codegen, self.graph = lambda: None, None, None
 
   def get_compile_ticket(self, ast: LazyOp) -> CompileTicket: return CompileTicket(ast,)
+
+  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def get_runner(self, ast:LazyOp) -> InterpretedASTRunner: return _get_interpreted_fxn(self.fxn_for_op, ast)
 
 def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> InterpretedASTRunner:
@@ -287,6 +289,10 @@ class Compiler:
       lib = self.compile(src)
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
+  def compile_linearizer(self, k: Linearizer, name:Optional[str]=None):
+    k.linearize()
+    src = self.render(to_function_name(k.name if name is None else name), k.uops)
+    return k.ast, k.name, k.global_size, k.local_size, src, self.compile(src)
 
 class CompiledASTRunner(JITRunner):
   def __init__(self, ast:Optional[LazyOp], name:str, prg:str, device:Compiled, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, precompiled:Optional[bytes]=None):  # noqa: E501
@@ -327,17 +333,13 @@ class CompiledASTRunner(JITRunner):
     return et
 
 
-def _compile_linearizer(compiler, k:Linearizer, name:Optional[str]=None):
-  k.linearize()
-  src = compiler.render(to_function_name(k.name if name is None else name), k.uops)   # NOTE: these all have the same name for deduping
-  return k.ast, k.name, k.global_size, k.local_size, src, compiler.compile(src)
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Compiler, runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
     self.compiler_futures: Dict[Union[LazyOp, Any], Callable] = {}
   def synchronize(self): pass  # override this in your device
 
-  def to_program(self, k:Linearizer): return self.to_ast_runner(_compile_linearizer(self.compiler, k))
+  def to_program(self, k:Linearizer): return self.to_ast_runner(self.compiler.compile_linearizer(k))
   def to_ast_runner(self, ast, name, global_size, local_size, src, prg):
     if DEBUG >= 3:
       from tinygrad.graph import print_tree
@@ -368,7 +370,7 @@ class Compiled:
   # functools.lru_cache ensures each function runs only once per input
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def start_compile(self, ast: LazyOp):
-    compile_fn = functools.partial(_compile_linearizer, self.compiler, self.get_linearizer(ast))
+    compile_fn = functools.partial(self.compiler.compile_linearizer, self.get_linearizer(ast))
     self.compiler_futures[CompileTicket(ast)] = compile_fn if DEBUG >= 4 or get_beam_pool() is None else get_beam_pool().apply_async(compile_fn).get
     return CompileTicket(ast)
 

@@ -1,6 +1,6 @@
 from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
-from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner, Compiler, get_beam_pool, _compile_linearizer
+from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner, Compiler, get_beam_pool
 from tinygrad.ops import MemBuffer, LazyOp
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
@@ -44,7 +44,7 @@ def _time_program(ast:LazyOp, rdev:Compiled, lib:bytes, global_size, local_size,
   return tms
 
 def _try_compile_linearized_w_idx(x, compiler:Compiler):
-  try: return (x[0], _compile_linearizer(compiler, x[1], "test"))
+  try: return (x[0], compiler.compile_linearizer(x[1], "test"))  # NOTE: these all have the same name for deduping
   except Exception:
     if DEBUG >= 4: traceback.print_exc()
     return (x[0], None)
@@ -145,7 +145,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
   assert isinstance(dev, Compiled)
 
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
-  lib, global_size, local_size = _compile_linearizer(dev.compiler, lin)
+  lib, global_size, local_size = dev.compiler.compile_linearizer(lin)
   tms = _time_program(lin.ast, dev, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))  # noqa: E501
 
   if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)
