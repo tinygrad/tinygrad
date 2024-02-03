@@ -1,4 +1,7 @@
 from __future__ import annotations
+import multiprocessing
+from multiprocessing.pool import AsyncResult
+import signal
 from collections import defaultdict
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple, cast, ClassVar, NamedTuple
 import importlib, inspect, functools, pathlib, time, re, ctypes
@@ -8,8 +11,6 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op, GlobalCounters, MovementOps
 from dataclasses import dataclass
-import multiprocessing
-from multiprocessing.pool import AsyncResult
 
 if TYPE_CHECKING:
   from tinygrad.codegen.linearizer import Linearizer
@@ -189,15 +190,15 @@ class InterpretedASTRunner(JITRunner):
 # eventually this will be (ast, opts)
 class CompileTicket(NamedTuple):
   lin: Union[Linearizer, LazyOp]
-beam_pool = None
-import signal
+
+
 # workers should ignore ctrl c
 def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+@functools.lru_cache
 def get_beam_pool():
-  global beam_pool
   default_parallel = 1 if Device.DEFAULT in {"CUDA", "HIP"} else 0
-  if beam_pool is None and getenv("PARALLEL", default_parallel): beam_pool = multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker)
-  return beam_pool
+  return multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker) if getenv("PARALLEL", default_parallel) else None
 
 class Interpreted:
   def __init__(self, device:str, allocator: Allocator, fxn_for_op:Dict[Op, Callable]):
@@ -334,7 +335,7 @@ def _compile_linearizer(compiler, k:Linearizer, name:Optional[str]=None):
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Compiler, runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
-    self.compiler_cache = {}
+    self.compiler_cache: Dict[Union[LazyOp, Any], Callable] = {}
   def synchronize(self): pass  # override this in your device
 
   def to_program(self, k:Linearizer): return self.to_ast_runner(_compile_linearizer(self.compiler, k))
@@ -367,10 +368,10 @@ class Compiled:
 
   # functools.lru_cache ensures each function runs only once per input
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def start_compile(self, lin: Union[Linearizer, LazyOp], parallel=True):
-    compile_fn = functools.partial(_compile_linearizer, self.compiler, self.get_linearizer(lin) if isinstance(lin, LazyOp) else lin)
-    self.compiler_cache[CompileTicket(lin)] = compile_fn if not parallel or DEBUG >= 4 or get_beam_pool() is None else get_beam_pool().apply_async(compile_fn).get
-    return CompileTicket(lin)
+  def start_compile(self, ast: LazyOp, parallel=True):
+    compile_fn = functools.partial(_compile_linearizer, self.compiler, self.get_linearizer(ast))
+    self.compiler_cache[CompileTicket(ast)] = compile_fn if not parallel or DEBUG >= 4 or get_beam_pool() is None else get_beam_pool().apply_async(compile_fn).get
+    return CompileTicket(ast)
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
   def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.to_ast_runner(*self.compiler_cache.pop(self.start_compile(ast))())

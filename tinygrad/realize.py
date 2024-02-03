@@ -45,7 +45,7 @@ def run_schedule(schedule:List[ScheduleItem]):
     si, prg = schedule.pop(0), prgs.pop(0)
     if logops and si.ast.op not in LoadOps: logops.write(str(si.ast)+"\n")
 
-    if isinstance(prg, CompileTicket): prg = Device[si.out.device].get_runner(prg.lin)
+    if isinstance(prg, CompileTicket): prg = Device[si.out.device].get_runner(*prg)
 
     # invalidate the output buffer if there's a non contig usage of it in inputs
     if si.out.output_buffer is not None:
