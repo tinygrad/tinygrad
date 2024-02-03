@@ -332,7 +332,6 @@ class CompiledASTRunner(JITRunner):
     self.first_run = False
     return et
 
-
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Compiler, runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
