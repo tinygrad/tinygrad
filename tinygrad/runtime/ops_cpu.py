@@ -15,7 +15,7 @@ def einsum_mulacc(einsum, get_strides, expand):
     (a_axes, a_slices), (b_axes, b_slices) = axes_slice(a_strides := get_strides(a)), axes_slice(get_strides(b))
     if not (set(a_axes).issuperset(sum_axes := tuple(i for i,s in enumerate(new_shape) if s == 1)) or set(b_axes).issuperset(sum_axes)):
       a_axes = tuple(sorted(set(a_axes).union(sum_axes)))
-      a_slices = tuple(slice(None) if s != 0 or i in sum_axes else 0 for i, s in enumerate(a_strides))
+      a_slices = tuple(slice(None) if i in a_axes else 0 for i in range(len(a_strides)))
     out = [i for i in range(len(new_shape)) if a.shape[i] == new_shape[i] and (i in a_axes or i in b_axes)]
     ret = einsum(f"{einscripts(a_axes)}, {einscripts(b_axes)} -> {einscripts(out)}", a[a_slices], b[b_slices])
     return expand(ret.reshape(tuple(1 if i not in a_axes and i not in b_axes else s for i,s in enumerate(new_shape))), new_shape)
