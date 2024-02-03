@@ -206,7 +206,7 @@ class Interpreted:
 
   def get_compile_ticket(self, ast: LazyOp) -> CompileTicket: return CompileTicket(ast,)
 
-  @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
+  @functools.lru_cache(None)   # pylint: disable=method-cache-max-size-none
   def get_runner(self, ast:LazyOp) -> InterpretedASTRunner: return _get_interpreted_fxn(self.fxn_for_op, ast)
 
 def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> InterpretedASTRunner:
