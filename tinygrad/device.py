@@ -263,14 +263,6 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 
 # **************** for Compiled Devices ****************
 
-class CompilerOutput(NamedTuple):
-  ast: Optional[LazyOp]
-  name: str
-  prg: str
-  binary: bytes
-  global_size: Optional[List[int]]
-  local_size: Optional[List[int]]
-
 class Compiler:
   linearizer_opts: ClassVar[LinearizerOptions]
   def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
@@ -281,27 +273,30 @@ class Compiler:
       lib = self.compile(src)
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
-  def compile_linearizer(self:Compiler, lin:Linearizer, name:Optional[str]=None) -> CompilerOutput:
+  def compile_linearizer(self:Compiler, lin:Linearizer, name:Optional[str]=None) -> CompiledASTRunner:
     lin.linearize()
     src = self.render(name if name is not None else to_function_name(lin.name), lin.uops)
-    return CompilerOutput(lin.ast, lin.name, src, self.compile(src), lin.global_size, lin.local_size)
+    return CompiledASTRunner(lin.ast, lin.name, src, global_size=lin.global_size, local_size=lin.local_size, precompiled=self.compile(src))
 
 class CompiledASTRunner(JITRunner):
-  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, device:Compiled, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, precompiled:Optional[bytes]=None):  # noqa: E501
+  def __init__(self, ast:Optional[LazyOp], name:str, prg:str, device:Optional[Compiled]=None, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, precompiled:Optional[bytes]=None):  # noqa: E501
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
-    self.name, self.display_name, self.prg, self.device, self.global_size, self.local_size, self.first_run = \
-      to_function_name(name), name, prg, device, global_size, local_size, True
-    lib:bytes = precompiled if precompiled is not None else self.device.compiler.compile_cached(prg)
-    self.lib, self.clprg = lib, self.device.runtime(self.name, lib)
+    self.name, self.display_name, self.prg, self.global_size, self.local_size, self.first_run = \
+      to_function_name(name), name, prg, global_size, local_size, True
+    self.lib:bytes = precompiled if precompiled is not None else device.compiler.compile_cached(prg)
+    if device is not None: self.build(device)
     self.vars: List[Variable] = []
     if ast:
       info = get_lazyop_info(ast)
       self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
       self.vars = ast.vars()
       assert all(v._val is None for v in self.vars), f"ASTRunner contains bound Variable {self.vars}"
+  def build(self, device:Compiled):
+    self.device, self.clprg = device, device.runtime(self.name, self.lib)
+    return self
 
   def launch_dims(self, var_vals):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else self.global_size
@@ -339,8 +334,7 @@ class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Compiler, runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
   def synchronize(self): pass  # override this in your device
-  def to_program(self, k:Linearizer) -> CompiledASTRunner: return self.to_ast_runner(self.compiler.compile_linearizer(k))
-  def to_ast_runner(self, co: CompilerOutput): return CompiledASTRunner(co.ast, co.name, co.prg, self, co.global_size, co.local_size, co.binary)
+  def to_program(self, k:Linearizer) -> CompiledASTRunner: return self.compiler.compile_linearizer(k).build(self)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:
@@ -370,4 +364,4 @@ class Compiled:
   def get_runner(self, ast: LazyOp):
     if DEBUG >= 1 or (pool := get_mp_pool(self.dname)) is None: return self.to_program(self.get_linearizer(ast))
     mp_fut = pool.apply_async(functools.partial(self.compiler.compile_linearizer, self.get_linearizer(ast)))
-    return DeferredASTRunner(lambda: self.to_ast_runner(mp_fut.get()))
+    return DeferredASTRunner(lambda: mp_fut.get().build(self))
