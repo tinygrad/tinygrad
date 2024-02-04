@@ -340,7 +340,7 @@ class Compiled:
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
   def synchronize(self): pass  # override this in your device
   def to_program(self, k:Linearizer) -> CompiledASTRunner: return self.to_ast_runner(self.compiler.compile_linearizer(k))
-  def to_ast_runner(self, co: CompilerOutput): return CompiledASTRunner(co.ast, co.name, co.prg, self, co.global_size, co.local_size)
+  def to_ast_runner(self, co: CompilerOutput): return CompiledASTRunner(co.ast, co.name, co.prg, self, co.global_size, co.local_size, co.binary)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:
