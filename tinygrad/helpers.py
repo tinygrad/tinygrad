@@ -171,9 +171,8 @@ def diskcache(func):
   return wrapper
 
 # *** parallel compile ***
+def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN) # workers should ignore ctrl c
 mp_pool = None
-# workers should ignore ctrl c
-def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
 def get_mp_pool(device):
   global mp_pool
   if not getenv("PARALLEL", 1 if device in {"CUDA", "HIP"} else 0): return None
