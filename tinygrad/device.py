@@ -326,10 +326,11 @@ class DeferredASTRunner(JITRunner):
     self.fut: Optional[Callable[[], JITRunner]] = fut
   def _wait(self):
     if self.fut is not None: self.runner, self.fut = self.fut(), None  # free the fut
-  def exec(self, *args, **kwargs) -> Optional[float]:
-    self._wait()
-    return self.runner.exec(*args, **kwargs)
-  def __call__(self, *args, **kwargs): return self.runner(*args, **kwargs)
+    return self.runner
+  # DeferredASTRunner should not make it into the CacheCollector, since the exec call will be passed through
+  def exec(self, *args, **kwargs) -> Optional[float]: return self._wait().exec(*args, **kwargs)
+  def __call__(self, *args, **kwargs): return self._wait()(*args, **kwargs)
+  def __getattr__(self, item): return getattr(self._wait(), item)  # allow direct access to class specific attributes
 
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Compiler, runtime, graph=None):
