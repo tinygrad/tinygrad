@@ -587,6 +587,26 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(AssertionError):
       a = Tensor(3.14)
       a.matmul(a)
+  def test_mulacc_with_zero_strides(self):
+    helper_test_op(
+      [],
+      lambda: torch.tensor(1.0).reshape((1,1,1)).expand(2,4,3).mul(torch.tensor(1.0).reshape((1,1,1)).expand(2,4,3)).sum(-1),
+      lambda: Tensor(1.0).reshape((1,1,1)).expand(2,4,3).mul(Tensor(1.0).reshape((1,1,1)).expand(2,4,3)).sum(-1),
+      forward_only=True
+    )
+    a = [[1.,1.,1.,1.], [1.,1.,1.,1.]]
+    b = [1.,1.,1.,1.]
+    helper_test_op(
+      [],
+      lambda: torch.tensor(a).reshape((2,4,1)).expand(2,4,3).mul(torch.tensor(b).reshape((1,4,1)).expand(2,4,3)).sum([0,2]),
+      lambda: Tensor(a).reshape((2,4,1)).expand(2,4,3).mul(Tensor(b).reshape((1,4,1)).expand(2,4,3)).sum([0,2]),
+      forward_only=True
+    )
+    helper_test_op(
+      [],
+      lambda: torch.ones((1,2)).matmul(torch.ones((2,3))), lambda: Tensor.ones((1,2)).dot(Tensor.ones((2,3))),
+      forward_only=True
+    )
 
   def test_matmul_simple(self):
     helper_test_op([(4), (4,4)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
