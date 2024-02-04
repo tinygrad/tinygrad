@@ -146,7 +146,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
 
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
   compiled = dev.compiler.compile_linearizer(lin)
-  lib, global_size, local_size = compiled.binary, compiled.global_size, compiled.local_size
+  lib, global_size, local_size = compiled.lib, compiled.global_size, compiled.local_size
   tms = _time_program(lin.ast, dev, lib, global_size, local_size, var_vals, rawbufs, max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))  # noqa: E501
 
   if CACHELEVEL >= 2: diskcache_put("time_linearizer", key, tms)

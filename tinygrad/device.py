@@ -1,6 +1,6 @@
 from __future__ import annotations
 from collections import defaultdict
-from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple, cast, ClassVar, NamedTuple
+from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple, cast, ClassVar
 import importlib, inspect, functools, pathlib, time, re, ctypes
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
@@ -286,7 +286,8 @@ class CompiledASTRunner(JITRunner):
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
     self.name, self.display_name, self.prg, self.global_size, self.local_size, self.first_run = \
       to_function_name(name), name, prg, global_size, local_size, True
-    self.lib:bytes = precompiled if precompiled is not None else device.compiler.compile_cached(prg)
+    assert precompiled is not None or device is not None
+    self.lib:bytes = precompiled if precompiled is not None else cast(Compiled, device).compiler.compile_cached(prg)
     if device is not None: self.build(device)
     self.vars: List[Variable] = []
     if ast:
