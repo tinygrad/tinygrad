@@ -28,7 +28,7 @@ def fuzz_invert() -> Tuple[ShapeTracker, ShapeTracker]:
   return start, st_sum
 
 if __name__ == "__main__":
-  # random.seed(42)
+  if seed:=getenv("SEED"): random.seed(seed)
   total = getenv("CNT", 1000)
   for fuzz in [globals()[f'fuzz_{x}'] for x in getenv("FUZZ", "invert,plus").split(",")]:
     same_but_neq = 0

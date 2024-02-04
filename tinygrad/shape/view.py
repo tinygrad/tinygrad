@@ -85,13 +85,14 @@ class View:
     contiguous = offset == 0 and mask is None and strides == strides_for_shape(shape)
     # if any dimension has size >1, but is masked such that only one index in the dimension is unmasked
     # then its stride can also be set to 0, albeit with a corresponding adjustment required to the offset
+    # TODO: assert comparison with LtNode to avoid mis-using symbolic
     if mask and any(elim := [not (b+1 < e) for b,e in mask]):
       if any(not (b < e) for b,e in mask):
         strides, offset, mask = (0,) * len(shape), 0, ((0,0),) * len(shape)
       offset += sum((strides[i] * mask[i][0]) if e else 0 for i, e in enumerate(elim))
       strides = tuple(0 if e else st for st,e in zip(strides, elim))
     # canonicalize empty mask
-    if mask and all(b==0 and e==s for (b,e),s in zip(mask, shape)): mask = None
+    if mask is not None and all(m == (0,s) for m,s in zip(mask, shape)): mask = None
     return View(shape, strides, offset, mask, contiguous)
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
