@@ -9,7 +9,8 @@ from tinygrad.shape.view import strides_for_shape
 from tinygrad.features.multi import MultiLazyBuffer
 
 safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64,
-               "F64": dtypes.double, "B": dtypes.bool, "I16": dtypes.short, "U16": dtypes.ushort, "UI": dtypes.uint, "UL": dtypes.ulong}
+               "F64": dtypes.double, "BOOL": dtypes.bool, "I16": dtypes.short, "U16": dtypes.ushort, "UI": dtypes.uint, "UL": dtypes.ulong,
+               "BF16": dtypes.bfloat16}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
 def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
