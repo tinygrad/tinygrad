@@ -1,9 +1,10 @@
 from __future__ import annotations
 from collections import defaultdict
-from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple, cast, ClassVar
+from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple, cast, ClassVar, NamedTuple
 import importlib, inspect, functools, pathlib, time, re, ctypes
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
+from tinygrad.helpers import get_mp_pool
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op, GlobalCounters, MovementOps
@@ -262,6 +263,14 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 
 # **************** for Compiled Devices ****************
 
+class CompilerOutput(NamedTuple):
+  ast: Optional[LazyOp]
+  name: str
+  prg: str
+  binary: bytes
+  global_size: Optional[List[int]]
+  local_size: Optional[List[int]]
+
 class Compiler:
   linearizer_opts: ClassVar[LinearizerOptions]
   def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
@@ -272,6 +281,10 @@ class Compiler:
       lib = self.compile(src)
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib
+  def compile_linearizer(self:Compiler, lin:Linearizer, name:Optional[str]=None) -> CompilerOutput:
+    lin.linearize()
+    src = self.render(name if name is not None else to_function_name(lin.name), lin.uops)
+    return CompilerOutput(lin.ast, lin.name, src, self.compile(src), lin.global_size, lin.local_size)
 
 class CompiledASTRunner(JITRunner):
   def __init__(self, ast:Optional[LazyOp], name:str, prg:str, device:Compiled, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None, precompiled:Optional[bytes]=None):  # noqa: E501
@@ -311,14 +324,23 @@ class CompiledASTRunner(JITRunner):
     self.first_run = False
     return et
 
+class DeferredASTRunner(JITRunner):
+  def __init__(self, fut: Callable[[], JITRunner]):
+    super().__init__()
+    self.fut: Optional[Callable[[], JITRunner]] = fut
+  def _wait(self):
+    if self.fut is not None: self.runner, self.fut = self.fut(), None  # free the fut
+  def exec(self, *args, **kwargs) -> Optional[float]:
+    self._wait()
+    return self.runner.exec(*args, **kwargs)
+  def __call__(self, *args, **kwargs): return self.runner(*args, **kwargs)
+
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Compiler, runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
   def synchronize(self): pass  # override this in your device
-
-  def to_program(self, k:Linearizer) -> CompiledASTRunner:
-    k.linearize()
-    return CompiledASTRunner(k.ast, k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size)
+  def to_program(self, k:Linearizer) -> CompiledASTRunner: return self.to_ast_runner(self.compiler.compile_linearizer(k))
+  def to_ast_runner(self, co: CompilerOutput): return CompiledASTRunner(co.ast, co.name, co.prg, self, co.global_size, co.local_size)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:
@@ -345,4 +367,7 @@ class Compiled:
     return k
 
   @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, ast:LazyOp) -> CompiledASTRunner: return self.to_program(self.get_linearizer(ast))
+  def get_runner(self, ast: LazyOp):
+    if DEBUG >= 1 or (pool := get_mp_pool(self.dname)) is None: return self.to_program(self.get_linearizer(ast))
+    mp_fut = pool.apply_async(functools.partial(self.compiler.compile_linearizer, self.get_linearizer(ast)))
+    return DeferredASTRunner(lambda: self.to_ast_runner(mp_fut.get()))

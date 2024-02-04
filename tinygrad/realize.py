@@ -40,12 +40,10 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
 
 logops = open(getenv("LOGOPS", ""), "a") if getenv("LOGOPS", "") else None
 def run_schedule(schedule:List[ScheduleItem]):
+  prgs = [lower_schedule_item(si) for si in schedule]  # kick off any parallel compilations
   while len(schedule):
-    si = schedule.pop(0)
+    si, prg = schedule.pop(0), prgs.pop(0)
     if logops and si.ast.op not in LoadOps: logops.write(str(si.ast)+"\n")
-
-    # get the program
-    prg = lower_schedule_item(si)
 
     # invalidate the output buffer if there's a non contig usage of it in inputs
     if si.out.output_buffer is not None:

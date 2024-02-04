@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, cProfile, pstats, tempfile, pathlib, string, ctypes
-import itertools, urllib.request
+import itertools, urllib.request, multiprocessing, signal
 from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
@@ -169,6 +169,16 @@ def diskcache(func):
     if (ret:=diskcache_get(table, key)): return ret
     return diskcache_put(table, key, func(*args, **kwargs))
   return wrapper
+
+# *** parallel compile ***
+mp_pool = None
+# workers should ignore ctrl c
+def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
+def get_mp_pool(device):
+  global mp_pool
+  if not getenv("PARALLEL", 1 if device in {"CUDA", "HIP"} else 0): return None
+  if mp_pool is None: mp_pool = multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker)
+  return mp_pool
 
 # *** http support ***
 
