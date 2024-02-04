@@ -130,6 +130,7 @@ class TestSafetensors(unittest.TestCase):
   def test_load_supported_types(self):
     import torch
     from safetensors.torch import save_file
+    from safetensors.numpy import save_file as np_save_file
     torch.manual_seed(1337)
     tensors = {
       "weight_F16": torch.randn((2, 2), dtype=torch.float16),
@@ -141,15 +142,28 @@ class TestSafetensors(unittest.TestCase):
       "weight_F64": torch.randn((2, 2), dtype=torch.double),
       "weight_BOOL": torch.tensor([True, False], dtype=torch.bool),
       "weight_I16": torch.tensor([127, 64], dtype=torch.short),
-      # pytorch does not support U16, UI, and UL dtypes.
       "weight_BF16": torch.randn((2, 2), dtype=torch.bfloat16),
     }
     save_file(tensors, temp("model.safetensors"))
 
-    try:
-      safe_load(temp("model.safetensors"))
-    except Exception as e:
-      self.fail(f"got error while loading safetensors: {e}")
+    loaded = safe_load(temp("model.safetensors"))
+    for k,v in loaded.items():
+      if v.dtype != dtypes.bfloat16:
+        assert v.numpy().dtype == tensors[k].numpy().dtype
+        np.testing.assert_allclose(v.numpy(), tensors[k].numpy())
+
+    # pytorch does not support U16, U32, and U64 dtypes.
+    tensors = {
+      "weight_U16": np.array([1, 2, 3], dtype=np.uint16),
+      "weight_U32": np.array([1, 2, 3], dtype=np.uint32),
+      "weight_U64": np.array([1, 2, 3], dtype=np.uint64),
+    }
+    np_save_file(tensors, temp("model.safetensors"))
+
+    loaded = safe_load(temp("model.safetensors"))
+    for k,v in loaded.items():
+      assert v.numpy().dtype == tensors[k].dtype
+      np.testing.assert_allclose(v.numpy(), tensors[k])
 
 def helper_test_disk_tensor(fn, data, np_fxn, tinygrad_fxn=None):
   if tinygrad_fxn is None: tinygrad_fxn = np_fxn
