@@ -8,7 +8,7 @@ from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap
 from tinygrad.shape.view import strides_for_shape
 from tinygrad.features.multi import MultiLazyBuffer
 
-safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64,
+safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "BF16": dtypes.bfloat16, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64,
                "F64": dtypes.double, "B": dtypes.bool, "I16": dtypes.short, "U16": dtypes.ushort, "UI": dtypes.uint, "UL": dtypes.ulong}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
