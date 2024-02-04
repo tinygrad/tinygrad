@@ -11,7 +11,7 @@ def reduce_axis(in_shape:Tuple[int, ...], out_shape:Tuple[int, ...]) -> Tuple[in
 def einsum_mulacc(einsum, get_strides, expand):
   def einscripts(x): return ''.join(["abcdefghijklmnopqrstuvwxyz"[i] for i in x])
   def get_input_axes(t, sum_axes): return tuple(i for i,stride in enumerate(get_strides(t)) if stride != 0 or i in sum_axes)
-  def get_sliced_input(t, axes): return t[tuple(slice(None) if i in axes else 0 for i in range(t.ndim))]
+  def get_sliced_input(t, axes): return t[tuple(slice(None) if i in axes else 0 for i in range(len(get_strides(t))))]
   def mulacc(a, b, out_shape):
     sum_axes = tuple(i for i,s in enumerate(out_shape) if s == 1)
     a_axes, b_axes = get_input_axes(a, sum_axes), get_input_axes(b, sum_axes)
