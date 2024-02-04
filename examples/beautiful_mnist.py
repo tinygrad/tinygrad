@@ -22,19 +22,23 @@ if __name__ == "__main__":
 
   model = Model()
   opt = nn.optim.Adam(nn.state.get_parameters(model))
+  bs=512
 
   @TinyJit
   def train_step() -> Tensor:
     with Tensor.train():
       opt.zero_grad()
-      samples = Tensor.randint(512, high=X_train.shape[0])
+      samples = Tensor.randint(bs, high=X_train.shape[0])
       # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
       loss = model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]).backward()
       opt.step()
       return loss
 
   @TinyJit
-  def get_test_acc() -> Tensor: return (model(X_test).argmax(axis=1) == Y_test).mean()*100
+  def get_test_acc() -> Tensor:
+    n_test_batches = X_test.shape[0]//bs
+    return (sum([(model(X_test[i:i+bs]).argmax(axis=1) == Y_test[i:i+bs]).float()
+                      for i in range(n_test_batches)]).mean())/n_test_batches*100
 
   test_acc = float('nan')
   for i in (t:=trange(70)):
