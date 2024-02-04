@@ -10,11 +10,11 @@ def reduce_axis(in_shape:Tuple[int, ...], out_shape:Tuple[int, ...]) -> Tuple[in
 
 def einsum_mulacc(einsum, get_strides, expand):
   def einscripts(x): return ''.join(["abcdefghijklmnopqrstuvwxyz"[i] for i in x])
-  def get_input_axes(strides, sum_axes): return tuple(i for i,s in enumerate(strides) if s != 0 or i in sum_axes)
+  def get_input_axes(t, sum_axes): return tuple(i for i,s in enumerate(get_strides(t)) if s != 0 or i in sum_axes)
   def get_sliced_input(t, axes): return t[tuple(slice(None) if i in axes else 0 for i in range(t.ndim))]
   def mulacc(a, b, out_shape):
     sum_axes = tuple(i for i,s in enumerate(out_shape) if s == 1)
-    a_axes, b_axes = get_input_axes(get_strides(a), sum_axes), get_input_axes(get_strides(b), sum_axes)
+    a_axes, b_axes = get_input_axes(a, sum_axes), get_input_axes(b, sum_axes)
     a_input, b_input = get_sliced_input(a, a_axes), get_sliced_input(b, b_axes)
     out_axes = [i for i in range(len(out_shape)) if (i in a_axes or i in b_axes) and i not in sum_axes]
     ret = einsum(f"{einscripts(a_axes)}, {einscripts(b_axes)} -> {einscripts(out_axes)}", a_input, b_input)
