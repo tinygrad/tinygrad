@@ -1,6 +1,6 @@
 import unittest
 from PIL import Image
-from tinygrad.helpers import Context, ContextVar, merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv
+from tinygrad.helpers import Context, ContextVar, merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, get_contraction
 from tinygrad.shape.symbolic import Variable, NumNode
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -170,6 +170,75 @@ class TestMemoryview(unittest.TestCase):
     mv = to_mv(ct, len(base))
     mv[0] = 2
     assert base[0] == 2
+
+class TestGetContraction(unittest.TestCase):
+  def test_contraction(self):
+    r = get_contraction((1,2,3,4), (2,3,4))
+    self.assertEqual(r, [[0, 1], [2], [3]])
+
+    r = get_contraction((2,1,3,4), (2,3,4))
+    self.assertEqual(r, [[0], [1, 2], [3]])
+
+    r = get_contraction((1,2,3,1,4), (1,2,3,4))
+    self.assertEqual(r, [[], [0, 1], [2], [3, 4]])
+
+    r = get_contraction((1,2,3,1,4,1,1), (2,3,4))
+    self.assertEqual(r, [[0, 1], [2], [3, 4, 5, 6]])
+
+    r = get_contraction((1,2,3,4), (1,2,3*4))
+    self.assertEqual(r, [[], [0, 1], [2, 3]])
+
+    r = get_contraction((1,2,3,4), (2,1,3,4))
+    self.assertEqual(r, [[0, 1], [], [2], [3]])
+
+    r = get_contraction((1,2,3,4), (1,1,2*3*4,1))
+    self.assertEqual(r, [[], [], [0,1,2,3], []])
+
+    r = get_contraction((2,1,3,4), (1,2,3,4))
+    self.assertEqual(r, [[], [0], [1, 2], [3]])
+
+    r = get_contraction((1,2,3,4), (2*3*4,1,1,1))
+    self.assertEqual(r, [[0, 1, 2, 3], [], [], []])
+
+    r = get_contraction((4,4,4,4), (16,1,16))
+    self.assertEqual(r, [[0, 1], [], [2, 3]])
+
+    r = get_contraction((1,2,3,4,1,1,1), (2,3,4))
+    self.assertEqual(r, [[0, 1], [2], [3, 4, 5, 6]])
+
+    r = get_contraction((1,2,3,4), (1,2,3,4,1))
+    self.assertEqual(r, [[], [0, 1], [2], [3], []])
+
+    r = get_contraction((14,1,384,14,1,1,1,1), (1,14,384,14))
+    self.assertEqual(r, [[], [0], [1,2], [3,4,5,6,7]])
+
+    r = get_contraction((14,1,384,1,14,1,1,1,1), (1,14,384,14))
+    self.assertEqual(r, [[], [0], [1,2], [3,4,5,6,7,8]])
+
+    r = get_contraction((512, 512), (1, 1, 512, 1, 1, 1, 1, 512))
+    self.assertEqual(r, [[], [], [0], [], [], [], [], [1]])
+
+    r = get_contraction((1,2,3,4), (1,2,6,2))
+    self.assertEqual(r, None)
+
+  def test_contraction_ones(self):
+    r = get_contraction((1,), (1,1,1))
+    self.assertEqual(r, [[], [], [0]])
+
+    r = get_contraction((1,1), (1,1,1))
+    self.assertEqual(r, [[], [], [0, 1]])
+
+    r = get_contraction((1,1,1,1), (1,))
+    self.assertEqual(r, [[0,1,2,3]])
+
+    r = get_contraction((1,1,1,1), (1,1))
+    self.assertEqual(r, [[], [0,1,2,3]])
+
+    r = get_contraction((1,1,1,1), (1,1,1))
+    self.assertEqual(r, [[], [], [0,1,2,3]])
+
+    r = get_contraction((1,1,1,1), (1,1,1,1))
+    self.assertEqual(r, [[], [], [], [0,1,2,3]])
 
 if __name__ == '__main__':
   unittest.main()
