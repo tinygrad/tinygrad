@@ -264,12 +264,11 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 
 class Compiler:
   linearizer_opts: ClassVar[LinearizerOptions]
-  def __init__(self, cachekey=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
+  def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
   def render(self, name:str, uops) -> str: raise NotImplementedError("need a render function")
   def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
   def compile_cached(self, src:str) -> bytes:
-    if self.cachekey is not None: lib = diskcache_get(self.cachekey, src)
-    if lib is None:
+    if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
       lib = self.compile(src)
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib

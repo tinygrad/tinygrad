@@ -564,7 +564,7 @@ class Tensor:
   def mean(self, axis=None, keepdim=False):
     assert all_int(self.shape), "does not support symbolic shape"
     out = self.sum(axis=axis, keepdim=keepdim)
-    return out.mul(prod(out.shape)/prod(self.shape)) if 0 not in self.shape else out
+    return out.div(prod(self.shape) / prod(out.shape)) if 0 not in out.shape else out
   def var(self, axis=None, keepdim=False, correction=1):
     assert all_int(self.shape), "does not support symbolic shape"
     square_sum = ((self - self.mean(axis=axis, keepdim=True)).square()).sum(axis=axis, keepdim=keepdim)
@@ -675,7 +675,10 @@ class Tensor:
       return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
 
     # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
-    def apply_matrix(mat, t, dim=0): return t if dim == len(HW) else Tensor.stack([apply_matrix(mat, sum(mm*t[j] for j,mm in enumerate(m) if mm), dim=dim+1) for m in mat])  # noqa: E501
+    def apply_matrix(mat, t, dims=len(HW)):
+      t_ = t.reshape(t.shape[:dims]+(1,)*dims+t.shape[dims:]).expand(t.shape[:dims]+(len(mat),)*dims+t.shape[dims:])
+      matcols = [[Tensor.cat(*[Tensor.full(t_.shape[dims:dims+dim]+(1,)+t_.shape[dims+dim+1:], float(m[k]), device=t.device) for m in mat], dim=dim) for k in range(len(mat[0]))] for dim in range(dims)]  # noqa: E501
+      return sum(prod(col[idx] for col, idx in zip(matcols, mat_is)) * t_[mat_is] for mat_is in itertools.product(range(len(mat[0])), repeat=dims))
     HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
     winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
     winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
@@ -686,16 +689,16 @@ class Tensor:
     # (bs, cin_, tyx, HWI)
     d = self.pad2d(sum([[padding_[i*2], padding_[i*2+1] + (-(dim + sum(padding_[i * 2:(i + 1) * 2]) - 2) % 4)] for i, dim in enumerate(self.shape[-len(HW):])], []))._pool(HWI, HWO)  # noqa: E501
     # move HW to the front: # (HWI, bs, cin_, tyx)
-    d = d.permute(*range(len(d.shape)-len(HW),len(d.shape)), *range(len(d.shape)-len(HW))).contiguous_backward()
+    d = d.permute(*range(len(d.shape)-len(HW),len(d.shape)), *range(len(d.shape)-len(HW)))
     tyx = d.shape[-len(HWI):]  # dim of tiling
 
     g = weight.permute(*range(len(weight.shape)-len(HW),len(weight.shape)), *range(len(weight.shape)-len(HW)))  # move HW to the front
 
     # compute 6x6 winograd tiles: GgGt, BtdB
     # (HWI, groups * rcout, cin) -> (HWI, bs=1, groups, rcout, cin, tyx=(1,1))
-    gfactors = apply_matrix(winograd_G, g).contiguous().reshape(*HWI, 1, groups, rcout, cin, *([1]*len(tyx)))
+    gfactors = apply_matrix(winograd_G, g).reshape(*HWI, 1, groups, rcout, cin, *([1]*len(tyx)))
     # (HWI, bs, cin_, tyx) -> (HWI, bs, groups, 1 ,cin, *tyx)
-    dfactors = apply_matrix(winograd_Bt, d).contiguous().reshape(*HWI, bs, groups, 1, cin, *tyx)
+    dfactors = apply_matrix(winograd_Bt, d).reshape(*HWI, bs, groups, 1, cin, *tyx)
 
     # matmul; sum across cin: (HWI, bs, groups, rcout, *tyx); then HWI -> HWO: (HWO, bs, groups, rcout, *tyx)
     ret = apply_matrix(winograd_At, (gfactors * dfactors).sum(axis=-1-len(HW), acc_dtype=acc_dtype))
@@ -735,6 +738,7 @@ class Tensor:
   @staticmethod
   def _tri(r:sint, c:sint, k:int=0, **kwargs) -> Tensor:
     assert all_int((r,c)), "does not support symbolic"
+    if r == 0: return Tensor.zeros((r, c), **kwargs)
     return Tensor.arange(r, **kwargs).unsqueeze(1).expand(r,c) <= Tensor.arange(-k, c-k, **kwargs).unsqueeze(0).expand(r,c)
   def triu(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k, device=self.device).where(self, 0)
   def tril(self, k:int=0) -> Tensor: return Tensor._tri(self.shape[-2], self.shape[-1], k=k+1, device=self.device).where(0, self)
@@ -916,10 +920,11 @@ class Tensor:
     return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
 
   def batchnorm(self, weight:Optional[Tensor], bias:Optional[Tensor], mean:Tensor, invstd:Tensor) -> Tensor:
-    x = (self - mean.reshape(shape=[1, -1, 1, 1]))
-    if weight: x = x * weight.reshape(shape=[1, -1, 1, 1])
-    ret = x.mul(invstd.reshape(shape=[1, -1, 1, 1]) if len(invstd.shape) == 1 else invstd)
-    return (ret + bias.reshape(shape=[1, -1, 1, 1])) if bias else ret
+    shape = (1, -1) + (1,) * (self.ndim-2)
+    x = self - mean.reshape(shape)
+    if weight: x = x * weight.reshape(shape)
+    ret = x.mul(invstd.reshape(shape) if len(invstd.shape) == 1 else invstd)
+    return (ret + bias.reshape(shape)) if bias else ret
 
   def dropout(self, p=0.5) -> Tensor:
     if not Tensor.training or p == 0: return self

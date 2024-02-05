@@ -459,7 +459,7 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_equal(Tensor([]).max().numpy(), -float("inf"))
     np.testing.assert_equal(Tensor([]).min().numpy(), float("inf"))
     np.testing.assert_equal(Tensor([]).sum().numpy(), 0)
-    np.testing.assert_equal(Tensor([]).mean().numpy(), 0)
+    np.testing.assert_equal(Tensor([]).mean().numpy(), float("nan"))
 
 class TestTensorCreationDevice(unittest.TestCase):
   # test auxiliary tensors are created on the same device
