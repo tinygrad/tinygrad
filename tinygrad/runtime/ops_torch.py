@@ -1,3 +1,4 @@
+import os
 import torch
 from typing import Dict, Callable
 from tinygrad.ops import BufferOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, MovementOps, Op
@@ -6,6 +7,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, flatten
 from tinygrad.runtime.ops_cpu import einsum_mulacc, reduce_axis
 
+os.environ['PYTORCH_CUDA_ALLOC_CONF']='expandable_segments:True'
 device = torch.device("cuda:0" if torch.cuda.is_available() else ("mps" if getenv("MPS", 0) else "cpu"))
 type_map = {torch.bool: dtypes.bool,
             torch.int8: dtypes.int8, torch.uint8: dtypes.uint8, torch.int16: dtypes.int16, torch.int32: dtypes.int32, torch.int64: dtypes.int64,
