@@ -683,6 +683,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x.mean())
   def test_mean_axis(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)))
+  def test_mean_zero_axis(self):
+    helper_test_op([], lambda: torch.ones((1,0,3,0,5)).mean(axis=(1,3)), lambda: Tensor.ones((1,0,3,0,5)).mean(axis=(1,3)), forward_only=True)
 
   def test_var(self):
     helper_test_op([(15, 25, 35)], lambda x: x.var())
