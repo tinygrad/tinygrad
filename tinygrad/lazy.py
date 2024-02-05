@@ -104,6 +104,7 @@ class LazyBuffer:
 
   def e(self, op:Union[LoadOps, UnaryOps, BinaryOps, TernaryOps], *in_srcs:LazyBuffer, arg:Optional[Any]=None) -> LazyBuffer:
     srcs: List[LazyBuffer] = []
+    if isinstance(op, UnaryOps) and self != self.base: return self.base.e(op, *in_srcs, arg=arg)._view(self.st)
     for s in (self,)+in_srcs:
       if s == s.base and s.base.contiguous_child and (root:=s.base.contiguous_child[0]()) is not None:
         srcs.append(root._view(s.base.contiguous_child[1]))
