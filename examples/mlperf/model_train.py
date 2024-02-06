@@ -202,7 +202,7 @@ def train_resnet():
 
 
     # "eval" loop. Evaluate every 4 epochs, starting with epoch 0
-    if e % 1 == 0:
+    if (e+1) % 1 == 0:
       eval_loss = []
       eval_times = []
       eval_top_1_acc = []
@@ -244,7 +244,7 @@ def train_resnet():
                 "eval/top_5_acc": sum(eval_top_5_acc) / len(eval_top_5_acc),
       })
 
-      if e % getenv("CKPT_EPOCHS", 4) == 0:
+      if (e+1) % getenv("CKPT_EPOCHS", 4) == 0:
         if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
         fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
         print(f"saving ckpt to {fn}")
