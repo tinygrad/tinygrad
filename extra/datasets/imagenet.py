@@ -13,12 +13,15 @@ def get_imagenet_categories():
   return {v[0]: int(k) for k,v in ci.items()}
 
 @diskcache
-def get_train_files(): return glob.glob(str(BASEDIR / "train/*/*"))
+def get_train_files():
+  train_files = glob.glob(str(BASEDIR / "train/*/*"))
+  if getenv("TEST_TRAIN"): train_files = train_files[:getenv("TEST_TRAIN")]
+  return train_files
 
 @functools.lru_cache(None)
 def get_val_files():
   val_files = glob.glob(str(BASEDIR / "val/*/*"))
-  if getenv("TEST_VAL"): val_files=val_files[:getenv("TEST")]
+  if getenv("TEST_VAL"): val_files=val_files[:getenv("TEST_VAL")]
   return val_files
 
 def normalization(img, transpose=False):
