@@ -46,7 +46,10 @@ def train_resnet():
   np.random.seed(seed)
   random.seed(seed)
 
-  wandb.init()
+  if getenv("WANDB_RESUME", ""):
+    wandb.init(id=getenv("WANDB_RESUME", ""), resume="must")
+  else:
+    wandb.init()
 
   if FP16: dtypes.default_float = dtypes.float16
 
