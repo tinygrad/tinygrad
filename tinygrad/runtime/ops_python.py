@@ -14,39 +14,36 @@ class PythonProgram:
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     # TODO: abstract this out so it can be used for constant folding
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]+local_size[::-1]]):
-      ul, pbufs = {}, list(bufs)
+      ul = {}
+      pbufs: List[memoryview] = list(bufs)
       for i,u in enumerate(self.uops):
-        vidx = [self.uops.index(v) for v in u.vin]
-        if u.uop is UOps.DEFINE_GLOBAL: ul[i] = pbufs.pop()
+        inp = [ul[self.uops.index(v)] for v in u.vin]
+        if u.uop is UOps.DEFINE_GLOBAL: ul[i] = pbufs.pop(0).cast(u.dtype.fmt)
         elif u.uop is UOps.SPECIAL:
           if u.arg[1][0] == 'g': ul[i] = idxs[2-u.arg[0]]
           elif u.arg[1][0] == 'l': ul[i] = idxs[5-u.arg[0]]
         elif u.uop is UOps.CONST: ul[i] = u.arg
         elif u.uop is UOps.CAST:
           assert u.dtype.sz > 1
-          ul[i] = [ul[v] for v in vidx]
+          ul[i] = inp
         elif u.uop is UOps.STORE:
-          if isinstance(ul[vidx[2]], list):
-            for j,val in enumerate(ul[vidx[2]]):
-              ul[vidx[0]][ul[vidx[1]]+j] = val
+          if isinstance(inp[2], list):
+            for j,val in enumerate(inp[2]):
+              inp[0][inp[1] + j] = val
           else:
-            ul[vidx[0]][ul[vidx[1]]] = ul[vidx[2]]
+            inp[0][inp[1]] = inp[2]
         elif u.uop is UOps.LOAD:
           if u.dtype.sz > 1:
-            ul[i] = [ul[vidx[0]][ul[vidx[1]]+j] for j in range(u.dtype.sz)]
+            ul[i] = [inp[0][inp[1]+j] for j in range(u.dtype.sz)]
           else:
-            ul[i] = ul[vidx[0]][ul[vidx[1]]]
+            ul[i] = inp[0][inp[1]]
         elif u.uop is UOps.GEP:
-          ul[i] = ul[vidx[0]][u.arg]
+          ul[i] = inp[0][u.arg]
         elif u.uop is UOps.ALU:
           if u.arg == BinaryOps.MUL:
-            ul[i] = ul[vidx[0]] * ul[vidx[1]]
+            ul[i] = inp[0] * inp[1]
           elif u.arg == BinaryOps.ADD:
-            ul[i] = ul[vidx[0]] + ul[vidx[1]]
-          else:
-            print(u)
-        else:
-          print(u)
+            ul[i] = inp[0] + inp[1]
 
 class PythonCompiler(Compiler):
   linearizer_opts = LinearizerOptions()
@@ -54,7 +51,7 @@ class PythonCompiler(Compiler):
   def compile(self, src:str) -> bytes: return base64.b64decode(src)
 
 class PythonAllocator(Allocator):
-  def _alloc(self, size): return bytearray(size)
+  def _alloc(self, size): return memoryview(bytearray(size))
   def copyin(self, dest, src:memoryview): dest[:] = src
   def copyout(self, dest:memoryview, src): dest[:] = src
 
