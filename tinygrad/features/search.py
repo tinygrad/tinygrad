@@ -1,5 +1,5 @@
-from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
-import itertools, functools, random, math, time, multiprocessing, traceback, signal
+from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable, Union
+import itertools, random, math, time, multiprocessing, traceback, signal
 from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner, Compiler
 from tinygrad.ops import MemBuffer, LazyOp
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
@@ -48,11 +48,16 @@ def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=No
   src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
   return compiler.compile(src), lin.global_size, lin.local_size
 
-def _try_compile_linearized_w_idx(x, compiler:Compiler):
-  try: return (x[0], _compile_linearizer(compiler, x[1], "test"))
+def _try_compile_linearized_w_idx(args):
+  try: return args[0], _compile_linearizer(*args[1])
   except Exception:
     if DEBUG >= 4: traceback.print_exc()
-    return (x[0], None)
+    return args[0], None
+
+def _compile_parallel(compiler:Compiler, linearizers:List[Linearizer]):
+  global beam_pool
+  mapfn: Union[type[map] | Callable] = map if beam_pool is None else beam_pool.imap_unordered
+  return mapfn(_try_compile_linearized_w_idx, enumerate([(compiler, lin, 'test') for lin in linearizers]))
 
 # workers should ignore ctrl c
 def _init_worker(): signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -112,8 +117,8 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
     while not exiting:
       acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam]) if len(beam) else [lin]
       timed_lins: List[Tuple[Linearizer, float]] = []
-      _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=cast(Compiled, Device[lin.opts.device]).compiler)
-      for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(acted_lins))):
+      compiler = cast(Compiled, Device[lin.opts.device]).compiler
+      for i,proc in _compile_parallel(compiler, acted_lins):
         if proc is None: continue
         lib, global_size, local_size = proc
         if lib in seen_libs: continue
