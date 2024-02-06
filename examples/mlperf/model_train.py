@@ -5,19 +5,20 @@ from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
 from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_parameters, get_state_dict
-from tinygrad.nn import optim
+from tinygrad.nn import optim, state
 from tqdm import tqdm
 import numpy as np
 import random
 import wandb
 import time
+import os
 
 FP16 = getenv("FP16", 0)
 BS, EVAL_BS, STEPS = getenv("BS", 64), getenv('EVAL_BS', 64), getenv("STEPS", 1000)
 
 def train_resnet():
   # TODO: Resnet50-v1.5
-  from extra.models.resnet import ResNet50
+  from extra.models.resnet import ResNet50, ResNet18
   from examples.mlperf.dataloader import batch_load_resnet
   from extra.datasets.imagenet import get_train_files, get_val_files
   from extra.lr_scheduler import MultiStepLR, LR_Scheduler, Optimizer, PolynomialLR
@@ -50,16 +51,15 @@ def train_resnet():
   if FP16: dtypes.default_float = dtypes.float16
 
   if getenv("MOCKGPUS", 0):
-    GPUS = [f'{Device.DEFAULT}:{0}' for i in range(getenv("MOCKGPUS", 0))]
+    GPUS = tuple([f'{Device.DEFAULT}:{0}' for i in range(getenv("MOCKGPUS", 0))])
   else:
-    GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))]
+    GPUS = tuple([f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))])
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
 
   num_classes = 1000
-  model = ResNet50(num_classes)
+  model = ResNet50(num_classes) if not getenv("SMALL") else ResNet18(num_classes)
 
-  if getenv("TESTEVAL"): model.load_from_pretrained()
   for v in get_parameters(model):
     v.to_(GPUS)
   parameters = get_parameters(model)
@@ -99,8 +99,8 @@ def train_resnet():
   base_lr = 8.4 * (BS/1024)
   epochs = getenv("EPOCHS", 60)
   optimizer = optim.SGD(parameters, base_lr / lr_scaler, momentum=.875, weight_decay=1/2**15)
-  steps_in_train_epoch = (len(get_train_files()) // BS) - 1
-  steps_in_val_epoch = (len(get_val_files()) // EVAL_BS) - 1
+  steps_in_train_epoch = (len(get_train_files()) // BS)
+  steps_in_val_epoch = (len(get_val_files()) // EVAL_BS)
   #scheduler = MultiStepLR(optimizer, [m for m in lr_steps], gamma=lr_gamma, warmup=lr_warmup)
   scheduler = PolynomialLR(optimizer, base_lr, 1e-4, epochs=epochs * steps_in_train_epoch, warmup=lr_warmup_epochs * steps_in_train_epoch)
   print(f"training with batch size {BS} for {epochs} epochs")
@@ -111,7 +111,19 @@ def train_resnet():
         if i % 1000 == 0: print(epoch, i, scheduler.get_lr().numpy())
     exit(0)
 
-  for e in range(epochs):
+  start_epoch = 0
+  if ckpt:=getenv("RESUME", ""):
+    print(f"resuming from {ckpt}")
+    state.load_state_dict(scheduler, state.safe_load(ckpt))
+    start_epoch = int(scheduler.epoch_counter.numpy().item() / steps_in_train_epoch)
+    print(f"resuming at epoch {start_epoch}")
+  elif getenv("TESTEVAL"): model.load_from_pretrained()
+  for v in get_parameters(model):
+    # can't use mlb.to(tuple)...
+    if not isinstance(v.device, tuple):
+      v.to_(GPUS)
+
+  for e in range(start_epoch, epochs):
     # train loop
     Tensor.training = True
     scheduler.step()
@@ -206,6 +218,13 @@ def train_resnet():
                 "eval/top_1_acc": sum(eval_top_1_acc) / len(eval_top_1_acc),
                 "eval/top_5_acc": sum(eval_top_5_acc) / len(eval_top_5_acc),
       })
+
+      if e % getenv("CKPT_EPOCHS", 4) == 0:
+        if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
+        # scheduler has optimizer and model
+        fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
+        print(f"saving ckpt to {fn}")
+        state.safe_save(state.get_state_dict(scheduler), fn)
 
 def train_retinanet():
   # TODO: Retinanet
