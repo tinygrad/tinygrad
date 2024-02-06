@@ -47,32 +47,28 @@ class HSAProgram:
   def __del__(self):
     if hasattr(self, 'exec'): check(hsa.hsa_executable_destroy(self.exec))
 
+  # @profile
   def __call__(self, *args, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     if not hasattr(self, "args_struct_t"):
       self.args_struct_t = init_c_struct_t(tuple([(f'f{i}', hip.hipDeviceptr_t) for i in range(len(args))] +
                                             [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
       assert ctypes.sizeof(self.args_struct_t) == self.kernargs_segment_size.value, f"{ctypes.sizeof(self.args_struct_t)} != {self.kernargs_segment_size.value}"
 
-    kernargs, wait_signals = None, []
+    kernargs, wait_signals = None, [] if self.device.last_copy_signal is None else [self.device.last_copy_signal]
     if self.kernargs_segment_size.value > 0:
       kernargs = self.device.alloc_kernargs(self.kernargs_segment_size.value)
       args_st = self.args_struct_t.from_address(kernargs)
-      for i in range(len(args)):
-        args_st.__setattr__(f'f{i}', arg := args[i].value)
-
-        # Need to wait only for copies to complete. Kernel accesses are ordered with barriers.
-        if arg in self.device.resource_to_signal and self.device.resource_to_signal[arg][1] == USAGE_MEM:
-          wait_signals.append(self.device.resource_to_signal.pop(arg)[0])
+      for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].value)
       for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
     signal = self.device.hw_queue.submit_kernel(self, global_size, local_size, kernargs, signals=wait_signals)
     self.device.acquired_signals.extend(wait_signals)
     if wait:
       hsa.hsa_signal_wait_scacquire(signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
-      check(hsa.hsa_amd_profiling_get_dispatch_time(self.device.agent, signal, ctypes.byref(timings := hsa.hsa_amd_profiling_dispatch_time_t())))
+      check(hsa.hsa_amd_profiling_get_dispatch_time(self.device.agent, self.device.last_exec_signal, ctypes.byref(timings := hsa.hsa_amd_profiling_dispatch_time_t())))
       self.device.acquired_signals.append(signal)
-      return (timings.end - timings.start) * self.device.hw_queue.clocks_to_time # TODO: move out
-    else:
-      for arg in args: self.device.resource_to_signal[arg.value] = (signal, USAGE_EXEC)
+      self.device.last_exec_signal = None
+      return (timings.end - timings.start) * self.device.hw_queue.clocks_to_time
+    else: self.device.last_exec_signal = signal
 
 
 T = TypeVar("T")
@@ -86,26 +82,29 @@ class HSAAllocator(LRUAllocator):
     return buf
 
   def _free(self, opaque:T):
-    # TODO: not sure this is great.
-    if opaque.value in self.device.resource_to_signal: self.device.delayed_free(opaque)
-    else: check(hsa.hsa_amd_memory_pool_free(opaque))
+    self.device.synchronize()
+    check(hsa.hsa_amd_memory_pool_free(opaque))
 
   def copyin(self, dest:T, src: memoryview):
     sdma_engine = self.device.select_sdma(len(src))
     agents = [HSADevice.cpu_agent, self.device.agent]
     c_agents = (hsa.hsa_agent_t * len(agents))(*agents)
 
-    wait_signal, c_wait_signal = None, None
-    if dest.value in self.device.resource_to_signal:
-      wait_signal = self.device.resource_to_signal.pop(dest.value)[0] # wait for copies & executions
-      c_wait_signal = (hsa.hsa_signal_t * 1)(wait_signal)
+    wait_signal, c_wait_signal = [], None
+    if self.device.last_copy_signal:
+      wait_signal.append(self.device.last_copy_signal)
+      self.device.last_copy_signal = None
+    if self.device.last_exec_signal:
+      wait_signal.append(self.device.last_exec_signal)
+      self.device.last_exec_signal = None
+    if wait_signal: c_wait_signal = (hsa.hsa_signal_t * len(wait_signal))(*wait_signal)
 
     check(hsa.hsa_amd_memory_lock_to_pool(from_mv(src), src.nbytes, c_agents, len(agents), HSADevice.cpu_memory_pool, 0, ctypes.byref(src_addr := ctypes.c_void_p())))
     copy_signal = self.device.alloc_signal()
-    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, src_addr, HSADevice.cpu_agent, src.nbytes, 1 if c_wait_signal is not None else 0, c_wait_signal, copy_signal, sdma_engine, True))
-    self.device.resource_to_signal[dest.value] = (copy_signal, USAGE_MEM)
+    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, src_addr, HSADevice.cpu_agent, src.nbytes, len(wait_signal), c_wait_signal, copy_signal, sdma_engine, True))
+    self.device.last_copy_signal = copy_signal
     self.device.pending_copyin.append(src)
-    if wait_signal: self.device.acquired_signals.append(wait_signal)
+    self.device.acquired_signals.extend(wait_signal)
 
   def copyout(self, dest:memoryview, src:T):
     self.device.synchronize()
@@ -152,26 +151,34 @@ class HSADevice(Compiled):
     self.pending_copyin = []
     self.acquired_signals = []
     self.delayed_free = []
-    self.resource_to_signal = dict()
+    self.next_sdma = 0
+
+    # Pretend that we execute copy and exec in different streams, so we need to synchronise them.
+    self.last_exec_signal = None
+    self.last_copy_signal = None
 
     super().__init__(device, HSAAllocator(self), HSACompiler(self.arch), functools.partial(HSAProgram, self), None)
 
   def synchronize(self):
-    for sig in self.resource_to_signal.values():
-      if sig[1] == USAGE_MEM: self.hw_queue.signals.append(sig[0])
-      else: self.acquired_signals.append(sig[0])
+    if self.last_exec_signal: self.hw_queue.signals.append(self.last_exec_signal)
+    if self.last_copy_signal: self.hw_queue.signals.append(self.last_copy_signal)
     self.hw_queue.wait()
     for opaque in self.pending_copyin: check(hsa.hsa_amd_memory_unlock(from_mv(opaque)))
     for opaque in self.delayed_free: check(hsa.hsa_amd_memory_pool_free(opaque))
     for sig in self.acquired_signals: hsa.hsa_signal_store_relaxed(sig, 1)
     self.signal_pool.extend(self.acquired_signals)
     self.pending_copyin.clear()
-    self.resource_to_signal.clear()
     self.delayed_free.clear()
     self.acquired_signals.clear()
     self.kernarg_next = self.kernarg_ptr
 
-  def select_sdma(self, sz): return hsa.HSA_AMD_SDMA_ENGINE_0
+    self.last_exec_signal = None
+    self.last_copy_signal = None
+
+  def select_sdma(self, sz):
+    self.next_sdma ^= 1
+    return hsa.HSA_AMD_SDMA_ENGINE_0 if self.next_sdma == 0 else hsa.HSA_AMD_SDMA_ENGINE_1
+
   def alloc_signal(self):
     if len(self.signal_pool): return self.signal_pool.pop()
     check(hsa.hsa_amd_signal_create(1, 0, None, 0, ctypes.byref(signal := hsa.hsa_signal_t())))
