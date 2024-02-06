@@ -684,12 +684,14 @@ class TestOps(unittest.TestCase):
   def test_mean_axis(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)))
   def test_mean_zero_axis(self):
-    helper_test_op([], lambda: torch.ones((1,0,3,0,5)).mean(axis=(1,3)), lambda: Tensor.ones((1,0,3,0,5)).mean(axis=(1,3)), forward_only=True)
+    helper_test_op([(1,0,3,0,5)], lambda x: x.mean(axis=(1,3)))
 
   def test_var(self):
     helper_test_op([(15, 25, 35)], lambda x: x.var())
     helper_test_op([(15, 25, 35)], lambda x: x.var(correction=0))
     helper_test_op([(15, 25, 35)], lambda x: x.var(correction=5))
+    # TODO: fix this
+    # helper_test_op([(10, 2)], lambda x: x.var(correction=50))
   def test_var_axis(self):
     helper_test_op([(15, 25, 35)], lambda x: x.var(0))
     helper_test_op([(15, 25, 35)], lambda x: x.var(2))
@@ -697,6 +699,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(15, 25, 35)], lambda x: x.var(0, correction=0))
     helper_test_op([(15, 25, 35)], lambda x: x.var(2, correction=0))
     helper_test_op([(15, 25, 35)], lambda x: x.var([1, 2], correction=0))
+  def test_var_zero_axis(self):
+    helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3)))
+    helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3), correction=0))
+    helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3), correction=5))
   def test_var_keepdim(self):
     helper_test_op([(15, 25, 35)], lambda x: x.var(keepdim=True))
     helper_test_op([(15, 25, 35)], lambda x: x.var(0, keepdim=True, correction=0))
@@ -712,6 +718,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(15, 25, 35)], lambda x: x.std(0, correction=0))
     helper_test_op([(15, 25, 35)], lambda x: x.std(2, correction=0))
     helper_test_op([(15, 25, 35)], lambda x: x.std([1, 2], correction=0))
+  def test_std_zero_axis(self):
+    helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3)))
+    helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=0))
+    helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=5))
   def test_std_keepdim(self):
     helper_test_op([(15, 25, 35)], lambda x: x.std(keepdim=True))
     helper_test_op([(15, 25, 35)], lambda x: x.std(0, keepdim=True, correction=0))
