@@ -1,5 +1,6 @@
 import math
 from typing import Optional, Union, Tuple, cast, List
+from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import prod, getenv
 from tinygrad.nn import optim, state  # noqa: F401
@@ -35,8 +36,8 @@ class BatchNorm2d:
     if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
     else: self.weight, self.bias = None, None
 
-    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
-    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
+    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False, dtype=dtypes.float32), Tensor.ones(sz, requires_grad=False, dtype=dtypes.float32)
+    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False, dtype=dtypes.float32)
 
   def __call__(self, x:Tensor):
     rtype = x.dtype
