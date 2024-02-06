@@ -273,8 +273,12 @@ class HIPLanguage(CStyleLanguage):
   __attribute__((device)) __attribute__((const)) _Float16 __ocml_sqrt_f16(_Float16);
   }\n""" + '\n'.join([_make_hip_dtype(*x) for x in [("signed int", "int", 2),
                      ("_Float16", "half", 2), ("_Float16", "half", 4), ("_Float16", "half", 8), ("_Float16", "half", 16),
-                     ("float", "float", 2), ("float", "float", 4), ("float", "float", 8)]]) + \
-  'extern "C" __attribute__((global))'
+                     ("float", "float", 2), ("float", "float", 4), ("float", "float", 8)]]) + """
+  static __attribute__((device)) half8 __hip_wmma_f16_f16(half16 a, half16 b, half8 c) {
+    half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
+    c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
+    for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;
+  }\nextern "C" __attribute__((global))"""
   code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_hip}
