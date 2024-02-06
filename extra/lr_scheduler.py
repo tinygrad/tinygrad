@@ -1,18 +1,19 @@
 import math
-from typing import List
+from typing import List, Union
 from tinygrad.nn.optim import Optimizer
 from tinygrad.tensor import Tensor
+from tinygrad.dtype import dtypes
 
 class LR_Scheduler:
   def __init__(self, optimizer: Optimizer):
     self.optimizer = optimizer
-    self.epoch_counter = Tensor([0], requires_grad=False, device=self.optimizer.device)
+    self.epoch_counter = Tensor([0], requires_grad=False, device=self.optimizer.device, dtype=dtypes.float32)
 
-  def get_lr(self): pass
+  def get_lr(self) -> Union[Tensor, int]: pass
 
   def step(self) -> None:
     self.epoch_counter.assign(self.epoch_counter + 1).realize()
-    self.optimizer.lr.assign(self.get_lr()).realize()
+    self.optimizer.lr.assign(lr.cast(self.optimizer.lr.dtype) if isinstance(lr := self.get_lr(), Tensor) else lr).realize()
 
 class MultiStepLR(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, milestones: List[int], gamma=0.1):
@@ -24,6 +25,17 @@ class MultiStepLR(LR_Scheduler):
     if self.epoch_counter.numpy()[0] not in self.milestones:
       return self.optimizer.lr
     return self.optimizer.lr * self.gamma
+
+class PolynomialLR(LR_Scheduler):
+  def __init__(self, optimizer: Optimizer, start_lr, end_lr, epochs, warmup=0, power=2):
+    super().__init__(optimizer)
+    assert epochs > warmup
+    self.start_lr, self.end_lr, self.epochs, self.power, self.warmup = start_lr, end_lr, epochs, power, warmup
+
+  def get_lr(self):
+    warmup_lr = ((self.epoch_counter + 1) * (1.0/(self.warmup+1))) * self.start_lr
+    x= (1- (self.epoch_counter - self.warmup)/(self.epochs - self.warmup))
+    return (self.epoch_counter < self.warmup).where(warmup_lr, (self.start_lr-self.end_lr)*x*x+self.end_lr)
 
 class ReduceLROnPlateau(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, mode="min", factor=0.1, patience=10, threshold=1e-4, threshold_mode="rel"):

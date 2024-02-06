@@ -33,19 +33,31 @@ def shuffled_indices(n):
     del indices[i]
 
 def loader_process(q_in, q_out, X:Tensor):
+  import signal
+  signal.signal(signal.SIGINT, signal.SIG_IGN)
+
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
-      idx, fn = _recv
+      idx, fn, seed, val = _recv
       img = Image.open(fn)
       img = img.convert('RGB') if img.mode != "RGB" else img
 
-      # eval: 76.08%, load in 0m7.366s (0m5.301s with simd)
-      # sudo apt-get install libjpeg-dev
-      # CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
-      rescale = min(img.size) / 256
-      crop_left = (img.width - 224*rescale) / 2.0
-      crop_top = (img.height - 224*rescale) / 2.0
-      img = img.resize((224, 224), Image.BILINEAR, box=(crop_left, crop_top, crop_left+224*rescale, crop_top+224*rescale))
+      if val:
+        # eval: 76.08%, load in 0m7.366s (0m5.301s with simd)
+        # sudo apt-get install libjpeg-dev
+        # CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
+        rescale = min(img.size) / 256
+        crop_left = (img.width - 224*rescale) / 2.0
+        crop_top = (img.height - 224*rescale) / 2.0
+        img = img.resize((224, 224), Image.BILINEAR, box=(crop_left, crop_top, crop_left+224*rescale, crop_top+224*rescale))
+        img = np.array(img)
+      else:
+        from extra.datasets.imagenet import preprocess_train
+        # reseed rng for determinism
+        if seed is not None:
+          np.random.seed(seed)
+          random.seed(seed)
+        img = preprocess_train(img)
 
       # broken out
       #img_tensor = Tensor(img.tobytes(), device='CPU')
@@ -59,25 +71,35 @@ def loader_process(q_in, q_out, X:Tensor):
       #X[idx].assign(img.tobytes())   # NOTE: this is slow!
       q_out.put(idx)
 
-def batch_load_resnet(batch_size=64, val=False, shuffle=True):
+def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
   from extra.datasets.imagenet import get_train_files, get_val_files
   files = get_val_files() if val else get_train_files()
   from extra.datasets.imagenet import get_imagenet_categories
   cir = get_imagenet_categories()
 
-  BATCH_COUNT = 32
+  if seed is not None:
+    random.seed(seed)
+    np.random.seed(seed)
+
+  BATCH_COUNT = min(32, len(files) // batch_size)
   #q_in, q_out = MyQueue(multiple_writers=False), MyQueue(multiple_readers=False)
   q_in, q_out = Queue(), Queue()
 
   sz = (batch_size*BATCH_COUNT, 224, 224, 3)
-  shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
+  try:
+    shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
+  except:
+    import os
+    os.unlink("/dev/shm/resnet_X")
+    shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
+
   # disk:shm is slower
   #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
   X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/resnet_X")
   Y = [None] * (batch_size*BATCH_COUNT)
 
   procs = []
-  for _ in range(64):
+  for _ in range(getenv("WORKERS", 64)):
     p = Process(target=loader_process, args=(q_in, q_out, X))
     p.daemon = True
     p.start()
@@ -86,8 +108,9 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
   gen = shuffled_indices(len(files)) if shuffle else iter(range(len(files)))
   def enqueue_batch(num):
     for idx in range(num*batch_size, (num+1)*batch_size):
-      fn = files[next(gen)]
-      q_in.put((idx, fn))
+      fidx = next(gen)
+      fn = files[fidx]
+      q_in.put((idx, fn, (seed+1) * len(files) + fidx if seed is not None else None, val))
       Y[idx] = cir[fn.split("/")[-2]]
   for bn in range(BATCH_COUNT): enqueue_batch(bn)
 
@@ -112,7 +135,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
   # shutdown processes
   for _ in procs: q_in.put(None)
   for p in procs: p.join()
-  shm.close()
+  shm.close()  # shm will stay alive until the X disktensor is freed
   shm.unlink()
 
 if __name__ == "__main__":
