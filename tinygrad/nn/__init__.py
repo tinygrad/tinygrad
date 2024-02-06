@@ -31,15 +31,18 @@ class UnsyncedBatchNorm2d:
 
 class BatchNorm2d:
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
+    dtypes.default_float, old_default = dtypes.float32, dtypes.default_float
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
     if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
     else: self.weight, self.bias = None, None
 
-    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False, dtype=dtypes.float32), Tensor.ones(sz, requires_grad=False, dtype=dtypes.float32)
-    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False, dtype=dtypes.float32)
+    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
+    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
+    dtypes.default_float = old_default
 
   def __call__(self, x:Tensor):
+    dtypes.default_float, old_default = dtypes.float32, dtypes.default_float
     rtype = x.dtype
     x = x.float()
     if Tensor.training:
@@ -61,7 +64,9 @@ class BatchNorm2d:
       # NOTE: this can be precomputed for static inference. we expand it here so it fuses
       batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
 
-    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd).cast(rtype)
+    ret = x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd).cast(rtype)
+    dtypes.default_float = old_default
+    return ret
 
 # TODO: these Conv lines are terrible
 def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
