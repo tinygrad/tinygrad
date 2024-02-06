@@ -10,13 +10,14 @@ from tinygrad.tensor import Tensor
 from tinygrad.shape.symbolic import sym_infer
 
 from tinygrad.codegen.kernel import Opt, OptOps
-actions = [Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,7] for axis in range(6)]
+actions = [Opt(op=OptOps.UPCAST, axis=axis, amt=amt) for amt in [0,2,3,4,5,7] for axis in range(6)]
 actions += [Opt(op=OptOps.UNROLL, axis=axis, amt=amt) for amt in [0,4] for axis in range(4)]
 actions += [Opt(op=OptOps.LOCAL, axis=axis, amt=amt) for amt in [2,3,4,8,13,16,29] for axis in range(5)]
 actions += [Opt(op=OptOps.GROUPTOP, axis=axis, amt=amt) for amt in [13,16,29,32,256] for axis in range(3)]
+actions += [Opt(op=OptOps.GROUP, axis=axis, amt=amt) for amt in [0,4,8,16] for axis in range(3)]
 actions += [Opt(op=OptOps.PADTO, axis=axis, amt=amt) for amt in [32] for axis in range(7)]
-actions += [Opt(op=OptOps.LOCAL, axis=0, amt=32), Opt(op=OptOps.UPCASTMID, axis=1, amt=4),
-            Opt(op=OptOps.GROUP, axis=0, amt=4), Opt(op=OptOps.GROUP, axis=0, amt=8), Opt(op=OptOps.GROUP, axis=1, amt=8),]
+actions += [Opt(op=OptOps.LOCAL, axis=0, amt=32), Opt(op=OptOps.UPCASTMID, axis=1, amt=4)]
+actions += [Opt(op=OptOps.TC, axis=axis, amt=0) for axis in range(4)]
 if getenv("NOLOCALS"): actions += [Opt(op=OptOps.NOLOCALS)]
 
 def _get_test_global_size(global_size, max_global_size, var_vals):
@@ -72,7 +73,7 @@ def bufs_from_lin(lin:Linearizer) -> List[Buffer]:
 
 # get dictionary of all possible actions
 def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Linearizer]:
-  acted_lins = {0:lin} if include_0 else {}
+  acted_lins, max_up, max_lcl = {0:lin} if include_0 else {}, getenv("BEAM_UP_MAX", 256), getenv("BEAM_LCL_MAX", 256)
   for i,a in enumerate(actions):
     if a.axis is not None and a.axis >= lin.shape_len: continue
     if a.axis is not None and lin.full_shape[a.axis] == a.amt and Opt(a.op, a.axis, 0) in actions: continue
@@ -83,7 +84,7 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
       for s,c in zip(lin2.full_shape, lin2.colors()):
         if c in {"magenta", "yellow"}: up *= s
         if c in {"cyan", "green", "white"}: lcl *= s
-      if up > 256 or lcl > 256 or ("green" in lin2.colors() and up*lcl > 2 ** 15): continue
+      if up > max_up or lcl > max_lcl or ("green" in lin2.colors() and up*lcl > 2 ** 15): continue
       acted_lins[i+1] = lin2
     except Exception:
       pass
@@ -101,7 +102,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
   beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
 
-  default_parallel = 1 if lin.opts.device in {"CUDA", "HIP"} else 0
+  default_parallel, min_progress_micros = 1 if lin.opts.device in {"CUDA", "HIP"} else 0, getenv("BEAM_MIN_PROGRESS",0)
   if beam_pool is None and getenv("PARALLEL", default_parallel): beam_pool = multiprocessing.Pool(multiprocessing.cpu_count(), _init_worker)
 
   try:
@@ -124,8 +125,9 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
 
       # done
       opts = sorted(timed_lins, key=lambda x: x[1])
-      exiting = len(opts) == 0 or (len(beam) > 0 and beam[0][1] <= opts[0][1])
+      exiting = len(opts) == 0 or (len(beam) > 0 and ((beam[0][1]-opts[0][1])*1e6 < min_progress_micros))
       if not exiting: beam = opts[:amt]
+      elif len(opts) > 0 and opts[0][1] < beam[0][1]: beam = opts[:1]
       assert len(beam) > 0, "no BEAM items succeeded?!?"
       if DEBUG >= 2: print(f"\r{time.perf_counter() - st:7.2f}s:", colored(f"{beam[0][1]*1e6:12.2f} us", "green" if exiting else None), f"from {len(acted_lins):3d} -> {len(opts):3d} actions\033[K", beam[0][0].colored_shape())  # noqa: E501
   except KeyboardInterrupt as e:
