@@ -575,7 +575,9 @@ class TestLinearizerOpts(unittest.TestCase):
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4)],
         [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)],
         [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
-        # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
+        [Opt(OptOps.GROUP, 0, 2)], # check group
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.GROUP, 0, 2)],
+        [Opt(OptOps.GROUP, 0, 2), Opt(OptOps.GROUP, 0, 0)],
       ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):

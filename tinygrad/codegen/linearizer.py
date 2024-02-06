@@ -7,6 +7,7 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.helpers import colored, DEBUG, prod, getenv, all_same, to_function_name
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.view import View
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.features.image import to_image_idx
@@ -18,10 +19,10 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
   if maxdim != 0 and len(local_dims) > maxdim:
     dd = local_idxs[maxdim-1]
     nli = []
-    for s in local_dims[maxdim-1:][::-1]:
+    for s in local_dims[maxdim-1:]:
       nli.append(dd % s)
       dd //= s
-    local_idxs = local_idxs[0:maxdim-1] + nli[::-1]
+    local_idxs = local_idxs[0:maxdim-1] + nli
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
 def expand_idx(node:Node) -> Union[Variable, NumNode]: return next((v for v in node.vars() if v.expr.startswith("_uidx")), NumNode(0))
@@ -197,8 +198,14 @@ class Linearizer(Kernel):
       self.buf_uops[self.bufs.index(lb)] = self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), (lb.name, self.sts[self.bufs.index(lb)].size))
     # add a local buffer for multistage reduce. # TODO: use local alias
     if self.group_for_reduce:
-      # TODO: the strides of this can be controlled
-      self.sts.append(ShapeTracker.from_shape(tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+len(self.group_for_reduce)]) + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])))  # noqa: E501
+      group_shape = tuple([1] * self.global_dims + list(self.full_shape[self.global_dims:self.global_dims+self.local_dims+len(self.group_for_reduce)]) + [1] * (self.shape_len - self.upcasted - len(self.group_for_reduce) - self.first_reduce) + [x[0] for x in self.upcasted_axis(0)])  # noqa: E501
+      out_strides, group_strides, bst = self.sts[0].real_strides(), [1]*len(group_shape), 1
+      group_axes = sorted([(i,sz,out_strides[i]) for i,sz in enumerate(group_shape) if sz>1 and out_strides[i]>0], key=lambda x: x[2]) # same strides as out
+      group_axes += [(i,sz,out_strides[i]) for i,sz in enumerate(group_shape) if sz>1 and out_strides[i]==0] # reduce axes last
+      for (i,sz,_) in group_axes:
+        group_strides[i] = bst
+        bst *= sz
+      self.sts.append(ShapeTracker((View.create(group_shape,tuple(group_strides)),)))
       temp_dtype = self.get_base_dtype(get_lazyop_info(self.reduceop).dtype)
       self.bufs.append(LocalBuffer("temp", self.sts[-1].size, temp_dtype))
       self.buf_uops.append(self.uop(UOps.DEFINE_LOCAL, PtrDType(temp_dtype), (), ("temp", self.sts[-1].size)))
@@ -229,12 +236,12 @@ class Linearizer(Kernel):
     self.global_size: Optional[List[int]] = None
     self.local_size: Optional[List[int]] = None
     if self.dont_use_locals:
-      self.global_size = [x.max+1 for x in loop_global_idxs][::-1]
-      self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr.replace("gidx", "idx"), x.max+1)) for i,x in enumerate(loop_global_idxs)})  # noqa: E501
+      self.global_size = [x.max+1 for x in loop_global_idxs]
+      self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (i, x.expr.replace("gidx", "idx"), x.max+1)) for i,x in enumerate(loop_global_idxs)})  # noqa: E501
     elif self.opts.has_local:
-      self.global_size, self.local_size = [x.max+1 for x in loop_global_idxs][::-1], [x.max+1 for x in loop_local_idxs][::-1]
-      self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_global_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_global_idxs)})  # noqa: E501
-      self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (len(loop_local_idxs)-1-i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})  # noqa: E501
+      self.global_size, self.local_size = [x.max+1 for x in loop_global_idxs], [x.max+1 for x in loop_local_idxs]
+      self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (i, x.expr, x.max+1)) for i,x in enumerate(loop_global_idxs)})  # noqa: E501
+      self.loop_uops.update({x.expr:self.uop(UOps.SPECIAL, dtypes.int32, (), (i, x.expr, x.max+1)) for i,x in enumerate(loop_local_idxs)})  # noqa: E501
     else:
       render_loop(loop_global_idxs+loop_local_idxs)
 
@@ -260,16 +267,17 @@ class Linearizer(Kernel):
             full_var, full_var_sz = NumNode(0), 1
             if alias[0] != 0:
               for i in alias:
-                next_var = local_idxs[-i] if i > 0 else Variable("_uidx_tc", 0, local_size-1)
+                next_var = local_idxs[i-1] if i > 0 else Variable("_uidx_tc", 0, local_size-1)
                 full_var += next_var * full_var_sz
                 full_var_sz *= next_var.max+1
             replace_idxs.append(full_var)
           return replace_idxs
         replace_acc_idxs = calc_tc_idxs(tc.thread_local_sizes[2], tc.thread_local_aliases[2])
         for n in range(len(tc.threads)):
-          local_idxs[self.local_dims-len(tc.threads)+n] = replace_acc_idxs[n] # replace locals
+          local_idxs[n] = replace_acc_idxs[n] # replace locals
         for n in range(len(replace_acc_idxs)-len(tc.threads)):
           upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
+        if DEBUG >= 3: print(f"acc: idxs=", global_idxs+local_idxs+reduce_idxs+upcast_idxs)
 
       # reduce loop
       loop_ctx = render_loop(reduce_idxs)
@@ -286,7 +294,7 @@ class Linearizer(Kernel):
           min_alias_idx = min(self.local_alias.keys())
           replace_input_idxs = calc_tc_idxs(self.tensor_core.thread_local_sizes[i-min_alias_idx], self.tensor_core.thread_local_aliases[i-min_alias_idx])  # noqa: E501
           for n in range(len(self.tensor_core.threads)):
-            buf_idxs[self.first_reduce-len(self.tensor_core.threads)+n] = replace_input_idxs[n] # replace locals
+            buf_idxs[self.global_dims+n] = replace_input_idxs[n] # replace locals
           for n in range(len(replace_input_idxs)-len(self.tensor_core.threads)):
             buf_idxs[self.shape_len-self.upcasted+n] = replace_input_idxs[len(self.tensor_core.threads)+n] # replace upcasts
         if DEBUG >= 3: print(f"{localbuf_idx} alias {i}: idxs=", buf_idxs)
