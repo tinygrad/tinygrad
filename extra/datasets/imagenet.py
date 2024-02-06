@@ -16,7 +16,7 @@ def get_imagenet_categories():
 def get_train_files():
   train_files = glob.glob(str(BASEDIR / "train/*/*"))
   if getenv("TEST_TRAIN"): train_files = train_files[:getenv("TEST_TRAIN")]
-  print(len(train_files))
+  print(f"Training on {len(train_files)} images")
   return train_files
 
 @functools.lru_cache(None)
