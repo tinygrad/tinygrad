@@ -12,10 +12,11 @@ def get_imagenet_categories():
   ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
   return {v[0]: int(k) for k,v in ci.items()}
 
-@diskcache
+@functools.lru_cache(None)
 def get_train_files():
   train_files = glob.glob(str(BASEDIR / "train/*/*"))
   if getenv("TEST_TRAIN"): train_files = train_files[:getenv("TEST_TRAIN")]
+  print(len(train_files))
   return train_files
 
 @functools.lru_cache(None)
