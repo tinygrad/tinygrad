@@ -82,14 +82,14 @@ def train_resnet():
     loss = sparse_categorical_crossentropy(out, Y, label_smoothing=0.1)
     return loss.realize(), out.realize()
 
-  input_mean = Tensor([0.485, 0.456, 0.406], device=GPUS).reshape(1, -1, 1, 1)
-  input_std = Tensor([0.229, 0.224, 0.225], device=GPUS).reshape(1, -1, 1, 1)
+  input_mean = Tensor([0.485, 0.456, 0.406], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
+  input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
 
   def normalize(x):
-    x = x.permute([0, 3, 1, 2]).cast(dtypes.default_float) / 255.0
+    x = x.permute([0, 3, 1, 2]).cast(dtypes.float32) / 255.0
     x -= input_mean
     x /= input_std
-    return x
+    return x.cast(dtypes.default_float)
 
   lr_scaler = 8 if FP16 else 1
   lr_gamma = 0.1
