@@ -1,7 +1,10 @@
 import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import torch_load
-from tinygrad.helpers import fetch, get_child
+from tinygrad.helpers import fetch, get_child, getenv
+from tinygrad.dtype import dtypes
+
+BatchNorm = nn.BatchNorm2d if getenv("BNSYNC", 0) else nn.UnsyncedBatchNorm2d
 
 class BasicBlock:
   expansion = 1
@@ -9,14 +12,14 @@ class BasicBlock:
   def __init__(self, in_planes, planes, stride=1, groups=1, base_width=64):
     assert groups == 1 and base_width == 64, "BasicBlock only supports groups=1 and base_width=64"
     self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
-    self.bn1 = nn.BatchNorm2d(planes)
+    self.bn1 = BatchNorm(planes)
     self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, padding=1, stride=1, bias=False)
-    self.bn2 = nn.BatchNorm2d(planes)
+    self.bn2 = BatchNorm(planes)
     self.downsample = []
     if stride != 1 or in_planes != self.expansion*planes:
       self.downsample = [
         nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
-        nn.BatchNorm2d(self.expansion*planes)
+        BatchNorm(self.expansion*planes)
       ]
 
   def __call__(self, x):
@@ -35,16 +38,16 @@ class Bottleneck:
     width = int(planes * (base_width / 64.0)) * groups
     # NOTE: the original implementation places stride at the first convolution (self.conv1), control with stride_in_1x1
     self.conv1 = nn.Conv2d(in_planes, width, kernel_size=1, stride=stride if stride_in_1x1 else 1, bias=False)
-    self.bn1 = nn.BatchNorm2d(width)
+    self.bn1 = BatchNorm(width)
     self.conv2 = nn.Conv2d(width, width, kernel_size=3, padding=1, stride=1 if stride_in_1x1 else stride, groups=groups, bias=False)
-    self.bn2 = nn.BatchNorm2d(width)
+    self.bn2 = BatchNorm(width)
     self.conv3 = nn.Conv2d(width, self.expansion*planes, kernel_size=1, bias=False)
-    self.bn3 = nn.BatchNorm2d(self.expansion*planes)
+    self.bn3 = BatchNorm(self.expansion*planes)
     self.downsample = []
     if stride != 1 or in_planes != self.expansion*planes:
       self.downsample = [
         nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
-        nn.BatchNorm2d(self.expansion*planes)
+        BatchNorm(self.expansion*planes)
       ]
 
   def __call__(self, x):
@@ -79,7 +82,7 @@ class ResNet:
     self.groups = groups
     self.base_width = width_per_group
     self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, bias=False, padding=3)
-    self.bn1 = nn.BatchNorm2d(64)
+    self.bn1 = BatchNorm(64)
     self.layer1 = self._make_layer(self.block, 64, self.num_blocks[0], stride=1, stride_in_1x1=stride_in_1x1)
     self.layer2 = self._make_layer(self.block, 128, self.num_blocks[1], stride=2, stride_in_1x1=stride_in_1x1)
     self.layer3 = self._make_layer(self.block, 256, self.num_blocks[2], stride=2, stride_in_1x1=stride_in_1x1)
@@ -111,6 +114,7 @@ class ResNet:
     out = out.sequential(self.layer4)
     if is_feature_only: features.append(out)
     if not is_feature_only:
+      out = out.cast(dtypes.float32)
       out = out.mean([2,3])
       out = self.fc(out).log_softmax()
       return out

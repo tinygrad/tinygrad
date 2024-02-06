@@ -33,19 +33,29 @@ def shuffled_indices(n):
     del indices[i]
 
 def loader_process(q_in, q_out, X:Tensor):
+  import signal
+  def _init_worker():
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+  _init_worker()
+
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
-      idx, fn = _recv
+      idx, fn, val = _recv
       img = Image.open(fn)
       img = img.convert('RGB') if img.mode != "RGB" else img
 
-      # eval: 76.08%, load in 0m7.366s (0m5.301s with simd)
-      # sudo apt-get install libjpeg-dev
-      # CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
-      rescale = min(img.size) / 256
-      crop_left = (img.width - 224*rescale) / 2.0
-      crop_top = (img.height - 224*rescale) / 2.0
-      img = img.resize((224, 224), Image.BILINEAR, box=(crop_left, crop_top, crop_left+224*rescale, crop_top+224*rescale))
+      if val:
+        # eval: 76.08%, load in 0m7.366s (0m5.301s with simd)
+        # sudo apt-get install libjpeg-dev
+        # CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
+        rescale = min(img.size) / 256
+        crop_left = (img.width - 224*rescale) / 2.0
+        crop_top = (img.height - 224*rescale) / 2.0
+        img = img.resize((224, 224), Image.BILINEAR, box=(crop_left, crop_top, crop_left+224*rescale, crop_top+224*rescale))
+        r = np.array(img)
+      else:
+        from extra.datasets.imagenet import preprocess
+        r = preprocess(img, val).astype(np.int8)
 
       # broken out
       #img_tensor = Tensor(img.tobytes(), device='CPU')
@@ -53,7 +63,7 @@ def loader_process(q_in, q_out, X:Tensor):
       #storage_tensor._copyin(img_tensor.numpy())
 
       # faster
-      X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
+      X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = r.tobytes()
 
       # ideal
       #X[idx].assign(img.tobytes())   # NOTE: this is slow!
@@ -70,14 +80,20 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
   q_in, q_out = Queue(), Queue()
 
   sz = (batch_size*BATCH_COUNT, 224, 224, 3)
-  shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
+  try:
+    shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
+  except:
+    import os
+    os.unlink("/dev/shm/resnet_X")
+    shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
+
   # disk:shm is slower
   #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
   X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/resnet_X")
   Y = [None] * (batch_size*BATCH_COUNT)
 
   procs = []
-  for _ in range(64):
+  for _ in range(getenv("WORKERS", 64)):
     p = Process(target=loader_process, args=(q_in, q_out, X))
     p.daemon = True
     p.start()
@@ -87,7 +103,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
   def enqueue_batch(num):
     for idx in range(num*batch_size, (num+1)*batch_size):
       fn = files[next(gen)]
-      q_in.put((idx, fn))
+      q_in.put((idx, fn, val))
       Y[idx] = cir[fn.split("/")[-2]]
   for bn in range(BATCH_COUNT): enqueue_batch(bn)
 
@@ -95,7 +111,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
     def __init__(self, num): self.num = num
     def __del__(self):
       try: enqueue_batch(self.num)
-      except StopIteration: pass
+      except StopIteration: pass  # todo: hold up shm from closing before all cookies are returned
 
   gotten = [0]*BATCH_COUNT
   def receive_batch():

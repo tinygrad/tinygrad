@@ -10,6 +10,8 @@ from examples.mlperf import helpers
 def tlog(x): print(f"{x:25s}  @ {time.perf_counter()-start:5.2f}s")
 
 def eval_resnet():
+  FP16 = getenv("FP16", 0)
+  if FP16: dtypes.default_float = dtypes.float16
   Tensor.no_grad = True
   # Resnet50-v1.5
   from extra.models.resnet import ResNet50
@@ -24,13 +26,13 @@ def eval_resnet():
       for x in get_parameters(self.mdl) if device else []: x.to_(device)
       if (fn:=getenv("RESNET_MODEL", "")): load_state_dict(self.mdl, safe_load(fn))
       else: self.mdl.load_from_pretrained()
-      self.input_mean = Tensor([0.485, 0.456, 0.406], device=device).reshape(1, -1, 1, 1)
-      self.input_std = Tensor([0.229, 0.224, 0.225], device=device).reshape(1, -1, 1, 1)
+      self.input_mean = Tensor([0.485, 0.456, 0.406], device=device, dtype=dtypes.float32).reshape(1, -1, 1, 1)
+      self.input_std = Tensor([0.229, 0.224, 0.225], device=device, dtype=dtypes.float32).reshape(1, -1, 1, 1)
     def __call__(self, x:Tensor) -> Tensor:
       x = x.permute([0,3,1,2]).cast(dtypes.float32) / 255.0
       x -= self.input_mean
       x /= self.input_std
-      return self.mdl(x).argmax(axis=1).realize()
+      return self.mdl(x.cast(dtypes.default_float)).argmax(axis=1).realize()
 
   mdl = TinyJit(ResnetRunner(GPUS))
   tlog("loaded models")

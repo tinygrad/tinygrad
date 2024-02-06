@@ -2,11 +2,12 @@ import math
 from typing import List
 from tinygrad.nn.optim import Optimizer
 from tinygrad.tensor import Tensor
+from tinygrad.dtype import dtypes
 
 class LR_Scheduler:
   def __init__(self, optimizer: Optimizer):
     self.optimizer = optimizer
-    self.epoch_counter = Tensor([0], requires_grad=False, device=self.optimizer.device)
+    self.epoch_counter = Tensor([0], requires_grad=False, device=self.optimizer.device, dtype=dtypes.float32)
 
   def get_lr(self): pass
 
@@ -15,15 +16,37 @@ class LR_Scheduler:
     self.optimizer.lr.assign(self.get_lr()).realize()
 
 class MultiStepLR(LR_Scheduler):
-  def __init__(self, optimizer: Optimizer, milestones: List[int], gamma=0.1):
+  def __init__(self, optimizer: Optimizer, milestones: List[int], gamma=0.1, warmup=0):
     super().__init__(optimizer)
     self.milestones = milestones
     self.gamma = gamma
+    self.start = Tensor(float(optimizer.lr.numpy()[0]), requires_grad=False, dtype=dtypes.float32)
+    self.warmup = Tensor(float(warmup), requires_grad=False, dtype=dtypes.float32)
 
   def get_lr(self) -> Tensor:
-    if self.epoch_counter.numpy()[0] not in self.milestones:
-      return self.optimizer.lr
-    return self.optimizer.lr * self.gamma
+    progress = Tensor(1.0)
+    for m in self.milestones:
+      progress = progress * (self.epoch_counter < float(m)).where(Tensor(1.0), self.gamma)
+    lr = self.start * progress
+    result = (self.epoch_counter < self.warmup).where(
+      self.epoch_counter / self.warmup * self.start,
+      lr
+    ).contiguous()
+    return result
+
+class PolynomialLR(LR_Scheduler):
+  def __init__(self, optimizer: Optimizer, start_lr, end_lr, epochs, warmup=0, power=2):
+    super().__init__(optimizer)
+    self.start_lr = start_lr
+    self.end_lr = end_lr
+    self.epochs = epochs
+    self.power = power
+    self.warmup = warmup
+
+  def get_lr(self):
+    warmup_lr = (self.epoch_counter * (1.0/self.warmup)) * self.start_lr
+    x= (1- (self.epoch_counter - 1 - self.warmup)/(self.epochs - self.warmup))
+    return (self.epoch_counter < self.warmup).where(warmup_lr, (self.start_lr-self.end_lr)*x*x+self.end_lr)
 
 class ReduceLROnPlateau(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, mode="min", factor=0.1, patience=10, threshold=1e-4, threshold_mode="rel"):
@@ -61,7 +84,7 @@ class CosineAnnealingLR(LR_Scheduler):
     self.eta_max = optimizer.lr.numpy()[0]
 
   def get_lr(self) -> Tensor:
-    return Tensor([self.eta_min + 0.5 * (self.eta_max - self.eta_min) * (1 + math.cos((self.epoch_counter.numpy()[0]/self.T_max) * math.pi))], device=self.optimizer.device)
+    return Tensor([self.eta_min + 0.5 * (self.eta_max - self.eta_min) * (1 + math.cos((self.epoch_counter.numpy()[0]/self.T_max) * math.pi))])
 
 class OneCycleLR(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, max_lr: float, div_factor: float, final_div_factor: float, total_steps: int, pct_start: float,
