@@ -47,7 +47,7 @@ def train_resnet():
 
   wandb.init()
 
-  if FP16: Tensor.default_type = dtypes.float16
+  if FP16: dtypes.default_float = dtypes.float16
 
   if getenv("MOCKGPUS", 0):
     GPUS = [f'{Device.DEFAULT}:{0}' for i in range(getenv("MOCKGPUS", 0))]

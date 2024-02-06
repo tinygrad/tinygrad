@@ -26,7 +26,7 @@ class UnsyncedBatchNorm2d:
     # TODO: what do we want to do for inference? average weight? pick any one?
     # a good start would be to check each mean/std are similar
     return bn_ts[0].cat(*bn_ts[1:])
-  def __getattr__(self, item): return getattr(self.bns[0], item) # todo: hack
+  def __getattr__(self, item): return getattr(self.bns[0], item) # todo: hack, this make eval only work on 1 gpu if you load from weights...
 
 class BatchNorm2d:
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
