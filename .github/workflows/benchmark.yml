@@ -138,14 +138,14 @@ jobs:
         HIP=1 JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
         HIP=1 JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
     - name: Run 10 CIFAR training steps
-      run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
-    - name: Run full CIFAR training w HALF
-      run: time HALF=1 STEPS=1000 python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
-    # # TODO: make wino faster so we can enable both
-    # - name: Run 10 CIFAR training steps w winograd
-    #   run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
-    # - name: Run 10 CIFAR training steps w WINO/HALF/HIP
-    #   run: HALF=1 WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino_half_hip.txt
+      run: HIP=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+    - name: Run 10 CIFAR training steps w HALF
+      run: HIP=1 STEPS=10 HALF=1 python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+    # # TODO: enable this. it took 3 minutes in CI and made the full training one more than 5 minutes
+    # - name: Run 10 CIFAR training steps w 6 GPUS
+    #   run: time HALF=1 STEPS=10 BS=1536 GPUS=6 python3 examples/hlb_cifar10.py
+    - name: Run full CIFAR training
+      run: time HIP=1 HALF=1 LATEWINO=1 STEPS=1000 python3 examples/hlb_cifar10.py | tee train_cifar_one_gpu.py
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AMD)

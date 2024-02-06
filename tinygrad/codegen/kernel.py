@@ -44,6 +44,7 @@ tensor_cores: Dict[str, List[TensorCore]] = {
   ],
   "HIP": [
     TensorCore(dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="__builtin_amdgcn_wmma_f32_16x16x16_f16_w32", ops=[(OptOps.LASTLOCAL,0,2),(OptOps.LASTLOCAL,0,8),(OptOps.LASTLOCAL,1,2),(OptOps.UPCAST,1,8)], thread_local_sizes=[16,16,8], thread_local_aliases=[ [[1],[0],[0],[-1],[2]], [[0],[2],[1],[-1],[0]] ]),  # noqa: E501
+    TensorCore(dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.half,  wmma_func="__hip_wmma_f16_f16",                         ops=[(OptOps.LASTLOCAL,0,2),(OptOps.LASTLOCAL,0,8),(OptOps.LASTLOCAL,1,2),(OptOps.UPCAST,1,8)], thread_local_sizes=[16,16,8], thread_local_aliases=[ [[1],[0],[0],[-1],[2]], [[0],[2],[1],[-1],[0]] ]),  # noqa: E501
   ]
 }
 
