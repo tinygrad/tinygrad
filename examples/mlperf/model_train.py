@@ -180,29 +180,25 @@ def train_resnet():
         GlobalCounters.reset()
         st = time.time()
 
-        (loss, out), Y, cookie = (eval_step(proc[0], proc[1]), proc[1], proc[2])
-        proc = None  # drop references
+        proc = (eval_step(proc[0], proc[1]), proc[1], proc[2])
 
         try:
           next_proc = data_get()
         except StopIteration:
           next_proc = None
 
-        top_1_acc = calculate_accuracy(out, Y, 1)
-        top_5_acc = calculate_accuracy(out, Y, 5)
+        top_1_acc = calculate_accuracy(proc[0][1], proc[1], 1)
+        top_5_acc = calculate_accuracy(proc[0][1], proc[1], 5)
 
-        eval_loss.append(loss.numpy().item())
+        eval_loss.append(proc[0][0].numpy().item())
         eval_top_1_acc.append(top_1_acc)
         eval_top_5_acc.append(top_5_acc)
-
-        del loss, out, Y, cookie  # drop buffers and cookie
 
         et = time.time()
 
         eval_times.append(et - st)
 
-        proc, next_proc = next_proc, None
-
+        proc, next_proc = next_proc, None  # drop cookie
 
       tqdm.write(f"eval loss: {sum(eval_loss) / len(eval_loss):.2f}, eval time: {sum(eval_times) / len(eval_times):.2f}, eval top 1 acc: {sum(eval_top_1_acc) / len(eval_top_1_acc):.2f}, eval top 5 acc: {sum(eval_top_5_acc) / len(eval_top_5_acc):.2f}")
       wandb.log({"eval/loss": sum(eval_loss) / len(eval_loss),
