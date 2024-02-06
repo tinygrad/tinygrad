@@ -387,21 +387,21 @@ class TestHandCodedOpts(unittest.TestCase):
     assert k.local_dims == 1
     assert k.upcasted == 1
 
-def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
+def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False, atol=1e-4, rtol=1e-4):
   wanna_output = None
   realized_ast, real_bufs = helper_realized_ast(r)
 
   def check_opt(opts, create_k, to_prg):
     k = create_k()
     if apply_tc:
-      k.apply_tensor_cores(1, opts)
+      assert k.apply_tensor_cores(1, opts), "no tensor core triggered"
     else:
       for opt in opts:
         k.apply_opt(opt)
     prg = to_prg(k)
     real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
     prg.exec(real_bufs)
-    np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=1e-4, rtol=1e-4)
+    np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=atol, rtol=rtol)
 
   # Get baseline, which is not optimized at all.
   k = Linearizer(realized_ast)
@@ -415,7 +415,7 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False):
   prg = Device[Device.DEFAULT].to_program(k)
   real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=real_bufs[0].dtype.np).data) # Zero to check that all values are filled
   prg.exec(real_bufs)
-  np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=1e-4, rtol=1e-4)
+  np.testing.assert_allclose(wanna_output, np.frombuffer(real_bufs[0].as_buffer(), real_bufs[0].dtype.np), atol=atol, rtol=rtol)
   for x in opts: # Check custom transformations if any.
     check_opt(x, lambda: Linearizer(realized_ast), Device[Device.DEFAULT].to_program)
 
@@ -524,7 +524,7 @@ class TestLinearizerOpts(unittest.TestCase):
        Opt(OptOps.UPCAST, 0, 2)], # No globals
     ])
 
-  def test_tensor_core_opts(self):
+  def test_invalid_tensor_core_extra_opts(self):
     if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local:
       self.skipTest("Only Compiled uses linearizer with locals")
     if Device.DEFAULT not in tensor_cores:
@@ -534,25 +534,49 @@ class TestLinearizerOpts(unittest.TestCase):
     Tensor.manual_seed(1552)
     a = Tensor.rand(N, N)
     b = Tensor.rand(N, N)
-    r = a@b
-    helper_linearizer_opt(r, [
-      [],
-      [Opt(OptOps.UPCAST, 0, 4)],
-      [Opt(OptOps.UPCAST, 1, 4)],
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
-      [Opt(OptOps.UNROLL, 0, 2)], # check last unroll
-      [Opt(OptOps.LASTLOCAL, 0, 4)], # check last local
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of last unroll and last local
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2)],
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LASTLOCAL, 0, 2)],
-      [Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4)], # check permutations
-      [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
-      [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4)],
-      [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)],
-      [Opt(OptOps.LASTLOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
-      # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
-    ], apply_tc=True)
+    realized_ast, _ = helper_realized_ast(a@b)
+    invalid_opts = [
+      [Opt(OptOps.LOCAL, 2, 2)],
+      [Opt(OptOps.UPCAST, 2, 2)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 2, 2)],
+    ]
+    for x in invalid_opts:
+      k = Linearizer(realized_ast)
+      with self.assertRaises(AssertionError):
+        assert k.apply_tensor_cores(use_tensor_cores=1, extra_opts=x), "no valid tensor core" # for METAL in runners
+
+  def test_tensor_core_opts(self):
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local:
+      self.skipTest("Only Compiled uses linearizer with locals")
+    if Device.DEFAULT not in tensor_cores:
+      self.skipTest("No tensor cores for device")
+
+    N = 128
+    Tensor.manual_seed(1552)
+    for tc in tensor_cores[Device.DEFAULT]:
+      if tc.arch is not None and tc.arch != os.uname().machine: continue
+      a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
+      r = a.matmul(b, acc_dtype=tc.dtype_out)
+      (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
+      helper_linearizer_opt(r, [
+        [],
+        [Opt(OptOps.UPCAST, 0, 4)],
+        [Opt(OptOps.UPCAST, 1, 4)],
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
+        [Opt(OptOps.UNROLL, 0, 2)], # check unroll
+        [Opt(OptOps.UNROLL, 0, 0)], # check full unroll of reduce with locals
+        [Opt(OptOps.LOCAL, 0, 4)], # check local
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of unroll and local
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2)],
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
+        [Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4)], # check permutations
+        [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4)],
+        [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)],
+        [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
+        # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
+      ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):
     if Device.DEFAULT == "CUDA": self.skipTest("super slow on CUDA")

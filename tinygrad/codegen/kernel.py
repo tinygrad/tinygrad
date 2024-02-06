@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 class OptOps(Enum):
-  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto(); LASTLOCAL = auto() # noqa: E702
+  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
   GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
@@ -241,8 +241,6 @@ class Kernel:
     # TODO: this should be factored in to multi shape stride
     if self.shape_len == 0: return False
     all_ones = [s==1 for s in self.full_shape]
-    self.local_dims -= sum(all_ones[self.first_reduce-self.local_dims:self.first_reduce])
-    self.upcasted -= sum(all_ones[self.shape_len-self.upcasted:])
     self.reshape_and_permute(lambda shape: [x for i,x in enumerate(shape) if not all_ones[i]], None)
     return any(all_ones)
 
@@ -367,7 +365,7 @@ class Kernel:
         self.apply_opt(Opt(OptOps.UNROLL, 0, tc.dims[2]))
         self.apply_opt(Opt(OptOps.UPCAST, s0 if tc.upcast_dim == 0 else s1, (tc.dims[0]*tc.dims[2])//prod([a[1] for a in tc.threads])))
         for (tc_dim, tc_amt) in tc.threads:
-          fix(self.apply_opt(Opt(OptOps.LASTLOCAL, s0 if tc_dim == 0 else s1, tc_amt)), s0 if tc_dim == 0 else s1)
+          fix(self.apply_opt(Opt(OptOps.LOCAL, s0 if tc_dim == 0 else s1, tc_amt)), s0 if tc_dim == 0 else s1)
 
         # assert tensor core and prevent extra_opts from altering the key shape structure
         if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
@@ -385,7 +383,7 @@ class Kernel:
           if self.tensor_core and s0_exists:
             for upc in [4,2]:
               if self.full_shape[s0] % upc == 0:
-                self.apply_opt(Opt(OptOps.LASTLOCAL, s0, upc))
+                self.apply_opt(Opt(OptOps.LOCAL, s0, upc))
                 break
 
         # alias buffer
@@ -396,7 +394,7 @@ class Kernel:
     return False
 
   def apply_opt(self, opt:Opt):
-    assert not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.LASTLOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals"  # noqa: E501
+    assert not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals"  # noqa: E501
     self.applied_opts.append(opt)
     if opt.axis is not None:
       axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op in [OptOps.GROUP, OptOps.GROUPTOP] else 0))  # noqa: E501
@@ -408,14 +406,10 @@ class Kernel:
       if opt.op != OptOps.PADTO: assert self.full_shape[axis] % amt == 0, "no longer valid shift"
     else:
       amt = -1
-    if opt.op in [OptOps.LOCAL, OptOps.LASTLOCAL]:    # cyan
+    if opt.op == OptOps.LOCAL:    # cyan
       assert self.opts.has_local, "target does not support local"
-      assert axis < self.first_reduce, "can't local a reduce"
-      if opt.op == OptOps.LOCAL:
-        assert not self.tensor_core, "can't local with tensor cores"
-        self.shift_to(axis, amt, insert_before=self.first_reduce)
-      else:
-        self.shift_to(axis, amt, insert_before=self.first_reduce-self.local_dims)
+      assert axis < self.global_dims, "local is for globals"
+      self.shift_to(axis, amt, insert_before=self.first_reduce-self.local_dims)
       self.local_dims += 1
     elif opt.op in [OptOps.GROUP, OptOps.GROUPTOP]:   # green
       assert self.opts.has_local and self.opts.has_shared, "target does not support local or shared mem"
@@ -432,7 +426,7 @@ class Kernel:
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
     elif opt.op == OptOps.UPCAST:                     # yellow
-      assert axis < self.first_reduce, "upcast is for non-reduce"
+      assert axis < self.global_dims, "upcast is for globals"
       assert amt <= 8, "don't upcast more than 8"
       self.shift_to(axis, amt, insert_before=None)
       self.upcast()
