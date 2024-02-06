@@ -37,6 +37,7 @@ class MultiStepLR(LR_Scheduler):
 class PolynomialLR(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, start_lr, end_lr, epochs, warmup=0, power=2):
     super().__init__(optimizer)
+    assert epochs > warmup
     self.start_lr = start_lr
     self.end_lr = end_lr
     self.epochs = epochs
@@ -44,8 +45,8 @@ class PolynomialLR(LR_Scheduler):
     self.warmup = warmup
 
   def get_lr(self):
-    warmup_lr = (self.epoch_counter * (1.0/self.warmup)) * self.start_lr
-    x= (1- (self.epoch_counter - 1 - self.warmup)/(self.epochs - self.warmup))
+    warmup_lr = ((self.epoch_counter + 1) * (1.0/(self.warmup+1))) * self.start_lr
+    x= (1- (self.epoch_counter - self.warmup)/(self.epochs - self.warmup))
     return (self.epoch_counter < self.warmup).where(warmup_lr, (self.start_lr-self.end_lr)*x*x+self.end_lr)
 
 class ReduceLROnPlateau(LR_Scheduler):

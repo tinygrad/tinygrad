@@ -146,20 +146,30 @@ class Allocator:
   def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
 
 class LRUAllocator(Allocator):  # pylint: disable=abstract-method
-  def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
+  def __init__(self):
+    self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
+    self.mem_used = 0
   def alloc(self, size:int, options:Optional[BufferOptions]=None):
     if len(c := self.cache[(size, options)]): return c.pop()
+    if getenv("MLIMIT") and self.mem_used + size > getenv("MLIMIT") * 2**20:
+      self.free_cache()
+    if getenv("MLIMIT") and self.mem_used + size > getenv("MLIMIT") * 2**20:
+      raise RuntimeError(f"out of memory {self.mem_used // 2 ** 20} {size // 2 ** 20}")
+    self.mem_used += size
     try: return super().alloc(size, options)
     except (RuntimeError, MemoryError):
       self.free_cache()
       return super().alloc(size, options)
   def free_cache(self):
-    for opaques in self.cache.values():
+    for (size, _), opaques in self.cache.items():
+      self.mem_used -= size * len(opaques)
       for opaque in opaques: self._free(opaque)
       opaques.clear()
   def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
     if getenv("LRU", 1) and (options is None or not options.signal): self.cache[(size, options)].append(opaque)
-    else: self._free(opaque)
+    else:
+      self.mem_used -= size
+      self._free(opaque)
 
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int): return (ctypes.c_uint8 * size)()

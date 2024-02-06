@@ -60,7 +60,7 @@ def train_resnet():
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
 
-  num_classes = 1000
+  num_classes = getenv("TEST_CATS", 1000)
   model = ResNet50(num_classes) if not getenv("SMALL") else ResNet18(num_classes)
 
   for v in get_parameters(model):
@@ -101,7 +101,10 @@ def train_resnet():
   base_lr = 0.256 * (BS / 256)  # Linearly scale from BS=256, lr=0.256
   base_lr = 8.4 * (BS/2048)
   epochs = getenv("EPOCHS", 45)
-  optimizer = optim.SGD(parameters, base_lr / lr_scaler, momentum=.875, weight_decay=1/2**15)
+  if getenv("LARS", 1):
+    optimizer = optim.LARS(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=2e-4)
+  else:
+    optimizer = optim.SGD(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=1/2**15)
   steps_in_train_epoch = (len(get_train_files()) // BS)
   steps_in_val_epoch = (len(get_val_files()) // EVAL_BS)
   #scheduler = MultiStepLR(optimizer, [m for m in lr_steps], gamma=lr_gamma, warmup=lr_warmup)
@@ -244,7 +247,7 @@ def train_resnet():
                 "eval/top_5_acc": sum(eval_top_5_acc) / len(eval_top_5_acc),
       })
 
-      if (e+1) % getenv("CKPT_EPOCHS", 4) == 0:
+      if (e+1) % getenv("CKPT_EPOCHS", 4) == 0 or e + 1 == epochs:
         if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
         fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
         print(f"saving ckpt to {fn}")

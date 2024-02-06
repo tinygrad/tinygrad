@@ -70,3 +70,36 @@ class LAMB(Optimizer):
         r = 1.0
       t.assign(t.detach() - self.lr * r * up)
     self.realize([self.t] + self.m + self.v)
+
+# https://github.com/mlcommons/training/blob/master/image_classification/tensorflow2/lars_optimizer.py
+class LARS(Optimizer):
+  def __init__(self, params: List[Tensor], lr, momentum=0.9, weight_decay=1e-4, eta=0.001, eps=0.0, nesterov=False):
+    super().__init__(params, lr)
+    self.momentum, self.weight_decay, self.eta, self.eps, self.nesterov = momentum, weight_decay, eta, eps, nesterov
+    self.b = [Tensor.zeros(*t.shape, device=t.device, requires_grad=False) for t in self.params]
+
+  def step(self):
+    for i, t in enumerate(self.params):
+      assert t.grad is not None
+      # this is needed since the grads can form a "diamond"
+      # TODO: fix this in lazy.py
+      t.grad.realize()
+      t_ = t.detach()
+      w_norm = (t_ * t_).sum().sqrt()
+      g_norm = (t.grad * t.grad).sum().sqrt()
+      trust_ratio = (w_norm > 0).where(
+        (g_norm > 0).where(
+          self.eta * w_norm / (g_norm + self.weight_decay * w_norm + self.eps), 1.0
+        ), 1.0
+      )
+
+      scaled_lr = self.lr * trust_ratio
+
+      g = (t.grad + self.weight_decay * t.detach())
+      g = g * scaled_lr.cast(g.dtype)
+      if self.momentum:
+        self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
+        g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
+      t.assign(t.detach() - g)
+    self.realize(self.b)
+

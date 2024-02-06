@@ -75,7 +75,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
   from extra.datasets.imagenet import get_imagenet_categories
   cir = get_imagenet_categories()
 
-  BATCH_COUNT = 32
+  BATCH_COUNT = min(32, len(files) // batch_size)
   #q_in, q_out = MyQueue(multiple_writers=False), MyQueue(multiple_readers=False)
   q_in, q_out = Queue(), Queue()
 

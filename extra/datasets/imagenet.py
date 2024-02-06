@@ -15,13 +15,21 @@ def get_imagenet_categories():
 @functools.lru_cache(None)
 def get_train_files():
   train_files = glob.glob(str(BASEDIR / "train/*/*"))
-  if getenv("TEST_TRAIN"): train_files = train_files[:getenv("TEST_TRAIN")]
+  # test train with less categories
+  if getenv("TEST_CATS", 1000) != 1000:
+    ci = get_imagenet_categories()
+    train_files = [fn for fn in train_files if ci[fn.split("/")[-2]] < getenv("TEST_CATS", 1000)]
+    print(f"Limiting to {getenv('TEST_CATS')} categories")
+  if getenv("TEST_TRAIN"): train_files=train_files[:getenv("TEST_TRAIN")]
   print(f"Training on {len(train_files)} images")
   return train_files
 
 @functools.lru_cache(None)
 def get_val_files():
   val_files = glob.glob(str(BASEDIR / "val/*/*"))
+  if getenv("TEST_CATS"):
+    ci = get_imagenet_categories()
+    val_files = [fn for fn in val_files if ci[fn.split("/")[-2]] < getenv("TEST_CATS")]
   if getenv("TEST_VAL"): val_files=val_files[:getenv("TEST_VAL")]
   return val_files
 
