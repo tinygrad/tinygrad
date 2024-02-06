@@ -1,28 +1,61 @@
+import math
+from typing import List
 import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import torch_load
-from tinygrad.helpers import fetch, get_child
+from tinygrad.helpers import fetch, get_child, getenv, prod, argfix
+from tinygrad.dtype import dtypes
+from tinygrad.features.multi import MultiLazyBuffer
+
+class UnsyncedBatchNorm(nn.UnsyncBatchNorm2d):
+  devices = None
+  def __init__(self, *args, **kwargs):
+    super().__init__(UnsyncedBatchNorm.devices, *args, kwargs)
+
+BatchNorm = nn.BatchNorm2d if getenv("SYNCBN", 0) else UnsyncedBatchNorm
+
+
+# rejection sampling truncated randn
+def randn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
+  CNT=8
+  x = Tensor.randn(*(*shape, CNT), dtype=dtype, **kwargs)
+  ctr = Tensor.arange(CNT).reshape((1,) * len(x.shape[:-1]) + (CNT,)).expand(x.shape)
+  take = (x.abs() <= truncstds).where(ctr, CNT).min(axis=-1, keepdim=True)  # set to 0 if no good samples
+  return (ctr == take).where(x, 0).sum(axis=-1)
+
+
+class Conv2dHeNormal(nn.Conv2d):
+  def initialize_weight(self, out_channels, in_channels, groups):
+    # https://github.com/keras-team/keras/blob/v2.15.0/keras/initializers/initializers.py#L1026-L1065
+    def he_normal(*shape, a: float = 0.00, **kwargs) -> Tensor:
+      std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(argfix(*shape)[1:])) / 0.87962566103423978
+      return std * randn(*shape, **kwargs)
+    return he_normal(out_channels, in_channels//groups, *self.kernel_size, a=0.0)
+
+class Linear(nn.Linear):
+  def initialize_weight(self, in_features, out_features):
+    return Tensor.normal((out_features, in_features), mean=0.0, std=0.01)
+  def initialize_bias(self, in_features, out_features):
+    return Tensor.zeros(out_features)
 
 class BasicBlock:
   expansion = 1
 
   def __init__(self, in_planes, planes, stride=1, groups=1, base_width=64):
     assert groups == 1 and base_width == 64, "BasicBlock only supports groups=1 and base_width=64"
-    self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
-    self.bn1 = nn.BatchNorm2d(planes)
-    self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, padding=1, stride=1, bias=False)
-    self.bn2 = nn.BatchNorm2d(planes)
-    self.downsample = []
+    self.conv1 = Conv2dHeNormal(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
+    self.bn1 = BatchNorm(planes)
+    self.conv2 = Conv2dHeNormal(planes, planes, kernel_size=3, padding=1, stride=1, bias=False)
+    self.bn2 = BatchNorm(planes)
+    self.conv_downsample, self.bn_downsample = None, None
     if stride != 1 or in_planes != self.expansion*planes:
-      self.downsample = [
-        nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
-        nn.BatchNorm2d(self.expansion*planes)
-      ]
+      self.conv_downsample = Conv2dHeNormal(in_planes, self.expansion * planes, kernel_size=1, stride=stride, bias=False)
+      self.bn_downsample = BatchNorm(self.expansion * planes)
 
   def __call__(self, x):
     out = self.bn1(self.conv1(x)).relu()
     out = self.bn2(self.conv2(out))
-    out = out + x.sequential(self.downsample)
+    out = out + x.sequential([self.conv_downsample, self.bn_downsample] if self.conv_downsample is not None else [])
     out = out.relu()
     return out
 
@@ -34,24 +67,22 @@ class Bottleneck:
   def __init__(self, in_planes, planes, stride=1, stride_in_1x1=False, groups=1, base_width=64):
     width = int(planes * (base_width / 64.0)) * groups
     # NOTE: the original implementation places stride at the first convolution (self.conv1), control with stride_in_1x1
-    self.conv1 = nn.Conv2d(in_planes, width, kernel_size=1, stride=stride if stride_in_1x1 else 1, bias=False)
-    self.bn1 = nn.BatchNorm2d(width)
-    self.conv2 = nn.Conv2d(width, width, kernel_size=3, padding=1, stride=1 if stride_in_1x1 else stride, groups=groups, bias=False)
-    self.bn2 = nn.BatchNorm2d(width)
-    self.conv3 = nn.Conv2d(width, self.expansion*planes, kernel_size=1, bias=False)
-    self.bn3 = nn.BatchNorm2d(self.expansion*planes)
-    self.downsample = []
+    self.conv1 = Conv2dHeNormal(in_planes, width, kernel_size=1, stride=stride if stride_in_1x1 else 1, bias=False)
+    self.bn1 = BatchNorm(width)
+    self.conv2 = Conv2dHeNormal(width, width, kernel_size=3, padding=1, stride=1 if stride_in_1x1 else stride, groups=groups, bias=False)
+    self.bn2 = BatchNorm(width)
+    self.conv3 = Conv2dHeNormal(width, self.expansion*planes, kernel_size=1, bias=False)
+    self.bn3 = BatchNorm(self.expansion*planes)
+    self.conv_downsample, self.bn_downsample = None, None
     if stride != 1 or in_planes != self.expansion*planes:
-      self.downsample = [
-        nn.Conv2d(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
-        nn.BatchNorm2d(self.expansion*planes)
-      ]
+      self.conv_downsample = Conv2dHeNormal(in_planes, self.expansion * planes, kernel_size=1, stride=stride, bias=False)
+      self.bn_downsample = BatchNorm(self.expansion * planes)
 
   def __call__(self, x):
     out = self.bn1(self.conv1(x)).relu()
     out = self.bn2(self.conv2(out)).relu()
     out = self.bn3(self.conv3(out))
-    out = out + x.sequential(self.downsample)
+    out = out + x.sequential([self.conv_downsample, self.bn_downsample] if self.conv_downsample is not None else [])
     out = out.relu()
     return out
 
@@ -78,13 +109,13 @@ class ResNet:
 
     self.groups = groups
     self.base_width = width_per_group
-    self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, bias=False, padding=3)
-    self.bn1 = nn.BatchNorm2d(64)
+    self.conv1 = Conv2dHeNormal(3, 64, kernel_size=7, stride=2, bias=False, padding=3)
+    self.bn1 = BatchNorm(64)
     self.layer1 = self._make_layer(self.block, 64, self.num_blocks[0], stride=1, stride_in_1x1=stride_in_1x1)
     self.layer2 = self._make_layer(self.block, 128, self.num_blocks[1], stride=2, stride_in_1x1=stride_in_1x1)
     self.layer3 = self._make_layer(self.block, 256, self.num_blocks[2], stride=2, stride_in_1x1=stride_in_1x1)
     self.layer4 = self._make_layer(self.block, 512, self.num_blocks[3], stride=2, stride_in_1x1=stride_in_1x1)
-    self.fc = nn.Linear(512 * self.block.expansion, num_classes) if num_classes is not None else None
+    self.fc = Linear(512 * self.block.expansion, num_classes) if num_classes is not None else None
 
   def _make_layer(self, block, planes, num_blocks, stride, stride_in_1x1):
     strides = [stride] + [1] * (num_blocks-1)
@@ -112,7 +143,7 @@ class ResNet:
     if is_feature_only: features.append(out)
     if not is_feature_only:
       out = out.mean([2,3])
-      out = self.fc(out).log_softmax()
+      out = self.fc(out)
       return out
     return features
 
