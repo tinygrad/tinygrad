@@ -99,8 +99,8 @@ def train_resnet():
   lr_steps = [30, 60, 80]
   lr_warmup_epochs = 5
   base_lr = 0.256 * (BS / 256)  # Linearly scale from BS=256, lr=0.256
-  base_lr = 8.4 * (BS/1024)
-  epochs = getenv("EPOCHS", 60)
+  base_lr = 8.4 * (BS/2048)
+  epochs = getenv("EPOCHS", 45)
   optimizer = optim.SGD(parameters, base_lr / lr_scaler, momentum=.875, weight_decay=1/2**15)
   steps_in_train_epoch = (len(get_train_files()) // BS)
   steps_in_val_epoch = (len(get_val_files()) // EVAL_BS)
