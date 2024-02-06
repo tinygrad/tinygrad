@@ -91,7 +91,7 @@ def train_resnet():
     x /= input_std
     return x
 
-  lr_scaler = 8
+  lr_scaler = 8 if FP16 else 1
   lr_gamma = 0.1
   lr_steps = [30, 60, 80]
   lr_warmup_epochs = 5
