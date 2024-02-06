@@ -111,10 +111,32 @@ def train_resnet():
         if i % 1000 == 0: print(epoch, i, scheduler.get_lr().numpy())
     exit(0)
 
+  train_state = {'model':model, 'scheduler':scheduler, 'optimizer':optimizer}
+  def _get_state_dict():
+    big_dict = state.get_state_dict(train_state)
+    deduped = {}
+    seen = set()
+    for k, v in big_dict.items():
+      if v in seen: continue
+      seen.add(v)
+      deduped[k] = v
+    return deduped
+  def _load_state_dict(state_dict):
+    big_dict = state.get_state_dict(train_state)
+    # hack: put back the dupes
+    dupe_names = {}
+    for k, v in big_dict.items():
+      if v not in dupe_names:
+        dupe_names[v] = k
+        assert k in state_dict
+      state_dict[k] = state_dict[dupe_names[v]]
+    state.load_state_dict([model, scheduler, optimizer], state_dict)
   start_epoch = 0
   if ckpt:=getenv("RESUME", ""):
     print(f"resuming from {ckpt}")
-    state.load_state_dict(scheduler, state.safe_load(ckpt))
+    resume_dict = state.safe_load(ckpt)
+    #print((resume_dict.keys()))
+    _load_state_dict(resume_dict)
     start_epoch = int(scheduler.epoch_counter.numpy().item() / steps_in_train_epoch)
     print(f"resuming at epoch {start_epoch}")
   elif getenv("TESTEVAL"): model.load_from_pretrained()
@@ -221,10 +243,9 @@ def train_resnet():
 
       if e % getenv("CKPT_EPOCHS", 4) == 0:
         if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-        # scheduler has optimizer and model
         fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
         print(f"saving ckpt to {fn}")
-        state.safe_save(state.get_state_dict(scheduler), fn)
+        state.safe_save(_get_state_dict(), fn)
 
 def train_retinanet():
   # TODO: Retinanet
