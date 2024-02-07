@@ -63,22 +63,17 @@ def train_resnet():
   parameters = get_parameters(model)
 
   @TinyJit
-  def train_step(X, Y):
+  def forward_step(X, Y):
     scheduler.step()
     optimizer.zero_grad()
     X = normalize(X)
     out = model.forward(X)
     loss = sparse_categorical_crossentropy(out, Y, label_smoothing=0.1) * lr_scaler
+    return loss.realize(), out.realize(), (out.argmax(-1) == Y).sum()
+  @TinyJit
+  def backward_step(loss):
     loss.backward()
     optimizer.step()
-    return loss.realize(), out.realize(), (out.argmax(-1) == Y).sum()
-
-  @TinyJit
-  def eval_step(X, Y):
-    X = normalize(X)
-    out = model.forward(X)
-    loss = sparse_categorical_crossentropy(out, Y, label_smoothing=0.1)
-    return loss.realize(), out.realize()
 
   input_mean = Tensor([0.485, 0.456, 0.406], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
   input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
@@ -191,7 +186,11 @@ def train_resnet():
       if getenv("TESTEVAL"): break
 
       GlobalCounters.reset()
-      proc = (train_step(proc[0], proc[1]), proc[2])
+      proc = (forward_step(proc[0], proc[1]), proc[2])
+      # the backward step should be realized by loss.numpy(), even though it doesn't depend on this.
+      # doing this uses 16.38gb vs 15.55gb? why? because the grads get realized in optimizer.step, and the backward buffers are freed?
+      fwet = time.perf_counter()
+      backward_step(proc[0][0])
 
       et = time.perf_counter()
       dt = time.perf_counter()
@@ -209,7 +208,7 @@ def train_resnet():
       new_st = time.perf_counter()
 
       tqdm.write(
-        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(et - st) * 1000.0:7.2f} ms python, {(cl - dte) * 1000.0:7.2f} ms CL, {(dte - dt) * 1000.0:6.2f} ms fetch data, {loss_cpu:5.2f} loss, {top_1_acc:3.2f} acc, {optimizer.lr.numpy()[0] * lr_scaler:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(fwet - st) * 1000.0:7.2f}+{(et - fwet) * 1000.0:7.2f} ms bw python, {(cl - dte) * 1000.0:7.2f} ms CL, {(dte - dt) * 1000.0:6.2f} ms fetch data, {loss_cpu:5.2f} loss, {top_1_acc:3.2f} acc, {optimizer.lr.numpy()[0] * lr_scaler:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
       wandb.log({"lr": optimizer.lr.numpy() * lr_scaler,
                  "train/data_time": dte-dt,
                  "train/step_time": cl - st,
@@ -234,7 +233,7 @@ def train_resnet():
       eval_times = []
       eval_top_1_acc = []
       eval_top_5_acc = []
-      Tensor.training = False
+      #Tensor.training = False  # disable to make kernels as similar as possible
 
       iterator = iter(tqdm(t := batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False), total=steps_in_val_epoch))
 
@@ -244,7 +243,7 @@ def train_resnet():
         GlobalCounters.reset()
         st = time.time()
 
-        proc = (eval_step(proc[0], proc[1]), proc[1], proc[2])
+        proc = (forward_step(proc[0], proc[1]), proc[1], proc[2])
 
         try:
           next_proc = data_get()
