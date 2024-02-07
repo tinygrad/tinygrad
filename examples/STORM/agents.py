@@ -1,7 +1,11 @@
 import torch
-import torch.nn as nn
+import torch.nn as tnn
 import torch.nn.functional as F
-import torch.distributions as distributions
+
+from tinygrad import Tensor, dtypes , nn
+import tinygrad
+# import torch.distributions as distributions
+import distributions
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 import copy
@@ -130,33 +134,34 @@ class ActorCriticAgent(nn.Module):
         '''
         Update policy and value model
         '''
-        self.train()
-        with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=self.use_amp):
-            logits, raw_value = self.get_logits_raw_value(latent)
-            dist = distributions.Categorical(logits=logits[:, :-1])
-            log_prob = dist.log_prob(action)
-            entropy = dist.entropy()
+        # self.train()
+        # with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=self.use_amp):
+        logits, raw_value = self.get_logits_raw_value(latent)
+        dist = distributions.Categorical(logits=logits[:, :-1])
+        log_prob = dist.log_prob(action)
+        entropy = dist.entropy()
 
-            # decode value, calc lambda return
-            slow_value = self.slow_value(latent)
-            slow_lambda_return = calc_lambda_return(reward, slow_value, termination, self.gamma, self.lambd)
-            value = self.symlog_twohot_loss.decode(raw_value)
-            lambda_return = calc_lambda_return(reward, value, termination, self.gamma, self.lambd)
+        # decode value, calc lambda return
+        slow_value = self.slow_value(latent)
+        slow_lambda_return = calc_lambda_return(reward, slow_value, termination, self.gamma, self.lambd)
+        value = self.symlog_twohot_loss.decode(raw_value)
+        lambda_return = calc_lambda_return(reward, value, termination, self.gamma, self.lambd)
 
-            # update value function with slow critic regularization
-            value_loss = self.symlog_twohot_loss(raw_value[:, :-1], lambda_return.detach())
-            slow_value_regularization_loss = self.symlog_twohot_loss(raw_value[:, :-1], slow_lambda_return.detach())
+        # update value function with slow critic regularization
+        value_loss = self.symlog_twohot_loss(raw_value[:, :-1], lambda_return.detach())
+        slow_value_regularization_loss = self.symlog_twohot_loss(raw_value[:, :-1], slow_lambda_return.detach())
 
-            lower_bound = self.lowerbound_ema(percentile(lambda_return, 0.05))
-            upper_bound = self.upperbound_ema(percentile(lambda_return, 0.95))
-            S = upper_bound-lower_bound
-            norm_ratio = torch.max(torch.ones(1).cuda(), S)  # max(1, S) in the paper
-            norm_advantage = (lambda_return-value[:, :-1]) / norm_ratio
-            policy_loss = -(log_prob * norm_advantage.detach()).mean()
+        lower_bound = self.lowerbound_ema(percentile(lambda_return, 0.05))
+        upper_bound = self.upperbound_ema(percentile(lambda_return, 0.95))
+        S = upper_bound-lower_bound
+        # norm_ratio = torch.max(torch.ones(1).cuda(), S)  # max(1, S) in the paper
+        norm_ratio = Tensor.max(Tensor.ones(1), S) # max(1, S) in the paper
+        norm_advantage = (lambda_return-value[:, :-1]) / norm_ratio
+        policy_loss = -(log_prob * norm_advantage.detach()).mean()
 
-            entropy_loss = entropy.mean()
+        entropy_loss = entropy.mean()
 
-            loss = policy_loss + value_loss + slow_value_regularization_loss - self.entropy_coef * entropy_loss
+        loss = policy_loss + value_loss + slow_value_regularization_loss - self.entropy_coef * entropy_loss
 
         # gradient descent
         self.scaler.scale(loss).backward()

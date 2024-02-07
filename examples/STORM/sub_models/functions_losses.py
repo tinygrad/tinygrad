@@ -29,9 +29,9 @@ class SymLogLoss:
         return 0.5*mse_loss(output, target)
 
 
-class SymLogTwoHotLoss(nn.Module):
+class SymLogTwoHotLoss:
     def __init__(self, num_classes, lower_bound, upper_bound):
-        super().__init__()
+        # super().__init__()
         self.num_classes = num_classes
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
@@ -42,7 +42,7 @@ class SymLogTwoHotLoss(nn.Module):
         self.register_buffer(
             'bins', torch.linspace(-20, 20, num_classes), persistent=False)
 
-    def forward(self, output, target):
+    def forward(self, output:Tensor, target):
         target = symlog(target)
         assert target.min() >= self.lower_bound and target.max() <= self.upper_bound
 
@@ -52,14 +52,17 @@ class SymLogTwoHotLoss(nn.Module):
         weight = torch.clamp(weight, 0, 1)
         weight = weight.unsqueeze(-1)
 
-        target_prob = (1-weight)*F.one_hot(index-1, self.num_classes) + weight*F.one_hot(index, self.num_classes)
+        # target_prob = (1-weight)*F.one_hot(index-1, self.num_classes) + weight*F.one_hot(index, self.num_classes)
+        target_prob = (1-weight)*(index-1).one_hot(self.num_classes) + weight*index.one_hot(self.num_classes)
 
-        loss = -target_prob * F.log_softmax(output, dim=-1)
+        # loss = -target_prob * F.log_softmax(output, dim=-1)
+        loss = -target_prob * output.log_softmax(axis=-1)
         loss = loss.sum(dim=-1)
         return loss.mean()
 
-    def decode(self, output):
-        return symexp(F.softmax(output, dim=-1) @ self.bins)
+    def decode(self, output:Tensor):
+        # return symexp(F.softmax(output, dim=-1) @ self.bins)
+        return symexp(output.softmax(axis=-1) @ self.bins)
 
 
 if __name__ == "__main__":
