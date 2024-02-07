@@ -46,11 +46,6 @@ def train_resnet():
   np.random.seed(seed)
   random.seed(seed)
 
-  if getenv("WANDB_RESUME", ""):
-    wandb.init(id=getenv("WANDB_RESUME", ""), resume="must")
-  else:
-    wandb.init()
-
   if FP16: dtypes.default_float = dtypes.float16
 
   if getenv("MOCKGPUS", 0):
@@ -151,6 +146,34 @@ def train_resnet():
     if not isinstance(v.device, tuple):
       v.to_(GPUS)
 
+  # ** init wandb **
+  wandb_config = {
+    'BS': BS,
+    'EVAL_BS': EVAL_BS,
+    'base_lr': base_lr,
+    'epochs': epochs,
+    'classes': num_classes,
+    'train_files': len(get_train_files()),
+    'eval_files': len(get_train_files()),
+    'steps_in_train_epoch': steps_in_train_epoch,
+    'GPUS': GPUS,
+    'FP16': FP16,
+    'BEAM': getenv('BEAM'),
+    'TEST_TRAIN': getenv('TEST_TRAIN'),
+    'TEST_EVAL': getenv('TEST_EVAL'),
+    'model': 'resnet50' if not getenv('SMALL') else 'resnet18',
+    'optimizer': optimizer.__class__.__name__,
+    'scheduler': scheduler.__class__.__name__,
+  }
+  wandb_tags = []
+  if num_classes != 1000:
+    wandb_tags.append('cats')
+    wandb_tags.append(f'cats{num_classes}')
+  if getenv("WANDB_RESUME", ""):
+    wandb.init(id=getenv("WANDB_RESUME", ""), resume="must", config=wandb_config, tags=wandb_tags)
+  else:
+    wandb.init(config=wandb_config, tags=wandb_tags)
+
   for e in range(start_epoch, epochs):
     # train loop
     Tensor.training = True
@@ -180,13 +203,13 @@ def train_resnet():
 
       dte = time.perf_counter()
 
-      proc, top_1_acc = proc[0][0].numpy(), proc[0][2].numpy().item()  # return cookie
+      proc, top_1_acc = proc[0][0].numpy(), proc[0][2].numpy().item() / BS  # return cookie
       loss_cpu = proc / lr_scaler
       cl = time.perf_counter()
       new_st = time.perf_counter()
 
       tqdm.write(
-        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(et - st) * 1000.0:7.2f} ms python, {(cl - dte) * 1000.0:7.2f} ms CL, {(dte - dt) * 1000.0:6.2f} ms fetch data, {loss_cpu:5.2f} loss, {top_1_acc / BS:3.2f} acc, {optimizer.lr.numpy()[0] * lr_scaler:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(et - st) * 1000.0:7.2f} ms python, {(cl - dte) * 1000.0:7.2f} ms CL, {(dte - dt) * 1000.0:6.2f} ms fetch data, {loss_cpu:5.2f} loss, {top_1_acc:3.2f} acc, {optimizer.lr.numpy()[0] * lr_scaler:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
       wandb.log({"lr": optimizer.lr.numpy() * lr_scaler,
                  "train/data_time": dte-dt,
                  "train/step_time": cl - st,
@@ -250,7 +273,10 @@ def train_resnet():
 
       if (e+1) % getenv("CKPT_EPOCHS", 4) == 0 or e + 1 == epochs:
         if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
-        fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
+        if wandb.run is not None:
+          fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{e}.safe"
+        else:
+          fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
         print(f"saving ckpt to {fn}")
         state.safe_save(_get_state_dict(), fn)
 
