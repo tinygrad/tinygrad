@@ -9,7 +9,13 @@ import time
 import yacs
 from yacs.config import CfgNode as CN
 
-
+def _sum_rightmost(value, dim):
+    if dim == 0:
+        return value
+    required_shape = value.shape[:-dim] + (-1,)
+    return value.reshape(required_shape).sum(-1)
+def numel(shape):
+    return int(np.prod(shape)) if shape else 1
 def seed_np_torch(seed=20001118):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
