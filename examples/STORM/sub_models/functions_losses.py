@@ -2,24 +2,31 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from tinygrad import Tensor, dtypes #, nn
+import tinygrad
 
-@torch.no_grad()
+# @torch.no_grad()
 def symlog(x):
-    return torch.sign(x) * torch.log(1 + torch.abs(x))
+    # return torch.sign(x) * torch.log(1 + torch.abs(x))
+    return Tensor.sign(x) * Tensor.log(1 + Tensor.abs(x))
 
 
-@torch.no_grad()
+# @torch.no_grad()
 def symexp(x):
-    return torch.sign(x) * (torch.exp(torch.abs(x)) - 1)
+    # return torch.sign(x) * (torch.exp(torch.abs(x)) - 1)
+    return Tensor.sign(x) * (Tensor.exp(Tensor.abs(x)) - 1)
 
-
-class SymLogLoss(nn.Module):
+def mse_loss(x, y):
+    return Tensor.square(x - y).mean()
+class SymLogLoss:
     def __init__(self):
-        super().__init__()
+        # super().__init__()
+        pass
 
     def forward(self, output, target):
         target = symlog(target)
-        return 0.5*F.mse_loss(output, target)
+        # return 0.5*F.mse_loss(output, target)
+        return 0.5*mse_loss(output, target)
 
 
 class SymLogTwoHotLoss(nn.Module):
@@ -57,8 +64,10 @@ class SymLogTwoHotLoss(nn.Module):
 
 if __name__ == "__main__":
     loss_func = SymLogTwoHotLoss(255, -20, 20)
-    output = torch.randn(1, 1, 255).requires_grad_()
-    target = torch.ones(1).reshape(1, 1).float() * 0.1
+    # output = torch.randn(1, 1, 255).requires_grad_()
+    output = Tensor.randn(1, 1, 255)
+    # target = torch.ones(1).reshape(1, 1).float() * 0.1
+    target = Tensor.ones(1).reshape((1, 1)).float() * 0.1
     print(target)
     loss = loss_func(output, target)
     print(loss)

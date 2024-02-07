@@ -1,15 +1,18 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+# import torch.nn as nn
+# import torch.nn.functional as F
+
+from tinygrad import Tensor, dtypes, nn
+import tinygrad
 from einops import repeat, rearrange
 
 from sub_models.attention_blocks import get_vector_mask
 from sub_models.attention_blocks import PositionalEncoding1D, AttentionBlock, AttentionBlockKVCache
 
 
-class StochasticTransformer(nn.Module):
+class StochasticTransformer:
     def __init__(self, stoch_dim, action_dim, feat_dim, num_layers, num_heads, max_length, dropout):
-        super().__init__()
+        # super().__init__()
         self.action_dim = action_dim
 
         # mix image_embedding and action
@@ -28,8 +31,9 @@ class StochasticTransformer(nn.Module):
 
         self.head = nn.Linear(feat_dim, stoch_dim)
 
-    def forward(self, samples, action, mask):
-        action = F.one_hot(action.long(), self.action_dim).float()
+    def forward(self, samples, action:Tensor, mask):
+        # action = F.one_hot(action.long(), self.action_dim).float()
+        action = action.long().one_hot(self.action_dim).float()
         feats = self.stem(torch.cat([samples, action], dim=-1))
         feats = self.position_encoding(feats)
         feats = self.layer_norm(feats)
@@ -41,9 +45,9 @@ class StochasticTransformer(nn.Module):
         return feat
 
 
-class StochasticTransformerKVCache(nn.Module):
+class StochasticTransformerKVCache:
     def __init__(self, stoch_dim, action_dim, feat_dim, num_layers, num_heads, max_length, dropout):
-        super().__init__()
+        # super().__init__()
         self.action_dim = action_dim
         self.feat_dim = feat_dim
 
@@ -65,7 +69,8 @@ class StochasticTransformerKVCache(nn.Module):
         '''
         Normal forward pass
         '''
-        action = F.one_hot(action.long(), self.action_dim).float()
+        # action = F.one_hot(action.long(), self.action_dim).float()
+        action = action.long().one_hot(self.action_dim).float()
         feats = self.stem(torch.cat([samples, action], dim=-1))
         feats = self.position_encoding(feats)
         feats = self.layer_norm(feats)
@@ -81,7 +86,8 @@ class StochasticTransformerKVCache(nn.Module):
         '''
         self.kv_cache_list = []
         for layer in self.layer_stack:
-            self.kv_cache_list.append(torch.zeros(size=(batch_size, 0, self.feat_dim), dtype=dtype, device="cuda"))
+            # self.kv_cache_list.append(torch.zeros(size=(batch_size, 0, self.feat_dim), dtype=dtype, device="cuda"))
+            self.kv_cache_list.append(Tensor.zeros((batch_size, 0, self.feat_dim), dtype=dtype))
 
     def forward_with_kv_cache(self, samples, action):
         '''
@@ -90,13 +96,15 @@ class StochasticTransformerKVCache(nn.Module):
         assert samples.shape[1] == 1
         mask = get_vector_mask(self.kv_cache_list[0].shape[1]+1, samples.device)
 
-        action = F.one_hot(action.long(), self.action_dim).float()
+        # action = F.one_hot(action.long(), self.action_dim).float()
+        action = action.long().one_hot(self.action_dim).float()
         feats = self.stem(torch.cat([samples, action], dim=-1))
         feats = self.position_encoding.forward_with_position(feats, position=self.kv_cache_list[0].shape[1])
         feats = self.layer_norm(feats)
 
         for idx, layer in enumerate(self.layer_stack):
-            self.kv_cache_list[idx] = torch.cat([self.kv_cache_list[idx], feats], dim=1)
+            # self.kv_cache_list[idx] = torch.cat([self.kv_cache_list[idx], feats], dim=1)
+            self.kv_cache_list[idx] = Tensor.cat([self.kv_cache_list[idx], feats], dim=1)
             feats, attn = layer(feats, self.kv_cache_list[idx], self.kv_cache_list[idx], mask)
 
         return feats

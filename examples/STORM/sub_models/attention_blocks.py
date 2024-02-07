@@ -39,16 +39,18 @@ class ScaledDotProductAttention:
     def __init__(self, temperature, attn_dropout=0.1):
         # super().__init__()
         self.temperature = temperature
-        self.dropout = nn.Dropout(attn_dropout)
+        self.dropoutVal = attn_dropout
     # TODO: need masked_fill equivalent
     def forward(self, q, k, v, mask=None):
-        attn = torch.matmul(q / self.temperature, k.transpose(2, 3))
-        # attn = Tensor.matmul(q / self.temperature, k.transpose(2, 3))
+        # attn = torch.matmul(q / self.temperature, k.transpose(2, 3))
+        attn = Tensor.matmul(q / self.temperature, k.transpose(2, 3))
         if mask is not None:
             attn = attn.masked_fill(mask == 0, -1e9)
 
-        attn = self.dropout(F.softmax(attn, dim=-1))
-        output = torch.matmul(attn, v)
+        # attn = self.dropout(F.softmax(attn, dim=-1))
+        attn = attn.softmax(dim=-1).dropout(self.dropoutVal)
+        # output = torch.matmul(attn, v)
+        output = Tensor.matmul(attn, v)
 
         return output, attn
 
@@ -69,7 +71,7 @@ class MultiHeadAttention:
 
         self.attention = ScaledDotProductAttention(temperature=d_k ** 0.5)
 
-        self.dropout = nn.Dropout(dropout)
+        self.dropoutVal = dropout
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
 
     def forward(self, q, k, v, mask=None):
@@ -95,7 +97,8 @@ class MultiHeadAttention:
         # Transpose to move the head dimension back: b x lq x n x dv
         # Combine the last two dimensions to concatenate all the heads together: b x lq x (n*dv)
         q = q.transpose(1, 2).contiguous().view(sz_b, len_q, -1)
-        q = self.dropout(self.fc(q))
+        # q = self.dropout(self.fc(q))
+        q = self.fc(q).dropout(self.dropoutVal)
         q += residual
 
         q = self.layer_norm(q)
@@ -110,7 +113,7 @@ class PositionwiseFeedForward:
         self.w_1 = nn.Linear(d_in, d_hid)  # position-wise
         self.w_2 = nn.Linear(d_hid, d_in)  # position-wise
         self.layer_norm = nn.LayerNorm(d_in, eps=1e-6)
-        self.dropout = nn.Dropout(dropout)
+        self.dropoutVal = dropout
 
     def forward(self, x):
 
@@ -118,7 +121,7 @@ class PositionwiseFeedForward:
 
         # x = self.w_2(F.relu(self.w_1(x)))
         x = self.w_2(self.w_1(x).relu())
-        x = self.dropout(x)
+        x = x.dropout(self.dropoutVal)
         x += residual
 
         x = self.layer_norm(x)
@@ -161,7 +164,9 @@ class PositionalEncoding1D:
         self.pos_emb = nn.Embedding(self.max_length, embed_dim)
 
     def forward(self, feat):
-        pos_emb = self.pos_emb(torch.arange(self.max_length, device=feat.device))
+        # pos_emb = self.pos_emb(torch.arange(self.max_length, device=feat.device))
+        pos_emb = self.pos_emb(Tensor.arange(self.max_length, device=feat.device))
+
         pos_emb = repeat(pos_emb, "L D -> B L D", B=feat.shape[0])
 
         feat = feat + pos_emb[:, :feat.shape[1], :]
@@ -169,7 +174,9 @@ class PositionalEncoding1D:
 
     def forward_with_position(self, feat, position):
         assert feat.shape[1] == 1
-        pos_emb = self.pos_emb(torch.arange(self.max_length, device=feat.device))
+        # pos_emb = self.pos_emb(torch.arange(self.max_length, device=feat.device))
+        pos_emb = self.pos_emb(Tensor.arange(self.max_length, device=feat.device))
+
         pos_emb = repeat(pos_emb, "L D -> B L D", B=feat.shape[0])
 
         feat = feat + pos_emb[:, position:position+1, :]

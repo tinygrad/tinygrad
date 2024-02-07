@@ -4,9 +4,13 @@ from tensorboardX import SummaryWriter
 import cv2
 import numpy as np
 from einops import rearrange
+
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+# import torch.nn as nn
+# import torch.nn.functional as F
+
+from tinygrad import Tensor, dtypes, nn
+import tinygrad
 from collections import deque
 from tqdm import tqdm
 import copy
@@ -17,7 +21,7 @@ import shutil
 import pickle
 import os
 
-from utils import seed_np_torch, Logger, load_config
+from utils import Logger, load_config, seed_np#, seed_np_torch
 from replay_buffer import ReplayBuffer
 import env_wrapper
 import agents
@@ -49,7 +53,7 @@ def train_world_model_step(replay_buffer: ReplayBuffer, world_model: WorldModel,
     world_model.update(obs, action, reward, termination, logger=logger)
 
 
-@torch.no_grad()
+# @torch.no_grad()
 def world_model_imagine_data(replay_buffer: ReplayBuffer,
                              world_model: WorldModel, agent: agents.ActorCriticAgent,
                              imagine_batch_size, imagine_demonstration_batch_size,
@@ -101,18 +105,21 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
         if replay_buffer.ready():
             world_model.eval()
             agent.eval()
-            with torch.no_grad():
-                if len(context_action) == 0:
-                    action = vec_env.action_space.sample()
-                else:
-                    context_latent = world_model.encode_obs(torch.cat(list(context_obs), dim=1))
-                    model_context_action = np.stack(list(context_action), axis=1)
-                    model_context_action = torch.Tensor(model_context_action).cuda()
-                    prior_flattened_sample, last_dist_feat = world_model.calc_last_dist_feat(context_latent, model_context_action)
-                    action = agent.sample_as_env_action(
-                        torch.cat([prior_flattened_sample, last_dist_feat], dim=-1),
-                        greedy=False
-                    )
+            # with torch.no_grad():
+            if len(context_action) == 0:
+                action = vec_env.action_space.sample()
+            else:
+                # context_latent = world_model.encode_obs(torch.cat(list(context_obs), dim=1))
+                context_latent = world_model.encode_obs(Tensor.cat(list(context_obs), dim=1))
+                model_context_action = np.stack(list(context_action), axis=1)
+                # model_context_action = torch.Tensor(model_context_action).cuda()
+                model_context_action = Tensor(model_context_action)
+                prior_flattened_sample, last_dist_feat = world_model.calc_last_dist_feat(context_latent, model_context_action)
+                action = agent.sample_as_env_action(
+                    # torch.cat([prior_flattened_sample, last_dist_feat], dim=-1),
+                    Tensor.cat([prior_flattened_sample, last_dist_feat], dim=-1),
+                    greedy=False
+                )
 
             context_obs.append(rearrange(torch.Tensor(current_obs).cuda(), "B H W C -> B 1 C H W")/255)
             context_action.append(action)
@@ -194,7 +201,7 @@ def build_world_model(conf, action_dim):
         transformer_hidden_dim=conf.Models.WorldModel.TransformerHiddenDim,
         transformer_num_layers=conf.Models.WorldModel.TransformerNumLayers,
         transformer_num_heads=conf.Models.WorldModel.TransformerNumHeads
-    ).cuda()
+    )#.cuda()
 
 
 def build_agent(conf, action_dim):
@@ -206,15 +213,15 @@ def build_agent(conf, action_dim):
         gamma=conf.Models.Agent.Gamma,
         lambd=conf.Models.Agent.Lambda,
         entropy_coef=conf.Models.Agent.EntropyCoef,
-    ).cuda()
+    )#.cuda()
 
 
 if __name__ == "__main__":
     # ignore warnings
     import warnings
     warnings.filterwarnings('ignore')
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
+    # torch.backends.cuda.matmul.allow_tf32 = True
+    # torch.backends.cudnn.allow_tf32 = True
 
     # parse arguments
     parser = argparse.ArgumentParser()
@@ -228,7 +235,8 @@ if __name__ == "__main__":
     print(colorama.Fore.RED + str(args) + colorama.Style.RESET_ALL)
 
     # set seed
-    seed_np_torch(seed=args.seed)
+    # seed_np_torch(seed=args.seed)
+    seed_np(seed=args.seed)
     # tensorboard writer
     logger = Logger(path=f"runs/{args.n}")
     # copy config file
