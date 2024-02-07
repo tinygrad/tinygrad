@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 class OptOps(Enum):
-  UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
+  TC = auto(); UPCAST = auto(); UPCASTMID = auto(); UNROLL = auto(); LOCAL = auto() # noqa: E702
   GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto() # noqa: E702
   def __lt__(self, x:OptOps): return self.value < x.value
 
@@ -102,6 +102,7 @@ class Kernel:
     self.local_dims: int = 0
     self.local_alias: Dict[int, LocalBuffer] = {}
     self.tensor_core: Optional[TensorCore] = None
+    self.tensor_core_bufs: List[int] = []
     self.dont_use_locals: bool = False
 
     # group simplifies
@@ -118,13 +119,14 @@ class Kernel:
     ret.opts, ret.ast = self.opts, self.ast
 
     # things downstream of the AST
-    # NOTE: we copy bufs for local buffers and sts for optimizations
-    ret.info, ret.reduceop, ret.bufs, ret.earlybufs, ret.full_buf_index, ret.sts = \
-      self.info, self.reduceop, self.bufs[:], self.earlybufs, self.full_buf_index, self.sts[:]
+    ret.info, ret.reduceop, ret.bufs, ret.earlybufs, ret.full_buf_index = \
+      self.info, self.reduceop, [x for x in self.bufs if not isinstance(x, LocalBuffer)], self.earlybufs, self.full_buf_index
+    ret.sts = self.sts[:len(ret.bufs)] # NOTE: must redo the local buffers with TC in beam
 
     # parameters for optimizations
-    ret.applied_opts, ret.group_for_reduce, ret.upcasted, ret.local_dims, ret.local_alias, ret.tensor_core, ret.dont_use_locals = \
-      self.applied_opts[:], self.group_for_reduce[:], self.upcasted, self.local_dims, self.local_alias.copy(), self.tensor_core, self.dont_use_locals
+    ret.applied_opts, ret.group_for_reduce, ret.upcasted, ret.local_dims, ret.dont_use_locals = \
+      self.applied_opts[:], self.group_for_reduce[:], self.upcasted, self.local_dims, self.dont_use_locals
+    ret.tensor_core, ret.tensor_core_bufs, ret.local_alias = self.tensor_core, self.tensor_core_bufs, {}
 
     # uncached since linearize didn't run
     ret.applied_opts_cache = None
@@ -327,7 +329,7 @@ class Kernel:
 
   # ******************** high level optimizers ********************
 
-  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None) -> bool:
+  def apply_tensor_cores(self, use_tensor_cores=1, axis:int=0, extra_opts:Optional[List[Opt]]=None) -> bool:
     if use_tensor_cores and self.opts.has_local and self.reduceop and self.reduceop.op == ReduceOps.SUM and self.opts.device in tensor_cores:
       for tc in tensor_cores[self.opts.device]:
         if not (use_tensor_cores==2 or (tc.arch is None or tc.arch == os.uname().machine)): continue
@@ -346,9 +348,11 @@ class Kernel:
 
         if not(axis_buf0 and axis_buf1 and self.full_shape[self.first_reduce]%tc.dims[2] == 0 and self.full_shape[self.first_reduce] >= tc.dims[2] and (self.shape_len-self.first_reduce) == 1): continue  # noqa: E501
 
-        if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
+        axis_choices = list(itertools.product(axis_buf0, axis_buf1))
+        if not(axis < len(axis_choices)): continue
 
-        s0, s1 = axis_buf0[-1][0], axis_buf1[-1][0] # TODO: select axis in smart way
+        if DEBUG >= 3: print("TENSOR CORES", axis_buf0, axis_buf1, tc)
+        s0, s1 = axis_choices[-(axis+1)][0][0], axis_choices[-(axis+1)][1][0]
         s0_exists, s1_exists = True, True
         assert s0 != s1 and self.full_shape[s0]%tc.dims[0] == 0 and self.full_shape[s1]%tc.dims[1] == 0
         def fix(needed, ax):
@@ -362,10 +366,10 @@ class Kernel:
             s1_exists = False
 
         # tensor core -- unroll the reduce dim, upcast input, then create the correct thread pattern
-        self.apply_opt(Opt(OptOps.UNROLL, 0, tc.dims[2]))
-        self.apply_opt(Opt(OptOps.UPCAST, s0 if tc.upcast_dim == 0 else s1, (tc.dims[0]*tc.dims[2])//prod([a[1] for a in tc.threads])))
+        self.apply_opt(Opt(OptOps.UNROLL, 0, tc.dims[2]), append_opt=False)
+        self.apply_opt(Opt(OptOps.UPCAST, s0 if tc.upcast_dim == 0 else s1, (tc.dims[0]*tc.dims[2])//prod([a[1] for a in tc.threads])), append_opt=False)  # noqa: E501
         for (tc_dim, tc_amt) in tc.threads:
-          fix(self.apply_opt(Opt(OptOps.LOCAL, s0 if tc_dim == 0 else s1, tc_amt)), s0 if tc_dim == 0 else s1)
+          fix(self.apply_opt(Opt(OptOps.LOCAL, s0 if tc_dim == 0 else s1, tc_amt), append_opt=False), s0 if tc_dim == 0 else s1)
 
         # assert tensor core and prevent extra_opts from altering the key shape structure
         if use_tensor_cores == 1: self.tensor_core = tc # TC=2 will do the shape ops without the WMMA
@@ -386,16 +390,21 @@ class Kernel:
                 self.apply_opt(Opt(OptOps.LOCAL, s0, upc))
                 break
 
-        # alias buffer
-        alias_pattern = [0]*(self.global_dims+(self.local_dims-len(tc.threads))) + [2]*(len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
-        self.alias_buffer(buf0, alias_pattern)
-        self.alias_buffer(buf1, alias_pattern)
+        # delay alias_buffer until all optimizations are completed
+        self.tensor_core_bufs = [buf0, buf1]
         return True
     return False
 
-  def apply_opt(self, opt:Opt):
+  def apply_opt(self, opt:Opt, append_opt:bool=True):
     assert not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals"  # noqa: E501
-    self.applied_opts.append(opt)
+    if append_opt: self.applied_opts.append(opt)
+
+    if opt.op == OptOps.TC:
+      assert len(self.applied_opts) == 1, "tensor core opts must be first"
+      assert opt.axis is not None, "tensor core opts must have an axis"
+      assert self.apply_tensor_cores(getenv("TC", 1), opt.axis, []), "no tensor core available"
+      return self.simplify_ones()
+
     if opt.axis is not None:
       axis = opt.axis + (self.first_reduce if opt.op == OptOps.UNROLL else (self.first_reduce+len(self.group_for_reduce) if opt.op in [OptOps.GROUP, OptOps.GROUPTOP] else 0))  # noqa: E501
     else:
