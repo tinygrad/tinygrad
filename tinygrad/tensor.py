@@ -418,19 +418,20 @@ class Tensor:
 
       # track tensor_dim and tensor_index using a dict
       # calc_dim to get dim and use that to normalize the negative tensor indices
-      idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor],tensor_index)}
+      idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor], tensor_index)}
 
-      # compute sum_dim, arange, and idx
-      max_idx_dim, first_dim, last_dim = max(i.ndim for i in idx.values()), min(idx.keys()), max(idx.keys())
-      sum_dim = tuple(d if n==0 else d+max_idx_dim-n for n,d in enumerate(idx.keys()))
-      arange = [Tensor.arange(ret.shape[d], requires_grad=False, device=self.device).reshape(ret.shape[d:d+1] + (1,)*(ret.ndim + max_idx_dim - n - sd - 1)) for n,(sd,d) in enumerate(zip(sum_dim, idx.keys()))]   # noqa: E501
-      reshaped_idx = [i.reshape(i.shape + (1,)*(ret.ndim - first_dim - (n or 1))) for n,i in enumerate(idx.values())]
-      ret = ret.reshape(ret.shape[:first_dim+1] + (1,)*max_idx_dim + ret.shape[first_dim+1:])
+      eqs, first_dim, max_idx_dim, last_dim  = [], min(idx.keys()), max(i.ndim for i in idx.values()), max(idx.keys())
+      for dim, i in idx.items():
+        a = i.reshape(i.shape + (1,)*(ret.ndim - first_dim))
+        b = Tensor.arange(ret.shape[dim]).reshape(ret.shape[dim:dim+1] + (1,)*(ret.ndim - dim - 1))
+        eqs.append(a == b)
 
-      # iteratively eq -> mul -> sum fancy index
-      try:
-        for a,i,sd in zip(arange, reshaped_idx, sum_dim): ret = (a==i).mul(ret).sum(sd)
+      try: mask = reduce(lambda x,y: x.mul(y), eqs).contiguous()
       except AssertionError as exc: raise IndexError("cannot broadcast indices") from exc
+
+      sh = ret.shape[:first_dim] + (1,)*max_idx_dim + ret.shape[first_dim:]
+      sum_arg = [i+max_idx_dim for i in idx.keys()]
+      ret = (mask*ret.reshape(sh)).sum(sum_arg)
 
       # special permute case
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
