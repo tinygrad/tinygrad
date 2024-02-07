@@ -1,6 +1,6 @@
-import torch
+# import torch
 # import torch.nn as nn
-import torch.nn.functional as F
+# import torch.nn.functional as F
 
 from tinygrad import Tensor, dtypes, nn
 import tinygrad
@@ -40,11 +40,12 @@ class ScaledDotProductAttention:
         # super().__init__()
         self.temperature = temperature
         self.dropoutVal = attn_dropout
-    # TODO: need masked_fill equivalent
+
     def forward(self, q, k, v, mask=None):
         # attn = torch.matmul(q / self.temperature, k.transpose(2, 3))
         attn = Tensor.matmul(q / self.temperature, k.transpose(2, 3))
         if mask is not None:
+            # IMPLEMENTTHISSSSSSSSSs
             attn = attn.masked_fill(mask == 0, -1e9)
 
         # attn = self.dropout(F.softmax(attn, dim=-1))

@@ -1,8 +1,8 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+# import torch.nn as nn
+# import torch.nn.functional as F
 
-from tinygrad import Tensor, dtypes #, nn
+from tinygrad import Tensor, dtypes, nn
 import tinygrad
 
 # @torch.no_grad()

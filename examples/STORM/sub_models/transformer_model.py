@@ -4,7 +4,7 @@ import torch
 
 from tinygrad import Tensor, dtypes, nn
 import tinygrad
-from einops import repeat, rearrange
+# from einops import repeat, rearrange
 
 from sub_models.attention_blocks import get_vector_mask
 from sub_models.attention_blocks import PositionalEncoding1D, AttentionBlock, AttentionBlockKVCache

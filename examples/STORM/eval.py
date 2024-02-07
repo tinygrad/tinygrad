@@ -12,13 +12,13 @@ from tinygrad import Tensor, dtypes, nn
 import tinygrad
 from collections import deque
 from tqdm import tqdm
-import copy
+# import copy
 import colorama
-import random
-import json
-import shutil
-import pickle
-import os
+# import random
+# import json
+# import shutil
+# import pickle
+# import os
 
 from utils import  Logger, load_config, seed_np#, seed_np_torch
 from replay_buffer import ReplayBuffer

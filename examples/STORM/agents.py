@@ -89,7 +89,7 @@ class ActorCriticAgent(nn.Module):
         self.optimizer = torch.optim.Adam(self.parameters(), lr=3e-5, eps=1e-5)
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
 
-    @torch.no_grad()
+    # @torch.no_grad()
     def update_slow_critic(self, decay=0.98):
         for slow_param, param in zip(self.slow_critic.parameters(), self.critic.parameters()):
             slow_param.data.copy_(slow_param.data * decay + param.data * (1 - decay))
@@ -103,7 +103,7 @@ class ActorCriticAgent(nn.Module):
         value = self.symlog_twohot_loss.decode(value)
         return value
 
-    @torch.no_grad()
+    # @torch.no_grad()
     def slow_value(self, x):
         value = self.slow_critic(x)
         value = self.symlog_twohot_loss.decode(value)
@@ -114,21 +114,22 @@ class ActorCriticAgent(nn.Module):
         raw_value = self.critic(x)
         return logits, raw_value
 
-    @torch.no_grad()
+    # @torch.no_grad()
     def sample(self, latent, greedy=False):
-        self.eval()
-        with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=self.use_amp):
-            logits = self.policy(latent)
-            dist = distributions.Categorical(logits=logits)
-            if greedy:
-                action = dist.probs.argmax(dim=-1)
-            else:
-                action = dist.sample()
+        # self.eval()
+        # with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=self.use_amp):
+        logits = self.policy(latent)
+        dist = distributions.Categorical(logits=logits)
+        if greedy:
+            action = dist.probs.argmax(dim=-1)
+        else:
+            action = dist.sample()
         return action
 
     def sample_as_env_action(self, latent, greedy=False):
         action = self.sample(latent, greedy)
-        return action.detach().cpu().squeeze(-1).numpy()
+        # return action.detach().cpu().squeeze(-1).numpy()
+        return action.detach().numpy()
 
     def update(self, latent, action, old_logprob, old_value, reward, termination, logger=None):
         '''

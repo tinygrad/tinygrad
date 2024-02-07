@@ -1,10 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+# from tinygrad import Tensor, dtypes, nn
+# import tinygrad
 from distributions import OneHotCategorical, Normal
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
-from torch.cuda.amp import autocast
+# from torch.cuda.amp import autocast
 
 from sub_models.functions_losses import SymLogTwoHotLoss
 from sub_models.attention_blocks import get_subsequent_mask_with_batch_length, get_subsequent_mask
@@ -271,39 +274,39 @@ class WorldModel(nn.Module):
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
 
     def encode_obs(self, obs):
-        with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=self.use_amp):
-            embedding = self.encoder(obs)
-            post_logits = self.dist_head.forward_post(embedding)
-            sample = self.stright_throught_gradient(post_logits, sample_mode="random_sample")
-            flattened_sample = self.flatten_sample(sample)
+        # with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=self.use_amp):
+        embedding = self.encoder(obs)
+        post_logits = self.dist_head.forward_post(embedding)
+        sample = self.stright_throught_gradient(post_logits, sample_mode="random_sample")
+        flattened_sample = self.flatten_sample(sample)
         return flattened_sample
 
     def calc_last_dist_feat(self, latent, action):
-        with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=self.use_amp):
-            temporal_mask = get_subsequent_mask(latent)
-            dist_feat = self.storm_transformer(latent, action, temporal_mask)
-            last_dist_feat = dist_feat[:, -1:]
-            prior_logits = self.dist_head.forward_prior(last_dist_feat)
-            prior_sample = self.stright_throught_gradient(prior_logits, sample_mode="random_sample")
-            prior_flattened_sample = self.flatten_sample(prior_sample)
+        # with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=self.use_amp):
+        temporal_mask = get_subsequent_mask(latent)
+        dist_feat = self.storm_transformer(latent, action, temporal_mask)
+        last_dist_feat = dist_feat[:, -1:]
+        prior_logits = self.dist_head.forward_prior(last_dist_feat)
+        prior_sample = self.stright_throught_gradient(prior_logits, sample_mode="random_sample")
+        prior_flattened_sample = self.flatten_sample(prior_sample)
         return prior_flattened_sample, last_dist_feat
 
     def predict_next(self, last_flattened_sample, action, log_video=True):
-        with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=self.use_amp):
-            dist_feat = self.storm_transformer.forward_with_kv_cache(last_flattened_sample, action)
-            prior_logits = self.dist_head.forward_prior(dist_feat)
+        # with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=self.use_amp):
+        dist_feat = self.storm_transformer.forward_with_kv_cache(last_flattened_sample, action)
+        prior_logits = self.dist_head.forward_prior(dist_feat)
 
-            # decoding
-            prior_sample = self.stright_throught_gradient(prior_logits, sample_mode="random_sample")
-            prior_flattened_sample = self.flatten_sample(prior_sample)
-            if log_video:
-                obs_hat = self.image_decoder(prior_flattened_sample)
-            else:
-                obs_hat = None
-            reward_hat = self.reward_decoder(dist_feat)
-            reward_hat = self.symlog_twohot_loss_func.decode(reward_hat)
-            termination_hat = self.termination_decoder(dist_feat)
-            termination_hat = termination_hat > 0
+        # decoding
+        prior_sample = self.stright_throught_gradient(prior_logits, sample_mode="random_sample")
+        prior_flattened_sample = self.flatten_sample(prior_sample)
+        if log_video:
+            obs_hat = self.image_decoder(prior_flattened_sample)
+        else:
+            obs_hat = None
+        reward_hat = self.reward_decoder(dist_feat)
+        reward_hat = self.symlog_twohot_loss_func.decode(reward_hat)
+        termination_hat = self.termination_decoder(dist_feat)
+        termination_hat = termination_hat > 0
 
         return obs_hat, reward_hat, termination_hat, prior_flattened_sample, dist_feat
 
