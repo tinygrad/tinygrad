@@ -290,3 +290,19 @@ class HIPLanguage(CStyleLanguage):
   uses_ptr_arithmetic = True
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
+
+# TODO: go through all dtypes and make sure they're correct
+class HVXLanguage(CStyleLanguage):
+  kernel_prefix = """ #include <math.h>\n#include <stdio.h>\n#include <string.h>\n#include <stdlib.h>
+#define max(x,y) ((x>y)?x:y)\n#define int64 long long\n#define half __fp16\n#define uchar unsigned char
+#define bool uchar\n#define true 1\n #define false 0\n"""
+  buffer_suffix=" restrict"
+  type_map = {dtypes.long: "long long", dtypes.ulong: "unsigned long long"}
+
+  def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
+    if bitcast: return f"(*(({self.buffer_prefix}{self.render_dtype(var_dtype)}*)&{x[0]}))"
+    #casting short to half always results in zero on Hexagon v65(fixed in v68), so to avoid that we go through long
+    if len(x) == 1 and var_dtype == dtypes.half: return f"({self.render_dtype(var_dtype)})(long)({x[0]})"
+    if len(x) == 1: return f"({self.render_dtype(var_dtype)})({x[0]})"
+    assert len(x) == var_dtype.sz, f"cast is wrong size {len(x)} != {var_dtype.sz}"
+    return f"({self.render_dtype(var_dtype)})({x[0]})"
