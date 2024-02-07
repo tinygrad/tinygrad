@@ -688,21 +688,21 @@ class Tensor:
 
       # calculate expanded matrix columns for each dimension
       # prod(itertools.product(matcols)) gives the columns of kron(mat, mat, ...)
-      matcols = [[None for _ in range(mat_in)] for _ in range(dims)]
+      matcols: List[List[Tensor]] = [[] for _ in range(dims)]
       for dim in range(dims):
         for col in range(mat_in):
           col_entries = []
           for matrow in mat:
             col_entries.append(Tensor.full(full_col_shape[:dim] + (1,) + full_col_shape[dim + 1:], float(matrow[col]), device=t.device))
-          matcols[dim][col] = Tensor.cat(*col_entries, dim=dim)
+          matcols[dim].append(col_entries[0].cat(*col_entries[1:], dim=dim))
 
       # do the mul and reduce
-      r = 0
+      r: Union[Tensor, int] = 0
       for mat_is in itertools.product(range(mat_in), repeat=dims):
-        kron_column = 1
+        kron_column: Union[Tensor, int] = 1
         # accumulate the kron column
-        for col, idx in zip(matcols, mat_is):
-          kron_column = kron_column * col[idx]
+        for mat_column, idx in zip(matcols, mat_is):
+          kron_column = kron_column * mat_column[idx]
         r = r + kron_column * expanded_t[mat_is]  # fancy indexing
       return r
     HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
