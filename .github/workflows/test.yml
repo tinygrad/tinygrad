@@ -125,6 +125,8 @@ jobs:
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
       run: TORCH=1 python -m pytest -n=auto test/ --durations=20
+    - name: Run test_ops with inputs moved to a different device
+      run: TORCH=1 MOVE_TENSOR=TORCH:1 python -m pytest -n=auto test/test_ops.py --durations=20
     - name: Run ONNX
       run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
 

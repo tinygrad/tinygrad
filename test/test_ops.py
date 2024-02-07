@@ -19,6 +19,10 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   out = torch_fxn(*ts)
   torch_fp = time.monotonic() - st
 
+  # move inputs to a different device, test the device of intermediate tensors are correct
+  if mt:=getenv("MOVE_TENSOR", ""):
+    for t in tst: t.to_(mt)
+
   st = time.monotonic()
   ret = tinygrad_fxn(*tst).realize()
   tinygrad_fp = time.monotonic() - st
@@ -383,6 +387,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: 2.0**x)
     helper_test_op([()], lambda x: x**2.0)
     helper_test_op([()], lambda x: 2.0**x)
+    # TODO: fix 0**x and 0**0 == 1
+    # helper_test_op(None, lambda x: 0**x, vals=[[-2.,-1,0,1,2,3]])
+    # TODO: fix backward, should be nan
+    helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]], forward_only=True)
 
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt())
