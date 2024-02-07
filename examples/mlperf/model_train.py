@@ -76,7 +76,7 @@ def train_resnet():
     loss = sparse_categorical_crossentropy(out, Y, label_smoothing=0.1) * lr_scaler
     loss.backward()
     optimizer.step()
-    return loss.realize(), out.realize()
+    return loss.realize(), out.realize(), (out.argmax(-1) == Y).sum()
 
   @TinyJit
   def eval_step(X, Y):
@@ -180,19 +180,20 @@ def train_resnet():
 
       dte = time.perf_counter()
 
-      proc = proc[0][0].numpy()  # return cookie
+      proc, top_1_acc = proc[0][0].numpy(), proc[0][2].numpy().item()  # return cookie
       loss_cpu = proc / lr_scaler
       cl = time.perf_counter()
       new_st = time.perf_counter()
 
       tqdm.write(
-        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(et - st) * 1000.0:7.2f} ms python, {(cl - dte) * 1000.0:7.2f} ms CL, {(dte - dt) * 1000.0:7.2f} ms fetch data, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0] * lr_scaler:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(et - st) * 1000.0:7.2f} ms python, {(cl - dte) * 1000.0:7.2f} ms CL, {(dte - dt) * 1000.0:6.2f} ms fetch data, {loss_cpu:5.2f} loss, {top_1_acc / BS:3.2f} acc, {optimizer.lr.numpy()[0] * lr_scaler:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
       wandb.log({"lr": optimizer.lr.numpy() * lr_scaler,
                  "train/data_time": dte-dt,
                  "train/step_time": cl - st,
                  "train/python_time": et - st,
                  "train/cl_time": cl - dte,
                  "train/loss": loss_cpu,
+                 "train/top_1_acc": top_1_acc,
                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st),
                  })
 
