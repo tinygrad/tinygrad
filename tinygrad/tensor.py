@@ -661,9 +661,50 @@ class Tensor:
 
     # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
     def apply_matrix(mat, t, dims=len(HW)):
-      t_ = t.reshape(t.shape[:dims]+(1,)*dims+t.shape[dims:]).expand(t.shape[:dims]+(len(mat),)*dims+t.shape[dims:])
-      matcols = [[Tensor.cat(*[Tensor.full(t_.shape[dims:dims+dim]+(1,)+t_.shape[dims+dim+1:], float(m[k]), device=t.device) for m in mat], dim=dim) for k in range(len(mat[0]))] for dim in range(dims)]  # noqa: E501
-      return sum(prod(col[idx] for col, idx in zip(matcols, mat_is)) * t_[mat_is] for mat_is in itertools.product(range(len(mat[0])), repeat=dims))
+      # calculate kron(mat, mat, ...) @ t
+      # does so by creating each column of kron with only consts, and only then multiplying each element of t with its column.
+      # nice properties;
+      #   only mat_in ** dims LBs in tree that are views of t (previously mat_out ** (2 * dims) by: in_pos * out_pos)
+      #   only mat_in ** dims unique views (simple shrinks) of t (previously mat_out ** (2 * dims))
+      #   only mat_in ** (2 * dims) upcasted fetches of t (previously mat_out ** (3 * dims))
+      #   only mat_in ** dims unique expr_idxs evaluations of t (simple shrinks) (previously mat_out ** (3 * dims) by: in_pos * out_pos * padding)
+      #   only mat_in *  dims unique stacks necessary (can be only mat_in stacks if expand does not contiguous)
+      mat_in, mat_out = len(mat[0]), len(mat)
+      # the "one-line" version:
+      # sum([
+      #   prod([  # broadcast
+      #     Tensor.stack([
+      #       Tensor(mat[i][j])
+      #       for i in range(mat_out)  # the "m" dim
+      #     ]).reshape((1,)*dim + (mat_out,) + (1,)*(len(t.shape)-(dim+1)))  # written like this so the stack can be reused
+      #     for j, dim in zip(mat_is, range(dims))  # the conv dim
+      #   ]) * t[mat_is].reshape((1,)*dims+t.shape)  # broadcast, "n" = 1
+      #   for mat_is in itertools.product(range(mat_in), repeat=dims)  # the "k" dim
+      # ])
+
+      # add expand dims to t
+      expanded_t = t.reshape(t.shape[:dims]+(1,)*dims+t.shape[dims:]).expand(t.shape[:dims]+(mat_out,)*dims+t.shape[dims:])
+      full_col_shape = expanded_t.shape[dims:]
+
+      # calculate expanded matrix columns for each dimension
+      # prod(itertools.product(matcols)) gives the columns of kron(mat, mat, ...)
+      matcols = [[None for _ in range(mat_in)] for _ in range(dims)]
+      for dim in range(dims):
+        for col in range(mat_in):
+          col_entries = []
+          for matrow in mat:
+            col_entries.append(Tensor.full(full_col_shape[:dim] + (1,) + full_col_shape[dim + 1:], float(matrow[col]), device=t.device))
+          matcols[dim][col] = Tensor.cat(*col_entries, dim=dim)
+
+      # do the mul and reduce
+      r = 0
+      for mat_is in itertools.product(range(mat_in), repeat=dims):
+        kron_column = 1
+        # accumulate the kron column
+        for col, idx in zip(matcols, mat_is):
+          kron_column = kron_column * col[idx]
+        r = r + kron_column * expanded_t[mat_is]  # fancy indexing
+      return r
     HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
     winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
     winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
