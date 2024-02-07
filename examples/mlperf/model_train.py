@@ -14,7 +14,8 @@ import time
 import os
 
 FP16 = getenv("FP16", 0)
-BS, EVAL_BS, STEPS = getenv("BS", 64), getenv('EVAL_BS', 64), getenv("STEPS", 1000)
+BS = getenv("BS", 64)
+EVAL_BS = getenv('EVAL_BS', BS)
 
 def train_resnet():
   # TODO: Resnet50-v1.5
@@ -208,7 +209,7 @@ def train_resnet():
       new_st = time.perf_counter()
 
       tqdm.write(
-        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(fwet - st) * 1000.0:7.2f}+{(et - fwet) * 1000.0:7.2f} ms bw python, {(cl - dte) * 1000.0:7.2f} ms CL, {(dte - dt) * 1000.0:6.2f} ms fetch data, {loss_cpu:5.2f} loss, {top_1_acc:3.2f} acc, {optimizer.lr.numpy()[0] * lr_scaler:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(fwet - st) * 1000.0:7.2f}+{(et - fwet) * 1000.0:7.2f} ms python, {(cl - dte) * 1000.0:7.2f} ms CL, {(dte - dt) * 1000.0:6.2f} ms fetch data, {loss_cpu:5.2f} loss, {top_1_acc:3.2f} acc, {optimizer.lr.numpy()[0] * lr_scaler:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
       wandb.log({"lr": optimizer.lr.numpy() * lr_scaler,
                  "train/data_time": dte-dt,
                  "train/step_time": cl - st,
