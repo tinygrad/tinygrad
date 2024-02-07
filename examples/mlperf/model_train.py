@@ -17,6 +17,8 @@ FP16 = getenv("FP16", 0)
 BS = getenv("BS", 64)
 EVAL_BS = getenv('EVAL_BS', BS)
 
+# fp32 GPUS<=6 7900xtx can fit BS=112
+
 def train_resnet():
   # TODO: Resnet50-v1.5
   from extra.models.resnet import ResNet50, ResNet18
@@ -85,6 +87,8 @@ def train_resnet():
     x /= input_std
     return x.cast(dtypes.default_float)
 
+  target = getenv("TARGET", 0.759)
+  achieved = False
   lr_scaler = 8 if FP16 else 1
   lr_gamma = 0.1
   lr_steps = [30, 60, 80]
@@ -264,12 +268,19 @@ def train_resnet():
 
         proc, next_proc = next_proc, None  # drop cookie
 
+      total_top_1 = sum(eval_top_1_acc) / len(eval_top_1_acc)
       tqdm.write(f"eval loss: {sum(eval_loss) / len(eval_loss):.2f}, eval time: {sum(eval_times) / len(eval_times):.2f}, eval top 1 acc: {sum(eval_top_1_acc) / len(eval_top_1_acc):.2f}, eval top 5 acc: {sum(eval_top_5_acc) / len(eval_top_5_acc):.2f}")
       wandb.log({"eval/loss": sum(eval_loss) / len(eval_loss),
                 "eval/forward_time": sum(eval_times) / len(eval_times),
-                "eval/top_1_acc": sum(eval_top_1_acc) / len(eval_top_1_acc),
+                "eval/top_1_acc": total_top_1,
                 "eval/top_5_acc": sum(eval_top_5_acc) / len(eval_top_5_acc),
       })
+
+      if not achieved and total_top_1 >= target:
+        fn = f"./ckpts/{wandb_config['model']}_cats{num_classes}.safe"
+        state.safe_save(state.get_state_dict(model), fn)
+        print(f" *** WGMI {fn} ***")
+        achieved = True
 
       if (e+1) % getenv("CKPT_EPOCHS", 4) == 0 or e + 1 == epochs:
         if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
