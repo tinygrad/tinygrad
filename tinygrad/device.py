@@ -146,30 +146,20 @@ class Allocator:
   def copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
 
 class LRUAllocator(Allocator):  # pylint: disable=abstract-method
-  def __init__(self):
-    self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
-    self.mem_used = 0
+  def __init__(self): self.cache: Dict[Tuple[int, Optional[BufferOptions]], Any] = defaultdict(list)
   def alloc(self, size:int, options:Optional[BufferOptions]=None):
     if len(c := self.cache[(size, options)]): return c.pop()
-    if getenv("MLIMIT") and self.mem_used + size > getenv("MLIMIT") * 2**20:
-      self.free_cache()
-    if getenv("MLIMIT") and self.mem_used + size > getenv("MLIMIT") * 2**20:
-      raise RuntimeError(f"out of memory {self.mem_used // 2 ** 20} {size // 2 ** 20}")
-    self.mem_used += size
     try: return super().alloc(size, options)
     except (RuntimeError, MemoryError):
       self.free_cache()
       return super().alloc(size, options)
   def free_cache(self):
-    for (size, _), opaques in self.cache.items():
-      self.mem_used -= size * len(opaques)
+    for opaques in self.cache.values():
       for opaque in opaques: self._free(opaque)
       opaques.clear()
   def free(self, opaque:Any, size:int, options:Optional[BufferOptions]=None):
     if getenv("LRU", 1) and (options is None or not options.signal): self.cache[(size, options)].append(opaque)
-    else:
-      self.mem_used -= size
-      self._free(opaque)
+    else: self._free(opaque)
 
 class _MallocAllocator(LRUAllocator):
   def _alloc(self, size:int): return (ctypes.c_uint8 * size)()
@@ -351,9 +341,10 @@ class Compiled:
           lins[-1][1].hand_coded_optimizations()
         kb = Linearizer(ast, self.compiler.linearizer_opts)
         kb.required_optimizations()
-        from tinygrad.features.search import beam_search, time_linearizer
-        lins.append((f"beam{BEAM.value}", beam_search(kb, None, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
-        timed = sorted([(nm, tk, time_linearizer(tk, None, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
+        from tinygrad.features.search import beam_search, time_linearizer, bufs_from_lin
+        test_rawbuffers = bufs_from_lin(kb)    # allocate scratch buffers for optimization
+        lins.append((f"beam{BEAM.value}", beam_search(kb, test_rawbuffers, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
+        timed = sorted([(nm, tk, time_linearizer(tk, test_rawbuffers, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
         if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
         k = timed[0][1]
     return k
