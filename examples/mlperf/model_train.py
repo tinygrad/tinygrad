@@ -226,6 +226,7 @@ def train_resnet():
                  "train/loss": loss_cpu,
                  "train/top_1_acc": top_1_acc,
                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st),
+                 "epoch": e + (i + 1) / steps_in_train_epoch,
                  })
 
       st = new_st
@@ -278,6 +279,7 @@ def train_resnet():
                 "eval/forward_time": sum(eval_times) / len(eval_times),
                 "eval/top_1_acc": total_top_1,
                 "eval/top_5_acc": sum(eval_top_5_acc) / len(eval_top_5_acc),
+                "epoch": e + 1,
       })
 
       if not achieved and total_top_1 >= target:
