@@ -1,7 +1,7 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Tuple, List, Optional, Any
+from typing import Tuple, List, Optional, Any, Dict
 import pickle, base64, itertools, time, math
 from tinygrad.dtype import DType, dtypes
 from tinygrad.helpers import all_same
@@ -10,12 +10,14 @@ from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 
 def exec_alu(arg, dtype, p):
-  # TODO: make this complete
+  # TODO: make this complete and correctly honor the dtypes
   if arg == TernaryOps.MULACC: return p[0]*p[1]+p[2]
   if arg == TernaryOps.WHERE: return p[1] if p[0] else p[2]
   if arg == UnaryOps.LOG2: return math.log2(p[0]) if p[0] > 0 else math.nan
   if arg == UnaryOps.EXP2: return math.exp2(p[0])
-  if arg == UnaryOps.SQRT: return math.sqrt(p[0])
+  if arg == UnaryOps.SQRT: return math.sqrt(p[0]) if p[0] > 0 else math.nan
+  if arg == UnaryOps.SIN: return math.sin(p[0])
+  if arg == UnaryOps.NEG: return -p[0]
   if arg == BinaryOps.MUL: return p[0]*p[1]
   if arg == BinaryOps.ADD: return p[0]+p[1]
   if arg == BinaryOps.SUB: return p[0]-p[1]
@@ -23,7 +25,7 @@ def exec_alu(arg, dtype, p):
   if arg == BinaryOps.MAX: return max(p[0], p[1])
   if arg == BinaryOps.CMPEQ: return p[0] == p[1]
   if arg == BinaryOps.CMPLT: return p[0] < p[1]
-  if arg == BinaryOps.DIV: return p[0]//p[1] if dtypes.is_int(dtype) else p[0]/p[1]
+  if arg == BinaryOps.DIV: return p[0]//p[1] if dtypes.is_int(dtype) else (p[0]/p[1] if p[1] != 0 else math.nan)
   if arg == BinaryOps.MOD: return p[0]%p[1]
   raise NotImplementedError(f"no support for {arg}")
 
@@ -36,18 +38,34 @@ class PythonProgram:
     warp_size = len(warp)
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
       # TODO: abstract this out so it can be used for constant folding
-      ul, dl = {}, {}
+      ul: Dict[int, Any] = {}
+      dl: Dict[int, DType] = {}
       pbufs: List[memoryview] = list(bufs)
       i = 0
-      loop_ends = {}
+      loop_ends: Dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        if dtype: dl[i] = dtype
         inp = [ul[v] for v in idp]
         dtp = [dl[v] for v in idp]
+        if uop is UOps.STORE:
+          if dtp[2].sz > 1:
+            for j,val in enumerate(inp[2]):
+              for m,o,v in zip(inp[0], inp[1], val): m[o+j] = v
+          else:
+            for m,o,v in zip(*inp): m[o] = v
+          i += 1
+          continue
+        elif uop is UOps.END:
+          loop_ends[idp[0]] = i
+          i = idp[0]
+          continue
+        assert dtype is not None, f"{uop} is missing a dtype"
+        dl[i] = dtype
         if uop is UOps.DEFINE_GLOBAL:
+          assert dtype.fmt is not None
           ul[i] = [pbufs.pop(0).cast(dtype.fmt)] * warp_size
         elif uop is UOps.DEFINE_LOCAL:
+          assert dtype.fmt is not None
           lbuf = memoryview(bytearray(arg[1]*dtype.sz))
           ul[i] = [lbuf.cast(dtype.fmt)] * warp_size
         elif uop is UOps.SPECIAL:
@@ -70,28 +88,17 @@ class PythonProgram:
             if ul[i][0] == inp[1][0]:
               i = loop_ends[i] + 1
               continue
-        elif uop is UOps.END:
-          loop_ends[idp[0]] = i
-          i = idp[0] - 1
         elif uop is UOps.CAST:
           if dtype.sz > 1:
             ul[i] = inp
           else:
             # TODO: add real cast
             if dtypes.is_int(dtype):
-              ul[i] = int(inp[0])
+              ul[i] = [int(x) for x in inp[0]]
             elif dtypes.is_float(dtype):
-              ul[i] = float(inp[0])
+              ul[i] = [float(x) for x in inp[0]]
             else:
               ul[i] = inp[0]
-        elif uop is UOps.STORE:
-          if dtp[2].sz > 1:
-            for j,val in enumerate(inp[2]):
-              for m,o,v in zip(inp[0], inp[1], val):
-                m[o+j] = v
-          else:
-            for m,o,v in zip(*inp):
-              m[o] = v
         elif uop is UOps.LOAD:
           if dtype.sz > 1:
             ul[i] = [[m[x+j] for m,x in zip(inp[0], inp[1])] for j in range(dtype.sz)]
@@ -143,7 +150,7 @@ class PythonCompiler(Compiler):
   #linearizer_opts = LinearizerOptions()
   def render(self, name:str, uops:List[UOp]) -> str:
     lops = [(u.uop, u.dtype, [uops.index(v) for v in u.vin], u.arg) for u in uops]
-    return base64.b64encode(pickle.dumps(lops))
+    return base64.b64encode(pickle.dumps(lops)).decode()
   def compile(self, src:str) -> bytes: return base64.b64decode(src)
 
 class PythonAllocator(Allocator):
