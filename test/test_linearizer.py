@@ -1,5 +1,5 @@
 import numpy as np
-import unittest, os
+import unittest
 
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node
@@ -103,10 +103,10 @@ class TestLinearizer(unittest.TestCase):
       d, w = Tensor.rand(4, 8, 8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, 2, 2, dtype=tensor_dtype)
       helper_arg_acc_dtype(d.conv2d(w, acc_dtype=acc_dtype), expected_dtype)
 
-  @unittest.skipUnless(Device.DEFAULT in tensor_cores, "No tensor cores for device")
   def test_tensor_cores(self):
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_tensor_cores:
+      self.skipTest("device doesn't have tensor cores")
     for tc in tensor_cores[Device.DEFAULT]:
-      if tc.arch is not None and tc.arch != os.uname().machine: continue
       a, b = Tensor.rand(tc.dims[1], tc.dims[2], dtype=tc.dtype_in), Tensor.rand(tc.dims[2], tc.dims[0], dtype=tc.dtype_in)
       np_a, np_b = a.numpy(), b.numpy()
       r = a.matmul(b, acc_dtype=tc.dtype_out)
@@ -529,13 +529,14 @@ class TestLinearizerOpts(unittest.TestCase):
   def test_tensor_core_opts(self):
     if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local:
       self.skipTest("Only Compiled uses linearizer with locals")
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_tensor_cores:
+      self.skipTest("device doesn't have tensor cores")
     if Device.DEFAULT not in tensor_cores:
       self.skipTest("No tensor cores for device")
 
     N = 128
     Tensor.manual_seed(1552)
     for tc in tensor_cores[Device.DEFAULT]:
-      if tc.arch is not None and tc.arch != os.uname().machine: continue
       a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
       r = a.matmul(b, acc_dtype=tc.dtype_out)
       (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
