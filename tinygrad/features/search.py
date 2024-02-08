@@ -97,6 +97,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
     ret = lin.copy()
     for o in val[len(lin.applied_opts):]: ret.apply_opt(o)
     return ret
+  if rawbufs is None: rawbufs = bufs_from_lin(lin)
 
   beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
@@ -151,6 +152,8 @@ def optimize_local_size(clprg:Callable, global_size:List[int], rawbufs:List[Buff
 def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, max_global_size=65536, cnt=3, disable_cache=False, clear_l2=False) -> float:  # noqa: E501
   key = {"ast": str(lin.ast), "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size, "clear_l2": clear_l2, "device": lin.opts.device.split(':')[0]}  # noqa: E501
   if not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
+
+  if rawbufs is None: rawbufs = bufs_from_lin(lin)
 
   dev = Device[lin.opts.device]
   assert isinstance(dev, Compiled)
