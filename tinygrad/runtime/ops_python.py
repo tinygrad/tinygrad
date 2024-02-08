@@ -83,20 +83,25 @@ class PythonProgram:
           if arg == '__metal_wmma<float2,simdgroup_float8x8,float2>':
             #print("TODO: write METAL wmma")
             order = [0, 32, 1, 33, 8, 40, 9, 41,
-                     2, 34, 3, 35, 10, 42, 11, 43,
-                     4, 36, 5, 37, 12, 44, 13, 45,
-                     6, 38, 7, 39, 14, 46, 15, 47,
-                     16, 48, 17, 49, 24, 56, 25, 57,
-                     18, 50, 19, 51, 26, 58, 27, 59,
-                     20, 52, 21, 53, 28, 60, 29, 61,
-                     22, 54, 23, 55, 30, 62, 31, 63]
-            def unswizzle(x): return [x[0][idx] if idx < 32 else x[1][idx-32] for idx in order]
-            m1,m2 = unswizzle(inp[0]), unswizzle(inp[1])
-            out = inp[2][0][:] + inp[2][1][:]
-            for _i in range(8):
-              for _j in range(8):
-                out[order[_i*8 + _j]] += sum(m1[_i*8+_k] * m2[_k*8+_j] for _k in range(8))
-            ul[i] = out[:32], out[32:]
+                    2, 34, 3, 35, 10, 42, 11, 43,
+                    4, 36, 5, 37, 12, 44, 13, 45,
+                    6, 38, 7, 39, 14, 46, 15, 47,
+                    16, 48, 17, 49, 24, 56, 25, 57,
+                    18, 50, 19, 51, 26, 58, 27, 59,
+                    20, 52, 21, 53, 28, 60, 29, 61,
+                    22, 54, 23, 55, 30, 62, 31, 63]
+            def unswizzle(goff, x): return [x[0][goff+idx] if idx < 32 else
+                                            x[1][goff+idx-32] for idx in order]
+            out = inp[2][0][:], inp[2][1][:]
+            for goff in range(0, warp_size, 32):
+              m1,m2 = unswizzle(goff, inp[0]), unswizzle(goff, inp[1])
+              for _i in range(8):
+                for _j in range(8):
+                  oidx = order[_i*8 + _j]
+                  nval = sum(m1[_i*8+_k] * m2[_k*8+_j] for _k in range(8))
+                  if oidx < 32: out[0][goff+oidx] += nval
+                  else: out[1][goff+oidx-32] += nval
+              ul[i] = out
           else:
             raise Exception(f"unimplemented tensor core {arg}")
         elif uop is UOps.ALU:
