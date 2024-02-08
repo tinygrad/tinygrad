@@ -285,7 +285,6 @@ class CompiledASTRunner(JITRunner):
     self.lib, self.clprg = lib, self.device.runtime(self.name, lib)
     self.vars: List[Variable] = []
     if ast:
-      self.ast = ast
       info = get_lazyop_info(ast)
       self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
       self.vars = ast.vars()
@@ -297,10 +296,6 @@ class CompiledASTRunner(JITRunner):
     return global_size, local_size
 
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False, do_update_stats=True) -> Optional[float]:
-    if GlobalCounters.kernel_count+1 == getenv("DEBUGK", -1):
-      from tinygrad.graph import print_tree
-      print_tree(self.ast)
-      print(self.prg)
     global_size, local_size = self.launch_dims(var_vals)
     if global_size is not None and local_size is None and all_int(self.global_size): # type: ignore[arg-type]
       # TODO: this is copied from get_program

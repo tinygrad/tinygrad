@@ -140,7 +140,7 @@ class ResNet:
     if is_feature_only: features.append(out)
     if not is_feature_only:
       out = out.mean([2,3])
-      out = self.fc(out).float().log_softmax()
+      out = self.fc(out).log_softmax()
       return out
     return features
 

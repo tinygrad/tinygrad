@@ -1,5 +1,5 @@
 import math
-from typing import List
+from typing import List, Union
 from tinygrad.nn.optim import Optimizer
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
@@ -9,11 +9,11 @@ class LR_Scheduler:
     self.optimizer = optimizer
     self.epoch_counter = Tensor([0], requires_grad=False, device=self.optimizer.device, dtype=dtypes.float32)
 
-  def get_lr(self): pass
+  def get_lr(self) -> Union[Tensor, int]: pass
 
   def step(self) -> None:
     self.epoch_counter.assign(self.epoch_counter + 1).realize()
-    self.optimizer.lr.assign(self.get_lr()).realize()
+    self.optimizer.lr.assign(lr.cast(self.optimizer.lr.dtype) if isinstance(lr := self.get_lr(), Tensor) else lr).realize()
 
 class MultiStepLR(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, milestones: List[int], gamma=0.1):

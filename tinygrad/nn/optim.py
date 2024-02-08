@@ -39,7 +39,7 @@ class SGD(Optimizer):
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
-      t.assign(t.detach() - g * self.lr.cast(g.dtype))
+      t.assign(t.detach() - g * self.lr)
     self.realize(self.b)
 
 # LAMB is essentially just the trust ratio part of LARS applied to Adam/W so if we just set the trust ratio to 1.0 its just Adam/W.
@@ -92,11 +92,9 @@ class LARS(Optimizer):
           self.eta * w_norm / (g_norm + self.weight_decay * w_norm + self.eps), 1.0
         ), 1.0
       )
-
       scaled_lr = self.lr * trust_ratio
 
-      g = (t.grad + self.weight_decay * t.detach())
-      g = g * scaled_lr.cast(g.dtype)
+      g = (t.grad + self.weight_decay * t.detach()) * scaled_lr
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
