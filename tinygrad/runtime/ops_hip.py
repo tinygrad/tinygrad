@@ -127,7 +127,6 @@ class HIPAllocator(LRUAllocator):
     hip_set_device(self.device.device)
     check(hip.hipMemcpyAsync(dest, src, sz, hip.hipMemcpyDeviceToDevice, None))
 
-
 class HIPSyncEvent(JITRunner):
   def __init__(self, lb):
     self.lb, self.device, self.dname = lb, cast(HIPDevice, Device[lb.device]), lb.device

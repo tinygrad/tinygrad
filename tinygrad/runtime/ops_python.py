@@ -12,20 +12,24 @@ from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 def exec_alu(arg, dtype, p):
   # TODO: make this complete
   if arg == TernaryOps.MULACC: return p[0]*p[1]+p[2]
+  if arg == TernaryOps.WHERE: return p[1] if p[0] else p[2]
   if arg == UnaryOps.LOG2: return math.log2(p[0]) if p[0] > 0 else math.nan
   if arg == UnaryOps.EXP2: return math.exp2(p[0])
   if arg == UnaryOps.SQRT: return math.sqrt(p[0])
   if arg == BinaryOps.MUL: return p[0]*p[1]
   if arg == BinaryOps.ADD: return p[0]+p[1]
   if arg == BinaryOps.SUB: return p[0]-p[1]
+  if arg == BinaryOps.XOR: return p[0]^p[1]
   if arg == BinaryOps.MAX: return max(p[0], p[1])
   if arg == BinaryOps.CMPEQ: return p[0] == p[1]
+  if arg == BinaryOps.CMPLT: return p[0] < p[1]
   if arg == BinaryOps.DIV: return p[0]//p[1] if dtypes.is_int(dtype) else p[0]/p[1]
+  if arg == BinaryOps.MOD: return p[0]%p[1]
   raise NotImplementedError(f"no support for {arg}")
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
-    self.uops: List[Tuple[UOp, Optional[DType], List[int], Any]] = pickle.loads(lib)
+    self.uops: List[Tuple[UOps, Optional[DType], List[int], Any]] = pickle.loads(lib)
   def __call__(self, *bufs, global_size:Tuple[int,int,int]=(1,1,1), local_size:Tuple[int,int,int]=(1,1,1), vals:Tuple[int, ...]=(), wait=False):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
@@ -43,12 +47,15 @@ class PythonProgram:
         dtp = [dl[v] for v in idp]
         if uop is UOps.DEFINE_GLOBAL:
           ul[i] = [pbufs.pop(0).cast(dtype.fmt)] * warp_size
+        elif uop is UOps.DEFINE_LOCAL:
+          lbuf = memoryview(bytearray(arg[1]*dtype.sz))
+          ul[i] = [lbuf.cast(dtype.fmt)] * warp_size
         elif uop is UOps.SPECIAL:
           if arg[1][0] == 'g':
             ul[i] = [idxs[2-arg[0]]] * warp_size
           elif arg[1][0] == 'l':
             ul[i] = [x[2-arg[0]] for x in warp]
-        elif uop is UOps.CONST: ul[i] = [arg] * warp_size
+        elif uop is UOps.CONST: ul[i] = [int(arg) if dtypes.is_int(dtype) else float(arg)] * warp_size
         elif uop is UOps.DEFINE_ACC:
           if dtype.sz > 1:
             ul[i] = [[arg] * warp_size for _ in range(dtype.sz)]
@@ -123,7 +130,7 @@ class PythonProgram:
             raise Exception(f"unimplemented tensor core {arg}")
         elif uop is UOps.ALU:
           assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {arg}"
-          assert all_same([dtype] + dtp) or arg in {BinaryOps.CMPEQ, BinaryOps.CMPLT}
+          assert all_same([dtype] + dtp) or arg in {BinaryOps.CMPEQ, BinaryOps.CMPLT, TernaryOps.WHERE}, f"dtype mismatch on {arg}"
           ul[i] = [exec_alu(arg, dtype, p) for p in zip(*inp)]
         assert uop in {UOps.STORE, UOps.END, UOps.BARRIER} or i in ul, (uop, dtype, idp, arg)
         #print(i, uop, dtype, arg, ul[i] if i in ul else None)
