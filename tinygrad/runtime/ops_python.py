@@ -2,13 +2,26 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Tuple, List, Optional, Any
-import pickle, base64, itertools, time
+import pickle, base64, itertools, time, math
 from tinygrad.dtype import DType, dtypes
-from tinygrad.helpers import all_same, argsort
+from tinygrad.helpers import all_same
 from tinygrad.device import Compiled, Allocator, Compiler
-from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+
+def exec_alu(arg, dtype, p):
+  # TODO: make this complete
+  if arg == TernaryOps.MULACC: return p[0]*p[1]+p[2]
+  if arg == UnaryOps.LOG2: return math.log2(p[0]) if p[0] > 0 else math.nan
+  if arg == UnaryOps.EXP2: return math.exp2(p[0])
+  if arg == UnaryOps.SQRT: return math.sqrt(p[0])
+  if arg == BinaryOps.MUL: return p[0]*p[1]
+  if arg == BinaryOps.ADD: return p[0]+p[1]
+  if arg == BinaryOps.SUB: return p[0]-p[1]
+  if arg == BinaryOps.MAX: return max(p[0], p[1])
+  if arg == BinaryOps.CMPEQ: return p[0] == p[1]
+  if arg == BinaryOps.DIV: return p[0]//p[1] if dtypes.is_int(dtype) else p[0]/p[1]
+  raise NotImplementedError(f"no support for {arg}")
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
@@ -58,7 +71,12 @@ class PythonProgram:
             ul[i] = inp
           else:
             # TODO: add real cast
-            ul[i] = inp[0]
+            if dtypes.is_int(dtype):
+              ul[i] = int(inp[0])
+            elif dtypes.is_float(dtype):
+              ul[i] = float(inp[0])
+            else:
+              ul[i] = inp[0]
         elif uop is UOps.STORE:
           if dtp[2].sz > 1:
             for j,val in enumerate(inp[2]):
@@ -81,15 +99,14 @@ class PythonProgram:
         elif uop is UOps.WMMA:
           # here are the models for the WMMA instruction on the different hardware
           if arg == '__metal_wmma<float2,simdgroup_float8x8,float2>':
-            #print("TODO: write METAL wmma")
             order = [0, 32, 1, 33, 8, 40, 9, 41,
-                    2, 34, 3, 35, 10, 42, 11, 43,
-                    4, 36, 5, 37, 12, 44, 13, 45,
-                    6, 38, 7, 39, 14, 46, 15, 47,
-                    16, 48, 17, 49, 24, 56, 25, 57,
-                    18, 50, 19, 51, 26, 58, 27, 59,
-                    20, 52, 21, 53, 28, 60, 29, 61,
-                    22, 54, 23, 55, 30, 62, 31, 63]
+                     2, 34, 3, 35, 10, 42, 11, 43,
+                     4, 36, 5, 37, 12, 44, 13, 45,
+                     6, 38, 7, 39, 14, 46, 15, 47,
+                     16, 48, 17, 49, 24, 56, 25, 57,
+                     18, 50, 19, 51, 26, 58, 27, 59,
+                     20, 52, 21, 53, 28, 60, 29, 61,
+                     22, 54, 23, 55, 30, 62, 31, 63]
             def unswizzle(goff, x): return [x[0][goff+idx] if idx < 32 else
                                             x[1][goff+idx-32] for idx in order]
             out = inp[2][0][:], inp[2][1][:]
@@ -106,27 +123,8 @@ class PythonProgram:
             raise Exception(f"unimplemented tensor core {arg}")
         elif uop is UOps.ALU:
           assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {arg}"
-          assert all_same(dtp)
-          if arg == BinaryOps.MUL:
-            ul[i] = [x*y for x,y in zip(inp[0], inp[1])]
-          elif arg == BinaryOps.MOD:
-            assert dtypes.is_int(dtype)
-            ul[i] = [x%y for x,y in zip(inp[0], inp[1])]
-          elif arg == BinaryOps.DIV:
-            if dtypes.is_int(dtype):
-              ul[i] = [x//y for x,y in zip(inp[0], inp[1])]
-            else:
-              ul[i] = [x/y for x,y in zip(inp[0], inp[1])]
-          elif arg == BinaryOps.ADD:
-            ul[i] = [x+y for x,y in zip(inp[0], inp[1])]
-          elif arg == TernaryOps.MULACC:
-            ul[i] = [x*y+z for x,y,z in zip(inp[0], inp[1], inp[2])]
-          #elif arg == BinaryOps.MAX:
-          #  ul[i] = max(inp[0], inp[1])
-          #elif arg == BinaryOps.CMPLT:
-          #  ul[i] = inp[0] < inp[1]
-          #elif arg == UnaryOps.NEG:
-          #  ul[i] = -inp[0]
+          assert all_same([dtype] + dtp) or arg in {BinaryOps.CMPEQ, BinaryOps.CMPLT}
+          ul[i] = [exec_alu(arg, dtype, p) for p in zip(*inp)]
         assert uop in {UOps.STORE, UOps.END, UOps.BARRIER} or i in ul, (uop, dtype, idp, arg)
         #print(i, uop, dtype, arg, ul[i] if i in ul else None)
         i += 1
