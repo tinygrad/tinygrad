@@ -241,7 +241,7 @@ def train_resnet():
       eval_top_5_acc = []
       #Tensor.training = False  # disable to make kernels as similar as possible
 
-      iterator = iter(tqdm(t := batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False), total=steps_in_val_epoch))
+      iterator = iter(tqdm(t := batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=True), total=steps_in_val_epoch))
 
       proc = data_get()
 
