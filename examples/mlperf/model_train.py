@@ -99,7 +99,7 @@ def train_resnet():
   if getenv("LARS", 1):
     optimizer = optim.LARS(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=2e-4)
   else:
-    optimizer = optim.SGD(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=1/2**15)
+    optimizer = optim.SGD(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=2e-4)
   steps_in_train_epoch = (len(get_train_files()) // BS)
   steps_in_val_epoch = (len(get_val_files()) // EVAL_BS)
   #scheduler = MultiStepLR(optimizer, [m for m in lr_steps], gamma=lr_gamma, warmup=lr_warmup)
