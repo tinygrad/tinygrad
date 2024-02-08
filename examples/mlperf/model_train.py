@@ -97,12 +97,13 @@ def train_resnet():
   lr_steps = [30, 60, 80]
   lr_warmup_epochs = 5
   base_lr = 0.256 * (BS / 256)  # Linearly scale from BS=256, lr=0.256
-  base_lr = 8.4 * (BS/2048)
+  base_lr = getenv("LR", 8.4 * (BS/2048))
   epochs = getenv("EPOCHS", 45)
+  decay = getenv("DECAY", 2e-4)
   if getenv("LARS", 1):
-    optimizer = optim.LARS(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=2e-4)
+    optimizer = optim.LARS(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay)
   else:
-    optimizer = optim.SGD(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=2e-4)
+    optimizer = optim.SGD(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay)
   steps_in_train_epoch = (len(get_train_files()) // BS)
   steps_in_val_epoch = (len(get_val_files()) // EVAL_BS)
   #scheduler = MultiStepLR(optimizer, [m for m in lr_steps], gamma=lr_gamma, warmup=lr_warmup)
@@ -157,6 +158,7 @@ def train_resnet():
     'base_lr': base_lr,
     'epochs': epochs,
     'classes': num_classes,
+    'decay': decay,
     'train_files': len(get_train_files()),
     'eval_files': len(get_train_files()),
     'steps_in_train_epoch': steps_in_train_epoch,
