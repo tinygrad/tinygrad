@@ -149,9 +149,8 @@ class PythonProgram:
         i += 1
     return time.perf_counter() - st
 
-from tinygrad.runtime.ops_metal import MetalCompiler
 class PythonCompiler(Compiler):
-  linearizer_opts = MetalCompiler.linearizer_opts if getenv("EMULATE_METAL") else LinearizerOptions()
+  linearizer_opts = LinearizerOptions("METAL") if getenv("EMULATE_METAL") else LinearizerOptions()
   def render(self, name:str, uops:List[UOp]) -> str:
     lops = [(u.uop, u.dtype, [uops.index(v) for v in u.vin], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()

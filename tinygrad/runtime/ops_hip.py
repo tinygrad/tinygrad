@@ -11,7 +11,7 @@ from tinygrad.runtime.compiler.hip_comgr import compile_hip
 
 
 class HIPCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("HIP")
+  linearizer_opts = LinearizerOptions("HIP", has_tensor_cores=True)
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
