@@ -164,21 +164,23 @@ class PositionalEncoding1D:
 
         self.pos_emb = nn.Embedding(self.max_length, embed_dim)
 
-    def forward(self, feat):
+    def forward(self, feat:Tensor):
         # pos_emb = self.pos_emb(torch.arange(self.max_length, device=feat.device))
         pos_emb = self.pos_emb(Tensor.arange(self.max_length, device=feat.device))
 
-        pos_emb = repeat(pos_emb, "L D -> B L D", B=feat.shape[0])
+        # pos_emb = repeat(pos_emb, "L D -> B L D", B=feat.shape[0])
+        pos_emb = pos_emb.repeat(feat.shape[0], 1, 1)
 
         feat = feat + pos_emb[:, :feat.shape[1], :]
         return feat
 
-    def forward_with_position(self, feat, position):
+    def forward_with_position(self, feat:Tensor, position):
         assert feat.shape[1] == 1
         # pos_emb = self.pos_emb(torch.arange(self.max_length, device=feat.device))
         pos_emb = self.pos_emb(Tensor.arange(self.max_length, device=feat.device))
 
-        pos_emb = repeat(pos_emb, "L D -> B L D", B=feat.shape[0])
+        # pos_emb = repeat(pos_emb, "L D -> B L D", B=feat.shape[0])
+        pos_emb = pos_emb.repeat(feat.shape[0], 1, 1)
 
         feat = feat + pos_emb[:, position:position+1, :]
         return feat

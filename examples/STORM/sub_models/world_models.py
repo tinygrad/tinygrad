@@ -1,9 +1,9 @@
 import torch
-import torch.nn as nn
+import torch.nn as tnn
 import torch.nn.functional as F
 
-# from tinygrad import Tensor, dtypes, nn
-# import tinygrad
+from tinygrad import Tensor, dtypes, nn
+import tinygrad
 from distributions import OneHotCategorical, Normal
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
@@ -15,9 +15,9 @@ from sub_models.transformer_model import StochasticTransformerKVCache
 import agents
 
 
-class EncoderBN(nn.Module):
+class EncoderBN:
     def __init__(self, in_channels, stem_channels, final_feature_width) -> None:
-        super().__init__()
+        # super().__init__()
 
         backbone = []
         # stem
@@ -34,7 +34,8 @@ class EncoderBN(nn.Module):
         feature_width = 64//2
         channels = stem_channels
         backbone.append(nn.BatchNorm2d(stem_channels))
-        backbone.append(nn.ReLU(inplace=True))
+        # backbone.append(nn.ReLU(inplace=True))
+        backbone.append(Tensor.relu())
 
         # layers
         while True:
@@ -51,19 +52,23 @@ class EncoderBN(nn.Module):
             channels *= 2
             feature_width //= 2
             backbone.append(nn.BatchNorm2d(channels))
-            backbone.append(nn.ReLU(inplace=True))
+            # backbone.append(nn.ReLU(inplace=True))
+            backbone.append(Tensor.relu())
 
             if feature_width == final_feature_width:
                 break
 
-        self.backbone = nn.Sequential(*backbone)
+        # self.backbone = nn.Sequential(*backbone)
+        self.backbone = Tensor.sequential(backbone)
         self.last_channels = channels
 
     def forward(self, x):
         batch_size = x.shape[0]
-        x = rearrange(x, "B L C H W -> (B L) C H W")
+        # x = rearrange(x, "B L C H W -> (B L) C H W")
+        x = x.reshape(x.shape[0]*x.shape[1], x.shape[2], x.shape[3], x.shape[4])
         x = self.backbone(x)
         x = rearrange(x, "(B L) C H W -> B L (C H W)", B=batch_size)
+        x = x.repeat(batch_size, 1, 1, 1, 1).reshape(x.shape[0], x.shape[1], x.shape[2] * x.shape[3] * x.shape[4])
         return x
 
 

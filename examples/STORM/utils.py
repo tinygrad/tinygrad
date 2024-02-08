@@ -1,9 +1,9 @@
-import torch
+# import torch
 import os
 import numpy as np
 import random
 from tensorboardX import SummaryWriter
-from einops import repeat
+# from einops import repeat
 from contextlib import contextmanager
 import time
 import yacs
@@ -16,16 +16,16 @@ def _sum_rightmost(value, dim):
     return value.reshape(required_shape).sum(-1)
 def numel(shape):
     return int(np.prod(shape)) if shape else 1
-def seed_np_torch(seed=20001118):
-    random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    # some cudnn methods can be random even after fixing the seed unless you tell it to be deterministic
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+# def seed_np_torch(seed=20001118):
+#     random.seed(seed)
+#     os.environ['PYTHONHASHSEED'] = str(seed)
+#     np.random.seed(seed)
+#     torch.manual_seed(seed)
+#     torch.cuda.manual_seed(seed)
+#     torch.cuda.manual_seed_all(seed)
+#     # some cudnn methods can be random even after fixing the seed unless you tell it to be deterministic
+#     torch.backends.cudnn.deterministic = True
+#     torch.backends.cudnn.benchmark = False
 
 def seed_np(seed=20001118):
     random.seed(seed)

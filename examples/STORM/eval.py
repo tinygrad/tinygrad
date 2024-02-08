@@ -78,7 +78,8 @@ def eval_episodes(num_episode, env_name, max_steps, num_envs, image_size,
             model_context_action = Tensor(model_context_action)
             prior_flattened_sample, last_dist_feat = world_model.calc_last_dist_feat(context_latent, model_context_action)
             action = agent.sample_as_env_action(
-                torch.cat([prior_flattened_sample, last_dist_feat], dim=-1),
+                # torch.cat([prior_flattened_sample, last_dist_feat], dim=-1),
+                Tensor.cat([prior_flattened_sample, last_dist_feat], dim=-1),
                 greedy=False
             )
 

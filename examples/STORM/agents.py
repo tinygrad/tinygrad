@@ -1,7 +1,7 @@
 import torch
 import torch.nn as tnn
 import torch.nn.functional as F
-
+import numpy as np
 from tinygrad import Tensor, dtypes , nn
 import tinygrad
 # import torch.distributions as distributions
@@ -15,10 +15,13 @@ from sub_models.functions_losses import SymLogTwoHotLoss
 from utils import EMAScalar
 
 
-def percentile(x, percentage):
-    flat_x = torch.flatten(x)
+def percentile(x:Tensor, percentage):
+    # flat_x = torch.flatten(x)
+    flat_x = x.flatten()
     kth = int(percentage*len(flat_x))
-    per = torch.kthvalue(flat_x, kth).values
+    # per = torch.kthvalue(flat_x, kth).values
+    sorted_x = np.sort(flat_x.cpu().data)
+    per = Tensor(sorted_x[kth])
     return per
 
 
@@ -52,13 +55,15 @@ class ActorCriticAgent(nn.Module):
         actor = [
             nn.Linear(feat_dim, hidden_dim, bias=False),
             nn.LayerNorm(hidden_dim),
-            nn.ReLU()
+            # nn.ReLU()
+            Tensor.relu()
         ]
         for i in range(num_layers - 1):
             actor.extend([
                 nn.Linear(hidden_dim, hidden_dim, bias=False),
                 nn.LayerNorm(hidden_dim),
-                nn.ReLU()
+                # nn.ReLU()
+                Tensor.relu()
             ])
         self.actor = nn.Sequential(
             *actor,
@@ -68,13 +73,15 @@ class ActorCriticAgent(nn.Module):
         critic = [
             nn.Linear(feat_dim, hidden_dim, bias=False),
             nn.LayerNorm(hidden_dim),
-            nn.ReLU()
+            # nn.ReLU()
+            Tensor.relu()
         ]
         for i in range(num_layers - 1):
             critic.extend([
                 nn.Linear(hidden_dim, hidden_dim, bias=False),
                 nn.LayerNorm(hidden_dim),
-                nn.ReLU()
+                # nn.ReLU()
+                Tensor.relu()
             ])
 
         self.critic = nn.Sequential(

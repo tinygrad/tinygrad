@@ -1,5 +1,5 @@
-import torch
-# import torch.nn as nn
+# import torch
+# import torch.nn as tnn
 # import torch.nn.functional as F
 
 from tinygrad import Tensor, dtypes, nn
@@ -16,25 +16,39 @@ class StochasticTransformer:
         self.action_dim = action_dim
 
         # mix image_embedding and action
-        self.stem = nn.Sequential(
+      
+        # self.stem = nn.Sequential(
+        #     nn.Linear(stoch_dim+action_dim, feat_dim, bias=False),
+        #     nn.LayerNorm(feat_dim),
+        #     nn.ReLU(inplace=True),
+        #     nn.Linear(feat_dim, feat_dim, bias=False),
+        #     nn.LayerNorm(feat_dim)
+        # )
+
+        self.stem = Tensor.sequential(
             nn.Linear(stoch_dim+action_dim, feat_dim, bias=False),
             nn.LayerNorm(feat_dim),
-            nn.ReLU(inplace=True),
+            Tensor.relu(),
             nn.Linear(feat_dim, feat_dim, bias=False),
             nn.LayerNorm(feat_dim)
         )
+
         self.position_encoding = PositionalEncoding1D(max_length=max_length, embed_dim=feat_dim)
-        self.layer_stack = nn.ModuleList([
+        # self.layer_stack = nn.ModuleList([
+        #     AttentionBlock(feat_dim=feat_dim, hidden_dim=feat_dim*2, num_heads=num_heads, dropout=dropout) for _ in range(num_layers)
+        # ])
+        self.layer_stack = [
             AttentionBlock(feat_dim=feat_dim, hidden_dim=feat_dim*2, num_heads=num_heads, dropout=dropout) for _ in range(num_layers)
-        ])
+        ]
         self.layer_norm = nn.LayerNorm(feat_dim, eps=1e-6)  # TODO: check if this is necessary
 
         self.head = nn.Linear(feat_dim, stoch_dim)
 
     def forward(self, samples, action:Tensor, mask):
         # action = F.one_hot(action.long(), self.action_dim).float()
-        action = action.long().one_hot(self.action_dim).float()
-        feats = self.stem(torch.cat([samples, action], dim=-1))
+        action = action.cast(dtypes.long).one_hot(self.action_dim).float()
+        # feats = self.stem(torch.cat([samples, action], dim=-1))
+        feats = self.stem(Tensor.cat([samples, action], dim=-1))
         feats = self.position_encoding(feats)
         feats = self.layer_norm(feats)
 
@@ -52,26 +66,39 @@ class StochasticTransformerKVCache:
         self.feat_dim = feat_dim
 
         # mix image_embedding and action
-        self.stem = nn.Sequential(
+        # self.stem = nn.Sequential(
+        #     nn.Linear(stoch_dim+action_dim, feat_dim, bias=False),
+        #     nn.LayerNorm(feat_dim),
+        #     nn.ReLU(inplace=True),
+        #     nn.Linear(feat_dim, feat_dim, bias=False),
+        #     nn.LayerNorm(feat_dim)
+        # )
+
+        self.stem = Tensor.sequential(
             nn.Linear(stoch_dim+action_dim, feat_dim, bias=False),
             nn.LayerNorm(feat_dim),
-            nn.ReLU(inplace=True),
+            Tensor.relu(),
             nn.Linear(feat_dim, feat_dim, bias=False),
             nn.LayerNorm(feat_dim)
         )
+
         self.position_encoding = PositionalEncoding1D(max_length=max_length, embed_dim=feat_dim)
-        self.layer_stack = nn.ModuleList([
+        # self.layer_stack = nn.ModuleList([
+        #     AttentionBlockKVCache(feat_dim=feat_dim, hidden_dim=feat_dim*2, num_heads=num_heads, dropout=dropout) for _ in range(num_layers)
+        # ])
+        self.layer_stack = [
             AttentionBlockKVCache(feat_dim=feat_dim, hidden_dim=feat_dim*2, num_heads=num_heads, dropout=dropout) for _ in range(num_layers)
-        ])
+        ]
         self.layer_norm = nn.LayerNorm(feat_dim, eps=1e-6)  # TODO: check if this is necessary
 
-    def forward(self, samples, action, mask):
+    def forward(self, samples, action:Tensor, mask):
         '''
         Normal forward pass
         '''
         # action = F.one_hot(action.long(), self.action_dim).float()
-        action = action.long().one_hot(self.action_dim).float()
-        feats = self.stem(torch.cat([samples, action], dim=-1))
+        action = action.cast(dtypes.long).one_hot(self.action_dim).float()
+        # feats = self.stem(torch.cat([samples, action], dim=-1))
+        feats = self.stem(Tensor.cat([samples, action], dim=-1))
         feats = self.position_encoding(feats)
         feats = self.layer_norm(feats)
 
@@ -89,7 +116,7 @@ class StochasticTransformerKVCache:
             # self.kv_cache_list.append(torch.zeros(size=(batch_size, 0, self.feat_dim), dtype=dtype, device="cuda"))
             self.kv_cache_list.append(Tensor.zeros((batch_size, 0, self.feat_dim), dtype=dtype))
 
-    def forward_with_kv_cache(self, samples, action):
+    def forward_with_kv_cache(self, samples, action:Tensor):
         '''
         Forward pass with kv_cache, cache stored in self.kv_cache_list
         '''
@@ -97,8 +124,9 @@ class StochasticTransformerKVCache:
         mask = get_vector_mask(self.kv_cache_list[0].shape[1]+1, samples.device)
 
         # action = F.one_hot(action.long(), self.action_dim).float()
-        action = action.long().one_hot(self.action_dim).float()
-        feats = self.stem(torch.cat([samples, action], dim=-1))
+        action = action.cast(dtypes.long).one_hot(self.action_dim).float()
+        # feats = self.stem(torch.cat([samples, action], dim=-1))
+        feats = self.stem(Tensor.cat([samples, action], dim=-1))
         feats = self.position_encoding.forward_with_position(feats, position=self.kv_cache_list[0].shape[1])
         feats = self.layer_norm(feats)
 
