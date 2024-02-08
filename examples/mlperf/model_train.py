@@ -184,6 +184,7 @@ def train_resnet():
     iterator = iter(tqdm(t := batch_load_resnet(batch_size=BS, val=False, shuffle=True), total=steps_in_train_epoch))
     def data_get():
       x, y, cookie = next(iterator)
+      # x must realize here, since the shm diskbuffer in dataloader might disappear?
       return x.shard(GPUS, axis=0).realize(), Tensor(y).shard(GPUS, axis=0), cookie
 
     i, proc = 0, data_get()
@@ -197,6 +198,7 @@ def train_resnet():
       # doing this uses 16.38gb vs 15.55gb? why? because the grads get realized in optimizer.step, and the backward buffers are freed?
       fwet = time.perf_counter()
       backward_step(*proc[1], proc[0][0])
+      # proc = (proc[0], proc[2])  # drop inputs
 
       et = time.perf_counter()
       dt = time.perf_counter()
@@ -313,16 +315,10 @@ def train_maskrcnn():
   pass
 
 if __name__ == "__main__":
-  Tensor.training = True
-
-  for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
-    nm = f"train_{m}"
-    if nm in globals():
-      print(f"training {m}")
-      train_func = globals()[nm]
-      break
-  else:
-    print("please specify MODEL")
-    exit(1)
-
-  train_func()
+  with Tensor.train():
+    Tensor.training = True
+    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
+      nm = f"train_{m}"
+      if nm in globals():
+        print(f"training {m}")
+        globals()[nm]()

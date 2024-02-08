@@ -34,9 +34,7 @@ def shuffled_indices(n):
 
 def loader_process(q_in, q_out, X:Tensor):
   import signal
-  def _init_worker():
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-  _init_worker()
+  signal.signal(signal.SIGINT, signal.SIG_IGN)
 
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
@@ -52,10 +50,10 @@ def loader_process(q_in, q_out, X:Tensor):
         crop_left = (img.width - 224*rescale) / 2.0
         crop_top = (img.height - 224*rescale) / 2.0
         img = img.resize((224, 224), Image.BILINEAR, box=(crop_left, crop_top, crop_left+224*rescale, crop_top+224*rescale))
-        r = np.array(img)
+        img = np.array(img)
       else:
         from extra.datasets.imagenet import preprocess
-        r = preprocess(img, val).astype(np.int8)
+        img = preprocess(img, val)
 
       # broken out
       #img_tensor = Tensor(img.tobytes(), device='CPU')
@@ -63,7 +61,7 @@ def loader_process(q_in, q_out, X:Tensor):
       #storage_tensor._copyin(img_tensor.numpy())
 
       # faster
-      X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = r.tobytes()
+      X[idx].contiguous().realize().lazydata.realized.as_buffer(force_zero_copy=True)[:] = img.tobytes()
 
       # ideal
       #X[idx].assign(img.tobytes())   # NOTE: this is slow!
@@ -111,7 +109,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
     def __init__(self, num): self.num = num
     def __del__(self):
       try: enqueue_batch(self.num)
-      except StopIteration: pass  # todo: hold up shm from closing before all cookies are returned
+      except StopIteration: pass
 
   gotten = [0]*BATCH_COUNT
   def receive_batch():
@@ -128,7 +126,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
   # shutdown processes
   for _ in procs: q_in.put(None)
   for p in procs: p.join()
-  shm.close()
+  shm.close()  # shm will stay alive until the X disktensor is freed
   shm.unlink()
 
 if __name__ == "__main__":
