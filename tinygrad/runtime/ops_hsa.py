@@ -53,14 +53,22 @@ class HSAProgram:
                                             [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))
       assert ctypes.sizeof(self.args_struct_t) == self.kernargs_segment_size.value, f"{ctypes.sizeof(self.args_struct_t)} != {self.kernargs_segment_size.value}"
 
-    kernargs, wait_signals = None, [] if self.device.last_copy_signal is None else [self.device.last_copy_signal]
+    kernargs, wait_signals = None, []
+    if self.device.last_copy_signal:
+      wait_signals.append(self.device.last_copy_signal)
+      self.device.acquired_signals.append(self.device.last_copy_signal)
+      self.device.last_copy_signal = None
+    if self.device.last_transfer_signal:
+      wait_signals.append(self.device.last_transfer_signal)
+      self.device.last_transfer_signal = None
+
+    self.device.last_copy_signal = None
     if self.kernargs_segment_size.value > 0:
       kernargs = self.device.alloc_kernargs(self.kernargs_segment_size.value)
       args_st = self.args_struct_t.from_address(kernargs)
       for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].value)
       for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
     signal = self.device.hw_queue.submit_kernel(self, global_size, local_size, kernargs, signals=wait_signals)
-    self.device.acquired_signals.extend(wait_signals)
     if wait:
       hsa.hsa_signal_wait_scacquire(signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
       check(hsa.hsa_amd_profiling_get_dispatch_time(self.device.agent, signal, ctypes.byref(timings := hsa.hsa_amd_profiling_dispatch_time_t())))
@@ -78,6 +86,9 @@ class HSAAllocator(LRUAllocator):
 
   def _alloc(self, size:int):
     check(hsa.hsa_amd_memory_pool_allocate(self.device.gpu_memory_pool, size, 0, ctypes.byref(buf := ctypes.c_void_p())))
+    agents = [dev.agent for dev in HSADevice.devices]
+    c_agents = (hsa.hsa_agent_t * len(agents))(*agents)
+    check(hsa.hsa_amd_agents_allow_access(len(agents), c_agents, None, buf)) # TODO: this is not good...
     return buf
 
   def _free(self, opaque:T):
@@ -92,9 +103,14 @@ class HSAAllocator(LRUAllocator):
     wait_signal, c_wait_signal = [], None
     if self.device.last_copy_signal:
       wait_signal.append(self.device.last_copy_signal)
+      self.device.acquired_signals.append(self.device.last_copy_signal)
       self.device.last_copy_signal = None
+    if self.device.last_transfer_signal:
+      wait_signal.append(self.device.last_transfer_signal)
+      self.device.last_transfer_signal = None
     if self.device.last_exec_signal:
       wait_signal.append(self.device.last_exec_signal)
+      self.device.acquired_signals.append(self.device.last_exec_signal)
       self.device.last_exec_signal = None
     if wait_signal: c_wait_signal = (hsa.hsa_signal_t * len(wait_signal))(*wait_signal)
 
@@ -103,7 +119,6 @@ class HSAAllocator(LRUAllocator):
     check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, src_addr, HSADevice.cpu_agent, src.nbytes, len(wait_signal), c_wait_signal, copy_signal, sdma_engine, True))
     self.device.last_copy_signal = copy_signal
     self.device.pending_copyin.append(src)
-    self.device.acquired_signals.extend(wait_signal)
 
   def copyout(self, dest:memoryview, src:T):
     self.device.synchronize()
@@ -116,49 +131,6 @@ class HSAAllocator(LRUAllocator):
     check(hsa.hsa_amd_memory_unlock(from_mv(dest)))
     self.device.acquired_signals.append(copy_signal)
 
-  # def copy_from_fd(self, dest, fd, offset, size):
-  #   if not hasattr(self, 'hb'):
-  #     agents = [HSADevice.cpu_agent, self.device.agent]
-  #     c_agents = (hsa.hsa_agent_t * len(agents))(*agents)
-  #     self.hb = []
-  #     for _ in range(2):
-  #       check(hsa.hsa_amd_memory_pool_allocate(HSADevice.cpu_memory_pool, CHUNK_SIZE, 0, ctypes.byref(buf := ctypes.c_void_p())))
-  #       check(hsa.hsa_amd_agents_allow_access(len(agents), c_agents, None, buf))
-  #       self.hb.append(buf)
-  #     self.hb_signals = [None, None]
-  #     self.hb_polarity = 0
-
-  #   wait_signal, c_wait_signal = [], None
-  #   if self.device.last_copy_signal:
-  #     wait_signal.append(self.device.last_copy_signal)
-  #     self.device.last_copy_signal = None
-  #   if self.device.last_exec_signal:
-  #     wait_signal.append(self.device.last_exec_signal)
-  #     self.device.last_exec_signal = None
-  #   if wait_signal: c_wait_signal = (hsa.hsa_signal_t * len(wait_signal))(*wait_signal)
-
-  #   fo = io.FileIO(fd, "a+b", closefd=False)
-  #   fo.seek(offset - (minor_offset:=offset % PAGE_SIZE))
-  #   copied_in = 0
-  #   for local_offset in range(0, size+minor_offset, CHUNK_SIZE):
-  #     local_size = min(round_up(size+minor_offset, PAGE_SIZE)-local_offset, CHUNK_SIZE)
-  #     if self.hb_signals[self.hb_polarity] is not None:
-  #       # NOTE: block doesn't work here because we modify the CPU memory
-  #       # check(hip.hipEventSynchronize(self.hb_events[self.hb_polarity]))
-  #       # check(hip.hipEventDestroy(self.hb_events[self.hb_polarity]))
-        
-  #       self.hb_signals[self.hb_polarity] = None
-  #     fo.readinto(to_mv(self.hb[self.hb_polarity], local_size))
-  #     check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, self.hb[self.hb_polarity], HSADevice.cpu_agent,
-  #       copy_size:=min(local_size-minor_offset, size-copied_in), len(wait_signal), c_wait_signal, copy_signal, sdma_engine, True))
-  #     # check(hip.hipMemcpyAsync(ctypes.c_void_p(dest.value + copied_in), ctypes.c_void_p(self.hb[self.hb_polarity].value + minor_offset),
-  #     #                          copy_size:=min(local_size-minor_offset, size-copied_in), hip.hipMemcpyHostToDevice, None))
-  #     self.hb_events[self.hb_polarity] = init_c_var(hip.hipEvent_t(), lambda x: check(hip.hipEventCreate(ctypes.byref(x))))
-  #     check(hip.hipEventRecord(self.hb_events[self.hb_polarity], None))
-  #     copied_in += copy_size
-  #     self.hb_polarity = (self.hb_polarity+1) % len(self.hb)
-  #     minor_offset = 0 # only on the first
-
   def transfer(self, dest:T, src:T, sz:int, src_dev=None, dest_dev=None):
     assert src_dev is not None and dest_dev is not None
 
@@ -170,6 +142,9 @@ class HSAAllocator(LRUAllocator):
         wait_signal.append(dev.last_copy_signal)
         dev.acquired_signals.append(dev.last_copy_signal)
         dev.last_copy_signal = None
+      if dev.last_transfer_signal:
+        wait_signal.append(dev.last_transfer_signal)
+        dev.last_transfer_signal = None
       if dev.last_exec_signal:
         wait_signal.append(dev.last_exec_signal)
         dev.acquired_signals.append(dev.last_exec_signal)
@@ -178,13 +153,14 @@ class HSAAllocator(LRUAllocator):
 
     copy_signal = dest_dev.alloc_signal()
     check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_dev.agent, src, src_dev.agent, sz, len(wait_signal), c_wait_signal, copy_signal, sdma_engine, True))
-    src_dev.last_copy_signal = copy_signal # cannot modify them until copy is done.
-    dest_dev.last_copy_signal = copy_signal
+    src_dev.last_transfer_signal = copy_signal # cannot modify them until copy is done.
+    dest_dev.last_transfer_signal = copy_signal
 
 
 class HSADevice(Compiled):
   cpu_agent = None
   cpu_memory_pool = None
+  devices = []
   def __init__(self, device:str=""):
     if not HSADevice.cpu_agent:
       check(hsa.hsa_init())
@@ -197,6 +173,7 @@ class HSADevice(Compiled):
     self.gpu_memory_pool = find_memory_pool(self.agent, segtyp=hsa.HSA_AMD_SEGMENT_GLOBAL, location=hsa.HSA_AMD_MEMORY_POOL_LOCATION_GPU)
     self.kernargs_memory_pool = find_memory_pool(self.agent, segtyp=hsa.HSA_AMD_SEGMENT_GLOBAL, flags=hsa.HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT)
     self.hw_queue = HWQueue(self, HSADevice.cpu_agent, HSADevice.cpu_memory_pool)
+    HSADevice.devices.append(self)
 
     check(hsa.hsa_agent_get_info(self.agent, hsa.HSA_AGENT_INFO_NAME, ctypes.byref(agent_name_buf := ctypes.create_string_buffer(256))))
     self.arch = ctypes.string_at(agent_name_buf).decode()
@@ -219,13 +196,16 @@ class HSADevice(Compiled):
     # Pretend that we execute copy and exec in different streams, so we need to synchronise them.
     self.last_exec_signal = None
     self.last_copy_signal = None
+    self.last_transfer_signal = None
 
     super().__init__(device, HSAAllocator(self), HSACompiler(self.arch), functools.partial(HSAProgram, self), None)
 
   def synchronize(self):
     if self.last_exec_signal: self.hw_queue.signals.append(self.last_exec_signal)
     if self.last_copy_signal: self.hw_queue.signals.append(self.last_copy_signal)
+    if self.last_transfer_signal: self.hw_queue.signals.append(self.last_transfer_signal)
     self.hw_queue.wait()
+    if self.last_transfer_signal: assert self.last_transfer_signal == self.acquired_signals.pop(-2) # bad HACK
     for opaque in self.pending_copyin: check(hsa.hsa_amd_memory_unlock(from_mv(opaque)))
     for opaque in self.delayed_free: check(hsa.hsa_amd_memory_pool_free(opaque))
     for sig in self.acquired_signals: hsa.hsa_signal_store_relaxed(sig, 1)
@@ -237,6 +217,7 @@ class HSADevice(Compiled):
 
     self.last_exec_signal = None
     self.last_copy_signal = None
+    self.last_transfer_signal = None
 
   def select_sdma(self, sz):
     self.next_sdma ^= 1
