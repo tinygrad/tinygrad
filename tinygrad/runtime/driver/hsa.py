@@ -206,6 +206,15 @@ class HWQueue:
       self.dev.acquired_signals.append(sig)
     self.signals.clear()
 
+  def blit(self, packet_addr, packet_cnt):
+    # TODO: support overflow
+    ctypes.memmove(self.write_addr, packet_addr, AQL_PACKET_SIZE * packet_cnt)
+
+    self.next_doorbell_index += packet_cnt
+    self.write_addr += AQL_PACKET_SIZE * packet_cnt
+    hsa.hsa_queue_store_write_index_screlease(self.hw_queue, self.next_doorbell_index + 1)
+    hsa.hsa_signal_store_screlease(self.hw_queue.contents.doorbell_signal, self.next_doorbell_index)
+
 @functools.lru_cache(None)
 def find_hsa_agent(typ, device_id):
   @ctypes.CFUNCTYPE(hsa.hsa_status_t, hsa.hsa_agent_t, ctypes.c_void_p)

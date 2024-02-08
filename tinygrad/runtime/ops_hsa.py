@@ -198,7 +198,9 @@ class HSADevice(Compiled):
     self.last_copy_signal = None
     self.last_transfer_signal = None
 
-    super().__init__(device, HSAAllocator(self), HSACompiler(self.arch), functools.partial(HSAProgram, self), None)
+    from tinygrad.runtime.graph.hsa import HSAGraph
+    super().__init__(device, HSAAllocator(self), HSACompiler(self.arch), functools.partial(HSAProgram, self),
+                     functools.partial(HSAGraph, self))
 
   def synchronize(self):
     if self.last_exec_signal: self.hw_queue.signals.append(self.last_exec_signal)
