@@ -322,7 +322,7 @@ class TestTypeSpec(unittest.TestCase):
 
   def test_reduce_0d_default(self):
     assert Tensor.ones([2,3,0]).sum(2).dtype ==  dtypes.default_float
-    # assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int  # requires reduceop acc fix
+    assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int
 
   @given(strat.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), strat.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
   def test_arange(self, default_int, default_float):
