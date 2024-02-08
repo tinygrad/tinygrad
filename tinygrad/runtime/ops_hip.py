@@ -171,6 +171,7 @@ class HIPDevice(Compiled):
       super().__init__(device, HIPAllocator(self), HIPCompiler(self.arch),
                       functools.partial(HIPProgram, self.device), HIPGraph)
   def synchronize(self):
+    if getenv("HIPCPU"): return
     hip_set_device(self.device)
     check(hip.hipDeviceSynchronize())
     for opaque in self.pending_copyin: check(hip.hipFree(opaque))
