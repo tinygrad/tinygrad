@@ -166,9 +166,8 @@ def train_resnet():
     'scheduler': scheduler.__class__.__name__,
   }
   wandb_tags = []
-  if num_classes != 1000:
-    wandb_tags.append('cats')
-    wandb_tags.append(f'cats{num_classes}')
+  wandb_tags.append(f'cats{num_classes}')
+  wandb_tags.append('cats')
   if getenv("WANDB_RESUME", ""):
     wandb.init(id=getenv("WANDB_RESUME", ""), resume="must", config=wandb_config, tags=wandb_tags)
   else:
