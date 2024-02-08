@@ -134,7 +134,8 @@ def train_resnet():
         dupe_names[v] = k
         assert k in state_dict
       state_dict[k] = state_dict[dupe_names[v]]
-    state.load_state_dict(train_state, state_dict)
+    train_state_ = {'scheduler': scheduler}
+    state.load_state_dict(train_state_, state_dict)
   start_epoch = 0
   if ckpt:=getenv("RESUME", ""):
     print(f"resuming from {ckpt}")
