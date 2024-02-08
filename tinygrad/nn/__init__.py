@@ -5,19 +5,13 @@ from tinygrad.helpers import prod
 from tinygrad.nn import optim, state  # noqa: F401
 
 class LazyLayer:
-  def __init__(self, get_layer_input_size, create_layer):
-    self.get_layer_input_size, self.create_layer = get_layer_input_size, create_layer
-    self.layer_input_size, self.layer = None, None
+  def __init__(self, create_layer):
+    self.layer, self.create_layer = None, create_layer
 
   def __call__(self, t:Tensor):
     assert isinstance(t, Tensor), f"expected Tensor, got {type(t)}"
 
-    if self.layer is None:
-      self.layer_input_size = self.get_layer_input_size(t)
-      self.layer = self.create_layer(self.layer_input_size)
-    if self.layer_input_size is not None:
-      assert self.layer_input_size == (sz := self.get_layer_input_size(t)), f"expected input size {self.layer_input_size}, got {sz}"
-
+    if self.layer is None: self.layer = self.create_layer(t)
     return self.layer(t)
 
 class BatchNorm2d:
@@ -72,12 +66,11 @@ class Conv2d:
 
 class LazyConv2d(LazyLayer):
   def __init__(self, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
-    def get_layer_input_size(t:Tensor):
+    def create_layer(t:Tensor):
       assert len(t.shape) == 4, f"expected 4D tensor, got {t.shape}"
-      return t.shape[1]
-    def create_layer(in_channels:int): return Conv2d(in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias)
+      return Conv2d(t.shape[1], out_channels, kernel_size, stride, padding, dilation, groups, bias)
 
-    super().__init__(get_layer_input_size, create_layer)
+    super().__init__(create_layer)
 
 def ConvTranspose1d(in_channels, out_channels, kernel_size, stride=1, padding=0, output_padding=0, dilation=1, groups=1, bias=True):
   return ConvTranspose2d(in_channels, out_channels, (kernel_size,), stride, padding, output_padding, dilation, groups, bias)
@@ -106,12 +99,11 @@ class Linear:
 
 class LazyLinear(LazyLayer):
   def __init__(self, out_features, bias=True):
-    def get_layer_input_size(t:Tensor):
+    def create_layer(t:Tensor):
       assert len(t.shape) >= 1, f"expected at least 1D tensor, got {t.shape}"
-      return t.shape[-1]
-    def create_layer(in_features:int): return Linear(in_features, out_features, bias)
+      return Linear(t.shape[-1], out_features, bias)
 
-    super().__init__(get_layer_input_size, create_layer)
+    super().__init__(create_layer)
 
 class GroupNorm:
   def __init__(self, num_groups:int, num_channels:int, eps:float=1e-5, affine:bool=True):
