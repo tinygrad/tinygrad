@@ -16,33 +16,21 @@ class LR_Scheduler:
     self.optimizer.lr.assign(self.get_lr()).realize()
 
 class MultiStepLR(LR_Scheduler):
-  def __init__(self, optimizer: Optimizer, milestones: List[int], gamma=0.1, warmup=0):
+  def __init__(self, optimizer: Optimizer, milestones: List[int], gamma=0.1):
     super().__init__(optimizer)
     self.milestones = milestones
     self.gamma = gamma
-    self.start = Tensor(float(optimizer.lr.numpy()[0]), requires_grad=False, dtype=dtypes.float32)
-    self.warmup = Tensor(float(warmup), requires_grad=False, dtype=dtypes.float32)
 
   def get_lr(self) -> Tensor:
-    progress = Tensor(1.0)
-    for m in self.milestones:
-      progress = progress * (self.epoch_counter < float(m)).where(Tensor(1.0), self.gamma)
-    lr = self.start * progress
-    result = (self.epoch_counter < self.warmup).where(
-      self.epoch_counter / self.warmup * self.start,
-      lr
-    ).contiguous()
-    return result
+    if self.epoch_counter.numpy()[0] not in self.milestones:
+      return self.optimizer.lr
+    return self.optimizer.lr * self.gamma
 
 class PolynomialLR(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, start_lr, end_lr, epochs, warmup=0, power=2):
     super().__init__(optimizer)
     assert epochs > warmup
-    self.start_lr = start_lr
-    self.end_lr = end_lr
-    self.epochs = epochs
-    self.power = power
-    self.warmup = warmup
+    self.start_lr, self.end_lr, self.epochs, self.power, self.warmup = start_lr, end_lr, epochs, power, warmup
 
   def get_lr(self):
     warmup_lr = ((self.epoch_counter + 1) * (1.0/(self.warmup+1))) * self.start_lr
@@ -85,7 +73,7 @@ class CosineAnnealingLR(LR_Scheduler):
     self.eta_max = optimizer.lr.numpy()[0]
 
   def get_lr(self) -> Tensor:
-    return Tensor([self.eta_min + 0.5 * (self.eta_max - self.eta_min) * (1 + math.cos((self.epoch_counter.numpy()[0] / self.T_max) * math.pi))], device=self.optimizer.device)
+    return Tensor([self.eta_min + 0.5 * (self.eta_max - self.eta_min) * (1 + math.cos((self.epoch_counter.numpy()[0]/self.T_max) * math.pi))], device=self.optimizer.device)
 
 class OneCycleLR(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, max_lr: float, div_factor: float, final_div_factor: float, total_steps: int, pct_start: float,

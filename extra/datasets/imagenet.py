@@ -20,7 +20,7 @@ def get_train_files():
     ci = get_imagenet_categories()
     train_files = [fn for fn in train_files if ci[fn.split("/")[-2]] < getenv("TEST_CATS", 1000)]
     print(f"Limiting to {getenv('TEST_CATS')} categories")
-  if getenv("TEST_TRAIN"): train_files=train_files[:getenv("TEST_TRAIN")] * getenv("TEST_TRAIN_REPEAT", 1)
+  if getenv("TEST_TRAIN"): train_files=train_files[:getenv("TEST_TRAIN")]
   print(f"Training on {len(train_files)} images")
   return train_files
 

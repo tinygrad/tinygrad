@@ -321,7 +321,6 @@ def train_maskrcnn():
 
 if __name__ == "__main__":
   with Tensor.train():
-    Tensor.training = True
     for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
       nm = f"train_{m}"
       if nm in globals():

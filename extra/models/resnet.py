@@ -1,10 +1,35 @@
+from typing import List
 import tinygrad.nn as nn
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import torch_load
 from tinygrad.helpers import fetch, get_child, getenv
 from tinygrad.dtype import dtypes
+from tinygrad.features.multi import MultiLazyBuffer
 
-BatchNorm = nn.BatchNorm2d if getenv("BNSYNC", 0) else nn.UnsyncedBatchNorm2d
+class UnsyncedBatchNorm:
+  def __init__(self, num_features, num_devices=getenv("GPUS", 1)):
+    self.bns:List[nn.BatchNorm2d] = []
+    for _ in range(num_devices):
+      bn = nn.BatchNorm2d(num_features)
+      self.bns.append(bn)
+
+  def __call__(self, x:Tensor):
+    if len(self.bns) == 1: return self.bns[0](x)
+
+    bn_ts = []
+    assert isinstance(x.lazydata, MultiLazyBuffer)
+    for bound, bn in zip(x.lazydata.bounds, self.bns):
+      # TODO: __getitem__ does not work
+      # xi = x[bound]
+      xi = x.shrink((bound, None, None, None))
+      bni = bn(xi)
+      bn_ts.append(bni)
+    # TODO: what do we want to do for inference? average weight? pick any one?
+    # a good start would be to check each mean/std are similar
+    return bn_ts[0].cat(*bn_ts[1:])
+  def __getattr__(self, item): return getattr(self.bns[0], item) # todo: hack, this make eval only work on 1 gpu if you load from weights...
+
+BatchNorm = nn.BatchNorm2d if getenv("BNSYNC", 0) else UnsyncedBatchNorm
 
 class BasicBlock:
   expansion = 1
@@ -114,9 +139,8 @@ class ResNet:
     out = out.sequential(self.layer4)
     if is_feature_only: features.append(out)
     if not is_feature_only:
-      out = out.cast(dtypes.float32)
       out = out.mean([2,3])
-      out = self.fc(out).log_softmax()
+      out = self.fc(out).float().log_softmax()
       return out
     return features
 

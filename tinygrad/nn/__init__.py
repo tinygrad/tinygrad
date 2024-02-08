@@ -6,32 +6,8 @@ from tinygrad.helpers import prod, getenv
 from tinygrad.nn import optim, state  # noqa: F401
 from tinygrad.features.multi import MultiLazyBuffer
 
-class UnsyncedBatchNorm2d:
-  def __init__(self, num_features, num_devices=getenv("GPUS", 1)):
-    self.bns:List[BatchNorm2d] = []
-    for _ in range(num_devices):
-      bn = BatchNorm2d(num_features)
-      self.bns.append(bn)
-
-  def __call__(self, x:Tensor):
-    if len(self.bns) == 1: return self.bns[0](x)
-
-    bn_ts = []
-    assert isinstance(x.lazydata, MultiLazyBuffer)
-    for bound, bn in zip(x.lazydata.bounds, self.bns):
-      # TODO: __getitem__ does not work
-      # xi = x[bound]
-      xi = x.shrink((bound, None, None, None))
-      bni = bn(xi)
-      bn_ts.append(bni)
-    # TODO: what do we want to do for inference? average weight? pick any one?
-    # a good start would be to check each mean/std are similar
-    return bn_ts[0].cat(*bn_ts[1:])
-  def __getattr__(self, item): return getattr(self.bns[0], item) # todo: hack, this make eval only work on 1 gpu if you load from weights...
-
 class BatchNorm2d:
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
-    dtypes.default_float, old_default = dtypes.float32, dtypes.default_float
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
     if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
@@ -39,12 +15,8 @@ class BatchNorm2d:
 
     self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
-    dtypes.default_float = old_default
 
   def __call__(self, x:Tensor):
-    dtypes.default_float, old_default = dtypes.float32, dtypes.default_float
-    rtype = x.dtype
-    x = x.float()
     if Tensor.training:
       # This requires two full memory accesses to x
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
@@ -64,8 +36,7 @@ class BatchNorm2d:
       # NOTE: this can be precomputed for static inference. we expand it here so it fuses
       batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
 
-    ret = x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd).cast(rtype)
-    dtypes.default_float = old_default
+    ret = x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
     return ret
 
 # TODO: these Conv lines are terrible
