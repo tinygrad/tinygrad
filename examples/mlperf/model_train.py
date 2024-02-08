@@ -67,16 +67,19 @@ def train_resnet():
 
   @TinyJit
   def forward_step(X, Y):
-    scheduler.step()
     optimizer.zero_grad()
     X = normalize(X)
     out = model.forward(X)
     loss = sparse_categorical_crossentropy(out, Y, label_smoothing=0.1) * lr_scaler
     return loss.realize(), out.realize(), (out.argmax(-1) == Y).sum()
+  # ** need to pass X and Y into backward step so that tinyjit can correctly replace the buffers in the backward tree!!! **
+  # otherwise it will use stale buffer from the second call to forward forever in the backward pass
   @TinyJit
-  def backward_step(loss):
+  def backward_step(X, Y, loss):
+    scheduler.step()
     loss.backward()
     optimizer.step()
+    pass
 
   input_mean = Tensor([0.485, 0.456, 0.406], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
   input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
@@ -176,7 +179,6 @@ def train_resnet():
   for e in range(start_epoch, epochs):
     # train loop
     Tensor.training = True
-    scheduler.step()
     dt = time.perf_counter()
 
     iterator = iter(tqdm(t := batch_load_resnet(batch_size=BS, val=False, shuffle=True), total=steps_in_train_epoch))
@@ -190,11 +192,11 @@ def train_resnet():
       if getenv("TESTEVAL"): break
 
       GlobalCounters.reset()
-      proc = (forward_step(proc[0], proc[1]), proc[2])
+      proc = (forward_step(proc[0], proc[1]), (proc[0], proc[1]), proc[2])
       # the backward step should be realized by loss.numpy(), even though it doesn't depend on this.
       # doing this uses 16.38gb vs 15.55gb? why? because the grads get realized in optimizer.step, and the backward buffers are freed?
       fwet = time.perf_counter()
-      backward_step(proc[0][0])
+      backward_step(*proc[1], proc[0][0])
 
       et = time.perf_counter()
       dt = time.perf_counter()
