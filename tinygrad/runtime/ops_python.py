@@ -4,13 +4,15 @@
 from typing import Tuple, List, Optional, Any, Dict
 import pickle, base64, itertools, time, math
 from tinygrad.dtype import DType, dtypes
-from tinygrad.helpers import all_same
+from tinygrad.helpers import all_same, getenv
 from tinygrad.device import Compiled, Allocator, Compiler
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.codegen.kernel import LinearizerOptions
 
 def exec_alu(arg, dtype, p):
   # TODO: make this complete and correctly honor the dtypes
+  # TODO: use this for constant folding
   if arg == TernaryOps.MULACC: return p[0]*p[1]+p[2]
   if arg == TernaryOps.WHERE: return p[1] if p[0] else p[2]
   if arg == UnaryOps.LOG2: return math.log2(p[0]) if p[0] > 0 else math.nan
@@ -37,7 +39,6 @@ class PythonProgram:
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
     for idxs in itertools.product(*[range(x) for x in global_size[::-1]]):
-      # TODO: abstract this out so it can be used for constant folding
       ul: Dict[int, Any] = {}
       dl: Dict[int, DType] = {}
       pbufs: List[memoryview] = list(bufs)
@@ -58,6 +59,10 @@ class PythonProgram:
         elif uop is UOps.END:
           loop_ends[idp[0]] = i
           i = idp[0]
+          continue
+        elif uop is UOps.BARRIER:
+          # in the python emulator, the warp is always in sync
+          i += 1
           continue
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
@@ -113,10 +118,10 @@ class PythonProgram:
         elif uop is UOps.WMMA:
           # here are the models for the WMMA instruction on the different hardware
           if arg == '__metal_wmma<float2,simdgroup_float8x8,float2>':
-            order = [0, 32, 1, 33, 8, 40, 9, 41,
-                     2, 34, 3, 35, 10, 42, 11, 43,
-                     4, 36, 5, 37, 12, 44, 13, 45,
-                     6, 38, 7, 39, 14, 46, 15, 47,
+            order = [0,  32, 1,  33, 8,  40, 9,  41,
+                     2,  34, 3,  35, 10, 42, 11, 43,
+                     4,  36, 5,  37, 12, 44, 13, 45,
+                     6,  38, 7,  39, 14, 46, 15, 47,
                      16, 48, 17, 49, 24, 56, 25, 57,
                      18, 50, 19, 51, 26, 58, 27, 59,
                      20, 52, 21, 53, 28, 60, 29, 61,
@@ -139,15 +144,14 @@ class PythonProgram:
           assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {arg}"
           assert all_same([dtype] + dtp) or arg in {BinaryOps.CMPEQ, BinaryOps.CMPLT, TernaryOps.WHERE}, f"dtype mismatch on {arg}"
           ul[i] = [exec_alu(arg, dtype, p) for p in zip(*inp)]
-        assert uop in {UOps.STORE, UOps.END, UOps.BARRIER} or i in ul, (uop, dtype, idp, arg)
+        assert i in ul, (uop, dtype, idp, arg)
         #print(i, uop, dtype, arg, ul[i] if i in ul else None)
         i += 1
     return time.perf_counter() - st
 
 from tinygrad.runtime.ops_metal import MetalCompiler
 class PythonCompiler(Compiler):
-  linearizer_opts = MetalCompiler.linearizer_opts
-  #linearizer_opts = LinearizerOptions()
+  linearizer_opts = MetalCompiler.linearizer_opts if getenv("EMULATE_METAL") else LinearizerOptions()
   def render(self, name:str, uops:List[UOp]) -> str:
     lops = [(u.uop, u.dtype, [uops.index(v) for v in u.vin], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()

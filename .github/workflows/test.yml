@@ -55,6 +55,8 @@ jobs:
         PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
     - name: Test shapetracker to_movement_ops
       run: PYTHONPATH="." python extra/to_movement_ops.py
+    - name: Test emulated METAL tensor cores
+      run: DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_big_gemm
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir

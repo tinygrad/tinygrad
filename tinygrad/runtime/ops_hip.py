@@ -159,7 +159,6 @@ if getenv("HIPCPU"):
 class HIPDevice(Compiled):
   def __init__(self, device:str=""):
     self.device = int(device.split(":")[1]) if ":" in device else 0
-    self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode()
     self.pending_copyin: List[ctypes.c_void_p] = []
     self.track_cross_buffer: List[Any] = []
     self.peers: Set[int] = set()
@@ -167,6 +166,7 @@ class HIPDevice(Compiled):
     if getenv("HIPCPU"):
       super().__init__(device, MallocAllocator, HIPCompiler("gfx1100"), RHIPProgram)
     else:
+      self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode()
       from tinygrad.runtime.graph.hip import HIPGraph
       super().__init__(device, HIPAllocator(self), HIPCompiler(self.arch),
                       functools.partial(HIPProgram, self.device), HIPGraph)
