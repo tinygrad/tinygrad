@@ -101,7 +101,7 @@ class PythonProgram:
                   nval = sum(m1[_i*8+_k] * m2[_k*8+_j] for _k in range(8))
                   if oidx < 32: out[0][goff+oidx] += nval
                   else: out[1][goff+oidx-32] += nval
-              ul[i] = out
+            ul[i] = out
           else:
             raise Exception(f"unimplemented tensor core {arg}")
         elif uop is UOps.ALU:
