@@ -105,10 +105,15 @@ class PythonProgram:
             else:
               ul[i] = inp[0]
         elif uop is UOps.LOAD:
+          def fetch(inp, j=0):
+            if len(inp) == 4:
+              return [m[x+j] if gate else default for m,x,gate,default in zip(*inp)]
+            else:
+              return [m[x+j] for m,x in zip(inp[0], inp[1])]
           if dtype.sz > 1:
-            ul[i] = [[m[x+j] for m,x in zip(inp[0], inp[1])] for j in range(dtype.sz)]
+            ul[i] = [fetch(inp, j) for j in range(dtype.sz)]
           else:
-            ul[i] = [m[x] for m,x in zip(inp[0], inp[1])]
+            ul[i] = fetch(inp)
         elif uop is UOps.PHI:
           for j in range(len(inp[0])):
             inp[0][j] = inp[1][j]
