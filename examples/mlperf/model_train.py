@@ -290,7 +290,7 @@ def train_resnet():
         print(f" *** WGMI {fn} ***")
         achieved = True
 
-      if (e+1) % getenv("CKPT_EPOCHS", 4) == 0 or e + 1 == epochs:
+      if not getenv("TESTEVAL") and ((e+1) % getenv("CKPT_EPOCHS", 4) == 0 or e + 1 == epochs):
         if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
         if wandb.run is not None:
           fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_{wandb.run.id}_e{e}.safe"
