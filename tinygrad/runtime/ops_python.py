@@ -121,6 +121,7 @@ class PythonProgram:
           else:
             # TODO: add real cast
             if isinstance(arg, tuple) and arg[1] or (dtypes.is_int(dtype) and dtypes.is_int(dtp[0]) and dtype.itemsize == dtp[0].itemsize):
+              assert dtype.fmt is not None and dtp[0].fmt is not None
               ul[i] = [struct.unpack(dtype.fmt, struct.pack(dtp[0].fmt, x))[0] for x in inp[0]]
             elif dtypes.is_int(dtype):
               ul[i] = [int(x) for x in inp[0]]
