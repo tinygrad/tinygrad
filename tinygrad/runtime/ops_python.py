@@ -31,6 +31,16 @@ def exec_alu(arg, dtype, p):
   if arg == BinaryOps.MOD: return p[0]%p[1]
   raise NotImplementedError(f"no support for {arg}")
 
+def _load(m, i):
+  if i<0 or i>=len(m): raise IndexError(f"access out of bounds, size is {len(m)} and access is {i}")
+  return m[i]
+def load(inp, j=0):
+  if len(inp) == 4:
+    return [_load(m, x+j) if gate else default for m,x,gate,default in zip(*inp)]
+  else:
+    assert len(inp) == 2, "image loads not supported yet"
+    return [_load(m, x+j) for m,x in zip(inp[0], inp[1])]
+
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
     self.uops: List[Tuple[UOps, Optional[DType], List[int], Any]] = pickle.loads(lib)
@@ -105,18 +115,10 @@ class PythonProgram:
             else:
               ul[i] = inp[0]
         elif uop is UOps.LOAD:
-          def load(m, i):
-            assert i>=0 and i<len(m), f"access out of bounds, size is {len(m)} and access is {i}"
-            return m[i]
-          def fetch(inp, j=0):
-            if len(inp) == 4:
-              return [load(m, x+j) if gate else default for m,x,gate,default in zip(*inp)]
-            else:
-              return [load(m, x+j) for m,x in zip(inp[0], inp[1])]
           if dtype.sz > 1:
-            ul[i] = [fetch(inp, j) for j in range(dtype.sz)]
+            ul[i] = [load(inp, j) for j in range(dtype.sz)]
           else:
-            ul[i] = fetch(inp)
+            ul[i] = load(inp)
         elif uop is UOps.PHI:
           for j in range(len(inp[0])):
             inp[0][j] = inp[1][j]
