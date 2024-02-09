@@ -25,14 +25,6 @@ def train_resnet():
   from extra.datasets.imagenet import get_train_files, get_val_files
   from extra.lr_scheduler import PolynomialLR
 
-  def sparse_categorical_crossentropy(out, Y, label_smoothing=0):
-    num_classes = out.shape[-1]
-    y_counter = Tensor.arange(num_classes, requires_grad=False, device=Y.device).unsqueeze(0).expand(Y.numel(), num_classes)
-    y = (y_counter == Y.reshape(-1, 1)).where(-1.0 * num_classes, 0)
-    y = y.reshape(*Y.shape, num_classes)
-    return (1 - label_smoothing) * out.mul(y).mean() + (-1 * label_smoothing * out.mean())
-
-
   def calculate_accuracy(out, Y, top_n):
     out_top_n = np.argpartition(out.cpu().numpy(), -top_n, axis=-1)[:, -top_n:]
     YY = np.expand_dims(Y.numpy(), axis=1)
@@ -76,7 +68,7 @@ def train_resnet():
     optimizer.zero_grad()
     X = normalize(X)
     out = model.forward(X)
-    loss = sparse_categorical_crossentropy(out, Y, label_smoothing=0.1) * lr_scaler
+    loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1) * lr_scaler
     return loss.realize(), out.realize(), (out.argmax(-1) == Y).sum()
   # ** need to pass X and Y into backward step so that tinyjit can correctly replace the buffers in the backward tree!!! **
   # otherwise it will use stale buffer from the second call to forward forever in the backward pass
