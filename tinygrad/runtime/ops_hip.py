@@ -1,14 +1,42 @@
 from __future__ import annotations
-import ctypes, functools, subprocess, io
+import ctypes, functools, subprocess, io, atexit, json
 from typing import Tuple, TypeVar, List, Any, cast, Set
 import tinygrad.runtime.autogen.hip as hip
-from tinygrad.helpers import DEBUG, getenv, init_c_var
+from tinygrad.helpers import DEBUG, getenv, init_c_var, dedup
 from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t
 from tinygrad.device import Compiled, LRUAllocator, BufferOptions, JITRunner, Device, Buffer, MallocAllocator, update_stats, Compiler
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.runtime.compiler.hip_comgr import compile_hip
 
+RECORD = getenv("RECORD")
+hipEventBlockingSync = 1
+if RECORD:
+  recorded_kernels = []
+  def save_recorded():
+    global recorded_kernels
+    mjson = []
+    devices = dedup([x[0] for x in recorded_kernels])
+    for dev in devices: Device[f"HIP:{dev}"].synchronize()
+    fsts = {}
+    for dev in devices:
+      hip_set_device(dev)
+      rev = init_c_var(hip.hipEvent_t(), lambda x: hip.hipEventCreate(ctypes.byref(x), hipEventBlockingSync))
+      check(hip.hipEventRecord(rev, None))
+      fsts[dev] = rev
+    for dev in devices: Device[f"HIP:{dev}"].synchronize()
+    for dev, name, rk, rke in recorded_kernels:
+      check(hip.hipEventElapsedTime(ctypes.byref(st := ctypes.c_float()), fsts[dev], rk))
+      st = st.value * 1e-3
+      check(hip.hipEventElapsedTime(ctypes.byref(et := ctypes.c_float()), fsts[dev], rke))
+      et = et.value * 1e-3
+      #print(f"{st:10.4f} {et:10.4f} {dev:2d} {name}")
+      mjson.append({"name": name, "ph": "B", "pid": dev, "ts": st*1e6})
+      mjson.append({"name": name, "ph": "E", "pid": dev, "ts": et*1e6})
+    with open("/tmp/events.json", "w") as f:
+      f.write(json.dumps({"traceEvents": mjson}))
+    recorded_kernels = []
+  atexit.register(save_recorded)
 
 class HIPCompiler(Compiler):
   linearizer_opts = LinearizerOptions("HIP", has_tensor_cores=True)
@@ -57,7 +85,14 @@ class HIPProgram:
     if wait:
       evs = [init_c_var(hip.hipEvent_t(), lambda x: hip.hipEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
       check(hip.hipEventRecord(evs[0], None))
+    if RECORD:
+      rev = init_c_var(hip.hipEvent_t(), lambda x: hip.hipEventCreate(ctypes.byref(x), hipEventBlockingSync))
+      check(hip.hipEventRecord(rev, None))
     check(hip.hipModuleLaunchKernel(self.prg, *global_size, *local_size, 0, None, None, self.vargs))
+    if RECORD:
+      reve = init_c_var(hip.hipEvent_t(), lambda x: hip.hipEventCreate(ctypes.byref(x), hipEventBlockingSync))
+      check(hip.hipEventRecord(reve, None))
+      recorded_kernels.append((self.device, self.name, rev, reve))
     if wait:
       check(hip.hipEventRecord(evs[1], None))
       check(hip.hipEventSynchronize(evs[1]))
@@ -162,7 +197,6 @@ class HIPDevice(Compiled):
     self.pending_copyin: List[ctypes.c_void_p] = []
     self.track_cross_buffer: List[Any] = []
     self.peers: Set[int] = set()
-
     if getenv("HIPCPU"):
       super().__init__(device, MallocAllocator, HIPCompiler("gfx1100"), RHIPProgram)
     else:
