@@ -2,7 +2,7 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Tuple, List, Optional, Any, Dict
-import pickle, base64, itertools, time, math
+import pickle, base64, itertools, time, math, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Allocator, Compiler
@@ -73,7 +73,7 @@ class PythonProgram:
                 _store(m, ox*4 + oy*dtp[0].shape[1]*4 + j, v)
           elif dtp[2].sz > 1:
             for j,val in enumerate(inp[2]):
-              for m,o,v in zip(inp[0], inp[1], val): _store(m, o+j, v)
+              for m,o,v in zip(inp[0], inp[1], val if type(val) == list else [val]*len(inp[0])): _store(m, o+j, v)
           else:
             for m,o,v in zip(*inp): _store(m, o, v)
           i += 1
@@ -120,7 +120,9 @@ class PythonProgram:
             ul[i] = inp
           else:
             # TODO: add real cast
-            if dtypes.is_int(dtype):
+            if isinstance(arg, tuple) and arg[1] or (dtypes.is_int(dtype) and dtypes.is_int(dtp[0]) and dtype.itemsize == dtp[0].itemsize):
+              ul[i] = [struct.unpack(dtype.fmt, struct.pack(dtp[0].fmt, x))[0] for x in inp[0]]
+            elif dtypes.is_int(dtype):
               ul[i] = [int(x) for x in inp[0]]
             elif dtypes.is_float(dtype):
               ul[i] = [float(x) for x in inp[0]]
