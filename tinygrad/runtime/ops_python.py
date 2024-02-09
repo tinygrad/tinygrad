@@ -61,6 +61,7 @@ class PythonProgram:
         uop, dtype, idp, arg = self.uops[i]
         inp = [ul[v] for v in idp]
         dtp = [dl[v] for v in idp]
+        if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
         if uop is UOps.STORE:
           assert len(inp) <= 3, "gated stores not supported yet"
           if isinstance(dtp[0], ImageDType):
@@ -175,7 +176,6 @@ class PythonProgram:
           assert all_same([dtype] + dtp) or arg in {BinaryOps.CMPEQ, BinaryOps.CMPLT, TernaryOps.WHERE}, f"dtype mismatch on {arg}"
           ul[i] = [exec_alu(arg, dtype, p) for p in zip(*inp)]
         assert i in ul, (uop, dtype, idp, arg)
-        #print(i, uop, dtype, arg, ul[i] if i in ul else None)
         i += 1
     return time.perf_counter() - st
 
