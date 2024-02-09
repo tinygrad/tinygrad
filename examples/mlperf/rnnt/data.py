@@ -4,6 +4,7 @@ import pathlib
 import numpy as np
 import librosa
 import soundfile
+from tinygrad import Tensor
 
 """
 The dataset has to be downloaded manually from https://www.openslr.org/12/ and put in `extra/datasets/librispeech`.
@@ -81,9 +82,22 @@ def load_wav(file):
   sample = soundfile.read(file)[0].astype(np.float32)
   return sample, sample.shape[0]
 
-def iterate(ci, bs=1, start=0):
 
-  for i in range(start, len(ci), bs):
+i2c = [" ","a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z","'"]
+c2i = {c:i for i,c in enumerate(i2c)}
+
+def text_encode(y:np.ndarray,maxlen):
+  ylens = np.array([len(t) for t in y])
+  y = [np.array([c2i[c] for c in t]) for t in y]
+  y = np.array([np.pad(t, (0, maxlen - len(t)), "constant") for t in y])
+  return y,ylens
+
+def text_decode(y:np.ndarray):
+  return ["".join([i2c[c] for c in t]) for t in y]
+
+def iterate(ci, bs, maxx, maxy):
+
+  for i in range(0, len(ci), bs):
     samples, sample_lens = zip(*[load_wav(BASEDIR / v["files"][0]["fname"]) for v in ci[i : i + bs]])
     samples = list(samples)
     # pad to same length
@@ -93,9 +107,17 @@ def iterate(ci, bs=1, start=0):
     samples, sample_lens = np.array(samples), np.array(sample_lens)
     files = ci[i:i+bs]
     if (len(files)< bs): return
-    yield feature_extract(samples, sample_lens), np.array([v["transcript"] for v in files])
     
+    x,xlens = feature_extract(samples, sample_lens)
 
-if __name__ == "__main__":
-  X, Y = next(iterate())
-  print(X[0].shape, Y.shape)
+    x = np.pad(x, ((0, maxx - x.shape[0]), (0, 0), (0, 0)), "constant")
+    y = np.array([v["transcript"] for v in files])
+    y,ylens = text_encode(y, maxy)
+
+    yield map(lambda x:Tensor(x).realize(), [x,y,xlens,ylens])    
+    
+#%%
+    
+ci, maxx, maxy = load_data()
+x,y,xlens,ylens = next(iterate(ci, 2,maxx,maxy))
+

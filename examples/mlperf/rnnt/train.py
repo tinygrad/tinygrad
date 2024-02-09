@@ -163,9 +163,9 @@ def test():
 
 def timestring(s:int): return f"{int(s//3600)}:{int(s//60%60)}:{s%60:.4}"
 
-B = 2
-SLEN = 7
-rnnt.load("rnnt_e_20")
+# B = 2
+# SLEN = 7
+# rnnt.load("rnnt_e_20")
 
 #%%
 if __name__ == "__main__":
