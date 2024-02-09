@@ -51,7 +51,13 @@ class PythonProgram:
         if uop is UOps.STORE:
           if dtp[2].sz > 1:
             for j,val in enumerate(inp[2]):
-              for m,o,v in zip(inp[0], inp[1], val): m[o+j] = v
+              # print(inp[0], inp[1], val)
+              # for m,o,v in zip(inp[0], inp[1], val): 
+              for m,o,v in zip(inp[0], inp[1], [val]*len(inp[1])): 
+                m = memoryview(m)
+                # print(type(m), type(v),v)
+                m[o+j] = v
+                # m[o+j] = v[-1] if isinstance(v, list) else v
               # for m,o,v in zip(inp[0], inp[1], val): print(m,o,j,v) #m[o+j] = v
           else:
             for m,o,v in zip(*inp): m[o] = v
