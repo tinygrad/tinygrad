@@ -177,7 +177,7 @@ def train_resnet():
   else:
     wandb.init(config=wandb_config, tags=wandb_tags)
 
-  # ** train loop **
+  # ** epoch loop **
   for e in range(start_epoch, epochs):
     Tensor.training = True
     dt = time.perf_counter()
@@ -188,6 +188,7 @@ def train_resnet():
       # x must realize here, since the shm diskbuffer in dataloader might disappear?
       return x.shard(GPUS, axis=0).realize(), Tensor(y).shard(GPUS, axis=0), cookie
 
+    # ** train loop **
     i, proc = 0, data_get(it)
     st = time.perf_counter()
     while proc is not None:
@@ -239,8 +240,8 @@ def train_resnet():
 
 
 
-    # "eval" loop. Evaluate every 4 epochs, starting with epoch 0
-    if (e+1) % 1 == 0:
+    # ** eval loop **
+    if (e+1) % getenv("EVAL_EPOCHS", 1) == 0:
       eval_loss = []
       eval_times = []
       eval_top_1_acc = []
