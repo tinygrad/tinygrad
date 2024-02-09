@@ -105,11 +105,14 @@ class PythonProgram:
             else:
               ul[i] = inp[0]
         elif uop is UOps.LOAD:
+          def load(m, i):
+            assert i>=0 and i<len(m), f"access out of bounds, size is {len(m)} and access is {i}"
+            return m[i]
           def fetch(inp, j=0):
             if len(inp) == 4:
-              return [m[x+j] if gate else default for m,x,gate,default in zip(*inp)]
+              return [load(m, x+j) if gate else default for m,x,gate,default in zip(*inp)]
             else:
-              return [m[x+j] for m,x in zip(inp[0], inp[1])]
+              return [load(m, x+j) for m,x in zip(inp[0], inp[1])]
           if dtype.sz > 1:
             ul[i] = [fetch(inp, j) for j in range(dtype.sz)]
           else:
