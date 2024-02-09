@@ -284,12 +284,15 @@ def train_resnet():
 
         proc, next_proc = next_proc, None  # drop cookie
 
+      total_loss = sum(eval_loss) / len(eval_loss)
       total_top_1 = sum(eval_top_1_acc) / len(eval_top_1_acc)
-      tqdm.write(f"eval loss: {sum(eval_loss) / len(eval_loss):.2f}, eval time: {sum(eval_times) / len(eval_times):.2f}, eval top 1 acc: {sum(eval_top_1_acc) / len(eval_top_1_acc):.3f}, eval top 5 acc: {sum(eval_top_5_acc) / len(eval_top_5_acc):.3f}")
-      wandb.log({"eval/loss": sum(eval_loss) / len(eval_loss),
-                "eval/forward_time": sum(eval_times) / len(eval_times),
+      total_top_5 = sum(eval_top_5_acc) / len(eval_top_5_acc)
+      total_fw_time = sum(eval_times) / len(eval_times)
+      tqdm.write(f"eval loss: {total_loss:.2f}, eval time: {total_fw_time:.2f}, eval top 1 acc: {total_top_1:.3f}, eval top 5 acc: {total_top_5:.3f}")
+      wandb.log({"eval/loss": total_loss,
                 "eval/top_1_acc": total_top_1,
-                "eval/top_5_acc": sum(eval_top_5_acc) / len(eval_top_5_acc),
+                "eval/top_5_acc": total_top_5,
+                 "eval/forward_time": total_fw_time,
                 "epoch": e + 1,
       })
 
