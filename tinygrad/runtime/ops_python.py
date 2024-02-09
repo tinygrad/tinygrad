@@ -9,7 +9,6 @@ from tinygrad.device import Compiled, Allocator, Compiler
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.codegen.kernel import LinearizerOptions
-import numpy as np
 
 def exec_alu(arg, dtype, p):
   # TODO: make this complete and correctly honor the dtypes
@@ -73,11 +72,11 @@ class PythonProgram:
         dl[i] = dtype
         if uop is UOps.DEFINE_GLOBAL:
           assert dtype.fmt is not None
-          ul[i] = [np.frombuffer(pbufs.pop(0), dtype=dtype.np)] * warp_size
+          ul[i] = [pbufs.pop(0).cast(dtype.fmt)] * warp_size
         elif uop is UOps.DEFINE_LOCAL:
           assert dtype.fmt is not None
           lbuf = memoryview(bytearray(arg[1]*dtype.sz))
-          ul[i] = [np.frombuffer(lbuf, dtype=dtype.np)] * warp_size
+          ul[i] = [lbuf.cast(dtype.fmt)] * warp_size
         elif uop is UOps.SPECIAL:
           if arg[1][0] == 'g':
             ul[i] = [idxs[2-arg[0]]] * warp_size
