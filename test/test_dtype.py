@@ -18,6 +18,7 @@ def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   if dtype == dtypes.bfloat16: return False # numpy doesn't support bf16, tested separately in TestBFloat16DType
   if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
   if device == "TORCH": return dtype not in [dtypes.uint16, dtypes.uint32, dtypes.uint64]
+  if device == "PYTHON": return dtype not in [dtypes.half]
   # for CI GPU, cl_khr_fp16 isn't supported
   # for CI LLVM, it segfaults because it can't link to the casting function
   # CUDA in CI uses CUDACPU that does not support half
