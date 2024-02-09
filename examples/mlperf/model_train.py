@@ -177,8 +177,8 @@ def train_resnet():
   else:
     wandb.init(config=wandb_config, tags=wandb_tags)
 
+  # ** train loop **
   for e in range(start_epoch, epochs):
-    # train loop
     Tensor.training = True
     dt = time.perf_counter()
 
