@@ -56,7 +56,7 @@ class PythonProgram:
               cnt = 0
               for m,o,v in zip(inp[0], inp[1], [val]*len(inp[1])): 
                 m = memoryview(m)
-                print(type(m), type(v),v)
+                # print(type(m), type(v),v)
                 # m[o+j] = v
                 m[o+j] = v[cnt] if isinstance(v, list) else v
                 if isinstance(v, list): cnt += 1
