@@ -9,7 +9,7 @@ from tinygrad.device import Compiled, Allocator, Compiler
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.codegen.kernel import LinearizerOptions
-
+import numpy as np
 def exec_alu(arg, dtype, p):
   # TODO: make this complete and correctly honor the dtypes
   # TODO: use this for constant folding
@@ -52,6 +52,7 @@ class PythonProgram:
           if dtp[2].sz > 1:
             for j,val in enumerate(inp[2]):
               for m,o,v in zip(inp[0], inp[1], val): m[o+j] = v
+              # for m,o,v in zip(inp[0], inp[1], val): print(m,o,j,v) #m[o+j] = v
           else:
             for m,o,v in zip(*inp): m[o] = v
           i += 1
@@ -68,11 +69,27 @@ class PythonProgram:
         dl[i] = dtype
         if uop is UOps.DEFINE_GLOBAL:
           assert dtype.fmt is not None
-          ul[i] = [pbufs.pop(0).cast(dtype.fmt)] * warp_size
+          # print('cust PRINT:',dtype.fmt)
+          # import sys
+          # sys.exit(1)
+          # pbufs.pop(0).cast()
+          # print(type(dtype.np))
+          
+          # print(dtype.np, dtype.fmt, len(dtype.fmt))
+          
+          # print(dir(dtype.np))
+          # print(dtype.np.__name__)
+          # import numpy as np
+          # print(np.dtype(dtype.fmt))
+          # temp = pbufs.pop(0)
+          # temp = temp.cast(dtype.fmt)
+          # ul[i] = [pbufs.pop(0).cast(dtype.fmt)] * warp_size
+          ul[i] = [np.frombuffer(pbufs.pop(0), dtype=dtype.np)] * warp_size
         elif uop is UOps.DEFINE_LOCAL:
           assert dtype.fmt is not None
           lbuf = memoryview(bytearray(arg[1]*dtype.sz))
-          ul[i] = [lbuf.cast(dtype.fmt)] * warp_size
+          # ul[i] = [lbuf.cast(dtype.fmt)] * warp_size
+          ul[i] = [np.frombuffer(lbuf, dtype=dtype.np)] * warp_size
         elif uop is UOps.SPECIAL:
           if arg[1][0] == 'g':
             ul[i] = [idxs[2-arg[0]]] * warp_size
