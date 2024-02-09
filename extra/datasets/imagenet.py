@@ -3,7 +3,7 @@ import glob, random, json, math
 import numpy as np
 from PIL import Image
 import functools, pathlib
-from tinygrad.helpers import DEBUG, diskcache, getenv
+from tinygrad.helpers import diskcache, getenv
 
 BASEDIR = pathlib.Path(__file__).parent / "imagenet"
 
@@ -12,9 +12,11 @@ def get_imagenet_categories():
   ci = json.load(open(BASEDIR / "imagenet_class_index.json"))
   return {v[0]: int(k) for k,v in ci.items()}
 
+@diskcache
+def _get_train_files(): return glob.glob(str(BASEDIR / "train/*/*"))
 @functools.lru_cache(None)
 def get_train_files():
-  train_files = glob.glob(str(BASEDIR / "train/*/*"))
+  train_files = _get_train_files
   # test train with less categories
   if getenv("TEST_CATS", 1000) != 1000:
     ci = get_imagenet_categories()
