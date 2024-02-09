@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from tinygrad import Tensor, dtypes, nn
 import tinygrad
 from distributions import OneHotCategorical, Normal
+import distributions
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
 # from torch.cuda.amp import autocast
@@ -72,16 +73,17 @@ class EncoderBN:
         return x
 
 
-class DecoderBN(nn.Module):
+class DecoderBN:
     def __init__(self, stoch_dim, last_channels, original_in_channels, stem_channels, final_feature_width) -> None:
-        super().__init__()
+        # super().__init__()
 
         backbone = []
         # stem
         backbone.append(nn.Linear(stoch_dim, last_channels*final_feature_width*final_feature_width, bias=False))
         backbone.append(Rearrange('B L (C H W) -> (B L) C H W', C=last_channels, H=final_feature_width))
         backbone.append(nn.BatchNorm2d(last_channels))
-        backbone.append(nn.ReLU(inplace=True))
+        # backbone.append(nn.ReLU(inplace=True))
+        backbone.append(Tensor.relu())
         # residual_layer
         # backbone.append(ResidualStack(last_channels, 1, last_channels//4))
         # layers
@@ -103,7 +105,8 @@ class DecoderBN(nn.Module):
             channels //= 2
             feat_width *= 2
             backbone.append(nn.BatchNorm2d(channels))
-            backbone.append(nn.ReLU(inplace=True))
+            # backbone.append(nn.ReLU(inplace=True))
+            backbone.append(Tensor.relu())
 
         backbone.append(
             nn.ConvTranspose2d(
@@ -114,8 +117,8 @@ class DecoderBN(nn.Module):
                 padding=1
             )
         )
-        self.backbone = nn.Sequential(*backbone)
-
+        # self.backbone = nn.Sequential(*backbone)
+        self.backbone = Tensor.sequential(backbone)
     def forward(self, sample):
         batch_size = sample.shape[0]
         obs_hat = self.backbone(sample)
@@ -123,21 +126,24 @@ class DecoderBN(nn.Module):
         return obs_hat
 
 
-class DistHead(nn.Module):
+class DistHead:
     '''
     Dist: abbreviation of distribution
     '''
     def __init__(self, image_feat_dim, transformer_hidden_dim, stoch_dim) -> None:
-        super().__init__()
+        # super().__init__()
         self.stoch_dim = stoch_dim
         self.post_head = nn.Linear(image_feat_dim, stoch_dim*stoch_dim)
         self.prior_head = nn.Linear(transformer_hidden_dim, stoch_dim*stoch_dim)
 
-    def unimix(self, logits, mixing_ratio=0.01):
+    def unimix(self, logits:Tensor, mixing_ratio=0.01):
         # uniform noise mixing
-        probs = F.softmax(logits, dim=-1)
-        mixed_probs = mixing_ratio * torch.ones_like(probs) / self.stoch_dim + (1-mixing_ratio) * probs
-        logits = torch.log(mixed_probs)
+        # probs = F.softmax(logits, dim=-1)
+        probs = logits.softmax(axis=-1)
+        # mixed_probs = mixing_ratio * torch.ones_like(probs) / self.stoch_dim + (1-mixing_ratio) * probs
+        mixed_probs = mixing_ratio * Tensor.ones_like(probs) / self.stoch_dim + (1-mixing_ratio) * probs
+        # logits = torch.log(mixed_probs)
+        logits = mixed_probs.log()
         return logits
 
     def forward_post(self, x):
@@ -156,14 +162,16 @@ class DistHead(nn.Module):
 class RewardDecoder(nn.Module):
     def __init__(self, num_classes, embedding_size, transformer_hidden_dim) -> None:
         super().__init__()
-        self.backbone = nn.Sequential(
+        self.backbone = Tensor.sequential([
             nn.Linear(transformer_hidden_dim, transformer_hidden_dim, bias=False),
             nn.LayerNorm(transformer_hidden_dim),
-            nn.ReLU(inplace=True),
+            # nn.ReLU(inplace=True),
+            Tensor.relu(),
             nn.Linear(transformer_hidden_dim, transformer_hidden_dim, bias=False),
             nn.LayerNorm(transformer_hidden_dim),
-            nn.ReLU(inplace=True),
-        )
+            # nn.ReLU(inplace=True),
+            Tensor.relu(),
+        ])
         self.head = nn.Linear(transformer_hidden_dim, num_classes)
 
     def forward(self, feat):
@@ -178,10 +186,12 @@ class TerminationDecoder(nn.Module):
         self.backbone = nn.Sequential(
             nn.Linear(transformer_hidden_dim, transformer_hidden_dim, bias=False),
             nn.LayerNorm(transformer_hidden_dim),
-            nn.ReLU(inplace=True),
+            # nn.ReLU(inplace=True),
+            Tensor.relu(),
             nn.Linear(transformer_hidden_dim, transformer_hidden_dim, bias=False),
             nn.LayerNorm(transformer_hidden_dim),
-            nn.ReLU(inplace=True),
+            # nn.ReLU(inplace=True),
+            Tensor.relu(),
         )
         self.head = nn.Sequential(
             nn.Linear(transformer_hidden_dim, 1),
@@ -205,19 +215,22 @@ class MSELoss(nn.Module):
         return loss.mean()
 
 
-class CategoricalKLDivLossWithFreeBits(nn.Module):
+class CategoricalKLDivLossWithFreeBits:
     def __init__(self, free_bits) -> None:
-        super().__init__()
+        # super().__init__()
         self.free_bits = free_bits
 
     def forward(self, p_logits, q_logits):
         p_dist = OneHotCategorical(logits=p_logits)
         q_dist = OneHotCategorical(logits=q_logits)
-        kl_div = torch.distributions.kl.kl_divergence(p_dist, q_dist)
-        kl_div = reduce(kl_div, "B L D -> B L", "sum")
+        # kl_div = torch.distributions.kl.kl_divergence(p_dist, q_dist)
+        kl_div = distributions.kl_divergence(p_dist, q_dist)
+        # kl_div = reduce(kl_div, "B L D -> B L", "sum")
+        kl_div = kl_div.sum(axis=-1)
         kl_div = kl_div.mean()
         real_kl_div = kl_div
-        kl_div = torch.max(torch.ones_like(kl_div)*self.free_bits, kl_div)
+        # kl_div = torch.max(torch.ones_like(kl_div)*self.free_bits, kl_div)
+        kl_div = Tensor.max(Tensor.ones_like(kl_div)*self.free_bits, kl_div)
         return kl_div, real_kl_div
 
 

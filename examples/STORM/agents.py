@@ -18,20 +18,21 @@ from utils import EMAScalar
 def percentile(x:Tensor, percentage):
     # flat_x = torch.flatten(x)
     flat_x = x.flatten()
-    kth = int(percentage*len(flat_x))
+    kth = int(percentage*len(flat_x)) # maybe can do flat_x[kth-1]
     # per = torch.kthvalue(flat_x, kth).values
     sorted_x = np.sort(flat_x.cpu().data)
     per = Tensor(sorted_x[kth])
     return per
 
-
-def calc_lambda_return(rewards, values, termination, gamma, lam, dtype=torch.float32):
+# def calc_lambda_return(rewards, values, termination, gamma, lam, dtype=torch.float32):
+def calc_lambda_return(rewards, values, termination, gamma, lam, dtype=dtypes.float32):
     # Invert termination to have 0 if the episode ended and 1 otherwise
     inv_termination = (termination * -1) + 1
 
     batch_size, batch_length = rewards.shape[:2]
     # gae_step = torch.zeros((batch_size, ), dtype=dtype, device="cuda")
-    gamma_return = torch.zeros((batch_size, batch_length+1), dtype=dtype, device="cuda")
+    # gamma_return = torch.zeros((batch_size, batch_length+1), dtype=dtype, device="cuda")
+    gamma_return = Tensor.zeros((batch_size, batch_length+1), dtype=dtype)
     gamma_return[:, -1] = values[:, -1]
     for t in reversed(range(batch_length)):  # with last bootstrap
         gamma_return[:, t] = \
@@ -41,14 +42,15 @@ def calc_lambda_return(rewards, values, termination, gamma, lam, dtype=torch.flo
     return gamma_return[:, :-1]
 
 
-class ActorCriticAgent(nn.Module):
+class ActorCriticAgent:
     def __init__(self, feat_dim, num_layers, hidden_dim, action_dim, gamma, lambd, entropy_coef) -> None:
-        super().__init__()
+        # super().__init__()
         self.gamma = gamma
         self.lambd = lambd
         self.entropy_coef = entropy_coef
         self.use_amp = True
-        self.tensor_dtype = torch.bfloat16 if self.use_amp else torch.float32
+        # self.tensor_dtype = torch.bfloat16 if self.use_amp else torch.float32
+        self.tensor_dtype = dtypes.bfloat16 if self.use_amp else dtypes.float32
 
         self.symlog_twohot_loss = SymLogTwoHotLoss(255, -20, 20)
 
@@ -65,9 +67,10 @@ class ActorCriticAgent(nn.Module):
                 # nn.ReLU()
                 Tensor.relu()
             ])
-        self.actor = nn.Sequential(
-            *actor,
-            nn.Linear(hidden_dim, action_dim)
+        actor.append(nn.Linear(hidden_dim, action_dim))
+        self.actor = Tensor.sequential(
+            actor,
+            # nn.Linear(hidden_dim, action_dim)
         )
 
         critic = [
@@ -83,10 +86,10 @@ class ActorCriticAgent(nn.Module):
                 # nn.ReLU()
                 Tensor.relu()
             ])
-
-        self.critic = nn.Sequential(
-            *critic,
-            nn.Linear(hidden_dim, 255)
+        critic.append(nn.Linear(hidden_dim, 255))
+        self.critic = Tensor.sequential(
+            critic,
+            # nn.Linear(hidden_dim, 255)
         )
         self.slow_critic = copy.deepcopy(self.critic)
 

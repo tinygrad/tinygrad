@@ -46,7 +46,9 @@ class ScaledDotProductAttention:
         attn = Tensor.matmul(q / self.temperature, k.transpose(2, 3))
         if mask is not None:
             # IMPLEMENTTHISSSSSSSSSs
-            attn = attn.masked_fill(mask == 0, -1e9)
+            # attn = attn.masked_fill(mask == 0, -1e9)
+            attn_mask = (mask == 0).where(-float("inf"), 0)
+            attn = attn + attn_mask
 
         # attn = self.dropout(F.softmax(attn, dim=-1))
         attn = attn.softmax(dim=-1).dropout(self.dropoutVal)
@@ -77,7 +79,8 @@ class MultiHeadAttention:
 
     def forward(self, q, k, v, mask=None):
         d_k, d_v, n_head = self.d_k, self.d_v, self.n_head
-        sz_b, len_q, len_k, len_v = q.size(0), q.size(1), k.size(1), v.size(1)
+        # sz_b, len_q, len_k, len_v = q.size(0), q.size(1), k.size(1), v.size(1)
+        sz_b, len_q, len_k, len_v = q.shape[0], q.shape[1], k.shape[1], v.shape[1]
 
         residual = q
 
