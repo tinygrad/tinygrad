@@ -30,7 +30,7 @@ def eval_resnet():
       x = x.permute([0,3,1,2]).cast(dtypes.float32) / 255.0
       x -= self.input_mean
       x /= self.input_std
-      return self.mdl(x).argmax(axis=1).realize()
+      return self.mdl(x).log_softmax().argmax(axis=1).realize()
 
   mdl = TinyJit(ResnetRunner(GPUS))
   tlog("loaded models")
