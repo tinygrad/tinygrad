@@ -159,9 +159,9 @@ class DistHead:
         return logits
 
 
-class RewardDecoder(nn.Module):
+class RewardDecoder:
     def __init__(self, num_classes, embedding_size, transformer_hidden_dim) -> None:
-        super().__init__()
+        # super().__init__()
         self.backbone = Tensor.sequential([
             nn.Linear(transformer_hidden_dim, transformer_hidden_dim, bias=False),
             nn.LayerNorm(transformer_hidden_dim),
@@ -180,10 +180,10 @@ class RewardDecoder(nn.Module):
         return reward
 
 
-class TerminationDecoder(nn.Module):
+class TerminationDecoder:
     def __init__(self,  embedding_size, transformer_hidden_dim) -> None:
-        super().__init__()
-        self.backbone = nn.Sequential(
+        # super().__init__()
+        self.backbone = Tensor.sequential([
             nn.Linear(transformer_hidden_dim, transformer_hidden_dim, bias=False),
             nn.LayerNorm(transformer_hidden_dim),
             # nn.ReLU(inplace=True),
@@ -192,11 +192,11 @@ class TerminationDecoder(nn.Module):
             nn.LayerNorm(transformer_hidden_dim),
             # nn.ReLU(inplace=True),
             Tensor.relu(),
-        )
-        self.head = nn.Sequential(
+        ])
+        self.head = Tensor.sequential([
             nn.Linear(transformer_hidden_dim, 1),
             # nn.Sigmoid()
-        )
+        ])
 
     def forward(self, feat):
         feat = self.backbone(feat)
@@ -243,7 +243,8 @@ class WorldModel(nn.Module):
         self.stoch_dim = 32
         self.stoch_flattened_dim = self.stoch_dim*self.stoch_dim
         self.use_amp = True
-        self.tensor_dtype = torch.bfloat16 if self.use_amp else torch.float32
+        # self.tensor_dtype = torch.bfloat16 if self.use_amp else torch.float32
+        self.tensor_dtype = dtypes.bfloat16 if self.use_amp else dtypes.float32
         self.imagine_batch_size = -1
         self.imagine_batch_length = -1
 
@@ -353,11 +354,16 @@ class WorldModel(nn.Module):
             latent_size = (imagine_batch_size, imagine_batch_length+1, self.stoch_flattened_dim)
             hidden_size = (imagine_batch_size, imagine_batch_length+1, self.transformer_hidden_dim)
             scalar_size = (imagine_batch_size, imagine_batch_length)
-            self.latent_buffer = torch.zeros(latent_size, dtype=dtype, device="cuda")
-            self.hidden_buffer = torch.zeros(hidden_size, dtype=dtype, device="cuda")
-            self.action_buffer = torch.zeros(scalar_size, dtype=dtype, device="cuda")
-            self.reward_hat_buffer = torch.zeros(scalar_size, dtype=dtype, device="cuda")
-            self.termination_hat_buffer = torch.zeros(scalar_size, dtype=dtype, device="cuda")
+            # self.latent_buffer = torch.zeros(latent_size, dtype=dtype, device="cuda")
+            self.latent_buffer = Tensor.zeros(latent_size, dtype=dtype)
+            # self.hidden_buffer = torch.zeros(hidden_size, dtype=dtype, device="cuda")
+            self.hidden_buffer = Tensor.zeros(hidden_size, dtype=dtype)
+            # self.action_buffer = torch.zeros(scalar_size, dtype=dtype, device="cuda")
+            self.action_buffer = Tensor.zeros(scalar_size, dtype=dtype)
+            # self.reward_hat_buffer = torch.zeros(scalar_size, dtype=dtype, device="cuda")
+            self.reward_hat_buffer = Tensor.zeros(scalar_size, dtype=dtype)
+            # self.termination_hat_buffer = torch.zeros(scalar_size, dtype=dtype, device="cuda")
+            self.termination_hat_buffer = Tensor.zeros(scalar_size, dtype=dtype)
 
     def imagine_data(self, agent: agents.ActorCriticAgent, sample_obs, sample_action,
                      imagine_batch_size, imagine_batch_length, log_video, logger):
