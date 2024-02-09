@@ -220,13 +220,14 @@ def train_resnet():
 
       dte = time.perf_counter()
 
+      device_str = proc[0][2].device if isinstance(proc[0][2].device, str) else f"{proc[0][2].device[0]} * {len(proc[0][2].device)}"
       proc, top_1_acc = proc[0][0].numpy(), proc[0][2].numpy().item() / BS  # return cookie
       loss_cpu = proc / lr_scaler
       cl = time.perf_counter()
       new_st = time.perf_counter()
 
       tqdm.write(
-        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(fwet - st) * 1000.0:7.2f}fw {(et - fwet) * 1000.0:7.2f}bw ms python, {(cl - dte) * 1000.0:7.2f} ms CL, {(dte - dt) * 1000.0:6.2f} ms fetch data, {loss_cpu:5.2f} loss, {top_1_acc:3.2f} acc, {optimizer.lr.numpy()[0] * lr_scaler:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(fwet - st) * 1000.0:7.2f}fw {(et - fwet) * 1000.0:7.2f}bw ms python, {(cl - dte) * 1000.0:7.2f} ms {device_str}, {(dte - dt) * 1000.0:6.2f} ms fetch data, {loss_cpu:5.2f} loss, {top_1_acc:3.2f} acc, {optimizer.lr.numpy()[0] * lr_scaler:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
       wandb.log({"lr": optimizer.lr.numpy() * lr_scaler,
                  "train/data_time": dte-dt,
                  "train/step_time": cl - st,
