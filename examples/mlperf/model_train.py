@@ -20,11 +20,10 @@ EVAL_BS = getenv('EVAL_BS', BS)
 # fp32 GPUS<=6 7900xtx can fit BS=112
 
 def train_resnet():
-  # TODO: Resnet50-v1.5
   from extra.models.resnet import ResNet50, ResNet18
   from examples.mlperf.dataloader import batch_load_resnet
   from extra.datasets.imagenet import get_train_files, get_val_files
-  from extra.lr_scheduler import MultiStepLR, LR_Scheduler, Optimizer, PolynomialLR
+  from extra.lr_scheduler import PolynomialLR
 
   def sparse_categorical_crossentropy(out, Y, label_smoothing=0):
     num_classes = out.shape[-1]
@@ -52,7 +51,7 @@ def train_resnet():
   if FP16: dtypes.default_float = dtypes.float16
 
   if getenv("MOCKGPUS", 0):
-    GPUS = tuple([f'{Device.DEFAULT}:{0}' for i in range(getenv("MOCKGPUS", 0))])
+    GPUS = tuple([f'{Device.DEFAULT}:{0}' for _ in range(getenv("MOCKGPUS", 0))])
   else:
     GPUS = tuple([f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))])
   print(f"Training on {GPUS}")
@@ -65,6 +64,13 @@ def train_resnet():
     v.to_(GPUS)
   parameters = get_parameters(model)
 
+  input_mean = Tensor([0.485, 0.456, 0.406], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
+  input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
+  def normalize(x):
+    x = x.permute([0, 3, 1, 2]).cast(dtypes.float32) / 255.0
+    x -= input_mean
+    x /= input_std
+    return x.cast(dtypes.default_float)
   @TinyJit
   def forward_step(X, Y):
     optimizer.zero_grad()
@@ -81,32 +87,31 @@ def train_resnet():
     optimizer.step()
     pass
 
-  input_mean = Tensor([0.485, 0.456, 0.406], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
-  input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
-
-  def normalize(x):
-    x = x.permute([0, 3, 1, 2]).cast(dtypes.float32) / 255.0
-    x -= input_mean
-    x /= input_std
-    return x.cast(dtypes.default_float)
-
   target = getenv("TARGET", 0.759)
   achieved = False
-  lr_scaler = 8 if FP16 else 1
-  lr_gamma = 0.1
-  lr_steps = [30, 60, 80]
-  lr_warmup_epochs = 5
-  base_lr = 0.256 * (BS / 256)  # Linearly scale from BS=256, lr=0.256
-  base_lr = getenv("LR", 8.4 * (BS/2048))
   epochs = getenv("EPOCHS", 45)
   decay = getenv("DECAY", 2e-4)
+  steps_in_train_epoch = (len(get_train_files()) // BS)
+  steps_in_val_epoch = (len(get_val_files()) // EVAL_BS)
+
+  # ** Learning rate **
+  lr_scaler = 8 if FP16 else 1
+  # MultiStepLR parameters from mlperf reference impl
+  # lr_gamma = 0.1
+  # lr_steps = [30, 60, 80]
+  # base_lr = 0.256 * (BS / 256)  # Linearly scale from BS=256, lr=0.256
+  # PolynomialLR parameters from mlperf reference impl
+  lr_warmup_epochs = 5
+  base_lr = getenv("LR", 8.4 * (BS/2048))
+
+  # ** Optimizer **
   if getenv("LARS", 1):
     optimizer = optim.LARS(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay)
   else:
     optimizer = optim.SGD(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay)
-  steps_in_train_epoch = (len(get_train_files()) // BS)
-  steps_in_val_epoch = (len(get_val_files()) // EVAL_BS)
-  #scheduler = MultiStepLR(optimizer, [m for m in lr_steps], gamma=lr_gamma, warmup=lr_warmup)
+
+  # ** LR scheduler **
+  # scheduler = MultiStepLR(optimizer, [m for m in lr_steps], gamma=lr_gamma, warmup=lr_warmup)
   scheduler = PolynomialLR(optimizer, base_lr, 1e-4, epochs=epochs * steps_in_train_epoch, warmup=lr_warmup_epochs * steps_in_train_epoch)
   print(f"training with batch size {BS} for {epochs} epochs")
   if getenv("TEST_LR", 0):
@@ -116,8 +121,12 @@ def train_resnet():
         if i % 1000 == 0: print(epoch, i, scheduler.get_lr().numpy())
     exit(0)
 
+  # ** checkpointing **
+  # hack: let get_state_dict walk the tree starting with model, so that the checkpoint keys are
+  # readable and can be loaded as a model for eval
   train_state = {'model':model, 'scheduler':scheduler, 'optimizer':optimizer}
   def _get_state_dict():
+    # store each tensor into the first key it appears in
     big_dict = state.get_state_dict(train_state)
     deduped = {}
     seen = set()
@@ -127,6 +136,7 @@ def train_resnet():
       deduped[k] = v
     return deduped
   def _load_state_dict(state_dict):
+    # use fresh model to restore duplicate keys
     big_dict = state.get_state_dict(train_state)
     # hack: put back the dupes
     dupe_names = {}
@@ -135,21 +145,17 @@ def train_resnet():
         dupe_names[v] = k
         assert k in state_dict
       state_dict[k] = state_dict[dupe_names[v]]
+    # scheduler contains optimizer and all params, load each weight only once
     train_state_ = {'scheduler': scheduler}
     state.load_state_dict(train_state_, state_dict)
   start_epoch = 0
   if ckpt:=getenv("RESUME", ""):
     print(f"resuming from {ckpt}")
     resume_dict = state.safe_load(ckpt)
-    #print((resume_dict.keys()))
     _load_state_dict(resume_dict)
     start_epoch = int(scheduler.epoch_counter.numpy().item() / steps_in_train_epoch)
     print(f"resuming at epoch {start_epoch}")
   elif getenv("TESTEVAL"): model.load_from_pretrained()
-  for v in get_parameters(model):
-    # can't use mlb.to(tuple)...
-    if not isinstance(v.device, tuple):
-      v.to_(GPUS)
 
   # ** init wandb **
   wandb_config = {
@@ -196,6 +202,7 @@ def train_resnet():
       if getenv("TESTEVAL"): break
 
       GlobalCounters.reset()
+      # todo: splitting fw and bw steps wastes memory, and disallows Tensor.training=False for eval. implement JIT-internal buffer pool
       proc = (forward_step(proc[0], proc[1]), (proc[0], proc[1]), proc[2])
       # the backward step should be realized by loss.numpy(), even though it doesn't depend on this.
       # doing this uses 16.38gb vs 15.55gb? why? because the grads get realized in optimizer.step, and the backward buffers are freed?
@@ -245,8 +252,10 @@ def train_resnet():
       eval_times = []
       eval_top_1_acc = []
       eval_top_5_acc = []
-      #Tensor.training = False  # disable to make kernels as similar as possible
+      # Tensor.training = False  # disable to make kernels as similar as possible, but makes batchnorm less accurate for eval
 
+      # if Tensor.training is False, need to shuffle eval set to get good batch statistics in batchnorm
+      # dataset is sorted by class -- images of the same class have different mean/variance from population.
       iterator = iter(tqdm(t := batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=True), total=steps_in_val_epoch))
 
       proc = data_get()
