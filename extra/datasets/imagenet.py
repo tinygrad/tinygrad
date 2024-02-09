@@ -16,7 +16,7 @@ def get_imagenet_categories():
 def _get_train_files(): return glob.glob(str(BASEDIR / "train/*/*"))
 @functools.lru_cache(None)
 def get_train_files():
-  train_files = _get_train_files
+  train_files = _get_train_files()
   # test train with less categories
   if getenv("TEST_CATS", 1000) != 1000:
     ci = get_imagenet_categories()
