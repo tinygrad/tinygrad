@@ -103,7 +103,8 @@ class PythonProgram:
           else:
             # TODO: add real cast
             if dtypes.is_int(dtype):
-              ul[i] = [int(x) for x in inp[0]]
+              if dtypes.is_unsigned(dtype): ul[i] = [int(256+x) if x < 0 else int(x) for x in inp[0]]
+              else: ul[i] = [int(x-256) if x > 127 else int(x) for x in inp[0]]
             elif dtypes.is_float(dtype):
               ul[i] = [float(x) for x in inp[0]]
             else:
