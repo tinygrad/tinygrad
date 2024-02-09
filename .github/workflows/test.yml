@@ -25,7 +25,7 @@ jobs:
     - name: Cache python packages
       uses: actions/cache@v3
       with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.8/site-packages
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.12/site-packages
         key: uops-packages-${{ hashFiles('**/setup.py') }}-3.12
     - name: Install dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
