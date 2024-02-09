@@ -27,7 +27,8 @@ class UnsyncedBatchNorm:
     # TODO: what do we want to do for inference? average weight? pick any one?
     # a good start would be to check each mean/std are similar
     return bn_ts[0].cat(*bn_ts[1:])
-  def __getattr__(self, item): return getattr(self.bns[0], item) # todo: hack, this make eval only work on 1 gpu if you load from weights...
+  # todo: hack, this make loading from weights work on 1 gpu...
+  def __getattr__(self, item): return getattr(self.bns[0], item)
 
 BatchNorm = nn.BatchNorm2d if getenv("BNSYNC", 0) else UnsyncedBatchNorm
 
