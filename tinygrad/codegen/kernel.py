@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, math, itertools
+import math, itertools
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.device import Device, Compiled
@@ -33,14 +33,13 @@ class TensorCore:
   thread_local_aliases: List[List[List[int]]] # a list of [threads_1, ..., threads_n, upcast_1(unrolled), upcast_2(upcast)] defining the alias (-1 is upcast, 1-n is warp threads) for each TC dim # noqa: E501
   thread_local_sizes: List[int] # in each thread, the number of elements stored in registers for each TC dim
   wmma_func: str # name of wmma function to call
-  arch: Optional[str] = None
   def __str__(self): return f"tensor_core<{self.dims}, {self.dtype_in}, {self.dtype_out}>"
 
 tensor_cores: Dict[str, List[TensorCore]] = {
   "METAL": [
-    TensorCore(dims=[8,8,8], dtype_in=dtypes.float, dtype_out=dtypes.float, wmma_func="__metal_wmma<float2,simdgroup_float8x8,float2>", upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"), # noqa: E501
-    TensorCore(dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.float, wmma_func="__metal_wmma<half2,simdgroup_float8x8,float2>",  upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"), # noqa: E501
-    TensorCore(dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.half,  wmma_func="__metal_wmma<half2,simdgroup_half8x8,half2>",    upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ], arch="arm64"), # noqa: E501
+    TensorCore(dims=[8,8,8], dtype_in=dtypes.float, dtype_out=dtypes.float, wmma_func="__metal_wmma<float2,simdgroup_float8x8,float2>", upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ]), # noqa: E501
+    TensorCore(dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.float, wmma_func="__metal_wmma<half2,simdgroup_float8x8,float2>",  upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ]), # noqa: E501
+    TensorCore(dims=[8,8,8], dtype_in=dtypes.half,  dtype_out=dtypes.half,  wmma_func="__metal_wmma<half2,simdgroup_half8x8,half2>",    upcast_dim=0, threads=[(0,2),(1,4),(0,2),(1,2)], thread_local_sizes=[2,2,2], thread_local_aliases= [ [[4],[0],[2],[0],[-1, 1, 3],[0]], [[0],[3],[0],[1],[2, 4],[-1]], [[4],[3],[2],[1],[0],[-1]] ]), # noqa: E501
   ],
   "HIP": [
     TensorCore(dims=[16,16,16], dtype_in=dtypes.half, dtype_out=dtypes.float, wmma_func="__builtin_amdgcn_wmma_f32_16x16x16_f16_w32", upcast_dim=1, threads=[(0,16),(1,2)], thread_local_sizes=[16,16,8], thread_local_aliases=[ [[0],[0],[-1],[1]], [[0],[1],[-1],[0]], [[0],[1],[0],[2,-1]] ]),  # noqa: E501
@@ -61,6 +60,7 @@ class LinearizerOptions(NamedTuple):
   supports_float4: bool = True
   has_local: bool = True
   has_shared: bool = True
+  has_tensor_cores: bool = False
   # NOTE: these two should be in z,y,x(reversed) order for cstyle backends, they are flipped when kernel is rendered
   global_max: Optional[List[int]] = None
   local_max: Optional[List[int]] = None
@@ -330,9 +330,9 @@ class Kernel:
   # ******************** high level optimizers ********************
 
   def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None) -> bool:
+    if not self.opts.has_tensor_cores and use_tensor_cores != 2: return False
     if use_tensor_cores and self.opts.has_local and self.reduceop and self.reduceop.op == ReduceOps.SUM and self.opts.device in tensor_cores:
       for tc in tensor_cores[self.opts.device]:
-        if not (use_tensor_cores==2 or (tc.arch is None or tc.arch == os.uname().machine)): continue
         has_cast = tc.dtype_in != tc.dtype_out
 
         if has_cast and not(self.reduceop.src[0].op == UnaryOps.CAST and self.reduceop.src[0].arg[0] == tc.dtype_out): continue

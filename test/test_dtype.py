@@ -21,7 +21,8 @@ def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   # for CI GPU, cl_khr_fp16 isn't supported
   # for CI LLVM, it segfaults because it can't link to the casting function
   # CUDA in CI uses CUDACPU that does not support half
-  if dtype == dtypes.half: return not (CI and device in ["GPU", "LLVM", "CUDA"])
+  # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
+  if dtype == dtypes.half: return not (CI and device in ["GPU", "LLVM", "CUDA"]) and device != "PYTHON"
   if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
   return True
 
