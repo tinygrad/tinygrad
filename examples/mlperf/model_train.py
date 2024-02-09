@@ -182,13 +182,13 @@ def train_resnet():
     Tensor.training = True
     dt = time.perf_counter()
 
-    iterator = iter(tqdm(t := batch_load_resnet(batch_size=BS, val=False, shuffle=True), total=steps_in_train_epoch))
-    def data_get():
-      x, y, cookie = next(iterator)
+    it = iter(tqdm(t := batch_load_resnet(batch_size=BS, val=False, shuffle=True), total=steps_in_train_epoch))
+    def data_get(it):
+      x, y, cookie = next(it)
       # x must realize here, since the shm diskbuffer in dataloader might disappear?
       return x.shard(GPUS, axis=0).realize(), Tensor(y).shard(GPUS, axis=0), cookie
 
-    i, proc = 0, data_get()
+    i, proc = 0, data_get(it)
     st = time.perf_counter()
     while proc is not None:
       if getenv("TESTEVAL"): break
@@ -206,7 +206,7 @@ def train_resnet():
       dt = time.perf_counter()
 
       try:
-        next_proc = data_get()
+        next_proc = data_get(it)
       except StopIteration:
         next_proc = None
 
@@ -249,9 +249,9 @@ def train_resnet():
 
       # if Tensor.training is False, need to shuffle eval set to get good batch statistics in batchnorm
       # dataset is sorted by class -- images of the same class have different mean/variance from population.
-      iterator = iter(tqdm(t := batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=True), total=steps_in_val_epoch))
+      it = iter(tqdm(t := batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=True), total=steps_in_val_epoch))
 
-      proc = data_get()
+      proc = data_get(it)
 
       while proc is not None:
         GlobalCounters.reset()
@@ -260,7 +260,7 @@ def train_resnet():
         proc = (forward_step(proc[0], proc[1]), proc[1], proc[2])
 
         try:
-          next_proc = data_get()
+          next_proc = data_get(it)
         except StopIteration:
           next_proc = None
 
