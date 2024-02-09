@@ -53,11 +53,13 @@ class PythonProgram:
             for j,val in enumerate(inp[2]):
               # print(inp[0], inp[1], val)
               # for m,o,v in zip(inp[0], inp[1], val): 
+              cnt = 0
               for m,o,v in zip(inp[0], inp[1], [val]*len(inp[1])): 
                 m = memoryview(m)
-                # print(type(m), type(v),v)
-                m[o+j] = v
-                # m[o+j] = v[-1] if isinstance(v, list) else v
+                print(type(m), type(v),v)
+                # m[o+j] = v
+                m[o+j] = v[cnt] if isinstance(v, list) else v
+                if isinstance(v, list): cnt += 1
               # for m,o,v in zip(inp[0], inp[1], val): print(m,o,j,v) #m[o+j] = v
           else:
             for m,o,v in zip(*inp): m[o] = v
