@@ -13,7 +13,7 @@ os.environ["METAL"] = "1"
 import time
 import numpy as np
 from tinygrad.helpers import getenv
-from tinygrad.runtime.ops_metal import MetalAllocator, MetalDevice, MetalProgram, compile_metal
+from tinygrad.runtime.ops_metal import MetalAllocator, MetalDevice, MetalProgram, MetalCompiler
 
 N = 16384
 M = 4096
@@ -41,7 +41,7 @@ WORKSIZE_ROW = 16
 WORKSIZE_COL = 1
 LOCAL_SIZE = [32, WORKSIZE_COL, WORKSIZE_ROW]
 GLOBAL_SIZE = [M//(LOCAL_SIZE[0]*LOCAL_SIZE[1]*4), 1, 1]
-prog = compile_metal(f"""
+prog = MetalProgram(device, "test", MetalCompiler(device).compile(f"""
 #include <metal_stdlib>
 using namespace metal;
 kernel void test(device float* data0, const device float* data1, const device float* data2, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {{
@@ -87,8 +87,7 @@ kernel void test(device float* data0, const device float* data1, const device fl
     *( (device float4 *) (data0 + (gidx0*{M//GLOBAL_SIZE[0]}) + ( ( (lidx1*{LOCAL_SIZE[1]})+lidx2 ) * 4 ) ) ) = out;
   }}
 }}
-""")
-prog = MetalProgram(device,"test", prog)
+"""))
 a = metalalloc.alloc(M*4)
 b = metalalloc.alloc(N*4)
 c = metalalloc.alloc(N*M*4)
