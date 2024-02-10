@@ -340,8 +340,7 @@ class LLaMa:
     toks = [self.tokenizer.bos_id()] + self.tokenizer.encode(prompt)
     start_pos = 0
     for i in range(max_length):
-      logits = llama.model(Tensor([toks[start_pos:]]), start_pos, temperature)
-      probs = (logits[:, -1, :] / (temperature+1e-6)).softmax().flatten().realize()
+      probs = llama.model(Tensor([toks[start_pos:]]), start_pos, temperature)
       probs_np = probs.numpy()
       tok = int(np.random.choice(len(probs_np), p=probs_np))
       start_pos = len(toks)
