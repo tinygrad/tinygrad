@@ -4,7 +4,7 @@ import time
 import numpy as np
 from tinygrad import Device, dtypes
 from tinygrad.helpers import getenv, flat_mv
-from tinygrad.runtime.ops_metal import MetalAllocator, MetalDevice, MetalProgram, compile_metal
+from tinygrad.runtime.ops_metal import MetalAllocator, MetalDevice, MetalProgram, MetalCompiler
 
 N = getenv("N", 2048)
 LID = 2
@@ -26,7 +26,7 @@ metalalloc.copyin(c,nc.tobytes())
 FLOPS = N*N*N*2
 BW = N*N*3*4
 
-prog = MetalProgram(device,"test", compile_metal(f"""
+prog = MetalProgram(device, "test", MetalCompiler(device).compile(f"""
 #include <metal_stdlib>
 #include <metal_simdgroup_matrix>  // Available from Metal version 2.3 released with OS X 11.0+
 using namespace metal;
