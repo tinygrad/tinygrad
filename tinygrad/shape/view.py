@@ -22,14 +22,14 @@ def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tu
   assert len(shape) == len(strides)
   ret = [(shape[0], strides[0], shape[0] if strides[0] else 0)]
   # wrt merging zero strided dimensions
-  merging = (mask and strides[0] == 0 and shape[0] != 1 and mask[0][1] - mask[0][0] == 1)
+  merging = strides[0] == 0 and (mask[0][1] - mask[0][0] == 1 if mask else shape[0] == 1)
   for i, (sh, st) in enumerate(zip(shape[1:], strides[1:]), start=1):
     if sh == 1: continue
     if merging or ret[-1][1] == sh * st: # mergeable
       ret[-1] = (ret[-1][0] * sh, st, (sh if merging else ret[-1][2] * sh) if st else 0)
     else: ret.append((sh, st, sh if st else 0)) # begin new
     # merging ends with either non-zero strided dim or zero strided dim with mask range > 1
-    merging = (st == 0 and mask and mask[i][1] - mask[i][0] == 1)
+    merging = st == 0 and (mask[i][1] - mask[i][0] == 1 if mask else sh == 1)
   return tuple(ret)
 
 @functools.lru_cache(maxsize=None)
