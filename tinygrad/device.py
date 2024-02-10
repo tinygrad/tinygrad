@@ -130,7 +130,7 @@ class BufferXfer(BufferCopy):
   def copy(self, dest, src):
     if hasattr(dest.allocator.device, "track_cross_buffer") and hasattr(src.allocator, "track_cross_device"):
       dest.allocator.device.track_cross_buffer.append(src)
-      src.allocator.track_cross_device.append(dest.allocator.device)
+      src.allocator.track_cross_device.add(dest.allocator.device)
     dest.allocator.transfer(dest._buf, src._buf, dest.nbytes)
 
 # TODO: size, dest, src are the same type. can we enforce this?
