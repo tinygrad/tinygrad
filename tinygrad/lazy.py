@@ -70,6 +70,7 @@ class LazyBuffer:
 
   def cast(self, dtype:DType, bitcast:bool=False):
     if self.dtype == dtype: return self
+    if dtype.itemsize <= self.dtype.itemsize and self != self.base: return self.base.cast(dtype, bitcast)._view(self.st)
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
 
   def is_unrealized_const(self): return not self.base.realized and self.base.op is LoadOps.CONST
@@ -138,6 +139,7 @@ class LazyBuffer:
   # *** movement ops ***
 
   def _view(self, new_st:ShapeTracker) -> LazyBuffer:
+    if self.st.size == 0: return self.const(0, new_st.shape)
     if new_st.contiguous and self.base.shape == new_st.shape: return self.base
     return create_lazybuffer(self.device, new_st, self.dtype, base=self.base)
 

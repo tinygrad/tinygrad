@@ -120,10 +120,8 @@ def Unsqueeze(data: Tensor, axes):
 def Binarizer(x, threshold=0.0): return (x > threshold).float()
 
 def ArgMax(x: Tensor, axis=0, keepdims=1, select_last_index=0):
-  axis = axis + x.ndim if axis < 0 else axis
-  m = x == (x.max(axis=axis, keepdim=keepdims) if keepdims else x.max(axis=axis, keepdim=keepdims).unsqueeze(axis))
-  c = Tensor.arange(x.shape[axis]).reshape(*[1]*(axis), x.shape[axis], *[1]*(x.ndim - axis-1)) * m
-  return c.max(axis=axis,keepdim=keepdims).cast(dtypes.int64)
+  if select_last_index: return ((x.shape[axis]-1) - x.flip(axis).argmax(axis, keepdim=keepdims)).cast(dtypes.int64)
+  return x.argmax(axis, keepdim=keepdims).cast(dtypes.int64)
 def ArgMin(x, axis=0, keepdims=1, select_last_index=0): return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
 
 def Concat(*xs: List[Tensor], axis): return xs[0].cat(*xs[1:], dim=axis)
@@ -163,14 +161,6 @@ def CumSum(X:Tensor, axis:Tensor, exclusive=0, reverse=0):
   if reverse: return X.cumsum(axis).flip(axis)
   return X.cumsum(axis)
 
-# works with Tensors.ndim != 4
-def _batchnorm(self:Tensor, weight:Optional[Tensor], bias:Optional[Tensor], mean:Tensor, invstd:Tensor):
-  shape = [1, -1] + [1] * (self.ndim-2)
-  x = (self - mean.reshape(shape=shape))
-  if weight: x = x * weight.reshape(shape=shape)
-  ret = x.mul(invstd.reshape(shape=shape) if len(invstd.shape) == 1 else invstd)
-  return (ret + bias.reshape(shape=shape)) if bias else ret
-
 # TODO: this is copied from tinygrad/nn/__init__.py
 # spatial is from opset 7 and has since been removed
 def BatchNormalization(X: Tensor, scale, B, input_mean, input_var, epsilon=1e-05, momentum=0.9, training_mode=0, spatial=1, is_test=0):
@@ -184,9 +174,9 @@ def BatchNormalization(X: Tensor, scale, B, input_mean, input_var, epsilon=1e-05
     running_mean = input_mean * momentum + current_mean * (1 - momentum)
     running_var = input_var * momentum + current_var * (1 - momentum)
 
-    return _batchnorm(X, scale, B, current_mean, current_invstd), running_mean, running_var
+    return X.batchnorm(scale, B, current_mean, current_invstd), running_mean, running_var
   invstd = (input_var + epsilon)**-0.5
-  return _batchnorm(X, scale, B, input_mean, invstd)
+  return X.batchnorm(scale, B, input_mean, invstd)
 
 def InstanceNormalization(x: Tensor, scale: Tensor, bias: Tensor, epsilon=1e-05):
   axis = tuple(range(2, len(x.shape)))
