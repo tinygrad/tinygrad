@@ -9,6 +9,7 @@ from tinygrad.device import Compiled, Allocator, Compiler
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.codegen.kernel import LinearizerOptions
+import numpy as np
 
 def exec_alu(arg, dtype, p):
   # TODO: make this complete and correctly honor the dtypes
@@ -73,7 +74,10 @@ class PythonProgram:
                 _store(m, ox*4 + oy*dtp[0].shape[1]*4 + j, v)
           elif dtp[2].sz > 1:
             for j,val in enumerate(inp[2]):
-              for m,o,v in zip(inp[0], inp[1], val): _store(m, o+j, v)
+              if isinstance(val, list):
+                for m,o,v in zip(inp[0], inp[1], val): _store(m, o+j, v)
+              else:
+                for m,o in zip(inp[0], inp[1]): _store(m, o+j, val)
           else:
             for m,o,v in zip(*inp): _store(m, o, v)
           i += 1
@@ -119,13 +123,12 @@ class PythonProgram:
           if dtype.sz > 1:
             ul[i] = inp
           else:
-            # TODO: add real cast
-            if dtypes.is_int(dtype):
-              ul[i] = [int(x) for x in inp[0]]
-            elif dtypes.is_float(dtype):
-              ul[i] = [float(x) for x in inp[0]]
+            input_type = dtp[0]
+            cast_target_type, is_bitcast = arg
+            if is_bitcast:
+              ul[i] = [np.asarray([x], dtype=input_type.np).view(cast_target_type.np)[0].item() for x in inp[0]]
             else:
-              ul[i] = inp[0]
+              ul[i] = [np.asarray([x], dtype=input_type.np).astype(cast_target_type.np)[0].item() for x in inp[0]]
         elif uop is UOps.LOAD:
           if isinstance(dtp[0], ImageDType):
             assert dtype.sz == 4
