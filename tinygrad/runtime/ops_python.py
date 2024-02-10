@@ -73,7 +73,7 @@ class PythonProgram:
                 _store(m, ox*4 + oy*dtp[0].shape[1]*4 + j, v)
           elif dtp[2].sz > 1:
             for j,val in enumerate(inp[2]):
-              for m,o,v in zip(inp[0], inp[1], val if type(val) is list else [val]*len(inp[0])): _store(m, o+j, v)
+              for m,o,v in zip(inp[0], inp[1], val if type(val) is list else inp[2]): _store(m, o+j, v)
           else:
             for m,o,v in zip(*inp): _store(m, o, v)
           i += 1
