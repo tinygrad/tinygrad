@@ -661,7 +661,7 @@ class Tensor:
 
     # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
     def apply_matrix(mat, t, dims=len(HW)):
-      # multiply mat_1 @ mat_2 @ t, where mat_i acts on vector t along dimension i; roughly kron(mat, mat) @ t
+      # multiply mat_1 @ mat_2 @ t with foldable constants, where mat_i acts on vector t along dimension i; roughly kron(mat, mat) @ t
       # due to realize-before-expand rule in lazy.py, we must operate in this order: reshape -> expand -> arithmetic
       t_ = t.reshape(t.shape[:dims] + (1,) * dims + t.shape[dims:]).expand(t.shape[:dims] + (len(mat),) * dims + t.shape[dims:])  # add output dims
       # precaclulate mat columns for each dim; prod(itertools.product(matcols)) gives the columns of kron(mat, mat, ...)
