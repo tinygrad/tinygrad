@@ -172,6 +172,10 @@ if Device.DEFAULT == "METAL" or (OSX and Device.DEFAULT == "GPU"):
   backend_test.exclude('test_mish_cpu')
   backend_test.exclude('test_mish_expanded_cpu')
 
+if Device.DEFAULT == 'METAL':
+  # with default fast math enabled, padding -inf does not work
+  backend_test.exclude('test_MaxPool3d_stride_padding_cpu')
+
 # TODO: llvm has problems with inf
 if Device.DEFAULT in ['LLVM']:
   backend_test.exclude('test_isinf_cpu')
