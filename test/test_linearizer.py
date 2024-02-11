@@ -560,7 +560,7 @@ class TestLinearizerOpts(unittest.TestCase):
       ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):
-    if Device.DEFAULT == "CUDA": self.skipTest("super slow on CUDA")
+    if Device.DEFAULT in ["CUDA", "HIP"]: self.skipTest("super slow on CUDA and HIP because of the big grid dims")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)
