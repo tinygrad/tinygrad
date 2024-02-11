@@ -1,10 +1,10 @@
 from __future__ import annotations
-from typing import Callable, List, Tuple, Dict, cast, Union, Optional, TypeVar, Generic
-import functools, itertools, operator
+from typing import Callable, List, Tuple, Dict, cast, Union, Optional, TypeVar, Generic, Any
+import functools, itertools, operator, collections
 from tinygrad.nn.state import get_parameters
 from tinygrad.dtype import DType
 from tinygrad.helpers import DEBUG, merge_dicts, getenv, all_int, Context, GRAPH, flatten, GraphException
-from tinygrad.device import Compiled, JITRunner, CompiledASTRunner, Buffer
+from tinygrad.device import Compiled, JITRunner, CompiledASTRunner, Buffer, BufferXfer
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
@@ -12,6 +12,8 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node
 from weakref import ref, WeakKeyDictionary
 from dataclasses import dataclass
+
+OLD_JIT_SPLIT = getenv("OLD_JIT_SPLIT", 0)
 
 @dataclass(frozen=True)
 class JitItem:
@@ -54,22 +56,69 @@ def apply_graph_to_jit(jit_cache: List[JitItem], input_rawbuffers: List[Buffer],
     current_batch = []
     current_device = None
 
-  for i,ji in enumerate(jit_cache):
-    # If the jit item can potentially be graphed, put it in a batch.
-    can_be_graphed = isinstance(ji.prg, CompiledASTRunner) and ji.prg.device.graph
-    if can_be_graphed:
-      assert isinstance(ji.prg, CompiledASTRunner)
-      # If the device changed we flush the batch early and append this item for the next batch.
-      if current_device is not None and ji.prg.device != current_device: flush()
-      current_device = ji.prg.device
-      current_batch.append(ji)
+  if not OLD_JIT_SPLIT:
+    graphed_jit_cache = []
+    batch_per_device: Dict[Any, List[JitItem]] = {}
+    open_batch_location: Dict[Any, int] = {}
+    def push_to_batch(dev, ji):
+      nonlocal batch_per_device, open_batch_location, graphed_jit_cache
+      if (dev in batch_per_device) and len(batch_per_device[dev]) >= getenv("JIT_BATCH_SIZE", 64):
+        flush(dev)
+      if not(dev in batch_per_device.keys()):
+        open_batch_location[dev] = len(graphed_jit_cache)
+        graphed_jit_cache.append(None)
+        batch_per_device[dev] = list()
+      batch_per_device[dev].append(ji)
 
-    # The flush is done when (1) ji is the last one, (2) the size of batch exceeds the maximum batch size or
-    # (3) the current jit item cannot be graphed, so the current batch is flushed before such a jit item is added.
-    if len(current_batch) > 0 and (i==len(jit_cache)-1 or len(current_batch) >= getenv("JIT_BATCH_SIZE", 64) or not can_be_graphed): flush()
+    def flush(dev):
+      nonlocal batch_per_device, open_batch_location, graphed_jit_cache
+      if dev not in batch_per_device: return
+      position = open_batch_location[dev]
 
-    # If the jit item cannot be graphed, put it right into the final cache after the flush.
-    if not can_be_graphed: graphed_jit_cache.append(ji)
+      try:
+        if len(batch_per_device[dev]) <= 1: raise GraphException("only one kernel doesn't graph")
+        graphed_jit_cache[position] = JitItem(dev.graph(batch_per_device[dev], input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers)) # noqa: E501
+        if DEBUG >= 2: print(f"\tJIT GRAPHing batch with {len(batch_per_device[dev])} kernels on device {dev.device_id}")
+      except GraphException as e:
+        graphed_jit_cache.extend(batch_per_device[dev])
+        if DEBUG >= 2: print(f"\tJIT GRAPHing failed batch with {len(batch_per_device[dev])} kernels on device {dev.device_id}: {e}")
+      batch_per_device.pop(dev)
+
+    for i,ji in enumerate(jit_cache):
+      graph_on_devices = []
+      if isinstance(ji.prg, CompiledASTRunner): graph_on_devices.append(ji.prg.device)
+      if isinstance(ji.prg, BufferXfer): graph_on_devices = [x.d for x in ji.rawbufs[0:2]]
+
+      can_be_graphed = isinstance(ji.prg, CompiledASTRunner) and len(graph_on_devices) > 0 and all(dev.graph is not None for dev in graph_on_devices)
+      if can_be_graphed:
+        for dev in graph_on_devices: push_to_batch(dev, ji)
+      else:
+        for dev in graph_on_devices: flush(dev)
+        graphed_jit_cache.append(ji)
+
+    to_flush = list(batch_per_device.keys())
+    for k in to_flush: flush(k)
+
+    graphed_jit_cache_tmp = [x for x in graphed_jit_cache if x is not None]
+    graphed_jit_cache = graphed_jit_cache_tmp
+  else:
+    for i,ji in enumerate(jit_cache):
+      # If the jit item can potentially be graphed, put it in a batch.
+      can_be_graphed = isinstance(ji.prg, CompiledASTRunner) and ji.prg.device.graph
+      if can_be_graphed:
+        assert isinstance(ji.prg, CompiledASTRunner)
+        # If the device changed we flush the batch early and append this item for the next batch.
+        if current_device is not None and ji.prg.device != current_device: flush()
+        current_device = ji.prg.device
+        current_batch.append(ji)
+
+      # The flush is done when (1) ji is the last one, (2) the size of batch exceeds the maximum batch size or
+      # (3) the current jit item cannot be graphed, so the current batch is flushed before such a jit item is added.
+      if len(current_batch) > 0 and (i==len(jit_cache)-1 or len(current_batch) >= getenv("JIT_BATCH_SIZE", 64) or not can_be_graphed): flush()
+
+      # If the jit item cannot be graphed, put it right into the final cache after the flush.
+      if not can_be_graphed: graphed_jit_cache.append(ji)
+
   return graphed_jit_cache
 
 # *** JIT ***
