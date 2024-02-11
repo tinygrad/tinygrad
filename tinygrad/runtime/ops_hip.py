@@ -11,7 +11,7 @@ from tinygrad.runtime.compiler.hip_comgr import compile_hip
 
 
 class HIPCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("HIP")
+  linearizer_opts = LinearizerOptions("HIP", has_tensor_cores=True)
   def __init__(self, arch:str):
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
@@ -71,11 +71,14 @@ CHUNK_SIZE, PAGE_SIZE = 256*1024*1024, 0x1000
 class HIPAllocator(LRUAllocator):
   def __init__(self, device:HIPDevice):
     self.device = device
-    self.track_cross_device: List[HIPDevice] = []
+    self.track_cross_device: Set[HIPDevice] = set()
     super().__init__()
-  def free_cache(self):
+  def full_synchronize(self):
     self.device.synchronize()
     for x in self.track_cross_device: x.synchronize()
+    self.track_cross_device.clear()
+  def free_cache(self):
+    self.full_synchronize()
     return super().free_cache()
   def _alloc(self, size:int):
     hip_set_device(self.device.device)
@@ -120,35 +123,12 @@ class HIPAllocator(LRUAllocator):
     ctypes.memmove(host_mem, from_mv(src), len(src))
     check(hip.hipMemcpyAsync(dest, host_mem, len(src), hip.hipMemcpyHostToDevice, None))
   def copyout(self, dest:memoryview, src:T):
-    self.device.synchronize()
+    self.full_synchronize()
     hip_set_device(self.device.device)
     check(hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
   def transfer(self, dest:T, src:T, sz:int):
     hip_set_device(self.device.device)
     check(hip.hipMemcpyAsync(dest, src, sz, hip.hipMemcpyDeviceToDevice, None))
-
-class HIPDevice(Compiled):
-  def __init__(self, device:str=""):
-    self.device = int(device.split(":")[1]) if ":" in device else 0
-    self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode()
-    self.pending_copyin: List[ctypes.c_void_p] = []
-    self.track_cross_buffer: List[Any] = []
-    self.peers: Set[int] = set()
-
-    from tinygrad.runtime.graph.hip import HIPGraph
-    super().__init__(device, HIPAllocator(self), HIPCompiler(self.arch),
-                     functools.partial(HIPProgram, self.device), HIPGraph)
-  def synchronize(self):
-    hip_set_device(self.device)
-    check(hip.hipDeviceSynchronize())
-    for opaque in self.pending_copyin: check(hip.hipFree(opaque))
-    self.track_cross_buffer.clear()
-    self.pending_copyin.clear()
-  def enable_peer(self, dnum):
-    if self.device == dnum or dnum in self.peers: return
-    hip_set_device(self.device)
-    check(hip.hipDeviceEnablePeerAccess(dnum, 0))
-    self.peers.add(dnum)
 
 class HIPSyncEvent(JITRunner):
   def __init__(self, lb):
@@ -170,16 +150,38 @@ class HIPWaitEvent(JITRunner):
     update_stats(colored("wait", "RED"), 0, 0, {}, None, 1, jit, device=self.dname)
 
 if getenv("HIPCPU"):
-  hip = ctypes.CDLL("/usr/local/lib/libremu.so") # type: ignore[assignment]
-
-  class HIPProgram: # type: ignore[no-redef]
+  rhip = ctypes.CDLL("/usr/local/lib/libremu.so")
+  class RHIPProgram:
     def __init__(self, name:str, lib:bytes):
       self.name, self.lib = name, lib
     def __call__(self, *args, global_size, local_size, vals=(), wait=False):
       args = (*args, *vals)
-      hip.hipModuleLaunchKernel(self.lib, len(self.lib), *global_size, *local_size, 0, None, None,
+      rhip.hipModuleLaunchKernel(self.lib, len(self.lib), *global_size, *local_size, 0, None, None,
                                 len(args), (ctypes.c_void_p * len(args))(*[ctypes.cast(x, ctypes.c_void_p) for x in args]))
 
-  class HIPDevice(Compiled): # type: ignore[no-redef]
-    def __init__(self, device=""):
-      super().__init__(device, MallocAllocator, HIPCompiler("gfx1100"), HIPProgram)
+class HIPDevice(Compiled):
+  def __init__(self, device:str=""):
+    self.device = int(device.split(":")[1]) if ":" in device else 0
+    self.pending_copyin: List[ctypes.c_void_p] = []
+    self.track_cross_buffer: List[Any] = []
+    self.peers: Set[int] = set()
+
+    if getenv("HIPCPU"):
+      super().__init__(device, MallocAllocator, HIPCompiler("gfx1100"), RHIPProgram)
+    else:
+      self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device))).gcnArchName.decode()
+      from tinygrad.runtime.graph.hip import HIPGraph
+      super().__init__(device, HIPAllocator(self), HIPCompiler(self.arch),
+                      functools.partial(HIPProgram, self.device), HIPGraph)
+  def synchronize(self):
+    if getenv("HIPCPU"): return
+    hip_set_device(self.device)
+    check(hip.hipDeviceSynchronize())
+    for opaque in self.pending_copyin: check(hip.hipFree(opaque))
+    self.track_cross_buffer.clear()
+    self.pending_copyin.clear()
+  def enable_peer(self, dnum):
+    if self.device == dnum or dnum in self.peers: return
+    hip_set_device(self.device)
+    check(hip.hipDeviceEnablePeerAccess(dnum, 0))
+    self.peers.add(dnum)

@@ -21,7 +21,8 @@ def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   # for CI GPU, cl_khr_fp16 isn't supported
   # for CI LLVM, it segfaults because it can't link to the casting function
   # CUDA in CI uses CUDACPU that does not support half
-  if dtype == dtypes.half: return not (CI and device in ["GPU", "LLVM", "CUDA"])
+  # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
+  if dtype == dtypes.half: return not (CI and device in ["GPU", "LLVM", "CUDA"]) and device != "PYTHON"
   if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
   return True
 
@@ -322,7 +323,7 @@ class TestTypeSpec(unittest.TestCase):
 
   def test_reduce_0d_default(self):
     assert Tensor.ones([2,3,0]).sum(2).dtype ==  dtypes.default_float
-    # assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int  # requires reduceop acc fix
+    assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int
 
   @given(strat.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), strat.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
   def test_arange(self, default_int, default_float):
