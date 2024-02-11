@@ -38,6 +38,8 @@ def get_jc_idxs_with_updatable_var_vals(jit_cache: List[JitItem]) -> List[int]:
 def apply_graph_to_jit(jit_cache: List[JitItem], input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int]) -> List[JitItem]:
   # Split JIT cache into batches for faster graph execution.
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
+  next_batch_size = collections.defaultdict(lambda: 16)
+  
   graphed_jit_cache: List[JitItem] = []
   current_batch: List[JitItem] = []
   current_device: Union[Compiled, None] = None
@@ -62,7 +64,7 @@ def apply_graph_to_jit(jit_cache: List[JitItem], input_rawbuffers: List[Buffer],
     open_batch_location: Dict[Any, int] = {}
     def push_to_batch(dev, ji):
       nonlocal batch_per_device, open_batch_location, graphed_jit_cache
-      if (dev in batch_per_device) and len(batch_per_device[dev]) >= getenv("JIT_BATCH_SIZE", 64):
+      if (dev in batch_per_device) and len(batch_per_device[dev]) >= next_batch_size[dev]:
         flush(dev)
       if not(dev in batch_per_device.keys()):
         open_batch_location[dev] = len(graphed_jit_cache)
@@ -79,17 +81,32 @@ def apply_graph_to_jit(jit_cache: List[JitItem], input_rawbuffers: List[Buffer],
         if len(batch_per_device[dev]) <= 1: raise GraphException("only one kernel doesn't graph")
         graphed_jit_cache[position] = JitItem(dev.graph(batch_per_device[dev], input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers)) # noqa: E501
         if DEBUG >= 2: print(f"\tJIT GRAPHing batch with {len(batch_per_device[dev])} kernels on device {dev.device_id}")
+        next_batch_size[dev] = min(next_batch_size[dev] * 2, 512)
       except GraphException as e:
         graphed_jit_cache.extend(batch_per_device[dev])
         if DEBUG >= 2: print(f"\tJIT GRAPHing failed batch with {len(batch_per_device[dev])} kernels on device {dev.device_id}: {e}")
+        next_batch_size[dev] = max(next_batch_size[dev] // 4, 16)
       batch_per_device.pop(dev)
 
     for i,ji in enumerate(jit_cache):
       graph_on_devices = []
+      allow_xfer_into_graph = False
       if isinstance(ji.prg, CompiledASTRunner): graph_on_devices.append(ji.prg.device)
-      if isinstance(ji.prg, BufferXfer): graph_on_devices = [x.d for x in ji.rawbufs[0:2]]
+      if isinstance(ji.prg, BufferXfer):
+        graph_on_devices = [x.d for x in ji.rawbufs[0:2]]
 
-      can_be_graphed = isinstance(ji.prg, CompiledASTRunner) and len(graph_on_devices) > 0 and all(dev.graph is not None for dev in graph_on_devices)
+        # HACK: remove it
+        if ji.rawbufs[0].device.startswith("HSA"):
+          if open_batch_location[graph_on_devices[0]] < open_batch_location[graph_on_devices[1]]:
+            ji.prg.__setattr__("reset_device", graph_on_devices[0])
+          else:
+            ji.prg.__setattr__("reset_device", graph_on_devices[1])
+          if not hasattr(ji.prg, "sync_signal"):
+            ji.prg.__setattr__("sync_signal", graph_on_devices[0].alloc_signal())
+            ji.prg.__setattr__("completion_signal", graph_on_devices[0].alloc_signal())
+          allow_xfer_into_graph = True
+
+      can_be_graphed = (isinstance(ji.prg, CompiledASTRunner) or allow_xfer_into_graph) and all(dev.graph is not None for dev in graph_on_devices)
       if can_be_graphed:
         for dev in graph_on_devices: push_to_batch(dev, ji)
       else:

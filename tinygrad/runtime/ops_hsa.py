@@ -66,7 +66,7 @@ class HSAProgram:
     if self.kernargs_segment_size.value > 0:
       kernargs = self.device.alloc_kernargs(self.kernargs_segment_size.value)
       args_st = self.args_struct_t.from_address(kernargs)
-      for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i].value)
+      for i in range(len(args)): args_st.__setattr__(f'f{i}', args[i])
       for i in range(len(vals)): args_st.__setattr__(f'v{i}', vals[i])
     signal = self.device.hw_queue.submit_kernel(self, global_size, local_size, kernargs, signals=wait_signals)
     if wait:
@@ -89,7 +89,7 @@ class HSAAllocator(LRUAllocator):
     agents = [dev.agent for dev in HSADevice.devices]
     c_agents = (hsa.hsa_agent_t * len(agents))(*agents)
     check(hsa.hsa_amd_agents_allow_access(len(agents), c_agents, None, buf)) # TODO: this is not good...
-    return buf
+    return buf.value
 
   def _free(self, opaque:T):
     self.device.synchronize()

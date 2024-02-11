@@ -30,6 +30,9 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
     if si.ast.op is LoadOps.SYNC: return HIPSyncEvent(si.out)
     if si.ast.op is LoadOps.WAIT: return HIPWaitEvent(si.out.device)
   if si.ast.op in {LoadOps.SYNC, LoadOps.WAIT} and si.out.device.startswith("HSA") and si.inputs[0].device.startswith("HSA"):
+    # from tinygrad.runtime.ops_hsa import HSASyncEvent, HSAWaitEvent
+    # if si.ast.op is LoadOps.SYNC: return HSASyncEvent(si.out)
+    # if si.ast.op is LoadOps.WAIT: return HSAWaitEvent(si.out.device)
     if si.ast.op is LoadOps.SYNC: return None
     if si.ast.op is LoadOps.WAIT: return None
   if si.ast.op is LoadOps.COPY:
