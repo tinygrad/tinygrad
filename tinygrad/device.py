@@ -30,7 +30,7 @@ class _Device:
   def DEFAULT(self) -> str:
     device_from_env: Optional[str] = functools.reduce(lambda val, ele: ele if getenv(ele) == 1 else val, self._devices, None)   # type: ignore
     if device_from_env: return device_from_env
-    for device in ["METAL", "CUDA", "HIP", "GPU"]:
+    for device in ["METAL", "HIP", "CUDA", "GPU"]:
       try:
         if self[device]: return device
       except Exception: pass
@@ -130,7 +130,7 @@ class BufferXfer(BufferCopy):
   def copy(self, dest, src):
     if hasattr(dest.allocator.device, "track_cross_buffer") and hasattr(src.allocator, "track_cross_device"):
       dest.allocator.device.track_cross_buffer.append(src)
-      src.allocator.track_cross_device.append(dest.allocator.device)
+      src.allocator.track_cross_device.add(dest.allocator.device)
     dest.allocator.transfer(dest._buf, src._buf, dest.nbytes)
 
 # TODO: size, dest, src are the same type. can we enforce this?
@@ -264,12 +264,11 @@ def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> Interpret
 
 class Compiler:
   linearizer_opts: ClassVar[LinearizerOptions]
-  def __init__(self, cachekey=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
+  def __init__(self, cachekey:Optional[str]=None): self.cachekey = None if getenv("DISABLE_COMPILER_CACHE") else cachekey
   def render(self, name:str, uops) -> str: raise NotImplementedError("need a render function")
   def compile(self, src:str) -> bytes: raise NotImplementedError("need a compile function")
   def compile_cached(self, src:str) -> bytes:
-    if self.cachekey is not None: lib = diskcache_get(self.cachekey, src)
-    if lib is None:
+    if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
       lib = self.compile(src)
       if self.cachekey is not None: diskcache_put(self.cachekey, src, lib)
     return lib

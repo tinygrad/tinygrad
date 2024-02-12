@@ -1,8 +1,7 @@
 #!/usr/bin/env python
-# ruff: noqa: E501
 import unittest
 import numpy as np
-from tinygrad.helpers import prod, DEBUG, get_contraction
+from tinygrad.helpers import prod, DEBUG
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad.shape.symbolic import Variable, NumNode
 from itertools import product
@@ -155,7 +154,8 @@ class TestIndexExpressions2d(unittest.TestCase):
   def setUp(self):
     shapes = [(30, 5), (15, 10), (15, 1), (5, 10), (5, 1)] # Make sure dim0 is a multiple of 5, one of the tests divides this dimension by 5
     offsets = [0, 1, 15, 28, 10000]
-    self.sts = [ShapeTracker.from_shape((prod(base_shape)+offset,)).shrink(((offset, offset+prod(base_shape)),)).reshape(base_shape) for base_shape in shapes for offset in offsets]
+    self.sts = [ShapeTracker.from_shape((prod(base_shape)+offset,)).shrink(((offset, offset+prod(base_shape)),)).\
+                reshape(base_shape) for base_shape in shapes for offset in offsets]
     self.offset = [NumNode(offset) for base_shape in shapes for offset in offsets]
     self.shapes = [shape for shape in shapes for offset in offsets]
     self.idxs_exprs = []
@@ -167,7 +167,8 @@ class TestIndexExpressions2d(unittest.TestCase):
       self.check_bounds(idxs_expr(self.default_idxs(st.shape)), offset, numel)
       idx0s = [(0,0), (0, min(1, st.shape[0]-1)), (0, st.shape[0]-1), (min(3, st.shape[0]-1), min(6, st.shape[0]-1)), (st.shape[0]-1, st.shape[0]-1)]
       idx1s = [(0,0), (0, min(1, st.shape[1]-1)), (0, st.shape[1]-1), (min(3, st.shape[1]-1), min(6, st.shape[1]-1)), (st.shape[1]-1, st.shape[1]-1)]
-      idx2s = [(0,0), (0, min(1, st.shape[2]-1)), (0, st.shape[2]-1), (min(3, st.shape[2]-1), min(6, st.shape[2]-1)), (st.shape[2]-1, st.shape[2]-1)] if len(st.shape) == 3 else [None for _ in idx0s]
+      idx2s = [(0,0), (0, min(1, st.shape[2]-1)), (0, st.shape[2]-1), (min(3, st.shape[2]-1), min(6, st.shape[2]-1)),
+               (st.shape[2]-1, st.shape[2]-1)] if len(st.shape) == 3 else [None for _ in idx0s]
       for idx0, idx1, idx2 in product(idx0s, idx1s, idx2s):
         idxs = [Variable(f"idx{i}", idx[0], idx[1]) for i, idx in enumerate((idx0, idx1, idx2)) if idx is not None]
         assert idxs_expr(idxs) == st.expr_idxs(idxs)[0]
@@ -217,7 +218,8 @@ class TestIndexExpressions2d(unittest.TestCase):
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):
       st = st.permute((1, 0))
       st = st.reshape((base_shape[0]//5, 1, base_shape[1]*5))
-      self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: (idxs[0]*(base_shape[1]*5)+idxs[2])%base_shape[0]*base_shape[1] + (idxs[0]*(base_shape[1]*5)+idxs[2])//base_shape[0] + offset)
+      self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: (idxs[0]*(base_shape[1]*5)+idxs[2])%base_shape[0]*base_shape[1] + \
+                             (idxs[0]*(base_shape[1]*5)+idxs[2])//base_shape[0] + offset)
       new_st.append(st)
     self.sts = new_st
 
@@ -226,7 +228,8 @@ class TestIndexExpressions2d(unittest.TestCase):
     for st, base_shape, offset in zip(self.sts, self.shapes, self.offset):
       st = st.permute((1, 0))
       st = st.reshape((1, base_shape[0]//5, base_shape[1]*5))
-      self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: (idxs[1]*(base_shape[1]*5)+idxs[2])%base_shape[0]*base_shape[1] + (idxs[1]*(base_shape[1]*5)+idxs[2])//base_shape[0] + offset)
+      self.idxs_exprs.append(lambda idxs, base_shape=base_shape, offset=offset: (idxs[1]*(base_shape[1]*5)+idxs[2])%base_shape[0]*base_shape[1] + \
+                             (idxs[1]*(base_shape[1]*5)+idxs[2])//base_shape[0] + offset)
       new_st.append(st)
     self.sts = new_st
 
@@ -713,75 +716,6 @@ class TestShapeTracker(unittest.TestCase):
     self.test_slice_1()
     self.test_expand()
     self.test_permute()
-
-class TestGetContraction(unittest.TestCase):
-  def test_contraction(self):
-    r = get_contraction((1,2,3,4), (2,3,4))
-    self.assertEqual(r, [[0, 1], [2], [3]])
-
-    r = get_contraction((2,1,3,4), (2,3,4))
-    self.assertEqual(r, [[0], [1, 2], [3]])
-
-    r = get_contraction((1,2,3,1,4), (1,2,3,4))
-    self.assertEqual(r, [[], [0, 1], [2], [3, 4]])
-
-    r = get_contraction((1,2,3,1,4,1,1), (2,3,4))
-    self.assertEqual(r, [[0, 1], [2], [3, 4, 5, 6]])
-
-    r = get_contraction((1,2,3,4), (1,2,3*4))
-    self.assertEqual(r, [[], [0, 1], [2, 3]])
-
-    r = get_contraction((1,2,3,4), (2,1,3,4))
-    self.assertEqual(r, [[0, 1], [], [2], [3]])
-
-    r = get_contraction((1,2,3,4), (1,1,2*3*4,1))
-    self.assertEqual(r, [[], [], [0,1,2,3], []])
-
-    r = get_contraction((2,1,3,4), (1,2,3,4))
-    self.assertEqual(r, [[], [0], [1, 2], [3]])
-
-    r = get_contraction((1,2,3,4), (2*3*4,1,1,1))
-    self.assertEqual(r, [[0, 1, 2, 3], [], [], []])
-
-    r = get_contraction((4,4,4,4), (16,1,16))
-    self.assertEqual(r, [[0, 1], [], [2, 3]])
-
-    r = get_contraction((1,2,3,4,1,1,1), (2,3,4))
-    self.assertEqual(r, [[0, 1], [2], [3, 4, 5, 6]])
-
-    r = get_contraction((1,2,3,4), (1,2,3,4,1))
-    self.assertEqual(r, [[], [0, 1], [2], [3], []])
-
-    r = get_contraction((14,1,384,14,1,1,1,1), (1,14,384,14))
-    self.assertEqual(r, [[], [0], [1,2], [3,4,5,6,7]])
-
-    r = get_contraction((14,1,384,1,14,1,1,1,1), (1,14,384,14))
-    self.assertEqual(r, [[], [0], [1,2], [3,4,5,6,7,8]])
-
-    r = get_contraction((512, 512), (1, 1, 512, 1, 1, 1, 1, 512))
-    self.assertEqual(r, [[], [], [0], [], [], [], [], [1]])
-
-    r = get_contraction((1,2,3,4), (1,2,6,2))
-    self.assertEqual(r, None)
-
-  def test_contraction_ones(self):
-    r = get_contraction((1,), (1,1,1))
-    self.assertEqual(r, [[], [], [0]])
-
-    r = get_contraction((1,1), (1,1,1))
-    self.assertEqual(r, [[], [], [0, 1]])
-
-    r = get_contraction((1,1,1,1), (1,))
-    self.assertEqual(r, [[0,1,2,3]])
-
-    r = get_contraction((1,1,1,1), (1,1))
-    self.assertEqual(r, [[], [0,1,2,3]])
-
-    r = get_contraction((1,1,1,1), (1,1,1))
-    self.assertEqual(r, [[], [], [0,1,2,3]])
-
-    r = get_contraction((1,1,1,1), (1,1,1,1))
-    self.assertEqual(r, [[], [], [], [0,1,2,3]])
 
 class TestShapeTrackerSize(unittest.TestCase):
   def test_simple_size(self):

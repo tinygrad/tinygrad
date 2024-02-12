@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, GlobalCounters
-from tinygrad.helpers import Timing, CI, Profiling, WINO
+from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG
 from tinygrad.ops import LoadOps
 from tinygrad.codegen.linearizer import Linearizer
 
@@ -28,6 +28,13 @@ class TestWinograd(unittest.TestCase):
         l = Linearizer(s.ast)
         l.hand_coded_optimizations()
         l.linearize()
+      assert len(l.sts) <= 256  # just the current value to prevent regression
+      if DEBUG >= 2: print(f"{len(l.sts):4d} shapetrackers with max {max(len(x.views) for x in l.sts)} views")
+      for st in l.sts:
+        assert len(st.views) <= 2, "too many views in winograd"
+        if DEBUG >= 3:
+          print(f"{len(st.views):3d} views")
+          for v in st.views: print(v)
 
   def test_profile(self):
     x,w = Tensor.rand(1,4,9,9).realize(), Tensor.rand(4,4,3,3).realize()
