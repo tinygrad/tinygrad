@@ -9,7 +9,7 @@ from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Compiled
 from tinygrad.helpers import DEBUG, GRAPH
 from tinygrad.codegen.linearizer import Linearizer
-from tinygrad.graph import print_tree, realized_lazybuffer
+from tinygrad.features.graph import print_tree, realized_lazybuffer
 from tinygrad import nn, dtypes
 
 def check_schedule(t:Tensor, allowed:int, to_prerealize:Optional[List[Tensor]]=None, filter_loadops=True):

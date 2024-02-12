@@ -9,7 +9,7 @@ from tinygrad import nn, dtypes
 from tinygrad.helpers import fetch
 from tinygrad.nn.state import torch_load
 from tinygrad.tensor import Tensor
-from tinygrad.jit import TinyJit
+from tinygrad.features.jit import TinyJit
 from unidecode import unidecode
 
 LRELU_SLOPE = 0.1
