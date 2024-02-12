@@ -3,13 +3,14 @@ from tinygrad.ops import LoadOps
 from tinygrad.codegen.linearizer import Linearizer
 from test.external.fuzz_linearizer import run_linearizer
 from tinygrad.codegen.kernel import Opt, OptOps
+from tinygrad.realize import create_schedule
 
 N = 17**3
 
 a = Tensor.rand(N, N)
 b = Tensor.rand(N, N)
 c = a @ b
-sched = [si for si in c.lazydata.schedule() if si.ast.op not in LoadOps]
+sched = [si for si in create_schedule([c.lazydata]) if si.ast.op not in LoadOps]
 assert len(sched) == 1
 lin = Linearizer(sched[0].ast)
 
@@ -24,7 +25,7 @@ run_linearizer(lin)
 ###
 
 a = Tensor.rand(61, 61).sum(axis=0)
-sched = [si for si in a.lazydata.schedule() if si.ast.op not in LoadOps]
+sched = [si for si in create_schedule([a.lazydata]) if si.ast.op not in LoadOps]
 assert len(sched) == 1
 lin = Linearizer(sched[0].ast)
 
