@@ -98,7 +98,7 @@ def train_resnet():
 
   # ** Optimizer **
   if getenv("LARS", 1):
-    optimizer = optim.LARS(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay)
+    optimizer = optim.LARS(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay, track_gnorm=True)
   else:
     optimizer = optim.SGD(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay)
 

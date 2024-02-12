@@ -102,5 +102,5 @@ class LARS(Optimizer):
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       t.assign(t.detach() - g)
     self.realize(self.b)
-    return gnorm.realize()
+    if self.track_gnorm: return gnorm.realize()
 
