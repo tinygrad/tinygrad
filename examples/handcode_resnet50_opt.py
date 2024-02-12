@@ -8,6 +8,7 @@ from tinygrad.features.search import time_linearizer, beam_search, bufs_from_lin
 from tinygrad.helpers import ansilen, DEBUG, getenv
 from tinygrad.shape.symbolic import sym_infer
 from tinygrad.dtype import dtypes
+from tinygrad.realize import create_schedule
 
 if __name__ == "__main__":
   if getenv("HALF"):
@@ -21,12 +22,12 @@ if __name__ == "__main__":
   print(f"optimizing for {Device.DEFAULT}")
 
   # first model run to init the weights, they are saved in seen
-  mdl(Tensor.empty(64, 3, 224, 224)).lazydata.schedule(seen)
+  create_schedule([mdl(Tensor.empty(64, 3, 224, 224)).lazydata], seen)
 
   # run model again to get only what changes, these are the kernels of the model
   x = Tensor.empty(64, 3, 224, 224)
   out = mdl(x)
-  sched = out.lazydata.schedule(seen)
+  sched = create_schedule([out.lazydata], seen)
   sched = [x for x in sched if x.ast.op not in LoadOps]
 
   # focus on one kernel

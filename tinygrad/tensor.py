@@ -8,12 +8,12 @@ import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, Scalar, least_upper_float, least_upper_dtype
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, WINO, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
-from tinygrad.lazy import LazyBuffer, create_schedule
+from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
 from tinygrad.device import Device, Buffer
 from tinygrad.shape.symbolic import sint
-from tinygrad.realize import run_schedule
+from tinygrad.realize import run_schedule, create_schedule
 
 # **** start with two base classes, Tensor and Function ****
 
@@ -127,7 +127,7 @@ class Tensor:
     run_schedule(create_schedule(flatten([x.lazydata.lbs if isinstance(x.lazydata, MultiLazyBuffer) else [x.lazydata] for x in lst])))
 
   def realize(self) -> Tensor:
-    run_schedule(self.lazydata.schedule())
+    Tensor.corealize([self])
     return self
 
   def assign(self, x) -> Tensor:

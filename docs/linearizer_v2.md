@@ -20,10 +20,8 @@ More generically, the whole network is a DAG. Ignore the forward/backward stuff,
 
 This is a rewrite of a lot of tinygrad. I don't think continuing to support Interpreted backends is worth it, have to deal with disk in a smart way.
 
-We keep the frontend: tensor.py + mlops.py + lazy.py
-We keep the backend (renderer/runtime): cstyle.py + device.py + ops_*.py
-We keep the shapetracker/symbolic: shapetracker.py + view.py + symbolic.py
 We keep the features and nn stuff.
-But codegen is all rewritten.
-
-
+We keep the frontend (Tensor -> LazyBuffer): tensor.py + mlops.py + lazy.py
+We keep the shapetracker/symbolic (part of the frontend): shapetracker.py + view.py + symbolic.py
+Codegen is all rewritten.
+We keep the backend (uops renderer/runtime): cstyle.py + device.py + ops_*.py

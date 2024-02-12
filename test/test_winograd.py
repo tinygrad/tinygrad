@@ -3,6 +3,7 @@ from tinygrad import Tensor, GlobalCounters
 from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG
 from tinygrad.ops import LoadOps
 from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.realize import create_schedule
 
 class TestWinograd(unittest.TestCase):
   def setUp(self):
@@ -19,7 +20,7 @@ class TestWinograd(unittest.TestCase):
       out = Tensor.conv2d(x, w)
 
     with Timing("scheduling: "):
-      sched = out.lazydata.schedule()
+      sched = create_schedule([out.lazydata])
 
     for i,s in enumerate(sched):
       if s.ast.op in LoadOps: continue
