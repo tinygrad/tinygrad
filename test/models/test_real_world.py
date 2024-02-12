@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
-from tinygrad.jit import TinyJit
+from tinygrad.features.jit import TinyJit
 from tinygrad import Device, GlobalCounters, dtypes
 from tinygrad.helpers import CI
 from tinygrad.shape.symbolic import Variable

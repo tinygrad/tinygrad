@@ -6,7 +6,7 @@ from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
 from tinygrad.tensor import Tensor
-from tinygrad.graph import print_tree
+from tinygrad.features.graph import print_tree
 from tinygrad.helpers import getenv, from_mv, Context
 from tinygrad.device import Device, Compiled, Interpreted
 from tinygrad.codegen.linearizer import UOp
