@@ -97,6 +97,6 @@ def uops_flops_mem(uops:List[UOp]):
     if u.uop is UOps.STORE:
       mem += u.vin[2].dtype.sz * u.vin[2].dtype.itemsize * prod(mults)
     if u.uop is UOps.WMMA:
-      if u.arg.startswith("__metal_wmma"): flops += (8*8*8)//32 * prod(mults)
+      if u.arg.startswith("__metal_wmma"): flops += 2*(8*8*8)//32 * prod(mults)
       else: raise Exception("not implemented")
   return flops, mem
