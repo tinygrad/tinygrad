@@ -229,7 +229,7 @@ class Tensor:
     return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(dtype or dtypes.default_float)
 
   @staticmethod
-  def randint(*shape, low=0, high=10, **kwargs) -> Tensor: return Tensor.uniform(*shape, low=low, high=high, dtype=dtypes.int32)
+  def randint(*shape, low=0, high=10, **kwargs) -> Tensor: return Tensor.uniform(*shape, low=low, high=high, dtype=dtypes.int32, **kwargs)
 
   @staticmethod
   def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor: return (std * Tensor.randn(*shape, **kwargs)) + mean
@@ -264,7 +264,7 @@ class Tensor:
     assert replacement or num_samples == 1, "no replacement only supports num_samples = 1"
     weight = self.unsqueeze(0) if self.ndim == 1 else self
     cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
-    unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1)
+    unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1, device=self.device)
     indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
     return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.default_int)
 
@@ -356,6 +356,8 @@ class Tensor:
 
     # turn scalar Tensors into const val for int indexing if possible
     indices = [self._to_const_val(i) if isinstance(i, Tensor) else i for i in indices]
+    # move Tensor indices to the same device as self
+    indices = [i.to(self.device) if isinstance(i, Tensor) else i for i in indices]
 
     # filter ellipsis and fill with slice(None) or fill rest of indices with slice(None)
     ellipsis_idx = [dim for dim, i in enumerate(indices) if i is Ellipsis]
@@ -451,7 +453,7 @@ class Tensor:
     assert idx.ndim == self.ndim, "self.ndim must equal idx.ndim"
     assert all(s >= i for s,i in zip(self.shape, idx.shape)), "all dim of idx.shape must be smaller than self.shape"
     if dim < 0: dim += self.ndim
-    idx = idx.transpose(ax1=dim, ax2=0).unsqueeze(-1)
+    idx = idx.to(self.device).transpose(ax1=dim, ax2=0).unsqueeze(-1)
     permarg = list(range(self.ndim))
     permarg = permarg[1:dim] + [permarg[0]] + permarg[dim+1:] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
     return ((idx == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)) * self.permute(*permarg).shrink(
@@ -659,8 +661,14 @@ class Tensor:
 
     # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
     def apply_matrix(mat, t, dims=len(HW)):
-      t_ = t.reshape(t.shape[:dims]+(1,)*dims+t.shape[dims:]).expand(t.shape[:dims]+(len(mat),)*dims+t.shape[dims:])
-      matcols = [[Tensor.cat(*[Tensor.full(t_.shape[dims:dims+dim]+(1,)+t_.shape[dims+dim+1:], float(m[k]), device=t.device) for m in mat], dim=dim) for k in range(len(mat[0]))] for dim in range(dims)]  # noqa: E501
+      # multiply mat_1 @ mat_2 @ t with foldable constants, where mat_i acts on vector t along dimension i; roughly kron(mat, mat) @ t
+      # due to realize-before-expand rule in lazy.py, we must operate in this order: reshape -> expand -> arithmetic
+      t_ = t.reshape(t.shape[:dims] + (1,) * dims + t.shape[dims:]).expand(t.shape[:dims] + (len(mat),) * dims + t.shape[dims:])  # add output dims
+      # precalculate mat columns for each dim; prod(itertools.product(matcols)) gives the columns of kron(mat, mat, ...)
+      matcols = [[
+        Tensor.cat(*[Tensor.full(t_.shape[dims:dims + dim] + (1,) + t_.shape[dims + dim + 1:], float(m[k]), device=t.device) for m in mat], dim=dim)
+      for k in range(len(mat[0]))] for dim in range(dims)]
+      # multiply each element of t_ by the corresponding stacked column of kron(mat, mat), producing only one view for each element of t
       return sum(prod(col[idx] for col, idx in zip(matcols, mat_is)) * t_[mat_is] for mat_is in itertools.product(range(len(mat[0])), repeat=dims))
     HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
     winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
