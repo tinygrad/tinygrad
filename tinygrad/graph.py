@@ -89,7 +89,7 @@ def graph_uops(uops:List[UOp]):
             UOps.LOOP: "#c8a0e0", UOps.PHI: "#e0ffc0", UOps.BARRIER: "#ff8080", UOps.IF: "#c8b0c0"}
   G = nx.DiGraph()
   for u in uops:
-    if u.uop == UOps.END: continue
+    if u.uop in {UOps.ENDLOOP, UOps.ENDIF}: continue
     G.add_node(uops.index(u), label=f"{str(u.uop)[5:]}{(' '+str(u.arg)) if u.arg is not None else ''}\n{str(u.dtype)}", style="filled", fillcolor=colors.get(u.uop, "#ffffff"))  # noqa: E501
     for v in u.vin: G.add_edge(uops.index(v), uops.index(u))
   save_graph(G, f'{GRAPHPATH}.uops', '-Grankdir=LR')
