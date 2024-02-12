@@ -413,10 +413,10 @@ class Linearizer(Kernel):
     while changed_something:
       changed_something = False
       for u in self.uops:
-        if u.uop == UOps.PHI and len(u.vin) == 3:
+        if u.uop is UOps.PHI and len(u.vin) == 3:
           # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
           # TODO: ADD becomes a MUL, MAX can just become nothing
-          if all(x.uop != UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) and u.vin[1].arg == BinaryOps.ADD:
+          if all(x.uop is not UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) and u.vin[1].arg is BinaryOps.ADD:
             if DEBUG >= 4: print(f"removing PHI node {u}")
             del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
             # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
@@ -433,10 +433,10 @@ class Linearizer(Kernel):
 
     # add UOps.END
     for u in self.uops:
-      if u.uop == UOps.LOOP:
+      if u.uop is UOps.LOOP:
         # add END of loops after the last thing that (recursively) depends on them
         self.uop(UOps.END, None, (u,), cachable=False, insert_before=self.uops.index(sorted(list(get_recursive_children(self.uops, u)), key=self.uops.index)[-1])+1)  # noqa: E501
-      elif u.uop == UOps.IF:
+      elif u.uop is UOps.IF:
         # END any if statements at the end of the uops
         self.uop(UOps.END, None, (u,), cachable=False)
 
@@ -445,24 +445,24 @@ class Linearizer(Kernel):
 
   def uop(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None, simplify=True) -> UOp:  # noqa: E501
     if simplify:
-      if uop == UOps.PHI and len(vin) == 2: return vin[1]   # a phi without loops is a noop
-      if uop == UOps.GEP and vin[0].uop == UOps.CONST: return self.const(vin[0].arg, dtype, insert_before)
-      if uop == UOps.CAST and all(x.uop == UOps.CONST for x in vin) and all_same([x.arg for x in vin]):
+      if uop is UOps.PHI and len(vin) == 2: return vin[1]   # a phi without loops is a noop
+      if uop is UOps.GEP and vin[0].uop is UOps.CONST: return self.const(vin[0].arg, dtype, insert_before)
+      if uop is UOps.CAST and all(x.uop is UOps.CONST for x in vin) and all_same([x.arg for x in vin]):
         return self.const(vin[0].arg, dtype, insert_before)
-      if uop == UOps.ALU:
+      if uop is UOps.ALU:
         # rewrites. NOTE: the rewritten NEG op is still around...
-        if arg == BinaryOps.ADD and vin[1].uop == UOps.ALU and vin[1].arg == UnaryOps.NEG:
+        if arg is BinaryOps.ADD and vin[1].uop is UOps.ALU and vin[1].arg is UnaryOps.NEG:
           return self.uop(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable, insert_before)
         # constant folding
-        if arg == UnaryOps.NEG and vin[0].uop == UOps.CONST: return self.const(-vin[0].arg, dtype, insert_before)
-        if arg == TernaryOps.WHERE and vin[1] == vin[2]: return vin[1] # a conditional with the same results either way is a noop
+        if arg is UnaryOps.NEG and vin[0].uop is UOps.CONST: return self.const(-vin[0].arg, dtype, insert_before)
+        if arg is TernaryOps.WHERE and vin[1] == vin[2]: return vin[1] # a conditional with the same results either way is a noop
         # zero folding
         for x in [0,1]:
-          if arg == BinaryOps.ADD and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[1-x]
-          if arg == BinaryOps.MUL and vin[x].uop == UOps.CONST and vin[x].arg == 1.0: return vin[1-x]
-          if arg == BinaryOps.MUL and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[x]
-        if arg == BinaryOps.SUB and vin[1].uop == UOps.CONST and vin[1].arg == 0.0: return vin[0]
-        if arg == BinaryOps.DIV and vin[1].uop == UOps.CONST and vin[1].arg == 1.0: return vin[0]
+          if arg is BinaryOps.ADD and vin[x].uop is UOps.CONST and vin[x].arg == 0.0: return vin[1-x]
+          if arg is BinaryOps.MUL and vin[x].uop is UOps.CONST and vin[x].arg == 1.0: return vin[1-x]
+          if arg is BinaryOps.MUL and vin[x].uop is UOps.CONST and vin[x].arg == 0.0: return vin[x]
+        if arg is BinaryOps.SUB and vin[1].uop is UOps.CONST and vin[1].arg == 0.0: return vin[0]
+        if arg is BinaryOps.DIV and vin[1].uop is UOps.CONST and vin[1].arg == 1.0: return vin[0]
 
     key = (uop, dtype, vin, arg)
     if insert_before is None: insert_before = len(self.uops)

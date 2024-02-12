@@ -108,26 +108,26 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
   for u in uops:
     uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
     # these four uops don't have output dtypes
-    if uop == UOps.IF:
+    if uop is UOps.IF:
       kk(f"if ({r[vin[0]]}) {{")
       depth += 1
-    elif uop == UOps.BARRIER: kk(lang.barrier)
-    elif uop == UOps.END:
+    elif uop is UOps.BARRIER: kk(lang.barrier)
+    elif uop is UOps.END:
       depth -= 1
       kk("}")
-    elif uop == UOps.STORE:
+    elif uop is UOps.STORE:
       assert vin[0].dtype is not None and vin[2].dtype is not None
       if len(vin) > 3: kk(f"if ({r[vin[3]]}) {{")
-      kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
+      kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL))
       if len(vin) > 3: kk("}")
     else:
       assert dtype is not None, f"None dtype for uop {uop}"
-      if uop == UOps.LOOP:
+      if uop is UOps.LOOP:
         kk(f"for (int {(expr := ssa(u,'ridx'))} = {r[vin[0]]}; {expr} < {r[vin[1]]}; {expr}++) {{")
         depth += 1
-      elif uop == UOps.ALU:
+      elif uop is UOps.ALU:
         # remove parens if ALU types are the same. TODO: can do more here
-        if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.XOR}:
+        if vin[0].uop is UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.XOR}:
           val = lang.code_for_op[args](strip_parens(r[vin[0]]), *[r[x] for x in vin[1:]], dtype)
         else:
           val = lang.code_for_op[args](*[r[x] for x in vin] + [dtype])
@@ -135,19 +135,19 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         # TODO: fix index rendering issue. fix clang nested max macro issue
         if child_count[u] <= 1 and args != BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
         else: kk(f"{dtype.name} {ssa(u,'alu')} = {val};")
-      elif uop == UOps.SPECIAL:
+      elif uop is UOps.SPECIAL:
         kk(f"int {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
         if args[1].startswith("l"): local_size.append(args[2])
         r[u] = args[1]
-      elif uop == UOps.LOAD:
-        val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
+      elif uop is UOps.LOAD:
+        val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
         # NOTE: this relies on the load not happening if it's in the unselected branch
         if len(vin) > 3: val = lang.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
         kk(f"{lang.render_dtype(dtype)} {ssa(u,'val')} = {val};")
-      elif uop == UOps.PHI:
+      elif uop is UOps.PHI:
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
         r[u] = r[vin[0]]
-      elif uop == UOps.CAST:
+      elif uop is UOps.CAST:
         if isinstance(args, tuple) and args[1]:  # bitcast
           assert len(vin) == 1
           precast = ssa(None,'precast')
@@ -157,16 +157,16 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
           val = lang.render_cast([r[x] for x in vin], dtype, bitcast=False)
         if child_count[u] <= 1: r[u] = val
         else: kk(f"{dtype.name} {ssa(u,'cast')} = {val};")
-      elif uop == UOps.DEFINE_LOCAL:
+      elif uop is UOps.DEFINE_LOCAL:
         kk(lang.render_local(args[0], dtype, args[1]))
         r[u] = args[0]
-      elif uop == UOps.DEFINE_GLOBAL:
+      elif uop is UOps.DEFINE_GLOBAL:
         bufs.append((args, dtype))
         r[u] = args
-      elif uop == UOps.WMMA: kk(f"{dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
-      elif uop == UOps.DEFINE_ACC: kk(f"{dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
-      elif uop == UOps.CONST: r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
-      elif uop == UOps.GEP: r[u] = f"({r[vin[0]]})[{args}]" if cast(DType, vin[0].dtype).sz > 4 else f"({r[vin[0]]}).{'xyzw'[args]}"
+      elif uop is UOps.WMMA: kk(f"{dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
+      elif uop is UOps.DEFINE_ACC: kk(f"{dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
+      elif uop is UOps.CONST: r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
+      elif uop is UOps.GEP: r[u] = f"({r[vin[0]]})[{args}]" if cast(DType, vin[0].dtype).sz > 4 else f"({r[vin[0]]}).{'xyzw'[args]}"
       else: raise RuntimeError(f"failed to render {uop}")
 
   return lang.render_kernel(function_name, kernel, bufs, local_size)
