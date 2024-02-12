@@ -438,7 +438,7 @@ class Linearizer(Kernel):
         self.uop(UOps.END, None, (u,), cachable=False, insert_before=self.uops.index(sorted(list(get_recursive_children(self.uops, u)), key=self.uops.index)[-1])+1)  # noqa: E501
       elif u.uop is UOps.IF:
         # END any if statements at the end of the uops
-        self.uop(UOps.END, None, (u,), cachable=False)
+        self.uop(UOps.ENDIF, None, (u,), cachable=False)
 
     # verify the uop types
     uops_type_verify(self.uops)
