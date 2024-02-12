@@ -664,7 +664,7 @@ class Tensor:
       # multiply mat_1 @ mat_2 @ t with foldable constants, where mat_i acts on vector t along dimension i; roughly kron(mat, mat) @ t
       # due to realize-before-expand rule in lazy.py, we must operate in this order: reshape -> expand -> arithmetic
       t_ = t.reshape(t.shape[:dims] + (1,) * dims + t.shape[dims:]).expand(t.shape[:dims] + (len(mat),) * dims + t.shape[dims:])  # add output dims
-      # precaclulate mat columns for each dim; prod(itertools.product(matcols)) gives the columns of kron(mat, mat, ...)
+      # precalculate mat columns for each dim; prod(itertools.product(matcols)) gives the columns of kron(mat, mat, ...)
       matcols = [[
         Tensor.cat(*[Tensor.full(t_.shape[dims:dims + dim] + (1,) + t_.shape[dims + dim + 1:], float(m[k]), device=t.device) for m in mat], dim=dim)
       for k in range(len(mat[0]))] for dim in range(dims)]
