@@ -55,22 +55,16 @@ class TestWinograd(unittest.TestCase):
     #OC, IC, X, Y = 512, 256, 8, 8
     x,w = Tensor.rand(1,IC,Y,X).realize(), Tensor.rand(OC,IC,3,3).realize()
     GlobalCounters.reset()
-    sched = Tensor.conv2d(x,w).lazydata.schedule()
-    run_schedule(sched[0:1])
-    print(sched[0].out.shape)
-    print("ops", GlobalCounters.global_ops, "mem", GlobalCounters.global_mem)
-    #return
-
-    run_schedule(sched[1:])
+    Tensor.conv2d(x,w).realize()
     ops_wino, mem_wino = GlobalCounters.global_ops, GlobalCounters.global_mem
-
     WINO.value = 0
     GlobalCounters.reset()
     Tensor.conv2d(x,w).realize()
     ops_normal, mem_normal = GlobalCounters.global_ops, GlobalCounters.global_mem
 
-    # TODO: make these reasonable
     ops_ratio, mem_ratio = ops_wino/ops_normal, mem_wino/mem_normal
+    assert ops_ratio < 2
+    assert mem_ratio < 2
 
     print(f"ops: normal {ops_normal:9d} wino {ops_wino:9d} ratio {ops_ratio:.2f}")
     print(f"mem: normal {mem_normal:9d} wino {mem_wino:9d} ratio {mem_ratio:.2f}")

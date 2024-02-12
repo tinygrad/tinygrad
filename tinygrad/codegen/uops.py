@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Set, Optional, Tuple, Any
-from tinygrad.helpers import DEBUG, flatten
+from tinygrad.helpers import DEBUG, flatten, prod
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from enum import Enum, auto
@@ -91,9 +91,9 @@ def uops_info(uops:List[UOp]):
     if u.uop is UOps.END:
       mults = mults[:-1]
     if u.uop is UOps.ALU:
-      flops += 1 * mults[-1]
+      flops += 1 * prod(mults)
     if u.uop is UOps.LOAD:
-      mem += u.dtype.sz * u.dtype.itemsize * mults[-1]
+      mem += u.dtype.sz * u.dtype.itemsize * prod(mults)
     if u.uop is UOps.STORE:
-      mem += u.vin[2].dtype.sz * u.vin[2].dtype.itemsize * mults[-1]
+      mem += u.vin[2].dtype.sz * u.vin[2].dtype.itemsize * prod(mults)
   return flops, mem
