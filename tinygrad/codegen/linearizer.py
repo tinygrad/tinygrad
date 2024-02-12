@@ -383,7 +383,7 @@ class Linearizer(Kernel):
       for u in self.uops:
         print(f"{self.uops.index(u):4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} {str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")  # noqa: E501
     if getenv("GRAPHUOPS"):
-      from tinygrad.graph import graph_uops
+      from tinygrad.features.graph import graph_uops
       graph_uops(self.uops)
 
     # restore backups

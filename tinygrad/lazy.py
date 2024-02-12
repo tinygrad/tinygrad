@@ -8,7 +8,7 @@ from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Bu
 from tinygrad.shape.symbolic import sint, Variable
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.device import Buffer
-from tinygrad.graph import log_lazybuffer
+from tinygrad.features.graph import log_lazybuffer
 from weakref import ref, ReferenceType
 
 # lazy can recurse a lot

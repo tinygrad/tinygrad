@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, cast
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, InterpretedASTRunner, Compiled, BufferOptions
-from tinygrad.graph import print_tree, realized_lazybuffer
+from tinygrad.features.graph import print_tree, realized_lazybuffer
 from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG
 from tinygrad.shape.symbolic import Variable
 
