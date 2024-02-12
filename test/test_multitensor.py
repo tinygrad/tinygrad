@@ -297,7 +297,7 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(bn): p.shard_(devices).realize()
 
     out = bn(t)
-    scheds = [sched for sched in create_schedule([out.lazydata]) if sched.out.device in devices and sched.ast.op is not LoadOps.COPY]
+    scheds = [sched for sched in create_schedule(out.lazydata.lbs) if sched.out.device in devices and sched.ast.op is not LoadOps.COPY]
     assert set(sched.out.device for sched in scheds) == set(devices), "should have ast on each shard device"
     asts = [sched.ast for sched in scheds]
     assert len(asts) == 8, len(asts)
@@ -528,9 +528,9 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
         p.shard_(devices)
 
       synced_out = synced_bn(x)
-      synced_si = [si for si in create_schedule([synced_out.lazydata])]
+      synced_si = [si for si in create_schedule(synced_out.lazydata.lbs)]
       unsynced_out = unsynced_bn(x)
-      unsynced_si = [si for si in create_schedule([unsynced_out.lazydata])]
+      unsynced_si = [si for si in create_schedule(unsynced_out.lazydata.lbs)]
 
     # TODO: test synced / unsynced batchnorm cross device kernel and copies
     assert synced_si
