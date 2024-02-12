@@ -3,6 +3,9 @@ import os, functools, platform, time, re, contextlib, operator, hashlib, pickle,
 import itertools, urllib.request
 from tqdm import tqdm
 from typing import Dict, Tuple, Union, List, ClassVar, Optional, Iterable, Any, TypeVar, TYPE_CHECKING, Callable, Sequence
+from inspect import signature
+from traceback import print_list, extract_stack, FrameSummary
+from io import StringIO
 if TYPE_CHECKING:  # TODO: remove this and import TypeGuard from typing once minimum python supported version is 3.10
   from typing_extensions import TypeGuard
   from tinygrad.shape.shapetracker import sint
@@ -118,6 +121,49 @@ class Profiling(contextlib.ContextDecorator):
         print(f"n:{num_calls:8d}  tm:{tottime*self.time_scale:7.2f}ms  tot:{cumtime*self.time_scale:7.2f}ms",
               colored(_format_fcn(fcn), "yellow") + " "*(50-len(_format_fcn(fcn))),
               colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if len(scallers) else '')
+
+class LazyError:
+  def __init__(self, skip: int = 1, debug: int = 1, path: str = "__stacktrace__"):
+    self.skip, self.debug, self.path = skip, debug, path
+
+  def __call__(self, cls):
+    original_init = cls.__init__
+    def wrapper(orgn_self, *args, **kwargs):
+      r = original_init(orgn_self, *args, **kwargs)
+      if DEBUG >= self.debug:
+        orgn_self.__setattr__(self.path, extract_stack()[:-self.skip if self.skip > 0 else None])
+      else:
+        orgn_self.__setattr__(self.path, self.debug)
+      return r
+    cls.__init__ = wrapper
+    return cls
+
+class LazyRealizer:
+  def __init__(self, argument: str, path: str | None = "__stacktrace__", note: str = "This might've been caused by:"):
+    self.argument, self.path, self.note = argument, path, note
+
+  def __call__(self, fn):
+    def wrapper(*args, **kwargs):
+      try:
+        return fn(*args, **kwargs)
+      except Exception as e:
+        ba = signature(fn).bind(*args, **kwargs)
+        ba.apply_defaults()
+        try:
+          stacktrace = eval(self.argument, globals(), ba.arguments) # pylint: disable=W0123
+          if self.path is not None:
+            stacktrace = stacktrace.__getattribute__(self.path)
+          if isinstance(stacktrace, list) and len(stacktrace) > 0 and all(isinstance(x, FrameSummary) for x in stacktrace):
+            sio = StringIO()
+            print_list(stacktrace, sio)
+            # NOTE: Exception.add_note is only availible since python 3.11
+            e.add_note(f"\n{self.note}\n{sio.getvalue()}")
+          elif isinstance(stacktrace, int):
+            e.add_note(f"\nSet DEBUG={stacktrace} to view additional debug information.")
+        except Exception:
+          pass
+        raise
+    return wrapper
 
 # *** universal database cache ***
 
