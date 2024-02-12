@@ -76,7 +76,7 @@ def train_resnet():
   def backward_step(X, Y, loss):
     scheduler.step()
     loss.backward()
-    optimizer.step()
+    return optimizer.step()
     pass
 
   target = getenv("TARGET", 0.759)
@@ -200,7 +200,7 @@ def train_resnet():
       # the backward step should be realized by loss.numpy(), even though it doesn't depend on this.
       # doing this uses 16.38gb vs 15.55gb? why? because the grads get realized in optimizer.step, and the backward buffers are freed?
       fwet = time.perf_counter()
-      backward_step(*proc[1], proc[0][0])
+      gnorm = backward_step(*proc[1], proc[0][0])
       # proc = (proc[0], proc[2])  # drop inputs
 
       et = time.perf_counter()
@@ -214,7 +214,7 @@ def train_resnet():
       dte = time.perf_counter()
 
       device_str = proc[0][2].device if isinstance(proc[0][2].device, str) else f"{proc[0][2].device[0]} * {len(proc[0][2].device)}"
-      proc, top_1_acc = proc[0][0].numpy(), proc[0][2].numpy().item() / BS  # return cookie
+      proc, top_1_acc, gnorm = proc[0][0].numpy(), proc[0][2].numpy().item() / BS, gnorm.numpy()  # return cookie
       loss_cpu = proc / lr_scaler
       cl = time.perf_counter()
       new_st = time.perf_counter()
@@ -228,6 +228,7 @@ def train_resnet():
                  "train/cl_time": cl - dte,
                  "train/loss": loss_cpu,
                  "train/top_1_acc": top_1_acc,
+                 "train/gnorm": gnorm,
                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st),
                  "epoch": e + (i + 1) / steps_in_train_epoch,
                  })
