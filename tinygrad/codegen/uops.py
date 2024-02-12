@@ -82,18 +82,21 @@ def uops_type_verify(uops:List[UOp]):
         assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
         assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
 
-def uops_info(uops:List[UOp]):
+def uops_flops_mem(uops:List[UOp]):
   flops, mem = 0, 0
   mults = [1]
   for u in uops:
     if u.uop is UOps.LOOP:
       mults.append(u.vin[1].arg)
-    if u.uop is UOps.END:
+    if u.uop is UOps.ENDLOOP:
       mults = mults[:-1]
     if u.uop is UOps.ALU:
-      flops += 1 * prod(mults)
+      flops += (2 if u.arg is TernaryOps.MULACC else 1) * prod(mults)
     if u.uop is UOps.LOAD:
       mem += u.dtype.sz * u.dtype.itemsize * prod(mults)
     if u.uop is UOps.STORE:
       mem += u.vin[2].dtype.sz * u.vin[2].dtype.itemsize * prod(mults)
+    if u.uop is UOps.WMMA:
+      if u.arg.startswith("__metal_wmma"): flops += (8*8*8)//32 * prod(mults)
+      else: raise Exception("not implemented")
   return flops, mem

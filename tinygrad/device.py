@@ -319,8 +319,8 @@ class Compiled:
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     k.linearize()
     ret = CompiledASTRunner(k.ast, k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size)
-    from tinygrad.codegen.uops import uops_info
-    ret.op_estimate, ret.mem_estimate = uops_info(k.uops)
+    from tinygrad.codegen.uops import uops_flops_mem
+    ret.op_estimate, ret.mem_estimate = uops_flops_mem(k.uops)
     ret.op_estimate *= prod(k.global_size+k.local_size)
     ret.mem_estimate *= prod(k.global_size+k.local_size)
     return ret
