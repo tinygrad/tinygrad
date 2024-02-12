@@ -15,13 +15,13 @@ Currently the Linearizer is merging many concerns:
 
 More generically, the whole network is a DAG. Ignore the forward/backward stuff, I'm fine with starting at the LazyBuffer level.
 
-1. Is it possible to put an entire network in a single kernel? I think the answer has to be yes, but you may end up doing an absolutely crazy amount of recomputation.
+1. Is it possible to put an entire network in a single kernel? I think the answer has to be yes, but you may end up doing an absolutely crazy amount of recomputation. This should still be doable to check correctness.
 2. You can use intermediate buffers, be they local or global, to do less compute.
 
-This is a rewrite of a lot of tinygrad. I don't think continuing to support Interpreted backends is worth it.
+This is a rewrite of a lot of tinygrad. I don't think continuing to support Interpreted backends is worth it, have to deal with disk in a smart way.
 
 We keep the frontend: tensor.py + mlops.py + lazy.py
-We keep the backend (renderer/runtime): cstyle.py + ops_*.py
+We keep the backend (renderer/runtime): cstyle.py + device.py + ops_*.py
 We keep the shapetracker/symbolic: shapetracker.py + view.py + symbolic.py
 We keep the features and nn stuff.
 But codegen is all rewritten.

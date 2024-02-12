@@ -277,7 +277,7 @@ result = Tensor(2.0) + Tensor(3.0)
 
 # we have a global cache used by the JIT
 # from there, we can see the generated clang code
-from tinygrad.jit import CacheCollector
+from tinygrad.features.jit import CacheCollector
 CacheCollector.start()       # enables the cache
 result.realize()             # create the program and runs it
 cache_saved = CacheCollector.finish()  # disable the cache
