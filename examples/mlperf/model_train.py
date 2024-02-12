@@ -165,6 +165,7 @@ def train_resnet():
     'BEAM': getenv('BEAM'),
     'TEST_TRAIN': getenv('TEST_TRAIN'),
     'TEST_EVAL': getenv('TEST_EVAL'),
+    'SYNCBN': getenv('SYNCBN', 0),
     'model': 'resnet50' if not getenv('SMALL') else 'resnet18',
     'optimizer': optimizer.__class__.__name__,
     'scheduler': scheduler.__class__.__name__,
