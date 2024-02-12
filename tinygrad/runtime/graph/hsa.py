@@ -54,7 +54,8 @@ class HSAGraph:
 
     # Build packets
     self.packets = []
-    self.buffer_to_signal = {}
+    self.w_buffer_to_signal = {}
+    self.r_buffer_to_signal = {}
     # print(self.buffer_to_signal)
     self.transfers = []
     self.signals_to_reset = [self.finish_signal]
@@ -65,9 +66,15 @@ class HSAGraph:
       packet = None
       if isinstance(ji.prg, CompiledASTRunner):
         wait_signals = []
-        for rb in ji.rawbufs:
-          if rb._buf in self.buffer_to_signal:
-            if isinstance(self.buffer_to_signal[rb._buf], hsa.hsa_signal_t): wait_signals.append(self.buffer_to_signal[rb._buf])
+        for i,rb in enumerate(ji.rawbufs):
+          if i == 0 and rb._buf in self.r_buffer_to_signal:
+            if isinstance(self.r_buffer_to_signal[rb._buf], hsa.hsa_signal_t):
+              wait_signals.append(self.r_buffer_to_signal[rb._buf])
+              self.r_buffer_to_signal.pop(rb._buf)
+          if rb._buf in self.w_buffer_to_signal:
+            if isinstance(self.w_buffer_to_signal[rb._buf], hsa.hsa_signal_t):
+              wait_signals.append(self.w_buffer_to_signal[rb._buf])
+              self.w_buffer_to_signal.pop(rb._buf)
 
         if len(wait_signals) > 0:
           for i in range(0, len(wait_signals), 5):
@@ -92,7 +99,8 @@ class HSAGraph:
         packet.header = DISPATCH_KERNEL_HEADER
 
         for rb in ji.rawbufs:
-          self.buffer_to_signal[rb._buf] = self.packet_off
+          if i == 0: self.w_buffer_to_signal[rb._buf] = self.packet_off
+          else: self.r_buffer_to_signal[rb._buf] = self.packet_off
 
         self.packets.append(packet)
         self.packet_off += 64
@@ -112,38 +120,70 @@ class HSAGraph:
           # Wait for dest to be ready to accept signal
           wait_signal, c_wait_signal = [], None
           wait_signal.append(ji.prg.sync_signal)
-          if src._buf in self.buffer_to_signal:
+          if src._buf in self.w_buffer_to_signal:
             # now we need a signal, patch it
-            if isinstance(self.buffer_to_signal[src._buf], int):
-              off = self.buffer_to_signal[src._buf]
+            if isinstance(self.w_buffer_to_signal[src._buf], int):
+              off = self.w_buffer_to_signal[src._buf]
               packet = hsa.hsa_kernel_dispatch_packet_t.from_address(off)
               if packet.completion_signal.handle == EMPTY_SIGNAL.handle:
-                self.buffer_to_signal[src._buf] = self.device.alloc_signal()
-                self.signals_to_reset.append(self.buffer_to_signal[src._buf])
-                packet.completion_signal = self.buffer_to_signal[src._buf]
-              else:
-                self.buffer_to_signal[src._buf] = packet.completion_signal.handle
+                self.w_buffer_to_signal[src._buf] = self.device.alloc_signal()
+                self.signals_to_reset.append(self.w_buffer_to_signal[src._buf])
+                packet.completion_signal = self.w_buffer_to_signal[src._buf]
+              else: assert False
+            else:
+              self.w_buffer_to_signal[src._buf] = packet.completion_signal
 
-            wait_signal.append(self.buffer_to_signal[src._buf])
+            wait_signal.append(self.w_buffer_to_signal[src._buf])
+            self.w_buffer_to_signal.pop(src._buf)
 
           sdma_engine = self.device.select_sdma(0)
           c_wait_signal = (hsa.hsa_signal_t * len(wait_signal))(*wait_signal)
           self.transfers.append((dest._buf, dest.d.agent, src._buf, src.d.agent, dest.nbytes, len(wait_signal), c_wait_signal, ji.prg.completion_signal, sdma_engine))
-          self.buffer_to_signal[src._buf] = ji.prg.completion_signal
+          self.r_buffer_to_signal[src._buf] = ji.prg.completion_signal
         else:
           wait_signal = []
           has_embed = False
-          if dest._buf in self.buffer_to_signal:
-            if isinstance(self.buffer_to_signal[dest._buf], int):
-              off = self.buffer_to_signal[dest._buf]
-              packet = hsa.hsa_kernel_dispatch_packet_t.from_address(off)
-              if packet.completion_signal.handle == EMPTY_SIGNAL.handle:
-                packet.completion_signal = ji.prg.sync_signal
-                has_embed = True
+          
+          need_barrier = -1
+          if dest._buf in self.r_buffer_to_signal:
+            if isinstance(self.r_buffer_to_signal[dest._buf], int):
+              need_barrier = max(need_barrier, self.r_buffer_to_signal[dest._buf])
+              self.r_buffer_to_signal.pop(dest._buf)
             else:
-              wait_signal.append(self.buffer_to_signal[dest._buf])
-          if not has_embed: self.add_barrier_packet(wait_signal, ji.prg.sync_signal)
-          self.buffer_to_signal[dest._buf] = ji.prg.completion_signal
+              wait_signal.append(self.r_buffer_to_signal[dest._buf])
+              self.r_buffer_to_signal.pop(dest._buf)
+          if dest._buf in self.w_buffer_to_signal:
+            if isinstance(self.w_buffer_to_signal[dest._buf], int):
+              need_barrier = max(need_barrier, self.w_buffer_to_signal[dest._buf])
+            else:
+              wait_signal.append(self.w_buffer_to_signal[dest._buf])
+              self.w_buffer_to_signal.pop(dest._buf)
+
+          if need_barrier > 0:
+            packet = hsa.hsa_kernel_dispatch_packet_t.from_address(need_barrier)
+            if packet.completion_signal.handle == EMPTY_SIGNAL.handle:
+              packet.completion_signal = ji.prg.sync_signal
+              has_embed = True
+
+          if has_embed and len(wait_signal) == 0:
+            pass
+          else:
+            self.add_barrier_packet(wait_signal, ji.prg.sync_signal)
+          self.w_buffer_to_signal[dest._buf] = ji.prg.completion_signal
+
+
+          # self.buffer_to_signal[dest._buf] = ji.prg.completion_signal
+          # if dest._buf in self.buffer_to_signal:
+          #   if isinstance(self.buffer_to_signal[dest._buf], int):
+          #     off = self.buffer_to_signal[dest._buf]
+          #     packet = hsa.hsa_kernel_dispatch_packet_t.from_address(off)
+          #     if packet.completion_signal.handle == EMPTY_SIGNAL.handle:
+          #       packet.completion_signal = ji.prg.sync_signal
+          #       has_embed = True
+          #   else:
+          #     wait_signal.append(self.buffer_to_signal[dest._buf])
+          # if not has_embed: self.add_barrier_packet(wait_signal, ji.prg.sync_signal)
+          # self.buffer_to_signal[dest._buf] = ji.prg.completion_signal
 
         self.packets.append(None) # so packet is easy to find with jit index.
 
@@ -152,7 +192,8 @@ class HSAGraph:
 
     final_wait = []
     last_addr = 0
-    for v in self.buffer_to_signal.values():
+    rem = list(self.w_buffer_to_signal.values()) + list(self.r_buffer_to_signal.values())
+    for v in rem:
       if isinstance(v, hsa.hsa_signal_t):
         final_wait.append(v)
       else:
@@ -176,7 +217,8 @@ class HSAGraph:
 
   def __call__(self, input_rawbuffers: List[Buffer], var_vals: Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     # Wait and restore signal
-    for sig in self.signals_to_reset: 
+    # hsa.hsa_signal_wait_scacquire(self.finish_signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
+    for sig in self.signals_to_reset:
       hsa.hsa_signal_wait_scacquire(sig, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
       hsa.hsa_signal_store_relaxed(sig, 1)
 
@@ -217,8 +259,8 @@ class HSAGraph:
     self.device.last_transfer_signal = self.finish_signal # HACK to not return the signal to device
     self.device.hw_queue.blit(self.c_aql_packets_addr, self.packets_count)
 
-    for (dest, dest_agent, src, src_agent, sz, wait_signal_cnt, c_wait_signal, copy_signal, sdma_engine) in self.transfers:
-      check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_agent, src, src_agent, sz, wait_signal_cnt, c_wait_signal, copy_signal, sdma_engine, True))
+    for x in self.transfers:
+      check(hsa.hsa_amd_memory_async_copy_on_engine(*x, True))
 
     et = None
     update_stats(f"<batched {len(self.jit_cache)}>", self.op_estimate, self.mem_estimate, var_vals, et, buf_count=len(input_rawbuffers),

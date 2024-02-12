@@ -97,7 +97,7 @@ def apply_graph_to_jit(jit_cache: List[JitItem], input_rawbuffers: List[Buffer],
 
         # HACK: remove it
         if ji.rawbufs[0].device.startswith("HSA"):
-          if open_batch_location[graph_on_devices[0]] < open_batch_location[graph_on_devices[1]]:
+          if open_batch_location.get(graph_on_devices[0], 1e9) < open_batch_location.get(graph_on_devices[1], 1e9):
             ji.prg.__setattr__("reset_device", graph_on_devices[0])
           else:
             ji.prg.__setattr__("reset_device", graph_on_devices[1])
