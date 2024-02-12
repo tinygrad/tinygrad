@@ -112,7 +112,7 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       kk(f"if ({r[vin[0]]}) {{")
       depth += 1
     elif uop is UOps.BARRIER: kk(lang.barrier)
-    elif uop is UOps.END:
+    elif uop in {UOps.END, UOps.ENDIF}:
       depth -= 1
       kk("}")
     elif uop is UOps.STORE:
