@@ -456,6 +456,8 @@ class Linearizer(Kernel):
         # constant folding
         if arg == UnaryOps.NEG and vin[0].uop == UOps.CONST: return self.const(-vin[0].arg, dtype, insert_before)
         if arg == TernaryOps.WHERE and vin[1] == vin[2]: return vin[1] # a conditional with the same results either way is a noop
+        if arg == BinaryOps.MUL and vin[0].uop == UOps.CONST and vin[1].uop == UOps.CONST and dtype is not None and dtypes.is_float(dtype):
+          return self.const(vin[0].arg * vin[1].arg, dtype, insert_before)
         # zero folding
         for x in [0,1]:
           if arg == BinaryOps.ADD and vin[x].uop == UOps.CONST and vin[x].arg == 0.0: return vin[1-x]

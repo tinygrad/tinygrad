@@ -57,7 +57,6 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int):
   t_ = t.reshape(t.shape[:dims] + (1,) * dims + t.shape[dims:]).expand(t.shape[:dims] + (len(mat),) * dims + t.shape[dims:])  # add output dims
   # precalculate mat columns for each dim; prod(itertools.product(matcols)) gives the columns of kron(mat, mat, ...)
   matcols = _get_winograd_matcols(mat, dims, t_.shape[dims:], t_.device)
-  #print(matcols[0][0].shape, t_.shape[dims:])
   # multiply each element of t_ by the corresponding stacked column of kron(mat, mat), producing only one view for each element of t
   return sum(prod(col[idx] for col, idx in zip(matcols, mat_is)) * t_[mat_is] for mat_is in itertools.product(range(len(mat[0])), repeat=dims))
 

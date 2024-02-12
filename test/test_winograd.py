@@ -3,6 +3,7 @@ from tinygrad import Tensor, GlobalCounters
 from tinygrad.helpers import Timing, CI, Profiling, WINO, DEBUG
 from tinygrad.ops import LoadOps
 from tinygrad.codegen.linearizer import Linearizer
+from tinygrad.realize import run_schedule
 
 class TestWinograd(unittest.TestCase):
   def setUp(self):
@@ -48,6 +49,28 @@ class TestWinograd(unittest.TestCase):
     out = Tensor.conv2d(x,w).realize()
     assert GlobalCounters.kernel_count == 4
     out.numpy()
+
+  def test_counters(self):
+    IC, OC, X, Y = 4,4,9,9
+    #OC, IC, X, Y = 512, 256, 8, 8
+    x,w = Tensor.rand(1,IC,Y,X).realize(), Tensor.rand(OC,IC,3,3).realize()
+    WINO.value = 0
+    GlobalCounters.reset()
+    Tensor.conv2d(x,w).realize()
+    ops_normal, mem_normal = GlobalCounters.global_ops, GlobalCounters.global_mem
+    WINO.value = 1
+    GlobalCounters.reset()
+    sched = Tensor.conv2d(x,w).lazydata.schedule()
+    run_schedule(sched[0:1])
+    print(sched[0].out.shape)
+    print(GlobalCounters.global_ops, GlobalCounters.global_mem)
+
+    run_schedule(sched[1:])
+    ops_wino, mem_wino = GlobalCounters.global_ops, GlobalCounters.global_mem
+    print("ops: normal", ops_normal, "wino", ops_wino, "ratio", ops_wino/ops_normal)
+    print("mem: normal", mem_normal, "wino", mem_wino, "ratio", mem_wino/mem_normal)
+    #assert ops_wino < ops_normal
+    #assert mem_wino < mem_normal
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
