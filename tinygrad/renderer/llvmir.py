@@ -102,7 +102,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
       if len(vin) > 3:
         with bb[-1].if_then(lvars[vin[3]]): store_op()
       else: store_op()
-    elif uop is UOps.END:
+    elif uop is UOps.ENDLOOP:
       block, phis = loop_blocks.pop()
       idx_p1 = bb[-1].add(lvars[vin[0]], ir.Constant(ir.IntType(32), 1))
       lvars[vin[0]].add_incoming(idx_p1, bb[-1]._block)

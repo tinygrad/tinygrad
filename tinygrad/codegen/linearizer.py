@@ -431,11 +431,11 @@ class Linearizer(Kernel):
     # (recursively) remove childless uops
     self.uops = remove_childless_uops(self.uops)
 
-    # add UOps.END
+    # add UOps.END*
     for u in self.uops:
       if u.uop is UOps.LOOP:
         # add END of loops after the last thing that (recursively) depends on them
-        self.uop(UOps.END, None, (u,), cachable=False, insert_before=self.uops.index(sorted(list(get_recursive_children(self.uops, u)), key=self.uops.index)[-1])+1)  # noqa: E501
+        self.uop(UOps.ENDLOOP, None, (u,), cachable=False, insert_before=self.uops.index(sorted(list(get_recursive_children(self.uops, u)), key=self.uops.index)[-1])+1)  # noqa: E501
       elif u.uop is UOps.IF:
         # END any if statements at the end of the uops
         self.uop(UOps.ENDIF, None, (u,), cachable=False)
