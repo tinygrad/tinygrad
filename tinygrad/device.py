@@ -3,7 +3,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple, cast, ClassVar
 import importlib, inspect, functools, pathlib, time, re, ctypes
 from tinygrad.dtype import DType, ImageDType
-from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
+from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put, prod
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
 from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op, GlobalCounters, MovementOps
@@ -318,7 +318,12 @@ class Compiled:
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
     k.linearize()
-    return CompiledASTRunner(k.ast, k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size)
+    ret = CompiledASTRunner(k.ast, k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size)
+    from tinygrad.codegen.uops import uops_info
+    ret.op_estimate, ret.mem_estimate = uops_info(k.uops)
+    ret.op_estimate *= prod(k.global_size+k.local_size)
+    ret.mem_estimate *= prod(k.global_size+k.local_size)
+    return ret
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:
