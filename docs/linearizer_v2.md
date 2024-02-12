@@ -20,8 +20,8 @@ More generically, the whole network is a DAG. Ignore the forward/backward stuff,
 
 This is a rewrite of a lot of tinygrad. I don't think continuing to support Interpreted backends is worth it, have to deal with disk in a smart way.
 
-We keep the features and nn stuff.
-We keep the frontend (Tensor -> LazyBuffer): tensor.py + mlops.py + lazy.py
-We keep the shapetracker/symbolic (part of the frontend): shapetracker.py + view.py + symbolic.py
-Codegen is all rewritten.
-We keep the backend (uops renderer/runtime): cstyle.py + device.py + ops_*.py
+We keep the features and nn stuff = 793 lines
+We keep the frontend (Tensor -> LazyBuffer): tensor.py + mlops.py + lazy.py + dtype.py = 1032 lines
+We keep the shapetracker/symbolic (part of the frontend): shapetracker.py + view.py + symbolic.py = 603 lines
+Codegen is all rewritten. realize.py is simpler with the new codegen
+We keep the backend (uops renderer/runtime): cstyle.py/llvmir.py + device.py + ops_*.py = 1216 lines (less when we remove interpreted)
