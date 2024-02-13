@@ -112,7 +112,7 @@ class PythonProgram:
           else:
             ul[i] = [arg] * warp_size
         elif uop is UOps.LOOP:
-          if i not in ul:
+          if i not in ul or ul[i][0] == inp[1][0]:
             ul[i] = [0] * warp_size
           else:
             for j in range(len(ul[i])):
