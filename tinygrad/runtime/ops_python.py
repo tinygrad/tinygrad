@@ -72,12 +72,17 @@ class PythonProgram:
                 assert ox >= 0 and ox < dtp[0].shape[1] and oy >= 0 and oy < dtp[0].shape[0]
                 _store(m, ox*4 + oy*dtp[0].shape[1]*4 + j, v)
           elif dtp[2].sz > 1:
-            for j,val in enumerate(inp[2]):
-              for m,o,v in zip(inp[0], inp[1], val): _store(m, o+j, v)
+            if type(inp[2][0]) is list:
+              for j, val in enumerate(inp[2]):
+                for m,o,v in zip(inp[0], inp[1], val): _store(m, o+j, v)
+            else:
+              for m,o,v in zip(inp[0], inp[1], inp[2]): _store(m, o, v)
           else:
             for m,o,v in zip(*inp): _store(m, o, v)
-            ul[i] = [inp[2][0]] * warp_size
-            dl[i] = [m for m in inp[0]]
+          # ul[i] = [inp[2][0]] * warp_size
+          ul[i] = inp[2]
+          # dl[i] = [m for m in inp[0]]
+          dl[i] = inp[0]
           i += 1
           continue
         elif uop is UOps.ENDLOOP:
