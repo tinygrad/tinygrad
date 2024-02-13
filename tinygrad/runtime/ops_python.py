@@ -74,7 +74,7 @@ class PythonProgram:
               for m,ox,oy,v in zip(inp[0], inp[1][0], inp[1][1], val):
                 assert ox >= 0 and ox < dtp[0].shape[1] and oy >= 0 and oy < dtp[0].shape[0]
                 _store(m, ox*4 + oy*dtp[0].shape[1]*4 + j, v)
-          elif dtp[2].sz > 1 and len(inp[2]) > 1:
+          elif dtp[2].sz > 1 and isinstance(inp[2][0], list):
             for j,val in enumerate(inp[2]):
               for m,o,v in zip(inp[0], inp[1], val): _store(m, o+j, v)
           else:
