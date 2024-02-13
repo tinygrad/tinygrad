@@ -126,7 +126,14 @@ class HSAAllocator(LRUAllocator):
     hsa.hsa_signal_wait_scacquire(copy_signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
     check(hsa.hsa_amd_memory_unlock(from_mv(dest)))
 
-  def transfer(self, dest:T, src:T, sz:int, src_dev=None, dest_dev=None): assert False
+  def transfer(self, dest:T, src:T, sz:int, src_dev=None, dest_dev=None):
+    copy_signal = dest_dev.alloc_signal(returnable=False)
+    sync_signal_1 = src_dev.hw_queue.submit_barrier(need_signal=True)
+    sync_signal_2 = dest_dev.hw_queue.submit_barrier(need_signal=True)
+    c_wait_signal = (hsa.hsa_signal_t*2)(sync_signal_1, sync_signal_2)
+    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_dev.agent, src, src_dev.agent, sz, 2, c_wait_signal, copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True))
+    src_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
+    dest_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
 
 class HSADevice(Compiled):
   cpu_agent = None
