@@ -16,7 +16,7 @@ def exec_alu(arg, dtype, p):
   if arg == TernaryOps.MULACC: return p[0]*p[1]+p[2]
   if arg == TernaryOps.WHERE: return p[1] if p[0] else p[2]
   if arg == UnaryOps.LOG2: return math.log2(p[0]) if p[0] > 0 else math.nan
-  if arg == UnaryOps.EXP2: return math.exp(p[0]*math.log(2))
+  if arg == UnaryOps.EXP2: return math.exp(p[0]*math.log(2)) if p[0] < 1024 else math.inf
   if arg == UnaryOps.SQRT: return math.sqrt(p[0]) if p[0] > 0 else math.nan
   if arg == UnaryOps.SIN: return math.sin(p[0])
   if arg == UnaryOps.NEG: return -p[0]
