@@ -38,6 +38,7 @@ class HWQueue:
     self.write_addr_end = self.hw_queue.contents.base_address + (AQL_PACKET_SIZE * self.queue_size) - 1
     self.available_packet_slots = self.queue_size
 
+    check(hsa.hsa_amd_queue_set_priority(self.hw_queue, hsa.HSA_AMD_QUEUE_PRIORITY_HIGH))
     check(hsa.hsa_amd_profiling_set_profiler_enabled(self.hw_queue, 1))
 
   def __del__(self):
@@ -76,7 +77,7 @@ class HWQueue:
     packet.reserved0 = 0
     packet.reserved1 = 0
     for i in range(5):
-      packet.dep_signal[i] = wait_signals.pop() if wait_signals and len(wait_signals) > 0 else EMPTY_SIGNAL
+      packet.dep_signal[i] = wait_signals[i] if wait_signals and len(wait_signals) > i else EMPTY_SIGNAL
     packet.reserved2 = 0
     packet.completion_signal = signal
     packet.header = BARRIER_HEADER
@@ -132,7 +133,7 @@ def find_memory_pool(agent, segtyp=-1, flags=-1, location=-1):
     if location >= 0 and loc.value != location: return hsa.HSA_STATUS_SUCCESS
 
     check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_SIZE, ctypes.byref(sz := ctypes.c_size_t())))
-    if sz == 0: return hsa.HSA_STATUS_SUCCESS
+    if sz.value == 0: return hsa.HSA_STATUS_SUCCESS
 
     ret = ctypes.cast(data, ctypes.POINTER(hsa.hsa_amd_memory_pool_t))
     ret[0] = mem_pool

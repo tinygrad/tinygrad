@@ -75,11 +75,13 @@ class HSAAllocator(LRUAllocator):
     copy_signal = self.device.alloc_signal(reusable=True)
     sync_signal = self.device.hw_queue.submit_barrier(need_signal=True)
     c_agents = (hsa.hsa_agent_t*2)(*[HSADevice.cpu_agent, self.device.agent])
-    check(hsa.hsa_amd_memory_lock_to_pool(from_mv(src), src.nbytes, c_agents, 2, HSADevice.cpu_mempool, 0, ctypes.byref(addr:=ctypes.c_void_p())))
-    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, addr, HSADevice.cpu_agent, src.nbytes,
+    check(hsa.hsa_amd_memory_pool_allocate(HSADevice.cpu_mempool, src.nbytes, 0, ctypes.byref(mem := ctypes.c_void_p())))
+    check(hsa.hsa_amd_agents_allow_access(2, c_agents, None, mem))
+    ctypes.memmove(mem, from_mv(src), src.nbytes)
+    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, mem, HSADevice.cpu_agent, src.nbytes,
                                                   1, ctypes.byref(sync_signal), copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True))
     self.device.hw_queue.submit_barrier(wait_signals=[copy_signal])
-    self.device.pending_copyin.append(src)
+    self.device.delayed_free.append(mem)
 
   def copy_from_fd(self, dest, fd, offset, size):
     sync_signal = self.device.hw_queue.submit_barrier(need_signal=True)
@@ -99,23 +101,29 @@ class HSAAllocator(LRUAllocator):
     fo = io.FileIO(fd, "a+b", closefd=False)
     fo.seek(offset - (minor_offset:=offset % PAGE_SIZE))
 
+    copies_called = 0
     copied_in = 0
     for local_offset in range(0, size+minor_offset, CHUNK_SIZE):
-      hsa.hsa_signal_wait_scacquire(self.hb_signals[self.hb_polarity], hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
-      hsa.hsa_signal_store_relaxed(self.hb_signals[self.hb_polarity], 1)
-
       local_size = min(round_up(size+minor_offset, PAGE_SIZE)-local_offset, CHUNK_SIZE)
-      fo.readinto(to_mv(self.hb[self.hb_polarity], local_size))
-
       copy_size = min(local_size-minor_offset, size-copied_in)
+      if copy_size == 0: break
+
+      hsa.hsa_signal_wait_scacquire(self.hb_signals[self.hb_polarity], hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
+      self.device.reusable_signals.append(self.hb_signals[self.hb_polarity]) # it's free now and can be reused
+      self.hb_signals[self.hb_polarity] = self.device.alloc_signal(reusable=False)
+
+      fo.readinto(to_mv(self.hb[self.hb_polarity], local_size))
       check(hsa.hsa_amd_memory_async_copy_on_engine(dest+copied_in, self.device.agent, self.hb[self.hb_polarity]+minor_offset, HSADevice.cpu_agent,
                                                     copy_size, 1, ctypes.byref(sync_signal), self.hb_signals[self.hb_polarity],
                                                     self.sdma[self.hb_polarity], True))
       copied_in += copy_size
-      self.hb_polarity = (self.hb_polarity+1) % len(self.hb)
+      self.hb_polarity = (self.hb_polarity + 1) % len(self.hb)
       minor_offset = 0 # only on the first
+      copies_called += 1
 
-    self.device.hw_queue.submit_barrier(wait_signals=[self.hb_signals[(self.hb_polarity-1)%len(self.hb)]])
+    wait_signals = [self.hb_signals[self.hb_polarity - 1]]
+    if copies_called > 1: wait_signals.append(self.hb_signals[self.hb_polarity])
+    self.device.hw_queue.submit_barrier(wait_signals=wait_signals)
 
   def copyout(self, dest:memoryview, src:T):
     self.device.synchronize()
@@ -165,7 +173,6 @@ class HSADevice(Compiled):
 
     self.delayed_free: List[ctypes.c_void_p] = []
     self.signal_pool: List[hsa.hsa_signal_t] = []
-    self.pending_copyin: List[memoryview] = []
     self.reusable_signals: List[hsa.hsa_signal_t] = []
     for _ in range(4096):
       check(hsa.hsa_amd_signal_create(1, 0, None, 0, ctypes.byref(signal := hsa.hsa_signal_t())))
@@ -176,10 +183,7 @@ class HSADevice(Compiled):
   def synchronize(self):
     self.hw_queue.wait()
 
-    for opaque in self.pending_copyin: check(hsa.hsa_amd_memory_unlock(from_mv(opaque)))
-    self.pending_copyin.clear()
-
-    for sig in self.reusable_signals: hsa.hsa_signal_store_relaxed(sig, 1)
+    for sig in self.reusable_signals: hsa.hsa_signal_silent_store_relaxed(sig, 1)
     self.signal_pool.extend(self.reusable_signals)
     self.reusable_signals.clear()
 
@@ -192,7 +196,7 @@ class HSADevice(Compiled):
     if len(self.signal_pool): signal = self.signal_pool.pop()
     else: check(hsa.hsa_amd_signal_create(1, 0, None, 0, ctypes.byref(signal := hsa.hsa_signal_t())))
 
-    # returable means a signal could be reused after synchronize for the device it's allocated from is called.
+    # reusable means a signal could be reused after synchronize for the device it's allocated from is called.
     if reusable: self.reusable_signals.append(signal)
     return signal
 
