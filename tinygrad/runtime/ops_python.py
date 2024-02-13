@@ -76,6 +76,8 @@ class PythonProgram:
               for m,o,v in zip(inp[0], inp[1], val): _store(m, o+j, v)
           else:
             for m,o,v in zip(*inp): _store(m, o, v)
+            ul[i] = [inp[2][0]] * warp_size
+            dl[i] = [m for m in inp[0]]
           i += 1
           continue
         elif uop is UOps.ENDLOOP:
@@ -84,6 +86,22 @@ class PythonProgram:
           continue
         elif uop is UOps.BARRIER:
           # in the python emulator, the warp is always in sync
+          ul[i] = ul[i - 1]
+          dl[i] = dl[i - 1]
+          i += 1
+          continue
+        elif uop is UOps.IF:
+          ul[i] = ul[i - 1]
+          dl[i] = dl[i - 1]
+          if any(inp[0]):
+            i += 1
+          else:
+            while True:
+              if self.uops[i][0] is UOps.ENDIF:
+                break
+              i += 1
+          continue
+        elif uop is UOps.ENDIF:
           i += 1
           continue
         assert dtype is not None, f"{uop} is missing a dtype"
