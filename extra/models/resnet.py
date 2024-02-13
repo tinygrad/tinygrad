@@ -36,7 +36,7 @@ BatchNorm = nn.BatchNorm2d if getenv("BNSYNC", 0) else UnsyncedBatchNorm
 
 # rejection sampling truncated randn
 def randn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
-  CNT=20
+  CNT=8
   x = Tensor.randn(*(*shape, CNT), dtype=dtype, **kwargs)
   ctr = Tensor.arange(CNT).reshape((1,) * len(x.shape[:-1]) + (CNT,)).expand(x.shape)
   take = (x.abs() <= truncstds).where(ctr, CNT).min(axis=-1, keepdim=True)  # set to 0 if no good samples
