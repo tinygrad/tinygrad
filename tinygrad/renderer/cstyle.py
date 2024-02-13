@@ -20,7 +20,6 @@ class CStyleLanguage(NamedTuple):
   local_max: List[int] = []
   extra_args: List[str] = []
   float4: Optional[str] = None
-  half_prekernel: Optional[str] = None
   uses_vload: bool = False
   uses_ptr_arithmetic: bool = False
   launch_bounds: bool = False
@@ -192,10 +191,7 @@ class OpenCLLanguage(CStyleLanguage):
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
 class MetalLanguage(CStyleLanguage):
-  kernel_prefix = """#include <metal_stdlib>\nusing namespace metal;\ntemplate<typename T, typename S, typename U> U __metal_wmma(T m, T n, U o) {
-  S a,b,c; a.thread_elements()[0] = m.x; a.thread_elements()[1] = m.y; b.thread_elements()[0] = n.x; b.thread_elements()[1] = n.y;
-  c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
-  return U(c.thread_elements()[0], c.thread_elements()[1]);\n}\nkernel """
+  kernel_prefix = "kernel "
   buffer_prefix = "device "
   smem_prefix = "threadgroup "
   arg_int_prefix = "constant int&"
@@ -206,6 +202,12 @@ class MetalLanguage(CStyleLanguage):
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
     return f"as_type<{var_dtype.name}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
+  def render_kernel(self, *args, prefix=["#include <metal_stdlib>","using namespace metal;"]) -> str:
+    if any(uop.uop == UOps.WMMA for uop in args[4]): prefix.append("""template<typename T, typename S, typename U> U __metal_wmma(T m, T n, U o) {
+    S a,b,c; a.thread_elements()[0] = m.x; a.thread_elements()[1] = m.y; b.thread_elements()[0] = n.x; b.thread_elements()[1] = n.y;
+    c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
+    return U(c.thread_elements()[0], c.thread_elements()[1]);\n}""")
+    return super().render_kernel(*args, prefix=prefix)
 MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 
 code_for_op_half = {
@@ -225,10 +227,6 @@ class CUDALanguage(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+x)}", "l": lambda x: f"threadIdx.{chr(120+x)}",
                        "i": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
-  half_prekernel = "#include <cuda_fp16.h>\n"+"#include <cuda_bf16.h>\n"+"""
-    struct half4 { half x, y, z, w; };
-    __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
-  """
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
   def render_kernel(self, *args, prefix=["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]):
     if any(dt == dtypes.half for _, dt in args[2]):
