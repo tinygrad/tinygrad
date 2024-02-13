@@ -46,6 +46,8 @@ jobs:
       run: |
         DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
         DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
+    - name: Test ops (Python)
+      run: PYTHON=1 python3 ./test/test_ops.py
 
   linter:
     name: Linters
