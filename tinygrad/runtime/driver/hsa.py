@@ -28,7 +28,7 @@ class HWQueue:
     check(hsa.hsa_agent_get_info(self.device.agent, hsa.HSA_AGENT_INFO_QUEUE_MAX_SIZE, ctypes.byref(max_queue_size := ctypes.c_uint32())))
     queue_size = min(max_queue_size.value, sz) if sz != -1 else max_queue_size.value
 
-    null_func = ctypes.CFUNCTYPE(None, hsa.hsa_status_t, ctypes.POINTER(hsa.struct_hsa_queue_s), ctypes.POINTER(None))()
+    null_func = ctypes.CFUNCTYPE(None, hsa.hsa_status_t, ctypes.POINTER(hsa.struct_hsa_queue_s), ctypes.c_void_p)()
     self.hw_queue = init_c_var(ctypes.POINTER(hsa.hsa_queue_t)(), lambda x: check(
       hsa.hsa_queue_create(self.device.agent, queue_size, hsa.HSA_QUEUE_TYPE_SINGLE, null_func, None, (1<<32)-1, (1<<32)-1, ctypes.byref(x))))
 
@@ -42,7 +42,7 @@ class HWQueue:
     if hasattr(self, 'hw_queue'): check(hsa.hsa_queue_destroy(self.hw_queue))
 
   def submit_kernel(self, prg, global_size, local_size, kernargs, need_signal=False):
-    signal = self.device.alloc_signal(returnable=True) if need_signal else EMPTY_SIGNAL
+    signal = self.device.alloc_signal(reusable=True) if need_signal else EMPTY_SIGNAL
 
     packet = hsa.hsa_kernel_dispatch_packet_t.from_address(self.write_addr)
     packet.workgroup_size_x = local_size[0]
@@ -71,7 +71,7 @@ class HWQueue:
 
   def submit_barrier(self, wait_signals=None, need_signal=False):
     assert wait_signals is None or len(wait_signals) < 5
-    signal = self.device.alloc_signal(returnable=True) if need_signal else EMPTY_SIGNAL
+    signal = self.device.alloc_signal(reusable=True) if need_signal else EMPTY_SIGNAL
 
     packet = hsa.hsa_barrier_and_packet_t.from_address(self.write_addr)
     packet.reserved0 = 0
@@ -118,10 +118,10 @@ def find_memory_pool(agent, segtyp=-1, flags=-1, location=-1):
     check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_SEGMENT, ctypes.byref(segment := hsa.hsa_amd_segment_t())))
     if segtyp >= 0 and segment.value != segtyp: return hsa.HSA_STATUS_SUCCESS
 
-    check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, ctypes.byref(fgs := hsa.hsa_amd_memory_pool_global_flag_t())))
+    check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, ctypes.byref(fgs := hsa.hsa_amd_memory_pool_global_flag_t()))) # noqa: E501
     if flags >= 0 and (fgs.value & flags) == flags: return hsa.HSA_STATUS_SUCCESS
 
-    check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_LOCATION, ctypes.byref(loc := hsa.hsa_amd_memory_pool_location_t())))
+    check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_LOCATION, ctypes.byref(loc:=hsa.hsa_amd_memory_pool_location_t())))
     if location >= 0 and loc.value != location: return hsa.HSA_STATUS_SUCCESS
 
     check(hsa.hsa_amd_memory_pool_get_info(mem_pool, hsa.HSA_AMD_MEMORY_POOL_INFO_SIZE, ctypes.byref(sz := ctypes.c_size_t())))

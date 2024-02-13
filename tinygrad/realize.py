@@ -37,7 +37,6 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
   if si.ast.op in {LoadOps.SYNC, LoadOps.WAIT} and si.out.device.startswith("HSA") and si.inputs[0].device.startswith("HSA"):
     # Our HSA runtime handles synchronization
     if si.ast.op is LoadOps.SYNC: return None
-    if si.ast.op is LoadOps.WAIT: return None
   if si.ast.op is LoadOps.COPY:
     if hasattr(Device[si.out.device].allocator, 'transfer') and type(Device[si.out.device]) is type(Device[si.inputs[0].device]): return BufferXfer()
     if si.inputs[0].device.startswith("DISK"): return BufferRead()

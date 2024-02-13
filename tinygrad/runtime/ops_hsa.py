@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, functools, subprocess, io, atexit
-from typing import Tuple, TypeVar
+from typing import Tuple, TypeVar, List
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.helpers import DEBUG, init_c_var
 from tinygrad.helpers import from_mv, round_up, to_mv, init_c_struct_t
@@ -72,26 +72,26 @@ class HSAAllocator(LRUAllocator):
 
   def copyin(self, dest:T, src: memoryview):
     # Async copyin sync model uses barriers on the main hw queue, since barriers are guaranteed to execute in order with all other packets.
-    copy_signal = self.device.alloc_signal(returnable=True)
+    copy_signal = self.device.alloc_signal(reusable=True)
     sync_signal = self.device.hw_queue.submit_barrier(need_signal=True)
     c_agents = (hsa.hsa_agent_t*2)(*[HSADevice.cpu_agent, self.device.agent])
-    check(hsa.hsa_amd_memory_lock_to_pool(from_mv(src), src.nbytes, c_agents, 2, HSADevice.cpu_mempool, 0, ctypes.byref(src_addr := ctypes.c_void_p())))
-    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, src_addr, HSADevice.cpu_agent, src.nbytes,
+    check(hsa.hsa_amd_memory_lock_to_pool(from_mv(src), src.nbytes, c_agents, 2, HSADevice.cpu_mempool, 0, ctypes.byref(addr:=ctypes.c_void_p())))
+    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, self.device.agent, addr, HSADevice.cpu_agent, src.nbytes,
                                                   1, ctypes.byref(sync_signal), copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True))
     self.device.hw_queue.submit_barrier(wait_signals=[copy_signal])
     self.device.pending_copyin.append(src)
 
-  def copy_from_fd(self, dest:T, fd, offset, size):
+  def copy_from_fd(self, dest, fd, offset, size):
     sync_signal = self.device.hw_queue.submit_barrier(need_signal=True)
 
     if not hasattr(self, 'hb'):
+      c_agents = (hsa.hsa_agent_t*2)(*[HSADevice.cpu_agent, self.device.agent])
       self.hb = []
       for _ in range(2):
-        c_agents = (hsa.hsa_agent_t*2)(HSADevice.cpu_agent, self.device.agent)
         check(hsa.hsa_amd_memory_pool_allocate(HSADevice.cpu_mempool, CHUNK_SIZE, 0, ctypes.byref(mem := ctypes.c_void_p())))
         check(hsa.hsa_amd_agents_allow_access(2, c_agents, None, mem))
         self.hb.append(mem.value)
-      self.hb_signals = [self.device.alloc_signal(returnable=False) for _ in range(2)]
+      self.hb_signals = [self.device.alloc_signal(reusable=False) for _ in range(2)]
       self.hb_polarity = 0
       self.sdma = [hsa.HSA_AMD_SDMA_ENGINE_0, hsa.HSA_AMD_SDMA_ENGINE_1]
       for sig in self.hb_signals: hsa.hsa_signal_store_relaxed(sig, 0)
@@ -109,8 +109,8 @@ class HSAAllocator(LRUAllocator):
 
       copy_size = min(local_size-minor_offset, size-copied_in)
       check(hsa.hsa_amd_memory_async_copy_on_engine(dest+copied_in, self.device.agent, self.hb[self.hb_polarity]+minor_offset, HSADevice.cpu_agent,
-                                                    copy_size, 1, ctypes.byref(sync_signal), self.hb_signals[self.hb_polarity], self.sdma[self.hb_polarity], True))
-
+                                                    copy_size, 1, ctypes.byref(sync_signal), self.hb_signals[self.hb_polarity],
+                                                    self.sdma[self.hb_polarity], True))
       copied_in += copy_size
       self.hb_polarity = (self.hb_polarity+1) % len(self.hb)
       minor_offset = 0 # only on the first
@@ -119,26 +119,26 @@ class HSAAllocator(LRUAllocator):
 
   def copyout(self, dest:memoryview, src:T):
     self.device.synchronize()
-    copy_signal = self.device.alloc_signal(returnable=True)
+    copy_signal = self.device.alloc_signal(reusable=True)
     c_agents = (hsa.hsa_agent_t*2)(*[HSADevice.cpu_agent, self.device.agent])
-    check(hsa.hsa_amd_memory_lock_to_pool(from_mv(dest), dest.nbytes, c_agents, 2, HSADevice.cpu_mempool, 0, ctypes.byref(addr := ctypes.c_void_p())))
+    check(hsa.hsa_amd_memory_lock_to_pool(from_mv(dest), dest.nbytes, c_agents, 2, HSADevice.cpu_mempool, 0, ctypes.byref(addr:=ctypes.c_void_p())))
     check(hsa.hsa_amd_memory_async_copy(addr, HSADevice.cpu_agent, src, self.device.agent, dest.nbytes, 0, None, copy_signal))
     hsa.hsa_signal_wait_scacquire(copy_signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
     check(hsa.hsa_amd_memory_unlock(from_mv(dest)))
 
   def transfer(self, dest:T, src:T, sz:int, src_dev=None, dest_dev=None):
-    copy_signal = dest_dev.alloc_signal(returnable=False)
+    copy_signal = dest_dev.alloc_signal(reusable=False)
     sync_signal_1 = src_dev.hw_queue.submit_barrier(need_signal=True)
     sync_signal_2 = dest_dev.hw_queue.submit_barrier(need_signal=True)
     c_wait_signal = (hsa.hsa_signal_t*2)(sync_signal_1, sync_signal_2)
-    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_dev.agent, src, src_dev.agent, sz, 2, c_wait_signal, copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True))
+    check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_dev.agent, src, src_dev.agent, sz, 2, c_wait_signal, copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True)) # noqa: E501
     src_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
     dest_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
 
 class HSADevice(Compiled):
   cpu_agent = None
   cpu_mempool = None
-  devices = []
+  devices: List[HSADevice] = []
   def __init__(self, device:str=""):
     if not HSADevice.cpu_agent:
       check(hsa.hsa_init())
@@ -157,16 +157,16 @@ class HSADevice(Compiled):
     self.arch = ctypes.string_at(agent_name_buf).decode()
 
     check(hsa.hsa_system_get_info(hsa.HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, ctypes.byref(gpu_freq := ctypes.c_uint64())))
-    self.clocks_to_time = 1 / gpu_freq.value
+    self.clocks_to_time: float = 1 / gpu_freq.value
 
     self.kernarg_pool_sz = 16 << 20
-    self.kernarg_start_addr = init_c_var(ctypes.c_void_p(), lambda x: check(hsa.hsa_amd_memory_pool_allocate(self.kernargs_pool, self.kernarg_pool_sz, 0, ctypes.byref(x)))).value
+    self.kernarg_start_addr = init_c_var(ctypes.c_void_p(), lambda x: check(hsa.hsa_amd_memory_pool_allocate(self.kernargs_pool, self.kernarg_pool_sz, 0, ctypes.byref(x)))).value # noqa: E501
     self.kernarg_next_addr = self.kernarg_start_addr
 
-    self.delayed_free = []
-    self.signal_pool = []
-    self.pending_copyin = []
-    self.returnable_signals = []
+    self.delayed_free: List[ctypes.c_void_p] = []
+    self.signal_pool: List[hsa.hsa_signal_t] = []
+    self.pending_copyin: List[memoryview] = []
+    self.reusable_signals: List[hsa.hsa_signal_t] = []
     for _ in range(4096):
       check(hsa.hsa_amd_signal_create(1, 0, None, 0, ctypes.byref(signal := hsa.hsa_signal_t())))
       self.signal_pool.append(signal)
@@ -179,28 +179,28 @@ class HSADevice(Compiled):
     for opaque in self.pending_copyin: check(hsa.hsa_amd_memory_unlock(from_mv(opaque)))
     self.pending_copyin.clear()
 
-    for sig in self.returnable_signals: hsa.hsa_signal_store_relaxed(sig, 1)
-    self.signal_pool.extend(self.returnable_signals)
-    self.returnable_signals.clear()
+    for sig in self.reusable_signals: hsa.hsa_signal_store_relaxed(sig, 1)
+    self.signal_pool.extend(self.reusable_signals)
+    self.reusable_signals.clear()
 
-    for opaque in self.delayed_free: check(hsa.hsa_amd_memory_pool_free(opaque))
+    for opaque_to_free in self.delayed_free: check(hsa.hsa_amd_memory_pool_free(opaque_to_free))
     self.delayed_free.clear()
 
     self.kernarg_next_addr = self.kernarg_start_addr
 
-  def alloc_signal(self, returnable=False):
+  def alloc_signal(self, reusable=False):
     if len(self.signal_pool): signal = self.signal_pool.pop()
     else: check(hsa.hsa_amd_signal_create(1, 0, None, 0, ctypes.byref(signal := hsa.hsa_signal_t())))
 
     # returable means a signal could be reused after synchronize for the device it's allocated from is called.
-    if returnable: self.returnable_signals.append(signal)
+    if reusable: self.reusable_signals.append(signal)
     return signal
 
   def alloc_kernargs(self, sz):
     if self.kernarg_next_addr > self.kernarg_start_addr + self.kernarg_pool_sz:
       self.delayed_free.append(self.kernarg_start_addr)
       self.kernarg_pool_sz = int(self.kernarg_pool_sz * 2)
-      self.kernarg_start_addr = init_c_var(ctypes.c_void_p(), lambda x: check(hsa.hsa_amd_memory_pool_allocate(self.kernargs_pool, self.kernarg_pool_sz, 0, ctypes.byref(x)))).value
+      self.kernarg_start_addr = init_c_var(ctypes.c_void_p(), lambda x: check(hsa.hsa_amd_memory_pool_allocate(self.kernargs_pool, self.kernarg_pool_sz, 0, ctypes.byref(x)))).value # noqa: E501
       self.kernarg_next_addr = self.kernarg_start_addr
 
     result = self.kernarg_next_addr
