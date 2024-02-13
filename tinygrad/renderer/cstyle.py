@@ -61,7 +61,7 @@ class CStyleLanguage(NamedTuple):
       out_val = f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
     return self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val
 
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], uops: List[UOp], prefix=[]) -> str:
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], uops:List[UOp], prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""  # noqa: E501
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
                 ("const " if i > 0 else "")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
@@ -69,7 +69,7 @@ class CStyleLanguage(NamedTuple):
     prg = ''.join([f"{self.kernel_prefix}void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
-    prg = "\n".join(dedup(prefix)) + f"\n{prg}"
+    if prefix is not None: prg = "\n".join(dedup(prefix)) + f"\n{prg}"
     return prg
 
   # returns a str statement that does the store
@@ -185,9 +185,10 @@ class OpenCLLanguage(CStyleLanguage):
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
     return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
-  def render_kernel(self, *args, prefix=[]) -> str:
-    if any(dt == dtypes.half for _, dt in args[2]): prefix.append("#pragma OPENCL EXTENSION cl_khr_fp16 : enable")
-    return super().render_kernel(*args, prefix=prefix)
+
+  def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None) -> str:
+    if any(dt == dtypes.half for _, dt in bufs): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
+    return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix)
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
 class MetalLanguage(CStyleLanguage):
@@ -202,12 +203,14 @@ class MetalLanguage(CStyleLanguage):
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
     return f"as_type<{var_dtype.name}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
-  def render_kernel(self, *args, prefix=["#include <metal_stdlib>","using namespace metal;"]) -> str:
-    if any(uop.uop == UOps.WMMA for uop in args[4]): prefix.append("""template<typename T, typename S, typename U> U __metal_wmma(T m, T n, U o) {
+
+  def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None):
+    prefix = ["#include <metal_stdlib>","using namespace metal;"]
+    if any(uop.uop == UOps.WMMA for uop in uops): prefix.append("""template<typename T, typename S, typename U> U __metal_wmma(T m, T n, U o) {
     S a,b,c; a.thread_elements()[0] = m.x; a.thread_elements()[1] = m.y; b.thread_elements()[0] = n.x; b.thread_elements()[1] = n.y;
     c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
     return U(c.thread_elements()[0], c.thread_elements()[1]);\n}""")
-    return super().render_kernel(*args, prefix=prefix)
+    return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix)
 MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 
 code_for_op_half = {
@@ -228,12 +231,13 @@ class CUDALanguage(CStyleLanguage):
                        "i": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
-  def render_kernel(self, *args, prefix=["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]):
-    if any(dt == dtypes.half for _, dt in args[2]):
+  def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None):
+    prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
+    if any(dt == dtypes.half for _, dt in bufs):
       prefix += ["#include <cuda_fp16.h>", "struct half4 { half x, y, z, w; };",
-                 "__device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }"]
-    if any(dt == dtypes.bfloat16 for _, dt in args[2]): prefix.append("#include <cuda_bf16.h>")
-    return super().render_kernel(*args, prefix=prefix)
+      "__device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }"]
+    if any(dt == dtypes.bfloat16 for _, dt in bufs): prefix.append("#include <cuda_bf16.h>")
+    return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix=prefix)
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 code_for_op_hip = {
@@ -271,7 +275,9 @@ class HIPLanguage(CStyleLanguage):
   launch_bounds = True
   uses_ptr_arithmetic = True
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
-  def render_kernel(self, *args, prefix=['#include <hip/hip_common.h>', '#define INFINITY (__builtin_inff())', '#define NAN (__builtin_nanf(""))']):
+
+  def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None):
+    prefix = ['#include <hip/hip_common.h>', '#define INFINITY (__builtin_inff())', '#define NAN (__builtin_nanf(""))']
     prefix.append("""#define launch_bounds_impl0(requiredMaxThreadsPerBlock)\
 __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock)))
 #define launch_bounds_impl1(requiredMaxThreadsPerBlock, minBlocksPerMultiprocessor)\
@@ -281,17 +287,17 @@ __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock), amdgp
     prefix.append("typedef long unsigned int size_t;")
     for fn in ["local_id", "group_id", "local_size"]:
       prefix.append(f'extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_{fn}(unsigned int);')
-    if any(dt == dtypes.float for _, dt in args[2]): prefix += [_make_hip_dtype("float","float",sz) for sz in [2,4,8]]
-    if any(dt == dtypes.int for _, dt in args[2]): prefix.append(_make_hip_dtype("signed int", "int", 2))
-    if any(dt == dtypes.half for _, dt in args[2]): prefix += ["#define half _Float16", *[_make_hip_dtype("_Float16","half",sz) for sz in [2,4,8,16]]]
-    if any(dt == dtypes.bfloat16 for _, dt in args[2]): prefix.append("struct hip_bfloat16 { unsigned short data; };")
-    for uop in args[4]:
+    prefix += [_make_hip_dtype("float","float",sz) for sz in [2,4,8]]
+    if any(dt == dtypes.int for _, dt in bufs): prefix.append(_make_hip_dtype("signed int", "int", 2))
+    if any(dt == dtypes.half for _, dt in bufs): prefix += ["#define half _Float16", *[_make_hip_dtype("_Float16","half",sz) for sz in [2,4,8,16]]]
+    if any(dt == dtypes.bfloat16 for _, dt in bufs): prefix.append("struct hip_bfloat16 { unsigned short data; };")
+    for uop in uops:
       if uop.uop == UOps.ALU and uop.arg in def_for_op_hip.keys():
         prefix.append('extern "C" __attribute__((device))' + def_for_op_hip[uop.arg](uop.dtype))
-    if any(uop.uop == UOps.WMMA for uop in args[4]): prefix.append(
+    if any(uop.uop == UOps.WMMA for uop in uops): prefix.append(
     """static __attribute__((device)) half8 __hip_wmma_f16_f16(half16 a, half16 b, half8 c) {
       half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
       c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
       for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
-    return super().render_kernel(*args, prefix=prefix)
+    return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix=prefix)
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
