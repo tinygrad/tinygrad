@@ -76,12 +76,13 @@ class PythonProgram:
               for j, val in enumerate(inp[2]):
                 for m,o,v in zip(inp[0], inp[1], val): _store(m, o+j, v)
             else:
-              for m,o,v in zip(inp[0], inp[1], inp[2]): _store(m, o, v)
+              for m,o,v in zip(inp[0], inp[1], inp[2]):
+                for j in range(dtp[2].sz):
+                  _store(m, o+j, v)
           else:
-            for m,o,v in zip(*inp): _store(m, o, v)
-          # ul[i] = [inp[2][0]] * warp_size
+            for m,o,v in zip(*inp):
+              _store(m, o, v)
           ul[i] = inp[2]
-          # dl[i] = [m for m in inp[0]]
           dl[i] = inp[0]
           i += 1
           continue
