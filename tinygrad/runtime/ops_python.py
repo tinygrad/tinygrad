@@ -136,6 +136,8 @@ class PythonProgram:
             for j in range(len(ul[i])):
               ul[i][j] += 1
             if ul[i][0] == inp[1][0]:
+              # Handle loop in loop, reset counter when exiting the loop
+              del ul[i]
               i = loop_ends[i] + 1
               continue
         elif uop is UOps.CAST:
