@@ -59,8 +59,8 @@ class PythonProgram:
       loop_ends: Dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        inp = [ul[v] for v in idp]
-        dtp = [dl[v] for v in idp]
+        inp = [ul[v] for v in idp if self.uops[v][0] not in [UOps.STORE, UOps.ENDLOOP, UOps.BARRIER, UOps.IF, UOps.ENDIF]]
+        dtp = [dl[v] for v in idp if self.uops[v][0] not in [UOps.STORE, UOps.ENDLOOP, UOps.BARRIER, UOps.IF, UOps.ENDIF]]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
         if uop is UOps.STORE:
           assert len(inp) <= 3, "gated stores not supported yet"
@@ -77,13 +77,9 @@ class PythonProgram:
                 for m,o,v in zip(inp[0], inp[1], val): _store(m, o+j, v)
             else:
               for m,o,v in zip(inp[0], inp[1], inp[2]):
-                for j in range(dtp[2].sz):
-                  _store(m, o+j, v)
+                for j in range(dtp[2].sz): _store(m, o+j, v)
           else:
-            for m,o,v in zip(*inp):
-              _store(m, o, v)
-          ul[i] = inp[2]
-          dl[i] = inp[0]
+            for m,o,v in zip(*inp): _store(m, o, v)
           i += 1
           continue
         elif uop is UOps.ENDLOOP:
@@ -92,19 +88,14 @@ class PythonProgram:
           continue
         elif uop is UOps.BARRIER:
           # in the python emulator, the warp is always in sync
-          ul[i] = ul[i - 1]
-          dl[i] = dl[i - 1]
           i += 1
           continue
         elif uop is UOps.IF:
-          ul[i] = ul[i - 1]
-          dl[i] = dl[i - 1]
-          if any(inp[0]):
+          if any(inp[0]): # not sure, could it be simply inp[0][0]?
             i += 1
           else:
             while True:
-              if self.uops[i][0] is UOps.ENDIF:
-                break
+              if self.uops[i][0] is UOps.ENDIF: break
               i += 1
           continue
         elif uop is UOps.ENDIF:
