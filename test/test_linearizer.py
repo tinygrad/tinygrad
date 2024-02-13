@@ -526,9 +526,28 @@ class TestLinearizerOpts(unittest.TestCase):
        Opt(OptOps.UPCAST, 0, 2)], # No globals
     ])
 
+  def test_invalid_tensor_core_extra_opts(self):
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_tensor_cores:
+      self.skipTest("device doesn't have tensor cores")
+    if Device.DEFAULT not in tensor_cores:
+      self.skipTest("No tensor cores for device")
+
+    N = 128
+    Tensor.manual_seed(1552)
+    a = Tensor.rand(N, N)
+    b = Tensor.rand(N, N)
+    realized_ast, _ = helper_realized_ast(a@b)
+    invalid_opts = [
+      [Opt(OptOps.LOCAL, 2, 2)],
+      [Opt(OptOps.UPCAST, 2, 2)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 2, 2)],
+    ]
+    for x in invalid_opts:
+      k = Linearizer(realized_ast)
+      with self.assertRaises(AssertionError):
+        assert k.apply_tensor_cores(use_tensor_cores=1, extra_opts=x), "no valid tensor core" # for METAL in runners
+
   def test_tensor_core_opts(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local:
-      self.skipTest("Only Compiled uses linearizer with locals")
     if not Device[Device.DEFAULT].compiler.linearizer_opts.has_tensor_cores:
       self.skipTest("device doesn't have tensor cores")
     if Device.DEFAULT not in tensor_cores:
@@ -545,17 +564,18 @@ class TestLinearizerOpts(unittest.TestCase):
         [Opt(OptOps.UPCAST, 0, 4)],
         [Opt(OptOps.UPCAST, 1, 4)],
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
-        [Opt(OptOps.UNROLL, 0, 2)], # check last unroll
-        [Opt(OptOps.LASTLOCAL, 0, 4)], # check last local
-        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of last unroll and last local
+        [Opt(OptOps.UNROLL, 0, 2)], # check unroll
+        [Opt(OptOps.UNROLL, 0, 0)], # check full unroll of reduce with locals
+        [Opt(OptOps.LOCAL, 0, 4)], # check local
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of unroll and local
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2)],
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
-        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LASTLOCAL, 0, 2)],
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
         [Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4)], # check permutations
         [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4)],
         [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)],
-        [Opt(OptOps.LASTLOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
+        [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
         # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
       ], apply_tc=True, atol=atol, rtol=rtol)
 
