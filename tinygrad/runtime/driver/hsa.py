@@ -32,9 +32,11 @@ class HWQueue:
     self.hw_queue = init_c_var(ctypes.POINTER(hsa.hsa_queue_t)(), lambda x: check(
       hsa.hsa_queue_create(self.device.agent, queue_size, hsa.HSA_QUEUE_TYPE_SINGLE, null_func, None, (1<<32)-1, (1<<32)-1, ctypes.byref(x))))
 
+    self.next_doorbell_index = 0
+    self.queue_size = self.hw_queue.contents.size
     self.write_addr = self.hw_queue.contents.base_address
-    self.write_addr_end = self.hw_queue.contents.base_address + (64 * self.hw_queue.contents.size) - 1
-    self.next_doorbell_index = -1
+    self.write_addr_end = self.hw_queue.contents.base_address + (AQL_PACKET_SIZE * self.queue_size) - 1
+    self.available_packet_slots = self.queue_size
 
     check(hsa.hsa_amd_profiling_set_profiler_enabled(self.hw_queue, 1))
 
@@ -42,6 +44,7 @@ class HWQueue:
     if hasattr(self, 'hw_queue'): check(hsa.hsa_queue_destroy(self.hw_queue))
 
   def submit_kernel(self, prg, global_size, local_size, kernargs, need_signal=False):
+    if self.available_packet_slots == 0: self._wait_queue()
     signal = self.device.alloc_signal(reusable=True) if need_signal else EMPTY_SIGNAL
 
     packet = hsa.hsa_kernel_dispatch_packet_t.from_address(self.write_addr)
@@ -60,42 +63,46 @@ class HWQueue:
     packet.completion_signal = signal
     packet.setup = DISPATCH_KERNEL_SETUP
     packet.header = DISPATCH_KERNEL_HEADER
+    self._submit_packet()
 
-    self.next_doorbell_index += 1
-    self.write_addr += AQL_PACKET_SIZE
-    if self.write_addr > self.write_addr_end: self.write_addr = self.hw_queue.contents.base_address
-
-    hsa.hsa_queue_store_write_index_relaxed(self.hw_queue, self.next_doorbell_index + 1)
-    hsa.hsa_signal_store_screlease(self.hw_queue.contents.doorbell_signal, self.next_doorbell_index)
     return signal
 
   def submit_barrier(self, wait_signals=None, need_signal=False):
     assert wait_signals is None or len(wait_signals) < 5
+    if self.available_packet_slots == 0: self._wait_queue()
     signal = self.device.alloc_signal(reusable=True) if need_signal else EMPTY_SIGNAL
 
     packet = hsa.hsa_barrier_and_packet_t.from_address(self.write_addr)
     packet.reserved0 = 0
     packet.reserved1 = 0
-    packet.dep_signal[0] = wait_signals.pop() if wait_signals and len(wait_signals) > 0 else EMPTY_SIGNAL
-    packet.dep_signal[1] = wait_signals.pop() if wait_signals and len(wait_signals) > 0 else EMPTY_SIGNAL
-    packet.dep_signal[2] = wait_signals.pop() if wait_signals and len(wait_signals) > 0 else EMPTY_SIGNAL
-    packet.dep_signal[3] = wait_signals.pop() if wait_signals and len(wait_signals) > 0 else EMPTY_SIGNAL
-    packet.dep_signal[4] = wait_signals.pop() if wait_signals and len(wait_signals) > 0 else EMPTY_SIGNAL
+    for i in range(5):
+      packet.dep_signal[i] = wait_signals.pop() if wait_signals and len(wait_signals) > 0 else EMPTY_SIGNAL
     packet.reserved2 = 0
     packet.completion_signal = signal
     packet.header = BARRIER_HEADER
+    self._submit_packet()
 
-    self.next_doorbell_index += 1
-    self.write_addr += AQL_PACKET_SIZE
-    if self.write_addr > self.write_addr_end: self.write_addr = self.hw_queue.contents.base_address
-
-    hsa.hsa_queue_store_write_index_relaxed(self.hw_queue, self.next_doorbell_index + 1)
-    hsa.hsa_signal_store_screlease(self.hw_queue.contents.doorbell_signal, self.next_doorbell_index)
     return signal
 
   def wait(self):
     signal = self.submit_barrier(need_signal=True)
     hsa.hsa_signal_wait_scacquire(signal, hsa.HSA_SIGNAL_CONDITION_LT, 1, (1 << 64) - 1, hsa.HSA_WAIT_STATE_ACTIVE)
+    self.available_packet_slots = self.queue_size
+
+  def _wait_queue(self):
+    while self.available_packet_slots == 0:
+      rindex = hsa.hsa_queue_load_read_index_relaxed(self.hw_queue)
+      self.available_packet_slots = self.queue_size - (self.next_doorbell_index - rindex)
+
+  def _submit_packet(self):
+    hsa.hsa_queue_store_write_index_relaxed(self.hw_queue, self.next_doorbell_index + 1)
+    hsa.hsa_signal_store_screlease(self.hw_queue.contents.doorbell_signal, self.next_doorbell_index)
+
+    self.write_addr += AQL_PACKET_SIZE
+    if self.write_addr > self.write_addr_end: self.write_addr = self.hw_queue.contents.base_address
+    self.next_doorbell_index += 1
+    self.available_packet_slots -= 1
+
 
 def find_agent(typ, device_id):
   @ctypes.CFUNCTYPE(hsa.hsa_status_t, hsa.hsa_agent_t, ctypes.c_void_p)

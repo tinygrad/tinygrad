@@ -197,7 +197,7 @@ class HSADevice(Compiled):
     return signal
 
   def alloc_kernargs(self, sz):
-    if self.kernarg_next_addr > self.kernarg_start_addr + self.kernarg_pool_sz:
+    if self.kernarg_next_addr + sz >= self.kernarg_start_addr + self.kernarg_pool_sz:
       self.delayed_free.append(self.kernarg_start_addr)
       self.kernarg_pool_sz = int(self.kernarg_pool_sz * 2)
       self.kernarg_start_addr = init_c_var(ctypes.c_void_p(), lambda x: check(hsa.hsa_amd_memory_pool_allocate(self.kernargs_pool, self.kernarg_pool_sz, 0, ctypes.byref(x)))).value # noqa: E501
