@@ -33,12 +33,22 @@ class UnsyncedBatchNorm:
 
 BatchNorm = nn.BatchNorm2d if getenv("BNSYNC", 0) else UnsyncedBatchNorm
 
+
+# rejection sampling truncated randn
+def randn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
+  CNT=20
+  x = Tensor.randn(*(*shape, CNT), dtype=dtype, **kwargs)
+  ctr = Tensor.arange(CNT).reshape((1,) * len(x.shape[:-1]) + (CNT,)).expand(x.shape)
+  take = (x.abs() <= truncstds).where(ctr, CNT).min(axis=-1, keepdim=True)  # set to 0 if no good samples
+  return (ctr == take).where(x, 0).sum(axis=-1)
+
+
 class Conv2dHeNormal(nn.Conv2d):
   def initialize_weight(self, out_channels, in_channels, groups):
     # https://github.com/keras-team/keras/blob/v2.15.0/keras/initializers/initializers.py#L1026-L1065
     def he_normal(*shape, a: float = 0.00, **kwargs) -> Tensor:
       std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(argfix(*shape)[1:])) / 0.87962566103423978
-      return Tensor.normal(*shape, mean=0.0, std=std, **kwargs).clip(-2.0, 2.0)
+      return std * randn(*shape, **kwargs)
     return he_normal(out_channels, in_channels//groups, *self.kernel_size, a=0.0)
 class BasicBlock:
   expansion = 1
