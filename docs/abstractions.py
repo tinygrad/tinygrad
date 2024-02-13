@@ -250,7 +250,8 @@ result = Tensor(2.0).realize() + Tensor(3.0).realize()
 
 # use the real Linearizer to linearize 2+3
 from tinygrad.codegen.linearizer import Linearizer
-sched = result.lazydata.schedule()
+from tinygrad.realize import create_schedule
+sched = create_schedule([result.lazydata])
 linearizer = Linearizer(sched[-1].ast, ClangCompiler.linearizer_opts)
 linearizer.linearize()
 
@@ -277,7 +278,7 @@ result = Tensor(2.0) + Tensor(3.0)
 
 # we have a global cache used by the JIT
 # from there, we can see the generated clang code
-from tinygrad.jit import CacheCollector
+from tinygrad.features.jit import CacheCollector
 CacheCollector.start()       # enables the cache
 result.realize()             # create the program and runs it
 cache_saved = CacheCollector.finish()  # disable the cache

@@ -78,7 +78,7 @@ class PythonProgram:
             for m,o,v in zip(*inp): _store(m, o, v)
           i += 1
           continue
-        elif uop is UOps.END:
+        elif uop is UOps.ENDLOOP:
           loop_ends[idp[0]] = i
           i = idp[0]
           continue
