@@ -50,6 +50,13 @@ class Conv2dHeNormal(nn.Conv2d):
       std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(argfix(*shape)[1:])) / 0.87962566103423978
       return std * randn(*shape, **kwargs)
     return he_normal(out_channels, in_channels//groups, *self.kernel_size, a=0.0)
+
+class Linear(nn.Linear):
+  def initialize_weight(self, in_features, out_features):
+    return Tensor.normal((out_features, in_features), mean=0.0, std=0.01)
+  def initialize_bias(self, in_features, out_features):
+    return Tensor.zeros(out_features)
+
 class BasicBlock:
   expansion = 1
 
@@ -131,7 +138,7 @@ class ResNet:
     self.layer2 = self._make_layer(self.block, 128, self.num_blocks[1], stride=2, stride_in_1x1=stride_in_1x1)
     self.layer3 = self._make_layer(self.block, 256, self.num_blocks[2], stride=2, stride_in_1x1=stride_in_1x1)
     self.layer4 = self._make_layer(self.block, 512, self.num_blocks[3], stride=2, stride_in_1x1=stride_in_1x1)
-    self.fc = nn.Linear(512 * self.block.expansion, num_classes) if num_classes is not None else None
+    self.fc = Linear(512 * self.block.expansion, num_classes) if num_classes is not None else None
 
   def _make_layer(self, block, planes, num_blocks, stride, stride_in_1x1):
     strides = [stride] + [1] * (num_blocks-1)
