@@ -800,7 +800,7 @@ class Tensor:
       assert isinstance(y, (float, int, bool)), f"{type(y)=}, {y=}"
       if isinstance(self.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
       else: y_dtype = dtypes.from_py(y)
-      y = Tensor(cast_scalar(y, self.dtype), self.device, y_dtype, requires_grad=False)
+      y = Tensor(cast_scalar(y, y_dtype), self.device, y_dtype, requires_grad=False)
 
     if match_dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)
