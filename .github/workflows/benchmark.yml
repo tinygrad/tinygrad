@@ -16,6 +16,7 @@ jobs:
     if: github.repository_owner == 'tinygrad'
     env:
       PYTHONPATH: .
+      DISABLE_COMPILER_CACHE: 1
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
