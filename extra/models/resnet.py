@@ -31,7 +31,7 @@ class UnsyncedBatchNorm:
   # todo: hack, this make loading from weights work on 1 gpu...
   def __getattr__(self, item): return getattr(self.bns[0], item)
 
-BatchNorm = nn.BatchNorm2d if getenv("BNSYNC", 0) else UnsyncedBatchNorm
+BatchNorm = nn.BatchNorm2d if getenv("SYNCBN", 0) else UnsyncedBatchNorm
 
 
 # rejection sampling truncated randn
