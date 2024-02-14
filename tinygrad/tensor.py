@@ -6,7 +6,7 @@ from collections import defaultdict
 from functools import partialmethod, reduce
 import numpy as np
 
-from tinygrad.dtype import DType, dtypes, ImageDType, Scalar, least_upper_float, least_upper_dtype
+from tinygrad.dtype import DType, cast_scalar, dtypes, ImageDType, Scalar, least_upper_float, least_upper_dtype
 from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, WINO, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
@@ -818,7 +818,7 @@ class Tensor:
   def _to_const_val(self, x:Union[Tensor, Scalar]) -> Union[Tensor, Scalar]:
     # TODO: update with multi
     return x.lazydata.base.arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_contiguous_const() \
-      and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
+      and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x if isinstance(x, Tensor) else cast_scalar(x, self.dtype)
 
   def add(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
     x = self._to_const_val(x)
