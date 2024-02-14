@@ -3,7 +3,7 @@ start = time.perf_counter()
 from pathlib import Path
 import numpy as np
 from tinygrad import Tensor, Device, dtypes, GlobalCounters
-from tinygrad.jit import TinyJit
+from tinygrad.features.jit import TinyJit
 from tinygrad.nn.state import get_parameters, load_state_dict, safe_load
 from tinygrad.helpers import getenv, Timing
 from examples.mlperf import helpers
@@ -103,7 +103,7 @@ def eval_retinanet():
   coco_eval = COCOeval(coco, iouType="bbox")
   coco_evalimgs, evaluated_imgs, ncats, narea = [], [], len(coco_eval.params.catIds), len(coco_eval.params.areaRng)
 
-  from tinygrad.jit import TinyJit
+  from tinygrad.features.jit import TinyJit
   mdlrun = TinyJit(lambda x: mdl(input_fixup(x)).realize())
 
   n, bs = 0, 8

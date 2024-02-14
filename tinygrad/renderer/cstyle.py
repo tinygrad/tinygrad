@@ -20,7 +20,6 @@ class CStyleLanguage(NamedTuple):
   local_max: List[int] = []
   extra_args: List[str] = []
   float4: Optional[str] = None
-  half_prekernel: Optional[str] = None
   uses_vload: bool = False
   uses_ptr_arithmetic: bool = False
   launch_bounds: bool = False
@@ -62,7 +61,7 @@ class CStyleLanguage(NamedTuple):
       out_val = f"*({buf_name}+{idx})" if self.uses_ptr_arithmetic else f"{buf_name}[{idx}]"
     return self.render_cast([out_val], output_dtype) if output_dtype != buf_dtype else out_val
 
-  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int]) -> str:
+  def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], uops:List[UOp], prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""  # noqa: E501
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
                 ("const " if i > 0 else "")+self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
@@ -70,8 +69,7 @@ class CStyleLanguage(NamedTuple):
     prg = ''.join([f"{self.kernel_prefix}void {f'__launch_bounds__ ({prod(local_size)}, 1) ' if self.launch_bounds else ''}{function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
-    if self.half_prekernel and any(dtype in [dtypes.float16, dtypes.bfloat16] for _,dtype in bufs): prg = ''.join((self.half_prekernel, "\n", prg))
-    return prg
+    return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 
   # returns a str statement that does the store
   def render_store(self, buf_name:str, buf_dtype:DType, var_name:str, var_dtype:DType, idx:str, local=False) -> str:
@@ -108,26 +106,26 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
   for u in uops:
     uop,dtype,vin,args = u.uop,u.dtype,u.vin,u.arg
     # these four uops don't have output dtypes
-    if uop == UOps.IF:
+    if uop is UOps.IF:
       kk(f"if ({r[vin[0]]}) {{")
       depth += 1
-    elif uop == UOps.BARRIER: kk(lang.barrier)
-    elif uop == UOps.END:
+    elif uop is UOps.BARRIER: kk(lang.barrier)
+    elif uop in {UOps.ENDLOOP, UOps.ENDIF}:
       depth -= 1
       kk("}")
-    elif uop == UOps.STORE:
+    elif uop is UOps.STORE:
       assert vin[0].dtype is not None and vin[2].dtype is not None
       if len(vin) > 3: kk(f"if ({r[vin[3]]}) {{")
-      kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL))
+      kk(lang.render_store(r[vin[0]], vin[0].dtype, r[vin[2]], vin[2].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL))
       if len(vin) > 3: kk("}")
     else:
       assert dtype is not None, f"None dtype for uop {uop}"
-      if uop == UOps.LOOP:
+      if uop is UOps.LOOP:
         kk(f"for (int {(expr := ssa(u,'ridx'))} = {r[vin[0]]}; {expr} < {r[vin[1]]}; {expr}++) {{")
         depth += 1
-      elif uop == UOps.ALU:
+      elif uop is UOps.ALU:
         # remove parens if ALU types are the same. TODO: can do more here
-        if vin[0].uop == UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.XOR}:
+        if vin[0].uop is UOps.ALU and vin[0].arg == args and args in {BinaryOps.ADD, BinaryOps.SUB, BinaryOps.MUL, BinaryOps.XOR}:
           val = lang.code_for_op[args](strip_parens(r[vin[0]]), *[r[x] for x in vin[1:]], dtype)
         else:
           val = lang.code_for_op[args](*[r[x] for x in vin] + [dtype])
@@ -135,19 +133,19 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         # TODO: fix index rendering issue. fix clang nested max macro issue
         if child_count[u] <= 1 and args != BinaryOps.MAX and not getenv("EXPAND_SSA"): r[u] = val
         else: kk(f"{dtype.name} {ssa(u,'alu')} = {val};")
-      elif uop == UOps.SPECIAL:
+      elif uop is UOps.SPECIAL:
         kk(f"int {args[1]} = {lang.code_for_workitem[args[1][0]](args[0])}; /* {args[2]} */")
         if args[1].startswith("l"): local_size.append(args[2])
         r[u] = args[1]
-      elif uop == UOps.LOAD:
-        val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop == UOps.DEFINE_LOCAL)
+      elif uop is UOps.LOAD:
+        val = lang.render_load(dtype, r[vin[0]], vin[0].dtype, strip_parens(r[vin[1]]), vin[0].uop is UOps.DEFINE_LOCAL)
         # NOTE: this relies on the load not happening if it's in the unselected branch
         if len(vin) > 3: val = lang.code_for_op[TernaryOps.WHERE](r[vin[2]], val, r[vin[3]], dtype)
         kk(f"{lang.render_dtype(dtype)} {ssa(u,'val')} = {val};")
-      elif uop == UOps.PHI:
+      elif uop is UOps.PHI:
         kk(f"{r[vin[0]]} = {r[vin[1]]};")
         r[u] = r[vin[0]]
-      elif uop == UOps.CAST:
+      elif uop is UOps.CAST:
         if isinstance(args, tuple) and args[1]:  # bitcast
           assert len(vin) == 1
           precast = ssa(None,'precast')
@@ -157,26 +155,25 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
           val = lang.render_cast([r[x] for x in vin], dtype, bitcast=False)
         if child_count[u] <= 1: r[u] = val
         else: kk(f"{dtype.name} {ssa(u,'cast')} = {val};")
-      elif uop == UOps.DEFINE_LOCAL:
+      elif uop is UOps.DEFINE_LOCAL:
         kk(lang.render_local(args[0], dtype, args[1]))
         r[u] = args[0]
-      elif uop == UOps.DEFINE_GLOBAL:
+      elif uop is UOps.DEFINE_GLOBAL:
         bufs.append((args, dtype))
         r[u] = args
-      elif uop == UOps.WMMA: kk(f"{dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
-      elif uop == UOps.DEFINE_ACC: kk(f"{dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
-      elif uop == UOps.CONST: r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
-      elif uop == UOps.GEP: r[u] = f"({r[vin[0]]})[{args}]" if cast(DType, vin[0].dtype).sz > 4 else f"({r[vin[0]]}).{'xyzw'[args]}"
+      elif uop is UOps.WMMA: kk(f"{dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
+      elif uop is UOps.DEFINE_ACC: kk(f"{dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
+      elif uop is UOps.CONST: r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
+      elif uop is UOps.GEP: r[u] = f"({r[vin[0]]})[{args}]" if cast(DType, vin[0].dtype).sz > 4 else f"({r[vin[0]]}).{'xyzw'[args]}"
       else: raise RuntimeError(f"failed to render {uop}")
 
-  return lang.render_kernel(function_name, kernel, bufs, local_size)
+  return lang.render_kernel(function_name, kernel, bufs, local_size, uops)
 
 class OpenCLLanguage(CStyleLanguage):
   kernel_prefix = "__kernel "
   buffer_prefix = "__global "
   smem_align = "__attribute__ ((aligned (16))) "
   smem_prefix = "__local "
-  half_prekernel = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable"
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
   float4 = "(float4)"
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
@@ -187,6 +184,10 @@ class OpenCLLanguage(CStyleLanguage):
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
     return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
+
+  def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None) -> str:
+    if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
+    return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix)
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
 class MetalLanguage(CStyleLanguage):
@@ -215,7 +216,7 @@ code_for_op_half = {
 }
 
 class CUDALanguage(CStyleLanguage):
-  kernel_prefix = "#define INFINITY (__int_as_float(0x7f800000))\n#define NAN (__int_as_float(0x7fffffff))\nextern \"C\" __global__ "
+  kernel_prefix = "extern \"C\" __global__ "
   smem_prefix = "__shared__ "
   smem_prefix_for_cast = False
   barrier = "__syncthreads();"
@@ -223,11 +224,15 @@ class CUDALanguage(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+x)}", "l": lambda x: f"threadIdx.{chr(120+x)}",
                        "i": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
-  half_prekernel = "#include <cuda_fp16.h>\n"+"#include <cuda_bf16.h>\n"+"""
-    struct half4 { half x, y, z, w; };
-    __device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }
-  """
   type_map = {dtypes.bfloat16: "nv_bfloat16"}
+
+  def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None):
+    prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
+    if any(uop.dtype == dtypes.half for uop in uops):
+      prefix += ["#include <cuda_fp16.h>", "struct half4 { half x, y, z, w; };",
+      "__device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }"]
+    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("#include <cuda_bf16.h>")
+    return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix=prefix)
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 code_for_op_hip = {

@@ -10,14 +10,19 @@ if CI:
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
+
 def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, grad_atol=1e-4, grad_rtol=1e-3,
-                   forward_only=False, vals=None, a=-0.5, b=3):
+                   forward_only=False, vals=None, low=-1.5, high=1.5):
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
-  ts, tst = prepare_test_op(a, b, shps, vals, forward_only)
+  ts, tst = prepare_test_op(low, high, shps, vals, forward_only)
 
   st = time.monotonic()
   out = torch_fxn(*ts)
   torch_fp = time.monotonic() - st
+
+  # move inputs to a different device, test the device of intermediate tensors are correct
+  if mt:=getenv("MOVE_TENSOR", ""):
+    for t in tst: t.to_(mt)
 
   st = time.monotonic()
   ret = tinygrad_fxn(*tst).realize()
@@ -55,19 +60,19 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % \
           (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
 
-def prepare_test_op(a, b, shps, vals, forward_only=False):
+def prepare_test_op(low, high, shps, vals, forward_only=False):
   torch.manual_seed(0)
   np.random.seed(0)
   if shps is None: ts = [torch.tensor(x, requires_grad=(not forward_only)) for x in vals]
-  else: ts = [torch.tensor((np.random.random(size=x) + a) * b, requires_grad=(not forward_only), dtype=torch.float32) for x in shps]
+  else: ts = [torch.tensor(np.random.uniform(low=low, high=high, size=x), requires_grad=(not forward_only), dtype=torch.float32) for x in shps]
   tst = [Tensor(x.detach().numpy(), requires_grad=(not forward_only and not FORWARD_ONLY)) for x in ts]
   return ts, tst
 
 class TestOps(unittest.TestCase):
 
-  def helper_test_exception(self, shps, torch_fxn, tinygrad_fxn, expected, exact=False, vals=None, a=-0.5, b=3):
+  def helper_test_exception(self, shps, torch_fxn, tinygrad_fxn, expected, exact=False, vals=None, low=-1.5, high=1.5):
     if getenv("CUDACPU"): self.skipTest('helper_test_exception fails in CUDACPU')
-    ts, tst = prepare_test_op(a, b, shps, vals)
+    ts, tst = prepare_test_op(low, high, shps, vals)
     with self.assertRaises(expected) as torch_cm:
       torch_fxn(*ts)
     with self.assertRaises(expected) as tinygrad_cm:
@@ -222,7 +227,7 @@ class TestOps(unittest.TestCase):
     (tt*(tt == 0)).sum().backward()
     t = torch.tensor(tt.numpy(), requires_grad=True)
     (t*(t == 0)).sum().backward()
-    np.testing.assert_allclose(t.grad.numpy(), tt.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(t.grad.numpy(), tt.grad.numpy(), rtol=1e-5)
 
   def test_cmp_lt_backwards(self):
     t1 = torch.ones(4, requires_grad=True)
@@ -235,7 +240,7 @@ class TestOps(unittest.TestCase):
     (tt*(tt < 0)).sum().backward()
     t = torch.tensor(tt.numpy(), requires_grad=True)
     (t*(t < 0)).sum().backward()
-    np.testing.assert_allclose(t.grad.numpy(), tt.grad.numpy(), atol=5e-4, rtol=1e-5)
+    np.testing.assert_allclose(t.grad.numpy(), tt.grad.numpy(), rtol=1e-5)
 
   def test_trunc(self):
     helper_test_op([(45,35)], lambda x: x.trunc(), forward_only=True)
@@ -280,6 +285,9 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, torch.minimum, Tensor.minimum, vals=[[1., 0., 3., -4.], [-1., -2., 3., 0.]])
     helper_test_op(None, torch.minimum, Tensor.minimum, vals=[[True, False, False], True], forward_only=True)
     helper_test_op(None, torch.minimum, Tensor.minimum, vals=[[True, False, False], [True, True, False]], forward_only=True)
+
+  def test_tiny_add(self):
+    helper_test_op([(3), (3)], lambda x,y: x+y, Tensor.add, forward_only=True)
 
   def test_add(self):
     helper_test_op([(45,68), (45,68)], lambda x,y: x+y, Tensor.add)
@@ -366,13 +374,13 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x**2)
     helper_test_op([()], lambda x: x**-2)
     # Regression tests for https://github.com/tinygrad/tinygrad/issues/1151
-    helper_test_op([(45,65)], lambda x: x**3, a=-10)
-    helper_test_op([()], lambda x: x**3, a=-10)
+    helper_test_op([(45,65)], lambda x: x**3, low=-30, high=-27)
+    helper_test_op([()], lambda x: x**3, low=-30, high=-27)
     # Regression tests for https://github.com/tinygrad/tinygrad/issues/1251
-    helper_test_op([(45,65)], lambda x: x**0.2, a=-10)
-    helper_test_op([(45,65)], lambda x: x**1.2, a=-10)
-    helper_test_op([()], lambda x: x**0.2, a=-10)
-    helper_test_op([()], lambda x: x**1.2, a=-10)
+    helper_test_op([(45,65)], lambda x: x**0.2, low=-30, high=-27)
+    helper_test_op([(45,65)], lambda x: x**1.2, low=-30, high=-27)
+    helper_test_op([()], lambda x: x**0.2, low=-30, high=-27)
+    helper_test_op([()], lambda x: x**1.2, low=-30, high=-27)
     a, b = Tensor([0.0], requires_grad=True), torch.tensor([0.0], requires_grad=True)
     helper_test_op([], lambda: b**1.1, lambda: a**1.1)
   def test_pow_const(self):
@@ -383,6 +391,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: 2.0**x)
     helper_test_op([()], lambda x: x**2.0)
     helper_test_op([()], lambda x: 2.0**x)
+    # TODO: fix 0**x and 0**0 == 1
+    # helper_test_op(None, lambda x: 0**x, vals=[[-2.,-1,0,1,2,3]])
+    # TODO: fix backward, should be nan
+    helper_test_op(None, lambda x: (-2)**x, vals=[[-2.,-1,0,1,2,3]], forward_only=True)
 
   def test_sqrt(self):
     helper_test_op([(45,65)], lambda x: x.sqrt())
@@ -450,22 +462,22 @@ class TestOps(unittest.TestCase):
 
   def test_sigmoid(self):
     helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid)
-    helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, a=100)
-    helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, a=-100)
+    helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=300, high=303)
+    helper_test_op([(45,65)], torch.sigmoid, Tensor.sigmoid, low=-300, high=-297)
     helper_test_op([()], torch.sigmoid, Tensor.sigmoid)
   def test_softplus(self):
-    helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, atol=1e-6, grad_atol=1e-6)
-    helper_test_op([()], torch.nn.functional.softplus, Tensor.softplus, atol=1e-6, grad_atol=1e-6)
+    helper_test_op([(45,65)], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)
+    helper_test_op([()], torch.nn.functional.softplus, Tensor.softplus, grad_atol=1e-6)
 
   def test_gelu(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu)
     if not (CI and Device.DEFAULT == "METAL"):
-      helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu, a=100)
-    helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu, a=-100)
+      helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu, low=300, high=303)
+    helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu, low=-300, high=-297)
   def test_quick_gelu(self):
     helper_test_op([(45,65)], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu)
-    helper_test_op([(45,65)], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu, a=100)
-    helper_test_op([(45,65)], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu, a=-100)
+    helper_test_op([(45,65)], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu, low=300, high=303)
+    helper_test_op([(45,65)], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu, low=-300, high=-297)
     helper_test_op([()], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu)
 
   def test_elu(self):
@@ -476,11 +488,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.nn.functional.relu6, Tensor.relu6)
     helper_test_op([()], torch.nn.functional.relu6, Tensor.relu6)
   def test_hardswish(self):
-    helper_test_op([(45,65)], torch.nn.functional.hardswish, Tensor.hardswish, atol=1e-6, grad_atol=1e-6)
-    helper_test_op([()], torch.nn.functional.hardswish, Tensor.hardswish, atol=1e-6, grad_atol=1e-6)
+    helper_test_op([(45,65)], torch.nn.functional.hardswish, Tensor.hardswish, grad_atol=1e-6)
+    helper_test_op([()], torch.nn.functional.hardswish, Tensor.hardswish, grad_atol=1e-6)
   def test_mish(self):
-    helper_test_op([(45,65)], torch.nn.functional.mish, Tensor.mish, atol=1e-4)
-    helper_test_op([()], torch.nn.functional.mish, Tensor.mish, atol=1e-4)
+    helper_test_op([(45,65)], torch.nn.functional.mish, Tensor.mish)
+    helper_test_op([()], torch.nn.functional.mish, Tensor.mish)
 
   def test_multinomial(self):
     # NOTE: this is random, so it has a very large atol
@@ -488,16 +500,16 @@ class TestOps(unittest.TestCase):
                               lambda x: Tensor.multinomial(x.clip(0,1)), forward_only=True, atol=1000.)
 
   def test_small_cumsum(self):
-    helper_test_op([(10)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
+    helper_test_op([(10)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
   def test_simple_cumsum(self):
-    helper_test_op([(512)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
-    helper_test_op([(1022)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
+    helper_test_op([(512)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
+    helper_test_op([(1022)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
   def test_cumsum(self):
-    helper_test_op([(20)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
-    helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0), atol=1e-6)
-    helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=1), lambda x: Tensor.cumsum(x, axis=1), atol=1e-6)
-    helper_test_op([(20,30,40)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2), atol=1e-6)
-    helper_test_op([(20,30,40)], lambda x: torch.cumsum(x, dim=-1), lambda x: Tensor.cumsum(x, axis=-1), atol=1e-6)
+    helper_test_op([(20)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
+    helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
+    helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=1), lambda x: Tensor.cumsum(x, axis=1))
+    helper_test_op([(20,30,40)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2))
+    helper_test_op([(20,30,40)], lambda x: torch.cumsum(x, dim=-1), lambda x: Tensor.cumsum(x, axis=-1))
 
   def test_argmax(self):
     self.assertEqual(torch.tensor([2,2]).argmax().numpy(), Tensor([2,2]).argmax().numpy()) # check if returns first index for same max
@@ -622,6 +634,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,3), (1,3,3,5)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
   def test_small_gemm(self):
     helper_test_op([(8,8), (8,8)], lambda x,y: x.matmul(y), lambda x,y: x@y, atol=1e-3)
+  def test_small_gemm_range(self):
+    helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, atol=1e-3, vals=[np.arange(0,64,dtype=np.float32).reshape(8,8),
+                                                                                    np.arange(64,128,dtype=np.float32).reshape(8,8)])
   def test_small_gemm_eye(self):
     helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, atol=1e-3, vals=[np.eye(8).astype(np.float32), np.eye(8).astype(np.float32)])
   def test_gemm(self):
@@ -684,12 +699,14 @@ class TestOps(unittest.TestCase):
   def test_mean_axis(self):
     helper_test_op([(3,4,5,6)], lambda x: x.mean(axis=(1,2)))
   def test_mean_zero_axis(self):
-    helper_test_op([], lambda: torch.ones((1,0,3,0,5)).mean(axis=(1,3)), lambda: Tensor.ones((1,0,3,0,5)).mean(axis=(1,3)), forward_only=True)
+    helper_test_op([(1,0,3,0,5)], lambda x: x.mean(axis=(1,3)))
 
   def test_var(self):
     helper_test_op([(15, 25, 35)], lambda x: x.var())
     helper_test_op([(15, 25, 35)], lambda x: x.var(correction=0))
     helper_test_op([(15, 25, 35)], lambda x: x.var(correction=5))
+    # TODO: fix this
+    # helper_test_op([(10, 2)], lambda x: x.var(correction=50))
   def test_var_axis(self):
     helper_test_op([(15, 25, 35)], lambda x: x.var(0))
     helper_test_op([(15, 25, 35)], lambda x: x.var(2))
@@ -697,6 +714,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(15, 25, 35)], lambda x: x.var(0, correction=0))
     helper_test_op([(15, 25, 35)], lambda x: x.var(2, correction=0))
     helper_test_op([(15, 25, 35)], lambda x: x.var([1, 2], correction=0))
+  def test_var_zero_axis(self):
+    helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3)))
+    helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3), correction=0))
+    helper_test_op([(1,0,3,0,5)], lambda x: x.var(axis=(1,3), correction=5))
   def test_var_keepdim(self):
     helper_test_op([(15, 25, 35)], lambda x: x.var(keepdim=True))
     helper_test_op([(15, 25, 35)], lambda x: x.var(0, keepdim=True, correction=0))
@@ -712,6 +733,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(15, 25, 35)], lambda x: x.std(0, correction=0))
     helper_test_op([(15, 25, 35)], lambda x: x.std(2, correction=0))
     helper_test_op([(15, 25, 35)], lambda x: x.std([1, 2], correction=0))
+  def test_std_zero_axis(self):
+    helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3)))
+    helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=0))
+    helper_test_op([(1,0,3,0,5)], lambda x: x.std(axis=(1,3), correction=5))
   def test_std_keepdim(self):
     helper_test_op([(15, 25, 35)], lambda x: x.std(keepdim=True))
     helper_test_op([(15, 25, 35)], lambda x: x.std(0, keepdim=True, correction=0))
@@ -730,40 +755,40 @@ class TestOps(unittest.TestCase):
     helper_test_op([(10,10,10)], lambda x: x.log_softmax(2), atol=1e-7, grad_atol=1e-7)
 
   def test_sinh(self):
-    helper_test_op([(45,65)], lambda x: x.sinh(), atol=1e-6, grad_atol=1e-6)
+    helper_test_op([(45,65)], lambda x: x.sinh(), grad_atol=1e-6)
     # TODO: backward nan instead of inf
-    helper_test_op([(45,65)], lambda x: x.sinh(), atol=1e-6, grad_atol=1e-6, a=-100, forward_only=True)
-    helper_test_op([(45,65)], lambda x: x.sinh(), atol=1e-6, grad_atol=1e-6, a=100, forward_only=True)
+    helper_test_op([(45,65)], lambda x: x.sinh(), grad_atol=1e-6, low=-300, high=-297, forward_only=True)
+    helper_test_op([(45,65)], lambda x: x.sinh(), grad_atol=1e-6, low=300, high=303, forward_only=True)
   def test_cosh(self):
-    helper_test_op([(45,65)], lambda x: x.cosh(), atol=1e-6, grad_atol=1e-6)
+    helper_test_op([(45,65)], lambda x: x.cosh(), grad_atol=1e-6)
     # TODO: backward nan instead of inf
-    helper_test_op([(45,65)], lambda x: x.cosh(), atol=1e-6, grad_atol=1e-6, a=-100, forward_only=True)
-    helper_test_op([(45,65)], lambda x: x.cosh(), atol=1e-6, grad_atol=1e-6, a=100, forward_only=True)
+    helper_test_op([(45,65)], lambda x: x.cosh(), grad_atol=1e-6, low=-300, high=-297, forward_only=True)
+    helper_test_op([(45,65)], lambda x: x.cosh(), grad_atol=1e-6, low=300, high=303, forward_only=True)
   def test_tanh(self):
-    helper_test_op([(45,65)], lambda x: x.tanh(), atol=1e-6, grad_atol=1e-6)
-    helper_test_op([(45,65)], lambda x: x.tanh(), atol=1e-6, grad_atol=1e-6, a=-100)
-    helper_test_op([(45,65)], lambda x: x.tanh(), atol=1e-6, grad_atol=1e-6, a=100)
+    helper_test_op([(45,65)], lambda x: x.tanh(), grad_atol=1e-6)
+    helper_test_op([(45,65)], lambda x: x.tanh(), grad_atol=1e-6, low=-300, high=-297)
+    helper_test_op([(45,65)], lambda x: x.tanh(), grad_atol=1e-6, low=300, high=303)
   def test_hardtanh(self):
     for val in range(10, 30, 5):
-      helper_test_op([(45,65)], lambda x: torch.nn.functional.hardtanh(x, -val, val), lambda x: x.hardtanh(-val, val), atol=1e-6, grad_atol=1e-6)
-      helper_test_op([()], lambda x: torch.nn.functional.hardtanh(x, -val, val), lambda x: x.hardtanh(-val, val), atol=1e-6, grad_atol=1e-6)
+      helper_test_op([(45,65)], lambda x: torch.nn.functional.hardtanh(x, -val, val), lambda x: x.hardtanh(-val, val), grad_atol=1e-6)
+      helper_test_op([()], lambda x: torch.nn.functional.hardtanh(x, -val, val), lambda x: x.hardtanh(-val, val), grad_atol=1e-6)
   def test_asinh(self):
-    helper_test_op([(45,65)], lambda x: x.asinh(), atol=1e-6, grad_atol=1e-6)
+    helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6)
     # NOTE: this one has larger atol
-    helper_test_op([(45,65)], lambda x: x.asinh(), atol=1e-2, grad_atol=1e-6, a=-100)
-    helper_test_op([(45,65)], lambda x: x.asinh(), atol=1e-6, grad_atol=1e-6, a=100)
+    helper_test_op([(45,65)], lambda x: x.asinh(), atol=1e-2, grad_atol=1e-6, low=-300, high=-297)
+    helper_test_op([(45,65)], lambda x: x.asinh(), grad_atol=1e-6, low=300, high=303)
   def test_acosh(self):
-    helper_test_op([(45,65)], lambda x: x.acosh(), atol=1e-6, grad_atol=1e-6)
-    helper_test_op([(45,65)], lambda x: x.acosh(), atol=1e-6, grad_atol=1e-6, a=-100)
-    helper_test_op([(45,65)], lambda x: x.acosh(), atol=1e-6, grad_atol=1e-6, a=100)
+    helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6)
+    helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6, low=-300, high=-297)
+    helper_test_op([(45,65)], lambda x: x.acosh(), grad_atol=1e-6, low=300, high=303)
   def test_atanh(self):
-    helper_test_op([(45,65)], lambda x: x.atanh(), atol=1e-6, grad_atol=1e-6)
-    helper_test_op([(45,65)], lambda x: x.atanh(), atol=1e-6, grad_atol=1e-6, a=-100)
-    helper_test_op([(45,65)], lambda x: x.atanh(), atol=1e-6, grad_atol=1e-6, a=100)
+    helper_test_op([(45,65)], lambda x: x.atanh(), grad_atol=1e-6)
+    helper_test_op([(45,65)], lambda x: x.atanh(), grad_atol=1e-6, low=-300, high=-297)
+    helper_test_op([(45,65)], lambda x: x.atanh(), grad_atol=1e-6, low=300, high=303)
 
   def test_topo_sort(self):
-    helper_test_op([(45,65)], lambda x: (x+x)*x, atol=1e-6, grad_atol=1e-6)
-    helper_test_op([()], lambda x: (x+x)*x, atol=1e-6, grad_atol=1e-6)
+    helper_test_op([(45,65)], lambda x: (x+x)*x, grad_atol=1e-6)
+    helper_test_op([()], lambda x: (x+x)*x, grad_atol=1e-6)
 
   def test_flip_eye_crash(self):
     helper_test_op([], lambda: (torch.eye(10)@torch.eye(10).flip(0)),
@@ -774,7 +799,10 @@ class TestOps(unittest.TestCase):
                                   (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
       for shapes in [((5,13,24,16), (5,1,24,1)), ((1,3,1,7,1), (2,1,5,1,8))]:
         with self.subTest(op=torch_op.__name__, shapes=shapes):
-          helper_test_op(shapes, torch_op, tinygrad_op, a=-0.5 if tinygrad_op != Tensor.pow else 0.0)
+          if tinygrad_op != Tensor.pow:
+            helper_test_op(shapes, torch_op, tinygrad_op)
+          else:
+            helper_test_op(shapes, torch_op, tinygrad_op, low=0, high=3)
 
   def test_broadcast_simple(self):
     helper_test_op([(45,65), (45,1)], lambda x,y: x/y)
@@ -782,12 +810,15 @@ class TestOps(unittest.TestCase):
 
   def test_broadcast_partial(self):
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
-                                  (torch.div, Tensor.div)]: #, (torch.pow, Tensor.pow)]:
+                                  (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
       for shapes in [((1,32,32,32), (1,32,1,1)), ((5,13,24,16,2), (1,13,24,1,1)),
                      ((4,1), (4,5)), ((1,4), (5,4))]:
         with self.subTest(op=torch_op.__name__, shapes=shapes):
           # NOTE: ANE backwards?
-          helper_test_op(shapes, torch_op, tinygrad_op, a=-0.5 if tinygrad_op != Tensor.pow else 0.0)
+          if tinygrad_op != Tensor.pow:
+            helper_test_op(shapes, torch_op, tinygrad_op)
+          else:
+            helper_test_op(shapes, torch_op, tinygrad_op, low=0, high=3)
 
   def test_slice_in_bounds_1dim(self):
     helper_test_op([(3)], lambda x: x[1:3])

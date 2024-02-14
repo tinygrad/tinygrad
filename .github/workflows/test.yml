@@ -11,6 +11,42 @@ on:
   workflow_dispatch:
 
 jobs:
+  uops:
+    name: uops tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.12
+    - name: Cache python packages
+      uses: actions/cache@v3
+      with:
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.12/site-packages
+        key: uops-packages-${{ hashFiles('**/setup.py') }}-3.12
+    - name: Install dependencies
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Test IMAGE=2 support
+      run: |
+        IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
+      # TODO: this is broken
+      #IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_simple_conv2d
+    - name: Test emulated METAL tensor cores
+      run: DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_big_gemm
+    - name: Test emulated HIP tensor cores
+      run: |
+        PYTHONPATH=. DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
+        PYTHONPATH=. DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
+        PYTHONPATH=. DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
+        PYTHONPATH=. DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
+    - name: Full test tensor cores
+      run: |
+        DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
+        DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
+
   linter:
     name: Linters
     runs-on: ubuntu-latest
@@ -40,7 +76,7 @@ jobs:
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
-      run: python -m mypy
+      run: python -m mypy --strict-equality
     - name: Test Docs
       run: |
         python docs/abstractions.py
@@ -125,6 +161,8 @@ jobs:
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Run Pytest
       run: TORCH=1 python -m pytest -n=auto test/ --durations=20
+    - name: Run test_ops with inputs moved to a different device
+      run: TORCH=1 MOVE_TENSOR=TORCH:1 python -m pytest -n=auto test/test_ops.py --durations=20
     - name: Run ONNX
       run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
 
@@ -446,7 +484,7 @@ jobs:
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --durations=20
       - name: Run pytest (hip)
         if: matrix.backend=='hip'
-        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py --durations=20
+        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py --durations=20
 
   #testunicorn:
   #  name: ARM64 unicorn Test

@@ -1,12 +1,12 @@
 import random, traceback, ctypes
 from typing import List, Tuple
 import numpy as np
-from collections import Counter
+from collections import defaultdict
 from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
 from tinygrad.tensor import Tensor
-from tinygrad.graph import print_tree
+from tinygrad.features.graph import print_tree
 from tinygrad.helpers import getenv, from_mv, Context
 from tinygrad.device import Device, Compiled, Interpreted
 from tinygrad.codegen.linearizer import UOp
@@ -48,6 +48,7 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
       prg = device.get_runner(lin.ast)
   except Exception:
     print(lin.ast)
+    print(lin.applied_opts)
     traceback.print_exc()
     print("COMPILE FAILED!!")
     return "COMPILE_ERROR"
@@ -56,6 +57,7 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
     prg.exec(rawbufs, var_vals)
   except Exception:
     print(lin.ast)
+    print(lin.applied_opts)
     traceback.print_exc()
     print("EXEC FAILED!!")
     return "EXEC_ERROR"
@@ -69,60 +71,81 @@ def fuzz_linearizer(lin: Linearizer):
   print_tree(lin.ast)
   print(lin.colored_shape())
   rawbufs = get_fuzz_rawbufs(lin)
-
+  FUZZ_BEAM=getenv("FUZZ_BEAM", 0)
   seen_uops = {}
-  ground_truth = None
-  while 1:
-    if len(seen_uops) >= 10: break  # enough for this kernel
-    actions = get_linearizer_actions(lin, include_0=False)
-    if not actions: break
-    lin = random.choice(list(actions.values()))
-    if lin.applied_opts: print(f"applied action: {lin.applied_opts[-1]}")
+  last_lins = [lin]
+  failures = defaultdict(list)
 
-    # stop if kernel uops repeat
-    tuops = tuplize_uops(lin.linearize().uops)
-    if tuops in seen_uops: break
-    seen_uops[tuops] = tuple(lin.applied_opts)
+  # get baseline unoptimized output
+  unoptimized = Linearizer(lin.ast)
+  var_vals = {v: random.randint(v.min, v.max) for v in lin.ast.vars()}
+  if run_linearizer(unoptimized, rawbufs, var_vals) != "PASS":
+    failures["BASELINE_ERROR"].append((unoptimized.ast, unoptimized.applied_opts))
+    return failures
+  ground_truth = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np).copy()
 
-    print(lin.colored_shape())
-    # get a new output buffer
-    rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True)
-    var_vals = {v: random.randint(v.min, v.max) for v in lin.ast.vars()}
-    if (msg := run_linearizer(lin, rawbufs, var_vals)) != "PASS":
-      print(f"{lin.applied_opts=}")
-      return msg
+  for depth in range(getenv("DEPTH", 1 if FUZZ_BEAM else 10)):
+    next_lins = []
+    for lin in last_lins:
+      actions = get_linearizer_actions(lin, include_0=False)
+      if FUZZ_BEAM: print(f"testing {lin.applied_opts=} with {len(actions)} actions")
+      if not actions: continue
 
-    result = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np)
-    if ground_truth is None:
-      ground_truth = result
-    else:
-      try:
-        # compare memoryviews directly
-        np.testing.assert_allclose(result, ground_truth, rtol=1e-2, atol=1e-2)
-      except AssertionError:
-        print(lin.ast)
-        traceback.print_exc()
-        print(f"{lin.applied_opts=}")
-        return "NOT_ALLCLOSE"
-  return "PASS"
+      test_lins = list(actions.values())
+      if not FUZZ_BEAM: test_lins = [random.choice(test_lins)]
 
+      for test_lin in test_lins:
+        if not FUZZ_BEAM and test_lin.applied_opts: print(f"applied opts: {test_lin.applied_opts}")
+
+        # stop if kernel uops repeat
+        tuops = tuplize_uops(test_lin.linearize().uops)
+        if tuops in seen_uops:
+          continue
+        seen_uops[tuops] = tuple(test_lin.applied_opts)
+
+        if not FUZZ_BEAM: print(test_lin.colored_shape())
+        # get a new output buffer
+        rawbufs[0] = get_fuzz_rawbuf_like(rawbufs[0], zero=True)
+        var_vals = {v: random.randint(v.min, v.max) for v in test_lin.ast.vars()}
+        if (msg := run_linearizer(test_lin, rawbufs, var_vals)) != "PASS":
+          failures[msg].append((test_lin.ast, test_lin.applied_opts))
+          continue
+
+        result = np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np)
+        try:
+          # compare memoryviews directly
+          np.testing.assert_allclose(result, ground_truth, rtol=1e-2, atol=1e-2)
+        except AssertionError:
+          print(test_lin.ast)
+          print(test_lin.applied_opts)
+          traceback.print_exc()
+          print("COMPARE FAILED!!")
+          failures["COMPARE_ERROR"].append((test_lin.ast, test_lin.applied_opts))
+          continue
+        next_lins.append(test_lin)
+
+    last_lins = next_lins
+    if FUZZ_BEAM: print(f"depth={depth} total_lins={len(last_lins)} {failures=}")
+  return failures
 
 if __name__ == "__main__":
   ast_strs = load_worlds()
   print(f"{len(ast_strs)=}")
   tested = 0
-  c = Counter()
-  failed = []
+  failures = defaultdict(list)
   for i, ast in enumerate(ast_strs[:getenv("FUZZ_N", len(ast_strs))]):
     if "Variable" in ast and isinstance(device, Interpreted): continue  # no symbolic shape for Interpreted
     if "dtypes.image" in ast and Device.DEFAULT != "GPU": continue  # IMAGE is only for GPU
     print(f"testing ast {i}")
     tested += 1
     lin = ast_str_to_lin(ast)
-    fuzz = str(fuzz_linearizer(lin))
-    c[fuzz] += 1
-    if fuzz != "PASS":
-      failed.append(i)
+    for k, v in fuzz_linearizer(lin).items():
+      for f in v:
+        failures[k].append(f)
+  for msg, errors in failures.items():
+    for i, (ast, opts) in enumerate(errors):
+      print(f"{msg} {i} AST: {ast}")
+      print(f"{msg} {i} OPTS: {opts}\n")
   print(f"{tested=}")
-  print(c.most_common())
-  print(f"{failed=}")
+  for msg, errors in failures.items():
+    print(f"{msg}: {len(errors)}")

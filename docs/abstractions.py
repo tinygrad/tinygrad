@@ -250,7 +250,8 @@ result = Tensor(2.0).realize() + Tensor(3.0).realize()
 
 # use the real Linearizer to linearize 2+3
 from tinygrad.codegen.linearizer import Linearizer
-sched = result.lazydata.schedule()
+from tinygrad.realize import create_schedule
+sched = create_schedule([result.lazydata])
 linearizer = Linearizer(sched[-1].ast, ClangCompiler.linearizer_opts)
 linearizer.linearize()
 
@@ -277,7 +278,7 @@ result = Tensor(2.0) + Tensor(3.0)
 
 # we have a global cache used by the JIT
 # from there, we can see the generated clang code
-from tinygrad.jit import CacheCollector
+from tinygrad.features.jit import CacheCollector
 CacheCollector.start()       # enables the cache
 result.realize()             # create the program and runs it
 cache_saved = CacheCollector.finish()  # disable the cache
@@ -306,23 +307,23 @@ from tinygrad.shape.shapetracker import ShapeTracker
 # create a virtual (10, 10) Tensor. this is just a shape, there's no actual tensor
 a = ShapeTracker.from_shape((10, 10))
 
-# you'll see it has one view. the (10, 1 are the strides)
-print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (10, 1), 0)])
+# you'll see it has one view
+print(a) # ShapeTracker(views=(View(shape=(10, 10), strides=(10, 1))))
 
 # we can permute it, and the strides change
 a = a.permute((1,0))
-print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (1, 10), 0)])
+print(a) # ShapeTracker(views=(View(shape=(10, 10), strides=(1, 10))))
 
 # we can then reshape it, and the strides change again
 # note how the permute stays applied
 a = a.reshape((5,2,5,2))
-print(a) # ShapeTracker(shape=(5, 2, 5, 2), views=[View((5, 2, 5, 2), (2, 1, 20, 10), 0)])
+print(a) # ShapeTracker(views=(View(shape=(5, 2, 5, 2), strides=(2, 1, 20, 10))))
 
 # now, if we were to reshape it to a (100,) shape tensor, we have to create a second view
 a = a.reshape((100,))
-print(a) # ShapeTracker(shape=(100,), views=[
-         #   View((5, 2, 5, 2), (2, 1, 20, 10), 0),
-         #   View((100,), (1,), 0)])
+print(a) # ShapeTracker(views=(
+         #   View(shape=(5, 2, 5, 2), strides=(2, 1, 20, 10)),
+         #   View(shape=(100,), strides=(1,))))
 
 # Views stack on top of each other, to allow zero copy for any number of MovementOps
 # we can render a Python expression for the index at any time
@@ -335,17 +336,17 @@ idx, _ = a.expr_idxs()
 print(idx.render())  # ((idx1*10)+idx0)
 
 # the ShapeTracker still has two views though...
-print(a) # ShapeTracker(shape=(10, 10), views=[
-         #   View((5, 2, 5, 2), (2, 1, 20, 10), 0),
-         #   View((10, 10), (10, 1), 0)])
+print(a) # ShapeTracker(views=(
+         #   View(shape=(5, 2, 5, 2), strides=(2, 1, 20, 10),
+         #   View(shape=(10, 10), strides=(10, 1))))
 
 # ...until we simplify it!
 a = a.simplify()
-print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (1, 10), 0)])
+print(a) # ShapeTracker(views=(View(shape=(10, 10), strides=(1, 10), offset=0)))
 
 # and now we permute it back
 a = a.permute((1,0))
-print(a) # ShapeTracker(shape=(10, 10), views=[View((10, 10), (10, 1), 0)])
+print(a) # ShapeTracker(views=(View(shape=(10, 10), strides=(10, 1), offset=0)))
 
 # and it's even contiguous
 assert a.contiguous == True

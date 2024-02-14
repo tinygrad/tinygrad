@@ -162,21 +162,19 @@ backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill v
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type string
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 
-# issue 1791 fast math messes with these https://github.com/tinygrad/tinygrad/issues/1791
-backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
-backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
-backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
-
-# issue 2067 potentially also a fastmath issue https://github.com/tinygrad/tinygrad/issues/2067
-if Device.DEFAULT in ['METAL']:
-  backend_test.exclude('test_maxpool_2d_pads_cpu')
-  backend_test.exclude('test_maxpool_2d_same_lower_cpu')
-  backend_test.exclude('test_maxpool_2d_same_upper_cpu')
+if Device.DEFAULT in ['GPU', 'METAL']:
+  backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
+  backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
+  backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
 
 if Device.DEFAULT == "METAL" or (OSX and Device.DEFAULT == "GPU"):
   # numerical inaccuracy
   backend_test.exclude('test_mish_cpu')
   backend_test.exclude('test_mish_expanded_cpu')
+
+if Device.DEFAULT == 'METAL':
+  # with default fast math enabled, padding -inf does not work
+  backend_test.exclude('test_MaxPool3d_stride_padding_cpu')
 
 # TODO: llvm has problems with inf
 if Device.DEFAULT in ['LLVM']:
