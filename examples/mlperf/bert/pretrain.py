@@ -1,21 +1,15 @@
 import json, math, time
 from pathlib import Path
 import numpy as np
-from tinygrad.helpers import GlobalCounters, getenv
-from tinygrad.jit import TinyJit
+from tinygrad.helpers import getenv
+from tinygrad.features.jit import TinyJit
+from tinygrad.ops import GlobalCounters
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters, load_state_dict, safe_load, safe_save, get_state_dict
-from tinygrad.device import Device
 from tinygrad.tensor import Tensor, dtypes
 from extra.lr_scheduler import OneCycleLR
 from extra.models.bert import Bert
 from extra.datasets.wikipedia import iterate
-from extra import dist
-
-if __name__ == "__main__":
-  if getenv("DIST"):
-    dist.preinit()
-    from extra.dist import collectives
 
 if getenv('HALF', 0):
   Tensor.default_type = dtypes.float16
@@ -56,13 +50,7 @@ def get_model_and_config(path:str):
   embedding_table = model.embeddings.word_embeddings.weight
   return model, embedding_table, s_weights, s_bias, m_weights, m_bias, p_weights 
 
-def one_hot(arr:Tensor, num_classes=3):
-  res = Tensor.eye(num_classes)[arr.reshape(-1)]
-  return res.reshape(list(arr.shape) + [num_classes])
-
-def pool_output(output:Tensor, weights:Tensor):
-  pooled_output = output[:, 0]
-  return Tensor.tanh(pooled_output.linear(weights))
+def pool_output(output:Tensor, weights:Tensor): return Tensor.tanh(output[:, 0].linear(weights))
 
 def gather_indexes(sequence_tensor:Tensor, positions:Tensor):
   assert len(sequence_tensor.shape) == 3, f"Expected tensor to have rank 3, but got {len(sequence_tensor.shape)}"
@@ -100,16 +88,10 @@ def pretrain():
   optimizer = optim.LAMB(get_parameters(model), 1 / WARMUP_STEPS, eps=1e-6, wd=0.01, adam=True) # TODO: Keep in FP32?, Exclude LayerNorm, and bias from weight decay
   lr_scheduler = OneCycleLR(optimizer, MAX_LR, MAX_LR * WARMUP_STEPS, MAX_LR * 1e12, STEPS, WARMUP_STEPS / STEPS)
 
-  from extra.dist import OOB
-  assert OOB is not None or not getenv("DIST"), "OOB should be initialized"
-  rank, world_size = getenv("RANK", 0), getenv("WORLD_SIZE", 1)
-
   @TinyJit
   def eval_step_jitted(model, embedding_table, input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions):
-    Tensor.training = False
     output = model(input_ids=input_ids, attention_mask=input_mask, token_type_ids=segment_ids)
     acc = get_masked_lm_accuracy(output, embedding_table, m_weights, m_bias, masked_lm_positions, masked_lm_ids)
-    Tensor.training = True
     return acc.realize()
 
   @TinyJit
@@ -125,36 +107,18 @@ def pretrain():
       optimizer.zero_grad()
       loss.backward()
 
-      if getenv("DIST"):
-        bucket, offset = [], 0
-        for v in get_parameters(model):
-          if v.grad is not None: bucket.append(v.grad.flatten())
-        grads = collectives.allreduce(Tensor.cat(*bucket), cache_id="grads")
-        for v in get_parameters(model):
-          if v.grad is not None:
-            v.grad.assign(grads[offset:offset+v.grad.numel()].reshape(*v.grad.shape))
-            offset += v.grad.numel()
-      
       optimizer.step()
       lr_scheduler.step()
     return loss.realize()
   
-  def get_data(X, rank=0):
-    device = f"{Device.DEFAULT}:{rank}"
+  def get_data(X):
     input_ids = Tensor(X["input_ids"])
     input_mask = Tensor(X["input_mask"])
     segment_ids = Tensor(X["segment_ids"])
     masked_lm_ids = Tensor(X["masked_lm_ids"], dtype=dtypes.int32)
     masked_lm_positions = Tensor(X["masked_lm_positions"], dtype=dtypes.int32)
     next_sentence_labels = Tensor(X["next_sentence_labels"], dtype=dtypes.int32)
-    if getenv('DIST'):
-      input_ids = input_ids.chunk(world_size, 0)[rank]
-      input_mask = input_mask.chunk(world_size, 0)[rank]
-      segment_ids = segment_ids.chunk(world_size, 0)[rank]
-      masked_lm_ids = masked_lm_ids.chunk(world_size, 0)[rank]
-      masked_lm_positions = masked_lm_positions.chunk(world_size, 0)[rank]
-      next_sentence_labels = next_sentence_labels.chunk(world_size, 0)[rank]
-    return input_ids.to(device).realize(), input_mask.to(device).realize(), segment_ids.to(device).realize(), masked_lm_ids.to(device).realize(), masked_lm_positions.to(device).realize(), next_sentence_labels.to(device).realize()
+    return input_ids.realize(), input_mask.realize(), segment_ids.realize(), masked_lm_ids.realize(), masked_lm_positions.realize(), next_sentence_labels.realize()
   
   train_batcher = iterate(bs=BS, val=False)
   eval_batcher = iterate(bs=EVAL_BS, val=True)
@@ -163,50 +127,42 @@ def pretrain():
   for _ in range(EPOCH):
     i = 0
     while i <= STEPS:
-      if i % EVAL_FREQ == 0 and i != 0:
+      if i % EVAL_FREQ == 0 and i > 0:
         e = 0
         while e <= MAX_EVAL_STEPS:
           st = time.monotonic()
           X, _ = next(eval_batcher)
-          input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels = get_data(X, rank)
+          input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels = get_data(X)
           acc = eval_step_jitted(model, embedding_table, input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions)
           et = time.monotonic()
           acc = acc.numpy()
           cl = time.monotonic()
-          if getenv('DIST'):
-            if rank == 0:
-              accs = []
-              for j in range(1, min(world_size, 8)):
-                accs.append(OOB.recv(j))
-            elif rank < min(world_size, 8):
-              OOB.send(acc, 0)
           
-          if rank == 0:
-            acc = (sum(acc) / len(acc))*100.0 if getenv('DIST') else acc
-            print(f"MLM accuarcy: {acc:.2f}%, val_loss STEP={i} (in {(time.monotonic()-st)*1e3:.2f} ms)")
-            if acc > 72.0:
-              wallclock_end = time.monotonic()
-              hours, remainder = divmod(wallclock_end - wallclock_start, 3600)
-              minutes, seconds = divmod(remainder, 60)
-              print(f"MLM accuracy achieved in {int(hours)} hours, {int(minutes)} minutes, and {int(seconds)} seconds.")
-              accuracy_achieved = True
-              print("Saving weights...")
-              safe_save(get_state_dict(model), "bert.safetensors")
-              safe_save(get_state_dict(p_weights), "/tmp/p_weights.safetensor")
-              safe_save(get_state_dict(s_weights), "/tmp/s_weights.safetensor")
-              safe_save(get_state_dict(s_bias), "/tmp/s_bias.safetensor")
-              safe_save(get_state_dict(m_weights), "/tmp/m_weights.safetensor")
-              safe_save(get_state_dict(m_bias), "/tmp/m_bias.safetensor")
-              break
+          acc = (sum(acc) / len(acc))*100.0 if getenv('DIST') else acc
+          print(f"MLM accuarcy: {acc:.2f}%, val_loss STEP={i} (in {(time.monotonic()-st)*1e3:.2f} ms)")
+          if acc > 72.0:
+            wallclock_end = time.monotonic()
+            hours, remainder = divmod(wallclock_end - wallclock_start, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            print(f"MLM accuracy achieved in {int(hours)} hours, {int(minutes)} minutes, and {int(seconds)} seconds.")
+            accuracy_achieved = True
+            print("Saving weights...")
+            safe_save(get_state_dict(model), "bert.safetensors")
+            safe_save(get_state_dict(p_weights), "/tmp/p_weights.safetensor")
+            safe_save(get_state_dict(s_weights), "/tmp/s_weights.safetensor")
+            safe_save(get_state_dict(s_bias), "/tmp/s_bias.safetensor")
+            safe_save(get_state_dict(m_weights), "/tmp/m_weights.safetensor")
+            safe_save(get_state_dict(m_bias), "/tmp/m_bias.safetensor")
+            break
           e += 1
           st = cl
-      if accuracy_achieved or STEPS == 0 or i==STEPS: break
+      if accuracy_achieved or STEPS == 0 or i == STEPS: break
 
       if accuracy_achieved: break
 
       st = time.monotonic()
       X, _ = next(train_batcher)
-      input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels = get_data(X, rank)
+      input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels = get_data(X)
       GlobalCounters.reset()
       loss = train_step_jitted(model, embedding_table, optimizer, lr_scheduler, input_ids, input_mask, segment_ids, masked_lm_ids, masked_lm_positions, next_sentence_labels)
 
@@ -214,33 +170,9 @@ def pretrain():
       loss_cpu = loss.numpy()
       cl = time.monotonic()
 
-      if not getenv("DIST"):
-        print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
-      else:
-        print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {world_size*GlobalCounters.mem_used/1e9:.2f} GB used, {world_size*GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      print(f"{i:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
       st = cl
       i += 1
 
-def train():
-  if not getenv("DIST"):
-    pretrain()
-  else:
-    if getenv("HIP"):
-      devices = [f"hip:{i}" for i in range(8)] # find way to query device count
-    else:
-      devices = [f"gpu:{i}" for i in range(8)] # find way to query device count
-    world_size = len(devices)
-
-    assert BS % world_size == 0, f"batch size {BS} is not divisible by world size {world_size}"
-    assert EVAL_BS % min(world_size, 5) == 0, f"evaluation batch size {EVAL_BS} is not divisible by world size {min(world_size, 5)}"
-    assert EVAL_BS < 10000, "EVAL_BS exceeds eval sample (10000) count"
-
-    dist.init_oob(world_size)
-
-    processes = []
-    for rank, device in enumerate(devices):
-       processes.append(dist.spawn(rank, device, fn=pretrain, args=()))
-    for p in processes: p.join()
-
 if __name__ == "__main__":
-  with Tensor.train(): train()
+  with Tensor.train(): pretrain()
