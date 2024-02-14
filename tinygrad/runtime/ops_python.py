@@ -89,7 +89,6 @@ class PythonProgram:
           # in the python emulator, the warp is always in sync
           i += 1
           continue
-
         assert dtype is not None, f"{uop} is missing a dtype"
         dl[i] = dtype
         if uop is UOps.DEFINE_GLOBAL:
