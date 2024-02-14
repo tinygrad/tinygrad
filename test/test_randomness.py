@@ -2,7 +2,7 @@ import math
 import unittest
 import numpy as np
 import torch
-from tinygrad import nn, dtypes, Tensor, Device
+from tinygrad import nn, dtypes, Tensor
 from tinygrad.helpers import THREEFRY
 from functools import partial
 
