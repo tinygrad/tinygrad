@@ -85,7 +85,6 @@ class PythonProgram:
           loop_ends[idp[0]] = i
           i = idp[0]
           continue
-        # TODO: implement UOps.IF and UOps.ENDIF
         elif uop in (UOps.BARRIER, UOps.IF, UOps.ENDIF):
           # in the python emulator, the warp is always in sync
           i += 1
