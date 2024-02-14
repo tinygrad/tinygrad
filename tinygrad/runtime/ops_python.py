@@ -74,7 +74,7 @@ class PythonProgram:
               for m,ox,oy,v in zip(inp[0], inp[1][0], inp[1][1], val):
                 assert ox >= 0 and ox < dtp[0].shape[1] and oy >= 0 and oy < dtp[0].shape[0]
                 _store(m, ox*4 + oy*dtp[0].shape[1]*4 + j, v)
-          elif dtp[2].sz > 1 and isinstance(inp[2][0], list):
+          elif dtp[2].sz > 1:
             for j,val in enumerate(inp[2]):
               for m,o,v in zip(inp[0], inp[1], val): _store(m, o+j, v)
           else:
@@ -105,7 +105,12 @@ class PythonProgram:
             ul[i] = [idxs[2-arg[0]]] * warp_size
           elif arg[1][0] == 'l':
             ul[i] = [x[2-arg[0]] for x in warp]
-        elif uop is UOps.CONST: ul[i] = [int(arg) if dtypes.is_int(dtype) else float(arg)] * warp_size
+        elif uop is UOps.CONST:
+          casted_arg = int(arg) if dtypes.is_int(dtype) else float(arg)
+          if dtype.sz > 1:
+            ul[i] = [[casted_arg] * warp_size for _ in range(dtype.sz)]
+          else:
+            ul[i] = [casted_arg] * warp_size
         elif uop is UOps.DEFINE_ACC:
           if dtype.sz > 1:
             ul[i] = [[arg] * warp_size for _ in range(dtype.sz)]
