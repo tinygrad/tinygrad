@@ -98,10 +98,9 @@ def train_resnet():
 
   # ** Optimizer **
   if getenv("LARS", 1):
-    optimizer = optim.LARS(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay, track_norms=True)
+    optimizer = optim.LARS(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay, track_gnorm=True)
   else:
     optimizer = optim.SGD(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay)
-  parameter_keys = [k for k, v in get_state_dict(model).items() if v.requires_grad]
 
   # ** LR scheduler **
   # scheduler = MultiStepLR(optimizer, [m for m in lr_steps], gamma=lr_gamma, warmup=lr_warmup)
@@ -202,7 +201,7 @@ def train_resnet():
       # the backward step should be realized by loss.numpy(), even though it doesn't depend on this.
       # doing this uses 16.38gb vs 15.55gb? why? because the grads get realized in optimizer.step, and the backward buffers are freed?
       fwet = time.perf_counter()
-      wnorm, wnorms, gnorm, gnorms = backward_step(*proc[1], proc[0][0])
+      gnorm = backward_step(*proc[1], proc[0][0])
       # proc = (proc[0], proc[2])  # drop inputs
 
       et = time.perf_counter()
@@ -216,10 +215,8 @@ def train_resnet():
       dte = time.perf_counter()
 
       device_str = proc[0][2].device if isinstance(proc[0][2].device, str) else f"{proc[0][2].device[0]} * {len(proc[0][2].device)}"
-      proc, top_1_acc, wnorm, wnorms, gnorm, gnorms = proc[0][0].numpy(), proc[0][2].numpy().item() / BS, wnorm.numpy(), [x.numpy() for x in wnorms], gnorm.numpy(), [x.numpy() for x in gnorms]  # return cookie
+      proc, top_1_acc, gnorm = proc[0][0].numpy(), proc[0][2].numpy().item() / BS, gnorm.numpy()  # return cookie
       loss_cpu = proc / lr_scaler
-      wnorms = {f"wnorms/{k}": v for k, v in zip(parameter_keys, wnorms)}
-      gnorms = {f"gnorms/{k}": v for k, v in zip(parameter_keys, gnorms)}
       cl = time.perf_counter()
       new_st = time.perf_counter()
 
@@ -232,12 +229,9 @@ def train_resnet():
                  "train/cl_time": cl - dte,
                  "train/loss": loss_cpu,
                  "train/top_1_acc": top_1_acc,
-                 "train/wnorm": wnorm,
                  "train/gnorm": gnorm,
                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st),
                  "epoch": e + (i + 1) / steps_in_train_epoch,
-                 **wnorms,
-                 **gnorms,
                  })
 
       st = new_st
@@ -291,14 +285,11 @@ def train_resnet():
       total_top_5 = sum(eval_top_5_acc) / len(eval_top_5_acc)
       total_fw_time = sum(eval_times) / len(eval_times)
       tqdm.write(f"eval loss: {total_loss:.2f}, eval time: {total_fw_time:.2f}, eval top 1 acc: {total_top_1:.3f}, eval top 5 acc: {total_top_5:.3f}")
-
-      weight_hists = {f"weights/{k}": wandb.Hist(v.numpy().flatten().tolist()) for k, v in get_state_dict(model)}
       wandb.log({"eval/loss": total_loss,
                 "eval/top_1_acc": total_top_1,
                 "eval/top_5_acc": total_top_5,
-                "eval/forward_time": total_fw_time,
+                 "eval/forward_time": total_fw_time,
                 "epoch": e + 1,
-                 **weight_hists,
       })
 
       if not achieved and total_top_1 >= target:
