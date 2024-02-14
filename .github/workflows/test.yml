@@ -76,7 +76,7 @@ jobs:
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
-      run: python -m mypy
+      run: python -m mypy --strict-equality
     - name: Test Docs
       run: |
         python docs/abstractions.py

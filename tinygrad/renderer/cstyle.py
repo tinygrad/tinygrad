@@ -231,7 +231,7 @@ class CUDALanguage(CStyleLanguage):
     if any(uop.dtype == dtypes.half for uop in uops):
       prefix += ["#include <cuda_fp16.h>", "struct half4 { half x, y, z, w; };",
       "__device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }"]
-    if any(uop.uop == dtypes.bfloat16 for uop in uops): prefix.append("#include <cuda_bf16.h>")
+    if any(uop.dtype == dtypes.bfloat16 for uop in uops): prefix.append("#include <cuda_bf16.h>")
     return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix=prefix)
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
