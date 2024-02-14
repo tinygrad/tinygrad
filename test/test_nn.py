@@ -13,11 +13,11 @@ class TestNN(unittest.TestCase):
     # create in tinygrad
     input = Tensor.randn(3, 5)
     target = Tensor.randint((3,), low=0, high=4)
-    loss = input.sparse_categorical_crossentropy(target)
+    loss = input.sparse_categorical_crossentropy(target, label_smoothing=0.1)
 
     torch_input = torch.tensor(input.numpy())
     torch_target = torch.tensor(target.numpy(), dtype=torch.long)
-    torch_loss = torch.nn.CrossEntropyLoss(reduction='mean')(torch_input, torch_target)
+    torch_loss = torch.nn.CrossEntropyLoss(reduction='mean', label_smoothing=0.1)(torch_input, torch_target)
 
     np.testing.assert_allclose(loss.numpy(), torch_loss.detach().numpy(), atol=1e-5, rtol=1e-6)
 
