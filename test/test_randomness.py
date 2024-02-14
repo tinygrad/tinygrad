@@ -59,7 +59,7 @@ class TestRandomness(unittest.TestCase):
     self.assertFalse(normal_test(Tensor.rand))
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
 
-  @unittest.skipIf(not THREEFRY, "not using threefry")
+  @unittest.skipIf(not THREEFRY.value, "not using threefry")
   def test_threefly_against_reference(self):
     Tensor.manual_seed(1337)
     # generated using
