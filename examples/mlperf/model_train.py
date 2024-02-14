@@ -1,9 +1,8 @@
 from extra import dist
-from tinygrad import GlobalCounters, Device
+from tinygrad import GlobalCounters, Device, TinyJit
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
-from tinygrad.jit import TinyJit
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.nn import optim, state
 from tqdm import tqdm
@@ -98,7 +97,7 @@ def train_resnet():
 
   # ** Optimizer **
   if getenv("LARS", 1):
-    optimizer = optim.LARS(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay, track_gnorm=True)
+    optimizer = optim.LARS(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay, track_gnorm=bool(getenv("TRACK_NORMS", 1)))
   else:
     optimizer = optim.SGD(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay)
 
@@ -201,7 +200,7 @@ def train_resnet():
       # the backward step should be realized by loss.numpy(), even though it doesn't depend on this.
       # doing this uses 16.38gb vs 15.55gb? why? because the grads get realized in optimizer.step, and the backward buffers are freed?
       fwet = time.perf_counter()
-      gnorm = backward_step(*proc[1], proc[0][0])
+      gnorm = backward_step(*proc[1], proc[0][0]) or Tensor(0)
       # proc = (proc[0], proc[2])  # drop inputs
 
       et = time.perf_counter()
