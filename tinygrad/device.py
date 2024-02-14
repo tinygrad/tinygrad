@@ -43,7 +43,7 @@ class JITRunner:
   def __init__(self): self.op_estimate, self.mem_estimate = 0, 0
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     var_vals = var_vals if var_vals is not None else {}
-    from tinygrad.jit import CacheCollector
+    from tinygrad.features.jit import CacheCollector
     et = self(rawbufs, var_vals)
     CacheCollector.add(self, rawbufs, var_vals)
     return et
@@ -194,7 +194,7 @@ class Interpreted:
 
 def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> InterpretedASTRunner:
   if DEBUG >= 3:
-    from tinygrad.graph import print_tree
+    from tinygrad.features.graph import print_tree
     print_tree(ast)
   tglob: Dict[str, Any] = {"Variable": Variable}
 
@@ -322,7 +322,7 @@ class Compiled:
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
     if DEBUG >= 3:
-      from tinygrad.graph import print_tree
+      from tinygrad.features.graph import print_tree
       print_tree(ast)
     from tinygrad.codegen.linearizer import Linearizer
     k = Linearizer(ast, self.compiler.linearizer_opts)
