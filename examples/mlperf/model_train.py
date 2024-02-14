@@ -292,7 +292,7 @@ def train_resnet():
       total_fw_time = sum(eval_times) / len(eval_times)
       tqdm.write(f"eval loss: {total_loss:.2f}, eval time: {total_fw_time:.2f}, eval top 1 acc: {total_top_1:.3f}, eval top 5 acc: {total_top_5:.3f}")
 
-      weight_hists = {f"weights/{k}": wandb.Histogram(v.numpy().flatten().tolist()) for k, v in get_state_dict(model).items() if v.requires_grad}
+      weight_hists = {f"weights/{k}": wandb.Hist(v.numpy().flatten().tolist()) for k, v in get_state_dict(model)}
       wandb.log({"eval/loss": total_loss,
                 "eval/top_1_acc": total_top_1,
                 "eval/top_5_acc": total_top_5,
