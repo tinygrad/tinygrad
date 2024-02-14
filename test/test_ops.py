@@ -1211,6 +1211,7 @@ class TestOps(unittest.TestCase):
   def test_conv2d_bs_1_cin_1(self): self._test_conv2d(bs=1, cin=1)
   def test_conv2d_bs_4_cin_1(self): self._test_conv2d(bs=4, cin=1)
 
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "PYTHON is too slow")
   def test_large_input_conv2d(self):
     bs = 4
     cin = 16
@@ -1373,12 +1374,13 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(2,2), stride=stride),
           lambda x: Tensor.max_pool2d(x, kernel_size=(2,2), stride=stride))
 
-  @unittest.skipIf(Device.DEFAULT == "CUDA", "CUDA fails on this")
+  @unittest.skipIf(Device.DEFAULT in ["CUDA", "PYTHON"], "CUDA fails on this. PYTHON is too slow.")
   def test_maxpool2d_unit_stride(self):
     helper_test_op([(32,2,110,28)],
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=1),
       lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=1))
 
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "PYTHON is too slow")
   def test_maxpool2d_smaller_stride(self):
     for stride in [(2,3), (3,2), 2, 3]:
       with self.subTest(stride=stride):
@@ -1386,6 +1388,7 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=stride),
           lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=stride))
 
+  @unittest.skipIf(Device.DEFAULT == "PYTHON", "PYTHON is too slow")
   def test_maxpool2d_dilation(self):
     for dilation in [(2, 3), (3, 2), 2, 3]:
       helper_test_op([(32,2,110,28)],
