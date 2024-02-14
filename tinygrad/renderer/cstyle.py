@@ -186,7 +186,7 @@ class OpenCLLanguage(CStyleLanguage):
     return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
 
   def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None) -> str:
-    if any(dt == dtypes.half for _, dt in bufs): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
+    if any(uop.dtype == dtypes.half for uop in uops): prefix = ["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"]
     return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix)
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
@@ -228,10 +228,10 @@ class CUDALanguage(CStyleLanguage):
 
   def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None):
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))","#define NAN (__int_as_float(0x7fffffff))"]
-    if any(dt == dtypes.half for _, dt in bufs):
+    if any(uop.dtype == dtypes.half for uop in uops):
       prefix += ["#include <cuda_fp16.h>", "struct half4 { half x, y, z, w; };",
       "__device__ half4 make_half4(half x, half y, half z, half w) { half4 ret; ret.x = x; ret.y = y; ret.z = z; ret.w = w; return ret; }"]
-    if any(dt == dtypes.bfloat16 for _, dt in bufs): prefix.append("#include <cuda_bf16.h>")
+    if any(uop == dtypes.bfloat16 for uop in uops): prefix.append("#include <cuda_bf16.h>")
     return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix=prefix)
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
