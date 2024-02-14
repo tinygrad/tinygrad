@@ -147,6 +147,8 @@ class PythonProgram:
                 else: ret.append(_load(m, ox*4 + oy*dtp[0].shape[1]*4 + j))
               ul[i].append(ret)
           elif dtype.sz > 1:
+            if len(inp) == 4 and dtp[3].sz > 1:
+              inp[3] = inp[3][0]
             ul[i] = [load(inp, j) for j in range(dtype.sz)]
           else:
             ul[i] = load(inp)
