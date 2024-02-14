@@ -800,7 +800,7 @@ class Tensor:
       assert isinstance(y, (float, int, bool)), f"{type(y)=}, {y=}"
       if isinstance(self.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
       else: y_dtype = dtypes.from_py(y)
-      y = Tensor(y, self.device, y_dtype, requires_grad=False)
+      y = Tensor(cast_scalar(y, self.dtype), self.device, y_dtype, requires_grad=False)
 
     if match_dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)
@@ -818,7 +818,7 @@ class Tensor:
   def _to_const_val(self, x:Union[Tensor, Scalar]) -> Union[Tensor, Scalar]:
     # TODO: update with multi
     return x.lazydata.base.arg if isinstance(x, Tensor) and isinstance(x.lazydata, LazyBuffer) and x.lazydata.is_unrealized_contiguous_const() \
-      and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x if isinstance(x, Tensor) else cast_scalar(x, self.dtype)
+      and not x.requires_grad and self._broadcasted(x)[0].shape == self.shape else x
 
   def add(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
     x = self._to_const_val(x)
