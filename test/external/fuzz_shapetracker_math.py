@@ -31,11 +31,16 @@ if __name__ == "__main__":
   if seed:=getenv("SEED"): random.seed(seed)
   total = getenv("CNT", 1000)
   for fuzz in [globals()[f'fuzz_{x}'] for x in getenv("FUZZ", "invert,plus").split(",")]:
-    same_but_neq = 0
+    same_but_neq = same_but_neq_canon = 0
     for _ in trange(total, desc=f"{fuzz}"):
       st1, st2 = fuzz()
+      sts1, sts2 = st1.simplify(), st2.simplify()
+      stc1, stc2 = st1.canonicalize(), st2.canonicalize()
       eq = st_equal(st1, st2)
-      if getenv("CHECK_NEQ") and eq and st1.simplify() != st2.simplify():
+      eqs = sts1 == st2
+      eqc = stc1 == stc2
+      if eq and not eqc: same_but_neq_canon += 1
+      if getenv("CHECK_NEQ") and eq and not eqs:
         print(colored("same but unequal", "yellow"))
         print(st1.simplify())
         print(st2.simplify())
@@ -43,6 +48,14 @@ if __name__ == "__main__":
       if DEBUG >= 1:
         print(f"EXP: {st1}")
         print(f"GOT: {st2}")
-        print(colored("****", "green" if eq else "red"))
-      if not eq: exit(0)
-    if getenv("CHECK_NEQ"): print(f"same but unequal {(same_but_neq/total)*100:.2f}%")
+      if DEBUG >= 2:
+        print(f"EXP CANON: {st1}")
+        print(f"GOT CANON: {st2}")
+      if DEBUG >= 1:
+        print(colored(f"****{' (symbolic)' if DEBUG>=2 else ''}", "green" if eq else "red"))
+      if DEBUG >= 2:
+        print(colored("**** (canon)", "green" if eqc else "red"))
+      if not (eq or eqc): exit(0)
+    if getenv("CHECK_NEQ"):
+      print(f"same but unequal {(same_but_neq/total)*100:.2f}%")
+      if DEBUG >= 2: print(f"same but unequal canon {(same_but_neq_canon/total)*100:.2f}%")
