@@ -90,13 +90,14 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
   return acted_lins
 
 beam_pool = None
-def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linearizer:
+def beam_search(lin:Linearizer, rawbufs: Optional[List[Buffer]], amt:int, allow_test_size=True) -> Linearizer:
   global beam_pool
   key = {"ast": str(lin.ast), "amt": amt, "allow_test_size": allow_test_size, "device": lin.opts.device}
   if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE") and CACHELEVEL >= 1:
     ret = lin.copy()
     for o in val[len(lin.applied_opts):]: ret.apply_opt(o)
     return ret
+  if rawbufs is None: rawbufs = bufs_from_lin(lin)
 
   beam: List[Tuple[Linearizer, float]] = []
   seen_libs = set()
@@ -148,9 +149,10 @@ def optimize_local_size(clprg:Callable, global_size:List[int], rawbufs:List[Buff
   assert not math.isinf(ret[0]), "all optimize_local_size exec failed"
   return ret[1]
 
-def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, max_global_size=65536, cnt=3, disable_cache=False, clear_l2=False) -> float:  # noqa: E501
+def time_linearizer(lin:Linearizer, rawbufs:Optional[List[Buffer]], allow_test_size=True, max_global_size=65536, cnt=3, disable_cache=False, clear_l2=False) -> float:  # noqa: E501
   key = {"ast": str(lin.ast), "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size, "clear_l2": clear_l2, "device": lin.opts.device}  # noqa: E501
   if not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
+  if rawbufs is None: rawbufs = bufs_from_lin(lin)
 
   dev = Device[lin.opts.device]
   assert isinstance(dev, Compiled)
