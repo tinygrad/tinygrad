@@ -2,9 +2,13 @@ import numpy as np
 import torch
 import unittest, copy
 import mmap
-from tinygrad.tensor import Tensor, Device
-from tinygrad.helpers import dtypes, temp
+from tinygrad import Tensor, Device, dtypes
+from tinygrad.helpers import temp, CI
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
+from hypothesis import given, settings, strategies as strat
+
+settings.register_profile("my_profile", max_examples=200, deadline=None)
+settings.load_profile("my_profile")
 
 x_init = np.random.randn(1,3).astype(np.float32)
 U_init = np.random.randn(3,3).astype(np.float32)
@@ -152,29 +156,29 @@ class TestTinygrad(unittest.TestCase):
     except: raise
     finally: Tensor.rand = original_rand
 
-  def test_zeros_like_has_same_dtype(self):
+  def test_zeros_like_has_same_dtype_and_shape(self):
     for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
       a = Tensor([1, 2, 3], dtype=datatype)
       b = Tensor.zeros_like(a)
-      assert a.dtype == b.dtype, f"a.dtype and b.dtype should be {datatype}"
-      assert a.shape == b.shape, f"shape mismatch (Tensor.zeros_like){a.shape} != (torch){b.shape}"
+      assert a.dtype == b.dtype, f"dtype mismatch {a.dtype=} != {b.dtype}"
+      assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
     a = Tensor([1, 2, 3])
     b = Tensor.zeros_like(a, dtype=dtypes.int8)
-    assert a.dtype != b.dtype and a.dtype == dtypes.float32 and b.dtype == dtypes.int8, "a.dtype should be float and b.dtype should be char"
-    assert a.shape == b.shape, f"shape mismatch (Tensor.zeros_like){a.shape} != (torch){b.shape}"
+    assert a.dtype == dtypes.default_int and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
+    assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
   def test_ones_like_has_same_dtype_and_shape(self):
     for datatype in [dtypes.float16, dtypes.float32, dtypes.int8, dtypes.int32, dtypes.int64, dtypes.uint8]:
       a = Tensor([1, 2, 3], dtype=datatype)
       b = Tensor.ones_like(a)
-      assert a.dtype == b.dtype, f"a.dtype and b.dtype should be {datatype}"
-      assert a.shape == b.shape, f"shape mismatch (Tensor.ones_like){a.shape} != (torch){b.shape}"
+      assert a.dtype == b.dtype, f"dtype mismatch {a.dtype=} != {b.dtype}"
+      assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
     a = Tensor([1, 2, 3])
     b = Tensor.ones_like(a, dtype=dtypes.int8)
-    assert a.dtype != b.dtype and a.dtype == dtypes.float32 and b.dtype == dtypes.int8, "a.dtype should be float and b.dtype should be char"
-    assert a.shape == b.shape, f"shape mismatch (Tensor.ones_like){a.shape} != (torch){b.shape}"
+    assert a.dtype == dtypes.default_int and b.dtype == dtypes.int8, "a.dtype should be int and b.dtype should be char"
+    assert a.shape == b.shape, f"shape mismatch {a.shape} != {b.shape}"
 
   def test_ndim(self):
     assert Tensor(1).ndim == 0
@@ -239,10 +243,46 @@ class TestTinygrad(unittest.TestCase):
     assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64 # check that it works for something else
 
   def test_tensor_list_dtype(self):
-    arr = [1]
-    assert Tensor(arr).dtype == Tensor.default_type
-    assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
-    assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+    for arr in ([1], [[[1]]], [[1,1],[1,1]], [[[1,1],[1,1]],[[1,1],[1,1]]]):
+      assert Tensor(arr).dtype == dtypes.default_int
+      assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
+      assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+
+    for arr in ([True], [[[False]]], [[True,False],[True,False]], [[[False,True],[False,False]],[[True,True],[False,True]]]):
+      assert Tensor(arr).dtype == dtypes.bool
+      assert Tensor(arr, dtype=dtypes.float32).dtype == dtypes.float32
+      assert Tensor(arr, dtype=dtypes.float64).dtype == dtypes.float64
+
+    # empty tensor defaults
+    for arr in ([], [[[]]], [[],[]]):
+      t = Tensor(arr)
+      assert t.dtype == dtypes.default_float
+      np.testing.assert_allclose(t.numpy(), np.array(arr))
+
+    # mixture of bool and int
+    for arr in ([True, 3], [[True],[3]], [[[True]], [[3]]], [[True, 3], [3, True]]):
+      t = Tensor(arr)
+      assert t.dtype == dtypes.default_int
+      np.testing.assert_allclose(t.numpy(), np.array(arr))
+
+    # mixture of bool, int and float
+    for arr in ([[True,True],[3.,True]], [[0,1],[3.,4]], [[[0],[1]],[[3.],[4]]], [[[True],[1]],[[3.],[4]]]):
+      t = Tensor(arr)
+      assert t.dtype == dtypes.default_float
+      np.testing.assert_allclose(t.numpy(), np.array(arr))
+
+  def test_tensor_list_shapes(self):
+    self.assertEqual(Tensor([[[]]]).shape, (1,1,0))
+    self.assertEqual(Tensor([[],[]]).shape, (2,0))
+    self.assertEqual(Tensor([[[[]],[[]]], [[[]],[[]]], [[[]],[[]]]]).shape, (3,2,1,0))
+
+  def test_tensor_list_errors(self):
+    # inhomogeneous shape
+    with self.assertRaises(ValueError): Tensor([[],[[]]])
+    with self.assertRaises(ValueError): Tensor([[1],[]])
+    with self.assertRaises(ValueError): Tensor([[1],[1],1])
+    with self.assertRaises(ValueError): Tensor([[[1,1,1],[1,1]]])
+    with self.assertRaises(ValueError): Tensor([[1,1,1],[[1,1,1]]])
 
   def test_tensor_copy(self):
     x = copy.deepcopy(Tensor.ones((3,3,3)))
@@ -266,6 +306,38 @@ class TestTinygrad(unittest.TestCase):
     assert not ua_arr.flags.aligned
     # force device copy - to() is opt'd away - Tensor(dev)/1 is ignored
     np.testing.assert_allclose(ua_arr, (Tensor(ua_arr)/Tensor(1)).numpy())
+
+  def test_item_to_tensor_to_item(self):
+    for a in [0, 1, 2, 3, -1, -100, 100, -101.1, 2.345, 100.1, True, False]:
+      item = Tensor(a).item()
+      assert type(item) == type(a), a
+      np.testing.assert_allclose(item, a), a
+      buffered_item = Tensor([a]).item()
+      assert type(buffered_item) == type(a), a
+      np.testing.assert_allclose(buffered_item, a), a
+      reshaped_item = Tensor([a]).reshape((1, 1, 1, 1, 1)).item()
+      assert type(reshaped_item) == type(a), a
+      np.testing.assert_allclose(reshaped_item, a), a
+
+@unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
+class TestMoveTensor(unittest.TestCase):
+  d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
+  @given(strat.sampled_from([d0, d1]), strat.sampled_from([d0, d1]),
+         strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False, None]))
+  def test_to_preserves(self, src, dest, dtype, requires_grad):
+    s = Tensor([1, 2, 3], device=src, dtype=dtype, requires_grad=requires_grad)
+    t = s.to(dest)
+    np.testing.assert_equal(s.numpy(), t.numpy())
+    assert s.dtype == t.dtype
+    assert s.requires_grad == t.requires_grad
+
+  @given(strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False, None]))
+  def test_shard_preserves(self, dtype, requires_grad):
+    s = Tensor([1, 2, 3], dtype=dtype, requires_grad=requires_grad)
+    t = s.shard((f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"))
+    np.testing.assert_equal(s.numpy(), t.numpy())
+    assert s.dtype == t.dtype
+    assert s.requires_grad == t.requires_grad
 
 class TestZeroShapeTensor(unittest.TestCase):
   def test_shape_stride(self):
@@ -387,7 +459,14 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_equal(Tensor([]).max().numpy(), -float("inf"))
     np.testing.assert_equal(Tensor([]).min().numpy(), float("inf"))
     np.testing.assert_equal(Tensor([]).sum().numpy(), 0)
-    np.testing.assert_equal(Tensor([]).mean().numpy(), 0)
+    np.testing.assert_equal(Tensor([]).mean().numpy(), float("nan"))
+
+class TestTensorCreationDevice(unittest.TestCase):
+  # test auxiliary tensors are created on the same device
+  def test_one_hot(self):
+    y = Tensor([1, 2, 3]).to("CPU")
+    x = y.one_hot(10)
+    x.realize()
 
 if __name__ == '__main__':
   unittest.main()

@@ -2,17 +2,20 @@ import os, json, pathlib, zipfile, pickle, tarfile, struct
 from tqdm import tqdm
 from typing import Dict, Union, List, Optional, Any, Tuple
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes, prod, argsort, DEBUG, Timing, GlobalCounters, CI, unwrap
+from tinygrad.ops import GlobalCounters
+from tinygrad.dtype import dtypes
+from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap
 from tinygrad.shape.view import strides_for_shape
+from tinygrad.features.multi import MultiLazyBuffer
 
-safe_dtypes = {"F16": dtypes.float16, "F32": dtypes.float32, "U8": dtypes.uint8, "I8": dtypes.int8, "I32": dtypes.int32, "I64": dtypes.int64,
-               "F64": dtypes.double, "B": dtypes.bool, "I16": dtypes.short, "U16": dtypes.ushort, "UI": dtypes.uint, "UL": dtypes.ulong}
+safe_dtypes = {"BOOL":dtypes.bool, "I8":dtypes.int8, "U8":dtypes.uint8, "I16":dtypes.int16, "U16":dtypes.uint16, "I32":dtypes.int, "U32":dtypes.uint,
+               "I64":dtypes.int64, "U64":dtypes.uint64, "F16":dtypes.float16, "BF16":dtypes.bfloat16, "F32":dtypes.float32, "F64":dtypes.float64}
 inverse_safe_dtypes = {v:k for k,v in safe_dtypes.items()}
 
 def safe_load_metadata(fn:Union[Tensor,str]) -> Tuple[Tensor, int, Any]:
   t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=dtypes.uint8, device=f"disk:{fn}")
-  json_len = t[0:1].cast(dtypes.int64).numpy()[0]
-  return (t, json_len, json.loads(t[8:8+json_len].numpy().tobytes()))
+  json_len = t[0:1].cast(dtypes.int64).item()
+  return t, json_len, json.loads(t[8:8+json_len].numpy().tobytes())
 
 def safe_load(fn:Union[Tensor,str]) -> Dict[str, Tensor]:
   t, json_len, metadata = safe_load_metadata(fn)
@@ -54,7 +57,7 @@ def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> Dict[str, Tensor]:
   return state_dict
 def get_parameters(obj) -> List[Tensor]: return list(get_state_dict(obj).values())
 
-def load_state_dict(model, state_dict, strict=True, verbose=True):
+def load_state_dict(model, state_dict:Dict[str, Tensor], strict=True, verbose=True, consume=False):
   start_mem_used = GlobalCounters.mem_used
   with Timing("loaded weights in ", lambda et_ns: f", {(GlobalCounters.mem_used-start_mem_used)/1e9:.2f} GB loaded at {(GlobalCounters.mem_used-start_mem_used)/et_ns:.2f} GB/s"):  # noqa: E501
     model_state_dict = get_state_dict(model)
@@ -65,7 +68,8 @@ def load_state_dict(model, state_dict, strict=True, verbose=True):
       if k not in state_dict and not strict:
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
         continue
-      v.assign(state_dict[k].to(v.device)).realize()
+      v.assign(state_dict[k].shard(mlb.device, mlb.axis) if isinstance((mlb:=v.lazydata), MultiLazyBuffer) else state_dict[k].to(v.device)).realize()
+      if consume: del state_dict[k]
 
 # torch support!
 
@@ -109,9 +113,9 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
         if DEBUG >= 2: print(f"WARNING: returning Dummy for {module} {name}")
         return Dummy
       return intercept[name] if module_root == "torch" else super().find_class(module, name)
-    def persistent_load(self, pid): return deserialized_objects[pid] if pid in deserialized_objects else pid
+    def persistent_load(self, pid): return deserialized_objects.get(pid, pid)
 
-  if tuple(t[0:2].numpy()) == (0x50, 0x4b):
+  if zipfile.is_zipfile(fn):
     myzip = zipfile.ZipFile(fn, 'r')
     base_name = myzip.namelist()[0].split('/', 1)[0]
     for n in myzip.namelist():
@@ -120,7 +124,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
           offsets[n.split("/")[-1]] = myfile._orig_compress_start # type: ignore
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       return TorchPickle(myfile).load()
-  elif bytes(t[0:0xe].numpy()) == b"././@PaxHeader":  # TODO: is this how you detect a tarfile?
+  elif tarfile.is_tarfile(fn):
     with tarfile.open(fn, "r") as tar:
       storages_offset = tar.getmember('storages').offset_data
       f = unwrap(tar.extractfile('storages'))

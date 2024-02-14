@@ -19,12 +19,15 @@ def create_fixed_tokenizer(output_file):
   with open(output_file, "wb") as f:
     f.write(mp.SerializeToString())
 
+# example:
+# echo -en "write 2+2\nwrite hello world\ny\n" | TEMP=0 python3 examples/coder.py
+
 if __name__ == "__main__":
   Tensor.no_grad = True
 
   # https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/blob/main/config.json
   with Timing("create model: "):
-    model = Transformer(4096, 14336, n_heads=32, n_layers=32, norm_eps=1e-5, vocab_size=32002, n_kv_heads=8, max_context=4096)
+    model = Transformer(4096, 14336, n_heads=32, n_layers=32, norm_eps=1e-5, vocab_size=32002, n_kv_heads=8, max_context=4096, jit=getenv("JIT", 1))
 
   with Timing("download weights: "):
     part1 = nn.state.torch_load(fetch("https://huggingface.co/teknium/OpenHermes-2.5-Mistral-7B/resolve/main/pytorch_model-00001-of-00002.bin?download=true"))
@@ -71,7 +74,7 @@ if __name__ == "__main__":
       turn = not turn
     old_output_len = len(outputted)
     while 1:
-      tok = model(Tensor([toks[start_pos:]]), start_pos, temperature).multinomial().item()
+      tok = model(Tensor([toks[start_pos:]]), start_pos, temperature).item()
       start_pos = len(toks)
       toks.append(tok)
       outputted = output(outputted, toks, "blue" if not turn else "cyan")

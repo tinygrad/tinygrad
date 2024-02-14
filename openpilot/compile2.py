@@ -13,9 +13,10 @@ import onnx
 from tqdm import tqdm
 from typing import Tuple, List, Optional, Dict
 from extra.onnx import get_run_onnx
-from tinygrad import Tensor, Device
-from tinygrad.helpers import dtypes, partition, GlobalCounters, Context, fetch, getenv, ImageDType, GRAPH, DEBUG
-from tinygrad.realize import run_schedule, lower_schedule_item
+from tinygrad import Tensor, Device, GlobalCounters, dtypes
+from tinygrad.dtype import ImageDType
+from tinygrad.helpers import partition, Context, fetch, getenv, GRAPH, DEBUG
+from tinygrad.realize import run_schedule, lower_schedule_item, create_schedule
 from tinygrad.ops import LoadOps, ScheduleItem
 Device.DEFAULT = "GPU"
 
@@ -31,7 +32,7 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   # run the model
   inputs = {k:Tensor.empty(*shp) for k,shp in input_shapes.items()}
   ret: Tensor = next(iter(run_onnx(inputs).values())).cast(dtypes.float32).contiguous()
-  schedule = ret.lazydata.schedule()
+  schedule = create_schedule([ret.lazydata])
 
   # filter schedule that don't depend on the inputs
   input_lb = [x.lazydata.base for x in inputs.values()]
@@ -83,14 +84,14 @@ def test_vs_onnx(onnx_data, schedule:Optional[List[ScheduleItem]], inputs:Dict[s
     return
 
   # set inputs
-  for k,v in inputs.items(): v.lazydata.realized.copyin(new_np_inputs[k].data)
+  for k,v in inputs.items(): v.lazydata.base.realized.copyin(new_np_inputs[k].data)
 
   # run code (all buffers have been allocated)
   GlobalCounters.reset()
   for si in schedule: lower_schedule_item(si)([si.out.realized] + [x.realized for x in si.inputs], {})
 
-  new_tinygrad_out = schedule[-1].out.realized.toCPU()
-  np.testing.assert_allclose(new_torch_out.flatten(), new_tinygrad_out, atol=1e-4, rtol=1e-2)
+  new_tinygrad_out = Tensor(schedule[-1].out).numpy()
+  np.testing.assert_allclose(new_torch_out, new_tinygrad_out, atol=1e-4, rtol=1e-2)
   print("semi-thneed self-test passed!")
 
 if __name__ == "__main__":
@@ -104,7 +105,7 @@ if __name__ == "__main__":
   schedule, schedule_input = partition(schedule, lambda x: x.ast.op not in LoadOps)
   print(f"{len(schedule_input)} inputs")
 
-  run_schedule(schedule_independent, disable_logging=True)
+  run_schedule(schedule_independent)
   run_schedule(schedule_input)
   with Context(DEBUG=max(DEBUG.value, 2), BEAM=getenv("LATEBEAM")):
     image_count = sum(isinstance(si.out.dtype, ImageDType) for si in schedule)

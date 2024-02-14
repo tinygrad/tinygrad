@@ -5,10 +5,9 @@ from tqdm import trange
 from extra.models.efficientnet import EfficientNet
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
-from tinygrad.tensor import Tensor
-from tinygrad.helpers import GlobalCounters
+from tinygrad import Tensor, GlobalCounters
 from tinygrad.helpers import getenv
-from tinygrad.jit import CacheCollector
+from tinygrad.features.jit import CacheCollector
 
 def tensors_allocated():
   return sum(isinstance(x, Tensor) for x in gc.get_objects())

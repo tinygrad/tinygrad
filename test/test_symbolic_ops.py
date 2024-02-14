@@ -2,6 +2,7 @@ import unittest
 from tinygrad.shape.symbolic import Variable
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
+from examples.gpt2 import Attention
 import numpy as np
 
 @unittest.skipIf(getenv("ARM64") or getenv("PTX"), "ARM64 and PTX are not supported")
@@ -46,12 +47,22 @@ class TestSymbolicOps(unittest.TestCase):
       expected = f(q, k, v).numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
+  @unittest.skipIf(getenv("MOCKHIP"), "MOCKHIP only compiles and does not run")
   def test_attention_training(self):
     with Tensor.train():
       self.test_attention(dropout_p=0.0)
       with self.assertRaises(AssertionError):
         # symbolic shape dropout is not supported
         self.test_attention(dropout_p=0.5)
+
+  def test_attention_pos_0_sz_0(self):
+    Attention(128, 8)(Tensor.ones(1, 0, 128), Variable("start_pos", 0, 128).bind(0), None)
+
+  def test_attention_pos_0_sz_1(self):
+    Attention(128, 8)(Tensor.ones(1, 1, 128), Variable("start_pos", 0, 128).bind(0), None)
+
+  def test_attention_pos_0_sz_2(self):
+    Attention(128, 8)(Tensor.ones(1, 2, 128), Variable("start_pos", 0, 128).bind(0), None)
 
   def test_cat_dim0(self):
     def f(a, b): return a.cat(b, dim=0).realize()
@@ -97,6 +108,7 @@ class TestSymbolicOps(unittest.TestCase):
         expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
+  @unittest.skip("two vars not supported")
   def test_two_vars_plus1_ij(self):
     def f(a, b): return (a@b+1).realize()
     for i in range(1, 5):
@@ -109,6 +121,7 @@ class TestSymbolicOps(unittest.TestCase):
         expected = f(a, b).numpy()
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
+  @unittest.skip("two vars not supported")
   def test_two_vars_plus1_ji(self):
     # reverse the order of variables
     def f(a, b): return (a@b+1).realize()

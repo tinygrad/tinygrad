@@ -3,9 +3,8 @@ import math
 import os
 import numpy as np
 from pathlib import Path
-from tinygrad import nn
-from tinygrad.tensor import Tensor
-from tinygrad.helpers import dtypes, get_child, fetch
+from tinygrad import nn, Tensor, dtypes
+from tinygrad.helpers import get_child, fetch
 from tinygrad.nn.state import torch_load
 from extra.models.resnet import ResNet
 from extra.models.retinanet import nms as _box_nms

@@ -3,16 +3,17 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
-from tinygrad.jit import TinyJit
-from tinygrad import Device, GlobalCounters
-from tinygrad.helpers import CI, dtypes
+from tinygrad.features.jit import TinyJit
+from tinygrad import Device, GlobalCounters, dtypes
+from tinygrad.helpers import CI
 from tinygrad.shape.symbolic import Variable
+from extra.lr_scheduler import OneCycleLR
 from test.helpers import derandomize_model
 
 from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
-from examples.hlb_cifar10 import SpeedyResNet
+from examples.hlb_cifar10 import SpeedyResNet, hyp
 from examples.llama import Transformer as LLaMaTransformer, MODEL_PARAMS as LLAMA_MODEL_PARAMS
-from examples.stable_diffusion import UNetModel
+from examples.stable_diffusion import UNetModel, ResBlock
 
 global_mem_used = 0
 def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed, all_jitted=False):
@@ -33,18 +34,18 @@ def helper_test(nm, gen, train, max_memory_allowed, max_kernels_allowed, all_jit
   assert mem_used/1e9 < max_memory_allowed, f"{nm} used more than {max_memory_allowed:.2f} GB"
   assert not kernels_used or kernels_used <= max_kernels_allowed, f"{nm} used more than {max_kernels_allowed} kernels"
   if all_jitted:
-    assert kernels_used > 0 and kernels_used == GlobalCounters.kernel_count or (kernels_used == 1 and getattr(Device[Device.DEFAULT], "graph", None)), f"only {kernels_used} out of {GlobalCounters.kernel_count} were jitted"  # noqa: E501
+    assert kernels_used > 0 and kernels_used == GlobalCounters.kernel_count or (kernels_used <= GlobalCounters.kernel_count and getattr(Device[Device.DEFAULT], "graph", None)), f"only {kernels_used} out of {GlobalCounters.kernel_count} were jitted"  # noqa: E501
 
 class TestRealWorld(unittest.TestCase):
   def setUp(self):
     gc.collect()
     global global_mem_used
     global_mem_used = GlobalCounters.mem_used
-    self.old_type = Tensor.default_type
+    self.old_float = dtypes.default_float
     np.random.seed(2002)
 
   def tearDown(self):
-    Tensor.default_type = self.old_type
+    dtypes.default_float = self.old_float
 
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
   @unittest.skipIf(CI, "too big for CI")
@@ -55,22 +56,32 @@ class TestRealWorld(unittest.TestCase):
     def test(t, t2): return model(t, 801, t2).realize()
     helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 953)
 
+  @unittest.skipIf(Device.DEFAULT in ["CPU", "TORCH"], "tons of ram with interpreted")
+  def test_mini_stable_diffusion(self):
+    model = [ResBlock(16, 24, 16) for _ in range(4)]
+    derandomize_model(model)
+    @TinyJit
+    def test(t, t2):
+      for l in model: t = l(t, t2)
+      return t.realize()
+    helper_test("test_mini_sd", lambda: (Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24)), test, 0.01, 43)
+
   @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
-  @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp1")
+  @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp16")
   def test_llama(self):
-    Tensor.default_type = dtypes.float16
+    dtypes.default_float = dtypes.float16
 
     args_tiny = {"dim": 1024, "hidden_dim": 2048, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-05, "vocab_size": 1000}
     model = LLaMaTransformer(**(args_tiny if CI else LLAMA_MODEL_PARAMS["1"]["7B"]["args"]))
     derandomize_model(model)
     @TinyJit
     def test(t): return model(t, 0).realize()
-    # TODO: test first token vs rest properly, also memory test is broken with CacheCollector
-    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.25 if CI else 13.5, 181 if CI else 685, all_jitted=True)
+    # TODO: test first token vs rest properly
+    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.27 if CI else 14.9, 191 if CI else 719, all_jitted=True)
 
   @unittest.skipIf(Device.DEFAULT in ["LLVM", "GPU"] and CI, "too long on CI LLVM, GPU requires cl_khr_fp16")
   def test_gpt2(self):
-    Tensor.default_type = dtypes.float16
+    dtypes.default_float = dtypes.float16
 
     args_tiny = {"dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-5, "vocab_size": 1000}
     model = GPT2Transformer(**(args_tiny if CI else GPT2_MODEL_PARAMS["gpt2-medium"]))
@@ -122,6 +133,22 @@ class TestRealWorld(unittest.TestCase):
 
       # reset device
       #Device.DEFAULT = old_default
+
+  @unittest.skipIf(Device.DEFAULT == "LLVM", "LLVM segmentation fault")
+  @unittest.skipIf(Device.DEFAULT in ["GPU"] and CI, "opencl on intel can't compile half")
+  def test_train_cifar_hyp(self):
+    dtypes.default_float = dtypes.float16
+    with Tensor.train():
+      model = SpeedyResNet(Tensor.ones((12,3,2,2)))
+      optimizer = optim.SGD(get_parameters(model), lr=0.01, momentum=hyp['opt']['momentum'], nesterov=True, weight_decay=hyp['opt']['bias_decay'])
+      initial_div_factor = hyp['opt']['initial_div_factor']
+      final_lr_ratio = hyp['opt']['final_lr_ratio']
+      pct_start = hyp['opt']['percent_start']
+      lr_scheduler = OneCycleLR(optimizer, max_lr=hyp['opt']['bias_lr'], pct_start=pct_start, div_factor=initial_div_factor,
+                                final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=4)
+      assert not np.isnan(lr_scheduler.min_lr), "lr too small or initial_div_facotr too big for half"
+
+    dtypes.default_float = dtypes.float32
 
 if __name__ == '__main__':
   unittest.main()

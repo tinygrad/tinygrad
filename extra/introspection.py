@@ -3,16 +3,16 @@ import gc
 from tinygrad.helpers import prod
 from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
-from tinygrad.runtime.ops_gpu import CLBuffer
-from tinygrad.helpers import GlobalCounters
+from tinygrad.device import Buffer
+from tinygrad import GlobalCounters
 
 def print_objects():
   #gc.collect()
   tensors = [x for x in gc.get_objects() if isinstance(x, Tensor)]
   tensor_ram_used = sum([prod(x.shape)*4 for x in tensors])
   lazybuffers = [x for x in gc.get_objects() if isinstance(x, LazyBuffer)]
-  gpubuffers = [x for x in gc.get_objects() if isinstance(x, CLBuffer)]
-  realized_buffers = [x.realized for x in lazybuffers if x.realized]
+  gpubuffers = [x for x in gc.get_objects() if isinstance(x, Buffer)]
+  realized_buffers = [x.realized for x in lazybuffers if x.base == x and x.realized]
   gpubuffers_orphaned = [x for x in gpubuffers if x not in realized_buffers]
 
   print(f"{len(tensors)} tensors allocated in {tensor_ram_used/1e9:.2f} GB, GPU using {GlobalCounters.mem_used/1e9:.2f} GB")

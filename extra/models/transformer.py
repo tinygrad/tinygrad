@@ -1,5 +1,4 @@
-import numpy as np
-from tinygrad.tensor import Tensor
+from tinygrad import Tensor
 
 class TransformerBlock:
   def __init__(self, embed_dim, num_heads, ff_dim, prenorm=False, act=lambda x: x.relu(), dropout=0.1):
@@ -43,22 +42,20 @@ class Transformer:
   def __init__(self, syms, maxlen, layers, embed_dim, num_heads, ff_dim):
     self.maxlen, self.syms = maxlen, syms
     self.embed = Tensor.scaled_uniform(maxlen+syms, embed_dim, requires_grad=False)
-    self.tbs = []
-    for i in range(layers):
-      self.tbs.append(TransformerBlock(embed_dim, num_heads, ff_dim))
+    self.tbs = [TransformerBlock(embed_dim, num_heads, ff_dim) for _ in range(layers)]
     self.final = Tensor.scaled_uniform(embed_dim, syms)
 
   def forward(self, x):
     bs = x.shape[0]
-    xnp = x.numpy().astype(np.int32)
-    onehot = np.zeros((bs, x.shape[1], self.maxlen+self.syms), dtype=np.float32)
-    for i in range(x.shape[1]):
-      onehot[range(bs), i, i] = 1
-      onehot[range(bs), i, self.maxlen + xnp[:, i]] = 1
-    onehot = onehot.reshape(bs*x.shape[1], self.maxlen+self.syms)
 
-    x = Tensor(onehot, device=x.device).dot(self.embed).reshape(shape=(bs, x.shape[1], -1))
+    maxlen_eye = Tensor.eye(x.shape[1])
+    maxlen_eye = maxlen_eye.unsqueeze(0).expand([bs, *maxlen_eye.shape])
+
+    onehot_feat = x.one_hot(self.syms)
+
+    onehot = maxlen_eye.cat(onehot_feat, dim=2).flatten(end_dim=1)
+
+    x = onehot.dot(self.embed).reshape((bs, x.shape[1], -1))
     x = x.sequential(self.tbs)
-    x = x.reshape(shape=(-1, x.shape[-1])).dot(self.final).log_softmax()
-    return x.reshape(shape=(bs, -1, x.shape[-1]))
-
+    x = x.reshape((-1, x.shape[-1])).dot(self.final).log_softmax()
+    return x.reshape((bs, -1, x.shape[-1]))
