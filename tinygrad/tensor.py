@@ -7,7 +7,7 @@ from functools import partialmethod, reduce
 import numpy as np
 
 from tinygrad.dtype import DType, dtypes, ImageDType, Scalar, least_upper_float, least_upper_dtype
-from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, WINO, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
+from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, WINO, THREEFRY, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
@@ -209,8 +209,9 @@ class Tensor:
   def rand(*shape, device:Optional[Union[str, Tuple[str, ...]]]=None, dtype:Optional[DType]=None, **kwargs):
     assert device is None or isinstance(device, str), "rand only supports single device"
     if Tensor._rng_counter is None: Tensor._rng_counter = Tensor([0], dtype=dtypes.uint32, requires_grad=False)
-    if Device.canonicalize(device) == "TORCH" or getenv("CUDACPU") == 1:
-      return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, device=device, dtype=dtype, **kwargs)
+    if not THREEFRY.value: return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, device=device, dtype=dtype, **kwargs)
+
+    # threefry
     if (num := prod((shape:=argfix(*shape)))) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
     counts = (Tensor.arange(num, device=device, dtype=dtypes.uint32, requires_grad=False)+Tensor._rng_counter.to(device)).realize().pad(((0,num%2),))
     Tensor._rng_counter.assign(Tensor._rng_counter + num).realize()
@@ -1005,7 +1006,7 @@ if IMAGE:
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)
 
-# TODO: find a way to make threefry work for TORCH
+# TODO: eventually remove this
 def custom_random(out:Buffer):
   Tensor._seed += 1
   if DEBUG >= 2: print(f"*** {out.device}   rand  seed {Tensor._seed} size {out.size:<15d} dtype {out.dtype}")

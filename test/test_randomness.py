@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import torch
 from tinygrad import nn, dtypes, Tensor, Device
-from tinygrad.helpers import getenv
+from tinygrad.helpers import THREEFRY
 from functools import partial
 
 # https://gist.github.com/devries/11405101
@@ -59,8 +59,7 @@ class TestRandomness(unittest.TestCase):
     self.assertFalse(normal_test(Tensor.rand))
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
 
-  @unittest.skipIf(Device.DEFAULT == "TORCH", "threefly not implemented for torch")
-  @unittest.skipIf(getenv("CUDACPU") == 1, "threefly not implemented for cudacpu")
+  @unittest.skipIf(not THREEFRY, "not using threefry")
   def test_threefly_against_reference(self):
     Tensor.manual_seed(1337)
     # generated using

@@ -17,7 +17,7 @@ class TestZeroCopy(unittest.TestCase):
   def test_zero_copy_from_default_to_cpu(self):
     demo = Tensor.rand(1).realize()
     t1 = time_tensor_numpy(demo)
-    out = Tensor.empty(N, N).realize()
+    out = Tensor.rand(N, N).realize()
     t2 = time_tensor_numpy(out)
     gbps = out.nbytes()*1e-9/max(t2-t1, 1e-10)
     print(f"time(base): {t1*1e3:.2f} ms, time(copy): {t2*1e3:.2f} ms :  copy speed {gbps:.2f} GB/s")

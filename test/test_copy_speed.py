@@ -24,7 +24,7 @@ class TestCopySpeed(unittest.TestCase):
     s.unlink()
 
   def testCopyCPUtoDefault(self):
-    t = Tensor.zeros(N, N, device="cpu").contiguous().realize()
+    t = Tensor.rand(N, N, device="cpu").realize()
     print(f"buffer: {t.nbytes()*1e-9:.2f} GB")
     for _ in range(3):
       with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
@@ -35,7 +35,7 @@ class TestCopySpeed(unittest.TestCase):
   def testCopyCPUtoDefaultFresh(self):
     print("fresh copy")
     for _ in range(3):
-      t = Tensor.zeros(N, N, device="cpu").contiguous().realize()
+      t = Tensor.rand(N, N, device="cpu").realize()
       with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"): # noqa: F821
         with Timing("queue: "):
           t.to(Device.DEFAULT).realize()
@@ -43,7 +43,7 @@ class TestCopySpeed(unittest.TestCase):
       del t
 
   def testCopyDefaulttoCPU(self):
-    t = Tensor.zeros(N, N).contiguous().realize()
+    t = Tensor.rand(N, N).realize()
     print(f"buffer: {t.nbytes()*1e-9:.2f} GB")
     for _ in range(3):
       with Timing("sync:  ", on_exit=lambda ns: f" @ {t.nbytes()/ns:.2f} GB/s"):
