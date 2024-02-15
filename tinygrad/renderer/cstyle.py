@@ -247,6 +247,14 @@ code_for_op_hip = {
   UnaryOps.LOG2: lambda x,dtype: f"__ocml_log2_f32({x})" if dtype != dtypes.half else f"__ocml_log2_f16({x})",
   UnaryOps.EXP2: lambda x,dtype: f"__ocml_exp2_f32({x})" if dtype != dtypes.half else f"__ocml_exp2_f16({x})",
 }
+def _get_def_dt(dtype: DType): return ("_Float16", "f16") if dtype == dtypes.half else ("float", "f32")
+def_for_op_hip = {
+    BinaryOps.MAX: lambda dt: "__attribute__((const)) {0} __ocml_fmax_{1}({0},{0});".format(*_get_def_dt(dt)),
+    UnaryOps.SQRT: lambda dt: "__attribute__((const)) {0} __ocml_sqrt_{1}({0});".format(*_get_def_dt(dt)),
+    UnaryOps.SIN: lambda dt: "{0} __ocml_sin_{1}({0});".format(*_get_def_dt(dt)),
+    UnaryOps.LOG2: lambda dt: "__attribute__((pure)) {0} __ocml_log2_{1}({0});".format(*_get_def_dt(dt)),
+    UnaryOps.EXP2: lambda dt: "__attribute__((pure)) {0} __ocml_exp2_{1}({0});".format(*_get_def_dt(dt)),
+}
 
 def _make_hip_dtype(base_type, name, cnt):
   nms = "xyzwabcdefghijkl"[:cnt]
@@ -255,40 +263,7 @@ def _make_hip_dtype(base_type, name, cnt):
          ") { return {" + ', '.join(nms) + "}; }"
 
 class HIPLanguage(CStyleLanguage):
-  kernel_prefix = "#include <hip/hip_common.h>\n#define INFINITY (__builtin_inff())\n#define NAN (__builtin_nanf(\"\"))" + """
-  #define launch_bounds_impl0(requiredMaxThreadsPerBlock)                                       \
-    __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock)))
-  #define launch_bounds_impl1(requiredMaxThreadsPerBlock, minBlocksPerMultiprocessor)           \
-    __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock), amdgpu_waves_per_eu(minBlocksPerMultiprocessor)))
-  #define select_impl_(_1, _2, impl_, ...) impl_
-  #define __launch_bounds__(...) select_impl_(__VA_ARGS__, launch_bounds_impl1, launch_bounds_impl0)(__VA_ARGS__)
-  typedef long unsigned int size_t;
-  #define half _Float16
-  struct hip_bfloat16 { unsigned short data; };
-
-  extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_id(unsigned int);
-  extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_group_id(unsigned int);
-  extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_local_size(unsigned int);
-
-  extern "C" {
-  __attribute__((device)) __attribute__((const)) float __ocml_fmax_f32(float, float);
-  __attribute__((device)) __attribute__((pure)) float __ocml_exp2_f32(float);
-  __attribute__((device)) __attribute__((pure)) float __ocml_log2_f32(float);
-  __attribute__((device)) float __ocml_sin_f32(float);
-  __attribute__((device)) __attribute__((const)) float __ocml_sqrt_f32(float);
-  __attribute__((device)) __attribute__((const)) _Float16 __ocml_fmax_f16(_Float16, _Float16);
-  __attribute__((device)) __attribute__((pure)) _Float16 __ocml_exp2_f16(_Float16);
-  __attribute__((device)) __attribute__((pure)) _Float16 __ocml_log2_f16(_Float16);
-  __attribute__((device)) _Float16 __ocml_sin_f16(_Float16);
-  __attribute__((device)) __attribute__((const)) _Float16 __ocml_sqrt_f16(_Float16);
-  }\n""" + '\n'.join([_make_hip_dtype(*x) for x in [("signed int", "int", 2), ("signed int", "int", 4),
-                     ("_Float16", "half", 2), ("_Float16", "half", 4), ("_Float16", "half", 8), ("_Float16", "half", 16),
-                     ("float", "float", 2), ("float", "float", 4), ("float", "float", 8)]]) + """
-  static __attribute__((device)) half8 __hip_wmma_f16_f16(half16 a, half16 b, half8 c) {
-    half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
-    c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
-    for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;
-  }\nextern "C" __attribute__((global))"""
+  kernel_prefix = "extern \"C\" __attribute__((global)) "
   code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_hip}
@@ -299,4 +274,33 @@ class HIPLanguage(CStyleLanguage):
   launch_bounds = True
   uses_ptr_arithmetic = True
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
+
+  def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None):
+    prefix = ["#include <hip/hip_common.h>", "#define INFINITY (__builtin_inff())", "#define NAN (__builtin_nanf(""))",
+    """#define launch_bounds_impl0(requiredMaxThreadsPerBlock) __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock)))
+#define launch_bounds_impl1(requiredMaxThreadsPerBlock, minBlocksPerMultiprocessor)\
+__attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock), amdgpu_waves_per_eu(minBlocksPerMultiprocessor)))
+#define select_impl_(_1, _2, impl_, ...) impl_
+#define __launch_bounds__(...) select_impl_(__VA_ARGS__, launch_bounds_impl1, launch_bounds_impl0)(__VA_ARGS__)"""]
+
+    prefix.append("typedef long unsigned int size_t;")
+    for fn in ["local_id", "group_id", "local_size"]:
+      prefix.append(f'extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_{fn}(unsigned int);')
+
+    prefix += [_make_hip_dtype("float","float",sz) for sz in [2,4,8]]
+    if any(u.dtype == dtypes.int for u in uops): prefix += [_make_hip_dtype("signed int","int",sz) for sz in [2,4,8]]
+    if any(u.dtype == dtypes.half for u in uops): prefix += ["#define half _Float16",*[_make_hip_dtype("_Float16","half",sz) for sz in [2,4,8,16]]]
+    if any(u.dtype == dtypes.bfloat16 for u in uops): prefix.append("struct hip_bfloat16 { unsigned short data; };")
+
+    for uop in uops:
+      if uop.uop == UOps.ALU and uop.arg in def_for_op_hip.keys():
+        prefix.append('extern "C" __attribute__((device))' + def_for_op_hip[uop.arg](uop.dtype))
+    if any(uop.uop == UOps.WMMA for uop in uops): prefix.append(
+    """static __attribute__((device)) half8 __hip_wmma_f16_f16(half16 a, half16 b, half8 c) {
+      half16 c_frag = {}; half8 d; for (int n = 0; n < 8; n++) { c_frag[n*2] = c[n]; }
+      c_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(a, b, c_frag, false);
+      for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
+
+    return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix=prefix)
+
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
