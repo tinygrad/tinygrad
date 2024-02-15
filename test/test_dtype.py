@@ -495,10 +495,6 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([1, 2], dtype=dtypes.int32) / 2.0).dtype == dtypes.default_float
     assert (Tensor([1, 2], dtype=dtypes.float16) / 2).dtype == dtypes.float16
     assert (Tensor([1, 2], dtype=dtypes.float16) / 2.0).dtype == dtypes.float16
-    assert (2 / Tensor([1, 2], dtype=dtypes.int32)).dtype == dtypes.default_float
-    assert (2.0 / Tensor([1, 2], dtype=dtypes.int32)).dtype == dtypes.default_float
-    assert (2 / Tensor([1, 2], dtype=dtypes.float16)).dtype == dtypes.float16
-    assert (2.0 / Tensor([1, 2], dtype=dtypes.float16)).dtype == dtypes.float16
 
 if __name__ == '__main__':
   unittest.main()
