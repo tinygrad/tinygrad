@@ -348,10 +348,9 @@ class TestSchedule(unittest.TestCase):
     out = x.permute(0,2,3,1).contiguous()
     check_schedule(out, 2, filter_loadops=False)
 
-  @unittest.skip("the default device is no longer the CPU")
   def test_double_from(self):
     x = Tensor([1,2,3,4])
-    out = x.to('cpu')
+    out = x.to('ext')
     check_schedule(out, 0, filter_loadops=False)
 
   def test_pow_const_tensor_simplified(self):
