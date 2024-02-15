@@ -78,7 +78,7 @@ class PythonProgram:
             for m,o,v in zip(*inp): _store(m, o, v)
           i += 1
           continue
-        elif uop is UOps.END:
+        elif uop is UOps.ENDLOOP:
           loop_ends[idp[0]] = i
           i = idp[0]
           continue
@@ -93,7 +93,7 @@ class PythonProgram:
           ul[i] = [pbufs.pop(0).cast(dtype.fmt)] * warp_size
         elif uop is UOps.DEFINE_LOCAL:
           assert dtype.fmt is not None
-          lbuf = memoryview(bytearray(arg[1]*dtype.sz))
+          lbuf = memoryview(bytearray(arg[1]*dtype.itemsize))
           ul[i] = [lbuf.cast(dtype.fmt)] * warp_size
         elif uop is UOps.SPECIAL:
           if arg[1][0] == 'g':
