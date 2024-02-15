@@ -151,7 +151,9 @@ assert out[0] == 5, "when put in numpy, it's 5"
 
 # %%
 # == Compiled (in tinygrad/device.py, code 6/10) ==
-# Compiled backends take a little more (example: GPU, LLVM or PYTHON)
+
+# Now you can write a Compiled backend (example: GPU, LLVM or PYTHON)
+
 class Compiled:
   # a code generator, which compiles the AST
   codegen: Type[Linearizer]
