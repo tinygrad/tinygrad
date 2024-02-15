@@ -191,10 +191,7 @@ class OpenCLLanguage(CStyleLanguage):
 OpenCLRenderer = functools.partial(uops_to_cstyle, OpenCLLanguage())
 
 class MetalLanguage(CStyleLanguage):
-  kernel_prefix = """#include <metal_stdlib>\nusing namespace metal;\ntemplate<typename T, typename S, typename U> U __metal_wmma(T m, T n, U o) {
-  S a,b,c; a.thread_elements()[0] = m.x; a.thread_elements()[1] = m.y; b.thread_elements()[0] = n.x; b.thread_elements()[1] = n.y;
-  c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
-  return U(c.thread_elements()[0], c.thread_elements()[1]);\n}\nkernel """
+  kernel_prefix = "kernel "
   buffer_prefix = "device "
   smem_prefix = "threadgroup "
   arg_int_prefix = "constant int&"
@@ -205,6 +202,14 @@ class MetalLanguage(CStyleLanguage):
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
     return f"as_type<{var_dtype.name}>({x[0]})" if bitcast else super().render_cast(x, var_dtype)
+
+  def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None):
+    prefix = ["#include <metal_stdlib>","using namespace metal;"]
+    if any(uop.uop == UOps.WMMA for uop in uops): prefix.append("""template<typename T, typename S, typename U> U __metal_wmma(T m, T n, U o) {
+    S a,b,c; a.thread_elements()[0] = m.x; a.thread_elements()[1] = m.y; b.thread_elements()[0] = n.x; b.thread_elements()[1] = n.y;
+    c.thread_elements()[0] = o.x; c.thread_elements()[1] = o.y; simdgroup_multiply_accumulate(c, a, b, c);
+    return U(c.thread_elements()[0], c.thread_elements()[1]);\n}""")
+    return super().render_kernel(function_name, kernel, bufs, local_size, uops, prefix)
 MetalRenderer = functools.partial(uops_to_cstyle, MetalLanguage())
 
 code_for_op_half = {
@@ -276,7 +281,7 @@ class HIPLanguage(CStyleLanguage):
   __attribute__((device)) __attribute__((pure)) _Float16 __ocml_log2_f16(_Float16);
   __attribute__((device)) _Float16 __ocml_sin_f16(_Float16);
   __attribute__((device)) __attribute__((const)) _Float16 __ocml_sqrt_f16(_Float16);
-  }\n""" + '\n'.join([_make_hip_dtype(*x) for x in [("signed int", "int", 2),
+  }\n""" + '\n'.join([_make_hip_dtype(*x) for x in [("signed int", "int", 2), ("signed int", "int", 4),
                      ("_Float16", "half", 2), ("_Float16", "half", 4), ("_Float16", "half", 8), ("_Float16", "half", 16),
                      ("float", "float", 2), ("float", "float", 4), ("float", "float", 8)]]) + """
   static __attribute__((device)) half8 __hip_wmma_f16_f16(half16 a, half16 b, half8 c) {
