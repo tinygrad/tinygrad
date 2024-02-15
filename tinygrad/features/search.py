@@ -153,7 +153,7 @@ def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, 
   if not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
 
   dev = Device[lin.opts.device]
-  assert isinstance(dev, Compiled)
+  assert isinstance(dev, Compiled) and dev.compiler is not None
 
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
   lib, global_size, local_size = _compile_linearizer(dev.compiler, lin)

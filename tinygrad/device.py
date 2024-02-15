@@ -131,7 +131,7 @@ class BufferXfer(BufferCopy):
     if hasattr(dest.allocator.device, "track_cross_buffer") and hasattr(src.allocator, "track_cross_device"):
       dest.allocator.device.track_cross_buffer.append(src)
       src.allocator.track_cross_device.add(dest.allocator.device)
-    dest.allocator.transfer(dest._buf, src._buf, dest.nbytes)
+    dest.allocator.transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.device, dest_dev=dest.allocator.device)
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator:
@@ -281,6 +281,7 @@ class CompiledASTRunner(JITRunner):
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
     self.name, self.display_name, self.prg, self.device, self.global_size, self.local_size, self.first_run = \
       to_function_name(name), name, prg, device, global_size, local_size, True
+    assert self.device.compiler is not None, "compiler is reuired to make an AST kernel"
     lib:bytes = precompiled if precompiled is not None else self.device.compiler.compile_cached(prg)
     self.lib, self.clprg = lib, self.device.runtime(self.name, lib)
     self.vars: List[Variable] = []
@@ -312,15 +313,17 @@ class CompiledASTRunner(JITRunner):
     return et
 
 class Compiled:
-  def __init__(self, device:str, allocator:Allocator, compiler:Compiler, runtime, graph=None):
+  def __init__(self, device:str, allocator:Allocator, compiler:Optional[Compiler], runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
   def synchronize(self): pass  # override this in your device
 
   def to_program(self, k:Linearizer) -> CompiledASTRunner:
+    assert self.compiler is not None, "compiler is required to run AST"
     k.linearize()
     return CompiledASTRunner(k.ast, k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size)
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
+    assert self.compiler is not None, "compiler is required to build AST"
     if DEBUG >= 3:
       from tinygrad.features.graph import print_tree
       print_tree(ast)
