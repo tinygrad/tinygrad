@@ -2,8 +2,7 @@ from __future__ import annotations
 import ctypes, functools, subprocess, io, atexit
 from typing import Tuple, TypeVar, List
 import tinygrad.runtime.autogen.hsa as hsa
-from tinygrad.helpers import DEBUG, init_c_var
-from tinygrad.helpers import from_mv, round_up, to_mv, init_c_struct_t
+from tinygrad.helpers import DEBUG, init_c_var, from_mv, round_up, to_mv, init_c_struct_t
 from tinygrad.device import Compiled, LRUAllocator
 from tinygrad.runtime.ops_hip import HIPCompiler
 from tinygrad.runtime.driver.hsa import check, find_agent, find_memory_pool, HWQueue

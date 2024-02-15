@@ -3,7 +3,9 @@ import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.helpers import init_c_var
 
 def check(status):
-  if status != 0: raise RuntimeError(f"HSA Error {status}")
+  if status != 0:
+    hsa.hsa_status_string(status, ctypes.byref(status_str := ctypes.POINTER(ctypes.c_char)()))
+    raise RuntimeError(f"HSA Error {status}: {ctypes.string_at(status_str).decode()}")
 
 # Precalulated AQL info
 AQL_PACKET_SIZE = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t)
