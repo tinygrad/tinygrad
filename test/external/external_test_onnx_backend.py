@@ -187,6 +187,10 @@ if Device.DEFAULT in ['LLVM', 'METAL']:
   backend_test.exclude('test_isnan_float16_cpu')
   backend_test.exclude('test_isnan_cpu')
 
+# TODO: Onnx expects division between non-float tensors to be floordiv
+backend_test.exclude('test_center_crop_pad_crop_expanded_cpu')
+backend_test.exclude('test_div_uint8_cpu')
+
 # disable model tests for now since they are slow
 if not getenv("MODELTESTS"):
   for x in backend_test.test_suite:
