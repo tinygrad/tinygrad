@@ -287,7 +287,7 @@ __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock), amdgp
     for fn in ["local_id", "group_id", "local_size"]:
       prefix.append(f'extern "C" __attribute__((device)) __attribute__((const)) size_t __ockl_get_{fn}(unsigned int);')
 
-    prefix += [_make_hip_dtype("float","float",sz) for sz in [2,4,8]]
+    if any(u.dtype == dtypes.float for u in uops): prefix += [_make_hip_dtype("float","float",sz) for sz in [2,4,8]]
     if any(u.dtype == dtypes.int for u in uops): prefix += [_make_hip_dtype("signed int","int",sz) for sz in [2,4,8]]
     if any(u.dtype == dtypes.half for u in uops): prefix += ["#define half _Float16",*[_make_hip_dtype("_Float16","half",sz) for sz in [2,4,8,16]]]
     if any(u.dtype == dtypes.bfloat16 for u in uops): prefix.append("struct hip_bfloat16 { unsigned short data; };")
