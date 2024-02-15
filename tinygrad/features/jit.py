@@ -165,7 +165,9 @@ class _CacheCollector:
   def add(self, prg, rawbufs, var_vals):
     if self.cache is None: return
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
-    if len(rawbufs): self.placeholders[rawbufs[0]] = PlaceHolder(rawbufs[0])    # NOTE: this is making an assumption that 0 is special
+    # NOTE: this is making an assumption that 0 is special
+    # TODO: this is wrong for sync and wait
+    if len(rawbufs): self.placeholders[rawbufs[0]] = PlaceHolder(rawbufs[0])
     self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, Buffer) else x for x in rawbufs]))
 
   def finish(self) -> List[JitItem]:
