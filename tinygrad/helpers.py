@@ -91,7 +91,7 @@ class ContextVar:
   def __lt__(self, x): return self.value < x
 
 DEBUG, IMAGE, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
-WINO, THREEFRY = ContextVar("WINO", 0), ContextVar("THREEFRY", 0)
+WINO, THREEFRY = ContextVar("WINO", 0), ContextVar("THREEFRY", 1)
 GRAPH, GRAPHPATH = ContextVar("GRAPH", 0), getenv("GRAPHPATH", "/tmp/net")
 
 class Timing(contextlib.ContextDecorator):
