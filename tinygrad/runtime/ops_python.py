@@ -15,8 +15,10 @@ def exec_alu(arg, dtype, p):
   # TODO: use this for constant folding
   if arg == TernaryOps.MULACC: return p[0]*p[1]+p[2]
   if arg == TernaryOps.WHERE: return p[1] if p[0] else p[2]
-  if arg == UnaryOps.LOG2: return math.log2(p[0]) if p[0] > 0 else math.nan
-  if arg == UnaryOps.EXP2: return math.exp(p[0]*math.log(2))
+  if arg == UnaryOps.LOG2: return math.log2(p[0]) if p[0] > 0 else -math.inf if p[0] == 0 else math.nan
+  if arg == UnaryOps.EXP2:
+    try: return math.exp(p[0]*math.log(2))
+    except OverflowError: return math.inf
   if arg == UnaryOps.SQRT: return math.sqrt(p[0]) if p[0] > 0 else math.nan
   if arg == UnaryOps.SIN: return math.sin(p[0])
   if arg == UnaryOps.NEG: return -p[0]
@@ -59,8 +61,9 @@ class PythonProgram:
       loop_ends: Dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        inp = [ul[v] for v in idp]
-        dtp = [dl[v] for v in idp]
+        void_ops = {UOps.STORE, UOps.ENDLOOP, UOps.BARRIER, UOps.IF, UOps.ENDIF}
+        inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
+        dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
         if uop is UOps.STORE:
           assert len(inp) <= 3, "gated stores not supported yet"
@@ -82,7 +85,7 @@ class PythonProgram:
           loop_ends[idp[0]] = i
           i = idp[0]
           continue
-        elif uop is UOps.BARRIER:
+        elif uop in (UOps.BARRIER, UOps.IF, UOps.ENDIF):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
@@ -100,7 +103,12 @@ class PythonProgram:
             ul[i] = [idxs[2-arg[0]]] * warp_size
           elif arg[1][0] == 'l':
             ul[i] = [x[2-arg[0]] for x in warp]
-        elif uop is UOps.CONST: ul[i] = [int(arg) if dtypes.is_int(dtype) else float(arg)] * warp_size
+        elif uop is UOps.CONST:
+          casted_arg = int(arg) if dtypes.is_int(dtype) else float(arg)
+          if dtype.count > 1:
+            ul[i] = [[casted_arg] * warp_size for _ in range(dtype.count)]
+          else:
+            ul[i] = [casted_arg] * warp_size
         elif uop is UOps.DEFINE_ACC:
           if dtype.count > 1:
             ul[i] = [[arg] * warp_size for _ in range(dtype.count)]
@@ -108,11 +116,12 @@ class PythonProgram:
             ul[i] = [arg] * warp_size
         elif uop is UOps.LOOP:
           if i not in ul:
-            ul[i] = [0] * warp_size
+            ul[i] = [inp[0][0]] * warp_size
           else:
             for j in range(len(ul[i])):
               ul[i][j] += 1
             if ul[i][0] == inp[1][0]:
+              del ul[i]
               i = loop_ends[i] + 1
               continue
         elif uop is UOps.CAST:
@@ -137,7 +146,7 @@ class PythonProgram:
                 else: ret.append(_load(m, ox*4 + oy*dtp[0].shape[1]*4 + j))
               ul[i].append(ret)
           elif dtype.count > 1:
-            ul[i] = [load(inp, j) for j in range(dtype.count)]
+            ul[i] = [load([inp[i][j] if dtp[i].count > 1 else inp[i] for i in range(len(inp))], j) for j in range(dtype.count)]
           else:
             ul[i] = load(inp)
         elif uop is UOps.PHI:
