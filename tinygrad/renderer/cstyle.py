@@ -276,7 +276,7 @@ class HIPLanguage(CStyleLanguage):
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
 
   def render_kernel(self, function_name, kernel, bufs, local_size, uops, prefix=None):
-    prefix = ["#include <hip/hip_common.h>", "#define INFINITY (__builtin_inff())", "#define NAN (__builtin_nanf(""))",
+    prefix = ["#include <hip/hip_common.h>", "#define INFINITY (__builtin_inff())", '#define NAN (__builtin_nanf(""))',
     """#define launch_bounds_impl0(requiredMaxThreadsPerBlock) __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock)))
 #define launch_bounds_impl1(requiredMaxThreadsPerBlock, minBlocksPerMultiprocessor)\
 __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock), amdgpu_waves_per_eu(minBlocksPerMultiprocessor)))
