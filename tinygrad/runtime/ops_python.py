@@ -115,12 +115,13 @@ class PythonProgram:
           else:
             ul[i] = [arg] * warp_size
         elif uop is UOps.LOOP:
-          if i not in ul or ul[i][0] == inp[1][0]:
+          if i not in ul:
             ul[i] = [inp[0][0]] * warp_size
           else:
             for j in range(len(ul[i])):
               ul[i][j] += 1
             if ul[i][0] == inp[1][0]:
+              del ul[i]
               i = loop_ends[i] + 1
               continue
         elif uop is UOps.CAST:
