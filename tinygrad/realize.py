@@ -67,7 +67,7 @@ def run_schedule(schedule:List[ScheduleItem]):
     if si.out.size > 0:
       options = BufferOptions(host=True, signal=True) if si.ast.op is LoadOps.SYNC else None
       si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
-        Buffer(si.out.device, si.out.size, si.out.dtype, None, options=options)
+        Buffer(si.out.device, si.out.size, si.out.dtype, "PLACEHOLDER" if getattr(prg, "skip_allocation", False) else None, options=options)
       del si.out.srcs
 
     # run the function (put it in JIT)
