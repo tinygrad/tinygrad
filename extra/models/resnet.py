@@ -69,7 +69,7 @@ class BasicBlock:
     self.downsample = []
     self.bn_downsample = None
     if stride != 1 or in_planes != self.expansion*planes:
-      self.bn_downsample = BatchNorm(self.expansion*planes)
+      self.bn_downsample = BatchNorm(self.expansion*planes)  # name this BN so LARS can exclude it
       self.downsample = [
         Conv2dHeNormal(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
         self.bn_downsample
