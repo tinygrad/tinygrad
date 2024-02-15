@@ -464,7 +464,7 @@ class TestZeroShapeTensor(unittest.TestCase):
 class TestTensorCreationDevice(unittest.TestCase):
   # test auxiliary tensors are created on the same device
   def test_one_hot(self):
-    y = Tensor([1, 2, 3]).to("CPU")
+    y = Tensor([1, 2, 3]).to("CLANG")
     x = y.one_hot(10)
     x.realize()
 
