@@ -44,7 +44,7 @@ def _loadop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str,
 def _fromcpu(x: np.ndarray) -> LazyBuffer:
   ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "EXT")
   if x.size == 0:
-    ret.realized = Buffer("EXT", 0, dtypes.from_np(x.dtype), (memoryview(bytes()), None))
+    ret.realized = Buffer("EXT", 0, dtypes.from_np(x.dtype), (memoryview(bytearray()), None))
   else:
     ret.realized = Buffer("EXT", prod(x.shape), dtypes.from_np(x.dtype), (flat_mv(np.require(x, requirements='C').data), x))
   return ret
