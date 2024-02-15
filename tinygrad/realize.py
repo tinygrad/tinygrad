@@ -96,7 +96,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
   if buf.op is LoadOps.CONST:
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
-    return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.arg), buf.dtype, unbound_st))
+    return LazyOp(BufferOps.CONST, (), ConstBuffer(buf.arg, buf.dtype, unbound_st))
 
   # if we aren't fusing it, it's a load and we add it to the inputs
   if buf.realized or (buf in realizes and not first):
