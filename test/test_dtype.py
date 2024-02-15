@@ -484,5 +484,21 @@ class TestAutoCastType(unittest.TestCase):
     assert Tensor([1, 2], dtype=dt).maximum(3).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
     assert Tensor([1, 2], dtype=dt).maximum(True).dtype == dt
 
+  def test_div(self):
+    assert (Tensor([1, 2], dtype=dtypes.int32) / Tensor([2, 2], dtype=dtypes.int32)).dtype == dtypes.default_float
+    assert (Tensor([1, 2], dtype=dtypes.int16) / Tensor([2, 2], dtype=dtypes.int32)).dtype == dtypes.default_float
+    assert (Tensor([1, 2], dtype=dtypes.float32) / Tensor([2, 2], dtype=dtypes.float16)).dtype == dtypes.float32
+    assert (Tensor([1, 2], dtype=dtypes.int32) / Tensor([2, 2], dtype=dtypes.float16)).dtype == dtypes.float16
+
+  def test_div_const(self):
+    assert (Tensor([1, 2], dtype=dtypes.int32) / 2).dtype == dtypes.default_float
+    assert (Tensor([1, 2], dtype=dtypes.int32) / 2.0).dtype == dtypes.default_float
+    assert (Tensor([1, 2], dtype=dtypes.float16) / 2).dtype == dtypes.float16
+    assert (Tensor([1, 2], dtype=dtypes.float16) / 2.0).dtype == dtypes.float16
+    assert (2 / Tensor([1, 2], dtype=dtypes.int32)).dtype == dtypes.default_float
+    assert (2.0 / Tensor([1, 2], dtype=dtypes.int32)).dtype == dtypes.default_float
+    assert (2 / Tensor([1, 2], dtype=dtypes.float16)).dtype == dtypes.float16
+    assert (2.0 / Tensor([1, 2], dtype=dtypes.float16)).dtype == dtypes.float16
+
 if __name__ == '__main__':
   unittest.main()
