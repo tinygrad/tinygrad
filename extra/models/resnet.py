@@ -67,10 +67,12 @@ class BasicBlock:
     self.conv2 = Conv2dHeNormal(planes, planes, kernel_size=3, padding=1, stride=1, bias=False)
     self.bn2 = BatchNorm(planes)
     self.downsample = []
+    self.bn_downsample = None
     if stride != 1 or in_planes != self.expansion*planes:
+      self.bn_downsample = BatchNorm(self.expansion*planes)
       self.downsample = [
         Conv2dHeNormal(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
-        BatchNorm(self.expansion*planes)
+        self.bn_downsample
       ]
 
   def __call__(self, x):

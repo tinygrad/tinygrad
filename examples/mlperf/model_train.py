@@ -97,7 +97,8 @@ def train_resnet():
 
   # ** Optimizer **
   if getenv("LARS", 1):
-    optimizer = optim.LARS(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay, track_gnorm=bool(getenv("TRACK_NORMS", 1)))
+    skip_list = {v for k, v in get_state_dict(model).items() if 'bn' in k or 'bias' in k}
+    optimizer = optim.LARS(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay, track_gnorm=bool(getenv("TRACK_NORMS", 1)), skip_list=skip_list)
   else:
     optimizer = optim.SGD(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay)
 
