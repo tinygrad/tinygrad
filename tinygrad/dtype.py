@@ -38,7 +38,7 @@ class PtrDType(DType):
   def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.sz==dt.sz
   def __ne__(self, dt): return not (self == dt)
 
-def cast_scalar(scalar: Scalar, dtype:DType): return int(scalar) if dtypes.is_int(dtype) else float(scalar)
+def cast_scalar(scalar: Scalar, dtype:DType): return int(scalar) if dtypes.is_int(dtype) else float(scalar) if dtypes.is_float(dtype) else bool(scalar)
 
 class dtypes:
   @staticmethod
