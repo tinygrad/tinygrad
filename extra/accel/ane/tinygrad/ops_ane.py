@@ -30,7 +30,7 @@ def compile_relu(ane, sz):
 class ReLU(Function):
   def forward(ctx, input):
     ret = ctx.ane.tensor(input.shape)
-    ctx.ane.run(compile_relu(ctx.ane, input.count), input, ret)
+    ctx.ane.run(compile_relu(ctx.ane, input.sz), input, ret)
     return ret
 
   def backward(ctx, grad_output):
