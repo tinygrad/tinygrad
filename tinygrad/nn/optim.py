@@ -97,10 +97,12 @@ class LARS(Optimizer):
           ), 1.0
         )
         scaled_lr = self.lr * trust_ratio
+        g = t.grad + self.weight_decay * t.detach()
       else:
         scaled_lr = self.lr
+        g = t.grad
 
-      g = (t.grad + self.weight_decay * t.detach()) * scaled_lr
+      g = g * scaled_lr
       if self.momentum:
         self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
