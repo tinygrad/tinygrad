@@ -150,18 +150,8 @@ out = result.lazydata.base.realized.as_buffer().cast('I')
 assert out[0] == 5, "when put in numpy, it's 5"
 
 # %%
-# == Union[Interpreted, Compiled] (in tinygrad/device.py, code 6/10) ==
-
-# Now you have a choice, you can either write a "Interpreted" backend or "Compiled" backend
-
-# Interpreted backends are very simple (example: CPU and TORCH)
-class Interpreted:
-  # and they have a lookup table to functions for the Ops
-  fxn_for_op: Dict[Op, Callable] = {
-    UnaryOps.EXP2: lambda x: np.exp2(x),
-    BinaryOps.ADD: lambda x,y: x+y}
-
-# Compiled backends take a little more (example: GPU and LLVM)
+# == Compiled (in tinygrad/device.py, code 6/10) ==
+# Compiled backends take a little more (example: GPU, LLVM or PYTHON)
 class Compiled:
   # a code generator, which compiles the AST
   codegen: Type[Linearizer]

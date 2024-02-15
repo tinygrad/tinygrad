@@ -56,7 +56,6 @@ class TestRealWorld(unittest.TestCase):
     def test(t, t2): return model(t, 801, t2).realize()
     helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 953)
 
-  @unittest.skipIf(Device.DEFAULT in ["CPU", "TORCH"], "tons of ram with interpreted")
   def test_mini_stable_diffusion(self):
     model = [ResBlock(16, 24, 16) for _ in range(4)]
     derandomize_model(model)

@@ -2,7 +2,7 @@ import os, mmap, _posixshmem, io
 from typing import Callable, Dict, Tuple
 from tinygrad.dtype import DType, dtypes
 from tinygrad.helpers import prod, OSX
-from tinygrad.device import Interpreted, Allocator
+from tinygrad.device import Allocator
 from tinygrad.ops import Op, MovementOps, UnaryOps
 from tinygrad.shape.view import strides_for_shape
 
@@ -52,6 +52,3 @@ class DiskAllocator(Allocator):
         fo.readinto(dest)
     else:
       dest[:] = src._buf()
-
-class DiskDevice(Interpreted):
-  def __init__(self, device:str): super().__init__(device, DiskAllocator(device[len("disk:"):]), disk_fxn_for_op)
