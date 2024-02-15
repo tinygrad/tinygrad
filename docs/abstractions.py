@@ -135,8 +135,8 @@ assert len(lazyop.srcs) == 2
 # the source is a LazyBuffer that is a "CPU" Tensor
 # again, a LazyOp AST is like a GPU kernel. you have to copy the data on the device first
 assert lazyop.srcs[0].op == LoadOps.COPY
-assert lazyop.srcs[0].srcs[0].device == "EXT"
-assert lazyop.srcs[0].srcs[0].realized._buf[0][0] == 2, "the src of the COPY LazyOP is a LazyBuffer on the CPU holding [2]"
+assert lazyop.srcs[0].srcs[0].device == "CPU"
+assert lazyop.srcs[0].srcs[0].realized._buf[0] == 2, "the src of the COPY LazyOP is a LazyBuffer on the CPU holding [2]"
 assert result.lazydata.base.realized is None, "the LazyBuffer is not realized yet"
 
 # now we realize the LazyBuffer
