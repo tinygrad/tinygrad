@@ -90,7 +90,7 @@ class Linearizer(Kernel):
     invalid_value = 0 if dtypes.is_int(buf.dtype) else 0.0
     for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, NumNode(0), NumNode(1)) if valid.max == 0 else (const, idx, valid)
-      key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
+      key = f"{acc}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
           self.load_cache[key] = self.uop(UOps.DEFINE_ACC, localtype, (), this_const, cachable=False)
@@ -264,6 +264,7 @@ class Linearizer(Kernel):
           local_idxs[self.local_dims-len(tc.threads)+n] = replace_acc_idxs[n] # replace locals
         for n in range(len(replace_acc_idxs)-len(tc.threads)):
           upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
+        if DEBUG >= 3: print("store alias: idxs=", global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)
 
       # reduce loop
       loop_ctx = render_loop(reduce_idxs)
@@ -276,23 +277,23 @@ class Linearizer(Kernel):
       for i in self.local_alias:
         localbuf_idx = self.bufs.index(self.local_alias[i])
         buf_idxs = [idx*0 if s == 0 else idx for idx,s in zip(global_idxs+local_idxs+reduce_idxs+full_upcast_idxs,self.sts[i].real_strides())]
-        if self.tensor_core:
+        if (tc:=self.tensor_core):
           min_alias_idx = min(self.local_alias.keys())
-          replace_input_idxs = calc_tc_idxs(self.tensor_core.thread_local_sizes[i-min_alias_idx], self.tensor_core.thread_local_aliases[i-min_alias_idx])  # noqa: E501
-          for n in range(len(self.tensor_core.threads)):
-            buf_idxs[self.first_reduce-len(self.tensor_core.threads)+n] = replace_input_idxs[n] # replace locals
-          for n in range(len(replace_input_idxs)-len(self.tensor_core.threads)):
-            buf_idxs[self.shape_len-self.upcasted+n] = replace_input_idxs[len(self.tensor_core.threads)+n] # replace upcasts
+          replace_input_idxs = calc_tc_idxs(tc.thread_local_sizes[i-min_alias_idx], tc.thread_local_aliases[i-min_alias_idx])
+          for n in range(tc.num_threads()):
+            buf_idxs[self.first_reduce-tc.num_threads()+n] = replace_input_idxs[n] # replace locals
+          for n in range(tc.num_upcasts()):
+            buf_idxs[self.shape_len-self.upcasted+n] = replace_input_idxs[tc.num_threads()+n] # replace upcasts
         if DEBUG >= 3: print(f"{localbuf_idx} alias {i}: idxs=", buf_idxs)
         ll = self.global_load(i, buf_idxs)
         locals_to_store.append((localbuf_idx, buf_idxs, ll))
 
       # copy in any global buffers
       if (tc:=self.tensor_core):
-        wmma_sz, num_tc_upcast = tc.thread_local_sizes, 2 # 2 is for UNROLL and one UPCAST
+        wmma_sz = tc.thread_local_sizes
         def upcast_strides(buf:int):
           strides, next = [], 1
-          for (sz, stride, reduce) in self.upcasted_axis(buf)[num_tc_upcast:]:
+          for (sz, stride, reduce) in self.upcasted_axis(buf)[tc.num_upcasts():]:
             strides.append((0 if stride == 0 else next, sz))
             next *= 1 if stride == 0 else sz
           return strides
@@ -383,7 +384,7 @@ class Linearizer(Kernel):
       for u in self.uops:
         print(f"{self.uops.index(u):4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} {str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")  # noqa: E501
     if getenv("GRAPHUOPS"):
-      from tinygrad.graph import graph_uops
+      from tinygrad.features.graph import graph_uops
       graph_uops(self.uops)
 
     # restore backups
