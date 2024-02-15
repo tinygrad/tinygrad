@@ -20,7 +20,7 @@ class MetalCompiler(Compiler):
       return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
     else:
       options = Metal.MTLCompileOptions.new()
-      options.setFastMathEnabled_(getenv("METAL_FAST_MATH", 1))
+      options.setFastMathEnabled_(getenv("METAL_FAST_MATH"))
       library = unwrap2(self.device.device.newLibraryWithSource_options_error_(src, options, None))
       return library.libraryDataContents().bytes().tobytes()
 
