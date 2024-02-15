@@ -165,6 +165,7 @@ class TestFloatDType(TestDType): DTYPE = dtypes.float
 class TestDoubleDtype(TestDType):
   DTYPE = dtypes.double
   @unittest.skipIf(getenv("CUDACPU",0)==1, "conversion not supported on CUDACPU")
+  @unittest.skipIf(getenv("HIP",0)==1, "HIP renderer does not support f64 precision")
   def test_float64_increased_precision(self):
     for func in [
       lambda t: t.exp(),
