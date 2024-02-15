@@ -281,7 +281,7 @@ class HIPLanguage(CStyleLanguage):
   __attribute__((device)) __attribute__((pure)) _Float16 __ocml_log2_f16(_Float16);
   __attribute__((device)) _Float16 __ocml_sin_f16(_Float16);
   __attribute__((device)) __attribute__((const)) _Float16 __ocml_sqrt_f16(_Float16);
-  }\n""" + '\n'.join([_make_hip_dtype(*x) for x in [("signed int", "int", 2),
+  }\n""" + '\n'.join([_make_hip_dtype(*x) for x in [("signed int", "int", 2), ("signed int", "int", 4),
                      ("_Float16", "half", 2), ("_Float16", "half", 4), ("_Float16", "half", 8), ("_Float16", "half", 16),
                      ("float", "float", 2), ("float", "float", 4), ("float", "float", 8)]]) + """
   static __attribute__((device)) half8 __hip_wmma_f16_f16(half16 a, half16 b, half8 c) {
