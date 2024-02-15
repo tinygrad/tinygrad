@@ -1,7 +1,7 @@
 from typing import Tuple, Dict, List
 from tinygrad.dtype import DType
 from tinygrad.tensor import Device, Tensor
-from tinygrad.jit import TinyJit
+from tinygrad.features.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
 from tinygrad.dtype import dtypes
 import json
@@ -133,7 +133,7 @@ def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, 
       gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures[0].tex, 0);
       gl.useProgram(program);
-      gl.uniform1i(gl.getUniformLocation(program, "width"), textures[0].width);  
+      gl.uniform1i(gl.getUniformLocation(program, "width"), textures[0].width);
 
       const vao = setupVertexData(gl, program, [-1, 1, 0, 1, -1, -1, 0, 0, 1, 1, 1, 1, 1, -1, 1, 0]);
       gl.bindVertexArray(vao);
@@ -158,13 +158,13 @@ def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, 
 
     function limitTextureDims(size, threshold) {{
       if (size <= threshold) {{ return [size, 1] }};
-      
+
       for (let i = 2; i < threshold + 1; i++) {{
         if ((size % i == 0) && (Math.floor(size / i) <= threshold)) {{
           return [Math.floor(size / i), i];
         }}
       }}
-      
+
       return [size, 1];
     }}
 
@@ -197,11 +197,11 @@ def export_model_webgl(functions, statements, bufs, bufs_to_save, weight_names, 
       const internalFormat = gl.RGBA;
       const texSize = limitTextureDims(size, gl.getParameter(gl.MAX_TEXTURE_SIZE));
       let weights;
-      
+
       if (tensorBuffer != null) {{
         if (!isHalf)
           weights = new Float32Array(tensorBuffer.buffer, tensorBuffer.byteOffset, tensorBuffer.byteLength / Float32Array.BYTES_PER_ELEMENT);
-        else 
+        else
           weights = new Uint16Array(tensorBuffer.buffer, tensorBuffer.byteOffset, tensorBuffer.byteLength / Uint16Array.BYTES_PER_ELEMENT);
       }} else {{
         if (!isHalf)

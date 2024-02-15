@@ -3,7 +3,7 @@ import Metal
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, unwrap2, GraphException
 from tinygrad.device import Buffer, CompiledASTRunner, update_stats
-from tinygrad.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims
+from tinygrad.features.jit import JitItem, get_input_replace, get_jit_stats, get_jc_idxs_with_updatable_launch_dims
 from tinygrad.shape.symbolic import Variable
 from tinygrad.runtime.ops_metal import MetalDevice
 

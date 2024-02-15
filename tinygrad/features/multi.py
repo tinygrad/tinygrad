@@ -4,7 +4,7 @@ import functools, itertools, operator
 from tinygrad.helpers import all_same, dedup, round_up, prod, DEBUG
 from tinygrad.dtype import DType, Scalar
 from tinygrad.ops import BinaryOps, LoadOps, UnaryOps, TernaryOps, ReduceOps
-from tinygrad.lazy import LazyBuffer, create_schedule
+from tinygrad.lazy import LazyBuffer
 from tinygrad.shape.shapetracker import sint
 
 def all_reduce(op:ReduceOps, lbs):
@@ -57,7 +57,6 @@ class MultiLazyBuffer:
   def is_unrealized_contiguous_const(self): return False
 
   # passthroughs
-  def schedule(self, seen=None): return create_schedule(self.real_lbs, seen)
   def cast(self, dtype:DType, bitcast:bool=False): return MultiLazyBuffer([x.cast(dtype, bitcast) for x in self.lbs], self.axis, self.real)
   def const(self, val:Scalar) -> MultiLazyBuffer: return MultiLazyBuffer([x.const(val) for x in self.lbs], self.axis, self.real)
   def contiguous(self): return MultiLazyBuffer([x.contiguous() for x in self.lbs], self.axis, self.real)

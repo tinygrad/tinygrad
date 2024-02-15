@@ -1,5 +1,5 @@
 from extra import dist
-from tinygrad.jit import TinyJit
+from tinygrad.features.jit import TinyJit
 if __name__ == "__main__":
   dist.preinit()
 

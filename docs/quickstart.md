@@ -247,7 +247,7 @@ To use the JIT we just need to add a function decorator to the forward pass of o
 Or in this case we will create a wrapper function and decorate the wrapper function to speed up the evaluation of our neural network.
 
 ```python
-from tinygrad.jit import TinyJit
+from tinygrad import TinyJit
 
 @TinyJit
 def jit(x):
