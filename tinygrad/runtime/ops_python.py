@@ -2,7 +2,7 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Tuple, List, Optional, Any, Dict
-import pickle, base64, itertools, time, math
+import pickle, base64, itertools, time, math, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Allocator, Compiler
@@ -123,7 +123,11 @@ class PythonProgram:
             if dtypes.is_int(dtype):
               ul[i] = [int(x) for x in inp[0]]
             elif dtypes.is_float(dtype):
-              ul[i] = [float(x) for x in inp[0]]
+              assert(len(arg) == 2)
+              if arg[1]: # bitcast
+                ul[i] = [struct.unpack("f", struct.pack("i", x))[0] for x in inp[0]]
+              else:
+                ul[i] = [float(x) for x in inp[0]]
             else:
               ul[i] = inp[0]
         elif uop is UOps.LOAD:
