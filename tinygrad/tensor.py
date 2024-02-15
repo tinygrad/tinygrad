@@ -6,8 +6,9 @@ from collections import defaultdict
 from functools import partialmethod, reduce
 import numpy as np
 
-from tinygrad.dtype import DType, dtypes, ImageDType, Scalar, least_upper_float, least_upper_dtype
-from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, WINO, THREEFRY, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
+from tinygrad.dtype import DType, dtypes, ImageDType, Scalar, least_upper_float, least_upper_dtype, cast_scalar
+from tinygrad.helpers import argfix, make_pair, getenv, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv
+from tinygrad.helpers import IMAGE, DEBUG, WINO, THREEFRY
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
@@ -42,8 +43,11 @@ def _loadop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str,
   return MultiLazyBuffer([LazyBuffer.loadop(op, shape, dtype, d, arg, src) for d in device], None)
 
 def _fromcpu(x: np.ndarray) -> LazyBuffer:
-  ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "CPU")
-  ret.realized = Buffer("CPU", prod(x.shape), dtypes.from_np(x.dtype), x.flatten())
+  ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "EXT")
+  if x.size == 0:
+    ret.realized = Buffer("EXT", 0, dtypes.from_np(x.dtype), (memoryview(bytearray()), None))
+  else:
+    ret.realized = Buffer("EXT", prod(x.shape), dtypes.from_np(x.dtype), (flat_mv(np.require(x, requirements='C').data), x))
   return ret
 
 def _get_winograd_matcols(mat, dims:int, shp:Tuple[sint, ...], device:Union[str, Tuple[str, ...]]) -> List[List[Tensor]]:
@@ -133,7 +137,7 @@ class Tensor:
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
-      if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
+      if x.__class__ is not Tensor: x = Tensor(x, device="EXT", dtype=self.dtype)
       self.contiguous().realize().lazydata.base.realized.copyin(x.numpy().data)
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
@@ -152,7 +156,7 @@ class Tensor:
 
   def _data(self) -> memoryview:
     if 0 in self.shape: return memoryview(bytearray(0))
-    t = self if isinstance(self.device, str) else self.to("CPU")   # deal with multitensor
+    t = self if isinstance(self.device, str) else self.to(self.device[0])   # deal with multitensor
     return cast(Buffer, t.cast(t.dtype.scalar()).contiguous().realize().lazydata.base.realized).as_buffer()
 
   def data(self) -> memoryview:
@@ -823,7 +827,7 @@ class Tensor:
       assert isinstance(y, (float, int, bool)), f"{type(y)=}, {y=}"
       if isinstance(self.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
       else: y_dtype = dtypes.from_py(y)
-      y = Tensor(y, self.device, y_dtype, requires_grad=False)
+      y = Tensor(cast_scalar(y, y_dtype), self.device, y_dtype, requires_grad=False)
 
     if match_dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)

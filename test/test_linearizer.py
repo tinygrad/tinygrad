@@ -40,6 +40,19 @@ class TestLinearizer(unittest.TestCase):
     assert num_loads <= 4, "more load uops than needed"
     assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
 
+  def test_load_cache_const_bufs(self):
+    # make sure const buffers are differentiated from local and mem buffers
+    a = Tensor([1,2,3,4])
+    out = a[2] + 2 + a[3] + 3 + 2 + a[0]
+    si = create_schedule([out.lazydata])[-1]
+    lin = Linearizer(si.ast)
+    lin.linearize()
+
+    cache_keys = lin.load_cache.keys()
+    assert len(cache_keys) == 5
+    assert len([k for k in cache_keys if "CONST" in k]) == 2
+    assert len([k for k in cache_keys if "CONST" not in k]) == 3
+
   def test_upcast_cse(self):
     # when upcasting, within a subtree, there may be common expressions.
 

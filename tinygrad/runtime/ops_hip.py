@@ -126,7 +126,7 @@ class HIPAllocator(LRUAllocator):
     self.full_synchronize()
     hip_set_device(self.device.device)
     check(hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
-  def transfer(self, dest:T, src:T, sz:int):
+  def transfer(self, dest:T, src:T, sz:int, **kwargs):
     hip_set_device(self.device.device)
     check(hip.hipMemcpyAsync(dest, src, sz, hip.hipMemcpyDeviceToDevice, None))
 
