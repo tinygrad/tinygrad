@@ -34,7 +34,7 @@ class _Device:
       try:
         if self[device]: return device
       except Exception: pass
-    raise Exception("no usable devices")
+    raise RuntimeError("no usable devices")
 Device = _Device()
 
 # **************** base Runner + helpers ****************

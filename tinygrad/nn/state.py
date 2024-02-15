@@ -94,7 +94,7 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
       if DEBUG >= 3: print(f"WARNING: this torch load is slow. CPU to permute {intermediate_shape} with {permute_indexes}")
       assert storage[1] != dtypes.bfloat16, "can't CPU permute BF16"
       # TODO: find a nice way to support all shapetracker on disktensors
-      ret = ret.cpu().reshape(intermediate_shape).permute(permute_indexes)
+      ret = ret.reshape(intermediate_shape).permute(permute_indexes)
 
     return ret.reshape(size)
 
