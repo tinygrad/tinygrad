@@ -61,11 +61,11 @@ class TestLazyBuffer(unittest.TestCase):
   def test_const_dtype(self):
     lb: LazyBuffer = Tensor([1], dtype=dtypes.int).lazydata
     assert lb.const(1).base.arg == 1
-    assert type(lb.const(1).base.arg) == int
+    assert type(lb.const(1).base.arg) is int
 
     lb: LazyBuffer = Tensor([1], dtype=dtypes.float).lazydata
     assert lb.const(1).base.arg == 1.0
-    assert type(lb.const(1).base.arg) == float
+    assert type(lb.const(1).base.arg) is float
 
 if __name__ == "__main__":
   unittest.main()
