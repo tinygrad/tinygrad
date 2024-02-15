@@ -33,6 +33,10 @@ class TinygradBackend(Backend):
     run_onnx = get_run_onnx(model)
     return TinygradModel(run_onnx, net_feed_input)
 
+  @classmethod
+  def supports_device(cls, device: str) -> bool:
+    return device == "CLANG"
+
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
 # no support for reduce with multiply (needs llop)
