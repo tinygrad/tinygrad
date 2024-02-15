@@ -38,7 +38,7 @@ def safe_save(tensors:Dict[str, Tensor], fn:str, metadata:Optional[Dict[str, Any
   pathlib.Path(fn).unlink(missing_ok=True)
   t = Tensor.empty(8+len(j)+offset, dtype=dtypes.uint8, device=f"disk:{fn}")
   t[0:1].cast(dtypes.int64).assign([len(j)])
-  t[8:8+len(j)].assign(Tensor(list(j.encode('utf-8')), dtype=dtypes.uint8, device="cpu"))
+  t[8:8+len(j)].assign(list(j.encode('utf-8')))
   for k,v in safe_load(t).items(): v.assign(tensors[k])
 
 # state dict
@@ -94,7 +94,8 @@ def torch_load(fn:str) -> Dict[str, Tensor]:
       if DEBUG >= 3: print(f"WARNING: this torch load is slow. CPU to permute {intermediate_shape} with {permute_indexes}")
       assert storage[1] != dtypes.bfloat16, "can't CPU permute BF16"
       # TODO: find a nice way to support all shapetracker on disktensors
-      ret = ret.cpu().reshape(intermediate_shape).permute(permute_indexes)
+      # TODO: BUG: a ".realize()" is needed here for 'GPU=1 python3 test/models/test_efficientnet.py TestEfficientNet.test_car'
+      ret = ret.clang().reshape(intermediate_shape).permute(permute_indexes).realize()
 
     return ret.reshape(size)
 
