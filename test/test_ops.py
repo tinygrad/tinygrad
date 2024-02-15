@@ -113,7 +113,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.eye(1), lambda: Tensor.eye(1), forward_only=True)
     helper_test_op([], lambda: torch.eye(0), lambda: Tensor.eye(0), forward_only=True)
 
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_split(self):
     test_cases = [
       (torch.arange(10), Tensor.arange(10), 5),
@@ -502,11 +501,9 @@ class TestOps(unittest.TestCase):
 
   def test_small_cumsum(self):
     helper_test_op([(10)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_simple_cumsum(self):
     helper_test_op([(512)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
     helper_test_op([(1022)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_cumsum(self):
     helper_test_op([(20)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
     helper_test_op([(20,30)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
@@ -528,7 +525,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(10,20)], lambda x: x.argmin(1, False), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmin(1, True), forward_only=True)
 
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_einsum(self):
     # matrix transpose
     helper_test_op([(150,150)], lambda a: torch.einsum('ij->ji', a), lambda a: Tensor.einsum('ij->ji', a))
@@ -586,7 +582,6 @@ class TestOps(unittest.TestCase):
       Tensor.einsum('ij,jk->ij', a)
 
   @unittest.skipIf(IMAGE>0, "no 1d dot for images")
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_dot_1d(self):
     helper_test_op([(65), (65)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
     helper_test_op([(65), (65,45)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-4)
@@ -646,7 +641,6 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, atol=1e-3, vals=[np.eye(8).astype(np.float32), np.eye(8).astype(np.float32)])
   def test_gemm(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_big_gemm(self):
     helper_test_op([(256,256), (256,256)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-3)
   @unittest.skipIf(IMAGE>0, "no 0 in shape matmul on images")
@@ -658,14 +652,12 @@ class TestOps(unittest.TestCase):
     helper_test_op([(0,0), (0,0)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-7)
     helper_test_op([(0), (0,8)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-7)
     helper_test_op([(0), (0)], lambda x,y: x.matmul(y), Tensor.dot, atol=1e-7)
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_broadcastdot(self):
     helper_test_op([(10,45,65), (65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
     with self.assertRaises(AssertionError):
       a = Tensor(3.14)
       b = Tensor.ones(3,3)
       a @ b
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_multidot(self):
     helper_test_op([(10,45,65), (10,65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
     helper_test_op([(3,3,45,65), (3,3,65,45)], lambda x,y: x @ y, Tensor.dot, atol=1e-4)
@@ -715,7 +707,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(15, 25, 35)], lambda x: x.var(correction=5))
     # TODO: fix this
     # helper_test_op([(10, 2)], lambda x: x.var(correction=50))
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_var_axis(self):
     helper_test_op([(15, 25, 35)], lambda x: x.var(0))
     helper_test_op([(15, 25, 35)], lambda x: x.var(2))
@@ -735,7 +726,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(15, 25, 35)], lambda x: x.std())
     helper_test_op([(15, 25, 35)], lambda x: x.std(correction=0))
     helper_test_op([(15, 25, 35)], lambda x: x.std(correction=5))
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_std_axis(self):
     helper_test_op([(15, 25, 35)], lambda x: x.std(0))
     helper_test_op([(15, 25, 35)], lambda x: x.std(2))
@@ -804,7 +794,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: (torch.eye(10)@torch.eye(10).flip(0)),
                        lambda: (Tensor.eye(10)@Tensor.eye(10).flip(0)), forward_only=True)
 
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_broadcast_full(self):
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
                                   (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
@@ -819,7 +808,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,1)], lambda x,y: x/y)
     helper_test_op([(45,65), ()], lambda x,y: x/y)
 
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_broadcast_partial(self):
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
                                   (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
@@ -1078,7 +1066,6 @@ class TestOps(unittest.TestCase):
       lambda x,w: Tensor.conv2d(x,w).relu(), atol=1e-4, grad_rtol=1e-5)
 
   @unittest.skipIf(IMAGE>0, "no conv3d on images")
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_simple_conv3d(self):
     helper_test_op([(1,4,9,9,9), (4,4,3,3,3)],
       lambda x,w: torch.nn.functional.conv3d(x,w).relu(),
@@ -1145,7 +1132,6 @@ class TestOps(unittest.TestCase):
         lambda x,w: torch.nn.functional.conv_transpose2d(x,w,padding=padding).relu(),
         lambda x,w: Tensor.conv_transpose2d(x,w,padding=padding).relu(), atol=1e-4, grad_rtol=1e-5)
 
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_dilated_conv_transpose2d(self):
     for dilation in [(1,2), (2,1), 2, 1]:
       helper_test_op([(2,4,9,9), (4,4,3,3)],
@@ -1165,7 +1151,6 @@ class TestOps(unittest.TestCase):
         lambda x,w,b: Tensor.conv_transpose2d(x,w,b,output_padding=output_padding,stride=stride).relu(), atol=1e-4, grad_rtol=1e-5)
 
   @unittest.skipIf(IMAGE>0, "no conv3d on images")
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_simple_conv_transpose3d(self):
     helper_test_op([(2,4,9,9,9), (4,4,3,3,3)],
       lambda x,w: torch.nn.functional.conv_transpose3d(x,w).relu(),
@@ -1226,7 +1211,6 @@ class TestOps(unittest.TestCase):
   def test_conv2d_bs_1_cin_1(self): self._test_conv2d(bs=1, cin=1)
   def test_conv2d_bs_4_cin_1(self): self._test_conv2d(bs=4, cin=1)
 
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_large_input_conv2d(self):
     bs = 4
     cin = 16
@@ -1369,7 +1353,6 @@ class TestOps(unittest.TestCase):
           lambda x,w: torch.nn.functional.conv2d(x,w,dilation=dilation).relu(),
           lambda x,w: Tensor.conv2d(x,w,dilation=dilation).relu(), atol=1e-4)
 
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_maxpool2d_simple(self):
     ksz = (2,2)
     helper_test_op([(1,1,2,3)],
@@ -1383,7 +1366,6 @@ class TestOps(unittest.TestCase):
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=ksz),
           lambda x: Tensor.max_pool2d(x, kernel_size=ksz))
 
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_maxpool2d_bigger_stride(self):
     for stride in [(2,3), (3,2), 2, 3]:
       with self.subTest(stride=stride):
@@ -1412,7 +1394,6 @@ class TestOps(unittest.TestCase):
         lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), dilation=dilation),
         lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), dilation=dilation))
 
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_avgpool2d(self):
     shape = (32,2,111,28)
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
@@ -1426,7 +1407,6 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
       lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
 
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_cat(self):
     for dim in range(-2, 3):
       helper_test_op([(45,65,9), (45,65,9), (45,65,9)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))
@@ -1610,14 +1590,12 @@ class TestOps(unittest.TestCase):
     self.helper_test_exception([(2,1,1)], lambda x: x.gather(index=b, dim=0),
                                           lambda x: x.gather(idx=a, dim=0), expected=(RuntimeError, AssertionError))
 
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_scaled_product_attention(self):
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)], torch.nn.functional.scaled_dot_product_attention, Tensor.scaled_dot_product_attention)
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64), (32,8,16,16)],
                    lambda x,y,z,m: torch.nn.functional.scaled_dot_product_attention(x,y,z,attn_mask=m),
                    lambda x,y,z,m: Tensor.scaled_dot_product_attention(x,y,z,attn_mask=m))
 
-  @unittest.skipIf(Device.DEFAULT == "PYTHON", "too slow")
   def test_scaled_product_attention_causal(self):
     helper_test_op([(32,8,16,64), (32,8,16,64), (32,8,16,64)],
                    lambda x,y,z: torch.nn.functional.scaled_dot_product_attention(x,y,z,is_causal=True),
