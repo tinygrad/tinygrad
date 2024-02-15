@@ -60,7 +60,7 @@ class MetalAllocator(LRUAllocator):
     ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return ret
-  def transfer(self, dest:Any, src:Any, sz:int):
+  def transfer(self, dest:Any, src:Any, sz:int, **kwargs):
     command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.blitCommandEncoder()
     encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src, 0, dest, 0, sz)
