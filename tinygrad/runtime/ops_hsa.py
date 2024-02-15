@@ -5,7 +5,7 @@ import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.helpers import DEBUG, init_c_var, from_mv, round_up, to_mv, init_c_struct_t
 from tinygrad.device import Compiled, LRUAllocator
 from tinygrad.runtime.ops_hip import HIPCompiler
-from tinygrad.runtime.driver.hsa import check, find_agent, find_memory_pool, HWQueue
+from tinygrad.runtime.driver.hsa import check, find_agent, find_memory_pool, AQLQueue
 
 HSACompiler = HIPCompiler
 
@@ -67,7 +67,7 @@ class HSAAllocator(LRUAllocator):
     return buf.value
 
   def _free(self, opaque:T):
-    self.device.synchronize()
+    HSADevice.synchronize_system()
     check(hsa.hsa_amd_memory_pool_free(opaque))
 
   def copyin(self, dest:T, src: memoryview):
@@ -95,7 +95,6 @@ class HSAAllocator(LRUAllocator):
         self.hb.append(mem.value)
       self.hb_signals = [self.device.alloc_signal(reusable=False) for _ in range(2)]
       self.hb_polarity = 0
-      self.sdma = [hsa.HSA_AMD_SDMA_ENGINE_0, hsa.HSA_AMD_SDMA_ENGINE_1]
       for sig in self.hb_signals: hsa.hsa_signal_store_relaxed(sig, 0)
 
     fo = io.FileIO(fd, "a+b", closefd=False)
@@ -115,7 +114,7 @@ class HSAAllocator(LRUAllocator):
       fo.readinto(to_mv(self.hb[self.hb_polarity], local_size))
       check(hsa.hsa_amd_memory_async_copy_on_engine(dest+copied_in, self.device.agent, self.hb[self.hb_polarity]+minor_offset, HSADevice.cpu_agent,
                                                     copy_size, 1, ctypes.byref(sync_signal), self.hb_signals[self.hb_polarity],
-                                                    self.sdma[self.hb_polarity], True))
+                                                    hsa.HSA_AMD_SDMA_ENGINE_0, True))
       copied_in += copy_size
       self.hb_polarity = (self.hb_polarity + 1) % len(self.hb)
       minor_offset = 0 # only on the first
@@ -126,7 +125,7 @@ class HSAAllocator(LRUAllocator):
     self.device.hw_queue.submit_barrier(wait_signals=wait_signals)
 
   def copyout(self, dest:memoryview, src:T):
-    self.device.synchronize()
+    HSADevice.synchronize_system()
     copy_signal = self.device.alloc_signal(reusable=True)
     c_agents = (hsa.hsa_agent_t*2)(*[HSADevice.cpu_agent, self.device.agent])
     check(hsa.hsa_amd_memory_lock_to_pool(from_mv(dest), dest.nbytes, c_agents, 2, HSADevice.cpu_mempool, 0, ctypes.byref(addr:=ctypes.c_void_p())))
@@ -158,7 +157,7 @@ class HSADevice(Compiled):
     self.agent = find_agent(hsa.HSA_DEVICE_TYPE_GPU, device_id=self.device_id)
     self.gpu_mempool = find_memory_pool(self.agent, segtyp=hsa.HSA_AMD_SEGMENT_GLOBAL, location=hsa.HSA_AMD_MEMORY_POOL_LOCATION_GPU)
     self.kernargs_pool = find_memory_pool(self.agent, segtyp=hsa.HSA_AMD_SEGMENT_GLOBAL, flags=hsa.HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT)
-    self.hw_queue = HWQueue(self)
+    self.hw_queue = AQLQueue(self)
     HSADevice.devices.append(self)
 
     check(hsa.hsa_agent_get_info(self.agent, hsa.HSA_AGENT_INFO_NAME, ctypes.byref(agent_name_buf := ctypes.create_string_buffer(256))))
@@ -178,7 +177,8 @@ class HSADevice(Compiled):
       check(hsa.hsa_amd_signal_create(1, 0, None, 0, ctypes.byref(signal := hsa.hsa_signal_t())))
       self.signal_pool.append(signal)
 
-    super().__init__(device, HSAAllocator(self), HSACompiler(self.arch), functools.partial(HSAProgram, self), None)
+    from tinygrad.runtime.graph.hsa import HSAGraph
+    super().__init__(device, HSAAllocator(self), HSACompiler(self.arch), functools.partial(HSAProgram, self), HSAGraph)
 
   def synchronize(self):
     self.hw_queue.wait()
@@ -191,6 +191,10 @@ class HSADevice(Compiled):
     self.delayed_free.clear()
 
     self.kernarg_next_addr = self.kernarg_start_addr
+
+  @staticmethod
+  def synchronize_system():
+    for d in HSADevice.devices: d.synchronize()
 
   def alloc_signal(self, reusable=False):
     if len(self.signal_pool): signal = self.signal_pool.pop()
