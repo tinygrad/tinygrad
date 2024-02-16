@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, operator, itertools
 from dataclasses import dataclass
-from typing import Tuple, List, Optional, Dict, Set, cast
+from typing import Tuple, List, Optional, Dict, Set
 from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, sint
 
@@ -185,11 +185,12 @@ class View:
     if 0 in self.shape:
       assert 0 in new_shape, f"cannot reshape 0 size to {new_shape}"
       return View.create(new_shape)
-    # check for the same size
+    # check symbolic reshape only to a variable
     if all_int(self.shape):
       assert all(isinstance(s, (int, Variable)) for s in new_shape), f"{self.shape=} -> {new_shape=} contains non (int, Variable) dim"
-      if prod(self.shape) != prod([s if isinstance(s, int) else cast(Variable,s).val for s in new_shape]):
-        raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
+    # check for the same size
+    if prod([s if isinstance(s, int) else s.val for s in self.shape]) != prod([s if isinstance(s, int) else s.val for s in new_shape]):
+      raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
 
     if new_shape == () and self.mask and any(mx==my for (mx,my) in self.mask): return None
 

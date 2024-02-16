@@ -121,9 +121,10 @@ class TestSymbolicReshape(unittest.TestCase):
 
   def test_reshape_into_symbols_bad_shape(self):
     vi = Variable("i", 1, 10).bind(4)
-    # TODO: this never actually worked, it relied on lazy
-    #with self.assertRaises(ValueError):
-    #  Tensor.rand(4, 6).reshape(vi, 6).reshape(1, 77) # reshape to a different size new shape through symbolic shape
+    with self.assertRaises(ValueError):
+      Tensor.rand(4, 6).reshape(vi, 6).reshape(1, 77) # reshape to a different size new shape through symbolic reshape
+    with self.assertRaises(ValueError):
+      Tensor.rand(4, 6).shrink(((0, 4), (0, vi))).reshape(1, 77) # reshape to a different size new shape through symbolic shrink
     with self.assertRaises(AssertionError):
       Tensor.rand(3, 4).reshape(3, (vi+1)) # reshape into non-Variable Node
 
@@ -147,8 +148,8 @@ class TestSymbolicReshape(unittest.TestCase):
     new_shape = (1, 1, (NumNode(1)+Variable('start_pos', 1, 128).bind(2)), 16, 64)
     assert view.reshape(new_shape) is None
 
-    view = View(shape=(2, 1, (NumNode(1)+Variable('start_pos', 1, 128)), 16, 64), strides=(0, 0, 1024, 64, 1), offset=131072, mask=((1, 2), (0, 1), (0, (NumNode(1)+Variable('start_pos', 1, 128))), (0, 16), (0, 64)), contiguous=False)   # noqa: E501
-    new_shape = (2, (NumNode(1)+Variable('start_pos', 1, 128)), 16, 64)
+    view = View(shape=(2, 1, (NumNode(1)+Variable('start_pos', 1, 128).bind(2)), 16, 64), strides=(0, 0, 1024, 64, 1), offset=131072, mask=((1, 2), (0, 1), (0, (NumNode(1)+Variable('start_pos', 1, 128).bind(2))), (0, 16), (0, 64)), contiguous=False)   # noqa: E501
+    new_shape = (2, (NumNode(1)+Variable('start_pos', 1, 128).bind(2)), 16, 64)
     assert view.reshape(new_shape) is None
 
 class TestSymbolicExpand(unittest.TestCase):
@@ -172,6 +173,8 @@ class TestSymbolicShrink(unittest.TestCase):
     vi = Variable("i", 1, 5)
     t = Tensor.rand(3, 5).shrink(((0, 2), (vi, vi+1)))
     assert t.shape == (2, 1)
+    # shrink with symbolic that yields integer shape output does not produce NumNode in shape
+    assert all(isinstance(ti, int) for ti in t.shape)
 
 class TestSymbolicShapeExpr(unittest.TestCase):
   def test_symbolic_expr_idxs(self):

@@ -16,6 +16,8 @@ class Node:
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
     return ops[type(self)](self, ops, ctx)
   def vars(self) -> Set[Variable]: return set()
+  @property
+  def val(self) -> int: raise NotImplementedError("override this")
   # substitute Variables with the values in var_vals
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node: raise RuntimeError(self.__class__.__name__)
   def unbind(self) -> Tuple[Node, Optional[int]]: return self.substitute({v: v.unbind()[0] for v in self.vars() if v.val is not None}), None
@@ -149,6 +151,8 @@ class NumNode(Node):
   def bind(self, val):
     assert self.b == val, f"cannot bind {val} to {self}"
     return self
+  @property
+  def val(self) -> int: return self.b
   def __eq__(self, other): return self.b == other
   def __hash__(self): return hash(self.b)  # needed with __eq__ override
   def substitute(self, var_vals: Dict[Variable, Node]) -> Node: return self
@@ -174,6 +178,8 @@ class LtNode(OpNode):
     return self.a.substitute(var_vals) < (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
 class MulNode(OpNode):
+  @property
+  def val(self) -> int: return self.a.val * (self.b if isinstance(self.b, int) else self.b.val)
   def __lt__(self, b: Union[Node, int]):
     if isinstance(b, Node) or isinstance(self.b, Node) or self.b == -1: return Node.__lt__(self, b)
     sgn = 1 if self.b > 0 else -1
@@ -211,6 +217,8 @@ class RedNode(Node):
   def vars(self) -> Set[Variable]: return set.union(*[x.vars() for x in self.nodes], set())
 
 class SumNode(RedNode):
+  @property
+  def val(self) -> int: return sum(node.val for node in self.nodes)
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
