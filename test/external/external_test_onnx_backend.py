@@ -35,7 +35,7 @@ class TinygradBackend(Backend):
 
   @classmethod
   def supports_device(cls, device: str) -> bool:
-    return device == "CPU"
+    return device == "CLANG"
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
@@ -48,11 +48,6 @@ backend_test.exclude('test_adam_multiple_cpu')
 backend_test.exclude('test_nesterov_momentum_cpu')
 
 # about different dtypes
-if Device.DEFAULT in ["TORCH"]:
-  backend_test.exclude('uint16')
-  backend_test.exclude('uint32')
-  backend_test.exclude('uint64')
-
 if Device.DEFAULT in ["METAL"] or (OSX and Device.DEFAULT == "GPU"):
   backend_test.exclude('float64')
   backend_test.exclude('DOUBLE')

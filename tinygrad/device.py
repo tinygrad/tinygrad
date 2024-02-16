@@ -1,12 +1,11 @@
 from __future__ import annotations
 from collections import defaultdict
-from typing import TYPE_CHECKING, Union, Any, List, Optional, Dict, Callable, Tuple, cast, ClassVar
-import importlib, inspect, functools, pathlib, time, re, ctypes
+from typing import TYPE_CHECKING, Any, List, Optional, Dict, Tuple, ClassVar
+import importlib, inspect, functools, pathlib, time, ctypes
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.helpers import ansilen, DEBUG, getenv, colored, BEAM, NOOPT, all_int, to_function_name, from_mv, flat_mv, diskcache_get, diskcache_put
-from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, sym_infer, sint
-from tinygrad.ops import LazyOp, TernaryOps, get_lazyop_info, ReduceOps, BufferOps, BinaryOps, UnaryOps, Op, GlobalCounters, MovementOps
+from tinygrad.ops import LazyOp, get_lazyop_info, GlobalCounters
 from dataclasses import dataclass
 
 if TYPE_CHECKING:
@@ -21,9 +20,9 @@ class _Device:
   def _canonicalize(self, device:str) -> str: return (device.split(":", 1)[0].upper() + ((":"+device.split(":", 1)[1]) if ':' in device else '')).replace(":0", "")   # noqa: E501
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
   def canonicalize(self, device:Optional[str]) -> str: return self._canonicalize(device) if device is not None else Device.DEFAULT
-  def __getitem__(self, ix:str) -> Union[Interpreted, Compiled]: return self.__get_canonicalized_item(self.canonicalize(ix))
+  def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
   @functools.lru_cache(maxsize=None)  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def __get_canonicalized_item(self, ix:str) -> Union[Interpreted, Compiled]:
+  def __get_canonicalized_item(self, ix:str) -> Compiled:
     x = ix.split(":")[0].upper()
     return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'tinygrad.runtime.ops_{x.lower()}')) if (cname.lower() == x.lower() + "device") and x in self._devices][0](ix)  # noqa: E501
   @functools.cached_property
@@ -167,98 +166,6 @@ class _MallocAllocator(LRUAllocator):
   def copyin(self, dest, src:memoryview): ctypes.memmove(dest, from_mv(src), len(src))
   def copyout(self, dest:memoryview, src): ctypes.memmove(from_mv(dest), src, len(dest))
 MallocAllocator = _MallocAllocator()
-
-# **************** for Interpreted Devices ****************
-
-class InterpretedASTRunner(JITRunner):
-  def __init__(self, ast:LazyOp, fxn:Callable):
-    super().__init__()
-    self.fxn = fxn
-    info = get_lazyop_info(ast)
-    self.op_estimate, self.mem_estimate = info.flops, info.mem_estimate
-
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> float:
-    st = time.perf_counter()
-    rawbufs[0]._buf = self.fxn([x._buf for x in rawbufs[1:]], var_vals)
-    et = time.perf_counter() - st
-    update_stats(f"<interpreted {rawbufs[0].size}>", self.op_estimate, self.mem_estimate, var_vals, et, len(rawbufs), jit, device=rawbufs[0].device)
-    return et
-
-class Interpreted:
-  def __init__(self, device:str, allocator: Allocator, fxn_for_op:Dict[Op, Callable]):
-    self.dname, self.allocator, self.fxn_for_op = device, allocator, fxn_for_op
-    self.synchronize, self.codegen, self.graph = lambda: None, None, None
-
-  @functools.lru_cache(None)    # pylint: disable=method-cache-max-size-none
-  def get_runner(self, ast:LazyOp) -> InterpretedASTRunner: return _get_interpreted_fxn(self.fxn_for_op, ast)
-
-def _get_interpreted_fxn(fxn_for_op:Dict[Op, Callable], ast:LazyOp) -> InterpretedASTRunner:
-  if DEBUG >= 3:
-    from tinygrad.features.graph import print_tree
-    print_tree(ast)
-  tglob: Dict[str, Any] = {"Variable": Variable}
-
-  @functools.lru_cache(None)
-  def gstr(x:Any, nm=None) -> str:
-    if ('Variable' in (str_arg := repr(x)) or 'NumNode' in str_arg):
-      str_arg = re.sub(r'Variable\(.*?\)', lambda m: f'var_vals[{str(m.group(0))}]', str_arg)
-      # TODO: (Variable - Variable) might create NumNode. can we remove it?
-      return re.sub(r'NumNode\((.*?)\)', r'\1', str_arg)
-    ret = str(nm).replace(".", "_") if nm else f"m{len(tglob):04d}"
-    tglob[ret] = x
-    return ret
-
-  lines: List[str] = []
-  @functools.lru_cache(None)
-  def _interpret_ast(ast:LazyOp) -> str:
-    # TODO: shortcutted store won't work with strides
-    if ast.op == BufferOps.STORE: return _interpret_ast(ast.src[0])
-    if TernaryOps.MULACC in fxn_for_op and ast.op == ReduceOps.SUM:
-      if ast.src[0].op == BinaryOps.MUL: ast = LazyOp(TernaryOps.MULACC, ast.src[0].src, ast.arg)
-      if (castop:=ast.src[0]).op == UnaryOps.CAST and (mulop:=castop.src[0]).op == BinaryOps.MUL:
-        # MULACC with acc cast rewrite: MUL -> CAST -> SUM => CAST -> MULACC
-        ast = LazyOp(TernaryOps.MULACC, tuple(LazyOp(UnaryOps.CAST, (s, ), castop.arg) for s in mulop.src), ast.arg)
-
-    if ast.op in BufferOps:
-      if ast.op == BufferOps.CONST: tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({gstr(ast.arg.val)}, {gstr(ast.arg.dtype)})"
-      else: tmp = f"{gstr(fxn_for_op[UnaryOps.CAST], UnaryOps.CAST)}(inputs[{ast.arg.idx-1}], ({gstr(ast.arg.dtype)}, True))"
-
-      # convert ShapeTracker to MovementOps
-      to_apply:List[Tuple[MovementOps, Tuple]] = []
-      for v in cast(ShapeTracker, ast.arg.st).views:
-        real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
-        real_offset = 0 if 0 in real_shape else (v.offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0))
-        # first, we apply the offset
-        # then, we make it the correct shape
-        # then, we apply permutations
-        to_apply.append((MovementOps.AS_STRIDED, (tuple([s if st != 0 else 1 for s,st in zip(real_shape, v.strides)]), v.strides, real_offset)))
-        # then, we apply pre expand pads
-        if v.mask is not None:
-          pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
-          post_expand_pads = tuple((x,s-y) if st == 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
-          if any(x != (0,0) for x in pre_expand_pads):
-            to_apply.append((MovementOps.PAD, pre_expand_pads))
-            real_shape = tuple(x+s[0]+s[1] for x,s in zip(real_shape, pre_expand_pads))
-        # then, we do any expands
-        # NOTE: this is a good idea even without masks, since torch doesn't support negative strides and has to make a copy
-        if any(s != 1 and st == 0 for s,st in zip(real_shape, v.strides)): to_apply.append((MovementOps.EXPAND, real_shape))
-        # lastly, we apply post expand pads
-        if v.mask is not None and any(x != (0,0) for x in post_expand_pads): to_apply.append((MovementOps.PAD, post_expand_pads))
-
-      # apply those MovementOps
-      for mop,arg in to_apply: tmp = f"{gstr(fxn_for_op[mop], mop)}({tmp}, {gstr(arg)})"
-    else:
-      tmp = f"{gstr(fxn_for_op[ast.op], ast.op)}({', '.join([_interpret_ast(src) for src in ast.src] + ([gstr(ast.arg)] if ast.arg else []))})"
-
-    ret = f"a{len(lines)}"
-    lines.append(f"  {ret} = {tmp}")
-    return ret
-
-  ret = _interpret_ast(ast)
-  src = '\n'.join(['def run(inputs, var_vals):'] + lines + [f"  return {ret}"])
-  if DEBUG >= 4: print(functools.reduce(lambda x,y: (x.replace(y[0], str(y[1])) if y[0][0:2] == "m0" else x), tglob.items(), src))
-  exec(compile(src, "<ast>", "exec"), tglob) # pylint: disable=exec-used
-  return InterpretedASTRunner(ast, tglob['run'])
 
 # **************** for Compiled Devices ****************
 

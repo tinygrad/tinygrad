@@ -17,7 +17,6 @@ floats = [dt for dt in core_dtypes if dtypes.is_float(dt)]
 def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   if dtype == dtypes.bfloat16: return False # numpy doesn't support bf16, tested separately in TestBFloat16DType
   if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
-  if device == "TORCH": return dtype not in [dtypes.uint16, dtypes.uint32, dtypes.uint64]
   # for CI GPU, cl_khr_fp16 isn't supported
   # for CI LLVM, it segfaults because it can't link to the casting function
   # CUDA in CI uses CUDACPU that does not support half
@@ -127,7 +126,7 @@ def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
   _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
 
-@unittest.skipUnless(Device.DEFAULT in ["LLVM", "TORCH"], "bfloat16 not supported")
+@unittest.skipUnless(Device.DEFAULT == "LLVM", "bfloat16 not supported")
 class TestBFloat16DType(unittest.TestCase):
   def test_bf16_to_float(self):
     with self.assertRaises(AssertionError):
