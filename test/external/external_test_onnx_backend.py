@@ -35,7 +35,8 @@ class TinygradBackend(Backend):
 
   @classmethod
   def supports_device(cls, device: str) -> bool:
-    return device == "CLANG"
+    # NOTE: this is onnx CPU
+    return device == "CPU"
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
 
