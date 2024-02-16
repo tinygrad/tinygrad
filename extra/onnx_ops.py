@@ -32,9 +32,7 @@ def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_t
 # **************** Simple Ops ****************
 
 # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_div.py
-def Div(x: Tensor, other: Tensor):
-  ret = x/other
-  return ret if ret.dtype == x.dtype else ret.cast(x.dtype)
+def Div(x: Tensor, other: Tensor): return (x/other).cast(x.dtype)
 
 def Constant(value: Tensor=None, value_float=None, value_floats=None, value_int=None, value_ints=None, value_string=None, value_strings=None):
   if value is not None: return value
