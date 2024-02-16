@@ -15,7 +15,7 @@ setup(name='tinygrad',
       long_description=long_description,
       long_description_content_type='text/markdown',
       packages = ['tinygrad', 'tinygrad.runtime.autogen', 'tinygrad.codegen', 'tinygrad.nn', 'tinygrad.renderer',
-                  'tinygrad.runtime', 'tinygrad.runtime.compiler', 'tinygrad.runtime.graph', 'tinygrad.shape', 'tinygrad.features'],
+                  'tinygrad.runtime', 'tinygrad.runtime.driver', 'tinygrad.runtime.graph', 'tinygrad.shape', 'tinygrad.features'],
       classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License"
