@@ -1,6 +1,6 @@
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
-from bert.pretrain import train
+from bert.pretrain2 import pretrain as train
 
 def train_resnet():
   # TODO: Resnet50-v1.5
@@ -18,8 +18,7 @@ def train_rnnt():
   # TODO: RNN-T
   pass
 
-def train_bert():
-  train()
+def train_bert(): train()
 
 def train_maskrcnn():
   # TODO: Mask RCNN
