@@ -161,7 +161,25 @@ class TestHalfDtype(TestDType): DTYPE = dtypes.half
 
 class TestFloatDType(TestDType): DTYPE = dtypes.float
 
-class TestDoubleDtype(TestDType): DTYPE = dtypes.double
+class TestDoubleDtype(TestDType):
+  DTYPE = dtypes.double
+  @unittest.skipIf(getenv("CUDACPU",0)==1, "conversion not supported on CUDACPU")
+  @unittest.skipIf(getenv("HIP",0)==1, "HIP renderer does not support f64 precision")
+  def test_float64_increased_precision(self):
+    for func in [
+      lambda t: t.exp(),
+      lambda t: t.exp2(),
+      lambda t: t.log(),
+      lambda t: t.log2(),
+      lambda t: t.sqrt(),
+      lambda t: t.rsqrt(),
+      lambda t: t.sin(),
+      lambda t: t.cos(),
+      lambda t: t.tan(),
+      lambda t: t.sigmoid(),
+    ]:
+      a = [2, 3, 4]
+      np.testing.assert_allclose(func(Tensor(a, dtype=self.DTYPE)).numpy(), func(torch.tensor(a, dtype=torch.float64)), rtol=1e-12, atol=1e-12)
 
 class TestInt8Dtype(TestDType):
   DTYPE = dtypes.int8

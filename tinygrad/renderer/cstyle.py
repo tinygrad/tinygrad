@@ -45,6 +45,7 @@ class CStyleLanguage(NamedTuple):
   def render_const(self, x:Union[float,int,bool], var_dtype) -> str:
     if math.isnan(x): val = "NAN"
     elif math.isinf(x): val = ("-" if x < 0 else "") + "INFINITY"
+    elif var_dtype == dtypes.float64: val = f"{float(x)}"
     else: val = f"{float(x)}f" if dtypes.is_float(var_dtype) else f"{int(x)}" if dtypes.is_int(var_dtype) else f"{bool(x)}".lower()
     return (self.render_cast([val]*var_dtype.count, var_dtype)
       if var_dtype.count > 1 or var_dtype not in [dtypes.float, dtypes.int, dtypes.bool] else val)
