@@ -111,9 +111,8 @@ class PythonProgram:
       loop_ends: Dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        inp = [ul[v] for v in idp]
-        dtp = [dl[v] for v in idp]
-        ul[i] = [] # default to empty list
+        inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
+        dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
         if uop is UOps.STORE:
           assert len(inp) <= 3, "gated stores not supported yet"
