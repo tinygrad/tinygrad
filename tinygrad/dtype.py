@@ -1,3 +1,4 @@
+import math
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union
 from dataclasses import dataclass
 import numpy as np  # TODO: remove numpy
@@ -20,6 +21,8 @@ class DType:
   # TODO: someday this will be removed with the "remove numpy" project
   @property
   def np(self) -> Optional[type]: return np.dtype(self.fmt).type if self.fmt is not None else None
+  @property
+  def __name__(self): return self.name
 
 # dependent typing?
 @dataclass(frozen=True, repr=False)
@@ -43,15 +46,80 @@ def cast_scalar(scalar: Scalar, dtype:DType):
 
 class dtypes:
   @staticmethod
+  def type(scalar: Scalar) -> DType: return dtypes.from_py(scalar)
+  @staticmethod
+  def is_uniform_types(*ds:DType) -> bool:
+    # Check that all dtypes are the same class aka int, float, bool
+    return all(dtypes.is_float(d) for d in ds) or all(dtypes.is_int(d) for d in ds) or all(dtypes.is_bool(d) for d in ds)
+  @staticmethod
+  def get_float_max(dtype: DType) -> float: return np.finfo(dtype.np).max if dtype.np is not None else float('inf')
+  @staticmethod
+  def get_float_min(dtype: DType) -> float: return np.finfo(dtype.np).min if dtype.np is not None else float('-inf')
+  @staticmethod
+  def get_int_max(dtype: DType) -> int: return np.iinfo(dtype.np).max if dtype.np is not None else 2**63-1
+  @staticmethod
+  def get_int_min(dtype: DType) -> int: return np.iinfo(dtype.np).min if dtype.np is not None else -2**63
+  @staticmethod
+  def get_nan(dtype: DType) -> float: return np.nan
+  @staticmethod
+  def check_bounds(x: Scalar, dtype: DType) -> None:
+    # Check overflow/underflow
+    if dtypes.is_int(dtype):
+      int_max = dtypes.get_int_max(dtype)
+      int_min = dtypes.get_int_min(dtype)
+      if x > int_max or x < int_min: raise OverflowError(f"Cannot convert {x} to {dtype}")
+    if dtypes.is_float(dtype):
+      # Check for inf, -inf, nan
+      if not math.isinf(x) and not math.isnan(x):
+        float_max = dtypes.get_float_max(dtype)
+        float_min = dtypes.get_float_min(dtype)
+        if x > float_max or x < float_min: raise OverflowError(f"Cannot convert {x} to {dtype}")
+    if dtypes.is_bool(dtype) and x:
+      # Check that ints are exactly 0 or 1
+      if isinstance(x, int) and x not in (0, 1): raise ValueError(f"Cannot convert {x} to {dtype}")
+      # Check that floats are close to 0.0 or 1.0
+      if isinstance(x, float) and not (np.isclose(x, 0.0) or np.isclose(x, 1.0)): raise ValueError(f"Cannot convert {x} to {dtype}")
+      # Check that bools are exactly True or False
+      if isinstance(x, bool) and x not in (True, False): raise ValueError(f"Cannot convert {x} to {dtype}")
+  @staticmethod
+  def check_cast(x: Scalar, dtype: DType) -> None:
+    # Check that the cast is valid
+    if dtypes.is_int(dtype) and not isinstance(x, int): raise TypeError(f"Cannot convert {x} to {dtype}")
+    if dtypes.is_float(dtype) and not isinstance(x, float): raise TypeError(f"Cannot convert {x} to {dtype}")
+    if dtypes.is_bool(dtype) and not isinstance(x, bool): raise TypeError(f"Cannot convert {x} to {dtype}")
+  @staticmethod
+  def get_highest_order(*ds:DType) -> DType:
+    # Define the order of the dtypes
+    order = [dtypes.bool, dtypes.int8, dtypes.uint8, dtypes.int16, dtypes.uint16, dtypes.int32, dtypes.uint32, dtypes.int64, dtypes.uint64, dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64]
+    return max(ds, key=lambda x: order.index(x.scalar()))
+  @staticmethod
+  def as_type(scalar: Scalar, dtype: DType) -> Scalar:
+    # Check that the dtype respects the bounds
+    dtypes.check_bounds(scalar, dtype)
+    # Do nothing if the scalar is already the correct type
+    if dtypes.is_bool(dtype): scalar = scalar if isinstance(scalar, bool) else bool(scalar)
+    elif dtypes.is_int(dtype): scalar = scalar if (isinstance(scalar, int) and not isinstance(scalar, bool)) else int(scalar)
+    elif dtypes.is_float(dtype): scalar = scalar if isinstance(scalar, float) else float(scalar)
+    else: raise TypeError(f"Unsupported dtype {dtype}")
+    # Check that the cast is valid
+    dtypes.check_cast(scalar, dtype)
+    return scalar
+  @staticmethod
   def is_float(x: DType) -> bool: return x.scalar() in (dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64)
   @staticmethod # static methds on top, or bool in the type info will refer to dtypes.bool
   def is_int(x: DType) -> bool: return x.scalar() in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64) or dtypes.is_unsigned(x)
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
+  def is_bool(x: DType) -> bool: return x.scalar() == dtypes.bool
+  @staticmethod
   def from_np(x: type) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod  # NOTE: isinstance(True, int) is True in python
-  def from_py(x) -> DType: return dtypes.default_float if isinstance(x, float) else dtypes.bool if isinstance(x, bool) else dtypes.default_int
+  def from_py(x) -> DType:
+    if isinstance(x, bool): return dtypes.bool
+    if isinstance(x, int): return dtypes.int64 if x > 2**31-1 else dtypes.default_int
+    if isinstance(x, float): return dtypes.float64 if x > 2**31-1 else dtypes.default_float
+    raise TypeError(f"Unsupported type {type(x)}")
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", '?', 1)
