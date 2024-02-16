@@ -311,8 +311,8 @@ def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
   assert isinstance(ret, NumNode), f"sym_infer didn't produce NumNode from {a} with {var_vals}"
   return ret.b
 
-# symbolic int
-sint = Union[Node, int]
+# symbolic int, these are allowed in a Tensor shape
+sint = Union[int, Variable, MulNode, SumNode]
 
 render_python: Dict[Type, Callable] = {
   Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}{'='+str(self.val) if self._val is not None else ''}]" if ctx == "DEBUG" else (f"Variable('{self.expr}', {self.min}, {self.max})"+(f".bind({self.val})" if self._val is not None else '') if ctx == "REPR" else f"{self.expr}"),  # noqa: E501
