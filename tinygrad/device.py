@@ -231,9 +231,7 @@ class Compiled:
     ret = CompiledASTRunner(k.ast, k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size)
     from tinygrad.codegen.uops import uops_flops_mem
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
-    ret.op_estimate, ret.mem_estimate = uops_flops_mem(k.uops)
-    ret.op_estimate *= run_count
-    ret.mem_estimate *= run_count
+    ret.op_estimate, ret.mem_estimate = uops_flops_mem(k.uops, run_count)
     return ret
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:

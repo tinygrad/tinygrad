@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Set, Optional, Tuple, Any
-from tinygrad.helpers import DEBUG, flatten, prod
+from tinygrad.helpers import DEBUG, flatten
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from enum import Enum, auto
@@ -82,23 +82,23 @@ def uops_type_verify(uops:List[UOp]):
         assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
         assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
 
-def uops_flops_mem(uops:List[UOp]):
+def uops_flops_mem(uops:List[UOp], mults=1):
   flops, mem = 0, 0
-  mults = [1]
   for u in uops:
     if u.uop is UOps.LOOP:
-      mults.append(u.vin[1].arg)
+      mults *= u.vin[1].arg
     if u.uop is UOps.ENDLOOP:
-      mults = mults[:-1]
+      mults //= u.vin[0].vin[1].arg
     if u.uop is UOps.ALU:
-      flops += (2 if u.arg is TernaryOps.MULACC else 1) * prod(mults)
+      flops += (2 if u.arg is TernaryOps.MULACC else 1) * mults
     if u.uop is UOps.LOAD:
       assert u.dtype is not None
-      mem += u.dtype.count * u.dtype.itemsize * prod(mults)
+      mem += u.dtype.count * u.dtype.itemsize * mults
     if u.uop is UOps.STORE:
       assert u.vin[2].dtype is not None
-      mem += u.vin[2].dtype.count * u.vin[2].dtype.itemsize * prod(mults)
+      mem += u.vin[2].dtype.count * u.vin[2].dtype.itemsize * mults
     if u.uop is UOps.WMMA:
-      if u.arg.startswith("__metal_wmma"): flops += 2*(8*8*8)//32 * prod(mults)
+      if u.arg.startswith("__metal_wmma"): flops += 2*(8*8*8)//32 * mults
+      elif u.arg == "__hip_wmma_f16_f16" or u.arg == "__builtin_amdgcn_wmma_f32_16x16x16_f16_w32": flops += 2*(16*16*16)//32 * mults
       else: raise Exception("not implemented")
   return flops, mem
