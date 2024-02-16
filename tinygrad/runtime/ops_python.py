@@ -1,13 +1,13 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Tuple, List, Optional, Any, Dict
+from typing import Callable, Tuple, List, Optional, Any, Dict
 import pickle, base64, itertools, time, math
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Allocator, Compiler
 from tinygrad.codegen.uops import UOp, UOps
-from tinygrad.ops import Ops, UnaryOps, BinaryOps, TernaryOps
+from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
 from tinygrad.codegen.kernel import LinearizerOptions
 
 def check_types(arg, p, dtype):
