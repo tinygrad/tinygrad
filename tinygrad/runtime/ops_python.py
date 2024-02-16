@@ -7,31 +7,81 @@ from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Allocator, Compiler
 from tinygrad.codegen.uops import UOp, UOps
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.ops import Ops, UnaryOps, BinaryOps, TernaryOps
 from tinygrad.codegen.kernel import LinearizerOptions
 
+def check_types(arg, p, dtype):
+  types = [dtypes.type(x) for x in p] + [dtype]
+  if not dtypes.is_uniform_types(*types):
+    raise TypeError(f"All elements in p must be of the same basic type, got {types} for {arg} {dtype} {p}")
+
+def patch_p(p, dtype):
+  # FIXME: This is a temporary fix for bad dtype inference for bools vs 0./1. ints/floats
+  # Upcast bools to the highest order type
+  if any(dtypes.is_bool(dtypes.type(x)) for x in p):
+    patched_p = [x if not dtypes.is_bool(dtypes.type(x)) else dtypes.as_type(x, dtype) for x in p]
+    p = tuple(patched_p)
+  types = [dtypes.type(x) for x in p] + [dtype]
+  dtype = dtypes.get_highest_order(*types)
+  return p, dtype
+
 def exec_alu(arg, dtype, p):
-  # TODO: make this complete and correctly honor the dtypes
-  # TODO: use this for constant folding
-  if arg == TernaryOps.MULACC: return p[0]*p[1]+p[2]
-  if arg == TernaryOps.WHERE: return p[1] if p[0] else p[2]
-  if arg == UnaryOps.LOG2: return math.log2(p[0]) if p[0] > 0 else -math.inf if p[0] == 0 else math.nan
-  if arg == UnaryOps.EXP2:
-    try: return math.exp(p[0]*math.log(2))
-    except OverflowError: return math.inf
-  if arg == UnaryOps.SQRT: return math.sqrt(p[0]) if p[0] > 0 else math.nan
-  if arg == UnaryOps.SIN: return math.sin(p[0])
-  if arg == UnaryOps.NEG: return -p[0]
-  if arg == BinaryOps.MUL: return p[0]*p[1]
-  if arg == BinaryOps.ADD: return p[0]+p[1]
-  if arg == BinaryOps.SUB: return p[0]-p[1]
-  if arg == BinaryOps.XOR: return p[0]^p[1]
-  if arg == BinaryOps.MAX: return max(p[0], p[1])
-  if arg == BinaryOps.CMPEQ: return p[0] == p[1]
-  if arg == BinaryOps.CMPLT: return p[0] < p[1]
-  if arg == BinaryOps.DIV: return p[0]//p[1] if dtypes.is_int(dtype) else (p[0]/p[1] if p[1] != 0 else math.nan)
-  if arg == BinaryOps.MOD: return p[0]%p[1]
-  raise NotImplementedError(f"no support for {arg}")
+  if arg is TernaryOps.WHERE:
+    # Attempt to force first operand to bool if it is 0/1
+    p_0 = dtypes.as_type(p[0], dtypes.bool)
+    patched, dtype = patch_p(p[1:], dtype)
+    p = (p_0,) + patched
+    check_types(arg, p[1:], dtype)
+  else:
+    p, dtype = patch_p(p, dtype)
+    check_types(arg, p, dtype)
+
+  operations: Dict[Op, Callable] ={
+    TernaryOps.MULACC: lambda: p[0]*p[1]+p[2] if len(p) == 3 and (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else None,
+    TernaryOps.WHERE: lambda: p[1] if p[0] else p[2] if len(p) == 3 and dtypes.is_bool(dtypes.type(p[0])) else None,
+    UnaryOps.LOG2: lambda: math.log2(p[0]) if len(p) == 1 and p[0] > 0 and dtypes.is_float(dtype) else math.nan,
+    UnaryOps.EXP2: lambda: math.exp2(p[0]) if len(p) == 1 and dtypes.is_float(dtype) else None,
+    UnaryOps.SQRT: lambda: math.sqrt(p[0]) if len(p) == 1 and p[0] >= 0 and dtypes.is_float(dtype) else math.nan,
+    UnaryOps.SIN: lambda: math.sin(p[0]) if len(p) == 1 and dtypes.is_float(dtype) else None,
+    UnaryOps.NEG: lambda: -p[0] if len(p) == 1 and (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else None,
+    BinaryOps.MUL: lambda: p[0]*p[1] if len(p) == 2 and (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else None,
+    BinaryOps.ADD: lambda: p[0]+p[1] if len(p) == 2 and (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else None,
+    BinaryOps.SUB: lambda: p[0]-p[1] if len(p) == 2 and (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else None,
+    BinaryOps.XOR: lambda: p[0]^p[1] if len(p) == 2 and dtypes.is_int(dtype) and not dtypes.is_unsigned(dtype) else None,
+    BinaryOps.MAX: lambda: max(p[0], p[1]) if len(p) == 2 and (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else None,
+    BinaryOps.CMPEQ: lambda: p[0] == p[1] if len(p) == 2 and (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else None,
+    BinaryOps.CMPLT: lambda: p[0] < p[1] if len(p) == 2 and (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else None,
+    BinaryOps.DIV: lambda: p[0]//p[1] if len(p) == 2 and dtypes.is_int(dtype) and p[1] != 0 else (p[0]/p[1] if p[1] != 0 else math.nan) if dtypes.is_float(dtype) else None,
+    BinaryOps.MOD: lambda: p[0]%p[1] if len(p) == 2 and dtypes.is_int(dtype) and not dtypes.is_unsigned(dtype) and p[1] != 0 else None
+  }
+
+  if arg not in operations:
+    raise NotImplementedError(f"Unsupported operation: {arg}")
+  result = operations[arg]()
+  if result is None:
+    raise ValueError(f"Invalid operands for operation {arg}: {p}")
+  
+  try:
+    # FIXME: This is a temporary fix for bad result dtype inference for floats that are too large
+    try:
+      dtypes.check_bounds(result, dtype)
+    except OverflowError:
+      # Try to increase the precision of the result
+      if dtypes.is_float(dtype):
+        dtype = dtypes.double
+      elif dtypes.is_unsigned(dtype):
+        dtype = dtypes.ulong
+      elif dtypes.is_int(dtype):
+        dtype = dtypes.long
+    result = dtypes.as_type(result, dtype)
+  except TypeError as e:
+    error_msg = f"Result {result} cannot be converted to {dtype} for operation {arg} and operands {p}"
+    raise TypeError(error_msg) from e
+  except OverflowError as e:
+    error_msg = f"Result {result} overflows {dtype} (upcast failed) for operation {arg} and operands {p}"
+    raise OverflowError(error_msg) from e
+
+  return result
 
 def _load(m, i):
   if i<0 or i>=len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
@@ -61,9 +111,9 @@ class PythonProgram:
       loop_ends: Dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        void_ops = {UOps.STORE, UOps.ENDLOOP, UOps.BARRIER, UOps.IF, UOps.ENDIF}
-        inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
-        dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
+        inp = [ul[v] for v in idp]
+        dtp = [dl[v] for v in idp]
+        ul[i] = [] # default to empty list
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
         if uop is UOps.STORE:
           assert len(inp) <= 3, "gated stores not supported yet"
@@ -104,11 +154,10 @@ class PythonProgram:
           elif arg[1][0] == 'l':
             ul[i] = [x[2-arg[0]] for x in warp]
         elif uop is UOps.CONST:
-          casted_arg = int(arg) if dtypes.is_int(dtype) else float(arg)
           if dtype.count > 1:
-            ul[i] = [[casted_arg] * warp_size for _ in range(dtype.count)]
+            ul[i] = [[dtypes.as_type(arg, dtype)] * warp_size for _ in range(dtype.count)]
           else:
-            ul[i] = [casted_arg] * warp_size
+            ul[i] = [dtypes.as_type(arg, dtype)] * warp_size
         elif uop is UOps.DEFINE_ACC:
           if dtype.count > 1:
             ul[i] = [[arg] * warp_size for _ in range(dtype.count)]
@@ -125,15 +174,12 @@ class PythonProgram:
               i = loop_ends[i] + 1
               continue
         elif uop is UOps.CAST:
-          if dtype.count > 1:
+          if dtype.sz > 1:
             ul[i] = inp
           else:
-            # TODO: add real cast
-            if dtypes.is_int(dtype):
-              ul[i] = [int(x) for x in inp[0]]
-            elif dtypes.is_float(dtype):
-              ul[i] = [float(x) for x in inp[0]]
-            else:
+            try:
+              ul[i] = [dtypes.as_type(x, dtype) for x in inp[0]]
+            except Exception:
               ul[i] = inp[0]
         elif uop is UOps.LOAD:
           if isinstance(dtp[0], ImageDType):
