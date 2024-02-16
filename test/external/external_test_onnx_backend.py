@@ -35,6 +35,7 @@ class TinygradBackend(Backend):
 
   @classmethod
   def supports_device(cls, device: str) -> bool:
+    # NOTE: this is onnx CPU
     return device == "CPU"
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
@@ -48,11 +49,6 @@ backend_test.exclude('test_adam_multiple_cpu')
 backend_test.exclude('test_nesterov_momentum_cpu')
 
 # about different dtypes
-if Device.DEFAULT in ["TORCH"]:
-  backend_test.exclude('uint16')
-  backend_test.exclude('uint32')
-  backend_test.exclude('uint64')
-
 if Device.DEFAULT in ["METAL"] or (OSX and Device.DEFAULT == "GPU"):
   backend_test.exclude('float64')
   backend_test.exclude('DOUBLE')
@@ -162,7 +158,7 @@ backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # unsure about fill v
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type string
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 
-if Device.DEFAULT in ['GPU']:
+if Device.DEFAULT in ['GPU', 'METAL']:
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')

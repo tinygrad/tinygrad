@@ -4,7 +4,7 @@ import numpy as np
 import time, torch, torch.mps
 
 from tinygrad.tensor import Tensor
-from tinygrad.jit import TinyJit
+from tinygrad.features.jit import TinyJit
 from tinygrad import Device, GlobalCounters, dtypes
 from tinygrad.helpers import colored, getenv, CI, flat_mv
 
@@ -108,7 +108,7 @@ metalalloc.copyout(flat_mv(metal_a.data), a)
 np.testing.assert_allclose(metal_a, torch_a, atol=5e-3)
 
 from tinygrad.tensor import Tensor
-from tinygrad.jit import TinyJit
+from tinygrad.features.jit import TinyJit
 b = Tensor(nb)
 c = Tensor(nc)
 # TODO: slowness without the JIT I suspect comes from a lack of a caching allocator

@@ -93,9 +93,11 @@ def uops_flops_mem(uops:List[UOp]):
     if u.uop is UOps.ALU:
       flops += (2 if u.arg is TernaryOps.MULACC else 1) * prod(mults)
     if u.uop is UOps.LOAD:
-      mem += u.dtype.sz * u.dtype.itemsize * prod(mults)
+      assert u.dtype is not None
+      mem += u.dtype.count * u.dtype.itemsize * prod(mults)
     if u.uop is UOps.STORE:
-      mem += u.vin[2].dtype.sz * u.vin[2].dtype.itemsize * prod(mults)
+      assert u.vin[2].dtype is not None
+      mem += u.vin[2].dtype.count * u.vin[2].dtype.itemsize * prod(mults)
     if u.uop is UOps.WMMA:
       if u.arg.startswith("__metal_wmma"): flops += 2*(8*8*8)//32 * prod(mults)
       else: raise Exception("not implemented")

@@ -135,8 +135,8 @@ assert len(lazyop.srcs) == 2
 # the source is a LazyBuffer that is a "CPU" Tensor
 # again, a LazyOp AST is like a GPU kernel. you have to copy the data on the device first
 assert lazyop.srcs[0].op == LoadOps.COPY
-assert lazyop.srcs[0].srcs[0].device == "CPU"
-assert lazyop.srcs[0].srcs[0].realized._buf[0] == 2, "the src of the COPY LazyOP is a LazyBuffer on the CPU holding [2]"
+assert lazyop.srcs[0].srcs[0].device == "EXT"
+assert lazyop.srcs[0].srcs[0].realized._buf[0][0] == 2, "the src of the COPY LazyOP is a LazyBuffer on the CPU holding [2]"
 assert result.lazydata.base.realized is None, "the LazyBuffer is not realized yet"
 
 # now we realize the LazyBuffer
@@ -150,18 +150,10 @@ out = result.lazydata.base.realized.as_buffer().cast('I')
 assert out[0] == 5, "when put in numpy, it's 5"
 
 # %%
-# == Union[Interpreted, Compiled] (in tinygrad/device.py, code 6/10) ==
+# == Compiled (in tinygrad/device.py, code 6/10) ==
 
-# Now you have a choice, you can either write a "Interpreted" backend or "Compiled" backend
+# Now you can write a Compiled backend (example: GPU, LLVM or PYTHON)
 
-# Interpreted backends are very simple (example: CPU and TORCH)
-class Interpreted:
-  # and they have a lookup table to functions for the Ops
-  fxn_for_op: Dict[Op, Callable] = {
-    UnaryOps.EXP2: lambda x: np.exp2(x),
-    BinaryOps.ADD: lambda x,y: x+y}
-
-# Compiled backends take a little more (example: GPU and LLVM)
 class Compiled:
   # a code generator, which compiles the AST
   codegen: Type[Linearizer]
@@ -250,7 +242,8 @@ result = Tensor(2.0).realize() + Tensor(3.0).realize()
 
 # use the real Linearizer to linearize 2+3
 from tinygrad.codegen.linearizer import Linearizer
-sched = result.lazydata.schedule()
+from tinygrad.realize import create_schedule
+sched = create_schedule([result.lazydata])
 linearizer = Linearizer(sched[-1].ast, ClangCompiler.linearizer_opts)
 linearizer.linearize()
 
@@ -277,7 +270,7 @@ result = Tensor(2.0) + Tensor(3.0)
 
 # we have a global cache used by the JIT
 # from there, we can see the generated clang code
-from tinygrad.jit import CacheCollector
+from tinygrad.features.jit import CacheCollector
 CacheCollector.start()       # enables the cache
 result.realize()             # create the program and runs it
 cache_saved = CacheCollector.finish()  # disable the cache

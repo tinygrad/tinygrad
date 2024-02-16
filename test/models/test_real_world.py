@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad.tensor import Tensor
 from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
-from tinygrad.jit import TinyJit
+from tinygrad.features.jit import TinyJit
 from tinygrad import Device, GlobalCounters, dtypes
 from tinygrad.helpers import CI
 from tinygrad.shape.symbolic import Variable
@@ -56,7 +56,6 @@ class TestRealWorld(unittest.TestCase):
     def test(t, t2): return model(t, 801, t2).realize()
     helper_test("test_sd", lambda: (Tensor.randn(1, 4, 64, 64),Tensor.randn(1, 77, 768)), test, 18.0, 953)
 
-  @unittest.skipIf(Device.DEFAULT in ["CPU", "TORCH"], "tons of ram with interpreted")
   def test_mini_stable_diffusion(self):
     model = [ResBlock(16, 24, 16) for _ in range(4)]
     derandomize_model(model)

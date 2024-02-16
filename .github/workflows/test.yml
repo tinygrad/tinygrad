@@ -46,6 +46,8 @@ jobs:
       run: |
         DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
         DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
+    - name: Test ops with Python emulator
+      run: DEBUG=2 PYTHON=1 python3 -m pytest test/test_ops.py -k "not (test_split or test_simple_cumsum or test_cumsum or test_einsum or test_dot_1d or test_big_gemm or test_broadcastdot or test_multidot or test_var_axis or test_std_axis or test_broadcast_full or test_broadcast_partial or test_simple_conv3d or test_dilated_conv_transpose2d or test_simple_conv_transpose3d or test_large_input_conv2d or test_maxpool2d_simple or test_maxpool2d_bigger_stride or test_avgpool2d or test_cat or test_scaled_product_attention or test_scaled_product_attention_causal)"
 
   linter:
     name: Linters
@@ -76,7 +78,7 @@ jobs:
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
-      run: python -m mypy
+      run: python -m mypy --strict-equality
     - name: Test Docs
       run: |
         python docs/abstractions.py
@@ -103,7 +105,7 @@ jobs:
       run: MAX_LINE_COUNT=6000 python sz.py
 
   testcpuimagenet:
-    name: CPU and ImageNet to C Tests
+    name: ImageNet to C Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -126,45 +128,14 @@ jobs:
         key: downloads-cache-cpu-${{ env.DOWNLOAD_CACHE_VERSION }}
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Run Pytest
-      run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)" --durations=20
+    #- name: Run Pytest
+    #  run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)" --durations=20
     - name: Compile EfficientNet to C
       run: PYTHONPATH="." CLANG=1 python examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
       run: clang -O2 recognize.c -lm -o recognize
     - name: Test EfficientNet
       run: cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
-
-  testtorch:
-    name: Torch Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: 3.11
-    - name: Cache python packages
-      uses: actions/cache@v3
-      with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-        key: testing-packages-${{ hashFiles('**/setup.py') }}
-    - name: Cache downloads
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/tinygrad/downloads/
-        key: downloads-cache-torch-${{ env.DOWNLOAD_CACHE_VERSION }}
-    - name: Install Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Run Pytest
-      run: TORCH=1 python -m pytest -n=auto test/ --durations=20
-    - name: Run test_ops with inputs moved to a different device
-      run: TORCH=1 MOVE_TENSOR=TORCH:1 python -m pytest -n=auto test/test_ops.py --durations=20
-    - name: Run ONNX
-      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
 
   testopencl:
     strategy:
@@ -236,9 +207,6 @@ jobs:
       #  run: |
       #    PYTHONPATH="." python test/external/dist/test_world.py
       #    PYTHONPATH="." python test/external/dist/test_collectives.py
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test ONNX (CPU)
-        run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Test ONNX (GPU)
         run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
@@ -484,7 +452,7 @@ jobs:
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --durations=20
       - name: Run pytest (hip)
         if: matrix.backend=='hip'
-        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py --durations=20
+        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/imported/test_indexing.py --durations=20
 
   #testunicorn:
   #  name: ARM64 unicorn Test
