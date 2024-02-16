@@ -84,11 +84,15 @@ def uops_type_verify(uops:List[UOp]):
 
 def uops_flops_mem(uops:List[UOp]) -> Tuple[int, int]:
   flops, mem, mults = 0, 0, 1
+  mult_stack = []
   for u in uops:
     if u.uop is UOps.LOOP:
+      mult_stack.append(mults)
+      # NOTE: this can also be DEFINE_GLOBAL
+      assert u.vin[1].uop == UOps.CONST
       mults *= u.vin[1].arg
     if u.uop is UOps.ENDLOOP:
-      mults //= u.vin[0].vin[1].arg
+      mults = mult_stack.pop(-1)
     if u.uop is UOps.ALU:
       flops += (2 if u.arg is TernaryOps.MULACC else 1) * mults
     if u.uop is UOps.LOAD:
