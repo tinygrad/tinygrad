@@ -142,7 +142,7 @@ class ShapeTracker:
     bad_idx_vars: Set[Variable] = set()
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
       idx_maybe, stride_maybe = (this_dim.a, this_dim.b) if isinstance(this_dim, MulNode) else (this_dim, 1)
-      try: ret[idxs.index(idx_maybe)] = stride_maybe
+      try: ret[idxs.index(idx_maybe)] = cast(sint, stride_maybe)
       except ValueError: bad_idx_vars = bad_idx_vars.union(idx_maybe.vars())
     idx_vars, valid_vars = idx.vars(), valid.vars()
     for i,tidx in enumerate(idxs):
