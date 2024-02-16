@@ -174,7 +174,7 @@ class PythonProgram:
               i = loop_ends[i] + 1
               continue
         elif uop is UOps.CAST:
-          if dtype.sz > 1:
+          if dtype.count > 1:
             ul[i] = inp
           else:
             try:
