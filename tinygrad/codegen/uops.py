@@ -82,8 +82,8 @@ def uops_type_verify(uops:List[UOp]):
         assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
         assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
 
-def uops_flops_mem(uops:List[UOp], mults=1):
-  flops, mem = 0, 0
+def uops_flops_mem(uops:List[UOp]) -> Tuple[int, int]:
+  flops, mem, mults = 0, 0, 1
   for u in uops:
     if u.uop is UOps.LOOP:
       mults *= u.vin[1].arg
@@ -93,10 +93,10 @@ def uops_flops_mem(uops:List[UOp], mults=1):
       flops += (2 if u.arg is TernaryOps.MULACC else 1) * mults
     if u.uop is UOps.LOAD:
       assert u.dtype is not None
-      mem += u.dtype.count * u.dtype.itemsize * mults
+      mem += u.dtype.itemsize * mults
     if u.uop is UOps.STORE:
       assert u.vin[2].dtype is not None
-      mem += u.vin[2].dtype.count * u.vin[2].dtype.itemsize * mults
+      mem += u.vin[2].dtype.itemsize * mults
     if u.uop is UOps.WMMA:
       if u.arg.startswith("__metal_wmma"): flops += 2*(8*8*8)//32 * mults
       elif u.arg == "__hip_wmma_f16_f16" or u.arg == "__builtin_amdgcn_wmma_f32_16x16x16_f16_w32": flops += 2*(16*16*16)//32 * mults
