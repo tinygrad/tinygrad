@@ -255,7 +255,7 @@ class Kernel:
     if isinstance(self.bufs[0].dtype, ImageDType):
       base_shape = self.bufs[0].dtype.shape
       if shape_idx_groups := get_contraction(self.output_shape, base_shape):
-        special_strides: Tuple[int, ...] = tuple()
+        special_strides: Tuple[sint, ...] = tuple()
         for i,g in enumerate(shape_idx_groups):
           shape_piece = tuple(self.output_shape[x] for x in g)
           assert prod(shape_piece) == base_shape[i], f"get_contraction was wrong? {shape_piece} != {base_shape[i]}"

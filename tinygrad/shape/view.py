@@ -6,11 +6,11 @@ from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, sint
 
 @functools.lru_cache(maxsize=None)
-def canonicalize_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
+def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tuple[sint, ...]:
   return tuple(0 if s == 1 else st for s, st in zip(shape, strides))
 
 @functools.lru_cache(maxsize=None)
-def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
+def strides_for_shape(shape:Tuple[sint, ...]) -> Tuple[sint, ...]:
   if not shape: return ()
   strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))
   return canonicalize_strides(shape, strides[::-1])
