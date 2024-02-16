@@ -47,20 +47,9 @@ def _store(m, i, v):
   m[i] = v
 
 TYPES_MAP = {
-  dtypes.int8: ctypes.c_byte,
-  dtypes.uint8: ctypes.c_ubyte,
-  dtypes.int16: ctypes.c_short,
-  dtypes.uint16: ctypes.c_ushort,
-  dtypes.int32: ctypes.c_int,
-  dtypes.uint32: ctypes.c_uint,
-  dtypes.int64: ctypes.c_longlong,
-  dtypes.uint64: ctypes.c_ulonglong,
-  dtypes.float16: ctypes.c_float,
-  dtypes.bfloat16: ctypes.c_float,
-  dtypes.float32: ctypes.c_float,
-  dtypes.float64: ctypes.c_double,
-  dtypes.bool: ctypes.c_bool,
-}
+  dtypes.bool: ctypes.c_bool, dtypes.int8: ctypes.c_byte, dtypes.uint8: ctypes.c_ubyte, dtypes.int16: ctypes.c_short, dtypes.uint16: ctypes.c_ushort,
+  dtypes.int32: ctypes.c_int, dtypes.uint32: ctypes.c_uint, dtypes.int64: ctypes.c_longlong, dtypes.uint64: ctypes.c_ulonglong,
+  dtypes.float16: ctypes.c_float, dtypes.bfloat16: ctypes.c_float, dtypes.float32: ctypes.c_float, dtypes.float64: ctypes.c_double}
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
@@ -149,12 +138,8 @@ class PythonProgram:
               ul[i] = [struct.unpack(dtype.fmt, struct.pack(dtp[0].fmt, x))[0] for x in inp[0]]
             else:
               cast = TYPES_MAP[dtype]
-              if dtypes.is_int(dtype):
-                ul[i] = [cast(int(x)).value for x in inp[0]]
-              elif dtypes.is_float(dtype):
-                ul[i] = [cast(float(x)).value for x in inp[0]]
-              else:
-                ul[i] = inp[0]
+              type_conv = int if dtypes.is_int(dtype) else float if dtypes.is_float(dtype) else lambda x: x
+              ul[i] = [cast(type_conv(x)).value for x in inp[0]] if dtypes.is_int(dtype) or dtypes.is_float(dtype) else inp[0]
         elif uop is UOps.LOAD:
           if isinstance(dtp[0], ImageDType):
             assert dtype.count == 4
