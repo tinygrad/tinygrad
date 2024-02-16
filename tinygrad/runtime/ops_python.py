@@ -2,7 +2,7 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Tuple, List, Optional, Any, Dict
-import pickle, base64, itertools, time, math
+import pickle, base64, itertools, time, math, ctypes, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Allocator, Compiler
@@ -45,6 +45,22 @@ def load(inp, j=0):
 def _store(m, i, v):
   if i<0 or i>=len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
   m[i] = v
+
+TYPES_MAP = {
+  dtypes.int8: ctypes.c_byte,
+  dtypes.uint8: ctypes.c_ubyte,
+  dtypes.int16: ctypes.c_short,
+  dtypes.uint16: ctypes.c_ushort,
+  dtypes.int32: ctypes.c_int,
+  dtypes.uint32: ctypes.c_uint,
+  dtypes.int64: ctypes.c_longlong,
+  dtypes.uint64: ctypes.c_ulonglong,
+  dtypes.float16: ctypes.c_float,
+  dtypes.bfloat16: ctypes.c_float,
+  dtypes.float32: ctypes.c_float,
+  dtypes.float64: ctypes.c_double,
+  dtypes.bool: ctypes.c_bool,
+}
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
@@ -128,13 +144,17 @@ class PythonProgram:
           if dtype.count > 1:
             ul[i] = inp
           else:
-            # TODO: add real cast
-            if dtypes.is_int(dtype):
-              ul[i] = [int(x) for x in inp[0]]
-            elif dtypes.is_float(dtype):
-              ul[i] = [float(x) for x in inp[0]]
+            is_bitcast = arg[1]
+            if is_bitcast:
+              ul[i] = [struct.unpack(dtype.fmt, struct.pack(dtp[0].fmt, x))[0] for x in inp[0]]
             else:
-              ul[i] = inp[0]
+              cast = TYPES_MAP[dtype]
+              if dtypes.is_int(dtype):
+                ul[i] = [cast(int(x)).value for x in inp[0]]
+              elif dtypes.is_float(dtype):
+                ul[i] = [cast(float(x)).value for x in inp[0]]
+              else:
+                ul[i] = inp[0]
         elif uop is UOps.LOAD:
           if isinstance(dtp[0], ImageDType):
             assert dtype.count == 4
