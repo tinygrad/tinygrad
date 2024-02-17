@@ -38,7 +38,7 @@ def loader_process(q_in, q_out, X:Tensor):
 
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
-      idx, fn, val = _recv
+      idx, fn, fidx, val = _recv
       img = Image.open(fn)
       img = img.convert('RGB') if img.mode != "RGB" else img
 
@@ -52,8 +52,11 @@ def loader_process(q_in, q_out, X:Tensor):
         img = img.resize((224, 224), Image.BILINEAR, box=(crop_left, crop_top, crop_left+224*rescale, crop_top+224*rescale))
         img = np.array(img)
       else:
-        from extra.datasets.imagenet import preprocess
-        img = preprocess(img, val)
+        from extra.datasets.imagenet import preprocess_train
+        # reseed rng for determinism
+        np.random.seed(fidx)
+        random.seed(fidx)
+        img = preprocess_train(img)
 
       # broken out
       #img_tensor = Tensor(img.tobytes(), device='CPU')
@@ -100,8 +103,9 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
   gen = shuffled_indices(len(files)) if shuffle else iter(range(len(files)))
   def enqueue_batch(num):
     for idx in range(num*batch_size, (num+1)*batch_size):
-      fn = files[next(gen)]
-      q_in.put((idx, fn, val))
+      fidx = next(gen)
+      fn = files[fidx]
+      q_in.put((idx, fn, fidx, val))
       Y[idx] = cir[fn.split("/")[-2]]
   for bn in range(BATCH_COUNT): enqueue_batch(bn)
 

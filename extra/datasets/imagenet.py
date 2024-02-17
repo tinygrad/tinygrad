@@ -53,26 +53,21 @@ def image_resize(img, size, interpolation):
 
 def rand_flip(img):
   if random.random() < 0.5:
-    img = np.flip(img, axis=(0, 1)).copy()
+    img = np.flip(img, axis=1).copy()
   return img
 
-def center_crop(img, size):
-  w, h = img.size
-  crop_h, crop_w = size, size
-  crop_top = int(round((h - crop_h) / 2.0))
-  crop_left = int(round((w - crop_w) / 2.0))
-  return img.crop((crop_left, crop_top, size + crop_left, size + crop_top))
-
-def random_resized_crop(img, size, scale=(0.08, 1.0), ratio=(3/4, 4/3)):
+# we don't use supplied imagenet bounding boxes, so scale min is just min_object_covered
+# https://github.com/tensorflow/tensorflow/blob/e193d8ea7776ef5c6f5d769b6fb9c070213e737a/tensorflow/core/kernels/image/sample_distorted_bounding_box_op.cc
+def random_resized_crop(img, size, scale=(0.10, 1.0), ratio=(3/4, 4/3)):
   w, h = img.size
   area = w * h
 
   # Crop
-  log_ratio = [math.log(i) for i in ratio]
   random_solution_found = False
   for _ in range(10):
-    target_area = area * random.uniform(scale[0], scale[1])
-    aspect_ratio = math.exp(random.uniform(log_ratio[0], log_ratio[1]))
+    aspect_ratio = random.uniform(ratio[0], ratio[1])
+    max_scale = min(min(w * aspect_ratio / h, h / aspect_ratio / w), scale[1])
+    target_area = area * random.uniform(scale[0], max_scale)
 
     w_new = int(round(math.sqrt(target_area * aspect_ratio)))
     h_new = int(round(math.sqrt(target_area / aspect_ratio)))
@@ -85,33 +80,21 @@ def random_resized_crop(img, size, scale=(0.08, 1.0), ratio=(3/4, 4/3)):
         random_solution_found = True
         break
 
-  # Center crop
   if not random_solution_found:
-    in_ratio = float(w) / float(h)
-    if in_ratio < min(ratio):
-        w_new = w
-        h = int(round(w / min(ratio)))
-    elif in_ratio > max(ratio):
-        h_new = h
-        w = int(round(h * max(ratio)))
-    else:
-        w_new = w
-        h_new = h
-    crop_left = (h - h) // 2
-    crop_top = (w - w) // 2
-    img = img.crop((crop_left, crop_top, crop_left + w_new, crop_top + h_new))
-
-  # Resize
-  img = img.resize([size, size], Image.BILINEAR)
+    print('no random crop found!')
+    # Center crop
+    rescale = min(img.size) / 256
+    crop_left = (img.width - 224 * rescale) / 2.0
+    crop_top = (img.height - 224 * rescale) / 2.0
+    img = img.resize((224, 224), Image.BILINEAR, box=(crop_left, crop_top, crop_left + 224 * rescale, crop_top + 224 * rescale))
+  else:
+    # Resize
+    img = img.resize([size, size], Image.BILINEAR)
 
   return img
 
-def preprocess(img, val):
-  if not val:
-    img = random_resized_crop(img, 224)
-    img = rand_flip(np.array(img))
-  else:
-    img = center_crop(img, 224)
-    img = np.array(img)
+def preprocess_train(img):
+  img = random_resized_crop(img, 224)
+  img = rand_flip(np.array(img))
   #img = normalization(img)
   return img

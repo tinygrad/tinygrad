@@ -36,8 +36,6 @@ def train_resnet():
 
   seed = getenv('SEED', 42)
   Tensor.manual_seed(seed)
-  np.random.seed(seed)
-  random.seed(seed)
 
   if FP16: dtypes.default_float = dtypes.float16
 
@@ -55,28 +53,31 @@ def train_resnet():
     v.to_(GPUS)
   parameters = get_parameters(model)
 
-  input_mean = Tensor([0.485, 0.456, 0.406], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
-  input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
+  input_mean = Tensor([123.68, 116.78, 103.94], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
+  # input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
   def normalize(x):
+    if True:
+      return (x.permute([0, 3, 1, 2]).cast(dtypes.float32) - input_mean).cast(dtypes.default_float)
     x = x.permute([0, 3, 1, 2]).cast(dtypes.float32) / 255.0
     x -= input_mean
     x /= input_std
     return x.cast(dtypes.default_float)
   @TinyJit
-  def forward_step(X, Y):
+  def train_step(X, Y):
     optimizer.zero_grad()
     X = normalize(X)
     out = model.forward(X)
     loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1) * lr_scaler
-    return loss.realize(), out.realize(), (out.argmax(-1) == Y).sum()
-  # ** need to pass X and Y into backward step so that tinyjit can correctly replace the buffers in the backward tree!!! **
-  # otherwise it will use stale buffer from the second call to forward forever in the backward pass
-  @TinyJit
-  def backward_step(X, Y, loss):
     scheduler.step()
     loss.backward()
-    return optimizer.step()
-    pass
+    gnorm = optimizer.step()
+    return loss.realize(), out.realize(), (out.argmax(-1) == Y).sum().realize(), gnorm.realize() if gnorm is not None else Tensor(0)
+  @TinyJit
+  def eval_step(X, Y):
+    X = normalize(X)
+    out = model.forward(X)
+    loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1) * lr_scaler
+    return loss.realize(), out.realize(), (out.argmax(-1) == Y).sum().realize()
 
   target = getenv("TARGET", 0.759)
   achieved = False
@@ -181,6 +182,9 @@ def train_resnet():
   # ** epoch loop **
   for e in range(start_epoch, epochs):
     Tensor.training = True
+    # reseed rng for every epoch (restore rng state from ckpt)
+    np.random.seed(seed + e)
+    random.seed(seed + e)
     dt = time.perf_counter()
 
     it = iter(tqdm(t := batch_load_resnet(batch_size=BS, val=False, shuffle=True), total=steps_in_train_epoch))
@@ -197,11 +201,9 @@ def train_resnet():
 
       GlobalCounters.reset()
       # todo: splitting fw and bw steps wastes memory, and disallows Tensor.training=False for eval. implement JIT-internal buffer pool
-      proc = (forward_step(proc[0], proc[1]), (proc[0], proc[1]), proc[2])
+      proc = (train_step(proc[0], proc[1]), (proc[0], proc[1]), proc[2])
       # the backward step should be realized by loss.numpy(), even though it doesn't depend on this.
       # doing this uses 16.38gb vs 15.55gb? why? because the grads get realized in optimizer.step, and the backward buffers are freed?
-      fwet = time.perf_counter()
-      gnorm = backward_step(*proc[1], proc[0][0]) or Tensor(0)
       # proc = (proc[0], proc[2])  # drop inputs
 
       et = time.perf_counter()
@@ -215,13 +217,13 @@ def train_resnet():
       dte = time.perf_counter()
 
       device_str = proc[0][2].device if isinstance(proc[0][2].device, str) else f"{proc[0][2].device[0]} * {len(proc[0][2].device)}"
-      proc, top_1_acc, gnorm = proc[0][0].numpy(), proc[0][2].numpy().item() / BS, gnorm.numpy()  # return cookie
+      proc, top_1_acc, gnorm = proc[0][0].numpy(), proc[0][2].numpy().item() / BS, proc[0][3].numpy()  # return cookie
       loss_cpu = proc / lr_scaler
       cl = time.perf_counter()
       new_st = time.perf_counter()
 
       tqdm.write(
-        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(fwet - st) * 1000.0:7.2f}fw {(et - fwet) * 1000.0:7.2f}bw ms python, {(cl - dte) * 1000.0:7.2f} ms {device_str}, {(dte - dt) * 1000.0:6.2f} ms fetch data, {loss_cpu:5.2f} loss, {top_1_acc:3.2f} acc, {optimizer.lr.numpy()[0] * lr_scaler:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(et - st) * 1000.0:7.2f} ms python, {(cl - dte) * 1000.0:7.2f} ms {device_str}, {(dte - dt) * 1000.0:6.2f} ms fetch data, {loss_cpu:5.2f} loss, {top_1_acc:3.2f} acc, {optimizer.lr.numpy()[0] * lr_scaler:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
       wandb.log({"lr": optimizer.lr.numpy() * lr_scaler,
                  "train/data_time": dte-dt,
                  "train/step_time": cl - st,
@@ -244,15 +246,16 @@ def train_resnet():
 
     # ** eval loop **
     if (e+1) % getenv("EVAL_EPOCHS", 1) == 0:
+      train_step.reset()  # free the train step memory :(
       eval_loss = []
       eval_times = []
       eval_top_1_acc = []
       eval_top_5_acc = []
-      # Tensor.training = False  # disable to make kernels as similar as possible, but makes batchnorm less accurate for eval
+      Tensor.training = False
 
       # if Tensor.training is False, need to shuffle eval set to get good batch statistics in batchnorm
       # dataset is sorted by class -- images of the same class have different mean/variance from population.
-      it = iter(tqdm(t := batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=True), total=steps_in_val_epoch))
+      it = iter(tqdm(t := batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False), total=steps_in_val_epoch))
 
       proc = data_get(it)
 
@@ -260,7 +263,7 @@ def train_resnet():
         GlobalCounters.reset()
         st = time.time()
 
-        proc = (forward_step(proc[0], proc[1]), proc[1], proc[2])
+        proc = (eval_step(proc[0], proc[1]), proc[1], proc[2])
 
         try:
           next_proc = data_get(it)
@@ -280,6 +283,7 @@ def train_resnet():
 
         proc, next_proc = next_proc, None  # drop cookie
 
+      eval_step.reset()
       total_loss = sum(eval_loss) / len(eval_loss)
       total_top_1 = sum(eval_top_1_acc) / len(eval_top_1_acc)
       total_top_5 = sum(eval_top_5_acc) / len(eval_top_5_acc)
