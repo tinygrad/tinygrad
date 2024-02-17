@@ -140,9 +140,9 @@ class TestLinearizer(unittest.TestCase):
       np.testing.assert_allclose(np_c, r.numpy(), atol=tc_atol, rtol=tc_rtol)
 
   def test_limit_dims_to_max_5d_global(self):
-    t = Tensor.rand(3, 4, 5, 6, 7).pad(((1, 1), (1, 1), (1, 1), (1, 1), (1, 1))) + 1
+    t = Tensor.ones(3, 4, 5, 6, 7).contiguous().pad(((1, 1), (1, 1), (1, 1), (1, 1), (1, 1))) + 1
     sched = [si for si in create_schedule([t.lazydata]) if si.ast.op not in LoadOps]
-    assert len(sched) == 2 # one from rand
+    assert len(sched) == 1
     lin = Linearizer(sched[0].ast)
     assert lin.full_shape[:lin.global_dims] == (5, 6, 7, 8, 9)
     lin.limit_dims_to_max(global_max=[16, 16, 16], local_max=[16, 16, 16])
