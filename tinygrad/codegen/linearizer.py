@@ -13,6 +13,7 @@ from tinygrad.features.image import to_image_idx
 
 from tinygrad.codegen.uops import UOps, UOp, get_recursive_children, remove_childless_uops, fix_loop_scope, uops_type_verify
 
+def panic(x:Any=""): raise Exception(f"explicit panic: {x}")
 def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
   local_idxs = loop_local_idxs = [Variable(f"{prefix}{start_dim+i}", 0, s-1) for i,s in enumerate(local_dims[0:maxdim-1] + (prod(local_dims[maxdim-1:]),) if len(local_dims) > maxdim else local_dims)]  # noqa: E501
   if maxdim != 0 and len(local_dims) > maxdim:
