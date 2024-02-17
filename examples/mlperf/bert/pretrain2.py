@@ -103,8 +103,8 @@ def pretrain():
     predictions = lm_logits.log_softmax().argmax(-1)
     return (predictions == masked_lm_ids).float().mean()
   
-  train_batcher = iterate(val=False)
-  eval_batcher = iterate(val=True)
+  train_batcher = iterate(bs=BS, val=False)
+  eval_batcher = iterate(bs=EVAL_BS, val=True)
 
   epoch = 0
   while epoch < EPOCH:

@@ -309,15 +309,10 @@ def instance_to_features(instance, tokenizer):
 
 def process_part(part):
   tokenizer = Tokenizer(Path(__file__).parent / "wiki" / "vocab.txt")
-  batch_features = []
   os.makedirs(BASEDIR / "train" / str(part), exist_ok=True)
-  batch_size = getenv('BS', 32)
   for i, features in enumerate(process_iterate(tokenizer, val=False, part=part)):
-    batch_features.append(features)
-    if (i + 1) % batch_size == 0: # We drop the last batch if it's not full
-      with open(BASEDIR / f"train/{str(part)}/{part}_batch_{i//batch_size}.pkl", "wb") as f:
-        pickle.dump(batch_features, f)
-        batch_features = []
+    with open(BASEDIR / f"train/{str(part)}/{part}_{i}.pkl", "wb") as f:
+      pickle.dump(features, f)
 
 def process_iterate(tokenizer, val=False, part=0): # Convert raw text to masked NSP samples
   rng = random.Random(getenv('SEED', 12345))
@@ -352,37 +347,37 @@ def get_val_files():
 def get_train_files():
   return sorted(list((BASEDIR / "train/").glob("*/*.pkl")))
 
-def load_batch(file):
-  batch_features_list = []
+def load_file(file):
   with open(file, "rb") as f:
     features = pickle.load(f)
-    for i in range(len(features)):
-        batch_features_list.append({
-            "input_ids": features[i]["input_ids"],
-            "input_mask": features[i]["input_mask"],
-            "segment_ids": features[i]["segment_ids"],
-            "masked_lm_positions": features[i]["masked_lm_positions"],
-            "masked_lm_ids": features[i]["masked_lm_ids"],
-            "next_sentence_labels": features[i]["next_sentence_labels"],
-        })
-  return batch_features_list
+    return {
+        "input_ids": features[i]["input_ids"],
+        "input_mask": features[i]["input_mask"],
+        "segment_ids": features[i]["segment_ids"],
+        "masked_lm_positions": features[i]["masked_lm_positions"],
+        "masked_lm_ids": features[i]["masked_lm_ids"],
+        "next_sentence_labels": features[i]["next_sentence_labels"],
+    }
 
-def iterate(start=0, val=False):
+def iterate(bs=1, start=0, val=False):
   files = get_val_files() if val else get_train_files()
-  for i in range(start, len(files)):
-    features = load_batch(files[i])
+  p = Pool()
+  for i in range(start, len(files), bs):
+    results = p.map(load_file, files[i:i+bs])
 
     X = {
-      "input_ids": np.concatenate([f["input_ids"] for f in features], axis=0),
-      "input_mask": np.concatenate([f["input_mask"] for f in features], axis=0),
-      "segment_ids": np.concatenate([f["segment_ids"] for f in features], axis=0),
-      "masked_lm_positions": np.concatenate([f["masked_lm_positions"] for f in features], axis=0),
+      "input_ids": np.concatenate([f["input_ids"] for f in results], axis=0),
+      "input_mask": np.concatenate([f["input_mask"] for f in results], axis=0),
+      "segment_ids": np.concatenate([f["segment_ids"] for f in results], axis=0),
+      "masked_lm_positions": np.concatenate([f["masked_lm_positions"] for f in results], axis=0),
     }
     Y = {
-      "masked_lm_ids": np.concatenate([f["masked_lm_ids"] for f in features], axis=0),
-      "next_sentence_labels": np.concatenate([f["next_sentence_labels"] for f in features], axis=0),
+      "masked_lm_ids": np.concatenate([f["masked_lm_ids"] for f in results], axis=0),
+      "next_sentence_labels": np.concatenate([f["next_sentence_labels"] for f in results], axis=0),
     }
     yield X, Y
+  p.join()
+  p.close()
 
 if __name__ == "__main__":
   tokenizer = Tokenizer(Path(__file__).parent / "wiki" / "vocab.txt")
@@ -399,16 +394,11 @@ if __name__ == "__main__":
       X["input_ids"][0][int(X["masked_lm_positions"][0][i])] = Y["masked_lm_ids"][0][i]
     print(" ".join(tokenizer.convert_ids_to_tokens(X["input_ids"][0])))
   else:
-    batch_size = getenv('BS', 32)
     if sys.argv[1] == "pre-eval":
       os.makedirs(BASEDIR / "eval", exist_ok=True)
-      all_features = []
       for i, features in tqdm(enumerate(process_iterate(tokenizer, val=True)), total=10000):
-        all_features.append(features)
-        if (i + 1) % batch_size == 0: # We drop the last batch if it's not full
-          with open(BASEDIR / f"eval/{i}.pkl", "wb") as f:
-            pickle.dump(all_features, f)
-            all_features = []
+        with open(BASEDIR / f"eval/{i}.pkl", "wb") as f:
+          pickle.dump(features, f)
     elif sys.argv[1] == "pre-train":
       os.makedirs(BASEDIR / "train", exist_ok=True)
       if sys.argv[2] == "all":
@@ -416,10 +406,6 @@ if __name__ == "__main__":
       else:
         part = int(sys.argv[2])
         os.makedirs(BASEDIR / "train" / str(part), exist_ok=True)
-        all_features = []
         for i, features in tqdm(enumerate(process_iterate(tokenizer, val=False, part=part))):
-          all_features.append(features)
-          if (i + 1) % batch_size == 0: # We drop the last batch if it's not full
-            with open(BASEDIR / f"train/{str(part)}/{part}_batch_{i//batch_size}.pkl", "wb") as f:
-              pickle.dump(all_features, f)
-              all_features = []
+          with open(BASEDIR / f"train/{str(part)}/{part}_{i}.pkl", "wb") as f:
+            pickle.dump(features, f)
