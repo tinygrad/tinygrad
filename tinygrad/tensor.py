@@ -225,9 +225,9 @@ class Tensor:
 
     x = [(c := counts.chunk(2))[0] + ks[-1], c[1] + ks[0]]
     for i in range(5):
-      for r in rotations[i % 2]: x[0], x[1] = (x0 := x[0] + x[1]), x0 ^ ((x[1] * (2 ** r)) + (x[1] / (2 ** (32 - r))))
+      for r in rotations[i % 2]: x[0], x[1] = (x0 := x[0] + x[1]), x0 ^ ((x[1] * (2 ** r)) + (x[1].div(2 ** (32 - r), upcast=False)))
       x = [(x[0] + ks[i % 3]), (x[1] + ks[(i + 1) % 3] + i + 1)]
-    out = ((x[0].cat(x[1])[:num] / 2 ** 8).cast(dtypes.float32).realize() / (2 ** 24))
+    out = x[0].cat(x[1])[:num].div(2 ** 8, upcast=False).cast(dtypes.float32).realize().div(2 ** 24, upcast=False)
     out = out.reshape(shape).cast(dtypes.default_float if dtype is None else dtype)
     out.requires_grad = kwargs.get("requires_grad")
     return out.contiguous()
@@ -858,10 +858,10 @@ class Tensor:
     if x.__class__ is not Tensor and x == 0.0: return mlops.Zero.apply(self)
     if x.__class__ is not Tensor and x == -1.0: return -self
     return mlops.Mul.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x != 1.0 else self
-  def div(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
+  def div(self, x:Union[Tensor, Scalar], reverse=False, upcast=True) -> Tensor:
     x = self._to_const_val(x)
-    if x.__class__ is not Tensor and not reverse and x != 0: return self.mul(1/x)
-    if isinstance(x, Tensor) and dtypes.is_float(x.dtype): return mlops.Div.apply(*self._broadcasted(x, reverse))
+    if x.__class__ is not Tensor and not reverse and x != 0 and dtypes.is_float(self.dtype): return self.mul(1/x)
+    if (isinstance(x, Tensor) and dtypes.is_float(x.dtype)) or not upcast: return mlops.Div.apply(*self._broadcasted(x, reverse))
     return mlops.Div.apply(*self.cast(least_upper_float(self.dtype))._broadcasted(x, reverse))
   def xor(self, x:Tensor, reverse=False) -> Tensor: return mlops.Xor.apply(*self._broadcasted(x, reverse))
 
