@@ -81,7 +81,6 @@ def random_resized_crop(img, size, scale=(0.10, 1.0), ratio=(3/4, 4/3)):
         break
 
   if not random_solution_found:
-    print('no random crop found!')
     # Center crop
     rescale = min(img.size) / 256
     crop_left = (img.width - 224 * rescale) / 2.0
