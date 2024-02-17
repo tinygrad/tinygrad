@@ -18,7 +18,8 @@ class HSAProgram:
       print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
     self.exec = init_c_var(hsa.hsa_executable_t(), lambda x: check(hsa.hsa_executable_create_alt(hsa.HSA_PROFILE_FULL, hsa.HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, None, ctypes.byref(x)))) # noqa: E501
-    self.code_reader = init_c_var(hsa.hsa_code_object_reader_t(), lambda x: check(hsa.hsa_code_object_reader_create_from_memory(lib, len(lib), ctypes.byref(x)))) # noqa: E501
+    self.code_reader = init_c_var(hsa.hsa_code_object_reader_t(),
+                                  lambda x: check(hsa.hsa_code_object_reader_create_from_memory(lib, len(lib), ctypes.byref(x))))
     check(hsa.hsa_executable_load_agent_code_object(self.exec, self.device.agent, self.code_reader, None, None))
     check(hsa.hsa_executable_freeze(self.exec, None))
 
