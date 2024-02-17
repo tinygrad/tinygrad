@@ -442,7 +442,7 @@ class Tensor:
         b = Tensor.arange(ret.shape[dim]).reshape(ret.shape[dim:dim+1] + (1,)*(ret.ndim - dim - 1))
         eqs.append(a == b)
 
-      try: mask = reduce(lambda x,y: x.mul(y), eqs).contiguous()
+      try: mask = reduce(lambda x,y: x.mul(y), eqs)
       except AssertionError as exc: raise IndexError("cannot broadcast indices") from exc
 
       sh = ret.shape[:first_dim] + (1,)*max_idx_dim + ret.shape[first_dim:]

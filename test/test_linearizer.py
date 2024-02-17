@@ -14,6 +14,15 @@ from tinygrad.realize import create_schedule, run_schedule
 from tinygrad.helpers import prod, Context
 from tinygrad.dtype import DType, dtypes
 
+class TestLinearizerFailure(unittest.TestCase):
+  @unittest.skip("fix :D")
+  def test_failed_eq_mul_sum(self):
+    inp = Tensor.zeros(2,2).realize()
+    np_inp = inp.numpy()
+    inp = inp[[0], [0]]
+    np_inp = inp[[0], [0]]
+    np.testing.assert_allclose(np_inp, inp.numpy(), atol=1e-4, rtol=1e-4)
+
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT], Compiled), "linearizer is only for compiled backends")
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
