@@ -9,6 +9,7 @@ from tinygrad.device import Compiled, Allocator, Compiler
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.codegen.kernel import LinearizerOptions
+import numpy as np
 
 def exec_alu(arg, dtype, p):
   # TODO: make this complete and correctly honor the dtypes
@@ -128,13 +129,8 @@ class PythonProgram:
           if dtype.count > 1:
             ul[i] = inp
           else:
-            # TODO: add real cast
-            if dtypes.is_int(dtype):
-              ul[i] = [int(x) for x in inp[0]]
-            elif dtypes.is_float(dtype):
-              ul[i] = [float(x) for x in inp[0]]
-            else:
-              ul[i] = inp[0]
+            np_inp = np.array(inp[0], dtype=dtp[0].np)
+            ul[i] = np_inp.view(dtype.np).tolist() if arg[1] else np_inp.astype(dtype.np).tolist()
         elif uop is UOps.LOAD:
           if isinstance(dtp[0], ImageDType):
             assert dtype.count == 4
