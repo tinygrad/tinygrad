@@ -1,7 +1,7 @@
 from __future__ import annotations
 import math
 from typing import Union, Optional, Any, Tuple, List, Dict, cast
-from tinygrad.dtype import dtypes, DType, Scalar
+from tinygrad.dtype import cast_scalar, dtypes, DType, Scalar
 from tinygrad.helpers import prod, getenv, all_int, all_same
 from tinygrad.ops import LoadOps, UnaryOps, BinaryOps, TernaryOps, ReduceOps, Op
 from tinygrad.shape.symbolic import sint
@@ -53,7 +53,7 @@ class LazyBuffer:
 
   def const(self, val:Scalar, shape:Optional[Tuple[sint,...]]=None) -> LazyBuffer:
     shape = self.shape if shape is None else shape
-    return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=val).reshape((1,)*len(shape)).expand(shape)
+    return LazyBuffer.loadop(LoadOps.CONST, tuple(), self.dtype, self.device, arg=cast_scalar(val, self.dtype)).reshape((1,)*len(shape)).expand(shape)
 
   def contiguous(self):
     if not self.st.contiguous or self.size != self.base.size or self.is_unrealized_const():
@@ -73,6 +73,9 @@ class LazyBuffer:
 
   def _copy(self, device:str) -> LazyBuffer:
     sync_size = 1 if self.device.startswith("HIP") else 0
+    if self.device.startswith("EXT") or self.device.startswith("DISK"):
+      # DISK/EXT don't sync
+      return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self,), enable_cache=False)
     sync = LazyBuffer.loadop(LoadOps.SYNC, (sync_size,), dtypes.uint32, self.device, src=self, enable_cache=True)
     wait = LazyBuffer.loadop(LoadOps.WAIT, (0,), dtypes.uint32, device, src=sync, enable_cache=True)
     return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self, wait), enable_cache=False)

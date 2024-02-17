@@ -9,7 +9,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, NumNode, Node
+from tinygrad.shape.symbolic import Variable, sint
 from weakref import ref, WeakKeyDictionary
 from dataclasses import dataclass
 
@@ -18,8 +18,8 @@ class JitItem:
   prg: JITRunner  # or a graph executor like MetalGraph
   rawbufs: List[Optional[Buffer]]
 
-def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[Node, int]:
-  return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], NumNode(0)), \
+def get_jit_stats(jit_cache: List[JitItem]) -> Tuple[sint, int]:
+  return functools.reduce(operator.add, [ji.prg.op_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], 0), \
          functools.reduce(operator.add, [ji.prg.mem_estimate for ji in jit_cache if isinstance(ji.prg, CompiledASTRunner)], 0)
 def get_input_replace(jit_cache: List[JitItem], input_rawbuffers:List[Buffer]) -> Dict[Tuple[int, int], int]:
   input_replace: Dict[Tuple[int, int], int] = {}
@@ -165,7 +165,9 @@ class _CacheCollector:
   def add(self, prg, rawbufs, var_vals):
     if self.cache is None: return
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
-    if len(rawbufs): self.placeholders[rawbufs[0]] = PlaceHolder(rawbufs[0])    # NOTE: this is making an assumption that 0 is special
+    # NOTE: this is making an assumption that 0 is special
+    # TODO: this is wrong for sync and wait
+    if len(rawbufs): self.placeholders[rawbufs[0]] = PlaceHolder(rawbufs[0])
     self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, Buffer) else x for x in rawbufs]))
 
   def finish(self) -> List[JitItem]:

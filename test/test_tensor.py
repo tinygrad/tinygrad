@@ -289,7 +289,7 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_allclose(x.numpy(), np.ones((3,3,3)))
 
   def test_copy_from_disk(self):
-    t = Tensor.randn(30, device="CPU").to(f"disk:{temp('test_copy_from_disk')}")
+    t = Tensor.randn(30).to(f"disk:{temp('test_copy_from_disk')}")
     a = t[10:20]
     dev = a.to(Device.DEFAULT)
     np.testing.assert_allclose(a.numpy(), dev.numpy())
@@ -394,15 +394,13 @@ class TestZeroShapeTensor(unittest.TestCase):
     assert t.shape == (3, 2, 2)
     np.testing.assert_equal(t.numpy(), np.ones((3, 2, 2)))
 
-    if Device.DEFAULT != "TORCH":
-      # torch does not support padding non-zero dim with 0-size. torch.nn.functional.pad(torch.zeros(3,2,0), [0,0,0,4,0,0])
-      t = Tensor.rand(3, 2, 0).pad((None, (1, 1), None), 1)
-      assert t.shape == (3, 4, 0)
-      np.testing.assert_equal(t.numpy(), np.ones((3, 4, 0)))
+    t = Tensor.rand(3, 2, 0).pad((None, (1, 1), None), 1)
+    assert t.shape == (3, 4, 0)
+    np.testing.assert_equal(t.numpy(), np.ones((3, 4, 0)))
 
-      t = Tensor.rand(3, 2, 0).pad(((1, 1), None, None), 1)
-      assert t.shape == (5, 2, 0)
-      np.testing.assert_equal(t.numpy(), np.ones((5, 2, 0)))
+    t = Tensor.rand(3, 2, 0).pad(((1, 1), None, None), 1)
+    assert t.shape == (5, 2, 0)
+    np.testing.assert_equal(t.numpy(), np.ones((5, 2, 0)))
 
   def test_shrink_into_zero(self):
     t = Tensor.rand(3, 4).realize()
@@ -416,12 +414,10 @@ class TestZeroShapeTensor(unittest.TestCase):
     assert t.shape == (3, 2, 2)
     np.testing.assert_equal(t.numpy(), s.numpy())
 
-    if Device.DEFAULT != "TORCH":
-      # torch does not support padding non-zero dim with 0-size. torch.nn.functional.pad(torch.zeros(3,2,0), [0,0,0,4,0,0])
-      s = Tensor.rand(3, 4, 0)
-      t = Tensor.rand(3, 2, 0).cat(s, dim=1)
-      assert t.shape == (3, 6, 0)
-      np.testing.assert_equal(t.numpy(), np.zeros((3, 6, 0)))
+    s = Tensor.rand(3, 4, 0)
+    t = Tensor.rand(3, 2, 0).cat(s, dim=1)
+    assert t.shape == (3, 6, 0)
+    np.testing.assert_equal(t.numpy(), np.zeros((3, 6, 0)))
 
   def test_elementwise(self):
     a = Tensor.rand(3, 2, 0)
@@ -464,7 +460,7 @@ class TestZeroShapeTensor(unittest.TestCase):
 class TestTensorCreationDevice(unittest.TestCase):
   # test auxiliary tensors are created on the same device
   def test_one_hot(self):
-    y = Tensor([1, 2, 3]).to("CPU")
+    y = Tensor([1, 2, 3]).to("CLANG")
     x = y.one_hot(10)
     x.realize()
 

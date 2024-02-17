@@ -55,7 +55,7 @@ class TestLinearizerFailures(unittest.TestCase):
     ast = LazyOp(op=ReduceOps.MAX, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker(views=(View(shape=(32, 2, 111, 27), strides=(6160, 3080, 28, 1), offset=0, mask=((0, 32), (0, 2), (0, 110), (0, 27)), contiguous=False), View(shape=(32, 2, 37, 9, 2, 2), strides=(5994, 2997, 81, 3, 27, 1), offset=0, mask=None, contiguous=False))))),), arg=(32, 2, 37, 9, 1, 1))
     opts = [Opt(op=OptOps.LOCAL, axis=0, amt=32)]
     ast = helper_add_store(ast)
-    helper_test_lin(Linearizer(ast), opts, failed_platforms=["CPU", "TORCH"])
+    helper_test_lin(Linearizer(ast), opts, failed_platforms=[])
 
   @unittest.skipIf(CI and Device.DEFAULT=="METAL", "behaves differently on METAL CI")
   def test_failure_3(self):
