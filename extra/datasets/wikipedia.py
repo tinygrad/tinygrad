@@ -351,12 +351,12 @@ def load_file(file):
   with open(file, "rb") as f:
     features = pickle.load(f)
     return {
-        "input_ids": features[i]["input_ids"],
-        "input_mask": features[i]["input_mask"],
-        "segment_ids": features[i]["segment_ids"],
-        "masked_lm_positions": features[i]["masked_lm_positions"],
-        "masked_lm_ids": features[i]["masked_lm_ids"],
-        "next_sentence_labels": features[i]["next_sentence_labels"],
+        "input_ids": features["input_ids"],
+        "input_mask": features["input_mask"],
+        "segment_ids": features["segment_ids"],
+        "masked_lm_positions": features["masked_lm_positions"],
+        "masked_lm_ids": features["masked_lm_ids"],
+        "next_sentence_labels": features["next_sentence_labels"],
     }
 
 def iterate(bs=1, start=0, val=False):

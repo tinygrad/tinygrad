@@ -113,7 +113,7 @@ def pretrain():
       if step % 10 == 0 and step > 0:
         X, Y = next(eval_batcher)
         Tensor.train = False
-        acc = eval_step_jitted(Tensor(X["input_ids"]).realize(), Tensor(X["segment_ids"]).realize(), Tensor(X["input_mask"]).realize(), Tensor(X["masked_lm_positions"]).realize(), Tensor(Y["masked_lm_ids"]).realize())
+        acc = eval_step_jitted(Tensor(X["input_ids"]), Tensor(X["segment_ids"]), Tensor(X["input_mask"]), Tensor(X["masked_lm_positions"]), Tensor(Y["masked_lm_ids"]))
         Tensor.train = True
         print(f"{step:3d} {acc.numpy()*100:.2f}% MLM Acc")
       st = time.monotonic()
