@@ -485,7 +485,7 @@ class Linearizer(Kernel):
     if x.op in ReduceOps and not do_reduce:
       assert offs is None, "not available if we aren't doing reduce"
       return acc
-    # MULACC fusion. TODO: this is copied from Interpreted
+    # MULACC fusion.
     if x.op == ReduceOps.SUM:
       if x.src[0].op == BinaryOps.MUL: x = LazyOp(TernaryOps.MULACC, x.src[0].src, x.arg)
       if (castop:=x.src[0]).op == UnaryOps.CAST and (mulop:=castop.src[0]).op == BinaryOps.MUL:

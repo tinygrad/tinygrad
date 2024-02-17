@@ -73,8 +73,8 @@ class LazyBuffer:
 
   def _copy(self, device:str) -> LazyBuffer:
     sync_size = 1 if self.device.startswith("HIP") else 0
-    if self.device.startswith("EXT"):
-      # EXT doesn't sync
+    if self.device.startswith("EXT") or self.device.startswith("DISK"):
+      # DISK/EXT don't sync
       return create_lazybuffer(device, ShapeTracker.from_shape(self.shape), self.dtype, LoadOps.COPY, None, (self,), enable_cache=False)
     sync = LazyBuffer.loadop(LoadOps.SYNC, (sync_size,), dtypes.uint32, self.device, src=self, enable_cache=True)
     wait = LazyBuffer.loadop(LoadOps.WAIT, (0,), dtypes.uint32, device, src=sync, enable_cache=True)
