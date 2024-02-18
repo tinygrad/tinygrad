@@ -113,8 +113,10 @@ class BufferCopy(JITRunner):
     if wait or DEBUG >= 2:
       dest.d.synchronize()
       et = time.perf_counter() - st
-    update_stats(colored(f"{type(self).__name__[6:].lower()} {dest.size*dest.dtype.itemsize:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}",
-                         "yellow"), 0, dest.size*dest.dtype.itemsize, {}, et, 2, jit, device=dest.device)
+    total_sz = dest.size*dest.dtype.itemsize
+    if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest.device[:7]:>7s} <- {src.device[:7]:7s}"
+    else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}"
+    update_stats(colored(name, "yellow"), 0, total_sz, {}, et, 2, jit, device=dest.device)
 
 class BufferRead(BufferCopy):
   def copy(self, dest, src):

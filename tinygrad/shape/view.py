@@ -6,11 +6,11 @@ from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, sint
 
 @functools.lru_cache(maxsize=None)
-def canonicalize_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
+def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tuple[sint, ...]:
   return tuple(0 if s == 1 else st for s, st in zip(shape, strides))
 
 @functools.lru_cache(maxsize=None)
-def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
+def strides_for_shape(shape:Tuple[sint, ...]) -> Tuple[sint, ...]:
   if not shape: return ()
   strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))
   return canonicalize_strides(shape, strides[::-1])
@@ -103,7 +103,7 @@ class View:
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def unbind(self) -> Tuple[View, Dict[Variable, int]]:
     var_unboundvar_val = [(v, v.unbind()) for v in self.vars() if v.val is not None]
-    unbound_vars:Dict[Variable,Node] = {v:uv for v,(uv,_) in var_unboundvar_val}
+    unbound_vars = {v:uv for v,(uv,_) in var_unboundvar_val}
     new_shape = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.shape])
     new_strides = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.strides])
     new_offset = self.offset if isinstance(self.offset, int) else self.offset.substitute(unbound_vars)
