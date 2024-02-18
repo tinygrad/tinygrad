@@ -3,46 +3,40 @@ from tinygrad.nn import Linear, Embedding
 
 
 class LSTMCell:
-  def __init__(self, input_size, hidden_size, dropout):
-    self.dropout = dropout
-
+  def __init__(self, input_size, hidden_size):
     k = hidden_size ** -0.5
+    self.w_ih = Tensor.randn(input_size, hidden_size * 4).realize() * k
+    self.b_ih = Tensor.randn(hidden_size * 4).realize() * k
+    self.w_hh = Tensor.randn(hidden_size, hidden_size * 4).realize() * k
+    self.b_hh = Tensor.randn(hidden_size * 4).realize() * k
 
-    self.weights_ih = Tensor.uniform(input_size, hidden_size * 4)*k
-    self.bias_ih = Tensor.uniform(hidden_size * 4)*k
-    self.weights_hh = Tensor.uniform(hidden_size, hidden_size * 4)*k
-    self.bias_hh = Tensor.uniform(hidden_size * 4)*k
+  def __call__(self, x):
+    h = Tensor.zeros(x.shape[1], self.w_hh.shape[0])
+    c = Tensor.zeros(x.shape[1], self.w_hh.shape[0])
+    res = []
+    for t in range(x.shape[0]):
 
-  def __call__(self, x:Tensor, hc:Tensor):
-    gates = x.linear(self.weights_ih, self.bias_ih) + hc[:x.shape[0]].linear(self.weights_hh, self.bias_hh)
+      gates = x[t].linear(self.w_ih, self.b_ih) + h.linear(self.w_hh, self.b_hh)
+      i, f, g, o = gates.chunk(4, 1)
+      i, f, g, o = i.sigmoid(), f.sigmoid(), g.tanh(), o.sigmoid()
+      h = (o * c.tanh()).realize()
+      c = (f * c) + (i * g).realize()
 
-    i, f, g, o = gates.chunk(4, 1)
-    i, f, g, o = i.sigmoid(), f.sigmoid(), g.tanh(), o.sigmoid()
-
-    c = (f * hc[x.shape[0]:]) + (i * g)
-    h = (o * c.tanh()).dropout(self.dropout)
-
-    return Tensor.cat(h, c).realize()
+      res.append(Tensor.stack([h,c]))
+      h = res[-1][0]
+      c = res[-1][1]
+    
+    ret = res[0].unsqueeze(0)
+    for e in res[1:]: ret = ret.cat(e.unsqueeze(0) , dim=0).realize()
+    return ret[:,0].realize()
 
 class LSTM:
-  def __init__(self, input_size, hidden_size, layers, dropout):
-    self.input_size = input_size
-    self.hidden_size = hidden_size
-    self.layers = layers
-
-    self.cells = [LSTMCell(input_size, hidden_size, dropout) if i == 0 else LSTMCell(hidden_size, hidden_size, dropout if i != layers - 1 else 0) for i in range(layers)]
-
-  def __call__(self,x:Tensor,hc=  None):
-    if hc is None: hc = [Tensor.zeros(x.shape[1]*2,self.hidden_size,requires_grad = False) for _ in range(self.layers)]
-    res = []
-    for t in range(int(x.shape[0])):
-      c = x[t]
-      for l in range(self.layers):
-        cell =  self.cells[l]
-        hc[l] = cell(c,hc[l])
-        c = hc[l][:x.shape[1],:self.hidden_size]
-      res.append(c)
-    return Tensor.stack(res),hc
+  def __init__(self,input_size, hidden_size, layers,_):
+    self.cells = [LSTMCell(input_size, hidden_size) if i == 0 else LSTMCell(hidden_size,hidden_size) for i in range(layers)]
+  
+  def __call__(self,x:Tensor):
+    for cell in self.cells: x = cell(x)
+    return x.realize()
 
 class StackTime:
   def __init__(self, factor):
@@ -62,9 +56,9 @@ class Encoder:
     self.post_rnn = LSTM(STACKFACTOR * hidden_size, hidden_size, post_layers, dropout)
 
   def __call__(self, x):
-    x, _ = self.pre_rnn(x)
+    x = self.pre_rnn(x)
     x = self.stack_time(x)
-    x, _ = self.post_rnn(x)
+    x = self.post_rnn(x)
     return x.transpose(0, 1)
 
 class Prediction:
@@ -74,10 +68,10 @@ class Prediction:
     self.emb = Embedding(vocab_size - 1, hidden_size)
     self.rnn = LSTM(hidden_size, hidden_size, layers, dropout)
 
-  def __call__(self, x, hc, m):
+  def __call__(self, x, m):
     emb = self.emb(x) * m
-    x_, hc = self.rnn(emb.transpose(0, 1), hc)
-    return x_.transpose(0, 1), hc
+    x_ = self.rnn(emb.transpose(0, 1))
+    return x_.transpose(0, 1)
 
 class Joint:
   def __init__(self, vocab_size, pred_hidden_size, enc_hidden_size, joint_hidden_size, dropout):
@@ -104,9 +98,9 @@ class RNNT:
     self.prediction = Prediction(vocab_size, pred_hidden_size, pred_layers, dropout)
     self.joint = Joint(vocab_size, pred_hidden_size, enc_hidden_size, joint_hidden_size, dropout)
 
-  def __call__(self, x, y, hc=None):
-    f, _ = self.encoder(x, None)
-    g, _ = self.prediction(y, hc, Tensor.ones(1, requires_grad=False))
+  def __call__(self, x, y):
+    f = self.encoder(x)
+    g = self.prediction(y, Tensor.ones(1, requires_grad=False))
     out = self.joint(f, g)
     return out.realize()
 
@@ -152,39 +146,4 @@ class RNNT:
   def save(self,fname): safe_save(get_state_dict(self),fname)
 
   def load(self,fname:str): load_state_dict(self, safe_load(fname))
-
-
-  def load_from_pretrained(self):
-    fn = Path(__file__).parents[1] / "weights/rnnt.pt"
-    fetch("https://zenodo.org/record/3662521/files/DistributedDataParallel_1576581068.9962234-epoch-100.pt?download=1", fn)
-
-    import torch
-    with open(fn, "rb") as f:
-      state_dict = torch.load(f, map_location="cpu")["state_dict"]
-
-    # encoder
-    for i in range(2):
-      self.encoder.pre_rnn.cells[i].weights_ih.assign(state_dict[f"encoder.pre_rnn.lstm.weight_ih_l{i}"].numpy())
-      self.encoder.pre_rnn.cells[i].weights_hh.assign(state_dict[f"encoder.pre_rnn.lstm.weight_hh_l{i}"].numpy())
-      self.encoder.pre_rnn.cells[i].bias_ih.assign(state_dict[f"encoder.pre_rnn.lstm.bias_ih_l{i}"].numpy())
-      self.encoder.pre_rnn.cells[i].bias_hh.assign(state_dict[f"encoder.pre_rnn.lstm.bias_hh_l{i}"].numpy())
-    for i in range(3):
-      self.encoder.post_rnn.cells[i].weights_ih.assign(state_dict[f"encoder.post_rnn.lstm.weight_ih_l{i}"].numpy())
-      self.encoder.post_rnn.cells[i].weights_hh.assign(state_dict[f"encoder.post_rnn.lstm.weight_hh_l{i}"].numpy())
-      self.encoder.post_rnn.cells[i].bias_ih.assign(state_dict[f"encoder.post_rnn.lstm.bias_ih_l{i}"].numpy())
-      self.encoder.post_rnn.cells[i].bias_hh.assign(state_dict[f"encoder.post_rnn.lstm.bias_hh_l{i}"].numpy())
-
-    # prediction
-    self.prediction.emb.weight.assign(state_dict["prediction.embed.weight"].numpy())
-    for i in range(2):
-      self.prediction.rnn.cells[i].weights_ih.assign(state_dict[f"prediction.dec_rnn.lstm.weight_ih_l{i}"].numpy())
-      self.prediction.rnn.cells[i].weights_hh.assign(state_dict[f"prediction.dec_rnn.lstm.weight_hh_l{i}"].numpy())
-      self.prediction.rnn.cells[i].bias_ih.assign(state_dict[f"prediction.dec_rnn.lstm.bias_ih_l{i}"].numpy())
-      self.prediction.rnn.cells[i].bias_hh.assign(state_dict[f"prediction.dec_rnn.lstm.bias_hh_l{i}"].numpy())
-
-    # joint
-    self.joint.l1.weight.assign(state_dict["joint_net.0.weight"].numpy())
-    self.joint.l1.bias.assign(state_dict["joint_net.0.bias"].numpy())
-    self.joint.l2.weight.assign(state_dict["joint_net.3.weight"].numpy())
-    self.joint.l2.bias.assign(state_dict["joint_net.3.bias"].numpy())
 

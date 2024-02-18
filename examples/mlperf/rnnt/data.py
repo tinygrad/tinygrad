@@ -114,7 +114,7 @@ def iterate(ci, bs, maxx, maxy):
     y = np.array([v["transcript"] for v in files])
     y,ylens = text_encode(y, maxy)
 
-    yield map(lambda x:Tensor(x).realize(), [x,y,xlens,ylens])    
+    yield list(map(lambda x:Tensor(x).realize(), [x,y,xlens,ylens]))
     
 #%%
     

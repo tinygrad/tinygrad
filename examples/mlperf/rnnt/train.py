@@ -1,7 +1,7 @@
 # %%
-from tinygrad.graph import print_tree
+from tinygrad.features.graph import print_tree
 
-from tinygrad.jit import TinyJit
+from tinygrad import TinyJit
 from tinygrad.nn.optim import Adam
 from tinygrad.nn.state import get_parameters
 from tinygrad.tensor import Tensor, Function
@@ -43,26 +43,28 @@ def unshear(x:Tensor):
     x = x.reshape((B,X,Y+1))
     return x.shrink(((0,B),(0,X),(0,Y+1-X)))
 
-class TransducerLoss(Function):
+class Loss:
+  def __init__(self,d:Tensor, labels:Tensor):
+    Tensor.no_grad = True
 
-  def forward(self, d:Tensor, labels:Tensor):
+    self.d = d
     self.B,self.X,self.Y,self.C = d.shape
 
-    self.labels = Tensor(labels).pad(((0,0),(0,1)))
-    self.lattice = shear(Tensor(d), 0.)
+    self.labels = labels.pad(((0,0),(0,1)))
+    self.lattice = shear(d, 0.)
     self.X = self.X+self.Y-1
     assert self.lattice.shape == (self.B,self.X,self.Y,self.C), f"{self.lattice.shape}"
 
-    self.skip = shear(Tensor(d)[:,:,:,-1:],1.)[:,:,:,0].log()
+    self.skip = shear(d[:,:,:,-1:],1.)[:,:,:,0].log()
 
     self.p = self.lattice[
-      Tensor(np.arange(self.B).reshape((-1,1,1))),
-      Tensor(np.arange(self.X).reshape((1,-1,1))),
-      Tensor(np.arange(self.Y).reshape((1,1,-1))),
+      Tensor.arange(self.B).reshape((-1,1,1)),
+      Tensor.arange(self.X).reshape((1,-1,1)),
+      Tensor.arange(self.Y).reshape((1,1,-1)),
       self.labels.reshape((self.B,1,-1))].log()
 
     assert self.p.shape == (self.B, self.X, self.Y)
-    self.a = [Tensor([0]*self.B).reshape(-1,1).pad(((0,0),(0,self.Y-1),),-inf).realize()]
+    self.a = [Tensor.zeros(self.B).reshape(-1,1).pad(((0,0),(0,self.Y-1),),-inf).realize()]
 
     for x in range(0,self.X-1):
       self.a.append(logsumexp(
@@ -71,13 +73,11 @@ class TransducerLoss(Function):
           self.a[-1][:,:-1].pad(((0,0),(1,0),),-inf).realize() + self.p[:,x,:-1].pad(((0,0),(1,0),),-inf)
         ).realize()
       ))
+    self.value = -self.a[-1].max(1).sum()
 
-    # return (-self.a[-1][:,-1] - self.skip[:,-1,-1]).sum().lazydata
-    return (-self.a[-1].max(1).sum()).lazydata
-    
-  def backward(self, g):
-
-    self.b = [None] * (self.X-1) + [Tensor.ones(self.B,self.Y)]
+  def backward(self):
+    Tensor.no_grad = True
+    self.b: list[None | Tensor] = [None] * (self.X-1) + [Tensor.ones(self.B,self.Y)]
     for x in range(self.X-2,-1,-1):
       self.b[x] = (
         logsumexp(
@@ -97,9 +97,34 @@ class TransducerLoss(Function):
     self.p_grad = (unshear(self.p_grad.transpose(1,2))).transpose(1,2).realize() - self.b[0][:,0].unsqueeze(1).unsqueeze(1)
 
     self.p_grad = self.p_grad.exp().unsqueeze(-1).mul(Tensor.eye(self.C-1)[self.labels].unsqueeze(1))
-    grad = self.p_grad.cat(self.skg.unsqueeze(-1), dim=-1).pad(((0,0),(0,1),(0,0),(0,0)))
+    grad = - self.p_grad.cat(self.skg.unsqueeze(-1), dim=-1).pad(((0,0),(0,1),(0,0),(0,0)))
 
-    return grad.lazydata, None
+    Tensor.no_grad = False
+
+    # inject loss gradient into autograd
+    loss = (self.d - self.d.detach() + grad).square().sum() / 2
+    backward(loss)
+
+
+def backward(self) -> Tensor:
+  assert self.shape == tuple(), f"backward can only be called for scalar tensors, but it has shape {self.shape})"
+
+  # fill in the first grad with one. don't use Tensor.ones because we don't need contiguous
+  # this is "implicit gradient creation"
+  self.grad = Tensor(1.0, device=self.device, requires_grad=False)
+
+  for t0 in reversed(self.deepwalk()):
+    if t0.grad is None: raise RuntimeError("tensor has no grad")
+    grads = t0._ctx.backward(t0.grad.lazydata)
+    grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
+      for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
+    for t, g in zip(t0._ctx.parents, grads):
+      if g is not None and t.requires_grad:
+        assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
+        t.grad = g if t.grad is None else (t.grad + g).realize()
+    del t0._ctx
+  return self
+
 
 def mask(d,X_lens, Y_lens, maxX, maxY, vocab=28):
 
@@ -128,59 +153,59 @@ if (GPUS):
     for x in get_parameters(rnnt):
         x.to_(GPUS)
 
-@TinyJit
+
 def fb_pass(X:Tensor,labels, X_lens, Y_lens, maxX, maxY):
     opt.zero_grad()
     L = forward(X, labels, X_lens, Y_lens, maxX, maxY)
-    # backward this????
+    L.backward()
     for p in opt.params: p.grad.realize()
     opt.step()
-    return L.realize()
+    return (L.value/ X_lens.sum()).realize()
 
-def forward(X:Tensor, labels, X_lens, Y_lens, maxX, maxY):
+def forward(X:Tensor, labels, X_lens, Y_lens, maxx, maxy):
     X = rnnt.encoder.__call__(X) # LSTM expects (N,B,D)
     X_lens = (X_lens+1)/2
-    Y,_ = rnnt.prediction(labels,None,1)
+    Y = rnnt.prediction.__call__(labels,1)
     Y = Y.pad(((0,0),(1,0),(0,0)))
     d = rnnt.joint(X,Y).softmax(-1).realize()
-    md = mask(d,X_lens, Y_lens, maxX/2, maxY)
-    L = TransducerLoss.apply(md, labels)
-    return L.realize()
+    md = mask(d,X_lens, Y_lens, maxx/2, maxy)
+    L = Loss(md, labels)
+    return L
 
 forward_jit = TinyJit(forward)
 
 def test():
-    iter = iterate(test_set,B)
+    iter = iterate(test_set,BS, maxx,maxy)
     Tensor.no_grad = True
     L = 0
     for sample in iter:
         X_lens = sample[2]
-        l = forward_jit(*sample)/(X_lens.sum())
+        l = forward_jit(*sample,maxx,maxy).value.numpy()/(X_lens.sum())
         L += l.numpy().item()
 
     Tensor.no_grad = False
-    return L / int(len(test_set) / B)
+    return L / int(len(test_set) / BS)
 
 def timestring(s:int): return f"{int(s//3600)}:{int(s//60%60)}:{s%60:.4}"
 
-# B = 2
-# SLEN = 7
-# rnnt.load("rnnt_e_20")
 
-#%%
+BS = 4
+maxsecs = 5
+
 if __name__ == "__main__":
 
-    ci, maxX, maxY = load_data(SLEN)
-    train_set = ci[:-(2*B)]
-    test_set = ci[-(2*B):]
+    ci, maxx, maxy = load_data(maxsecs)
+    train_set = ci[:-(2*BS)]
+    test_set = ci[-(2*BS):]
     print(f"eval: {test()}")
     interrupt = False
+    step = TinyJit(fb_pass)
     for e in range(20,40):
         st = time.time()
-        for i,sample in enumerate(iterate(train_set, B)):
+        for i,sample in enumerate(iterate(train_set, BS, maxx,maxy)):
             try:
-                L = fb_pass(*sample, maxX, maxY).numpy().item()
-                print( end = f"\r {i}/{int(len(train_set)/B)} L:{L:.4}", flush = True)
+                L = fb_pass(*sample, maxx, maxy).numpy().item()
+                print( end = f"\r {i}/{int(len(train_set)/BS)} L:{L:.4}", flush = True)
             except KeyboardInterrupt:
                 rnnt.save(f"rnnt_e_{e+1}_i_{i+1}")
                 interrupt = True
@@ -189,3 +214,5 @@ if __name__ == "__main__":
         print (f"\nepoch {e+1} finished in {timestring(time.time() - st )} val:{test()}")
         rnnt.save(f"rnnt_e_{e+1}")
 
+
+# %%
