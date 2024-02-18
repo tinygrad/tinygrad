@@ -7,7 +7,7 @@ from tinygrad.realize import create_schedule
 from tinygrad.renderer.cstyle import MetalRenderer
 
 data = np.arange(10)
-a = Tensor(data, dtype=dtypes.int).sum()
+a = Tensor(data, dtype=dtypes.int).sum() + 4
 ast = create_schedule([a.lazydata])[-1].ast
 lin = Linearizer(ast)
 #lin.hand_coded_optimizations()
