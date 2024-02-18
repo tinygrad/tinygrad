@@ -147,13 +147,13 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
     if DEBUG >= 3: print(f"forcing image {buf.dtype} with shape {buf.shape} to float32")
     buf.dtype = dtypes.float32  # NOTE: this is what makes the dtype above not match
   if buf.base != buf:
-    # realize all places where the buffer is expanded
-    if prod(buf.base.st.shape) < prod(buf.st.shape):
-      if len(buf.st.views) == 1 and buf.st.views[-1].mask and all_int(buf.base.st.shape) and \
-          prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask]):
-        simple_pads.add(buf.base)
-      else:
-        realizes.add(buf.base)
+    # defer checking for unsafe pads
+    if any(v.mask is not None for v in buf.st.views): simple_pads.add(buf.base)
+    # realize all places where the buffer is expanded (eliding if the expansion is just padding)
+    if prod(buf.base.st.shape) < prod(buf.st.shape) and not \
+      (len(buf.st.views) == 1 and buf.st.views[-1].mask and all_int(buf.base.st.shape) and \
+        prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask])):
+      realizes.add(buf.base)
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children)
   if buf.forced_realize: realizes.add(buf)
   allbufs[buf] = None

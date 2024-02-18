@@ -39,6 +39,11 @@ class TestLazyBuffer(unittest.TestCase):
     z = Tensor([1, np.e]).numpy()
     np.testing.assert_allclose(y, z)
 
+  def test_shuffle_shrinking_pad(self):
+    y = Tensor([1, 2, 3]).realize().exp().shrink(((0, 1),)).pad(((0, 1),)).numpy()
+    z = np.array([np.e, 0])
+    np.testing.assert_allclose(y, z)
+
   def test_device_0_is_the_same_device(self):
     a = Tensor([1, 2, 3], f"{Device.DEFAULT}")
     b = Tensor([1, 2, 3], f"{Device.DEFAULT}:0")
