@@ -118,11 +118,12 @@ class Node:
 
 class Variable(Node):
   def __new__(cls, *args):
-    if len(args) == 0: return super().__new__(cls)   # fix pickle
     expr, nmin, nmax = args
     assert nmin >= 0 and nmin <= nmax, f"invalid Variable {expr=} {nmin=} {nmax=}"
     if nmin == nmax: return NumNode(nmin)
     return super().__new__(cls)
+
+  def __getnewargs__(self): return (self.expr, self.min, self.max)  # args passed to __new__ when unpickling
 
   def __init__(self, expr:str, nmin:int, nmax:int):
     self.expr, self.min, self.max = expr, nmin, nmax
