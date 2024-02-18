@@ -38,7 +38,7 @@ def loader_process(q_in, q_out, X:Tensor):
 
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
-      idx, fn, fidx, val = _recv
+      idx, fn, seed, val = _recv
       img = Image.open(fn)
       img = img.convert('RGB') if img.mode != "RGB" else img
 
@@ -54,8 +54,8 @@ def loader_process(q_in, q_out, X:Tensor):
       else:
         from extra.datasets.imagenet import preprocess_train
         # reseed rng for determinism
-        np.random.seed(fidx)
-        random.seed(fidx)
+        np.random.seed(seed)
+        random.seed(seed)
         img = preprocess_train(img)
 
       # broken out
@@ -70,11 +70,15 @@ def loader_process(q_in, q_out, X:Tensor):
       #X[idx].assign(img.tobytes())   # NOTE: this is slow!
       q_out.put(idx)
 
-def batch_load_resnet(batch_size=64, val=False, shuffle=True):
+def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
   from extra.datasets.imagenet import get_train_files, get_val_files
   files = get_val_files() if val else get_train_files()
   from extra.datasets.imagenet import get_imagenet_categories
   cir = get_imagenet_categories()
+
+  if seed is not None:
+    random.seed(seed)
+    np.random.seed(seed)
 
   BATCH_COUNT = min(32, len(files) // batch_size)
   #q_in, q_out = MyQueue(multiple_writers=False), MyQueue(multiple_readers=False)
@@ -105,7 +109,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True):
     for idx in range(num*batch_size, (num+1)*batch_size):
       fidx = next(gen)
       fn = files[fidx]
-      q_in.put((idx, fn, fidx, val))
+      q_in.put((idx, fn, (seed+1) * len(files) + fidx, val))
       Y[idx] = cir[fn.split("/")[-2]]
   for bn in range(BATCH_COUNT): enqueue_batch(bn)
 

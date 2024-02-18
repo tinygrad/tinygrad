@@ -182,12 +182,9 @@ def train_resnet():
   # ** epoch loop **
   for e in range(start_epoch, epochs):
     Tensor.training = True
-    # reseed rng for every epoch (restore rng state from ckpt)
-    np.random.seed(seed + e)
-    random.seed(seed + e)
     dt = time.perf_counter()
 
-    it = iter(tqdm(t := batch_load_resnet(batch_size=BS, val=False, shuffle=True), total=steps_in_train_epoch))
+    it = iter(tqdm(t := batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e), total=steps_in_train_epoch))
     def data_get(it):
       x, y, cookie = next(it)
       # x must realize here, since the shm diskbuffer in dataloader might disappear?
