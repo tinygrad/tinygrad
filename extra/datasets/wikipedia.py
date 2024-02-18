@@ -361,23 +361,21 @@ def load_file(file):
 
 def iterate(bs=1, start=0, val=False):
   files = get_val_files() if val else get_train_files()
-  p = Pool()
-  for i in range(start, len(files), bs):
-    results = p.map(load_file, files[i:i+bs])
+  with Pool() as p:
+    for i in range(start, len(files), bs):
+      results = p.map(load_file, files[i:i+bs])
 
-    X = {
-      "input_ids": np.concatenate([f["input_ids"] for f in results], axis=0),
-      "input_mask": np.concatenate([f["input_mask"] for f in results], axis=0),
-      "segment_ids": np.concatenate([f["segment_ids"] for f in results], axis=0),
-      "masked_lm_positions": np.concatenate([f["masked_lm_positions"] for f in results], axis=0),
-    }
-    Y = {
-      "masked_lm_ids": np.concatenate([f["masked_lm_ids"] for f in results], axis=0),
-      "next_sentence_labels": np.concatenate([f["next_sentence_labels"] for f in results], axis=0),
-    }
-    yield X, Y
-  p.join()
-  p.close()
+      X = {
+        "input_ids": np.concatenate([f["input_ids"] for f in results], axis=0),
+        "input_mask": np.concatenate([f["input_mask"] for f in results], axis=0),
+        "segment_ids": np.concatenate([f["segment_ids"] for f in results], axis=0),
+        "masked_lm_positions": np.concatenate([f["masked_lm_positions"] for f in results], axis=0),
+      }
+      Y = {
+        "masked_lm_ids": np.concatenate([f["masked_lm_ids"] for f in results], axis=0),
+        "next_sentence_labels": np.concatenate([f["next_sentence_labels"] for f in results], axis=0),
+      }
+      yield X, Y
 
 if __name__ == "__main__":
   tokenizer = Tokenizer(Path(__file__).parent / "wiki" / "vocab.txt")
