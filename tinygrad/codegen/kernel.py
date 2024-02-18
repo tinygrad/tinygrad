@@ -1,6 +1,7 @@
 from __future__ import annotations
 import math, itertools
 from typing import NamedTuple, Optional, List, Tuple, cast, Dict, Union
+from tinygrad.helpers import panic
 from tinygrad.ops import LazyOp, FlopCounter, get_lazyop_info, UnaryOps, BinaryOps, ReduceOps, MemBuffer, ConstBuffer, BufferOps
 from tinygrad.device import Device, Compiled
 from tinygrad.dtype import dtypes, ImageDType, DType
@@ -107,7 +108,7 @@ class Kernel:
 
     # group simplifies
     self.simplify_ones()
-    self.simplify_merge_adjacent()
+    #self.simplify_merge_adjacent()
 
     # cache
     self.applied_opts_cache: Optional[List[Opt]] = None

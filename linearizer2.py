@@ -7,9 +7,11 @@ from tinygrad.features.graph import print_tree
 from tinygrad.ops import BinaryOps, BufferOps, LazyOp, MemBuffer, ReduceOps
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.shape.symbolic import Variable
+from tinygrad.tensor import Tensor
 from verify import verify
-
-def panic(x:Any=""): raise Exception(f"explicit panic: {x}")
+from tinygrad.helpers import panic
+from tinygrad.codegen.linearizer import Linearizer as LinearizerOld
 
 def create_graph(outs: List[LazyOp]):
   ts = graphlib.TopologicalSorter()
@@ -23,7 +25,7 @@ class Linearizer:
   def __init__(self, ast):
     self.ast = ast
     self.uops: List[UOp] = []
-
+    
     self.buf_pointers: Dict[Union[MemBuffer,LocalBuffer], UOp] = {}
 
     self.loaded_bufs: Dict[Union[MemBuffer,LocalBuffer], UOp] = {}
@@ -41,13 +43,20 @@ class Linearizer:
     if op.op == BufferOps.LOAD: return self.loaded_bufs[op.arg]
     if op.op in ReduceOps:
       if op in self.reduce_cache: return self.reduce_cache[op]
-      min, max = self.const(0), self.const((buf:=op.src[0].arg).st.shape[0])
-      loop = UOp(UOps.LOOP, dtype=dtypes.int, vin=(min,max))
-      src = UOp(UOps.LOAD, dtype=buf.dtype, vin=(self.buf_pointers[buf],loop))
+      buf: MemBuffer = op.src[0].arg
+      reduce_dims = [Variable(f"ridx{i}", 0, dim) for i, dim in enumerate(buf.st.shape)]
+      idx = UOp(UOps.LOOP, dtype=dtypes.int, vin=(self.const(reduce_dims[0].min),self.const(reduce_dims[0].max)))
+      loop_uops = [idx]
+      for i, dim in enumerate(reduce_dims[1:]):
+        outer_alu = UOp(UOps.ALU, dtype=dtypes.int, vin=(idx,self.const(reduce_dims[i-1].max)), arg=BinaryOps.MUL)
+        inner_loop = UOp(UOps.LOOP, dtype=dtypes.int, vin=(self.const(dim.min),self.const(dim.max)))
+        idx = UOp(UOps.ALU, dtype=dtypes.int, vin=(outer_alu,inner_loop), arg=BinaryOps.ADD)
+        loop_uops += [inner_loop, outer_alu, idx]
+      src = UOp(UOps.LOAD, dtype=buf.dtype, vin=(self.buf_pointers[buf],idx))
       acc = UOp(UOps.DEFINE_ACC, dtype=src.dtype, arg=0)
       reduce_alu = UOp(UOps.ALU, dtype=src.dtype, vin=(acc,src), arg=BinaryOps.ADD if op.op == ReduceOps.SUM else BinaryOps.MAX)
-      ret = UOp(UOps.PHI, dtype=src.dtype, vin=(acc,reduce_alu,loop))
-      loop_uops = [acc, loop, src, reduce_alu, ret, UOp(UOps.ENDLOOP, vin=(loop,))]
+      ret = UOp(UOps.PHI, dtype=src.dtype, vin=(acc,reduce_alu,*loop_uops))
+      loop_uops = [acc, *loop_uops, src, reduce_alu, ret, *[UOp(UOps.ENDLOOP, vin=(uop,)) for uop in loop_uops if uop.uop == UOps.LOOP]]
       self.uops.extend(loop_uops)
       self.reduce_cache[op] = ret
       return ret
@@ -117,3 +126,17 @@ class TestLinearizer2(unittest.TestCase):
     outs = init_outputs([1,1])
     prg(a, b, *outs, global_size=(1,1,1), local_size=(1,1,1))
     assert get_outputs(outs) == [[6], [4]]
+
+  def test_multi_dim_reduce(self):
+    a = LazyOp(BufferOps.LOAD, src=(), arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker.from_shape((4,4))))
+    b = LazyOp(BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker.from_shape((1,))))
+    reduce = LazyOp(ReduceOps.SUM, src=(a,), arg=((1,1)))
+    out0 = LazyOp(BufferOps.STORE, src=(reduce,), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker.from_shape((1,1))))
+    out1 = LazyOp(BufferOps.STORE, src=(LazyOp(BinaryOps.MUL, src=(b,reduce), arg=((1,1))),), arg=MemBuffer(idx=3, dtype=dtypes.int, st=ShapeTracker.from_shape((1,1))))
+    graph = create_graph([out0, out1])
+    uops = Linearizer(graph).linearize()
+    alloc_data, init_outputs, prg, get_outputs = verify(uops)
+    a, b = alloc_data(list(range(16))), alloc_data([2])
+    outs = init_outputs([1,1])
+    prg(a, b, *outs, global_size=(1,1,1), local_size=(1,1,1))
+    assert get_outputs(outs) == [[120], [240]]
