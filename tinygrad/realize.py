@@ -139,7 +139,7 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
-                simple_pads:Set[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], scheduled=False):
+                pad_srcs:Set[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], scheduled=False):
   if buf in allbufs or buf.base.realized: return
   if GRAPH: log_lazybuffer(buf, scheduled)
   if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
@@ -148,13 +148,13 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
     buf.dtype = dtypes.float32  # NOTE: this is what makes the dtype above not match
   if buf.base != buf:
     # defer checking for unsafe pads
-    if any(v.mask is not None for v in buf.st.views): simple_pads.add(buf.base)
+    if any(v.mask is not None for v in buf.st.views): pad_srcs.add(buf.base)
     # realize all places where the buffer is expanded (eliding if the expansion is just padding)
     if prod(buf.base.st.shape) < prod(buf.st.shape) and not \
       (len(buf.st.views) == 1 and buf.st.views[-1].mask and all_int(buf.base.st.shape) and \
         prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask])):
       realizes.add(buf.base)
-    return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children)
+    return _recurse_lb(buf.base, realizes, allbufs, pad_srcs, children)
   if buf.forced_realize: realizes.add(buf)
   allbufs[buf] = None
   if buf.op in LoadOps: realizes.add(buf.base)
@@ -163,7 +163,7 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
     realizes.add(buf.srcs[0].base)
   for x in buf.srcs:
     children[x.base][buf] = None
-    _recurse_lb(x, realizes, allbufs, simple_pads, children)
+    _recurse_lb(x, realizes, allbufs, pad_srcs, children)
 
 UNSAFE_PAD_OPS = {BinaryOps.DIV, BinaryOps.CMPLT, BinaryOps.CMPEQ, UnaryOps.LOG2, UnaryOps.EXP2}
 def _is_padding_okay(buf:LazyBuffer, realizes:Set[LazyBuffer]) -> bool:
@@ -178,12 +178,12 @@ def create_schedule(outs:List[LazyBuffer], seen:Optional[Set[LazyBuffer]]=None) 
   # start by just realizing the buffers passed in
   realizes: Set[LazyBuffer] = set([x.base for x in outs if not x.base.realized])
   allbufs: Dict[LazyBuffer, None] = {}
-  simple_pads: Set[LazyBuffer] = set()
+  pad_srcs: Set[LazyBuffer] = set()
   children: DefaultDict[LazyBuffer, Dict[LazyBuffer, None]] = defaultdict(dict)
-  for out in outs: _recurse_lb(out.base, realizes, allbufs, simple_pads, children, scheduled=True)
+  for out in outs: _recurse_lb(out.base, realizes, allbufs, pad_srcs, children, scheduled=True)
 
   # check if we have to realize pads
-  for p in simple_pads:
+  for p in pad_srcs:
     if not _is_padding_okay(p, realizes):
       realizes.add(p)
 
