@@ -1,3 +1,4 @@
+import struct
 from typing import Any, List, cast
 from tinygrad.device import Device
 from tinygrad.runtime.ops_metal import MetalDevice, MetalRenderer, MetalCompiler, MetalAllocator, MetalProgram
@@ -15,5 +16,7 @@ def verify(uops):
     allocator.copyin(d, data)
     return d
   init_outputs = lambda szs: [allocator.alloc(sz*4) for sz in szs]
-  get_outputs = lambda x: list([allocator.as_buffer(out).cast("I").tolist() for out in x])
+  get_outputs = lambda x,cast="I": list([allocator.as_buffer(out).cast(cast).tolist() for out in x])
   return alloc_data, init_outputs, prg, get_outputs
+
+def f32_to_bits(f): return struct.unpack('<I', struct.pack('<f', f))[0]
