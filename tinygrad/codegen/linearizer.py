@@ -4,7 +4,7 @@ import itertools, math, functools
 from collections import defaultdict
 
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
-from tinygrad.helpers import colored, DEBUG, prod, getenv, all_same, to_function_name
+from tinygrad.helpers import colored, DEBUG, prod, getenv, all_same, to_function_name, panic
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode

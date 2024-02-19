@@ -16,9 +16,9 @@ class UOps(Enum):
 @dataclass(eq=False)
 class UOp:
   uop: UOps
-  dtype: Optional[DType]
-  vin: Tuple[UOp, ...]
-  arg: Any
+  dtype: Optional[DType] = None
+  vin: Tuple[UOp, ...] = ()
+  arg: Any = ()
   def __repr__(self):
     return f"{str(self.uop):20s}: {str(self.dtype) if self.dtype is not None else '':25s} {str([x.uop for x in self.vin]):32s} {self.arg}"
 
