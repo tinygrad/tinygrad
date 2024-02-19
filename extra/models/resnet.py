@@ -66,19 +66,15 @@ class BasicBlock:
     self.bn1 = BatchNorm(planes)
     self.conv2 = Conv2dHeNormal(planes, planes, kernel_size=3, padding=1, stride=1, bias=False)
     self.bn2 = BatchNorm(planes)
-    self.downsample = []
-    self.bn_downsample = None
+    self.conv_downsample, self.bn_downsample = None, None
     if stride != 1 or in_planes != self.expansion*planes:
-      self.bn_downsample = BatchNorm(self.expansion*planes)  # name this BN so LARS can exclude it
-      self.downsample = [
-        Conv2dHeNormal(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
-        self.bn_downsample
-      ]
+      self.conv_downsample = Conv2dHeNormal(in_planes, self.expansion * planes, kernel_size=1, stride=stride, bias=False),
+      self.bn_downsample = BatchNorm(self.expansion * planes)
 
   def __call__(self, x):
     out = self.bn1(self.conv1(x)).relu()
     out = self.bn2(self.conv2(out))
-    out = out + x.sequential(self.downsample)
+    out = out + x.sequential([self.conv_downsample, self.bn_downsample] if self.conv_downsample is not None else [])
     out = out.relu()
     return out
 
@@ -96,20 +92,16 @@ class Bottleneck:
     self.bn2 = BatchNorm(width)
     self.conv3 = Conv2dHeNormal(width, self.expansion*planes, kernel_size=1, bias=False)
     self.bn3 = BatchNorm(self.expansion*planes)
-    self.downsample = []
-    self.bn_downsample = None
+    self.conv_downsample, self.bn_downsample = None, None
     if stride != 1 or in_planes != self.expansion*planes:
+      self.conv_downsample = Conv2dHeNormal(in_planes, self.expansion * planes, kernel_size=1, stride=stride, bias=False),
       self.bn_downsample = BatchNorm(self.expansion * planes)
-      self.downsample = [
-        Conv2dHeNormal(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
-        self.bn_downsample
-      ]
 
   def __call__(self, x):
     out = self.bn1(self.conv1(x)).relu()
     out = self.bn2(self.conv2(out)).relu()
     out = self.bn3(self.conv3(out))
-    out = out + x.sequential(self.downsample)
+    out = out + x.sequential([self.conv_downsample, self.bn_downsample] if self.conv_downsample is not None else [])
     out = out.relu()
     return out
 
