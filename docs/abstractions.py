@@ -311,7 +311,7 @@ print(a) # ShapeTracker(views=(
          #   View(shape=(5, 2, 5, 2), strides=(2, 1, 20, 10)),
          #   View(shape=(100,), strides=(1,))))
 
-# Views stack on top of each other, to allow zero copy for any number of shapertracker ops
+# Views stack on top of each other, to allow zero copy for any number of shapetracker ops
 # we can render a Python expression for the index at any time
 idx, _ = a.expr_idxs()
 print(idx.render())  # (((idx0%10)*10)+(idx0//10))
