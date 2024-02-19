@@ -235,4 +235,3 @@ def time_execution_cuda_style(cb, ev_t, evcreate, evrecord, evsync, evdestroy, e
   evtime(ctypes.byref(ret := ctypes.c_float()), evs[0], evs[1])
   for ev in evs: evdestroy(ev)
   return ret.value * 1e-3
-def panic(x:Any=""): raise Exception(f"explicit panic: {x}")

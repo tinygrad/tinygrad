@@ -10,15 +10,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import BinaryOps, BufferOps, ConstBuffer, LazyOp, LoadOps, MemBuffer, Op, ReduceOps
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import DEBUG, panic
-
-def create_graph(outs: List[LazyOp]):
-  ts = graphlib.TopologicalSorter()
-  def _recursive_add(op: LazyOp):
-    for src in op.src: _recursive_add(src)
-    ts.add(op, *op.src)
-  for out in outs: _recursive_add(out)
-  return tuple(ts.static_order())
+from tinygrad.helpers import DEBUG
 
 class ASTRunner(JITRunner):
   def __init__(self, ast: Tuple[LazyOp,...]):
@@ -60,7 +52,7 @@ class Scheduler:
     self.sched.append(MiniScheduleItem(ASTRunner(ast), self.rawbufs))
 
   def _recursive_lazyop(self, lb:LazyBuffer) -> LazyOp:
-    # these ops have special sources
+    # LoadOps have special sources
     if lb.base.op == LoadOps.CONST: # Consts are always generated
       return LazyOp(BufferOps.CONST, src=(), arg=ConstBuffer(val=lb.base.arg, dtype=lb.base.dtype, st=lb.st.simplify().unbind()[0]))
     elif lb.base.op == LoadOps.COPY:
@@ -71,14 +63,14 @@ class Scheduler:
         device_buf = self.rawbufs[idx]
       else:
         device_buf = Buffer(lb.device, lb.size, lb.dtype)
-        self.rawbufs.append(device_buf)
-        idx = len(self.rawbufs)
         self.sched.append(MiniScheduleItem(BufferCopy(), [device_buf, host_buf]))
+        idx = len(self.rawbufs)
         self.copy_cache[host_buf] = len(self.rawbufs)
+        self.rawbufs.append(device_buf)
 
       unbound_st, st_var_vals = lb.st.simplify().unbind()
       assert st_var_vals == {}, "variables not supported yet"
-      return LazyOp(BufferOps.LOAD, (), MemBuffer(idx-1, lb.dtype, unbound_st))
+      return LazyOp(BufferOps.LOAD, (), MemBuffer(idx, lb.dtype, unbound_st))
 
     srcs: List[LazyOp] = []
     for src in lb.base.srcs:
@@ -93,9 +85,7 @@ class MiniLinearizer:
   def __init__(self, ast):
     self.ast = ast
     self.uops: List[UOp] = []
-    
     self.buf_pointers: Dict[Union[MemBuffer,LocalBuffer], UOp] = {}
-
     self.loaded_bufs: Dict[Union[MemBuffer,LocalBuffer], UOp] = {}
     self.alu_cache: Dict[Any, UOp] = {}
     self.reduce_cache: Dict[LazyOp, UOp] = {}
