@@ -69,7 +69,6 @@ class LazyOp:
     return sorted(set.union(*[x.arg.st.vars() for x in self.lazyops if x.op in BufferOps], set()), key=lambda x: str(x.expr))
 
 # **************** independent FlopCounter ****************
-# TODO: remove this, it's not used to count flops/mem anymore, only for dtype
 
 @dataclass
 class FlopCounter:
