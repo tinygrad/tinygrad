@@ -130,7 +130,7 @@ class PythonProgram:
           else:
             pack_format = str(warp_size) + dtp[0].fmt
             unpack_format = str(warp_size) + dtype.fmt
-            if bitcast:=arg[1]:
+            if arg[1]:
               ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
             else:
               casted = [float(x) if dtypes.is_float(dtype) else int(x) if dtypes.is_int(dtype) else x for x in inp[0]]
