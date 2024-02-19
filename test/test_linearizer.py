@@ -7,7 +7,7 @@ from tinygrad.device import Compiled, Device, Buffer
 from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, Node, create_rednode
+from tinygrad.shape.symbolic import MulNode, Variable, NumNode, Node
 from tinygrad.tensor import Tensor
 from tinygrad.features.jit import CacheCollector
 from tinygrad.realize import create_schedule, run_schedule
@@ -688,14 +688,13 @@ class TestLinearizerHelper(unittest.TestCase):
   def test_sum_node_expand(self):
     a = Variable("_uidx0", 1, 3)
     b = Variable("b", 5, 7)
-
-    s1 = create_rednode(SumNode, [a, b])
+    s1 = a + b
     assert expand_node(s1) == [Node.sum([NumNode(i),b]) for i in range(1,4)]
 
   def test_multi_expand(self):
     a = Variable("a", 1, 3)
     b = Variable("b", 14, 17)
-    s1 = create_rednode(SumNode, [a, b])
+    s1 = a + b
     # expand increments earlier variables faster than later variables (as specified in the argument)
     # this behavior was just copied from before, no idea why this should be true
     assert expand_node(s1, (a, b)) == [NumNode(x + y) for x in range(b.min, b.max + 1) for y in range(a.min, a.max + 1)]
