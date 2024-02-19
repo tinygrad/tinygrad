@@ -492,6 +492,27 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       out.mean().backward()
       optim.step()
 
+  def test_unsynced_backprop_sync_weights(self):
+    from extra.lr_scheduler import OneCycleLR
+    from tinygrad.nn import UnsyncBatchNorm2d
+    GPUS = (d1, d2)
+
+    with Tensor.train():
+      conv = nn.Conv2d(3, 16, 3)
+      bn = UnsyncBatchNorm2d(16, gpus=len(GPUS))
+
+      for p in get_parameters([conv, bn]):
+        p.shard_(GPUS)
+      optim = nn.optim.Adam(get_parameters([conv, bn]))
+      lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
+      lr_sched.step()
+
+      fake_image = Tensor.rand((8, 3, 32, 32)).shard(GPUS, axis=0)
+
+      out = bn(conv(fake_image))
+      optim.zero_grad()
+      out.mean().backward()
+      optim.step()
   @given(strat.sampled_from((False, True)))
   def test_batchnorm(self, is_training):
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]

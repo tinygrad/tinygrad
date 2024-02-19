@@ -28,7 +28,7 @@ else:
   dtypes.default_float = dtypes.float32
   np_dtype = np.float32
 
-class BatchNorm(nn.BatchNorm2d):
+class BatchNorm(nn.UnsyncBatchNorm2d if getenv("SYNCBN", 0) else nn.BatchNorm2d):
   def __init__(self, num_features):
     super().__init__(num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
     self.weight.requires_grad = False

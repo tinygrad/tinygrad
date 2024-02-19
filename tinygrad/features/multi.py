@@ -72,10 +72,14 @@ class MultiLazyBuffer:
     axis = axes[-1] if len(axes := dedup([x.axis for x in msrcs if x.axis is not None])) else None
     srcs = []
     not_all_real = any(not all(mlb.real) for mlb in msrcs)
-    new_real = [all(transposed) for transposed in zip(*[mlb.real for mlb in msrcs])] if not_all_real else self.real
+    if axis is not None:
+      new_real = [all(transposed) for transposed in zip(*[mlb.real for mlb in msrcs])] if not_all_real else self.real
+    elif axis is None:
+      new_real = [any(transposed) for transposed in zip(*[mlb.real for mlb in msrcs])] if not_all_real else self.real
     assert any(new_real), "output contains no real lb"
     for mlb in msrcs:
-      if mlb.axis == axis or not_all_real: srcs.append(mlb.lbs)
+      if axis is None and not_all_real: srcs.append([mlb.copy_to_device(lb.device) for lb in mlb.lbs])
+      elif mlb.axis == axis or not_all_real: srcs.append(mlb.lbs)
       elif mlb.axis is None and axis is not None: srcs.append(to_sharded(mlb.lbs, axis))
       else: srcs.append(to_sharded([mlb.copy_to_device(lb.device) for lb in mlb.lbs], axis))
     # NOTE: lsrcs[-1].const(0) is correct for where

@@ -1,8 +1,9 @@
 import math
 from typing import Optional, Union, Tuple, cast
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import prod
+from tinygrad.helpers import prod, getenv
 from tinygrad.nn import optim, state  # noqa: F401
+from tinygrad.features.multi import MultiLazyBuffer
 
 class BatchNorm2d:
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
@@ -35,6 +36,54 @@ class BatchNorm2d:
       batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
 
     return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
+
+class UnsyncBatchNorm2d:
+  def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1, gpus=getenv("GPUS", 1)):
+    self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
+
+    if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
+    else: self.weight, self.bias = None, None
+
+    self.running_mean, self.running_var = [Tensor.zeros(sz, requires_grad=False) for _ in range(gpus)], [Tensor.ones(sz, requires_grad=False) for _ in range(gpus)]
+    self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
+
+  def __call__(self, x:Tensor):
+    bn_ts = []
+    assert isinstance(x.lazydata, MultiLazyBuffer)
+    for i, bound in enumerate(x.lazydata.bounds):
+      # TODO: __getitem__ does not work
+      # xi = x[bound]
+      xi = x.shrink((bound, None, None, None))
+      batch_mean, batch_invstd = self.calc_stats(xi, self.running_mean[i], self.running_var[i])
+      bni = xi.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
+      bn_ts.append(bni)
+    if Tensor.training:
+      self.num_batches_tracked += 1
+    # TODO: what do we want to do for inference? average weight? pick any one?
+    # a good start would be to check each mean/std are similar
+    ret = bn_ts[0].cat(*bn_ts[1:])
+    return ret
+
+  def calc_stats(self, x:Tensor, running_mean, running_var):
+    if Tensor.training:
+      # This requires two full memory accesses to x
+      # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
+      # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
+      batch_mean = x.mean(axis=(0,2,3))
+      y = (x - batch_mean.reshape(shape=[1, -1, 1, 1]))
+      batch_var = (y*y).mean(axis=(0,2,3))
+      batch_invstd = batch_var.add(self.eps).pow(-0.5)
+
+      # NOTE: wow, this is done all throughout training in most PyTorch models
+      if self.track_running_stats:
+        running_mean.assign((1-self.momentum) * running_mean + self.momentum * batch_mean.detach())
+        running_var.assign((1-self.momentum) * running_var + self.momentum * prod(y.shape)/(prod(y.shape)-y.shape[1]) * batch_var.detach())
+    else:
+      batch_mean = running_mean
+      # NOTE: this can be precomputed for static inference. we expand it here so it fuses
+      batch_invstd = running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
+    return batch_mean, batch_invstd
+
 
 # TODO: these Conv lines are terrible
 def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
