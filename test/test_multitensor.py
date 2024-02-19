@@ -495,14 +495,16 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
   def test_unsynced_backprop_sync_weights(self):
     from extra.lr_scheduler import OneCycleLR
     from tinygrad.nn import UnsyncBatchNorm2d
+    from tinygrad.features.multi import MultiLazyBuffer
     GPUS = (d1, d2)
 
     with Tensor.train():
       conv = nn.Conv2d(3, 16, 3)
-      bn = UnsyncBatchNorm2d(16, gpus=len(GPUS))
+      bn = UnsyncBatchNorm2d(GPUS, 16)
 
       for p in get_parameters([conv, bn]):
-        p.shard_(GPUS)
+        if not isinstance(p.lazydata, MultiLazyBuffer):
+          p.shard_(GPUS)
       optim = nn.optim.Adam(get_parameters([conv, bn]))
       lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
       lr_sched.step()

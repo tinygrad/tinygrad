@@ -103,8 +103,8 @@ class MultiLazyBuffer:
     if self.axis is None: return MultiLazyBuffer([x.reshape(arg) for x in self.lbs], None, self.real)
     arg_acc:List[sint] = list(itertools.accumulate(arg, operator.mul, initial=1))
     # new_axis is the one that preserves prod(prior to new_axis) and prod(post to new_axis)
-    new_axis = [tuple(p) for p in zip(arg_acc, arg_acc[1:])].index((prod(self.shape[:self.axis]), prod(self.shape[:self.axis+1])))
-    return MultiLazyBuffer([x.reshape(tuple(x.shape[self.axis] if a == new_axis else s for a,s in enumerate(arg))) for x in self.lbs],
+    new_axis = len(arg_acc) - arg_acc[::-1].index(prod(self.shape[:self.axis])) - 1
+    return MultiLazyBuffer([x.reshape(tuple(arg[a]//len(self.lbs) if a == new_axis else s for a,s in enumerate(arg))) for x in self.lbs],
                            new_axis, self.real)
 
   def pad(self, arg:Tuple[Tuple[sint, sint], ...]):
