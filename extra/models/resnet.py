@@ -7,29 +7,10 @@ from tinygrad.helpers import fetch, get_child, getenv, prod, argfix
 from tinygrad.dtype import dtypes
 from tinygrad.features.multi import MultiLazyBuffer
 
-class UnsyncedBatchNorm:
-  def __init__(self, num_features, num_devices=getenv("GPUS", 1)):
-    self.bns:List[nn.BatchNorm2d] = []
-    for _ in range(num_devices):
-      bn = nn.BatchNorm2d(num_features)
-      self.bns.append(bn)
-
-  def __call__(self, x:Tensor):
-    if len(self.bns) == 1: return self.bns[0](x)
-
-    bn_ts = []
-    assert isinstance(x.lazydata, MultiLazyBuffer)
-    for bound, bn in zip(x.lazydata.bounds, self.bns):
-      # TODO: __getitem__ does not work
-      # xi = x[bound]
-      xi = x.shrink((bound, None, None, None))
-      bni = bn(xi)
-      bn_ts.append(bni)
-    # TODO: what do we want to do for inference? average weight? pick any one?
-    # a good start would be to check each mean/std are similar
-    return bn_ts[0].cat(*bn_ts[1:])
-  # todo: hack, this make loading from weights work on 1 gpu...
-  def __getattr__(self, item): return getattr(self.bns[0], item)
+class UnsyncedBatchNorm(nn.UnsyncBatchNorm2d):
+  devices = None
+  def __init__(self, *args, **kwargs):
+    super().__init__(UnsyncedBatchNorm.devices, *args, kwargs)
 
 BatchNorm = nn.BatchNorm2d if getenv("SYNCBN", 0) else UnsyncedBatchNorm
 

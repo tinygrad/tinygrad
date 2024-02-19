@@ -19,7 +19,7 @@ EVAL_BS = getenv('EVAL_BS', BS)
 # fp32 GPUS<=6 7900xtx can fit BS=112
 
 def train_resnet():
-  from extra.models.resnet import ResNet50, ResNet18
+  from extra.models.resnet import ResNet50, ResNet18, UnsyncedBatchNorm
   from examples.mlperf.dataloader import batch_load_resnet
   from extra.datasets.imagenet import get_train_files, get_val_files
   from extra.lr_scheduler import PolynomialLR
@@ -40,9 +40,10 @@ def train_resnet():
   if FP16: dtypes.default_float = dtypes.float16
 
   if getenv("MOCKGPUS", 0):
-    GPUS = tuple([f'{Device.DEFAULT}:{0}' for _ in range(getenv("MOCKGPUS", 0))])
+    GPUS = tuple([Device.canonicalize(f'{Device.DEFAULT}:{0}') for _ in range(getenv("MOCKGPUS", 0))])
   else:
-    GPUS = tuple([f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))])
+    GPUS = tuple([Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(getenv("GPUS", 1))])
+  UnsyncedBatchNorm.devices = GPUS
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
 
