@@ -159,7 +159,10 @@ class TestBFloat16DType(unittest.TestCase):
 
 class TestHalfDtype(TestDType): DTYPE = dtypes.half
 
-class TestFloatDType(TestDType): DTYPE = dtypes.float
+class TestFloatDType(TestDType):
+  DTYPE = dtypes.float
+  def test_float_to_uint_negative(self):
+    _test_op(lambda: Tensor([-3.5, -2.5, -1.5], dtype=dtypes.float).cast(dtypes.uint), dtypes.uint, [4294967293, 4294967294, 4294967295])
 
 class TestDoubleDtype(TestDType):
   DTYPE = dtypes.double
@@ -187,11 +190,17 @@ class TestInt8Dtype(TestDType):
   def test_int8_to_uint8_negative(self):
     _test_op(lambda: Tensor([-1, -2, -3, -4], dtype=dtypes.int8).cast(dtypes.uint8), dtypes.uint8, [255, 254, 253, 252])
 
+  def test_int8_to_uint16_negative(self):
+    _test_op(lambda: Tensor([-1, -2, -3, -4], dtype=dtypes.int8).cast(dtypes.uint16), dtypes.uint16, [65535, 65534, 65533, 65532])
+
 class TestUint8Dtype(TestDType):
   DTYPE = dtypes.uint8
   @unittest.skipIf(getenv("CUDA",0)==1 or getenv("PTX", 0)==1, "cuda saturation works differently")
   def test_uint8_to_int8_overflow(self):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
+
+  def test_uint16_to_int8_overflow(self):
+    _test_op(lambda: Tensor([65535, 65534, 65533, 65532], dtype=dtypes.uint16).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
 
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
