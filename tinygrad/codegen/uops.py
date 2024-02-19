@@ -83,6 +83,16 @@ def uops_type_verify(uops:List[UOp]):
         assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
         assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
 
+def uops_alu_resolve(u:UOp, vars:Dict[str, Variable]) -> sint:
+  if u.uop == UOps.CONST: return u.arg
+  elif u.uop == UOps.DEFINE_GLOBAL: return vars[u.arg]
+  elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL:
+    return uops_alu_resolve(u.vin[0], vars) * uops_alu_resolve(u.vin[1], vars)
+  elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD:
+    return uops_alu_resolve(u.vin[0], vars) + uops_alu_resolve(u.vin[1], vars)
+  else:
+    raise RuntimeError(f"ALU resolve fail @ {u.uop}")
+
 def uops_flops_mem(uops:List[UOp], vars:Dict[str, Variable]) -> Tuple[sint, sint]:
   flops: sint = 0
   mem: sint = 0
@@ -91,14 +101,7 @@ def uops_flops_mem(uops:List[UOp], vars:Dict[str, Variable]) -> Tuple[sint, sint
   for u in uops:
     if u.uop is UOps.LOOP:
       mult_stack.append(mults)
-      # NOTE: this can also be DEFINE_GLOBAL
-      if u.vin[1].uop == UOps.CONST:
-        mults *= u.vin[1].arg
-      elif u.vin[1].uop == UOps.DEFINE_GLOBAL:
-        # TODO: should the ops spec change to make the arg be the Variable?
-        mults *= vars[u.vin[1].arg]
-      else:
-        raise RuntimeError(f"non const/variable loop {u.vin[1].uop}")
+      mults *= uops_alu_resolve(u.vin[1], vars)
     if u.uop is UOps.ENDLOOP:
       mults = mult_stack.pop(-1)
     if u.uop is UOps.ALU:
