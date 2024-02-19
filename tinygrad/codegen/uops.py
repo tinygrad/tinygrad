@@ -1,8 +1,9 @@
 from __future__ import annotations
-from typing import List, Set, Optional, Tuple, Any
+from typing import List, Set, Optional, Tuple, Any, Dict
 from tinygrad.helpers import DEBUG, flatten
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.shape.symbolic import Variable, sint
 from enum import Enum, auto
 from dataclasses import dataclass
 
@@ -82,15 +83,21 @@ def uops_type_verify(uops:List[UOp]):
         assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
         assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
 
-def uops_flops_mem(uops:List[UOp]) -> Tuple[int, int]:
-  flops, mem, mults = 0, 0, 1
+def uops_flops_mem(uops:List[UOp], vars:Dict[str, Variable]) -> Tuple[sint, sint]:
+  flops: sint = 0
+  mem: sint = 0
+  mults: sint = 1
   mult_stack = []
   for u in uops:
     if u.uop is UOps.LOOP:
       mult_stack.append(mults)
       # NOTE: this can also be DEFINE_GLOBAL
-      assert u.vin[1].uop == UOps.CONST
-      mults *= u.vin[1].arg
+      if u.vin[1].uop == UOps.CONST:
+        mults *= u.vin[1].arg
+      elif u.vin[1].uop == UOps.DEFINE_GLOBAL:
+        mults = vars[u.vin[1].arg]
+      else:
+        raise RuntimeError("non const/variable loop")
     if u.uop is UOps.ENDLOOP:
       mults = mult_stack.pop(-1)
     if u.uop is UOps.ALU:

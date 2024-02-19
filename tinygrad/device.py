@@ -50,9 +50,10 @@ class JITRunner:
   def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
     raise NotImplementedError("override this")
 
-def update_stats(name:str, op_estimate:sint, mem_estimate:int, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count:int, jit=False, num_kernels=1, lra: Optional[Dict]=None, device:str="", first_run=False):  # noqa: E501
+def update_stats(name:str, op_estimate:sint, mem_estimate:sint, var_vals: Optional[Dict[Variable, int]], et: Optional[float], buf_count:int, jit=False, num_kernels=1, lra: Optional[Dict]=None, device:str="", first_run=False):  # noqa: E501
   if var_vals is None: var_vals = {}
   op_estimate = sym_infer(op_estimate, var_vals)
+  mem_estimate = sym_infer(mem_estimate, var_vals)
   GlobalCounters.kernel_count += num_kernels
   GlobalCounters.global_ops += op_estimate
   GlobalCounters.global_mem += mem_estimate
@@ -233,9 +234,10 @@ class Compiled:
     ret = CompiledASTRunner(k.ast, k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size)
     from tinygrad.codegen.uops import uops_flops_mem
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
-    ops, mem = uops_flops_mem(k.uops)
-    ret.op_estimate = ops * run_count
-    ret.mem_estimate = mem * run_count
+    ops, mem = uops_flops_mem(k.uops, {x.expr:x for x in ret.vars})
+    # NOTE: we use min here to ignore the indexing FLOPS
+    ret.op_estimate = min(ret.op_estimate, ops * run_count)
+    ret.mem_estimate = min(ret.mem_estimate, mem * run_count)
     return ret
 
   def get_linearizer(self, ast:LazyOp) -> Linearizer:
