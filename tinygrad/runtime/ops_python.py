@@ -2,7 +2,7 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Tuple, List, Optional, Any, Dict
-import pickle, base64, itertools, time, math, struct
+import pickle, base64, itertools, time, math, ctypes
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Allocator, Compiler
@@ -45,6 +45,23 @@ def load(inp, j=0):
 def _store(m, i, v):
   if i<0 or i>=len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
   m[i] = v
+
+def cstyle_cast(value, in_dtype: DType, out_dtype: DType, bitcast: bool):
+  def c_bitcast(value, in_dtype: DType, out_dtype: DType):
+    to_ctype = {dtypes.bool: ctypes.c_bool, dtypes.int8: ctypes.c_int8, dtypes.uint8: ctypes.c_uint8,
+                dtypes.int16: ctypes.c_int16, dtypes.uint16: ctypes.c_uint16, dtypes.int32: ctypes.c_int32,
+                dtypes.uint32: ctypes.c_uint32, dtypes.int64: ctypes.c_int64, dtypes.uint64: ctypes.c_uint64,
+                dtypes.float32: ctypes.c_float, dtypes.float64: ctypes.c_double}
+    return ctypes.cast(ctypes.pointer(to_ctype[in_dtype](value)), ctypes.POINTER(to_ctype[out_dtype])).contents.value
+
+  if bitcast: return c_bitcast(value, in_dtype, out_dtype)
+
+  # perform Python type casting
+  out = int(value) if dtypes.is_int(out_dtype) else float(value) if dtypes.is_float(out_dtype) else bool(value)
+  # return the output if the involved types are Python-supported
+  if not (dtypes.is_unsigned(in_dtype) or dtypes.is_unsigned(out_dtype)): return out
+  # otherwise, bitcast the output to mimic C-style type casting for operands involving unsigned types
+  return c_bitcast(out, out_dtype, out_dtype)
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
@@ -128,15 +145,7 @@ class PythonProgram:
           if dtype.count > 1:
             ul[i] = inp
           else:
-            assert dtp[0].fmt and dtype.fmt
-            pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
-            if arg[1]:
-              ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
-            else:
-              casted = [float(x) if dtypes.is_float(dtype) else int(x) if dtypes.is_int(dtype) else x for x in inp[0]]
-              packed = struct.pack(pack_format if (dtypes.is_int(dtype) and dtypes.is_int(dtp[0]) and dtype.itemsize == dtp[0].itemsize)
-                                   else unpack_format, *casted)
-              ul[i] = list(struct.unpack(unpack_format, packed))
+            ul[i] = [cstyle_cast(value, dtp[0], dtype, arg[1]) for value in inp[0]]
         elif uop is UOps.LOAD:
           if isinstance(dtp[0], ImageDType):
             assert dtype.count == 4
