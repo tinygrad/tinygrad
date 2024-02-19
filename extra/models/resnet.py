@@ -97,10 +97,12 @@ class Bottleneck:
     self.conv3 = Conv2dHeNormal(width, self.expansion*planes, kernel_size=1, bias=False)
     self.bn3 = BatchNorm(self.expansion*planes)
     self.downsample = []
+    self.bn_downsample = None
     if stride != 1 or in_planes != self.expansion*planes:
+      self.bn_downsample = BatchNorm(self.expansion * planes)
       self.downsample = [
         Conv2dHeNormal(in_planes, self.expansion*planes, kernel_size=1, stride=stride, bias=False),
-        BatchNorm(self.expansion*planes)
+        self.bn_downsample
       ]
 
   def __call__(self, x):
