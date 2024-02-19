@@ -1,8 +1,7 @@
 import numpy as np
 from dataclasses import dataclass
-import graphlib, unittest
-from typing import Any, Dict, List, Tuple, Union, cast
-from tinygrad.codegen.kernel import LocalBuffer
+import graphlib, unittest, math
+from typing import Any, Dict, List, Tuple, cast
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.device import Buffer, BufferCopy, Compiled, Compiler, Device, JITRunner
 from tinygrad.dtype import PtrDType, dtypes
@@ -85,8 +84,8 @@ class MiniLinearizer:
   def __init__(self, ast):
     self.ast = ast
     self.uops: List[UOp] = []
-    self.buf_pointers: Dict[Union[MemBuffer,LocalBuffer], UOp] = {}
-    self.loaded_bufs: Dict[Union[MemBuffer,LocalBuffer], UOp] = {}
+    self.buf_pointers: Dict[int, UOp] = {}
+    self.loaded_bufs: Dict[MemBuffer, UOp] = {}
     self.alu_cache: Dict[Any, UOp] = {}
     self.reduce_cache: Dict[LazyOp, UOp] = {}
 
@@ -96,6 +95,12 @@ class MiniLinearizer:
     uop = UOp(UOps.CONST, dtype=dtype, arg=val)
     self.uops.append(uop)
     return uop
+
+  def get_reduce_acc(self, dtype, op):
+    if op == ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
+    elif op == ReduceOps.MAX:
+      if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
+      return -math.inf if dtypes.is_float(dtype) else False
 
   def _lower_op(self, op:LazyOp) -> UOp:
     if op.op == BufferOps.LOAD: return self.loaded_bufs[op.arg]
@@ -111,8 +116,8 @@ class MiniLinearizer:
         inner_loop = UOp(UOps.LOOP, dtype=dtypes.int, vin=(self.const(dim.min),self.const(dim.max)))
         idx = UOp(UOps.ALU, dtype=dtypes.int, vin=(outer_alu,inner_loop), arg=BinaryOps.ADD)
         loop_uops += [inner_loop, outer_alu, idx]
-      src = UOp(UOps.LOAD, dtype=buf.dtype, vin=(self.buf_pointers[buf],idx))
-      acc = UOp(UOps.DEFINE_ACC, dtype=src.dtype, arg=0)
+      src = UOp(UOps.LOAD, dtype=buf.dtype, vin=(self.buf_pointers[buf.idx],idx))
+      acc = UOp(UOps.DEFINE_ACC, dtype=src.dtype, arg=self.get_reduce_acc(src.dtype,op.op))
       reduce_alu = UOp(UOps.ALU, dtype=src.dtype, vin=(acc,src), arg=BinaryOps.ADD if op.op == ReduceOps.SUM else BinaryOps.MAX)
       ret = UOp(UOps.PHI, dtype=src.dtype, vin=(acc,reduce_alu,*loop_uops))
       loop_uops = [acc, *loop_uops, src, reduce_alu, ret, *[UOp(UOps.ENDLOOP, vin=(uop,)) for uop in loop_uops if uop.uop == UOps.LOOP]]
@@ -131,14 +136,14 @@ class MiniLinearizer:
     for op in self.ast:
       if not (op.op in BufferOps and isinstance(buf:=op.arg, MemBuffer)): continue
       if buf not in self.buf_pointers:
-        self.buf_pointers[buf] = UOp(UOps.DEFINE_GLOBAL, dtype=PtrDType(buf.dtype), arg=f"data{buf.idx}")
-        self.uops.append(self.buf_pointers[buf])
+        self.buf_pointers[buf.idx] = UOp(UOps.DEFINE_GLOBAL, dtype=PtrDType(buf.dtype), arg=f"data{buf.idx}")
+        self.uops.append(self.buf_pointers[buf.idx])
       if op.op == BufferOps.LOAD and buf not in self.loaded_bufs:
-        self.loaded_bufs[buf] = UOp(UOps.LOAD, dtype=buf.dtype, vin=(self.buf_pointers[buf],self.const(0)))
+        self.loaded_bufs[buf] = UOp(UOps.LOAD, dtype=buf.dtype, vin=(self.buf_pointers[buf.idx],self.const(0)))
         self.uops.append(self.loaded_bufs[buf])
       else:
         ret = self._lower_op(op.src[0])
-        self.uops.append(UOp(UOps.STORE, dtype=ret.dtype, vin=(self.buf_pointers[buf],self.const(0),ret)))
+        self.uops.append(UOp(UOps.STORE, dtype=ret.dtype, vin=(self.buf_pointers[buf.idx],self.const(0),ret)))
     return self.uops
 
 class TestLinearizer2(unittest.TestCase):
@@ -153,8 +158,8 @@ class TestLinearizer2(unittest.TestCase):
 
   def test_multi_output_simple(self):
     a = Tensor([2])
-    b = Tensor([4])
-    out0 = a + b
+    b = Tensor([6])
+    out0 = a - b
     out1 = a * b
     outputs = [out0, out1]
 
