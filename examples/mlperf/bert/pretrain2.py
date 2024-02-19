@@ -2,7 +2,7 @@ import json, math, time
 from pathlib import Path
 import numpy as np
 
-from tinygrad.helpers import getenv
+from tinygrad.helpers import Timing, getenv
 from tinygrad.features.jit import TinyJit
 from tinygrad.ops import GlobalCounters
 from tinygrad.nn import Linear, optim
@@ -11,6 +11,21 @@ from tinygrad.tensor import Tensor, dtypes
 from extra.lr_scheduler import OneCycleLR
 from extra.models.bert import Bert
 from extra.datasets.wikipedia import iterate
+
+BS, EVAL_BS, STEPS, MAX_EVAL_STEPS, WARMUP_STEPS, EPOCH, MAX_LR  = getenv("BS", 32), getenv('EVAL_BS', 8), getenv("STEPS", 100000), getenv("MAX_EVAL_STEPS", 100), getenv("WARMUP_STEPS", 10000), getenv("EPOCHS", 30), getenv('MAX_LR', 2.0)
+EVAL_FREQ = math.floor(min(0.05*(230.23 * BS + 3000000), 25000))
+
+if getenv('WANDB', 0): 
+  import wandb
+  wandb.init(project="tinygrad-examples_mlperf", config={
+    "max_lr": MAX_LR,
+    "batch_size": BS,
+    "steps": STEPS,
+    "max_eval_steps": MAX_EVAL_STEPS,
+    "warmup_steps": WARMUP_STEPS,
+    "epochs": EPOCH,
+    "eval_freq": EVAL_FREQ
+})
 
 if getenv('HALF', 0):
   Tensor.default_type = dtypes.float16
@@ -56,9 +71,6 @@ class BertMLperf:
     lm_logits = self.decoder(h_masked) + self.decoder_bias
 
     return lm_logits, clsf_logits
-
-BS, EVAL_BS, STEPS, MAX_EVAL_STEPS, WARMUP_STEPS, EPOCH, MAX_LR  = getenv("BS", 32), getenv('EVAL_BS', 8), getenv("STEPS", 100000), getenv("MAX_EVAL_STEPS", 100), getenv("WARMUP_STEPS", 10000), getenv("EPOCHS", 30), getenv('MAX_LR', 2.0)
-EVAL_FREQ = math.floor(min(0.05*(230.23 * BS + 3000000), 25000))
 
 def get_model(config_path:str):
   with open(config_path, 'r') as f:
@@ -110,15 +122,16 @@ def pretrain():
   while epoch < EPOCH:
     step = 0
     while step < STEPS:
-      if step % 10 == 0 and step > 0:
+      if step % 10 == 0 and step > 0 and not getenv('DISABLE_EVAL', 0):
         X, Y = next(eval_batcher)
         Tensor.train = False
         acc = eval_step_jitted(Tensor(X["input_ids"]), Tensor(X["segment_ids"]), Tensor(X["input_mask"]), Tensor(X["masked_lm_positions"]), Tensor(Y["masked_lm_ids"]))
         Tensor.train = True
-        print(f"{step:3d} {acc.numpy()*100:.2f}% MLM Acc")
+        print(f"{step:3d} {(acc := acc.numpy())*100:.2f}% MLM Acc")
+        wandb.log({"MLM Accuracy": acc*100}) if getenv('WANDB', 0) else None
+
       st = time.monotonic()
       X, Y = next(train_batcher) 
-      
       GlobalCounters.reset()
 
       loss = train_step_jitted(Tensor(X["input_ids"]).realize(), Tensor(X["segment_ids"]).realize(), Tensor(X["input_mask"]).realize(), Tensor(X["masked_lm_positions"]).realize(), Tensor(Y["masked_lm_ids"]).realize(), Tensor(Y["next_sentence_labels"]).realize())
@@ -126,7 +139,8 @@ def pretrain():
       loss_cpu = loss.numpy()
       cl = time.monotonic()
 
-      print(f"{step:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      print(f"{step:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {(lr := optimizer.lr.numpy()[0]):.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      wandb.log({"Loss": loss_cpu, "LR": lr}) if getenv('WANDB', 0) else None
       st = cl
       step += 1
     epoch += 1
