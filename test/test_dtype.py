@@ -159,7 +159,12 @@ class TestBFloat16DType(unittest.TestCase):
 
 class TestHalfDtype(TestDType): DTYPE = dtypes.half
 
-class TestFloatDType(TestDType): DTYPE = dtypes.float
+class TestFloatDType(TestDType):
+  DTYPE = dtypes.float
+
+  def test_float_to_uint_negative(self):
+    _test_op(lambda: Tensor([-3.5, -2.5, -1.5], dtype=dtypes.float).cast(dtypes.uint), dtypes.uint,
+             [4294967293, 4294967294, 4294967295])
 
 class TestDoubleDtype(TestDType):
   DTYPE = dtypes.double
