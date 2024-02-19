@@ -134,7 +134,8 @@ class PythonProgram:
               ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
             else:
               casted = [float(x) if dtypes.is_float(dtype) else int(x) if dtypes.is_int(dtype) else x for x in inp[0]]
-              packed = struct.pack(pack_format if (dtypes.is_int(dtype) and dtypes.is_int(dtp[0]) and dtype.itemsize == dtp[0].itemsize) else unpack_format, *casted)
+              packed = struct.pack(pack_format if (dtypes.is_int(dtype) and dtypes.is_int(dtp[0]) and dtype.itemsize == dtp[0].itemsize)
+                                   else unpack_format, *casted)
               ul[i] = list(struct.unpack(unpack_format, packed))
         elif uop is UOps.LOAD:
           if isinstance(dtp[0], ImageDType):
