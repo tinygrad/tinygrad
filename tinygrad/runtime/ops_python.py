@@ -128,8 +128,8 @@ class PythonProgram:
           if dtype.count > 1:
             ul[i] = inp
           else:
-            pack_format = str(warp_size) + dtp[0].fmt
-            unpack_format = str(warp_size) + dtype.fmt
+            assert dtp[0].fmt and dtype.fmt
+            pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
             if arg[1]:
               ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
             else:
