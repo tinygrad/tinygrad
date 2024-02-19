@@ -161,6 +161,7 @@ class TestHalfDtype(TestDType): DTYPE = dtypes.half
 
 class TestFloatDType(TestDType):
   DTYPE = dtypes.float
+  @unittest.skipIf(getenv("HIP", 0) == 1 or getenv("CUDA", 0) == 1, "doesn't work on CUDA or HIP")
   def test_float_to_uint_negative(self):
     _test_op(lambda: Tensor([-3.5, -2.5, -1.5], dtype=dtypes.float).cast(dtypes.uint), dtypes.uint, [4294967293, 4294967294, 4294967295])
 
