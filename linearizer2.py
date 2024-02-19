@@ -1,19 +1,16 @@
 import numpy as np
 from dataclasses import dataclass
-import graphlib, unittest, copy
-from typing import Any, Dict, List, Optional, Tuple, Union, cast
+import graphlib, unittest
+from typing import Any, Dict, List, Tuple, Union, cast
 from tinygrad.codegen.kernel import LocalBuffer
 from tinygrad.codegen.uops import UOp, UOps
 from tinygrad.device import Buffer, BufferCopy, Compiled, Compiler, Device, JITRunner
 from tinygrad.dtype import PtrDType, dtypes
-from tinygrad.features.graph import print_tree
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import BinaryOps, BufferOps, ConstBuffer, LazyOp, LoadOps, MemBuffer, Op, ReduceOps
-from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
-from verify import verify, f32_to_bits
-from tinygrad.helpers import panic
+from tinygrad.helpers import DEBUG, panic
 
 def create_graph(outs: List[LazyOp]):
   ts = graphlib.TopologicalSorter()
@@ -31,9 +28,10 @@ class ASTRunner(JITRunner):
   def __call__(self, rawbufs: List[Buffer], var_vals, wait=False, jit=False):
     lin = MiniLinearizer(self.ast)
     lin.linearize()
-    code = self.compiler.render("test", lin.uops)
+    code = self.compiler.render("new_linearizer", lin.uops)
+    if DEBUG >= 4: print(code)
     lib = self.compiler.compile(code)
-    prg = self.device.runtime("test", lib)
+    prg = self.device.runtime("new_linearizer", lib)
     prg(*[x._buf for x in rawbufs])
 
 @dataclass(frozen=True)
@@ -159,88 +157,41 @@ class TestLinearizer2(unittest.TestCase):
     scheduler.create_schedule([x.lazydata for x in vals])
     for si in scheduler.sched:
       si.runner(si.rawbufs, var_vals={})
-    ret = [x.numpy() for x in vals]
-    for x in vals: x.lazydata.realized = None
+    ret = [np.frombuffer(x.lazydata.realized.as_buffer(), dtype=x.dtype.np).reshape(x.shape) for x in vals]
+    for x in vals: x.lazydata.realized = None # reset values for the comparison
     return ret
 
-  def test_add_simple(self):
+  def test_multi_output_simple(self):
     a = Tensor([2])
     b = Tensor([4])
     out0 = a + b
     out1 = a * b
     outputs = [out0, out1]
+
     ret = self._new_realize(outputs)
     expected = [x.numpy() for x in outputs]
     np.testing.assert_equal(ret, expected)
 
-  def test_multi_output_simple(self):
-    a = LazyOp(BufferOps.LOAD, src=(), arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker.from_shape((1,))))
-    b = LazyOp(BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker.from_shape((1,))))
-    c = LazyOp(BinaryOps.ADD, src=(a,b))
-    out0 = LazyOp(BufferOps.STORE, src=(LazyOp(BinaryOps.ADD, src=(a,c)),), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker.from_shape((1,))))
-    out1 = LazyOp(BufferOps.STORE, src=(LazyOp(BinaryOps.MUL, src=(a,b)),), arg=MemBuffer(idx=3, dtype=dtypes.int, st=ShapeTracker.from_shape((1,))))
-    graph = create_graph([out0, out1])
-    uops = MiniLinearizer(graph).linearize()
-    alloc_data, init_outputs, prg, get_outputs = verify(uops)
-    a, b = alloc_data([1]), alloc_data([2])
-    outs = init_outputs([1,1])
-    prg(a, b, *outs, global_size=(1,1,1), local_size=(1,1,1))
-    assert get_outputs(outs) == [[4], [2]]
-
   def test_multi_output_multi_reduce(self):
-    a = LazyOp(BufferOps.LOAD, src=(), arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker.from_shape((3,))))
-    b = LazyOp(BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker.from_shape((3,))))
-    c = LazyOp(BinaryOps.ADD, src=(a,b))
-    out0 = LazyOp(BufferOps.STORE, src=(LazyOp(BinaryOps.ADD, src=(a,c)),), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker.from_shape((3,))))
-    out1 = LazyOp(BufferOps.STORE, src=(LazyOp(BinaryOps.MUL, src=(a,b)),), arg=MemBuffer(idx=3, dtype=dtypes.int, st=ShapeTracker.from_shape((3,))))
-    out2 = LazyOp(BufferOps.STORE, src=(LazyOp(ReduceOps.SUM, src=(a,)),), arg=MemBuffer(idx=4, dtype=dtypes.int, st=ShapeTracker.from_shape((1,))))
-    out3 = LazyOp(BufferOps.STORE, src=(LazyOp(ReduceOps.MAX, src=(b,)),), arg=MemBuffer(idx=5, dtype=dtypes.int, st=ShapeTracker.from_shape((1,))))
-    graph = create_graph([out0, out1, out2, out3])
-    uops = MiniLinearizer(graph).linearize()
-    alloc_data, init_outputs, prg, get_outputs = verify(uops)
-    a, b = alloc_data([4,3,4]), alloc_data([10,20,3])
-    outs = init_outputs([1,1,1,1])
-    prg(a, b, *outs, global_size=(1,1,1), local_size=(1,1,1))
-    assert get_outputs(outs) == [[18], [40], [11], [20]]
+    a = Tensor([1,2,3,4])
+    b = Tensor([22])
+    out0 = a.sum()
+    out1 = out0 + b
+    out2 = a.max()
+    outputs = [out0, out1, out2]
 
-  def test_multi_output_reduce_alu(self):
-    a = LazyOp(BufferOps.LOAD, src=(), arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker.from_shape((4,))))
-    b = LazyOp(BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker.from_shape((1,))))
-    c = LazyOp(ReduceOps.SUM, src=(a,))
-    out0 = LazyOp(BufferOps.STORE, src=(LazyOp(BinaryOps.ADD, src=(c,b)),), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker.from_shape((1,))))
-    out1 = LazyOp(BufferOps.STORE, src=(c,), arg=MemBuffer(idx=3, dtype=dtypes.int, st=ShapeTracker.from_shape((1,))))
-    graph = create_graph([out0, out1])
-    uops = MiniLinearizer(graph).linearize()
-    alloc_data, init_outputs, prg, get_outputs = verify(uops)
-    a, b = alloc_data([1,1,1,1]), alloc_data([2])
-    outs = init_outputs([1,1])
-    prg(a, b, *outs, global_size=(1,1,1), local_size=(1,1,1))
-    assert get_outputs(outs) == [[6], [4]]
+    ret = self._new_realize(outputs)
+    expected = [x.numpy() for x in outputs]
+    np.testing.assert_equal(ret, expected)
 
   def test_multi_dim_reduce(self):
-    a = LazyOp(BufferOps.LOAD, src=(), arg=MemBuffer(idx=0, dtype=dtypes.int, st=ShapeTracker.from_shape((4,4))))
-    b = LazyOp(BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.int, st=ShapeTracker.from_shape((1,))))
-    reduce = LazyOp(ReduceOps.SUM, src=(a,), arg=((1,1)))
-    out0 = LazyOp(BufferOps.STORE, src=(reduce,), arg=MemBuffer(idx=2, dtype=dtypes.int, st=ShapeTracker.from_shape((1,1))))
-    out1 = LazyOp(BufferOps.STORE, src=(LazyOp(BinaryOps.MUL, src=(b,reduce), arg=((1,1))),), arg=MemBuffer(idx=3, dtype=dtypes.int, st=ShapeTracker.from_shape((1,1))))
-    graph = create_graph([out0, out1])
-    uops = MiniLinearizer(graph).linearize()
-    alloc_data, init_outputs, prg, get_outputs = verify(uops)
-    a, b = alloc_data(list(range(16))), alloc_data([2])
-    outs = init_outputs([1,1])
-    prg(a, b, *outs, global_size=(1,1,1), local_size=(1,1,1))
-    assert get_outputs(outs) == [[120], [240]]
+    # even though doing two reduces on different shapes might not be profitable, we should be able to linearize it
+    a = Tensor([[2,2], [3,3]])
+    b = Tensor([1,2,3])
+    out0 = a.sum()
+    out1 = b.sum()
+    outputs = [out0, out1]
 
-  def test_const_load_combo(self):
-    a = LazyOp(BufferOps.LOAD, src=(), arg=MemBuffer(idx=0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,))))
-    b = LazyOp(BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=dtypes.float, st=ShapeTracker.from_shape((1,))))
-    c = LazyOp(BufferOps.CONST, src=(), arg=ConstBuffer(val=4.0, dtype=dtypes.float, st=ShapeTracker.from_shape((1,))))
-    out0 = LazyOp(BufferOps.STORE, src=(LazyOp(BinaryOps.ADD, src=(a,b)),), arg=MemBuffer(idx=2, dtype=dtypes.float, st=ShapeTracker.from_shape((1,))))
-    out1 = LazyOp(BufferOps.STORE, src=(LazyOp(BinaryOps.MUL, src=(a,c)),), arg=MemBuffer(idx=3, dtype=dtypes.float, st=ShapeTracker.from_shape((1,))))
-    uops = MiniLinearizer(create_graph([out0, out1])).linearize()
-    alloc_data, init_outputs, prg, get_outputs = verify(uops)
-    a, b = alloc_data([f32_to_bits(1)]), alloc_data([f32_to_bits(2)])
-    outs = init_outputs([1,1])
-    prg(a, b, *outs, global_size=(1,1,1), local_size=(1,1,1))
-
-    assert get_outputs(outs, "f") == [[3.0], [4.0]]
+    ret = self._new_realize(outputs)
+    expected = [x.numpy() for x in outputs]
+    np.testing.assert_equal(ret, expected)
