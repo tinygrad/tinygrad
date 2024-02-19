@@ -98,7 +98,7 @@ def uops_flops_mem(uops:List[UOp], vars:Dict[str, Variable]) -> Tuple[sint, sint
         # TODO: should the ops spec change to make the arg be the Variable?
         mults *= vars[u.vin[1].arg]
       else:
-        raise RuntimeError("non const/variable loop")
+        raise RuntimeError(f"non const/variable loop {u.vin[1].uop}")
     if u.uop is UOps.ENDLOOP:
       mults = mult_stack.pop(-1)
     if u.uop is UOps.ALU:
