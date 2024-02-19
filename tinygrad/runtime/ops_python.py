@@ -1,7 +1,7 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Tuple, List, Optional, Any, Dict
+from typing import Tuple, List, Optional, Any, Dict, Type
 import pickle, base64, itertools, time, math, ctypes
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
@@ -48,7 +48,7 @@ def _store(m, i, v):
 
 def cstyle_cast(value, in_dtype: DType, out_dtype: DType, bitcast: bool):
   def c_bitcast(value, in_dtype: DType, out_dtype: DType):
-    to_ctype = {dtypes.bool: ctypes.c_bool, dtypes.int8: ctypes.c_int8, dtypes.uint8: ctypes.c_uint8,
+    to_ctype: Dict[DType, Type[ctypes._SimpleCData]] = {dtypes.bool: ctypes.c_bool, dtypes.int8: ctypes.c_int8, dtypes.uint8: ctypes.c_uint8,
                 dtypes.int16: ctypes.c_int16, dtypes.uint16: ctypes.c_uint16, dtypes.int32: ctypes.c_int32,
                 dtypes.uint32: ctypes.c_uint32, dtypes.int64: ctypes.c_int64, dtypes.uint64: ctypes.c_uint64,
                 dtypes.float32: ctypes.c_float, dtypes.float64: ctypes.c_double}
