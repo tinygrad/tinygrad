@@ -9,13 +9,11 @@ from tinygrad.dtype import PtrDType, dtypes
 from tinygrad.features.graph import print_tree
 from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import BinaryOps, BufferOps, ConstBuffer, LazyOp, LoadOps, MemBuffer, Op, ReduceOps
-from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
 from verify import verify, f32_to_bits
 from tinygrad.helpers import panic
-from tinygrad.codegen.linearizer import MiniLinearizer as LinearizerOld
 
 def create_graph(outs: List[LazyOp]):
   ts = graphlib.TopologicalSorter()
@@ -33,7 +31,8 @@ class ASTRunner(JITRunner):
   def __call__(self, rawbufs: List[Buffer], var_vals, wait=False, jit=False):
     lin = MiniLinearizer(self.ast)
     lin.linearize()
-    lib = self.compiler.compile(self.compiler.render("test", lin.uops))
+    code = self.compiler.render("test", lin.uops)
+    lib = self.compiler.compile(code)
     prg = self.device.runtime("test", lib)
     prg(*[x._buf for x in rawbufs])
 
@@ -46,45 +45,50 @@ class Scheduler:
   def __init__(self) -> None:
     self.sched: List[MiniScheduleItem] = []
     self.rawbufs: List[Buffer] = []
-    self.host_bufs: List[Buffer] = []
+    self.copy_cache: Dict[Buffer, int] = {}
+    self.ast = graphlib.TopologicalSorter()
 
-  def create_schedule(self, lb:LazyBuffer):
-    if lb.base.op == LoadOps.COPY:
-      host_buf, device_buf = cast(Buffer,lb.base.srcs[0].realized), Buffer(lb.device, lb.size, lb.dtype)
-      self.sched.append(MiniScheduleItem(BufferCopy(), [device_buf, host_buf]))
-      self.rawbufs.append(device_buf)
-      self.host_bufs.append(host_buf)
-    else:
-      ast = graphlib.TopologicalSorter()
-      for src in lb.srcs: self.create_schedule(src)
-      src = self._recursive_lazyop(lb, ast)
+  def create_schedule(self, lazy_buffers:List[LazyBuffer]):
+    for lb in lazy_buffers:
+      src = self._recursive_lazyop(lb)
       assert src is not None
       op = LazyOp(BufferOps.STORE, (src, ), MemBuffer(len(self.rawbufs), lb.dtype, lb.st.simplify().unbind()[0]))
       store_buf = Buffer(lb.device, lb.size, lb.dtype)
       lb.realized = store_buf
       self.rawbufs.append(store_buf)
-      ast.add(op, src)
-      output_ast = tuple(ast.static_order())
-      self.sched.append(MiniScheduleItem(ASTRunner(output_ast), self.rawbufs))
+      self.ast.add(op, src)
 
-  def _recursive_lazyop(self, lb:LazyBuffer, ast) -> LazyOp:
+    ast = tuple(self.ast.static_order())
+    self.sched.append(MiniScheduleItem(ASTRunner(ast), self.rawbufs))
+
+  def _recursive_lazyop(self, lb:LazyBuffer) -> LazyOp:
     # these ops have special sources
-    if lb.base.op == LoadOps.EMPTY: # LoadOps.EMPTY "defines" the input MemBuffer in the AST
-      assert isinstance(lb.realized, Buffer)
-      unbound_st, st_var_vals = lb.st.simplify().unbind()
-      assert st_var_vals == {}, "variables not supported yet"
-      return LazyOp(BufferOps.LOAD, (), MemBuffer(self.host_bufs.index(lb.realized), lb.dtype, unbound_st))
     if lb.base.op == LoadOps.CONST: # Consts are always generated
       return LazyOp(BufferOps.CONST, src=(), arg=ConstBuffer(val=lb.base.arg, dtype=lb.base.dtype, st=lb.st.simplify().unbind()[0]))
-    elif lb.base.op == LoadOps.COPY: return self._recursive_lazyop(lb.srcs[0], ast)
+    elif lb.base.op == LoadOps.COPY:
+      host_buf = cast(Buffer,lb.base.srcs[0].realized)
+
+      if host_buf in self.copy_cache:
+        idx = self.copy_cache[host_buf]
+        device_buf = self.rawbufs[idx]
+      else:
+        device_buf = Buffer(lb.device, lb.size, lb.dtype)
+        self.rawbufs.append(device_buf)
+        idx = len(self.rawbufs)
+        self.sched.append(MiniScheduleItem(BufferCopy(), [device_buf, host_buf]))
+        self.copy_cache[host_buf] = len(self.rawbufs)
+
+      unbound_st, st_var_vals = lb.st.simplify().unbind()
+      assert st_var_vals == {}, "variables not supported yet"
+      return LazyOp(BufferOps.LOAD, (), MemBuffer(idx-1, lb.dtype, unbound_st))
 
     srcs: List[LazyOp] = []
     for src in lb.base.srcs:
-      src_op = self._recursive_lazyop(src, ast)
+      src_op = self._recursive_lazyop(src)
       if src_op is not None:
         srcs.append(src_op)
     op = LazyOp(cast(Op,lb.base.op), src=tuple(srcs))
-    ast.add(op, *srcs)
+    self.ast.add(op, *srcs)
     return op
 
 class MiniLinearizer:
@@ -150,19 +154,23 @@ class MiniLinearizer:
     return self.uops
 
 class TestLinearizer2(unittest.TestCase):
-  def _new_realize(self, x):
+  def _new_realize(self, vals):
     scheduler = Scheduler()
-    scheduler.create_schedule(x.lazydata)
+    scheduler.create_schedule([x.lazydata for x in vals])
     for si in scheduler.sched:
       si.runner(si.rawbufs, var_vals={})
-    ret = x.numpy()
-    x.lazydata.realized = None
+    ret = [x.numpy() for x in vals]
+    for x in vals: x.lazydata.realized = None
     return ret
 
   def test_add_simple(self):
-    x = Tensor([1]) + Tensor([67])
-    ret = self._new_realize(x)
-    expected = x.numpy()
+    a = Tensor([2])
+    b = Tensor([4])
+    out0 = a + b
+    out1 = a * b
+    outputs = [out0, out1]
+    ret = self._new_realize(outputs)
+    expected = [x.numpy() for x in outputs]
     np.testing.assert_equal(ret, expected)
 
   def test_multi_output_simple(self):
