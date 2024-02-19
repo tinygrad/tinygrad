@@ -54,8 +54,9 @@ def loader_process(q_in, q_out, X:Tensor):
       else:
         from extra.datasets.imagenet import preprocess_train
         # reseed rng for determinism
-        np.random.seed(seed)
-        random.seed(seed)
+        if seed is not None:
+          np.random.seed(seed)
+          random.seed(seed)
         img = preprocess_train(img)
 
       # broken out
@@ -109,7 +110,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
     for idx in range(num*batch_size, (num+1)*batch_size):
       fidx = next(gen)
       fn = files[fidx]
-      q_in.put((idx, fn, (seed+1) * len(files) + fidx, val))
+      q_in.put((idx, fn, (seed+1) * len(files) + fidx if seed is not None else None, val))
       Y[idx] = cir[fn.split("/")[-2]]
   for bn in range(BATCH_COUNT): enqueue_batch(bn)
 
