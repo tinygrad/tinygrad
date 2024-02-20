@@ -6,11 +6,11 @@ from tinygrad.helpers import prod, all_int, argsort
 from tinygrad.shape.symbolic import Node, NumNode, Variable, sint
 
 @functools.lru_cache(maxsize=None)
-def canonicalize_strides(shape:Tuple[int, ...], strides:Tuple[int, ...]) -> Tuple[int, ...]:
+def canonicalize_strides(shape:Tuple[sint, ...], strides:Tuple[sint, ...]) -> Tuple[sint, ...]:
   return tuple(0 if s == 1 else st for s, st in zip(shape, strides))
 
 @functools.lru_cache(maxsize=None)
-def strides_for_shape(shape:Tuple[int, ...]) -> Tuple[int, ...]:
+def strides_for_shape(shape:Tuple[sint, ...]) -> Tuple[sint, ...]:
   if not shape: return ()
   strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))
   return canonicalize_strides(shape, strides[::-1])
@@ -22,14 +22,14 @@ def _merge_dims(shape:Tuple[int, ...], strides:Tuple[int, ...], mask:Optional[Tu
   assert len(shape) == len(strides)
   ret = [(shape[0], strides[0], shape[0] if strides[0] else 0)]
   # wrt merging zero strided dimensions
-  merging = (mask and strides[0] == 0 and shape[0] != 1 and mask[0][1] - mask[0][0] == 1)
+  merging = strides[0] == 0 and (mask[0][1] - mask[0][0] == 1 if mask else shape[0] == 1)
   for i, (sh, st) in enumerate(zip(shape[1:], strides[1:]), start=1):
     if sh == 1: continue
     if merging or ret[-1][1] == sh * st: # mergeable
       ret[-1] = (ret[-1][0] * sh, st, (sh if merging else ret[-1][2] * sh) if st else 0)
     else: ret.append((sh, st, sh if st else 0)) # begin new
     # merging ends with either non-zero strided dim or zero strided dim with mask range > 1
-    merging = (st == 0 and mask and mask[i][1] - mask[i][0] == 1)
+    merging = st == 0 and (mask[i][1] - mask[i][0] == 1 if mask else sh == 1)
   return tuple(ret)
 
 @functools.lru_cache(maxsize=None)
@@ -82,6 +82,8 @@ class View:
   @functools.lru_cache(maxsize=None)
   def create(shape:Tuple[sint, ...], strides:Optional[Tuple[sint, ...]]=None, offset:sint=0, mask:Optional[Tuple[Tuple[sint, sint], ...]]=None):
     strides = canonicalize_strides(shape, strides) if strides else strides_for_shape(shape)
+    # canonicalize empty mask
+    if mask is not None and all(m == (0,s) for m,s in zip(mask, shape)): mask = None
     contiguous = offset == 0 and mask is None and strides == strides_for_shape(shape)
     # if any dimension has size >1, but is masked such that only one index in the dimension is unmasked
     # then its stride can also be set to 0, albeit with a corresponding adjustment required to the offset
@@ -91,8 +93,6 @@ class View:
         strides, offset, mask = (0,) * len(shape), 0, ((0,0),) * len(shape)
       offset += sum((strides[i] * mask[i][0]) if e else 0 for i, e in enumerate(elim))
       strides = tuple(0 if e else st for st,e in zip(strides, elim))
-    # canonicalize empty mask
-    if mask is not None and all(m == (0,s) for m,s in zip(mask, shape)): mask = None
     return View(shape, strides, offset, mask, contiguous)
 
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
@@ -103,7 +103,7 @@ class View:
   @functools.lru_cache(None)  # pylint: disable=method-cache-max-size-none
   def unbind(self) -> Tuple[View, Dict[Variable, int]]:
     var_unboundvar_val = [(v, v.unbind()) for v in self.vars() if v.val is not None]
-    unbound_vars:Dict[Variable,Node] = {v:uv for v,(uv,_) in var_unboundvar_val}
+    unbound_vars = {v:uv for v,(uv,_) in var_unboundvar_val}
     new_shape = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.shape])
     new_strides = tuple([s if isinstance(s, int) else s.substitute(unbound_vars) for s in self.strides])
     new_offset = self.offset if isinstance(self.offset, int) else self.offset.substitute(unbound_vars)

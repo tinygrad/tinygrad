@@ -4,13 +4,13 @@ import unittest
 from tinygrad.codegen.kernel import Opt, OptOps, tensor_cores
 from tinygrad.codegen.linearizer import Linearizer, UOp, UOps, expand_node
 from tinygrad.device import Compiled, Device, Buffer
-from tinygrad.ops import BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
+from tinygrad.ops import BinaryOps, BufferOps, MemBuffer, ConstBuffer, LazyOp, LoadOps, TernaryOps
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, Node, create_rednode
+from tinygrad.shape.symbolic import MulNode, Variable, NumNode, Node
 from tinygrad.tensor import Tensor
-from tinygrad.jit import CacheCollector
-from tinygrad.realize import run_schedule
+from tinygrad.features.jit import CacheCollector
+from tinygrad.realize import create_schedule, run_schedule
 from tinygrad.helpers import prod, Context
 from tinygrad.dtype import DType, dtypes
 
@@ -33,12 +33,32 @@ class TestLinearizer(unittest.TestCase):
     # these are of size 3 to avoid float4 coalesce
     r = a[:-1] + a[1:]
 
-    k = Linearizer(r.lazydata.schedule()[-1].ast)
+    k = Linearizer(create_schedule([r.lazydata])[-1].ast)
     k.upcast()
     k.linearize()
     num_loads = len([uop for uop in k.uops if uop.uop == UOps.LOAD])
     assert num_loads <= 4, "more load uops than needed"
     assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
+
+  def test_load_cache_const_bufs(self):
+    # make sure const buffers are differentiated from local and mem buffers
+    ST, DT = ShapeTracker(views=(View(shape=((1,)), strides=(0, 0), offset=0, mask=None, contiguous=False),)), dtypes.int
+    VAL = LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=2, dtype=DT, st=ST))
+
+    # data1[0] + VAL
+    a = LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.LOAD, src=(), arg=MemBuffer(idx=1, dtype=DT, st=ST)), VAL))
+    # (literal const 1) + VAL
+    b = LazyOp(op=BinaryOps.ADD, src=(LazyOp(op=BufferOps.CONST, src=(), arg=ConstBuffer(val=1, dtype=DT, st=ST)), VAL))
+
+    ast = LazyOp(op=BufferOps.STORE, src=(LazyOp(op=BinaryOps.ADD, src=(a,b)),), arg=MemBuffer(idx=0, dtype=DT, st=ST))
+    lin = Linearizer(ast)
+    lin.linearize()
+
+    a_bufs = [u.uop for u in lin.uops[-2].vin[0].vin]
+    b_bufs = [u.uop for u in lin.uops[-2].vin[1].vin]
+
+    assert a_bufs == [UOps.LOAD, UOps.CONST]
+    assert b_bufs == [UOps.CONST, UOps.CONST]
 
   def test_upcast_cse(self):
     # when upcasting, within a subtree, there may be common expressions.
@@ -46,7 +66,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = a.expand([2]) + b.expand([2])
 
-    k = Linearizer(r.lazydata.schedule()[-1].ast)
+    k = Linearizer(create_schedule([r.lazydata])[-1].ast)
     k.upcast()
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
@@ -56,7 +76,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack([a, b])
 
-    k = Linearizer(r.lazydata.schedule()[-1].ast)
+    k = Linearizer(create_schedule([r.lazydata])[-1].ast)
     k.upcast()
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
@@ -67,7 +87,7 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor(2), Tensor(3)
     r = a * b
 
-    k = Linearizer(r.lazydata.schedule()[-1].ast)
+    k = Linearizer(create_schedule([r.lazydata])[-1].ast)
     k.linearize()
     num_ops = len([uop for uop in k.uops if uop.uop in [UOps.LOAD, UOps.ALU]])
     assert num_ops <= 0, "more load or alu uops than needed"
@@ -76,14 +96,14 @@ class TestLinearizer(unittest.TestCase):
     for tensor_dtype, acc_dtype in (
       (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
       a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
-      k = Linearizer(a.lazydata.schedule()[-1].ast)
+      k = Linearizer(create_schedule([a.lazydata])[-1].ast)
       k.linearize()
       local = [uop for uop in k.uops if uop.uop == UOps.DEFINE_ACC]
       assert local[0].dtype == acc_dtype
 
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
-      k = Linearizer(c.lazydata.schedule()[-1].ast)
+      k = Linearizer(create_schedule([c.lazydata])[-1].ast)
       k.linearize()
       local = [uop for uop in k.uops if uop.uop == UOps.DEFINE_ACC]
       assert local[0].dtype == expected_dtype
@@ -106,7 +126,7 @@ class TestLinearizer(unittest.TestCase):
   def test_tensor_cores(self):
     if not Device[Device.DEFAULT].compiler.linearizer_opts.has_tensor_cores:
       self.skipTest("device doesn't have tensor cores")
-    for tc in tensor_cores[Device.DEFAULT]:
+    for tc in tensor_cores[Device[Device.DEFAULT].compiler.linearizer_opts.device]:
       a, b = Tensor.rand(tc.dims[1], tc.dims[2], dtype=tc.dtype_in), Tensor.rand(tc.dims[2], tc.dims[0], dtype=tc.dtype_in)
       np_a, np_b = a.numpy(), b.numpy()
       r = a.matmul(b, acc_dtype=tc.dtype_out)
@@ -121,7 +141,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_limit_dims_to_max_5d_global(self):
     t = Tensor.rand(3, 4, 5, 6, 7).pad(((1, 1), (1, 1), (1, 1), (1, 1), (1, 1))) + 1
-    sched = [si for si in t.lazydata.schedule() if si.ast.op not in LoadOps]
+    sched = [si for si in create_schedule([t.lazydata]) if si.ast.op not in LoadOps]
     assert len(sched) == 1
     lin = Linearizer(sched[0].ast)
     assert lin.full_shape[:lin.global_dims] == (5, 6, 7, 8, 9)
@@ -129,7 +149,7 @@ class TestLinearizer(unittest.TestCase):
 
   def test_sum_collapse(self):
     t = Tensor.ones(256,256).sum()
-    sched = [si for si in t.lazydata.schedule() if si.ast.op not in LoadOps]
+    sched = [si for si in create_schedule([t.lazydata]) if si.ast.op not in LoadOps]
     assert len(sched) == 1
     lin = Linearizer(sched[0].ast)
     assert not any(u.uop == UOps.LOOP for u in lin.linearize().uops), "found loop in sum collapse"
@@ -154,7 +174,7 @@ class TestLinearizer(unittest.TestCase):
                                 arg=TernaryOps.WHERE).uop == UOps.ALU
 
 def helper_realized_ast(r:Tensor):
-  s = r.lazydata.schedule()
+  s = create_schedule([r.lazydata])
   run_schedule(s[:-1])  # run all kernels except the last one
   # now all input LazyBuffers buffers in s[-1] should be realized
   # allocate an output buffer
@@ -176,7 +196,7 @@ class TestFloat4(unittest.TestCase):
     b = Tensor.rand(2, 8).realize()
     c = a + b
 
-    s = c.lazydata.schedule()[0]
+    s = create_schedule([c.lazydata])[0]
     k = Linearizer(s.ast)
     k.hand_coded_optimizations()
     k.linearize()
@@ -188,7 +208,7 @@ class TestFloat4(unittest.TestCase):
     b = Tensor.rand(2, 8).realize()
     c = a + b
 
-    s = c.lazydata.schedule()[0]
+    s = create_schedule([c.lazydata])[0]
     k = Linearizer(s.ast)
     k.shift_to(0, 4)  # float4 dimension
     k.shift_to(0, 2, insert_before=k.shape_len-1)
@@ -204,7 +224,7 @@ class TestFloat4(unittest.TestCase):
     b = Tensor.rand(9).realize().shrink(((1, 9),))
     c = a + b
 
-    s = c.lazydata.schedule()[0]
+    s = create_schedule([c.lazydata])[0]
     k = Linearizer(s.ast)
     k.hand_coded_optimizations()  # implicit trigger float4 dim
     k.linearize()
@@ -216,7 +236,7 @@ class TestFloat4(unittest.TestCase):
     b = Tensor.rand(2, 9).realize().shrink(((0, 2), (1, 9),))
     c = a + b
 
-    s = c.lazydata.schedule()[0]
+    s = create_schedule([c.lazydata])[0]
     k = Linearizer(s.ast)
     k.shift_to(len(k.full_unupcasted_shape)-1, 4)  # manual trigger float4 dim
     k.upcast()
@@ -234,7 +254,7 @@ class TestFloat4(unittest.TestCase):
     # only the first and last conv dot products are aligned in a, and b is never aligned, so no
     # float4 should be emitted (the reduce axis of size 4 is the float4 axis here)
 
-    s = c.lazydata.schedule()[0]
+    s = create_schedule([c.lazydata])[0]
     k = Linearizer(s.ast)
     k.upcast()
     k.linearize()
@@ -249,7 +269,7 @@ class TestFloat4(unittest.TestCase):
     # dimension, then we could do float4 for only that one set of loads, but we currently
     # don't.
 
-    s = c.lazydata.schedule()[0]
+    s = create_schedule([c.lazydata])[0]
     k = Linearizer(s.ast)
     k.upcast()
     k.upcast()
@@ -265,7 +285,7 @@ class TestFloat4(unittest.TestCase):
     # we will upcast the top axis of sz 4. they should not be coalesced into float4,
     # since the top axis is not contiguous.
 
-    s = c.lazydata.schedule()[0]
+    s = create_schedule([c.lazydata])[0]
     k = Linearizer(s.ast)
     k.shift_to(0, 4, top=True)  # top axes are float4 axes
     k.upcast()
@@ -281,7 +301,7 @@ class TestFloat4(unittest.TestCase):
     # we will upcast the top axis of sz 4. they should not be coalesced into float4,
     # since the top axis is not contiguous.
 
-    s = c.lazydata.schedule()[0]
+    s = create_schedule([c.lazydata])[0]
     k = Linearizer(s.ast)
     k.shift_to(0, 4)  # float4 axis
     k.upcast()
@@ -296,7 +316,7 @@ class TestFloat4(unittest.TestCase):
 
     # should float4 b but not a
 
-    s = c.lazydata.schedule()[0]
+    s = create_schedule([c.lazydata])[0]
     k = Linearizer(s.ast)
     k.shift_to(0, 4)  # float4 axis
     k.upcast()
@@ -310,7 +330,7 @@ class TestHandCodedOpts(unittest.TestCase):
     layer_1 = Tensor.cat(*[Tensor.rand(5) for _ in range(4)])
     layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 20))
 
-    s = layer_2.lazydata.schedule()[-1]
+    s = create_schedule([layer_2.lazydata])[-1]
     k = Linearizer(s.ast)
     k.hand_coded_optimizations()
     assert len(k.bufs) == 6  # make sure all ops are done in one kernel
@@ -323,7 +343,7 @@ class TestHandCodedOpts(unittest.TestCase):
   def test_masked_upcast_wino(self):
     monster = Tensor.stack([Tensor.stack([Tensor.rand(16) for _ in range(6)]) for _ in range(6)])
 
-    s = monster.lazydata.schedule()[-1]
+    s = create_schedule([monster.lazydata])[-1]
     k = Linearizer(s.ast)
     k.hand_coded_optimizations()
     assert len(k.bufs) == 37  # make sure all ops are done in one kernel
@@ -335,7 +355,7 @@ class TestHandCodedOpts(unittest.TestCase):
       x,w = Tensor.rand(1,4,8,8, requires_grad=True).realize(), Tensor.rand(4,4,3,3, requires_grad=True).realize()
       out = Tensor.conv2d(x,w, padding=1)
       upcasts = []
-      wino_schedule = out.lazydata.schedule()
+      wino_schedule = create_schedule([out.lazydata])
       # collect upcasts of tile transform kernels
       for i, si in enumerate(wino_schedule):
         k = Linearizer(si.ast)
@@ -349,7 +369,7 @@ class TestHandCodedOpts(unittest.TestCase):
       assert upcasts.count((6, 6)) == 2 #and upcasts.count((4, 4)) == 1
 
       out.mean().backward()
-      backward_schedule = x.grad.lazydata.schedule() + w.grad.lazydata.schedule()
+      backward_schedule = create_schedule([x.grad.lazydata, w.grad.lazydata])
       for si in backward_schedule:
         k = Linearizer(si.ast)
         k.hand_coded_optimizations()
@@ -364,7 +384,7 @@ class TestHandCodedOpts(unittest.TestCase):
     layer_2 = Tensor.cat(layer_1.unsqueeze(0), Tensor.rand(6, 7, 4))
     layer_3 = Tensor.cat(layer_2.unsqueeze(0), Tensor.rand(6, 7, 7, 4))
 
-    s = layer_3.lazydata.schedule()[-1]
+    s = create_schedule([layer_3.lazydata])[-1]
     k = Linearizer(s.ast)
     k.hand_coded_optimizations()
     assert len(k.bufs) == 5  # make sure all ops are done in one kernel
@@ -379,11 +399,11 @@ class TestHandCodedOpts(unittest.TestCase):
     b = Tensor.rand(N, N).realize()
     c = a @ b
 
-    s = c.lazydata.schedule()[0]
+    s = create_schedule([c.lazydata])[0]
     k = Linearizer(s.ast)
     k.hand_coded_optimizations()
 
-    assert len(k.group_for_reduce) == 1
+    assert k.group_for_reduces == 1
     assert k.local_dims == 1
     assert k.upcasted == 1
 
@@ -526,9 +546,7 @@ class TestLinearizerOpts(unittest.TestCase):
        Opt(OptOps.UPCAST, 0, 2)], # No globals
     ])
 
-  def test_tensor_core_opts(self):
-    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_local:
-      self.skipTest("Only Compiled uses linearizer with locals")
+  def test_invalid_tensor_core_extra_opts(self):
     if not Device[Device.DEFAULT].compiler.linearizer_opts.has_tensor_cores:
       self.skipTest("device doesn't have tensor cores")
     if Device.DEFAULT not in tensor_cores:
@@ -536,7 +554,28 @@ class TestLinearizerOpts(unittest.TestCase):
 
     N = 128
     Tensor.manual_seed(1552)
-    for tc in tensor_cores[Device.DEFAULT]:
+    a = Tensor.rand(N, N)
+    b = Tensor.rand(N, N)
+    realized_ast, _ = helper_realized_ast(a@b)
+    invalid_opts = [
+      [Opt(OptOps.LOCAL, 2, 2)],
+      [Opt(OptOps.UPCAST, 2, 2)],
+      [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.LOCAL, 2, 2)],
+    ]
+    for x in invalid_opts:
+      k = Linearizer(realized_ast)
+      with self.assertRaises(AssertionError):
+        assert k.apply_tensor_cores(use_tensor_cores=1, extra_opts=x), "no valid tensor core" # for METAL in runners
+
+  def test_tensor_core_opts(self):
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.has_tensor_cores:
+      self.skipTest("device doesn't have tensor cores")
+    if Device.DEFAULT not in tensor_cores:
+      self.skipTest("No tensor cores for device")
+
+    N = 128
+    Tensor.manual_seed(1552)
+    for tc in tensor_cores[Device[Device.DEFAULT].compiler.linearizer_opts.device]:
       a, b = Tensor.rand(N, N, dtype=tc.dtype_in), Tensor.rand(N, N, dtype=tc.dtype_in)
       r = a.matmul(b, acc_dtype=tc.dtype_out)
       (atol, rtol) = ((0.25, 0.01) if tc.dtype_out == dtypes.half else (3e-2, 1e-3)) if tc.dtype_in == dtypes.half else (1e-4, 1e-4)
@@ -545,22 +584,23 @@ class TestLinearizerOpts(unittest.TestCase):
         [Opt(OptOps.UPCAST, 0, 4)],
         [Opt(OptOps.UPCAST, 1, 4)],
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)], # check upcasts
-        [Opt(OptOps.UNROLL, 0, 2)], # check last unroll
-        [Opt(OptOps.LASTLOCAL, 0, 4)], # check last local
-        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of last unroll and last local
+        [Opt(OptOps.UNROLL, 0, 2)], # check unroll
+        [Opt(OptOps.UNROLL, 0, 0)], # check full unroll of reduce with locals
+        [Opt(OptOps.LOCAL, 0, 4)], # check local
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2)], # check combo of unroll and local
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2)],
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)],
-        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LASTLOCAL, 0, 2)],
+        [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.LOCAL, 0, 2)],
         [Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4)], # check permutations
         [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
         [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4)],
         [Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)],
-        [Opt(OptOps.LASTLOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
+        [Opt(OptOps.LOCAL, 0, 2), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 2), Opt(OptOps.UPCAST, 0, 4)],
         # [Opt(OptOps.GROUP, 0, 2)] # doesn't work because group_for_reduce dims become early locals (conflicting with TC)
       ], apply_tc=True, atol=atol, rtol=rtol)
 
   def test_padto_matmul(self):
-    if Device.DEFAULT == "CUDA": self.skipTest("super slow on CUDA")
+    if Device.DEFAULT in ["CUDA", "HIP"]: self.skipTest("super slow on CUDA and HIP because of the big grid dims")
     N = 17 * 17
     Tensor.manual_seed(289)
     a = Tensor.rand(N, N)
@@ -612,9 +652,14 @@ class TestLinearizerOpts(unittest.TestCase):
     opts_shapes = [
       ([Opt(OptOps.LOCAL, 0, 2)], [("blue",16),("blue",32),("cyan",2),("red",32)]),
       ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.GROUP, 0, 2)], [("blue",16),("blue",32),("cyan",2),("green",2),("red",16)]),
-      # TODO: fix these broken transformations
-      # ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.UNROLL, 0, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
-      # ([Opt(OptOps.GROUP, 0, 2),Opt(OptOps.UNROLL, 0, 0)], [("blue",32),("blue",32),("red",16),("magenta",2)]),
+      # check to ensure local_dims are stable for full UNROLL of first_reduce
+      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.UNROLL, 0, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
+      ([Opt(OptOps.UNROLL, 0, 0),Opt(OptOps.LOCAL, 0, 2)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
+      # check behavior for full UNROLL on an existing GROUP
+      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.GROUP, 0, 0),Opt(OptOps.UNROLL, 0, 2)], [("blue",16),("blue",32),("cyan",2),("green",16),("magenta",2)]),
+      ([Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.GROUP, 0, 0),Opt(OptOps.UNROLL, 0, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
+      ([Opt(OptOps.GROUP, 0, 0),Opt(OptOps.LOCAL, 0, 2),Opt(OptOps.UNROLL, 0, 0)], [("blue",16),("blue",32),("cyan",2),("magenta",32)]),
+      ([Opt(OptOps.GROUP, 0, 2),Opt(OptOps.UNROLL, 0, 0)], [("blue",32),("blue",32),("red",16),("magenta",2)]),
     ]
     helper_linearizer_opt(r, [x[0] for x in opts_shapes], color_sizes=[x[1] for x in opts_shapes])
 
@@ -643,14 +688,13 @@ class TestLinearizerHelper(unittest.TestCase):
   def test_sum_node_expand(self):
     a = Variable("_uidx0", 1, 3)
     b = Variable("b", 5, 7)
-
-    s1 = create_rednode(SumNode, [a, b])
+    s1 = a + b
     assert expand_node(s1) == [Node.sum([NumNode(i),b]) for i in range(1,4)]
 
   def test_multi_expand(self):
     a = Variable("a", 1, 3)
     b = Variable("b", 14, 17)
-    s1 = create_rednode(SumNode, [a, b])
+    s1 = a + b
     # expand increments earlier variables faster than later variables (as specified in the argument)
     # this behavior was just copied from before, no idea why this should be true
     assert expand_node(s1, (a, b)) == [NumNode(x + y) for x in range(b.min, b.max + 1) for y in range(a.min, a.max + 1)]

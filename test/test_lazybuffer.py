@@ -2,6 +2,7 @@
 import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.lazy import LazyBuffer
 
 class TestLazyBuffer(unittest.TestCase):
   def test_fromcpu_shape_tracker(self):
@@ -56,6 +57,15 @@ class TestLazyBuffer(unittest.TestCase):
     b = Tensor.zeros(4,1,4)
     c = a.cat(b, dim=1)
     np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
+
+  def test_const_dtype(self):
+    lb: LazyBuffer = Tensor([1], dtype=dtypes.int).lazydata
+    assert lb.const(1).base.arg == 1
+    assert type(lb.const(1).base.arg) is int
+
+    lb: LazyBuffer = Tensor([1], dtype=dtypes.float).lazydata
+    assert lb.const(1).base.arg == 1.0
+    assert type(lb.const(1).base.arg) is float
 
 if __name__ == "__main__":
   unittest.main()

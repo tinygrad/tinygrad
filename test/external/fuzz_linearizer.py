@@ -6,9 +6,9 @@ from extra.optimization.helpers import load_worlds, ast_str_to_lin
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
 from tinygrad.tensor import Tensor
-from tinygrad.graph import print_tree
+from tinygrad.features.graph import print_tree
 from tinygrad.helpers import getenv, from_mv, Context
-from tinygrad.device import Device, Compiled, Interpreted
+from tinygrad.device import Device, Compiled
 from tinygrad.codegen.linearizer import UOp
 
 def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
@@ -134,7 +134,6 @@ if __name__ == "__main__":
   tested = 0
   failures = defaultdict(list)
   for i, ast in enumerate(ast_strs[:getenv("FUZZ_N", len(ast_strs))]):
-    if "Variable" in ast and isinstance(device, Interpreted): continue  # no symbolic shape for Interpreted
     if "dtypes.image" in ast and Device.DEFAULT != "GPU": continue  # IMAGE is only for GPU
     print(f"testing ast {i}")
     tested += 1

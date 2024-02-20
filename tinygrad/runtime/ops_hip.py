@@ -7,8 +7,7 @@ from tinygrad.helpers import from_mv, round_up, to_mv, colored, init_c_struct_t
 from tinygrad.device import Compiled, LRUAllocator, BufferOptions, JITRunner, Device, Buffer, MallocAllocator, update_stats, Compiler
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.codegen.kernel import LinearizerOptions
-from tinygrad.runtime.compiler.hip_comgr import compile_hip
-
+from tinygrad.runtime.driver.hip_comgr import compile_hip
 
 class HIPCompiler(Compiler):
   linearizer_opts = LinearizerOptions("HIP", has_tensor_cores=True)
@@ -71,11 +70,14 @@ CHUNK_SIZE, PAGE_SIZE = 256*1024*1024, 0x1000
 class HIPAllocator(LRUAllocator):
   def __init__(self, device:HIPDevice):
     self.device = device
-    self.track_cross_device: List[HIPDevice] = []
+    self.track_cross_device: Set[HIPDevice] = set()
     super().__init__()
-  def free_cache(self):
+  def full_synchronize(self):
     self.device.synchronize()
     for x in self.track_cross_device: x.synchronize()
+    self.track_cross_device.clear()
+  def free_cache(self):
+    self.full_synchronize()
     return super().free_cache()
   def _alloc(self, size:int):
     hip_set_device(self.device.device)
@@ -120,10 +122,10 @@ class HIPAllocator(LRUAllocator):
     ctypes.memmove(host_mem, from_mv(src), len(src))
     check(hip.hipMemcpyAsync(dest, host_mem, len(src), hip.hipMemcpyHostToDevice, None))
   def copyout(self, dest:memoryview, src:T):
-    self.device.synchronize()
+    self.full_synchronize()
     hip_set_device(self.device.device)
     check(hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
-  def transfer(self, dest:T, src:T, sz:int):
+  def transfer(self, dest:T, src:T, sz:int, **kwargs):
     hip_set_device(self.device.device)
     check(hip.hipMemcpyAsync(dest, src, sz, hip.hipMemcpyDeviceToDevice, None))
 

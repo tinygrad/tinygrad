@@ -18,8 +18,9 @@ def un1d(shape:Tuple[sint, ...], offs:sint) -> List[sint]:
 
 @functools.lru_cache(maxsize=None)
 def merge_views(vm2:View, vm1:View) -> Optional[View]:
-  if vm1.contiguous and vm1.shape == vm2.shape: return vm2
   if vm2.contiguous: return vm1
+  if vm1.contiguous and vm1.shape == vm2.shape: return vm2
+  if vm1.contiguous and vm1.size() == vm2.size() and (ret := vm2.reshape(vm1.shape)) is not None: return ret
   if not vm2.mask and vm1.offset == 0 and None not in (rstrides := ShapeTracker((vm2, vm1)).real_strides()):
     return View.create(vm1.shape, cast(Tuple[sint, ...], rstrides), vm2.offset, vm1.mask)
   if vm1.mask:
@@ -141,7 +142,7 @@ class ShapeTracker:
     bad_idx_vars: Set[Variable] = set()
     for this_dim in (idx.nodes if isinstance(idx, SumNode) else [idx]):
       idx_maybe, stride_maybe = (this_dim.a, this_dim.b) if isinstance(this_dim, MulNode) else (this_dim, 1)
-      try: ret[idxs.index(idx_maybe)] = stride_maybe
+      try: ret[idxs.index(idx_maybe)] = cast(sint, stride_maybe)
       except ValueError: bad_idx_vars = bad_idx_vars.union(idx_maybe.vars())
     idx_vars, valid_vars = idx.vars(), valid.vars()
     for i,tidx in enumerate(idxs):
