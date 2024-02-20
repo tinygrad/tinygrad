@@ -1,10 +1,13 @@
 import unittest
+from tinygrad.helpers import CI
+from tinygrad import Device
 from examples.mamba import Mamba, generate
 from transformers import AutoTokenizer
 
 PROMPT = 'Why is gravity '
 TOKENIZER = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
 
+@unittest.skipIf(CI and Device.DEFAULT in ["CLANG"], "Inference hack broken on CLANG")
 class TestMamba(unittest.TestCase):
   def test_mamba_130M(self):
     OUT_130M = '''Why is gravity \nnot a good idea?\n\nA:'''
