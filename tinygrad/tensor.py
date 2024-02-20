@@ -246,13 +246,13 @@ class Tensor:
     return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(dtype or dtypes.default_float)
 
   @staticmethod
-  def randint(*shape, low=0, high=10, **kwargs) -> Tensor: return Tensor.uniform(*shape, low=low, high=high, dtype=dtypes.int32, **kwargs)
+  def randint(*shape, low: int=0, high: int=10, **kwargs) -> Tensor: return Tensor.uniform(*shape, low=low, high=high, dtype=dtypes.int32, **kwargs)
 
   @staticmethod
-  def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor: return (std * Tensor.randn(*shape, **kwargs)) + mean
+  def normal(*shape, mean: float=0.0, std: float=1.0, **kwargs) -> Tensor: return (std * Tensor.randn(*shape, **kwargs)) + mean
 
   @staticmethod
-  def uniform(*shape, low=0.0, high=1.0, **kwargs) -> Tensor:
+  def uniform(*shape, low: int=0.0, high: int=1.0, **kwargs) -> Tensor:
     dtype = kwargs.pop("dtype", dtypes.default_float)
     return ((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype) + low
 
@@ -287,8 +287,8 @@ class Tensor:
 
   # ***** toposort and backward pass *****
 
-  def deepwalk(self):
-    def _deepwalk(node, visited):
+  def deepwalk(self) -> List[Tensor]:
+    def _deepwalk(node:Tensor, visited:set[Tensor]) -> Iterable[Tensor]:
       visited.add(node)
       if getattr(node, "_ctx", None):
         for i in node._ctx.parents:
@@ -317,7 +317,7 @@ class Tensor:
 
   # ***** movement mlops *****
 
-  def reshape(self, shape:Tuple[sint, ...], *args) -> Tensor:
+  def reshape(self, shape, *args) -> Tensor:
     new_shape = argfix(shape, *args)
     new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)])
     return mlops.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self

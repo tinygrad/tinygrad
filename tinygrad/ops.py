@@ -50,7 +50,7 @@ class LazyOp:
   op: Op
   src: Tuple[LazyOp, ...] = ()
   arg: Any = None
-  def cached_compare(self, x, context):
+  def cached_compare(self, x: LazyOp, context: Dict[Tuple[int, int], bool]) -> bool:
     if id(self) == id(x): return True
     if self.op != x.op or self.arg != x.arg or len(self.src) != len(x.src): return False
     if (key := (id(self), id(x))) in context: return context[key]
@@ -80,7 +80,7 @@ class FlopCounter:
     self.flops, ret = 0, self.flops
     return ret
 
-InterpretedFlopCounter: Dict[Op, Callable] = {
+InterpretedFlopCounter: Dict[Op, Callable[..., FlopCounter]] = {
   BufferOps.LOAD: lambda arg: FlopCounter(arg.st.shape, arg.dtype, 0, {arg.idx: arg.dtype.itemsize*arg.st.real_size()}),
   BufferOps.CONST: lambda arg: FlopCounter(arg.st.shape, arg.dtype, 0, {}),
   BufferOps.STORE: lambda self,arg: FlopCounter(arg.st.shape, arg.dtype, self.consume_flops(), {**self.mem, arg.idx: arg.dtype.itemsize*arg.st.real_size()}),  # noqa: E501
