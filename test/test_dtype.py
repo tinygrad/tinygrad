@@ -192,6 +192,9 @@ class TestInt8Dtype(TestDType):
   def test_int8_to_uint8_negative(self):
     _test_op(lambda: Tensor([-1, -2, -3, -4], dtype=dtypes.int8).cast(dtypes.uint8), dtypes.uint8, [255, 254, 253, 252])
 
+  def test_int8_to_uint16_negative(self):
+    _test_op(lambda: Tensor([-1, -2, -3, -4], dtype=dtypes.int8).cast(dtypes.uint16), dtypes.uint16, [2**16-1, 2**16-2, 2**16-3, 2**16-4])
+
 class TestUint8Dtype(TestDType):
   DTYPE = dtypes.uint8
   @unittest.skipIf(getenv("CUDA",0)==1 or getenv("PTX", 0)==1, "cuda saturation works differently")
@@ -215,7 +218,12 @@ class TestBitCast(unittest.TestCase):
     assert b.numpy()[0,0] == 1.
 
 class TestInt16Dtype(TestDType): DTYPE = dtypes.int16
-class TestUint16Dtype(TestDType): DTYPE = dtypes.uint16
+
+class TestUint16Dtype(TestDType):
+  DTYPE = dtypes.uint16
+
+  def test_uint16_to_int8_overflow(self):
+    _test_op(lambda: Tensor([2**16-1, 2**16-2, 1, 0], dtype=dtypes.uint16).cast(dtypes.int8), dtypes.int8, [-1, -2, 1, 0])
 
 class TestInt32Dtype(TestDType): DTYPE = dtypes.int32
 class TestUint32Dtype(TestDType): DTYPE = dtypes.uint32

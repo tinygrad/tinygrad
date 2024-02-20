@@ -134,10 +134,10 @@ class PythonProgram:
               ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
             else:
               casted = [float(x) if dtypes.is_float(dtype) else int(x) if dtypes.is_int(dtype) else x for x in inp[0]]
-              overflowed = [(x % 2**(dtype.itemsize*8)) - 2**(dtype.itemsize*8-1)*(not dtypes.is_unsigned(dtype))*(x<0) if dtypes.is_int(dtype)
-                            else x for x in casted]
-              packed = struct.pack(pack_format if (dtypes.is_int(dtype) and dtypes.is_int(dtp[0]) and dtype.itemsize == dtp[0].itemsize)
-                                   else unpack_format, *overflowed)
+              overflow_adjustment = 2**(dtype.itemsize*8-1) * (not dtypes.is_unsigned(dtype))
+              overflow_fixed = [((x + overflow_adjustment) % 2**(dtype.itemsize*8) - overflow_adjustment) if dtypes.is_int(dtype)
+                                else x for x in casted]
+              packed = struct.pack(unpack_format, *overflow_fixed)
               ul[i] = list(struct.unpack(unpack_format, packed))
         elif uop is UOps.LOAD:
           if isinstance(dtp[0], ImageDType):
