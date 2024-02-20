@@ -1,7 +1,7 @@
 import os, atexit, functools
 from collections import defaultdict
 from typing import List, Any, DefaultDict, TYPE_CHECKING
-from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, MovementOps, LoadOps, BufferOps, TernaryOps, LazyOp, GlobalCounters
+from tinygrad.ops import UnaryOps, BinaryOps, ReduceOps, LoadOps, BufferOps, TernaryOps, LazyOp, GlobalCounters
 from tinygrad.device import Device
 from tinygrad.helpers import GRAPHPATH, DEBUG, getenv
 from tinygrad.codegen.linearizer import UOps, UOp
@@ -46,7 +46,7 @@ def realized_lazybuffer(lb:'LazyBuffer', num):
   G.nodes[nm(lb)]['label'] = '"' + G.nodes[nm(lb)]["label"].replace('"', '') + f'\nK:{num} b:{"FAKE" if lb.realized is None else nm(lb.realized)}"'
 
 top_colors = {LoadOps: '#FFFFa0', UnaryOps: "#c0c0c0", ReduceOps: "#FFA0A0", BinaryOps: "#c0c0c0",
-              MovementOps: "#80ff80", TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
+              TernaryOps: "#c0c0c0", BufferOps: '#a0a0ff'}
 def log_lazybuffer(lb:'LazyBuffer', scheduled=False):
   init_graph()
   if lb.base != lb:
