@@ -47,18 +47,22 @@ def _store(m, i, v):
   m[i] = v
 
 def cstyle_cast(value, in_dtype: DType, out_dtype: DType, bitcast: bool):
-  def c_bitcast(value, in_dtype: DType, out_dtype: DType):
+  def c_bitcast(value, out_dtype_name: str, in_dtype_name: Optional[str] = None):
+    # passing only the out data type means reinterpret the bits of the input value as the output type
+    if in_dtype_name is None: in_dtype_name = out_dtype_name
     # mapping dtype.name to ctypes API names as per https://docs.python.org/3/library/ctypes.html
     def to_cname(dtype_name: str): return f"c_{dtype_name.replace('char', 'int8').replace('unsigned ', 'u')}"
-    in_cvalue, out_ctype = getattr(ctypes, f"{to_cname(in_dtype.name)}")(value), getattr(ctypes, f"{to_cname(out_dtype.name)}")
+    in_cvalue, out_ctype = getattr(ctypes, f"{to_cname(in_dtype_name)}")(value), getattr(ctypes, f"{to_cname(out_dtype_name)}")
     return ctypes.cast(ctypes.pointer(in_cvalue), ctypes.POINTER(out_ctype)).contents.value
 
-  if bitcast: return c_bitcast(value, in_dtype, out_dtype)
+  if bitcast: return c_bitcast(value, out_dtype.name, in_dtype.name)
 
   # perform Python type casting for Python-supported types
   out = int(value) if dtypes.is_int(out_dtype) else float(value) if dtypes.is_float(out_dtype) else bool(value)
   # bitcast the output to mimic C-style type casting for operands involving unsigned types
-  if dtypes.is_unsigned(in_dtype) or dtypes.is_unsigned(out_dtype): out = c_bitcast(out, out_dtype, out_dtype)
+  # for example, if input is -2.5 (float) and the output type is uint, then Python can cast the input to -2 (int),
+  # but we need to continue our casting to uint, and so c_bitcast here is used to reinterpret the bits as uint
+  if dtypes.is_unsigned(in_dtype) or dtypes.is_unsigned(out_dtype): out = c_bitcast(out, out_dtype.name)
   return out
 
 class PythonProgram:
