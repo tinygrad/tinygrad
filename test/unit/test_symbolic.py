@@ -413,9 +413,11 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     c = Variable("c", 1, 10)
     d = Variable("d", 5, 10)
     # if the value is always the same, it folds to num
-    assert (a < b) == 1
-    assert (b < a) == 0
-    assert (d < a) == 0
+    assert (a < b) == NumNode(1)
+    assert (b < a) == NumNode(0)
+    assert (d < a) == NumNode(0)
+    assert (a < a) == NumNode(0)
+    assert (a > a) == NumNode(0)
     # if it remains as a LtNode, bool is always true and (min, max) == (0, 1)
     assert isinstance((a < c), LtNode) and (a < c).min == 0 and (a < c).max == 1
     assert a < c
