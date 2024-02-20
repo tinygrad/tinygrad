@@ -9,7 +9,7 @@ from tinygrad.lazy import LazyBuffer
 from tinygrad.ops import BinaryOps, BufferOps, ConstBuffer, LazyOp, LoadOps, MemBuffer, Op, ReduceOps
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, getenv
 
 class ASTRunner(JITRunner):
   def __init__(self, ast: Tuple[LazyOp,...]):
@@ -147,6 +147,7 @@ class MiniLinearizer:
     return self.uops
 
 class TestLinearizer2(unittest.TestCase):
+  assert getenv("LINEARIZER2"), "please use LINEARIZER2=1 to render the bufs correctly in cstyle"
   def _new_realize(self, vals):
     scheduler = Scheduler()
     scheduler.create_schedule([x.lazydata for x in vals])

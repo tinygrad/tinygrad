@@ -65,7 +65,7 @@ class CStyleLanguage(NamedTuple):
 
   def render_kernel(self, function_name:str, kernel:List[str], bufs:List[Tuple[str,DType]], local_size:List[int], uops:List[UOp], prefix=None) -> str:
     tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,dtype in bufs) else ""  # noqa: E501
-    bufs = sorted(bufs, key=lambda x: x[0].split("data")[-1])
+    if getenv("LINEARIZER2"): bufs = sorted(bufs, key=lambda x: x[0].split("data")[-1]) # TODO this breaks indexing, need to think of a good way to sort multi-output bufs
     buftypes = [(name,f"{'read_only' if i > 0 else 'write_only'} image2d_t" if dtype.name.startswith('image') else
                 self.buffer_prefix+self.render_dtype(dtype)+"*"+self.buffer_suffix if isinstance(dtype, PtrDType) else
                 self.arg_int_prefix if dtype == dtypes.int else None) for i,(name,dtype) in enumerate(bufs)]
