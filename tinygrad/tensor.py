@@ -246,13 +246,13 @@ class Tensor:
     return src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(dtype or dtypes.default_float)
 
   @staticmethod
-  def randint(*shape, low: int=0, high: int=10, **kwargs) -> Tensor: return Tensor.uniform(*shape, low=low, high=high, dtype=dtypes.int32, **kwargs)
+  def randint(*shape, low=0, high=10, **kwargs) -> Tensor: return Tensor.uniform(*shape, low=low, high=high, dtype=dtypes.int32, **kwargs)
 
   @staticmethod
-  def normal(*shape, mean: float=0.0, std: float=1.0, **kwargs) -> Tensor: return (std * Tensor.randn(*shape, **kwargs)) + mean
+  def normal(*shape, mean=0.0, std=1.0, **kwargs) -> Tensor: return (std * Tensor.randn(*shape, **kwargs)) + mean
 
   @staticmethod
-  def uniform(*shape, low: int=0.0, high: int=1.0, **kwargs) -> Tensor:
+  def uniform(*shape, low=0.0, high=1.0, **kwargs) -> Tensor:
     dtype = kwargs.pop("dtype", dtypes.default_float)
     return ((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype) + low
 
@@ -305,6 +305,8 @@ class Tensor:
 
     for t0 in reversed(self.deepwalk()):
       if t0.grad is None: raise RuntimeError("tensor has no grad")
+      # NOTE: Not sure whether to raise an error here or not
+      if t0._ctx is None: continue
       grads = t0._ctx.backward(t0.grad.lazydata)
       grads = [Tensor(g, device=self.device, requires_grad=False) if g is not None else None
         for g in ([grads] if len(t0._ctx.parents) == 1 else grads)]
