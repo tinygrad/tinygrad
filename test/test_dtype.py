@@ -162,9 +162,9 @@ class TestHalfDtype(TestDType): DTYPE = dtypes.half
 class TestFloatDType(TestDType):
   DTYPE = dtypes.float
 
-  def test_float_to_uint_negative(self):
-    _test_op(lambda: Tensor([-3.5, -2.5, -1.5], dtype=dtypes.float).cast(dtypes.uint), dtypes.uint,
-             [4294967293, 4294967294, 4294967295])
+  def test_float_to_uint(self):
+    _test_op(lambda: Tensor([-0.9, -0.3, 1.2], dtype=dtypes.float32).cast(dtypes.uint32), dtypes.uint32,
+             [0, 0, 1])
 
 class TestDoubleDtype(TestDType):
   DTYPE = dtypes.double
@@ -226,7 +226,12 @@ class TestUint16Dtype(TestDType):
     _test_op(lambda: Tensor([2**16-1, 2**16-2, 1, 0], dtype=dtypes.uint16).cast(dtypes.int8), dtypes.int8, [-1, -2, 1, 0])
 
 class TestInt32Dtype(TestDType): DTYPE = dtypes.int32
-class TestUint32Dtype(TestDType): DTYPE = dtypes.uint32
+class TestUint32Dtype(TestDType):
+  DTYPE = dtypes.uint32
+
+  @unittest.skipIf(getenv("PYTHON",0)==1, "python memoryview doesn't support float16")
+  def test_uint32_to_float16_inf(self):
+    _test_op(lambda: Tensor([2**20-1, 2**20-2, 1, 0], dtype=dtypes.uint32).cast(dtypes.float16), dtypes.float16, [float('inf'), float('inf'), 1, 0])
 
 class TestInt64Dtype(TestDType): DTYPE = dtypes.int64
 class TestUint64Dtype(TestDType): DTYPE = dtypes.uint64
