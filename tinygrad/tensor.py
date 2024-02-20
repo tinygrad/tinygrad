@@ -859,7 +859,7 @@ class Tensor:
     return mlops.Mul.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x != 1.0 else self
   def div(self, x:Union[Tensor, Scalar], reverse=False, upcast=True) -> Tensor:
     x = self._to_const_val(x)
-    if x.__class__ is not Tensor and not reverse and x != 0 and dtypes.is_float(self.dtype): return self.mul(1/x)
+    if x.__class__ is not Tensor and not reverse and x != 0 and upcast: return self.mul(1/x)
     if (isinstance(x, Tensor) and dtypes.is_float(x.dtype)) or not upcast: return mlops.Div.apply(*self._broadcasted(x, reverse))
     return mlops.Div.apply(*self.cast(least_upper_float(self.dtype))._broadcasted(x, reverse))
   def xor(self, x:Tensor, reverse=False) -> Tensor: return mlops.Xor.apply(*self._broadcasted(x, reverse))
