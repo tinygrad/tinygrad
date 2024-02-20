@@ -161,9 +161,13 @@ class TestHalfDtype(TestDType): DTYPE = dtypes.half
 
 class TestFloatDType(TestDType):
   DTYPE = dtypes.float
-  @unittest.skipIf(getenv("HIP", 0) == 1 or getenv("CUDA", 0) == 1 or getenv("METAL", 0) == 1, "doesn't work on CUDA, HIP, or METAL")
+  @unittest.skipIf(any([getenv("HIP"), getenv("CUDA"), getenv("METAL")]), "has different behavior on mentioned devices")
   def test_float_to_uint_negative(self):
-    _test_op(lambda: Tensor([-3.5, -2.5, -1.5], dtype=dtypes.float).cast(dtypes.uint), dtypes.uint, [4294967293, 4294967294, 4294967295])
+    _test_op(lambda: Tensor([-3.5, -2.5, -1.5], dtype=dtypes.float).cast(dtypes.uint), dtypes.uint, [2**32-1, 2**32-1, 2**32-1])
+
+  @unittest.skipIf(not any([getenv("HIP"), getenv("CUDA"), getenv("METAL")]), "the behavior is only for mentioned devices")
+  def test_float_to_uint_zeros(self):
+    _test_op(lambda: Tensor([-3.5, -2.5, -1.5], dtype=dtypes.float).cast(dtypes.uint), dtypes.uint, [0, 0, 0])
 
 class TestDoubleDtype(TestDType):
   DTYPE = dtypes.double
@@ -192,7 +196,7 @@ class TestInt8Dtype(TestDType):
     _test_op(lambda: Tensor([-1, -2, -3, -4], dtype=dtypes.int8).cast(dtypes.uint8), dtypes.uint8, [255, 254, 253, 252])
 
   def test_int8_to_uint16_negative(self):
-    _test_op(lambda: Tensor([-1, -2, -3, -4], dtype=dtypes.int8).cast(dtypes.uint16), dtypes.uint16, [65535, 65534, 65533, 65532])
+    _test_op(lambda: Tensor([-1, -2, -3, -4], dtype=dtypes.int8).cast(dtypes.uint16), dtypes.uint16, [2**16-1, 2**16-2, 2**16-3, 2**16-4])
 
 class TestUint8Dtype(TestDType):
   DTYPE = dtypes.uint8
@@ -201,7 +205,7 @@ class TestUint8Dtype(TestDType):
     _test_op(lambda: Tensor([255, 254, 253, 252], dtype=dtypes.uint8).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
 
   def test_uint16_to_int8_overflow(self):
-    _test_op(lambda: Tensor([65535, 65534, 65533, 65532], dtype=dtypes.uint16).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
+    _test_op(lambda: Tensor([2**16-1, 2**16-2, 2**16-3, 2**16-4], dtype=dtypes.uint16).cast(dtypes.int8), dtypes.int8, [-1, -2, -3, -4])
 
 @unittest.skipIf(Device.DEFAULT == "WEBGL", "No bitcast on WebGL")
 class TestBitCast(unittest.TestCase):
