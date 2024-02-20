@@ -2,7 +2,7 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Tuple, List, Optional, Any, Dict
-import pickle, base64, itertools, time, math
+import pickle, base64, itertools, time, math, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Allocator, Compiler
@@ -128,13 +128,15 @@ class PythonProgram:
           if dtype.count > 1:
             ul[i] = inp
           else:
-            # TODO: add real cast
-            if dtypes.is_int(dtype):
-              ul[i] = [int(x) for x in inp[0]]
-            elif dtypes.is_float(dtype):
-              ul[i] = [float(x) for x in inp[0]]
+            assert dtp[0].fmt and dtype.fmt
+            pack_format, unpack_format = str(warp_size) + dtp[0].fmt, str(warp_size) + dtype.fmt
+            if arg[1]:
+              ul[i] = list(struct.unpack(unpack_format, struct.pack(pack_format, *inp[0])))
             else:
-              ul[i] = inp[0]
+              casted = [float(x) if dtypes.is_float(dtype) else int(x) if dtypes.is_int(dtype) else x for x in inp[0]]
+              packed = struct.pack(pack_format if (dtypes.is_int(dtype) and dtypes.is_int(dtp[0]) and dtype.itemsize == dtp[0].itemsize)
+                                   else unpack_format, *casted)
+              ul[i] = list(struct.unpack(unpack_format, packed))
         elif uop is UOps.LOAD:
           if isinstance(dtp[0], ImageDType):
             assert dtype.count == 4
