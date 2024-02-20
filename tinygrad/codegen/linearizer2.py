@@ -67,8 +67,6 @@ def linearize_lazyop(x:LazyOp) -> List[LazyOp]:
 # B = (256, 4,  1024, 256, 4)
 #      glb  up  glb   red  un
 
-
-
 class Linearizer:
   def __init__(self, ast:LazyOp, opts:LinearizerOptions):
     self.opts = opts

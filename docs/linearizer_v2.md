@@ -25,3 +25,19 @@ We keep the frontend (Tensor -> LazyBuffer): tensor.py + mlops.py + lazy.py + dt
 We keep the shapetracker/symbolic (part of the frontend): shapetracker.py + view.py + symbolic.py = 603 lines
 Codegen is all rewritten. realize.py is simpler with the new codegen
 We keep the backend (uops renderer/runtime): cstyle.py/llvmir.py + device.py + ops_*.py = 1216 lines (less when we remove interpreted)
+
+V2
+
+For each buffer in the global graph, we assign it to one of four places:
+* Global memory
+* Local memory
+* Warp-local memory (this is what tensor cores are)
+* Registers (RDNA3 has two scopes for registers, v (vector in warp) and s (same in warp like indexing))
+
+All the buffers in a kernel have to have the same shape, and certain shape changes aren't allowed.
+
+Can all shapetrackers be pushed to the edge?
+
+Pushing expands through reduces, a massive compute waste, but possible. Can reduce be a shapetracker op?
+
+How do we canonicalize the shape of an AST?
