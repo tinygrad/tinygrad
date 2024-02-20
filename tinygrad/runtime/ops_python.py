@@ -49,7 +49,7 @@ def _store(m, i, v):
 def cstyle_cast(value, in_dtype: DType, out_dtype: DType, bitcast: bool):
   def c_bitcast(value, in_dtype: DType, out_dtype: DType):
     # mapping dtype.name to ctypes API names as per https://docs.python.org/3/library/ctypes.html
-    def to_cname(dtype_name: str): return dtype_name.replace("char", "int8").replace("unsigned", "u").replace(" ", "")
+    def to_cname(dtype_name: str): return dtype_name.replace("char", "int8").replace("unsigned ", "u")
     in_cvalue, out_ctype = getattr(ctypes, f"c_{to_cname(in_dtype.name)}")(value), getattr(ctypes, f"c_{to_cname(out_dtype.name)}")
     return ctypes.cast(ctypes.pointer(in_cvalue), ctypes.POINTER(out_ctype)).contents.value
 
