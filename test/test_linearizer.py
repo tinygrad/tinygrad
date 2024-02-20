@@ -132,9 +132,10 @@ class TestLinearizer(unittest.TestCase):
       r = a.matmul(b, acc_dtype=tc.dtype_out)
       realized_ast, _ = helper_realized_ast(r)
       k = Linearizer(realized_ast)
-      k.apply_tensor_cores(use_tensor_cores=1, axis=0)
+      k.apply_opt(Opt(OptOps.TC, 0, 0))
       k.linearize()
       assert len([uop for uop in k.uops if uop.uop == UOps.WMMA]) == 1, "tensor core not triggered"
+      assert len([x for x in k.applied_opts if x.op == OptOps.TC]) == 1, "tensor core opt not included"
       np_c = np_a @ np_b
       (tc_atol, tc_rtol) = (1e-2, 1e-3) if tc.dtype_out == dtypes.half else (5e-3, 1e-4)
       np.testing.assert_allclose(np_c, r.numpy(), atol=tc_atol, rtol=tc_rtol)
@@ -413,11 +414,9 @@ def helper_linearizer_opt(r:Tensor, opts=[], apply_tc=False, atol=1e-4, rtol=1e-
 
   def check_opt(opts, create_k, to_prg, expected_color_size):
     k = create_k()
-    if apply_tc:
-      assert k.apply_tensor_cores(use_tensor_cores=1, axis=0, extra_opts=opts), "no tensor core triggered"
-    else:
-      for opt in opts:
-        k.apply_opt(opt)
+    if apply_tc: k.apply_opt(Opt(OptOps.TC, 0, 0))
+    for opt in opts:
+      k.apply_opt(opt)
     if expected_color_size is not None:
       assert (cs:=[(x,y) for x,y in zip(k.colors(), k.full_shape)]) == expected_color_size, f"expected={expected_color_size} got={cs}"
     prg = to_prg(k)
@@ -565,7 +564,9 @@ class TestLinearizerOpts(unittest.TestCase):
     for x in invalid_opts:
       k = Linearizer(realized_ast)
       with self.assertRaises(AssertionError):
-        assert k.apply_tensor_cores(use_tensor_cores=1, axis=0, extra_opts=x), "no valid tensor core" # for METAL in runners
+        assert k.apply_opt(Opt(OptOps.TC, 0, 0)), "no valid tensor core" # for METAL in runners
+        for opt in x:
+          k.apply_opt(opt)
 
   def test_tensor_core_opts(self):
     if not Device[Device.DEFAULT].compiler.linearizer_opts.has_tensor_cores:

@@ -170,9 +170,9 @@ class Linearizer(Kernel):
     if self.applied_opts == self.applied_opts_cache: return self
 
     # late alias the tensor core buffers
-    if (tc:=self.tensor_core):
+    if (tc:=self.tensor_core) and (tc_opts:=self.tensor_core_opts):
       alias_pattern = [0]*(self.global_dims+(self.local_dims-len(tc.threads))) + [2]*(len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
-      for tc_buf in self.tensor_core_bufs:
+      for tc_buf in tc_opts.bufs:
         self.alias_buffer(tc_buf, alias_pattern)
 
     # save backups
