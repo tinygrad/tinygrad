@@ -168,9 +168,9 @@ class OpNode(Node):
 
 class LtNode(OpNode):
   def get_bounds(self) -> Tuple[int, int]:
-    if (diff := self.a - self.b).min >= 0: return 0, 0
-    if diff.max < 0: return 1, 1
-    return 0, 1
+    if self.a == self.b: return (0, 0)
+    if isinstance(self.b, int): return (1, 1) if self.a.max < self.b else (0, 0) if self.a.min >= self.b else (0, 1)
+    return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min >= self.b.max else (0, 1)
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
     return self.a.substitute(var_vals) < (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
