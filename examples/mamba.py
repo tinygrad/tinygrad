@@ -5,7 +5,7 @@ from typing import Any, Optional
 from dataclasses import dataclass, field
 import time
 from tinygrad import Tensor, dtypes, nn
-from tinygrad.jit import TinyJit
+from tinygrad.features.jit import TinyJit
 from tinygrad.helpers import fetch
 from tinygrad.nn.state import get_state_dict, load_state_dict, torch_load
 
