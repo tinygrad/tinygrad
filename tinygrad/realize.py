@@ -1,6 +1,6 @@
 import sys
 from collections import defaultdict
-from typing import List, Dict, Optional, cast, Set, DefaultDict
+from typing import Callable, List, Dict, Optional, Tuple, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
 from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, Compiled, BufferOptions
 from tinygrad.features.graph import print_tree, realized_lazybuffer, log_lazybuffer
@@ -13,16 +13,16 @@ from tinygrad.shape.shapetracker import ShapeTracker
 # *** schedule running ***
 
 class CustomOp(JITRunner):
-  def __init__(self, fxn):
+  def __init__(self, fxn:Callable):
     self.fxn = fxn
     super().__init__()
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False): self.fxn(*rawbufs)
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait:bool=False, jit:bool=False): self.fxn(*rawbufs)
 
 class SyncOp(JITRunner):
-  def __init__(self, device):
+  def __init__(self, device:str):
     self.device, self.dname = Device[device], device
     super().__init__()
-  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False):
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait:bool=False, jit:bool=False):
     et = cpu_time_execution(self.device.synchronize, enable=wait or DEBUG >= 1)
     update_stats(colored("synchronize", "RED"), 0, 0, {}, et, 1, device=self.dname)
 
@@ -84,7 +84,7 @@ sys.setrecursionlimit(10000)
 
 # recursively create a lazyop
 def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Variable, int], st:ShapeTracker,
-                      realizes:Set[LazyBuffer], cache, first=True) -> LazyOp:
+                      realizes:Set[LazyBuffer], cache:Dict[Tuple[LazyBuffer, ShapeTracker], LazyOp], first:bool=True) -> LazyOp:
   if (buf, st) in cache: return cache[(buf, st)]
   if buf != buf.base:
     st = buf.st + st
@@ -139,7 +139,7 @@ def _recursive_schedule(out:LazyBuffer, seen:Set[LazyBuffer], realizes:Set[LazyB
 
 # recursively search the entire graph for all LazyBuffers, insert realizes after expands
 def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffer, None],
-                simple_pads:Set[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], scheduled=False):
+                simple_pads:Set[LazyBuffer], children:DefaultDict[LazyBuffer, Dict[LazyBuffer, None]], scheduled:bool=False):
   if buf in allbufs or buf.base.realized: return
   if GRAPH: log_lazybuffer(buf, scheduled)
   if isinstance(buf.dtype, ImageDType) and (prod(buf.shape) != prod(buf.dtype.shape) or
