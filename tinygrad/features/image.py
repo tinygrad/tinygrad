@@ -1,10 +1,11 @@
 from typing import Tuple
 from tinygrad.helpers import prod, IMAGE, getenv, DEBUG
 from tinygrad.dtype import dtypes
+from tinygrad.tensor import Tensor
 
 # *** image Tensor function replacements ***
 
-def image_dot(self, w, acc_dtype=None):
+def image_dot(self: Tensor, w: Tensor, acc_dtype: dtypes = None) -> Tensor:
   # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
   n1, n2 = len(self.shape), len(w.shape)
   assert n1 != 0 and n2 != 0, f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
@@ -19,7 +20,7 @@ def image_dot(self, w, acc_dtype=None):
   cw = w.transpose(w.ndim-1, w.ndim-2).reshape((groups*cout, cin, 1, 1))
   return image_conv2d(cx, cw, groups=groups, acc_dtype=acc_dtype).reshape(out_shape_t).transpose(self.ndim-1, self.ndim-2)
 
-def image_conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, padding=0, acc_dtype=None):
+def image_conv2d(self: Tensor, weight: Tensor, bias: Tensor = None, stride: int = 1, padding: int = 0, dilation: int = 1, groups: int = 1, acc_dtype: dtypes = None) -> Tensor:
   base_image_type = dtypes.imageh if getenv("FLOAT16", 0) else dtypes.imagef
 
   (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape

@@ -317,7 +317,7 @@ class Tensor:
 
   # ***** movement mlops *****
 
-  def reshape(self, shape, *args) -> Tensor:
+  def reshape(self, shape:Tuple[sint, ...], *args) -> Tensor:
     new_shape = argfix(shape, *args)
     new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else (s if s is not None else self.shape[i]) for i,s in enumerate(new_shape)])
     return mlops.Reshape.apply(self, shape=new_shape) if new_shape != self.shape else self
