@@ -55,12 +55,11 @@ def cstyle_cast(value, in_dtype: DType, out_dtype: DType, bitcast: bool):
 
   if bitcast: return c_bitcast(value, in_dtype, out_dtype)
 
-  # perform Python type casting
+  # perform Python type casting for Python-supported types
   out = int(value) if dtypes.is_int(out_dtype) else float(value) if dtypes.is_float(out_dtype) else bool(value)
-  # return the output if the involved types are Python-supported
-  if not (dtypes.is_unsigned(in_dtype) or dtypes.is_unsigned(out_dtype)): return out
-  # otherwise, bitcast the output to mimic C-style type casting for operands involving unsigned types
-  return c_bitcast(out, out_dtype, out_dtype)
+  # bitcast the output to mimic C-style type casting for operands involving unsigned types
+  if dtypes.is_unsigned(in_dtype) or dtypes.is_unsigned(out_dtype): out = c_bitcast(out, out_dtype, out_dtype)
+  return out
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
