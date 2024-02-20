@@ -7,7 +7,7 @@ from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
 from tinygrad.tensor import Tensor
 from tinygrad.features.graph import print_tree
-from tinygrad.helpers import getenv, from_mv, Context
+from tinygrad.helpers import getenv, from_mv, prod, Context
 from tinygrad.device import Device, Compiled
 from tinygrad.codegen.linearizer import UOp
 
@@ -75,6 +75,11 @@ def fuzz_linearizer(lin: Linearizer):
   seen_uops = {}
   last_lins = [lin]
   failures = defaultdict(list)
+
+  FUZZ_MAX_SIZE=getenv("FUZZ_MAX_SIZE", 0)
+  if FUZZ_MAX_SIZE > 0 and prod(lin.full_shape)>FUZZ_MAX_SIZE:
+    print("skipping large kernel")
+    return failures
 
   # get baseline unoptimized output
   unoptimized = Linearizer(lin.ast)
