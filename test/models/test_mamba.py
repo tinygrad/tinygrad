@@ -7,9 +7,9 @@ from transformers import AutoTokenizer
 
 PROMPT = 'Why is gravity '
 TOKENIZER = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
+
 class TestMamba(unittest.TestCase):
   def test_mamba_130M(self):
-    print("test_mamba_130M")
     OUT_130M = '''Why is gravity \nnot a good idea?\n\nA:'''
     model = Mamba.from_pretrained('130m')
     tinyoutput = generate(model, TOKENIZER, PROMPT, n_tokens_to_gen=10)
