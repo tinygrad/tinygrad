@@ -543,8 +543,8 @@ class Tensor:
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False) -> Tensor:
-    axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if isinstance(axis, int) else list(axis))
-    axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
+    axis_: Tuple[int, ...] = tuple(range(len(self.shape))) if axis is None else ((axis,) if isinstance(axis, int) else tuple(axis))
+    axis_ = tuple(x if x >= 0 else x+len(self.shape) for x in axis_)
     shape = tuple(s for i,s in enumerate(self.shape) if i not in axis_)
     ret = fxn.apply(self, axis=axis_)
     return ret if keepdim else ret.reshape(shape=shape)
