@@ -78,7 +78,7 @@ class LazyBuffer:
   dtype: DType
 
   # a ShapeTracker is used to track things like reshapes and permutes
-  # all MovementOps are zero copy in tinygrad!
+  # all shapetracker operations are zero copy in tinygrad!
   # the ShapeTracker specifies how the data in the RawBuffer matches to the shape
   # we'll come back to this later
   st: ShapeTracker
@@ -102,13 +102,9 @@ class LazyOp:
 class UnaryOps(Enum):    EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto();   SQRT = auto()
 class BinaryOps(Enum):   ADD = auto();  SUB = auto();  MUL = auto();  DIV = auto();  CMPLT = auto(); MAX = auto()
 class ReduceOps(Enum):   SUM = auto();  MAX = auto()
-class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto()
 class TernaryOps(Enum):  MULACC = auto(); WHERE = auto()
 class LoadOps(Enum):     EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto()
-# NOTE: if you have a Compiled device
-#       you do not need to implement the MovementOps
-#       as they are handled by the ShapeTracker (in tinygrad/shape/shapetracker.py, code 7/10)
-Op = Union[UnaryOps, BinaryOps, ReduceOps, MovementOps, TernaryOps, LoadOps]
+Op = Union[UnaryOps, BinaryOps, ReduceOps, TernaryOps, LoadOps]
 
 # most of tinygrad/lazy.py is concerned with fusing Ops into LazyOps ASTs that map to kernels
 # it's beyond the scope of this tutorial, but you can read the file if interested
@@ -291,8 +287,6 @@ void E_n2(float* restrict data0) {
 # %%
 # == Example: ShapeTracker (in tinygrad/shape/shapetracker.py, code 7/10) ==
 
-# remember how I said you don't have to write the MovementOps for CompiledBuffers?
-# that's all thanks to ShapeTracker!
 # ShapeTracker tracks the indices into the RawBuffer
 from tinygrad.shape.shapetracker import ShapeTracker
 
@@ -317,7 +311,7 @@ print(a) # ShapeTracker(views=(
          #   View(shape=(5, 2, 5, 2), strides=(2, 1, 20, 10)),
          #   View(shape=(100,), strides=(1,))))
 
-# Views stack on top of each other, to allow zero copy for any number of MovementOps
+# Views stack on top of each other, to allow zero copy for any number of shapetracker ops
 # we can render a Python expression for the index at any time
 idx, _ = a.expr_idxs()
 print(idx.render())  # (((idx0%10)*10)+(idx0//10))
