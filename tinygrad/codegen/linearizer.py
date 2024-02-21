@@ -72,8 +72,7 @@ class Linearizer(Kernel):
       functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
   def global_load(self, i:int, idxs:List[Node], acc=None, barrier:Optional[UOp]=None) -> List[UOp]:
-    buf, out_buf = self.bufs[i], i
-    if acc is not None: out_buf = -1 if self.group_for_reduces else i
+    buf = self.bufs[i]
     localtype = self.get_base_dtype(buf.dtype if acc is None else get_lazyop_info(self.reduceop).dtype)
     const = buf.val if isinstance(buf, ConstBuffer) else acc
 
@@ -81,9 +80,9 @@ class Linearizer(Kernel):
 
     dim, amt = None, 1
     # float 4 grouping
-    if len(upcast_dim := self.get_float4_upcast_dim(out_buf)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [4,2]:
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [4,2]:
       dim, amt = upcast_dim[0], len(float4_expand)
-      g_idx, g_valid = self.sts[out_buf].expr_idxs(idxs[:dim] + [float4_expand[0]] + idxs[dim+1:])
+      g_idx, g_valid = self.sts[i].expr_idxs(idxs[:dim] + [float4_expand[0]] + idxs[dim+1:])
       # do not use float4 if idx is not aligned
       if g_idx != (g_idx//amt*amt): dim, amt = None, 1
     if dim is None:
@@ -252,7 +251,7 @@ class Linearizer(Kernel):
       fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
       # define accumulator
-      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
+      acc = self.global_load(-1 if self.group_for_reduces else 0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
 
       if (tc:=self.tensor_core):
         def calc_tc_idxs(local_size: int, aliases: List[List[int]]):
@@ -356,7 +355,7 @@ class Linearizer(Kernel):
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
+        acc = self.global_load(0 if self.group_for_reduces else -1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
 
         # late reduce loop
         loop_ctx = render_loop(end_local_idxs)

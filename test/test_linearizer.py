@@ -81,12 +81,16 @@ class TestLinearizer(unittest.TestCase):
     k = Linearizer(create_schedule([r.lazydata])[-1].ast)
     k.hand_coded_optimizations()
     k.linearize()
-    code = Device[Device.DEFAULT].compiler.render(k.name, k.uops)
 
     accs = [u for u in k.uops if u.uop == UOps.DEFINE_ACC]
     stores = [u for u in k.uops if u.uop == UOps.STORE]
-    print(accs)
-    print(stores)
+
+    # the first store is to lds and can be upcasted
+    assert accs[0].dtype == stores[0].vin[-1].dtype == dtypes.float.vec(4)
+    assert stores[0].vin[0].uop == UOps.DEFINE_LOCAL
+    # the second store is to gds with no upcasts
+    assert accs[1].dtype == stores[1].vin[-1].dtype == dtypes.float
+    assert stores[1].vin[0].uop == UOps.DEFINE_GLOBAL
 
 
   def test_zero_fold(self):
