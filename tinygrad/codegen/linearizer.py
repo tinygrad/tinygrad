@@ -66,10 +66,10 @@ class Linearizer(Kernel):
     AndNode: lambda self,ops,ctx:
       functools.reduce(lambda a,b: ctx.uop_alu_idx(a, b, ops, ctx, BinaryOps.MUL, dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
 
-  def global_load(self, i:int, idxs:List[Node], acc=None, barrier:Optional[UOp]=None) -> List[UOp]:
+  def global_load(self, i:int, idxs:List[Node], barrier:Optional[UOp]=None) -> List[UOp]:
     buf = self.bufs[i]
-    localtype = self.get_base_dtype(buf.dtype if acc is None else get_lazyop_info(self.reduceop).dtype)
-    const = buf.val if isinstance(buf, ConstBuffer) else acc
+    localtype = self.get_base_dtype(buf.dtype)
+    const = buf.val if isinstance(buf, ConstBuffer) else None
 
     expand_vars = tuple([expand_idx(idx) for j, idx in enumerate(idxs)])
 
@@ -90,11 +90,9 @@ class Linearizer(Kernel):
     invalid_value = 0 if dtypes.is_int(buf.dtype) else 0.0
     for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, NumNode(0), NumNode(1)) if valid.max == 0 else (const, idx, valid)
-      key = f"{acc}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
+      key = f"{localtype}{'CONST'+str(this_const) if this_const is not None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
-        if acc is not None:
-          self.load_cache[key] = self.uop(UOps.DEFINE_ACC, localtype, (), this_const, cachable=False)
-        elif this_const is not None:
+        if this_const is not None:
           self.load_cache[key] = self.const(this_const, localtype)
           if valid.min == 0 and valid.max == 1:
             valid_rendered = valid.render(self.render_ops, self)
@@ -158,6 +156,11 @@ class Linearizer(Kernel):
       if valid.min == 1: stores.append(self.uop(UOps.STORE, None, (buf_uop, rendered_idx, var)))
       else: stores.append(self.uop(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(self.render_ops, self))))
     return stores
+
+  def define_acc(self, reduce_op: LazyOp):
+    dtype = self.get_base_dtype(get_lazyop_info(reduce_op).dtype)
+    value = self.get_reduce_acc(reduce_op)
+    return self.uop(UOps.DEFINE_ACC, dtype, (), value, cachable=False)
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
@@ -245,7 +248,7 @@ class Linearizer(Kernel):
       fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
       # define accumulator
-      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
+      acc = [self.define_acc(self.reduceop)]
 
       if (tc:=self.tensor_core):
         def calc_tc_idxs(local_size: int, aliases: List[List[int]]):
