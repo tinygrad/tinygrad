@@ -29,7 +29,6 @@ class TestTorchLoad(unittest.TestCase):
   # for LLVM, it segfaults because it can't link to the casting function
   # CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
   @unittest.skipIf(Device.DEFAULT in ["GPU", "LLVM", "CUDA"] and CI, "fp16 broken in some backends")
-  @unittest.skipIf(Device.DEFAULT == "TORCH", "torch doesn't support the way we load bfloat (cast to uint32)")
   def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/qazalin/bf16-lightweight/resolve/main/consolidated.00.pth?download=true")
 
   # pytorch tar format
@@ -127,10 +126,48 @@ class TestSafetensors(unittest.TestCase):
       safe_save(get_state_dict(ones), path)
       assert ones == list(safe_load(path).values())[0]
 
+  def test_load_supported_types(self):
+    import torch
+    from safetensors.torch import save_file
+    from safetensors.numpy import save_file as np_save_file
+    torch.manual_seed(1337)
+    tensors = {
+      "weight_F16": torch.randn((2, 2), dtype=torch.float16),
+      "weight_F32": torch.randn((2, 2), dtype=torch.float32),
+      "weight_U8": torch.tensor([1, 2, 3], dtype=torch.uint8),
+      "weight_I8": torch.tensor([-1, 2, 3], dtype=torch.int8),
+      "weight_I32": torch.tensor([-1, 2, 3], dtype=torch.int32),
+      "weight_I64": torch.tensor([-1, 2, 3], dtype=torch.int64),
+      "weight_F64": torch.randn((2, 2), dtype=torch.double),
+      "weight_BOOL": torch.tensor([True, False], dtype=torch.bool),
+      "weight_I16": torch.tensor([127, 64], dtype=torch.short),
+      "weight_BF16": torch.randn((2, 2), dtype=torch.bfloat16),
+    }
+    save_file(tensors, temp("model.safetensors"))
+
+    loaded = safe_load(temp("model.safetensors"))
+    for k,v in loaded.items():
+      if v.dtype != dtypes.bfloat16:
+        assert v.numpy().dtype == tensors[k].numpy().dtype
+        np.testing.assert_allclose(v.numpy(), tensors[k].numpy())
+
+    # pytorch does not support U16, U32, and U64 dtypes.
+    tensors = {
+      "weight_U16": np.array([1, 2, 3], dtype=np.uint16),
+      "weight_U32": np.array([1, 2, 3], dtype=np.uint32),
+      "weight_U64": np.array([1, 2, 3], dtype=np.uint64),
+    }
+    np_save_file(tensors, temp("model.safetensors"))
+
+    loaded = safe_load(temp("model.safetensors"))
+    for k,v in loaded.items():
+      assert v.numpy().dtype == tensors[k].dtype
+      np.testing.assert_allclose(v.numpy(), tensors[k])
+
 def helper_test_disk_tensor(fn, data, np_fxn, tinygrad_fxn=None):
   if tinygrad_fxn is None: tinygrad_fxn = np_fxn
   pathlib.Path(temp(fn)).unlink(missing_ok=True)
-  tinygrad_tensor = Tensor(data, device="CPU").to(f"disk:{temp(fn)}")
+  tinygrad_tensor = Tensor(data, device="CLANG").to(f"disk:{temp(fn)}")
   numpy_arr = np.array(data)
   tinygrad_fxn(tinygrad_tensor)
   np_fxn(numpy_arr)
@@ -144,7 +181,7 @@ class TestDiskTensor(unittest.TestCase):
   def test_write_ones(self):
     pathlib.Path(temp("dt2")).unlink(missing_ok=True)
 
-    out = Tensor.ones(10, 10, device="CPU").contiguous()
+    out = Tensor.ones(10, 10, device="CLANG").contiguous()
     outdisk = out.to(f"disk:{temp('dt2')}")
     print(outdisk)
     outdisk.realize()

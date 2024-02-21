@@ -8,7 +8,7 @@ from tinygrad.device import Compiled, LRUAllocator, Compiler
 from tinygrad.renderer.cstyle import MetalRenderer
 
 class MetalCompiler(Compiler):
-  linearizer_opts = LinearizerOptions("METAL")
+  linearizer_opts = LinearizerOptions("METAL", has_tensor_cores=os.uname().machine == "arm64")
   def __init__(self, device:Optional[MetalDevice]):
     self.device = device
     super().__init__("compile_metal")
@@ -20,6 +20,7 @@ class MetalCompiler(Compiler):
       return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
     else:
       options = Metal.MTLCompileOptions.new()
+      options.setFastMathEnabled_(getenv("METAL_FAST_MATH"))
       library = unwrap2(self.device.device.newLibraryWithSource_options_error_(src, options, None))
       return library.libraryDataContents().bytes().tobytes()
 
@@ -59,7 +60,7 @@ class MetalAllocator(LRUAllocator):
     ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return ret
-  def transfer(self, dest:Any, src:Any, sz:int):
+  def transfer(self, dest:Any, src:Any, sz:int, **kwargs):
     command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.blitCommandEncoder()
     encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src, 0, dest, 0, sz)

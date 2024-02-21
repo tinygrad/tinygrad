@@ -1,25 +1,25 @@
 indent-width = 2
 
-select = [
+lint.select = [
   "F",
   "W6",
   "E71",
   "E72",
-  "E112",
-  "E113",
+  "E112",   # no-indented-block
+  "E113",   # unexpected-indentation
   # "E124",
-  "E203",
-  "E272",
+  "E203",   # whitespace-before-punctuation
+  "E272",   # multiple-spaces-before-keyword
   # "E303",
   # "E304",
-  "E501",
+  "E501",   # line-too-long
   # "E502",
-  "E702",
-  "E703",
-  "E731",
-  "W191",
-  "W291",
-  "W293",
+  "E702",   # multiple-statements-on-one-line-semicolon
+  "E703",   # useless-semicolon
+  "E731",   # lambda-assignment
+  "W191",   # tab-indentation
+  "W291",   # trailing-whitespace
+  "W293",   # blank-line-with-whitespace
   "UP039",  # unnecessary-class-parentheses
 ]
 
@@ -33,4 +33,3 @@ exclude = [
   "openpilot/",
   "tinygrad/runtime/autogen",
 ]
-
