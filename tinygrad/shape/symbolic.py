@@ -51,10 +51,9 @@ class Node:
 
   def __rfloordiv__(self, b:int): return NumNode(b) // self
   def __floordiv__(self, b:sint, factoring_allowed=True):
-    if isinstance(b, Node):
-      if b.__class__ is NumNode: return self // b.b
-      if self == b: return NumNode(1)
-      if (b - self).min > 0 and self.min >= 0: return NumNode(0) # b - self simplifies the node
+    if not isinstance(b, int):
+      if self == b.node: return NumNode(1)
+      if (b.node - self).min > 0 and self.min >= 0: return NumNode(0) # b - self simplifies the node
       raise RuntimeError(f"not supported: {self} // {b}")
     assert b != 0
     if b < 0: return (self//-b)*-1
@@ -69,10 +68,9 @@ class Node:
 
   def __rmod__(self, b:int): return NumNode(b) % self
   def __mod__(self, b:sint):
-    if isinstance(b, Node):
-      if b.__class__ is NumNode: return self % b.b
-      if self == b: return NumNode(0)
-      if (b - self).min > 0 and self.min >= 0: return self # b - self simplifies the node
+    if not isinstance(b, int):
+      if self == b.node: return NumNode(0)
+      if (b.node - self).min > 0 and self.min >= 0: return self # b - self simplifies the node
       raise RuntimeError(f"not supported: {self} % {b}")
     assert b > 0
     if b == 1: return NumNode(0)
