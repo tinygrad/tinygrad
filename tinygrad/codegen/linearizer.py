@@ -159,13 +159,22 @@ class Linearizer(Kernel):
 
   def define_acc(self, output_idx:int, reduce_op: LazyOp, idxs=[]) -> List[UOp]:
     ret = []
-    dtype = self.get_base_dtype(get_lazyop_info(reduce_op).dtype)
-    if len(dim:=self.get_float4_upcast_dim(output_idx)) == 1 and (amt:=len(expand_node(idxs[dim[0]]))) in [4,2]: dtype.vec(amt)
+    dtype, value = self.get_base_dtype(get_lazyop_info(reduce_op).dtype), self.get_reduce_acc(reduce_op)
     expand_vars = tuple([expand_idx(idx) for _,idx in enumerate(idxs)])
-    for i in iter_idxs(expand_vars):
-      acc = self.uop(UOps.DEFINE_ACC, dtype, (), self.get_reduce_acc(reduce_op), cachable=False)
-      if dtype.count > 1: ret.append(self.uop(UOps.GEP, dtype.scalar(), (acc,), i[dim[0]]))
-      else: ret.append(acc)
+
+    if len(dim:=self.get_float4_upcast_dim(output_idx)) == 1 and len(float4_expand:=expand_node(idxs[dim[0]])) in [4,2]:
+      dtype = dtype.vec(len(float4_expand))
+      g_idx, _ = self.sts[output_idx].expr_idxs(idxs[:dim[0]] + [float4_expand[0]] + idxs[dim[0]+1:])
+      e_idxs = expand_node(g_idx, expand_vars)
+
+    for i, idx in enumerate(iter_idxs(expand_vars)):
+      key = f"acc{output_idx}{i}"
+      if dtype.count > 1: key += e_idxs[i].render() # give the acc a unique key
+      if key not in self.load_cache:
+        self.load_cache[key] = self.uop(UOps.DEFINE_ACC, dtype, (), value, cachable=False)
+      if dtype.count > 1:
+        ret.append(self.uop(UOps.GEP, dtype.scalar(), (self.load_cache[key],), idx[dim[0]]))
+      else: ret.append(self.load_cache[key])
     return ret
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
