@@ -158,13 +158,10 @@ class Linearizer(Kernel):
     return stores
 
   def define_acc(self, reduce_op: LazyOp, idxs=[]) -> List[UOp]:
-    ret = []
     dtype = self.get_base_dtype(get_lazyop_info(reduce_op).dtype)
     value = self.get_reduce_acc(reduce_op)
     expand_vars = tuple([expand_idx(idx) for _,idx in enumerate(idxs)])
-    for idx in iter_idxs(expand_vars):
-      ret.append(self.uop(UOps.DEFINE_ACC, dtype, (), value, cachable=False))
-    return ret
+    return [self.uop(UOps.DEFINE_ACC, dtype, (), value, cachable=False) for _ in iter_idxs(expand_vars)]
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
@@ -356,7 +353,7 @@ class Linearizer(Kernel):
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = self.define_acc(self.reduceop)
+        acc = self.define_acc(self.reduceop, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)
 
         # late reduce loop
         loop_ctx = render_loop(end_local_idxs)
