@@ -157,10 +157,14 @@ class Linearizer(Kernel):
       else: stores.append(self.uop(UOps.STORE, None, (buf_uop, rendered_idx, var, valid.render(self.render_ops, self))))
     return stores
 
-  def define_acc(self, reduce_op: LazyOp):
+  def define_acc(self, reduce_op: LazyOp, idxs=[]) -> List[UOp]:
+    ret = []
     dtype = self.get_base_dtype(get_lazyop_info(reduce_op).dtype)
     value = self.get_reduce_acc(reduce_op)
-    return self.uop(UOps.DEFINE_ACC, dtype, (), value, cachable=False)
+    expand_vars = tuple([expand_idx(idx) for _,idx in enumerate(idxs)])
+    for idx in iter_idxs(expand_vars):
+      ret.append(self.uop(UOps.DEFINE_ACC, dtype, (), value, cachable=False))
+    return ret
 
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
@@ -248,7 +252,7 @@ class Linearizer(Kernel):
       fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
       # define accumulator
-      acc = [self.define_acc(self.reduceop)]
+      acc = self.define_acc(self.reduceop, fake_reduce_idxs+upcast_idxs)
 
       if (tc:=self.tensor_core):
         def calc_tc_idxs(local_size: int, aliases: List[List[int]]):
@@ -352,7 +356,7 @@ class Linearizer(Kernel):
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = [self.define_acc(self.reduceop)]
+        acc = self.define_acc(self.reduceop)
 
         # late reduce loop
         loop_ctx = render_loop(end_local_idxs)
@@ -501,7 +505,6 @@ class Linearizer(Kernel):
       ret: List[UOp] = []
       input_acc = acc[:]
       for val, off in zip(zip(*values), cast(List[int], offs)):
-        print(acc, off)
         acc[off] = self.uop(UOps.ALU, acc[off].dtype, vin=val+(acc[off],), arg=ops[x.op])
         ret.append(acc[off])
       for off in range(len(acc)):
