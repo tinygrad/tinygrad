@@ -72,6 +72,23 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
     assert num_ops <= 1, "more alu uops than needed"
 
+  def test_upcast_with_locals(self):
+    if not (opts:=Device[Device.DEFAULT].compiler.linearizer_opts).has_local or not opts.has_shared or not opts.supports_float4:
+      self.skipTest("device does not support upcasted reduce with locals")
+
+    x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
+    r = (x@y).relu()
+    k = Linearizer(create_schedule([r.lazydata])[-1].ast)
+    k.hand_coded_optimizations()
+    k.linearize()
+    code = Device[Device.DEFAULT].compiler.render(k.name, k.uops)
+
+    accs = [u for u in k.uops if u.uop == UOps.DEFINE_ACC]
+    stores = [u for u in k.uops if u.uop == UOps.STORE]
+    print(accs)
+    print(stores)
+
+
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack([a, b])
