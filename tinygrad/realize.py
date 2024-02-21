@@ -150,10 +150,10 @@ def _recurse_lb(buf:LazyBuffer, realizes:Set[LazyBuffer], allbufs:Dict[LazyBuffe
     # defer checking for unsafe pads
     if any(v.mask is not None for v in buf.st.views): simple_pads.add(buf.base)
     # realize all places where the buffer is expanded (eliding if the expansion is just padding)
-    if prod(buf.base.st.shape) < prod(buf.st.shape) and not \
-      (len(buf.st.views) == 1 and buf.st.views[-1].mask and all_int(buf.base.st.shape) and \
+    if prod(buf.base.st.shape) < prod(buf.st.shape):
+      if not (len(buf.st.views) == 1 and buf.st.views[-1].mask and all_int(buf.base.st.shape) and \
         prod(buf.base.st.shape) >= prod([y-x for x,y in buf.st.views[-1].mask])):
-      realizes.add(buf.base)
+        realizes.add(buf.base)
     return _recurse_lb(buf.base, realizes, allbufs, simple_pads, children)
   if buf.forced_realize: realizes.add(buf)
   allbufs[buf] = None

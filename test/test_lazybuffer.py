@@ -40,7 +40,8 @@ class TestLazyBuffer(unittest.TestCase):
     np.testing.assert_allclose(y, z)
 
   def test_shuffle_shrinking_pad(self):
-    y = Tensor([1, 2, 3]).realize().exp().shrink(((0, 1),)).pad(((0, 1),)).numpy()
+    # should not shuffle unsafe pad ops through any pads, even if buffer is shrunk overall
+    y = Tensor([1, 2, 3]).exp().shrink(((0, 1),)).pad(((0, 1),)).numpy()
     z = np.array([np.e, 0])
     np.testing.assert_allclose(y, z)
 
