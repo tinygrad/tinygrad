@@ -142,15 +142,15 @@ class Where(Function):
 # ************* reduce ops *************
 
 class Sum(Function):
-  def forward(self, x:LazyBuffer, new_shape:Tuple[int, ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
     self.input_shape = x.shape
-    return x.r(ReduceOps.SUM, new_shape)
+    return x.r(ReduceOps.SUM, tuple(1 if i in axis else s for i,s in enumerate(x.shape)))
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.expand(self.input_shape)
 
 class Max(Function):
-  def forward(self, x:LazyBuffer, new_shape:Tuple[int, ...]) -> LazyBuffer:
-    self.x, self.ret = x, x.r(ReduceOps.MAX, new_shape)
+  def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
+    self.x, self.ret = x, x.r(ReduceOps.MAX, tuple(1 if i in axis else s for i,s in enumerate(x.shape)))
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
