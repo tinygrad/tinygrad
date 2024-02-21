@@ -3,7 +3,7 @@ from typing import List, Set, Optional, Tuple, Any, Dict
 from tinygrad.helpers import DEBUG, flatten
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.shape.symbolic import Variable, sint
+from tinygrad.shape.symbolic import Variable, SymDim, sint
 from enum import Enum, auto
 from dataclasses import dataclass
 
@@ -85,7 +85,7 @@ def uops_type_verify(uops:List[UOp]):
 
 def uops_alu_resolve(u:UOp, vars:Dict[str, Variable]) -> sint:
   if u.uop == UOps.CONST: return u.arg
-  elif u.uop == UOps.DEFINE_GLOBAL: return vars[u.arg]
+  elif u.uop == UOps.DEFINE_GLOBAL: return SymDim(vars[u.arg])
   elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL:
     return uops_alu_resolve(u.vin[0], vars) * uops_alu_resolve(u.vin[1], vars)
   elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD:
