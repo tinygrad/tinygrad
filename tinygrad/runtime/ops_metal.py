@@ -7,6 +7,11 @@ from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
 from tinygrad.device import Compiled, LRUAllocator, Compiler
 from tinygrad.renderer.cstyle import MetalRenderer
 
+def wait_check(cbuf: Any):
+  cbuf.waitUntilCompleted()
+  if (error := cbuf.error()) is not None:
+    raise RuntimeError(error)
+
 class MetalCompiler(Compiler):
   linearizer_opts = LinearizerOptions("METAL", has_tensor_cores=os.uname().machine == "arm64")
   def __init__(self, device:Optional[MetalDevice]):
@@ -48,7 +53,7 @@ class MetalProgram:
     encoder.endEncoding()
     command_buffer.commit()
     if wait:
-      command_buffer.waitUntilCompleted()
+      wait_check(command_buffer)
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
     self.device.mtl_buffers_in_flight.append(command_buffer)
 
@@ -88,6 +93,6 @@ class MetalDevice(Compiled):
     super().__init__(device, MetalAllocator(self), MetalCompiler(None if getenv("METAL_XCODE") else self),
                      functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
   def synchronize(self):
-    for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
+    for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
     self.mv_in_metal.clear()
     self.mtl_buffers_in_flight.clear()
