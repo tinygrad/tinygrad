@@ -3,14 +3,9 @@ import unittest, pickle
 from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, ModNode, Node, sym_render, sym_infer
 
 class TestSymbolicPickle(unittest.TestCase):
-  def test_pickle_variable(self):
-    dat = Variable("a", 3, 8)
-    datp = pickle.loads(pickle.dumps(dat))
-    self.assertEqual(str(datp), "<a[3-8]>")
-  def test_pickle_variable_times_2(self):
-    dat = Variable("a", 3, 8)*2
-    datp = pickle.loads(pickle.dumps(dat))
-    self.assertEqual(str(datp), "<(a[3-8]*2)>")
+  def _test_pickle_unpickle(self, x): self.assertEqual(x, pickle.loads(pickle.dumps(x)))
+  def test_pickle_variable(self): self._test_pickle_unpickle(Variable("a", 3, 8))
+  def test_pickle_variable_times_2(self): self._test_pickle_unpickle(Variable("a", 3, 8)*2)
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -418,9 +413,11 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     c = Variable("c", 1, 10)
     d = Variable("d", 5, 10)
     # if the value is always the same, it folds to num
-    assert (a < b) == 1
-    assert (b < a) == 0
-    assert (d < a) == 0
+    assert (a < b) == NumNode(1)
+    assert (b < a) == NumNode(0)
+    assert (d < a) == NumNode(0)
+    assert (a < a) == NumNode(0)
+    assert (a > a) == NumNode(0)
     # if it remains as a LtNode, bool is always true and (min, max) == (0, 1)
     assert isinstance((a < c), LtNode) and (a < c).min == 0 and (a < c).max == 1
     assert a < c
