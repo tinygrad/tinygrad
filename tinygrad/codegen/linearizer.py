@@ -47,7 +47,9 @@ class Linearizer(Kernel):
   def cast(self, val: UOp, dtype) -> UOp: return self.uop(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
 
   def get_reduce_acc(self, reduceop:LazyOp):
-    dtype = get_lazyop_info(reduceop).dtype
+    info = get_lazyop_info(reduceop)
+    assert all(0 <= x < len(info.shape) for x in reduceop.arg), "arg axis out of range"
+    dtype = info.dtype
     if reduceop.op == ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
     elif reduceop.op == ReduceOps.MAX:
       if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
