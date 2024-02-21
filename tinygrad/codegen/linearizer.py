@@ -165,15 +165,12 @@ class Linearizer(Kernel):
     if len(dim:=self.get_float4_upcast_dim(output_idx)) == 1 and len(float4_expand:=expand_node(idxs[dim[0]])) in [4,2]:
       dtype = dtype.vec(len(float4_expand))
       g_idx, _ = self.sts[output_idx].expr_idxs(idxs[:dim[0]] + [float4_expand[0]] + idxs[dim[0]+1:])
-      e_idxs = expand_node(g_idx, expand_vars)
+    else: g_idx, _ = self.sts[output_idx].expr_idxs(idxs)
 
-    for i, idx in enumerate(iter_idxs(expand_vars)):
-      key = f"acc{output_idx}{i}"
-      if dtype.count > 1: key += e_idxs[i].render() # give the acc a unique key
-      if key not in self.load_cache:
-        self.load_cache[key] = self.uop(UOps.DEFINE_ACC, dtype, (), value, cachable=False)
-      if dtype.count > 1:
-        ret.append(self.uop(UOps.GEP, dtype.scalar(), (self.load_cache[key],), idx[dim[0]]))
+    for idx, e_idx in zip(iter_idxs(expand_vars), expand_node(g_idx, expand_vars)):
+      key = f"acc{output_idx}{e_idx.render()}"
+      if key not in self.load_cache: self.load_cache[key] = self.uop(UOps.DEFINE_ACC, dtype, (), value, cachable=False)
+      if dtype.count > 1: ret.append(self.uop(UOps.GEP, dtype.scalar(), (self.load_cache[key],), idx[dim[0]]))
       else: ret.append(self.load_cache[key])
     return ret
 

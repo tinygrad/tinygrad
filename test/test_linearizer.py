@@ -72,6 +72,20 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
     assert num_ops <= 1, "more alu uops than needed"
 
+  def test_upcast_reduce(self):
+    x, w = Tensor.randn((1,1,3)).realize(), Tensor.randn((1,1,2)).realize()
+    r = Tensor.conv2d(x,w,padding=1).relu()
+
+    k = Linearizer(create_schedule([r.lazydata])[-1].ast)
+    k.upcast()
+    k.upcast()
+    k.linearize()
+    accs = [u for u in k.uops if u.uop == UOps.DEFINE_ACC]
+    stores = [u for u in k.uops if u.uop == UOps.STORE]
+    assert len(accs) == 1
+    assert len(stores) == 1
+    assert stores[0].vin[-1].dtype == accs[0].dtype == dtypes.float.vec(4)
+
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack([a, b])
