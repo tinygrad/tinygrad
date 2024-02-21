@@ -7,7 +7,7 @@
 
 print("******** first, the runtime ***********")
 
-from tinygrad.runtime.ops_clang import ClangProgram, compile_clang, MallocAllocator
+from tinygrad.runtime.ops_clang import ClangProgram, ClangCompiler, MallocAllocator
 
 # allocate some buffers
 out = MallocAllocator.alloc(4)
@@ -19,7 +19,7 @@ MallocAllocator.copyin(a, bytearray([2,0,0,0]))
 MallocAllocator.copyin(b, bytearray([3,0,0,0]))
 
 # compile a program to a binary
-lib = compile_clang("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
+lib = ClangCompiler().compile("void add(int *out, int *a, int *b) { out[0] = a[0] + b[0]; }")
 
 # create a runtime for the program (ctypes.CDLL)
 fxn = ClangProgram("add", lib)
@@ -73,25 +73,23 @@ assert out.as_buffer().cast('I')[0] == 5
 print("******** third, the LazyBuffer ***********")
 
 from tinygrad.lazy import LazyBuffer, LoadOps
-from tinygrad.realize import run_schedule
+from tinygrad.realize import run_schedule, create_schedule
 
 # allocate some values + load in values
-# TODO: remove numpy here
-import numpy as np
-a = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, "CPU")
-b = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, "CPU")
-a.realized = Buffer("CPU", 1, dtypes.int32, np.array([2], np.int32).flatten())
-b.realized = Buffer("CPU", 1, dtypes.int32, np.array([3], np.int32).flatten())
+a = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, "CLANG")
+b = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, "CLANG")
+a.realized = Buffer("CLANG", 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 2))))
+b.realized = Buffer("CLANG", 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 3))))
 
 # describe the computation
 out = a.e(BinaryOps.ADD, b)
 
 # schedule the computation as a list of kernels
-sched = out.schedule()
+sched = create_schedule([out])
 for si in sched: print(si.ast.op)  # NOTE: the first two convert it to CLANG
 
 # DEBUGGING: print the compute ast as a tree
-from tinygrad.graph import print_tree
+from tinygrad.features.graph import print_tree
 print_tree(sched[-1].ast)
 # NOTE: sched[-1].ast is the same as st_0 above
 

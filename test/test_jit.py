@@ -4,7 +4,7 @@ import numpy as np
 
 from test.helpers import assert_jit_cache_len
 from tinygrad.tensor import Tensor
-from tinygrad.jit import TinyJit
+from tinygrad.features.jit import TinyJit
 from tinygrad.device import Device
 from tinygrad.helpers import CI
 
@@ -110,6 +110,15 @@ class TestJit(unittest.TestCase):
       else:
         np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(add_array, 1)
+
+  def test_jit_copyin(self):
+    @TinyJit
+    def f(a):
+      return a + Tensor([1,2,3])
+    for _ in range(5):
+      b = Tensor.randn(3)
+      c = f(b)
+      np.testing.assert_allclose(c.numpy(), b.numpy()+[1,2,3], atol=1e-4, rtol=1e-5)
 
   def test_method_jit(self):
     class Fun:
@@ -250,8 +259,8 @@ class TestJit(unittest.TestCase):
     # save [2] in the caches
     cache.good(zero, two)
     cache.bad(zero, two)
-    np.testing.assert_equal([2], cache.good_cache)
-    np.testing.assert_equal([2], cache.bad_cache)
+    np.testing.assert_equal([2], cache.good_cache.numpy())
+    np.testing.assert_equal([2], cache.bad_cache.numpy())
 
     # verify the jitted calls read 2 from the cache
     np.testing.assert_equal([2], cache.good_jitted(zero).numpy())

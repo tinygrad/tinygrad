@@ -6,6 +6,7 @@ import numpy as np
 from hypothesis import given, strategies as strat, settings
 from tinygrad.dtype import DType
 from tinygrad.helpers import CI, getenv
+from tinygrad.realize import create_schedule
 from tinygrad.ops import UnaryOps, get_lazyop_info
 from test.test_dtype import is_dtype_supported
 
@@ -37,7 +38,8 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), operator.neg, (T
 #binary_operations += [(Tensor.maximum, np.maximum)]
 
 # TODO: CUDACPU segfaults on sin
-if getenv("CUDACPU"): unary_operations.remove((Tensor.sin, np.sin))
+# TODO: METAL sin can't handle infinity
+if getenv("CUDACPU") or Device.DEFAULT == "METAL": unary_operations.remove((Tensor.sin, np.sin))
 
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
@@ -63,7 +65,7 @@ def universal_test(a, b, dtype, op):
 def universal_test_unary(a, dtype, op):
   if not isinstance(op, tuple): op = (op, op)
   out: Tensor = op[0](Tensor([a], dtype=dtype))
-  ast = out.lazydata.schedule()[-1].ast
+  ast = create_schedule([out.lazydata])[-1].ast
   tensor_value = out.numpy()
   numpy_value = op[1](np.array([a]).astype(dtype.np))
   if dtype in dtypes_float:
@@ -142,9 +144,10 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, ht.int32, ht.float32, strat.sampled_from(integer_binary_operations), strat.sampled_from(binary_operations))
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 
-  # Metal and CUDACPU behave differently than numpy in CI for overflows
-  @given(strat.floats(width=32, min_value=0, max_value=10.0) if CI and (Device.DEFAULT == "METAL" or getenv("CUDACPU")) else ht.float32,
-         strat.floats(width=32, min_value=0, max_value=10.0) if CI and (Device.DEFAULT == "METAL" or getenv("CUDACPU")) else ht.float32,
+  # Metal and CUDACPU and HIP behave differently than numpy in CI for overflows
+  skip_overflow = CI and (Device.DEFAULT in ["METAL","HIP"] or getenv("CUDACPU"))
+  @given(strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
+         strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          ht.int32, strat.sampled_from(binary_operations), strat.sampled_from(integer_binary_operations))
   def test_float_midcast_int32(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.float32, dtypes.int32)
 

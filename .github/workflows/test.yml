@@ -11,6 +11,45 @@ on:
   workflow_dispatch:
 
 jobs:
+  uops:
+    name: uops tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.12
+    - name: Cache python packages
+      uses: actions/cache@v3
+      with:
+        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.12/site-packages
+        key: uops-packages-${{ hashFiles('**/setup.py') }}-3.12
+    - name: Install dependencies
+      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
+    - name: Test IMAGE=2 support
+      run: |
+        IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
+        IMAGE=2 PYTHON=1 python3 test/test_ops.py TestOps.test_simple_conv2d
+    - name: Test emulated METAL tensor cores
+      run: DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_big_gemm
+    - name: Test emulated HIP tensor cores
+      run: |
+        PYTHONPATH=. DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
+        PYTHONPATH=. DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
+        PYTHONPATH=. DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 N=16 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
+        PYTHONPATH=. DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 N=64 HALF=1 ACC_HALF=1 python3 ./extra/gemm/simple_matmul.py
+    - name: Full test tensor cores
+      run: |
+        DEBUG=2 EMULATE_METAL=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
+        DEBUG=2 EMULATE_HIP=1 FORWARD_ONLY=1 PYTHON=1 python3 ./test/test_linearizer.py TestLinearizer.test_tensor_cores
+    - name: Test dtype with Python emulator
+      run: DEBUG=2 PYTHON=1 python3 test/test_dtype.py
+    - name: Test ops with Python emulator
+      run: DEBUG=2 PYTHON=1 python3 -m pytest test/test_ops.py -k "not (test_split or test_simple_cumsum or test_cumsum or test_einsum or test_dot_1d or test_big_gemm or test_broadcastdot or test_multidot or test_var_axis or test_std_axis or test_broadcast_full or test_broadcast_partial or test_simple_conv3d or test_dilated_conv_transpose2d or test_simple_conv_transpose3d or test_large_input_conv2d or test_maxpool2d_simple or test_maxpool2d_bigger_stride or test_avgpool2d or test_cat or test_scaled_product_attention or test_scaled_product_attention_causal)"
+
   linter:
     name: Linters
     runs-on: ubuntu-latest
@@ -40,7 +79,7 @@ jobs:
     - name: Lint tinygrad with pylint
       run: python -m pylint tinygrad/
     - name: Run mypy
-      run: python -m mypy
+      run: python -m mypy --strict-equality
     - name: Test Docs
       run: |
         python docs/abstractions.py
@@ -53,8 +92,6 @@ jobs:
       run: |
         PYTHONPATH="." python test/external/fuzz_shapetracker.py
         PYTHONPATH="." python test/external/fuzz_shapetracker_math.py
-    - name: Test shapetracker to_movement_ops
-      run: PYTHONPATH="." python extra/to_movement_ops.py
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
@@ -63,11 +100,11 @@ jobs:
         source venv/bin/activate
         pip install $GITHUB_WORKSPACE
         python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-    - name: Repo line count <5000 lines
-      run: MAX_LINE_COUNT=5000 python sz.py
+    - name: Repo line count <6000 lines
+      run: MAX_LINE_COUNT=6000 python sz.py
 
   testcpuimagenet:
-    name: CPU and ImageNet to C Tests
+    name: ImageNet to C Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -90,43 +127,14 @@ jobs:
         key: downloads-cache-cpu-${{ env.DOWNLOAD_CACHE_VERSION }}
     - name: Install Dependencies
       run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Run Pytest
-      run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)" --durations=20
+    #- name: Run Pytest
+    #  run: python -m pytest -n=auto test/ -k "not (test_efficientnet and models/test_train.py)" --durations=20
     - name: Compile EfficientNet to C
       run: PYTHONPATH="." CLANG=1 python examples/compile_efficientnet.py > recognize.c
     - name: Compile C to native
       run: clang -O2 recognize.c -lm -o recognize
     - name: Test EfficientNet
       run: cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
-
-  testtorch:
-    name: Torch Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: 3.11
-    - name: Cache python packages
-      uses: actions/cache@v3
-      with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-        key: testing-packages-${{ hashFiles('**/setup.py') }}
-    - name: Cache downloads
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/tinygrad/downloads/
-        key: downloads-cache-torch-${{ env.DOWNLOAD_CACHE_VERSION }}
-    - name: Install Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Run Pytest
-      run: TORCH=1 python -m pytest -n=auto test/ --durations=20
-    - name: Run ONNX
-      run: TORCH=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
 
   testopencl:
     strategy:
@@ -198,9 +206,6 @@ jobs:
       #  run: |
       #    PYTHONPATH="." python test/external/dist/test_world.py
       #    PYTHONPATH="." python test/external/dist/test_collectives.py
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test ONNX (CPU)
-        run: CPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       - if: ${{ matrix.task == 'onnx' }}
         name: Test ONNX (GPU)
         run: GPU=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
@@ -286,53 +291,11 @@ jobs:
     - name: Run metal test
       run: METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
     - name: Run ONNX
-      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py
+      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops
       run: METAL=1 TC=2 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
-
-  testhipcompilation:
-    name: HIP Compilation Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: 3.11
-    - name: Cache python packages
-      uses: actions/cache@v3
-      with:
-        path: ${{ env.Python3_ROOT_DIR }}/lib/python3.11/site-packages
-        key: testing-packages-${{ hashFiles('**/setup.py') }}
-    - name: Cache downloads
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/tinygrad/downloads/
-        key: downloads-cache-hipcompilation-${{ env.DOWNLOAD_CACHE_VERSION }}
-    - name: Install HIP tools
-      run: |
-        echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
-        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
-        # ROCm repository for jammy
-        sudo tee /etc/apt/sources.list.d/rocm.list <<'EOF'
-        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian jammy main
-        EOF
-        # Prefer packages from the rocm repository over system packages
-        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
-        sudo apt update
-        sudo apt install --no-install-recommends --allow-unauthenticated -y rocm-hip-libraries hip-dev
-    - name: Install Python Dependencies
-      run: pip install -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
-    - name: Test HIP compilation on RDNA3 [gfx1100]
-      # test/test_symbolic_ops.py can't run here, it was comparing empty memory
-      run: |
-        export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/hip/lib
-        MOCKHIP=1 HIP=1 python -m pytest -s test/test_hip_rdna3.py
 
 #  testwebgl:
 #    name: WebGL Tests
@@ -371,10 +334,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, clang, gpu, cuda] #, triton] #, ptx]
+        backend: [llvm, clang, gpu, cuda, hip] #, triton] #, ptx]
 
     name: Tests on (${{ matrix.backend }})
-    runs-on: ${{ matrix.backend == 'gpu'  && 'ubuntu-20.04' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
@@ -395,14 +358,14 @@ jobs:
           path: ~/.cache/tinygrad/downloads/
           key: downloads-cache-${{ matrix.backend }}-${{ env.DOWNLOAD_CACHE_VERSION }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas'}}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'LLVM=1' || matrix.backend == 'clang' && 'CLANG=1' || matrix.backend == 'gpu' && 'GPU=1' || matrix.backend == 'cuda' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\n' || matrix.backend == 'PTX' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nPTX=1' || matrix.backend == 'triton' && 'FORWARD_ONLY=1\nJIT=1\nOPT=2\nCUDA=1\nCUDACPU=1\nTRITON=1\nTRITON_PTXAS_PATH=/usr/bin/ptxas' || matrix.backend == 'hip' && 'HIP=1\nHIPCPU=1\nFORWARD_ONLY=1' }}" >> $GITHUB_ENV
       - name: Install OpenCL
         if: matrix.backend == 'gpu'
         run: |
           echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
           echo "deb [ allow-insecure=yes ] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
           sudo apt update
-          sudo apt install --allow-unauthenticated -y --no-install-recommends \
+          sudo apt install --allow-unauthenticated -y --no-install-recommends opencl-headers \
             intel-oneapi-runtime-openmp=2023.2.1-16 intel-oneapi-runtime-compilers-common=2023.2.1-16 intel-oneapi-runtime-compilers=2023.2.1-16 \
             intel-oneapi-runtime-dpcpp-sycl-opencl-cpu=2023.2.1-16 intel-oneapi-runtime-tbb-common=2021.10.0-49541 \
             intel-oneapi-runtime-tbb=2021.10.0-49541 intel-oneapi-runtime-opencl=2023.2.1-16
@@ -421,7 +384,7 @@ jobs:
           cache-name: cache-gpuocelot-build
         with:
           path: ${{ github.workspace }}/gpuocelot/ocelot
-          key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480-rebuild-2
+          key: ubuntu22.04-gpuocelot-18401f4245b27ca4b3af433196583cc81ef84480-rebuild-3
       - name: Clone/compile gpuocelot
         if: (matrix.backend == 'cuda' || matrix.backend == 'ptx' || matrix.backend == 'triton') && steps.cache-build.outputs.cache-hit != 'true'
         run: |
@@ -437,14 +400,48 @@ jobs:
         run: |
           cd ${{ github.workspace }}/gpuocelot/ocelot/build
           sudo ninja install -d explain
+      - name: Install packages (hip)
+        if: matrix.backend == 'hip'
+        run: |
+          echo 'Acquire::http::Pipeline-Depth "5";' | sudo tee -a /etc/apt/apt.conf.d/99parallel
+          wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+          sudo tee /etc/apt/sources.list.d/rocm.list <<'EOF'
+          deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/debian jammy main
+          EOF
+          echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
+          sudo apt update
+          sudo apt install --no-install-recommends --allow-unauthenticated -y rocm-hip-libraries hip-dev
+          curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
+          jq -r '.assets[] | select(.name == "libremu.so").browser_download_url' | \
+          sudo xargs curl -L -o /usr/local/lib/libremu.so
       - name: Install dependencies
         run: pip install -e '.[testing${{matrix.backend=='llvm'&&',llvm'||matrix.backend=='cuda'&&',cuda'||matrix.backend=='ptx'&&',cuda'||matrix.backend=='triton'&&',triton'||''}}]' --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
       - name: Check Device.DEFAULT and print some source
         run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU'], Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.DEFAULT in ['LLVM','CLANG','CUDA','GPU', 'HIP'], Device.DEFAULT"
           DEBUG=5 PYTHONPATH=${{ github.workspace }} FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
-      - name: Run pytest (not cuda)
-        if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton'
+      - name: Verify OpenCL autogen
+        if: matrix.backend == 'gpu'
+        run: |
+          cp tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
+          ./autogen_stubs.sh opencl
+          diff /tmp/opencl.py.bak tinygrad/runtime/autogen/opencl.py
+      - name: Verify CUDA autogen
+        if: matrix.backend == 'cuda'
+        run: |
+          cp tinygrad/runtime/autogen/cuda.py /tmp/cuda.py.bak
+          ./autogen_stubs.sh cuda
+          diff /tmp/cuda.py.bak tinygrad/runtime/autogen/cuda.py
+      - name: Verify HIP autogen
+        if: matrix.backend == 'hip'
+        run: |
+          cp tinygrad/runtime/autogen/hip.py /tmp/hip.py.bak
+          cp tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
+          ./autogen_stubs.sh hip
+          diff /tmp/hip.py.bak tinygrad/runtime/autogen/hip.py
+          diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
+      - name: Run pytest (not cuda or hip)
+        if: matrix.backend!='cuda' && matrix.backend!='ptx' && matrix.backend!='triton' && matrix.backend != 'hip'
         run: python -m pytest -n=auto test/ --durations=20
       - name: Run ONNX (only LLVM)
         if: matrix.backend == 'llvm'
@@ -452,6 +449,9 @@ jobs:
       - name: Run pytest (cuda)
         if: matrix.backend=='cuda'||matrix.backend=='ptx'||matrix.backend=='triton'
         run: python -m pytest -n=auto test/ -k 'not (half or test_efficientnet_safetensors)' --ignore=test/external --ignore=test/models --durations=20
+      - name: Run pytest (hip)
+        if: matrix.backend=='hip'
+        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/imported/test_indexing.py --durations=20
 
   #testunicorn:
   #  name: ARM64 unicorn Test

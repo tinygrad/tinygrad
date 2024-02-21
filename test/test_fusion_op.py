@@ -2,9 +2,7 @@ import unittest
 import time
 import numpy as np
 from tinygrad import Tensor, dtypes
-from tinygrad.device import InterpretedASTRunner
-from tinygrad.lazy import create_schedule
-from tinygrad.realize import run_schedule, lower_schedule_item
+from tinygrad.realize import run_schedule, create_schedule, lower_schedule_item
 
 class TestFusionOp(unittest.TestCase):
   def test_contiguous_add(self):
@@ -30,7 +28,7 @@ class TestFusionOp(unittest.TestCase):
     sched = create_schedule([a.lazydata], None)
     ji = lower_schedule_item(sched[-1])
     self.assertLess(time.perf_counter()-st, 1.0)
-    assert isinstance(ji, InterpretedASTRunner) or len(ji.prg.splitlines()) < 250
+    assert len(ji.prg.splitlines()) < 250
 
   def test_recursive_add_cmp(self):
     st = time.perf_counter()

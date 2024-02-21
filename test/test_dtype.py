@@ -17,11 +17,11 @@ floats = [dt for dt in core_dtypes if dtypes.is_float(dt)]
 def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   if dtype == dtypes.bfloat16: return False # numpy doesn't support bf16, tested separately in TestBFloat16DType
   if device in ["WEBGPU", "WEBGL"]: return dtype in [dtypes.float, dtypes.int32, dtypes.uint32]
-  if device == "TORCH": return dtype not in [dtypes.uint16, dtypes.uint32, dtypes.uint64]
   # for CI GPU, cl_khr_fp16 isn't supported
   # for CI LLVM, it segfaults because it can't link to the casting function
   # CUDA in CI uses CUDACPU that does not support half
-  if dtype == dtypes.half: return not (CI and device in ["GPU", "LLVM", "CUDA"])
+  # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
+  if dtype == dtypes.half: return not (CI and device in ["GPU", "LLVM", "CUDA"]) and device != "PYTHON"
   if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
   return True
 
@@ -106,16 +106,27 @@ class TestDType(unittest.TestCase):
     self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
     self.assertTrue(all(issubclass(value.np, np.generic) for value in fields.values() if value.np is not None))
 
+  def test_resulting_and_init_dtypes_match(self):
+    dtypes = list(map(np.dtype, ["bool", "uint8", "int8", "int16", "int32", "int64", "float32", "float64"]))
+    data = [1., 2., 0., 0.5, -1.5, 5.25]
+    for dt in dtypes:
+      arr = np.asarray(data, dtype=dt)
+      tin = Tensor(arr).numpy()
+      tor = torch.as_tensor(arr).detach().numpy()
+      assert dt is tin.dtype is tor.dtype, f"dtype mismatch: expected={dt} | tinygrad={tin.dtype} | torch={tor.dtype}"
+      np.testing.assert_allclose(tin, tor, atol=1e-6, rtol=1e-3)
+
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
   target_dtype = target_dtype or least_upper_dtype(a_dtype, b_dtype)
   if not is_dtype_supported(a_dtype) or not is_dtype_supported(b_dtype) or not is_dtype_supported(target_dtype): return
   if a_dtype == dtypes.bool or b_dtype == dtypes.bool: return
   _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)+Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [2,4,6,8])
+  _assert_eq((Tensor([1], dtype=a_dtype).cast(b_dtype)+Tensor([1], dtype=a_dtype).cast(b_dtype)).cast(a_dtype), a_dtype, [2])
   _assert_eq(Tensor([1,2,3,4], dtype=a_dtype)*Tensor([1,2,3,4], dtype=b_dtype), target_dtype, [1,4,9,16])
   _assert_eq(Tensor([[1,2],[3,4]], dtype=a_dtype)@Tensor.eye(2, dtype=b_dtype), target_dtype, [[1,2],[3,4]])
   _assert_eq(Tensor([1,1,1,1], dtype=a_dtype)+Tensor.ones((4,4), dtype=b_dtype), target_dtype, 2*Tensor.ones(4,4).numpy())
 
-@unittest.skipUnless(Device.DEFAULT in ["LLVM", "TORCH"], "bfloat16 not supported")
+@unittest.skipUnless(Device.DEFAULT == "LLVM", "bfloat16 not supported")
 class TestBFloat16DType(unittest.TestCase):
   def test_bf16_to_float(self):
     with self.assertRaises(AssertionError):
@@ -148,15 +159,46 @@ class TestBFloat16DType(unittest.TestCase):
 
 class TestHalfDtype(TestDType): DTYPE = dtypes.half
 
-class TestFloatDType(TestDType): DTYPE = dtypes.float
+class TestFloatDType(TestDType):
+  DTYPE = dtypes.float
 
-class TestDoubleDtype(TestDType): DTYPE = dtypes.double
+  def test_float_to_uint(self):
+    _test_op(lambda: Tensor([-0.9, -0.3, 1.2], dtype=dtypes.float32).cast(dtypes.uint32), dtypes.uint32,
+             [0, 0, 1])
+
+class TestDoubleDtype(TestDType):
+  DTYPE = dtypes.double
+  @unittest.skipIf(getenv("CUDACPU",0)==1, "conversion not supported on CUDACPU")
+  @unittest.skipIf(getenv("HIP",0)==1, "HIP renderer does not support f64 precision")
+  def test_float64_increased_precision(self):
+    for func in [
+      lambda t: t.exp(),
+      lambda t: t.exp2(),
+      lambda t: t.log(),
+      lambda t: t.log2(),
+      lambda t: t.sqrt(),
+      lambda t: t.rsqrt(),
+      lambda t: t.sin(),
+      lambda t: t.cos(),
+      lambda t: t.tan(),
+      lambda t: t.sigmoid(),
+    ]:
+      a = [2, 3, 4]
+      np.testing.assert_allclose(func(Tensor(a, dtype=self.DTYPE)).numpy(), func(torch.tensor(a, dtype=torch.float64)), rtol=1e-12, atol=1e-12)
+
+  def test_float64_to_float32_cast_inf(self):
+    _test_op(lambda: Tensor([3.4e40, 3.4e38, 1, 0], dtype=dtypes.float64).cast(dtypes.float32),
+             dtypes.float32, [float('inf'), 3.4e38, 1, 0])
+
 
 class TestInt8Dtype(TestDType):
   DTYPE = dtypes.int8
   @unittest.skipIf(getenv("CUDA",0)==1 or getenv("PTX", 0)==1, "cuda saturation works differently")
   def test_int8_to_uint8_negative(self):
     _test_op(lambda: Tensor([-1, -2, -3, -4], dtype=dtypes.int8).cast(dtypes.uint8), dtypes.uint8, [255, 254, 253, 252])
+
+  def test_int8_to_uint16_negative(self):
+    _test_op(lambda: Tensor([-1, -2, -3, -4], dtype=dtypes.int8).cast(dtypes.uint16), dtypes.uint16, [2**16-1, 2**16-2, 2**16-3, 2**16-4])
 
 class TestUint8Dtype(TestDType):
   DTYPE = dtypes.uint8
@@ -181,7 +223,12 @@ class TestBitCast(unittest.TestCase):
     assert b.numpy()[0,0] == 1.
 
 class TestInt16Dtype(TestDType): DTYPE = dtypes.int16
-class TestUint16Dtype(TestDType): DTYPE = dtypes.uint16
+
+class TestUint16Dtype(TestDType):
+  DTYPE = dtypes.uint16
+
+  def test_uint16_to_int8_overflow(self):
+    _test_op(lambda: Tensor([2**16-1, 2**16-2, 1, 0], dtype=dtypes.uint16).cast(dtypes.int8), dtypes.int8, [-1, -2, 1, 0])
 
 class TestInt32Dtype(TestDType): DTYPE = dtypes.int32
 class TestUint32Dtype(TestDType): DTYPE = dtypes.uint32
@@ -312,7 +359,7 @@ class TestTypeSpec(unittest.TestCase):
 
   def test_reduce_0d_default(self):
     assert Tensor.ones([2,3,0]).sum(2).dtype ==  dtypes.default_float
-    # assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int  # requires reduceop acc fix
+    assert Tensor.ones([2,3,0], dtype=dtypes.int).sum(2).dtype == dtypes.int
 
   @given(strat.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]), strat.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
   def test_arange(self, default_int, default_float):
@@ -397,40 +444,12 @@ class TestAutoCastType(unittest.TestCase):
       # float16 can have larger precision errors
       np.testing.assert_allclose(func(Tensor(a, dtype=dtype)).numpy(), func(torch.tensor(a)), rtol=1e-3, atol=1e-3)
 
-  @given(strat.sampled_from([dtypes.float16,dtypes.float32,dtypes.float64]))
-  def test_broadcast_float(self, default_float):
-    dtypes.default_float = default_float
-    assert (Tensor.rand(4, 4, dtype=dtypes.bool) + 2.3).dtype == dtypes.default_float
-    assert (Tensor.rand(4, 4, dtype=dtypes.int) + 2.3).dtype == dtypes.default_float
-    assert (Tensor.rand(4, 4, dtype=dtypes.int8) + 2.3).dtype == dtypes.default_float
-    assert (Tensor.rand(4, 4, dtype=dtypes.uint64) + 2.3).dtype == dtypes.default_float
-    assert (Tensor.rand(4, 4, dtype=dtypes.float16) + 2.3).dtype == dtypes.float16
-    assert (Tensor.rand(4, 4, dtype=dtypes.bfloat16) + 2.3).dtype == dtypes.bfloat16
-    assert (Tensor.rand(4, 4, dtype=dtypes.float32) + 2.3).dtype == dtypes.float32
-    assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2.3).dtype == dtypes.float64
-
-  @given(strat.sampled_from([dtypes.int8,dtypes.int16,dtypes.int32,dtypes.int64]))
-  def test_broadcast_int(self, default_int):
-    dtypes.default_int = default_int
-    assert (Tensor.rand(4, 4, dtype=dtypes.bool) + 2).dtype == dtypes.default_int
-    assert (Tensor.rand(4, 4, dtype=dtypes.int) + 2).dtype == dtypes.int
-    assert (Tensor.rand(4, 4, dtype=dtypes.int8) + 2).dtype == dtypes.int8
-    assert (Tensor.rand(4, 4, dtype=dtypes.uint64) + 2).dtype == dtypes.uint64
-    assert (Tensor.rand(4, 4, dtype=dtypes.float16) + 2).dtype == dtypes.float16
-    assert (Tensor.rand(4, 4, dtype=dtypes.bfloat16) + 2).dtype == dtypes.bfloat16
-    assert (Tensor.rand(4, 4, dtype=dtypes.float32) + 2).dtype == dtypes.float32
-    assert (Tensor.rand(4, 4, dtype=dtypes.float64) + 2).dtype == dtypes.float64
-
-  def test_broadcast_bool(self):
-    if Device.DEFAULT != "WEBGPU":
-      assert (Tensor([0, 1], dtype=dtypes.bool) + True).dtype == dtypes.bool
-    assert (Tensor([0, 1], dtype=dtypes.int) + True).dtype == dtypes.int32
-    assert (Tensor([0, 1], dtype=dtypes.int8) + True).dtype == dtypes.int8
-    assert (Tensor([0, 1], dtype=dtypes.uint64) + True).dtype == dtypes.uint64
-    assert (Tensor([0, 1], dtype=dtypes.float16) + True).dtype == dtypes.float16
-    assert (Tensor([0, 1], dtype=dtypes.bfloat16) + True).dtype == dtypes.bfloat16
-    assert (Tensor([0, 1], dtype=dtypes.float32) + True).dtype == dtypes.float32
-    assert (Tensor([0, 1], dtype=dtypes.float64) + True).dtype == dtypes.float64
+  @given(strat.sampled_from(core_dtypes))
+  def test_broadcast_scalar(self, dt):
+    assert (Tensor.rand(4, 4, dtype=dt) + 2.3).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
+    assert (Tensor.rand(4, 4, dtype=dt) + 2).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
+    if Device.DEFAULT != "WEBGPU" and dt != dtypes.bool:
+      assert (Tensor.rand(4, 4, dtype=dt) + True).dtype == dt
 
   def test_sum(self):
     assert (Tensor([0, 1], dtype=dtypes.bool)).sum().dtype == dtypes.int32
@@ -465,6 +484,52 @@ class TestAutoCastType(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_matmul(self, dt1, dt2):
     assert (Tensor([0, 1], dtype=dt1) @ Tensor([0, 1], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
+
+  @staticmethod
+  def check_where_alternate_input_other(input_, other, data_type):
+    assert (Tensor([True, False]).where(input_, other)).dtype == data_type
+    assert (Tensor([True, False]).where(other, input_)).dtype == data_type
+
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
+  def test_where_no_scalar(self, dt1, dt2):
+    self.check_where_alternate_input_other(Tensor(2, dtype=dt1), Tensor(3, dtype=dt2), least_upper_dtype(dt1, dt2))
+
+  @given(strat.sampled_from(core_dtypes))
+  def test_where_one_scalar(self, dt):
+    t = Tensor(2, dtype=dt)
+    self.check_where_alternate_input_other(t, 3.2, (dt if dtypes.is_float(dt) else dtypes.default_float))
+    self.check_where_alternate_input_other(t, 3, (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int))
+    self.check_where_alternate_input_other(t, True, dt)
+
+  def test_where_two_scalars(self):
+    self.check_where_alternate_input_other(3.1, 3.2, dtypes.default_float)
+    self.check_where_alternate_input_other(3.1, 3, dtypes.default_float)
+    self.check_where_alternate_input_other(3.1, True, dtypes.default_float)
+    self.check_where_alternate_input_other(3, 2, dtypes.default_int)
+    self.check_where_alternate_input_other(3, True, dtypes.default_int)
+    self.check_where_alternate_input_other(False, True, dtypes.bool)
+
+  @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
+  def test_maximum(self, dt1, dt2):
+    assert Tensor([0, 1, 2], dtype=dt1).maximum(Tensor([2, 0, 5], dtype=dt2)).dtype == least_upper_dtype(dt1, dt2)
+
+  @given(strat.sampled_from(core_dtypes))
+  def test_maximum_const(self, dt):
+    assert Tensor([1, 2], dtype=dt).maximum(3.1).dtype == (dt if dtypes.is_float(dt) else dtypes.default_float)
+    assert Tensor([1, 2], dtype=dt).maximum(3).dtype == (dt if dtypes.is_float(dt) or dtypes.is_int(dt) else dtypes.default_int)
+    assert Tensor([1, 2], dtype=dt).maximum(True).dtype == dt
+
+  def test_div(self):
+    assert (Tensor([1, 2], dtype=dtypes.int32) / Tensor([2, 2], dtype=dtypes.int32)).dtype == dtypes.default_float
+    assert (Tensor([1, 2], dtype=dtypes.int16) / Tensor([2, 2], dtype=dtypes.int32)).dtype == dtypes.default_float
+    assert (Tensor([1, 2], dtype=dtypes.float32) / Tensor([2, 2], dtype=dtypes.float16)).dtype == dtypes.float32
+    assert (Tensor([1, 2], dtype=dtypes.int32) / Tensor([2, 2], dtype=dtypes.float16)).dtype == dtypes.float16
+
+  def test_div_const(self):
+    assert (Tensor([1, 2], dtype=dtypes.int32) / 2).dtype == dtypes.default_float
+    assert (Tensor([1, 2], dtype=dtypes.int32) / 2.0).dtype == dtypes.default_float
+    assert (Tensor([1, 2], dtype=dtypes.float16) / 2).dtype == dtypes.float16
+    assert (Tensor([1, 2], dtype=dtypes.float16) / 2.0).dtype == dtypes.float16
 
 if __name__ == '__main__':
   unittest.main()
