@@ -571,6 +571,9 @@ class Tensor:
   def std(self, axis=None, keepdim=False, correction=1): return self.var(axis, keepdim, correction).sqrt()
 
   def _softmax(self, axis):
+    if len(self.shape) == 0:
+      assert axis in [-1, 0], f"{axis=} out of range of [-1, 0]"
+      axis = None
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
