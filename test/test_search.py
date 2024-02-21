@@ -3,7 +3,7 @@ import unittest
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.realize import create_schedule
 from tinygrad.features.search import time_linearizer
-from tinygrad.device import Compiled, Device, Buffer
+from tinygrad.device import Compiled, Device
 from tinygrad.ops import LoadOps
 from tinygrad.tensor import Tensor
 
