@@ -142,21 +142,21 @@ class Where(Function):
 # ************* reduce ops *************
 
 class Sum(Function):
-  def forward(self, x:LazyBuffer, new_shape:Tuple[int, ...]) -> LazyBuffer:
+  def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
     self.input_shape = x.shape
-    return x.r(ReduceOps.SUM, new_shape)
+    return x.r(ReduceOps.SUM, axis)
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.expand(self.input_shape)
 
 class Max(Function):
-  def forward(self, x:LazyBuffer, new_shape:Tuple[int, ...]) -> LazyBuffer:
-    self.x, self.ret = x, x.r(ReduceOps.MAX, new_shape)
+  def forward(self, x:LazyBuffer, axis:Tuple[int, ...]) -> LazyBuffer:
+    self.x, self.ret, self.axis = x, x.r(ReduceOps.MAX, axis), axis
     return self.ret
 
   def backward(self, grad_output:LazyBuffer) -> LazyBuffer:
     # 1s in locations where the max was chosen (can be two locations)
     max_is_1s = self.x.e(BinaryOps.CMPEQ, self.ret.expand(self.x.shape)).cast(self.x.dtype)
-    div = max_is_1s.r(ReduceOps.SUM, grad_output.shape).expand(self.x.shape)
+    div = max_is_1s.r(ReduceOps.SUM, self.axis).expand(self.x.shape)
     return max_is_1s.e(BinaryOps.DIV, div).e(BinaryOps.MUL, grad_output.expand(self.x.shape))
 
 # ************* movement ops *************
@@ -164,10 +164,10 @@ class Max(Function):
 # NOTE: this is sum in reverse
 class Expand(Function):
   def forward(self, x:LazyBuffer, shape:Tuple[int, ...]) -> LazyBuffer:
-    self.input_shape = x.shape
+    self.expanded_axis = tuple(i for i, (si, so) in enumerate(zip(x.shape, shape)) if si != so)
     return x.expand(shape)
 
-  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.r(ReduceOps.SUM, self.input_shape)
+  def backward(self, grad_output:LazyBuffer) -> LazyBuffer: return grad_output.r(ReduceOps.SUM, self.expanded_axis)
 
 class Reshape(Function):
   def forward(self, x:LazyBuffer, shape:Tuple[int, ...]) -> LazyBuffer:

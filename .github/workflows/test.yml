@@ -213,9 +213,10 @@ jobs:
       - if: ${{ matrix.task == 'onnx' }}
         name: Test ONNX (CLANG)
         run: CLANG=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - if: ${{ matrix.task == 'onnx' }}
-        name: Test Action Space
-        run: PYTHONPATH="." GPU=1 python3 extra/optimization/get_action_space.py
+      # NOTE: need to regenerate the dataset for this after the reduce change. it should probably gen a small dataset here instead
+      #- if: ${{ matrix.task == 'onnx' }}
+      #  name: Test Action Space
+      #  run: PYTHONPATH="." GPU=1 python3 extra/optimization/get_action_space.py
       - if: ${{ matrix.task == 'onnx' }}
         name: Test Beam Search
         run: PYTHONPATH="." GPU=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
