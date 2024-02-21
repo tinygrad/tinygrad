@@ -117,9 +117,10 @@ class LazyBuffer:
   # *** reduce ops ***
 
   def _reduce_op(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
+    assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
+    axis = tuple(x for x in axis if self.shape[x] != 1)
+    if len(axis) == 0: return self
     new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
-    if self.shape == new_shape: return self
-    # NOTE: currently the "axis" arg is only used for the flop counter
     return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, axis, (self,))
 
   def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
