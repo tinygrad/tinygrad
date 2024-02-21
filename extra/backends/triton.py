@@ -69,7 +69,6 @@ def uops_to_triton(function_name:str, uops:List[UOp]):
     BinaryOps.MAX: lambda x,y,dtype: f"tl.maximum({x},{y})",
     BinaryOps.CMPLT: lambda x,y,dtype: f"({x}<{y})",
     BinaryOps.MOD: lambda x,y,dtype: f"tl.abs({x})%tl.abs({y})*tl.where({x}<0,-1,1)",
-    TernaryOps.MULACC: lambda x,y,z,dtype: f"(({x}*{y})+{z})",
     TernaryOps.WHERE: lambda x,y,z,dtype: f"tl.where({x},{y},{z})",
   }
   def int_div(x,y): return f"({x}//{y})" if y != '0' else f"{x}*tl.where({x}==0, float('nan'), float('inf'))"

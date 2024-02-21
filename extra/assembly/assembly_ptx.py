@@ -35,7 +35,7 @@ def specialize_to_ptx(lang, function_name):
          BinaryOps.MOD: "rem", BinaryOps.CMPLT: "setp.lt", UnaryOps.SQRT: "sqrt.approx",
          UnaryOps.NOOP: "mov", UnaryOps.NEG: "neg",
          UnaryOps.SIN: "sin.approx", UnaryOps.LOG2: "lg2.approx", UnaryOps.EXP2: "ex2.approx.ftz",
-         TernaryOps.MULACC: "fma.rn", TernaryOps.WHERE: "selp"}
+         TernaryOps.WHERE: "selp"}
   for uop, out, vin, arg in lang.ins:
     if uop == UOps.ENDLOOP:
       ins.append("bar.sync 0;")

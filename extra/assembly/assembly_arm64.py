@@ -28,7 +28,7 @@ def specialize_to_arm64(fn_nm, asm):
           BinaryOps.MOD: "", BinaryOps.CMPLT: "subs",
           UnaryOps.NOOP: "mov", UnaryOps.NEG: "neg",
           UnaryOps.SIN:'bl ' + get_name('sinf'), UnaryOps.LOG2: 'bl ' + get_name("log2f"), UnaryOps.EXP2: 'bl ' + get_name("exp2f"), UnaryOps.SQRT: 'bl ' + get_name("sqrtf"),
-          TernaryOps.MULACC: "madd", TernaryOps.WHERE: "fcsel"}
+          TernaryOps.WHERE: "fcsel"}
 
   def mov_imm(value, reg):
     # Manually move value into reg if value can't fit

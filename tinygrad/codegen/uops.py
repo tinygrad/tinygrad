@@ -105,7 +105,7 @@ def uops_flops_mem(uops:List[UOp], vars:Dict[str, Variable]) -> Tuple[sint, sint
     if u.uop is UOps.ENDLOOP:
       mults = mult_stack.pop(-1)
     if u.uop is UOps.ALU:
-      flops += (2 if u.arg is TernaryOps.MULACC else 1) * mults
+      flops += mults
     if u.uop is UOps.LOAD:
       assert u.dtype is not None
       mem += u.dtype.itemsize * mults

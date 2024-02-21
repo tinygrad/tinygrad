@@ -13,7 +13,6 @@ from tinygrad.codegen.kernel import LinearizerOptions
 def exec_alu(arg, dtype, p):
   # TODO: make this complete and correctly honor the dtypes
   # TODO: use this for constant folding
-  if arg == TernaryOps.MULACC: return p[0]*p[1]+p[2]
   if arg == TernaryOps.WHERE: return p[1] if p[0] else p[2]
   if arg == UnaryOps.LOG2: return math.log2(p[0]) if p[0] > 0 else -math.inf if p[0] == 0 else math.nan
   if arg == UnaryOps.EXP2:
