@@ -31,11 +31,10 @@ if __name__ == "__main__":
   for ep_num,ast_str in enumerate(ast_strs):
     print("\nEPISODE", ep_num, f"win {wins*100/max(1,ep_num):.2f}%")
     lin = ast_str_to_lin(ast_str)
-    rawbufs = bufs_from_lin(lin)
 
     linhc = deepcopy(lin)
     linhc.hand_coded_optimizations()
-    tmhc = time_linearizer(linhc, rawbufs)
+    tmhc = time_linearizer(linhc)
     print(f"{tmhc*1e6:10.2f}     HC    ", linhc.colored_shape())
 
     pred_time = float('nan')
@@ -59,7 +58,7 @@ if __name__ == "__main__":
       except Exception:
         print("FAILED")
         break
-      tm = time_linearizer(lin, rawbufs)
+      tm = time_linearizer(lin)
       print(f"{tm*1e6:10.2f} {pred_time*1e6:10.2f}", lin.colored_shape())
 
     print(f"{colored('BEAT', 'green') if tm < tmhc else colored('lost', 'red')} hand coded {tmhc/tm:5.2f}x")

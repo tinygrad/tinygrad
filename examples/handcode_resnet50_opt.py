@@ -37,8 +37,6 @@ if __name__ == "__main__":
   total_tm = 0
   running_gflops = 0
   for i,si in enumerate(sched):
-    rawbufs = bufs_from_lin(Linearizer(si.ast))
-
     # "linearize" the op into uops in different ways
     lins:List[Linearizer] = []
 
@@ -55,13 +53,13 @@ if __name__ == "__main__":
     # try a beam search
     if beam:=getenv("BEAM"):
       lin = Linearizer(si.ast, device.compiler.linearizer_opts)
-      lin = beam_search(lin, rawbufs, beam, bool(getenv("BEAM_ESTIMATE", 1)))
+      lin = beam_search(lin, beam, bool(getenv("BEAM_ESTIMATE", 1)))
       lins.append(lin)
 
     # benchmark the programs
     choices = []
     for lin in lins:
-      tm = time_linearizer(lin, rawbufs, allow_test_size=False, cnt=10)
+      tm = time_linearizer(lin, allow_test_size=False, cnt=10)
       gflops = sym_infer(lin.info.flops, {k:k.min for k in lin.ast.vars()})*1e-9/tm
       choices.append((tm, gflops, lin.linearize()))
 

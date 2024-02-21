@@ -337,8 +337,8 @@ class Compiled:
         kb = Linearizer(ast, self.compiler.linearizer_opts)
         kb.required_optimizations()
         from tinygrad.features.search import beam_search, time_linearizer
-        lins.append((f"beam{BEAM.value}", beam_search(kb, None, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
-        timed = sorted([(nm, tk, time_linearizer(tk, None, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
+        lins.append((f"beam{BEAM.value}", beam_search(kb, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))))
+        timed = sorted([(nm, tk, time_linearizer(tk, allow_test_size=False, clear_l2=True)) for nm, tk in lins], key=lambda x: x[2])
         if DEBUG >= 1: print("  <  ".join(f"{nm:6s} : {lin.colored_shape(30, dense=True)} : {tm*1e6:8.2f} us" for nm, lin, tm in timed))
         k = timed[0][1]
     return k

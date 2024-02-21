@@ -20,8 +20,7 @@ if __name__ == "__main__":
   while 1:
     Tensor.no_grad, Tensor.training = True, False
     lin = ast_str_to_lin(random.choice(ast_strs))
-    rawbufs = bufs_from_lin(lin)
-    tm = last_tm = base_tm = time_linearizer(lin, rawbufs)
+    tm = last_tm = base_tm = time_linearizer(lin)
 
     # take actions
     feats, acts, rews = [], [], []
@@ -43,7 +42,7 @@ if __name__ == "__main__":
         break
       try:
         lin.apply_opt(actions[act-1])
-        tm = time_linearizer(lin, rawbufs)
+        tm = time_linearizer(lin)
         if math.isinf(tm): raise Exception("failed")
         rews.append(((last_tm-tm)/base_tm))
         last_tm = tm
