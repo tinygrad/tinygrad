@@ -10,7 +10,7 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Set,
 class Node:
   b: sint
   min: int
-  max: int
+  max: sint
   def render(self, ops=None, ctx=None) -> Any:
     if ops is None: ops = render_python
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
@@ -117,7 +117,7 @@ class Variable(Node):
 
   def __getnewargs__(self): return (self.expr, self.min, self.max)  # args passed to __new__ when unpickling
 
-  def __init__(self, expr:str, nmin:int, nmax:int):
+  def __init__(self, expr:str, nmin:int, nmax:sint):
     self.expr, self.min, self.max = expr, nmin, nmax
     self._val: Optional[int] = None
   @property

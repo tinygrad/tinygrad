@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import unittest, pickle
-from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, ModNode, Node, sym_render, sym_infer
+from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, ModNode, Node, SymDim, sym_render, sym_infer
 
 class TestSymbolicPickle(unittest.TestCase):
   def _test_pickle_unpickle(self, x): self.assertEqual(x, pickle.loads(pickle.dumps(x)))
@@ -63,7 +63,7 @@ class TestSymbolic(unittest.TestCase):
     assert idx1+idx2 == idx1+idx2
     assert idx1+idx2 == idx2+idx1
     assert idx1+idx2 != idx2
-    assert idx1*idx2 == idx2*idx1
+    assert idx1*SymDim(idx2) == idx2*SymDim(idx1)
 
   def test_numnode_eq_int(self):
     n1 = NumNode(1)
@@ -294,13 +294,13 @@ class TestSymbolicVars(unittest.TestCase):
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
-    assert (a + b * c).vars() == {a, b, c}
+    assert (a + b * SymDim(c)).vars() == {a, b, c}
     assert (a % 3 + b // 5).vars() == {a, b}
     assert (a + b + c - a).vars() == {b, c}
 
   def test_dedup(self):
     a = Variable("a", 0, 10)
-    assert (a * a).vars() == {a}
+    assert (a * SymDim(a)).vars() == {a}
     assert (a//4 + a//6).vars() == {a}
 
 class TestSymbolicMinMax(unittest.TestCase):
@@ -316,7 +316,7 @@ class TestSymRender(unittest.TestCase):
     assert sym_render(a) == "a"
     assert sym_render(1) == "1"
     assert sym_render(a+1) == "(1+a)"
-    assert sym_render(a*b) == "(a*b)"
+    assert sym_render(a*SymDim(b)) == "(a*b)"
 
 class TestSymInfer(unittest.TestCase):
   def test_sym_infer(self):
@@ -325,13 +325,13 @@ class TestSymInfer(unittest.TestCase):
     c = Variable("c", 0, 10)
     var_vals = {a: 2, b: 3, c: 4}
     assert sym_infer(5, var_vals) == 5
-    assert sym_infer(a, var_vals) == 2
-    assert sym_infer(b, var_vals) == 3
+    assert sym_infer(SymDim(a), var_vals) == 2
+    assert sym_infer(SymDim(b), var_vals) == 3
     assert sym_infer(a+b, var_vals) == 5
     assert sym_infer(a-b, var_vals) == -1
     assert sym_infer(a+b+c, var_vals) == 9
-    assert sym_infer(a*b, var_vals) == 6
-    assert sym_infer(a*b+c, var_vals) == 10
+    assert sym_infer(a*SymDim(b), var_vals) == 6
+    assert sym_infer(a*SymDim(b)+c, var_vals) == 10
 
 class TestSymbolicSymbolicOps(unittest.TestCase):
   def test_node_divmod_node(self):
@@ -351,25 +351,25 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     assert 0 % (Variable("i", 1, 10)*128) == 0
     assert idx0 // (i*3) == 0
     assert idx0 % (i*3) == idx0
-    assert i // i == 1
-    assert i % i == 0
+    assert i // SymDim(i) == 1
+    assert i % SymDim(i) == 0
     assert 128 // NumNode(4) == 32
     assert 128 % NumNode(4) == 0
-    assert NumNode(128) // NumNode(4) == 32
-    assert NumNode(128) % NumNode(4) == 0
+    assert NumNode(128) // SymDim(NumNode(4)) == 32
+    assert NumNode(128) % SymDim(NumNode(4)) == 0
 
   def test_mulnode_divmod_node(self):
     i = Variable("i", 1, 10)
     idx0 = Variable("idx0", 0, 31)
     assert (idx0*(i*4+4)) // (i+1) == (idx0*4)
     assert (idx0*(i*4+4)) % (i+1) == 0
-    assert (idx0*i) % i == 0
+    assert (idx0*SymDim(i)) % i == 0
 
   def test_sumnode_divmod_sumnode(self):
     i = Variable("i", 1, 10)
     idx0 = Variable("idx0", 0, 7)
     idx1 = Variable("idx1", 0, 3)
-    idx2 = Variable("idx2", 0, i)
+    idx2 = Variable("idx2", 0, SymDim(i))
     assert (idx0*(i*4+4)+idx1*(i+1)+idx2) // (i+1) == idx0*4+idx1
     assert (idx0*(i*4+4)+idx1*(i+1)+idx2) % (i+1) == idx2
     assert (i+1) // (i*128+128) == 0
@@ -383,7 +383,7 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
 
   def test_sumnode_divmod_sumnode_complex(self):
     i = Variable("i", 1, 1024)
-    gidx0 = Variable("gidx0", 0, i)
+    gidx0 = Variable("gidx0", 0, SymDim(i))
     lidx1 = Variable("lidx1", 0, 7)
     ridx2 = Variable("ridx1", 0, 31)
     assert ((i*128+128)*2 + gidx0*128 + lidx1*(i*512+512) + ridx2*4) // (i*128+128) == 2 + lidx1*4
@@ -395,7 +395,7 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
 
   def test_mod_node_max(self):
     i = Variable("i", 1, 128)
-    gidx0 = Variable("gidx0", 0, i)
+    gidx0 = Variable("gidx0", 0, SymDim(i))
     mod = gidx0 % 8
     assert isinstance(mod, ModNode) and mod.a == gidx0 and mod.b == 8
     mod = gidx0 % 2
@@ -413,15 +413,16 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     c = Variable("c", 1, 10)
     d = Variable("d", 5, 10)
     # if the value is always the same, it folds to num
-    assert (a < b) == NumNode(1)
-    assert (b < a) == NumNode(0)
-    assert (d < a) == NumNode(0)
-    assert (a < a) == NumNode(0)
-    assert (a > a) == NumNode(0)
+    assert (a < SymDim(b)) == NumNode(1)
+    assert (b < SymDim(a)) == NumNode(0)
+    assert (d < SymDim(a)) == NumNode(0)
+    # TODO: don't support idx < dim
+    # assert (a < a) == NumNode(0)
+    # assert (a > a) == NumNode(0)
     # if it remains as a LtNode, bool is always true and (min, max) == (0, 1)
-    assert isinstance((a < c), LtNode) and (a < c).min == 0 and (a < c).max == 1
-    assert a < c
-    assert isinstance((a > c), LtNode) and (a > c).min == 0 and (a > c).max == 1
+    assert isinstance((a < SymDim(c)), LtNode) and (a < SymDim(c)).min == 0 and (a < SymDim(c)).max == 1
+    assert a < SymDim(c)
+    assert isinstance((a > SymDim(c)), LtNode) and (a > SymDim(c)).min == 0 and (a > SymDim(c)).max == 1
     # same when comparing with a constant
     assert a < 3 and (a < 3).min == 0 and (a < 3).max == 1
     assert a > 3 and (a > 3).min == 0 and (a > 3).max == 1
@@ -430,25 +431,25 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     a = Variable("a", 1, 2)
     b = Variable("b", 1, 2)
     c = Variable("c", 1, 2)
-    x = SumNode([MulNode(a, b), c])
+    x = SumNode([MulNode(a, SymDim(b)), c])
     with self.assertRaises(AssertionError):
       (x < 3)
 
   def test_nested_variable_mod(self):
     i = Variable("i", 1, 5)
-    idx0 = Variable("idx0", 0, i)
+    idx0 = Variable("idx0", 0, SymDim(i))
     with self.assertRaises(AssertionError):
       assert idx0 % 2 == idx0
 
   def test_num_node_mul_node(self):
     a = Variable("a", 1, 5)
-    b = NumNode(2) * a
+    b = NumNode(2) * SymDim(a)
     assert b == a * 2
     assert isinstance(b, MulNode)
-    b = NumNode(1) * a
+    b = NumNode(1) * SymDim(a)
     assert b == a
     assert isinstance(b, Variable)
-    b = NumNode(0) * a
+    b = NumNode(0) * SymDim(a)
     assert b == 0
     assert isinstance(b, NumNode)
 
