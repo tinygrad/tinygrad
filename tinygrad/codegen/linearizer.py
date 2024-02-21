@@ -5,7 +5,6 @@ from collections import defaultdict
 
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.helpers import colored, DEBUG, prod, getenv, all_same, to_function_name
-from panic import panic
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, LtNode, AndNode
@@ -161,15 +160,11 @@ class Linearizer(Kernel):
   def define_acc(self, output_idx:int, reduce_op: LazyOp, idxs=[]) -> List[UOp]:
     ret = []
     dtype = self.get_base_dtype(get_lazyop_info(reduce_op).dtype)
-    panic(self.get_float4_upcast_dim(output_idx))
-    if len(upcast_dim:=self.get_float4_upcast_dim(output_idx)) == 1 and len(float4_expand:=expand_node(idxs[upcast_dim[0]])) in [4,2]:
-      dtype = dtype.vec(len(float4_expand))
-    value = self.get_reduce_acc(reduce_op)
+    if len(dim:=self.get_float4_upcast_dim(output_idx)) == 1 and (amt:=len(expand_node(idxs[dim[0]]))) in [4,2]: dtype.vec(amt)
     expand_vars = tuple([expand_idx(idx) for _,idx in enumerate(idxs)])
     for i in iter_idxs(expand_vars):
-      acc = self.uop(UOps.DEFINE_ACC, dtype, (), value, cachable=False)
-      if dtype.count > 1:
-        ret.append(self.uop(UOps.GEP, dtype.scalar(), (acc,), i[0]))
+      acc = self.uop(UOps.DEFINE_ACC, dtype, (), self.get_reduce_acc(reduce_op), cachable=False)
+      if dtype.count > 1: ret.append(self.uop(UOps.GEP, dtype.scalar(), (acc,), i[dim[0]]))
       else: ret.append(acc)
     return ret
 
@@ -259,7 +254,7 @@ class Linearizer(Kernel):
       fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
       # define accumulator
-      acc = self.define_acc(0, self.reduceop, fake_reduce_idxs+upcast_idxs)
+      acc = self.define_acc(0, self.reduceop, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)
 
       if (tc:=self.tensor_core):
         def calc_tc_idxs(local_size: int, aliases: List[List[int]]):
