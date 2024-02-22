@@ -299,8 +299,8 @@ class AndNode(RedNode):
 def sym_render(a:sint, ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.node.render(ops, ctx)
 def sym_infer(a: sint, var_vals: Dict[Variable, int]) -> int:
   if isinstance(a, (int, float)): return a
-  ret = a.substitute({k:NumNode(v) for k, v in var_vals.items()})
-  assert isinstance(ret, NumNode), f"sym_infer didn't produce NumNode from {a} with {var_vals}"
+  ret = a.node.substitute({k:NumNode(v) for k, v in var_vals.items()})
+  assert isinstance(ret, NumNode), f"sym_infer didn't produce NumNode from {a} with {var_vals} -> {ret=}"
   return ret.b
 
 # symbolic int, these are allowed in a Tensor shape
@@ -324,16 +324,18 @@ class SymDim:
 
   def __abs__(self): return self
 
-  def __floordiv__(self, b:sint): pass
-  def __rfloordiv__(self, b:int): return SymDim(NumNode(b) // self)
+  def __floordiv__(self, b:sint): return SymDim(self.node.__floordiv__(b))
+  def __rfloordiv__(self, b:int) -> sint: return SymDim(NumNode(b).__floordiv__(self.node))
 
-  def __mod__(self, b:sint): pass
-  def __rmod__(self, b:int): return SymDim(NumNode(b) % self)
+  def __mod__(self, b:sint): return SymDim(self.node.__mod__(b))
+  def __rmod__(self, b:int): return SymDim(NumNode(b).__mod__(self.node))
 
   def __ge__(self, b:sint): return SymDim(self.node.__ge__(b))
   def __gt__(self, b:sint): return SymDim(self.node.__gt__(b))
   def __le__(self, b:sint): return SymDim(self.node.__le__(b))
   def __lt__(self, b:sint): return SymDim(self.node.__lt__(b))
+
+  def vars(self) -> Set[Variable]: return self.node.vars()
 
   def unbind(self):
     ub = self.node.unbind()

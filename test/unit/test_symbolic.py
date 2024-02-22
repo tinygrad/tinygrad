@@ -294,9 +294,12 @@ class TestSymbolicVars(unittest.TestCase):
     a = Variable("a", 0, 10)
     b = Variable("b", 0, 10)
     c = Variable("c", 0, 10)
-    assert (a + b * SymDim(c)).vars() == {a, b, c}
-    assert (a % 3 + b // 5).vars() == {a, b}
-    assert (a + b + c - a).vars() == {b, c}
+    sa = SymDim(a)
+    sb = SymDim(b)
+    sc = SymDim(c)
+    assert (sa + sb * sc).vars() == {a, b, c}
+    assert (sa % 3 + sb // 5).vars() == {a, b}
+    assert (sa + sb + sc - sa).vars() == {b, c}
 
   def test_dedup(self):
     a = Variable("a", 0, 10)
@@ -311,12 +314,12 @@ class TestSymbolicMinMax(unittest.TestCase):
 
 class TestSymRender(unittest.TestCase):
   def test_sym_render(self):
-    a = Variable("a", 1, 8)
-    b = Variable("b", 1, 10)
+    a = SymDim(Variable("a", 1, 8))
+    b = SymDim(Variable("b", 1, 10))
     assert sym_render(a) == "a"
     assert sym_render(1) == "1"
     assert sym_render(a+1) == "(1+a)"
-    assert sym_render(a*SymDim(b)) == "(a*b)"
+    assert sym_render(a*b) == "(a*b)"
 
 class TestSymInfer(unittest.TestCase):
   def test_sym_infer(self):
