@@ -296,7 +296,7 @@ class AndNode(RedNode):
       subed.append(sub)
     return Node.ands(subed)
 
-def sym_render(a: Union[Node, int], ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.render(ops, ctx)
+def sym_render(a:sint, ops=None, ctx=None) -> str: return str(a) if isinstance(a, int) else a.node.render(ops, ctx)
 def sym_infer(a: sint, var_vals: Dict[Variable, int]) -> int:
   if isinstance(a, (int, float)): return a
   ret = a.substitute({k:NumNode(v) for k, v in var_vals.items()})
@@ -330,10 +330,10 @@ class SymDim:
   def __mod__(self, b:sint): pass
   def __rmod__(self, b:int): return SymDim(NumNode(b) % self)
 
-  def __ge__(self, b:sint): pass
-  def __gt__(self, b:sint): pass
-  def __le__(self, b:sint): pass
-  def __lt__(self, b:sint): pass
+  def __ge__(self, b:sint): return SymDim(self.node.__ge__(b))
+  def __gt__(self, b:sint): return SymDim(self.node.__gt__(b))
+  def __le__(self, b:sint): return SymDim(self.node.__le__(b))
+  def __lt__(self, b:sint): return SymDim(self.node.__lt__(b))
 
   def unbind(self):
     ub = self.node.unbind()
