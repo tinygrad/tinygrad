@@ -49,7 +49,6 @@ class Node:
 
   # *** complex ops ***
 
-  def __rfloordiv__(self, b:int): return NumNode(b) // self
   def __floordiv__(self, b:sint, factoring_allowed=True):
     if not isinstance(b, int):
       if self == b.node: return NumNode(1)
@@ -66,7 +65,6 @@ class Node:
       return (self + -offset*b).__floordiv__(b, factoring_allowed=False) + offset
     return create_node(DivNode(self, b))
 
-  def __rmod__(self, b:int): return NumNode(b) % self
   def __mod__(self, b:sint):
     if not isinstance(b, int):
       if self == b.node: return NumNode(0)
@@ -156,10 +154,10 @@ class OpNode(Node):
     self.a, self.b = a, b
     self.min, self.max = self.get_bounds()
   def vars(self): return self.a.vars() | (self.b.vars() if isinstance(self.b, Node) else set())
-  def get_bounds(self) -> Tuple[int, int]: raise NotImplementedError("must be implemented")
+  def get_bounds(self) -> Tuple[int, sint]: raise NotImplementedError("must be implemented")
 
 class LtNode(OpNode):
-  def get_bounds(self) -> Tuple[int, int]:
+  def get_bounds(self) -> Tuple[int, sint]:
     if self.a == self.b: return (0, 0)
     if isinstance(self.b, int): return (1, 1) if self.a.max < self.b else (0, 0) if self.a.min >= self.b else (0, 1)
     return (1, 1) if self.a.max < self.b.min else (0, 0) if self.a.min >= self.b.max else (0, 1)
@@ -177,13 +175,13 @@ class MulNode(OpNode):
     if b % self.b == 0 and self.b > 0: return self.a//(b//self.b)
     return Node.__floordiv__(self, b, factoring_allowed)
   def __mod__(self, b:sint): return Node.__mod__(self.a * (self.b%b), b)
-  def get_bounds(self) -> Tuple[int, int]: return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
+  def get_bounds(self) -> Tuple[int, sint]: return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
     return self.a.substitute(var_vals) * (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
 class DivNode(OpNode):
   def __floordiv__(self, b:sint, _=False): return self.a//(self.b*b) # two divs is one div
-  def get_bounds(self) -> Tuple[int, int]:
+  def get_bounds(self) -> Tuple[int, sint]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     return self.a.min//self.b, self.a.max//self.b
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self.a.substitute(var_vals) // self.b
@@ -194,7 +192,7 @@ class ModNode(OpNode):
     return self.a % b if self.b % b == 0 else Node.__mod__(self, b)
   def __floordiv__(self, b:sint, factoring_allowed=True):
     return (self.a//b) % (self.b//b) if self.b % b == 0 else Node.__floordiv__(self, b, factoring_allowed)
-  def get_bounds(self) -> Tuple[int, int]:
+  def get_bounds(self) -> Tuple[int, sint]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b): return (0, self.b-1)
     return (self.a.min%self.b, self.a.max%self.b)
@@ -205,10 +203,10 @@ class RedNode(Node):
     self.nodes = nodes
     self.min, self.max = self.get_bounds()
   def vars(self) -> Set[Variable]: return set.union(*[x.vars() for x in self.nodes], set())
-  def get_bounds(self) -> Tuple[int, int]: raise NotImplementedError("must be implemented")
+  def get_bounds(self) -> Tuple[int, sint]: raise NotImplementedError("must be implemented")
 
 class SumNode(RedNode):
-  def get_bounds(self) -> Tuple[int, int]: return sum([x.min for x in self.nodes]), sum([x.max for x in self.nodes])
+  def get_bounds(self) -> Tuple[int, sint]: return sum([x.min for x in self.nodes]), sum([x.max for x in self.nodes])
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __mul__(self, b:sint): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
@@ -290,7 +288,7 @@ class SumNode(RedNode):
   def flat_components(self): return [y for x in self.nodes for y in (x.flat_components if isinstance(x, SumNode) else [x])]
 
 class AndNode(RedNode):
-  def get_bounds(self) -> Tuple[int, int]: return min([x.min for x in self.nodes]), max([x.max for x in self.nodes])
+  def get_bounds(self) -> Tuple[int, sint]: return min([x.min for x in self.nodes]), max([x.max for x in self.nodes])
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
     subed = []
     for node in self.nodes:
@@ -310,7 +308,12 @@ def sym_infer(a: sint, var_vals: Dict[Variable, int]) -> int:
 class SymDim:
   def __init__(self, node:Node):
     self.node = node
-    self.min, self.max = node.min, node.max
+    self.min, self._max = node.min, node.max
+
+  @property
+  def max(self) -> int:
+    return self._max if isinstance(self._max, int) else self._max.max
+
   def __neg__(self): return SymDim(self.node*-1)
   def __add__(self, b:sint): return SymDim(self.node + (b if isinstance(b, int) else b.node))
   def __radd__(self, b:int): return SymDim(self.node + b)
@@ -322,9 +325,10 @@ class SymDim:
   def __abs__(self): return self
 
   def __floordiv__(self, b:sint): pass
-  def __rfloordiv__(self, b:int): pass
+  def __rfloordiv__(self, b:int): return SymDim(NumNode(b) // self)
+
   def __mod__(self, b:sint): pass
-  def __rmod__(self, b:int): pass
+  def __rmod__(self, b:int): return SymDim(NumNode(b) % self)
 
   def __ge__(self, b:sint): pass
   def __gt__(self, b:sint): pass
