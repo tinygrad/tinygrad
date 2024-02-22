@@ -354,6 +354,18 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(t0.numpy().flatten(), t1.numpy().flatten())
     assert t1.lazydata.axis == 2
 
+  def test_mlb_assign_change_axis(self):
+    devices = (d0, d1, d2, d3)
+
+    # axis=None <- axis=None + axis=0
+    t_none = Tensor.zeros((16, 16)).shard(devices)
+    t_zero = Tensor.zeros((16, 16)).shard(devices, axis=0)
+    t_none.assign(t_none + t_zero).realize()
+    assert t_none.lazydata.axis == 0  # should implicitly change axis
+    assert t_none.lazydata.lbs[0].realized.size == 4 * 16  # should reallocate buffers to smaller size
+
+    # axis=0 <- axis=None: what kind of behavior do we want?
+
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
   # shrink a multitensor on sharded axis
