@@ -101,7 +101,7 @@ class MultiLazyBuffer:
     # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
     new_axis = len(arg_acc) - arg_acc[::-1].index(prod(self.shape[:self.axis])) - 1
     if not arg[new_axis] == self.shape[self.axis]:
-      assert self.shape[self.axis] % len(self.real_lbs) == 0, f"cannot reshape on-axis for uneven shards {self.axis} {self.shape} {len(self.real_lbs)}"
+      assert self.shape[self.axis] % len(self.real_lbs) == 0, f"cannot reshape on-axis for uneven shard {self.axis} {self.shape} {len(self.real_lbs)}"
       assert arg[new_axis] % len(self.real_lbs) == 0, f"new on-axis shape must divide evenly between devices {new_axis} {arg} {len(self.real_lbs)}"
     return MultiLazyBuffer([x.reshape(tuple(s if a != new_axis else
                               x.shape[self.axis] if s == self.shape[self.axis] else
