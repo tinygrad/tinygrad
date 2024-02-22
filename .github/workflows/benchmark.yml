@@ -155,7 +155,7 @@ jobs:
           train_cifar.txt
           train_cifar_half.txt
           train_cifar_wino.txt
-          train_cifar_wino_half_hip.txt
+          train_cifar_one_gpu.txt
           llama_unjitted.txt
           llama_jitted.txt
           gpt2_unjitted.txt
