@@ -575,12 +575,13 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       bn_ts[0].cat(*bn_ts[1:]).numpy()
 
   def test_synced_vs_unsynced_bn(self):
-    from examples.hlb_cifar10 import BatchNorm, UnsyncedBatchNorm
+    from examples.hlb_cifar10 import UnsyncedBatchNorm
+    from tinygrad.nn import BatchNorm2d
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
     x = Tensor.ones(8, 8, 8, 8).contiguous().realize().shard(devices, axis=0)
 
     with Tensor.train():
-      synced_bn = BatchNorm(8)
+      synced_bn = BatchNorm2d(8)
       unsynced_bn = UnsyncedBatchNorm(8)
 
       for p in get_parameters([synced_bn, unsynced_bn]):

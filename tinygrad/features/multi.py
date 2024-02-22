@@ -99,6 +99,7 @@ class MultiLazyBuffer:
     if self.axis is None: return MultiLazyBuffer([x.reshape(arg) for x in self.lbs], None, self.real)
     arg_acc:List[sint] = list(itertools.accumulate(arg, operator.mul, initial=1))
     # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
+    # todo: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
     new_axis = len(arg_acc) - arg_acc[::-1].index(prod(self.shape[:self.axis])) - 1
     if not arg[new_axis] == self.shape[self.axis]:
       assert self.shape[self.axis] % len(self.real_lbs) == 0, f"cannot reshape on-axis for uneven shard {self.axis} {self.shape} {len(self.real_lbs)}"
