@@ -582,7 +582,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
     with Tensor.train():
       synced_bn = BatchNorm2d(8)
-      unsynced_bn = UnsyncedBatchNorm(8)
+      unsynced_bn = UnsyncedBatchNorm(8, num_devices=len(devices))
 
       for p in get_parameters([synced_bn, unsynced_bn]):
         p.shard_(devices)

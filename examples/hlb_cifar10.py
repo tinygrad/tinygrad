@@ -40,7 +40,7 @@ class UnsyncedBatchNorm:
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x:Tensor):
-    assert isinstance(x.lazydata, MultiLazyBuffer) and len(x.lazydata.lbs) == self.num_devices and x.lazydata.axis == 0
+    if isinstance(x.lazydata, MultiLazyBuffer): assert x.lazydata.axis is None or x.lazydata.axis == 0 and len(x.lazydata.lbs) == self.num_devices
 
     rshape, x = x.shape, x.reshape(self.num_devices, -1, *x.shape[1:])
     batch_mean, batch_invstd = self.calc_stats(x)
