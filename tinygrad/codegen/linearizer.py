@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Set, Iterator
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Set, Iterator, Sequence
 import itertools, math, functools
 from collections import defaultdict
 
@@ -25,6 +25,9 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
 def expand_idx(node:Node) -> Union[Variable, NumNode]: return next((v for v in node.vars() if v.expr.startswith("_uidx")), NumNode(0))
+def expand_idxs(nodes:Sequence[Node]) -> Tuple[Union[Variable, NumNode], ...]:
+  eidxs = [expand_idx(node) for node in nodes]
+  return tuple([v if v not in eidxs[:j] else NumNode(0) for j, v in enumerate(eidxs)])  # take only first occurrence of expand variable
 def iter_idxs(idxs:Tuple[Union[Variable, NumNode], ...]) -> Iterator[Tuple[int,...]]:
   yield from (x[::-1] for x in itertools.product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
 
@@ -47,7 +50,9 @@ class Linearizer(Kernel):
   def cast(self, val: UOp, dtype) -> UOp: return self.uop(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
 
   def get_reduce_acc(self, reduceop:LazyOp):
-    dtype = get_lazyop_info(reduceop).dtype
+    info = get_lazyop_info(reduceop)
+    assert all(0 <= x < len(info.shape) for x in reduceop.arg), "arg axis out of range"
+    dtype = info.dtype
     if reduceop.op == ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
     elif reduceop.op == ReduceOps.MAX:
       if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
@@ -71,7 +76,7 @@ class Linearizer(Kernel):
     localtype = self.get_base_dtype(buf.dtype if acc is None else get_lazyop_info(self.reduceop).dtype)
     const = buf.val if isinstance(buf, ConstBuffer) else acc
 
-    expand_vars = tuple([expand_idx(idx) for j, idx in enumerate(idxs)])
+    expand_vars = expand_idxs(idxs)
 
     dim, amt = None, 1
     # float 4 grouping
@@ -129,12 +134,12 @@ class Linearizer(Kernel):
     buf_uop = self.buf_uops[i]
     assert buf_uop is not None, f"buffer {i} wasn't UOped"
 
-    expanded_nodes = [expand_node(idx) for idx in idxs]
-    _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
+    expand_vars = expand_idxs(idxs)
+    _idxs = zip(*[expand_node(idx, expand_vars) for idx in idxs]) if idxs else [tuple()]  # transpose
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
-    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expanded_nodes[upcast_dim[0]]) in [2,4]:
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [2,4]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
         _idx = k[:upcast_dim[0]] + (float4_expand[0],) + k[upcast_dim[0]+1:]
