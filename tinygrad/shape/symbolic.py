@@ -32,7 +32,7 @@ class Node:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
   def __neg__(self): return self*-1
-  def __add__(self, b:Union[Node,int]): return Node.sum([self, b if isinstance(b, Node) else NumNode(b)])
+  def __add__(self, b:Union[Node,int]): return Node.sum([self, NumNode(b) if isinstance(b, int) else b])
   def __radd__(self, b:int): return self+b
   def __sub__(self, b:Union[Node,int]): return self+-b
   def __rsub__(self, b:int): return -self+b
@@ -43,7 +43,6 @@ class Node:
   def __mul__(self, b:Union[Node, int]):
     if b == 0: return NumNode(0)
     if b == 1: return self
-    if self.__class__ is NumNode: return NumNode(self.b*b) if isinstance(b, int) else b*self.b
     return create_node(MulNode(self, b.b)) if isinstance(b, NumNode) else create_node(MulNode(self, b))
   def __rmul__(self, b:int): return self*b
 
@@ -144,6 +143,7 @@ class NumNode(Node):
   def bind(self, val):
     assert self.b == val, f"cannot bind {val} to {self}"
     return self
+  def __mul__(self, b:Union[Node,int]): return NumNode(self.b*b) if isinstance(b, int) else b*self.b
   def __eq__(self, other): return self.b == other
   def __hash__(self): return hash(self.b)  # needed with __eq__ override
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self
@@ -192,8 +192,8 @@ class DivNode(OpNode):
 
 class ModNode(OpNode):
   def __mod__(self, b: Union[Node, int]):
-    if isinstance(b, Node) or isinstance(self.b, Node): return Node.__mod__(self, b)
-    return self.a % b if self.b % b == 0 else Node.__mod__(self, b)
+    if isinstance(b, int) and isinstance(self.b, int) and self.b % b == 0: return self.a % b
+    return Node.__mod__(self, b)
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     return (self.a//b) % (self.b//b) if self.b % b == 0 else Node.__floordiv__(self, b, factoring_allowed)
   def get_bounds(self) -> Tuple[int, int]:
@@ -316,7 +316,7 @@ def render_mulnode(node:MulNode, ops, ctx):
     return f"({sym_render(node.b,ops,ctx)}*{node.a.render(ops,ctx)})"
   return f"({node.a.render(ops,ctx)}*{sym_render(node.b,ops,ctx)})"
 
-render_python: Dict[Type, Callable] = {
+render_python: Dict[Type, Callable[..., str]] = {
   Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}{'='+str(self.val) if self._val is not None else ''}]" if ctx == "DEBUG" \
     else (f"Variable('{self.expr}', {self.min}, {self.max})"+(f".bind({self.val})" if self._val is not None else '') if ctx == "REPR" \
     else f"{self.expr}"),
