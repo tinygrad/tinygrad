@@ -325,6 +325,7 @@ class TestMultiTensor(unittest.TestCase):
     # test shape-one axis
     t5 = t4.reshape((26, 1, 105))
     assert t5.lazydata.axis == 2
+    np.testing.assert_allclose(t.numpy().flatten(), t5.numpy().flatten())
 
     # test split and rejoin to the right and reshape to the left
     t5 = t0.reshape((2, 13, 3, 5, 7))
