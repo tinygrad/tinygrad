@@ -1624,6 +1624,11 @@ class TestOps(unittest.TestCase):
     data = [[[1, 2, 3], [0, 3, 5]], [[1, 2, 3], [0, 3, 5]]]
     helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 8), lambda: Tensor(data).one_hot(8), forward_only=True)
 
+  @unittest.skipIf(getenv("METAL", 0)== 0, "only run on METAL backend")
+  def test_bfloat16_metal(self):
+    x = Tensor.uniform(10, 2, dtype=dtypes.bfloat16)
+    x.realize()
+
 if __name__ == '__main__':
   np.random.seed(1337)
   unittest.main(verbosity=2)
