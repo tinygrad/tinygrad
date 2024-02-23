@@ -49,6 +49,7 @@ class Node:
 
   # *** complex ops ***
 
+  def __rfloordiv__(self, b:int): return NumNode(b) // self
   def __floordiv__(self, b:sint, factoring_allowed=True):
     if not isinstance(b, int):
       if self == b.node: return NumNode(1)
@@ -65,6 +66,7 @@ class Node:
       return (self + -offset*b).__floordiv__(b, factoring_allowed=False) + offset
     return create_node(DivNode(self, b))
 
+  def __rmod__(self, b:int): return NumNode(b) % self
   def __mod__(self, b:sint):
     if not isinstance(b, int):
       if self == b.node: return NumNode(0)
