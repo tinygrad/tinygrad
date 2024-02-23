@@ -10,6 +10,7 @@ from tinygrad.ops import BinaryOps, BufferOps, ConstBuffer, LazyOp, LoadOps, Mem
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import DEBUG, getenv
+from panic import panic
 
 class ASTRunner(JITRunner):
   def __init__(self, ast: Tuple[LazyOp,...]):
@@ -37,20 +38,20 @@ class Scheduler:
     self.copy_cache: Dict[Buffer, int] = {}
     self.ast = graphlib.TopologicalSorter()
 
+  def store_output(self, lb: LazyBuffer, src:LazyOp):
+    op = LazyOp(BufferOps.STORE, (src, ), MemBuffer(len(self.rawbufs), lb.dtype, lb.st.simplify().unbind()[0]))
+    store_buf = Buffer(lb.device, lb.size, lb.dtype)
+    lb.base.realized = store_buf
+    self.rawbufs.append(store_buf)
+    self.ast.add(op, src)
+
   def create_schedule(self, lazy_buffers:List[LazyBuffer]):
     for lb in lazy_buffers:
-      src = self._recursive_lazyop(lb)
-      assert src is not None
-      op = LazyOp(BufferOps.STORE, (src, ), MemBuffer(len(self.rawbufs), lb.dtype, lb.st.simplify().unbind()[0]))
-      store_buf = Buffer(lb.device, lb.size, lb.dtype)
-      lb.realized = store_buf
-      self.rawbufs.append(store_buf)
-      self.ast.add(op, src)
+      src = self._recursive_lazyop(lb, out_shape=lb.shape)
+      self.store_output(lb, src)
+    self.sched.append(MiniScheduleItem(ASTRunner(tuple(self.ast.static_order())), self.rawbufs))
 
-    ast = tuple(self.ast.static_order())
-    self.sched.append(MiniScheduleItem(ASTRunner(ast), self.rawbufs))
-
-  def _recursive_lazyop(self, lb:LazyBuffer) -> LazyOp:
+  def _recursive_lazyop(self, lb:LazyBuffer, out_shape) -> LazyOp:
     # LoadOps have special sources
     if lb.base.op == LoadOps.CONST: # Consts are always generated
       return LazyOp(BufferOps.CONST, src=(), arg=ConstBuffer(val=lb.base.arg, dtype=lb.base.dtype, st=lb.st.simplify().unbind()[0]))
@@ -71,14 +72,15 @@ class Scheduler:
       assert st_var_vals == {}, "variables not supported yet"
       return LazyOp(BufferOps.LOAD, (), MemBuffer(idx, lb.dtype, unbound_st))
 
-    srcs: List[LazyOp] = []
-    for src in lb.base.srcs:
-      src_op = self._recursive_lazyop(src)
-      if src_op is not None:
-        srcs.append(src_op)
-    op = LazyOp(cast(Op,lb.base.op), src=tuple(srcs))
+    srcs = tuple([self._recursive_lazyop(src, out_shape) for src in lb.base.srcs])
+    op = LazyOp(cast(Op,lb.base.op), src=srcs)
     self.ast.add(op, *srcs)
     return op
+    if op.op not in ReduceOps: return op
+
+    if not lb.base.realized: self.store_output(lb, op)
+    idx = self.rawbufs.index(cast(Buffer,lb.base.realized))
+    return LazyOp(BufferOps.LOAD, (), MemBuffer(idx, lb.dtype, lb.st.simplify().unbind()[0]))
 
 class MiniLinearizer:
   def __init__(self, ast):
@@ -153,8 +155,8 @@ class TestLinearizer2(unittest.TestCase):
     scheduler.create_schedule([x.lazydata for x in vals])
     for si in scheduler.sched:
       si.runner(si.rawbufs, var_vals={})
-    ret = [np.frombuffer(x.lazydata.realized.as_buffer(), dtype=x.dtype.np).reshape(x.shape) for x in vals]
-    for x in vals: x.lazydata.realized = None # reset values for the comparison
+    ret = [np.frombuffer(x.lazydata.base.realized.as_buffer(), dtype=x.dtype.np).reshape(x.shape) for x in vals]
+    for x in vals: x.lazydata.base.realized = None # reset values for the comparison
     return ret
 
   def test_multi_output_simple(self):
@@ -191,3 +193,39 @@ class TestLinearizer2(unittest.TestCase):
     ret = self._new_realize(outputs)
     expected = [x.numpy() for x in outputs]
     np.testing.assert_equal(ret, expected)
+
+  def test_batchnorm(self):
+    """
+    x = np.random.randn(2, 4, 3, 3)
+    weight, bias = np.ones(4), np.zeros(4)
+    x, weight, bias = [Tensor(data, dtype=dtypes.float) for data in [x,weight,bias]]
+    batch_mean = x.mean(axis=(0,2,3))
+    y = (x - batch_mean.reshape(shape=[1, -1, 1, 1]))
+    batch_var = (y*y).mean(axis=(0,2,3))
+    batch_invstd = batch_var.add(1e-5).pow(-0.5)
+    out:Any = x.batchnorm(weight, bias, batch_mean, batch_invstd)
+
+    scheduler = Scheduler()
+    scheduler.create_schedule([out.lazydata])
+    ast = scheduler.sched[-1].runner.ast
+    #for si in scheduler.sched: print(si)
+    for op in ast:
+      if op.op == BufferOps.LOAD:
+        print(op.op)
+    print(len(scheduler.rawbufs))
+    """
+
+    x = Tensor([1,2,3,4]).sum()
+    y = Tensor([1,2,3,4]).sum()
+    scheduler = Scheduler()
+    scheduler.create_schedule([x.lazydata, y.lazydata])
+    ast = scheduler.sched[-1].runner.ast
+    #for si in scheduler.sched: print(si)
+    for op in ast:
+      if op.op == BufferOps.LOAD:
+        print(op.op)
+
+    lin = MiniLinearizer(ast)
+    lin.linearize()
+    code = Device[Device.DEFAULT].compiler.render("test", lin.uops)
+    print(code)
