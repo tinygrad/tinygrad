@@ -111,8 +111,8 @@ class TestNonFloatUOps(TestUOps):
     self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, (PtrDType(dtypes.bool), PtrDType(dtypes.float16), PtrDType(dtypes.float16)))
 
 class TestExecALU(TestUOps):
-    def test_sqrt(self):
-        self.assertEqual(exec_alu(UnaryOps.SQRT, dtypes.int, (0,)), 0)
+  def test_sqrt(self):
+    self.assertEqual(exec_alu(UnaryOps.SQRT, dtypes.int, (0,)), 0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
