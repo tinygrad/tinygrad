@@ -379,6 +379,33 @@ class Kernel:
         return True
     return False
 
+  def apply_tensor_cores(self, use_tensor_cores=1, extra_opts:Optional[List[Opt]]=None) -> bool:
+    if not self.opts.has_tensor_cores and use_tensor_cores != 2: return False
+    try: # check TC first and apply hand-coded opts if successful
+      self.apply_opt(Opt(OptOps.TC, 0, 0))
+
+      if (tc_opts:=self.tensor_core_opts) is not None:
+        if extra_opts is not None:
+          for opt in extra_opts: self.apply_opt(opt)
+        else:
+          # hand-coded TC opts
+          def late_upcast_tc(tc_dim: int):
+            if tc_opts.axes_exist[tc_dim]:
+              ax_div = [upc for upc in [5,4,3,2,1] if self.full_shape[tc_opts.axes[tc_dim]]%upc == 0][0]
+              if ax_div != 1: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], ax_div))
+          late_upcast_tc(1) # attempt to upcast M
+          late_upcast_tc(0) # attempt to upcast N
+
+          if self.tensor_core and tc_opts.axes_exist[0]: # attempt to local N
+            for upc in [4,2]:
+              if self.full_shape[tc_opts.axes[0]] % upc == 0:
+                self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], upc))
+                break
+
+      return True
+    except AssertionError: pass
+    return False
+
   def apply_opt(self, opt:Opt, append_opt:bool=True):
     assert not self.dont_use_locals or opt.op not in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP, OptOps.UPCASTMID}, "not using locals"
 
@@ -463,25 +490,6 @@ class Kernel:
         self.apply_opt(Opt(OptOps.UPCAST, unit_stride_axes_mul_4[0], 4))
 
   def hand_coded_optimizations(self):
-    try: # check TC first and apply hand-coded opts if successful
-      self.apply_opt(Opt(OptOps.TC, 0, 0))
-
-      if (tc_opts:=self.tensor_core_opts) is not None:
-        def late_upcast_tc(tc_dim: int):
-          if tc_opts.axes_exist[tc_dim]:
-            ax_div = [upc for upc in [5,4,3,2,1] if self.full_shape[tc_opts.axes[tc_dim]]%upc == 0][0]
-            if ax_div != 1: self.apply_opt(Opt(OptOps.UPCAST, tc_opts.axes[tc_dim], ax_div))
-        late_upcast_tc(1) # attempt to upcast M
-        late_upcast_tc(0) # attempt to upcast N
-
-        if self.tensor_core and tc_opts.axes_exist[0]: # attempt to local N
-          for upc in [4,2]:
-            if self.full_shape[tc_opts.axes[0]] % upc == 0:
-              self.apply_opt(Opt(OptOps.LOCAL, tc_opts.axes[0], upc))
-              break
-      return
-    except AssertionError: pass
-
     self.required_optimizations()
 
     # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat

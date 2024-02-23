@@ -47,6 +47,11 @@ if __name__ == "__main__":
     lin.hand_coded_optimizations()
     lins.append(lin)
 
+    # maybe try tensor cores
+    lin = Linearizer(si.ast, device.compiler.linearizer_opts)
+    if lin.apply_tensor_cores():
+      lins.append(lin)
+
     # try a beam search
     if beam:=getenv("BEAM"):
       lin = Linearizer(si.ast, device.compiler.linearizer_opts)
