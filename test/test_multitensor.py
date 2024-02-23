@@ -312,6 +312,7 @@ class TestMultiTensor(unittest.TestCase):
 
     # axis=None <- axis=None + axis=0
     t_none = Tensor.zeros((16, 16)).shard(devices).realize()  # allocate 16*16 length buffers on each device
+    assert t_none.lazydata.lbs[0].realized.size == 16 * 16  # check that buffers have been allocated
     t_zero = Tensor.ones((16, 16)).shard(devices, axis=0)
     @TinyJit
     def step():
