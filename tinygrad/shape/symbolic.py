@@ -49,10 +49,7 @@ class Node:
 
   # *** complex ops ***
 
-  def __rfloordiv__(self, b:int):
-    if self.min > b >= 0: return NumNode(0)
-    if isinstance(self, NumNode): return NumNode(b // self.b)
-    raise RuntimeError(f"not supported: {b} // {self}")
+  def __rfloordiv__(self, b:int): return NumNode(b) // self
   def __floordiv__(self, b:Union[Node,int], factoring_allowed=True):
     if isinstance(b, Node):
       if b.__class__ is NumNode: return self // b.b
@@ -70,10 +67,7 @@ class Node:
       return (self + -offset*b).__floordiv__(b, factoring_allowed=False) + offset
     return create_node(DivNode(self, b))
 
-  def __rmod__(self, b:int):
-    if self.min > b >= 0: return NumNode(b)
-    if isinstance(self, NumNode): return NumNode(b % self.b)
-    raise RuntimeError(f"not supported: {b} % {self}")
+  def __rmod__(self, b:int): return NumNode(b) % self
   def __mod__(self, b:Union[Node,int]):
     if isinstance(b, Node):
       if b.__class__ is NumNode: return self % b.b
