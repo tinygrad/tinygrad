@@ -146,8 +146,7 @@ class Tensor:
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.dtype == x.dtype and not getenv("DISALLOW_ASSIGN"):
       if isinstance(self.lazydata, MultiLazyBuffer):
-        if self.lazydata.axis == x.lazydata.axis:
-          for d,s in zip(x.lazydata.lbs, self.lazydata.lbs): d.output_buffer = s.base.realized
+        for d,s in zip(x.lazydata.lbs, self.lazydata.lbs): d.output_buffer = s.base.realized
       else:
         if self.lazydata.base.realized is not None: x.lazydata.output_buffer = self.lazydata.base.realized
     self.lazydata = x.lazydata
