@@ -311,11 +311,16 @@ class TestMultiTensor(unittest.TestCase):
     devices = (d0, d1, d2, d3)
 
     # axis=None <- axis=None + axis=0
-    t_none = Tensor.zeros((16, 16)).shard(devices)
-    t_zero = Tensor.zeros((16, 16)).shard(devices, axis=0)
-    t_none.assign(t_none + t_zero).realize()
+    t_none = Tensor.zeros((16, 16)).shard(devices).realize()  # allocate 16*16 length buffers on each device
+    t_zero = Tensor.ones((16, 16)).shard(devices, axis=0)
+    @TinyJit
+    def step():
+      t_none.assign(t_none + t_zero).realize()
+    step()
     assert t_none.lazydata.axis == 0  # should implicitly change axis
     assert t_none.lazydata.lbs[0].realized.size == 4 * 16  # should reallocate buffers to smaller size
+    for _ in range(9): step()
+    np.testing.assert_allclose(t_none.numpy(), Tensor.full((16, 16), 10).numpy())  # .numpy() should not fail
 
     # axis=0 <- axis=None: what kind of behavior do we want?
 
