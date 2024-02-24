@@ -243,11 +243,12 @@ class CUDALanguage(CStyleLanguage):
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 code_for_op_hip = {
-  BinaryOps.MAX: lambda a,b,dtype: f"__ocml_fmax_f32({a},{b})" if dtype != dtypes.half else f"__ocml_fmax_f16({a},{b})",
-  UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f32({x})" if dtype != dtypes.half else f"__ocml_sqrt_f16({x})",
-  UnaryOps.SIN: lambda x,dtype: f"__ocml_sin_f32({x})" if dtype != dtypes.half else f"__ocml_sin_f16({x})",
-  UnaryOps.LOG2: lambda x,dtype: f"__ocml_log2_f32({x})" if dtype != dtypes.half else f"__ocml_log2_f16({x})",
-  UnaryOps.EXP2: lambda x,dtype: f"__ocml_exp2_f32({x})" if dtype != dtypes.half else f"__ocml_exp2_f16({x})",
+  # TODO: MAX with int uses fmax_f32?
+  BinaryOps.MAX: lambda a,b,dtype: f"__ocml_fmax_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32) }({a},{b})",
+  UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
+  UnaryOps.SIN: lambda x,dtype: f"__ocml_sin_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
+  UnaryOps.LOG2: lambda x,dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
+  UnaryOps.EXP2: lambda x,dtype: f"__ocml_exp2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
 }
 
 def _make_hip_dtype(base_type, name, cnt):
@@ -278,6 +279,11 @@ class HIPLanguage(CStyleLanguage):
   __attribute__((device)) __attribute__((pure)) float __ocml_log2_f32(float);
   __attribute__((device)) float __ocml_sin_f32(float);
   __attribute__((device)) __attribute__((const)) float __ocml_sqrt_f32(float);
+  __attribute__((device)) __attribute__((const)) double __ocml_fmax_f64(double, double);
+  __attribute__((device)) __attribute__((pure)) double __ocml_exp2_f64(double);
+  __attribute__((device)) __attribute__((pure)) double __ocml_log2_f64(double);
+  __attribute__((device)) double __ocml_sin_f64(double);
+  __attribute__((device)) __attribute__((const)) double __ocml_sqrt_f64(double);
   __attribute__((device)) __attribute__((const)) _Float16 __ocml_fmax_f16(_Float16, _Float16);
   __attribute__((device)) __attribute__((pure)) _Float16 __ocml_exp2_f16(_Float16);
   __attribute__((device)) __attribute__((pure)) _Float16 __ocml_log2_f16(_Float16);
