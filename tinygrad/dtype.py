@@ -59,7 +59,7 @@ class dtypes:
     # Check if any bit is set outside the range of the dtype
     if dtypes.is_float(dtype): return
     # Construct the min and max values for the given dtype from the itemsize
-    if dtype == dtypes.bool:
+    if dtypes.is_bool(dtype):
       min_val = 0
       max_val = 1
     elif dtypes.is_unsigned(dtype):
