@@ -20,7 +20,6 @@ class CStyleLanguage(NamedTuple):
   local_max: List[int] = []
   extra_args: List[str] = []
   float4: Optional[str] = None
-  int4: Optional[str] = None
   uses_vload: bool = False
   uses_ptr_arithmetic: bool = False
   launch_bounds: bool = False
@@ -36,16 +35,11 @@ class CStyleLanguage(NamedTuple):
 
   # returns a str expression of the casted xs with the given type
   def render_cast(self, x:List[str], var_dtype:DType, bitcast=False) -> str:
-      if bitcast: return f"(*(({self.buffer_prefix}{self.render_dtype(var_dtype)}*)&{x[0]}))"
-      if len(x) == 1: return f"({self.render_dtype(var_dtype)})({x[0]})"
-      assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count}"
-      if dtypes.is_int(var_dtype):
-          assert self.int4 is not None, "vectorized cast is not supported on this platform"
-          return f"{self.int4.replace('int4', self.render_dtype(var_dtype))}({','.join(x)})"
-      elif dtypes.is_float(var_dtype):
-          assert self.float4 is not None, "vectorized cast is not supported on this platform"
-          return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}({','.join(x)})"
-      else: raise RuntimeError(f"unsupported cast {var_dtype}")
+    if bitcast: return f"(*(({self.buffer_prefix}{self.render_dtype(var_dtype)}*)&{x[0]}))"
+    if len(x) == 1: return f"({self.render_dtype(var_dtype)})({x[0]})"
+    assert len(x) == var_dtype.count, f"cast is wrong size {len(x)} != {var_dtype.count}"
+    assert self.float4 is not None, "vectorized cast is not supported on this platform"
+    return f"{self.float4.replace('float4', self.render_dtype(var_dtype))}({','.join(x)})"
 
   # returns a str expression of the const with the given type
   def render_const(self, x:Union[float,int,bool], var_dtype) -> str:
@@ -184,7 +178,6 @@ class OpenCLLanguage(CStyleLanguage):
   smem_prefix = "__local "
   barrier = "barrier(CLK_LOCAL_MEM_FENCE);"
   float4 = "(float4)"
-  int4 = "(int4)"
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
   uses_vload = True
   # NOTE: mad is used so the loads aren't reordered into the math on 845
@@ -206,7 +199,6 @@ class MetalLanguage(CStyleLanguage):
   arg_int_prefix = "constant int&"
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
-  int4 = "int4"
   uses_ptr_arithmetic = True
   code_for_workitem = {"g": lambda x: f"gid.{chr(120+x)}", "l": lambda x: f"lid.{chr(120+x)}"}
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
@@ -236,7 +228,6 @@ class CUDALanguage(CStyleLanguage):
   smem_prefix_for_cast = False
   barrier = "__syncthreads();"
   float4 = "make_float4"
-  int4 = "make_int4"
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+x)}", "l": lambda x: f"threadIdx.{chr(120+x)}",
                        "i": lambda x: f"(blockIdx.{chr(120+x)}*blockDim.{chr(120+x)}+threadIdx.{chr(120+x)})"}
   code_for_op = {**CStyleLanguage().code_for_op, **code_for_op_half}
@@ -313,7 +304,6 @@ class HIPLanguage(CStyleLanguage):
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
             '__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");'
   float4 = "make_float4"
-  int4 = "make_int4"
   launch_bounds = True
   uses_ptr_arithmetic = True
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
