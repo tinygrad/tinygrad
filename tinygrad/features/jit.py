@@ -38,14 +38,12 @@ def apply_graph_to_jit(jit_cache: List[JitItem], input_rawbuffers: List[Buffer],
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
   graphed_jit_cache: List[JitItem] = []
   current_batch: List[JitItem] = []
-  current_device: Union[Compiled, None] = None
+  current_device: Optional[Compiled] = None
 
-  # Flush the current batch.
-  def flush():
+  def flush_batch():
     nonlocal current_batch, current_device
-    assert current_device is not None
     try:
-      if len(current_batch) <= 1: raise GraphException("only one kernel doesn't graph")
+      if len(current_batch) <= 1 or current_device is None: raise GraphException("only one kernel doesn't graph")
       graphed_jit_cache.append(JitItem(current_device.graph(current_batch, input_rawbuffers, var_vals), cast(List[Optional[Buffer]], input_rawbuffers))) # noqa: E501
       if DEBUG >= 2: print(f"\tJIT GRAPHing batch with {len(current_batch)} kernels on device {current_device}")
     except GraphException as e:
@@ -54,22 +52,20 @@ def apply_graph_to_jit(jit_cache: List[JitItem], input_rawbuffers: List[Buffer],
     current_batch = []
     current_device = None
 
-  for i,ji in enumerate(jit_cache):
-    # If the jit item can potentially be graphed, put it in a batch.
-    can_be_graphed = isinstance(ji.prg, CompiledASTRunner) and ji.prg.device.graph
-    if can_be_graphed:
-      assert isinstance(ji.prg, CompiledASTRunner)
-      # If the device changed we flush the batch early and append this item for the next batch.
-      if current_device is not None and ji.prg.device != current_device: flush()
-      current_device = ji.prg.device
-      current_batch.append(ji)
+  for ji in jit_cache:
+    ji_graph_dev: Optional[Compiled] = None # device on which the ji will be graphed. Not graphed if None.
+    if isinstance(ji.prg, CompiledASTRunner): ji_graph_dev = ji.prg.device
 
-    # The flush is done when (1) ji is the last one, (2) the size of batch exceeds the maximum batch size or
-    # (3) the current jit item cannot be graphed, so the current batch is flushed before such a jit item is added.
-    if len(current_batch) > 0 and (i==len(jit_cache)-1 or len(current_batch) >= getenv("JIT_BATCH_SIZE", 64) or not can_be_graphed): flush()
+    can_be_graphed = ji_graph_dev and ji_graph_dev.graph
+    can_extend_graph_batch = can_be_graphed and len(current_batch) < getenv("JIT_BATCH_SIZE", 64) and ji_graph_dev == current_device
+    if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
 
-    # If the jit item cannot be graphed, put it right into the final cache after the flush.
-    if not can_be_graphed: graphed_jit_cache.append(ji)
+    if can_be_graphed: current_batch.append(ji)
+    else: graphed_jit_cache.append(ji)
+
+    current_device = ji_graph_dev
+
+  if len(current_batch) > 0: flush_batch()
   return graphed_jit_cache
 
 # *** JIT ***
@@ -165,10 +161,13 @@ class _CacheCollector:
   def add(self, prg, rawbufs, var_vals):
     if self.cache is None: return
     for k,v in var_vals.items(): assert k in self.var_vals and self.var_vals[k] == v, f"var_vals {k} mismatch {v} != {self.var_vals.get(k)}"
+
+    # Buffer optimization is allowed only for kernel operations. Avoids for copies (prevents parallelism) and syncs (incorrect buffer reuse).
+    allow_buffer_optimization = isinstance(prg, CompiledASTRunner)
+
     # NOTE: this is making an assumption that 0 is special
-    # TODO: this is wrong for sync and wait
     if len(rawbufs): self.placeholders[rawbufs[0]] = PlaceHolder(rawbufs[0])
-    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, Buffer) else x for x in rawbufs]))
+    self.cache.append((prg, [self.placeholders.get(x, x) if isinstance(x, Buffer) and allow_buffer_optimization else x for x in rawbufs]))
 
   def finish(self) -> List[JitItem]:
     if self.cache is None: return []

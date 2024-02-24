@@ -65,7 +65,9 @@ class LazyBuffer:
 
   def cast(self, dtype:DType, bitcast:bool=False):
     if self.dtype == dtype: return self
-    if dtype.itemsize <= self.dtype.itemsize and self != self.base: return self.base.cast(dtype, bitcast)._view(self.st)
+    # TODO: applying this makes gpt2 slower
+    if getenv("CAST_BEFORE_VIEW", 1) and dtype.itemsize <= self.dtype.itemsize and self != self.base:
+      return self.base.cast(dtype, bitcast)._view(self.st)
     return create_lazybuffer(self.device, ShapeTracker.from_shape(self.shape), dtype, UnaryOps.CAST, (dtype, bitcast), (self,))
 
   def is_unrealized_const(self): return not self.base.realized and self.base.op is LoadOps.CONST
@@ -114,24 +116,31 @@ class LazyBuffer:
 
   # *** reduce ops ***
 
-  def _reduce_op(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
-    if self.shape == new_shape: return self
-    unbound_new_shape = tuple(s.unbind()[0] if not isinstance(s, int) else s for s in new_shape)
-    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape), self.dtype, op, unbound_new_shape, (self,))
+  def _reduce_op(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
+    assert all(0 <= x < len(self.shape) for x in axis), f"axis args {axis} out of range for shape {self.shape}"
+    axis = tuple(x for x in axis if self.shape[x] != 1)
+    if len(axis) == 0: return self
+    # move all reduces to the end
+    new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
+    permute_order = tuple(x for x in range(len(self.shape)) if x not in axis) + axis
+    return create_lazybuffer(self.device, ShapeTracker.from_shape(new_shape).permute(permute_order),
+                             self.dtype, op, tuple(range(len(self.shape)-len(axis), len(self.shape))),
+                             (self.permute(permute_order),)).reshape(new_shape)
 
-  def r(self, op:ReduceOps, new_shape:Tuple[sint, ...]) -> LazyBuffer:
+  def r(self, op:ReduceOps, axis:Tuple[int, ...]) -> LazyBuffer:
+    new_shape = tuple(1 if i in axis else s for i,s in enumerate(self.shape))
     # TODO: this logic should move to the scheduler
     if self.size == 0 and 0 not in new_shape: return self.const({ReduceOps.SUM: 0.0, ReduceOps.MAX: -math.inf}[op], new_shape)
     assert len(self.shape)==len(new_shape) and all(ns in (1,s) for s,ns in zip(self.shape,new_shape)), f"not a contraction {self.shape=} {new_shape=}"
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not all_int(self.shape) or (0 in self.shape) or prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
-      return self._reduce_op(op, new_shape)
+      return self._reduce_op(op, axis)
     heuristic, divisor, dim_to_split = max(((divisor := math.gcd(256, old))/(stride or math.inf), divisor, i) for i, (old, new, stride) in enumerate(zip(self.shape, new_shape, self.st.real_strides())) if old != new) # type: ignore  # noqa: E501
-    if divisor < 16 or heuristic < 0.1: return self._reduce_op(op, new_shape)
+    if divisor < 16 or heuristic < 0.1: return self._reduce_op(op, axis)
     # choose largest divisor (>=16) to split on, penalize large strides
     def splitted_shape(dim_aft_div):
       return self.shape[:dim_to_split] + (self.shape[dim_to_split]//divisor,) + dim_aft_div + self.shape[dim_to_split+1:]
-    return self.reshape(splitted_shape((divisor,)))._reduce_op(op, splitted_shape((1,))).reshape(splitted_shape(()))._reduce_op(op, new_shape)
+    return self.reshape(splitted_shape((divisor,)))._reduce_op(op, (dim_to_split+1,)).reshape(splitted_shape(()))._reduce_op(op, axis)
 
   # *** movement ops ***
 
