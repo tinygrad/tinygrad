@@ -1,37 +1,70 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Tuple, List, Optional, Any, Dict
+from typing import Callable, Tuple, List, Optional, Any, Dict
 import pickle, base64, itertools, time, math
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Allocator, Compiler
 from tinygrad.codegen.uops import UOp, UOps
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
 from tinygrad.codegen.kernel import LinearizerOptions
 
+def patch_types(arg, p, dtype):
+  # Cast all bools to dtype unless it's a bool operation
+  if arg not in {BinaryOps.CMPEQ, BinaryOps.CMPLT}:
+    p = list(p)
+    if arg is TernaryOps.WHERE:
+      p = p[1:]
+    # If the output dtype is bool, then cast it to an int
+    if dtypes.is_bool(dtype):
+      dtype = dtypes.default_int
+    for i in range(len(p)):
+      if dtypes.is_bool(dtypes.from_py(p[i])):
+        #print(f"casting {p[i]} to {dtype}")
+        p[i] = dtypes.as_type(p[i], dtype)
+    p = tuple(p)
+  return p, dtype
+
+def check_types(arg, p, dtype):
+  # Throw out all the bool types as they can be used in any operation
+  types = [t for t in (dtypes.from_py(x) for x in p) if not dtypes.is_bool(t)] + [dtype] if not dtypes.is_bool(dtype) else []
+  is_uniform_types = all(dtypes.is_float(d) for d in types) or all(dtypes.is_int(d) for d in types)
+  if not is_uniform_types:
+    raise TypeError(f"All elements in p must be of the same basic type, got {types} for {arg} {dtype} {p}")
+
 def exec_alu(arg, dtype, p):
-  # TODO: make this complete and correctly honor the dtypes
-  # TODO: use this for constant folding
-  if arg == TernaryOps.MULACC: return p[0]*p[1]+p[2]
-  if arg == TernaryOps.WHERE: return p[1] if p[0] else p[2]
-  if arg == UnaryOps.LOG2: return math.log2(p[0]) if p[0] > 0 else -math.inf if p[0] == 0 else math.nan
-  if arg == UnaryOps.EXP2:
-    try: return math.exp(p[0]*math.log(2))
-    except OverflowError: return math.inf
-  if arg == UnaryOps.SQRT: return math.sqrt(p[0]) if p[0] > 0 else math.nan
-  if arg == UnaryOps.SIN: return math.sin(p[0])
-  if arg == UnaryOps.NEG: return -p[0]
-  if arg == BinaryOps.MUL: return p[0]*p[1]
-  if arg == BinaryOps.ADD: return p[0]+p[1]
-  if arg == BinaryOps.SUB: return p[0]-p[1]
-  if arg == BinaryOps.XOR: return p[0]^p[1]
-  if arg == BinaryOps.MAX: return max(p[0], p[1])
-  if arg == BinaryOps.CMPEQ: return p[0] == p[1]
-  if arg == BinaryOps.CMPLT: return p[0] < p[1]
-  if arg == BinaryOps.DIV: return p[0]//p[1] if dtypes.is_int(dtype) else (p[0]/p[1] if p[1] != 0 else math.nan)
-  if arg == BinaryOps.MOD: return p[0]%p[1]
-  raise NotImplementedError(f"no support for {arg}")
+  p, dtype = patch_types(arg, p, dtype)
+  check_types(arg, p, dtype)
+
+  operations: Dict[Op, Callable] ={
+    TernaryOps.MULACC: lambda: p[0]*p[1]+p[2] if len(p) == 3 and (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else None,
+    TernaryOps.WHERE: lambda: p[1] if p[0] else p[2] if len(p) == 3 and dtypes.is_bool(dtypes.from_py(p[0])) else None,
+    UnaryOps.LOG2: lambda: math.log2(p[0]) if len(p) == 1 and p[0] > 0 and dtypes.is_float(dtype) else math.nan,
+    UnaryOps.EXP2: lambda: math.exp2(p[0]) if len(p) == 1 and dtypes.is_float(dtype) else None,
+    UnaryOps.SQRT: lambda: math.sqrt(p[0]) if len(p) == 1 and p[0] >= 0 and dtypes.is_float(dtype) else math.nan,
+    UnaryOps.SIN: lambda: math.sin(p[0]) if len(p) == 1 and dtypes.is_float(dtype) else None,
+    UnaryOps.NEG: lambda: -p[0] if len(p) == 1 and (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else None,
+    BinaryOps.MUL: lambda: p[0]*p[1] if len(p) == 2 and (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else None,
+    BinaryOps.ADD: lambda: p[0]+p[1] if len(p) == 2 and (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else None,
+    BinaryOps.SUB: lambda: p[0]-p[1] if len(p) == 2 and (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else None,
+    BinaryOps.XOR: lambda: p[0]^p[1] if len(p) == 2 and dtypes.is_int(dtype) and not dtypes.is_unsigned(dtype) else None,
+    BinaryOps.MAX: lambda: max(p[0], p[1]) if len(p) == 2 and (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else None,
+    BinaryOps.CMPEQ: lambda: p[0] == p[1] if len(p) == 2 and dtypes.is_bool(dtype) else None,
+    BinaryOps.CMPLT: lambda: p[0] < p[1] if len(p) == 2 and dtypes.is_bool(dtype) else None,
+    BinaryOps.DIV: lambda: p[0]//p[1] if len(p) == 2 and dtypes.is_int(dtype) and p[1] != 0 else (p[0]/p[1] if p[1] != 0 else math.nan) if dtypes.is_float(dtype) else None,
+    BinaryOps.MOD: lambda: p[0]%p[1] if len(p) == 2 and dtypes.is_int(dtype) and not dtypes.is_unsigned(dtype) and p[1] != 0 else None
+  }
+
+  if arg not in operations:
+    raise NotImplementedError(f"Unsupported operation: {arg}")
+  result = operations[arg]()
+  if result is None:
+    raise ValueError(f"Invalid operands for operation {arg}: {p}")
+
+  dtypes.check_bounds(result, dtype)
+
+  return result
 
 def _load(m, i):
   if i<0 or i>=len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")

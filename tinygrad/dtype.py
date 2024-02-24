@@ -49,9 +49,38 @@ class dtypes:
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
+  def is_bool(x: DType) -> bool: return x.scalar() == dtypes.bool
+  @staticmethod
   def from_np(x: type) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod  # NOTE: isinstance(True, int) is True in python
   def from_py(x) -> DType: return dtypes.default_float if isinstance(x, float) else dtypes.bool if isinstance(x, bool) else dtypes.default_int
+  @staticmethod
+  def check_bounds(x: Scalar, dtype: DType) -> None:
+    # Check if any bit is set outside the range of the dtype
+    if dtypes.is_float(dtype): return
+    # Construct the min and max values for the given dtype from the itemsize
+    if dtype == dtypes.bool:
+      min_val = 0
+      max_val = 1
+    elif dtypes.is_unsigned(dtype):
+      min_val = 0
+      max_val = 2**dtype.itemsize - 1
+    elif dtypes.is_int(dtype):
+      min_val = -2**(dtype.itemsize * 8 - 1)
+      max_val = 2**(dtype.itemsize * 8 - 1) - 1
+    
+    if x < min_val or x > max_val:
+      raise ValueError(f"Value {x} is out of bounds for dtype {dtype}")
+  @staticmethod
+  def as_type(scalar: Scalar, dtype: DType) -> Scalar:
+    # Check that the dtype respects the bounds
+    dtypes.check_bounds(scalar, dtype)
+    # Do nothing if the scalar is already the correct type
+    if dtype == dtypes.bool: return bool(scalar)
+    elif dtypes.is_int(dtype): return int(scalar)
+    # Round the float to the correct number of bits
+    elif dtypes.is_float(dtype): return round(float(scalar), dtype.itemsize)
+    else: raise TypeError(f"Unsupported dtype {dtype}")
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", '?', 1)
