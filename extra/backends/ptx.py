@@ -78,7 +78,7 @@ def uops_to_asm(lang:AssemblyLanguage, function_name:str, uops:List[UOp]) -> str
       assert vin[0].dtype is not None
       kk(*lang.render_bra(lb:=ssa_label(u, 'if'), cast(r[vin[0]], dtypes.bool, vin[0].dtype, u=u, pred=True), f"{lb}_true"), f"{lb}_true:")
     elif uop == UOps.BARRIER and lang.barrier: kk(lang.barrier)
-    elif uop == UOps.END:
+    elif uop == UOps.ENDLOOP or uop == UOps.ENDIF:
       if vin[0].uop == UOps.LOOP:
         kk(lang.asm_for_op[BinaryOps.ADD](r[vin[0]], r[vin[0]], "1", dtypes.int, lang.types[dtypes.int]),
            lang.asm_for_op[BinaryOps.CMPLT](pred:=ssa(None, "pred", "pred"), r[vin[0]], r[vin[0].vin[1]], dtypes.int, lang.types[dtypes.int]))
