@@ -49,5 +49,12 @@ class TestUOpsStats(unittest.TestCase):
     # NOTE: it's hard to assert on the memory here, all depends on caching
     assert required_mem <= mem
 
+  def test_arange(self):
+    a = Tensor.arange(2.0, 3192, 7.0)
+    ops, mem = get_stats(a)
+    expected_ops, required_mem = 1368, 1824
+    assert expected_ops <= ops and ops <= expected_ops * 1.2
+    assert required_mem <= mem
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
