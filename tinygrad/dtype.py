@@ -71,7 +71,7 @@ class dtypes:
       min_val = -2**(dtype.itemsize * 8 - 1)
       max_val = 2**(dtype.itemsize * 8 - 1) - 1
     if x < min_val or x > max_val:
-      raise ValueError(f"Value {x} is out of bounds for dtype {dtype}")
+      raise ValueError(f"Value {x} is out of bounds for dtype {dtype} with itemsize {dtype.itemsize} and count {dtype.count}")
   @staticmethod
   def as_type(scalar: Scalar, dtype: DType) -> Scalar:
     # Check that the dtype respects the bounds
