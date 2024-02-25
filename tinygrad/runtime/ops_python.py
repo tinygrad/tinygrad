@@ -20,7 +20,7 @@ def exec_alu(arg, dtype, p):
     TernaryOps.WHERE: lambda: None if not dtypes.is_bool(dtypes.from_py(p[0])) else p[1] if p[0] else p[2],
     UnaryOps.LOG2: lambda: math.nan if p[0] < 0 else -math.inf if p[0] == 0 else math.log2(p[0]),
     UnaryOps.EXP2: lambda: safe_exp2(p[0]),
-    UnaryOps.SQRT: lambda: math.nan if p[0] <= 0 else math.sqrt(p[0]),
+    UnaryOps.SQRT: lambda: math.nan if p[0] < 0 else math.sqrt(p[0]),
     UnaryOps.SIN: lambda: math.sin(p[0]),
     UnaryOps.NEG: lambda: -p[0],
     # Multiplication hijacked for and operation
