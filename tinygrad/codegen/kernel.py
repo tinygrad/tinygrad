@@ -392,6 +392,10 @@ class Kernel:
 
         # alias buffer
         alias_pattern = [0]*(self.global_dims+(self.local_dims-len(tc.threads))) + [2]*(len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
+        # TODO del
+        # print(self.first_reduce)
+        # print(alias_pattern)
+        # print(tc.threads)
         self.alias_buffer(buf0, alias_pattern)
         self.alias_buffer(buf1, alias_pattern)
         return True

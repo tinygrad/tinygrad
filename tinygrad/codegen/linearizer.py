@@ -367,6 +367,12 @@ class Linearizer(Kernel):
         # been rewritten with fake end_local_idxs.
         local_idxs = local_idxs[:self.local_dims] + [NumNode(0) for i in range(self.group_for_reduces)]
 
+    # TODO del
+    print(f"{global_idxs=}")
+    print(f"{local_idxs=}")
+    print(f"{fake_reduce_idxs=}")
+    print(f"{upcast_idxs=}")
+    # exit()
     # load latebufs
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})  # noqa: E501
 
@@ -410,6 +416,7 @@ class Linearizer(Kernel):
     self.uops = fix_loop_scope(get_recursive_parents, self.uops)
 
     # uops optimization
+    '''
     changed_something = True
     while changed_something:
       changed_something = False
@@ -428,6 +435,7 @@ class Linearizer(Kernel):
             for v in self.uops: v.vin = tuple(new if x is u else x for x in v.vin)
             self.uops.remove(u)
             changed_something = True
+    '''
 
     # (recursively) remove childless uops
     self.uops = remove_childless_uops(self.uops)
@@ -473,10 +481,17 @@ class Linearizer(Kernel):
     if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
     ret = UOp(uop, dtype, vin, arg)
     self.uops.insert(insert_before, ret)
+    # TODO del
+    print(len(self.uops))
+    if len(self.uops) == 1215:
+      print("lol")
     if cachable: self.saved_exprs[key] = ret
     return ret
 
   def ast_parse(self, x:LazyOp, acc: List[UOp], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], do_reduce=False, loop_ctx=tuple(), cache=None) -> List[UOp]:  # noqa: E501
+    # TODO del
+    from tinygrad.features.graph import print_tree
+    print_tree(x)
     if cache is None: cache = {}
     if x in cache: return cache[x]
     if x.op in BufferOps: return loaded_buffers[x.arg]
@@ -485,8 +500,12 @@ class Linearizer(Kernel):
     if x.op in ReduceOps and not do_reduce:
       assert offs is None, "not available if we aren't doing reduce"
       return acc
+    # TODO del
+    # MULACC fusion.
+    # if x.op == ReduceOps.SUM and x.src[0].op == BinaryOps.MUL: x = LazyOp(TernaryOps.MULACC, x.src[0].src, x.arg)
 
     values = [self.ast_parse(v, acc, offs, loaded_buffers, loop_ctx=loop_ctx, cache=cache) for v in x.src]
+    # ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
     ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}
     if x.op in ops:
       ret: List[UOp] = []
