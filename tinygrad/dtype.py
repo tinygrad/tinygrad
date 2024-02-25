@@ -68,7 +68,6 @@ class dtypes:
     elif dtypes.is_int(dtype):
       min_val = -2**(dtype.itemsize * 8 - 1)
       max_val = 2**(dtype.itemsize * 8 - 1) - 1
-    
     if x < min_val or x > max_val:
       raise ValueError(f"Value {x} is out of bounds for dtype {dtype}")
   @staticmethod
@@ -76,11 +75,11 @@ class dtypes:
     # Check that the dtype respects the bounds
     dtypes.check_bounds(scalar, dtype)
     # Do nothing if the scalar is already the correct type
-    if dtype == dtypes.bool: return bool(scalar)
-    elif dtypes.is_int(dtype): return int(scalar)
+    if dtypes.is_bool(dtype): return bool(scalar)
+    if dtypes.is_int(dtype): return int(scalar)
     # Round the float to the correct number of bits
-    elif dtypes.is_float(dtype): return round(float(scalar), dtype.itemsize)
-    else: raise TypeError(f"Unsupported dtype {dtype}")
+    if dtypes.is_float(dtype): return round(float(scalar), dtype.itemsize)
+    raise TypeError(f"Unsupported dtype {dtype}")
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", '?', 1)
