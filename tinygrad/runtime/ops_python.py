@@ -38,7 +38,7 @@ def exec_alu(arg, dtype, p):
   
   def safe_exp2(x):
     try:
-        return math.exp2(x)
+        return math.exp(x * math.log(2))
     except OverflowError:
         return math.inf if x > 0 else 0
 
