@@ -44,13 +44,10 @@ def exec_alu(arg, dtype, p):
 
   def check_types(arg, p, dtype):
     types = [dtype] if arg not in {BinaryOps.CMPEQ, BinaryOps.CMPLT} else []
-    p = p if arg is not TernaryOps.WHERE else p[1:]
-    types.extend(dtypes.from_py(x) for x in p)
-    if all(dtypes.is_bool(t) for t in types):
-        if arg is BinaryOps.MUL: return
-        raise TypeError(f"Invalid operation {arg} for bools")
+    for i in range(int(arg is TernaryOps.WHERE), len(p)): types.append(dtypes.from_py(p[i]))
+    if arg is BinaryOps.MUL and all(dtypes.is_bool(t) for t in types): return
     if not (all(dtypes.is_float(t) for t in types) or all(dtypes.is_int(t) for t in types)):
-        raise TypeError(f"All elements in p must be of the same basic type, got {types} for {arg} {dtype} {p}")
+      raise TypeError(f"All elements in p must be of the same basic type, got {types} for {arg} {dtype} {p}")
 
   check_types(arg, p, dtype)
 
