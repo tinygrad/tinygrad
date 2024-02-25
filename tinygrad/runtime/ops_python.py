@@ -35,7 +35,7 @@ def exec_alu(arg, dtype, p):
     check_types(arg, p, dtype)
   else:
     raise ValueError(f"Invalid operands for operation {arg}: {p} {dtype}")
-  
+
   def safe_exp2(x):
     try:
         return math.exp2(x)
