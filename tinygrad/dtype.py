@@ -1,7 +1,9 @@
+import math
 from typing import Final, Optional, ClassVar, Set, Tuple, Dict, Union
 from dataclasses import dataclass
 import numpy as np  # TODO: remove numpy
 import functools
+from tinygrad.helpers import getenv
 
 Scalar = Union[float, int, bool]
 
@@ -49,9 +51,39 @@ class dtypes:
   @staticmethod
   def is_unsigned(x: DType) -> bool: return x.scalar() in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64)
   @staticmethod
+  def is_bool(x: DType) -> bool: return x.scalar() == dtypes.bool
+  @staticmethod
   def from_np(x: type) -> DType: return DTYPES_DICT[np.dtype(x).name]
   @staticmethod  # NOTE: isinstance(True, int) is True in python
   def from_py(x) -> DType: return dtypes.default_float if isinstance(x, float) else dtypes.bool if isinstance(x, bool) else dtypes.default_int
+  @staticmethod
+  def check_bounds(x: Scalar, dtype: DType) -> None:
+    if dtypes.is_float(dtype): return
+    if dtypes.is_bool(dtype): min_val, max_val = (0, 1)
+    elif dtypes.is_unsigned(dtype): min_val, max_val = (0, 2**(dtype.itemsize * 8) - 1)
+    elif dtypes.is_int(dtype): min_val, max_val = (-2**(dtype.itemsize * 8 - 1), 2**(dtype.itemsize * 8 - 1) - 1)
+    else: raise TypeError(f"Unsupported dtype {dtype}")
+    if x < min_val or x > max_val: raise ValueError(f"Value {x} is out of bounds for dtype {dtype}")
+  @staticmethod
+  def as_type(x: Scalar, dtype: DType) -> Scalar:
+    # Vectorized types are not supported
+    if dtype.count == 1: return x
+    dtypes.check_bounds(x, dtype)
+    if dtypes.is_bool(dtype): return bool(x)
+    if dtypes.is_int(dtype): return int(x)
+    if dtypes.is_float(dtype):
+      x = float(x)
+      if getenv("ROUND", 1) and dtype.itemsize in (2, 4, 8):
+        fraction_bits = {
+          dtypes.float16: 10,
+          dtypes.float32: 23,
+          dtypes.float64: 52,
+        }.get(dtype, 52)  # default to 52 if dtype is not in the dictionary
+        # Number of digits that can be represented by the fraction part
+        digits = int(math.log10(2 ** fraction_bits))
+        x = round(x, digits)
+      return x
+    raise TypeError(f"Unsupported dtype {dtype}")
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
   bool: Final[DType] = DType(0, 1, "bool", '?', 1)
