@@ -32,7 +32,7 @@ class Node:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
   def __neg__(self): return self*-1
-  def __add__(self, b:Union[Node,int]): return Node.sum([self, b if isinstance(b, Node) else NumNode(b)])
+  def __add__(self, b:Union[Node,int]): return Node.sum([self, NumNode(b) if isinstance(b, int) else b])
   def __radd__(self, b:int): return self+b
   def __sub__(self, b:Union[Node,int]): return self+-b
   def __rsub__(self, b:int): return -self+b
@@ -43,16 +43,12 @@ class Node:
   def __mul__(self, b:Union[Node, int]):
     if b == 0: return NumNode(0)
     if b == 1: return self
-    if self.__class__ is NumNode: return NumNode(self.b*b) if isinstance(b, int) else b*self.b
     return create_node(MulNode(self, b.b)) if isinstance(b, NumNode) else create_node(MulNode(self, b))
   def __rmul__(self, b:int): return self*b
 
   # *** complex ops ***
 
-  def __rfloordiv__(self, b:int):
-    if self.min > b >= 0: return NumNode(0)
-    if isinstance(self, NumNode): return NumNode(b // self.b)
-    raise RuntimeError(f"not supported: {b} // {self}")
+  def __rfloordiv__(self, b:int): return NumNode(b) // self
   def __floordiv__(self, b:Union[Node,int], factoring_allowed=True):
     if isinstance(b, Node):
       if b.__class__ is NumNode: return self // b.b
@@ -70,10 +66,7 @@ class Node:
       return (self + -offset*b).__floordiv__(b, factoring_allowed=False) + offset
     return create_node(DivNode(self, b))
 
-  def __rmod__(self, b:int):
-    if self.min > b >= 0: return NumNode(b)
-    if isinstance(self, NumNode): return NumNode(b % self.b)
-    raise RuntimeError(f"not supported: {b} % {self}")
+  def __rmod__(self, b:int): return NumNode(b) % self
   def __mod__(self, b:Union[Node,int]):
     if isinstance(b, Node):
       if b.__class__ is NumNode: return self % b.b
@@ -150,6 +143,7 @@ class NumNode(Node):
   def bind(self, val):
     assert self.b == val, f"cannot bind {val} to {self}"
     return self
+  def __mul__(self, b:Union[Node,int]): return NumNode(self.b*b) if isinstance(b, int) else b*self.b
   def __eq__(self, other): return self.b == other
   def __hash__(self): return hash(self.b)  # needed with __eq__ override
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self
@@ -198,13 +192,14 @@ class DivNode(OpNode):
 
 class ModNode(OpNode):
   def __mod__(self, b: Union[Node, int]):
-    if isinstance(b, Node) or isinstance(self.b, Node): return Node.__mod__(self, b)
-    return self.a % b if self.b % b == 0 else Node.__mod__(self, b)
+    if isinstance(b, int) and isinstance(self.b, int) and self.b % b == 0: return self.a % b
+    return Node.__mod__(self, b)
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     return (self.a//b) % (self.b//b) if self.b % b == 0 else Node.__floordiv__(self, b, factoring_allowed)
   def get_bounds(self) -> Tuple[int, int]:
     assert self.a.min >= 0 and isinstance(self.b, int)
-    return (0, self.b-1) if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b) else (self.a.min%self.b, self.a.max%self.b)  # noqa: E501
+    if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b): return (0, self.b-1)
+    return (self.a.min%self.b, self.a.max%self.b)
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self.a.substitute(var_vals) % self.b
 
 class RedNode(Node):
@@ -315,13 +310,21 @@ def sym_infer(a: Union[Node, int], var_vals: Dict[Variable, int]) -> int:
 # symbolic int, these are allowed in a Tensor shape
 sint = Union[int, Variable, MulNode, SumNode]
 
-render_python: Dict[Type, Callable] = {
-  Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}{'='+str(self.val) if self._val is not None else ''}]" if ctx == "DEBUG" else (f"Variable('{self.expr}', {self.min}, {self.max})"+(f".bind({self.val})" if self._val is not None else '') if ctx == "REPR" else f"{self.expr}"),  # noqa: E501
+def render_mulnode(node:MulNode, ops, ctx):
+  # TODO: add ProdNode and remove this case
+  if isinstance(node.a,Variable) and isinstance(node.b,Variable) and node.a.expr and node.b.expr and node.b.expr < node.a.expr:
+    return f"({sym_render(node.b,ops,ctx)}*{node.a.render(ops,ctx)})"
+  return f"({node.a.render(ops,ctx)}*{sym_render(node.b,ops,ctx)})"
+
+render_python: Dict[Type, Callable[..., str]] = {
+  Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}{'='+str(self.val) if self._val is not None else ''}]" if ctx == "DEBUG" \
+    else (f"Variable('{self.expr}', {self.min}, {self.max})"+(f".bind({self.val})" if self._val is not None else '') if ctx == "REPR" \
+    else f"{self.expr}"),
   NumNode: lambda self,ops,ctx: f"NumNode({self.b})" if ctx == "REPR" else f"{self.b}",
-  MulNode: lambda self,ops,ctx: f"({sym_render(self.b,ops,ctx)}*{self.a.render(ops,ctx)})" if isinstance(self.a,Variable) and isinstance(self.b,Variable) and self.a.expr and self.b.expr and self.b.expr < self.a.expr else f"({self.a.render(ops,ctx)}*{sym_render(self.b,ops,ctx)})",  # noqa: E501
+  MulNode: render_mulnode,
   DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}//{self.b})",
   ModNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}%{self.b})",
   LtNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}<{sym_render(self.b,ops,ctx)})",
   SumNode: lambda self,ops,ctx: f"({'+'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",
-  AndNode: lambda self,ops,ctx: f"({' and '.join(sorted([x.render(ops,ctx) for x in self.nodes]))})"
+  AndNode: lambda self,ops,ctx: f"({' and '.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",
 }

@@ -502,7 +502,7 @@ class Tensor:
   def split(self, sizes:Union[int, List[int]], dim:int=0) -> Tuple[Tensor, ...]:
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     dim = dim + self.ndim if dim < 0 else dim
-    if isinstance(sizes, int): return tuple(self.chunk(math.ceil(self.shape[dim]/sizes)))
+    if isinstance(sizes, int): return tuple(self.chunk(math.ceil(self.shape[dim]/sizes), dim=dim))
     return tuple(self[sl] for sl in [tuple([slice(None)]*dim + [slice(sum(sizes[:i]), sum(sizes[:i + 1]))]) for i in range(len(sizes))])
 
   def chunk(self, num:int, dim:int=0) -> List[Tensor]:
@@ -543,10 +543,10 @@ class Tensor:
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False) -> Tensor:
-    axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if isinstance(axis, int) else list(axis))
-    axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
+    axis_: Tuple[int, ...] = tuple(range(len(self.shape))) if axis is None else ((axis,) if isinstance(axis, int) else tuple(axis))
+    axis_ = tuple(x if x >= 0 else x+len(self.shape) for x in axis_)
     shape = tuple(s for i,s in enumerate(self.shape) if i not in axis_)
-    ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else s for i,s in enumerate(self.shape)]))
+    ret = fxn.apply(self, axis=axis_)
     return ret if keepdim else ret.reshape(shape=shape)
 
   def sum(self, axis=None, keepdim=False, acc_dtype:Optional[DType]=None):
@@ -571,6 +571,9 @@ class Tensor:
   def std(self, axis=None, keepdim=False, correction=1): return self.var(axis, keepdim, correction).sqrt()
 
   def _softmax(self, axis):
+    if len(self.shape) == 0:
+      assert axis in [-1, 0], f"{axis=} out of range of [-1, 0]"
+      axis = None
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)

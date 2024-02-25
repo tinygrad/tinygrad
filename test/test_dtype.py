@@ -1,12 +1,10 @@
-import unittest
+import unittest, operator, sys
 import numpy as np
 import torch
-import operator
+from typing import Any, List
 from tinygrad.helpers import CI, getenv, DEBUG, OSX, temp
 from tinygrad.dtype import DType, DTYPES_DICT, ImageDType, PtrDType, least_upper_float, least_upper_dtype
-from tinygrad import Device
-from tinygrad.tensor import Tensor, dtypes
-from typing import Any, List
+from tinygrad import Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
@@ -21,7 +19,9 @@ def is_dtype_supported(dtype: DType, device: str = Device.DEFAULT):
   # for CI LLVM, it segfaults because it can't link to the casting function
   # CUDA in CI uses CUDACPU that does not support half
   # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
-  if dtype == dtypes.half: return not (CI and device in ["GPU", "LLVM", "CUDA"]) and device != "PYTHON"
+  if dtype == dtypes.half:
+    if device in ["GPU", "LLVM", "CUDA"]: return not CI
+    if device == "PYTHON": return sys.version_info >= (3, 12)
   if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
   return True
 
@@ -168,8 +168,8 @@ class TestFloatDType(TestDType):
 
 class TestDoubleDtype(TestDType):
   DTYPE = dtypes.double
-  @unittest.skipIf(getenv("CUDACPU",0)==1, "conversion not supported on CUDACPU")
-  @unittest.skipIf(getenv("HIP",0)==1, "HIP renderer does not support f64 precision")
+  @unittest.skipIf(getenv("CUDACPU"), "conversion not supported on CUDACPU")
+  @unittest.skipIf(Device.DEFAULT == "HIP" and CI, "HIP emulator does not support f64 precision")
   def test_float64_increased_precision(self):
     for func in [
       lambda t: t.exp(),
