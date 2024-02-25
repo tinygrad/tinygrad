@@ -59,9 +59,9 @@ def exec_alu(arg, dtype, p):
     BinaryOps.MAX: lambda: None if len(p) != 2 or not (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else max(p[0], p[1]),
     BinaryOps.CMPEQ: lambda: None if len(p) != 2 or not dtypes.is_bool(dtype) else p[0] == p[1],
     BinaryOps.CMPLT: lambda: None if len(p) != 2 or not dtypes.is_bool(dtype) else p[0] < p[1],
-    BinaryOps.DIV: lambda: None if len(p) != 2 or dtypes.is_int(dtype) or not dtypes.is_float(dtype) \
+    BinaryOps.DIV: lambda: None if len(p) != 2 or not (dtypes.is_int(dtype) or dtypes.is_float(dtype)) \
                            else math.nan if p[1] == 0 else p[0]//p[1] if dtypes.is_int(dtype) else p[0]/p[1],
-    BinaryOps.MOD: lambda: None if len(p) != 2 or not dtypes.is_int(dtype) or dtypes.is_unsigned(dtype) or p[1] == 0 else p[0]%p[1]
+    BinaryOps.MOD: lambda: None if len(p) != 2 or not dtypes.is_int(dtype) else math.nan if p[1] == 0 else p[0]%p[1],
   }
 
   if arg not in operations:
