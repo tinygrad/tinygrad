@@ -36,13 +36,20 @@ def check_types(arg, p, dtype):
 def exec_alu(arg, dtype, p):
   p, dtype = patch_types(arg, p, dtype)
   check_types(arg, p, dtype)
+  
+  def safe_exp2(x):
+    try:
+        return math.exp2(x)
+    except OverflowError:
+        return math.inf if x > 0 else 0
 
   operations: Dict[Op, Callable] = {
     TernaryOps.MULACC: lambda: None if len(p) != 3 or not (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else p[0]*p[1]+p[2],
     TernaryOps.WHERE: lambda: None if len(p) != 3 or not dtypes.is_bool(dtypes.from_py(p[0])) else p[1] if p[0] else p[2],
-    UnaryOps.LOG2: lambda: None if len(p) != 1 or p[0] <= 0 or not dtypes.is_float(dtype) else math.log2(p[0]),
-    UnaryOps.EXP2: lambda: None if len(p) != 1 or not dtypes.is_float(dtype) else math.exp2(p[0]),
-    UnaryOps.SQRT: lambda: None if len(p) != 1 or p[0] < 0 or not dtypes.is_float(dtype) else math.sqrt(p[0]),
+    UnaryOps.LOG2: lambda: None if len(p) != 1 or not dtypes.is_float(dtype) else math.nan if p[0] < 0 \
+                           else -math.inf if p[0] == 0 else math.log2(p[0]),
+    UnaryOps.EXP2: lambda: None if len(p) != 1 or not dtypes.is_float(dtype) else safe_exp2(p[0]),
+    UnaryOps.SQRT: lambda: None if len(p) != 1 or not dtypes.is_float(dtype) else math.nan if p[0] < 0 else math.sqrt(p[0]),
     UnaryOps.SIN: lambda: None if len(p) != 1 or not dtypes.is_float(dtype) else math.sin(p[0]),
     UnaryOps.NEG: lambda: None if len(p) != 1 or not (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else -p[0],
     BinaryOps.MUL: lambda: None if len(p) != 2 or not (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else p[0]*p[1],
@@ -52,8 +59,8 @@ def exec_alu(arg, dtype, p):
     BinaryOps.MAX: lambda: None if len(p) != 2 or not (dtypes.is_int(dtype) or dtypes.is_float(dtype)) else max(p[0], p[1]),
     BinaryOps.CMPEQ: lambda: None if len(p) != 2 or not dtypes.is_bool(dtype) else p[0] == p[1],
     BinaryOps.CMPLT: lambda: None if len(p) != 2 or not dtypes.is_bool(dtype) else p[0] < p[1],
-    BinaryOps.DIV: lambda: None if len(p) != 2 or (dtypes.is_int(dtype) and p[1] == 0) or not dtypes.is_float(dtype) \
-                           else p[0]//p[1] if dtypes.is_int(dtype) else (p[0]/p[1] if p[1] != 0 else math.nan),
+    BinaryOps.DIV: lambda: None if len(p) != 2 or dtypes.is_int(dtype) or not dtypes.is_float(dtype) \
+                           else math.nan if p[1] == 0 else p[0]//p[1] if dtypes.is_int(dtype) else p[0]/p[1],
     BinaryOps.MOD: lambda: None if len(p) != 2 or not dtypes.is_int(dtype) or dtypes.is_unsigned(dtype) or p[1] == 0 else p[0]%p[1]
   }
 
