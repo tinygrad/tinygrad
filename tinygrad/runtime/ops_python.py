@@ -14,28 +14,27 @@ def patch_types(arg, p, dtype):
   # Cast all bools to dtype unless it's a bool operation
   if arg not in {BinaryOps.CMPEQ, BinaryOps.CMPLT}:
     p = list(p)
-    if arg is TernaryOps.WHERE:
-      p = p[1:]
-    # If the output dtype is bool, then cast it to an int
     if dtypes.is_bool(dtype):
       dtype = dtypes.default_int
-    for i in range(len(p)):
+    start = 1 if arg is TernaryOps.WHERE else 0
+    for i in range(start, len(p)):
       if dtypes.is_bool(dtypes.from_py(p[i])):
-        #print(f"casting {p[i]} to {dtype}")
         p[i] = dtypes.as_type(p[i], dtype)
     p = tuple(p)
   return p, dtype
 
 def check_types(arg, p, dtype):
-  # Throw out all the bool types as they can be used in any operation
   types = [t for t in (dtypes.from_py(x) for x in p) if not dtypes.is_bool(t)] + [dtype] if not dtypes.is_bool(dtype) else []
   is_uniform_types = all(dtypes.is_float(d) for d in types) or all(dtypes.is_int(d) for d in types)
   if not is_uniform_types:
     raise TypeError(f"All elements in p must be of the same basic type, got {types} for {arg} {dtype} {p}")
 
 def exec_alu(arg, dtype, p):
-  p, dtype = patch_types(arg, p, dtype)
-  check_types(arg, p, dtype)
+  if p is not None and len(p) != 0 and dtype is not None:
+    p, dtype = patch_types(arg, p, dtype)
+    check_types(arg, p, dtype)
+  else:
+    raise ValueError(f"Invalid operands for operation {arg}: {p} {dtype}")
   
   def safe_exp2(x):
     try:
