@@ -8,9 +8,9 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Set,
 # symbolic matches the Python behavior, but the code output is agnostic, and will never have negative numbers in div or mod
 
 class Node:
-  b: Union[Node, int]
-  min: int
-  max: int
+  b: Union[Node, int, float]
+  min: Union[int, float]
+  max: Union[int, float]
   def render(self, ops=None, ctx=None) -> Any:
     if ops is None: ops = render_python
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
@@ -32,15 +32,15 @@ class Node:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
   def __neg__(self): return self*-1
-  def __add__(self, b:Union[Node,int]): return Node.sum([self, b if isinstance(b, Node) else NumNode(b)])
+  def __add__(self, b:Union[Node,int,float]): return Node.sum([self, b if isinstance(b, Node) else NumNode(b)])
   def __radd__(self, b:int): return self+b
-  def __sub__(self, b:Union[Node,int]): return self+-b
-  def __rsub__(self, b:int): return -self+b
-  def __le__(self, b:Union[Node,int]): return self < (b+1)
-  def __gt__(self, b:Union[Node,int]): return (-self) < (-b)
-  def __ge__(self, b:Union[Node,int]): return (-self) < (-b+1)
-  def __lt__(self, b:Union[Node,int]): return create_node(LtNode(self, b))
-  def __mul__(self, b:Union[Node, int]):
+  def __sub__(self, b:Union[Node,int,float]): return self+-b
+  def __rsub__(self, b:Union[int,float]): return -self+b
+  def __le__(self, b:Union[Node,int,float]): return self < (b+1)
+  def __gt__(self, b:Union[Node,int,float]): return (-self) < (-b)
+  def __ge__(self, b:Union[Node,int,float]): return (-self) < (-b+1)
+  def __lt__(self, b:Union[Node,int,float]): return create_node(LtNode(self, b))
+  def __mul__(self, b:Union[Node, int,float]):
     if b == 0: return NumNode(0)
     if b == 1: return self
     if self.__class__ is NumNode: return NumNode(self.b*b) if isinstance(b, int) else b*self.b
@@ -53,7 +53,7 @@ class Node:
     if self.min > b >= 0: return NumNode(0)
     if isinstance(self, NumNode): return NumNode(b // self.b)
     raise RuntimeError(f"not supported: {b} // {self}")
-  def __floordiv__(self, b:Union[Node,int], factoring_allowed=True):
+  def __floordiv__(self, b:Union[Node,int,float], factoring_allowed=True):
     if isinstance(b, Node):
       if b.__class__ is NumNode: return self // b.b
       if self == b: return NumNode(1)
@@ -74,7 +74,7 @@ class Node:
     if self.min > b >= 0: return NumNode(b)
     if isinstance(self, NumNode): return NumNode(b % self.b)
     raise RuntimeError(f"not supported: {b} % {self}")
-  def __mod__(self, b:Union[Node,int]):
+  def __mod__(self, b:Union[Node,int,float]):
     if isinstance(b, Node):
       if b.__class__ is NumNode: return self % b.b
       if self == b: return NumNode(0)
@@ -143,9 +143,9 @@ class Variable(Node):
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return var_vals.get(self, self)
 
 class NumNode(Node):
-  def __init__(self, num:int):
-    assert isinstance(num, int), f"{num} is not an int"
-    self.b:int = num
+  def __init__(self, num:Union[int, float]):
+    assert isinstance(num, int) or isinstance(num, float), f"{num} is not number-like"
+    self.b:Union[int, float] = num
     self.min, self.max = num, num
   def bind(self, val):
     assert self.b == val, f"cannot bind {val} to {self}"
@@ -195,6 +195,11 @@ class DivNode(OpNode):
     assert self.a.min >= 0 and isinstance(self.b, int)
     return self.a.min//self.b, self.a.max//self.b
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self.a.substitute(var_vals) // self.b
+
+class MaxNode(OpNode):
+  def get_bounds(self) -> Tuple[int, int]:
+    if isinstance(self.b, int): return max(self.a.min, self.b), max(self.a.max, self.b)
+    return max(self.a.min, self.b.min), max(self.a.max, self.b.min)
 
 class ModNode(OpNode):
   def __mod__(self, b: Union[Node, int]):
@@ -330,6 +335,7 @@ render_python: Dict[Type, Callable] = {
   MulNode: render_mulnode,
   DivNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}//{self.b})",
   ModNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}%{self.b})",
+  MaxNode: lambda self,ops,ctx: f"max({self.a.render(ops,ctx)}, {self.b})",
   LtNode: lambda self,ops,ctx: f"({self.a.render(ops,ctx)}<{sym_render(self.b,ops,ctx)})",
   SumNode: lambda self,ops,ctx: f"({'+'.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",
   AndNode: lambda self,ops,ctx: f"({' and '.join(sorted([x.render(ops,ctx) for x in self.nodes]))})",

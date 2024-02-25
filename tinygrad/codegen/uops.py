@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Set, Optional, Tuple, Any, Dict
+from typing import List, Set, Optional, Tuple, Any, Dict, Callable
 from tinygrad.helpers import DEBUG, flatten
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
@@ -34,14 +34,14 @@ def get_recursive_children(uops:List[UOp], x:UOp) -> Set[UOp]:
   return deps
 
 UOPS_W_SIDE_EFFECTS = {UOps.STORE, UOps.BARRIER, UOps.DEFINE_GLOBAL}
-def remove_childless_uops(uops:List[UOp]) -> List[UOp]:
+def remove_childless_uops(uops:List[UOp], extra_uops_to_not_remove={}) -> List[UOp]:
   # NOTE: DEFINE_GLOBAL should be removable, but we'd have to propagate that
   while 1:
     has_child: Set[UOp] = set()
     for ru in uops:
       for vu in ru.vin:
         has_child.add(vu)
-    nu: List[UOp] = [x for x in uops if x in has_child or x.uop in UOPS_W_SIDE_EFFECTS]
+    nu: List[UOp] = [x for x in uops if x in has_child or x.uop in UOPS_W_SIDE_EFFECTS or x.uop in extra_uops_to_not_remove]
     if len(nu) == len(uops): break
     if DEBUG >= 4: print(f"reduced UOp count from {len(uops)} to {len(nu)}")
     uops = nu

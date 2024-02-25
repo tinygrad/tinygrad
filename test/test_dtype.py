@@ -8,6 +8,7 @@ from tinygrad import Device
 from tinygrad.tensor import Tensor, dtypes
 from typing import Any, List
 from hypothesis import given, settings, strategies as strat
+import time
 
 settings.register_profile("my_profile", max_examples=200, deadline=None)
 settings.load_profile("my_profile")
@@ -372,6 +373,18 @@ class TestTypeSpec(unittest.TestCase):
     assert Tensor.arange(5, dtype=dtypes.float16).dtype == dtypes.float16
     assert Tensor.arange(3, 9, 0.7).dtype == dtypes.default_float
     assert Tensor.arange(3, 8.5, 3).dtype == dtypes.default_float
+
+  def test_arange_o_n_performance(self):
+    for size in [100, 300, 500]:
+      start = time.perf_counter()
+      for _ in range(100):
+        a = Tensor.arange(size).realize()
+      print("size {} - {:.5f}".format(size, time.perf_counter() - start))
+
+  def test_arange_once(self):
+    print(Tensor.arange(77).realize().numpy())
+    print(Tensor.arange(256).realize().numpy())
+    print(Tensor.arange(1, 78, 2).realize().numpy())
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't follow the bool ops spec")
   @given(strat.sampled_from(core_dtypes), strat.sampled_from([operator.gt, operator.ge, operator.le, operator.lt, operator.eq, operator.ne]))

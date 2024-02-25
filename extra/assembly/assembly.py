@@ -3,7 +3,7 @@ from tinygrad.codegen.linearizer import UOps, MemOp, UOp
 from tinygrad.ops import BinaryOps, UnaryOps
 from tinygrad.dtype import DType, dtypes
 from tinygrad.helpers import DEBUG
-from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, LtNode, SumNode, AndNode
+from tinygrad.shape.symbolic import Variable, NumNode, MulNode, DivNode, ModNode, MaxNode, LtNode, SumNode, AndNode
 import functools
 import math
 from collections import defaultdict
@@ -70,6 +70,7 @@ class AssemblyLanguage:
                  MulNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.MUL, self.a.render(ops, ctx), self.b),
                  DivNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.DIV, self.a.render(ops, ctx), self.b),
                  ModNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.MOD, self.a.render(ops, ctx), self.b),
+                 MaxNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.MAX, self.a.render(ops, ctx), self.b),
                  LtNode: lambda self, ops, ctx: ctx.render_alu(BinaryOps.CMPLT, self.a.render(ops, ctx), self.b, dtype=dtypes.bool),
     SumNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.render_alu(BinaryOps.ADD, a, b.render(ops,ctx)), self.nodes[1:], self.nodes[0].render(ops,ctx)),
     AndNode: lambda self,ops,ctx: functools.reduce(lambda a,b: ctx.render_alu(BinaryOps.MUL, a, b.render(ops,ctx), dtype=dtypes.bool), self.nodes[1:], self.nodes[0].render(ops,ctx)) }
