@@ -69,7 +69,7 @@ def exec_alu(arg, dtype, p):
   if result is None:
     raise ValueError(f"Invalid operands for operation {arg}: {p}")
 
-  dtypes.check_bounds(result, dtype)
+  result = dtypes.as_type(result, dtype)
 
   return result
 
