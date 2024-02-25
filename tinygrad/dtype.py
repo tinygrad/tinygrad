@@ -56,6 +56,8 @@ class dtypes:
   def from_py(x) -> DType: return dtypes.default_float if isinstance(x, float) else dtypes.bool if isinstance(x, bool) else dtypes.default_int
   @staticmethod
   def check_bounds(x: Scalar, dtype: DType) -> None:
+    # TODO: Handle vectorized dtypes
+    if dtype.count > 1: return
     # Check if any bit is set outside the range of the dtype
     if dtypes.is_float(dtype): return
     # Construct the min and max values for the given dtype from the itemsize
