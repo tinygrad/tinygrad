@@ -1,37 +1,64 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Tuple, List, Optional, Any, Dict
+from typing import Callable, Tuple, List, Optional, Any, Dict
 import pickle, base64, itertools, time, math, struct
 from tinygrad.dtype import DType, dtypes, ImageDType
 from tinygrad.helpers import all_same, getenv, flatten
 from tinygrad.device import Compiled, Allocator, Compiler
 from tinygrad.codegen.uops import UOp, UOps
-from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.ops import Op, UnaryOps, BinaryOps, TernaryOps
 from tinygrad.codegen.kernel import LinearizerOptions
 
 def exec_alu(arg, dtype, p):
-  # TODO: make this complete and correctly honor the dtypes
-  # TODO: use this for constant folding
-  if arg == TernaryOps.MULACC: return p[0]*p[1]+p[2]
-  if arg == TernaryOps.WHERE: return p[1] if p[0] else p[2]
-  if arg == UnaryOps.LOG2: return math.log2(p[0]) if p[0] > 0 else -math.inf if p[0] == 0 else math.nan
-  if arg == UnaryOps.EXP2:
-    try: return math.exp(p[0]*math.log(2))
+  def safe_exp2(x):
+    try: return math.exp(x * math.log(2))
     except OverflowError: return math.inf
-  if arg == UnaryOps.SQRT: return math.sqrt(p[0]) if p[0] >= 0 else math.nan
-  if arg == UnaryOps.SIN: return math.sin(p[0])
-  if arg == UnaryOps.NEG: return -p[0]
-  if arg == BinaryOps.MUL: return p[0]*p[1]
-  if arg == BinaryOps.ADD: return p[0]+p[1]
-  if arg == BinaryOps.SUB: return p[0]-p[1]
-  if arg == BinaryOps.XOR: return p[0]^p[1]
-  if arg == BinaryOps.MAX: return max(p[0], p[1])
-  if arg == BinaryOps.CMPEQ: return p[0] == p[1]
-  if arg == BinaryOps.CMPLT: return p[0] < p[1]
-  if arg == BinaryOps.DIV: return p[0]//p[1] if dtypes.is_int(dtype) else (p[0]/p[1] if p[1] != 0 else math.nan)
-  if arg == BinaryOps.MOD: return p[0]%p[1]
-  raise NotImplementedError(f"no support for {arg}")
+
+  operations: Dict[Op, Callable] = {
+    TernaryOps.MULACC: lambda: p[0]*p[1]+p[2],
+    TernaryOps.WHERE: lambda: None if not dtypes.is_bool(dtypes.from_py(p[0])) else p[1] if p[0] else p[2],
+    UnaryOps.LOG2: lambda: math.nan if p[0] < 0 else -math.inf if p[0] == 0 else math.log2(p[0]),
+    UnaryOps.EXP2: lambda: safe_exp2(p[0]),
+    UnaryOps.SQRT: lambda: math.nan if p[0] <= 0 else math.sqrt(p[0]),
+    UnaryOps.SIN: lambda: math.sin(p[0]),
+    UnaryOps.NEG: lambda: -p[0],
+    # Multiplication hijacked for and operation
+    BinaryOps.MUL: lambda: p[0] and p[1] if dtypes.is_bool(dtype) else p[0]*p[1],
+    BinaryOps.ADD: lambda: p[0]+p[1],
+    BinaryOps.SUB: lambda: p[0]-p[1],
+    BinaryOps.XOR: lambda: None if not (dtypes.is_int(dtype) or dtypes.is_bool(dtype)) else p[0]^p[1],
+    BinaryOps.MAX: lambda: max(p[0], p[1]),
+    BinaryOps.CMPEQ: lambda: None if not dtypes.is_bool(dtype) else p[0] == p[1],
+    BinaryOps.CMPLT: lambda: None if not dtypes.is_bool(dtype) else p[0] < p[1],
+    BinaryOps.DIV: lambda: math.nan if p[1] == 0 else p[0]//p[1] if dtypes.is_int(dtype) else p[0]/p[1],
+    BinaryOps.MOD: lambda: None if not (dtypes.is_int(dtype) or dtypes.is_bool(dtype)) else math.nan if p[1] == 0 else p[0]%p[1],
+  }
+
+  if arg not in operations:
+    raise NotImplementedError(f"Unsupported operation: {arg}")
+
+  exp_arg_len = 1 if isinstance(arg, UnaryOps) else 2 if isinstance(arg, BinaryOps) else 3
+  if len(p) != exp_arg_len:
+    raise ValueError(f"Invalid number of operands for operation {arg}: {p}")
+
+  def check_types(arg, p, dtype):
+    types = [dtype] if arg not in {BinaryOps.CMPEQ, BinaryOps.CMPLT} else []
+    p = p if arg is not TernaryOps.WHERE else p[1:]
+    types.extend(dtypes.from_py(x) for x in p)
+    if all(dtypes.is_bool(t) for t in types):
+        if arg is BinaryOps.MUL: return
+        raise TypeError(f"Invalid operation {arg} for bools")
+    if not (all(dtypes.is_float(t) for t in types) or all(dtypes.is_int(t) for t in types)):
+        raise TypeError(f"All elements in p must be of the same basic type, got {types} for {arg} {dtype} {p}")
+
+  check_types(arg, p, dtype)
+
+  result = operations[arg]()
+  if result is None:
+    raise ValueError(f"Invalid operands for operation {arg}: {p}")
+
+  return dtypes.as_type(result, dtype)
 
 def _load(m, i):
   if i<0 or i>=len(m): raise IndexError(f"load out of bounds, size is {len(m)} and access is {i}")
