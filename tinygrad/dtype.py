@@ -66,10 +66,12 @@ class dtypes:
       max_val = 1
     elif dtypes.is_unsigned(dtype):
       min_val = 0
-      max_val = 2**dtype.itemsize - 1
+      max_val = 2**(dtype.itemsize * 8) - 1
     elif dtypes.is_int(dtype):
       min_val = -2**(dtype.itemsize * 8 - 1)
       max_val = 2**(dtype.itemsize * 8 - 1) - 1
+    else:
+      raise TypeError(f"Unsupported dtype {dtype}")
     if x < min_val or x > max_val:
       raise ValueError(f"Value {x} is out of bounds for dtype {dtype} with itemsize {dtype.itemsize} and count {dtype.count}")
   @staticmethod
