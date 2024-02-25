@@ -78,6 +78,7 @@ class dtypes:
     if dtypes.is_bool(dtype): return bool(scalar)
     if dtypes.is_int(dtype): return int(scalar)
     # TODO: Use round(float(scalar), dtype.itemsize) to round the float to the correct number of bits
+    # Tolerance is too low for this on some tests
     if dtypes.is_float(dtype): return float(scalar)
     raise TypeError(f"Unsupported dtype {dtype}")
   @staticmethod
