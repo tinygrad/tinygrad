@@ -77,8 +77,8 @@ class dtypes:
     # Do nothing if the scalar is already the correct type
     if dtypes.is_bool(dtype): return bool(scalar)
     if dtypes.is_int(dtype): return int(scalar)
-    # Round the float to the correct number of bits
-    if dtypes.is_float(dtype): return round(float(scalar), dtype.itemsize)
+    # TODO: Use round(float(scalar), dtype.itemsize) to round the float to the correct number of bits
+    if dtypes.is_float(dtype): return float(scalar)
     raise TypeError(f"Unsupported dtype {dtype}")
   @staticmethod
   def fields() -> Dict[str, DType]: return DTYPES_DICT
