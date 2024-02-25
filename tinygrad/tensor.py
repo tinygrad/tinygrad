@@ -208,7 +208,7 @@ class Tensor:
   def manual_seed(seed=0): Tensor._seed = seed
 
   @staticmethod
-  def rand(*shape, **kwargs): return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=custom_random, **kwargs)
+  def rand(*shape, **kwargs): return Tensor._loadop(LoadOps.CUSTOM, argfix(*shape), arg=threefry_random, **kwargs)
 
   # ***** creation helper functions *****
 
@@ -990,10 +990,20 @@ if IMAGE:
   setattr(Tensor, "conv2d", image_conv2d)
   setattr(Tensor, "dot", image_dot)
 
-# TODO: remove the custom op and replace with threefry
-def custom_random(out:Buffer):
+# https://www.thesalmons.org/john/random123/papers/random123sc11.pdf - https://pdebuyl.be/blog/2016/threefry-rng.html 
+def threefry_random(out:Buffer):
   Tensor._seed += 1
   if DEBUG >= 2: print(f"*** {out.device}   rand  seed {Tensor._seed} size {out.size:<15d} dtype {out.dtype}")
-  rng = np.random.default_rng(Tensor._seed)
-  rng_np_buffer = rng.random(size=out.size, dtype=np.float32).astype(dtype=out.dtype.np, copy=False)
-  out.copyin(rng_np_buffer.data)
+  def _threefry(inp, key):
+    key = (key[0], key[1], 0x1BD11BDA ^ key[0] ^ key[1])
+    mask, scale, roundmod8 = (2<<31)-1, 1/(2<<31), (13, 15, 26, 6, 17, 29, 16, 24)
+    for round in range(num_rounds:=12):
+        if round%4==0:
+            ks = (lambda k,s:(k[s%3]&mask, k[(s+1)%3]+s&mask))(key, round//4)
+            e = [(inp[0]+ks[0])&mask, (inp[1]+ks[1])&mask]
+        else: e = inp
+        inp[0], inp[1] = (lambda x0,x1,r:((y0:=(x0+x1)&mask), (((x1<<r)|(x1>>(32-r)))&mask)^y0))(e[0], e[1], roundmod8[round%8])
+    ks = (lambda k,s:(k[s%3]&mask, k[(s+1)%3]+s&mask))(key, num_rounds//4)
+    return ((inp[0]+ks[0])&mask)*scale, ((inp[1]+ks[1])&mask)*scale
+  r_buff = np.array([v for i in range(out.size//2) for v in _threefry([i, 0], (0, Tensor._seed))]).astype(dtype=out.dtype.np, copy=False)
+  out.copyin(r_buff.data)
