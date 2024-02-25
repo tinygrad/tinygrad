@@ -367,12 +367,6 @@ class Linearizer(Kernel):
         # been rewritten with fake end_local_idxs.
         local_idxs = local_idxs[:self.local_dims] + [NumNode(0) for i in range(self.group_for_reduces)]
 
-    # TODO del
-    print(f"{global_idxs=}")
-    print(f"{local_idxs=}")
-    print(f"{fake_reduce_idxs=}")
-    print(f"{upcast_idxs=}")
-    # exit()
     # load latebufs
     loaded_buffers.update({b:self.global_load(i, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs) for i,b in enumerate(self.bufs) if b not in self.earlybufs and i != 0 and b.__class__ is not LocalBuffer})  # noqa: E501
 
@@ -416,7 +410,6 @@ class Linearizer(Kernel):
     self.uops = fix_loop_scope(get_recursive_parents, self.uops)
 
     # uops optimization
-    '''
     changed_something = True
     while changed_something:
       changed_something = False
@@ -424,7 +417,8 @@ class Linearizer(Kernel):
         if u.uop is UOps.PHI and len(u.vin) == 3:
           # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
           # TODO: ADD becomes a MUL, MAX can just become nothing
-          if all(x.uop is not UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) and u.vin[1].arg is BinaryOps.ADD:
+          if all(x.uop is not UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) \
+          and u.vin[1].arg is BinaryOps.ADD and u.vin[1].vin[0].arg is not BinaryOps.MUL:
             if DEBUG >= 4: print(f"removing PHI node {u}")
             del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
             # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
@@ -435,7 +429,6 @@ class Linearizer(Kernel):
             for v in self.uops: v.vin = tuple(new if x is u else x for x in v.vin)
             self.uops.remove(u)
             changed_something = True
-    '''
 
     # (recursively) remove childless uops
     self.uops = remove_childless_uops(self.uops)
@@ -481,17 +474,10 @@ class Linearizer(Kernel):
     if cachable and (expr:=self.saved_exprs.get(key, None)) is not None and self.uops.index(expr) <= insert_before: return expr
     ret = UOp(uop, dtype, vin, arg)
     self.uops.insert(insert_before, ret)
-    # TODO del
-    print(len(self.uops))
-    if len(self.uops) == 1215:
-      print("lol")
     if cachable: self.saved_exprs[key] = ret
     return ret
 
   def ast_parse(self, x:LazyOp, acc: List[UOp], offs:Optional[List[int]], loaded_buffers:Dict[Union[MemBuffer, ConstBuffer, LocalBuffer], List[UOp]], do_reduce=False, loop_ctx=tuple(), cache=None) -> List[UOp]:  # noqa: E501
-    # TODO del
-    from tinygrad.features.graph import print_tree
-    print_tree(x)
     if cache is None: cache = {}
     if x in cache: return cache[x]
     if x.op in BufferOps: return loaded_buffers[x.arg]
