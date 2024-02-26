@@ -422,7 +422,7 @@ class Linearizer(Kernel):
         if u.uop is UOps.PHI and len(u.vin) == 3:
           # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
           # TODO: ADD becomes a MUL, MAX can just become nothing
-          # HACK: previously MULACC didn't remove PHI nodes so ADD (SUM) -> MUL cannot remove PHI nodes? This makes TC=2 work
+          # HACK: previously MULACC didn't remove PHI nodes so ADD (SUM) -> MUL cannot remove PHI nodes. This makes TC=2 work
           if all(x.uop is not UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) \
           and u.vin[1].arg is BinaryOps.ADD and u.vin[1].vin[0].arg is not BinaryOps.MUL:
             if DEBUG >= 4: print(f"removing PHI node {u}")
