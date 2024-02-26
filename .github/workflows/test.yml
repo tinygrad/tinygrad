@@ -411,7 +411,7 @@ jobs:
           echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
           sudo apt update
           sudo apt install --no-install-recommends --allow-unauthenticated -y rocm-hip-libraries hip-dev
-          curl -s https://api.github.com/repos/Qazalin/remu/releases/143696239 | \
+          curl -s https://api.github.com/repos/Qazalin/remu/releases/latest | \
           jq -r '.assets[] | select(.name == "libremu.so").browser_download_url' | \
           sudo xargs curl -L -o /usr/local/lib/libremu.so
       - name: Install dependencies
