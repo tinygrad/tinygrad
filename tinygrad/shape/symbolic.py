@@ -215,12 +215,9 @@ class SumNode(RedNode):
   def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
+    if self - b == 0: return NumNode(1)
     fully_divided: List[Node] = []
     rest: List[Node] = []
-    if isinstance(b, SumNode):
-      nu_num = sum(node.b for node in self.flat_components if node.__class__ is NumNode)
-      de_num = sum(node.b for node in b.flat_components if node.__class__ is NumNode)
-      if nu_num > 0 and de_num and (d:=nu_num//de_num) > 0: return NumNode(d) + (self-b*d) // b
     if isinstance(b, Node):
       for x in self.flat_components:
         if x % b == 0: fully_divided.append(x // b)
@@ -251,10 +248,7 @@ class SumNode(RedNode):
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __mod__(self, b: Union[Node, int]):
-    if isinstance(b, SumNode):
-      nu_num = sum(node.b for node in self.flat_components if node.__class__ is NumNode)
-      de_num = sum(node.b for node in b.flat_components if node.__class__ is NumNode)
-      if nu_num > 0 and de_num and (d:=nu_num//de_num) > 0: return (self-b*d) % b
+    if self - b == 0: return NumNode(0)
     if isinstance(b, Node) and (b - self).min > 0: return self # b - self simplifies the node
     new_nodes: List[Node] = []
     for x in self.nodes:
