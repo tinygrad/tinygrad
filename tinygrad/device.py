@@ -192,7 +192,7 @@ class CompiledASTRunner(JITRunner):
     if local_size is not None: local_size = local_size + [1]*(3-len(local_size))
     self.name, self.display_name, self.prg, self.device, self.global_size, self.local_size, self.first_run = \
       to_function_name(name), name, prg, device, global_size, local_size, True
-    assert self.device.compiler is not None, "compiler is reuired to make an AST kernel"
+    assert self.device.compiler is not None, "compiler is required to make an AST kernel"
     lib:bytes = precompiled if precompiled is not None else self.device.compiler.compile_cached(prg)
     self.lib, self.clprg = lib, self.device.runtime(self.name, lib)
     self.vars: List[Variable] = []
