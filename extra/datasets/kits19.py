@@ -81,10 +81,11 @@ def iterate(val=True, shuffle=False, bs=1, size=(128, 128, 128)):
     else:
       X_preprocessed, Y_preprocessed = [], []
       for x, y in zip(X, Y):
+        x, y = rand_balanced_crop(x, y, patch_size=size)
         x, y = rand_flip(x, y)
+        x, y = x.astype(np.float32), y.astype(np.uint8)
         x = random_brightness_augmentation(x)
         x = gaussian_noise(x)
-        x, y = rand_balanced_crop(x, y, patch_size=size)
         X_preprocessed.append(x)
         Y_preprocessed.append(y)
       yield np.stack(X_preprocessed, axis=0), np.stack(Y_preprocessed, axis=0)
