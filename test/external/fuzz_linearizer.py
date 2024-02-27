@@ -1,4 +1,4 @@
-import random, traceback, ctypes
+import random, traceback, ctypes, gc
 from typing import List, Tuple
 import numpy as np
 from collections import defaultdict
@@ -42,15 +42,13 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
 
   # TODO: images needs required_optimization
   try:
-    if isinstance(device, Compiled):
-      prg = device.to_program(lin)
-    else:
-      prg = device.get_runner(lin.ast)
+    prg = device.to_program(lin)
   except Exception:
     print(lin.ast)
     print(lin.applied_opts)
     traceback.print_exc()
     print("COMPILE FAILED!!")
+    gc.collect()
     return "COMPILE_ERROR"
 
   try:
