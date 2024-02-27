@@ -71,13 +71,13 @@ def fuzz_linearizer(lin: Linearizer):
   print_tree(lin.ast)
   print(lin.colored_shape())
   rawbufs = get_fuzz_rawbufs(lin)
-  FUZZ_BEAM=getenv("FUZZ_BEAM", 0)
   seen_uops = {}
   last_lins = [lin]
   failures = defaultdict(list)
 
-  FUZZ_MAX_SIZE=getenv("FUZZ_MAX_SIZE", 0)
-  if FUZZ_MAX_SIZE > 0 and prod(lin.full_shape)>FUZZ_MAX_SIZE:
+  FUZZ_BEAM = getenv("FUZZ_BEAM", 0)
+  FUZZ_MAX_SIZE = getenv("FUZZ_MAX_SIZE", 0)
+  if FUZZ_MAX_SIZE > 0 and prod(lin.full_shape) > FUZZ_MAX_SIZE:
     print("skipping large kernel")
     return failures
 
