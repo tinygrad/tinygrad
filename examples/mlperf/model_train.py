@@ -76,7 +76,7 @@ def train_unet3d():
   @TinyJit
   def _train_step(model, x, y):
     y_hat = model(x)
-    loss = dice_ce_loss(y_hat, y, gpus=GPUS)
+    loss = dice_ce_loss(y_hat, y, gpus=GPUS).realize()
 
     optim.zero_grad()
     loss.backward()
