@@ -67,12 +67,11 @@ def train_unet3d():
     for p in get_parameters(model):
       p.to_(GPUS)
 
-  parameters = get_parameters(model)
-  optim = SGD(parameters, lr=LR, momentum=MOMENTUM, nesterov=True)
+  optim = SGD(get_parameters(model), lr=LR, momentum=MOMENTUM, nesterov=True)
 
   def _lr_warm_up(optim, init_lr, lr, current_epoch, warmup_epochs):
     scale = current_epoch / warmup_epochs
-    optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale], device=GPUS))
+    optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale], device=GPUS if len(GPUS) > 1 else None))
 
   @TinyJit
   def _train_step(model, x, y):
@@ -97,7 +96,7 @@ def train_unet3d():
       _lr_warm_up(optim, LR_WARMUP_INIT_LR, LR, epoch, LR_WARMUP_EPOCHS)
 
     for x, y in (t:=tqdm(iterate(val=False, shuffle=True, bs=BS, size=SIZE), desc=f"[Training][Epoch: {epoch}/{NUM_EPOCHS}]", total=len(get_train_files()) // BS)):
-      x, y = Tensor(x), Tensor(y, dtype=dtypes.uint8)
+      x, y = Tensor(x, requires_grad=False), Tensor(y, requires_grad=False)
       if len(GPUS) > 1: x, y = x.shard(GPUS, axis=0), y.shard(GPUS, axis=0)
       loss = _train_step(model, x, y)
       t.set_description(f"[Training][Epoch: {epoch}/{NUM_EPOCHS}][Loss: {loss.item():.3f}]")
