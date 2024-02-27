@@ -76,7 +76,11 @@ class View:
   contiguous:bool
 
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def size(self) -> int: return prod([x.max if isinstance(x, Node) else x for x in self.shape])
+  def size(self) -> int:
+    # NOTE: Variable and the Node derived from it in symbolic shapes can only have int as max.
+    ret = prod([x.max if isinstance(x, Node) else x for x in self.shape])
+    assert isinstance(ret, int), f"{ret=} is not int"
+    return ret
 
   @staticmethod
   @functools.lru_cache(maxsize=None)
