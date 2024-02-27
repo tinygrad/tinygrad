@@ -1,5 +1,5 @@
 # ruff: noqa: E501
-import unittest, random
+import unittest, random, gc
 import numpy as np
 from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import Opt, OptOps
@@ -31,6 +31,7 @@ def helper_test_lin(lin: Linearizer, opts, failed_platforms):
   linearizer_passed = (run_linearizer(lin, rawbufs, var_vals) == "PASS")
   output_passed = np.allclose(ground_truth, np.frombuffer(rawbufs[0].as_buffer(), rawbufs[0].dtype.np), rtol=1e-2, atol=1e-2)
   del lin, rawbufs, var_vals, opts
+  gc.collect()
   if Device.DEFAULT not in failed_platforms:
     assert linearizer_passed and output_passed
   else:
