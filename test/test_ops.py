@@ -114,17 +114,20 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.eye(0), lambda: Tensor.eye(0), forward_only=True)
 
   def test_split(self):
+    def tensor(s): return torch.arange(math.prod(s)).reshape(s), Tensor.arange(math.prod(s)).reshape(s)
     test_cases = [
-      (torch.arange(10), Tensor.arange(10), 5),
-      (torch.arange(10), Tensor.arange(10), [1, 4, 5]),
-      (torch.arange(10), Tensor.arange(10), 3),
-      (torch.arange(12).reshape(3, 4), Tensor.arange(12).reshape(3, 4), 1),
-      (torch.arange(16).reshape(4, 4), Tensor.arange(16).reshape(4, 4), [2, 2]),
-      (torch.arange(10000), Tensor.arange(10000), 2500),
+      (tensor((10,)),       5, {}),
+      (tensor((10,)), [1,4,5], {}),
+      (tensor((10,)),       3, {}),
+      (tensor((3,4,)),      1, {}),
+      (tensor((3,4,)),      1, {'dim':1}),
+      (tensor((4,4,)),  [2,2], {}),
+      (tensor((4,4,)),  [2,2], {'dim':1}),
+      (tensor((10000,)), 2500, {}),
     ]
 
-    for tor, ten, sizes in test_cases:
-      tor_splits, ten_splits = tor.split(sizes), ten.split(sizes)
+    for (tor, ten), sizes, args in test_cases:
+      tor_splits, ten_splits = tor.split(sizes, **args), ten.split(sizes, **args)
       assert len(tor_splits) == len(ten_splits)
       for tor_chunk, ten_chunk in zip(tor_splits, ten_splits):
         helper_test_op([], lambda: tor_chunk, lambda: ten_chunk, forward_only=True)
