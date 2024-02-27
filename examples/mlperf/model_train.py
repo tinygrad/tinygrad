@@ -31,7 +31,6 @@ def train_unet3d():
   LR_WARMUP_INIT_LR = getenv("LR_WARMUP_INIT_LR", 0.0001)
   EVAL_AT = getenv("EVAL_AT", 20)
   CHECKPOINT_EVERY = getenv("CHECKPOINT_EVERY", 10)
-  JIT = getenv("JIT")
   CHECKPOINT_FN = getenv("CHECKPOINT_FN")
   WANDB = getenv("WANDB")
   PROJ_NAME = getenv("PROJ_NAME", "tinygrad_unet3d_mlperf")
@@ -39,7 +38,7 @@ def train_unet3d():
   SEED = getenv("SEED")
 
   if getenv("FLOAT16"):
-    dtypes.default_float = dtypes.half
+    dtypes.default_float = dtypes.float16
 
   if SEED:
     assert 1 <= SEED <= 9, "seed must be between 1-9"
@@ -53,7 +52,7 @@ def train_unet3d():
     except ImportError:
       raise "Need to install wandb to use it"
 
-  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  GPUS = tuple([Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(getenv("GPUS", 1))])
   assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}"
   for x in GPUS: Device[x]
 
@@ -64,22 +63,18 @@ def train_unet3d():
     load_state_dict(model, state_dict)
     if DEBUG >= 1: print(f"Loaded checkpoint {CHECKPOINT_FN} into model")
 
-  if JIT:
-    model_run = TinyJit(lambda x: model(x).realize())
-    if DEBUG >= 1: print(f"Enabled JIT for model")
-  else:
-    model_run = model
-
   if len(GPUS) > 1:
     for p in get_parameters(model):
       p.to_(GPUS)
 
-  optim = SGD(get_parameters(model), lr=LR, momentum=MOMENTUM, nesterov=True)
+  parameters = get_parameters(model)
+  optim = SGD(parameters, lr=LR, momentum=MOMENTUM, nesterov=True)
 
   def _lr_warm_up(optim, init_lr, lr, current_epoch, warmup_epochs):
     scale = current_epoch / warmup_epochs
-    optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale]))
+    optim.lr.assign(Tensor([init_lr + (lr - init_lr) * scale], device=GPUS))
 
+  @TinyJit
   def _train_step(model, x, y):
     y_hat = model(x)
     loss = dice_ce_loss(y_hat, y, gpus=GPUS)
@@ -104,7 +99,7 @@ def train_unet3d():
     for x, y in (t:=tqdm(iterate(val=False, shuffle=True, bs=BS, size=SIZE), desc=f"[Training][Epoch: {epoch}/{NUM_EPOCHS}]", total=len(get_train_files()) // BS)):
       x, y = Tensor(x), Tensor(y, dtype=dtypes.uint8)
       if len(GPUS) > 1: x, y = x.shard(GPUS, axis=0), y.shard(GPUS, axis=0)
-      loss = _train_step(model_run, x, y)
+      loss = _train_step(model, x, y)
       t.set_description(f"[Training][Epoch: {epoch}/{NUM_EPOCHS}][Loss: {loss.item():.3f}]")
       if WANDB: wandb.log({"train_loss": loss.item()})
 
