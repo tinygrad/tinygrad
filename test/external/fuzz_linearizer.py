@@ -1,4 +1,4 @@
-import random, traceback, ctypes, gc
+import random, traceback, ctypes
 from typing import List, Tuple
 import numpy as np
 from collections import defaultdict
@@ -48,7 +48,6 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
     print(lin.applied_opts)
     traceback.print_exc()
     print("COMPILE FAILED!!")
-    gc.collect()
     return "COMPILE_ERROR"
 
   try:
