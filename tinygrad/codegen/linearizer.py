@@ -167,8 +167,7 @@ class Linearizer(Kernel):
   kernel_cnt: Final[DefaultDict[str, int]] = defaultdict(int)
   def linearize(self):
     # no new opts and we already ran? skip relinearizing
-    # TODO enable
-    # if self.applied_opts == self.applied_opts_cache: return self
+    if self.applied_opts == self.applied_opts_cache: return self
 
     # save backups
     sts_backup, gfr_backup, upc_backup = self.sts[:], self.group_for_reduces, self.upcasted
@@ -425,7 +424,7 @@ class Linearizer(Kernel):
           # TODO: ADD becomes a MUL, MAX can just become nothing
           # HACK: previously MULACC didn't remove PHI nodes so ADD (SUM) -> MUL cannot remove PHI nodes. This makes TC=2 work
           if all(x.uop is not UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) \
-          and u.vin[1].arg is BinaryOps.ADD and u.vin[1].vin[0].arg is not BinaryOps.MUL:
+          and u.vin[1].arg is BinaryOps.ADD:
             if DEBUG >= 4: print(f"removing PHI node {u}")
             del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
             # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
