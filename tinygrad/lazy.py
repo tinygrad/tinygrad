@@ -134,8 +134,8 @@ class LazyBuffer:
     # TODO: can we split symbolic shape if the reduce axis is not symbolic?
     if not all_int(self.shape) or (0 in self.shape) or prod(self.shape) // prod(new_shape) < getenv("REDUCEOP_SPLIT_THRESHOLD", 32768):
       return self._reduce_op(op, axis)
-    heuristic, divisor, dim_to_split = max(((divisor := math.gcd(256, s))/(cast(int,stride) or math.inf), divisor, i) \
-                                           for i,(s,stride) in enumerate(zip(self.shape, self.st.real_strides())) if i in axis)
+    heuristic, divisor, dim_to_split = max(((divisor := math.gcd(256, s))/(st or math.inf), divisor, i) for i,(s,st) in \
+                                           enumerate(zip(self.shape, self.st.real_strides())) if i in axis and (st is None or isinstance(st, int)))
     if divisor < 16 or heuristic < 0.1: return self._reduce_op(op, axis)
     # choose largest divisor (>=16) to split on, penalize large strides
     def splitted_shape(dim_aft_div):
