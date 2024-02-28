@@ -95,6 +95,7 @@ class HSAAllocator(LRUAllocator):
         self.hb.append(mem.value)
       self.hb_signals = [self.device.alloc_signal(reusable=False) for _ in range(2)]
       self.hb_polarity = 0
+      self.sdma = [hsa.HSA_AMD_SDMA_ENGINE_0, hsa.HSA_AMD_SDMA_ENGINE_1]
       for sig in self.hb_signals: hsa.hsa_signal_store_relaxed(sig, 0)
 
     fo = io.FileIO(fd, "a+b", closefd=False)
@@ -114,7 +115,7 @@ class HSAAllocator(LRUAllocator):
       fo.readinto(to_mv(self.hb[self.hb_polarity], local_size))
       check(hsa.hsa_amd_memory_async_copy_on_engine(dest+copied_in, self.device.agent, self.hb[self.hb_polarity]+minor_offset, HSADevice.cpu_agent,
                                                     copy_size, 1, ctypes.byref(sync_signal), self.hb_signals[self.hb_polarity],
-                                                    hsa.HSA_AMD_SDMA_ENGINE_0, True))
+                                                    self.sdma[self.hb_polarity], True))
       copied_in += copy_size
       self.hb_polarity = (self.hb_polarity + 1) % len(self.hb)
       minor_offset = 0 # only on the first
