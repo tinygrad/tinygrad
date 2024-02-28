@@ -276,7 +276,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: /Users/runner/Library/Python/3.11/lib/python/site-packages
-        key: metal-testing-user3-packages-${{ hashFiles('**/setup.py') }}
+        key: metal-m1-testing-user3-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Cache downloads
