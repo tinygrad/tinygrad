@@ -262,7 +262,7 @@ jobs:
 
   testmetal:
     name: Metal Tests
-    runs-on: macos-13
+    runs-on: macos-14
     timeout-minutes: 20
 
     steps:
