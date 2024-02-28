@@ -81,7 +81,8 @@ class MetalAllocator(LRUAllocator):
 class MetalDevice(Compiled):
   def __init__(self, device:str):
     self.device = Metal.MTLCreateSystemDefaultDevice()
-    self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
+    # self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(1024)
+    self.mtl_queue = self.device.newCommandQueueWithMaxCommandBufferCount_(2048)
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
     from tinygrad.runtime.graph.metal import MetalGraph
