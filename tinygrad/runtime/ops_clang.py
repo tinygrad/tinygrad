@@ -12,8 +12,8 @@ class ClangCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      subprocess.check_output(args=('clang -shared -march=native -O2 -Wall -Werror -x c -fPIC - -o '+ \
-                                    str(output_file.name)).split(), input=(CLANG_PROGRAM_HEADER+src).encode('utf-8'))
+      command = ['clang', '-shared', '-march=native', '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-', '-o', output_file.name]
+      subprocess.run(command, input=(CLANG_PROGRAM_HEADER + src).encode('utf-8'), check=True)
       return pathlib.Path(output_file.name).read_bytes()
 
 class ClangProgram:
@@ -22,7 +22,7 @@ class ClangProgram:
     # write to disk so we can load it
     with tempfile.NamedTemporaryFile(delete=True) as cached_file_path:
       pathlib.Path(cached_file_path.name).write_bytes(lib)
-      self.fxn = ctypes.CDLL(str(cached_file_path.name))[name]
+      self.fxn = ctypes.CDLL(cached_file_path.name)[name]
 
   def __call__(self, *bufs, vals=(), wait=False): return cpu_time_execution(lambda: self.fxn(*bufs, *vals), enable=wait)
 
