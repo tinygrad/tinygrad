@@ -61,7 +61,9 @@ class HSAAllocator(LRUAllocator):
     super().__init__()
 
   def _alloc(self, size:int):
+    c_agents = (hsa.hsa_agent_t * len(HSADevice.devices))(*[dev.agent for dev in HSADevice.devices])
     check(hsa.hsa_amd_memory_pool_allocate(self.device.gpu_mempool, size, 0, ctypes.byref(buf := ctypes.c_void_p())))
+    check(hsa.hsa_amd_agents_allow_access(len(HSADevice.devices), c_agents, None, buf))
     return buf.value
 
   def _free(self, opaque:T):
@@ -137,8 +139,6 @@ class HSAAllocator(LRUAllocator):
     sync_signal_1 = src_dev.hw_queue.submit_barrier(need_signal=True)
     sync_signal_2 = dest_dev.hw_queue.submit_barrier(need_signal=True)
     c_wait_signal = (hsa.hsa_signal_t*2)(sync_signal_1, sync_signal_2)
-    c_agents = (hsa.hsa_agent_t * len(HSADevice.devices))(*[dev.agent for dev in HSADevice.devices])
-    check(hsa.hsa_amd_agents_allow_access(len(HSADevice.devices), c_agents, None, src))
     check(hsa.hsa_amd_memory_async_copy_on_engine(dest, dest_dev.agent, src, src_dev.agent, sz, 2, c_wait_signal, copy_signal, hsa.HSA_AMD_SDMA_ENGINE_0, True)) # noqa: E501
     src_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
     dest_dev.hw_queue.submit_barrier(wait_signals=[copy_signal])
