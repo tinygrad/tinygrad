@@ -1,10 +1,7 @@
 import math
-import torch
-# import torch.nn as nn
-# import torch.nn.functional as F
 from typing import List, Callable, Dict, Tuple
 from tinygrad import Tensor, TinyJit, nn, GlobalCounters
-# from tinygrad.tensor import Tensor
+import torch
 
 # TODO: use Tensor.reshape for einops.rearrange
 
@@ -87,7 +84,33 @@ class Mamba:
     else: 
       conv_s, ssm_s = inference_params[self.layer_index]
     return conv_s, ssm_s
-    
+
+class Block:
+  def __init__(self, dim, mixer_cls, norm_cls):
+    self.mixer = mixer_cls(dim)
+    self.norm = norm_cls(dim)
+
+  def __call__(self, hidden_states: Tensor, inference_params=None):
+    residual = hidden_states
+    hidden_states = self.norm(hidden_states)
+    hidden_states = self.mixer(hidden_states, inference_params=inference_params)
+    hidden_states += residual
+    return hidden_states
+
+
+def main():
+  mamba = Mamba()
+
+if __name__ == "__main__":
+  main()
+
+
+
+
+
+# import torch
+# import torch.nn as nn
+# import torch.nn.functional as F
 
 # class Mamba(nn.Module):
 #     def __init__(
@@ -178,7 +201,6 @@ class Mamba:
 #             conv_state, ssm_state = inference_params.key_value_memory_dict[self.layer_idx]
 #         return conv_state, ssm_state
 
-
 # class Block(nn.Module):
 #     def __init__(self, dim, mixer_cls, norm_cls):
 #         """ Simple block wrapping a mixer class with RMSNorm and residual connection """
@@ -203,12 +225,4 @@ class Mamba:
 #     residual_in_fp32: bool = True
 #     fused_add_norm: bool = True
 #     pad_vocab_size_multiple: int = 8
-
-
-def main():
-  mamba = Mamba()
-
-if __name__ == "__main__":
-  main()
-
 
