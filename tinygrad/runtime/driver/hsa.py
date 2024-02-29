@@ -1,4 +1,4 @@
-import ctypes
+import ctypes, collections
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.helpers import init_c_var
 
@@ -124,20 +124,17 @@ class AQLQueue:
 
   def _alloc_signal(self, reusable=False): return self.device.alloc_signal(reusable=reusable)
 
-def find_agent(typ, device_id):
+def scan_agents():
+  agents = collections.defaultdict(list)
+
   @ctypes.CFUNCTYPE(hsa.hsa_status_t, hsa.hsa_agent_t, ctypes.c_void_p)
-  def __filter_agents(agent, data):
+  def __scan_agents(agent, data):
     status = hsa.hsa_agent_get_info(agent, hsa.HSA_AGENT_INFO_DEVICE, ctypes.byref(device_type := hsa.hsa_device_type_t()))
-    if status == 0 and device_type.value == typ:
-      ret = ctypes.cast(data, ctypes.POINTER(hsa.hsa_agent_t))
-      if ret[0].handle == device_id:
-        ret[0] = agent
-        return hsa.HSA_STATUS_INFO_BREAK
-      ret[0].handle = ret[0].handle + 1
+    if status == 0: agents[device_type.value].append(agent)
     return hsa.HSA_STATUS_SUCCESS
 
-  hsa.hsa_iterate_agents(__filter_agents, ctypes.byref(agent := hsa.hsa_agent_t()))
-  return agent
+  hsa.hsa_iterate_agents(__scan_agents, None)
+  return agents
 
 def find_memory_pool(agent, segtyp=-1, flags=-1, location=-1):
   @ctypes.CFUNCTYPE(hsa.hsa_status_t, hsa.hsa_amd_memory_pool_t, ctypes.c_void_p)
