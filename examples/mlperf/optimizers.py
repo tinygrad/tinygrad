@@ -12,13 +12,11 @@ class LARS(Optimizer):
     self.skip_list = skip_list or set()
 
   def step(self):
-    gnorm = 0
     for i, t in enumerate(self.params):
       assert t.grad is not None
       t.grad.realize()
       t_ = t.detach()
       g_norm = (t.grad * t.grad).sum().sqrt()
-      if self.track_gnorm: gnorm = gnorm + g_norm.to("HIP")
       if t not in self.skip_list:
         w_norm = (t_ * t_).sum().sqrt()
         trust_ratio = (w_norm > 0).where(
@@ -38,4 +36,3 @@ class LARS(Optimizer):
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       t.assign(t.detach() - g)
     self.realize(self.b)
-    if self.track_gnorm: return gnorm.realize()
