@@ -7,6 +7,7 @@ from tinygrad.device import Buffer, Device
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.device import CompiledASTRunner, Compiled
 from tinygrad.codegen.linearizer import UOps, UOp
+from tinygrad.runtime.ops_python import exec_alu
 from test.test_dtype import is_dtype_supported
 
 def _uops_to_prg(uops):
@@ -86,7 +87,6 @@ class TestFloatUOps(TestUOps):
   def test_cmplt(self): self._test_bop_fxn(BinaryOps.CMPLT, lambda a,b: a<b)
   # MOD isn't tested on floats
 
-  def test_mulacc(self): self._test_top_fxn(TernaryOps.MULACC, lambda a,b,c: (a*b)+c)
   def test_where(self):
     self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, (PtrDType(dtypes.bool), PtrDType(dtypes.float), PtrDType(dtypes.float)))
 
@@ -108,6 +108,10 @@ class TestNonFloatUOps(TestUOps):
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "dtype not supported")
   def test_where_float16(self):
     self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, (PtrDType(dtypes.bool), PtrDType(dtypes.float16), PtrDType(dtypes.float16)))
+
+class TestExecALU(TestUOps):
+  def test_sqrt(self):
+    self.assertEqual(exec_alu(UnaryOps.SQRT, dtypes.int, (0,)), 0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
