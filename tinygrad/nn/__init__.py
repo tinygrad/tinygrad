@@ -131,7 +131,6 @@ class Linear:
     bound = 1 / math.sqrt(in_features)
     return Tensor.uniform(out_features, low=-bound, high=bound)
 
-
 class GroupNorm:
   def __init__(self, num_groups:int, num_channels:int, eps:float=1e-5, affine:bool=True):
     self.num_groups, self.num_channels, self.eps = num_groups, num_channels, eps
