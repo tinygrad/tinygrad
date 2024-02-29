@@ -458,7 +458,7 @@ class Linearizer(Kernel):
         return vars[u]
       elif u.uop == UOps.LOOP:
         if u not in vars:
-          vars[u] = Variable("_loopidx", resolve_loop_op(u.vin[0], vars, state, summation_processed), resolve_loop_op(u.vin[1], vars, state, summation_processed))
+          vars[u] = Variable("_loopidx", resolve_loop_op(u.vin[0], vars, state, summation_processed), resolve_loop_op(u.vin[1], vars, state, summation_processed) - 1)
           state["loopvar"] = vars[u]
         return vars[u]
       elif u.uop == UOps.PHI:
@@ -502,14 +502,14 @@ class Linearizer(Kernel):
         if is_less_than_comparison:
           # now is factored, calculate the summation
           min_clamp = NumNode(0)
-          max_clamp = NumNode(loop_var.max - loop_var.min)
-          raw_val = right - loop_var.min + 1
+          max_clamp = NumNode(loop_var.max - loop_var.min + 1)
+          raw_val = (right // 1) + 1 - loop_var.min
           clamped = MaxNode(MaxNode(raw_val, min_clamp) * -1, max_clamp * -1) * -1
           return clamped
         else:
           min_clamp = NumNode(0)
-          max_clamp = NumNode(loop_var.max - loop_var.min)
-          raw_val = loop_var.max - right - 1
+          max_clamp = NumNode(loop_var.max - loop_var.min + 1)
+          raw_val = loop_var.max - (right // 1)
           clamped = MaxNode(MaxNode(raw_val, min_clamp) * -1, max_clamp * -1) * -1
           return clamped
       elif u.uop == UOps.ALU and u.arg == TernaryOps.WHERE:
@@ -552,8 +552,9 @@ class Linearizer(Kernel):
               changed_vin = list(op.vin)
               changed_vin[vin_idx] = rendered
               op.vin = tuple(changed_vin)
+        self.uops = remove_childless_uops(self.uops, {UOps.ENDIF, UOps.ENDLOOP})
+        keep_removing_loops = True
         break
-
 
     # verify the uop types
     uops_type_verify(self.uops)
