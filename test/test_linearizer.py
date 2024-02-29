@@ -72,6 +72,42 @@ class TestLinearizer(unittest.TestCase):
     num_ops = len([uop for uop in k.uops if uop.uop == UOps.ALU])
     assert num_ops <= 1, "more alu uops than needed"
 
+  def test_reduce_upcast(self):
+    if not Device[Device.DEFAULT].compiler.linearizer_opts.supports_float4:
+      self.skipTest("device does not support upcast")
+    x, w = Tensor.randn((1,1,3)).realize(), Tensor.randn((1,1,2)).realize()
+    r = Tensor.conv2d(x,w,padding=1).relu()
+
+    k = Linearizer(create_schedule([r.lazydata])[-1].ast)
+    k.upcast()
+    k.upcast()
+    k.linearize()
+    accs = [u for u in k.uops if u.uop == UOps.DEFINE_ACC]
+    stores = [u for u in k.uops if u.uop == UOps.STORE]
+    assert len(accs) == 1
+    assert len(stores) == 1
+    assert stores[0].vin[-1].dtype == accs[0].dtype == dtypes.float.vec(4)
+
+  def test_upcast_with_locals(self):
+    if not (opts:=Device[Device.DEFAULT].compiler.linearizer_opts).has_local or not opts.has_shared or not opts.supports_float4:
+      self.skipTest("device does not support upcasted reduce with locals")
+
+    x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
+    r = (x@y).relu()
+    k = Linearizer(create_schedule([r.lazydata])[-1].ast)
+    k.hand_coded_optimizations()
+    k.linearize()
+
+    accs = [u for u in k.uops if u.uop == UOps.DEFINE_ACC]
+    stores = [u for u in k.uops if u.uop == UOps.STORE]
+
+    # the first store is to lds and can be upcasted
+    assert accs[0].dtype == stores[0].vin[-1].dtype == dtypes.float.vec(4)
+    assert stores[0].vin[0].uop == UOps.DEFINE_LOCAL
+    # the second store is to gds with no upcasts
+    assert accs[1].dtype == stores[1].vin[-1].dtype == dtypes.float
+    assert stores[1].vin[0].uop == UOps.DEFINE_GLOBAL
+
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack([a, b])
