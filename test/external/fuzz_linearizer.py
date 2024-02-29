@@ -42,6 +42,10 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
 
   # TODO: images needs required_optimization
   try:
+    if isinstance(device, Compiled):
+      prg = device.to_program(lin)
+    else:
+      prg = device.get_runner(lin.ast)
     prg = device.to_program(lin)
   except Exception:
     print(lin.ast)
