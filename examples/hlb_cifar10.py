@@ -16,7 +16,7 @@ from tinygrad.features.multi import MultiLazyBuffer
 
 BS, STEPS = getenv("BS", 512), getenv("STEPS", 1000)
 EVAL_BS = getenv("EVAL_BS", BS)
-GPUS = tuple([Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(getenv("GPUS", 1))])
+GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))]
 assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
 assert EVAL_BS % len(GPUS) == 0, f"{EVAL_BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
 for x in GPUS: Device[x]
@@ -73,7 +73,7 @@ class UnsyncedBatchNorm:
 
 class BatchNorm(nn.BatchNorm2d if getenv("SYNCBN") else UnsyncedBatchNorm):
   def __init__(self, num_features):
-    super().__init__(GPUS, num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
+    super().__init__(num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
     self.weight.requires_grad = False
     self.bias.requires_grad = True
 
