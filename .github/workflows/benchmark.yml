@@ -47,7 +47,7 @@ jobs:
         JIT=0 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_unjitted.txt
         JIT=1 python3 examples/gpt2.py --prompt "Hello." --count 10 --temperature 0 --timing | tee gpt2_jitted.txt
     - name: Run 10 CIFAR training steps
-      run: JIT=2 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
+      run: STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     # TODO: this is flaky too
     # - name: Run 10 CIFAR training steps w winograd
     #   run: WINO=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
