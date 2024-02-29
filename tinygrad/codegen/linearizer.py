@@ -190,13 +190,20 @@ class Linearizer(Kernel):
     self.loop_uops: Dict[str, UOp] = {}
 
     # add global buffers
+    buf_count = 0
+    buf_index = {}
     for i,buf in enumerate(self.bufs):
       if isinstance(buf, MemBuffer):
-        self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL, buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (), f"data{buf.idx}")
+        if buf.idx not in buf_index:
+          buf_index[buf.idx] = buf_count
+          buf_count += 1
+        self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL,
+                                    buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (),
+                                    (buf_index[buf.idx], f"data{buf.idx}"))
     # add var vals
-    for var in self.ast.vars():
+    for i,var in enumerate(self.ast.vars()):
       assert var.expr is not None
-      self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, (), var.expr)
+      self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, (), (len(buf_index)+i, var.expr))
     # define local buffers
     for lb in self.local_alias.values():
       self.buf_uops[self.bufs.index(lb)] = self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), (lb.name, self.sts[self.bufs.index(lb)].size))

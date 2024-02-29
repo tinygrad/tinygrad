@@ -89,7 +89,8 @@ class CStyleLanguage(NamedTuple):
 
 def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> str:
   local_size: List[int] = []
-  kernel,bufs = [],[]
+  kernel = []
+  bufs: List[Tuple[str, DType]] = []
   #pend_close = None
   depth = 1
   def kk(s): kernel.append("  "*depth+s)
@@ -161,8 +162,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
         kk(lang.render_local(args[0], dtype, args[1]))
         r[u] = args[0]
       elif uop is UOps.DEFINE_GLOBAL:
-        bufs.append((args, dtype))
-        r[u] = args
+        assert len(bufs) == args[0], f"missed a global buffer {len(bufs)} {args}"
+        bufs.append((args[1], dtype))
+        r[u] = args[1]
       elif uop is UOps.WMMA: kk(f"{dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
       elif uop is UOps.DEFINE_ACC: kk(f"{dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
       elif uop is UOps.CONST: r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
