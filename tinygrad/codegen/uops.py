@@ -33,9 +33,9 @@ def get_recursive_children(uops:List[UOp], x:UOp) -> Set[UOp]:
         deps.add(u)
   return deps
 
-#UOPS_W_SIDE_EFFECTS = {UOps.STORE, UOps.BARRIER}
 UOPS_W_SIDE_EFFECTS = {UOps.STORE, UOps.BARRIER, UOps.DEFINE_GLOBAL}
 def remove_childless_uops(uops:List[UOp]) -> List[UOp]:
+  # NOTE: DEFINE_GLOBAL should be removable, but we'd have to propagate that
   while 1:
     has_child: Set[UOp] = set()
     for ru in uops:
@@ -85,7 +85,7 @@ def uops_type_verify(uops:List[UOp]):
 
 def uops_alu_resolve(u:UOp, vars:Dict[str, Variable]) -> sint:
   if u.uop == UOps.CONST: return u.arg
-  elif u.uop == UOps.DEFINE_GLOBAL: return vars[u.arg]
+  elif u.uop == UOps.DEFINE_GLOBAL: return vars[u.arg[1]]
   elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL:
     return uops_alu_resolve(u.vin[0], vars) * uops_alu_resolve(u.vin[1], vars)
   elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD:
