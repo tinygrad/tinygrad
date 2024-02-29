@@ -1,7 +1,7 @@
 import unittest
 
 from test.helpers import assert_jit_cache_len
-from tinygrad.jit import TinyJit
+from tinygrad.features.jit import TinyJit
 from tinygrad.helpers import getenv
 from tinygrad.shape.symbolic import Variable
 from tinygrad.tensor import Tensor
@@ -124,7 +124,6 @@ class TestSymbolicJit(unittest.TestCase):
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert_jit_cache_len(jf, 1)
 
-  @unittest.skip("two vars not supported")
   def test_two_vars_plus1_ij(self):
     def f(a, b): return (a@b+1).realize()
     jf = TinyJit(f)
@@ -139,7 +138,6 @@ class TestSymbolicJit(unittest.TestCase):
         np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert_jit_cache_len(jf, 1)
 
-  @unittest.skip("two vars not supported")
   def test_two_vars_plus1_ji(self):
     def f(a, b): return (a@b+1).realize()
     jf = TinyJit(f)

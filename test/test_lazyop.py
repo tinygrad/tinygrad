@@ -1,5 +1,6 @@
 import unittest
 from tinygrad.tensor import Tensor
+from tinygrad.realize import create_schedule
 
 # stuff needed to unpack a kernel
 # ruff: noqa: F401
@@ -16,7 +17,7 @@ inf, nan = float('inf'), float('nan')
 class TestLazyOp(unittest.TestCase):
   def test_lazyop_str(self):
     t = Tensor.rand(10) + Tensor.rand(10)
-    s = t.lazydata.schedule()
+    s = create_schedule([t.lazydata])
     ast = s[-1].ast
     ast_remade = eval(str(ast))
     self.assertEqual(ast, ast_remade)

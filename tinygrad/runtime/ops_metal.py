@@ -4,18 +4,30 @@ import Metal, libdispatch
 from typing import List, Any, Tuple, Optional
 from tinygrad.codegen.kernel import LinearizerOptions
 from tinygrad.helpers import prod, getenv, DEBUG, unwrap2
-from tinygrad.device import Compiled, LRUAllocator
+from tinygrad.device import Compiled, LRUAllocator, Compiler
 from tinygrad.renderer.cstyle import MetalRenderer
 
-def compile_metal_xcode(prg:str) -> bytes:
-  # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
-  air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=prg.encode('utf-8'))
-  return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+def wait_check(cbuf: Any):
+  cbuf.waitUntilCompleted()
+  if (error := cbuf.error()) is not None:
+    raise RuntimeError(error)
 
-def compile_metal(device, prg:str) -> bytes:
-  options = Metal.MTLCompileOptions.new()
-  library = unwrap2(device.newLibraryWithSource_options_error_(prg, options, None))
-  return library.libraryDataContents().bytes().tobytes()
+class MetalCompiler(Compiler):
+  linearizer_opts = LinearizerOptions("METAL", has_tensor_cores=os.uname().machine == "arm64")
+  def __init__(self, device:Optional[MetalDevice]):
+    self.device = device
+    super().__init__("compile_metal")
+  def render(self, name:str, uops) -> str: return MetalRenderer(name, uops)
+  def compile(self, src:str) -> bytes:
+    if self.device is None:
+      # NOTE: if you run llvm-dis on "air" you can see the llvm bytecode
+      air = subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metal', '-x', 'metal', '-c', '-', '-o', '-'], input=src.encode('utf-8'))
+      return subprocess.check_output(['xcrun', '-sdk', 'macosx', 'metallib', '-', '-o', '-'], input=air)
+    else:
+      options = Metal.MTLCompileOptions.new()
+      options.setFastMathEnabled_(getenv("METAL_FAST_MATH"))
+      library = unwrap2(self.device.device.newLibraryWithSource_options_error_(src, options, None))
+      return library.libraryDataContents().bytes().tobytes()
 
 class MetalProgram:
   def __init__(self, device:MetalDevice, name:str, lib:bytes):
@@ -41,7 +53,7 @@ class MetalProgram:
     encoder.endEncoding()
     command_buffer.commit()
     if wait:
-      command_buffer.waitUntilCompleted()
+      wait_check(command_buffer)
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
     self.device.mtl_buffers_in_flight.append(command_buffer)
 
@@ -53,7 +65,7 @@ class MetalAllocator(LRUAllocator):
     ret = self.device.device.newBufferWithLength_options_(size, Metal.MTLResourceStorageModeShared)
     if ret is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return ret
-  def transfer(self, dest:Any, src:Any, sz:int):
+  def transfer(self, dest:Any, src:Any, sz:int, **kwargs):
     command_buffer = self.device.mtl_queue.commandBuffer()
     encoder = command_buffer.blitCommandEncoder()
     encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size_(src, 0, dest, 0, sz)
@@ -78,10 +90,9 @@ class MetalDevice(Compiled):
     self.mtl_buffers_in_flight: List[Any] = []
     self.mv_in_metal: List[memoryview] = []
     from tinygrad.runtime.graph.metal import MetalGraph
-    super().__init__(device, MetalAllocator(self), LinearizerOptions("METAL"), MetalRenderer,
-                     compile_metal_xcode if getenv("METAL_XCODE") else functools.partial(compile_metal, self.device), "compile_metal",
+    super().__init__(device, MetalAllocator(self), MetalCompiler(None if getenv("METAL_XCODE") else self),
                      functools.partial(MetalProgram, self), functools.partial(MetalGraph, self))
   def synchronize(self):
-    for cbuf in self.mtl_buffers_in_flight: cbuf.waitUntilCompleted()
+    for cbuf in self.mtl_buffers_in_flight: wait_check(cbuf)
     self.mv_in_metal.clear()
     self.mtl_buffers_in_flight.clear()

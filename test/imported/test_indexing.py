@@ -996,7 +996,8 @@ class TestIndexing(unittest.TestCase):
     z = y[:, 1:1, :]
     numpy_testing_assert_equal_helper((2, 0, 4), z.shape)
     # this isn't technically necessary, but matches NumPy stride calculations.
-    numpy_testing_assert_equal_helper((60, 20, 5), z.lazydata.st.real_strides())
+    # NOTE: this is empty and shouldn't have strides
+    #numpy_testing_assert_equal_helper((60, 20, 5), z.lazydata.st.real_strides())
     # NOTE tinygrad's int slicing implementation makes this not contiguous
     # self.assertTrue(z.lazydata.st.contiguous)
 

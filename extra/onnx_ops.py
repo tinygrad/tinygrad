@@ -7,7 +7,7 @@ from extra.onnx import safe_numpy, DTYPE_MAP
 import numpy as np
 
 tensor_methods = {"Neg", "Reciprocal", "Pow", "Sqrt", "Sign", "Abs", "Exp", "Log", "Mish", "Sin", "Cos", "Tan", "Relu", "Sigmoid", "MatMul",
-                  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Div", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
+                  "Floor", "Ceil", "Softplus", "HardSwish", "Where", "Mul", "Sinh", "Cosh", "Tanh", "Softsign", "Asinh", "Acosh", "Atanh",
                   "Elu", "Celu", "Xor", "Round"}
 
 # **************** Free Ops ****************
@@ -29,6 +29,9 @@ def Cast(x: Tensor, to: int, saturate=1): return x.cast(DTYPE_MAP[to])
 def CastLike(x: Tensor, target_type: Tensor, saturate=1): return x.cast(target_type.dtype)
 
 # **************** Simple Ops ****************
+
+# https://github.com/onnx/onnx/blob/main/onnx/reference/ops/op_div.py
+def Div(x: Tensor, other: Tensor): return (x/other).cast(x.dtype)
 
 def Constant(value: Tensor=None, value_float=None, value_floats=None, value_int=None, value_ints=None, value_string=None, value_strings=None):
   if value is not None: return value
@@ -119,10 +122,8 @@ def Unsqueeze(data: Tensor, axes):
 def Binarizer(x, threshold=0.0): return (x > threshold).float()
 
 def ArgMax(x: Tensor, axis=0, keepdims=1, select_last_index=0):
-  axis = axis + x.ndim if axis < 0 else axis
-  m = x == (x.max(axis=axis, keepdim=keepdims) if keepdims else x.max(axis=axis, keepdim=keepdims).unsqueeze(axis))
-  c = Tensor.arange(x.shape[axis]).reshape(*[1]*(axis), x.shape[axis], *[1]*(x.ndim - axis-1)) * m
-  return c.max(axis=axis,keepdim=keepdims).cast(dtypes.int64)
+  if select_last_index: return ((x.shape[axis]-1) - x.flip(axis).argmax(axis, keepdim=keepdims)).cast(dtypes.int64)
+  return x.argmax(axis, keepdim=keepdims).cast(dtypes.int64)
 def ArgMin(x, axis=0, keepdims=1, select_last_index=0): return ArgMax(-x, axis=axis, keepdims=keepdims, select_last_index=select_last_index)
 
 def Concat(*xs: List[Tensor], axis): return xs[0].cat(*xs[1:], dim=axis)
@@ -148,13 +149,19 @@ def Gemm(A: Tensor, B: Tensor, C: Tensor=None, alpha=1.0, beta=1.0, transA=0, tr
   if C is not None: ret += beta * (C if broadcast == 0 else C.reshape([-1 if i <  len(C.shape) else 1 for i in range(ret.ndim)][::-1]))
   return ret
 
-# works with Tensors.ndim != 4
-def _batchnorm(self:Tensor, weight:Optional[Tensor], bias:Optional[Tensor], mean:Tensor, invstd:Tensor):
-  shape = [1, -1] + [1] * (self.ndim-2)
-  x = (self - mean.reshape(shape=shape))
-  if weight: x = x * weight.reshape(shape=shape)
-  ret = x.mul(invstd.reshape(shape=shape) if len(invstd.shape) == 1 else invstd)
-  return (ret + bias.reshape(shape=shape)) if bias else ret
+def Einsum(*Inputs: List[Tensor], equation): return Tensor.einsum(equation, Inputs)
+
+def CumSum(X:Tensor, axis:Tensor, exclusive=0, reverse=0):
+  axis = safe_numpy(axis).item()
+  if axis < 0: axis += X.ndim
+  if reverse: X = X.flip(axis)
+  if exclusive:
+    pad_arg, shrink_arg = [None] * X.ndim, [None] * X.ndim
+    pad_arg[axis] = (1, 0)
+    shrink_arg[axis] = (0, X.shape[axis])
+    X = X.pad(tuple(pad_arg)).shrink(tuple(shrink_arg))
+  if reverse: return X.cumsum(axis).flip(axis)
+  return X.cumsum(axis)
 
 # TODO: this is copied from tinygrad/nn/__init__.py
 # spatial is from opset 7 and has since been removed
@@ -169,9 +176,9 @@ def BatchNormalization(X: Tensor, scale, B, input_mean, input_var, epsilon=1e-05
     running_mean = input_mean * momentum + current_mean * (1 - momentum)
     running_var = input_var * momentum + current_var * (1 - momentum)
 
-    return _batchnorm(X, scale, B, current_mean, current_invstd), running_mean, running_var
+    return X.batchnorm(scale, B, current_mean, current_invstd), running_mean, running_var
   invstd = (input_var + epsilon)**-0.5
-  return _batchnorm(X, scale, B, input_mean, invstd)
+  return X.batchnorm(scale, B, input_mean, invstd)
 
 def InstanceNormalization(x: Tensor, scale: Tensor, bias: Tensor, epsilon=1e-05):
   axis = tuple(range(2, len(x.shape)))
@@ -309,6 +316,17 @@ def ConvTranspose(X: Tensor, W: Tensor, B:Optional[Tensor]=None, auto_pad="NOTSE
     if output_shape is None: output_shape = [st*(xs-1) + (ks-1)*di+1 if n < 2 else st*(xs-1) + (ks-1)*di+1 - pads[n-2] - pads[n-1] for n, (st, xs, ks, di) in enumerate(zip(strides, X.shape[2:], kernel_shape, dilations))]
   if out_sh: output_padding = [os - rs for os, rs in zip(output_shape, out_sh)]
   return X.conv_transpose2d(W, B, stride=strides, groups=group, dilation=dilations, padding=pads if pads is not None else 0, output_padding=output_padding)
+
+def DepthToSpace(X:Tensor, blocksize:int, mode:str="DCR"):
+  b, c, h, w = X.shape
+  if mode == "DCR":
+    return X.reshape(b, blocksize, blocksize, c // (blocksize**2), h, w).permute(0, 3, 4, 1, 5, 2).reshape(b, c // (blocksize**2), h * blocksize, w * blocksize)
+  elif mode == "CRD":
+    return X.reshape(b, c // (blocksize ** 2), blocksize, blocksize, h, w).permute(0, 1, 4, 2, 5, 3).reshape(b, c // (blocksize ** 2), h * blocksize, w * blocksize)
+
+def SpaceToDepth(X:Tensor, blocksize:int):
+  b, c, h, w = X.shape
+  return X.reshape(b, c, h // blocksize, blocksize, w // blocksize, blocksize).permute(0, 3, 5, 1, 2, 4).reshape(b, c * (blocksize**2), h // blocksize, w // blocksize)
 
 # Reimplemented here because you need legacy RNG for passing ONNX tests.
 def Dropout(data: Tensor, ratio=0.5, training_mode=False, seed=None):

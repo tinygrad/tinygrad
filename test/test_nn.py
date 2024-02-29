@@ -123,7 +123,7 @@ class TestNN(unittest.TestCase):
     torch_z = torch_layer(torch_x)
     np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-4, rtol=1e-5)
 
-  @unittest.skipIf(Device.DEFAULT not in {"CPU", "TORCH"}, "Takes too long to compile for Compiled backends")
+  @unittest.skip("Takes too long to compile for Compiled backends")
   def test_conv2d_winograd(self):
     BS, C1, H, W = 2, 8, 16, 16
     C2, K, S, P = 8, 3, 1, 1

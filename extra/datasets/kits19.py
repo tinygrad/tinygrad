@@ -91,7 +91,7 @@ def pad_input(volume, roi_shape, strides, padding_mode="constant", padding_val=-
   return F.pad(torch.from_numpy(volume), paddings, mode=padding_mode, value=padding_val).numpy(), paddings
 
 def sliding_window_inference(model, inputs, labels, roi_shape=(128, 128, 128), overlap=0.5):
-  from tinygrad.jit import TinyJit
+  from tinygrad.features.jit import TinyJit
   mdl_run = TinyJit(lambda x: model(x).realize())
   image_shape, dim = list(inputs.shape[2:]), len(inputs.shape[2:])
   strides = [int(roi_shape[i] * (1 - overlap)) for i in range(dim)]

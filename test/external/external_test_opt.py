@@ -17,7 +17,7 @@ from tinygrad.helpers import getenv
 from tinygrad.nn import optim
 #from tinygrad.lazy import PUSH_PERMUTES
 PUSH_PERMUTES = False
-from tinygrad.jit import CacheCollector
+from tinygrad.features.jit import CacheCollector
 
 class CLCache:
   def __init__(self, allowed=None, strict=False, preclear=True, var_vals=None):

@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv, fetch, Timing
-from tinygrad.jit import TinyJit
+from tinygrad.features.jit import TinyJit
 from extra.models.efficientnet import EfficientNet
 np.set_printoptions(suppress=True)
 

@@ -2,7 +2,8 @@
 import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.device import Interpreted
+from tinygrad.lazy import LazyBuffer, ReduceOps
+from tinygrad.realize import create_schedule
 
 class TestLazyBuffer(unittest.TestCase):
   def test_fromcpu_shape_tracker(self):
@@ -56,18 +57,40 @@ class TestLazyBuffer(unittest.TestCase):
     a = Tensor.zeros(4,4,4).shrink((None, (0,0), None)).cast(dtypes.int32)
     b = Tensor.zeros(4,1,4)
     c = a.cat(b, dim=1)
+    np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
 
-    if isinstance(Device[Device.DEFAULT], Interpreted):
-      # TODO: fix cast resets shapetracker and remove this block
-      # this is expectedFailure with a condition
-      try:
-        np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
-      except Exception:
-        pass
-      else:
-        raise ValueError("assert_allclose not failed")
-    else:
-      np.testing.assert_allclose(c.numpy(), np.concatenate((a.numpy(), b.numpy()), axis=1))
+  def test_const_dtype(self):
+    lb: LazyBuffer = Tensor([1], dtype=dtypes.int).lazydata
+    assert lb.const(1).base.arg == 1
+    assert type(lb.const(1).base.arg) is int
+
+    lb: LazyBuffer = Tensor([1], dtype=dtypes.float).lazydata
+    assert lb.const(1).base.arg == 1.0
+    assert type(lb.const(1).base.arg) is float
+
+class TestReduceOp(unittest.TestCase):
+  def test_no_split_reduce_kernel(self):
+    a = Tensor.rand(4, 4).realize()
+    a = a.sum()
+    sched = create_schedule([a.lazydata])
+    assert len(sched) == 1
+    assert sched[0].ast.src[0].op is ReduceOps.SUM
+
+  def test_split_reduce_kernel_dim0(self):
+    a = Tensor.rand(256, 255).realize()
+    a = a.sum()
+    sched = create_schedule([a.lazydata])
+    assert len(sched) == 2
+    for s in sched:
+      assert s.ast.src[0].op is ReduceOps.SUM
+
+  def test_split_reduce_kernel_dim1(self):
+    a = Tensor.rand(255, 256).realize()
+    a = a.sum()
+    sched = create_schedule([a.lazydata])
+    assert len(sched) == 2
+    for s in sched:
+      assert s.ast.src[0].op is ReduceOps.SUM
 
 if __name__ == "__main__":
   unittest.main()

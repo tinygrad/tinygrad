@@ -7,12 +7,13 @@ from tinygrad.device import Buffer, Device
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.device import CompiledASTRunner, Compiled
 from tinygrad.codegen.linearizer import UOps, UOp
+from tinygrad.runtime.ops_python import exec_alu
 from test.test_dtype import is_dtype_supported
 
 def _uops_to_prg(uops):
-  src = Device[Device.DEFAULT].renderer("test", uops)
-  return CompiledASTRunner(None, "test", src, Device[Device.DEFAULT], [1] if Device[Device.DEFAULT].linearizer_opts.has_local else None,
-                           [1] if Device[Device.DEFAULT].linearizer_opts.has_local else None)
+  src = Device[Device.DEFAULT].compiler.render("test", uops)
+  has_local = Device[Device.DEFAULT].compiler.linearizer_opts.has_local
+  return CompiledASTRunner(None, "test", src, Device[Device.DEFAULT], [1] if has_local else None, [1] if has_local else None)
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(vin), arg))
@@ -108,6 +109,10 @@ class TestNonFloatUOps(TestUOps):
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "dtype not supported")
   def test_where_float16(self):
     self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, (PtrDType(dtypes.bool), PtrDType(dtypes.float16), PtrDType(dtypes.float16)))
+
+class TestExecALU(TestUOps):
+  def test_sqrt(self):
+    self.assertEqual(exec_alu(UnaryOps.SQRT, dtypes.int, (0,)), 0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

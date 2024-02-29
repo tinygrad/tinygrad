@@ -16,7 +16,7 @@ from extra.onnx import get_run_onnx
 from tinygrad import Tensor, Device, GlobalCounters, dtypes
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import partition, Context, fetch, getenv, GRAPH, DEBUG
-from tinygrad.realize import run_schedule, lower_schedule_item
+from tinygrad.realize import run_schedule, lower_schedule_item, create_schedule
 from tinygrad.ops import LoadOps, ScheduleItem
 Device.DEFAULT = "GPU"
 
@@ -32,7 +32,7 @@ def get_schedule(onnx_data) -> Tuple[List[ScheduleItem], List[ScheduleItem]]:
   # run the model
   inputs = {k:Tensor.empty(*shp) for k,shp in input_shapes.items()}
   ret: Tensor = next(iter(run_onnx(inputs).values())).cast(dtypes.float32).contiguous()
-  schedule = ret.lazydata.schedule()
+  schedule = create_schedule([ret.lazydata])
 
   # filter schedule that don't depend on the inputs
   input_lb = [x.lazydata.base for x in inputs.values()]

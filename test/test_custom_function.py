@@ -87,7 +87,7 @@ class TestCustomFunction(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT in ["CPU"], "atan2_cpu not jittable")
   def test_atan2_jit(self):
     # custom ops even work in the JIT!
-    from tinygrad.jit import TinyJit
+    from tinygrad.features.jit import TinyJit
 
     @TinyJit
     def jitted_atan2(a:Tensor, b:Tensor) -> Tensor:
