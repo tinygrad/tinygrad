@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Set, Iterator
+from typing import List, Tuple, Any, Optional, cast, DefaultDict, Dict, Union, Final, Set, Iterator, Sequence
 import itertools, math, functools
 from collections import defaultdict
 
@@ -25,6 +25,9 @@ def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
   return local_idxs, [x for x in loop_local_idxs if not isinstance(x, NumNode)]
 
 def expand_idx(node:Node) -> Union[Variable, NumNode]: return next((v for v in node.vars() if v.expr.startswith("_uidx")), NumNode(0))
+def expand_idxs(nodes:Sequence[Node]) -> Tuple[Union[Variable, NumNode], ...]:
+  eidxs = [expand_idx(node) for node in nodes]
+  return tuple([v if v not in eidxs[:j] else NumNode(0) for j, v in enumerate(eidxs)])  # take only first occurrence of expand variable
 def iter_idxs(idxs:Tuple[Union[Variable, NumNode], ...]) -> Iterator[Tuple[int,...]]:
   yield from (x[::-1] for x in itertools.product(*[[x for x in range(v.min, v.max + 1)] for v in idxs[::-1]]))
 
@@ -47,7 +50,9 @@ class Linearizer(Kernel):
   def cast(self, val: UOp, dtype) -> UOp: return self.uop(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
 
   def get_reduce_acc(self, reduceop:LazyOp):
-    dtype = get_lazyop_info(reduceop).dtype
+    info = get_lazyop_info(reduceop)
+    assert all(0 <= x < len(info.shape) for x in reduceop.arg), "arg axis out of range"
+    dtype = info.dtype
     if reduceop.op == ReduceOps.SUM: return 0.0 if dtypes.is_float(dtype) else 0
     elif reduceop.op == ReduceOps.MAX:
       if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.itemsize*8-1)
@@ -71,7 +76,7 @@ class Linearizer(Kernel):
     localtype = self.get_base_dtype(buf.dtype if acc is None else get_lazyop_info(self.reduceop).dtype)
     const = buf.val if isinstance(buf, ConstBuffer) else acc
 
-    expand_vars = tuple([expand_idx(idx) for j, idx in enumerate(idxs)])
+    expand_vars = expand_idxs(idxs)
 
     dim, amt = None, 1
     # float 4 grouping
@@ -90,7 +95,7 @@ class Linearizer(Kernel):
     invalid_value = 0 if dtypes.is_int(buf.dtype) else 0.0
     for idx, valid, rep_idx in zip(e_idxs, e_valids, iter_idxs(expand_vars)):
       this_const, idx, valid = (invalid_value, NumNode(0), NumNode(1)) if valid.max == 0 else (const, idx, valid)
-      key = f"{acc}{localtype}{this_const if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
+      key = f"{acc}{localtype}{'CONST'+str(this_const) if this_const is not None and acc is None else (buf.idx if isinstance(buf, MemBuffer) else cast(LocalBuffer, buf).name)}{idx.render()}{valid.render()}"  # noqa: E501
       if key not in self.load_cache:
         if acc is not None:
           self.load_cache[key] = self.uop(UOps.DEFINE_ACC, localtype, (), this_const, cachable=False)
@@ -129,12 +134,12 @@ class Linearizer(Kernel):
     buf_uop = self.buf_uops[i]
     assert buf_uop is not None, f"buffer {i} wasn't UOped"
 
-    expanded_nodes = [expand_node(idx) for idx in idxs]
-    _idxs = [x[::-1] for x in itertools.product(*expanded_nodes[::-1])]
+    expand_vars = expand_idxs(idxs)
+    _idxs = zip(*[expand_node(idx, expand_vars) for idx in idxs]) if idxs else [tuple()]  # transpose
     store_offset = dict(zip(_idxs, store))
 
     # float4 grouping
-    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expanded_nodes[upcast_dim[0]]) in [2,4]:
+    if len(upcast_dim := self.get_float4_upcast_dim(i)) == 1 and len(float4_expand := expand_node(idxs[upcast_dim[0]])) in [2,4]:
       grouped_store_offset = defaultdict(list)
       for k in store_offset:
         _idx = k[:upcast_dim[0]] + (float4_expand[0],) + k[upcast_dim[0]+1:]
@@ -245,7 +250,8 @@ class Linearizer(Kernel):
       fake_reduce_idxs = [x*0 for x in reduce_idxs]
 
       # define accumulator
-      acc = self.global_load(0, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
+      out_buf = -1 if self.group_for_reduces else 0
+      acc = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
 
       if (tc:=self.tensor_core):
         def calc_tc_idxs(local_size: int, aliases: List[List[int]]):
@@ -349,7 +355,7 @@ class Linearizer(Kernel):
         # NOTE: this structure is the same as the reduce op above
 
         # define late accumulator
-        acc = self.global_load(-1, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
+        acc = self.global_load(0, fake_global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
 
         # late reduce loop
         loop_ctx = render_loop(end_local_idxs)
@@ -417,7 +423,9 @@ class Linearizer(Kernel):
         if u.uop is UOps.PHI and len(u.vin) == 3:
           # if the parents of the PHI node don't have the LOOP in their parents, it can be folded
           # TODO: ADD becomes a MUL, MAX can just become nothing
-          if all(x.uop is not UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) and u.vin[1].arg is BinaryOps.ADD:
+          # NOTE: ADD -> MUL does not fold, this maintains original MULACC code path
+          if all(x.uop is not UOps.LOOP for x in get_recursive_parents(UOp(u.uop, u.dtype, u.vin[0:2], u.arg))) \
+          and u.vin[1].arg is BinaryOps.ADD and u.vin[1].vin[0].arg is not BinaryOps.MUL:
             if DEBUG >= 4: print(f"removing PHI node {u}")
             del self.saved_exprs[(u.uop, u.dtype, u.vin, u.arg)]
             # NOTE: assuming u.vin[2].vin[1] and u.vin[2].vin[0] have the same dtype
@@ -485,20 +493,14 @@ class Linearizer(Kernel):
     if x.op in ReduceOps and not do_reduce:
       assert offs is None, "not available if we aren't doing reduce"
       return acc
-    # MULACC fusion. TODO: this is copied from Interpreted
-    if x.op == ReduceOps.SUM:
-      if x.src[0].op == BinaryOps.MUL: x = LazyOp(TernaryOps.MULACC, x.src[0].src, x.arg)
-      if (castop:=x.src[0]).op == UnaryOps.CAST and (mulop:=castop.src[0]).op == BinaryOps.MUL:
-        # MULACC with acc cast rewrite: MUL -> CAST -> SUM => CAST -> MULACC
-        x = LazyOp(TernaryOps.MULACC, tuple(LazyOp(UnaryOps.CAST, (s, ), castop.arg) for s in mulop.src), x.arg)
 
     values = [self.ast_parse(v, acc, offs, loaded_buffers, loop_ctx=loop_ctx, cache=cache) for v in x.src]
-    ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX, TernaryOps.MULACC:TernaryOps.MULACC}
+    ops = {ReduceOps.SUM:BinaryOps.ADD, ReduceOps.MAX:BinaryOps.MAX}
     if x.op in ops:
       ret: List[UOp] = []
       input_acc = acc[:]
       for val, off in zip(zip(*values), cast(List[int], offs)):
-        acc[off] = self.uop(UOps.ALU, acc[off].dtype, vin=val+(acc[off],), arg=ops[x.op])
+        acc[off] = self.uop(UOps.ALU, acc[off].dtype, vin=val+(acc[off],), arg=ops[cast(ReduceOps, x.op)])
         ret.append(acc[off])
       for off in range(len(acc)):
         if input_acc[off] != acc[off]:

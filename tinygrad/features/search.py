@@ -92,7 +92,7 @@ def get_linearizer_actions(lin:Linearizer, include_0=True) -> Dict[int, Lineariz
 beam_pool = None
 def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linearizer:
   global beam_pool
-  key = {"ast": str(lin.ast), "amt": amt, "allow_test_size": allow_test_size, "device": lin.opts.device}
+  key = {"ast": lin.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": lin.opts.device}
   if (val:=diskcache_get("beam_search", key)) is not None and not getenv("IGNORE_BEAM_CACHE") and CACHELEVEL >= 1:
     ret = lin.copy()
     for o in val[len(lin.applied_opts):]: ret.apply_opt(o)
@@ -112,7 +112,7 @@ def beam_search(lin:Linearizer, rawbufs, amt:int, allow_test_size=True) -> Linea
     while not exiting:
       acted_lins = flatten([get_linearizer_actions(lin, include_0=False).values() for lin,_ in beam]) if len(beam) else [lin]
       timed_lins: List[Tuple[Linearizer, float]] = []
-      _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=cast(Compiled, Device[lin.opts.device]).compiler)
+      _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=Device[lin.opts.device].compiler)
       for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(acted_lins))):
         if proc is None: continue
         lib, global_size, local_size = proc
@@ -149,11 +149,11 @@ def optimize_local_size(clprg:Callable, global_size:List[int], rawbufs:List[Buff
   return ret[1]
 
 def time_linearizer(lin:Linearizer, rawbufs:List[Buffer], allow_test_size=True, max_global_size=65536, cnt=3, disable_cache=False, clear_l2=False) -> float:  # noqa: E501
-  key = {"ast": str(lin.ast), "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size, "clear_l2": clear_l2, "device": lin.opts.device}  # noqa: E501
+  key = {"ast": lin.ast.key, "opts": str(lin.applied_opts), "allow_test_size": allow_test_size, "max_global_size": max_global_size, "clear_l2": clear_l2, "device": lin.opts.device}  # noqa: E501
   if not disable_cache and CACHELEVEL >= 2 and (val:=diskcache_get("time_linearizer", key)) is not None: return min(val)
 
   dev = Device[lin.opts.device]
-  assert isinstance(dev, Compiled)
+  assert isinstance(dev, Compiled) and dev.compiler is not None
 
   var_vals = {k:(k.max+k.min)//2 for k in lin.ast.vars()}
   lib, global_size, local_size = _compile_linearizer(dev.compiler, lin)

@@ -7,8 +7,8 @@ from tinygrad.codegen.linearizer import Linearizer
 from tinygrad.features.search import get_linearizer_actions, bufs_from_lin
 from tinygrad.tensor import Tensor
 from tinygrad.features.graph import print_tree
-from tinygrad.helpers import getenv, from_mv, Context
-from tinygrad.device import Device, Compiled, Interpreted
+from tinygrad.helpers import getenv, from_mv, prod, Context
+from tinygrad.device import Device, Compiled
 from tinygrad.codegen.linearizer import UOp
 
 def tuplize_uops(uops:List[UOp]) -> Tuple: return tuple([(x.uop, x.dtype, tuple(uops.index(x) for x in x.vin), x.arg) for x in uops])
@@ -71,10 +71,15 @@ def fuzz_linearizer(lin: Linearizer):
   print_tree(lin.ast)
   print(lin.colored_shape())
   rawbufs = get_fuzz_rawbufs(lin)
-  FUZZ_BEAM=getenv("FUZZ_BEAM", 0)
   seen_uops = {}
   last_lins = [lin]
   failures = defaultdict(list)
+
+  FUZZ_BEAM = getenv("FUZZ_BEAM", 0)
+  FUZZ_MAX_SIZE = getenv("FUZZ_MAX_SIZE", 0)
+  if FUZZ_MAX_SIZE > 0 and prod(lin.full_shape) > FUZZ_MAX_SIZE:
+    print("skipping large kernel")
+    return failures
 
   # get baseline unoptimized output
   unoptimized = Linearizer(lin.ast)
@@ -134,7 +139,6 @@ if __name__ == "__main__":
   tested = 0
   failures = defaultdict(list)
   for i, ast in enumerate(ast_strs[:getenv("FUZZ_N", len(ast_strs))]):
-    if "Variable" in ast and isinstance(device, Interpreted): continue  # no symbolic shape for Interpreted
     if "dtypes.image" in ast and Device.DEFAULT != "GPU": continue  # IMAGE is only for GPU
     print(f"testing ast {i}")
     tested += 1

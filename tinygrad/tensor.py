@@ -6,8 +6,8 @@ from collections import defaultdict
 from functools import partialmethod, reduce
 import numpy as np
 
-from tinygrad.dtype import DType, dtypes, ImageDType, Scalar, least_upper_float, least_upper_dtype
-from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, WINO, flatten, prod, all_int, round_up, merge_dicts, fully_flatten
+from tinygrad.dtype import DType, dtypes, ImageDType, Scalar, least_upper_float, least_upper_dtype, cast_scalar
+from tinygrad.helpers import argfix, make_pair, getenv, IMAGE, DEBUG, WINO, flatten, prod, all_int, round_up, merge_dicts, fully_flatten, flat_mv
 from tinygrad.lazy import LazyBuffer
 from tinygrad.features.multi import MultiLazyBuffer
 from tinygrad.ops import LoadOps
@@ -42,8 +42,11 @@ def _loadop(op, shape:Tuple[sint,...], dtype:DType, device:Union[str, Tuple[str,
   return MultiLazyBuffer([LazyBuffer.loadop(op, shape, dtype, d, arg, src) for d in device], None)
 
 def _fromcpu(x: np.ndarray) -> LazyBuffer:
-  ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "CPU")
-  ret.realized = Buffer("CPU", prod(x.shape), dtypes.from_np(x.dtype), x.flatten())
+  ret = LazyBuffer.loadop(LoadOps.EMPTY, x.shape, dtypes.from_np(x.dtype), "EXT")
+  if x.size == 0:
+    ret.realized = Buffer("EXT", 0, dtypes.from_np(x.dtype), (memoryview(bytearray()), None))
+  else:
+    ret.realized = Buffer("EXT", prod(x.shape), dtypes.from_np(x.dtype), (flat_mv(np.require(x, requirements='C').data), x))
   return ret
 
 def _get_winograd_matcols(mat, dims:int, shp:Tuple[sint, ...], device:Union[str, Tuple[str, ...]]) -> List[List[Tensor]]:
@@ -133,7 +136,7 @@ class Tensor:
   def assign(self, x) -> Tensor:
     # TODO: this is a hack for writing to DISK. remove with working assign
     if isinstance(self.device, str) and self.device.startswith("DISK"):
-      if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
+      if x.__class__ is not Tensor: x = Tensor(x, device="EXT", dtype=self.dtype)
       self.contiguous().realize().lazydata.base.realized.copyin(x.numpy().data)
       return self
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
@@ -152,7 +155,7 @@ class Tensor:
 
   def _data(self) -> memoryview:
     if 0 in self.shape: return memoryview(bytearray(0))
-    t = self if isinstance(self.device, str) else self.to("CPU")   # deal with multitensor
+    t = self if isinstance(self.device, str) else self.to(self.device[0])   # deal with multitensor
     return cast(Buffer, t.cast(t.dtype.scalar()).contiguous().realize().lazydata.base.realized).as_buffer()
 
   def data(self) -> memoryview:
@@ -496,27 +499,31 @@ class Tensor:
     final_shape = [r*s for r,s in zip(repeats, base_shape)]
     return self.reshape(new_shape).expand(expand_shape).reshape(final_shape)
 
+  def _resolve_dim(self, dim:int, *, outer:bool=False) -> int:
+    if not -max(1, self.ndim+outer) <= dim < max(1, self.ndim+outer):
+      raise IndexError(f"{dim=} out of range {[-max(1, self.ndim+outer), max(1, self.ndim+outer)-1]}")
+    return dim + self.ndim+outer if dim < 0 else dim
+
   def split(self, sizes:Union[int, List[int]], dim:int=0) -> Tuple[Tensor, ...]:
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
-    dim = dim + self.ndim if dim < 0 else dim
-    if isinstance(sizes, int): return tuple(self.chunk(math.ceil(self.shape[dim]/sizes)))
+    dim = self._resolve_dim(dim)
+    if isinstance(sizes, int): sizes = [min(sizes, self.shape[dim]-i) for i in range(0, max(1, self.shape[dim]), max(1, sizes))]
+    assert sum(sizes) == self.shape[dim], f"expect sizes to sum exactly to {self.shape[dim]}, but got {sum(sizes)}"
     return tuple(self[sl] for sl in [tuple([slice(None)]*dim + [slice(sum(sizes[:i]), sum(sizes[:i + 1]))]) for i in range(len(sizes))])
 
   def chunk(self, num:int, dim:int=0) -> List[Tensor]:
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
-    dim, step = dim + self.ndim if dim < 0 else dim, math.ceil(self.shape[dim]/num)
-    slice_params = [[slice(None)]*dim + [slice(k, k + step)] for k in range(0, self.shape[dim], step)]
-    return [self[tuple(sl)] for sl in slice_params]
+    dim = self._resolve_dim(dim)
+    assert num > 0, f"expect num to be greater than 0, got: {num}"
+    return list(self.split(math.ceil(self.shape[dim]/num) if self.shape[dim] else [0]*num, dim=dim))
 
   def squeeze(self, dim:Optional[int]=None) -> Tensor:
     if dim is None: return self.reshape(tuple(dim for dim in self.shape if dim != 1))
-    if self.ndim == 0 and dim in [-1, 0]: return self  # this is to match torch behavior
-    if not -self.ndim <= dim <= self.ndim-1: raise IndexError(f"{dim=} out of range {[-self.ndim, self.ndim-1] if self.ndim else [-1, 0]}")
-    if dim < 0: dim += self.ndim
-    return self if self.shape[dim] != 1 else self.reshape(self.shape[:dim] + self.shape[dim+1:])
+    dim = self._resolve_dim(dim)
+    return self if not self.ndim or self.shape[dim] != 1 else self.reshape(self.shape[:dim] + self.shape[dim+1:])
 
   def unsqueeze(self, dim:int) -> Tensor:
-    if dim < 0: dim = self.ndim + dim + 1
+    dim = self._resolve_dim(dim, outer=True)
     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
   # (padding_left, padding_right, padding_top, padding_bottom)
@@ -540,10 +547,10 @@ class Tensor:
   # ***** reduce ops *****
 
   def _reduce(self, fxn:Type[Function], axis:Optional[Union[int, Tuple[int, ...]]]=None, keepdim=False) -> Tensor:
-    axis_: List[int] = list(range(len(self.shape))) if axis is None else ([axis] if isinstance(axis, int) else list(axis))
-    axis_ = [x if x >= 0 else x+len(self.shape) for x in axis_]
+    axis_: Tuple[int, ...] = tuple(range(len(self.shape))) if axis is None else ((axis,) if isinstance(axis, int) else tuple(axis))
+    axis_ = tuple(x if x >= 0 else x+len(self.shape) for x in axis_)
     shape = tuple(s for i,s in enumerate(self.shape) if i not in axis_)
-    ret = fxn.apply(self, new_shape=tuple([1 if i in axis_ else s for i,s in enumerate(self.shape)]))
+    ret = fxn.apply(self, axis=axis_)
     return ret if keepdim else ret.reshape(shape=shape)
 
   def sum(self, axis=None, keepdim=False, acc_dtype:Optional[DType]=None):
@@ -568,6 +575,9 @@ class Tensor:
   def std(self, axis=None, keepdim=False, correction=1): return self.var(axis, keepdim, correction).sqrt()
 
   def _softmax(self, axis):
+    if len(self.shape) == 0:
+      assert axis in [-1, 0], f"{axis=} out of range of [-1, 0]"
+      axis = None
     m = self - self.max(axis=axis, keepdim=True)
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
@@ -800,7 +810,7 @@ class Tensor:
       assert isinstance(y, (float, int, bool)), f"{type(y)=}, {y=}"
       if isinstance(self.dtype, ImageDType) or dtypes.is_float(x.dtype) or (dtypes.is_int(x.dtype) and isinstance(y, int)): y_dtype = x.dtype
       else: y_dtype = dtypes.from_py(y)
-      y = Tensor(y, self.device, y_dtype, requires_grad=False)
+      y = Tensor(cast_scalar(y, y_dtype), self.device, y_dtype, requires_grad=False)
 
     if match_dtype:
       output_dtype = least_upper_dtype(x.dtype, y.dtype)
@@ -833,8 +843,9 @@ class Tensor:
     return mlops.Mul.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or x != 1.0 else self
   def div(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:
     x = self._to_const_val(x)
-    return mlops.Div.apply(*self._broadcasted(x, reverse)) if x.__class__ is Tensor or reverse or not x or not dtypes.is_float(self.dtype) \
-      else self.mul(1/x)
+    if x.__class__ is not Tensor and not reverse and x != 0: return self.mul(1/x)
+    if isinstance(x, Tensor) and dtypes.is_float(x.dtype): return mlops.Div.apply(*self._broadcasted(x, reverse))
+    return mlops.Div.apply(*self.cast(least_upper_float(self.dtype))._broadcasted(x, reverse))
   def xor(self, x:Tensor, reverse=False) -> Tensor: return mlops.Xor.apply(*self._broadcasted(x, reverse))
 
   def pow(self, x:Union[Tensor, Scalar], reverse=False) -> Tensor:

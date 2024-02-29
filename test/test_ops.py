@@ -114,17 +114,20 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: torch.eye(0), lambda: Tensor.eye(0), forward_only=True)
 
   def test_split(self):
+    def tensor(s): return torch.arange(math.prod(s)).reshape(s), Tensor.arange(math.prod(s)).reshape(s)
     test_cases = [
-      (torch.arange(10), Tensor.arange(10), 5),
-      (torch.arange(10), Tensor.arange(10), [1, 4, 5]),
-      (torch.arange(10), Tensor.arange(10), 3),
-      (torch.arange(12).reshape(3, 4), Tensor.arange(12).reshape(3, 4), 1),
-      (torch.arange(16).reshape(4, 4), Tensor.arange(16).reshape(4, 4), [2, 2]),
-      (torch.arange(10000), Tensor.arange(10000), 2500),
+      (tensor((10,)),       5, {}),
+      (tensor((10,)), [1,4,5], {}),
+      (tensor((10,)),       3, {}),
+      (tensor((3,4,)),      1, {}),
+      (tensor((3,4,)),      1, {'dim':1}),
+      (tensor((4,4,)),  [2,2], {}),
+      (tensor((4,4,)),  [2,2], {'dim':1}),
+      (tensor((10000,)), 2500, {}),
     ]
 
-    for tor, ten, sizes in test_cases:
-      tor_splits, ten_splits = tor.split(sizes), ten.split(sizes)
+    for (tor, ten), sizes, args in test_cases:
+      tor_splits, ten_splits = tor.split(sizes, **args), ten.split(sizes, **args)
       assert len(tor_splits) == len(ten_splits)
       for tor_chunk, ten_chunk in zip(tor_splits, ten_splits):
         helper_test_op([], lambda: tor_chunk, lambda: ten_chunk, forward_only=True)
@@ -337,8 +340,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y)
     helper_test_op([(), ()], lambda x,y: x/y)
   def test_div_int(self):
-    helper_test_op(None, lambda x,y: x//y, Tensor.div, forward_only=True, vals=np.array([[5, 6, 7],[1, 2, 3]], dtype=np.int32))
-    helper_test_op(None, lambda x: (x/2).to(torch.int), lambda x: x/2, forward_only=True, vals=np.array([[3, 4, 5]], dtype=np.int32))
+    helper_test_op(None, lambda x,y: x/y, Tensor.div, forward_only=True, vals=np.array([[5, 6, 7],[1, 2, 3]], dtype=np.int32))
+    helper_test_op(None, lambda x: x/2, lambda x: x/2, forward_only=True, vals=np.array([[3, 4, 5]], dtype=np.int32))
   def test_scalar_div(self):
     helper_test_op([(45,65)], lambda x: x/255)
     helper_test_op([(45,65)], lambda x: x/1)
@@ -348,12 +351,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x/2)
     helper_test_op([()], lambda x: 2/x)
 
-  @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "METAL has issues with -inf")
   def test_mul_naninf(self):
     helper_test_op([(45,65)], lambda x: x*math.inf)
     helper_test_op([(45,65)], lambda x: x*-math.inf)
     helper_test_op([(45,65)], lambda x: x*math.nan)
-  @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "METAL has issues with -inf")
   def test_div_naninf(self):
     helper_test_op([(45,65)], lambda x: x/math.inf)
     helper_test_op([(45,65)], lambda x: x/-math.inf)
@@ -471,8 +472,7 @@ class TestOps(unittest.TestCase):
 
   def test_gelu(self):
     helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu)
-    if not (CI and Device.DEFAULT == "METAL"):
-      helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu, low=300, high=303)
+    helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu, low=300, high=303)
     helper_test_op([(45,65)], lambda x: torch.nn.functional.gelu(x, approximate="tanh"), Tensor.gelu, low=-300, high=-297)
   def test_quick_gelu(self):
     helper_test_op([(45,65)], lambda x: x * torch.sigmoid(1.702 * x), Tensor.quick_gelu)
@@ -745,10 +745,19 @@ class TestOps(unittest.TestCase):
     # exceed per kernel buffer limit with backward
     forward_only = (Device.DEFAULT == "WEBGPU")
     helper_test_op([(45,65)], torch.nn.Softmax(dim=1), Tensor.softmax, atol=1e-7, grad_atol=1e-7, forward_only=forward_only)
+    helper_test_op([(45)], torch.nn.Softmax(dim=0), Tensor.softmax, atol=1e-7, grad_atol=1e-7, forward_only=forward_only)
     helper_test_op([()], torch.nn.Softmax(dim=0), Tensor.softmax, atol=1e-7, grad_atol=1e-7, forward_only=forward_only)
+    helper_test_op([()], torch.nn.Softmax(dim=-1), Tensor.softmax, atol=1e-7, grad_atol=1e-7, forward_only=forward_only)
+  def test_softmax_other_axis(self):
+    helper_test_op([(10,10,10)], lambda x: x.softmax(0), atol=1e-7, grad_atol=1e-7)
+    helper_test_op([(10,10,10)], lambda x: x.softmax(1), atol=1e-7, grad_atol=1e-7)
+    helper_test_op([(10,10,10)], lambda x: x.softmax(2), atol=1e-7, grad_atol=1e-7)
+
   def test_log_softmax(self):
     helper_test_op([(45,65)], torch.nn.LogSoftmax(dim=1), Tensor.log_softmax, atol=1e-7, grad_atol=1e-7)
+    helper_test_op([(45)], torch.nn.LogSoftmax(dim=0), Tensor.log_softmax, atol=1e-7, grad_atol=1e-7)
     helper_test_op([()], torch.nn.LogSoftmax(dim=0), Tensor.log_softmax, atol=1e-7, grad_atol=1e-7)
+    helper_test_op([()], torch.nn.LogSoftmax(dim=-1), Tensor.log_softmax, atol=1e-7, grad_atol=1e-7)
   def test_log_softmax_other_axis(self):
     helper_test_op([(10,10,10)], lambda x: x.log_softmax(0), atol=1e-7, grad_atol=1e-7)
     helper_test_op([(10,10,10)], lambda x: x.log_softmax(1), atol=1e-7, grad_atol=1e-7)
@@ -1375,20 +1384,20 @@ class TestOps(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT == "CUDA", "CUDA fails on this")
   def test_maxpool2d_unit_stride(self):
-    helper_test_op([(32,2,110,28)],
+    helper_test_op([(8, 2, 17, 14)],
       lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=1),
       lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=1))
 
   def test_maxpool2d_smaller_stride(self):
     for stride in [(2,3), (3,2), 2, 3]:
       with self.subTest(stride=stride):
-        helper_test_op([(32,2,110,28)],
+        helper_test_op([(8, 2, 17, 14)],
           lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), stride=stride),
           lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), stride=stride))
 
   def test_maxpool2d_dilation(self):
     for dilation in [(2, 3), (3, 2), 2, 3]:
-      helper_test_op([(32,2,110,28)],
+      helper_test_op([(8, 2, 17, 14)],
         lambda x: torch.nn.functional.max_pool2d(x, kernel_size=(5,5), dilation=dilation),
         lambda x: Tensor.max_pool2d(x, kernel_size=(5,5), dilation=dilation))
 

@@ -350,7 +350,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_double_from(self):
     x = Tensor([1,2,3,4])
-    out = x.to('cpu')
+    out = x.to('ext')
     check_schedule(out, 0, filter_loadops=False)
 
   def test_pow_const_tensor_simplified(self):
