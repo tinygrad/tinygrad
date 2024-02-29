@@ -262,7 +262,7 @@ jobs:
 
   testmetal:
     name: Metal Tests
-    runs-on: macos-13
+    runs-on: macos-14
     timeout-minutes: 20
 
     steps:
@@ -276,7 +276,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: /Users/runner/Library/Python/3.11/lib/python/site-packages
-        key: metal-testing-user3-packages-${{ hashFiles('**/setup.py') }}
+        key: metal-m1-testing-user3-packages-${{ hashFiles('**/setup.py') }}
     - name: Install Dependencies
       run: pip install --user -e '.[testing]' --extra-index-url https://download.pytorch.org/whl/cpu
     - name: Cache downloads
@@ -289,11 +289,11 @@ jobs:
         METAL=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'METAL', Device.DEFAULT"
         METAL=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run metal test
-      run: METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
+      run: JIT=2 METAL=1 python -m pytest -n=auto test/ --ignore=test/external --ignore=test/models --durations=20
     - name: Run ONNX
-      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-    - name: Test tensor core ops
-      run: METAL=1 TC=2 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
+      run: JIT=2 METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+    - name: Test tensor core ops (real)
+      run: METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
     - name: Test LLaMA compile speed
       run: PYTHONPATH="." METAL=1 python test/external/external_test_speed_llama.py
 

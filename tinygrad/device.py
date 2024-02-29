@@ -223,6 +223,10 @@ class CompiledASTRunner(JITRunner):
     self.first_run = False
     return et
 
+class MultiDeviceJITGraph(JITRunner):
+  def __call__(self, rawbufs:List[Buffer], var_vals:Dict[Variable, int], wait=False, jit=False) -> Optional[float]:
+    raise NotImplementedError("override this")
+
 class Compiled:
   def __init__(self, device:str, allocator:Allocator, compiler:Optional[Compiler], runtime, graph=None):
     self.dname, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler, runtime, graph
