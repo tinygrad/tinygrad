@@ -1,3 +1,56 @@
+from transformers.utils import WEIGHTS_NAME, CONFIG_NAME
+from transformers.utils.hub import cached_file
+from dataclasses import dataclass, field
+from collections import namedtuple
+from functools import partial
+from tinygrad import Tensor, nn
+from typing import List, Callable
+import json
+
+from mamba import Mamba, Block
+from mixin import GenerationMixin
+
+def create_block(d_model, ssm_cfg=None, norm_epsilon=1e-5, layer_idx=None):
+    if ssm_cfg is None: ssm_cfg = {}
+    mixer_cls = partial(Mamba, layer_idx=layer_idx, **ssm_cfg)
+    norm_cls = partial(RMSNorm, eps=norm_epsilon)
+    block = Block(d_model, mixer_cls, norm_cls=norm_cls)
+    block.layer_idx = layer_idx
+    return block
+
+class RMSNorm:
+  def __init__(self, hidden_size, eps=1e-5):
+    self.eps = eps
+    self.weight = Tensor.empty(hidden_size)
+
+  def __call__(self, x:Tensor):
+    rstd = 1.0 / (x.square().mean(axis=-1, keepdim=True) + self.eps).sqrt()
+    return x * rstd * self.weight
+
+class MixerModel:
+  def __init__(
+    self,
+    d_model: int,
+    num_layers: int,
+    vocab_size: int,
+    ssm_cfg=None,
+    n_eps: float = 1e-5
+  ):
+    self.embedding = nn.Embedding(vocab_size, d_model)
+    self.layers: List[Block] = [
+      create_block(d_model, ssm_cfg=ssm_cfg, norm_epsilon=n_eps, layer_idx=i) 
+      for i in range(num_layers)
+    ]
+    self.norm_f = RMSNorm(d_model, eps=n_eps)
+
+  def __call__(self, input_ids, inference_params=None):
+    hidden_states = self.embedding(input_ids)
+    for layer in self.layers:
+      hidden_states = layer(hidden_states, inference_params=inference_params)
+    hidden_states = self.norm_f(hidden_states)
+    return hidden_states
+
+
 # from transformers.utils import WEIGHTS_NAME, CONFIG_NAME
 # from transformers.utils.hub import cached_file
 # from dataclasses import dataclass, field
@@ -40,17 +93,16 @@
 #     block.layer_idx = layer_idx
 #     return block
 
-# from extra.models.llama import RMSNorm
 
-# # class RMSNorm(torch.nn.Module):
-# #     def __init__(self, hidden_size, eps=1e-5):
-# #         super().__init__()
-# #         self.eps = eps
-# #         self.weight = torch.nn.Parameter(torch.empty(hidden_size))
+# class RMSNorm(torch.nn.Module):
+#     def __init__(self, hidden_size, eps=1e-5):
+#         super().__init__()
+#         self.eps = eps
+#         self.weight = torch.nn.Parameter(torch.empty(hidden_size))
 
-# #     def forward(self, x):
-# #         rstd = 1 / torch.sqrt(x.square().mean(dim=-1, keepdim=True) + self.eps)
-# #         return x * rstd * self.weight
+#     def forward(self, x):
+#         rstd = 1 / torch.sqrt(x.square().mean(dim=-1, keepdim=True) + self.eps)
+#         return x * rstd * self.weight
 
 
 # class MixerModel(nn.Module):

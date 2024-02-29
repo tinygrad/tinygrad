@@ -1,12 +1,13 @@
 import math
-from typing import List, Callable, Dict, Tuple
-from tinygrad import Tensor, TinyJit, nn, GlobalCounters
+from typing import Tuple, List, Dict
+from tinygrad import Tensor, nn
 import torch
 
 # TODO: use Tensor.reshape for einops.rearrange
 
 class Mamba:
-  def __init__(self, 
+  def __init__(
+    self, 
     d_model=2560, 
     d_state=16, 
     d_conv=4, 
