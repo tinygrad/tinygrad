@@ -142,12 +142,13 @@ class Tensor:
     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
     # NOTE: we allow cross device assign
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
+    if isinstance(self.lazydata, MultiLazyBuffer):
+      assert self.lazydata.axis == x.lazydata.axis
     assert not x.requires_grad  # self requires_grad is okay?
     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
     if self.dtype == x.dtype and not getenv("DISALLOW_ASSIGN"):
       if isinstance(self.lazydata, MultiLazyBuffer):
-        if self.lazydata.axis == x.lazydata.axis:
-          for d,s in zip(x.lazydata.lbs, self.lazydata.lbs): d.output_buffer = s.base.realized
+        for d,s in zip(x.lazydata.lbs, self.lazydata.lbs): d.output_buffer = s.base.realized
       else:
         if self.lazydata.base.realized is not None: x.lazydata.output_buffer = self.lazydata.base.realized
     self.lazydata = x.lazydata

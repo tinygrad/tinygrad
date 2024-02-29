@@ -308,22 +308,13 @@ class TestMultiTensor(unittest.TestCase):
     #   print(f"{i} {ast}")
 
   def test_mlb_assign_change_axis(self):
-    devices = (d0, d1, d2, d3)
+    devices = (d0, d1)
 
-    # axis=None <- axis=None + axis=0
-    t_none = Tensor.zeros((16, 16)).shard(devices).realize()  # allocate 16*16 length buffers on each device
-    assert t_none.lazydata.lbs[0].realized.size == 16 * 16  # check that buffers have been allocated
+    t_none = Tensor.zeros((16, 16)).shard(devices).contiguous().realize()
     t_zero = Tensor.ones((16, 16)).shard(devices, axis=0)
-    @TinyJit
-    def step():
-      t_none.assign(t_none + t_zero).realize()
-    step()
-    assert t_none.lazydata.axis == 0  # should implicitly change axis
-    assert t_none.lazydata.lbs[0].realized.size == 4 * 16  # should reallocate buffers to smaller size
-    for _ in range(9): step()
-    np.testing.assert_allclose(t_none.numpy(), Tensor.full((16, 16), 10).numpy())  # .numpy() should not fail
-
-    # axis=0 <- axis=None: what kind of behavior do we want?
+    with self.assertRaises(AssertionError):
+      # don't allow assigns that change axes
+      t_none.assign(t_zero)
 
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
