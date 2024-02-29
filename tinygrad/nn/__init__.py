@@ -5,36 +5,46 @@ from tinygrad.helpers import prod
 from tinygrad.nn import optim, state  # noqa: F401
 
 class BatchNorm2d:
-  def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
+  def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1, num_devices=1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
+    self.num_devices = num_devices
 
     if affine: self.weight, self.bias = Tensor.ones(sz), Tensor.zeros(sz)
     else: self.weight, self.bias = None, None
 
-    self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
+    self.running_mean, self.running_var = Tensor.zeros(num_devices, sz, requires_grad=False), Tensor.ones(num_devices, sz, requires_grad=False)
     self.num_batches_tracked = Tensor.zeros(1, requires_grad=False)
 
   def __call__(self, x:Tensor):
+    rshape, x = x.shape, x.reshape(self.num_devices, -1, *x.shape[1:])
+    batch_mean, batch_invstd = self.calc_stats(x)
+    ret = x.batchnorm(
+      self.weight.reshape(1, -1).expand((self.num_devices, -1)),
+      self.bias.reshape(1, -1).expand((self.num_devices, -1)),
+      batch_mean, batch_invstd, axis=(0, 2))
+    return ret.reshape(rshape)
+
+  def calc_stats(self, x:Tensor):
     if Tensor.training:
       # This requires two full memory accesses to x
       # https://github.com/pytorch/pytorch/blob/c618dc13d2aa23625cb0d7ada694137532a4fa33/aten/src/ATen/native/cuda/Normalization.cuh
       # There's "online" algorithms that fix this, like https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_Online_algorithm
-      batch_mean = x.mean(axis=(0,2,3))
-      y = (x - batch_mean.reshape(shape=[1, -1, 1, 1]))
-      batch_var = (y*y).mean(axis=(0,2,3))
+      batch_mean = x.mean(axis=(1,3,4))
+      y = (x - batch_mean.reshape(shape=[batch_mean.shape[0], 1, -1, 1, 1]))
+      batch_var = (y*y).mean(axis=(1,3,4))
       batch_invstd = batch_var.add(self.eps).pow(-0.5)
 
       # NOTE: wow, this is done all throughout training in most PyTorch models
       if self.track_running_stats:
         self.running_mean.assign((1-self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
-        self.running_var.assign((1-self.momentum) * self.running_var + self.momentum * prod(y.shape)/(prod(y.shape)-y.shape[1]) * batch_var.detach())
-        self.num_batches_tracked += 1
+        self.running_var.assign((1-self.momentum) * self.running_var +
+                                self.momentum * prod(y.shape[1:])/(prod(y.shape[1:])-y.shape[2]) * batch_var.detach())
+      self.num_batches_tracked += 1
     else:
       batch_mean = self.running_mean
       # NOTE: this can be precomputed for static inference. we expand it here so it fuses
-      batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
-
-    return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
+      batch_invstd = self.running_var.reshape(self.running_var.shape[0], 1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
+    return batch_mean, batch_invstd
 
 # TODO: these Conv lines are terrible
 def Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True):
