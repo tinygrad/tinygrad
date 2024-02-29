@@ -69,10 +69,7 @@ def universal_test_unary(a, dtype, op):
   tensor_value = out.numpy()
   numpy_value = op[1](np.array([a]).astype(dtype.np))
   if dtype in dtypes_float:
-    atol = 2 if (Device.DEFAULT == "METAL" or getenv("PTX")) and op[0] == Tensor.sin else 1e-3
-    rtol = 2 if Device.DEFAULT == "METAL" and op[0] == Tensor.sin else 1e-4 if dtype == dtypes.float32 else 1e-2
-    # exp and log and sin are approximations (in METAL, the default fast-math versions are less precise)
-    np.testing.assert_allclose(tensor_value, numpy_value, atol=atol, rtol=rtol)
+    np.testing.assert_allclose(tensor_value, numpy_value, atol=1e-3, rtol=1e-2)
   else: np.testing.assert_equal(tensor_value, numpy_value)
   if op[0] != Tensor.reciprocal: # reciprocal is not supported in most backends
     op = [x for x in ast.lazyops if x.op in UnaryOps][0]
