@@ -2,18 +2,18 @@ import json, math, time
 from pathlib import Path
 import numpy as np
 
-from tinygrad.helpers import Timing, getenv
+from tinygrad.helpers import getenv
 from tinygrad.features.jit import TinyJit
 from tinygrad.ops import GlobalCounters
 from tinygrad.nn import Linear, optim
-from tinygrad.nn.state import get_parameters
+from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
 from tinygrad.tensor import Tensor, dtypes
 from extra.lr_scheduler import OneCycleLR
 from extra.models.bert import Bert
 from extra.datasets.wikipedia import iterate
 
 BS, EVAL_BS, STEPS, MAX_EVAL_STEPS, WARMUP_STEPS, EPOCH, MAX_LR  = getenv("BS", 32), getenv('EVAL_BS', 8), getenv("STEPS", 100000), getenv("MAX_EVAL_STEPS", 100), getenv("WARMUP_STEPS", 10000), getenv("EPOCHS", 30), getenv('MAX_LR', 2.0)
-EVAL_FREQ = math.floor(min(0.05*(230.23 * BS + 3000000), 25000))
+EVAL_STEP_FREQ = int(math.floor(0.05 * (230.23 * BS + 3000000) / 25000) * 25000 / BS)
 
 if getenv('WANDB', 0): 
   import wandb
@@ -24,7 +24,7 @@ if getenv('WANDB', 0):
     "max_eval_steps": MAX_EVAL_STEPS,
     "warmup_steps": WARMUP_STEPS,
     "epochs": EPOCH,
-    "eval_freq": EVAL_FREQ
+    "eval_freq": EVAL_STEP_FREQ
 })
 
 if getenv('HALF', 0):
@@ -87,6 +87,8 @@ def get_model(config_path:str):
     config["hidden_dropout_prob"]
   )
 
+def save_model(model: BertMLperf, path:str = "/tmp/model"): safe_save(get_state_dict(model), path)
+def load_model(model:BertMLperf, path:str = "/tmp/model"): get_state_dict(model, safe_load(path))
 # ************ Actual training ************
 
 def pretrain():
@@ -118,20 +120,34 @@ def pretrain():
   train_batcher = iterate(bs=BS, val=False)
   eval_batcher = iterate(bs=EVAL_BS, val=True)
 
-  epoch = 0
-  while epoch < EPOCH:
+  epoch = 1
+  wallclock_start = time.monotonic()
+  accuracy_achieved = False
+  while epoch <= EPOCH:
     step = 0
     while step < STEPS:
-      if step % 10 == 0 and step > 0 and not getenv('DISABLE_EVAL', 0):
-        X, Y = next(eval_batcher)
+      if step % EVAL_STEP_FREQ == 0 and step > 0 and not getenv('DISABLE_EVAL', 0):
         Tensor.train = False
-        acc = eval_step_jitted(Tensor(X["input_ids"]), Tensor(X["segment_ids"]), Tensor(X["input_mask"]), Tensor(X["masked_lm_positions"]), Tensor(Y["masked_lm_ids"]))
+        accu = Tensor.zeros(1)
+        for _ in range(MAX_EVAL_STEPS):
+          X, Y = next(eval_batcher)
+          accu += eval_step_jitted(Tensor(X["input_ids"]), Tensor(X["segment_ids"]), Tensor(X["input_mask"]), Tensor(X["masked_lm_positions"]), Tensor(Y["masked_lm_ids"])).numpy()
         Tensor.train = True
-        print(f"{step:3d} {(acc := acc.numpy())*100:.2f}% MLM Acc")
+        print(f"{step:3d} {(acc := (accu.numpy()/MAX_EVAL_STEPS))*100:.2f}% MLM Acc")
         wandb.log({"MLM Accuracy": acc*100}) if getenv('WANDB', 0) else None
+        if acc >= 0.72:
+          wallclock_end = time.monotonic()
+          hours, minutes = divmod((wallclock_end - wallclock_start) / 3600, 1)
+          print(f"MLM accuracy achieved in {int(hours)} hours and {int(minutes * 60)} minutes.")
+          save_model(model, getenv('SAVE_PATH', "/tmp/bert_mlperf.safetensors"))
+          accuracy_achieved = True
+          break
+      
+      if accuracy_achieved: break
 
       st = time.monotonic()
       X, Y = next(train_batcher) 
+      mem = time.monotonic()
       GlobalCounters.reset()
 
       loss = train_step_jitted(Tensor(X["input_ids"]).realize(), Tensor(X["segment_ids"]).realize(), Tensor(X["input_mask"]).realize(), Tensor(X["masked_lm_positions"]).realize(), Tensor(Y["masked_lm_ids"]).realize(), Tensor(Y["next_sentence_labels"]).realize())
@@ -139,7 +155,7 @@ def pretrain():
       loss_cpu = loss.numpy()
       cl = time.monotonic()
 
-      print(f"{step:3d} {(cl-st)*1000.0:7.2f} ms run, {(et-st)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {(lr := optimizer.lr.numpy()[0]):.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
+      print(f"{step:3d} {(cl-st)*1000.0:7.2f} ms run, {(mem-st)*1000.0:7.2f} ms fetch, {(et-mem)*1000.0:7.2f} ms python, {(cl-et)*1000.0:7.2f} ms CL, {loss_cpu:7.2f} loss, {(lr := optimizer.lr.numpy()[0]):.6f} LR, {GlobalCounters.mem_used/1e9:.2f} GB used, {GlobalCounters.global_ops*1e-9/(cl-st):9.2f} GFLOPS")
       wandb.log({"Loss": loss_cpu, "LR": lr}) if getenv('WANDB', 0) else None
       st = cl
       step += 1
