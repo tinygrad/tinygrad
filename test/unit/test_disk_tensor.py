@@ -205,7 +205,6 @@ class TestDiskTensor(unittest.TestCase):
     helper_test_disk_tensor("dt5", [1,2,3,4,5], lambda x: x.reshape((1,5)))
     helper_test_disk_tensor("dt6", [1,2,3,4], lambda x: x.reshape((2,2)))
 
-  @unittest.expectedFailure
   def test_assign_to_different_dtype(self):
     # NOTE: this is similar to Y_train in fetch_cifar
     t = Tensor.empty(10, device=f'disk:{temp("dt7")}', dtype=dtypes.int64)
