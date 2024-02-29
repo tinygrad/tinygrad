@@ -79,6 +79,8 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - name: Print nvidia-smi
+      run: nvidia-smi
     - name: Run model inference benchmark
       run: CUDA=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
