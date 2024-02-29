@@ -16,7 +16,7 @@ BatchNorm = nn.BatchNorm2d if getenv("SYNCBN", 0) else UnsyncedBatchNorm
 
 
 # rejection sampling truncated randn
-def randn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
+def rand_truncn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
   CNT=8
   x = Tensor.randn(*(*shape, CNT), dtype=dtype, **kwargs)
   ctr = Tensor.arange(CNT).reshape((1,) * len(x.shape[:-1]) + (CNT,)).expand(x.shape)
@@ -29,7 +29,7 @@ class Conv2dHeNormal(nn.Conv2d):
     # https://github.com/keras-team/keras/blob/v2.15.0/keras/initializers/initializers.py#L1026-L1065
     def he_normal(*shape, a: float = 0.00, **kwargs) -> Tensor:
       std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(argfix(*shape)[1:])) / 0.87962566103423978
-      return std * randn(*shape, **kwargs)
+      return std * rand_truncn(*shape, **kwargs)
     return he_normal(out_channels, in_channels//groups, *self.kernel_size, a=0.0)
 
 class Linear(nn.Linear):
