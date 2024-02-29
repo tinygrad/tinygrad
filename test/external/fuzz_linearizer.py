@@ -46,7 +46,6 @@ def run_linearizer(lin: Linearizer, rawbufs=None, var_vals=None):
       prg = device.to_program(lin)
     else:
       prg = device.get_runner(lin.ast)
-    prg = device.to_program(lin)
   except Exception:
     print(lin.ast)
     print(lin.applied_opts)
