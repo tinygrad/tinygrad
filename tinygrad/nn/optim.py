@@ -72,4 +72,3 @@ class LAMB(Optimizer):
         r = 1.0
       t.assign(t.detach() - self.lr * r * up)
     self.realize([self.t] + self.m + self.v)
-
