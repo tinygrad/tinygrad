@@ -55,30 +55,27 @@ def train_resnet():
   parameters = get_parameters(model)
 
   input_mean = Tensor([123.68, 116.78, 103.94], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
+  # mlperf reference resnet does not divide by input_std for some reason
   # input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
-  def normalize(x):
-    if True:
-      return (x.permute([0, 3, 1, 2]).cast(dtypes.float32) - input_mean).cast(dtypes.default_float)
-    x = x.permute([0, 3, 1, 2]).cast(dtypes.float32) / 255.0
-    x -= input_mean
-    x /= input_std
-    return x.cast(dtypes.default_float)
+  def normalize(x): return (x.permute([0, 3, 1, 2]).cast(dtypes.float32) - input_mean).cast(dtypes.default_float)
   @TinyJit
   def train_step(X, Y):
     optimizer.zero_grad()
     X = normalize(X)
     out = model.forward(X)
     loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1) * lr_scaler
+    top_1 = (out.argmax(-1) == Y).sum()
     scheduler.step()
     loss.backward()
-    gnorm = optimizer.step()
-    return loss.realize(), out.realize(), (out.argmax(-1) == Y).sum().realize(), gnorm.realize() if gnorm is not None else Tensor(0)
+    optimizer.step()
+    return loss.realize(), out.realize(), top_1.realize()
   @TinyJit
   def eval_step(X, Y):
     X = normalize(X)
     out = model.forward(X)
     loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1) * lr_scaler
-    return loss.realize(), out.realize(), (out.argmax(-1) == Y).sum().realize()
+    top_1 = (out.argmax(-1) == Y).sum()
+    return loss.realize(), out.realize(), top_1.realize()
 
   target = getenv("TARGET", 0.759)
   achieved = False
@@ -101,7 +98,7 @@ def train_resnet():
   if getenv("LARS", 1):
     from examples.mlperf.optimizers import LARS
     skip_list = {v for k, v in get_state_dict(model).items() if 'bn' in k or 'bias' in k}
-    optimizer = LARS(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay, track_gnorm=bool(getenv("TRACK_NORMS", 0)), skip_list=skip_list)
+    optimizer = LARS(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay, skip_list=skip_list)
   else:
     optimizer = optim.SGD(parameters, base_lr / lr_scaler, momentum=.9, weight_decay=decay)
 
@@ -216,7 +213,7 @@ def train_resnet():
       dte = time.perf_counter()
 
       device_str = proc[0][2].device if isinstance(proc[0][2].device, str) else f"{proc[0][2].device[0]} * {len(proc[0][2].device)}"
-      proc, top_1_acc, gnorm = proc[0][0].numpy(), proc[0][2].numpy().item() / BS, proc[0][3].numpy()  # return cookie
+      proc, top_1_acc = proc[0][0].numpy(), proc[0][2].numpy().item() / BS # return cookie
       loss_cpu = proc / lr_scaler
       cl = time.perf_counter()
       new_st = time.perf_counter()
@@ -230,7 +227,6 @@ def train_resnet():
                  "train/cl_time": cl - dte,
                  "train/loss": loss_cpu,
                  "train/top_1_acc": top_1_acc,
-                 "train/gnorm": gnorm,
                  "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st),
                  "epoch": e + (i + 1) / steps_in_train_epoch,
                  })
