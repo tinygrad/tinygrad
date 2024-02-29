@@ -83,13 +83,15 @@ def uops_type_verify(uops:List[UOp]):
         assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
         assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
 
-def uops_alu_resolve(u:UOp, vars:Dict[str, Variable]) -> sint:
+def uops_alu_resolve(u:UOp, vars:Dict[str, Variable], alt_resolve:Optional[Callable[[UOp, [str, Variable]], Optional[sint]]]=None) -> sint:
   if u.uop == UOps.CONST: return u.arg
   elif u.uop == UOps.DEFINE_GLOBAL: return vars[u.arg]
   elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL:
-    return uops_alu_resolve(u.vin[0], vars) * uops_alu_resolve(u.vin[1], vars)
+    return uops_alu_resolve(u.vin[0], vars, alt_resolve) * uops_alu_resolve(u.vin[1], vars, alt_resolve)
   elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD:
-    return uops_alu_resolve(u.vin[0], vars) + uops_alu_resolve(u.vin[1], vars)
+    return uops_alu_resolve(u.vin[0], vars, alt_resolve) + uops_alu_resolve(u.vin[1], vars, alt_resolve)
+  elif alt_resolve is not None and ((alt_resolved:=alt_resolve(u, vars)) is not None):
+    return alt_resolved
   else:
     raise RuntimeError(f"ALU resolve fail @ {u.uop}")
 

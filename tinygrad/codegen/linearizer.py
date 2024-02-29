@@ -7,11 +7,11 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType
 from tinygrad.helpers import colored, DEBUG, prod, getenv, all_same, to_function_name
 from tinygrad.ops import LazyOp, UnaryOps, BinaryOps, TernaryOps, ReduceOps, ConstBuffer, MemBuffer, BufferOps, get_lazyop_info
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, MaxNode, LtNode, AndNode, RedNode
+from tinygrad.shape.symbolic import Variable, NumNode, Node, SumNode, MulNode, DivNode, ModNode, MaxNode, LtNode, AndNode, RedNode, factor_exprs
 from tinygrad.codegen.kernel import LocalBuffer, Kernel
 from tinygrad.features.image import to_image_idx
 
-from tinygrad.codegen.uops import UOps, UOp, get_recursive_children, remove_childless_uops, fix_loop_scope, uops_type_verify
+from tinygrad.codegen.uops import UOps, UOp, get_recursive_children, remove_childless_uops, fix_loop_scope, uops_alu_resolve, uops_type_verify
 
 def get_grouped_dims(prefix, start_dim, local_dims, maxdim:int=0):
   local_idxs = loop_local_idxs = [Variable(f"{prefix}{start_dim+i}", 0, s-1) for i,s in enumerate(local_dims[0:maxdim-1] + (prod(local_dims[maxdim-1:]),) if len(local_dims) > maxdim else local_dims)]  # noqa: E501
@@ -400,6 +400,33 @@ class Linearizer(Kernel):
     self.applied_opts_cache = self.applied_opts[:]
     return self
 
+  def loop_fold_resolve(self, u: UOp, vars:Dict[str, Variable]):
+    if u.uop == UOps.LOOP:
+      vars["_loopidx"] = Variable("_loopidx", uops_alu_resolve(u.vin[0], vars, self.loop_fold_resolve),
+                                  uops_alu_resolve(u.vin[1], vars, self.loop_fold_resolve) - 1)
+      return vars["_loopidx"]
+    elif u.uop == UOps.SPECIAL:
+      return vars[u.arg[1]]
+    elif u.uop == UOps.DEFINE_ACC:
+      return u.arg
+    elif u.uop == UOps.ALU and u.arg == BinaryOps.CMPLT:
+      left, right = uops_alu_resolve(u.vin[0], vars, self.loop_fold_resolve), uops_alu_resolve(u.vin[1], vars, self.loop_fold_resolve)
+      loop_var = vars["_loopidx"]
+      right, had_negative_multiplier = factor_exprs(left, right, loop_var)
+      min_clamp = NumNode(0)
+      max_clamp = NumNode(loop_var.max - loop_var.min + 1)
+      raw_val = (right // 1) + 1 - loop_var.min if ((isinstance(left, Node) and loop_var in left.vars()) ^ had_negative_multiplier) else loop_var.max - (right // 1)
+      clamped = MaxNode(MaxNode(raw_val, min_clamp) * -1, max_clamp * -1) * -1
+      return clamped
+    elif u.uop == UOps.ALU and u.arg == TernaryOps.WHERE:
+      bool = uops_alu_resolve(u.vin[0], vars, self.loop_fold_resolve)
+      return ((bool * uops_alu_resolve(u.vin[1], vars, self.loop_fold_resolve))
+              + (bool - 1) * uops_alu_resolve(u.vin[2], vars, self.loop_fold_resolve))
+    elif u.uop == UOps.PHI:
+      return uops_alu_resolve(u.vin[1], vars, self.loop_fold_resolve)
+    else:
+      return None
+
   def uoptimize(self):
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
     acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
@@ -448,111 +475,31 @@ class Linearizer(Kernel):
         self.uop(UOps.ENDIF, None, (u,), cachable=False)
 
     # remove unnecessary loops
-    def resolve_loop_op(u: UOp, vars: Dict[UOp, Any], state: Dict[str, Any], summation_processed: Dict[UOp, bool]):
-      if u.uop == UOps.CONST:
-        return u.arg
-      elif u.uop == UOps.DEFINE_ACC:
-        # TODO ensure accumulator isn't touched before loop starts
-        if u not in vars:
-          vars[u] = u.arg
-        return vars[u]
-      elif u.uop == UOps.LOOP:
-        if u not in vars:
-          vars[u] = Variable("_loopidx", resolve_loop_op(u.vin[0], vars, state, summation_processed), resolve_loop_op(u.vin[1], vars, state, summation_processed) - 1)
-          state["loopvar"] = vars[u]
-        return vars[u]
-      elif u.uop == UOps.PHI:
-        in_1 = resolve_loop_op(u.vin[1], vars, state, summation_processed)
-        vars[u.vin[0]] = in_1
-        return vars[u.vin[0]]
-      elif u.uop == UOps.SPECIAL:
-        if u not in vars:
-          vars[u] = Variable(u.arg[1], 0, u.arg[2] - 1)
-        return vars[u]
-      elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL:
-        return resolve_loop_op(u.vin[0], vars, state, summation_processed) * resolve_loop_op(u.vin[1], vars, state, summation_processed)
-      elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD:
-        return resolve_loop_op(u.vin[0], vars, state, summation_processed) + resolve_loop_op(u.vin[1], vars, state, summation_processed)
-      elif u.uop == UOps.ALU and u.arg == BinaryOps.CMPLT:
-        left = resolve_loop_op(u.vin[0], vars, state, summation_processed)
-        right = resolve_loop_op(u.vin[1], vars, state, summation_processed)
-        loop_var = state["loopvar"]
-        is_less_than_comparison = True
-        if isinstance(right, Node) and loop_var in right.vars():
-          tmp = left
-          right = left
-          left = tmp
-          is_less_than_comparison = not is_less_than_comparison
-
-        # factor the expression
-        if isinstance(left, RedNode):
-          for node in left.nodes:
-            if loop_var not in node.vars():
-              left = left - node
-              right = right - node
-        if isinstance(left, MulNode):
-          multiplier = left.b if isinstance(left.a, Node) and loop_var in left.a.vars() else left.b
-          left = left // multiplier
-          right = right // multiplier
-          if multiplier < 0:
-            is_less_than_comparison = not is_less_than_comparison
-        assert left == loop_var
-
-        summation_processed[op] = True
-        if is_less_than_comparison:
-          # now is factored, calculate the summation
-          min_clamp = NumNode(0)
-          max_clamp = NumNode(loop_var.max - loop_var.min + 1)
-          raw_val = (right // 1) + 1 - loop_var.min
-          clamped = MaxNode(MaxNode(raw_val, min_clamp) * -1, max_clamp * -1) * -1
-          return clamped
-        else:
-          min_clamp = NumNode(0)
-          max_clamp = NumNode(loop_var.max - loop_var.min + 1)
-          raw_val = loop_var.max - (right // 1)
-          clamped = MaxNode(MaxNode(raw_val, min_clamp) * -1, max_clamp * -1) * -1
-          return clamped
-      elif u.uop == UOps.ALU and u.arg == TernaryOps.WHERE:
-        bool = resolve_loop_op(u.vin[0], vars, state, summation_processed)
-        return ((bool * resolve_loop_op(u.vin[1], vars, state, summation_processed))
-                + (bool - 1) * resolve_loop_op(u.vin[2], vars, state, summation_processed))
-      else:
-        raise RuntimeError(f"ALU resolve fail @ {u.uop}")
-
-    # TODO check that no loop op is ALU MUL var and has a parent that is ALU MUL var in the loop
-    # otherwise that's not linear
     keep_removing_loops = True
     while keep_removing_loops:
       keep_removing_loops = False
       for loop_end_idx, op in enumerate(self.uops):
-        if op.uop is not UOps.ENDLOOP:
-          continue
-        loop_start = op.vin[0]
-        loop_start_idx = max([idx for idx, op in enumerate(self.uops[:loop_end_idx]) if op.uop == UOps.LOOP])
+        if op.uop is not UOps.ENDLOOP: continue
+        loop_start_idx = self.uops.index(op.vin[0])
         loop_ops = self.uops[loop_start_idx:loop_end_idx]
-        parents = get_recursive_parents(self.uops[loop_end_idx-1], with_phi=True)
+        phi_op = next(op for op in loop_ops if op.uop == UOps.PHI)
+        parents = get_recursive_parents(phi_op, with_phi=True)
 
+        # TODO check that no loop op is ALU MUL var and has a parent that is ALU MUL var in the loop
+        # otherwise that's not linear
         if not (all([op.uop in [UOps.LOOP, UOps.ALU, UOps.PHI, UOps.ENDLOOP] for op in loop_ops])
           and all([op.uop in [UOps.CONST, UOps.SPECIAL, UOps.LOOP, UOps.DEFINE_ACC, UOps.ALU] for op in parents])):
           break
 
-        op_to_eval = {}
-        state = {}
-        summation_processed = {}
-        phi_op = next(op for op in loop_ops if op.uop is UOps.PHI)
+        if DEBUG >= 4: print(f"removing loop")
+        vars = {op.arg[1]: Variable(op.arg[1], 0, op.arg[2] - 1) for op in self.uops if op.uop is UOps.SPECIAL}
         after_loop_ops = self.uops[loop_end_idx+1:]
         self.uops = self.uops[:loop_start_idx]
-        evaled_phi = resolve_loop_op(phi_op, op_to_eval, state, summation_processed)
-        rendered = evaled_phi.render(self.render_ops, self)
-
-        self.uops = self.uops + after_loop_ops
-        for op in self.uops:
-          for vin_idx, vin in enumerate(op.vin):
-            if vin in loop_ops and vin.uop == UOps.PHI:
-              changed_vin = list(op.vin)
-              changed_vin[vin_idx] = rendered
-              op.vin = tuple(changed_vin)
-        self.uops = remove_childless_uops(self.uops, {UOps.ENDIF, UOps.ENDLOOP})
+        rendered = uops_alu_resolve(phi_op, vars, self.loop_fold_resolve).render(self.render_ops, self)
+        for op in after_loop_ops:
+          if phi_op in op.vin:
+            op.vin = tuple([rendered if op == phi_op else op for op in list(op.vin)])
+        self.uops = remove_childless_uops(self.uops + after_loop_ops, {UOps.ENDIF, UOps.ENDLOOP})
         keep_removing_loops = True
         break
 
