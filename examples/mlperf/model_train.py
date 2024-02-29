@@ -1,6 +1,6 @@
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import getenv
-from bert.pretrain2 import pretrain as train
+from examples.mlperf.bert.pretrain import pretrain as train
 
 def train_resnet():
   # TODO: Resnet50-v1.5
