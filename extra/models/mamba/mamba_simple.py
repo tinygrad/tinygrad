@@ -197,18 +197,12 @@ class MambaLMHeadModel(GenerationMixin):
   
   @classmethod
   def from_pretrained(cls, model_name, device=None, dtype=None):
+    # TODO: use tinygrad functions for saving and loading weights
     pass
-
-#     @classmethod
-#     def from_pretrained(cls, pretrained_model_name, device=None, dtype=None, **kwargs):
-#         config_data = load_config_hf(pretrained_model_name)
-#         config = MambaConfig(**config_data)
-#         model = cls(config, **kwargs)
-#         model.load_state_dict(load_state_dict_hf(pretrained_model_name, device=device, dtype=dtype))
-#         return model
+  
 
 def main():
-  mamba = MixerModel()
+  mamba = MambaLMHeadModel()
 
 if __name__ == "__main__":
   main()
