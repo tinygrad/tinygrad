@@ -36,6 +36,8 @@ def loader_process(q_in, q_out, X:Tensor):
   import signal
   signal.signal(signal.SIGINT, signal.SIG_IGN)
 
+  from extra.datasets.imagenet import center_crop, preprocess_train
+
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
       idx, fn, seed, val = _recv
@@ -46,13 +48,9 @@ def loader_process(q_in, q_out, X:Tensor):
         # eval: 76.08%, load in 0m7.366s (0m5.301s with simd)
         # sudo apt-get install libjpeg-dev
         # CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
-        rescale = min(img.size) / 256
-        crop_left = (img.width - 224*rescale) / 2.0
-        crop_top = (img.height - 224*rescale) / 2.0
-        img = img.resize((224, 224), Image.BILINEAR, box=(crop_left, crop_top, crop_left+224*rescale, crop_top+224*rescale))
+        img = center_crop(img)
         img = np.array(img)
       else:
-        from extra.datasets.imagenet import preprocess_train
         # reseed rng for determinism
         if seed is not None:
           np.random.seed(seed)
