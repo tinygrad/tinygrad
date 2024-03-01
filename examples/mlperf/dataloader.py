@@ -133,7 +133,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
   # shutdown processes
   for _ in procs: q_in.put(None)
   for p in procs: p.join()
-  shm.close()  # shm will stay alive until the X disktensor is freed
+  shm.close()
   shm.unlink()
 
 if __name__ == "__main__":
