@@ -42,30 +42,6 @@ def train_resnet():
     v.to_(GPUS)
   parameters = get_parameters(model)
 
-  # ** jitted steps **
-  input_mean = Tensor([123.68, 116.78, 103.94], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
-  # mlperf reference resnet does not divide by input_std for some reason
-  # input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
-  def normalize(x): return (x.permute([0, 3, 1, 2]).cast(dtypes.float32) - input_mean).cast(dtypes.default_float)
-  @TinyJit
-  def train_step(X, Y):
-    optimizer.zero_grad()
-    X = normalize(X)
-    out = model.forward(X)
-    loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1)
-    top_1 = (out.argmax(-1) == Y).sum()
-    scheduler.step()
-    loss.backward()
-    optimizer.step()
-    return loss.realize(), out.realize(), top_1.realize()
-  @TinyJit
-  def eval_step(X, Y):
-    X = normalize(X)
-    out = model.forward(X)
-    loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1)
-    top_1 = (out.argmax(-1) == Y).sum()
-    return loss.realize(), out.realize(), top_1.realize()
-
   # ** hyperparameters **
   target = getenv("TARGET", 0.759)
   achieved = False
@@ -78,12 +54,9 @@ def train_resnet():
   base_lr = getenv("LR", 8.4 * (BS/2048))
 
   # ** Optimizer **
-  if getenv("LARS", 1):
-    from examples.mlperf.optimizers import LARS
-    skip_list = {v for k, v in get_state_dict(model).items() if 'bn' in k or 'bias' in k}
-    optimizer = LARS(parameters, base_lr, momentum=.9, weight_decay=decay, skip_list=skip_list)
-  else:
-    optimizer = optim.SGD(parameters, base_lr, momentum=.9, weight_decay=decay)
+  from examples.mlperf.optimizers import LARS
+  skip_list = {v for k, v in get_state_dict(model).items() if 'bn' in k or 'bias' in k}
+  optimizer = LARS(parameters, base_lr, momentum=.9, weight_decay=decay, skip_list=skip_list)
 
   # ** LR scheduler **
   lr_warmup_epochs = 5
@@ -91,31 +64,12 @@ def train_resnet():
   print(f"training with batch size {BS} for {epochs} epochs")
 
   # ** checkpointing **
-  # hack: let get_state_dict walk the tree starting with model, so that the checkpoint keys are
-  # readable and can be loaded as a model for eval
-  train_state = {'model':model, 'optimizer':optimizer, 'scheduler':scheduler}
-  def invert_dict(d): return {v: k for k, v in reversed(d.items())}
-  def dedup_dict(d): invert_dict(invert_dict(d))
-  # store each tensor into the first key it appears in
-  def _get_state_dict(): return dedup_dict(state.get_state_dict(train_state))
-  def _load_state_dict(state_dict):
-    # use fresh model to restore duplicate keys
-    big_dict = state.get_state_dict(train_state)
-    # hack: put back the dupes
-    dupe_names = {}
-    for k, v in big_dict.items():
-      if v not in dupe_names:
-        dupe_names[v] = k
-        assert k in state_dict
-      state_dict[k] = state_dict[dupe_names[v]]
-    # scheduler contains optimizer and all params, load each weight only once
-    train_state_ = {'scheduler': scheduler}
-    state.load_state_dict(train_state_, state_dict)
+  from examples.mlperf.helpers import get_training_state, load_training_state
 
   start_epoch = 0
   if ckpt:=getenv("RESUME", ""):
     print(f"resuming from {ckpt}")
-    _load_state_dict(state.safe_load(ckpt))
+    load_training_state(model, optimizer, scheduler, state.safe_load(ckpt))
     start_epoch = int(scheduler.epoch_counter.numpy().item() / steps_in_train_epoch)
     print(f"resuming at epoch {start_epoch}")
   elif getenv("TESTEVAL"): model.load_from_pretrained()
@@ -146,6 +100,30 @@ def train_resnet():
       wandb.init(id=getenv("WANDB_RESUME", ""), resume="must", config=wandb_config)
     else:
       wandb.init(config=wandb_config)
+
+  # ** jitted steps **
+  input_mean = Tensor([123.68, 116.78, 103.94], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
+  # mlperf reference resnet does not divide by input_std for some reason
+  # input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
+  def normalize(x): return (x.permute([0, 3, 1, 2]).cast(dtypes.float32) - input_mean).cast(dtypes.default_float)
+  @TinyJit
+  def train_step(X, Y):
+    optimizer.zero_grad()
+    X = normalize(X)
+    out = model.forward(X)
+    loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1)
+    top_1 = (out.argmax(-1) == Y).sum()
+    scheduler.step()
+    loss.backward()
+    optimizer.step()
+    return loss.realize(), out.realize(), top_1.realize()
+  @TinyJit
+  def eval_step(X, Y):
+    X = normalize(X)
+    out = model.forward(X)
+    loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1)
+    top_1 = (out.argmax(-1) == Y).sum()
+    return loss.realize(), out.realize(), top_1.realize()
 
   # ** epoch loop **
   for e in range(start_epoch, epochs):
@@ -253,7 +231,7 @@ def train_resnet():
         else:
           fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
         print(f"saving ckpt to {fn}")
-        state.safe_save(_get_state_dict(), fn)
+        state.safe_save(get_training_state(model, optimizer, scheduler), fn)
 
 def train_retinanet():
   # TODO: Retinanet
