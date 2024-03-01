@@ -62,6 +62,24 @@ class TestNN(unittest.TestCase):
   def test_batchnorm2d_training(self):
     self.test_batchnorm2d(True)
 
+  def test_batchnorm_axis(self):
+    sz = (2, 4, 3, 2, 2)
+    x = Tensor.randn(sz)
+    weight = Tensor.randn(2, 3)
+    bias = Tensor.randn(2, 3)
+    mean = Tensor.randn(2, 3)
+    invstd = Tensor.randn(2, 3)
+    a = (x.batchnorm(weight, bias, mean, invstd, axis=(0, 2))
+         .permute(1, 0, 2, 3, 4).reshape(4, 6, 2, 2))
+    b = (x.permute(1, 0, 2, 3, 4).reshape(4, 6, 2, 2)
+         .batchnorm(weight.flatten(), bias.flatten(), mean.flatten(), invstd.flatten()))
+    t_x = torch.tensor(x.permute(1, 0, 2, 3, 4).reshape(4, 6, 2, 2).numpy())
+    t_weight, t_bias = torch.tensor(weight.flatten().numpy()), torch.tensor(bias.flatten().numpy())
+    t_mean, t_invstd = torch.tensor(mean.flatten().numpy()), torch.tensor(invstd.flatten().numpy())
+    torch.nn.functional.batch_norm(t_x, t_mean, 1.0 / t_invstd**2, t_weight, t_bias)
+
+    np.testing.assert_allclose(a.numpy(), b.numpy())
+
   def test_linear(self):
     def _test_linear(x, in_dim, out_dim):
       # create in tinygrad

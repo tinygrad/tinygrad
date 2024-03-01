@@ -541,6 +541,30 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       out.mean().backward()
       optim.step()
 
+  def test_unsynced_backprop_sync_weights(self):
+    from extra.lr_scheduler import OneCycleLR
+    from examples.hlb_cifar10 import UnsyncedBatchNorm
+    from tinygrad.features.multi import MultiLazyBuffer
+    GPUS = (d1, d2)
+
+    with Tensor.train():
+      conv = nn.Conv2d(3, 16, 3)
+      bn = UnsyncedBatchNorm(16, num_devices=len(GPUS))
+
+      for p in get_parameters([conv, bn]):
+        if not isinstance(p.lazydata, MultiLazyBuffer):
+          p.shard_(GPUS)
+      optim = nn.optim.Adam(get_parameters([conv, bn]))
+      lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
+      lr_sched.step()
+
+      fake_image = Tensor.rand((8, 3, 32, 32)).shard(GPUS, axis=0)
+
+      out = bn(conv(fake_image))
+      optim.zero_grad()
+      out.mean().backward()
+      optim.step()
+
   @given(strat.sampled_from((False, True)))
   def test_batchnorm(self, is_training):
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
@@ -564,13 +588,14 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       bn_ts[0].cat(*bn_ts[1:]).numpy()
 
   def test_synced_vs_unsynced_bn(self):
-    from examples.hlb_cifar10 import BatchNorm, UnsyncedBatchNorm
+    from examples.hlb_cifar10 import UnsyncedBatchNorm
+    from tinygrad.nn import BatchNorm2d
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
     x = Tensor.ones(8, 8, 8, 8).contiguous().realize().shard(devices, axis=0)
 
     with Tensor.train():
-      synced_bn = BatchNorm(8)
-      unsynced_bn = UnsyncedBatchNorm(8)
+      synced_bn = BatchNorm2d(8)
+      unsynced_bn = UnsyncedBatchNorm(8, num_devices=len(devices))
 
       for p in get_parameters([synced_bn, unsynced_bn]):
         p.shard_(devices)
