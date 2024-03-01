@@ -327,17 +327,17 @@ def render_mulnode(node:MulNode, ops, ctx):
     return f"({sym_render(node.b,ops,ctx)}*{node.a.render(ops,ctx)})"
   return f"({node.a.render(ops,ctx)}*{sym_render(node.b,ops,ctx)})"
 
-def factor_exprs(left: Node, right: Node, var: Variable, had_negative_multiplier=False):
+def factor_exprs(left: Node, right: Node, var: Variable, sign_flipped=False):
   if isinstance(left, Node) and var in left.vars() and isinstance(right, Node) and var in right.vars(): raise RuntimeError("can't handle variable on both sides currently")
-  if isinstance(right, Node) and var in right.vars(): return factor_exprs(right, left, var, had_negative_multiplier)
+  if isinstance(right, Node) and var in right.vars(): return factor_exprs(right, left, var, not sign_flipped)
   if isinstance(left, RedNode):
     for node in [node for node in left.nodes if var not in node.vars()]:
       left, right = left - node, right - node
     return factor_exprs(left, right, var)
   if isinstance(left, MulNode):
-    return factor_exprs(left//(multiplier:=left.b), right//multiplier, var, had_negative_multiplier or multiplier < 0)
+    return factor_exprs(left // (multiplier:=left.b), right // multiplier, var, sign_flipped ^ multiplier < 0)
   assert left == var
-  return right, had_negative_multiplier
+  return right, sign_flipped
 
 render_python: Dict[Type, Callable] = {
   Variable: lambda self,ops,ctx: f"{self.expr}[{self.min}-{self.max}{'='+str(self.val) if self._val is not None else ''}]" if ctx == "DEBUG" \

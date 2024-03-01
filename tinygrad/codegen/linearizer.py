@@ -401,31 +401,26 @@ class Linearizer(Kernel):
     return self
 
   def loop_fold_resolve(self, u: UOp, vars:Dict[str, Variable]):
+    resolve = lambda uop: uops_alu_resolve(uop, vars, self.loop_fold_resolve)
     if u.uop == UOps.LOOP:
-      vars["_loopidx"] = Variable("_loopidx", uops_alu_resolve(u.vin[0], vars, self.loop_fold_resolve),
-                                  uops_alu_resolve(u.vin[1], vars, self.loop_fold_resolve) - 1)
+      vars["_loopidx"] = Variable("_loopidx", resolve(u.vin[0]), resolve(u.vin[1]) - 1)
       return vars["_loopidx"]
-    elif u.uop == UOps.SPECIAL:
-      return vars[u.arg[1]]
-    elif u.uop == UOps.DEFINE_ACC:
-      return u.arg
+    elif u.uop == UOps.SPECIAL: return vars[u.arg[1]]
+    elif u.uop == UOps.DEFINE_ACC: return u.arg
     elif u.uop == UOps.ALU and u.arg == BinaryOps.CMPLT:
-      left, right = uops_alu_resolve(u.vin[0], vars, self.loop_fold_resolve), uops_alu_resolve(u.vin[1], vars, self.loop_fold_resolve)
+      left, right = resolve(u.vin[0]), resolve(u.vin[1])
       loop_var = vars["_loopidx"]
-      right, had_negative_multiplier = factor_exprs(left, right, loop_var)
-      min_clamp = NumNode(0)
-      max_clamp = NumNode(loop_var.max - loop_var.min + 1)
-      raw_val = (right // 1) + 1 - loop_var.min if ((isinstance(left, Node) and loop_var in left.vars()) ^ had_negative_multiplier) else loop_var.max - (right // 1)
+      right, sign_flipped = factor_exprs(left, right, loop_var)
+      min_clamp, max_clamp = NumNode(0), NumNode(loop_var.max - loop_var.min + 1)
+      raw_val = loop_var.max - (right // 1) if sign_flipped else (right // 1) + 1 - loop_var.min
       clamped = MaxNode(MaxNode(raw_val, min_clamp) * -1, max_clamp * -1) * -1
       return clamped
     elif u.uop == UOps.ALU and u.arg == TernaryOps.WHERE:
-      bool = uops_alu_resolve(u.vin[0], vars, self.loop_fold_resolve)
-      return ((bool * uops_alu_resolve(u.vin[1], vars, self.loop_fold_resolve))
-              + (bool - 1) * uops_alu_resolve(u.vin[2], vars, self.loop_fold_resolve))
-    elif u.uop == UOps.PHI:
-      return uops_alu_resolve(u.vin[1], vars, self.loop_fold_resolve)
-    else:
-      return None
+      summation = resolve(u.vin[0])
+      loop_var = vars["_loopidx"]
+      return (summation * resolve(u.vin[1])) + (summation - (loop_var.max - loop_var.min + 1)) * resolve(u.vin[2])
+    elif u.uop == UOps.PHI: return resolve(u.vin[1])
+    else: return None
 
   def uoptimize(self):
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
@@ -474,31 +469,26 @@ class Linearizer(Kernel):
         # END any if statements at the end of the uops
         self.uop(UOps.ENDIF, None, (u,), cachable=False)
 
-    # remove unnecessary loops
     keep_removing_loops = True
     while keep_removing_loops:
       keep_removing_loops = False
       for loop_end_idx, op in enumerate(self.uops):
         if op.uop is not UOps.ENDLOOP: continue
-        loop_start_idx = self.uops.index(op.vin[0])
+        loop_start_idx = self.uops.index(loop_op:=op.vin[0])
         loop_ops = self.uops[loop_start_idx:loop_end_idx]
-        phi_op = next(op for op in loop_ops if op.uop == UOps.PHI)
-        parents = get_recursive_parents(phi_op, with_phi=True)
-
-        # TODO check that no loop op is ALU MUL var and has a parent that is ALU MUL var in the loop
-        # otherwise that's not linear
-        if not (all([op.uop in [UOps.LOOP, UOps.ALU, UOps.PHI, UOps.ENDLOOP] for op in loop_ops])
-          and all([op.uop in [UOps.CONST, UOps.SPECIAL, UOps.LOOP, UOps.DEFINE_ACC, UOps.ALU] for op in parents])):
+        phi_op = next((op for op in loop_ops if op.uop == UOps.PHI), None)
+        if (phi_op is None
+          or (any([op.uop not in [UOps.LOOP, UOps.ALU, UOps.PHI, UOps.ENDLOOP] for op in loop_ops]))
+          or (any([op.uop not in [UOps.CONST, UOps.SPECIAL, UOps.LOOP, UOps.DEFINE_ACC, UOps.ALU] for op in get_recursive_parents(phi_op)]))
+          or (len([vin for op in loop_ops[1:-1] for vin in op.vin if vin == loop_op]) > 1)):
           break
-
         if DEBUG >= 4: print(f"removing loop")
         vars = {op.arg[1]: Variable(op.arg[1], 0, op.arg[2] - 1) for op in self.uops if op.uop is UOps.SPECIAL}
         after_loop_ops = self.uops[loop_end_idx+1:]
         self.uops = self.uops[:loop_start_idx]
         rendered = uops_alu_resolve(phi_op, vars, self.loop_fold_resolve).render(self.render_ops, self)
         for op in after_loop_ops:
-          if phi_op in op.vin:
-            op.vin = tuple([rendered if op == phi_op else op for op in list(op.vin)])
+          op.vin = tuple([rendered if op == phi_op else op for op in list(op.vin)])
         self.uops = remove_childless_uops(self.uops + after_loop_ops, {UOps.ENDIF, UOps.ENDLOOP})
         keep_removing_loops = True
         break
