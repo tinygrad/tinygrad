@@ -56,6 +56,7 @@ class PythonProgram:
       ul: Dict[int, Any] = {}
       dl: Dict[int, DType] = {}
       pbufs: List[memoryview] = list(bufs)
+      pvals: List[int] = list(vals)
       i = 0
       loop_ends: Dict[int, int] = {}
       while i < len(self.uops):
@@ -97,6 +98,8 @@ class PythonProgram:
           assert dtype.fmt is not None
           lbuf = memoryview(bytearray(arg[1]*dtype.itemsize))
           ul[i] = [lbuf.cast(dtype.fmt)] * warp_size
+        elif uop is UOps.DEFINE_VAR:
+          ul[i] = [pvals.pop(0)] * warp_size
         elif uop is UOps.SPECIAL:
           if arg[1][0] == 'g':
             ul[i] = [idxs[2-arg[0]]] * warp_size

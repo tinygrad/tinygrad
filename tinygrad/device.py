@@ -238,7 +238,7 @@ class Compiled:
     ret = CompiledASTRunner(k.ast, k.name, self.compiler.render(to_function_name(k.name), k.uops), self, k.global_size, k.local_size)
     from tinygrad.codegen.uops import uops_flops_mem
     run_count = prod((k.global_size if k.global_size else []) + (k.local_size if k.local_size else []))
-    ops, mem = uops_flops_mem(k.uops, {x.expr:x for x in ret.vars})
+    ops, mem = uops_flops_mem(k.uops)
     # NOTE: we use min here to ignore the indexing FLOPS
     ret.op_estimate = min(ret.op_estimate, ops * run_count)
     ret.mem_estimate = min(ret.mem_estimate, mem * run_count)
