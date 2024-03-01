@@ -453,7 +453,7 @@ class Tensor:
       try: mask = reduce(lambda x,y: x.mul(y), masks)
       except AssertionError as exc: raise IndexError("cannot broadcast indices") from exc
 
-      # reshape ret by injecting 1's for the extra dims added in create masks
+      # inject 1's for the extra dims added in create masks
       sh = ret.shape[:first_dim] + (1,) * max_idx_dim + ret.shape[first_dim:]
       # sum reduce the extra dims introduced in create masks
       ret = (ret.reshape(sh) * mask).sum(tuple(i + max_idx_dim for i in idx.keys()))
