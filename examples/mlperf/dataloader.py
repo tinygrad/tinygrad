@@ -1,4 +1,4 @@
-import random
+import os, random
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
@@ -34,9 +34,9 @@ def shuffled_indices(n):
 
 def loader_process(q_in, q_out, X:Tensor):
   import signal
-  signal.signal(signal.SIGINT, signal.SIG_IGN)
-
   from extra.datasets.imagenet import center_crop, preprocess_train
+
+  signal.signal(signal.SIGINT, lambda _, __: exit(0))
 
   with Context(DEBUG=0):
     while (_recv := q_in.get()) is not None:
@@ -84,12 +84,9 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
   q_in, q_out = Queue(), Queue()
 
   sz = (batch_size*BATCH_COUNT, 224, 224, 3)
-  try:
-    shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
-  except:
-    import os
-    os.unlink("/dev/shm/resnet_X")
-    shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
+  if os.path.exists("/dev/shm/resnet_X"): os.unlink("/dev/shm/resnet_X")
+  shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
+  shm.unlink()  # no need to keep the name around
 
   # disk:shm is slower
   #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
@@ -134,7 +131,6 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
   for _ in procs: q_in.put(None)
   for p in procs: p.join()
   shm.close()
-  shm.unlink()
 
 if __name__ == "__main__":
   from extra.datasets.imagenet import get_train_files, get_val_files
