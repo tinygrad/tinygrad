@@ -10,7 +10,7 @@ from dataclasses import dataclass
 # bottom ones are asm only
 class UOps(Enum):
   LOOP = auto(); IF = auto(); ENDLOOP = auto(); ENDIF = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
-  DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
+  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto(); PHI = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
@@ -33,7 +33,7 @@ def get_recursive_children(uops:List[UOp], x:UOp) -> Set[UOp]:
         deps.add(u)
   return deps
 
-UOPS_W_SIDE_EFFECTS = {UOps.STORE, UOps.BARRIER, UOps.DEFINE_GLOBAL}
+UOPS_W_SIDE_EFFECTS = {UOps.STORE, UOps.BARRIER, UOps.DEFINE_VAR}
 def remove_childless_uops(uops:List[UOp]) -> List[UOp]:
   # NOTE: DEFINE_GLOBAL should be removable, but we'd have to propagate that
   while 1:

@@ -161,6 +161,9 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       elif uop is UOps.DEFINE_LOCAL:
         kk(lang.render_local(args[0], dtype, args[1]))
         r[u] = args[0]
+      elif uop is UOps.DEFINE_VAR:
+        bufs.append((args.expr, dtype))
+        r[u] = args.expr
       elif uop is UOps.DEFINE_GLOBAL:
         assert len(bufs) == args[0], f"missed a global buffer {len(bufs)} {args}"
         bufs.append((args[1], dtype))
