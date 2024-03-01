@@ -1,11 +1,11 @@
-import random, time, ctypes, struct
+import random
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
 import pickle
 from tinygrad import dtypes, Tensor
 from tinygrad.helpers import getenv, prod, Timing, Context
-from multiprocessing import Queue, Process, shared_memory, connection, Lock
+from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
 
 class MyQueue:
   def __init__(self, multiple_readers=True, multiple_writers=True):
@@ -97,7 +97,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
   Y = [None] * (batch_size*BATCH_COUNT)
 
   procs = []
-  for _ in range(getenv("WORKERS", 64)):
+  for _ in range(cpu_count()):
     p = Process(target=loader_process, args=(q_in, q_out, X))
     p.daemon = True
     p.start()
