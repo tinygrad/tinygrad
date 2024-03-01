@@ -223,7 +223,7 @@ class Tensor:
   def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1.0, **kwargs)
 
   @staticmethod
-  def arange(start, stop=None, step=1, **kwargs) -> Tensor:
+  def arange(start, stop=None, step=1, **kwargs):
     if stop is None: stop, start = start, 0
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs).cumsum() + (start - step)).cast(dtype)
@@ -439,23 +439,26 @@ class Tensor:
       # calc_dim to get dim and use that to normalize the negative tensor indices
       idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor], tensor_index)}
 
-      masks, first_dim, max_idx_dim, last_dim = [], min(idx.keys()), max(i.ndim for i in idx.values()), max(idx.keys())
+      masks, first_dim, last_dim, max_idx_dim = [], min(idx.keys()), max(idx.keys()), max(i.ndim for i in idx.values())
+      # create masks
       for dim, i in idx.items():
         i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim))
-        a = Tensor.arange(ret.shape[dim]).reshape(ret.shape[dim:dim+1] + (1,)*(ret.ndim - dim - 1))
+        a = Tensor.arange(ret.shape[dim], device=self.device, requires_grad=False).reshape(ret.shape[dim:dim+1] + (1,)*(ret.ndim - dim - 1))
         masks.append(i == a)
 
+      # reduce masks to 1 mask
+      # if masks can't broadcast, indices cannot broadcast
       try: mask = reduce(lambda x,y: x.mul(y), masks)
       except AssertionError as exc: raise IndexError("cannot broadcast indices") from exc
 
+      # reshape ret by injecting 1's for the extra dims added in create masks
       sh = ret.shape[:first_dim] + (1,) * max_idx_dim + ret.shape[first_dim:]
-      sum_arg = [i + max_idx_dim for i in idx.keys()]
-      ret = (ret.reshape(sh) * mask).sum(sum_arg)
+      # sum reduce the extra dims introduced in create masks
+      ret = (ret.reshape(sh) * mask).sum(tuple(i + max_idx_dim for i in idx.keys()))
 
       # special permute case
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
-        ret_dims = tuple(range(ret.ndim))
-        ret = ret.permute(ret_dims[first_dim:first_dim+max_idx_dim] + ret_dims[:first_dim] + ret_dims[first_dim+max_idx_dim:])
+        ret = ret.permute(*range(first_dim, first_dim+max_idx_dim), *range(0, first_dim), *range(first_dim+max_idx_dim, ret.ndim))
     return ret
 
   def __setitem__(self,indices,v): return self.__getitem__(indices).assign(v)
@@ -472,8 +475,7 @@ class Tensor:
     if dim < 0: dim += self.ndim
     idx = idx.to(self.device).unsqueeze(-1)
     idx_mask = idx == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)
-    permarg = tuple(range(self.ndim))
-    permarg = permarg[:dim] + permarg[dim+1:] + (dim,)
+    permarg = (*range(dim), *range(dim + 1, self.ndim), dim)
     shrinkarg = tuple((0,idx.shape[i]) for i in permarg[:-1]) + ((0,self.shape[dim]),)
     return (idx_mask * self.permute(permarg).shrink(shrinkarg).unsqueeze(dim)).sum(-1)
 
