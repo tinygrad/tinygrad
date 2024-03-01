@@ -70,8 +70,8 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
   # all llvm stuff goes into a module
   module = ir.Module(name=__file__)
 
-  # extract global buffers
-  buf_to_dtype = {u.arg:u.dtype for u in uops if u.uop == UOps.DEFINE_GLOBAL}
+  # extract global buffers (NOTE: this isn't right if DEFINE_GLOBAL is out of order)
+  buf_to_dtype = {u.arg:u.dtype for u in uops if u.uop in {UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR}}
   buf_index = {x:i for i,x in enumerate(buf_to_dtype.keys())}
 
   # create llvm function
@@ -144,7 +144,7 @@ def uops_to_llvm_ir(function_name:str, uops:List[UOp]) -> str:
       elif uop is UOps.ALU:
         lvars[u] = code_for_op[args](bb[-1], *[lvars[x] for x in vin], dtype if args not in (BinaryOps.CMPLT, BinaryOps.CMPEQ) else vin[0].dtype)
       elif uop is UOps.CAST: lvars[u] = cast(bb, lvars[vin[0]], vin[0].dtype, dtype, bitcast=isinstance(args, tuple) and args[1])
-      elif uop is UOps.DEFINE_GLOBAL: lvars[u] = func.args[buf_index[args]]
+      elif uop in {UOps.DEFINE_GLOBAL, UOps.DEFINE_VAR}: lvars[u] = func.args[buf_index[args]]
       elif uop is UOps.SPECIAL: lvars[u] = lvars[args.expr]
       elif uop is UOps.CONST: lvars[u] = const(args, dtype)
       else: raise RuntimeError(f"failed to render {uop}")
