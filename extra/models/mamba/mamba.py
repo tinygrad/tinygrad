@@ -335,7 +335,6 @@ def main():
   print(f"Loading model from {weights_path}")
   tokenizer = AutoTokenizer.from_pretrained(weights_path, device=device, dtype=dtype)
   mamba = MambaLMHeadModel.from_pretrained(weights_path, device=device, dtype=dtype)
-  # mamba.eval()
   print(f"Number of parameters: {sum(p.numel() for p in mamba.parameters() if p.requires_grad)}")
   while 1:
     prompt = str(input("prompt: "))
@@ -356,7 +355,6 @@ def main():
     print("".join(tokenizer.batch_decode(out.sequences)))
 
 
-  mamba = MambaLMHeadModel()
 
 if __name__ == "__main__":
   main()
