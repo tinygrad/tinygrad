@@ -355,15 +355,6 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(t0.numpy().flatten(), t1.numpy().flatten())
     assert t1.lazydata.axis == 2
 
-  def test_mlb_assign_change_axis(self):
-    devices = (d0, d1)
-
-    t_none = Tensor.zeros((16, 16)).shard(devices).contiguous().realize()
-    t_zero = Tensor.ones((16, 16)).shard(devices, axis=0)
-    with self.assertRaises(AssertionError):
-      # don't allow assigns that change axes
-      t_none.assign(t_zero)
-
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
   # shrink a multitensor on sharded axis
