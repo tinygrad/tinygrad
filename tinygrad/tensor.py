@@ -223,7 +223,7 @@ class Tensor:
   def ones(*shape, **kwargs): return Tensor.full(argfix(*shape), 1.0, **kwargs)
 
   @staticmethod
-  def arange(start, stop=None, step=1, **kwargs):
+  def arange(start, stop=None, step=1, **kwargs) -> Tensor:
     if stop is None: stop, start = start, 0
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     return (Tensor.full((math.ceil((stop-start)/step),), step, dtype=dtype, **kwargs).cumsum() + (start - step)).cast(dtype)
@@ -468,14 +468,14 @@ class Tensor:
 
   # TODO: maybe some comments explaining this cursed gather hmmm
   def gather(self:Tensor, idx:Tensor, dim:int) -> Tensor:
+    dim = self._resolve_dim(dim)
     assert idx.ndim == self.ndim, f"{idx.ndim=} must equal {self.ndim=}"
     assert all(s >= i for s,i in zip(self.shape, idx.shape)), f"{idx.shape=} cannot be larger than {self.shape=}"
-    if dim < 0: dim += self.ndim
     idx = idx.to(self.device).transpose(0, dim).unsqueeze(-1)
-    permarg, shrinkarg = tuple(range(self.ndim)), ((0,1),) + tuple((0,sh) for sh in idx.shape[1:-1]) + ((0,self.shape[dim]),)
+    permarg, shrinkarg = tuple(range(self.ndim)), tuple((0,sh) for sh in idx.shape[1:-1]) + ((0,self.shape[dim]),)
     permarg = permarg[1:dim] + (0,) + permarg[dim+1:] + (dim,) if dim != 0 else permarg[1:] + (0,)
     masked_idx = idx == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)
-    return (masked_idx * self.permute(permarg).unsqueeze(0).shrink(shrinkarg)).sum(-1).transpose(0, dim)
+    return (masked_idx * self.permute(permarg).shrink(shrinkarg).unsqueeze(0)).sum(-1).transpose(0, dim)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     if dim < 0: dim += self.ndim
