@@ -31,6 +31,7 @@ def train_resnet():
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
 
+  # ** model definition **
   num_classes = 1000
   if getenv("SMALL"):
     model, model_name = ResNet18(num_classes), "resnet18"
@@ -41,6 +42,7 @@ def train_resnet():
     v.to_(GPUS)
   parameters = get_parameters(model)
 
+  # ** jitted steps **
   input_mean = Tensor([123.68, 116.78, 103.94], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
   # mlperf reference resnet does not divide by input_std for some reason
   # input_std = Tensor([0.229, 0.224, 0.225], device=GPUS, dtype=dtypes.float32).reshape(1, -1, 1, 1)
@@ -64,6 +66,7 @@ def train_resnet():
     top_1 = (out.argmax(-1) == Y).sum()
     return loss.realize(), out.realize(), top_1.realize()
 
+  # ** hyperparameters **
   target = getenv("TARGET", 0.759)
   achieved = False
   epochs = getenv("EPOCHS", 45)
