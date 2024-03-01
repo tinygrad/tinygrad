@@ -29,7 +29,7 @@ class MultiStepLR(LR_Scheduler):
 class PolynomialLR(LR_Scheduler):
   def __init__(self, optimizer: Optimizer, start_lr, end_lr, epochs, warmup=0, power=2):
     super().__init__(optimizer)
-    assert epochs > warmup
+    warmup = min(warmup, epochs)
     self.start_lr, self.end_lr, self.epochs, self.power, self.warmup = start_lr, end_lr, epochs, power, warmup
 
   def get_lr(self):
