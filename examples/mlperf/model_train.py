@@ -68,11 +68,9 @@ def train_resnet():
 
   start_epoch = 0
   if ckpt:=getenv("RESUME", ""):
-    print(f"resuming from {ckpt}")
     load_training_state(model, optimizer, scheduler, state.safe_load(ckpt))
     start_epoch = int(scheduler.epoch_counter.numpy().item() / steps_in_train_epoch)
-    print(f"resuming at epoch {start_epoch}")
-  elif getenv("TESTEVAL"): model.load_from_pretrained()
+    print(f"resuming from {ckpt} at epoch {start_epoch}")
 
   # ** init wandb **
   WANDB = getenv("WANDB")
