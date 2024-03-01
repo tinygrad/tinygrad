@@ -41,7 +41,9 @@ Device = _Device()
 # **************** base Runner + helpers ****************
 
 class JITRunner:
-  def __init__(self): self.op_estimate, self.mem_estimate = 0, 0
+  def __init__(self):
+    self.op_estimate:sint = 0
+    self.mem_estimate:sint = 0
   def exec(self, rawbufs:List[Buffer], var_vals:Optional[Dict[Variable, int]]=None) -> Optional[float]:
     var_vals = var_vals if var_vals is not None else {}
     from tinygrad.features.jit import CacheCollector
@@ -198,6 +200,7 @@ class CompiledASTRunner(JITRunner):
     lib:bytes = precompiled if precompiled is not None else self.device.compiler.compile_cached(prg)
     self.lib, self.clprg = lib, self.device.runtime(self.name, lib)
     self.vars: List[Variable] = [] if variables is None else variables
+    self.op_estimate, self.mem_estimate = op_estimate, mem_estimate
 
   def launch_dims(self, var_vals):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else self.global_size
