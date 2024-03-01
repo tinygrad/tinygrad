@@ -210,7 +210,7 @@ def train_resnet():
       tqdm.write(f"eval loss: {total_loss:.2f}, eval time: {total_fw_time:.2f}, eval top 1 acc: {total_top_1:.3f}")
       if WANDB:
         wandb.log({"eval/loss": total_loss,
-                  "eval/top_1_acc": total_top_1,
+                   "eval/top_1_acc": total_top_1,
                    "eval/forward_time": total_fw_time,
                    "epoch": e + 1,
         })
