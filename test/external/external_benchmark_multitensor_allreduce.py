@@ -6,6 +6,7 @@ from tinygrad.ops import ReduceOps, BinaryOps, GlobalCounters
 from tinygrad.features.multi import MultiLazyBuffer, ring_allreduce
 from tinygrad.features.jit import TinyJit
 from tinygrad.realize import create_schedule, run_schedule
+from tinygrad.helpers import getenv
 from typing import List
 
 def naive_allreduce(op: ReduceOps, lbs: List[LazyBuffer]):
@@ -13,12 +14,14 @@ def naive_allreduce(op: ReduceOps, lbs: List[LazyBuffer]):
   return [functools.reduce(lambda x,y: x.e(bop, y), [x.copy_to_device(lb.device) for x in lbs]) for lb in lbs]
 
 def realize(x: LazyBuffer | List[LazyBuffer]):
-  run_schedule(create_schedule(x if isinstance(x, list) else [x]))
+  x = x if isinstance(x, list) else [x]
+  run_schedule(create_schedule(x))
+  for lb in x: Device[lb.device].synchronize()
 
 def test(impl, devs: List[str], N: int, iters:int = 10):
-  @TinyJit
   def _wrapped(impl, op: ReduceOps, t: Tensor) -> Tensor:
     return Tensor(MultiLazyBuffer(impl(op, t.lazydata.lbs), 0), device=devs)
+  _jitted = TinyJit(_wrapped) if getenv("USEJIT", 1) == 1 else _wrapped
 
   secs, gflops, gbs = 0, 0, 0
   for i in range(-2, iters):
@@ -26,8 +29,7 @@ def test(impl, devs: List[str], N: int, iters:int = 10):
     lbs = [Tensor.full((N,), float(1+i), device=d).contiguous().lazydata for i,d in enumerate(devs)]
     realize(lbs)
     start = time.time()
-    realize(_wrapped(impl, ReduceOps.SUM, Tensor(MultiLazyBuffer(lbs, 0), device=devs)).lazydata.lbs)
-    for dname in devs: Device[dname].synchronize()
+    realize(_jitted(impl, ReduceOps.SUM, Tensor(MultiLazyBuffer(lbs, 0), device=devs)).lazydata.lbs)
     end = time.time()
     if i < 0:
       # First time is slow due to kernel compilation
@@ -44,10 +46,10 @@ def test(impl, devs: List[str], N: int, iters:int = 10):
 
 
 def main():
-  dev, n_gpus = Device.DEFAULT, 6 # number of gpus
+  dev, n_gpus = Device.DEFAULT, getenv("GPUS", 6) # number of gpus
   devs = tuple([f"{dev}:{x}" for x in range(n_gpus)])
 
-  sz = 1 * 10**9 # size of data on each gpu
+  sz = getenv("SZ", 1000) * 10**6 # size of data on each gpu
   f32 = 4 # 4 bytes
   N = sz//f32
 
