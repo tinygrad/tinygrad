@@ -1,13 +1,10 @@
-from extra import dist
 from tinygrad import GlobalCounters, Device, TinyJit
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv
 from tinygrad.tensor import Tensor
 from tinygrad.nn.state import get_parameters, get_state_dict
-from tinygrad.nn import optim, state
+from tinygrad.nn import state
 from tqdm import tqdm
-import numpy as np
-import random
 import wandb
 import time
 import os
@@ -19,7 +16,7 @@ def train_resnet():
   from extra.lr_scheduler import PolynomialLR
 
   seed = getenv("SEED", 42)
-  Tensor.manual_seed(seed)
+  Tensor.manual_seed(seed)  # seed for weight initialization
 
   GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   UnsyncedBatchNorm.devices = len(GPUS)
