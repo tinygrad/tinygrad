@@ -381,9 +381,9 @@ class TestTypeSpec(unittest.TestCase):
       print("size {} - {:.5f}".format(size, time.perf_counter() - start))
 
   def test_arange_once(self):
-    print(Tensor.arange(256).realize().numpy())
+    # print(Tensor.arange(256).realize().numpy())
     # print(Tensor.arange(1, 78, 2).realize().numpy())
-    # print(Tensor.arange(5.5, 175.5, 2.5).realize().numpy())
+    print(Tensor.arange(5.5, 175.5, 2.5).realize().numpy())
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't follow the bool ops spec")
   @given(strat.sampled_from(core_dtypes), strat.sampled_from([operator.gt, operator.ge, operator.le, operator.lt, operator.eq, operator.ne]))

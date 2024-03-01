@@ -32,10 +32,10 @@ class Node:
     if not isinstance(other, Node): return NotImplemented
     return self.key == other.key
   def __neg__(self): return self*-1
-  def __add__(self, b:Union[Node,int]): return Node.sum([self, NumNode(b) if isinstance(b, int) else b])
+  def __add__(self, b:Union[Node,int]): return Node.sum([self, NumNode(b) if (isinstance(b, int) or isinstance(b, float)) else b])
   def __radd__(self, b:int): return self+b
   def __sub__(self, b:Union[Node,int]): return self+-b
-  def __rsub__(self, b:Union[int]): return -self+b
+  def __rsub__(self, b:int): return -self+b
   def __le__(self, b:Union[Node,int]): return self < (b+1)
   def __gt__(self, b:Union[Node,int]): return (-self) < (-b)
   def __ge__(self, b:Union[Node,int]): return (-self) < (-b+1)
@@ -136,14 +136,14 @@ class Variable(Node):
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return var_vals.get(self, self)
 
 class NumNode(Node):
-  def __init__(self, num:Union[int]):
-    assert isinstance(num, int), f"{num} is not number-like"
-    self.b:Union[int] = num
+  def __init__(self, num:int):
+    assert isinstance(num, int) or isinstance(num, float), f"{num} is not number-like"
+    self.b:int = num
     self.min, self.max = num, num
   def bind(self, val):
     assert self.b == val, f"cannot bind {val} to {self}"
     return self
-  def __mul__(self, b:Union[Node,int]): return NumNode(self.b*b) if isinstance(b, int) else b*self.b
+  def __mul__(self, b:Union[Node,int]): return NumNode(self.b*b) if (isinstance(b, int) or isinstance(b, float)) else b*self.b
   def __eq__(self, other): return self.b == other
   def __hash__(self): return hash(self.b)  # needed with __eq__ override
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self
@@ -180,7 +180,7 @@ class MulNode(OpNode):
     return Node.__floordiv__(self, b, factoring_allowed)
   def __mod__(self, b: Union[Node, int]): return Node.__mod__(self.a * (self.b%b), b)
   def get_bounds(self) -> Tuple[int, sint]:
-    if isinstance(self.b, int): return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
+    if (isinstance(self.b, int) or isinstance(self.b, float)): return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
     return (self.a.min*self.b.min, self.a.max*self.b.max) if self.b.min >= 0 else (self.a.max*self.b.min, self.a.min*self.b.max)
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
     return self.a.substitute(var_vals) * (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
@@ -199,7 +199,7 @@ class MaxNode(OpNode):
 
 class ModNode(OpNode):
   def __mod__(self, b: Union[Node, int]):
-    if isinstance(b, int) and isinstance(self.b, int) and self.b % b == 0: return self.a % b
+    if (isinstance(b, int) or isinstance(b, float)) and isinstance(self.b, int) and self.b % b == 0: return self.a % b
     return Node.__mod__(self, b)
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     return (self.a//b) % (self.b//b) if self.b % b == 0 else Node.__floordiv__(self, b, factoring_allowed)
@@ -261,7 +261,7 @@ class SumNode(RedNode):
 
   def __lt__(self, b:Union[Node,int]):
     lhs: Node = self
-    if isinstance(b, int):
+    if (isinstance(b, int) or isinstance(b, float)):
       new_sum = []
       for x in self.nodes:
         # TODO: should we just force the last one to always be the number

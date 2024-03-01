@@ -39,13 +39,16 @@ def expand_node(node:Node, idxs:Optional[Tuple[Union[Variable, NumNode], ...]]=N
   return [node.substitute({k:v for k,v in zip(idxs, (NumNode(x) for x in rep)) if isinstance(k, Variable)}) for rep in iter_idxs(idxs)]
 
 class Linearizer(Kernel):
-  def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op, dtype=dtypes.int32):
+  def uop_alu_idx(self, a:UOp, b, ops, ctx:Linearizer, op, dtype=None):
     render_b:UOp = cast(UOp, (NumNode(b) if not isinstance(b, Node) else b).render(ops, ctx))
-    return self.uop(UOps.ALU, dtype, (a, render_b), op)
+    if a.dtype != render_b.dtype:
+      new_type = a.dtype if a.dtype.priority > render_b.dtype.priority else render_b.dtype
+      a, render_b = self.cast(a, new_type), self.cast(render_b, new_type)
+    return self.uop(UOps.ALU, dtype or a.dtype, (a, render_b), op)
 
   # NOTE: the consts have to be cached for deduping of downstream uops to work
-  def const(self, b:Union[int,float], dtype=dtypes.int32, insert_before=None) -> UOp:
-    return self.uop(UOps.CONST, dtype, tuple(), b, insert_before=insert_before)
+  def const(self, b:Union[int,float], dtype=None, insert_before=None) -> UOp:
+    return self.uop(UOps.CONST, dtype or (dtypes.float32 if isinstance(b, float) else dtypes.int32), tuple(), b, insert_before=insert_before)
 
   def cast(self, val: UOp, dtype) -> UOp: return self.uop(UOps.CAST, dtype, (val,)) if val.dtype != dtype else val
 
@@ -482,10 +485,10 @@ class Linearizer(Kernel):
         loop_start_idx = self.uops.index(loop_op:=op.vin[0])
         loop_ops = self.uops[loop_start_idx:loop_end_idx]
         phi_op = next((op for op in loop_ops if op.uop == UOps.PHI), None)
+        # TODO: check that loop var isn't multiplied by itself?
         if (phi_op is None
           or (any([op.uop not in [UOps.LOOP, UOps.ALU, UOps.PHI, UOps.ENDLOOP] for op in loop_ops]))
-          or (any([op.uop not in [UOps.CONST, UOps.SPECIAL, UOps.LOOP, UOps.DEFINE_ACC, UOps.ALU] for op in get_recursive_parents(phi_op)]))
-          or (len([vin for op in loop_ops[1:-1] for vin in op.vin if vin == loop_op]) > 1)):
+          or (any([op.uop not in [UOps.CONST, UOps.SPECIAL, UOps.LOOP, UOps.DEFINE_ACC, UOps.ALU] for op in get_recursive_parents(phi_op)]))):
           break
         if DEBUG >= 4: print(f"removing loop")
         vars = {op.arg[1]: Variable(op.arg[1], 0, op.arg[2] - 1) for op in self.uops if op.uop is UOps.SPECIAL}
