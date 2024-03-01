@@ -169,6 +169,12 @@ class Linearizer(Kernel):
     # no new opts and we already ran? skip relinearizing
     if self.applied_opts == self.applied_opts_cache: return self
 
+    # late alias the tensor core buffers
+    if (tc:=self.tensor_core) and (tc_opts:=self.tensor_core_opts):
+      alias_pattern = [0]*(self.global_dims+(self.local_dims-len(tc.threads))) + [2]*(len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
+      for tc_buf in tc_opts.bufs:
+        self.alias_buffer(tc_buf, alias_pattern)
+
     # save backups
     sts_backup, gfr_backup, upc_backup = self.sts[:], self.group_for_reduces, self.upcasted
 
@@ -186,11 +192,13 @@ class Linearizer(Kernel):
     # add global buffers
     for i,buf in enumerate(self.bufs):
       if isinstance(buf, MemBuffer):
-        self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL, buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (), f"data{buf.idx}")
+        self.buf_uops[i] = self.uop(UOps.DEFINE_GLOBAL,
+                                    buf.dtype if isinstance(buf.dtype, ImageDType) else PtrDType(buf.dtype), (),
+                                    (buf.idx, f"data{buf.idx}"))
     # add var vals
-    for var in self.ast.vars():
+    for i,var in enumerate(self.ast.vars()):
       assert var.expr is not None
-      self.loop_uops[var.expr] = self.uop(UOps.DEFINE_GLOBAL, dtypes.int32, (), var.expr)
+      self.loop_uops[var.expr] = self.uop(UOps.DEFINE_VAR, dtypes.int32, (), var)
     # define local buffers
     for lb in self.local_alias.values():
       self.buf_uops[self.bufs.index(lb)] = self.uop(UOps.DEFINE_LOCAL, PtrDType(dtypes.float32), (), (lb.name, self.sts[self.bufs.index(lb)].size))
@@ -275,9 +283,6 @@ class Linearizer(Kernel):
       # reduce loop
       loop_ctx = render_loop(reduce_idxs)
 
-      # barrier for fast GEMM
-      if self.tensor_core: self.uop(UOps.BARRIER, None, (), cachable=False)
-
       # compute local aliases
       locals_to_store = []
       for i in self.local_alias:
@@ -313,10 +318,7 @@ class Linearizer(Kernel):
           for z in range(wmma_sz[2]):
             acc[offs[2]+z] = self.uop(UOps.PHI, tc.dtype_out, (op3[z], self.uop(UOps.GEP, tc.dtype_out, (ret,), z)) + loop_ctx)
       else:
-        if locals_to_store:
-          self.uop(UOps.BARRIER, None, (), cachable=False)
-          for i, idxs, ll in locals_to_store: self.global_store(i, idxs, ll)
-          self.uop(UOps.BARRIER, None, (), cachable=False)
+        assert not locals_to_store, "storing locals isn't supported here"
 
         # load earlybufs
         loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs[1:], start=1) if b in self.earlybufs})  # noqa: E501
