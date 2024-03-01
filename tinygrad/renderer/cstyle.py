@@ -30,7 +30,7 @@ class CStyleLanguage(NamedTuple):
     BinaryOps.ADD: lambda a,b,dtype: f"({a}+{b})", BinaryOps.SUB: lambda a,b,dtype: f"({a}-{b})", BinaryOps.MUL: lambda a,b,dtype: f"({a}*{b})",
     BinaryOps.DIV: lambda a,b,dtype: f"({a}/{b})", BinaryOps.MAX: lambda a,b,dtype: f"max({a},{b})", BinaryOps.MOD: lambda a,b,dtype: f"({a}%{b})",
     BinaryOps.CMPLT: lambda a,b,dtype: f"({a}<{b})", BinaryOps.CMPEQ: lambda a,b,dtype: f"({a}=={b})", BinaryOps.XOR: lambda a,b,dtype: f"({a}^{b})",
-    TernaryOps.MULACC: lambda a,b,c,dtype: f"(({a}*{b})+{c})", TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"
+    TernaryOps.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})"
   }
 
   # returns a str expression of the casted xs with the given type
@@ -89,7 +89,8 @@ class CStyleLanguage(NamedTuple):
 
 def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> str:
   local_size: List[int] = []
-  kernel,bufs = [],[]
+  kernel = []
+  bufs: List[Tuple[str, DType]] = []
   #pend_close = None
   depth = 1
   def kk(s): kernel.append("  "*depth+s)
@@ -160,9 +161,13 @@ def uops_to_cstyle(lang:CStyleLanguage, function_name:str, uops:List[UOp]) -> st
       elif uop is UOps.DEFINE_LOCAL:
         kk(lang.render_local(args[0], dtype, args[1]))
         r[u] = args[0]
+      elif uop is UOps.DEFINE_VAR:
+        bufs.append((args.expr, dtype))
+        r[u] = args.expr
       elif uop is UOps.DEFINE_GLOBAL:
-        bufs.append((args, dtype))
-        r[u] = args
+        assert len(bufs) == args[0], f"missed a global buffer {len(bufs)} {args}"
+        bufs.append((args[1], dtype))
+        r[u] = args[1]
       elif uop is UOps.WMMA: kk(f"{dtype.name} {ssa(u, 'wmma')} = {args}({r[vin[0]]}, {r[vin[1]]}, {r[vin[2]]});")
       elif uop is UOps.DEFINE_ACC: kk(f"{dtype.name} {ssa(u,'acc')} = {lang.render_const(args, dtype)};")
       elif uop is UOps.CONST: r[u] = lang.render_const(args, dtype) if args >= 0 else f"({lang.render_const(args, dtype)})"
@@ -180,9 +185,6 @@ class OpenCLLanguage(CStyleLanguage):
   float4 = "(float4)"
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
   uses_vload = True
-  # NOTE: mad is used so the loads aren't reordered into the math on 845
-  code_for_op = {**CStyleLanguage().code_for_op,
-                 TernaryOps.MULACC: lambda a,b,c,dtype: f"mad({a},{b},{c})" if dtypes.is_float(dtype) else f"(({a}*{b})+{c})"}
   type_map = { dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong" }
   def render_cast(self, x, var_dtype, bitcast=False) -> str:
     return f"as_{self.type_map.get(var_dtype) or var_dtype.name}({x[0]})" if bitcast else super().render_cast(x, var_dtype)
@@ -243,11 +245,12 @@ class CUDALanguage(CStyleLanguage):
 CUDARenderer = functools.partial(uops_to_cstyle, CUDALanguage())
 
 code_for_op_hip = {
-  BinaryOps.MAX: lambda a,b,dtype: f"__ocml_fmax_f32({a},{b})" if dtype != dtypes.half else f"__ocml_fmax_f16({a},{b})",
-  UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f32({x})" if dtype != dtypes.half else f"__ocml_sqrt_f16({x})",
-  UnaryOps.SIN: lambda x,dtype: f"__ocml_sin_f32({x})" if dtype != dtypes.half else f"__ocml_sin_f16({x})",
-  UnaryOps.LOG2: lambda x,dtype: f"__ocml_log2_f32({x})" if dtype != dtypes.half else f"__ocml_log2_f16({x})",
-  UnaryOps.EXP2: lambda x,dtype: f"__ocml_exp2_f32({x})" if dtype != dtypes.half else f"__ocml_exp2_f16({x})",
+  # TODO: MAX with int uses fmax_f32?
+  BinaryOps.MAX: lambda a,b,dtype: f"__ocml_fmax_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32) }({a},{b})",
+  UnaryOps.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
+  UnaryOps.SIN: lambda x,dtype: f"__ocml_sin_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
+  UnaryOps.LOG2: lambda x,dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
+  UnaryOps.EXP2: lambda x,dtype: f"__ocml_exp2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
 }
 
 def _make_hip_dtype(base_type, name, cnt):
@@ -278,6 +281,11 @@ class HIPLanguage(CStyleLanguage):
   __attribute__((device)) __attribute__((pure)) float __ocml_log2_f32(float);
   __attribute__((device)) float __ocml_sin_f32(float);
   __attribute__((device)) __attribute__((const)) float __ocml_sqrt_f32(float);
+  __attribute__((device)) __attribute__((const)) double __ocml_fmax_f64(double, double);
+  __attribute__((device)) __attribute__((pure)) double __ocml_exp2_f64(double);
+  __attribute__((device)) __attribute__((pure)) double __ocml_log2_f64(double);
+  __attribute__((device)) double __ocml_sin_f64(double);
+  __attribute__((device)) __attribute__((const)) double __ocml_sqrt_f64(double);
   __attribute__((device)) __attribute__((const)) _Float16 __ocml_fmax_f16(_Float16, _Float16);
   __attribute__((device)) __attribute__((pure)) _Float16 __ocml_exp2_f16(_Float16);
   __attribute__((device)) __attribute__((pure)) _Float16 __ocml_log2_f16(_Float16);

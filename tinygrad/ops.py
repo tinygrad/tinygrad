@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Union, Type, Tuple, Any, List, Dict, Callable, ClassVar
-import functools
+import functools, hashlib
 from enum import Enum, auto
 from tinygrad.helpers import prod, dedup
 from tinygrad.dtype import dtypes, DType
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 class UnaryOps(Enum): EXP2 = auto(); LOG2 = auto(); CAST = auto(); SIN = auto(); SQRT = auto(); NEG = auto() # noqa: E702
 class BinaryOps(Enum):
   ADD = auto(); SUB = auto(); MUL = auto(); DIV = auto(); MAX = auto(); MOD = auto(); CMPLT = auto(); CMPEQ = auto(); XOR = auto() # noqa: E702
-class TernaryOps(Enum): MULACC = auto(); WHERE = auto() # noqa: E702
+class TernaryOps(Enum): WHERE = auto() # noqa: E702
 class ReduceOps(Enum): SUM = auto(); MAX = auto() # noqa: E702
 class BufferOps(Enum): LOAD = auto(); CONST = auto(); STORE = auto() # noqa: E702
 class LoadOps(Enum): EMPTY = auto(); CONST = auto(); COPY = auto(); CONTIGUOUS = auto(); CUSTOM = auto(); SYNC = auto(); WAIT = auto() # noqa: E702
@@ -58,6 +58,9 @@ class LazyOp:
     return ret
   def __eq__(self, x): return self.cached_compare(x, context={})
   def __repr__(self): return f"LazyOp(op={self.op}, src={self.src}, arg={self.arg})"
+  @functools.cached_property
+  def key(self) -> bytes:
+    return hashlib.sha256(functools.reduce(lambda x,y: x+y, [s.key for s in self.src], str((self.op, self.arg)).encode())).digest()
   @functools.cached_property
   def hash(self): return hash((self.op, self.src, self.arg))
   def __hash__(self): return self.hash

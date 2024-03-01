@@ -76,10 +76,10 @@ from tinygrad.lazy import LazyBuffer, LoadOps
 from tinygrad.realize import run_schedule, create_schedule
 
 # allocate some values + load in values
-a = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, "CLANG")
-b = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, "CLANG")
-a.realized = Buffer("CLANG", 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 2))))
-b.realized = Buffer("CLANG", 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 3))))
+a = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, DEVICE)
+b = LazyBuffer.loadop(LoadOps.EMPTY, (1,), dtypes.int32, DEVICE)
+a.realized = Buffer(DEVICE, 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 2))))
+b.realized = Buffer(DEVICE, 1, dtypes.int32).copyin(memoryview(bytearray(struct.pack("I", 3))))
 
 # describe the computation
 out = a.e(BinaryOps.ADD, b)

@@ -307,6 +307,54 @@ class TestMultiTensor(unittest.TestCase):
     # for i, ast in enumerate(asts):
     #   print(f"{i} {ast}")
 
+  def test_reshape_on_axis(self):
+    devices = (d0, d1, d2)
+
+    t0 = Tensor.rand((26, 15, 7)).shard(devices, axis=1)
+
+    # test split and rejoin to the right
+    t1 = t0.reshape((26, 3, 5, 7))
+    t2 = t0.reshape((26, 3, 35))
+    t3 = t1.reshape((26, 15, 7))
+    t4 = t2.reshape((26, 105,))
+
+    for t in [t0, t1, t2, t3, t4]:
+      assert t.lazydata.axis == 1
+      np.testing.assert_allclose(t.numpy().flatten(), t0.numpy().flatten())
+
+    # test shape-one axis
+    t5 = t4.reshape((26, 1, 105))
+    assert t5.lazydata.axis == 2
+    np.testing.assert_allclose(t.numpy().flatten(), t5.numpy().flatten())
+
+    # test split and rejoin to the right and reshape to the left
+    t5 = t0.reshape((2, 13, 3, 5, 7))
+    t6 = t0.reshape((13, 2, 3, 7, 5))
+    t7 = t0.reshape((1, 13, 2, 3, 1, 7, 5))
+    np.testing.assert_allclose(t5.numpy().flatten(), t0.numpy().flatten())
+    assert t5.lazydata.axis == 2
+    np.testing.assert_allclose(t6.numpy().flatten(), t0.numpy().flatten())
+    assert t6.lazydata.axis == 2
+    np.testing.assert_allclose(t7.numpy().flatten(), t0.numpy().flatten())
+    assert t7.lazydata.axis == 3
+
+    # test no left join
+    with self.assertRaises((AssertionError, ValueError)):
+      t0.reshape((26*15,7))
+
+  def test_reshape_on_axis_uneven(self):
+    devices = (d0, d1, d2)
+    t0 = Tensor.rand((4, 8, 15)).shard(devices, axis=1)
+
+    # no split axis if uneven
+    with self.assertRaises((AssertionError, ValueError)):
+      t0.reshape((4,4,2,15))
+
+    # ok to split reshape left and right though
+    t1 = t0.reshape(2, 2, 8, 3, 5)
+    np.testing.assert_allclose(t0.numpy().flatten(), t1.numpy().flatten())
+    assert t1.lazydata.axis == 2
+
 @unittest.skipIf(CI and Device.DEFAULT in {"GPU", "CUDA", "METAL"}, "no GPU CI")
 class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
   # shrink a multitensor on sharded axis
@@ -493,6 +541,30 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       out.mean().backward()
       optim.step()
 
+  def test_unsynced_backprop_sync_weights(self):
+    from extra.lr_scheduler import OneCycleLR
+    from examples.hlb_cifar10 import UnsyncedBatchNorm
+    from tinygrad.features.multi import MultiLazyBuffer
+    GPUS = (d1, d2)
+
+    with Tensor.train():
+      conv = nn.Conv2d(3, 16, 3)
+      bn = UnsyncedBatchNorm(16, num_devices=len(GPUS))
+
+      for p in get_parameters([conv, bn]):
+        if not isinstance(p.lazydata, MultiLazyBuffer):
+          p.shard_(GPUS)
+      optim = nn.optim.Adam(get_parameters([conv, bn]))
+      lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
+      lr_sched.step()
+
+      fake_image = Tensor.rand((8, 3, 32, 32)).shard(GPUS, axis=0)
+
+      out = bn(conv(fake_image))
+      optim.zero_grad()
+      out.mean().backward()
+      optim.step()
+
   @given(strat.sampled_from((False, True)))
   def test_batchnorm(self, is_training):
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
@@ -516,13 +588,14 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       bn_ts[0].cat(*bn_ts[1:]).numpy()
 
   def test_synced_vs_unsynced_bn(self):
-    from examples.hlb_cifar10 import BatchNorm, UnsyncedBatchNorm
+    from examples.hlb_cifar10 import UnsyncedBatchNorm
+    from tinygrad.nn import BatchNorm2d
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
     x = Tensor.ones(8, 8, 8, 8).contiguous().realize().shard(devices, axis=0)
 
     with Tensor.train():
-      synced_bn = BatchNorm(8)
-      unsynced_bn = UnsyncedBatchNorm(8)
+      synced_bn = BatchNorm2d(8)
+      unsynced_bn = UnsyncedBatchNorm(8, num_devices=len(devices))
 
       for p in get_parameters([synced_bn, unsynced_bn]):
         p.shard_(devices)
