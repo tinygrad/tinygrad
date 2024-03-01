@@ -10,7 +10,7 @@ from typing import List, Dict, Callable, Tuple, Type, Union, Optional, Any, Set,
 class Node:
   b: Union[Node, int]
   min: int
-  max: int
+  max: sint
   def render(self, ops=None, ctx=None) -> Any:
     if ops is None: ops = render_python
     assert self.__class__ in (Variable, NumNode) or self.min != self.max
@@ -118,7 +118,7 @@ class Variable(Node):
 
   def __getnewargs__(self): return (self.expr, self.min, self.max)  # args passed to __new__ when unpickling
 
-  def __init__(self, expr:str, nmin:int, nmax:int):
+  def __init__(self, expr:str, nmin:int, nmax:sint):
     self.expr, self.min, self.max = expr, nmin, nmax
     self._val: Optional[int] = None
   @property
@@ -158,7 +158,7 @@ class OpNode(Node):
     self.a, self.b = a, b
     self.min, self.max = self.get_bounds()
   def vars(self): return self.a.vars() | (self.b.vars() if isinstance(self.b, Node) else set())
-  def get_bounds(self) -> Tuple[int, int]: raise NotImplementedError("must be implemented")
+  def get_bounds(self) -> Tuple[int, sint]: raise NotImplementedError("must be implemented")
 
 class LtNode(OpNode):
   def get_bounds(self) -> Tuple[int, int]:
@@ -179,13 +179,16 @@ class MulNode(OpNode):
     if b % self.b == 0 and self.b > 0: return self.a//(b//self.b)
     return Node.__floordiv__(self, b, factoring_allowed)
   def __mod__(self, b: Union[Node, int]): return Node.__mod__(self.a * (self.b%b), b)
-  def get_bounds(self) -> Tuple[int, int]: return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
+  def get_bounds(self) -> Tuple[int, sint]:
+    assert self.a.min >= 0
+    if isinstance(self.b, int): return (self.a.min*self.b, self.a.max*self.b) if self.b >= 0 else (self.a.max*self.b, self.a.min*self.b)
+    return (self.a.min*self.b.min, self.a.max*self.b.max) if self.b.min >= 0 else (self.a.max*self.b.min, self.a.min*self.b.max)
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
     return self.a.substitute(var_vals) * (self.b if isinstance(self.b, int) else self.b.substitute(var_vals))
 
 class DivNode(OpNode):
   def __floordiv__(self, b: Union[Node, int], _=False): return self.a//(self.b*b) # two divs is one div
-  def get_bounds(self) -> Tuple[int, int]:
+  def get_bounds(self) -> Tuple[int, sint]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     return self.a.min//self.b, self.a.max//self.b
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return self.a.substitute(var_vals) // self.b
@@ -196,7 +199,7 @@ class ModNode(OpNode):
     return Node.__mod__(self, b)
   def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
     return (self.a//b) % (self.b//b) if self.b % b == 0 else Node.__floordiv__(self, b, factoring_allowed)
-  def get_bounds(self) -> Tuple[int, int]:
+  def get_bounds(self) -> Tuple[int, sint]:
     assert self.a.min >= 0 and isinstance(self.b, int)
     if self.a.max - self.a.min >= self.b or (self.a.min != self.a.max and self.a.min%self.b >= self.a.max%self.b): return (0, self.b-1)
     return (self.a.min%self.b, self.a.max%self.b)
@@ -207,14 +210,14 @@ class RedNode(Node):
     self.nodes = nodes
     self.min, self.max = self.get_bounds()
   def vars(self) -> Set[Variable]: return set.union(*[x.vars() for x in self.nodes], set())
-  def get_bounds(self) -> Tuple[int, int]: raise NotImplementedError("must be implemented")
+  def get_bounds(self) -> Tuple[int, sint]: raise NotImplementedError("must be implemented")
 
 class SumNode(RedNode):
-  def get_bounds(self) -> Tuple[int, int]: return sum([x.min for x in self.nodes]), sum([x.max for x in self.nodes])
+  def get_bounds(self) -> Tuple[int, sint]: return sum([x.min for x in self.nodes]), sum([x.max for x in self.nodes])
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
   def __mul__(self, b: Union[Node, int]): return Node.sum([x*b for x in self.nodes]) # distribute mul into sum
   @functools.lru_cache(maxsize=None)  # pylint: disable=method-cache-max-size-none
-  def __floordiv__(self, b: Union[Node, int], factoring_allowed=True):
+  def __floordiv__(self, b: Union[Node, sint], factoring_allowed=True):
     if self == b: return NumNode(1)
     fully_divided: List[Node] = []
     rest: List[Node] = []
@@ -282,7 +285,7 @@ class SumNode(RedNode):
   def flat_components(self): return [y for x in self.nodes for y in (x.flat_components if isinstance(x, SumNode) else [x])]
 
 class AndNode(RedNode):
-  def get_bounds(self) -> Tuple[int, int]: return min([x.min for x in self.nodes]), max([x.max for x in self.nodes])
+  def get_bounds(self) -> Tuple[int, sint]: return min([x.min for x in self.nodes]), max([x.max for x in self.nodes])
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node:
     subed = []
     for node in self.nodes:

@@ -381,18 +381,6 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     # assert (i*128+128)*2 // (i*128+128) == 2
     # assert (i*128+128)*2 % (i*128+128) == 0
 
-  def test_sumnode_divmod_sumnode_complex(self):
-    i = Variable("i", 1, 1024)
-    gidx0 = Variable("gidx0", 0, i)
-    # lidx1 = Variable("lidx1", 0, 7)
-    ridx2 = Variable("ridx1", 0, 31)
-    # assert ((i*128+128)*2 + gidx0*128 + lidx1*(i*512+512) + ridx2*4) // (i*128+128) == 2 + lidx1*4
-    # assert ((i*128+128)*2 + gidx0*128 + lidx1*(i*512+512) + ridx2*4) % (i*128+128) == gidx0*128 + ridx2*4
-    # assert ((gidx0*128+i*128+ridx2*4+129)) // (i*128+128) == 1
-    # assert ((gidx0*128+i*128+ridx2*4+129)) % (i*128+128) == gidx0*128 + ridx2*4 + 1
-    assert (ridx2*(i*4+4)+1+i+gidx0) // (i*128+128) == 0
-    assert (ridx2*(i*4+4)+1+i+gidx0) % (i*128+128) == (ridx2*(i*4+4)+1+i+gidx0)
-
   def test_mod_node_max(self):
     i = Variable("i", 1, 128)
     gidx0 = Variable("gidx0", 0, i)

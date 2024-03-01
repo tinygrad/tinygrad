@@ -13,7 +13,6 @@ from tinygrad.codegen.kernel import LinearizerOptions
 def exec_alu(arg, dtype, p):
   # TODO: make this complete and correctly honor the dtypes
   # TODO: use this for constant folding
-  if arg == TernaryOps.MULACC: return p[0]*p[1]+p[2]
   if arg == TernaryOps.WHERE: return p[1] if p[0] else p[2]
   if arg == UnaryOps.LOG2: return math.log2(p[0]) if p[0] > 0 else -math.inf if p[0] == 0 else math.nan
   if arg == UnaryOps.EXP2:
@@ -57,6 +56,7 @@ class PythonProgram:
       ul: Dict[int, Any] = {}
       dl: Dict[int, DType] = {}
       pbufs: List[memoryview] = list(bufs)
+      pvals: List[int] = list(vals)
       i = 0
       loop_ends: Dict[int, int] = {}
       while i < len(self.uops):
@@ -93,11 +93,13 @@ class PythonProgram:
         dl[i] = dtype
         if uop is UOps.DEFINE_GLOBAL:
           assert dtype.fmt is not None
-          ul[i] = [pbufs.pop(0).cast(dtype.fmt)] * warp_size
+          ul[i] = [pbufs[arg[0]].cast(dtype.fmt)] * warp_size
         elif uop is UOps.DEFINE_LOCAL:
           assert dtype.fmt is not None
           lbuf = memoryview(bytearray(arg[1]*dtype.itemsize))
           ul[i] = [lbuf.cast(dtype.fmt)] * warp_size
+        elif uop is UOps.DEFINE_VAR:
+          ul[i] = [pvals.pop(0)] * warp_size
         elif uop is UOps.SPECIAL:
           if arg[1][0] == 'g':
             ul[i] = [idxs[2-arg[0]]] * warp_size
