@@ -2,7 +2,6 @@ from typing import Dict, List, cast, DefaultDict, Optional, Tuple, Callable
 import itertools, functools, random, math, time, multiprocessing, traceback, signal
 from tinygrad.device import Device, Compiled, Buffer, CompiledASTRunner, Compiler
 from tinygrad.ops import MemBuffer
-from tinygrad.codegen.uops import UOps
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, to_function_name
 from tinygrad.dtype import ImageDType
 from tinygrad.codegen.linearizer import Linearizer
@@ -49,8 +48,8 @@ def _time_program(variables:List[Variable], rdev:Compiled, lib:bytes, global_siz
 def _compile_linearizer(compiler:Compiler, lin:Linearizer, name:Optional[str]=None) -> Tuple[bytes, Optional[List[int]], Optional[List[int]],
                                                                                              List[Variable]]:
   lin.linearize()
-  src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops)   # NOTE: these all have the same name for deduping
-  return compiler.compile(src), lin.global_size, lin.local_size, [x.arg for x in lin.uops if x.uop is UOps.DEFINE_VAR]
+  src = compiler.render(name if name is not None else to_function_name(lin.name), lin.uops.uops)   # NOTE: these all have the same name for deduping
+  return compiler.compile(src), lin.global_size, lin.local_size, lin.uops.vars()
 
 def _try_compile_linearized_w_idx(x, compiler:Compiler):
   try: return (x[0], _compile_linearizer(compiler, x[1], "test"))
