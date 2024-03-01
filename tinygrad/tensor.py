@@ -439,22 +439,22 @@ class Tensor:
       # calc_dim to get dim and use that to normalize the negative tensor indices
       idx: Dict[int,Tensor] = {(dim := calc_dim(td)):(tensor<0).where(ret.shape[dim],0) + tensor for td,tensor in zip(type_dim[Tensor], tensor_index)}
 
-      eqs, first_dim, max_idx_dim, last_dim  = [], min(idx.keys()), max(i.ndim for i in idx.values()), max(idx.keys())
+      masks, first_dim, max_idx_dim, last_dim = [], min(idx.keys()), max(i.ndim for i in idx.values()), max(idx.keys())
       for dim, i in idx.items():
-        a = i.reshape(i.shape + (1,)*(ret.ndim - first_dim))
-        b = Tensor.arange(ret.shape[dim]).reshape(ret.shape[dim:dim+1] + (1,)*(ret.ndim - dim - 1))
-        eqs.append(a == b)
+        i = i.reshape(i.shape + (1,)*(ret.ndim - first_dim))
+        a = Tensor.arange(ret.shape[dim]).reshape(ret.shape[dim:dim+1] + (1,)*(ret.ndim - dim - 1))
+        masks.append(i == a)
 
-      try: mask = reduce(lambda x,y: x.mul(y), eqs)
+      try: mask = reduce(lambda x,y: x.mul(y), masks)
       except AssertionError as exc: raise IndexError("cannot broadcast indices") from exc
 
-      sh = ret.shape[:first_dim] + (1,)*max_idx_dim + ret.shape[first_dim:]
-      sum_arg = [i+max_idx_dim for i in idx.keys()]
-      ret = (mask*ret.reshape(sh)).sum(sum_arg)
+      sh = ret.shape[:first_dim] + (1,) * max_idx_dim + ret.shape[first_dim:]
+      sum_arg = [i + max_idx_dim for i in idx.keys()]
+      ret = (ret.reshape(sh) * mask).sum(sum_arg)
 
       # special permute case
       if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim+1)):
-        ret_dims = list(range(ret.ndim))
+        ret_dims = tuple(range(ret.ndim))
         ret = ret.permute(ret_dims[first_dim:first_dim+max_idx_dim] + ret_dims[:first_dim] + ret_dims[first_dim+max_idx_dim:])
     return ret
 
@@ -466,16 +466,16 @@ class Tensor:
     padding = tuple((max(0, -l), max(0, r-s)) for s,(l,r) in zip(self.shape, arg_))
     return self.pad(padding, value=value).shrink(tuple((l + pl, r + pl) for (l,r),(pl,_) in zip(arg_, padding)))
 
-  # TODO: maybe some comments explaining this cursed gather hmmm
   def gather(self:Tensor, idx:Tensor, dim:int) -> Tensor:
-    dim = self._resolve_dim(dim)
     assert idx.ndim == self.ndim, f"{idx.ndim=} must equal {self.ndim=}"
     assert all(s >= i for s,i in zip(self.shape, idx.shape)), f"{idx.shape=} cannot be larger than {self.shape=}"
-    idx = idx.to(self.device).transpose(0, dim).unsqueeze(-1)
-    permarg, shrinkarg = tuple(range(self.ndim)), tuple((0,sh) for sh in idx.shape[1:-1]) + ((0,self.shape[dim]),)
-    permarg = permarg[1:dim] + (0,) + permarg[dim+1:] + (dim,) if dim != 0 else permarg[1:] + (0,)
-    masked_idx = idx == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)
-    return (masked_idx * self.permute(permarg).shrink(shrinkarg).unsqueeze(0)).sum(-1).transpose(0, dim)
+    if dim < 0: dim += self.ndim
+    idx = idx.to(self.device).unsqueeze(-1)
+    idx_mask = idx == Tensor.arange(self.shape[dim], requires_grad=False, device=self.device)
+    permarg = tuple(range(self.ndim))
+    permarg = permarg[:dim] + permarg[dim+1:] + (dim,)
+    shrinkarg = tuple((0,idx.shape[i]) for i in permarg[:-1]) + ((0,self.shape[dim]),)
+    return (idx_mask * self.permute(permarg).shrink(shrinkarg).unsqueeze(dim)).sum(-1)
 
   def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     if dim < 0: dim += self.ndim
