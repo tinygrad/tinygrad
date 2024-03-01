@@ -219,12 +219,14 @@ def train_resnet():
                    "epoch": e + 1,
         })
 
+      # save model if achieved target
       if not achieved and total_top_1 >= target:
         fn = f"./ckpts/{model_name}_cats{num_classes}.safe"
         state.safe_save(state.get_state_dict(model), fn)
         print(f" *** Model saved to {fn} ***")
         achieved = True
 
+      # checkpoint every time we eval
       if not getenv("TESTEVAL") and getenv("CKPT"):
         if not os.path.exists("./ckpts"): os.mkdir("./ckpts")
         if WANDB and wandb.run is not None:
