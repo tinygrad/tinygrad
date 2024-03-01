@@ -55,7 +55,8 @@ class BasicBlock:
   def __call__(self, x):
     out = self.bn1(self.conv1(x)).relu()
     out = self.bn2(self.conv2(out))
-    out = out + x.sequential([self.conv_downsample, self.bn_downsample] if self.conv_downsample is not None else [])
+    if self.conv_downsample is not None:
+      out = out + x.sequential([self.conv_downsample, self.bn_downsample])
     out = out.relu()
     return out
 
@@ -82,7 +83,8 @@ class Bottleneck:
     out = self.bn1(self.conv1(x)).relu()
     out = self.bn2(self.conv2(out)).relu()
     out = self.bn3(self.conv3(out))
-    out = out + x.sequential([self.conv_downsample, self.bn_downsample] if self.conv_downsample is not None else [])
+    if self.conv_downsample is not None:
+      out = out + x.sequential([self.conv_downsample, self.bn_downsample])
     out = out.relu()
     return out
 
