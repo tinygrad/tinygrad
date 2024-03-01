@@ -172,7 +172,7 @@ class Linearizer(Kernel):
 
     # late alias the tensor core buffers
     if (tc:=self.tensor_core) and (tc_opts:=self.tensor_core_opts):
-      alias_pattern = [0]*(self.global_dims+(self.local_dims-len(tc.threads))) + [2]*(len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1,1] + [3]*(self.upcasted-2)  # noqa: E501
+      alias_pattern = [0]*(self.global_dims+(self.local_dims-len(tc.threads))) + [2]*(len(tc.threads)) + [0]*(self.shape_len-self.upcasted-self.first_reduce) + [1]*tc.num_upcasts() + [3]*(self.upcasted-tc.num_upcasts())  # noqa: E501
       for tc_buf in tc_opts.bufs:
         self.alias_buffer(tc_buf, alias_pattern)
 
@@ -263,27 +263,24 @@ class Linearizer(Kernel):
       out_buf = -1 if self.group_for_reduces else 0
       acc = self.global_load(out_buf, global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs, self.get_reduce_acc(self.reduceop))
 
+      # reduce loop
+      loop_ctx = render_loop(reduce_idxs)
+
       if (tc:=self.tensor_core):
-        def calc_tc_idxs(local_size: int, aliases: List[List[int]]):
-          replace_idxs = []
+        def calc_tc_idxs(local_sizes: List[int], aliases: List[List[int]]):
+          replace_idxs, thread_idxs, thread_idx = [], [], Variable("_uidx_tc", 0, prod(local_sizes)-1)
+          for s in local_sizes:
+            thread_idxs.append(thread_idx % s)
+            thread_idx //= s
           for alias in aliases:
             full_var, full_var_sz = NumNode(0), 1
             if alias[0] != 0:
               for i in alias:
-                next_var = local_idxs[-i] if i > 0 else Variable("_uidx_tc", 0, local_size-1)
+                next_var = local_idxs[-i] if i > 0 else thread_idxs[-i-1]
                 full_var += next_var * full_var_sz
                 full_var_sz *= next_var.max+1
             replace_idxs.append(full_var)
           return replace_idxs
-        replace_acc_idxs = calc_tc_idxs(tc.thread_local_sizes[2], tc.thread_local_aliases[2])
-        for n in range(len(tc.threads)):
-          local_idxs[self.local_dims-len(tc.threads)+n] = replace_acc_idxs[n] # replace locals
-        for n in range(len(replace_acc_idxs)-len(tc.threads)):
-          upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
-        if DEBUG >= 3: print("store alias: idxs=", global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs)
-
-      # reduce loop
-      loop_ctx = render_loop(reduce_idxs)
 
       # compute local aliases
       locals_to_store = []
@@ -297,13 +294,20 @@ class Linearizer(Kernel):
             buf_idxs[self.first_reduce-tc.num_threads()+n] = replace_input_idxs[n] # replace locals
           for n in range(tc.num_upcasts()):
             buf_idxs[self.shape_len-self.upcasted+n] = replace_input_idxs[tc.num_threads()+n] # replace upcasts
-        if DEBUG >= 3: print(f"{localbuf_idx} alias {i}: idxs=", buf_idxs)
+        if DEBUG >= 3: print(f"{localbuf_idx} alias {i}: sts={self.sts[i]} idxs={buf_idxs}")
         ll = self.global_load(i, buf_idxs)
         locals_to_store.append((localbuf_idx, buf_idxs, ll))
 
       # copy in any global buffers
       if (tc:=self.tensor_core):
-        wmma_sz = tc.thread_local_sizes
+        replace_acc_idxs = calc_tc_idxs(tc.thread_local_sizes[2], tc.thread_local_aliases[2])
+        for n in range(len(tc.threads)):
+          local_idxs[self.local_dims-len(tc.threads)+n] = replace_acc_idxs[n] # replace locals
+        for n in range(len(replace_acc_idxs)-len(tc.threads)):
+          upcast_idxs[n] = replace_acc_idxs[len(tc.threads)+n] # replace upcasts
+        if DEBUG >= 3: print(f"store alias: sts={self.sts[0]} idxs={global_idxs+local_idxs+fake_reduce_idxs+upcast_idxs}")
+
+        wmma_sz = [prod(l) for l in tc.thread_local_sizes]
         def upcast_strides(buf:int):
           strides, next = [], 1
           for (sz, stride, reduce) in self.upcasted_axis(buf)[tc.num_upcasts():]:
