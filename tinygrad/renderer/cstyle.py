@@ -307,4 +307,7 @@ class HIPLanguage(CStyleLanguage):
   launch_bounds = True
   uses_ptr_arithmetic = True
   type_map = {dtypes.bfloat16: "hip_bfloat16"}
+  def render_cast(self, x: List[str], var_dtype: DType, bitcast=False) -> str:
+    return (f"{{unsigned int fbits = __float_as_uint({x[0]}); hip_bfloat16 result = {{fbits >> 16}}; result;}}" if var_dtype == dtypes.bfloat16
+            else super().render_cast(x, var_dtype, bitcast))
 HIPRenderer = functools.partial(uops_to_cstyle, HIPLanguage())
