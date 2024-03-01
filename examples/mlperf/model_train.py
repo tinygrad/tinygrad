@@ -212,11 +212,12 @@ def train_resnet():
       total_top_1 = sum(eval_top_1_acc) / len(eval_top_1_acc)
       total_fw_time = sum(eval_times) / len(eval_times)
       tqdm.write(f"eval loss: {total_loss:.2f}, eval time: {total_fw_time:.2f}, eval top 1 acc: {total_top_1:.3f}")
-      wandb.log({"eval/loss": total_loss,
-                "eval/top_1_acc": total_top_1,
-                 "eval/forward_time": total_fw_time,
-                 "epoch": e + 1,
-      })
+      if WANDB:
+        wandb.log({"eval/loss": total_loss,
+                  "eval/top_1_acc": total_top_1,
+                   "eval/forward_time": total_fw_time,
+                   "epoch": e + 1,
+        })
 
       if not achieved and total_top_1 >= target:
         fn = f"./ckpts/{model_name}_cats{num_classes}.safe"
