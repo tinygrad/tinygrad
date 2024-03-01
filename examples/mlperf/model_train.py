@@ -119,7 +119,7 @@ def train_resnet():
     scheduler.step()
     loss.backward()
     optimizer.step()
-    return loss.realize(), out.realize(), top_1.realize()
+    return loss.realize(), top_1.realize()
   @TinyJit
   def eval_step(X, Y):
     X = normalize(X)
@@ -145,41 +145,38 @@ def train_resnet():
       if getenv("TESTEVAL"): break
 
       GlobalCounters.reset()
-      proc = (train_step(proc[0], proc[1]), (proc[0], proc[1]), proc[2])
+      loss, top_1_acc = train_step(proc[0], proc[1])
 
-      et = time.perf_counter()
-      dt = time.perf_counter()
+      pt = time.perf_counter()
 
       try:
         next_proc = data_get(it)
       except StopIteration:
         next_proc = None
 
-      dte = time.perf_counter()
+      dt = time.perf_counter()
 
-      device_str = proc[0][2].device if isinstance(proc[0][2].device, str) else f"{proc[0][2].device[0]} * {len(proc[0][2].device)}"
-      proc, loss_cpu, top_1_acc = None, proc[0][0].numpy(), proc[0][2].numpy().item() / BS  # return cookie
+      device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
+      proc, loss, top_1_acc = None, loss.numpy(), top_1_acc.numpy().item() / BS  # return cookie, free inputs
       cl = time.perf_counter()
 
       tqdm.write(
-        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(et - st) * 1000.0:7.2f} ms python, {(cl - dte) * 1000.0:7.2f} ms {device_str}, {(dte - dt) * 1000.0:6.2f} ms fetch data,"
-        f" {loss_cpu:5.2f} loss, {top_1_acc:3.2f} acc, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+        f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, {(cl - dt) * 1000.0:7.2f} ms {device_str},"
+        f" {loss:5.2f} loss, {top_1_acc:3.2f} acc, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
       if WANDB:
         wandb.log({"lr": optimizer.lr.numpy(),
-                   "train/data_time": dte-dt,
                    "train/step_time": cl - st,
-                   "train/python_time": et - st,
-                   "train/cl_time": cl - dte,
-                   "train/loss": loss_cpu,
+                   "train/python_time": pt - st,
+                   "train/data_time": dt - pt,
+                   "train/cl_time": cl - dt,
+                   "train/loss": loss,
                    "train/top_1_acc": top_1_acc,
                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st),
                    "epoch": e + (i + 1) / steps_in_train_epoch,
                    })
 
       st = cl
-
       proc, next_proc = next_proc, None
-
       i += 1
 
     # ** eval loop **
@@ -190,7 +187,7 @@ def train_resnet():
       eval_top_1_acc = []
       Tensor.training = False
 
-      it = iter(tqdm(t := batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False), total=steps_in_val_epoch))
+      it = iter(tqdm(batch_load_resnet(batch_size=EVAL_BS, val=True, shuffle=False), total=steps_in_val_epoch))
       proc = data_get(it)
       while proc is not None:
         GlobalCounters.reset()
@@ -204,7 +201,7 @@ def train_resnet():
           next_proc = None
 
         eval_loss.append(proc[0][0].numpy().item())
-        eval_top_1_acc.append(proc[0][2].numpy().item())
+        eval_top_1_acc.append(proc[0][2].numpy().item() / EVAL_BS)
         proc, next_proc = next_proc, None  # drop cookie
 
         et = time.time()
