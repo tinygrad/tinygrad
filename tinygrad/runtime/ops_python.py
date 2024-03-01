@@ -203,7 +203,7 @@ class PythonProgram:
 
 class PythonCompiler(Compiler):
   linearizer_opts = LinearizerOptions("METAL", has_tensor_cores=True) if getenv("EMULATE_METAL") else \
-    (LinearizerOptions("HIP", has_tensor_cores=True) if getenv("EMULATE_HIP") else LinearizerOptions())
+    (LinearizerOptions("HIP", has_tensor_cores=True) if getenv("EMULATE_HIP") else LinearizerOptions("PYTHON"))
   def render(self, name:str, uops:List[UOp]) -> str:
     lops = [(u.uop, u.dtype, [uops.index(v) for v in u.vin], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
