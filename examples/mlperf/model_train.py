@@ -126,7 +126,7 @@ def train_resnet():
     out = model.forward(X)
     loss = out.sparse_categorical_crossentropy(Y, label_smoothing=0.1)
     top_1 = (out.argmax(-1) == Y).sum()
-    return loss.realize(), out.realize(), top_1.realize()
+    return loss.realize(), top_1.realize()
 
   # ** epoch loop **
   for e in range(start_epoch, epochs):
@@ -145,7 +145,7 @@ def train_resnet():
       if getenv("TESTEVAL"): break
 
       GlobalCounters.reset()
-      loss, top_1_acc = train_step(proc[0], proc[1])
+      (loss, top_1_acc), proc = train_step(proc[0], proc[1]), proc[2]
 
       pt = time.perf_counter()
 
@@ -157,7 +157,8 @@ def train_resnet():
       dt = time.perf_counter()
 
       device_str = loss.device if isinstance(loss.device, str) else f"{loss.device[0]} * {len(loss.device)}"
-      proc, loss, top_1_acc = None, loss.numpy(), top_1_acc.numpy().item() / BS  # return cookie, free inputs
+      loss, top_1_acc = loss.numpy().item(), top_1_acc.numpy().item() / BS
+
       cl = time.perf_counter()
 
       tqdm.write(
@@ -176,7 +177,7 @@ def train_resnet():
                    })
 
       st = cl
-      proc, next_proc = next_proc, None
+      proc, next_proc = next_proc, None  # return old cookie
       i += 1
 
     # ** eval loop **
@@ -193,16 +194,17 @@ def train_resnet():
         GlobalCounters.reset()
         st = time.time()
 
-        proc = (eval_step(proc[0], proc[1]), proc[1], proc[2])
+        (loss, top_1_acc), proc = eval_step(proc[0], proc[1]), proc[2]  # drop inputs, keep cookie
 
         try:
           next_proc = data_get(it)
         except StopIteration:
           next_proc = None
 
-        eval_loss.append(proc[0][0].numpy().item())
-        eval_top_1_acc.append(proc[0][2].numpy().item() / EVAL_BS)
-        proc, next_proc = next_proc, None  # drop cookie
+        loss, top_1_acc = loss.numpy(), top_1_acc.numpy().item() / EVAL_BS
+        eval_loss.append(loss)
+        eval_top_1_acc.append(top_1_acc)
+        proc, next_proc = next_proc, None  # return old cookie
 
         et = time.time()
         eval_times.append(et - st)
