@@ -4,7 +4,7 @@ from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit
 from tinygrad.device import BufferCopy
 from tinygrad.ops import LoadOps, ReduceOps
 from tinygrad.helpers import CI
-from tinygrad.nn.state import get_parameters
+from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.realize import create_schedule
 import numpy as np
 from hypothesis import given, strategies as strat, settings
@@ -560,9 +560,11 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       conv = nn.Conv2d(3, 16, 3)
       bn = UnsyncedBatchNorm(16, num_devices=len(GPUS))
 
-      for p in get_parameters([conv, bn]):
-        if not isinstance(p.lazydata, MultiLazyBuffer):
-          p.shard_(GPUS)
+      for k, p in get_state_dict([conv, bn]).items():
+        if 'running_mean' in k or 'running_var' in k:
+          p.shard_(GPUS, axis=0)
+        else:
+          p.to_(GPUS)
       optim = nn.optim.Adam(get_parameters([conv, bn]))
       lr_sched = OneCycleLR(optim, max_lr=0.1, pct_start=0.1, div_factor=100, final_div_factor=0.1, total_steps=10)
       lr_sched.step()
@@ -606,8 +608,13 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       synced_bn = BatchNorm2d(8)
       unsynced_bn = UnsyncedBatchNorm(8, num_devices=len(devices))
 
-      for p in get_parameters([synced_bn, unsynced_bn]):
+      for p in get_parameters(synced_bn):
         p.shard_(devices)
+      for k, p in get_state_dict(unsynced_bn).items():
+        if 'running_mean' in k or 'running_var' in k:
+          p.shard_(devices, axis=0)
+        else:
+          p.to_(devices)
 
       synced_out = synced_bn(x)
       synced_si = [si for si in create_schedule(synced_out.lazydata.lbs)]
