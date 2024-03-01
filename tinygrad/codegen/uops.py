@@ -1,9 +1,9 @@
 from __future__ import annotations
-from typing import List, Set, Optional, Tuple, Any, Dict
+from typing import List, Set, Optional, Tuple, Any
 from tinygrad.helpers import DEBUG, flatten
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
-from tinygrad.shape.symbolic import Variable, sint
+from tinygrad.shape.symbolic import sint
 from enum import Enum, auto
 from dataclasses import dataclass
 
@@ -83,17 +83,17 @@ def uops_type_verify(uops:List[UOp]):
         assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
         assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
 
-def uops_alu_resolve(u:UOp, vars:Dict[str, Variable]) -> sint:
+def uops_alu_resolve(u:UOp) -> sint:
   if u.uop == UOps.CONST: return u.arg
-  elif u.uop == UOps.DEFINE_GLOBAL: return vars[u.arg[1]]
+  elif u.uop == UOps.DEFINE_VAR: return u.arg
   elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL:
-    return uops_alu_resolve(u.vin[0], vars) * uops_alu_resolve(u.vin[1], vars)
+    return uops_alu_resolve(u.vin[0]) * uops_alu_resolve(u.vin[1])
   elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD:
-    return uops_alu_resolve(u.vin[0], vars) + uops_alu_resolve(u.vin[1], vars)
+    return uops_alu_resolve(u.vin[0]) + uops_alu_resolve(u.vin[1])
   else:
     raise RuntimeError(f"ALU resolve fail @ {u.uop}")
 
-def uops_flops_mem(uops:List[UOp], vars:Dict[str, Variable]) -> Tuple[sint, sint]:
+def uops_flops_mem(uops:List[UOp]) -> Tuple[sint, sint]:
   flops: sint = 0
   mem: sint = 0
   mults: sint = 1
@@ -101,7 +101,7 @@ def uops_flops_mem(uops:List[UOp], vars:Dict[str, Variable]) -> Tuple[sint, sint
   for u in uops:
     if u.uop is UOps.LOOP:
       mult_stack.append(mults)
-      mults *= uops_alu_resolve(u.vin[1], vars)
+      mults *= uops_alu_resolve(u.vin[1])
     if u.uop is UOps.ENDLOOP:
       mults = mult_stack.pop(-1)
     if u.uop is UOps.ALU:
