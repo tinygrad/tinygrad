@@ -22,10 +22,11 @@ class MyQueue:
     self._writer.send_bytes(pickle.dumps(obj))
     if self._wlock: self._wlock.release()
 
-def shuffled_indices(n):
+def shuffled_indices(n, seed=None):
+  rng = random.Random(seed)
   indices = {}
   for i in range(n-1, -1, -1):
-    j = random.randint(0, i)
+    j = rng.randint(0, i)
     if i not in indices: indices[i] = i
     if j not in indices: indices[j] = j
     indices[i], indices[j] = indices[j], indices[i]
@@ -75,10 +76,6 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
   from extra.datasets.imagenet import get_imagenet_categories
   cir = get_imagenet_categories()
 
-  if seed is not None:
-    random.seed(seed)
-    np.random.seed(seed)
-
   BATCH_COUNT = min(32, len(files) // batch_size)
   #q_in, q_out = MyQueue(multiple_writers=False), MyQueue(multiple_readers=False)
   q_in, q_out = Queue(), Queue()
@@ -87,7 +84,6 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
   if os.path.exists("/dev/shm/resnet_X"): os.unlink("/dev/shm/resnet_X")
   shm = shared_memory.SharedMemory(name="resnet_X", create=True, size=prod(sz))
   shm.unlink()  # no need to keep the name around
-
   # disk:shm is slower
   #X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:shm:{shm.name}")
   X = Tensor.empty(*sz, dtype=dtypes.uint8, device=f"disk:/dev/shm/resnet_X")
@@ -100,7 +96,7 @@ def batch_load_resnet(batch_size=64, val=False, shuffle=True, seed=None):
     p.start()
     procs.append(p)
 
-  gen = shuffled_indices(len(files)) if shuffle else iter(range(len(files)))
+  gen = shuffled_indices(len(files), seed=seed) if shuffle else iter(range(len(files)))
   def enqueue_batch(num):
     for idx in range(num*batch_size, (num+1)*batch_size):
       fidx = next(gen)
