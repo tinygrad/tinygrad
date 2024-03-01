@@ -15,7 +15,6 @@ class UnsyncedBatchNorm(nn.UnsyncBatchNorm2d):
 
 BatchNorm = nn.BatchNorm2d if getenv("SYNCBN", 0) else UnsyncedBatchNorm
 
-
 # rejection sampling truncated randn
 def rand_truncn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
   CNT=8
@@ -23,7 +22,6 @@ def rand_truncn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
   ctr = Tensor.arange(CNT).reshape((1,) * len(x.shape[:-1]) + (CNT,)).expand(x.shape)
   take = (x.abs() <= truncstds).where(ctr, CNT).min(axis=-1, keepdim=True)  # set to 0 if no good samples
   return (ctr == take).where(x, 0).sum(axis=-1)
-
 
 class Conv2dHeNormal(nn.Conv2d):
   def initialize_weight(self, out_channels, in_channels, groups):
