@@ -187,7 +187,7 @@ class Compiler:
 
 class CompiledASTRunner(JITRunner):
   def __init__(self, name:str, prg:str, device:Compiled, global_size:Optional[List[int]]=None, local_size:Optional[List[int]]=None,
-               variables:Optional[List[Variable]]=None, op_estimate=0, mem_estimate=0, precompiled:Optional[bytes]=None):
+               variables:Optional[List[Variable]]=None, op_estimate:sint=0, mem_estimate:sint=0, precompiled:Optional[bytes]=None):
     super().__init__()
     if DEBUG >= 4: print(prg)
     if global_size is not None: global_size = global_size + [1]*(3-len(global_size))
