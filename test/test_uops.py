@@ -7,12 +7,13 @@ from tinygrad.device import Buffer, Device
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
 from tinygrad.device import CompiledASTRunner, Compiled
 from tinygrad.codegen.linearizer import UOps, UOp
+from tinygrad.runtime.ops_python import exec_alu
 from test.test_dtype import is_dtype_supported
 
 def _uops_to_prg(uops):
   src = Device[Device.DEFAULT].compiler.render("test", uops)
   has_local = Device[Device.DEFAULT].compiler.linearizer_opts.has_local
-  return CompiledASTRunner(None, "test", src, Device[Device.DEFAULT], [1] if has_local else None, [1] if has_local else None)
+  return CompiledASTRunner("test", src, Device[Device.DEFAULT], [1] if has_local else None, [1] if has_local else None)
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(vin), arg))
@@ -21,8 +22,8 @@ def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], ar
 def _test_single_value(vals, op, dts):
   uops = []
   output_dtype = dts[-1] if op is TernaryOps.WHERE else dtypes.bool if op is BinaryOps.CMPLT else dts[0]
-  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 'data0')
-  buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), f'data{i+1}') for i,dtype in enumerate(dts)]
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), (0, 'data0'))
+  buf_loads = [uop(uops, UOps.DEFINE_GLOBAL, PtrDType(dtype), (), (i+1, f'data{i+1}')) for i,dtype in enumerate(dts)]
   loads = (uop(uops, UOps.LOAD, dtype, [buf_loads[i], uop(uops, UOps.CONST, dtypes.int32, (), 0)]) for i,dtype in enumerate(dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
@@ -37,7 +38,7 @@ def _test_single_value(vals, op, dts):
 def _test_single_value_const(vals, op, dts):
   uops = []
   output_dtype = dts[-1] if op is TernaryOps.WHERE else dtypes.bool if op is BinaryOps.CMPLT else dts[0]
-  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), 'data0')
+  buf_store = uop(uops, UOps.DEFINE_GLOBAL, PtrDType(output_dtype), (), (0, 'data0'))
   loads = (uop(uops, UOps.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, UOps.ALU, output_dtype, loads, op)
   uop(uops, UOps.STORE, None, (buf_store, uop(uops, UOps.CONST, dtypes.int32, (), 0), alu))
@@ -86,7 +87,6 @@ class TestFloatUOps(TestUOps):
   def test_cmplt(self): self._test_bop_fxn(BinaryOps.CMPLT, lambda a,b: a<b)
   # MOD isn't tested on floats
 
-  def test_mulacc(self): self._test_top_fxn(TernaryOps.MULACC, lambda a,b,c: (a*b)+c)
   def test_where(self):
     self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, (PtrDType(dtypes.bool), PtrDType(dtypes.float), PtrDType(dtypes.float)))
 
@@ -108,6 +108,10 @@ class TestNonFloatUOps(TestUOps):
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "dtype not supported")
   def test_where_float16(self):
     self._test_top_fxn(TernaryOps.WHERE, lambda a,b,c: b if a!=0 else c, (PtrDType(dtypes.bool), PtrDType(dtypes.float16), PtrDType(dtypes.float16)))
+
+class TestExecALU(TestUOps):
+  def test_sqrt(self):
+    self.assertEqual(exec_alu(UnaryOps.SQRT, dtypes.int, (0,)), 0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

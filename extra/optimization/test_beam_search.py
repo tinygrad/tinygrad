@@ -63,5 +63,12 @@ class TestBeamSearch(unittest.TestCase):
     with Timing():
       c(x).realize()
 
+  def test_large_ast(self):
+    a = Tensor.rand(3, 3)
+    for _ in range(5):
+      for _ in range(4):
+        a = (a + a) * a
+    a.realize()
+
 if __name__ == '__main__':
   unittest.main()
