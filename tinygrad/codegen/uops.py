@@ -33,7 +33,7 @@ def get_recursive_children(uops:List[UOp], x:UOp) -> Set[UOp]:
         deps.add(u)
   return deps
 
-UOPS_W_SIDE_EFFECTS = {UOps.STORE, UOps.BARRIER}
+UOPS_W_SIDE_EFFECTS = {UOps.STORE}
 def remove_childless_uops(uops:List[UOp]) -> List[UOp]:
   while 1:
     has_child: Set[UOp] = set()

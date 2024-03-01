@@ -283,9 +283,6 @@ class Linearizer(Kernel):
       # reduce loop
       loop_ctx = render_loop(reduce_idxs)
 
-      # barrier for fast GEMM
-      if self.tensor_core: self.uop(UOps.BARRIER, None, (), cachable=False)
-
       # compute local aliases
       locals_to_store = []
       for i in self.local_alias:
@@ -321,10 +318,7 @@ class Linearizer(Kernel):
           for z in range(wmma_sz[2]):
             acc[offs[2]+z] = self.uop(UOps.PHI, tc.dtype_out, (op3[z], self.uop(UOps.GEP, tc.dtype_out, (ret,), z)) + loop_ctx)
       else:
-        if locals_to_store:
-          self.uop(UOps.BARRIER, None, (), cachable=False)
-          for i, idxs, ll in locals_to_store: self.global_store(i, idxs, ll)
-          self.uop(UOps.BARRIER, None, (), cachable=False)
+        assert not locals_to_store, "storing locals isn't supported here"
 
         # load earlybufs
         loaded_buffers.update({b:self.global_load(self.bufs.index(self.local_alias[i]) if i in self.local_alias else i, global_idxs+local_idxs+reduce_idxs+full_upcast_idxs) for i,b in enumerate(self.bufs[1:], start=1) if b in self.earlybufs})  # noqa: E501
