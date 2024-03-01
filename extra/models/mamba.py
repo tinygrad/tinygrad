@@ -2,7 +2,6 @@
 # https://medium.com/ai-insights-cobet/building-mamba-from-scratch-a-comprehensive-code-walkthrough-5db040c28049
 
 from tinygrad import Tensor, nn, dtypes
-import torch.nn as nnn
 
 #TODO: put these params in main and pass to classes
 device = "CUDA"
