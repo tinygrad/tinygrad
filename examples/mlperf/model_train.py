@@ -12,11 +12,6 @@ import wandb
 import time
 import os
 
-BS = getenv("BS", 64)
-EVAL_BS = getenv('EVAL_BS', BS)
-
-# fp32 GPUS<=6 7900xtx can fit BS=112
-
 def train_resnet():
   from extra.models.resnet import ResNet50, ResNet18, UnsyncedBatchNorm
   from examples.mlperf.dataloader import batch_load_resnet
@@ -46,15 +41,18 @@ def train_resnet():
   parameters = get_parameters(model)
 
   # ** hyperparameters **
-  target = getenv("TARGET", 0.759)
-  achieved = False
   epochs = getenv("EPOCHS", 45)
+  BS = getenv("BS", 104 * len(GPUS))  # fp32 GPUS<=6 7900xtx can fit BS=112
+  EVAL_BS = getenv('EVAL_BS', BS)
+  base_lr = getenv("LR", 8.4 * (BS/2048))
+  lr_warmup_epochs = 5
   decay = getenv("DECAY", 2e-4)
+  target, achieved = getenv("TARGET", 0.759), False
+  eval_start_epoch = getenv("EVAL_START_EPOCH", 2)
+  eval_epochs = getenv("EVAL_EPOCHS", 4)
+
   steps_in_train_epoch = (len(get_train_files()) // BS)
   steps_in_val_epoch = (len(get_val_files()) // EVAL_BS)
-
-  # ** Learning rate **
-  base_lr = getenv("LR", 8.4 * (BS/2048))
 
   # ** Optimizer **
   from examples.mlperf.optimizers import LARS
@@ -62,7 +60,6 @@ def train_resnet():
   optimizer = LARS(parameters, base_lr, momentum=.9, weight_decay=decay, skip_list=skip_list)
 
   # ** LR scheduler **
-  lr_warmup_epochs = 5
   scheduler = PolynomialLR(optimizer, base_lr, 1e-4, epochs=epochs * steps_in_train_epoch, warmup=lr_warmup_epochs * steps_in_train_epoch)
   print(f"training with batch size {BS} for {epochs} epochs")
 
@@ -181,7 +178,7 @@ def train_resnet():
       i += 1
 
     # ** eval loop **
-    if (e+1-getenv("EVAL_START_EPOCH", 2)) % getenv("EVAL_EPOCHS", 4) == 0:
+    if (e+1-eval_start_epoch) % eval_epochs == 0:
       train_step.reset()  # free the train step memory :(
       eval_loss = []
       eval_times = []
