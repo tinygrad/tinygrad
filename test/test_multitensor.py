@@ -553,7 +553,6 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
   def test_unsynced_backprop_sync_weights(self):
     from extra.lr_scheduler import OneCycleLR
     from examples.hlb_cifar10 import UnsyncedBatchNorm
-    from tinygrad.features.multi import MultiLazyBuffer
     GPUS = (d1, d2)
 
     with Tensor.train():
