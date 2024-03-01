@@ -38,9 +38,9 @@ temp_buffer = None
 
 class S6Layer():
   def __init__(self, seq_len, d_model, state_size, device):
-    self.fc1 = nn.Linear(d_model, d_model, device=device)
-    self.fc2 = nn.Linear(d_model, state_size, device=device)
-    self.fc3 = nn.Linear(d_model, state_size, device=device)
+    self.fc1 = nn.Linear(d_model, d_model)
+    self.fc2 = nn.Linear(d_model, state_size)
+    self.fc3 = nn.Linear(d_model, state_size)
 
     self.seq_len = seq_len
     self.d_model = d_model
@@ -69,10 +69,10 @@ class S6Layer():
 
     # inverse() only supports square matrix
     #dB = torch.matmul(torch.inverse(A * delta), torch.matmul(dA - torch.eye(A.shape[0]), B))
-    self.dB = self.delta.einsum("bld,bln->bldn", self.B)
+    self.dB = Tensor.einsum("bld,bln->bldn", (self.delta, self.B))
     # https://github.com/state-spaces/mamba/blob/0131c1e94a46fc9f70bcfc9d57962963bb2f0b9e/mamba_ssm/modules/mamba_simple.py#L240
     #dA = torch.matrix_exp(A * delta)  # matrix_exp() only supports square matrix
-    self.dA = self.delta.einsum("bld,dn->bldn", self.A).exp()
+    self.dA = Tensor.einsum("bld,dn->bldn", (self.delta, self.A)).exp()
     #print(f"self.dA.shape = {self.dA.shape}")
     #print(f"self.dA.requires_grad = {self.dA.requires_grad}")
 
@@ -104,24 +104,24 @@ class S6Layer():
       temp_buffer = h_new.detach() if not self.h.requires_grad else h_new()
       return self.y
     else: 
-        h = Tensor.zeros_like(x.shape[0], self.seq_len, self.d_model, self.state_size, device=x.device)
+        h = Tensor.zeros(x.shape[0], self.seq_len, self.d_model, self.state_size, device=x.device)
         y = Tensor.zeros_like(x)
-        h = self.dA.einsum("bldn,bldn->bldn", h) + x.reshape(current_batch_size, x.shape[1], x.shape[2], 1) * self.dB
-        y = self.C.einsum("bln,bldn->bld", h)
+        h = Tensor.einsum("bldn,bldn->bldn", (self.dA, h)) + x.reshape(current_batch_size, x.shape[1], x.shape[2], 1) * self.dB
+        y = Tensor.einsum("bln,bldn->bld", (self.C, h))
         return y
         
 
 class Block():
   def __init__(self, seq_len, d_model, state_size, device):
-    self.inp_proj = nn.Linear(d_model, 2*d_model, device=device)
-    self.out_proj = nn.Linear(2*d_model, d_model, device=device)
-    self.D = nn.Linear(d_model, 2*d_model, device=device)
+    self.inp_proj = nn.Linear(d_model, 2*d_model)
+    self.out_proj = nn.Linear(2*d_model, d_model)
+    self.D = nn.Linear(d_model, 2*d_model)
 
     # self.out_proj.bias._no_weight_decay = True
     self.out_proj.bias = Tensor.ones(self.out_proj.bias)
     self.S6 = S6Layer(seq_len, 2*d_model, state_size, device)
-    self.conv = nn.Conv1d(seq_len, seq_len, kernel_size=3, padding=1, device=device)
-    self.conv_linear = nn.Linear(2*d_model, 2*d_model, device=device)
+    self.conv = nn.Conv1d(seq_len, seq_len, kernel_size=3, padding=1)
+    self.conv_linear = nn.Linear(2*d_model, 2*d_model)
     self.norm = RMSNorm(d_model, device=device)
 
   def __call__(self, x):
@@ -176,7 +176,13 @@ class RMSNorm():
     return output
 
 def main():
-  pass
+  x = Tensor.rand(batch_size, seq_len, d_model, device=device)
+  mamba = Mamba(seq_len, d_model, state_size, device)
+  norm = RMSNorm(d_model)
+  x = norm(x)
+  output = mamba(x)
+  print(f"test_output.shape = {output.shape}")
+
 
 if __name__ == "__main__":
   main()
