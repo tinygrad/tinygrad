@@ -171,6 +171,7 @@ class TestLinearizer(unittest.TestCase):
       k.apply_tensor_cores(1)
       k.linearize()
       assert len([uop for uop in k.uops if uop.uop == UOps.WMMA]) == 1, "tensor core not triggered"
+      assert len([x for x in k.applied_opts if x.op == OptOps.TC]) == 1, "tensor core opt not included"
       np_c = np_a @ np_b
       (tc_atol, tc_rtol) = (1e-2, 1e-3) if tc.dtype_out == dtypes.half else (5e-3, 1e-4)
       np.testing.assert_allclose(np_c, r.numpy(), atol=tc_atol, rtol=tc_rtol)
