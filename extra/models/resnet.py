@@ -23,12 +23,13 @@ def rand_truncn(*shape, dtype=None, truncstds=2, **kwargs) -> Tensor:
   take = (x.abs() <= truncstds).where(ctr, CNT).min(axis=-1, keepdim=True)  # set to 0 if no good samples
   return (ctr == take).where(x, 0).sum(axis=-1)
 
+# https://github.com/keras-team/keras/blob/v2.15.0/keras/initializers/initializers.py#L1026-L1065
+def he_normal(*shape, a: float = 0.00, **kwargs) -> Tensor:
+  std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(argfix(*shape)[1:])) / 0.87962566103423978
+  return std * rand_truncn(*shape, **kwargs)
+
 class Conv2dHeNormal(nn.Conv2d):
   def initialize_weight(self, out_channels, in_channels, groups):
-    # https://github.com/keras-team/keras/blob/v2.15.0/keras/initializers/initializers.py#L1026-L1065
-    def he_normal(*shape, a: float = 0.00, **kwargs) -> Tensor:
-      std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(argfix(*shape)[1:])) / 0.87962566103423978
-      return std * rand_truncn(*shape, **kwargs)
     return he_normal(out_channels, in_channels//groups, *self.kernel_size, a=0.0)
 
 class Linear(nn.Linear):
