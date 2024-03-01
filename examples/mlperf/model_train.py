@@ -26,8 +26,8 @@ def train_resnet():
   seed = getenv('SEED', 42)
   Tensor.manual_seed(seed)
 
-  GPUS = tuple([Device.canonicalize(f'{Device.DEFAULT}:{i}') for i in range(getenv("GPUS", 1))])
-  UnsyncedBatchNorm.devices = GPUS
+  GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))]
+  UnsyncedBatchNorm.devices = len(GPUS)
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
 
@@ -38,8 +38,11 @@ def train_resnet():
   else:
     model, model_name = ResNet50(num_classes), "resnet50"
 
-  for v in get_parameters(model):
-    v.to_(GPUS)
+  for k, x in get_state_dict(model).items():
+    if not getenv('SYNCBN') and ('running_mean' in k or 'running_bias' in k):
+      x.shard_(GPUS, axis=0)
+    else:
+      x.to_(GPUS)
   parameters = get_parameters(model)
 
   # ** hyperparameters **
