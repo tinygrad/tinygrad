@@ -403,6 +403,12 @@ class Linearizer(Kernel):
     return self
 
   def uoptimize(self):
+    # toposort the uops
+    from graphlib import TopologicalSorter
+    graph = {u:u.vin for u in self.uops}
+    ts = TopologicalSorter(graph)
+    self.uops = list(ts.static_order())
+
     # get PHI node loop scope, link anything using a DEFINE_ACC to the loop as a "parent"
     acc_scope: DefaultDict[UOp, List[UOp]] = defaultdict(list)
     for u in self.uops:
