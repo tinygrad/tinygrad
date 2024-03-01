@@ -34,13 +34,13 @@ class Node:
   def __neg__(self): return self*-1
   def __add__(self, b:Union[Node,int]): return Node.sum([self, NumNode(b) if isinstance(b, int) else b])
   def __radd__(self, b:int): return self+b
-  def __sub__(self, b:Union[Node,int,float]): return self+-b
-  def __rsub__(self, b:Union[int,float]): return -self+b
-  def __le__(self, b:Union[Node,int,float]): return self < (b+1)
-  def __gt__(self, b:Union[Node,int,float]): return (-self) < (-b)
-  def __ge__(self, b:Union[Node,int,float]): return (-self) < (-b+1)
-  def __lt__(self, b:Union[Node,int,float]): return create_node(LtNode(self, b))
-  def __mul__(self, b:Union[Node, int,float]):
+  def __sub__(self, b:Union[Node,int]): return self+-b
+  def __rsub__(self, b:Union[int]): return -self+b
+  def __le__(self, b:Union[Node,int]): return self < (b+1)
+  def __gt__(self, b:Union[Node,int]): return (-self) < (-b)
+  def __ge__(self, b:Union[Node,int]): return (-self) < (-b+1)
+  def __lt__(self, b:Union[Node,int]): return create_node(LtNode(self, b))
+  def __mul__(self, b:Union[Node, int]):
     if b == 0: return NumNode(0)
     if b == 1: return self
     return create_node(MulNode(self, b.b)) if isinstance(b, NumNode) else create_node(MulNode(self, b))
@@ -136,9 +136,9 @@ class Variable(Node):
   def substitute(self, var_vals: Mapping[Variable, Union[NumNode, Variable]]) -> Node: return var_vals.get(self, self)
 
 class NumNode(Node):
-  def __init__(self, num:Union[int, float]):
-    assert isinstance(num, int) or isinstance(num, float), f"{num} is not number-like"
-    self.b:Union[int, float] = num
+  def __init__(self, num:Union[int]):
+    assert isinstance(num, int), f"{num} is not number-like"
+    self.b:Union[int] = num
     self.min, self.max = num, num
   def bind(self, val):
     assert self.b == val, f"cannot bind {val} to {self}"

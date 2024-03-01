@@ -404,7 +404,6 @@ class Linearizer(Kernel):
     return self
 
   def loop_fold_resolve(self, u: UOp, state:Dict[str, Variable]):
-    print("got loop fold resolve for ", u.uop, u.arg)
     resolve = lambda uop: uops_alu_resolve(uop, lambda u: self.loop_fold_resolve(u, state))
     if u.uop == UOps.LOOP:
       state["_loopidx"] = Variable("_loopidx", resolve(u.vin[0]), resolve(u.vin[1]) - 1)
@@ -501,7 +500,6 @@ class Linearizer(Kernel):
 
     # verify the uop types
     uops_type_verify(self.uops)
-
 
   def uop(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None, simplify=True) -> UOp:  # noqa: E501
     if simplify:
