@@ -83,7 +83,7 @@ def train_resnet():
       "classes": num_classes,
       "decay": decay,
       "train_files": len(get_train_files()),
-      "eval_files": len(get_train_files()),
+      "eval_files": len(get_val_files()),
       "steps_in_train_epoch": steps_in_train_epoch,
       "GPUS": GPUS,
       "BEAM": getenv("BEAM"),
