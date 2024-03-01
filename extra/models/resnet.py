@@ -6,11 +6,12 @@ from tinygrad.nn.state import torch_load
 from tinygrad.helpers import fetch, get_child, getenv, prod, argfix
 from tinygrad.dtype import dtypes
 from tinygrad.features.multi import MultiLazyBuffer
+from examples.hlb_cifar10 import UnsyncedBatchNorm
 
 class UnsyncedBatchNorm(nn.UnsyncBatchNorm2d):
-  devices = None
+  devices = 1
   def __init__(self, *args, **kwargs):
-    super().__init__(UnsyncedBatchNorm.devices, *args, kwargs)
+    super().__init__(*args, kwargs, UnsyncedBatchNorm.devices)
 
 BatchNorm = nn.BatchNorm2d if getenv("SYNCBN", 0) else UnsyncedBatchNorm
 
