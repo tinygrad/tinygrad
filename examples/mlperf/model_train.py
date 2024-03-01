@@ -163,12 +163,12 @@ def train_resnet():
         f" {loss:5.2f} loss, {top_1_acc:3.2f} acc, {optimizer.lr.numpy()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
       if WANDB:
         wandb.log({"lr": optimizer.lr.numpy(),
+                   "train/loss": loss,
+                   "train/top_1_acc": top_1_acc,
                    "train/step_time": cl - st,
                    "train/python_time": pt - st,
                    "train/data_time": dt - pt,
                    "train/cl_time": cl - dt,
-                   "train/loss": loss,
-                   "train/top_1_acc": top_1_acc,
                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st),
                    "epoch": e + (i + 1) / steps_in_train_epoch,
                    })
