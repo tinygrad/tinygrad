@@ -36,7 +36,6 @@ def center_crop(img):
   img = img.resize((224, 224), Image.BILINEAR, box=(crop_left, crop_top, crop_left + 224 * rescale, crop_top + 224 * rescale))
   return img
 
-
 # we don't use supplied imagenet bounding boxes, so scale min is just min_object_covered
 # https://github.com/tensorflow/tensorflow/blob/e193d8ea7776ef5c6f5d769b6fb9c070213e737a/tensorflow/core/kernels/image/sample_distorted_bounding_box_op.cc
 def random_resized_crop(img, size, scale=(0.10, 1.0), ratio=(3/4, 4/3)):
