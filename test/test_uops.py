@@ -13,7 +13,7 @@ from test.test_dtype import is_dtype_supported
 def _uops_to_prg(uops):
   src = Device[Device.DEFAULT].compiler.render("test", uops)
   has_local = Device[Device.DEFAULT].compiler.linearizer_opts.has_local
-  return CompiledASTRunner(None, "test", src, Device[Device.DEFAULT], [1] if has_local else None, [1] if has_local else None)
+  return CompiledASTRunner("test", src, Device[Device.DEFAULT], [1] if has_local else None, [1] if has_local else None)
 
 def uop(uops:List[UOp], uop:UOps, dtype:Optional[DType], vin:Tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(vin), arg))
