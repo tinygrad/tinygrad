@@ -1,6 +1,6 @@
 from __future__ import annotations
 import functools
-from typing import List, Set, Optional, Tuple, Any, Dict, Union, DefaultDict
+from typing import List, Set, Optional, Tuple, Any, Dict, DefaultDict
 from collections import defaultdict
 from tinygrad.helpers import DEBUG, flatten, all_same
 from tinygrad.dtype import dtypes, DType
@@ -55,25 +55,21 @@ class UOpGraph:
     for u in self.uops:
       print(f"{self.uops.index(u):4d} {str(u.uop):20s}: {str(u.dtype) if u.dtype is not None else '':25s} {str([self.uops.index(x) for x in u.vin]):32s} {u.arg}")  # noqa: E501
 
-  # NOTE: the consts have to be cached for deduping of downstream uops to work
-  def const(self, b:Union[int,float], dtype=dtypes.int32, insert_before=None) -> UOp:
-    return self.add(UOps.CONST, dtype, tuple(), b, insert_before=insert_before)
-
   def add(self, uop:UOps, dtype:Optional[DType]=None, vin:Tuple[UOp, ...]=tuple(), arg:Any=None, cachable=True, insert_before=None, simplify=True) -> UOp:  # noqa: E501
     if simplify:
       if uop is UOps.PHI and len(vin) == 2: return vin[1]   # a phi without loops is a noop
-      if uop is UOps.GEP and vin[0].uop is UOps.CONST: return self.const(vin[0].arg, dtype, insert_before)
+      if uop is UOps.GEP and vin[0].uop is UOps.CONST: return self.add(UOps.CONST, dtype, arg=vin[0].arg, insert_before=insert_before)
       if uop is UOps.CAST and all(x.uop is UOps.CONST for x in vin) and all_same([x.arg for x in vin]):
-        return self.const(vin[0].arg, dtype, insert_before)
+        return self.add(UOps.CONST, dtype, arg=vin[0].arg, insert_before=insert_before)
       if uop is UOps.ALU:
         # rewrites. NOTE: the rewritten NEG op is still around...
         if arg is BinaryOps.ADD and vin[1].uop is UOps.ALU and vin[1].arg is UnaryOps.NEG:
           return self.add(UOps.ALU, dtype, (vin[0], vin[1].vin[0]), BinaryOps.SUB, cachable, insert_before)
         # constant folding
-        if arg is UnaryOps.NEG and vin[0].uop is UOps.CONST: return self.const(-vin[0].arg, dtype, insert_before)
+        if arg is UnaryOps.NEG and vin[0].uop is UOps.CONST: return self.add(UOps.CONST, dtype, arg=-vin[0].arg, insert_before=insert_before)
         if arg is TernaryOps.WHERE and vin[1] == vin[2]: return vin[1] # a conditional with the same results either way is a noop
         if arg is BinaryOps.MUL and vin[0].uop is UOps.CONST and vin[1].uop is UOps.CONST and dtype is not None and dtypes.is_float(dtype):
-          return self.const(vin[0].arg * vin[1].arg, dtype, insert_before)
+          return self.add(UOps.CONST, dtype, arg=vin[0].arg * vin[1].arg, insert_before=insert_before)
         # zero folding
         for x in [0,1]:
           if arg is BinaryOps.ADD and vin[x].uop is UOps.CONST and vin[x].arg == 0.0: return vin[1-x]
