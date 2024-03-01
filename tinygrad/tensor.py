@@ -355,9 +355,10 @@ class Tensor:
   #   3. None indexing (no copy)
   #     - reshape (inject) a dim at the dim where there's None
   #   4. Tensor indexing (copy)
-  #     - use Tensor.arange == tensor_index to create a mask
-  #     - apply mask to self by mask * self for dims where index is a tensor
-  #     - (mask * self).sum(dim) to reduce to correct shape
+  #     - use Tensor.arange == tensor_index to create masks for dims with Tensors (adds a dim for each mask)
+  #     - combine masks together with mul
+  #     - apply mask to self by mask * self
+  #     - sum reduce away the extra dims added from creating masks
   # Tiny Things:
   #   1. Supported indices: Union[int, slice, Tensor, None, List, Tuple, Ellipsis]
   #     - for any list, List[Union[List, Tuple, int]], must have homogeneous shape
