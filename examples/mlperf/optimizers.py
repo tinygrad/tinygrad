@@ -14,25 +14,24 @@ class LARS(Optimizer):
   def step(self):
     for i, t in enumerate(self.params):
       assert t.grad is not None
-      t.grad.realize()
+      g = t.grad.realize()
       t_ = t.detach()
-      g_norm = (t.grad * t.grad).sum().sqrt()
+
       if t not in self.skip_list:
+        g_norm = (g * g).sum().sqrt()
         w_norm = (t_ * t_).sum().sqrt()
-        trust_ratio = (w_norm > 0).where(
-          (g_norm > 0).where(
-            self.eta * w_norm / (g_norm + self.weight_decay * w_norm + self.eps), 1.0
-          ), 1.0
-        )
+        trust_ratio = (w_norm > 0).where((g_norm > 0).where(
+            self.eta * w_norm / (g_norm + self.weight_decay * w_norm + self.eps),
+          1.0), 1.0)
+
         scaled_lr = self.lr * trust_ratio
-        g = t.grad + self.weight_decay * t.detach()
+        g = g + self.weight_decay * t.detach()
       else:
         scaled_lr = self.lr
-        g = t.grad
 
       g = g * scaled_lr
       if self.momentum:
-        self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
+        self.b[i].assign(self.momentum * self.b[i] + g)
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       t.assign(t.detach() - g)
     self.realize(self.b)
