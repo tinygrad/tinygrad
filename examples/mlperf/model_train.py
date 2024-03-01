@@ -18,10 +18,10 @@ def train_resnet():
   from extra.datasets.imagenet import get_train_files, get_val_files
   from extra.lr_scheduler import PolynomialLR
 
-  seed = getenv('SEED', 42)
+  seed = getenv("SEED", 42)
   Tensor.manual_seed(seed)
 
-  GPUS = [f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 1))]
+  GPUS = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
   UnsyncedBatchNorm.devices = len(GPUS)
   print(f"Training on {GPUS}")
   for x in GPUS: Device[x]
@@ -34,7 +34,7 @@ def train_resnet():
     model, model_name = ResNet50(num_classes), "resnet50"
 
   for k, x in get_state_dict(model).items():
-    if not getenv('SYNCBN') and ('running_mean' in k or 'running_bias' in k):
+    if not getenv("SYNCBN") and ("running_mean" in k or "running_bias" in k):
       x.shard_(GPUS, axis=0)
     else:
       x.to_(GPUS)
@@ -43,7 +43,7 @@ def train_resnet():
   # ** hyperparameters **
   epochs = getenv("EPOCHS", 45)
   BS = getenv("BS", 104 * len(GPUS))  # fp32 GPUS<=6 7900xtx can fit BS=112
-  EVAL_BS = getenv('EVAL_BS', BS)
+  EVAL_BS = getenv("EVAL_BS", BS)
   base_lr = getenv("LR", 8.4 * (BS/2048))
   lr_warmup_epochs = 5
   decay = getenv("DECAY", 2e-4)
@@ -56,7 +56,7 @@ def train_resnet():
 
   # ** Optimizer **
   from examples.mlperf.optimizers import LARS
-  skip_list = {v for k, v in get_state_dict(model).items() if 'bn' in k or 'bias' in k}
+  skip_list = {v for k, v in get_state_dict(model).items() if "bn" in k or "bias" in k}
   optimizer = LARS(parameters, base_lr, momentum=.9, weight_decay=decay, skip_list=skip_list)
 
   # ** LR scheduler **
@@ -78,23 +78,23 @@ def train_resnet():
   WANDB = getenv("WANDB")
   if WANDB:
     wandb_config = {
-      'BS': BS,
-      'EVAL_BS': EVAL_BS,
-      'base_lr': base_lr,
-      'epochs': epochs,
-      'classes': num_classes,
-      'decay': decay,
-      'train_files': len(get_train_files()),
-      'eval_files': len(get_train_files()),
-      'steps_in_train_epoch': steps_in_train_epoch,
-      'GPUS': GPUS,
-      'BEAM': getenv('BEAM'),
-      'TEST_TRAIN': getenv('TEST_TRAIN'),
-      'TEST_EVAL': getenv('TEST_EVAL'),
-      'SYNCBN': getenv('SYNCBN'),
-      'model': model_name,
-      'optimizer': optimizer.__class__.__name__,
-      'scheduler': scheduler.__class__.__name__,
+      "BS": BS,
+      "EVAL_BS": EVAL_BS,
+      "base_lr": base_lr,
+      "epochs": epochs,
+      "classes": num_classes,
+      "decay": decay,
+      "train_files": len(get_train_files()),
+      "eval_files": len(get_train_files()),
+      "steps_in_train_epoch": steps_in_train_epoch,
+      "GPUS": GPUS,
+      "BEAM": getenv("BEAM"),
+      "TEST_TRAIN": getenv("TEST_TRAIN"),
+      "TEST_EVAL": getenv("TEST_EVAL"),
+      "SYNCBN": getenv("SYNCBN"),
+      "model": model_name,
+      "optimizer": optimizer.__class__.__name__,
+      "scheduler": scheduler.__class__.__name__,
     }
     if getenv("WANDB_RESUME", ""):
       wandb.init(id=getenv("WANDB_RESUME", ""), resume="must", config=wandb_config)
