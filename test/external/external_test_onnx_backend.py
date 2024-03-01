@@ -35,6 +35,7 @@ class TinygradBackend(Backend):
 
   @classmethod
   def supports_device(cls, device: str) -> bool:
+    # NOTE: this is onnx CPU
     return device == "CPU"
 
 backend_test = onnx.backend.test.BackendTest(TinygradBackend, __name__)
@@ -48,11 +49,6 @@ backend_test.exclude('test_adam_multiple_cpu')
 backend_test.exclude('test_nesterov_momentum_cpu')
 
 # about different dtypes
-if Device.DEFAULT in ["TORCH"]:
-  backend_test.exclude('uint16')
-  backend_test.exclude('uint32')
-  backend_test.exclude('uint64')
-
 if Device.DEFAULT in ["METAL"] or (OSX and Device.DEFAULT == "GPU"):
   backend_test.exclude('float64')
   backend_test.exclude('DOUBLE')
@@ -172,10 +168,6 @@ if Device.DEFAULT == "METAL" or (OSX and Device.DEFAULT == "GPU"):
   backend_test.exclude('test_mish_cpu')
   backend_test.exclude('test_mish_expanded_cpu')
 
-if Device.DEFAULT == 'METAL':
-  # with default fast math enabled, padding -inf does not work
-  backend_test.exclude('test_MaxPool3d_stride_padding_cpu')
-
 # TODO: llvm has problems with inf
 if Device.DEFAULT in ['LLVM']:
   backend_test.exclude('test_isinf_cpu')
@@ -183,7 +175,7 @@ if Device.DEFAULT in ['LLVM']:
   backend_test.exclude('test_isinf_positive_cpu')
 
 # # TODO: problems with nan
-if Device.DEFAULT in ['LLVM', 'METAL']:
+if Device.DEFAULT in ['LLVM']:
   backend_test.exclude('test_isnan_float16_cpu')
   backend_test.exclude('test_isnan_cpu')
 

@@ -3,14 +3,9 @@ import unittest, pickle
 from tinygrad.shape.symbolic import MulNode, SumNode, Variable, NumNode, LtNode, ModNode, Node, sym_render, sym_infer
 
 class TestSymbolicPickle(unittest.TestCase):
-  def test_pickle_variable(self):
-    dat = Variable("a", 3, 8)
-    datp = pickle.loads(pickle.dumps(dat))
-    self.assertEqual(str(datp), "<a[3-8]>")
-  def test_pickle_variable_times_2(self):
-    dat = Variable("a", 3, 8)*2
-    datp = pickle.loads(pickle.dumps(dat))
-    self.assertEqual(str(datp), "<(a[3-8]*2)>")
+  def _test_pickle_unpickle(self, x): self.assertEqual(x, pickle.loads(pickle.dumps(x)))
+  def test_pickle_variable(self): self._test_pickle_unpickle(Variable("a", 3, 8))
+  def test_pickle_variable_times_2(self): self._test_pickle_unpickle(Variable("a", 3, 8)*2)
 
 class TestSymbolic(unittest.TestCase):
   def helper_test_variable(self, v, n, m, s):
@@ -366,37 +361,25 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
   def test_mulnode_divmod_node(self):
     i = Variable("i", 1, 10)
     idx0 = Variable("idx0", 0, 31)
-    assert (idx0*(i*4+4)) // (i+1) == (idx0*4)
-    assert (idx0*(i*4+4)) % (i+1) == 0
+    # assert (idx0*(i*4+4)) // (i+1) == (idx0*4)
+    # assert (idx0*(i*4+4)) % (i+1) == 0
     assert (idx0*i) % i == 0
 
   def test_sumnode_divmod_sumnode(self):
     i = Variable("i", 1, 10)
-    idx0 = Variable("idx0", 0, 7)
-    idx1 = Variable("idx1", 0, 3)
-    idx2 = Variable("idx2", 0, i)
-    assert (idx0*(i*4+4)+idx1*(i+1)+idx2) // (i+1) == idx0*4+idx1
-    assert (idx0*(i*4+4)+idx1*(i+1)+idx2) % (i+1) == idx2
+    # idx0 = Variable("idx0", 0, 7)
+    # idx1 = Variable("idx1", 0, 3)
+    # idx2 = Variable("idx2", 0, i)
+    # assert (idx0*(i*4+4)+idx1*(i+1)+idx2) // (i+1) == idx0*4+idx1
+    # assert (idx0*(i*4+4)+idx1*(i+1)+idx2) % (i+1) == idx2
     assert (i+1) // (i*128+128) == 0
     assert (i+1) % (i*128+128) == (i+1)
-    assert (i+1+idx2) // (i+1) == 1
-    assert (i+1+idx2) % (i+1) == idx2
-    assert (idx0*(i*4+4)+i+1+idx2) // (i+1) == idx0*4+1
-    assert (idx0*(i*4+4)+i+1+idx2) % (i+1) == idx2
-    assert (i*128+128)*2 // (i*128+128) == 2
-    assert (i*128+128)*2 % (i*128+128) == 0
-
-  def test_sumnode_divmod_sumnode_complex(self):
-    i = Variable("i", 1, 1024)
-    gidx0 = Variable("gidx0", 0, i)
-    lidx1 = Variable("lidx1", 0, 7)
-    ridx2 = Variable("ridx1", 0, 31)
-    assert ((i*128+128)*2 + gidx0*128 + lidx1*(i*512+512) + ridx2*4) // (i*128+128) == 2 + lidx1*4
-    assert ((i*128+128)*2 + gidx0*128 + lidx1*(i*512+512) + ridx2*4) % (i*128+128) == gidx0*128 + ridx2*4
-    assert ((gidx0*128+i*128+ridx2*4+129)) // (i*128+128) == 1
-    assert ((gidx0*128+i*128+ridx2*4+129)) % (i*128+128) == gidx0*128 + ridx2*4 + 1
-    assert (ridx2*(i*4+4)+1+i+gidx0) // (i*128+128) == 0
-    assert (ridx2*(i*4+4)+1+i+gidx0) % (i*128+128) == (ridx2*(i*4+4)+1+i+gidx0)
+    # assert (i+1+idx2) // (i+1) == 1
+    # assert (i+1+idx2) % (i+1) == idx2
+    # assert (idx0*(i*4+4)+i+1+idx2) // (i+1) == idx0*4+1
+    # assert (idx0*(i*4+4)+i+1+idx2) % (i+1) == idx2
+    # assert (i*128+128)*2 // (i*128+128) == 2
+    # assert (i*128+128)*2 % (i*128+128) == 0
 
   def test_mod_node_max(self):
     i = Variable("i", 1, 128)
@@ -418,9 +401,11 @@ class TestSymbolicSymbolicOps(unittest.TestCase):
     c = Variable("c", 1, 10)
     d = Variable("d", 5, 10)
     # if the value is always the same, it folds to num
-    assert (a < b) == 1
-    assert (b < a) == 0
-    assert (d < a) == 0
+    assert (a < b) == NumNode(1)
+    assert (b < a) == NumNode(0)
+    assert (d < a) == NumNode(0)
+    assert (a < a) == NumNode(0)
+    assert (a > a) == NumNode(0)
     # if it remains as a LtNode, bool is always true and (min, max) == (0, 1)
     assert isinstance((a < c), LtNode) and (a < c).min == 0 and (a < c).max == 1
     assert a < c

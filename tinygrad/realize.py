@@ -2,7 +2,7 @@ import sys
 from collections import defaultdict
 from typing import List, Dict, Optional, cast, Set, DefaultDict
 from tinygrad.ops import LoadOps, ScheduleItem, BufferOps, GlobalCounters, LazyOp, ReduceOps, ConstBuffer, MemBuffer, BinaryOps, UnaryOps
-from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, InterpretedASTRunner, Compiled, BufferOptions
+from tinygrad.device import Device, Buffer, BufferCopy, BufferXfer, BufferRead, JITRunner, update_stats, Compiled, BufferOptions
 from tinygrad.features.graph import print_tree, realized_lazybuffer, log_lazybuffer
 from tinygrad.helpers import colored, getenv, GRAPH, cpu_time_execution, DEBUG, flatten, prod, dedup, all_int
 from tinygrad.shape.symbolic import Variable
@@ -34,6 +34,9 @@ def lower_schedule_item(si:ScheduleItem) -> Optional[JITRunner]:
     from tinygrad.runtime.ops_hip import HIPSyncEvent, HIPWaitEvent
     if si.ast.op is LoadOps.SYNC: return HIPSyncEvent(si.out)
     if si.ast.op is LoadOps.WAIT: return HIPWaitEvent(si.out.device)
+  if si.ast.op in {LoadOps.SYNC, LoadOps.WAIT} and si.out.device.startswith("HSA") and si.inputs[0].device.startswith("HSA"):
+    # Our HSA runtime handles synchronization
+    if si.ast.op is LoadOps.SYNC: return None
   if si.ast.op is LoadOps.COPY:
     if hasattr(Device[si.out.device].allocator, 'transfer') and type(Device[si.out.device]) is type(Device[si.inputs[0].device]): return BufferXfer()
     if si.inputs[0].device.startswith("DISK"): return BufferRead()
@@ -64,7 +67,7 @@ def run_schedule(schedule:List[ScheduleItem]):
     if si.out.size > 0:
       options = BufferOptions(host=True, signal=True) if si.ast.op is LoadOps.SYNC else None
       si.out.realized = si.out.output_buffer if si.out.output_buffer is not None else \
-        Buffer(si.out.device, si.out.size, si.out.dtype, "PLACEHOLDER" if isinstance(prg, InterpretedASTRunner) else None, options=options)
+        Buffer(si.out.device, si.out.size, si.out.dtype, "PLACEHOLDER" if getattr(prg, "skip_allocation", False) else None, options=options)
       del si.out.srcs
 
     # run the function (put it in JIT)
@@ -93,7 +96,7 @@ def _recursive_lazyop(buf:LazyBuffer, inputs:List[LazyBuffer], var_vals:Dict[Var
   if buf.op is LoadOps.CONST:
     unbound_st, st_var_vals = st.simplify().unbind()
     var_vals.update(st_var_vals)
-    return LazyOp(BufferOps.CONST, (), ConstBuffer(float(buf.arg), buf.dtype, unbound_st))
+    return LazyOp(BufferOps.CONST, (), ConstBuffer(buf.arg, buf.dtype, unbound_st))
 
   # if we aren't fusing it, it's a load and we add it to the inputs
   if buf.realized or (buf in realizes and not first):

@@ -29,7 +29,6 @@ class TestTorchLoad(unittest.TestCase):
   # for LLVM, it segfaults because it can't link to the casting function
   # CUDACPU architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
   @unittest.skipIf(Device.DEFAULT in ["GPU", "LLVM", "CUDA"] and CI, "fp16 broken in some backends")
-  @unittest.skipIf(Device.DEFAULT == "TORCH", "torch doesn't support the way we load bfloat (cast to uint32)")
   def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/qazalin/bf16-lightweight/resolve/main/consolidated.00.pth?download=true")
 
   # pytorch tar format
@@ -168,7 +167,7 @@ class TestSafetensors(unittest.TestCase):
 def helper_test_disk_tensor(fn, data, np_fxn, tinygrad_fxn=None):
   if tinygrad_fxn is None: tinygrad_fxn = np_fxn
   pathlib.Path(temp(fn)).unlink(missing_ok=True)
-  tinygrad_tensor = Tensor(data, device="CPU").to(f"disk:{temp(fn)}")
+  tinygrad_tensor = Tensor(data, device="CLANG").to(f"disk:{temp(fn)}")
   numpy_arr = np.array(data)
   tinygrad_fxn(tinygrad_tensor)
   np_fxn(numpy_arr)
@@ -182,7 +181,7 @@ class TestDiskTensor(unittest.TestCase):
   def test_write_ones(self):
     pathlib.Path(temp("dt2")).unlink(missing_ok=True)
 
-    out = Tensor.ones(10, 10, device="CPU").contiguous()
+    out = Tensor.ones(10, 10, device="CLANG").contiguous()
     outdisk = out.to(f"disk:{temp('dt2')}")
     print(outdisk)
     outdisk.realize()
@@ -205,6 +204,17 @@ class TestDiskTensor(unittest.TestCase):
   def test_reshape(self):
     helper_test_disk_tensor("dt5", [1,2,3,4,5], lambda x: x.reshape((1,5)))
     helper_test_disk_tensor("dt6", [1,2,3,4], lambda x: x.reshape((2,2)))
+
+  def test_assign_to_different_dtype(self):
+    # NOTE: this is similar to Y_train in fetch_cifar
+    t = Tensor.empty(10, device=f'disk:{temp("dt7")}', dtype=dtypes.int64)
+
+    for i in range(5):
+      data = np.array([3, 3])
+      idx = 2 * i
+      t[idx:idx+2].assign(data)
+
+    np.testing.assert_array_equal(t.numpy(), np.array([3] * 10))
 
 if __name__ == "__main__":
   unittest.main()

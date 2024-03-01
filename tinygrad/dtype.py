@@ -11,12 +11,12 @@ class DType:
   itemsize: int
   name: str
   fmt: Optional[str]
-  sz: int
-  def __repr__(self): return f"dtypes.{'_'*(c:=self.sz!=1)}{INVERSE_DTYPES_DICT[self.name if not c else self.scalar().name]}{str(self.sz)*c}"
+  count: int
+  def __repr__(self): return f"dtypes.{'_'*(c:=self.count!=1)}{INVERSE_DTYPES_DICT[self.name if not c else self.scalar().name]}{str(self.count)*c}"
   def vec(self, sz:int):
-    assert sz > 1 and self.sz == 1, f"can't vectorize {self} with size {sz}"
+    assert sz > 1 and self.count == 1, f"can't vectorize {self} with size {sz}"
     return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz)
-  def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.sz))]] if self.sz > 1 else self
+  def scalar(self): return DTYPES_DICT[self.name[:-len(str(self.count))]] if self.count > 1 else self
   # TODO: someday this will be removed with the "remove numpy" project
   @property
   def np(self) -> Optional[type]: return np.dtype(self.fmt).type if self.fmt is not None else None
@@ -32,11 +32,14 @@ class ImageDType(DType):
 
 # @dataclass(frozen=True, init=False, repr=False, eq=False)
 class PtrDType(DType):
-  def __init__(self, dt:DType): super().__init__(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.sz)
+  def __init__(self, dt:DType): super().__init__(dt.priority, dt.itemsize, dt.name, dt.fmt, dt.count)
   def __repr__(self): return f"ptr.{super().__repr__()}"
   def __hash__(self): return super().__hash__()
-  def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.sz==dt.sz
+  def __eq__(self, dt): return self.priority==dt.priority and self.itemsize==dt.itemsize and self.name==dt.name and self.count==dt.count
   def __ne__(self, dt): return not (self == dt)
+
+def cast_scalar(scalar: Scalar, dtype:DType):
+  return int(scalar) if dtypes.is_int(dtype) else float(scalar) if dtypes.is_float(dtype) else bool(scalar)
 
 class dtypes:
   @staticmethod

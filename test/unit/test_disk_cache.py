@@ -76,5 +76,10 @@ class DiskCache(unittest.TestCase):
     self.assertEqual(diskcache_get(table, fancy_key), 5)
     self.assertEqual(diskcache_get(table, fancy_key3), None)
 
+  def test_table_name(self):
+    table = "test_gfx1010:xnack-"
+    diskcache_put(table, "key", "test")
+    self.assertEqual(diskcache_get(table, "key"), "test")
+
 if __name__ == "__main__":
   unittest.main()

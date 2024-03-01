@@ -3,13 +3,14 @@ from typing import List, Set, Optional, Tuple, Any
 from tinygrad.helpers import DEBUG, flatten
 from tinygrad.dtype import dtypes, DType
 from tinygrad.ops import UnaryOps, BinaryOps, TernaryOps
+from tinygrad.shape.symbolic import sint
 from enum import Enum, auto
 from dataclasses import dataclass
 
 # bottom ones are asm only
 class UOps(Enum):
   LOOP = auto(); IF = auto(); ENDLOOP = auto(); ENDIF = auto(); SPECIAL = auto() # loops can be global, local, or other # noqa: E702
-  DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
+  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); DEFINE_LOCAL = auto(); DEFINE_ACC = auto() # this defines buffers # noqa: E702
   LOAD = auto(); STORE = auto(); CONST = auto(); BARRIER = auto(); PHI = auto() # noqa: E702
   ALU = auto(); WMMA = auto(); CAST = auto(); GEP = auto() # noqa: E702
 
@@ -32,9 +33,8 @@ def get_recursive_children(uops:List[UOp], x:UOp) -> Set[UOp]:
         deps.add(u)
   return deps
 
-UOPS_W_SIDE_EFFECTS = {UOps.STORE, UOps.BARRIER, UOps.DEFINE_GLOBAL}
+UOPS_W_SIDE_EFFECTS = {UOps.STORE}
 def remove_childless_uops(uops:List[UOp]) -> List[UOp]:
-  # NOTE: DEFINE_GLOBAL should be removable, but we'd have to propagate that
   while 1:
     has_child: Set[UOp] = set()
     for ru in uops:
@@ -81,3 +81,38 @@ def uops_type_verify(uops:List[UOp]):
       elif arg == TernaryOps.WHERE:
         assert vin[0].dtype == dtypes.bool, f"{arg} selector dtype mismatch {vin[0].dtype=} != {dtypes.bool}"
         assert dtype == vin[1].dtype == vin[2].dtype, f"{arg} choice dtype mismatch {dtype=} != {vin[1].dtype=} != {vin[2].dtype=}"
+
+def uops_alu_resolve(u:UOp) -> sint:
+  if u.uop == UOps.CONST: return u.arg
+  elif u.uop == UOps.DEFINE_VAR: return u.arg
+  elif u.uop == UOps.ALU and u.arg == BinaryOps.MUL:
+    return uops_alu_resolve(u.vin[0]) * uops_alu_resolve(u.vin[1])
+  elif u.uop == UOps.ALU and u.arg == BinaryOps.ADD:
+    return uops_alu_resolve(u.vin[0]) + uops_alu_resolve(u.vin[1])
+  else:
+    raise RuntimeError(f"ALU resolve fail @ {u.uop}")
+
+def uops_flops_mem(uops:List[UOp]) -> Tuple[sint, sint]:
+  flops: sint = 0
+  mem: sint = 0
+  mults: sint = 1
+  mult_stack = []
+  for u in uops:
+    if u.uop is UOps.LOOP:
+      mult_stack.append(mults)
+      mults *= uops_alu_resolve(u.vin[1])
+    if u.uop is UOps.ENDLOOP:
+      mults = mult_stack.pop(-1)
+    if u.uop is UOps.ALU:
+      flops += mults
+    if u.uop is UOps.LOAD:
+      assert u.dtype is not None
+      mem += u.dtype.itemsize * mults
+    if u.uop is UOps.STORE:
+      assert u.vin[2].dtype is not None
+      mem += u.vin[2].dtype.itemsize * mults
+    if u.uop is UOps.WMMA:
+      if u.arg.startswith("__metal_wmma"): flops += 2*(8*8*8)//32 * mults
+      elif u.arg == "__hip_wmma_f16_f16" or u.arg == "__builtin_amdgcn_wmma_f32_16x16x16_f16_w32": flops += 2*(16*16*16)//32 * mults
+      else: raise Exception("not implemented")
+  return flops, mem
