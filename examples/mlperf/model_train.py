@@ -124,7 +124,7 @@ def train_resnet():
     it = iter(tqdm(t := batch_load_resnet(batch_size=BS, val=False, shuffle=True, seed=seed*epochs + e), total=steps_in_train_epoch))
     def data_get(it):
       x, y, cookie = next(it)
-      return x.shard(GPUS, axis=0).realize(), Tensor(y).shard(GPUS, axis=0).realize(), cookie
+      return x.shard(GPUS, axis=0).realize(), Tensor(y).shard(GPUS, axis=0), cookie
 
     # ** train loop **
     i, proc = 0, data_get(it)
