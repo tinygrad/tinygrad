@@ -180,7 +180,14 @@ class UOpGraph:
     elif u.uop == UOps.PHI: return resolve(u.vin[1])
     else: return None
 
+
   def remove_loops(self, get_recursive_parents, render_ops, ctx):
+    def loop_exponent(op):
+      if op.uop == UOps.ALU and op.arg == BinaryOps.MUL: return sum([loop_exponent(child) for child in op.vin])
+      elif op.uop == UOps.ALU or op.uop == UOps.PHI: return max([loop_exponent(child) for child in op.vin])
+      elif op.uop == UOps.LOOP: return 1
+      else: return 0
+
     keep_removing_loops = True
     while keep_removing_loops:
       keep_removing_loops = False
@@ -189,9 +196,10 @@ class UOpGraph:
         loop_start_idx = self.uops.index(op.vin[0])
         loop_ops = self.uops[loop_start_idx:loop_end_idx]
         phi_op = next((op for op in loop_ops if op.uop == UOps.PHI), None)
-        # TODO: check that loop var isn't multiplied by itself?
-        if (phi_op is None
+        if (phi_op is None or not dtypes.is_int(phi_op.dtype)
           or (any([op.uop not in [UOps.LOOP, UOps.ALU, UOps.PHI, UOps.ENDLOOP] for op in loop_ops]))
+          or not (any([op.uop == UOps.ALU and op.arg == BinaryOps.CMPLT for op in loop_ops])) #non-cmplt not supported
+          or loop_exponent(phi_op) > 1
           or (any([op.uop not in [UOps.CONST, UOps.SPECIAL, UOps.LOOP, UOps.DEFINE_ACC, UOps.ALU] for op in get_recursive_parents(phi_op)]))):
           break
         if DEBUG >= 4: print(f"removing loop")
